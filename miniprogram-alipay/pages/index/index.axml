@@ -1,0 +1,28 @@
+<view class="page">
+  <view class="hero">
+    <view class="brand">智能面馆</view>
+    <view class="sub" a:if="{{table}}">桌号 {{table.table_name}}</view>
+    <view class="sub" a:else>正在识别桌台...</view>
+  </view>
+
+  <view class="card" a:if="{{loading}}"><text>登录中，请稍候...</text></view>
+
+  <view class="card" a:if="{{showMemberPrompt}}">
+    <view class="title">注册会员，享受更多便利</view>
+    <view class="desc">{{memberText}}</view>
+    <input class="input" placeholder="怎么称呼您（选填）" value="{{nickname}}" onInput="onNickname" />
+    <label class="check">
+      <checkbox checked="{{enableFace}}" onTap="toggleFace" />
+      <text>同时开启人脸迎宾（主动授权，可随时关闭）</text>
+    </label>
+    <view class="face-tip" a:if="{{enableFace}}">{{faceText}}</view>
+    <button class="btn-primary" onTap="onRegister">注册并开始点餐</button>
+    <button class="btn-ghost skip" onTap="onSkip">暂不注册，先点餐</button>
+  </view>
+
+  <view class="card" a:elif="{{!loading && ready}}">
+    <view class="title">欢迎{{nickname ? '，' + nickname : ''}}</view>
+    <button class="btn-primary" onTap="goMenu">开始点餐</button>
+    <button class="btn-ghost skip" onTap="goMember">会员中心</button>
+  </view>
+</view>

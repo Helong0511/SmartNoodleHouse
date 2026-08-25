@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/menu/menu",
+    "pages/product/product",
+    "pages/cart/cart",
+    "pages/confirm/confirm",
+    "pages/result/result",
+    "pages/member/member",
+    "pages/face/face"
+  ],
+  "window": {
+    "defaultTitle": "智能面馆",
+    "titleBarColor": "#ff6b35"
+  }
+}

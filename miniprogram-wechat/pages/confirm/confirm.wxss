@@ -1,0 +1,4 @@
+.page { padding: 32rpx; }
+.tip { color: #999; margin-bottom: 20rpx; }
+.remark { width: 100%; background: #fff; border-radius: 12rpx; padding: 20rpx; box-sizing: border-box; min-height: 160rpx; }
+.pay { margin: 24rpx 0; }

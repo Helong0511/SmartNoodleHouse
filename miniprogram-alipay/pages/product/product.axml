@@ -1,0 +1,18 @@
+<view class="page" a:if="{{product}}">
+  <view class="title">{{product.name}}</view>
+  <view class="price">¥{{product.price}}</view>
+  <view class="group" a:for="{{product.option_groups}}" a:key="id">
+    <view class="gname">{{item.name}}</view>
+    <block a:if="{{item.selection_type === 'SINGLE'}}">
+      <view class="opt {{selected[item.id] === o.id ? 'on' : ''}}" a:for="{{item.options}}" a:for-item="o" a:key="id" data-gid="{{item.id}}" data-oid="{{o.id}}" onTap="selectSingle">
+        {{o.name}}
+      </view>
+    </block>
+    <block a:else>
+      <view class="opt {{(multi[item.id] || []).indexOf(o.id) >= 0 ? 'on' : ''}}" a:for="{{item.options}}" a:for-item="o" a:key="id" data-gid="{{item.id}}" data-oid="{{o.id}}" onTap="selectMulti">
+        {{o.name}}
+      </view>
+    </block>
+  </view>
+  <button class="btn-primary" onTap="addCart">加入购物车</button>
+</view>

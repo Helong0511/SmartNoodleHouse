@@ -1,0 +1,18 @@
+<view class="page">
+  <view class="card">
+    <view class="name">{{nickname || '面馆会员'}}</view>
+    <view class="no">编号 {{customerNo}}</view>
+  </view>
+  <view class="card">
+    <view class="row">
+      <text>人脸迎宾</text>
+      <switch checked="{{faceOn}}" color="#ff6b35" bindchange="onFaceSwitch" />
+    </view>
+    <view class="tip">需您主动授权。关闭后立即失效特征，不再识别身份。</view>
+  </view>
+  <view class="card" wx:if="{{prefs.length}}">
+    <view class="title">根据您之前的口味</view>
+    <view class="tag" wx:for="{{prefs}}" wx:key="option_code">{{item.category}} · {{item.option_code}}</view>
+    <button class="btn-primary" bindtap="reorder">一键复购去点餐</button>
+  </view>
+</view>

@@ -1,0 +1,20 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/menu/menu",
+    "pages/product/product",
+    "pages/cart/cart",
+    "pages/confirm/confirm",
+    "pages/result/result",
+    "pages/member/member",
+    "pages/face/face"
+  ],
+  "window": {
+    "navigationBarTitleText": "智能面馆",
+    "navigationBarBackgroundColor": "#ff6b35",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f7f7f7"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,19 @@
+<view class="page">
+  <view class="top">
+    <text class="table" wx:if="{{tableName}}">桌号 {{tableName}}</text>
+    <text class="member" bindtap="goMember">会员</text>
+  </view>
+  <block wx:for="{{categories}}" wx:key="id">
+    <view class="cat">{{item.name}}</view>
+    <view class="product" wx:for="{{item.products}}" wx:for-item="p" wx:key="id" bindtap="openProduct" data-id="{{p.id}}">
+      <view class="info">
+        <view class="name">{{p.name}}</view>
+        <view class="desc">{{p.description}}</view>
+      </view>
+      <view class="price">¥{{p.price}}</view>
+    </view>
+  </block>
+  <view class="cart-bar" bindtap="goCart">
+    购物车 {{cartCount}} · ¥{{cartTotal}}
+  </view>
+</view>

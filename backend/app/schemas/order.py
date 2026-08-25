@@ -1,0 +1,47 @@
+from decimal import Decimal
+
+from pydantic import BaseModel, Field
+
+
+class OrderItemCreate(BaseModel):
+    product_id: int
+    quantity: int = Field(ge=1, le=99)
+    option_ids: list[int] = []
+    remark: str | None = None
+
+
+class OrderCreate(BaseModel):
+    store_id: int = 1
+    table_token: str | None = None
+    customer_id: int | None = None
+    items: list[OrderItemCreate]
+    remark: str | None = None
+    channel: str | None = None
+    idempotency_key: str | None = None
+
+
+class OrderStatusUpdate(BaseModel):
+    status: str
+
+
+class PaymentCreate(BaseModel):
+    provider: str = Field(description="WECHAT or ALIPAY")
+    channel_type: str = "native"
+
+
+class OrderOut(BaseModel):
+    id: int
+    order_no: str
+    customer_id: int | None
+    table_id: int | None
+    store_id: int
+    status: str
+    subtotal: Decimal
+    discount_amount: Decimal
+    total_amount: Decimal
+    payment_status: str
+    payment_method: str | None
+    channel: str | None
+    remark: str | None
+
+    model_config = {"from_attributes": True}

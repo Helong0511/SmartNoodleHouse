@@ -1,0 +1,14 @@
+.page { padding: 32rpx; }
+.hero {
+  background: linear-gradient(135deg, #1677ff, #69b1ff);
+  color: #fff; border-radius: 24rpx; padding: 48rpx 32rpx; margin-bottom: 32rpx;
+}
+.brand { font-size: 48rpx; font-weight: 700; }
+.sub { margin-top: 12rpx; }
+.card { background: #fff; border-radius: 20rpx; padding: 32rpx; }
+.title { font-size: 34rpx; font-weight: 600; margin-bottom: 16rpx; }
+.desc { color: #666; line-height: 1.6; margin-bottom: 24rpx; }
+.input { border: 1px solid #eee; border-radius: 12rpx; padding: 20rpx; margin-bottom: 20rpx; }
+.check { display: flex; gap: 12rpx; margin: 16rpx 0; color: #444; }
+.face-tip { color: #999; font-size: 24rpx; margin-bottom: 20rpx; }
+.skip { margin-top: 20rpx; }

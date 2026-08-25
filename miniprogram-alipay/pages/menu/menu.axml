@@ -1,0 +1,17 @@
+<view class="page">
+  <view class="top">
+    <text class="table" a:if="{{tableName}}">桌号 {{tableName}}</text>
+    <text class="member" onTap="goMember">会员</text>
+  </view>
+  <block a:for="{{categories}}" a:key="id">
+    <view class="cat">{{item.name}}</view>
+    <view class="product" a:for="{{item.products}}" a:for-item="p" a:key="id" onTap="openProduct" data-id="{{p.id}}">
+      <view class="info">
+        <view class="name">{{p.name}}</view>
+        <view class="desc">{{p.description}}</view>
+      </view>
+      <view class="price">¥{{p.price}}</view>
+    </view>
+  </block>
+  <view class="cart-bar" onTap="goCart">购物车 {{cartCount}} · ¥{{cartTotal}}</view>
+</view>

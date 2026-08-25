@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="empty" a:if="{{!cart.length}}">购物车是空的</view>
+  <block a:else>
+    <view class="item" a:for="{{cart}}" a:key="index">
+      <text>{{item.name}} ×{{item.quantity}}</text>
+      <text>¥{{item.subtotal}}</text>
+    </view>
+    <button class="btn-primary" onTap="goConfirm">去结算</button>
+  </block>
+</view>

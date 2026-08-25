@@ -1,0 +1,6 @@
+<view class="page">
+  <view class="tip">金额由服务器重新计算，防止篡改</view>
+  <textarea class="remark" placeholder="备注（如不要香菜）" value="{{remark}}" bindinput="onRemark" />
+  <view class="pay">支付方式：微信支付</view>
+  <button class="btn-primary" loading="{{loading}}" bindtap="submit">提交并支付</button>
+</view>

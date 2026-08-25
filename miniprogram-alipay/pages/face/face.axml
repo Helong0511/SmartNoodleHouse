@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="title">人脸迎宾授权</view>
+  <view class="desc">仅在您主动同意后采集人脸特征，用于到店欢迎。未授权顾客不会被识别真实身份。您可随时关闭并删除特征。</view>
+  <camera a:if="{{cameraOn}}" device-position="front" class="camera"></camera>
+  <view class="actions">
+    <button class="btn-primary" onTap="startCamera" a:if="{{!cameraOn}}">打开摄像头采集</button>
+    <button class="btn-primary" onTap="confirmConsent" a:if="{{cameraOn}}">我已阅读并授权</button>
+    <button class="btn-ghost" onTap="cancel">取消</button>
+  </view>
+</view>

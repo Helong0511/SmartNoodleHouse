@@ -1,0 +1,17 @@
+<view class="page">
+  <view class="title">人脸迎宾授权</view>
+  <view class="desc">
+    仅在您主动同意后采集人脸特征，用于到店欢迎。未授权顾客不会被识别真实身份。您可随时在会员中心关闭并删除特征。
+  </view>
+  <camera
+    wx:if="{{cameraOn}}"
+    device-position="front"
+    flash="off"
+    class="camera"
+  ></camera>
+  <view class="actions">
+    <button class="btn-primary" bindtap="startCamera" wx:if="{{!cameraOn}}">打开摄像头采集</button>
+    <button class="btn-primary" bindtap="confirmConsent" wx:if="{{cameraOn}}">我已阅读并授权</button>
+    <button class="btn-ghost" bindtap="cancel">取消</button>
+  </view>
+</view>

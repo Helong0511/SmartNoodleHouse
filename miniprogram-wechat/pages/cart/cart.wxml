@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="empty" wx:if="{{!cart.length}}">购物车是空的</view>
+  <block wx:else>
+    <view class="item" wx:for="{{cart}}" wx:key="index">
+      <text>{{item.name}} ×{{item.quantity}}</text>
+      <text>¥{{item.subtotal}}</text>
+    </view>
+    <button class="btn-primary" bindtap="goConfirm">去结算</button>
+  </block>
+</view>

@@ -1,0 +1,16 @@
+page {
+  background: #f7f7f7;
+  color: #333;
+  font-size: 28rpx;
+}
+.btn-primary {
+  background: #ff6b35;
+  color: #fff;
+  border-radius: 48rpx;
+}
+.btn-ghost {
+  background: #fff;
+  color: #ff6b35;
+  border: 1px solid #ff6b35;
+  border-radius: 48rpx;
+}

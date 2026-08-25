@@ -1,0 +1,401 @@
+-- 面馆智能经营系统 - 初始数据库结构
+-- MySQL 8.0+ utf8mb4
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE DATABASE IF NOT EXISTS smart_noodle_house
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_unicode_ci;
+
+USE smart_noodle_house;
+
+-- ========== 系统用户与 RBAC ==========
+CREATE TABLE IF NOT EXISTS roles (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(50) NOT NULL UNIQUE COMMENT 'SUPER_ADMIN/STORE_ADMIN/CASHIER/KITCHEN/OPERATOR',
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS permissions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(100) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
+  module VARCHAR(50) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id BIGINT UNSIGNED NOT NULL,
+  permission_id BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (role_id, permission_id),
+  CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles(id),
+  CONSTRAINT fk_rp_perm FOREIGN KEY (permission_id) REFERENCES permissions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name VARCHAR(100) NOT NULL,
+  role_id BIGINT UNSIGNED NOT NULL,
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1=active 0=disabled',
+  last_login_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS operation_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED DEFAULT NULL,
+  action VARCHAR(100) NOT NULL,
+  module VARCHAR(50) NOT NULL,
+  target_type VARCHAR(50) DEFAULT NULL,
+  target_id BIGINT UNSIGNED DEFAULT NULL,
+  ip VARCHAR(45) DEFAULT NULL,
+  user_agent VARCHAR(500) DEFAULT NULL,
+  request_id VARCHAR(64) DEFAULT NULL,
+  detail JSON DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_op_logs_user (user_id, created_at),
+  INDEX idx_op_logs_module (module, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 门店与桌台 ==========
+CREATE TABLE IF NOT EXISTS stores (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  store_no VARCHAR(32) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
+  address VARCHAR(255) DEFAULT NULL,
+  phone VARCHAR(20) DEFAULT NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tables (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  store_id BIGINT UNSIGNED NOT NULL,
+  table_no VARCHAR(20) NOT NULL,
+  table_name VARCHAR(50) NOT NULL,
+  qr_token VARCHAR(64) NOT NULL UNIQUE COMMENT '不可预测桌台令牌',
+  wechat_qr_url VARCHAR(500) DEFAULT NULL,
+  alipay_qr_url VARCHAR(500) DEFAULT NULL,
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1=启用 0=禁用',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_store_table (store_id, table_no),
+  INDEX idx_tables_token (qr_token),
+  CONSTRAINT fk_tables_store FOREIGN KEY (store_id) REFERENCES stores(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 顾客体系 ==========
+CREATE TABLE IF NOT EXISTS member_levels (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(50) NOT NULL,
+  min_points INT NOT NULL DEFAULT 0,
+  discount_rate DECIMAL(5,4) NOT NULL DEFAULT 1.0000,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS customers (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  customer_no VARCHAR(32) NOT NULL UNIQUE,
+  display_name VARCHAR(100) DEFAULT NULL,
+  nickname VARCHAR(100) DEFAULT NULL,
+  avatar_url VARCHAR(500) DEFAULT NULL,
+  phone VARCHAR(20) DEFAULT NULL,
+  member_level_id BIGINT UNSIGNED DEFAULT NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  last_order_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_customers_phone (phone),
+  INDEX idx_customers_last_order (last_order_at),
+  CONSTRAINT fk_customers_level FOREIGN KEY (member_level_id) REFERENCES member_levels(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS customer_wechat_accounts (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  openid VARCHAR(64) NOT NULL UNIQUE,
+  unionid VARCHAR(64) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_wechat_unionid (unionid),
+  CONSTRAINT fk_cwa_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  alipay_user_id VARCHAR(64) NOT NULL UNIQUE,
+  alipay_union_id VARCHAR(64) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_caa_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 商品分类与商品 ==========
+CREATE TABLE IF NOT EXISTS product_categories (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_cat_sort (sort_order, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS products (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  category_id BIGINT UNSIGNED NOT NULL,
+  product_no VARCHAR(32) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
+  description TEXT DEFAULT NULL,
+  main_image VARCHAR(500) DEFAULT NULL,
+  price DECIMAL(10,2) NOT NULL,
+  original_price DECIMAL(10,2) DEFAULT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'ON_SALE' COMMENT 'ON_SALE/OFF_SALE/SOLD_OUT',
+  is_recommended TINYINT NOT NULL DEFAULT 0,
+  is_hot TINYINT NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  sales_count INT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_products_category (category_id, status, sort_order),
+  CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES product_categories(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_images (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id BIGINT UNSIGNED NOT NULL,
+  image_url VARCHAR(500) NOT NULL,
+  image_type VARCHAR(20) NOT NULL DEFAULT 'DETAIL' COMMENT 'MAIN/DETAIL/OPTION',
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_pi_product (product_id, sort_order),
+  CONSTRAINT fk_pi_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 规格系统 ==========
+CREATE TABLE IF NOT EXISTS option_groups (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(50) NOT NULL,
+  code VARCHAR(50) NOT NULL UNIQUE COMMENT 'NOODLE_AMOUNT/SPICY/NUMB/EXTRA等',
+  selection_type VARCHAR(20) NOT NULL DEFAULT 'SINGLE' COMMENT 'SINGLE/MULTIPLE',
+  is_required TINYINT NOT NULL DEFAULT 1,
+  sort_order INT NOT NULL DEFAULT 0,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS options (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  group_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(50) NOT NULL,
+  code VARCHAR(50) NOT NULL,
+  extra_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  sort_order INT NOT NULL DEFAULT 0,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_group_code (group_id, code),
+  CONSTRAINT fk_options_group FOREIGN KEY (group_id) REFERENCES option_groups(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_option_groups (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  product_id BIGINT UNSIGNED NOT NULL,
+  group_id BIGINT UNSIGNED NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_product_group (product_id, group_id),
+  CONSTRAINT fk_pog_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pog_group FOREIGN KEY (group_id) REFERENCES option_groups(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 订单 ==========
+CREATE TABLE IF NOT EXISTS orders (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_no VARCHAR(32) NOT NULL UNIQUE,
+  customer_id BIGINT UNSIGNED DEFAULT NULL,
+  table_id BIGINT UNSIGNED DEFAULT NULL,
+  store_id BIGINT UNSIGNED NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING_PAYMENT',
+  subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID',
+  payment_method VARCHAR(20) DEFAULT NULL,
+  channel VARCHAR(20) DEFAULT NULL COMMENT 'WECHAT/ALIPAY',
+  remark VARCHAR(500) DEFAULT NULL,
+  idempotency_key VARCHAR(64) DEFAULT NULL,
+  ordered_at DATETIME(3) DEFAULT NULL,
+  paid_at DATETIME(3) DEFAULT NULL,
+  completed_at DATETIME(3) DEFAULT NULL,
+  cancelled_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_idempotency (idempotency_key),
+  INDEX idx_orders_customer (customer_id, created_at),
+  INDEX idx_orders_table (table_id, created_at),
+  INDEX idx_orders_status (status, created_at),
+  INDEX idx_orders_payment (payment_status, created_at),
+  CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
+  CONSTRAINT fk_orders_table FOREIGN KEY (table_id) REFERENCES tables(id),
+  CONSTRAINT fk_orders_store FOREIGN KEY (store_id) REFERENCES stores(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_id BIGINT UNSIGNED NOT NULL,
+  product_id BIGINT UNSIGNED NOT NULL,
+  product_name_snapshot VARCHAR(100) NOT NULL,
+  unit_price_snapshot DECIMAL(10,2) NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  subtotal DECIMAL(10,2) NOT NULL,
+  remark VARCHAR(255) DEFAULT NULL,
+  INDEX idx_oi_order (order_id),
+  CONSTRAINT fk_oi_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_oi_product FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS order_item_options (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_item_id BIGINT UNSIGNED NOT NULL,
+  group_name_snapshot VARCHAR(50) NOT NULL,
+  option_name_snapshot VARCHAR(50) NOT NULL,
+  option_code VARCHAR(50) NOT NULL,
+  extra_price_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  quantity INT NOT NULL DEFAULT 1,
+  INDEX idx_oio_item (order_item_id),
+  CONSTRAINT fk_oio_item FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 支付 ==========
+CREATE TABLE IF NOT EXISTS payments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  payment_no VARCHAR(32) NOT NULL UNIQUE,
+  order_id BIGINT UNSIGNED NOT NULL,
+  customer_id BIGINT UNSIGNED DEFAULT NULL,
+  provider VARCHAR(20) NOT NULL COMMENT 'WECHAT/ALIPAY',
+  channel VARCHAR(30) NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  currency VARCHAR(10) NOT NULL DEFAULT 'CNY',
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  provider_trade_no VARCHAR(64) DEFAULT NULL,
+  provider_order_no VARCHAR(64) DEFAULT NULL,
+  callback_raw JSON DEFAULT NULL,
+  paid_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_provider_trade (provider, provider_trade_no),
+  INDEX idx_payments_order (order_id),
+  INDEX idx_payments_no (payment_no),
+  CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders(id),
+  CONSTRAINT fk_payments_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS payment_refunds (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  refund_no VARCHAR(32) NOT NULL UNIQUE,
+  payment_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  reason VARCHAR(255) DEFAULT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  provider_refund_no VARCHAR(64) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_refund_payment FOREIGN KEY (payment_id) REFERENCES payments(id),
+  CONSTRAINT fk_refund_order FOREIGN KEY (order_id) REFERENCES orders(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 顾客口味画像 ==========
+CREATE TABLE IF NOT EXISTS customer_preferences (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  category VARCHAR(50) NOT NULL COMMENT '规格组code',
+  option_code VARCHAR(50) NOT NULL,
+  preference_score DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
+  order_count INT NOT NULL DEFAULT 0,
+  last_used_at DATETIME(3) DEFAULT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_cust_pref (customer_id, category, option_code),
+  INDEX idx_pref_customer (customer_id, category),
+  CONSTRAINT fk_pref_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 摄像头与客流 ==========
+CREATE TABLE IF NOT EXISTS cameras (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  store_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  camera_type VARCHAR(20) NOT NULL COMMENT 'USB/RTSP/HTTP',
+  source_url VARCHAR(500) NOT NULL,
+  username VARCHAR(100) DEFAULT NULL,
+  password_encrypted VARCHAR(500) DEFAULT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'OFFLINE',
+  fps INT NOT NULL DEFAULT 25,
+  detect_fps INT NOT NULL DEFAULT 3,
+  last_online_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_cameras_store FOREIGN KEY (store_id) REFERENCES stores(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS visitor_events (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  visitor_no VARCHAR(64) NOT NULL,
+  camera_id BIGINT UNSIGNED NOT NULL,
+  event_type VARCHAR(30) NOT NULL COMMENT 'ENTER/EXIT/PASS',
+  event_time DATETIME(3) NOT NULL,
+  snapshot_path VARCHAR(500) DEFAULT NULL,
+  expires_at DATETIME(3) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_ve_camera_time (camera_id, event_time),
+  INDEX idx_ve_expires (expires_at),
+  CONSTRAINT fk_ve_camera FOREIGN KEY (camera_id) REFERENCES cameras(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 授权人脸会员 ==========
+CREATE TABLE IF NOT EXISTS face_profiles (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  feature_data BLOB NOT NULL COMMENT '加密存储的特征向量',
+  feature_version VARCHAR(20) NOT NULL DEFAULT 'v1',
+  consent_status VARCHAR(20) NOT NULL DEFAULT 'AUTHORIZED' COMMENT 'AUTHORIZED/REVOKED',
+  consent_at DATETIME(3) NOT NULL,
+  revoked_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_face_customer (customer_id, consent_status),
+  CONSTRAINT fk_face_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS welcome_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  camera_id BIGINT UNSIGNED DEFAULT NULL,
+  welcome_text VARCHAR(500) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX idx_welcome_customer (customer_id, created_at),
+  CONSTRAINT fk_welcome_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ========== 系统配置 ==========
+CREATE TABLE IF NOT EXISTS system_settings (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  setting_key VARCHAR(100) NOT NULL UNIQUE,
+  setting_value TEXT NOT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

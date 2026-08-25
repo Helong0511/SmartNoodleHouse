@@ -1,0 +1,8 @@
+.page { padding: 24rpx 24rpx 140rpx; }
+.top { display: flex; justify-content: space-between; margin-bottom: 16rpx; }
+.member { color: #1677ff; }
+.cat { font-size: 30rpx; font-weight: 600; margin: 24rpx 0 8rpx; }
+.product { display: flex; justify-content: space-between; background: #fff; padding: 24rpx; border-radius: 16rpx; margin-bottom: 12rpx; }
+.price { color: #1677ff; font-size: 34rpx; font-weight: 700; }
+.cart-bar { position: fixed; left: 24rpx; right: 24rpx; bottom: 40rpx; background: #1677ff; color: #fff; text-align: center; padding: 28rpx; border-radius: 48rpx; }
+.desc { color: #999; font-size: 24rpx; }

@@ -1,0 +1,430 @@
+from datetime import datetime
+from decimal import Decimal
+
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
+
+
+class TimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Role(Base):
+    __tablename__ = "roles"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(String(255))
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(100), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    module: Mapped[str] = mapped_column(String(50))
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("roles.id"), primary_key=True)
+    permission_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("permissions.id"), primary_key=True)
+
+
+class User(Base, TimestampMixin):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[str] = mapped_column(String(100))
+    role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("roles.id"))
+    status: Mapped[int] = mapped_column(Integer, default=1)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    role: Mapped["Role"] = relationship("Role")
+
+
+class OperationLog(Base):
+    __tablename__ = "operation_logs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger)
+    action: Mapped[str] = mapped_column(String(100))
+    module: Mapped[str] = mapped_column(String(50))
+    target_type: Mapped[str | None] = mapped_column(String(50))
+    target_id: Mapped[int | None] = mapped_column(BigInteger)
+    ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Store(Base, TimestampMixin):
+    __tablename__ = "stores"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_no: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    address: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class DiningTable(Base, TimestampMixin):
+    __tablename__ = "tables"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    table_no: Mapped[str] = mapped_column(String(20))
+    table_name: Mapped[str] = mapped_column(String(50))
+    qr_token: Mapped[str] = mapped_column(String(64), unique=True)
+    wechat_qr_url: Mapped[str | None] = mapped_column(String(500))
+    alipay_qr_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class MemberLevel(Base):
+    __tablename__ = "member_levels"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50))
+    min_points: Mapped[int] = mapped_column(Integer, default=0)
+    discount_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("1.0000"))
+
+
+class Customer(Base, TimestampMixin):
+    __tablename__ = "customers"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_no: Mapped[str] = mapped_column(String(32), unique=True)
+    display_name: Mapped[str | None] = mapped_column(String(100))
+    nickname: Mapped[str | None] = mapped_column(String(100))
+    avatar_url: Mapped[str | None] = mapped_column(String(500))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    member_level_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("member_levels.id"))
+    status: Mapped[int] = mapped_column(Integer, default=1)
+    last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CustomerWechatAccount(Base, TimestampMixin):
+    __tablename__ = "customer_wechat_accounts"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    openid: Mapped[str] = mapped_column(String(64), unique=True)
+    unionid: Mapped[str | None] = mapped_column(String(64))
+
+
+class CustomerAlipayAccount(Base, TimestampMixin):
+    __tablename__ = "customer_alipay_accounts"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    alipay_user_id: Mapped[str] = mapped_column(String(64), unique=True)
+    alipay_union_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class ProductCategory(Base, TimestampMixin):
+    __tablename__ = "product_categories"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(String(255))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Product(Base, TimestampMixin):
+    __tablename__ = "products"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product_categories.id"))
+    product_no: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
+    main_image: Mapped[str | None] = mapped_column(String(500))
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    original_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    status: Mapped[str] = mapped_column(String(20), default="ON_SALE")
+    is_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_hot: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    sales_count: Mapped[int] = mapped_column(Integer, default=0)
+    stock: Mapped[int] = mapped_column(Integer, default=999)
+    box_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    min_order_count: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class ProductImage(Base):
+    __tablename__ = "product_images"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"))
+    image_url: Mapped[str] = mapped_column(String(500))
+    image_type: Mapped[str] = mapped_column(String(20), default="DETAIL")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OptionGroup(Base, TimestampMixin):
+    __tablename__ = "option_groups"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50))
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    selection_type: Mapped[str] = mapped_column(String(20), default="SINGLE")
+    is_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Option(Base, TimestampMixin):
+    __tablename__ = "options"
+    __table_args__ = (UniqueConstraint("group_id", "code"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("option_groups.id"))
+    name: Mapped[str] = mapped_column(String(50))
+    code: Mapped[str] = mapped_column(String(50))
+    extra_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class ProductOptionGroup(Base):
+    __tablename__ = "product_option_groups"
+    __table_args__ = (UniqueConstraint("product_id", "group_id"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"))
+    group_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("option_groups.id"))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Order(Base, TimestampMixin):
+    __tablename__ = "orders"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_no: Mapped[str] = mapped_column(String(32), unique=True)
+    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"))
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING_PAYMENT")
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    payment_status: Mapped[str] = mapped_column(String(20), default="UNPAID")
+    payment_method: Mapped[str | None] = mapped_column(String(20))
+    channel: Mapped[str | None] = mapped_column(String(20))
+    remark: Mapped[str | None] = mapped_column(String(500))
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    ordered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"))
+    product_name_snapshot: Mapped[str] = mapped_column(String(100))
+    unit_price_snapshot: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    remark: Mapped[str | None] = mapped_column(String(255))
+
+
+class OrderItemOption(Base):
+    __tablename__ = "order_item_options"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("order_items.id", ondelete="CASCADE"))
+    group_name_snapshot: Mapped[str] = mapped_column(String(50))
+    option_name_snapshot: Mapped[str] = mapped_column(String(50))
+    option_code: Mapped[str] = mapped_column(String(50))
+    extra_price_snapshot: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Payment(Base, TimestampMixin):
+    __tablename__ = "payments"
+    __table_args__ = (UniqueConstraint("provider", "provider_trade_no"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    payment_no: Mapped[str] = mapped_column(String(32), unique=True)
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
+    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    provider: Mapped[str] = mapped_column(String(20))
+    channel: Mapped[str] = mapped_column(String(30))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    currency: Mapped[str] = mapped_column(String(10), default="CNY")
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    provider_trade_no: Mapped[str | None] = mapped_column(String(64))
+    provider_order_no: Mapped[str | None] = mapped_column(String(64))
+    callback_raw: Mapped[str | None] = mapped_column(Text)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PaymentRefund(Base, TimestampMixin):
+    __tablename__ = "payment_refunds"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    refund_no: Mapped[str] = mapped_column(String(32), unique=True)
+    payment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("payments.id"))
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    reason: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    provider_refund_no: Mapped[str | None] = mapped_column(String(64))
+
+
+class CustomerPreference(Base):
+    __tablename__ = "customer_preferences"
+    __table_args__ = (UniqueConstraint("customer_id", "category", "option_code"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    category: Mapped[str] = mapped_column(String(50))
+    option_code: Mapped[str] = mapped_column(String(50))
+    preference_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0000"))
+    order_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Camera(Base, TimestampMixin):
+    __tablename__ = "cameras"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    camera_type: Mapped[str] = mapped_column(String(20))
+    source_url: Mapped[str] = mapped_column(String(500))
+    username: Mapped[str | None] = mapped_column(String(100))
+    password_encrypted: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(20), default="OFFLINE")
+    fps: Mapped[int] = mapped_column(Integer, default=25)
+    detect_fps: Mapped[int] = mapped_column(Integer, default=3)
+    last_online_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VisitorEvent(Base):
+    __tablename__ = "visitor_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    visitor_no: Mapped[str] = mapped_column(String(64))
+    camera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cameras.id"))
+    event_type: Mapped[str] = mapped_column(String(30))
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    snapshot_path: Mapped[str | None] = mapped_column(String(500))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FaceProfile(Base, TimestampMixin):
+    __tablename__ = "face_profiles"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    feature_data: Mapped[bytes] = mapped_column(LargeBinary)
+    feature_version: Mapped[str] = mapped_column(String(20), default="v1")
+    consent_status: Mapped[str] = mapped_column(String(20), default="AUTHORIZED")
+    consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WelcomeLog(Base):
+    __tablename__ = "welcome_logs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    camera_id: Mapped[int | None] = mapped_column(BigInteger)
+    welcome_text: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    setting_key: Mapped[str] = mapped_column(String(100), unique=True)
+    setting_value: Mapped[str] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DeliveryProductMap(Base, TimestampMixin):
+    """平台菜品 ↔ 本系统商品"""
+
+    __tablename__ = "delivery_product_maps"
+    __table_args__ = (UniqueConstraint("store_id", "platform", "platform_sku_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    platform: Mapped[str] = mapped_column(String(20))
+    platform_sku_id: Mapped[str] = mapped_column(String(64))
+    platform_spu_code: Mapped[str | None] = mapped_column(String(64))
+    app_food_code: Mapped[str | None] = mapped_column(String(64))
+    option_signature: Mapped[str | None] = mapped_column(String(128))
+    platform_sku_name: Mapped[str | None] = mapped_column(String(100))
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"))
+    option_map_json: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class DeliveryOrder(Base, TimestampMixin):
+    """外卖订单扩展信息"""
+
+    __tablename__ = "delivery_orders"
+    __table_args__ = (UniqueConstraint("platform", "platform_order_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), unique=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    platform_order_id: Mapped[str] = mapped_column(String(64))
+    platform_day_seq: Mapped[str | None] = mapped_column(String(32))
+    delivery_status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    recipient_name: Mapped[str | None] = mapped_column(String(50))
+    recipient_phone: Mapped[str | None] = mapped_column(String(20))
+    recipient_address: Mapped[str | None] = mapped_column(String(500))
+    rider_name: Mapped[str | None] = mapped_column(String(50))
+    rider_phone: Mapped[str | None] = mapped_column(String(20))
+    expected_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    platform_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    packing_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    delivery_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    logistics_status: Mapped[str | None] = mapped_column(String(30))
+    logistics_code: Mapped[str | None] = mapped_column(String(50))
+    refund_status: Mapped[str] = mapped_column(String(30), default="NONE")
+    urge_count: Mapped[int] = mapped_column(Integer, default=0)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_payload: Mapped[str | None] = mapped_column(Text)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PlatformStoreBinding(Base, TimestampMixin):
+    __tablename__ = "platform_store_bindings"
+    __table_args__ = (UniqueConstraint("store_id", "platform", "platform_shop_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    platform: Mapped[str] = mapped_column(String(20))
+    platform_shop_id: Mapped[str] = mapped_column(String(64))
+    platform_shop_name: Mapped[str | None] = mapped_column(String(100))
+    access_token: Mapped[str | None] = mapped_column(Text)
+    refresh_token: Mapped[str | None] = mapped_column(Text)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    extra_config: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class DeliveryRefund(Base):
+    __tablename__ = "delivery_refunds"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    delivery_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("delivery_orders.id", ondelete="CASCADE"))
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(String(20))
+    platform_refund_id: Mapped[str | None] = mapped_column(String(64))
+    refund_type: Mapped[str] = mapped_column(String(30), default="FULL")
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    reason: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    raw_payload: Mapped[str | None] = mapped_column(Text)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeliveryCallbackLog(Base):
+    __tablename__ = "delivery_callback_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    event_type: Mapped[str] = mapped_column(String(50))
+    platform_order_id: Mapped[str | None] = mapped_column(String(64))
+    order_id: Mapped[int | None] = mapped_column(BigInteger)
+    payload: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

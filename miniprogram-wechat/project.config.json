@@ -1,0 +1,13 @@
+{
+  "description": "面馆智能经营系统 - 微信小程序点餐",
+  "packOptions": { "ignore": [] },
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "minified": true
+  },
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "smart-noodle-wechat",
+  "condition": {}
+}

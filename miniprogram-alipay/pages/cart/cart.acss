@@ -1,0 +1,4 @@
+.page { padding: 32rpx; }
+.item { display: flex; justify-content: space-between; background: #fff; padding: 24rpx; margin-bottom: 12rpx; border-radius: 12rpx; }
+.empty { text-align: center; color: #999; margin-top: 120rpx; }
+.btn-primary { margin-top: 40rpx; }

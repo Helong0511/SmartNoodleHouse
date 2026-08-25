@@ -1,0 +1,8 @@
+<view class="page">
+  <view class="ok">✓</view>
+  <view class="title">订单已提交</view>
+  <view>订单号：{{order.order_no}}</view>
+  <view>金额：¥{{order.total_amount}}</view>
+  <view>支付状态：{{order.payment_status}}</view>
+  <button class="btn-primary" onTap="goMenu">继续点餐</button>
+</view>
