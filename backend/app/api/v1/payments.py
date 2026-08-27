@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission
@@ -6,9 +9,15 @@ from app.core.response import calc_pages, success
 from app.models import Order, Payment
 from app.schemas.order import PaymentCreate
 from app.services.payment_service import PaymentService
+from app.services.store_scope import assert_order_store_access
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/payments", tags=["支付"])
+
+
+class RefundCreate(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+    reason: str = Field(default="商家退款", max_length=200)
 
 
 @router.post("/orders/{order_id}/pay")
@@ -30,6 +39,40 @@ async def create_payment(
     return success({"payment_no": payment.payment_no, "amount": str(payment.amount), **pay_data}, request=request)
 
 
+@router.post("/{payment_no}/refund", dependencies=[require_permission("payment:refund")])
+async def refund_payment(
+    payment_no: str,
+    data: RefundCreate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    result = await db.execute(select(Payment).where(Payment.payment_no == payment_no))
+    payment = result.scalar_one_or_none()
+    if not payment:
+        raise HTTPException(status_code=404, detail="支付记录不存在")
+    order = await db.get(Order, payment.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
+    row = await PaymentService.refund(db, payment, data.amount, data.reason, operator_id=user.id)
+    await ws_manager.notify_order_event(
+        "ORDER_REFUNDED",
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "payment_no": payment.payment_no,
+            "refund_no": row.refund_no,
+            "amount": str(row.amount),
+            "store_id": order.store_id,
+        },
+    )
+    return success(
+        {"refund_no": row.refund_no, "status": row.status, "amount": str(row.amount)},
+        request=request,
+    )
+
+
 @router.post("/wechat/notify")
 async def wechat_notify(request: Request, db: DbSession):
     body = await request.body()
@@ -38,7 +81,10 @@ async def wechat_notify(request: Request, db: DbSession):
     if payment and payment.status == "PAID":
         order = await db.get(Order, payment.order_id)
         if order:
-            await ws_manager.notify_order_event("ORDER_PAID", {"order_id": order.id, "order_no": order.order_no})
+            await ws_manager.notify_order_event(
+                "ORDER_PAID",
+                {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
+            )
     return {"code": "SUCCESS", "message": "成功"}
 
 
@@ -50,7 +96,10 @@ async def alipay_notify(request: Request, db: DbSession):
     if payment and payment.status == "PAID":
         order = await db.get(Order, payment.order_id)
         if order:
-            await ws_manager.notify_order_event("ORDER_PAID", {"order_id": order.id, "order_no": order.order_no})
+            await ws_manager.notify_order_event(
+                "ORDER_PAID",
+                {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
+            )
     return "success"
 
 
@@ -63,9 +112,14 @@ async def list_payments(
     page_size: int = 20,
     status: str | None = None,
 ):
+    from app.schemas.pagination import clamp_page
+
+    page, page_size = clamp_page(page, page_size)
     q = select(Payment)
     if status:
         q = q.where(Payment.status == status)
+    if user.store_id and user.role.code != "SUPER_ADMIN":
+        q = q.join(Order, Order.id == Payment.order_id).where(Order.store_id == user.store_id)
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
     result = await db.execute(q.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
     items = [
@@ -93,6 +147,10 @@ async def get_payment(payment_no: str, request: Request, db: DbSession, auth: St
         return success(None, message="支付记录不存在", request=request)
     if customer and payment.customer_id != customer.id:
         raise HTTPException(status_code=403, detail="无权查看此支付")
+    if user is not None:
+        order = await db.get(Order, payment.order_id)
+        if order:
+            assert_order_store_access(user, order)
     return success(
         {"payment_no": payment.payment_no, "status": payment.status, "amount": str(payment.amount), "provider": payment.provider},
         request=request,

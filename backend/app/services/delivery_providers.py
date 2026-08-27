@@ -18,6 +18,8 @@ from typing import Any
 
 import httpx
 
+from app.core.http_client import get_http_client
+
 from app.core.config import get_settings
 from app.services.delivery_context import PlatformCredentials
 from app.services.delivery_sign import (
@@ -30,9 +32,17 @@ from app.services.delivery_sign import (
 logger = logging.getLogger(__name__)
 
 
+def _ok_or_mock(data: dict, *, ok_expr: bool) -> bool:
+    """平台真实成功才算成功；mock 仅 allow_delivery_mock 时为 True。"""
+    if data.get("_mock"):
+        return bool(get_settings().allow_delivery_mock)
+    return ok_expr
+
+
+
 def _dev_mode_allowed() -> bool:
     s = get_settings()
-    return s.app_env == "development" and s.app_debug
+    return s.is_development and s.app_debug and bool(getattr(s, "allow_auth_mock", False))
 
 
 class DeliveryProvider(ABC):
@@ -173,7 +183,7 @@ class MeituanProvider(DeliveryProvider):
                 data.get("app_poi_code") or data.get("wm_poi_id") or data.get("poi_id") or order_obj.get("app_poi_code") or ""
             ),
             "platform_day_seq": str(data.get("day_seq") or order_obj.get("day_seq") or data.get("daySeq") or ""),
-            "store_id": int(data.get("store_id") or 1),
+            "store_id": int(data.get("store_id") or 0) or None,
             "total_amount": Decimal(str(data.get("total") or order_obj.get("total") or data.get("total_amount") or "0")),
             "recipient_name": data.get("recipient_name") or order_obj.get("recipient_name"),
             "recipient_phone": data.get("recipient_phone") or order_obj.get("recipient_phone"),
@@ -197,7 +207,9 @@ class MeituanProvider(DeliveryProvider):
         app_id = settings.meituan_app_id
         app_secret = settings.meituan_app_secret
         if not app_id or not app_secret:
-            logger.info("[MEITUAN mock] %s %s", path, biz_params)
+            if settings.is_production or not settings.allow_delivery_mock:
+                raise ValueError("美团未配置，禁止 Mock 成功")
+            logger.warning("[MEITUAN mock] %s %s", path, biz_params)
             return {"data": "ok", "_mock": True}
 
         if self.credentials.platform_shop_id and "app_poi_code" not in biz_params:
@@ -211,35 +223,38 @@ class MeituanProvider(DeliveryProvider):
             **{k: str(v) for k, v in biz_params.items() if v is not None},
         }
         params["sig"] = meituan_sign(url, params, app_secret)
-        async with httpx.AsyncClient(timeout=15) as client:
-            if method.upper() == "POST":
-                resp = await client.post(url, data=params)
-            else:
-                resp = await client.get(url, params=params)
-            try:
-                data = resp.json()
-            except Exception:
-                logger.error("美团响应非 JSON: %s", resp.text[:200])
-                return {"data": "ng", "error": {"msg": resp.text[:200]}}
-            if data.get("data") != "ok" and data.get("error"):
-                logger.error("美团 API 失败 %s: %s", path, data)
-            return data
+        client = get_http_client()
+        if method.upper() == "POST":
+            resp = await client.post(url, data=params)
+        else:
+            resp = await client.get(url, params=params)
+        try:
+            data = resp.json()
+        except Exception:
+            logger.error("美团响应非 JSON: %s", resp.text[:200])
+            return {"data": "ng", "error": {"msg": resp.text[:200]}}
+        if data.get("data") != "ok" and data.get("error"):
+            logger.error("美团 API 失败 %s: %s", path, data)
+        return data
 
     async def confirm_order(self, platform_order_id: str) -> bool:
         # 官方: GET /api/v1/order/confirm  order_id
         data = await self._request("/api/v1/order/confirm", {"order_id": platform_order_id})
-        return data.get("data") == "ok" or data.get("_mock") is True
+        if data.get("_mock"):
+            return bool(get_settings().allow_delivery_mock)
+        return data.get("data") == "ok"
 
     async def sync_status(self, platform_order_id: str, status: str) -> bool:
         if status == "ACCEPTED":
             return await self.confirm_order(platform_order_id)
         if status == "READY":
-            # 官方: GET /api/v1/order/preparationMealComplete  商家确认已完成出餐
             data = await self._request(
                 "/api/v1/order/preparationMealComplete",
                 {"order_id": platform_order_id},
             )
-            return data.get("data") == "ok" or data.get("_mock") is True
+            if data.get("_mock"):
+                return bool(get_settings().allow_delivery_mock)
+            return data.get("data") == "ok"
         if status in ("CANCELLED", "DONE"):
             logger.info("[MEITUAN] status %s 由平台/配送侧驱动，本地仅记录: %s", status, platform_order_id)
             return True
@@ -251,21 +266,21 @@ class MeituanProvider(DeliveryProvider):
             "/api/v1/order/remindReply",
             {"order_id": platform_order_id, "reply_type": raw.get("reply_type", 2)},
         )
-        return data.get("data") == "ok" or data.get("_mock") is True
+        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
 
     async def agree_refund(self, refund_id: str, platform_order_id: str) -> bool:
         data = await self._request(
             "/api/v1/order/refund/agree",
             {"order_id": platform_order_id, "refund_id": refund_id},
         )
-        return data.get("data") == "ok" or data.get("_mock") is True
+        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
 
     async def disagree_refund(self, refund_id: str, platform_order_id: str, reason: str) -> bool:
         data = await self._request(
             "/api/v1/order/refund/reject",
             {"order_id": platform_order_id, "refund_id": refund_id, "reason": reason},
         )
-        return data.get("data") == "ok" or data.get("_mock") is True
+        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
 
     async def sync_product(self, payload: dict[str, Any]) -> bool:
         food_data = json.dumps(
@@ -285,30 +300,36 @@ class MeituanProvider(DeliveryProvider):
             {"app_food_code": payload["app_food_code"], "food_data": food_data},
             method="POST",
         )
-        return data.get("data") == "ok" or data.get("_mock") is True
+        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
 
     async def cancel_order(self, platform_order_id: str, reason: str = "商家取消") -> bool:
         data = await self._request(
             "/api/v1/order/cancel",
             {"order_id": platform_order_id, "reason": reason},
         )
-        return data.get("data") == "ok" or data.get("_mock") is True
+        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
 
     async def sync_prices(self, items: list[dict]) -> int:
+        ok = 0
         for it in items:
-            await self._request(
+            data = await self._request(
                 "/api/v1/food/updatePrice",
                 {"app_food_code": it["app_food_code"], "price": it["price"]},
             )
-        return len(items)
+            if _ok_or_mock(data, ok_expr=data.get("data") == "ok"):
+                ok += 1
+        return ok
 
     async def sync_stock(self, items: list[dict]) -> int:
+        ok = 0
         for it in items:
-            await self._request(
+            data = await self._request(
                 "/api/v1/food/updateStock",
                 {"app_food_code": it["app_food_code"], "stock": it["stock"]},
             )
-        return len(items)
+            if _ok_or_mock(data, ok_expr=data.get("data") == "ok"):
+                ok += 1
+        return ok
 
 
 class ElemeProvider(DeliveryProvider):
@@ -328,20 +349,21 @@ class ElemeProvider(DeliveryProvider):
         if not settings.eleme_app_secret:
             raise ValueError("饿了么未配置，拒绝回调")
 
-        # 推送消息通常带 type / message / requestId，部分版本有 signature
-        # 未带 signature 时记录配置密钥后仍接受（平台侧以 IP 白名单/HTTPS 为主），生产建议开启验签字段校验
         sig = data.get("signature") or headers.get("x-eleme-signature")
-        if sig and settings.eleme_access_token:
-            action = str(data.get("type") or data.get("action") or "push")
-            expected = eleme_shop_sign(
-                action,
-                settings.eleme_access_token,
-                {"app_key": settings.eleme_app_id, "timestamp": data.get("timestamp", "")},
-                {"message": data.get("message", "")},
-                settings.eleme_app_secret,
-            )
-            if str(sig).upper() != expected:
-                logger.warning("饿了么推送签名不匹配，继续按消息处理（可按需改为拒绝）")
+        if not sig:
+            raise ValueError("饿了么回调缺少 signature，拒绝")
+        if not settings.eleme_access_token:
+            raise ValueError("饿了么 access_token 未配置，无法验签")
+        action = str(data.get("type") or data.get("action") or "push")
+        expected = eleme_shop_sign(
+            action,
+            settings.eleme_access_token,
+            {"app_key": settings.eleme_app_id, "timestamp": data.get("timestamp", "")},
+            {"message": data.get("message", "")},
+            settings.eleme_app_secret,
+        )
+        if str(sig).upper() != expected:
+            raise ValueError("饿了么推送签名验证失败")
         return data
 
     def parse_order(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -376,7 +398,7 @@ class ElemeProvider(DeliveryProvider):
             "platform_order_id": str(order.get("id") or order.get("orderId") or data.get("order_id") or ""),
             "platform_shop_id": str(order.get("shopId") or data.get("shopId") or data.get("shop_id") or ""),
             "platform_day_seq": str(order.get("daySn") or order.get("day_seq") or ""),
-            "store_id": int(data.get("store_id") or order.get("shopId") or 1),
+            "store_id": None,  # 必须通过 platform_store_bindings 解析，禁止 shopId 当本地 store_id
             "total_amount": Decimal(str(order.get("totalPrice") or order.get("total_amount") or "0")),
             "recipient_name": (order.get("consignee") or {}).get("name")
             if isinstance(order.get("consignee"), dict)
@@ -403,7 +425,9 @@ class ElemeProvider(DeliveryProvider):
         settings = get_settings()
         token = self.credentials.access_token or settings.eleme_access_token
         if not settings.eleme_app_id or not settings.eleme_app_secret or not token:
-            logger.info("[ELEME mock] %s %s", action, params)
+            if settings.is_production or not settings.allow_delivery_mock:
+                raise ValueError("饿了么未配置，禁止 Mock 成功")
+            logger.warning("[ELEME mock] %s %s", action, params)
             return {"result": "ok", "_mock": True}
 
         metas = {
@@ -420,21 +444,21 @@ class ElemeProvider(DeliveryProvider):
             "signature": eleme_shop_sign(action, token, metas, params, settings.eleme_app_secret),
         }
         url = settings.eleme_api_base.rstrip("/") + "/"
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, json=payload)
-            try:
-                data = resp.json()
-            except Exception:
-                logger.error("饿了么响应非 JSON: %s", resp.text[:200])
-                return {"error": resp.text[:200]}
-            if data.get("error"):
-                logger.error("饿了么 API 失败 %s: %s", action, data)
-            return data
+        client = get_http_client()
+        resp = await client.post(url, json=payload)
+        try:
+            data = resp.json()
+        except Exception:
+            logger.error("饿了么响应非 JSON: %s", resp.text[:200])
+            return {"error": resp.text[:200]}
+        if data.get("error"):
+            logger.error("饿了么 API 失败 %s: %s", action, data)
+        return data
 
     async def confirm_order(self, platform_order_id: str) -> bool:
         # 官方推荐: eleme.order.confirmOrderLite
         data = await self._rpc("eleme.order.confirmOrderLite", {"orderId": platform_order_id})
-        return data.get("_mock") is True or data.get("error") is None
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
     async def sync_status(self, platform_order_id: str, status: str) -> bool:
         if status == "ACCEPTED":
@@ -442,7 +466,7 @@ class ElemeProvider(DeliveryProvider):
         if status == "READY":
             # 官方: eleme.order.setOrderPrepared 商家确认已完成出餐
             data = await self._rpc("eleme.order.setOrderPrepared", {"orderId": platform_order_id})
-            return data.get("_mock") is True or data.get("error") is None
+            return _ok_or_mock(data, ok_expr=data.get("error") is None)
         if status in ("CANCELLED", "DONE"):
             logger.info("[ELEME] status %s 本地记录: %s", status, platform_order_id)
             return True
@@ -450,27 +474,29 @@ class ElemeProvider(DeliveryProvider):
 
     async def reply_urge(self, platform_order_id: str, raw: dict[str, Any]) -> bool:
         data = await self._rpc("eleme.order.replyReminder", {"orderId": platform_order_id})
-        return data.get("_mock") is True or data.get("error") is None
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
     async def agree_refund(self, refund_id: str, platform_order_id: str) -> bool:
         data = await self._rpc(
             "eleme.order.agreeRefundLite",
             {"orderId": platform_order_id, "refundOrderId": refund_id},
         )
-        return data.get("_mock") is True or data.get("error") is None
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
     async def disagree_refund(self, refund_id: str, platform_order_id: str, reason: str) -> bool:
         data = await self._rpc(
             "eleme.order.disagreeRefundLite",
             {"orderId": platform_order_id, "refundOrderId": refund_id, "reason": reason},
         )
-        return data.get("_mock") is True or data.get("error") is None
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
     async def sync_product(self, payload: dict[str, Any]) -> bool:
         settings = get_settings()
         if not settings.eleme_app_id:
+            if settings.is_production or not settings.allow_delivery_mock:
+                raise ValueError("饿了么未配置，禁止 Mock 同步商品")
             return True
-        await self._rpc(
+        data = await self._rpc(
             "eleme.product.item.createItem",
             {
                 "shopId": payload["shop_id"],
@@ -480,30 +506,36 @@ class ElemeProvider(DeliveryProvider):
                 "specs": [{"specId": payload["app_food_code"], "name": "默认", "price": payload["price"]}],
             },
         )
-        return True
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
     async def sync_prices(self, items: list[dict]) -> int:
+        ok = 0
         for it in items:
-            await self._rpc(
+            data = await self._rpc(
                 "eleme.product.item.updateItem",
                 {"itemId": it.get("platform_sku_id"), "specs": [{"price": it["price"]}]},
             )
-        return len(items)
+            if _ok_or_mock(data, ok_expr=data.get("error") is None):
+                ok += 1
+        return ok
 
     async def sync_stock(self, items: list[dict]) -> int:
+        ok = 0
         for it in items:
-            await self._rpc(
+            data = await self._rpc(
                 "eleme.product.item.updateItem",
                 {"itemId": it.get("platform_sku_id"), "stock": it["stock"]},
             )
-        return True
+            if _ok_or_mock(data, ok_expr=data.get("error") is None):
+                ok += 1
+        return ok
 
     async def cancel_order(self, platform_order_id: str, reason: str = "商家取消") -> bool:
         data = await self._rpc(
             "eleme.order.cancelOrderLite",
             {"orderId": platform_order_id, "reason": reason, "type": "restaurantClose"},
         )
-        return data.get("_mock") is True or data.get("error") is None
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
 
 PROVIDERS: dict[str, type[DeliveryProvider]] = {

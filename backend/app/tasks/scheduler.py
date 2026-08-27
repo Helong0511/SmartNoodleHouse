@@ -6,16 +6,23 @@ from sqlalchemy import delete, select
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
-from app.models import OperationLog, Order, VisitorEvent
+from app.models import OperationLog, Order, OrderItem, VisitorEvent
 
 logger = logging.getLogger(__name__)
 
-
 from app.services.platform_token_service import PlatformTokenService
+from app.services.stock_service import restore_stock
+from app.services.webhook_inbox import process_pending_inbox
 
 
 def register_tasks(scheduler) -> None:
     settings = get_settings()
+
+    @scheduler.scheduled_job("interval", seconds=5)
+    async def drain_webhook_inbox():
+        n = await process_pending_inbox(limit=30)
+        if n:
+            logger.info("Processed %s webhook inbox items", n)
 
     @scheduler.scheduled_job("interval", hours=6)
     async def refresh_platform_tokens():
@@ -27,18 +34,34 @@ def register_tasks(scheduler) -> None:
     async def close_expired_orders():
         async with AsyncSessionLocal() as db:
             timeout = now_local() - timedelta(minutes=settings.order_payment_timeout_minutes)
+            # FOR UPDATE 与支付回调行锁互斥，避免关单/入账竞态
             result = await db.execute(
-                select(Order).where(
+                select(Order)
+                .where(
                     Order.status == "PENDING_PAYMENT",
                     Order.payment_status == "UNPAID",
                     Order.created_at <= timeout,
                 )
+                .with_for_update(skip_locked=True)
             )
-            for order in result.scalars():
+            expired = list(result.scalars().all())
+            closed = 0
+            for order in expired:
+                # 二次确认：锁内状态可能已被回调改写
+                if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
+                    continue
                 order.status = "CANCELLED"
+                order.payment_status = "CANCELLED"
                 order.cancelled_at = now_local()
+                items = (
+                    await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+                ).scalars().all()
+                for it in items:
+                    await restore_stock(db, it.product_id, it.quantity)
+                closed += 1
             await db.commit()
-            logger.info("Expired orders closed")
+            if closed:
+                logger.info("Expired orders closed: %s", closed)
 
     @scheduler.scheduled_job("interval", hours=6)
     async def cleanup_visitor_data():

@@ -30,13 +30,13 @@ def extract_platform_shop_id(platform: str, raw: dict[str, Any], parsed: dict[st
             or parsed.get("platform_shop_id")
             or ""
         ) or None
+    # 饿了么：禁止把本地 store_id 与平台 shopId 混用
+    message = parsed.get("message") if isinstance(parsed.get("message"), dict) else {}
     return str(
         raw.get("shopId")
         or raw.get("shop_id")
         or parsed.get("platform_shop_id")
-        or (parsed.get("message") or {}).get("shopId")
-        if isinstance(parsed.get("message"), dict)
-        else None
+        or message.get("shopId")
         or ""
     ) or None
 
@@ -47,48 +47,60 @@ async def resolve_store_and_credentials(
     raw: dict[str, Any],
     parsed: dict[str, Any],
 ) -> tuple[int, PlatformCredentials | None]:
-    """平台门店 ID → 本系统 store_id + 调用凭证"""
+    """平台门店 ID → 本系统 store_id；无绑定则拒绝，禁止 fallback 到 1。"""
+    from app.core.exceptions import AppException
+
     shop_id = extract_platform_shop_id(platform, raw, parsed)
     settings = get_settings()
 
-    if shop_id:
-        binding = (
-            await db.execute(
-                select(PlatformStoreBinding).where(
-                    PlatformStoreBinding.platform == platform.upper(),
-                    PlatformStoreBinding.platform_shop_id == shop_id,
-                    PlatformStoreBinding.status == 1,
-                )
-            )
-        ).scalar_one_or_none()
-        if binding:
-            extra = {}
-            if binding.extra_config:
-                import json
+    if not shop_id:
+        raise AppException(40060, "回调缺少平台门店 ID，拒绝处理")
 
-                try:
-                    extra = json.loads(binding.extra_config) if isinstance(binding.extra_config, str) else binding.extra_config
-                except Exception:
-                    extra = {}
-            creds = PlatformCredentials(
-                store_id=binding.store_id,
-                platform_shop_id=binding.platform_shop_id,
-                access_token=binding.access_token,
-                refresh_token=binding.refresh_token,
-                extra=extra,
+    binding = (
+        await db.execute(
+            select(PlatformStoreBinding).where(
+                PlatformStoreBinding.platform == platform.upper(),
+                PlatformStoreBinding.platform_shop_id == shop_id,
+                PlatformStoreBinding.status == 1,
             )
-            return binding.store_id, creds
+        )
+    ).scalar_one_or_none()
+    if binding:
+        extra = {}
+        if binding.extra_config:
+            import json
 
-    fallback_store = int(parsed.get("store_id") or raw.get("store_id") or 1)
-    global_token = settings.eleme_access_token if platform.upper() == "ELEME" else None
+            try:
+                extra = json.loads(binding.extra_config) if isinstance(binding.extra_config, str) else binding.extra_config
+            except Exception:
+                extra = {}
+        creds = PlatformCredentials(
+            store_id=binding.store_id,
+            platform_shop_id=binding.platform_shop_id,
+            access_token=binding.access_token,
+            refresh_token=binding.refresh_token,
+            extra=extra,
+        )
+        return binding.store_id, creds
+
+    # 单店全局配置：仅当 .env 中 platform shop_id 与回调一致时使用
     global_shop = settings.eleme_shop_id if platform.upper() == "ELEME" else settings.meituan_shop_id
-    if global_token or global_shop:
-        return fallback_store, PlatformCredentials(
-            store_id=fallback_store,
-            platform_shop_id=global_shop or shop_id,
+    global_token = settings.eleme_access_token if platform.upper() == "ELEME" else None
+    if global_shop and str(global_shop) == str(shop_id):
+        # 使用绑定表缺失时的全局门店：必须显式配置 LOCAL_STORE_ID，默认仍禁止猜 1
+        local_store = int(raw.get("local_store_id") or parsed.get("local_store_id") or 0)
+        if local_store <= 0:
+            raise AppException(
+                40061,
+                f"平台门店 {shop_id} 未在 platform_store_bindings 绑定，且未提供 local_store_id",
+            )
+        return local_store, PlatformCredentials(
+            store_id=local_store,
+            platform_shop_id=global_shop,
             access_token=global_token,
         )
-    return fallback_store, None
+
+    raise AppException(40062, f"未知平台门店，拒绝落单: {platform}/{shop_id}")
 
 
 async def get_credentials_for_store(

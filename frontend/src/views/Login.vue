@@ -19,8 +19,8 @@ import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
-const username = ref('admin')
-const password = ref('admin123')
+const username = ref(import.meta.env.DEV ? 'admin' : '')
+const password = ref(import.meta.env.DEV ? 'admin123' : '')
 const loading = ref(false)
 
 async function handleLogin() {

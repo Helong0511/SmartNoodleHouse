@@ -4,7 +4,7 @@ import asyncio
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.api.deps import CurrentUser, DbSession, require_permission
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/delivery", tags=["外卖"])
 
 
 class ProductMapCreate(BaseModel):
-    store_id: int = 1
+    store_id: int | None = None
     platform: str = Field(description="MEITUAN 或 ELEME")
     platform_sku_id: str
     platform_spu_code: str | None = None
@@ -32,7 +32,7 @@ class ProductMapCreate(BaseModel):
 
 
 class StoreBindingCreate(BaseModel):
-    store_id: int = 1
+    store_id: int | None = None
     platform: str
     platform_shop_id: str
     platform_shop_name: str | None = None
@@ -70,14 +70,23 @@ async def _after_notify(result, platform: str, deferred: list):
 
 @router.post("/meituan/notify")
 async def meituan_notify(request: Request, db: DbSession, background_tasks: BackgroundTasks):
-    """美团推送回调：须在 2s 内返回 {"data":"ok"}"""
+    """美团推送：验签 → Inbox → 快速返回 ok；业务异步消费。"""
+    from app.services.delivery_providers import get_delivery_provider
+    from app.core.config import get_settings
+    from app.services.webhook_inbox import enqueue_delivery_webhook, process_inbox_item
+
     body = await request.body()
     headers = dict(request.headers)
-    deferred: list = []
+    settings = get_settings()
     try:
-        result = await DeliveryService.handle_notify(db, "MEITUAN", headers, body)
-        deferred = result.deferred_tasks
-        background_tasks.add_task(_after_notify, result, "MEITUAN", deferred)
+        provider = get_delivery_provider("MEITUAN")
+        raw = provider.verify_notify(headers, body, notify_url=settings.meituan_notify_url)
+        row, is_new = await enqueue_delivery_webhook(
+            db, platform="MEITUAN", headers=headers, body=body, raw=raw
+        )
+        await db.commit()
+        if is_new:
+            background_tasks.add_task(process_inbox_item, row.id)
     except Exception as e:
         return JSONResponse({"data": "ng", "error": {"msg": str(e)}}, status_code=200)
     return JSONResponse({"data": "ok"})
@@ -85,15 +94,47 @@ async def meituan_notify(request: Request, db: DbSession, background_tasks: Back
 
 @router.post("/eleme/notify")
 async def eleme_notify(request: Request, db: DbSession, background_tasks: BackgroundTasks):
-    """饿了么推送回调：成功返回 {"message":"ok"}"""
+    """饿了么推送：验签 → Inbox → 快速返回 ok。"""
+    from app.services.delivery_providers import get_delivery_provider
+    from app.core.config import get_settings
+    from app.services.webhook_inbox import enqueue_delivery_webhook, process_inbox_item
+
     body = await request.body()
     headers = dict(request.headers)
+    settings = get_settings()
     try:
-        result = await DeliveryService.handle_notify(db, "ELEME", headers, body)
-        background_tasks.add_task(_after_notify, result, "ELEME", result.deferred_tasks)
+        provider = get_delivery_provider("ELEME")
+        raw = provider.verify_notify(headers, body, notify_url=settings.eleme_notify_url)
+        row, is_new = await enqueue_delivery_webhook(
+            db, platform="ELEME", headers=headers, body=body, raw=raw
+        )
+        await db.commit()
+        if is_new:
+            background_tasks.add_task(process_inbox_item, row.id)
     except Exception as e:
         return JSONResponse({"message": "error", "error": str(e)}, status_code=200)
     return JSONResponse({"message": "ok"})
+
+
+@router.post("/orders/{order_id}/confirm", dependencies=[require_permission("order:update")])
+async def confirm_delivery_order(
+    order_id: int, request: Request, db: DbSession, user: CurrentUser, background_tasks: BackgroundTasks
+):
+    from app.models import Order
+    from app.services.store_scope import assert_order_store_access
+
+    existing = await db.get(Order, order_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, existing)
+    order, deferred = await DeliveryService.merchant_confirm(db, order_id)
+    if deferred:
+        background_tasks.add_task(run_deferred_tasks, deferred)
+    await ws_manager.notify_order_event(
+        "ORDER_CONFIRMED",
+        {"order_id": order.id, "order_no": order.order_no, "status": order.status, "store_id": order.store_id},
+    )
+    return success({"id": order.id, "status": order.status}, request=request)
 
 
 @router.get("/orders", dependencies=[require_permission("order:read")])
@@ -105,7 +146,15 @@ async def list_delivery_orders(
     page: int = 1,
     page_size: int = 20,
 ):
-    q = select(DeliveryOrder)
+    from app.models import Order
+    from app.services.store_scope import effective_store_id
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    q = select(DeliveryOrder).join(Order, Order.id == DeliveryOrder.order_id)
+    store = effective_store_id(user)
+    if store:
+        q = q.where(Order.store_id == store)
     if platform:
         q = q.where(DeliveryOrder.platform == platform.upper())
     result = await db.execute(
@@ -146,7 +195,15 @@ async def list_refunds(
     page: int = 1,
     page_size: int = 20,
 ):
-    q = select(DeliveryRefund)
+    from app.models import Order
+    from app.services.store_scope import effective_store_id
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    q = select(DeliveryRefund).join(Order, Order.id == DeliveryRefund.order_id)
+    store = effective_store_id(user)
+    if store:
+        q = q.where(Order.store_id == store)
     if status:
         q = q.where(DeliveryRefund.status == status.upper())
     result = await db.execute(
@@ -172,10 +229,20 @@ async def list_refunds(
 
 @router.post("/refunds/{refund_id}/action", dependencies=[require_permission("order:update")])
 async def refund_action(refund_id: int, data: RefundAction, request: Request, db: DbSession, user: CurrentUser):
+    from app.models import Order
+    from app.services.store_scope import assert_order_store_access
+
+    refund = await db.get(DeliveryRefund, refund_id)
+    if not refund:
+        raise HTTPException(status_code=404, detail="退款单不存在")
+    order = await db.get(Order, refund.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
     result = await DeliveryService.process_refund(db, refund_id, data.approve, data.reason)
     await ws_manager.notify_order_event(
         "ORDER_REFUND_HANDLED",
-        {"refund_id": refund_id, "approve": data.approve, **result},
+        {"refund_id": refund_id, "approve": data.approve, "store_id": order.store_id, **result},
     )
     return success(result, request=request)
 
@@ -188,6 +255,16 @@ async def merchant_cancel_order(
     db: DbSession,
     user: CurrentUser,
 ):
+    from app.models import Order
+    from app.services.store_scope import assert_order_store_access
+
+    d_order = await db.get(DeliveryOrder, delivery_order_id)
+    if not d_order:
+        raise HTTPException(status_code=404, detail="外卖订单不存在")
+    order = await db.get(Order, d_order.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
     result = await DeliveryService.cancel_by_merchant(db, delivery_order_id, data.reason)
     if result.get("order_id"):
         await ws_manager.notify_order_event(
@@ -207,7 +284,15 @@ async def list_callback_logs(
     page: int = 1,
     page_size: int = 50,
 ):
-    q = select(DeliveryCallbackLog)
+    from app.models import Order
+    from app.services.store_scope import effective_store_id
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    q = select(DeliveryCallbackLog).outerjoin(Order, Order.id == DeliveryCallbackLog.order_id)
+    store = effective_store_id(user)
+    if store:
+        q = q.where((DeliveryCallbackLog.order_id.is_(None)) | (Order.store_id == store))
     if platform:
         q = q.where(DeliveryCallbackLog.platform == platform.upper())
     if event_type:
@@ -230,9 +315,15 @@ async def list_callback_logs(
 
 
 @router.get("/store-bindings", dependencies=[require_permission("product:read")])
-async def list_store_bindings(request: Request, db: DbSession, user: CurrentUser, store_id: int = 1):
+async def list_store_bindings(request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, store_id) or user.store_id
+    if not sid:
+        return success({"items": []}, request=request)
+    assert_store_access(user, sid)
     result = await db.execute(
-        select(PlatformStoreBinding).where(PlatformStoreBinding.store_id == store_id).order_by(PlatformStoreBinding.platform)
+        select(PlatformStoreBinding).where(PlatformStoreBinding.store_id == sid).order_by(PlatformStoreBinding.platform)
     )
     items = [
         {
@@ -250,10 +341,16 @@ async def list_store_bindings(request: Request, db: DbSession, user: CurrentUser
 
 @router.post("/store-bindings", dependencies=[require_permission("product:update")])
 async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: DbSession, user: CurrentUser):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, data.store_id) or user.store_id
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少门店")
+    assert_store_access(user, sid)
     existing = (
         await db.execute(
             select(PlatformStoreBinding).where(
-                PlatformStoreBinding.store_id == data.store_id,
+                PlatformStoreBinding.store_id == sid,
                 PlatformStoreBinding.platform == data.platform.upper(),
                 PlatformStoreBinding.platform_shop_id == data.platform_shop_id,
             )
@@ -270,7 +367,7 @@ async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: D
         return success({"id": existing.id, "updated": True}, request=request)
 
     row = PlatformStoreBinding(
-        store_id=data.store_id,
+        store_id=sid,
         platform=data.platform.upper(),
         platform_shop_id=data.platform_shop_id,
         platform_shop_name=data.platform_shop_name,
@@ -283,20 +380,44 @@ async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: D
 
 
 @router.post("/sync/menu", dependencies=[require_permission("product:update")])
-async def sync_menu(request: Request, db: DbSession, user: CurrentUser, store_id: int = 1, platform: str = "MEITUAN"):
-    result = await ProductSyncService.sync_store_menu(db, store_id, platform)
+async def sync_menu(
+    request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None, platform: str = "MEITUAN"
+):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, store_id) or user.store_id
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少门店")
+    assert_store_access(user, sid)
+    result = await ProductSyncService.sync_store_menu(db, int(sid), platform)
     return success(result, request=request)
 
 
 @router.post("/sync/prices", dependencies=[require_permission("product:update")])
-async def sync_prices(request: Request, db: DbSession, user: CurrentUser, store_id: int = 1, platform: str = "MEITUAN"):
-    result = await ProductSyncService.sync_prices(db, store_id, platform)
+async def sync_prices(
+    request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None, platform: str = "MEITUAN"
+):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, store_id) or user.store_id
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少门店")
+    assert_store_access(user, sid)
+    result = await ProductSyncService.sync_prices(db, int(sid), platform)
     return success(result, request=request)
 
 
 @router.post("/sync/stock", dependencies=[require_permission("product:update")])
-async def sync_stock(request: Request, db: DbSession, user: CurrentUser, store_id: int = 1, platform: str = "MEITUAN"):
-    result = await ProductSyncService.sync_stock(db, store_id, platform)
+async def sync_stock(
+    request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None, platform: str = "MEITUAN"
+):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, store_id) or user.store_id
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少门店")
+    assert_store_access(user, sid)
+    result = await ProductSyncService.sync_stock(db, int(sid), platform)
     return success(result, request=request)
 
 
@@ -306,40 +427,59 @@ async def list_product_maps(
     db: DbSession,
     user: CurrentUser,
     platform: str | None = None,
-    store_id: int = 1,
+    store_id: int | None = None,
 ):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, store_id) or user.store_id
+    if not sid:
+        return success([], request=request)
+    assert_store_access(user, sid)
+    store_id = int(sid)
     q = select(DeliveryProductMap).where(DeliveryProductMap.store_id == store_id)
     if platform:
         q = q.where(DeliveryProductMap.platform == platform.upper())
     result = await db.execute(q)
-    items = []
-    for m in result.scalars():
-        product = await db.get(Product, m.product_id)
-        items.append(
-            {
-                "id": m.id,
-                "platform": m.platform,
-                "platform_sku_id": m.platform_sku_id,
-                "platform_spu_code": m.platform_spu_code,
-                "app_food_code": m.app_food_code,
-                "option_signature": m.option_signature,
-                "platform_sku_name": m.platform_sku_name,
-                "product_id": m.product_id,
-                "product_name": product.name if product else None,
-                "status": m.status,
-            }
-        )
+    maps = list(result.scalars().all())
+    product_ids = list({m.product_id for m in maps})
+    products = {}
+    if product_ids:
+        products = {
+            p.id: p
+            for p in (await db.execute(select(Product).where(Product.id.in_(product_ids)))).scalars().all()
+        }
+    items = [
+        {
+            "id": m.id,
+            "platform": m.platform,
+            "platform_sku_id": m.platform_sku_id,
+            "platform_spu_code": m.platform_spu_code,
+            "app_food_code": m.app_food_code,
+            "option_signature": m.option_signature,
+            "platform_sku_name": m.platform_sku_name,
+            "product_id": m.product_id,
+            "product_name": products[m.product_id].name if m.product_id in products else None,
+            "status": m.status,
+        }
+        for m in maps
+    ]
     return success(items, request=request)
 
 
 @router.post("/product-maps", dependencies=[require_permission("product:update")])
 async def create_product_map(data: ProductMapCreate, request: Request, db: DbSession, user: CurrentUser):
+    from app.services.store_scope import assert_store_access, effective_store_id
+
+    sid = effective_store_id(user, data.store_id) or user.store_id
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少门店")
+    assert_store_access(user, sid)
     product = await db.get(Product, data.product_id)
     if not product:
         return success(None, message="商品不存在", request=request)
     existing = await db.execute(
         select(DeliveryProductMap).where(
-            DeliveryProductMap.store_id == data.store_id,
+            DeliveryProductMap.store_id == sid,
             DeliveryProductMap.platform == data.platform.upper(),
             DeliveryProductMap.platform_sku_id == data.platform_sku_id,
         )
@@ -357,7 +497,7 @@ async def create_product_map(data: ProductMapCreate, request: Request, db: DbSes
         return success({"id": row.id, "updated": True}, request=request)
 
     row = DeliveryProductMap(
-        store_id=data.store_id,
+        store_id=sid,
         platform=data.platform.upper(),
         platform_sku_id=data.platform_sku_id,
         platform_spu_code=data.platform_spu_code,

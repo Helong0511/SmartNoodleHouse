@@ -11,7 +11,7 @@ class OrderItemCreate(BaseModel):
 
 
 class OrderCreate(BaseModel):
-    store_id: int = 1
+    store_id: int | None = None
     table_token: str | None = None
     customer_id: int | None = None
     items: list[OrderItemCreate]
@@ -21,7 +21,12 @@ class OrderCreate(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    status: str
+    """仅允许厨房/履约推进；禁止人工写入 PAID。"""
+
+    status: str = Field(
+        description="CONFIRMED/PREPARING/COOKING/READY/COMPLETED/CANCELLED",
+        pattern=r"^(CONFIRMED|PREPARING|COOKING|READY|COMPLETED|CANCELLED)$",
+    )
 
 
 class PaymentCreate(BaseModel):

@@ -80,6 +80,49 @@ class DeliveryService:
 
         await cls._log_callback(db, platform, event, platform_order_id, None, raw)
 
+        return await cls._dispatch_event(db, provider, platform, event, parsed, raw, credentials, platform_order_id)
+
+    @classmethod
+    async def process_verified(
+        cls,
+        db: AsyncSession,
+        platform: str,
+        headers: dict,
+        body: bytes,
+    ) -> DeliveryNotifyResult:
+        """兼容旧调用：解析 body 后走 process_raw。"""
+        text = body.decode("utf-8")
+        raw = json.loads(text) if text.strip().startswith("{") else {}
+        if isinstance(raw, dict) and raw.get("_verified") and isinstance(raw.get("raw"), dict):
+            raw = raw["raw"]
+        return await cls.process_raw(db, platform, raw)
+
+    @classmethod
+    async def process_raw(cls, db: AsyncSession, platform: str, raw: dict) -> DeliveryNotifyResult:
+        """已验签的 raw 业务处理（Inbox 消费入口）。"""
+        event = classify_meituan_event(raw) if platform.upper() == "MEITUAN" else classify_eleme_event(raw)
+        provider = get_delivery_provider(platform)
+        parsed = provider.parse_order(raw)
+        parsed["event"] = event
+        platform_order_id = parsed.get("platform_order_id") or ""
+        store_id, credentials = await resolve_store_and_credentials(db, platform, raw, parsed)
+        parsed["store_id"] = store_id
+        provider = get_delivery_provider(platform, credentials)
+        await cls._log_callback(db, platform, event, platform_order_id, None, raw)
+        return await cls._dispatch_event(db, provider, platform, event, parsed, raw, credentials, platform_order_id)
+
+    @classmethod
+    async def _dispatch_event(
+        cls,
+        db,
+        provider,
+        platform: str,
+        event: str,
+        parsed: dict,
+        raw: dict,
+        credentials,
+        platform_order_id: str,
+    ) -> DeliveryNotifyResult:
         if event == DeliveryEvent.ORDER_CANCEL:
             order = await cls._handle_cancel(db, platform, platform_order_id, raw)
             return DeliveryNotifyResult(event=event, order=order)
@@ -161,13 +204,25 @@ class DeliveryService:
         order_id: int | None,
         raw: dict,
     ) -> None:
+        event_id = None
+        for key in ("requestId", "request_id", "msg_id", "msgid", "notify_id", "event_id"):
+            if raw.get(key):
+                event_id = str(raw[key])
+                break
+        if not event_id and platform_order_id:
+            event_id = f"{event_type}:{platform_order_id}"
+        # 截断 payload，避免无限期保存大量 PII
+        payload = json.dumps(raw, ensure_ascii=False, default=str)
+        if len(payload) > 8000:
+            payload = payload[:8000] + "...[truncated]"
         db.add(
             DeliveryCallbackLog(
                 platform=platform.upper(),
                 event_type=event_type,
+                event_id=event_id,
                 platform_order_id=platform_order_id,
                 order_id=order_id,
-                payload=json.dumps(raw, ensure_ascii=False, default=str),
+                payload=payload,
             )
         )
         await db.flush()
@@ -229,7 +284,16 @@ class DeliveryService:
 
         for it in items_data:
             product, option_ids = await cls._resolve_product(db, store_id, platform, it)
-            unit = money(it["price"]) if it.get("price") else money(product.price)
+            # 金额：以本系统商品价为准，拒绝纯信平台价造成账实不符
+            unit = money(product.price)
+            if it.get("price") is not None and money(it["price"]) != unit:
+                logger.warning(
+                    "外卖单价与本地不一致 platform=%s product=%s platform_price=%s local=%s",
+                    platform,
+                    product.id,
+                    it.get("price"),
+                    unit,
+                )
             qty = int(it["quantity"])
             line = money(unit * qty)
             subtotal = money(subtotal + line)
@@ -247,7 +311,23 @@ class DeliveryService:
 
         packing = money(parsed.get("packing_fee") or 0)
         delivery_fee = money(parsed.get("delivery_fee") or 0)
-        total = money(parsed.get("total_amount") or (subtotal + packing + delivery_fee))
+        local_total = money(subtotal + packing + delivery_fee)
+        platform_total = money(parsed.get("total_amount") or 0)
+        # 差异过大则拒绝（防篡改）；允许分位误差
+        if platform_total > 0 and abs(platform_total - local_total) > Decimal("0.50"):
+            raise AppException(
+                40053,
+                f"外卖金额与本地计算不一致 platform={platform_total} local={local_total}",
+            )
+        total = local_total
+
+        # 原子扣库存（与堂食一致）
+        from app.services.stock_service import deduct_for_order_items
+
+        await deduct_for_order_items(
+            db,
+            [{"product_id": row["product"].id, "quantity": row["quantity"]} for row in order_items_payload],
+        )
 
         order = Order(
             order_no=generate_no("D"),
@@ -297,16 +377,54 @@ class DeliveryService:
         db.add(d_order)
         await db.flush()
 
-        # 乐观接单：本地先 CONFIRMED，平台 confirm 异步回传
+        settings = get_settings()
+        deferred: list[dict] = []
+        if settings.delivery_auto_confirm:
+            # 本地先标记 ACCEPTED，平台 confirm 失败由 deferred 回滚任务处理
+            d_order.delivery_status = "ACCEPTED"
+            order.status = "CONFIRMED"
+            deferred.append(
+                {
+                    "action": "confirm_order",
+                    "platform": platform,
+                    "platform_order_id": parsed["platform_order_id"],
+                    "credentials": cls._creds_dict(credentials),
+                    "order_id": order.id,
+                    "rollback_on_fail": True,
+                }
+            )
+        else:
+            # 默认：仅落库 PAID/PENDING，等待商家手动接单再调平台
+            d_order.delivery_status = "PENDING"
+            order.status = "PAID"
+
+        return order, deferred
+
+    @classmethod
+    async def merchant_confirm(cls, db: AsyncSession, order_id: int) -> tuple[Order, list[dict]]:
+        """商家手动接单：本地 CONFIRMED + 异步平台 confirm。"""
+        order = await db.get(Order, order_id)
+        if not order:
+            raise AppException(40404, "订单不存在")
+        d_order = (
+            await db.execute(select(DeliveryOrder).where(DeliveryOrder.order_id == order_id))
+        ).scalar_one_or_none()
+        if not d_order:
+            raise AppException(40450, "非外卖订单")
+        if d_order.delivery_status not in ("PENDING", "ACCEPTED"):
+            raise AppException(40054, f"当前配送状态不可接单: {d_order.delivery_status}")
+        credentials = await get_credentials_for_store(db, d_order.platform, order.store_id)
         d_order.delivery_status = "ACCEPTED"
         order.status = "CONFIRMED"
-
+        await db.flush()
         deferred = [
             {
                 "action": "confirm_order",
-                "platform": platform,
-                "platform_order_id": parsed["platform_order_id"],
+                "platform": d_order.platform,
+                "platform_order_id": d_order.platform_order_id,
                 "credentials": cls._creds_dict(credentials),
+                "order_id": order.id,
+                "rollback_on_fail": True,
             }
         ]
         return order, deferred
@@ -350,19 +468,10 @@ class DeliveryService:
             return product, option_ids
 
         name = item.get("name") or ""
-        if name:
-            result = await db.execute(select(Product).where(Product.name == name, Product.status == "ON_SALE"))
-            product = result.scalar_one_or_none()
-            if product:
-                logger.warning("外卖商品未配置映射，按名称匹配: %s", name)
-                return product, []
-
-        result = await db.execute(select(Product).where(Product.status == "ON_SALE").limit(1))
-        product = result.scalar_one_or_none()
-        if not product:
-            raise AppException(40452, f"无法解析外卖商品: {sku or name}")
-        logger.warning("外卖商品无映射，使用兜底商品 product_id=%s sku=%s", product.id, sku)
-        return product, []
+        raise AppException(
+            40452,
+            f"外卖商品未配置映射，拒绝落单: sku={sku or '-'} name={name or '-'}",
+        )
 
     @classmethod
     async def _get_delivery_order(cls, db: AsyncSession, platform: str, platform_order_id: str) -> DeliveryOrder | None:
@@ -381,10 +490,15 @@ class DeliveryService:
             return None
         order = await db.get(Order, d_order.order_id)
         if order and order.status not in ("COMPLETED", "CANCELLED"):
+            from app.services.stock_service import restore_stock
+
             order.status = "CANCELLED"
             order.cancelled_at = now_local()
             d_order.delivery_status = "CANCELLED"
             d_order.last_sync_at = now_local()
+            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
+            for it in items:
+                await restore_stock(db, it.product_id, it.quantity)
             await db.flush()
         return order
 
@@ -583,10 +697,15 @@ class DeliveryService:
         provider = get_delivery_provider(d_order.platform, credentials)
         ok = await provider.cancel_order(d_order.platform_order_id, reason)
         if ok and order:
+            from app.services.stock_service import restore_stock
+
             order.status = "CANCELLED"
             order.cancelled_at = now_local()
             d_order.delivery_status = "CANCELLED"
             d_order.last_sync_at = now_local()
+            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
+            for it in items:
+                await restore_stock(db, it.product_id, it.quantity)
             await db.flush()
         return {"ok": ok, "order_id": order.id if order else None}
 

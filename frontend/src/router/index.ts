@@ -34,7 +34,8 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('token')
+  const token =
+    localStorage.getItem('snh_staff_token') || localStorage.getItem('token')
   const publicPaths = ['/login', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member']
   const isPublic = publicPaths.some(p => to.path.startsWith(p))
   if (!isPublic && !token) next('/login')

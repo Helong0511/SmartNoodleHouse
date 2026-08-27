@@ -1,9 +1,7 @@
 import asyncio
 import base64
 import json
-from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Callable
+from datetime import timedelta
 
 import numpy as np
 from cryptography.fernet import Fernet
@@ -120,7 +118,6 @@ class VisitorService:
 
 class WelcomeService:
     _queue: asyncio.Queue | None = None
-    _frame_confirm: dict[int, list[float]] = defaultdict(list)
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
@@ -131,14 +128,31 @@ class WelcomeService:
     @staticmethod
     async def is_cooled_down(customer_id: int) -> bool:
         redis = await get_redis()
-        key = f"welcome:customer:{customer_id}"
+        key = f"snh:welcome:cooldown:{customer_id}"
         return await redis.exists(key) > 0
 
     @staticmethod
     async def set_cooldown(customer_id: int) -> None:
         redis = await get_redis()
         settings = get_settings()
-        await redis.setex(f"welcome:customer:{customer_id}", settings.welcome_cooldown_seconds, "1")
+        await redis.setex(f"snh:welcome:cooldown:{customer_id}", settings.welcome_cooldown_seconds, "1")
+
+    @staticmethod
+    async def push_frame_score(customer_id: int, camera_id: int | None, similarity: float) -> tuple[bool, float]:
+        """Redis 多帧确认，跨进程共享。返回 (ready, avg_score)。"""
+        settings = get_settings()
+        redis = await get_redis()
+        key = f"snh:welcome:frames:{camera_id or 0}:{customer_id}"
+        pipe = redis.pipeline()
+        pipe.rpush(key, f"{similarity:.6f}")
+        pipe.ltrim(key, -settings.face_confirm_frames, -1)
+        pipe.expire(key, 5)
+        pipe.llen(key)
+        pipe.lrange(key, 0, -1)
+        _, _, _, length, values = await pipe.execute()
+        scores = [float(v) for v in values]
+        avg = sum(scores) / len(scores) if scores else 0.0
+        return length >= settings.face_confirm_frames, avg
 
     @classmethod
     async def try_welcome(
@@ -149,12 +163,9 @@ class WelcomeService:
         similarity: float,
     ) -> bool:
         settings = get_settings()
-        cls._frame_confirm[customer_id].append(similarity)
-        if len(cls._frame_confirm[customer_id]) < settings.face_confirm_frames:
+        ready, avg_sim = await cls.push_frame_score(customer_id, camera_id, similarity)
+        if not ready:
             return False
-        avg_sim = sum(cls._frame_confirm[customer_id]) / len(cls._frame_confirm[customer_id])
-        cls._frame_confirm[customer_id].clear()
-
         if avg_sim < settings.face_match_threshold:
             return False
         if await cls.is_cooled_down(customer_id):
@@ -170,5 +181,11 @@ class WelcomeService:
 
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
         await cls.set_cooldown(customer_id)
+        # 清除帧缓存
+        try:
+            redis = await get_redis()
+            await redis.delete(f"snh:welcome:frames:{camera_id or 0}:{customer_id}")
+        except Exception:
+            pass
         await db.flush()
         return True

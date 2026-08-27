@@ -41,8 +41,10 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str] = mapped_column(String(100))
     role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("roles.id"))
+    store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     status: Mapped[int] = mapped_column(Integer, default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
 
     role: Mapped["Role"] = relationship("Role")
 
@@ -420,11 +422,65 @@ class DeliveryRefund(Base):
 
 class DeliveryCallbackLog(Base):
     __tablename__ = "delivery_callback_logs"
+    __table_args__ = (UniqueConstraint("platform", "event_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     platform: Mapped[str] = mapped_column(String(20))
     event_type: Mapped[str] = mapped_column(String(50))
+    event_id: Mapped[str | None] = mapped_column(String(128))
     platform_order_id: Mapped[str | None] = mapped_column(String(64))
     order_id: Mapped[int | None] = mapped_column(BigInteger)
     payload: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OrderStatusHistory(Base):
+    __tablename__ = "order_status_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
+    from_status: Mapped[str | None] = mapped_column(String(20))
+    to_status: Mapped[str] = mapped_column(String(20))
+    source: Mapped[str] = mapped_column(String(30))
+    operator_id: Mapped[int | None] = mapped_column(BigInteger)
+    remark: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PaymentStatusHistory(Base):
+    __tablename__ = "payment_status_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    payment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("payments.id", ondelete="CASCADE"))
+    from_status: Mapped[str | None] = mapped_column(String(20))
+    to_status: Mapped[str] = mapped_column(String(20))
+    source: Mapped[str] = mapped_column(String(30))
+    remark: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookInbox(Base):
+    __tablename__ = "webhook_inbox"
+    __table_args__ = (UniqueConstraint("channel", "event_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    channel: Mapped[str] = mapped_column(String(30))
+    event_id: Mapped[str] = mapped_column(String(128))
+    event_type: Mapped[str | None] = mapped_column(String(50))
+    payload: Mapped[str] = mapped_column(Text)
+    headers_json: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PaymentCallbackReceipt(Base):
+    __tablename__ = "payment_callback_receipts"
+    __table_args__ = (UniqueConstraint("provider", "receipt_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(20))
+    receipt_key: Mapped[str] = mapped_column(String(128))
+    payment_no: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

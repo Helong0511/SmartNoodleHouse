@@ -4,6 +4,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
+from app.core.database import AsyncSessionLocal
+from app.core.response import now_local
+from app.models import DeliveryOrder, Order
 from app.services.delivery_context import PlatformCredentials
 from app.services.delivery_providers import get_delivery_provider
 
@@ -11,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
-    """仅调用平台 OpenAPI，不另开 DB 会话（避免与测试内存库/生产库不一致）"""
     if not tasks:
         return
     for task in tasks:
@@ -23,10 +27,41 @@ async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
         provider = get_delivery_provider(platform, creds)
         try:
             if action == "confirm_order":
-                await provider.confirm_order(platform_order_id)
+                ok = await provider.confirm_order(platform_order_id)
+                if ok is False and task.get("rollback_on_fail"):
+                    await _rollback_confirm(task.get("order_id"), platform, platform_order_id)
             elif action == "reply_urge":
                 await provider.reply_urge(platform_order_id, task.get("raw") or {})
             else:
                 logger.warning("未知 deferred task: %s", action)
         except Exception as e:
             logger.exception("deferred task 失败 %s %s: %s", action, platform_order_id, e)
+            if action == "confirm_order" and task.get("rollback_on_fail"):
+                await _rollback_confirm(task.get("order_id"), platform, platform_order_id)
+
+
+async def _rollback_confirm(order_id: int | None, platform: str, platform_order_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        d_order = None
+        if order_id:
+            d_order = (
+                await db.execute(select(DeliveryOrder).where(DeliveryOrder.order_id == order_id))
+            ).scalar_one_or_none()
+        if not d_order:
+            d_order = (
+                await db.execute(
+                    select(DeliveryOrder).where(
+                        DeliveryOrder.platform == platform.upper(),
+                        DeliveryOrder.platform_order_id == platform_order_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        if not d_order:
+            return
+        d_order.delivery_status = "PENDING"
+        d_order.last_sync_at = now_local()
+        order = await db.get(Order, d_order.order_id)
+        if order and order.status == "CONFIRMED":
+            order.status = "PAID"
+        await db.commit()
+        logger.error("平台接单失败，已回滚本地状态 order_id=%s platform=%s", d_order.order_id, platform)

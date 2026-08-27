@@ -23,7 +23,7 @@ async def get_current_user(
     token = authorization.split(" ", 1)[1]
     try:
         payload = decode_token(token)
-        if payload.get("typ") == "customer":
+        if payload.get("typ") != "staff":
             raise HTTPException(status_code=401, detail="请使用员工账号登录")
         user_id = int(payload["sub"])
     except (JWTError, KeyError, ValueError):
@@ -34,6 +34,9 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在或已禁用")
+    # JWT 撤销：token_version 不匹配则失效
+    if int(payload.get("ver") or 0) != int(getattr(user, "token_version", 0) or 0):
+        raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
     request.state.user = user
     return user
 

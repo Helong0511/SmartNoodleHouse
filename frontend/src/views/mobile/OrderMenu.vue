@@ -60,7 +60,7 @@ const showProduct = ref(false)
 const currentProduct = ref<any>(null)
 const selectedOptions = reactive<Record<number, number>>({})
 const multiOptions = reactive<Record<number, number[]>>({})
-const cart = ref<any[]>(JSON.parse(localStorage.getItem('cart') || '[]'))
+const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
 
 const showMemberPrompt = ref(false)
 const nickname = ref('')
@@ -90,7 +90,31 @@ function addToCart() {
     if (g.selection_type === 'SINGLE' && selectedOptions[g.id]) optionIds.push(selectedOptions[g.id])
     if (g.selection_type === 'MULTIPLE' && multiOptions[g.id]) optionIds.push(...multiOptions[g.id])
   }
-  cart.value.push({ product_id: currentProduct.value.id, name: currentProduct.value.name, quantity: 1, option_ids: optionIds, subtotal: currentProduct.value.price })
+  // 必选规格校验（与后端一致）
+  for (const g of currentProduct.value.option_groups || []) {
+    if (!g.is_required) continue
+    const has =
+      (g.selection_type === 'SINGLE' && selectedOptions[g.id]) ||
+      (g.selection_type === 'MULTIPLE' && (multiOptions[g.id] || []).length)
+    if (!has) {
+      ElMessage.warning(`请选择：${g.name}`)
+      return
+    }
+  }
+  const stock = Number(currentProduct.value.stock ?? 999)
+  if (stock < 999 && stock < 1) {
+    ElMessage.error('库存不足')
+    return
+  }
+  cart.value.push({
+    product_id: currentProduct.value.id,
+    name: currentProduct.value.name,
+    quantity: 1,
+    option_ids: optionIds,
+    price: currentProduct.value.price,
+    subtotal: currentProduct.value.price,
+  })
+  localStorage.setItem('snh_cart', JSON.stringify(cart.value))
   localStorage.setItem('cart', JSON.stringify(cart.value))
   showProduct.value = false
 }
@@ -133,7 +157,9 @@ onMounted(async () => {
   const token = route.query.token as string
   const channel = (route.query.channel as string) || 'wechat'
   if (token) {
+    localStorage.setItem('snh_table_token', token)
     localStorage.setItem('table_token', token)
+    localStorage.setItem('snh_channel', channel)
     localStorage.setItem('channel', channel)
     try {
       const entry = await api.get('/miniprogram/entry', { params: { token, channel } })
@@ -147,17 +173,22 @@ onMounted(async () => {
     }
   }
 
-  // H5 模拟小程序登录（开发联调）
+  // H5：仅当 ALLOW_AUTH_MOCK 时后端才接受；生产应改为真实 code
   const channelCode = channel === 'alipay' ? `h5_ali_${Date.now()}` : `h5_wx_${Date.now()}`
   const loginPath = channel === 'alipay' ? '/miniprogram/alipay/login' : '/miniprogram/wechat/login'
   const loginBody = channel === 'alipay'
-    ? { auth_code: channelCode, table_token: token || localStorage.getItem('table_token') }
-    : { code: channelCode, table_token: token || localStorage.getItem('table_token') }
-  const res = await api.post(loginPath, loginBody)
-  customerId.value = res.data.customer_id
-  customerToken.value = res.data.customer_token
-  localStorage.setItem('customer_id', String(customerId.value))
-  localStorage.setItem('customer_token', customerToken.value || '')
+    ? { auth_code: channelCode, table_token: token || localStorage.getItem('snh_table_token') }
+    : { code: channelCode, table_token: token || localStorage.getItem('snh_table_token') }
+  try {
+    const res = await api.post(loginPath, loginBody, { headers: { 'X-Client': 'customer' } })
+    customerId.value = res.data.customer_id
+    customerToken.value = res.data.customer_token
+    localStorage.setItem('customer_id', String(customerId.value))
+    localStorage.setItem('snh_customer_token', customerToken.value || '')
+    localStorage.setItem('customer_token', customerToken.value || '')
+  } catch (e: any) {
+    ElMessage.warning(e.message || '顾客登录失败（生产需真实小程序 code）')
+  }
 
   if (!localStorage.getItem('member_prompt_done')) {
     showMemberPrompt.value = true

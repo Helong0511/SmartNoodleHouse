@@ -106,7 +106,7 @@ onMounted(() => {
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
 
-  const token = localStorage.getItem('token') || ''
+  const token = localStorage.getItem('snh_staff_token') || localStorage.getItem('token') || ''
 
   ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/kitchen?token=${encodeURIComponent(token)}`)
 

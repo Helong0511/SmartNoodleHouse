@@ -54,7 +54,7 @@ class OrderCreateService:
     async def create_order(
         db: AsyncSession,
         *,
-        store_id: int,
+        store_id: int | None,
         table_token: str | None,
         customer_id: int | None,
         items: list[dict],
@@ -62,6 +62,10 @@ class OrderCreateService:
         channel: str | None = None,
         idempotency_key: str | None = None,
     ) -> Order:
+        from sqlalchemy.exc import IntegrityError
+
+        from app.services.status_history import record_order_status
+
         if idempotency_key:
             existing = await db.execute(select(Order).where(Order.idempotency_key == idempotency_key))
             order = existing.scalar_one_or_none()
@@ -78,6 +82,10 @@ class OrderCreateService:
                 raise AppException(40403, "无效桌台二维码")
             table_id = table.id
             store_id = table.store_id
+        else:
+            # 禁止客户端随意指定门店占库存：必须桌台令牌或显式合法门店且 >0
+            if not store_id or int(store_id) <= 0:
+                raise AppException(40008, "缺少桌台令牌或有效门店")
 
         order = Order(
             order_no=generate_no("ORD"),
@@ -92,32 +100,74 @@ class OrderCreateService:
             ordered_at=now_local(),
         )
         db.add(order)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            # 并发幂等：唯一约束冲突后返回已有订单
+            await db.rollback()
+            if idempotency_key:
+                existing = await db.execute(select(Order).where(Order.idempotency_key == idempotency_key))
+                order = existing.scalar_one_or_none()
+                if order:
+                    return order
+            raise AppException(40901, "订单创建冲突，请重试")
 
-        subtotal = await OrderPriceCalculator.build_order_items(db, order, items)
+        subtotal = await OrderPriceCalculator.build_order_items(db, order, items, deduct_stock=True)
         order.subtotal = subtotal
         order.discount_amount = Decimal("0.00")
         order.total_amount = subtotal
+        await record_order_status(
+            db, order_id=order.id, from_status=None, to_status="PENDING_PAYMENT", source="SYSTEM"
+        )
         await db.flush()
         return order
 
     @staticmethod
-    async def update_status(db: AsyncSession, order_id: int, status: str) -> Order:
+    async def update_status(
+        db: AsyncSession,
+        order_id: int,
+        status: str,
+        *,
+        operator_id: int | None = None,
+    ) -> Order:
+        from app.services.order_state_machine import assert_staff_transition
+        from app.services.status_history import record_order_status
+        from app.services.stock_service import restore_stock
+
         order = await db.get(Order, order_id)
         if not order:
             raise AppException(40404, "订单不存在")
-        order.status = status
-        if status == "COMPLETED":
+        target = status.strip().upper()
+        assert_staff_transition(order.status, target)
+        already_completed = order.status == "COMPLETED"
+        old = order.status
+        order.status = target
+        if target == "COMPLETED" and not already_completed:
             order.completed_at = now_local()
             await PreferenceService.update_from_order(db, order_id)
-        elif status == "CANCELLED":
+        elif target == "CANCELLED" and old != "CANCELLED":
             order.cancelled_at = now_local()
+            # 回滚库存（未支付或已支付取消都回滚销量/库存）
+            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))).scalars().all()
+            for it in items:
+                await restore_stock(db, it.product_id, it.quantity)
+        await record_order_status(
+            db,
+            order_id=order.id,
+            from_status=old,
+            to_status=target,
+            source="STAFF",
+            operator_id=operator_id,
+        )
         await db.flush()
         return order
 
 
 class PreferenceService:
-    HIGH_PREFERENCE_THRESHOLD = Decimal("0.70")
+    # 相对阈值阈值过高会导致推荐为空；改为 Top-N + 最低出现次数
+    HIGH_PREFERENCE_THRESHOLD = Decimal("0.25")
+    MIN_ORDER_COUNT = 2
+    TOP_N = 8
 
     @staticmethod
     async def update_from_order(db: AsyncSession, order_id: int) -> None:
@@ -125,35 +175,38 @@ class PreferenceService:
         if not order or not order.customer_id or order.status != "COMPLETED":
             return
 
-        items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
-        items = items_result.scalars().all()
-        for item in items:
-            opts_result = await db.execute(
-                select(OrderItemOption).where(OrderItemOption.order_item_id == item.id)
-            )
-            for opt in opts_result.scalars().all():
-                pref_result = await db.execute(
-                    select(CustomerPreference).where(
-                        CustomerPreference.customer_id == order.customer_id,
-                        CustomerPreference.category == opt.group_name_snapshot,
-                        CustomerPreference.option_code == opt.option_code,
-                    )
+        # 批量加载明细与规格，消除 N+1
+        items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))).scalars().all()
+        item_ids = [i.id for i in items]
+        if not item_ids:
+            return
+        opts = (
+            await db.execute(select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids)))
+        ).scalars().all()
+
+        for opt in opts:
+            pref_result = await db.execute(
+                select(CustomerPreference).where(
+                    CustomerPreference.customer_id == order.customer_id,
+                    CustomerPreference.category == opt.group_name_snapshot,
+                    CustomerPreference.option_code == opt.option_code,
                 )
-                pref = pref_result.scalar_one_or_none()
-                if pref:
-                    pref.order_count += 1
-                    pref.last_used_at = now_local()
-                else:
-                    pref = CustomerPreference(
+            )
+            pref = pref_result.scalar_one_or_none()
+            if pref:
+                pref.order_count += 1
+                pref.last_used_at = now_local()
+            else:
+                db.add(
+                    CustomerPreference(
                         customer_id=order.customer_id,
                         category=opt.group_name_snapshot,
                         option_code=opt.option_code,
                         order_count=1,
                         last_used_at=now_local(),
                     )
-                    db.add(pref)
+                )
 
-        # 重新计算偏好分数
         total_orders = await db.scalar(
             select(func.count()).select_from(Order).where(
                 Order.customer_id == order.customer_id, Order.status == "COMPLETED"
@@ -166,10 +219,9 @@ class PreferenceService:
         for pref in prefs_result.scalars().all():
             pref.preference_score = money(Decimal(pref.order_count) / Decimal(total_orders))
 
-        if order.customer_id:
-            customer = await db.get(Customer, order.customer_id)
-            if customer:
-                customer.last_order_at = now_local()
+        customer = await db.get(Customer, order.customer_id)
+        if customer:
+            customer.last_order_at = now_local()
 
     @staticmethod
     async def get_recommendations(db: AsyncSession, customer_id: int) -> dict:
@@ -177,14 +229,29 @@ class PreferenceService:
             select(CustomerPreference)
             .where(
                 CustomerPreference.customer_id == customer_id,
-                CustomerPreference.preference_score >= PreferenceService.HIGH_PREFERENCE_THRESHOLD,
+                CustomerPreference.order_count >= PreferenceService.MIN_ORDER_COUNT,
             )
-            .order_by(CustomerPreference.preference_score.desc())
+            .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            .limit(PreferenceService.TOP_N)
         )
-        prefs = prefs_result.scalars().all()
+        prefs = list(prefs_result.scalars().all())
+        # 若无达到阈值的，退回 Top-N 不限次数
+        if not prefs:
+            prefs = list(
+                (
+                    await db.execute(
+                        select(CustomerPreference)
+                        .where(CustomerPreference.customer_id == customer_id)
+                        .order_by(CustomerPreference.preference_score.desc())
+                        .limit(PreferenceService.TOP_N)
+                    )
+                ).scalars().all()
+            )
+        high = [p for p in prefs if p.preference_score >= PreferenceService.HIGH_PREFERENCE_THRESHOLD]
+        use = high or prefs
         return {
             "preferences": [
                 {"category": p.category, "option_code": p.option_code, "score": float(p.preference_score)}
-                for p in prefs
+                for p in use
             ]
         }

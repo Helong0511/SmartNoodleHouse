@@ -1,4 +1,4 @@
-"""微信/支付宝小程序登录（code2session）"""
+"""微信/支付宝小程序登录（code2session）—— 生产禁止 mock"""
 import base64
 import hashlib
 import logging
@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 from app.core.config import get_settings
+from app.core.exceptions import AppException
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +35,19 @@ def _sign_alipay_rsa2(params: dict, private_key_pem: str) -> str:
     return base64.b64encode(signature).decode("utf-8")
 
 
-class WechatMiniAuth:
-    """微信小程序 code2session"""
+def _mock_allowed() -> bool:
+    s = get_settings()
+    return s.is_development and s.allow_auth_mock
 
+
+class WechatMiniAuth:
     async def code2session(self, code: str) -> dict:
         settings = get_settings()
         if not settings.wechat_app_id or not settings.wechat_app_secret:
+            if not _mock_allowed():
+                raise AppException(50030, "微信小程序未配置，拒绝登录")
             openid = "wx_dev_" + hashlib.md5(code.encode()).hexdigest()[:16]
-            logger.warning("WECHAT_APP_ID 未配置，使用开发模式 openid=%s", openid)
+            logger.warning("WECHAT 未配置，开发 Mock openid=%s", openid)
             return {"openid": openid, "unionid": None, "session_key": "dev_session", "is_mock": True}
 
         url = "https://api.weixin.qq.com/sns/jscode2session"
@@ -56,8 +62,7 @@ class WechatMiniAuth:
             data = resp.json()
         if data.get("errcode"):
             logger.error("微信 code2session 失败: %s", data)
-            openid = "wx_err_" + hashlib.md5(code.encode()).hexdigest()[:16]
-            return {"openid": openid, "unionid": None, "session_key": "", "is_mock": True}
+            raise AppException(50031, f"微信登录失败: {data.get('errmsg') or data.get('errcode')}")
         return {
             "openid": data["openid"],
             "unionid": data.get("unionid"),
@@ -67,13 +72,13 @@ class WechatMiniAuth:
 
 
 class AlipayMiniAuth:
-    """支付宝小程序 authCode 换用户（RSA2 签名）"""
-
     async def auth_code2user(self, auth_code: str) -> dict:
         settings = get_settings()
         if not settings.alipay_app_id or not settings.alipay_private_key:
+            if not _mock_allowed():
+                raise AppException(50032, "支付宝小程序未配置，拒绝登录")
             user_id = "ali_dev_" + hashlib.md5(auth_code.encode()).hexdigest()[:16]
-            logger.warning("ALIPAY_APP_ID 未配置，使用开发模式 user_id=%s", user_id)
+            logger.warning("ALIPAY 未配置，开发 Mock user_id=%s", user_id)
             return {"alipay_user_id": user_id, "is_mock": True}
 
         params = {
@@ -93,13 +98,13 @@ class AlipayMiniAuth:
                 data = resp.json()
             token_resp = data.get("alipay_system_oauth_token_response") or {}
             if token_resp.get("code") and token_resp.get("code") != "10000":
-                logger.error("支付宝 OAuth 失败: %s", token_resp)
-                raise ValueError(token_resp.get("sub_msg") or token_resp.get("msg"))
+                raise AppException(50033, token_resp.get("sub_msg") or token_resp.get("msg") or "支付宝 OAuth 失败")
             user_id = token_resp.get("user_id") or token_resp.get("open_id")
-            if user_id:
-                return {"alipay_user_id": user_id, "is_mock": False}
+            if not user_id:
+                raise AppException(50033, "支付宝未返回用户标识")
+            return {"alipay_user_id": user_id, "is_mock": False}
+        except AppException:
+            raise
         except Exception as e:
             logger.error("支付宝 authCode 换用户失败: %s", e)
-
-        user_id = "ali_err_" + hashlib.md5(auth_code.encode()).hexdigest()[:16]
-        return {"alipay_user_id": user_id, "is_mock": True}
+            raise AppException(50033, f"支付宝登录失败: {e}") from e

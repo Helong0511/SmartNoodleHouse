@@ -11,13 +11,13 @@ class Settings(BaseSettings):
     app_name: str = "SmartNoodleHouse"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-    app_debug: bool = True
+    app_debug: bool = False
     app_timezone: str = "Asia/Shanghai"
 
     database_url: str = "mysql+aiomysql://root:password@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4"
     redis_url: str = "redis://127.0.0.1:6379/0"
 
-    jwt_secret: str = "change-me"
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
 
@@ -62,9 +62,50 @@ class Settings(BaseSettings):
     camera_username: str = ""
     camera_password: str = ""
 
-    face_encryption_key: str = "change-me-face-encryption-key-32bytes!!"
+    face_encryption_key: str = ""
+
+    # 微信平台公钥/证书 PEM（回调 Wechatpay-Signature 验签必填；生产强制）
+    wechat_platform_public_key: str = ""
+    wechat_platform_cert_path: str = "certs/wechat_platform_cert.pem"
+
+    # 仅开发环境允许：假支付 / mock 小程序登录（生产启动校验会拒绝）
+    allow_payment_mock: bool = False
+    allow_auth_mock: bool = False
+    # 外卖新单是否自动向平台 confirm（默认 false：本地 PENDING，需商家确认）
+    delivery_auto_confirm: bool = False
+    enable_rate_limit: bool = True
+    # 未配置平台密钥时，同步接口是否允许返回 mock 成功（生产必须 false）
+    allow_delivery_mock: bool = False
+
+    # 对象存储：local | s3
+    storage_backend: str = "local"
+    s3_endpoint: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_public_base_url: str = ""
+
+    # Webhook IP 白名单，逗号分隔，支持 CIDR；空=不限制
+    webhook_ip_allowlist: str = ""
+    webhook_require_allowlist: bool = False
+
+    # 多进程角色：仅一个实例应为 leader（调度/TTS/摄像头/识别）
+    process_role: str = "leader"
+
+    # 结构化 JSON 日志
+    json_logs: bool = False
+    log_level: str = "INFO"
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() in ("production", "prod")
+
+    @property
+    def is_development(self) -> bool:
+        return self.app_env.lower() in ("development", "dev", "local")
 
     order_payment_timeout_minutes: int = 15
     visitor_data_retention_days: int = 7

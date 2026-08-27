@@ -1,0 +1,60 @@
+"""API 限流中间件（Redis 滑动窗口近似：固定窗口计数）"""
+from __future__ import annotations
+
+import logging
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.config import get_settings
+from app.core.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
+
+# path 前缀 → (limit, window_seconds)
+SENSITIVE_LIMITS = {
+    "/api/v1/auth/login": (20, 60),
+    "/api/v1/payments/": (60, 60),
+    "/api/v1/welcome/": (30, 60),
+    "/api/v1/miniprogram/": (60, 60),
+    "/api/v1/delivery/meituan/notify": (300, 60),
+    "/api/v1/delivery/eleme/notify": (300, 60),
+}
+DEFAULT_LIMIT = (120, 60)
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        settings = get_settings()
+        if settings.is_development and not getattr(settings, "enable_rate_limit", True):
+            return await call_next(request)
+
+        path = request.url.path
+        limit, window = DEFAULT_LIMIT
+        for prefix, cfg in SENSITIVE_LIMITS.items():
+            if path.startswith(prefix) or path == prefix.rstrip("/"):
+                limit, window = cfg
+                break
+
+        client_ip = request.client.host if request.client else "unknown"
+        # 优先 X-Forwarded-For 第一跳（需 Nginx 可信）
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            client_ip = xff.split(",")[0].strip()
+        key = f"snh:rl:{client_ip}:{path.split('?')[0]}"
+
+        try:
+            r = await get_redis()
+            count = await r.incr(key)
+            if count == 1:
+                await r.expire(key, window)
+            if count > limit:
+                return JSONResponse(
+                    status_code=429,
+                    content={"code": 429, "message": "请求过于频繁，请稍后再试", "data": None},
+                )
+        except Exception as e:
+            logger.warning("限流 Redis 不可用，跳过: %s", e)
+
+        return await call_next(request)
