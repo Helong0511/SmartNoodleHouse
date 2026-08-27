@@ -102,7 +102,10 @@ class VisitorService:
         snapshot_path: str | None = None,
     ) -> VisitorEvent:
         settings = get_settings()
-        expires = now_local() + timedelta(days=settings.visitor_data_retention_days)
+        from app.services.system_settings_service import SystemSettingsService
+
+        retention = await SystemSettingsService.get_int(db, "visitor_data_retention_days", settings.visitor_data_retention_days)
+        expires = now_local() + timedelta(days=retention)
         event = VisitorEvent(
             visitor_no=generate_no("V"),
             camera_id=camera_id,
@@ -132,27 +135,39 @@ class WelcomeService:
         return await redis.exists(key) > 0
 
     @staticmethod
-    async def set_cooldown(customer_id: int) -> None:
+    async def set_cooldown(customer_id: int, db: AsyncSession | None = None) -> None:
         redis = await get_redis()
         settings = get_settings()
-        await redis.setex(f"snh:welcome:cooldown:{customer_id}", settings.welcome_cooldown_seconds, "1")
+        from app.services.system_settings_service import SystemSettingsService
+
+        seconds = settings.welcome_cooldown_seconds
+        if db is not None:
+            seconds = await SystemSettingsService.get_int(db, "welcome_cooldown_seconds", seconds)
+        await redis.setex(f"snh:welcome:cooldown:{customer_id}", seconds, "1")
 
     @staticmethod
-    async def push_frame_score(customer_id: int, camera_id: int | None, similarity: float) -> tuple[bool, float]:
+    async def push_frame_score(
+        customer_id: int, camera_id: int | None, similarity: float, db: AsyncSession | None = None
+    ) -> tuple[bool, float]:
         """Redis 多帧确认，跨进程共享。返回 (ready, avg_score)。"""
         settings = get_settings()
+        from app.services.system_settings_service import SystemSettingsService
+
+        confirm_frames = settings.face_confirm_frames
+        if db is not None:
+            confirm_frames = await SystemSettingsService.get_int(db, "face_confirm_frames", confirm_frames)
         redis = await get_redis()
         key = f"snh:welcome:frames:{camera_id or 0}:{customer_id}"
         pipe = redis.pipeline()
         pipe.rpush(key, f"{similarity:.6f}")
-        pipe.ltrim(key, -settings.face_confirm_frames, -1)
+        pipe.ltrim(key, -confirm_frames, -1)
         pipe.expire(key, 5)
         pipe.llen(key)
         pipe.lrange(key, 0, -1)
         _, _, _, length, values = await pipe.execute()
         scores = [float(v) for v in values]
         avg = sum(scores) / len(scores) if scores else 0.0
-        return length >= settings.face_confirm_frames, avg
+        return length >= confirm_frames, avg
 
     @classmethod
     async def try_welcome(
@@ -163,10 +178,13 @@ class WelcomeService:
         similarity: float,
     ) -> bool:
         settings = get_settings()
-        ready, avg_sim = await cls.push_frame_score(customer_id, camera_id, similarity)
+        from app.services.system_settings_service import SystemSettingsService
+
+        threshold = await SystemSettingsService.get_float(db, "face_match_threshold", settings.face_match_threshold)
+        ready, avg_sim = await cls.push_frame_score(customer_id, camera_id, similarity, db)
         if not ready:
             return False
-        if avg_sim < settings.face_match_threshold:
+        if avg_sim < threshold:
             return False
         if await cls.is_cooled_down(customer_id):
             return False
@@ -177,15 +195,49 @@ class WelcomeService:
 
         name = customer.display_name or customer.nickname or "会员"
         text = f"欢迎回来，{name}。"
+        try:
+            from app.services.customer_service import PreferenceService
+
+            rec = await PreferenceService.get_recommendations(db, customer_id)
+            prefs = (rec or {}).get("preferences") or []
+            if prefs:
+                bits = []
+                for p in prefs[:2]:
+                    label = (p.get("label") or "").strip()
+                    if not label:
+                        cat = (p.get("category") or "").strip()
+                        name = (p.get("option_name") or p.get("option_code") or "").strip()
+                        label = f"{cat}·{name}" if cat and name else (name or cat)
+                    if label:
+                        bits.append(label)
+                if bits:
+                    text = f"欢迎回来，{name}。今天还是老样子：{'、'.join(bits)}？"
+        except Exception:
+            pass
+
         await cls.get_queue().put({"customer_id": customer_id, "text": text, "camera_id": camera_id})
 
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
-        await cls.set_cooldown(customer_id)
-        # 清除帧缓存
+        await cls.set_cooldown(customer_id, db)
         try:
             redis = await get_redis()
             await redis.delete(f"snh:welcome:frames:{camera_id or 0}:{customer_id}")
         except Exception:
             pass
         await db.flush()
+        try:
+            from app.services.websocket_manager import ws_manager
+
+            await ws_manager.broadcast(
+                "cameras",
+                "WELCOME",
+                {
+                    "customer_id": customer_id,
+                    "camera_id": camera_id,
+                    "text": text,
+                    "name": name,
+                },
+            )
+        except Exception:
+            pass
         return True

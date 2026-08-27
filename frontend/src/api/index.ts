@@ -1,6 +1,20 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+function parseApiError(err: unknown): string {
+  if (!err || typeof err !== 'object') return '网络错误'
+  const ax = err as { response?: { data?: any; status?: number }; message?: string }
+  const data = ax.response?.data
+  if (data?.message && typeof data.message === 'string') return data.message
+  if (Array.isArray(data?.detail)) {
+    return data.detail.map((d: any) => d.msg || JSON.stringify(d)).join('；')
+  }
+  if (typeof data?.detail === 'string') return data.detail
+  if (ax.response?.status === 422) return '请求参数有误，请检查表单'
+  if (ax.message) return ax.message
+  return '网络错误'
+}
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 30000,
@@ -12,11 +26,20 @@ api.interceptors.request.use((config) => {
   const isCustomerApi =
     url.includes('/miniprogram') ||
     url.startsWith('/customers/') ||
+    url.includes('/orders/mine') ||
+    /\/orders\/\d+\/reorder/.test(url) ||
     url.includes('/welcome/face') ||
     (config.headers?.['X-Client'] === 'customer')
   const staffToken = localStorage.getItem('snh_staff_token') || localStorage.getItem('token')
   const customerToken = localStorage.getItem('snh_customer_token') || localStorage.getItem('customer_token')
-  const token = isCustomerApi ? customerToken || staffToken : staffToken || customerToken
+  // 顾客订单列表/复购强制用顾客 token，避免后台登录态抢占
+  const forceCustomer =
+    url.includes('/orders/mine') || /\/orders\/\d+\/reorder/.test(url) || url.includes('/miniprogram')
+  const token = forceCustomer
+    ? customerToken
+    : isCustomerApi
+      ? customerToken || staffToken
+      : staffToken || customerToken
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -31,7 +54,7 @@ api.interceptors.response.use(
   },
   (err) => {
     const status = err.response?.status
-    const msg = err.response?.data?.message || err.message || '网络错误'
+    const msg = parseApiError(err)
     if (status === 401) {
       localStorage.removeItem('snh_staff_token')
       localStorage.removeItem('token')

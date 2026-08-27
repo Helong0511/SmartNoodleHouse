@@ -3,6 +3,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import app.bootstrap_path  # noqa: F401 — 项目根目录加入 sys.path（camera 模块）
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +12,13 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.core.config import get_settings
-from app.core.exceptions import AppException, app_exception_handler, http_exception_handler
+from app.core.exceptions import (
+    AppException,
+    app_exception_handler,
+    http_exception_handler,
+    sqlalchemy_integrity_handler,
+    sqlalchemy_operational_handler,
+)
 from app.core.http_client import close_http_client
 from app.core.ip_allowlist import WebhookAllowlistMiddleware
 from app.core.logging_config import setup_logging
@@ -36,9 +44,25 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     validate_settings(settings)
 
-    import os
+    try:
+        from sqlalchemy import text
 
-    is_leader = os.getenv("PROCESS_ROLE", "leader") == "leader"
+        from app.core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        logger.info("数据库连接正常")
+    except Exception as e:
+        logger.error(
+            "数据库连接失败：请在项目根目录 .env 配置 DATABASE_URL。"
+            "示例：mysql+aiomysql://root:你的密码@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4。"
+            "错误：%s",
+            e,
+        )
+
+    # 必须走 settings（会读 .env）；勿用 os.getenv，否则仅写在 .env 的 PROCESS_ROLE 会被忽略
+    role = (settings.process_role or "leader").strip().lower()
+    is_leader = role == "leader"
     await start_ws_subscriber(on_redis_ws_message)
 
     if is_leader:
@@ -48,11 +72,14 @@ async def lifespan(app: FastAPI):
         if settings.tts_provider == "local":
             tts_task = asyncio.create_task(tts_worker.run(WelcomeService.get_queue()))
             logger.info("TTS worker started (leader)")
-        if os.getenv("ENABLE_RECOGNITION_WORKER", "1") == "1":
-            from app.workers.recognition_worker import RecognitionWorker
+        if settings.enable_recognition_worker:
+            try:
+                from app.workers.recognition_worker import RecognitionWorker
 
-            recognition_task = asyncio.create_task(RecognitionWorker().run())
-            logger.info("RecognitionWorker started (leader)")
+                recognition_task = asyncio.create_task(RecognitionWorker().run())
+                logger.info("RecognitionWorker started (leader)")
+            except Exception as e:
+                logger.warning("RecognitionWorker 未启动: %s", e)
         try:
             from sqlalchemy import select
 
@@ -71,7 +98,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("摄像头自动恢复失败: %s", e)
     else:
-        logger.info("PROCESS_ROLE=%s：跳过 scheduler/TTS/camera 恢复", os.getenv("PROCESS_ROLE"))
+        logger.info("PROCESS_ROLE=%s：跳过 scheduler/TTS/camera 恢复", role)
 
     yield
 
@@ -89,7 +116,7 @@ async def lifespan(app: FastAPI):
             recognition_task.cancel()
             try:
                 await recognition_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 pass
         scheduler.shutdown()
 
@@ -110,6 +137,10 @@ def create_app() -> FastAPI:
     app.add_middleware(WebhookAllowlistMiddleware)
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
+    from sqlalchemy.exc import IntegrityError, OperationalError
+
+    app.add_exception_handler(IntegrityError, sqlalchemy_integrity_handler)
+    app.add_exception_handler(OperationalError, sqlalchemy_operational_handler)
     app.include_router(api_router)
 
     upload_dir = Path(settings.upload_dir)

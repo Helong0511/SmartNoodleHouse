@@ -1,11 +1,25 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# backend/ 与仓库根目录均可放 .env（README 约定在根目录）
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_ROOT = _BACKEND_ROOT.parent
+_ENV_CANDIDATES = (
+    _PROJECT_ROOT / ".env",
+    _BACKEND_ROOT / ".env",
+    Path(".env"),
+)
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=tuple(str(p) for p in _ENV_CANDIDATES),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: str = "development"
     app_name: str = "SmartNoodleHouse"
@@ -32,6 +46,8 @@ class Settings(BaseSettings):
     wechat_cert_serial_no: str = ""
     wechat_private_key_path: str = "certs/wechat_apiclient_key.pem"
     wechat_notify_url: str = ""
+    # 退款结果回调；留空则复用 WECHAT_NOTIFY_URL（同一入口按 event_type 分流）
+    wechat_refund_notify_url: str = ""
 
     alipay_app_id: str = ""
     alipay_private_key: str = ""
@@ -71,6 +87,8 @@ class Settings(BaseSettings):
     # 仅开发环境允许：假支付 / mock 小程序登录（生产启动校验会拒绝）
     allow_payment_mock: bool = False
     allow_auth_mock: bool = False
+    # 开发机未装 InsightFace 时可用 OpenCV 弱特征兜底；生产禁止
+    allow_opencv_face_fallback: bool = False
     # 外卖新单是否自动向平台 confirm（默认 false：本地 PENDING，需商家确认）
     delivery_auto_confirm: bool = False
     enable_rate_limit: bool = True
@@ -92,6 +110,8 @@ class Settings(BaseSettings):
 
     # 多进程角色：仅一个实例应为 leader（调度/TTS/摄像头/识别）
     process_role: str = "leader"
+    # 是否在 leader 进程启动人脸识别 worker（须走 settings 读 .env，勿用 os.getenv）
+    enable_recognition_worker: bool = True
 
     # 结构化 JSON 日志
     json_logs: bool = False

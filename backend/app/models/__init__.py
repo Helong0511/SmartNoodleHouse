@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -97,7 +97,7 @@ class MemberLevel(Base):
 class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_no: Mapped[str] = mapped_column(String(32), unique=True)
+    customer_no: Mapped[str] = mapped_column(String(40), unique=True)
     display_name: Mapped[str | None] = mapped_column(String(100))
     nickname: Mapped[str | None] = mapped_column(String(100))
     avatar_url: Mapped[str | None] = mapped_column(String(500))
@@ -126,6 +126,7 @@ class CustomerAlipayAccount(Base, TimestampMixin):
 class ProductCategory(Base, TimestampMixin):
     __tablename__ = "product_categories"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(String(255))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -134,9 +135,11 @@ class ProductCategory(Base, TimestampMixin):
 
 class Product(Base, TimestampMixin):
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("store_id", "product_no"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product_categories.id"))
-    product_no: Mapped[str] = mapped_column(String(32), unique=True)
+    product_no: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     main_image: Mapped[str | None] = mapped_column(String(500))
@@ -194,20 +197,44 @@ class ProductOptionGroup(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class StoreProductStock(Base, TimestampMixin):
+    """分店库存与上架覆盖；无记录则回退品牌商品 stock/status"""
+    __tablename__ = "store_product_stocks"
+    __table_args__ = (UniqueConstraint("store_id", "product_id"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"))
+    stock: Mapped[int] = mapped_column(Integer, default=999)
+    status: Mapped[int] = mapped_column(Integer, default=1)  # 1在售 0本店停售
+
+
+class StoreSetting(Base):
+    """门店业务参数覆盖（覆盖全局 system_settings 同名键）"""
+    __tablename__ = "store_settings"
+    __table_args__ = (UniqueConstraint("store_id", "setting_key"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"))
+    setting_key: Mapped[str] = mapped_column(String(100))
+    setting_value: Mapped[str] = mapped_column(String(500))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Order(Base, TimestampMixin):
     __tablename__ = "orders"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    order_no: Mapped[str] = mapped_column(String(32), unique=True)
+    order_no: Mapped[str] = mapped_column(String(40), unique=True)
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
     table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"))
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     status: Mapped[str] = mapped_column(String(20), default="PENDING_PAYMENT")
     subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    packing_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     payment_status: Mapped[str] = mapped_column(String(20), default="UNPAID")
     payment_method: Mapped[str | None] = mapped_column(String(20))
     channel: Mapped[str | None] = mapped_column(String(20))
+    dining_type: Mapped[str] = mapped_column(String(20), default="DINE_IN")
     remark: Mapped[str | None] = mapped_column(String(500))
     idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True)
     ordered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -243,7 +270,7 @@ class Payment(Base, TimestampMixin):
     __tablename__ = "payments"
     __table_args__ = (UniqueConstraint("provider", "provider_trade_no"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    payment_no: Mapped[str] = mapped_column(String(32), unique=True)
+    payment_no: Mapped[str] = mapped_column(String(40), unique=True)
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
     provider: Mapped[str] = mapped_column(String(20))
@@ -253,20 +280,24 @@ class Payment(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     provider_trade_no: Mapped[str | None] = mapped_column(String(64))
     provider_order_no: Mapped[str | None] = mapped_column(String(64))
-    callback_raw: Mapped[str | None] = mapped_column(Text)
+    callback_raw: Mapped[dict | None] = mapped_column(JSON)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PaymentRefund(Base, TimestampMixin):
     __tablename__ = "payment_refunds"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    refund_no: Mapped[str] = mapped_column(String(32), unique=True)
+    refund_no: Mapped[str] = mapped_column(String(40), unique=True)
     payment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("payments.id"))
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     reason: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     provider_refund_no: Mapped[str | None] = mapped_column(String(64))
+    callback_raw: Mapped[dict | None] = mapped_column(JSON)
+    fail_reason: Mapped[str | None] = mapped_column(String(255))
+    succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    operator_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class CustomerPreference(Base):
@@ -276,6 +307,7 @@ class CustomerPreference(Base):
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
     category: Mapped[str] = mapped_column(String(50))
     option_code: Mapped[str] = mapped_column(String(50))
+    option_name: Mapped[str | None] = mapped_column(String(50))
     preference_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0000"))
     order_count: Mapped[int] = mapped_column(Integer, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

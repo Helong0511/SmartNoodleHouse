@@ -5,12 +5,31 @@
   </view>
   <block a:for="{{categories}}" a:key="id">
     <view class="cat">{{item.name}}</view>
-    <view class="product" a:for="{{item.products}}" a:for-item="p" a:key="id" onTap="openProduct" data-id="{{p.id}}">
+    <view
+      class="product {{isWide ? 'wide' : ''}}"
+      a:for="{{item.products}}"
+      a:for-item="p"
+      a:key="id"
+      onTap="openProduct"
+      data-id="{{p.id}}"
+    >
+      <view class="thumb-wrap" style="{{p.thumbStyle}}">
+        <image
+          a:if="{{p.imageUrl}}"
+          class="thumb"
+          src="{{p.imageUrl}}"
+          mode="aspectFill"
+          lazy-load
+        />
+        <view a:else class="thumb placeholder">
+          <text class="ph-text">{{p.name[0] || '餐'}}</text>
+        </view>
+      </view>
       <view class="info">
         <view class="name">{{p.name}}</view>
-        <view class="desc">{{p.description}}</view>
+        <view class="desc" a:if="{{p.description}}">{{p.description}}</view>
+        <view class="price">¥{{p.price}}</view>
       </view>
-      <view class="price">¥{{p.price}}</view>
     </view>
   </block>
   <view class="cart-bar" onTap="goCart">购物车 {{cartCount}} · ¥{{cartTotal}}</view>

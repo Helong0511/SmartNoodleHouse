@@ -17,6 +17,9 @@ class OrderCreate(BaseModel):
     items: list[OrderItemCreate]
     remark: str | None = None
     channel: str | None = None
+    # 堂食默认；打包外带时计商品餐盒费 box_price
+    need_pack: bool = False
+    dining_type: str | None = Field(default=None, description="DINE_IN / TAKEAWAY，可与 need_pack 二选一")
     idempotency_key: str | None = None
 
 

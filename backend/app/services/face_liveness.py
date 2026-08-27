@@ -93,15 +93,21 @@ def check_liveness_simple(image_bytes: bytes) -> dict:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     brightness = float(np.mean(gray))
-    if sharpness < 35:
-        raise ValueError("活体检测失败：画面模糊（请勿使用静态照片翻拍过糊图）")
-    if brightness < 40 or brightness > 220:
+    from app.core.config import get_settings
+
+    is_dev = get_settings().is_development
+    min_sharp = 20 if is_dev else 35
+    if sharpness < min_sharp:
+        raise ValueError("活体检测失败：画面模糊，请正对镜头、保证光线")
+    if brightness < 30 or brightness > 230:
         raise ValueError("活体检测失败：光线过暗或过曝")
 
     face_ratio = 0.0
     try:
-        from app.services.face_extractor import _face_app
+        from app.services.face_extractor import _face_app, _insightface_available
 
+        if not _insightface_available():
+            raise ImportError("insightface missing")
         faces = _face_app().get(img)
         if not faces:
             raise ValueError("活体检测失败：未检测到人脸")
@@ -111,15 +117,14 @@ def check_liveness_simple(image_bytes: bytes) -> dict:
         fw = max(1.0, float(bbox[2] - bbox[0]))
         fh = max(1.0, float(bbox[3] - bbox[1]))
         face_ratio = (fw * fh) / float(w * h)
-        if face_ratio < 0.05:
+        if face_ratio < 0.04:
             raise ValueError("活体检测失败：人脸过小，请靠近")
-        if face_ratio > 0.85:
+        if face_ratio > 0.90:
             raise ValueError("活体检测失败：距离过近")
-        # 姿态：yaw/pitch 粗检（若有）
         pose = getattr(faces[0], "pose", None)
         if pose is not None and len(pose) >= 2:
             yaw, pitch = float(pose[0]), float(pose[1])
-            if abs(yaw) > 35 or abs(pitch) > 30:
+            if abs(yaw) > 40 or abs(pitch) > 35:
                 raise ValueError("活体检测失败：请正对摄像头")
     except ImportError:
         logger.warning("InsightFace 不可用，活体仅做清晰度/亮度检查")

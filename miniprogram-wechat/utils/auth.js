@@ -1,48 +1,62 @@
-const api = require('./api')
-const app = getApp()
-
-function wxLogin() {
-  return new Promise((resolve, reject) => {
-    wx.login({
-      success: resolve,
-      fail: reject
-    })
-  })
-}
-
-async function ensureLogin(tableToken) {
-  const loginRes = await wxLogin()
-  const data = await api.post('/miniprogram/wechat/login', {
-    code: loginRes.code,
-    table_token: tableToken || app.globalData.tableToken || wx.getStorageSync('table_token') || null,
-    nickname: app.globalData.nickname || null
-  }, false)
-  app.globalData.customerId = data.customer_id
-  app.globalData.customerNo = data.customer_no
-  app.globalData.customerToken = data.customer_token
-  app.globalData.nickname = data.nickname || ''
-  app.globalData.faceStatus = (data.face_status && data.face_status.consent_status) || 'NONE'
-  if (data.table) {
-    app.globalData.table = data.table
-    app.globalData.tableToken = data.table.qr_token
-    wx.setStorageSync('table_token', data.table.qr_token)
-  }
-  wx.setStorageSync('customer_id', data.customer_id)
-  wx.setStorageSync('customer_token', data.customer_token)
-  return data
-}
-
-function saveCart(cart) {
-  app.globalData.cart = cart
-  wx.setStorageSync('cart', cart)
-}
-
-function getCart() {
-  return app.globalData.cart || wx.getStorageSync('cart') || []
-}
-
-module.exports = {
-  ensureLogin,
-  saveCart,
-  getCart
-}
+const api = require('./api')
+const app = getApp()
+
+function wxLogin() {
+  return new Promise((resolve, reject) => {
+    wx.login({
+      success: resolve,
+      fail: reject
+    })
+  })
+}
+
+async function ensureLogin(tableToken) {
+  const loginRes = await wxLogin()
+  if (!loginRes || !loginRes.code) {
+    throw new Error('wx.login 未返回 code，请检查开发者工具登录状态')
+  }
+  const nickname = app.globalData.nickname || wx.getStorageSync('nickname') || null
+  const avatarUrl = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || null
+  const data = await api.post('/miniprogram/wechat/login', {
+    code: loginRes.code,
+    table_token: tableToken || app.globalData.tableToken || wx.getStorageSync('table_token') || null,
+    nickname,
+    avatar_url: avatarUrl
+  }, false)
+  if (!data || !data.customer_token) {
+    throw new Error('登录成功但未返回 customer_token')
+  }
+  // 微信授权登录后落库客户信息，并写回本地
+  app.globalData.customerId = data.customer_id
+  app.globalData.customerNo = data.customer_no
+  app.globalData.customerToken = data.customer_token
+  app.globalData.nickname = data.nickname || nickname || ''
+  app.globalData.avatarUrl = data.avatar_url || avatarUrl || ''
+  app.globalData.faceStatus = (data.face_status && data.face_status.consent_status) || 'NONE'
+  if (data.table) {
+    app.globalData.table = data.table
+    app.globalData.tableToken = data.table.qr_token
+    wx.setStorageSync('table_token', data.table.qr_token)
+  }
+  wx.setStorageSync('customer_id', data.customer_id)
+  wx.setStorageSync('customer_token', data.customer_token)
+  wx.setStorageSync('customer_no', data.customer_no || '')
+  if (app.globalData.nickname) wx.setStorageSync('nickname', app.globalData.nickname)
+  if (app.globalData.avatarUrl) wx.setStorageSync('avatar_url', app.globalData.avatarUrl)
+  return data
+}
+
+function saveCart(cart) {
+  app.globalData.cart = cart
+  wx.setStorageSync('cart', cart)
+}
+
+function getCart() {
+  return app.globalData.cart || wx.getStorageSync('cart') || []
+}
+
+module.exports = {
+  ensureLogin,
+  saveCart,
+  getCart
+}

@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 # 生产统一 512 维 ArcFace embedding；OpenCV 兜底仅开发且显式允许
 EMBEDDING_DIM = 512
-_ALLOW_OPENCV_FALLBACK_ENV = "ALLOW_OPENCV_FACE_FALLBACK"
 
 
 @lru_cache(maxsize=1)
@@ -22,27 +21,68 @@ def _face_app():
     return app
 
 
-def extract_face_embedding(image_bytes: bytes) -> list[float]:
-    """
-    SCRFD 检测 + ArcFace 512D。
-    InsightFace 不可用时：生产 fail-closed；开发仅在 ALLOW_OPENCV_FACE_FALLBACK=1 时降级。
-    """
+def _insightface_available() -> bool:
     try:
-        return _extract_insightface(image_bytes)
-    except ImportError:
-        logger.error("InsightFace 未安装，请 pip install insightface onnxruntime")
-    except Exception as e:
-        logger.warning("InsightFace 提取失败: %s", e)
-        raise
+        import insightface  # noqa: F401
 
+        return True
+    except ImportError:
+        return False
+
+
+def _opencv_fallback_allowed() -> bool:
     from app.core.config import get_settings
-    import os
 
     settings = get_settings()
-    if settings.is_production or os.getenv(_ALLOW_OPENCV_FALLBACK_ENV) != "1":
-        raise ValueError("人脸识别引擎不可用（需 InsightFace）")
+    if settings.is_production:
+        return False
+    if settings.allow_opencv_face_fallback:
+        return True
+    # 开发环境未装 InsightFace 时自动兜底，避免小程序授权直接 400
+    if settings.is_development and not _insightface_available():
+        return True
+    return False
+
+
+def extract_face_embedding(image_bytes: bytes) -> list[float]:
+    """
+    从内存图片字节提取特征（小程序授权上传用）。
+    到店实时识别请用 extract_face_embedding_bgr，勿落盘读文件。
+    """
+    import cv2
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("无法解码图片")
+    return extract_face_embedding_bgr(img)
+
+
+def extract_face_embedding_bgr(img: np.ndarray) -> list[float]:
+    """
+    从摄像头 BGR 帧直接提特征（内存，不打开图片文件）。
+    SCRFD 检测 + ArcFace 512D；InsightFace 不可用时生产 fail-closed。
+    """
+    if _insightface_available():
+        try:
+            return _extract_insightface_bgr(img)
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.warning("InsightFace 提取失败: %s", e)
+            if not _opencv_fallback_allowed():
+                raise ValueError(f"人脸特征提取失败: {e}") from e
+            logger.warning("InsightFace 失败，改用 OpenCV 开发兜底")
+    else:
+        logger.error("InsightFace 未安装")
+
+    if not _opencv_fallback_allowed():
+        raise ValueError(
+            "人脸识别引擎不可用：请 pip install insightface onnxruntime，"
+            "或开发环境设置 ALLOW_OPENCV_FACE_FALLBACK=true"
+        )
     logger.warning("使用 OpenCV 弱兜底（仅开发），不可用于生产迎宾")
-    return _extract_opencv_fallback(image_bytes)
+    return _extract_opencv_fallback_bgr(img)
 
 
 def assess_face_quality(image_bytes: bytes) -> dict:
@@ -55,11 +95,15 @@ def assess_face_quality(image_bytes: bytes) -> dict:
         raise ValueError("无法解码图片")
     h, w = img.shape[:2]
     if min(h, w) < 112:
-        raise ValueError("人脸图片过小")
+        raise ValueError("人脸图片过小，请靠近摄像头")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     lap = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    if lap < 40:
-        raise ValueError("图片模糊，请重新采集")
+    # 微信模拟器/弱光下清晰度偏低，开发略放宽
+    from app.core.config import get_settings
+
+    min_sharp = 25 if get_settings().is_development else 40
+    if lap < min_sharp:
+        raise ValueError("图片模糊，请正对镜头重新采集")
     return {"width": w, "height": h, "sharpness": lap}
 
 
@@ -73,13 +117,9 @@ def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float]
     return emb, quality
 
 
-def _extract_insightface(image_bytes: bytes) -> list[float]:
-    import cv2
-
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("无法解码图片")
+def _extract_insightface_bgr(img: np.ndarray) -> list[float]:
+    if img is None or getattr(img, "size", 0) == 0:
+        raise ValueError("无效视频帧")
 
     faces = _face_app().get(img)
     if not faces:
@@ -88,7 +128,6 @@ def _extract_insightface(image_bytes: bytes) -> list[float]:
         raise ValueError("检测到多张人脸，请确保画面中只有您一人")
 
     face = faces[0]
-    # 检测置信度 / 姿态粗检
     det_score = float(getattr(face, "det_score", 1.0) or 1.0)
     if det_score < 0.5:
         raise ValueError("人脸检测置信度过低")
@@ -103,24 +142,34 @@ def _extract_insightface(image_bytes: bytes) -> list[float]:
     return emb.tolist()
 
 
-def _extract_opencv_fallback(image_bytes: bytes) -> list[float]:
+def _extract_opencv_fallback_bgr(img: np.ndarray) -> list[float]:
     import hashlib
     import cv2
 
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError("无法解码图片")
+    if img is None or getattr(img, "size", 0) == 0:
+        raise ValueError("无效视频帧")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
 
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    faces = cascade.detectMultiScale(img, 1.1, 5, minSize=(80, 80))
-    if len(faces) == 0:
-        raise ValueError("未检测到人脸，请正对摄像头")
-    if len(faces) > 1:
-        raise ValueError("检测到多张人脸")
+    face_roi = None
+    if hasattr(cv2, "CascadeClassifier"):
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        faces = cascade.detectMultiScale(gray, 1.1, 4, minSize=(60, 60))
+        if len(faces) == 0:
+            raise ValueError("未检测到人脸，请正对摄像头、保证光线充足")
+        if len(faces) > 1:
+            raise ValueError("检测到多张人脸，请确保画面中只有您一人")
+        x, y, w, h = faces[0]
+        face_roi = gray[y : y + h, x : x + w]
+    else:
+        # OpenCV 5+ 移除 Haar；无模型时开发兜底取中心区域（非正式迎宾）
+        logger.warning("当前 OpenCV 无 CascadeClassifier，使用中心区域弱特征（仅开发联调）")
+        h, w = gray.shape[:2]
+        side = max(64, min(h, w) // 2)
+        y0 = max(0, (h - side) // 2)
+        x0 = max(0, (w - side) // 2)
+        face_roi = gray[y0 : y0 + side, x0 : x0 + side]
 
-    x, y, w, h = faces[0]
-    face = cv2.resize(img[y : y + h, x : x + w], (32, 16))
+    face = cv2.resize(face_roi, (32, 16))
     vec = face.flatten().astype(np.float32)
     vec = vec / (np.linalg.norm(vec) + 1e-8)
     seed = int(hashlib.md5(vec.tobytes()).hexdigest(), 16) % (2**31)

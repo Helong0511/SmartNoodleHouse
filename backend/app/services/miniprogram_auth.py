@@ -35,19 +35,33 @@ def _sign_alipay_rsa2(params: dict, private_key_pem: str) -> str:
     return base64.b64encode(signature).decode("utf-8")
 
 
-def _mock_allowed() -> bool:
+def _mock_allowed(*, provider_configured: bool = False) -> bool:
+    """生产禁止 mock；开发未配密钥或显式 ALLOW_AUTH_MOCK=true 时允许。"""
     s = get_settings()
-    return s.is_development and s.allow_auth_mock
+    if s.is_production:
+        return False
+    if s.allow_auth_mock:
+        return True
+    # 本地调试：未配置小程序密钥时自动走 mock，避免必配微信才能进首页
+    return s.is_development and not provider_configured
 
 
 class WechatMiniAuth:
     async def code2session(self, code: str) -> dict:
         settings = get_settings()
-        if not settings.wechat_app_id or not settings.wechat_app_secret:
-            if not _mock_allowed():
-                raise AppException(50030, "微信小程序未配置，拒绝登录")
-            openid = "wx_dev_" + hashlib.md5(code.encode()).hexdigest()[:16]
-            logger.warning("WECHAT 未配置，开发 Mock openid=%s", openid)
+        configured = bool(settings.wechat_app_id and settings.wechat_app_secret)
+        if not configured:
+            if not _mock_allowed(provider_configured=False):
+                raise AppException(50030, "微信小程序未配置，拒绝登录（开发可设 ALLOW_AUTH_MOCK=true）")
+            # 禁止用一次性 code 生成 openid：每次 wx.login 的 code 都不同，会不断新建顾客。
+            # 真实微信同一用户 openid 稳定；本地 mock 固定为 wx_dev_simulator。
+            # 多账号调试可在 code 前缀传 mock:<device_id>（开发者工具可改 auth.js）
+            if code.startswith("mock:") and len(code) > 5:
+                device = code[5:].strip()[:32] or "simulator"
+                openid = "wx_dev_" + hashlib.md5(device.encode()).hexdigest()[:16]
+            else:
+                openid = "wx_dev_simulator"
+            logger.warning("WECHAT 未配置，开发 Mock openid=%s（稳定身份，不会因 code 变化新建顾客）", openid)
             return {"openid": openid, "unionid": None, "session_key": "dev_session", "is_mock": True}
 
         url = "https://api.weixin.qq.com/sns/jscode2session"
@@ -62,7 +76,11 @@ class WechatMiniAuth:
             data = resp.json()
         if data.get("errcode"):
             logger.error("微信 code2session 失败: %s", data)
-            raise AppException(50031, f"微信登录失败: {data.get('errmsg') or data.get('errcode')}")
+            errmsg = data.get("errmsg") or str(data.get("errcode"))
+            hint = ""
+            if data.get("errcode") in (40013, 40125, 40001, 40163, 40029):
+                hint = "（请确认 .env 的 WECHAT_APP_ID/SECRET 与小程序 project.config.json 的 appid 一致）"
+            raise AppException(50031, f"微信登录失败: {errmsg}{hint}")
         return {
             "openid": data["openid"],
             "unionid": data.get("unionid"),
@@ -74,11 +92,17 @@ class WechatMiniAuth:
 class AlipayMiniAuth:
     async def auth_code2user(self, auth_code: str) -> dict:
         settings = get_settings()
-        if not settings.alipay_app_id or not settings.alipay_private_key:
-            if not _mock_allowed():
-                raise AppException(50032, "支付宝小程序未配置，拒绝登录")
-            user_id = "ali_dev_" + hashlib.md5(auth_code.encode()).hexdigest()[:16]
-            logger.warning("ALIPAY 未配置，开发 Mock user_id=%s", user_id)
+        configured = bool(settings.alipay_app_id and settings.alipay_private_key)
+        if not configured:
+            if not _mock_allowed(provider_configured=False):
+                raise AppException(50032, "支付宝小程序未配置，拒绝登录（开发可设 ALLOW_AUTH_MOCK=true）")
+            # 同微信：authCode 一次性，不可用来生成稳定用户身份
+            if auth_code.startswith("mock:") and len(auth_code) > 5:
+                device = auth_code[5:].strip()[:32] or "simulator"
+                user_id = "ali_dev_" + hashlib.md5(device.encode()).hexdigest()[:16]
+            else:
+                user_id = "ali_dev_simulator"
+            logger.warning("ALIPAY 未配置，开发 Mock user_id=%s（稳定身份）", user_id)
             return {"alipay_user_id": user_id, "is_mock": True}
 
         params = {

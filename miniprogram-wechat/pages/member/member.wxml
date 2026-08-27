@@ -1,18 +1,56 @@
 <view class="page">
   <view class="card">
-    <view class="name">{{nickname || '面馆会员'}}</view>
-    <view class="no">编号 {{customerNo}}</view>
+    <view class="profile">
+      <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
+      <view class="avatar placeholder" wx:else>{{avatarLetter}}</view>
+      <view class="meta">
+        <view class="name">{{displayName}}</view>
+        <view class="no">编号 {{customerNo}}</view>
+      </view>
+    </view>
   </view>
   <view class="card">
     <view class="row">
       <text>人脸迎宾</text>
       <switch checked="{{faceOn}}" color="#ff6b35" bindchange="onFaceSwitch" />
     </view>
-    <view class="tip">需您主动授权。关闭后立即失效特征，不再识别身份。</view>
+    <view class="tip">需摄像头实时采集授权。关闭后立即删除特征，不再识别身份。</view>
   </view>
-  <view class="card" wx:if="{{prefs.length}}">
-    <view class="title">根据您之前的口味</view>
-    <view class="tag" wx:for="{{prefs}}" wx:key="option_code">{{item.category}} · {{item.option_code}}</view>
-    <button class="btn-primary" bindtap="reorder">一键复购去点餐</button>
+  <view class="card">
+    <view class="title">智能记录的口味爱好</view>
+    <view class="tip" wx:if="{{!prefs.length}}">完成订单后，系统会自动累计您常点的规格口味，点餐时智能预选。</view>
+    <block wx:else>
+      <view class="tip">根据您历史订单自动学习，点餐时会智能预选常点口味。</view>
+      <view class="tag" wx:for="{{prefs}}" wx:key="option_code">
+        {{item.category}} · {{item.option_name || item.option_code}}
+      </view>
+      <button class="btn-primary" bindtap="goMenu">按爱好去点餐</button>
+    </block>
+  </view>
+
+  <view class="card">
+    <view class="title-row">
+      <view class="title">历史订单</view>
+      <text class="link" bindtap="loadOrders">刷新</text>
+    </view>
+    <view class="tip" wx:if="{{ordersLoading}}">加载中...</view>
+    <view class="tip" wx:elif="{{!orders.length}}">暂无订单。点餐完成后可在此查看，并一键再来一单。</view>
+    <view class="order" wx:for="{{orders}}" wx:key="id">
+      <view class="order-head">
+        <text class="ono">{{item.order_no}}</text>
+        <text class="st">{{item.status_label || item.status}}</text>
+      </view>
+      <view class="order-body">{{item.item_summary}}</view>
+      <view class="order-foot">
+        <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}</text>
+        <button
+          class="btn-mini"
+          size="mini"
+          data-id="{{item.id}}"
+          bindtap="reorderOrder"
+          disabled="{{!item.can_reorder || reorderingId == item.id}}"
+        >再来一单</button>
+      </view>
+    </view>
   </view>
 </view>

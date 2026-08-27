@@ -1,4 +1,26 @@
 .page { padding: 32rpx; }
 .tip { color: #999; margin-bottom: 20rpx; }
+.table-box, .pack-box, .cart-box { background: #fff; border-radius: 12rpx; padding: 24rpx; margin-bottom: 20rpx; }
+.label { color: #666; font-size: 26rpx; margin-bottom: 8rpx; }
+.table-on { font-size: 36rpx; font-weight: 600; color: #ff6b35; }
+.table-pick { font-size: 32rpx; color: #333; padding: 8rpx 0; border-bottom: 1px solid #eee; }
+.cart-line { display: flex; align-items: center; gap: 16rpx; padding: 12rpx 0; border-bottom: 1px solid #f5f5f5; }
+.mini { width: 72rpx; height: 72rpx; border-radius: 8rpx; flex-shrink: 0; }
+.mini.placeholder {
+  width: 72rpx; height: 72rpx; border-radius: 8rpx; flex-shrink: 0;
+  background: #ffe8df; color: #ff6b35; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; font-size: 28rpx;
+}
+.cart-info { flex: 1; display: flex; justify-content: space-between; align-items: center; font-size: 26rpx; }
+.cart-price { color: #ff6b35; font-weight: 600; }
+.sum-row { display: flex; justify-content: space-between; margin-top: 12rpx; color: #666; font-size: 26rpx; }
+.sum-row.total { color: #333; font-size: 30rpx; font-weight: 700; margin-top: 16rpx; }
+.pack-row { display: flex; gap: 16rpx; margin-top: 8rpx; }
+.pack-opt {
+  flex: 1; text-align: center; padding: 18rpx 0; border-radius: 10rpx;
+  border: 1px solid #ddd; color: #666;
+}
+.pack-opt.on { border-color: #ff6b35; color: #ff6b35; background: #fff5f0; font-weight: 600; }
+.pack-tip { margin-top: 12rpx; color: #999; font-size: 24rpx; }
 .remark { width: 100%; background: #fff; border-radius: 12rpx; padding: 20rpx; box-sizing: border-box; min-height: 160rpx; }
 .pay { margin: 24rpx 0; }

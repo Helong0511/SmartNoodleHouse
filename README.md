@@ -39,23 +39,19 @@
 按顺序执行：
 
 ```bash
-mysql -u root -p < sql/001_init_schema.sql
-mysql -u root -p < sql/002_seed_data.sql
-mysql -u root -p < sql/003_capacity_audit.sql
-mysql -u root -p < sql/004_indexes.sql
-mysql -u root -p < sql/005_delivery.sql
-mysql -u root -p < sql/006_delivery_enhance.sql
+mysql -u root -p < sql/000_create_db_grant.sql   # 可选：建库+授权
+mysql -u root -p < sql/001_schema.sql
+mysql -u root -p < sql/002_seed_test.sql
 python scripts/init_admin.py
 ```
 
 | 脚本 | 说明 |
 |------|------|
-| `001_init_schema.sql` | 主库表结构 |
-| `002_seed_data.sql` | 初始种子数据 |
-| `003_capacity_audit.sql` | 容量与审计相关 |
-| `004_indexes.sql` | 索引优化 |
-| `005_delivery.sql` | 外卖订单 / 商品映射 |
-| `006_delivery_enhance.sql` | 门店绑定、退款、回调日志、库存 / 餐盒费等 |
+| `000_create_db_grant.sql` | 建库与授权（需 root） |
+| `001_schema.sql` | 全量表结构（最终态 DDL） |
+| `002_seed_test.sql` | 测试/开发种子数据 |
+| `tools/003_capacity_audit.sql` | 容量审计（运维工具，非迁移） |
+| `archive/` | 历史增量脚本归档 |
 
 默认管理员: `admin` / `admin123`
 

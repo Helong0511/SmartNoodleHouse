@@ -10,17 +10,23 @@
         <el-menu-item index="/orders">订单管理</el-menu-item>
         <el-menu-item index="/customers">顾客管理</el-menu-item>
         <el-menu-item index="/tables">桌台管理</el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('user:read')" index="/users">员工管理</el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('product:read')" index="/store-stocks">分店库存</el-menu-item>
         <el-menu-item index="/payments">支付记录</el-menu-item>
         <el-menu-item index="/cameras">摄像头</el-menu-item>
-        <el-menu-item index="/kitchen">厨房 KDS</el-menu-item>
+        <el-menu-item index="/welcome-logs">迎宾日志</el-menu-item>
+        <el-menu-item v-if="auth.canAccessKitchen()" index="/kitchen">厨房 KDS</el-menu-item>
         <el-menu-item index="/delivery">外卖管理</el-menu-item>
-        <el-menu-item index="/settings">系统设置</el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('system:manage')" index="/settings">系统设置</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
       <el-header class="header">
-        <span>{{ $route.meta.title || '后台管理' }}</span>
-        <el-button type="danger" link @click="logout">退出</el-button>
+        <span>{{ ($route.meta.title as string) || '后台管理' }}</span>
+        <div class="right">
+          <span v-if="auth.user" class="user">{{ auth.user.display_name || auth.user.username }}</span>
+          <el-button type="danger" link @click="logout">退出</el-button>
+        </div>
       </el-header>
       <el-main><router-view /></el-main>
     </el-container>
@@ -28,6 +34,7 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -38,11 +45,23 @@ function logout() {
   auth.logout()
   router.push('/login')
 }
+
+onMounted(() => {
+  auth.fetchMe()
+})
 </script>
 
 <style scoped>
 .layout { height: 100vh; }
 .aside { background: #1d1e1f; }
 .logo { color: #fff; padding: 20px; font-size: 18px; font-weight: bold; text-align: center; }
-.header { display: flex; justify-content: space-between; align-items: center; background: #fff; border-bottom: 1px solid #eee; }
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+}
+.right { display: flex; align-items: center; gap: 12px; }
+.user { color: #666; font-size: 14px; }
 </style>

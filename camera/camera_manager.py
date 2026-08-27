@@ -109,13 +109,25 @@ class CameraManager:
             cls._instance._workers = {}
         return cls._instance
 
-    def start_camera(self, camera_id: int, source: str, fps: int = 25) -> CameraWorker:
-        if camera_id in self._workers:
-            return self._workers[camera_id]
+    def start_camera(self, camera_id: int, source: str, fps: int = 25, *, force: bool = False) -> CameraWorker:
+        existing = self._workers.get(camera_id)
+        if existing and not force:
+            # 已在跑则复用；卡死（线程死了）则重建
+            if existing._thread and existing._thread.is_alive():
+                return existing
+            self.stop_camera(camera_id)
+        elif existing and force:
+            self.stop_camera(camera_id)
         worker = CameraWorker(camera_id, source, fps)
         worker.start()
         self._workers[camera_id] = worker
         return worker
+
+    def restart_camera(self, camera_id: int, source: str, fps: int = 25) -> CameraWorker:
+        return self.start_camera(camera_id, source, fps, force=True)
+
+    def list_camera_ids(self) -> list[int]:
+        return list(self._workers.keys())
 
     def get_worker(self, camera_id: int) -> CameraWorker | None:
         return self._workers.get(camera_id)
@@ -128,3 +140,16 @@ class CameraManager:
     def get_status(self, camera_id: int) -> str:
         worker = self._workers.get(camera_id)
         return worker.status if worker else "OFFLINE"
+
+    def get_runtime(self, camera_id: int) -> dict:
+        worker = self._workers.get(camera_id)
+        if not worker:
+            return {"running": False, "status": "OFFLINE", "fps": 0, "has_frame": False}
+        frame, ts = worker.frame_buffer.get_frame()
+        return {
+            "running": bool(worker._thread and worker._thread.is_alive()),
+            "status": worker.status,
+            "fps": worker.fps,
+            "has_frame": frame is not None,
+            "frame_age_sec": round(time.time() - ts, 2) if ts else None,
+        }

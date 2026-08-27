@@ -103,9 +103,42 @@ async def trade_refund(
             "refund_reason": (reason or "退款")[:256],
         },
     )
+    # code=10000 表示接口调用成功；fund_change=Y 表示资金变动已发生（更接近退款成功）
+    fund_change = str(body.get("fund_change") or "").upper()
+    if fund_change == "Y":
+        status = "SUCCESS"
+    else:
+        status = "PROCESSING"
     return {
         "refund_no": refund_no,
-        "status": "SUCCESS" if str(body.get("code")) == "10000" else "FAILED",
+        "status": status,
         "provider_refund_no": body.get("trade_no"),
         "amount": f"{refund_yuan:.2f}",
+        "raw": body,
+    }
+
+
+async def trade_refund_query(*, payment_no: str, refund_no: str) -> dict[str, Any]:
+    """查询退款：refund_status=REFUND_SUCCESS 才表示退款成功。"""
+    body = await _gateway_call(
+        "alipay.trade.fastpay.refund.query",
+        {
+            "out_trade_no": payment_no,
+            "out_request_no": refund_no,
+        },
+    )
+    refund_status = str(body.get("refund_status") or "").upper()
+    if refund_status == "REFUND_SUCCESS":
+        status = "SUCCESS"
+    elif refund_status:
+        status = "FAILED"
+    else:
+        # 未返回 refund_status：可能尚未处理完
+        status = "PROCESSING"
+    return {
+        "refund_no": body.get("out_request_no") or refund_no,
+        "status": status,
+        "provider_refund_no": body.get("trade_no"),
+        "amount": body.get("refund_amount"),
+        "raw": body,
     }

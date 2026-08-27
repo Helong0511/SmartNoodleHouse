@@ -1,25 +1,512 @@
 <template>
-  <div>
-    <el-button type="primary" @click="showAdd = true">新增商品</el-button>
-    <el-table :data="products" style="margin-top:16px">
+  <div v-loading="loading">
+    <el-form inline class="toolbar">
+      <el-form-item v-if="auth.isSuperAdmin">
+        <el-select
+          v-model="storeFilter"
+          placeholder="全部门店"
+          clearable
+          style="width:160px"
+          @change="onStoreFilterChange"
+        >
+          <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+      </el-form-item>
+      <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
+      <el-form-item>
+        <el-input v-model="keyword" placeholder="搜索商品名" clearable @keyup.enter="reload" />
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="statusFilter" placeholder="状态" style="width:120px" @change="reload">
+          <el-option label="全部" value="ALL" />
+          <el-option label="在售" value="ON_SALE" />
+          <el-option label="下架" value="OFF_SALE" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="categoryFilter" placeholder="分类" clearable style="width:140px" @change="reload">
+          <el-option v-for="c in filterCategories" :key="c.id" :label="c.name" :value="c.id" />
+        </el-select>
+      </el-form-item>
+      <el-button type="primary" @click="openForm()">新增商品</el-button>
+      <el-button @click="load">刷新</el-button>
+    </el-form>
+
+    <el-table :data="products" border>
       <el-table-column prop="product_no" label="编号" width="100" />
-      <el-table-column prop="name" label="名称" />
+      <el-table-column prop="name" label="名称" width="160" show-overflow-tooltip />
+      <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
+      </el-table-column>
+      <el-table-column label="图片" width="72">
+        <template #default="{ row }">
+          <el-image
+            v-if="row.main_image"
+            :src="mediaUrl(row.main_image)"
+            fit="cover"
+            class="thumb"
+            :preview-src-list="[mediaUrl(row.main_image)]"
+          />
+          <span v-else class="no-img">无</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="分类" width="120">
+        <template #default="{ row }">{{ categoryName(row.category_id) }}</template>
+      </el-table-column>
       <el-table-column prop="price" label="价格" width="100" />
-      <el-table-column prop="status" label="状态" width="100" />
-      <el-table-column prop="sales_count" label="销量" width="80" />
+      <el-table-column prop="box_price" label="餐盒费" width="90" />
+      <el-table-column prop="stock" label="库存" width="100" />
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-select
+            :model-value="row.status"
+            size="small"
+            class="status-select"
+            @change="(v: string) => changeStatus(row, v)"
+          >
+            <el-option label="在售" value="ON_SALE" />
+            <el-option label="下架" value="OFF_SALE" />
+          </el-select>
+        </template>
+      </el-table-column>
+      <el-table-column prop="sales_count" label="销量" width="100" />
+      <el-table-column label="操作" width="120" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openForm(row)">编辑</el-button>
+          <el-button link type="danger" @click="remove(row)">删除</el-button>
+        </template>
+      </el-table-column>
     </el-table>
+
+    <el-pagination
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="total"
+      layout="total, prev, pager, next"
+      style="margin-top:16px"
+      @current-change="load"
+    />
+
+    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="560px" destroy-on-close>
+      <el-form :model="form" label-width="100px">
+        <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店" required>
+          <el-select v-model="form.store_id" placeholder="选择门店" style="width:100%" @change="onFormStoreChange">
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="门店">
+          <span>{{ form.store_name || boundStoreName || (form.store_id ? `门店#${form.store_id}` : '—') }}</span>
+        </el-form-item>
+        <el-form-item label="商品编号" required>
+          <el-input v-model="form.product_no" :disabled="!!form.id" placeholder="如 NOODLE001" />
+        </el-form-item>
+        <el-form-item label="名称" required>
+          <el-input v-model="form.name" />
+        </el-form-item>
+        <el-form-item label="预览图">
+          <div class="img-row">
+            <el-image
+              v-if="form.main_image"
+              :src="mediaUrl(form.main_image)"
+              fit="cover"
+              class="preview"
+              :preview-src-list="[mediaUrl(form.main_image)]"
+            />
+            <div v-else class="preview empty">暂无图片</div>
+            <div class="img-actions">
+              <el-upload
+                :show-file-list="false"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                :http-request="uploadImage"
+                :disabled="!form.id || uploading"
+              >
+                <el-button type="primary" plain :loading="uploading" :disabled="!form.id">
+                  {{ form.id ? '上传图片' : '请先保存商品' }}
+                </el-button>
+              </el-upload>
+              <el-button v-if="form.main_image" link type="danger" @click="clearImage">清除</el-button>
+              <p class="hint">建议 1:1、1200×1200（最低 800×800），小程序按屏幕自适应</p>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="分类" required>
+          <el-select v-model="form.category_id" style="width:100%" placeholder="请选择分类">
+            <el-option v-for="c in formCategories" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+          <p v-if="!formCategories.length" class="hint warn">该门店暂无分类，请先到「分类管理」创建</p>
+        </el-form-item>
+        <el-form-item label="价格" required>
+          <el-input-number v-model="form.price" :min="0.01" :precision="2" :step="1" placeholder="必填" />
+        </el-form-item>
+        <el-form-item label="原价">
+          <el-input-number v-model="form.original_price" :min="0" :precision="2" />
+        </el-form-item>
+        <el-form-item label="餐盒费">
+          <el-input-number v-model="form.box_price" :min="0" :precision="2" :step="0.5" />
+          <span class="hint">顾客选「打包」时按件数加收</span>
+        </el-form-item>
+        <el-form-item label="库存">
+          <el-input-number v-model="form.stock" :min="0" />
+          <span class="hint">999 表示不限库存</span>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="form.status">
+            <el-radio label="ON_SALE">在售</el-radio>
+            <el-radio label="OFF_SALE">下架</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="规格组">
+          <el-select v-model="form.option_group_ids" multiple style="width:100%" placeholder="选择关联规格组">
+            <el-option v-for="g in optionGroups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="form.description" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="form.sort_order" :min="0" />
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-checkbox v-model="form.is_recommended">推荐</el-checkbox>
+          <el-checkbox v-model="form.is_hot">热销</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
+const loading = ref(false)
+const saving = ref(false)
+const uploading = ref(false)
 const products = ref<any[]>([])
-const showAdd = ref(false)
+const categories = ref<any[]>([])
+const stores = ref<any[]>([])
+const optionGroups = ref<any[]>([])
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const keyword = ref('')
+const statusFilter = ref('ALL')
+const categoryFilter = ref<number | undefined>()
+const storeFilter = ref<number | undefined>()
+const dialogVisible = ref(false)
+
+const form = reactive({
+  id: 0,
+  store_id: undefined as number | undefined,
+  store_name: '',
+  product_no: '',
+  name: '',
+  category_id: undefined as number | undefined,
+  price: undefined as number | undefined,
+  original_price: undefined as number | undefined,
+  box_price: 0,
+  stock: 999,
+  status: 'ON_SALE',
+  description: '',
+  main_image: '' as string,
+  sort_order: 0,
+  is_recommended: false,
+  is_hot: false,
+  option_group_ids: [] as number[],
+})
+
+const boundStoreName = computed(() => {
+  const sid = auth.user?.store_id
+  if (!sid) return ''
+  return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
+})
+
+const effectiveListStoreId = computed(() => {
+  if (auth.isSuperAdmin) return storeFilter.value
+  return auth.user?.store_id || undefined
+})
+
+const filterCategories = computed(() => {
+  const sid = effectiveListStoreId.value
+  if (!sid) return categories.value
+  return categories.value.filter((c) => c.store_id === sid)
+})
+
+const formCategories = computed(() => {
+  const sid = form.store_id
+  if (!sid) return []
+  return categories.value.filter((c) => c.store_id === sid)
+})
+
+function mediaUrl(path: string) {
+  if (!path) return ''
+  if (/^https?:\/\//i.test(path)) return path
+  return path.startsWith('/') ? path : `/${path}`
+}
+
+function categoryName(id: number) {
+  const c = categories.value.find((x) => x.id === id)
+  return c?.name || id
+}
+
+async function loadStores() {
+  try {
+    stores.value = (await api.get('/settings/stores/options')).data.items || []
+  } catch {
+    stores.value = []
+  }
+}
+
+async function loadMeta() {
+  const sid = effectiveListStoreId.value
+  categories.value = (
+    await api.get('/categories', {
+      params: { all: true, ...(sid ? { store_id: sid } : {}) },
+    })
+  ).data
+  optionGroups.value = (await api.get('/options/groups')).data
+}
+
+function reload() {
+  page.value = 1
+  load()
+}
+
+async function onStoreFilterChange() {
+  categoryFilter.value = undefined
+  await loadMeta()
+  reload()
+}
+
+function onFormStoreChange() {
+  form.category_id = formCategories.value[0]?.id
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const res = await api.get('/products', {
+      params: {
+        page: page.value,
+        page_size: pageSize.value,
+        keyword: keyword.value || undefined,
+        status: statusFilter.value,
+        category_id: categoryFilter.value,
+        store_id: effectiveListStoreId.value,
+      },
+    })
+    products.value = res.data.items
+    total.value = res.data.total
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetForm() {
+  const defaultStore = auth.isSuperAdmin
+    ? storeFilter.value || stores.value[0]?.id
+    : auth.user?.store_id || stores.value[0]?.id
+  Object.assign(form, {
+    id: 0,
+    store_id: defaultStore,
+    store_name: stores.value.find((s) => s.id === defaultStore)?.name || '',
+    product_no: '',
+    name: '',
+    category_id: undefined,
+    price: undefined,
+    original_price: undefined,
+    box_price: 0,
+    stock: 999,
+    status: 'ON_SALE',
+    description: '',
+    main_image: '',
+    sort_order: 0,
+    is_recommended: false,
+    is_hot: false,
+    option_group_ids: [],
+  })
+  form.category_id = formCategories.value[0]?.id
+}
+
+async function openForm(row?: any) {
+  resetForm()
+  if (row) {
+    const detail = (await api.get(`/products/${row.id}`)).data
+    Object.assign(form, {
+      id: detail.id,
+      store_id: detail.store_id,
+      store_name: detail.store_name || '',
+      product_no: detail.product_no,
+      name: detail.name,
+      category_id: detail.category_id,
+      price: parseFloat(detail.price),
+      original_price: detail.original_price ? parseFloat(detail.original_price) : undefined,
+      box_price: detail.box_price != null ? parseFloat(detail.box_price) : 0,
+      stock: detail.stock ?? 999,
+      status: detail.status,
+      description: detail.description || '',
+      main_image: detail.main_image || '',
+      sort_order: detail.sort_order ?? 0,
+      is_recommended: detail.is_recommended ?? false,
+      is_hot: detail.is_hot ?? false,
+      option_group_ids: detail.option_group_ids || [],
+    })
+  }
+  dialogVisible.value = true
+}
+
+async function uploadImage(option: { file: File }) {
+  if (!form.id) {
+    ElMessage.warning('请先保存商品再上传图片')
+    return
+  }
+  uploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', option.file)
+    const res = await api.post(`/products/${form.id}/image`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    form.main_image = res.data.main_image || res.data.url || ''
+    ElMessage.success('图片已上传')
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function clearImage() {
+  if (!form.id) return
+  try {
+    await api.put(`/products/${form.id}`, { main_image: null })
+    form.main_image = ''
+    ElMessage.success('已清除主图')
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '清除失败')
+  }
+}
+
+async function save() {
+  const productNo = form.product_no?.trim()
+  if (!productNo || !form.name?.trim()) {
+    ElMessage.warning('请填写商品编号和名称')
+    return
+  }
+  if (!form.id && !form.store_id) {
+    ElMessage.warning('请选择门店')
+    return
+  }
+  if (!form.category_id) {
+    ElMessage.warning('请选择分类（请先在「分类管理」中创建分类）')
+    return
+  }
+  if (form.price == null || form.price <= 0) {
+    ElMessage.warning('请填写大于 0 的价格')
+    return
+  }
+  saving.value = true
+  try {
+    const payload: Record<string, unknown> = {
+      category_id: form.category_id,
+      product_no: productNo,
+      name: form.name.trim(),
+      price: form.price,
+      box_price: form.box_price ?? 0,
+      stock: form.stock,
+      status: form.status,
+      description: form.description?.trim() || null,
+      sort_order: form.sort_order,
+      is_recommended: form.is_recommended,
+      is_hot: form.is_hot,
+      option_group_ids: form.option_group_ids,
+    }
+    if (form.original_price != null && form.original_price > 0) {
+      payload.original_price = form.original_price
+    }
+    if (form.id) {
+      await api.put(`/products/${form.id}`, payload)
+      ElMessage.success('已更新')
+      dialogVisible.value = false
+      load()
+    } else {
+      payload.store_id = form.store_id
+      const res = await api.post('/products', payload)
+      form.id = res.data.id
+      form.store_id = res.data.store_id || form.store_id
+      ElMessage.success('已创建，可继续上传预览图')
+      statusFilter.value = form.status
+      page.value = 1
+      load()
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function changeStatus(row: any, status: string) {
+  if (status === row.status) return
+  try {
+    await api.put(`/products/${row.id}`, { status })
+    ElMessage.success(status === 'ON_SALE' ? '已上架' : '已下架')
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '操作失败')
+  }
+}
+
+async function remove(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除商品「${row.name}」（${row.product_no}）？删除后不可恢复。`,
+      '确认删除',
+      { type: 'warning' },
+    )
+    await api.delete(`/products/${row.id}`)
+    ElMessage.success('已删除')
+    load()
+  } catch (e: any) {
+    if (e !== 'cancel' && e?.message !== 'cancel') {
+      ElMessage.error(e.message || '删除失败')
+    }
+  }
+}
 
 onMounted(async () => {
-  const res = await api.get('/products', { params: { page_size: 100 } })
-  products.value = res.data.items
+  await loadStores()
+  if (!auth.isSuperAdmin && auth.user?.store_id) {
+    storeFilter.value = auth.user.store_id
+  }
+  await loadMeta()
+  await load()
 })
 </script>
+
+<style scoped>
+.toolbar { margin-bottom: 12px; }
+.thumb { width: 48px; height: 48px; border-radius: 6px; }
+.no-img { color: #c0c4cc; font-size: 12px; }
+.status-select { width: 88px; }
+.img-row { display: flex; gap: 12px; align-items: flex-start; }
+.preview { width: 96px; height: 96px; border-radius: 8px; }
+.preview.empty {
+  display: flex; align-items: center; justify-content: center;
+  background: #f5f7fa; color: #c0c4cc; font-size: 12px;
+}
+.img-actions { flex: 1; }
+.hint { margin: 4px 0 0; font-size: 12px; color: #909399; }
+.hint.warn { color: #e6a23c; }
+</style>

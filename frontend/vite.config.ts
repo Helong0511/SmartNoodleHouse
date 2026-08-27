@@ -5,13 +5,17 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [vue()],
   resolve: {
-    alias: { '@': resolve(__dirname, 'src') }
+    alias: { '@': resolve(__dirname, 'src') },
   },
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
-      '/uploads': { target: 'http://127.0.0.1:8000', changeOrigin: true }
-    }
-  }
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/uploads': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+    },
+  },
 })

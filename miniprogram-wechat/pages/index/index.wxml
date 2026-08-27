@@ -10,12 +10,25 @@
   </view>
 
   <view class="card" wx:if="{{showMemberPrompt}}">
-    <view class="title">注册会员，享受更多便利</view>
+    <view class="title">注册会员，智能记住您的口味</view>
     <view class="desc">{{memberText}}</view>
-    <input class="input" placeholder="怎么称呼您（选填）" value="{{nickname}}" bindinput="onNickname" />
+    <view class="profile-row">
+      <button class="avatar-btn" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
+        <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" wx:if="{{avatarUrl}}" />
+        <view class="avatar ph" wx:else>头</view>
+      </button>
+      <input
+        class="input nick"
+        type="nickname"
+        placeholder="微信昵称（点此授权）"
+        value="{{nickname}}"
+        bindinput="onNickname"
+        bindblur="onNickname"
+      />
+    </view>
     <label class="check">
       <checkbox checked="{{enableFace}}" bindtap="toggleFace" color="#ff6b35" />
-      <text>同时开启人脸迎宾（主动授权，可随时关闭）</text>
+      <text>同时开启人脸迎宾（摄像头实时采集，可随时关闭）</text>
     </label>
     <view class="face-tip" wx:if="{{enableFace}}">{{faceText}}</view>
     <button class="btn-primary" bindtap="onRegister">注册并开始点餐</button>
@@ -23,8 +36,11 @@
   </view>
 
   <view class="card" wx:elif="{{!loading && ready}}">
-    <view class="title">欢迎{{nickname ? '，' + nickname : ''}}</view>
+    <view class="welcome-row">
+      <image wx:if="{{avatarUrl}}" class="avatar-sm" src="{{avatarUrl}}" mode="aspectFill" />
+      <view class="title">欢迎{{nickname ? '，' + nickname : ''}}</view>
+    </view>
     <button class="btn-primary" bindtap="goMenu">开始点餐</button>
-    <button class="btn-ghost skip" bindtap="goMember">会员中心</button>
+    <button class="btn-ghost skip" bindtap="goMember">会员中心 · 口味爱好</button>
   </view>
 </view>

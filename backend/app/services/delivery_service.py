@@ -327,6 +327,7 @@ class DeliveryService:
         await deduct_for_order_items(
             db,
             [{"product_id": row["product"].id, "quantity": row["quantity"]} for row in order_items_payload],
+            store_id=store_id,
         )
 
         order = Order(
@@ -498,7 +499,7 @@ class DeliveryService:
             d_order.last_sync_at = now_local()
             items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
             for it in items:
-                await restore_stock(db, it.product_id, it.quantity)
+                await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
             await db.flush()
         return order
 
@@ -705,7 +706,7 @@ class DeliveryService:
             d_order.last_sync_at = now_local()
             items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
             for it in items:
-                await restore_stock(db, it.product_id, it.quantity)
+                await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
             await db.flush()
         return {"ok": ok, "order_id": order.id if order else None}
 

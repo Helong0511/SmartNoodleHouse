@@ -1,0 +1,7 @@
+-- 业务单号加长：前缀+日期时间+随机后缀（如 ORD20260827134405A1B2C3）
+USE smart_noodle_house;
+
+ALTER TABLE orders MODIFY COLUMN order_no VARCHAR(40) NOT NULL;
+ALTER TABLE payments MODIFY COLUMN payment_no VARCHAR(40) NOT NULL;
+ALTER TABLE payment_refunds MODIFY COLUMN refund_no VARCHAR(40) NOT NULL;
+ALTER TABLE customers MODIFY COLUMN customer_no VARCHAR(40) NOT NULL;

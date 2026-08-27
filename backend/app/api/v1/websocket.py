@@ -8,7 +8,7 @@ router = APIRouter(tags=["WebSocket"])
 
 PROTECTED_CHANNELS = {"kitchen", "orders", "dashboard", "cameras"}
 CHANNEL_PERMS = {
-    "kitchen": {"SUPER_ADMIN", "STORE_ADMIN", "KITCHEN", "OPERATOR"},
+    "kitchen": {"SUPER_ADMIN", "STORE_ADMIN", "KITCHEN"},
     "orders": {"SUPER_ADMIN", "STORE_ADMIN", "CASHIER", "OPERATOR", "KITCHEN"},
     "dashboard": {"SUPER_ADMIN", "STORE_ADMIN"},
     "cameras": {"SUPER_ADMIN", "STORE_ADMIN", "OPERATOR"},

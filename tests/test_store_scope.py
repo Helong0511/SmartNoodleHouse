@@ -4,7 +4,12 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.services.store_scope import assert_order_store_access, assert_store_access, effective_store_id
+from app.services.store_scope import (
+    assert_order_store_access,
+    assert_store_access,
+    effective_store_id,
+    require_bound_store,
+)
 
 
 def _user(role: str, store_id: int | None):
@@ -15,6 +20,15 @@ def test_effective_store_forces_staff_store():
     u = _user("CASHIER", 3)
     assert effective_store_id(u, requested=99) == 3
     assert effective_store_id(_user("SUPER_ADMIN", None), requested=99) == 99
+
+
+def test_require_bound_store_blocks_unbound_staff():
+    assert require_bound_store(_user("SUPER_ADMIN", None), None) is None
+    assert require_bound_store(_user("SUPER_ADMIN", None), 7) == 7
+    assert require_bound_store(_user("KITCHEN", 2), 99) == 2
+    with pytest.raises(HTTPException) as ei:
+        require_bound_store(_user("KITCHEN", None), None)
+    assert ei.value.status_code == 403
 
 
 def test_assert_store_access_blocks_cross_store():

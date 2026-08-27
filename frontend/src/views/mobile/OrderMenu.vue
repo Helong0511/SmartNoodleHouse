@@ -5,7 +5,6 @@
       <p v-if="table">桌号: {{ table.table_name }}</p>
     </header>
 
-    <!-- 扫码后会员/人脸引导 -->
     <div v-if="showMemberPrompt" class="prompt-mask">
       <div class="prompt-card">
         <h2>注册会员，享受更多便利</h2>
@@ -22,22 +21,49 @@
 
     <div v-for="cat in categories" :key="cat.id" class="section">
       <h3>{{ cat.name }}</h3>
-      <div v-for="p in productsByCategory(cat.id)" :key="p.id" class="product" @click="openProduct(p)">
-        <div class="info"><strong>{{ p.name }}</strong><p>{{ p.description }}</p></div>
-        <div class="price">¥{{ p.price }}</div>
+      <div
+        v-for="p in productsByCategory(cat.id)"
+        :key="p.id"
+        class="product"
+        @click="openProduct(p)"
+      >
+        <div class="thumb-wrap" :style="{ width: thumbPx + 'px', height: thumbPx + 'px' }">
+          <img v-if="p._imageUrl" :src="p._imageUrl" class="thumb" alt="" />
+          <div v-else class="thumb placeholder">{{ (p.name || '餐')[0] }}</div>
+        </div>
+        <div class="info">
+          <strong>{{ p.name }}</strong>
+          <p v-if="p.description">{{ p.description }}</p>
+          <div class="price">¥{{ p.price }}</div>
+        </div>
       </div>
     </div>
     <div class="cart-bar" @click="$router.push('/order/cart')">购物车 ({{ cartCount }}) ¥{{ cartTotal }}</div>
-    <el-drawer v-model="showProduct" title="选择规格" direction="btt" size="70%">
-      <div v-if="currentProduct">
+
+    <el-drawer v-model="showProduct" title="选择规格" direction="btt" size="78%">
+      <div v-if="currentProduct" class="drawer-body">
+        <div class="hero" :style="{ height: heroHeight + 'px' }">
+          <img
+            v-if="currentProduct._imageUrl"
+            :src="currentProduct._imageUrl"
+            class="hero-img"
+            alt=""
+          />
+          <div v-else class="hero-img placeholder">{{ (currentProduct.name || '餐')[0] }}</div>
+        </div>
         <h3>{{ currentProduct.name }} ¥{{ currentProduct.price }}</h3>
+        <p v-if="currentProduct.description" class="desc">{{ currentProduct.description }}</p>
         <div v-for="g in currentProduct.option_groups" :key="g.id" class="option-group">
           <h4>{{ g.name }}</h4>
           <el-radio-group v-if="g.selection_type==='SINGLE'" v-model="selectedOptions[g.id]">
-            <el-radio v-for="o in g.options" :key="o.id" :value="o.id">{{ o.name }} <span v-if="+o.extra_price">+¥{{ o.extra_price }}</span></el-radio>
+            <el-radio v-for="o in g.options" :key="o.id" :value="o.id">
+              {{ o.name }} <span v-if="+o.extra_price">+¥{{ o.extra_price }}</span>
+            </el-radio>
           </el-radio-group>
           <el-checkbox-group v-else v-model="multiOptions[g.id]">
-            <el-checkbox v-for="o in g.options" :key="o.id" :value="o.id">{{ o.name }} <span v-if="+o.extra_price">+¥{{ o.extra_price }}</span></el-checkbox>
+            <el-checkbox v-for="o in g.options" :key="o.id" :value="o.id">
+              {{ o.name }} <span v-if="+o.extra_price">+¥{{ o.extra_price }}</span>
+            </el-checkbox>
           </el-checkbox-group>
         </div>
         <el-button type="primary" style="width:100%;margin-top:16px" @click="addToCart">加入购物车</el-button>
@@ -51,6 +77,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { mediaUrl, thumbSizePx } from '@/utils/media'
 
 const route = useRoute()
 const table = ref<any>(null)
@@ -61,6 +88,8 @@ const currentProduct = ref<any>(null)
 const selectedOptions = reactive<Record<number, number>>({})
 const multiOptions = reactive<Record<number, number[]>>({})
 const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
+const thumbPx = ref(thumbSizePx())
+const heroHeight = ref(Math.min(typeof window !== 'undefined' ? window.innerWidth : 375, 480))
 
 const showMemberPrompt = ref(false)
 const nickname = ref('')
@@ -78,9 +107,20 @@ function productsByCategory(catId: number) {
   return products.value.filter(p => p.category_id === catId)
 }
 
+function decorate(p: any) {
+  return { ...p, description: p.description || '', _imageUrl: mediaUrl(p.main_image) }
+}
+
 async function openProduct(p: any) {
   const res = await api.get(`/products/${p.id}`)
-  currentProduct.value = res.data
+  currentProduct.value = decorate(res.data)
+  // 默认选中每组第一个单选
+  for (const g of currentProduct.value.option_groups || []) {
+    if (g.selection_type === 'SINGLE' && g.options?.length && !selectedOptions[g.id]) {
+      const normal = g.options.find((o: any) => o.code === 'NORMAL') || g.options[0]
+      selectedOptions[g.id] = normal.id
+    }
+  }
   showProduct.value = true
 }
 
@@ -90,7 +130,6 @@ function addToCart() {
     if (g.selection_type === 'SINGLE' && selectedOptions[g.id]) optionIds.push(selectedOptions[g.id])
     if (g.selection_type === 'MULTIPLE' && multiOptions[g.id]) optionIds.push(...multiOptions[g.id])
   }
-  // 必选规格校验（与后端一致）
   for (const g of currentProduct.value.option_groups || []) {
     if (!g.is_required) continue
     const has =
@@ -113,21 +152,12 @@ function addToCart() {
     option_ids: optionIds,
     price: currentProduct.value.price,
     subtotal: currentProduct.value.price,
+    imageUrl: currentProduct.value._imageUrl || '',
+    box_price: currentProduct.value.box_price || '0',
   })
   localStorage.setItem('snh_cart', JSON.stringify(cart.value))
   localStorage.setItem('cart', JSON.stringify(cart.value))
   showProduct.value = false
-}
-
-function mockFeature(seed: string) {
-  const arr: number[] = []
-  let x = 0
-  for (let i = 0; i < seed.length; i++) x = (x + seed.charCodeAt(i) * (i + 1)) % 997
-  for (let i = 0; i < 128; i++) {
-    x = (x * 9301 + 49297) % 233280
-    arr.push((x / 233280) * 2 - 1)
-  }
-  return arr
 }
 
 async function registerMember() {
@@ -154,6 +184,9 @@ function skipMember() {
 }
 
 onMounted(async () => {
+  thumbPx.value = thumbSizePx()
+  heroHeight.value = Math.min(window.innerWidth, 480)
+
   const token = route.query.token as string
   const channel = (route.query.channel as string) || 'wechat'
   if (token) {
@@ -173,7 +206,6 @@ onMounted(async () => {
     }
   }
 
-  // H5：仅当 ALLOW_AUTH_MOCK 时后端才接受；生产应改为真实 code
   const channelCode = channel === 'alipay' ? `h5_ali_${Date.now()}` : `h5_wx_${Date.now()}`
   const loginPath = channel === 'alipay' ? '/miniprogram/alipay/login' : '/miniprogram/wechat/login'
   const loginBody = channel === 'alipay'
@@ -194,8 +226,21 @@ onMounted(async () => {
     showMemberPrompt.value = true
   }
 
-  categories.value = (await api.get('/categories')).data
-  products.value = (await api.get('/products', { params: { page_size: 100 } })).data.items
+  categories.value = (
+    await api.get('/categories', {
+      params: table.value?.store_id ? { store_id: table.value.store_id } : {},
+    })
+  ).data
+  products.value = (
+    (
+      await api.get('/products', {
+        params: {
+          page_size: 100,
+          ...(table.value?.store_id ? { store_id: table.value.store_id } : {}),
+        },
+      })
+    ).data.items || []
+  ).map(decorate)
 })
 </script>
 
@@ -203,9 +248,31 @@ onMounted(async () => {
 .mobile-order { max-width: 480px; margin: 0 auto; padding-bottom: 60px; position: relative; }
 header { background: linear-gradient(135deg, #ff6b35, #f7b733); color: #fff; padding: 16px; text-align: center; }
 .section { padding: 12px; }
-.product { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; }
-.price { color: #ff6b35; font-weight: bold; font-size: 18px; }
-.cart-bar { position: fixed; bottom: 0; left: 0; right: 0; max-width: 480px; margin: 0 auto; background: #333; color: #fff; padding: 16px; text-align: center; cursor: pointer; }
+.product {
+  display: flex; gap: 12px; align-items: stretch;
+  padding: 12px; border-bottom: 1px solid #eee; cursor: pointer;
+}
+.thumb-wrap { flex-shrink: 0; border-radius: 8px; overflow: hidden; background: #f3f3f3; }
+.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.placeholder {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(145deg, #ffe8df, #f5f5f5); color: #ff6b35; font-weight: 700; font-size: 22px;
+}
+.info { flex: 1; min-width: 0; }
+.info p { color: #999; font-size: 13px; margin: 4px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.price { color: #ff6b35; font-weight: bold; font-size: 18px; margin-top: 8px; }
+.cart-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; max-width: 480px; margin: 0 auto;
+  background: #333; color: #fff; padding: 16px; text-align: center; cursor: pointer;
+}
+.drawer-body { padding-bottom: 24px; }
+.hero { width: 100%; border-radius: 12px; overflow: hidden; background: #eee; margin-bottom: 12px; }
+.hero-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hero-img.placeholder {
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, #ffe8df, #f0f0f0); color: #ff6b35; font-size: 48px; font-weight: 700;
+}
+.desc { color: #888; font-size: 13px; margin: 4px 0 12px; }
 .option-group { margin: 12px 0; }
 .prompt-mask {
   position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
@@ -215,6 +282,6 @@ header { background: linear-gradient(135deg, #ff6b35, #f7b733); color: #fff; pad
   background: #fff; border-radius: 16px; padding: 20px; width: 100%; max-width: 400px;
 }
 .prompt-card h2 { font-size: 18px; margin-bottom: 8px; }
-.desc { color: #666; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
+.prompt-card .desc { color: #666; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
 .face-tip { color: #999; font-size: 12px; margin-top: 8px; line-height: 1.5; }
 </style>

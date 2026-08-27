@@ -11,6 +11,182 @@ from app.core.response import money
 from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Product, ProductOptionGroup
 from app.services.stock_service import deduct_for_order_items
 
+ORDER_STATUS_LABEL = {
+    "PENDING_PAYMENT": "待支付",
+    "PAID": "已支付",
+    "CONFIRMED": "已接单",
+    "PREPARING": "备餐中",
+    "COOKING": "制作中",
+    "READY": "待取餐",
+    "COMPLETED": "已完成",
+    "CANCELLED": "已取消",
+    "REFUNDED": "已退款",
+}
+
+PAYMENT_STATUS_LABEL = {
+    "UNPAID": "未支付",
+    "PAID": "已支付",
+    "REFUNDING": "退款中",
+    "REFUNDED": "已退款",
+}
+
+
+class OrderReorderService:
+    """根据历史订单解析可再次下单的购物车条目"""
+
+    @staticmethod
+    async def build_cart_from_order(db: AsyncSession, order: Order) -> dict:
+        items = list(
+            (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id))).scalars()
+        )
+        if not items:
+            raise AppException(40040, "该订单没有可复购商品")
+
+        item_ids = [i.id for i in items]
+        opts = list(
+            (await db.execute(select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids)))).scalars()
+        )
+        opts_by_item: dict[int, list[OrderItemOption]] = {}
+        for o in opts:
+            opts_by_item.setdefault(o.order_item_id, []).append(o)
+
+        product_ids = list({i.product_id for i in items})
+        products = {
+            p.id: p
+            for p in (await db.execute(select(Product).where(Product.id.in_(product_ids)))).scalars()
+        }
+
+        pog_rows = (
+            await db.execute(
+                select(ProductOptionGroup, OptionGroup)
+                .join(OptionGroup, OptionGroup.id == ProductOptionGroup.group_id)
+                .where(ProductOptionGroup.product_id.in_(product_ids), OptionGroup.status == 1)
+            )
+        ).all()
+        bound_groups: dict[int, list[OptionGroup]] = {}
+        group_ids: list[int] = []
+        for pog, group in pog_rows:
+            bound_groups.setdefault(pog.product_id, []).append(group)
+            group_ids.append(group.id)
+
+        options_by_group: dict[int, list[Option]] = {}
+        if group_ids:
+            for opt in (
+                await db.execute(select(Option).where(Option.group_id.in_(set(group_ids)), Option.status == 1))
+            ).scalars():
+                options_by_group.setdefault(opt.group_id, []).append(opt)
+
+        cart_items: list[dict] = []
+        skipped: list[dict] = []
+
+        for item in items:
+            product = products.get(item.product_id)
+            snap_name = item.product_name_snapshot
+            hist_opts = opts_by_item.get(item.id, [])
+            if not product or product.status != "ON_SALE":
+                skipped.append(
+                    {
+                        "product_id": item.product_id,
+                        "name": snap_name,
+                        "reason": "商品已下架或不可用",
+                    }
+                )
+                continue
+
+            groups = bound_groups.get(product.id, [])
+            option_ids: list[int] = []
+            option_labels: list[str] = []
+            missing_required = False
+
+            # 先按历史选项 code / 组名匹配
+            matched_group_ids: set[int] = set()
+            for ho in hist_opts:
+                found: Option | None = None
+                for g in groups:
+                    if g.name != ho.group_name_snapshot:
+                        continue
+                    for opt in options_by_group.get(g.id, []):
+                        if opt.code == ho.option_code:
+                            found = opt
+                            break
+                    if found:
+                        break
+                if not found:
+                    for g in groups:
+                        for opt in options_by_group.get(g.id, []):
+                            if opt.code == ho.option_code:
+                                found = opt
+                                break
+                        if found:
+                            break
+                if found:
+                    option_ids.append(found.id)
+                    matched_group_ids.add(found.group_id)
+                    if found.code != "NORMAL":
+                        option_labels.append(found.name)
+
+            # 必选规格未匹配到时，尝试选默认 NORMAL / 第一项
+            for g in groups:
+                if not g.is_required or g.id in matched_group_ids:
+                    continue
+                opts_g = options_by_group.get(g.id, [])
+                if not opts_g:
+                    missing_required = True
+                    break
+                default = next((o for o in opts_g if o.code == "NORMAL"), opts_g[0])
+                option_ids.append(default.id)
+                matched_group_ids.add(g.id)
+                if default.code != "NORMAL":
+                    option_labels.append(default.name)
+
+            if missing_required:
+                skipped.append(
+                    {
+                        "product_id": product.id,
+                        "name": product.name,
+                        "reason": "缺少必选规格，请手动点餐",
+                    }
+                )
+                continue
+
+            # 用服务端计价，保证与下单一致
+            try:
+                priced = await OrderPriceCalculator.calculate_items_batch(
+                    db,
+                    [{"product_id": product.id, "quantity": item.quantity, "option_ids": option_ids}],
+                )
+                _p, line_subtotal, _detail, qty = priced[0]
+                unit_price = money(line_subtotal / Decimal(qty)) if qty else line_subtotal
+            except AppException as e:
+                skipped.append({"product_id": product.id, "name": product.name, "reason": e.message})
+                continue
+
+            cart_items.append(
+                {
+                    "product_id": product.id,
+                    "name": product.name,
+                    "quantity": qty,
+                    "option_ids": option_ids,
+                    "option_labels": option_labels,
+                    "option_text": "、".join(option_labels),
+                    "unit_price": float(unit_price),
+                    "subtotal": str(money(line_subtotal)),
+                    "imageUrl": product.main_image or "",
+                    "main_image": product.main_image or "",
+                }
+            )
+
+        if not cart_items:
+            raise AppException(40041, "没有可复购的在售商品，请重新点餐")
+
+        return {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "cart_items": cart_items,
+            "skipped": skipped,
+            "cart_count": sum(i["quantity"] for i in cart_items),
+        }
+
 
 class OrderPriceCalculator:
     """服务端订单价格计算 - 禁止信任前端金额"""
@@ -131,15 +307,19 @@ class OrderPriceCalculator:
         items_data: list[dict],
         *,
         deduct_stock: bool = True,
-    ) -> Decimal:
+        need_pack: bool = False,
+    ) -> tuple[Decimal, Decimal]:
+        """返回 (商品小计, 打包费)。打包费 = Σ(商品 box_price × 数量)，仅 need_pack 时计。"""
         rows = await OrderPriceCalculator.calculate_items_batch(db, items_data)
         if deduct_stock:
             await deduct_for_order_items(
                 db,
                 [{"product_id": p.id, "quantity": qty} for p, _, _, qty in rows],
+                store_id=order.store_id,
             )
 
         total = Decimal("0.00")
+        packing = Decimal("0.00")
         for (product, subtotal, options_detail, quantity), item in zip(rows, items_data):
             unit_extra = sum(o.extra_price for _, o, _ in options_detail)
             unit_price = money(product.price + unit_extra)
@@ -166,4 +346,6 @@ class OrderPriceCalculator:
                     )
                 )
             total += subtotal
-        return money(total)
+            if need_pack:
+                packing += money((product.box_price or Decimal("0")) * quantity)
+        return money(total), money(packing)

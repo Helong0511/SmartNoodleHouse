@@ -2,9 +2,28 @@
   <view class="empty" wx:if="{{!cart.length}}">购物车是空的</view>
   <block wx:else>
     <view class="item" wx:for="{{cart}}" wx:key="index">
-      <text>{{item.name}} ×{{item.quantity}}</text>
-      <text>¥{{item.subtotal}}</text>
+      <view class="thumb-wrap" style="{{thumbStyle}}">
+        <image wx:if="{{item.imageUrl}}" class="thumb" src="{{item.imageUrl}}" mode="aspectFill" />
+        <view wx:else class="thumb placeholder">{{item.name[0] || '餐'}}</view>
+      </view>
+      <view class="info">
+        <view class="name">{{item.name}}</view>
+        <view class="opts" wx:if="{{item.option_text}}">{{item.option_text}}</view>
+        <view class="unit">单价 ¥{{item.unit_price}}</view>
+      </view>
+      <view class="actions">
+        <view class="qty">
+          <text class="btn" data-index="{{index}}" data-delta="-1" bindtap="changeQty">−</text>
+          <text class="num">{{item.quantity}}</text>
+          <text class="btn" data-index="{{index}}" data-delta="1" bindtap="changeQty">+</text>
+        </view>
+        <view class="line-total">¥{{item.subtotal}}</view>
+        <text class="del" data-index="{{index}}" bindtap="removeItem">删除</text>
+      </view>
     </view>
-    <button class="btn-primary" bindtap="goConfirm">去结算</button>
+    <view class="footer">
+      <text class="sum">合计 ¥{{total}}</text>
+      <button class="btn-primary" bindtap="goConfirm">去结算</button>
+    </view>
   </block>
 </view>

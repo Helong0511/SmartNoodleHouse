@@ -33,7 +33,12 @@ def register_tasks(scheduler) -> None:
     @scheduler.scheduled_job("interval", minutes=1)
     async def close_expired_orders():
         async with AsyncSessionLocal() as db:
-            timeout = now_local() - timedelta(minutes=settings.order_payment_timeout_minutes)
+            from app.services.system_settings_service import SystemSettingsService
+
+            timeout_minutes = await SystemSettingsService.get_int(
+                db, "order_payment_timeout_minutes", settings.order_payment_timeout_minutes
+            )
+            timeout = now_local() - timedelta(minutes=timeout_minutes)
             # FOR UPDATE 与支付回调行锁互斥，避免关单/入账竞态
             result = await db.execute(
                 select(Order)
@@ -57,11 +62,19 @@ def register_tasks(scheduler) -> None:
                     await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
                 ).scalars().all()
                 for it in items:
-                    await restore_stock(db, it.product_id, it.quantity)
+                    await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
                 closed += 1
             await db.commit()
             if closed:
                 logger.info("Expired orders closed: %s", closed)
+
+    @scheduler.scheduled_job("interval", minutes=1)
+    async def poll_payment_refunds():
+        from app.services.payment_service import PaymentService
+
+        n = await PaymentService.poll_pending_refunds(limit=20)
+        if n:
+            logger.info("Payment refunds confirmed via query: %s", n)
 
     @scheduler.scheduled_job("interval", hours=6)
     async def cleanup_visitor_data():
@@ -72,8 +85,13 @@ def register_tasks(scheduler) -> None:
 
     @scheduler.scheduled_job("cron", hour=3, minute=0)
     async def cleanup_operation_logs():
-        cutoff = now_local() - timedelta(days=settings.operation_log_retention_days)
         async with AsyncSessionLocal() as db:
+            from app.services.system_settings_service import SystemSettingsService
+
+            retention = await SystemSettingsService.get_int(
+                db, "operation_log_retention_days", settings.operation_log_retention_days
+            )
+            cutoff = now_local() - timedelta(days=retention)
             await db.execute(delete(OperationLog).where(OperationLog.created_at < cutoff))
             await db.commit()
-            logger.info("Operation logs older than %s days cleaned", settings.operation_log_retention_days)
+            logger.info("Operation logs older than %s days cleaned", retention)

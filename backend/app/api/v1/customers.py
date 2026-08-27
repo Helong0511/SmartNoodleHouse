@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, require_permission
 from app.core.response import calc_pages, success
@@ -8,6 +8,7 @@ from app.models import (
     CustomerAlipayAccount,
     CustomerPreference,
     CustomerWechatAccount,
+    FaceProfile,
     Order,
 )
 from app.services.customer_service import PreferenceService
@@ -23,35 +24,140 @@ async def list_customers(
     page: int = 1,
     page_size: int = 20,
     keyword: str | None = None,
+    channel: str | None = None,
+    include_disabled: bool = False,
+    store_id: int | None = None,
 ):
+    from app.services.store_scope import require_bound_store
+
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
+    # 门店账号仅看在本店下过单的顾客；超管可传 store_id 筛选或看全量
+    effective_store = require_bound_store(user, store_id)
+
     q = select(Customer)
+    if not include_disabled:
+        q = q.where(Customer.status == 1)
+    if effective_store is not None:
+        q = q.where(
+            Customer.id.in_(
+                select(Order.customer_id).where(
+                    Order.store_id == effective_store,
+                    Order.customer_id.is_not(None),
+                ).distinct()
+            )
+        )
     if keyword:
-        q = q.where(Customer.display_name.contains(keyword) | Customer.phone.contains(keyword))
+        kw = keyword.strip()
+        q = q.where(
+            or_(
+                Customer.display_name.contains(kw),
+                Customer.nickname.contains(kw),
+                Customer.phone.contains(kw),
+                Customer.customer_no.contains(kw),
+            )
+        )
+    if channel:
+        ch = channel.strip().upper()
+        if ch == "WECHAT":
+            q = q.where(
+                Customer.id.in_(select(CustomerWechatAccount.customer_id).distinct())
+            )
+        elif ch == "ALIPAY":
+            q = q.where(
+                Customer.id.in_(select(CustomerAlipayAccount.customer_id).distinct())
+            )
+
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
         q.order_by(Customer.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
     )
     customers = list(result.scalars().all())
     ids = [c.id for c in customers]
+
     order_counts: dict[int, int] = {}
+    wechat_ids: set[int] = set()
+    alipay_ids: set[int] = set()
+    face_ids: set[int] = set()
     if ids:
-        rows = await db.execute(
+        oc_q = (
             select(Order.customer_id, func.count())
             .where(Order.customer_id.in_(ids))
             .group_by(Order.customer_id)
         )
+        if effective_store is not None:
+            oc_q = oc_q.where(Order.store_id == effective_store)
+        rows = await db.execute(oc_q)
         order_counts = {cid: int(cnt) for cid, cnt in rows.all()}
+        wechat_ids = set(
+            (
+                await db.execute(
+                    select(CustomerWechatAccount.customer_id).where(CustomerWechatAccount.customer_id.in_(ids))
+                )
+            ).scalars().all()
+        )
+        alipay_ids = set(
+            (
+                await db.execute(
+                    select(CustomerAlipayAccount.customer_id).where(CustomerAlipayAccount.customer_id.in_(ids))
+                )
+            ).scalars().all()
+        )
+        face_ids = set(
+            (
+                await db.execute(
+                    select(FaceProfile.customer_id).where(
+                        FaceProfile.customer_id.in_(ids),
+                        FaceProfile.consent_status == "AUTHORIZED",
+                    )
+                )
+            ).scalars().all()
+        )
+
+    # 智能口味偏好摘要（每位顾客 Top2）
+    pref_map: dict[int, list[dict]] = {i: [] for i in ids}
+    if ids:
+        pref_rows = (
+            await db.execute(
+                select(CustomerPreference)
+                .where(CustomerPreference.customer_id.in_(ids))
+                .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            )
+        ).scalars().all()
+        for p in pref_rows:
+            bucket = pref_map.setdefault(p.customer_id, [])
+            if len(bucket) >= 2:
+                continue
+            bucket.append(
+                {
+                    "category": p.category,
+                    "option_code": p.option_code,
+                    "option_name": p.option_name or p.option_code,
+                    "score": float(p.preference_score),
+                    "order_count": int(p.order_count or 0),
+                    "label": f"{p.category}·{(p.option_name or p.option_code)}"
+                    if p.category
+                    else str(p.option_name or p.option_code),
+                }
+            )
+
     items = [
         {
             "id": c.id,
             "customer_no": c.customer_no,
-            "display_name": c.display_name,
+            "display_name": c.display_name or c.nickname,
             "nickname": c.nickname,
             "phone": c.phone,
+            "status": c.status,
+            "channels": [
+                *(["WECHAT"] if c.id in wechat_ids else []),
+                *(["ALIPAY"] if c.id in alipay_ids else []),
+            ],
+            "has_face": c.id in face_ids,
+            "preferences": pref_map.get(c.id, []),
             "order_count": order_counts.get(c.id, 0),
             "last_order_at": c.last_order_at.isoformat() if c.last_order_at else None,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in customers
     ]
@@ -68,16 +174,91 @@ async def get_customer(customer_id: int, request: Request, db: DbSession):
         return success(None, message="顾客不存在", request=request)
     wechat = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == customer_id))
     alipay = await db.execute(select(CustomerAlipayAccount).where(CustomerAlipayAccount.customer_id == customer_id))
+    face = await db.execute(
+        select(FaceProfile).where(
+            FaceProfile.customer_id == customer_id,
+            FaceProfile.consent_status == "AUTHORIZED",
+        )
+    )
     prefs = await PreferenceService.get_recommendations(db, customer_id)
+    pref_list = prefs.get("preferences") or []
+    all_prefs = list(
+        (
+            await db.execute(
+                select(CustomerPreference)
+                .where(CustomerPreference.customer_id == customer_id)
+                .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+            )
+        ).scalars().all()
+    )
+    order_count = await db.scalar(
+        select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
+    ) or 0
     return success(
         {
             "id": customer.id,
             "customer_no": customer.customer_no,
-            "display_name": customer.display_name,
+            "display_name": customer.display_name or customer.nickname,
+            "nickname": customer.nickname,
             "phone": customer.phone,
-            "wechat_accounts": [{"openid": w.openid} for w in wechat.scalars()],
-            "alipay_accounts": [{"alipay_user_id": a.alipay_user_id} for a in alipay.scalars()],
-            "recommendations": prefs,
+            "status": customer.status,
+            "avatar_url": customer.avatar_url,
+            "has_face": face.scalar_one_or_none() is not None,
+            "order_count": int(order_count),
+            "last_order_at": customer.last_order_at.isoformat() if customer.last_order_at else None,
+            "created_at": customer.created_at.isoformat() if customer.created_at else None,
+            "wechat_accounts": [
+                {"openid": w.openid, "unionid": w.unionid, "is_mock": str(w.openid).startswith("wx_dev_")}
+                for w in wechat.scalars()
+            ],
+            "alipay_accounts": [
+                {
+                    "alipay_user_id": a.alipay_user_id,
+                    "is_mock": str(a.alipay_user_id).startswith("ali_dev_"),
+                }
+                for a in alipay.scalars()
+            ],
+            "preferences": [
+                {
+                    "category": p.category,
+                    "option_code": p.option_code,
+                    "option_name": getattr(p, "option_name", None) or p.option_code,
+                    "score": float(p.preference_score),
+                    "order_count": int(p.order_count or 0),
+                    "label": f"{p.category}·{(getattr(p, 'option_name', None) or p.option_code)}"
+                    if p.category
+                    else str(getattr(p, "option_name", None) or p.option_code),
+                    "last_used_at": p.last_used_at.isoformat() if p.last_used_at else None,
+                }
+                for p in all_prefs
+            ],
+            "recommendations": [
+                {
+                    "category": p.get("category"),
+                    "option_code": p.get("option_code"),
+                    "option_name": p.get("option_name") or p.get("option_code"),
+                    "score": p.get("score"),
+                    "order_count": p.get("order_count"),
+                    "label": p.get("label")
+                    or f"{p.get('category')}·{p.get('option_name') or p.get('option_code')}",
+                }
+                for p in pref_list
+                if isinstance(p, dict)
+            ],
+            "welcome_hint": (
+                "欢迎回来。今天还是老样子："
+                + "、".join(
+                    (
+                        x.get("label")
+                        or f"{x.get('category')}·{x.get('option_name') or x.get('option_code')}"
+                    )
+                    for x in pref_list[:2]
+                    if isinstance(x, dict)
+                )
+                + "？"
+                if pref_list
+                else None
+            ),
         },
         request=request,
     )
@@ -102,6 +283,7 @@ async def get_preferences(
         {
             "category": p.category,
             "option_code": p.option_code,
+            "option_name": p.option_name or p.option_code,
             "score": float(p.preference_score),
             "order_count": p.order_count,
         }

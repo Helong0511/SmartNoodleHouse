@@ -1,48 +1,104 @@
 <template>
   <div class="confirm-page">
     <h2>确认订单</h2>
+
+    <div v-if="tableLabel" class="card">
+      <div class="label">堂食桌号</div>
+      <div class="table">{{ tableLabel }}</div>
+    </div>
+
+    <div class="card">
+      <div class="label">已选商品</div>
+      <div v-for="(item, idx) in cart" :key="idx" class="line">
+        <img v-if="item.imageUrl" :src="item.imageUrl" class="mini" alt="" />
+        <div v-else class="mini placeholder">{{ (item.name || '餐')[0] }}</div>
+        <span class="name">{{ item.name }} ×{{ item.quantity || 1 }}</span>
+        <span class="amt">¥{{ item.subtotal }}</span>
+      </div>
+      <div class="sum"><span>小计</span><span>¥{{ subtotal }}</span></div>
+      <div v-if="needPack" class="sum"><span>打包费（预估）</span><span>¥{{ packingFee }}</span></div>
+      <div class="sum total"><span>应付约</span><span>¥{{ payEstimate }}</span></div>
+    </div>
+
+    <div class="card">
+      <div class="label">用餐方式</div>
+      <div class="pack-row">
+        <button type="button" :class="['pack-opt', { on: !needPack }]" @click="needPack = false">堂食</button>
+        <button type="button" :class="['pack-opt', { on: needPack }]" @click="needPack = true">打包外带</button>
+      </div>
+      <p v-if="needPack" class="tip">打包按商品餐盒费加收，以服务器结算为准</p>
+    </div>
+
     <el-input v-model="remark" placeholder="备注" style="margin:12px 0" />
-    <p>支付方式: {{ channel === 'alipay' ? '支付宝' : '微信' }}</p>
+    <p>支付方式: {{ channelLabel }}</p>
     <el-button type="primary" :loading="loading" style="width:100%" @click="submit">提交订单并支付</el-button>
   </div>
 </template>
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { mediaUrl } from '@/utils/media'
 
 const router = useRouter()
 const remark = ref('')
 const loading = ref(false)
-const channel = localStorage.getItem('snh_channel') || localStorage.getItem('channel') || 'wechat'
-const cart = JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]')
+const needPack = ref(false)
+const tableLabel = ref('')
+const channelRaw = localStorage.getItem('snh_channel') || localStorage.getItem('channel') || 'wechat'
+const channel = channelRaw.toUpperCase() === 'ALIPAY' ? 'ALIPAY' : 'WECHAT'
+const channelLabel = channel === 'ALIPAY' ? '支付宝' : '微信'
+const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
+
+const subtotal = computed(() =>
+  cart.value.reduce((s, i) => s + parseFloat(i.subtotal || i.price || 0), 0).toFixed(2),
+)
+const packingFee = computed(() => {
+  const fee = cart.value.reduce((s, i) => {
+    const box = parseFloat(i.box_price || 0) || 0
+    return s + box * (i.quantity || 1)
+  }, 0)
+  return fee.toFixed(2)
+})
+const payEstimate = computed(() => {
+  const sub = parseFloat(subtotal.value)
+  const pack = needPack.value ? parseFloat(packingFee.value) : 0
+  return (sub + pack).toFixed(2)
+})
 
 function idempotencyKey(): string {
   const table = localStorage.getItem('snh_table_token') || localStorage.getItem('table_token') || ''
   const raw = JSON.stringify({
     table,
     channel,
-    items: cart.map((c: any) => ({ p: c.product_id, q: c.quantity, o: c.option_ids || [] })),
+    needPack: needPack.value,
+    items: cart.value.map((c: any) => ({ p: c.product_id, q: c.quantity, o: c.option_ids || [] })),
   })
-  // 稳定短 hash，避免 Date.now() 导致重复下单
   let h = 0
   for (let i = 0; i < raw.length; i++) h = (Math.imul(31, h) + raw.charCodeAt(i)) | 0
-  return `idem_${Math.abs(h).toString(16)}_${cart.length}`
+  return `idem_${Math.abs(h).toString(16)}_${cart.value.length}`
 }
 
 async function submit() {
-  if (!cart.length) {
+  if (!cart.value.length) {
     ElMessage.warning('购物车为空')
+    return
+  }
+  const tableToken = localStorage.getItem('snh_table_token') || localStorage.getItem('table_token')
+  if (!tableToken) {
+    ElMessage.warning('请先扫描桌台二维码')
     return
   }
   loading.value = true
   try {
     const orderRes = await api.post('/orders', {
-      table_token: localStorage.getItem('snh_table_token') || localStorage.getItem('table_token'),
+      table_token: tableToken,
       channel,
+      need_pack: needPack.value,
+      dining_type: needPack.value ? 'TAKEAWAY' : 'DINE_IN',
       remark: remark.value,
-      items: cart.map((c: any) => ({
+      items: cart.value.map((c: any) => ({
         product_id: c.product_id,
         quantity: c.quantity || 1,
         option_ids: c.option_ids || [],
@@ -50,10 +106,9 @@ async function submit() {
       idempotency_key: idempotencyKey(),
     }, { headers: { 'X-Client': 'customer' } })
     const orderId = orderRes.data.id
-    const provider = channel === 'alipay' ? 'ALIPAY' : 'WECHAT'
     await api.post(
       `/payments/orders/${orderId}/pay`,
-      { provider, channel_type: channel === 'alipay' ? 'qr' : 'native' },
+      { provider: channel, channel_type: channel === 'ALIPAY' ? 'qr' : 'native' },
       { headers: { 'X-Client': 'customer' } },
     )
     localStorage.removeItem('snh_cart')
@@ -65,5 +120,56 @@ async function submit() {
     loading.value = false
   }
 }
+
+onMounted(async () => {
+  cart.value = cart.value.map((c) => ({
+    ...c,
+    imageUrl: c.imageUrl || mediaUrl(c.main_image),
+  }))
+  const token = localStorage.getItem('snh_table_token') || localStorage.getItem('table_token')
+  if (token) {
+    try {
+      const entry = await api.get('/miniprogram/entry', { params: { token, channel: channelRaw } })
+      const t = entry.data?.table
+      if (t) tableLabel.value = t.table_name || t.table_no || ''
+    } catch {
+      /* ignore */
+    }
+  }
+  // 补全餐盒费
+  for (const item of cart.value) {
+    if (item.box_price != null) continue
+    try {
+      const p = (await api.get(`/products/${item.product_id}`)).data
+      item.box_price = p.box_price || '0'
+      if (!item.imageUrl) item.imageUrl = mediaUrl(p.main_image)
+    } catch {
+      item.box_price = '0'
+    }
+  }
+})
 </script>
-<style scoped>.confirm-page { max-width:480px; margin:0 auto; padding:16px; }</style>
+<style scoped>
+.confirm-page { max-width:480px; margin:0 auto; padding:16px; }
+.card { background:#fff; border-radius:12px; padding:14px; margin-bottom:12px; border:1px solid #f0f0f0; }
+.label { color:#666; font-size:13px; margin-bottom:8px; }
+.table { font-size:20px; font-weight:700; color:#ff6b35; }
+.line { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f5f5f5; }
+.mini { width:40px; height:40px; border-radius:6px; object-fit:cover; flex-shrink:0; }
+.mini.placeholder {
+  width:40px; height:40px; border-radius:6px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:#ffe8df; color:#ff6b35; font-weight:700;
+}
+.name { flex:1; font-size:14px; }
+.amt { color:#ff6b35; font-weight:600; }
+.sum { display:flex; justify-content:space-between; margin-top:8px; color:#666; font-size:14px; }
+.sum.total { color:#333; font-weight:700; font-size:16px; margin-top:12px; }
+.pack-row { display:flex; gap:10px; }
+.pack-opt {
+  flex:1; padding:10px 0; border-radius:8px; border:1px solid #ddd; background:#fff;
+  color:#666; cursor:pointer;
+}
+.pack-opt.on { border-color:#ff6b35; color:#ff6b35; background:#fff5f0; font-weight:600; }
+.tip { color:#999; font-size:12px; margin-top:8px; }
+</style>

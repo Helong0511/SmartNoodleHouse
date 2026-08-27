@@ -33,4 +33,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 def generate_no(prefix: str) -> str:
-    return f"{prefix}{uuid.uuid4().hex[:16].upper()}"
+    """业务单号：前缀 + 本地日期时间(到秒) + 随机后缀，便于人工辨认下单时间。
+
+    示例：ORD20260827134405A1B2C3
+    """
+    from app.core.response import now_local
+
+    ts = now_local().strftime("%Y%m%d%H%M%S")
+    suffix = uuid.uuid4().hex[:6].upper()
+    return f"{prefix}{ts}{suffix}"

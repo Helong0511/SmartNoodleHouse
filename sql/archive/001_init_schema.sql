@@ -143,19 +143,22 @@ CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
 -- ========== 商品分类与商品 ==========
 CREATE TABLE IF NOT EXISTS product_categories (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  store_id BIGINT UNSIGNED NOT NULL,
   name VARCHAR(100) NOT NULL,
   description VARCHAR(255) DEFAULT NULL,
   sort_order INT NOT NULL DEFAULT 0,
   status TINYINT NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-  INDEX idx_cat_sort (sort_order, status)
+  INDEX idx_cat_store (store_id, sort_order, status),
+  CONSTRAINT fk_cat_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS products (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  store_id BIGINT UNSIGNED NOT NULL,
   category_id BIGINT UNSIGNED NOT NULL,
-  product_no VARCHAR(32) NOT NULL UNIQUE,
+  product_no VARCHAR(32) NOT NULL,
   name VARCHAR(100) NOT NULL,
   description TEXT DEFAULT NULL,
   main_image VARCHAR(500) DEFAULT NULL,
@@ -168,7 +171,10 @@ CREATE TABLE IF NOT EXISTS products (
   sales_count INT NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_products_store_no (store_id, product_no),
+  INDEX idx_products_store (store_id, status, sort_order),
   INDEX idx_products_category (category_id, status, sort_order),
+  CONSTRAINT fk_products_store FOREIGN KEY (store_id) REFERENCES stores(id),
   CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES product_categories(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -311,8 +317,13 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
   reason VARCHAR(255) DEFAULT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
   provider_refund_no VARCHAR(64) DEFAULT NULL,
+  callback_raw JSON DEFAULT NULL COMMENT '平台退款回调/查询原文',
+  fail_reason VARCHAR(255) DEFAULT NULL COMMENT '失败或关闭原因',
+  succeeded_at DATETIME(3) DEFAULT NULL COMMENT '退款成功确认时间',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_refunds_status (status),
+  INDEX idx_refunds_payment (payment_id),
   CONSTRAINT fk_refund_payment FOREIGN KEY (payment_id) REFERENCES payments(id),
   CONSTRAINT fk_refund_order FOREIGN KEY (order_id) REFERENCES orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -321,8 +332,9 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
 CREATE TABLE IF NOT EXISTS customer_preferences (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   customer_id BIGINT UNSIGNED NOT NULL,
-  category VARCHAR(50) NOT NULL COMMENT '规格组code',
+  category VARCHAR(50) NOT NULL COMMENT '规格组名称快照',
   option_code VARCHAR(50) NOT NULL,
+  option_name VARCHAR(50) DEFAULT NULL COMMENT '选项名称快照',
   preference_score DECIMAL(5,4) NOT NULL DEFAULT 0.0000,
   order_count INT NOT NULL DEFAULT 0,
   last_used_at DATETIME(3) DEFAULT NULL,

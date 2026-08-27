@@ -144,24 +144,53 @@ async def refund(
     reason: str,
 ) -> dict[str, Any]:
     settings = get_settings()
-    data = await _request(
-        "POST",
-        "/v3/refund/domestic/refunds",
-        {
-            "out_trade_no": payment_no,
-            "out_refund_no": refund_no,
-            "reason": (reason or "退款")[:80],
-            "notify_url": settings.wechat_notify_url,
-            "amount": {
-                "refund": int((refund_yuan * 100).quantize(Decimal("1"))),
-                "total": int((total_yuan * 100).quantize(Decimal("1"))),
-                "currency": "CNY",
-            },
+    notify = (settings.wechat_refund_notify_url or settings.wechat_notify_url or "").strip()
+    payload: dict[str, Any] = {
+        "out_trade_no": payment_no,
+        "out_refund_no": refund_no,
+        "reason": (reason or "退款")[:80],
+        "amount": {
+            "refund": int((refund_yuan * 100).quantize(Decimal("1"))),
+            "total": int((total_yuan * 100).quantize(Decimal("1"))),
+            "currency": "CNY",
         },
-    )
+    }
+    if notify:
+        payload["notify_url"] = notify
+    data = await _request("POST", "/v3/refund/domestic/refunds", payload)
+    # 申请成功仅表示受理；SUCCESS 才是终态，其余保持 PROCESSING 等回调/查询
+    raw_status = (data.get("status") or "PROCESSING").upper()
+    if raw_status == "SUCCESS":
+        status = "SUCCESS"
+    elif raw_status in ("CLOSED", "ABNORMAL"):
+        status = raw_status
+    else:
+        status = "PROCESSING"
     return {
         "refund_no": refund_no,
-        "status": data.get("status") or "PROCESSING",
+        "status": status,
         "provider_refund_no": data.get("refund_id"),
         "amount": str(refund_yuan),
+        "raw": data,
+    }
+
+
+async def query_refund(*, refund_no: str) -> dict[str, Any]:
+    """查询单笔退款（商户退款单号）。"""
+    data = await _request("GET", f"/v3/refund/domestic/refunds/out-refund-no/{refund_no}")
+    raw_status = (data.get("status") or "").upper()
+    if raw_status == "SUCCESS":
+        status = "SUCCESS"
+    elif raw_status in ("CLOSED", "ABNORMAL"):
+        status = raw_status
+    elif raw_status:
+        status = "PROCESSING"
+    else:
+        status = "PROCESSING"
+    return {
+        "refund_no": data.get("out_refund_no") or refund_no,
+        "status": status,
+        "provider_refund_no": data.get("refund_id"),
+        "amount": data.get("amount", {}),
+        "raw": data,
     }

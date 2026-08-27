@@ -1,0 +1,116 @@
+<template>
+  <div v-loading="loading">
+    <div class="toolbar">
+      <el-select
+        v-if="auth.isSuperAdmin"
+        v-model="storeId"
+        placeholder="选择门店"
+        style="width:200px"
+        @change="load"
+      >
+        <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-tag v-else type="info">本店库存覆盖</el-tag>
+      <el-button type="primary" @click="load">刷新</el-button>
+      <span class="tip">有覆盖则下单扣本店库存；删除覆盖后回退品牌库存</span>
+    </div>
+
+    <el-table :data="items" border style="margin-top:12px">
+      <el-table-column prop="product_no" label="编号" width="120" />
+      <el-table-column prop="name" label="商品" min-width="160" />
+      <el-table-column prop="brand_stock" label="品牌库存" width="100" />
+      <el-table-column label="本店库存" width="140">
+        <template #default="{ row }">
+          <el-input-number v-model="row.stock" :min="0" :max="999999" size="small" />
+        </template>
+      </el-table-column>
+      <el-table-column label="本店在售" width="100">
+        <template #default="{ row }">
+          <el-switch v-model="row.status" :active-value="1" :inactive-value="0" />
+        </template>
+      </el-table-column>
+      <el-table-column label="覆盖" width="80">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.has_override ? 'warning' : 'info'">
+            {{ row.has_override ? '是' : '否' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="160" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="saveRow(row)">保存</el-button>
+          <el-button link type="danger" :disabled="!row.has_override" @click="clearRow(row)">清除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const loading = ref(false)
+const stores = ref<any[]>([])
+const storeId = ref<number | undefined>()
+const items = ref<any[]>([])
+
+async function loadStores() {
+  const res = await api.get('/settings/stores/options')
+  stores.value = res.data.items || []
+  storeId.value = auth.user?.store_id || stores.value[0]?.id
+}
+
+async function load() {
+  if (!storeId.value && auth.isSuperAdmin) {
+    ElMessage.warning('请选择门店')
+    return
+  }
+  loading.value = true
+  try {
+    const res = await api.get('/store-stocks', { params: { store_id: storeId.value } })
+    items.value = (res.data.items || []).map((it: any) => ({ ...it }))
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveRow(row: any) {
+  try {
+    await api.put(`/store-stocks/${row.product_id}`, {
+      store_id: storeId.value,
+      stock: row.stock,
+      status: row.status,
+    })
+    ElMessage.success('已保存本店库存')
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  }
+}
+
+async function clearRow(row: any) {
+  try {
+    await api.delete(`/store-stocks/${row.product_id}`, { params: { store_id: storeId.value } })
+    ElMessage.success('已清除覆盖')
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '操作失败')
+  }
+}
+
+onMounted(async () => {
+  await loadStores()
+  await load()
+})
+</script>
+
+<style scoped>
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tip { color: #999; font-size: 12px; }
+</style>

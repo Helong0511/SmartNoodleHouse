@@ -1,70 +1,76 @@
-const api = require('../../utils/api')
-const auth = require('../../utils/auth')
-const app = getApp()
-
-Page({
-  data: { cameraOn: false, from: '' },
-
-  onLoad(query) {
-    this.setData({ from: query.from || '' })
-  },
-
-  startCamera() {
-    this.setData({ cameraOn: true })
-  },
-
-  chooseAndUpload() {
-    wx.chooseMedia({
-      count: 1,
-      mediaType: ['image'],
-      sourceType: ['camera', 'album'],
-      success: (res) => {
-        const path = res.tempFiles[0].tempFilePath
-        wx.getFileSystemManager().readFile({
-          filePath: path,
-          encoding: 'base64',
-          success: async (file) => {
-            await this.uploadFace(file.data)
-          },
-          fail: () => wx.showToast({ title: '读取图片失败', icon: 'none' })
-        })
-      }
-    })
-  },
-
-  async uploadFace(base64) {
-    if (!app.globalData.customerToken) {
-      wx.showToast({ title: '请先登录', icon: 'none' })
-      return
-    }
-    try {
-      wx.showLoading({ title: '授权中' })
-      await api.post('/miniprogram/face/consent-base64', { image_base64: base64 })
-      app.globalData.faceStatus = 'AUTHORIZED'
-      wx.hideLoading()
-      wx.showToast({ title: '授权成功', icon: 'success' })
-      setTimeout(() => {
-        if (this.data.from === 'register') {
-          wx.redirectTo({ url: '/pages/menu/menu' })
-        } else {
-          wx.navigateBack()
-        }
-      }, 600)
-    } catch (e) {
-      wx.hideLoading()
-      wx.showToast({ title: e.message || '授权失败', icon: 'none' })
-    }
-  },
-
-  confirmConsent() {
-    this.chooseAndUpload()
-  },
-
-  cancel() {
-    if (this.data.from === 'register') {
-      wx.redirectTo({ url: '/pages/menu/menu' })
-    } else {
-      wx.navigateBack()
-    }
-  }
-})
+const api = require('../../utils/api')
+const app = getApp()
+
+Page({
+  data: { cameraOn: false, from: '', uploading: false },
+
+  onLoad(query) {
+    this.setData({ from: query.from || '' })
+  },
+
+  startCamera() {
+    this.setData({ cameraOn: true })
+  },
+
+  /** 仅从 live camera 取帧，不走相册 / chooseMedia 读图文件 */
+  captureAndConsent() {
+    if (this.data.uploading) return
+    const ctx = wx.createCameraContext('faceCamera', this)
+    ctx.takePhoto({
+      quality: 'high',
+      success: (res) => {
+        const path = res.tempImagePath
+        wx.getFileSystemManager().readFile({
+          filePath: path,
+          encoding: 'base64',
+          success: async (file) => {
+            await this.uploadFace(file.data)
+          },
+          fail: () => wx.showToast({ title: '读取摄像头帧失败', icon: 'none' })
+        })
+      },
+      fail: () => wx.showToast({ title: '拍照失败，请检查摄像头权限', icon: 'none' })
+    })
+  },
+
+  async uploadFace(base64) {
+    if (!app.globalData.customerToken) {
+      wx.showToast({ title: '请先登录', icon: 'none' })
+      return
+    }
+    this.setData({ uploading: true })
+    try {
+      wx.showLoading({ title: '校验人脸中' })
+      await api.post('/miniprogram/face/consent-base64', { image_base64: base64 })
+      app.globalData.faceStatus = 'AUTHORIZED'
+      wx.hideLoading()
+      wx.showToast({ title: '授权成功', icon: 'success' })
+      setTimeout(() => {
+        if (this.data.from === 'register') {
+          wx.redirectTo({ url: '/pages/menu/menu' })
+        } else {
+          wx.navigateBack()
+        }
+      }, 600)
+    } catch (e) {
+      wx.hideLoading()
+      const msg = (e && e.message) || '授权失败'
+      // toast 字数太短，完整错误用 modal
+      wx.showModal({
+        title: '人脸授权失败',
+        content: msg,
+        showCancel: false
+      })
+    } finally {
+      this.setData({ uploading: false })
+    }
+  },
+
+  cancel() {
+    if (this.data.from === 'register') {
+      wx.redirectTo({ url: '/pages/menu/menu' })
+    } else {
+      wx.navigateBack()
+    }
+  }
+})

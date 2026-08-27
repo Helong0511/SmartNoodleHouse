@@ -1,105 +1,336 @@
-"""摄像头 API：鉴权 + 解密密码连接 + 生命周期"""
+"""摄像头 API：鉴权 + 解密密码连接 + 生命周期 + 访客统计"""
 from __future__ import annotations
+
+import time
 
 import cv2
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
-from app.core.response import success
+from app.core.exceptions import AppException
+from app.core.response import now_local, success
 from app.models import Camera, VisitorEvent
 from app.services.camera_credentials import (
     build_connect_source,
     encrypt_password,
     mask_rtsp_url,
 )
+from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/cameras", tags=["摄像头"])
 
 
-def _start_worker(camera: Camera) -> None:
+class CameraCreate(BaseModel):
+    store_id: int | None = None
+    name: str = Field(..., min_length=1, max_length=100)
+    camera_type: str = Field(default="USB", pattern="^(USB|RTSP)$")
+    source_url: str = Field(..., min_length=1, max_length=500)
+    username: str | None = Field(default=None, max_length=100)
+    password: str | None = None
+    fps: int = Field(default=25, ge=1, le=60)
+    detect_fps: int = Field(default=3, ge=1, le=30)
+    auto_start: bool = True
+
+
+class CameraUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    camera_type: str | None = Field(default=None, pattern="^(USB|RTSP)$")
+    source_url: str | None = Field(default=None, min_length=1, max_length=500)
+    username: str | None = Field(default=None, max_length=100)
+    password: str | None = None
+    fps: int | None = Field(default=None, ge=1, le=60)
+    detect_fps: int | None = Field(default=None, ge=1, le=30)
+    clear_password: bool = False
+
+
+def _assert_cam_access(user, camera: Camera) -> None:
+    assert_store_access(user, camera.store_id)
+
+
+def _start_worker(camera: Camera, *, force: bool = False) -> None:
     from camera.camera_manager import CameraManager
 
     source = build_connect_source(camera.source_url, camera.username, camera.password_encrypted)
-    CameraManager().start_camera(camera.id, source, camera.fps or 25)
+    CameraManager().start_camera(camera.id, source, camera.fps or 25, force=force)
+
+
+def _serialize(c: Camera, mgr) -> dict:
+    runtime = mgr.get_runtime(c.id) if mgr else {"running": False, "status": c.status, "has_frame": False}
+    live = runtime.get("status") if runtime.get("running") else c.status
+    return {
+        "id": c.id,
+        "name": c.name,
+        "camera_type": c.camera_type,
+        "source_url": mask_rtsp_url(c.source_url),
+        "username": c.username,
+        "status": live or c.status,
+        "fps": c.fps,
+        "detect_fps": c.detect_fps,
+        "store_id": c.store_id,
+        "has_password": bool(c.password_encrypted),
+        "last_online_at": c.last_online_at.isoformat() if c.last_online_at else None,
+        "runtime": runtime,
+        "created_at": c.created_at.isoformat() if getattr(c, "created_at", None) else None,
+    }
+
+
+@router.get("/overview", dependencies=[require_permission("camera:read")])
+async def cameras_overview(request: Request, db: DbSession, user: CurrentUser):
+    from camera.camera_manager import CameraManager
+
+    q = select(Camera)
+    sid = require_bound_store(user)
+    if sid is not None:
+        q = q.where(Camera.store_id == sid)
+    cams = list((await db.execute(q)).scalars().all())
+    mgr = CameraManager()
+    online = 0
+    reconnecting = 0
+    for c in cams:
+        st = mgr.get_status(c.id) if mgr.get_worker(c.id) else c.status
+        if st == "ONLINE":
+            online += 1
+        elif st == "RECONNECTING":
+            reconnecting += 1
+
+    today = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
+    cam_ids = [c.id for c in cams] or [-1]
+    visitor_today = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(VisitorEvent)
+            .where(VisitorEvent.camera_id.in_(cam_ids), VisitorEvent.event_time >= today)
+        )
+        or 0
+    )
+    visitor_total = int(
+        await db.scalar(select(func.count()).select_from(VisitorEvent).where(VisitorEvent.camera_id.in_(cam_ids)))
+        or 0
+    )
+    return success(
+        {
+            "camera_count": len(cams),
+            "online": online,
+            "reconnecting": reconnecting,
+            "offline": max(0, len(cams) - online - reconnecting),
+            "visitor_today": visitor_today,
+            "visitor_total": visitor_total,
+        },
+        request=request,
+    )
 
 
 @router.get("", dependencies=[require_permission("camera:read")])
 async def list_cameras(request: Request, db: DbSession, user: CurrentUser):
-    q = select(Camera)
-    if user.store_id and user.role.code != "SUPER_ADMIN":
-        q = q.where(Camera.store_id == user.store_id)
+    q = select(Camera).order_by(Camera.id.desc())
+    sid = require_bound_store(user)
+    if sid is not None:
+        q = q.where(Camera.store_id == sid)
     result = await db.execute(q)
     from camera.camera_manager import CameraManager
 
     mgr = CameraManager()
-    items = []
-    for c in result.scalars():
-        items.append(
-            {
-                "id": c.id,
-                "name": c.name,
-                "camera_type": c.camera_type,
-                "source_url": mask_rtsp_url(c.source_url),
-                "status": mgr.get_status(c.id) if mgr.get_worker(c.id) else c.status,
-                "fps": c.fps,
-                "store_id": c.store_id,
-                "has_password": bool(c.password_encrypted),
-            }
-        )
-    return success(items, request=request)
+    items = [_serialize(c, mgr) for c in result.scalars()]
+    return success({"items": items, "total": len(items)}, request=request)
 
 
-@router.post("", dependencies=[require_permission("camera:manage")])
-async def create_camera(
+@router.get("/visitors/stats", dependencies=[require_permission("camera:read")])
+async def visitor_stats(
     request: Request,
     db: DbSession,
     user: CurrentUser,
-    store_id: int | None = None,
-    name: str = "",
-    camera_type: str = "USB",
-    source_url: str = "0",
-    username: str | None = None,
-    password: str | None = None,
-    fps: int = 25,
+    camera_id: int | None = None,
 ):
-    from app.services.store_scope import assert_store_access, effective_store_id
+    today = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
+    q = select(func.count()).select_from(VisitorEvent)
+    q_today = select(func.count()).select_from(VisitorEvent).where(VisitorEvent.event_time >= today)
+    if camera_id:
+        camera = await db.get(Camera, camera_id)
+        if not camera:
+            raise AppException(40420, "摄像头不存在")
+        _assert_cam_access(user, camera)
+        q = q.where(VisitorEvent.camera_id == camera_id)
+        q_today = q_today.where(VisitorEvent.camera_id == camera_id)
+    else:
+        sid = require_bound_store(user)
+        if sid is not None:
+            cam_ids = (await db.execute(select(Camera.id).where(Camera.store_id == sid))).scalars().all()
+            ids = list(cam_ids) or [-1]
+            q = q.where(VisitorEvent.camera_id.in_(ids))
+            q_today = q_today.where(VisitorEvent.camera_id.in_(ids))
+    total = await db.scalar(q) or 0
+    today_cnt = await db.scalar(q_today) or 0
+    return success({"total_visitors": total, "today_visitors": today_cnt}, request=request)
 
-    sid = effective_store_id(user, store_id) or user.store_id
-    if not sid or int(sid) <= 0:
-        return {"code": 400, "message": "store_id 非法或账号未绑定门店", "data": None}
+
+@router.get("/visitors/events", dependencies=[require_permission("camera:read")])
+async def visitor_events(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    camera_id: int | None = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    from app.core.response import calc_pages
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    q = select(VisitorEvent)
+    if camera_id:
+        camera = await db.get(Camera, camera_id)
+        if not camera:
+            raise AppException(40420, "摄像头不存在")
+        _assert_cam_access(user, camera)
+        q = q.where(VisitorEvent.camera_id == camera_id)
+    else:
+        sid = require_bound_store(user)
+        if sid is not None:
+            cam_ids = (await db.execute(select(Camera.id).where(Camera.store_id == sid))).scalars().all()
+            q = q.where(VisitorEvent.camera_id.in_(list(cam_ids) or [-1]))
+    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    rows = list(
+        (
+            await db.execute(q.order_by(VisitorEvent.event_time.desc()).offset((page - 1) * page_size).limit(page_size))
+        ).scalars()
+    )
+    items = [
+        {
+            "id": e.id,
+            "visitor_no": e.visitor_no,
+            "camera_id": e.camera_id,
+            "event_type": e.event_type,
+            "event_time": e.event_time.isoformat() if e.event_time else None,
+            "expires_at": e.expires_at.isoformat() if e.expires_at else None,
+        }
+        for e in rows
+    ]
+    return success(
+        {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": calc_pages(total, page_size)},
+        request=request,
+    )
+
+
+@router.post("", dependencies=[require_permission("camera:manage")])
+async def create_camera(data: CameraCreate, request: Request, db: DbSession, user: CurrentUser):
+    # 超管可传 store_id；非超管强制本店。超管未传且无绑店则要求指定门店
+    sid = require_bound_store(user, data.store_id)
+    if sid is None:
+        if user.store_id:
+            sid = int(user.store_id)
+        else:
+            raise AppException(40020, "请指定门店后再创建摄像头")
     assert_store_access(user, sid)
-    pwd_enc = encrypt_password(password) if password else None
-    # source_url 入库时去掉明文密码
-    safe_url = mask_rtsp_url(source_url) if password and "://" in source_url else source_url
+    pwd_enc = encrypt_password(data.password) if data.password else None
+    safe_url = mask_rtsp_url(data.source_url) if data.password and "://" in data.source_url else data.source_url
     camera = Camera(
         store_id=int(sid),
-        name=name,
-        camera_type=camera_type,
-        source_url=safe_url if password else source_url,
-        username=username,
+        name=data.name.strip(),
+        camera_type=data.camera_type,
+        source_url=safe_url if data.password else data.source_url,
+        username=data.username,
         password_encrypted=pwd_enc,
-        fps=fps,
+        fps=data.fps,
+        detect_fps=data.detect_fps,
         status="OFFLINE",
     )
     db.add(camera)
     await db.flush()
-    _start_worker(camera)
-    camera.status = "ONLINE"
-    return success({"id": camera.id}, request=request)
+    if data.auto_start:
+        _start_worker(camera, force=True)
+        time.sleep(0.3)
+        from camera.camera_manager import CameraManager
+
+        mgr = CameraManager()
+        st = mgr.get_status(camera.id)
+        camera.status = st if st else "OFFLINE"
+        if camera.status == "ONLINE":
+            camera.last_online_at = now_local()
+        return success(_serialize(camera, mgr), request=request)
+    from camera.camera_manager import CameraManager
+
+    return success(_serialize(camera, CameraManager()), request=request)
+
+
+@router.put("/{camera_id}", dependencies=[require_permission("camera:manage")])
+async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db: DbSession, user: CurrentUser):
+    camera = await db.get(Camera, camera_id)
+    if not camera:
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
+    payload = data.model_dump(exclude_unset=True)
+    restart = False
+    if "name" in payload and payload["name"]:
+        camera.name = payload["name"].strip()
+    if "camera_type" in payload and payload["camera_type"]:
+        camera.camera_type = payload["camera_type"]
+        restart = True
+    if "source_url" in payload and payload["source_url"]:
+        camera.source_url = payload["source_url"]
+        restart = True
+    if "username" in payload:
+        camera.username = payload["username"]
+        restart = True
+    if payload.get("clear_password"):
+        camera.password_encrypted = None
+        restart = True
+    elif payload.get("password"):
+        camera.password_encrypted = encrypt_password(payload["password"])
+        if "://" in (camera.source_url or ""):
+            camera.source_url = mask_rtsp_url(camera.source_url)
+        restart = True
+    if "fps" in payload and payload["fps"] is not None:
+        camera.fps = payload["fps"]
+        restart = True
+    if "detect_fps" in payload and payload["detect_fps"] is not None:
+        camera.detect_fps = payload["detect_fps"]
+    await db.flush()
+    from camera.camera_manager import CameraManager
+
+    mgr = CameraManager()
+    if restart and mgr.get_worker(camera_id):
+        _start_worker(camera, force=True)
+        camera.status = mgr.get_status(camera_id) or "OFFLINE"
+    return success(_serialize(camera, mgr), request=request)
+
+
+@router.delete("/{camera_id}", dependencies=[require_permission("camera:manage")])
+async def delete_camera(camera_id: int, request: Request, db: DbSession, user: CurrentUser):
+    from camera.camera_manager import CameraManager
+
+    camera = await db.get(Camera, camera_id)
+    if not camera:
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
+    CameraManager().stop_camera(camera_id)
+    await db.delete(camera)
+    await db.flush()
+    return success({"deleted": True, "id": camera_id}, request=request)
 
 
 @router.post("/{camera_id}/start", dependencies=[require_permission("camera:manage")])
 async def start_camera(camera_id: int, request: Request, db: DbSession, user: CurrentUser):
     camera = await db.get(Camera, camera_id)
     if not camera:
-        return {"code": 404, "message": "摄像头不存在", "data": None}
-    if user.store_id and user.role.code != "SUPER_ADMIN" and camera.store_id != user.store_id:
-        return {"code": 403, "message": "无权操作该门店摄像头", "data": None}
-    _start_worker(camera)
-    camera.status = "ONLINE"
-    return success({"id": camera.id, "status": "ONLINE"}, request=request)
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
+    _start_worker(camera, force=True)
+    time.sleep(0.3)
+    from camera.camera_manager import CameraManager
+
+    st = CameraManager().get_status(camera_id) or "OFFLINE"
+    camera.status = st
+    if st == "ONLINE":
+        camera.last_online_at = now_local()
+    return success(_serialize(camera, CameraManager()), request=request)
+
+
+@router.post("/{camera_id}/restart", dependencies=[require_permission("camera:manage")])
+async def restart_camera(camera_id: int, request: Request, db: DbSession, user: CurrentUser):
+    return await start_camera(camera_id, request, db, user)
 
 
 @router.post("/{camera_id}/stop", dependencies=[require_permission("camera:manage")])
@@ -108,22 +339,21 @@ async def stop_camera(camera_id: int, request: Request, db: DbSession, user: Cur
 
     camera = await db.get(Camera, camera_id)
     if not camera:
-        return {"code": 404, "message": "摄像头不存在", "data": None}
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
     CameraManager().stop_camera(camera_id)
     camera.status = "OFFLINE"
-    return success({"id": camera.id, "status": "OFFLINE"}, request=request)
+    return success(_serialize(camera, CameraManager()), request=request)
 
 
 @router.post("/{camera_id}/stream-ticket", dependencies=[require_permission("camera:read")])
 async def create_camera_stream_ticket(camera_id: int, request: Request, db: DbSession, user: CurrentUser):
-    """签发 2 分钟流媒体票据，供 <img src> 使用，避免 JWT 长期暴露在 query。"""
     from app.core.security import create_stream_ticket
 
     camera = await db.get(Camera, camera_id)
     if not camera:
-        return {"code": 404, "message": "摄像头不存在", "data": None}
-    if user.store_id and user.role.code != "SUPER_ADMIN" and camera.store_id != user.store_id:
-        return {"code": 403, "message": "无权查看该门店摄像头", "data": None}
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
     ticket = create_stream_ticket(user.id, camera_id, token_version=int(getattr(user, "token_version", 0) or 0))
     return success({"ticket": ticket, "expires_in": 120}, request=request)
 
@@ -136,7 +366,6 @@ async def camera_stream(
     access_token: str | None = None,
     ticket: str | None = None,
 ):
-    """MJPEG 流：Authorization Bearer / 短期 ticket（推荐）/ access_token（兼容）。"""
     from camera.camera_manager import CameraManager
     from app.core.security import decode_token
     from jose import JWTError
@@ -183,7 +412,11 @@ async def camera_stream(
     camera = await db.get(Camera, camera_id)
     if not camera:
         return {"code": 404, "message": "摄像头不存在", "data": None}
-    if user.store_id and user.role.code != "SUPER_ADMIN" and camera.store_id != user.store_id:
+    from fastapi import HTTPException
+
+    try:
+        _assert_cam_access(user, camera)
+    except HTTPException:
         return {"code": 403, "message": "无权查看该门店摄像头", "data": None}
 
     mgr = CameraManager()
@@ -193,8 +426,6 @@ async def camera_stream(
         worker = mgr.get_worker(camera_id)
 
     def generate():
-        import time
-
         while True:
             if worker:
                 frame, _ = worker.frame_buffer.get_frame()
@@ -204,25 +435,3 @@ async def camera_stream(
             time.sleep(max(0.04, 1.0 / max((worker.fps if worker else 25), 1)))
 
     return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-
-@router.get("/visitors/stats", dependencies=[require_permission("camera:read")])
-async def visitor_stats(
-    request: Request,
-    db: DbSession,
-    user: CurrentUser,
-    camera_id: int | None = None,
-):
-    q = select(func.count()).select_from(VisitorEvent)
-    if camera_id:
-        camera = await db.get(Camera, camera_id)
-        if not camera:
-            return {"code": 404, "message": "摄像头不存在", "data": None}
-        if user.store_id and user.role.code != "SUPER_ADMIN" and camera.store_id != user.store_id:
-            return {"code": 403, "message": "无权查看", "data": None}
-        q = q.where(VisitorEvent.camera_id == camera_id)
-    elif user.store_id and user.role.code != "SUPER_ADMIN":
-        cam_ids = (await db.execute(select(Camera.id).where(Camera.store_id == user.store_id))).scalars().all()
-        q = q.where(VisitorEvent.camera_id.in_(cam_ids or [-1]))
-    total = await db.scalar(q) or 0
-    return success({"total_visitors": total}, request=request)

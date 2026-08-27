@@ -1,5 +1,6 @@
--- 数据库容量评估与索引优化建议
--- 在本地 MySQL 执行: source sql/003_capacity_audit.sql
+-- 数据库容量评估与索引优化建议（运维工具，非建库迁移）
+-- 在本地 MySQL 执行: source sql/tools/003_capacity_audit.sql
+-- 日常建库请用: sql/001_schema.sql + sql/002_seed_test.sql
 
 USE smart_noodle_house;
 

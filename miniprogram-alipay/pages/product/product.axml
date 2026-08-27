@@ -1,18 +1,70 @@
+<import-sjs name="util" from="../../utils/cart.sjs" />
+
 <view class="page" a:if="{{product}}">
-  <view class="title">{{product.name}}</view>
-  <view class="price">¥{{product.price}}</view>
-  <view class="group" a:for="{{product.option_groups}}" a:key="id">
-    <view class="gname">{{item.name}}</view>
-    <block a:if="{{item.selection_type === 'SINGLE'}}">
-      <view class="opt {{selected[item.id] === o.id ? 'on' : ''}}" a:for="{{item.options}}" a:for-item="o" a:key="id" data-gid="{{item.id}}" data-oid="{{o.id}}" onTap="selectSingle">
-        {{o.name}}
-      </view>
-    </block>
-    <block a:else>
-      <view class="opt {{(multi[item.id] || []).indexOf(o.id) >= 0 ? 'on' : ''}}" a:for="{{item.options}}" a:for-item="o" a:key="id" data-gid="{{item.id}}" data-oid="{{o.id}}" onTap="selectMulti">
-        {{o.name}}
-      </view>
-    </block>
+  <view class="hero-wrap" style="{{heroStyle}}">
+    <swiper
+      a:if="{{gallery.length}}"
+      class="hero-swiper"
+      style="{{heroStyle}}"
+      circular
+      indicator-dots="{{gallery.length > 1}}"
+      autoplay="{{gallery.length > 1}}"
+      interval="4000"
+    >
+      <swiper-item a:for="{{gallery}}" a:key="*this">
+        <image
+          class="hero"
+          src="{{item}}"
+          mode="aspectFill"
+          onTap="previewImage"
+          data-url="{{item}}"
+        />
+      </swiper-item>
+    </swiper>
+    <view a:else class="hero placeholder">
+      <text class="ph-text">{{product.name[0] || '餐'}}</text>
+      <text class="ph-sub">暂无图片</text>
+    </view>
   </view>
-  <button class="btn-primary" onTap="addCart">加入购物车</button>
+
+  <view class="body">
+    <view class="title">{{product.name}}</view>
+    <view class="desc" a:if="{{product.description}}">{{product.description}}</view>
+    <view class="price">
+      ¥{{displayPrice}}
+      <text class="base" a:if="{{displayPrice != product.price}}">（基础 ¥{{product.price}}）</text>
+    </view>
+
+    <view class="group" a:for="{{product.option_groups}}" a:key="id">
+      <view class="gname">{{item.name}}</view>
+      <block a:if="{{item.selection_type === 'SINGLE'}}">
+        <view
+          class="opt {{selected[item.id] == o.id ? 'on' : ''}}"
+          a:for="{{item.options}}"
+          a:for-item="o"
+          a:key="id"
+          data-gid="{{item.id}}"
+          data-oid="{{o.id}}"
+          onTap="selectSingle"
+        >
+          {{o.name}}<text a:if="{{o.extra_price > 0}}"> +¥{{o.extra_price}}</text>
+        </view>
+      </block>
+      <block a:else>
+        <view
+          class="opt {{util.hasId(multi[item.id], o.id) ? 'on' : ''}}"
+          a:for="{{item.options}}"
+          a:for-item="o"
+          a:key="id"
+          data-gid="{{item.id}}"
+          data-oid="{{o.id}}"
+          onTap="selectMulti"
+        >
+          {{o.name}}<text a:if="{{o.extra_price > 0}}"> +¥{{o.extra_price}}</text>
+        </view>
+      </block>
+    </view>
+
+    <button class="btn-primary" onTap="addCart">加入购物车</button>
+  </view>
 </view>

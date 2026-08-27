@@ -1,7 +1,246 @@
-<template><el-table :data="groups"><el-table-column prop="name" label="规格组" /><el-table-column label="选项"><template #default="{row}">{{ row.options?.map((o:any)=>o.name).join(', ') }}</template></el-table-column></el-table></template>
+<template>
+  <div v-loading="loading">
+    <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
+    <el-button @click="load">刷新</el-button>
+
+    <el-table :data="groups" style="margin-top:12px" border row-key="id">
+      <el-table-column type="expand">
+        <template #default="{ row }">
+          <div class="opts-panel">
+            <el-button size="small" type="primary" @click="openOptionForm(row)">新增选项</el-button>
+            <el-table :data="row.options" size="small" border style="margin-top:8px">
+              <el-table-column prop="name" label="选项名" />
+              <el-table-column prop="code" label="编码" width="120" />
+              <el-table-column prop="extra_price" label="加价" width="90">
+                <template #default="{ row: o }">¥{{ o.extra_price }}</template>
+              </el-table-column>
+              <el-table-column prop="sort_order" label="排序" width="70" />
+              <el-table-column label="状态" width="80">
+                <template #default="{ row: o }">
+                  <el-tag :type="o.status === 1 ? 'success' : 'info'" size="small">{{ o.status === 1 ? '启用' : '禁用' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="140">
+                <template #default="{ row: o }">
+                  <el-button link type="primary" @click="openOptionForm(row, o)">编辑</el-button>
+                  <el-button link type="danger" @click="removeOption(o)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="name" label="规格组" />
+      <el-table-column prop="code" label="编码" width="120" />
+      <el-table-column label="类型" width="100">
+        <template #default="{ row }">{{ row.selection_type === 'MULTIPLE' ? '多选' : '单选' }}</template>
+      </el-table-column>
+      <el-table-column label="必选" width="70">
+        <template #default="{ row }">{{ row.is_required ? '是' : '否' }}</template>
+      </el-table-column>
+      <el-table-column prop="sort_order" label="排序" width="70" />
+      <el-table-column label="状态" width="80">
+        <template #default="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="140">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openGroupForm(row)">编辑</el-button>
+          <el-button link type="danger" @click="removeGroup(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-dialog v-model="groupDialog" :title="groupForm.id ? '编辑规格组' : '新增规格组'" width="480px">
+      <el-form :model="groupForm" label-width="90px">
+        <el-form-item label="名称" required><el-input v-model="groupForm.name" /></el-form-item>
+        <el-form-item label="编码" required><el-input v-model="groupForm.code" :disabled="!!groupForm.id" placeholder="如 SIZE" /></el-form-item>
+        <el-form-item label="选择类型">
+          <el-radio-group v-model="groupForm.selection_type">
+            <el-radio label="SINGLE">单选</el-radio>
+            <el-radio label="MULTIPLE">多选</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="必选"><el-switch v-model="groupForm.is_required" /></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="groupForm.sort_order" :min="0" /></el-form-item>
+        <el-form-item v-if="groupForm.id" label="状态">
+          <el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="groupDialog = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveGroup">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="optionDialog" :title="optionForm.id ? '编辑选项' : '新增选项'" width="440px">
+      <el-form :model="optionForm" label-width="90px">
+        <el-form-item label="名称" required><el-input v-model="optionForm.name" /></el-form-item>
+        <el-form-item label="编码" required><el-input v-model="optionForm.code" :disabled="!!optionForm.id" /></el-form-item>
+        <el-form-item label="加价"><el-input-number v-model="optionForm.extra_price" :min="0" :precision="2" :step="0.5" /></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="optionForm.sort_order" :min="0" /></el-form-item>
+        <el-form-item v-if="optionForm.id" label="状态">
+          <el-switch v-model="optionForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="optionDialog = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveOption">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+
+const loading = ref(false)
+const saving = ref(false)
 const groups = ref<any[]>([])
-onMounted(async () => { groups.value = (await api.get('/options/groups')).data })
+const groupDialog = ref(false)
+const optionDialog = ref(false)
+
+const groupForm = reactive({
+  id: 0,
+  name: '',
+  code: '',
+  selection_type: 'SINGLE',
+  is_required: true,
+  sort_order: 0,
+  status: 1,
+})
+
+const optionForm = reactive({
+  id: 0,
+  group_id: 0,
+  name: '',
+  code: '',
+  extra_price: 0,
+  sort_order: 0,
+  status: 1,
+})
+
+async function load() {
+  loading.value = true
+  try {
+    groups.value = (await api.get('/options/groups', { params: { include_disabled: true } })).data
+  } finally {
+    loading.value = false
+  }
+}
+
+function openGroupForm(row?: any) {
+  if (row) {
+    Object.assign(groupForm, {
+      id: row.id,
+      name: row.name,
+      code: row.code,
+      selection_type: row.selection_type,
+      is_required: row.is_required,
+      sort_order: row.sort_order,
+      status: row.status ?? 1,
+    })
+  } else {
+    Object.assign(groupForm, { id: 0, name: '', code: '', selection_type: 'SINGLE', is_required: true, sort_order: 0, status: 1 })
+  }
+  groupDialog.value = true
+}
+
+async function saveGroup() {
+  if (!groupForm.name || !groupForm.code) {
+    ElMessage.warning('请填写名称和编码')
+    return
+  }
+  saving.value = true
+  try {
+    const payload = {
+      name: groupForm.name,
+      code: groupForm.code,
+      selection_type: groupForm.selection_type,
+      is_required: groupForm.is_required,
+      sort_order: groupForm.sort_order,
+    }
+    if (groupForm.id) {
+      await api.put(`/options/groups/${groupForm.id}`, { ...payload, status: groupForm.status })
+    } else {
+      await api.post('/options/groups', payload)
+    }
+    ElMessage.success('保存成功')
+    groupDialog.value = false
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeGroup(row: any) {
+  await ElMessageBox.confirm(`确定删除规格组「${row.name}」？关联选项将一并禁用。`, '确认')
+  await api.delete(`/options/groups/${row.id}`)
+  ElMessage.success('已删除')
+  load()
+}
+
+function openOptionForm(group: any, opt?: any) {
+  if (opt) {
+    Object.assign(optionForm, {
+      id: opt.id,
+      group_id: group.id,
+      name: opt.name,
+      code: opt.code,
+      extra_price: parseFloat(opt.extra_price),
+      sort_order: opt.sort_order,
+      status: opt.status ?? 1,
+    })
+  } else {
+    Object.assign(optionForm, { id: 0, group_id: group.id, name: '', code: '', extra_price: 0, sort_order: 0, status: 1 })
+  }
+  optionDialog.value = true
+}
+
+async function saveOption() {
+  if (!optionForm.name || !optionForm.code) {
+    ElMessage.warning('请填写名称和编码')
+    return
+  }
+  saving.value = true
+  try {
+    const payload = {
+      group_id: optionForm.group_id,
+      name: optionForm.name,
+      code: optionForm.code,
+      extra_price: optionForm.extra_price,
+      sort_order: optionForm.sort_order,
+    }
+    if (optionForm.id) {
+      await api.put(`/options/${optionForm.id}`, { ...payload, status: optionForm.status })
+    } else {
+      await api.post('/options', payload)
+    }
+    ElMessage.success('保存成功')
+    optionDialog.value = false
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeOption(opt: any) {
+  await ElMessageBox.confirm(`确定删除选项「${opt.name}」？`, '确认')
+  await api.delete(`/options/${opt.id}`)
+  ElMessage.success('已删除')
+  load()
+}
+
+onMounted(load)
 </script>
+
+<style scoped>
+.opts-panel { padding: 8px 16px 16px 48px; }
+</style>

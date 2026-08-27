@@ -110,12 +110,18 @@ class WechatPayVerifier:
         mch = inner.get("mchid") or inner.get("mch_id")
         if mch and str(mch) != str(settings.wechat_mch_id):
             raise ValueError("微信回调商户号不匹配")
+        event_type = str(data.get("event_type") or "")
         return {
+            "event_type": event_type,
             "out_trade_no": inner.get("out_trade_no"),
             "transaction_id": inner.get("transaction_id"),
             "trade_state": inner.get("trade_state"),
+            "out_refund_no": inner.get("out_refund_no"),
+            "refund_id": inner.get("refund_id"),
+            "refund_status": inner.get("refund_status"),
             "amount": inner.get("amount", {}),
             "mchid": mch,
+            "success_time": inner.get("success_time"),
         }
 
     @staticmethod

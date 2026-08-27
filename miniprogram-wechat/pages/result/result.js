@@ -1,11 +1,12 @@
 const api = require('../../utils/api')
 
 Page({
-  data: { order: {} },
+  data: { order: {}, hasPacking: false },
   async onLoad(query) {
     try {
       const order = await api.get(`/orders/${query.order_id}`)
-      this.setData({ order })
+      const fee = Number(order && order.packing_fee)
+      this.setData({ order, hasPacking: fee > 0 })
     } catch (e) {
       wx.showToast({ title: e.message || '加载失败', icon: 'none' })
     }
