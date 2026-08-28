@@ -8,17 +8,34 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import AsyncSessionLocal, generate_no
+from app.core.database import AsyncSessionLocal
+from app.core.biz_no import generate_no, payment_biz, refund_biz, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import Order, Payment, PaymentCallbackReceipt, PaymentRefund
+from app.models import DiningTable, Order, Payment, PaymentCallbackReceipt, PaymentRefund, Store
 from app.services import alipay_client, wechat_pay_client
-from app.services.order_state_machine import assert_payment_transition
+from app.services.order_lifecycle import apply_order_status
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
-from app.services.status_history import record_order_status, record_payment_status
+from app.services.status_history import record_payment_status
 from app.services.webhook_replay import claim_once, make_receipt_key
 
 logger = logging.getLogger(__name__)
+
+
+async def _order_table_parts(db: AsyncSession, order: Order) -> tuple[str | None, str]:
+    table_no = None
+    if order.table_id:
+        t = await db.get(DiningTable, order.table_id)
+        if t:
+            table_no = t.table_no
+    return resolve_table_parts(table_no, channel=order.channel, dining_type=order.dining_type)
+
+
+async def _order_store_no(db: AsyncSession, order: Order) -> str | None:
+    if not order.store_id:
+        return None
+    store = await db.get(Store, order.store_id)
+    return store.store_no if store else None
 
 
 def _wechat_pay_configured() -> bool:
@@ -211,8 +228,10 @@ class PaymentService:
             (provider.upper(), channel_type.lower()),
             f"{provider.upper()}_{channel_type.upper()}",
         )
+        t_no, t_ph = await _order_table_parts(db, order)
+        sno = await _order_store_no(db, order)
         payment = Payment(
-            payment_no=generate_no("PAY"),
+            payment_no=generate_no(payment_biz(provider), sno, t_no, table_placeholder=t_ph),
             order_id=order.id,
             customer_id=customer_id or order.customer_id,
             provider=provider.upper(),
@@ -243,20 +262,17 @@ class PaymentService:
         """开发 mock 支付：跳过真实收银台，直接标记订单已支付。"""
         if payment.status == "PAID":
             return
-        assert_payment_transition(order.status, "PAID")
         old_p = payment.status
-        old_o = order.status
         payment.status = "PAID"
         payment.provider_trade_no = f"mock_{payment.payment_no}"
         payment.paid_at = now_local()
         payment.callback_raw = {"source": "MOCK", "settled": True}
-        order.payment_status = "PAID"
-        order.status = "PAID"
         order.paid_at = now_local()
         order.payment_method = provider
         await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="MOCK")
-        await record_order_status(db, order_id=order.id, from_status=old_o, to_status="PAID", source="MOCK_PAYMENT")
-        await db.flush()
+        await apply_order_status(
+            db, order, "PAID", source="MOCK_PAYMENT", payment_status="PAID", assert_kind="PAYMENT"
+        )
         logger.warning("MOCK 支付已自动入账 order=%s payment=%s", order.order_no, payment.payment_no)
 
     @classmethod
@@ -392,19 +408,19 @@ class PaymentService:
             raise AppException(40302, "支付金额不匹配")
 
         if parsed["status"] == "PAID":
-            assert_payment_transition(order.status, "PAID")
             old_p = payment.status
-            old_o = order.status
             payment.status = "PAID"
             payment.provider_trade_no = parsed.get("provider_trade_no")
             payment.paid_at = now_local()
             payment.callback_raw = {"receipt": receipt}
-            order.payment_status = "PAID"
-            order.status = "PAID"
             order.paid_at = now_local()
             order.payment_method = provider_u
-            await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="CALLBACK")
-            await record_order_status(db, order_id=order.id, from_status=old_o, to_status="PAID", source="PAYMENT")
+            await record_payment_status(
+                db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="CALLBACK"
+            )
+            await apply_order_status(
+                db, order, "PAID", source="PAYMENT", payment_status="PAID", assert_kind="PAYMENT"
+            )
 
         await db.flush()
         return payment
@@ -526,13 +542,18 @@ class PaymentService:
                 await db.execute(select(Order).where(Order.id == row.order_id).with_for_update())
             ).scalar_one_or_none()
             if order:
-                order.payment_status = payment.status
-                if payment.status == "REFUNDED" and order.status in ("PAID", "CONFIRMED"):
-                    old_o = order.status
-                    order.status = "REFUNDED"
-                    await record_order_status(
-                        db, order_id=order.id, from_status=old_o, to_status="REFUNDED", source=source
+                if payment.status == "REFUNDED" and order.status not in ("CANCELLED", "REFUNDED"):
+                    await apply_order_status(
+                        db,
+                        order,
+                        "REFUNDED",
+                        source="PAYMENT",
+                        payment_status=payment.status,
+                        assert_kind="SYSTEM",
+                        remark=f"refund_no={row.refund_no}",
                     )
+                else:
+                    order.payment_status = payment.status
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status if new_status != "ABNORMAL" else "FAILED"
             row.fail_reason = row.fail_reason or fail_reason or new_status
@@ -599,7 +620,12 @@ class PaymentService:
         if amount > remain:
             raise AppException(40052, f"退款金额超过可退余额 ¥{remain}")
 
-        refund_no = generate_no("RF")
+        order = await db.get(Order, payment.order_id)
+        if not order:
+            raise AppException(40404, "订单不存在")
+        t_no, t_ph = await _order_table_parts(db, order)
+        sno = await _order_store_no(db, order)
+        refund_no = generate_no(refund_biz(payment.provider), sno, t_no, table_placeholder=t_ph)
         row = PaymentRefund(
             refund_no=refund_no,
             payment_id=payment.id,
@@ -703,6 +729,23 @@ class PaymentService:
                     await cls.sync_refund_status(db, row)
                     if row.status != before and row.status == "SUCCESS":
                         done += 1
+                        try:
+                            from app.services.websocket_manager import ws_manager
+
+                            order = await db.get(Order, row.order_id)
+                            await ws_manager.notify_order_event(
+                                "ORDER_REFUND",
+                                {
+                                    "order_id": row.order_id,
+                                    "order_no": order.order_no if order else None,
+                                    "status": order.status if order else None,
+                                    "payment_status": order.payment_status if order else None,
+                                    "refund_no": row.refund_no,
+                                    "store_id": order.store_id if order else None,
+                                },
+                            )
+                        except Exception as ws_err:
+                            logger.warning("退款成功 WS 通知失败: %s", ws_err)
                 except Exception as e:
                     logger.warning("退款查询失败 refund_no=%s: %s", row.refund_no, e)
             await db.commit()

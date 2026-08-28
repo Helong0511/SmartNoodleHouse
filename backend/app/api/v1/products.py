@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, DbSession, require_permission
+from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import (
@@ -121,6 +121,7 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
 async def list_products(
     request: Request,
     db: DbSession,
+    staff: OptionalStaffUser,
     page: int = 1,
     page_size: int = 20,
     category_id: int | None = None,
@@ -128,7 +129,12 @@ async def list_products(
     keyword: str | None = None,
     store_id: int | None = None,
 ):
-    """商品列表。传 store_id 时只看该店商品，并合并分店库存覆盖（本店停售剔除）。"""
+    """商品列表。传 store_id 时只看该店商品，并合并分店库存覆盖（本店停售剔除）。
+
+    员工登录时强制门店隔离（非超管忽略越权 store_id）；小程序/H5 无员工令牌时仍可按 store_id 公开查询。
+    """
+    if staff is not None:
+        store_id = require_bound_store(staff, store_id)
     q = select(Product)
     if store_id is not None:
         q = q.where(Product.store_id == int(store_id))
@@ -162,6 +168,17 @@ async def list_products(
             for s in (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
         }
 
+    product_ids = [p.id for p in products]
+    has_options: set[int] = set()
+    if product_ids:
+        has_options = set(
+            (
+                await db.execute(
+                    select(ProductOptionGroup.product_id).where(ProductOptionGroup.product_id.in_(product_ids))
+                )
+            ).scalars().all()
+        )
+
     items = []
     for p in products:
         ov = stock_map.get(p.id)
@@ -187,6 +204,7 @@ async def list_products(
                 "stock": ov.stock if ov is not None else p.stock,
                 "box_price": str(p.box_price or "0.00"),
                 "store_stock_override": ov is not None,
+                "has_options": p.id in has_options,
             }
         )
     return success(

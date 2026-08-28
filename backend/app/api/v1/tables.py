@@ -60,7 +60,7 @@ async def _get_owned_table(db, user, table_id: int) -> DiningTable:
     return table
 
 
-@router.get("")
+@router.get("", dependencies=[require_permission("table:manage")])
 async def list_tables(
     request: Request,
     db: DbSession,

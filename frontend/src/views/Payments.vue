@@ -14,27 +14,84 @@
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
+        <el-input
+          v-model="keyword"
+          clearable
+          placeholder="支付号 / 订单号"
+          style="width:220px"
+          @keyup.enter="reload"
+          @clear="reload"
+        />
+      </el-form-item>
+      <el-form-item>
         <el-select v-model="statusFilter" placeholder="支付状态" clearable style="width:130px" @change="reload">
           <el-option v-for="(label, key) in PAYMENT_STATUS" :key="key" :label="label" :value="key" />
         </el-select>
       </el-form-item>
-      <el-button @click="load">刷新</el-button>
+      <el-form-item>
+        <el-select v-model="providerFilter" placeholder="支付渠道" clearable style="width:130px" @change="reload">
+          <el-option v-for="(label, key) in PAYMENT_PROVIDER" :key="key" :label="label" :value="key" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="支付起"
+          end-placeholder="支付止"
+          style="width:240px"
+          @change="reload"
+        />
+      </el-form-item>
+      <el-button type="primary" @click="reload">查询</el-button>
+      <el-button @click="resetFilters">重置</el-button>
       <el-button type="warning" plain @click="openInflightRefunds">处理中退款</el-button>
     </el-form>
 
     <el-table :data="payments" border>
-      <el-table-column prop="payment_no" label="支付号" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="payment_no" label="支付号" min-width="260" show-overflow-tooltip />
       <el-table-column prop="store_name" label="门店" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
       </el-table-column>
-      <el-table-column label="订单" min-width="160" show-overflow-tooltip>
+      <el-table-column label="订单" min-width="260" show-overflow-tooltip>
         <template #default="{ row }">{{ row.order_no || `#${row.order_id}` }}</template>
+      </el-table-column>
+      <el-table-column label="桌号" width="90">
+        <template #default="{ row }">
+          {{
+            row.table_name ||
+            row.table_no ||
+            (row.order_channel === 'MEITUAN' || row.order_channel === 'ELEME' ? '外卖' : '—')
+          }}
+        </template>
+      </el-table-column>
+      <el-table-column label="用餐" width="90">
+        <template #default="{ row }">
+          <el-tag v-if="row.order_channel === 'MEITUAN' || row.order_channel === 'ELEME'" size="small" type="info">外卖</el-tag>
+          <el-tag v-else-if="row.dining_type === 'TAKEAWAY'" size="small" type="warning">打包</el-tag>
+          <span v-else>堂食</span>
+        </template>
       </el-table-column>
       <el-table-column label="渠道" width="110">
         <template #default="{ row }">{{ label(PAYMENT_PROVIDER, row.provider) }}</template>
       </el-table-column>
-      <el-table-column prop="amount" label="支付金额" width="100">
-        <template #default="{ row }">¥{{ row.amount }}</template>
+      <el-table-column label="通道" width="100">
+        <template #default="{ row }">{{ row.channel || '—' }}</template>
+      </el-table-column>
+      <el-table-column prop="amount" label="支付金额" width="120">
+        <template #default="{ row }">
+          ¥{{ row.amount }}
+          <div v-if="Number(row.order_discount_amount) > 0" class="fee-tip discount">
+            含会员优惠 -¥{{ row.order_discount_amount }}
+          </div>
+          <div v-if="Number(row.order_coupon_discount) > 0" class="fee-tip discount">
+            含优惠券 -¥{{ row.order_coupon_discount }}
+          </div>
+          <div v-if="Number(row.order_voucher_discount) > 0" class="fee-tip discount">
+            含代金券 -¥{{ row.order_voucher_discount }}
+          </div>
+        </template>
       </el-table-column>
       <el-table-column label="已退/可退" width="130">
         <template #default="{ row }">
@@ -117,8 +174,14 @@
           style="margin-bottom:12px"
         />
         <el-table :data="refundList" border size="small">
-          <el-table-column prop="refund_no" label="退款单号" min-width="150" show-overflow-tooltip />
-          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="payment_no" label="支付号" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="refund_no" label="退款单号" min-width="260" show-overflow-tooltip />
+          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="payment_no" label="支付号" min-width="240" show-overflow-tooltip />
+          <el-table-column prop="order_no" label="订单号" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.order_no || '—' }}</template>
+          </el-table-column>
+          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="store_name" label="门店" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.store_name || '—' }}</template>
+          </el-table-column>
           <el-table-column label="金额" width="90">
             <template #default="{ row }">¥{{ row.amount }}</template>
           </el-table-column>
@@ -128,6 +191,9 @@
                 {{ label(PAYMENT_REFUND_STATUS, row.status) }}
               </el-tag>
             </template>
+          </el-table-column>
+          <el-table-column prop="reason" label="原因" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.reason || '—' }}</template>
           </el-table-column>
           <el-table-column prop="operator_name" label="操作人" width="90" show-overflow-tooltip>
             <template #default="{ row }">{{ row.operator_name || '—' }}</template>
@@ -179,6 +245,7 @@ import {
   paymentRefundStatusTagType,
   paymentStatusTagType,
 } from '@/utils/labels'
+import { todayDateRange } from '@/utils/date'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -189,6 +256,9 @@ const pageSize = ref(20)
 const total = ref(0)
 const storeFilter = ref<number | undefined>()
 const statusFilter = ref<string | undefined>()
+const providerFilter = ref<string | undefined>()
+const keyword = ref('')
+const dateRange = ref<string[] | null>(todayDateRange())
 const refundDialog = ref(false)
 const refundRow = ref<any>(null)
 const refundAmount = ref(0)
@@ -240,6 +310,15 @@ function reload() {
   load()
 }
 
+function resetFilters() {
+  storeFilter.value = undefined
+  statusFilter.value = undefined
+  providerFilter.value = undefined
+  keyword.value = ''
+  dateRange.value = todayDateRange()
+  reload()
+}
+
 async function loadStores() {
   try {
     const res = await api.get('/settings/stores/options')
@@ -252,14 +331,19 @@ async function loadStores() {
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/payments', {
-      params: {
-        page: page.value,
-        page_size: pageSize.value,
-        status: statusFilter.value,
-        store_id: storeFilter.value,
-      },
-    })
+    const params: Record<string, unknown> = {
+      page: page.value,
+      page_size: pageSize.value,
+      status: statusFilter.value,
+      store_id: storeFilter.value,
+      provider: providerFilter.value,
+      keyword: keyword.value.trim() || undefined,
+    }
+    if (dateRange.value?.length === 2) {
+      params.date_from = dateRange.value[0]
+      params.date_to = dateRange.value[1]
+    }
+    const res = await api.get('/payments', { params })
     payments.value = res.data.items
     total.value = res.data.total
   } finally {
@@ -332,14 +416,18 @@ function openInflightRefunds() {
 async function loadInflightRefunds() {
   refundListLoading.value = true
   try {
-    const res = await api.get('/payments/refunds', {
-      params: {
-        page: refundPage.value,
-        page_size: refundPageSize,
-        status: 'PENDING,PROCESSING',
-        store_id: storeFilter.value,
-      },
-    })
+    const params: Record<string, unknown> = {
+      page: refundPage.value,
+      page_size: refundPageSize,
+      status: 'PENDING,PROCESSING',
+      store_id: storeFilter.value,
+      keyword: keyword.value.trim() || undefined,
+    }
+    if (dateRange.value?.length === 2) {
+      params.date_from = dateRange.value[0]
+      params.date_to = dateRange.value[1]
+    }
+    const res = await api.get('/payments/refunds', { params })
     refundList.value = res.data.items || []
     refundTotal.value = res.data.total || 0
   } catch (e: any) {
@@ -380,4 +468,6 @@ onMounted(async () => {
 .toolbar { margin-bottom: 12px; }
 .empty-hint { margin-top: 24px; text-align: center; color: #909399; }
 .muted { color: #c0c4cc; }
+.fee-tip { font-size: 11px; color: #e6a23c; line-height: 1.2; }
+.fee-tip.discount { color: #f56c6c; }
 </style>

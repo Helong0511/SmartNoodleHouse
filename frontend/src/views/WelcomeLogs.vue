@@ -12,14 +12,26 @@
     </div>
 
     <el-form inline class="toolbar">
+      <el-form-item v-if="auth.isSuperAdmin">
+        <el-select
+          v-model="storeFilter"
+          placeholder="全部门店"
+          clearable
+          style="width:160px"
+          @change="onStoreChange"
+        >
+          <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+      </el-form-item>
+      <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input v-model="filters.customerId" placeholder="顾客ID" clearable style="width:110px" @keyup.enter="reload" />
+        <el-input v-model="filters.customerId" placeholder="顾客ID" clearable style="width:110px" @keyup.enter="reload" @clear="reload" />
       </el-form-item>
       <el-form-item>
-        <el-input v-model="filters.keyword" placeholder="欢迎语关键词" clearable style="width:160px" @keyup.enter="reload" />
+        <el-input v-model="filters.keyword" placeholder="欢迎语关键词" clearable style="width:160px" @keyup.enter="reload" @clear="reload" />
       </el-form-item>
       <el-form-item>
-        <el-input-number v-model="filters.cameraId" :min="1" placeholder="摄像头" controls-position="right" style="width:120px" />
+        <el-input-number v-model="filters.cameraId" :min="1" placeholder="摄像头" controls-position="right" style="width:120px" @change="reload" />
       </el-form-item>
       <el-form-item>
         <el-date-picker
@@ -29,6 +41,7 @@
           start-placeholder="开始"
           end-placeholder="结束"
           style="width:240px"
+          @change="reload"
         />
       </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
@@ -73,9 +86,14 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { openStaffWebSocket } from '@/utils/ws'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const loading = ref(false)
 const logs = ref<any[]>([])
+const stores = ref<any[]>([])
+const storeFilter = ref<number | undefined>()
 const page = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
@@ -85,6 +103,12 @@ const filters = reactive({
   keyword: '',
   cameraId: undefined as number | undefined,
   dateRange: null as string[] | null,
+})
+
+const boundStoreName = computed(() => {
+  const sid = auth.user?.store_id
+  if (!sid) return ''
+  return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
 })
 
 const kpiCards = computed(() => [
@@ -109,6 +133,7 @@ function fmt(v?: string) {
 }
 
 function resetFilters() {
+  storeFilter.value = undefined
   filters.customerId = ''
   filters.keyword = ''
   filters.cameraId = undefined
@@ -116,14 +141,30 @@ function resetFilters() {
   reload()
 }
 
+function onStoreChange() {
+  refreshAll()
+}
+
 function reload() {
   page.value = 1
   return load()
 }
 
+async function loadStores() {
+  try {
+    const res = await api.get('/settings/stores/options')
+    stores.value = res.data.items || []
+  } catch {
+    stores.value = []
+  }
+}
+
 async function loadStats() {
   try {
-    Object.assign(stats, (await api.get('/welcome/stats')).data || {})
+    Object.assign(
+      stats,
+      (await api.get('/welcome/stats', { params: { store_id: storeFilter.value } })).data || {},
+    )
   } catch {
     /* */
   }
@@ -135,6 +176,7 @@ async function load() {
     const params: Record<string, any> = {
       page: page.value,
       page_size: pageSize.value,
+      store_id: storeFilter.value,
     }
     if (filters.customerId) params.customer_id = Number(filters.customerId)
     if (filters.keyword?.trim()) params.keyword = filters.keyword.trim()
@@ -185,10 +227,8 @@ function connectWs() {
   } catch {
     /* */
   }
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const token = localStorage.getItem('snh_staff_token') || localStorage.getItem('token') || ''
   connStatus.value = 'connecting'
-  ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/cameras?token=${encodeURIComponent(token)}`)
+  ws = openStaffWebSocket('cameras')
   ws.onopen = () => {
     reconnectAttempt = 0
     connStatus.value = 'online'
@@ -216,6 +256,7 @@ function connectWs() {
 }
 
 onMounted(async () => {
+  await loadStores()
   await refreshAll()
   connectWs()
 })

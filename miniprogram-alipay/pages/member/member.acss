@@ -1,14 +1,55 @@
 .page { padding: 24rpx; padding-bottom: 48rpx; }
+.loading-tip { text-align: center; padding: 80rpx 0; color: #999; }
 .card { background: #fff; border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
+.member-card { background: linear-gradient(135deg, #f0f7ff, #fff); }
+.profile { display: flex; align-items: center; gap: 20rpx; }
+.avatar.placeholder {
+  width: 96rpx; height: 96rpx; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #e6f4ff; color: #1677ff; font-weight: 700; font-size: 36rpx;
+}
+.meta { flex: 1; min-width: 0; }
 .name { font-size: 36rpx; font-weight: 700; }
-.no { color: #999; margin-top: 8rpx; }
+.no { color: #999; margin-top: 8rpx; font-size: 24rpx; }
+.level-row { margin-top: 12rpx; display: flex; align-items: center; flex-wrap: wrap; gap: 12rpx; }
+.badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #1677ff, #69b1ff);
+  color: #fff;
+  font-size: 22rpx;
+  padding: 6rpx 16rpx;
+  border-radius: 20rpx;
+  font-weight: 600;
+}
+.discount { color: #1677ff; font-size: 24rpx; font-weight: 600; }
+.hint { color: #999; font-size: 24rpx; }
+.points-line { color: #666; font-size: 24rpx; margin-top: 10rpx; }
+.pts { color: #1677ff; font-weight: 700; font-size: 28rpx; }
+.phone { color: #666; font-size: 24rpx; margin-top: 8rpx; }
 .row { display: flex; justify-content: space-between; align-items: center; }
 .tip { color: #999; font-size: 24rpx; margin-top: 16rpx; line-height: 1.5; }
 .title { font-weight: 600; margin-bottom: 4rpx; }
 .title-row { display: flex; justify-content: space-between; align-items: center; }
+.title-row .title { margin-bottom: 0; }
 .link { color: #1677ff; font-size: 24rpx; }
 .tag { display: inline-block; background: #e6f4ff; color: #1677ff; padding: 8rpx 16rpx; border-radius: 20rpx; margin: 12rpx 12rpx 0 0; }
 .btn-primary { margin-top: 20rpx; }
+.wallet-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-top: 16rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 12rpx;
+  border: 1px solid #f0f0f0;
+}
+.wallet-item.coupon { background: linear-gradient(90deg, #f0f7ff 0%, #fff 50%); border-color: #d6e4ff; }
+.wallet-item.voucher { background: linear-gradient(90deg, #fff8f0 0%, #fff 50%); border-color: #ffe7ba; }
+.wallet-main { flex: 1; min-width: 0; }
+.wallet-name { font-size: 28rpx; font-weight: 600; color: #333; }
+.wallet-rule { margin-top: 6rpx; font-size: 24rpx; color: #666; line-height: 1.4; }
+.wallet-expire { flex-shrink: 0; font-size: 22rpx; color: #999; white-space: nowrap; }
 .order { margin-top: 20rpx; padding-top: 20rpx; border-top: 1px solid #f2f2f2; }
 .order-head { display: flex; justify-content: space-between; }
 .ono { font-size: 24rpx; color: #666; }

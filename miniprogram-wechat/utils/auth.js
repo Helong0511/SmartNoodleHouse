@@ -37,6 +37,10 @@ async function ensureLogin(tableToken) {
     app.globalData.table = data.table
     app.globalData.tableToken = data.table.qr_token
     wx.setStorageSync('table_token', data.table.qr_token)
+    if (data.table.store) {
+      app.globalData.store = data.table.store
+      wx.setStorageSync('dine_store', data.table.store)
+    }
   }
   wx.setStorageSync('customer_id', data.customer_id)
   wx.setStorageSync('customer_token', data.customer_token)

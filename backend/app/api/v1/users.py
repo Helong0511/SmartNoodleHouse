@@ -193,11 +193,17 @@ async def update_user(
     if data.status is not None:
         if target.id == user.id and int(data.status) != 1:
             raise AppException(40083, "不能禁用自己的账号")
-        target.status = int(data.status)
+        new_status = int(data.status)
+        if new_status != int(target.status):
+            target.status = new_status
+            if new_status != 1:
+                target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
     if data.role_id is not None:
         role = await _get_role(db, data.role_id)
         _assert_can_assign_role(user, role)
-        target.role_id = role.id
+        if role.id != target.role_id:
+            target.role_id = role.id
+            target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
     if data.clear_store:
         if user.role.code != "SUPER_ADMIN":
             raise AppException(40312, "仅超管可清空门店绑定")

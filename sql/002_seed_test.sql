@@ -1,12 +1,17 @@
 -- ============================================================================
--- 智能面馆 SmartNoodleHouse — 测试 / 开发种子数据
+-- 智能面馆 SmartNoodleHouse — 测试 / 开发种子数据（**禁止用于生产**）
 -- ============================================================================
--- 适用：已执行 001_schema.sql 的空库或可幂等补齐的开发库
+-- 适用：本地开发、联调、自动化测试
+-- 生产请使用：sql/002_seed_prod.sql + python scripts/init_admin.py
 -- 说明：合并原 002 / 010 / 011 / 013 / 014 / 017 中业务种子与权限矩阵
 -- 默认管理员：admin / admin123（若无法登录请再执行 python scripts/init_admin.py）
--- 门店收银：cashier / admin123（绑定 SNH001，退款操作人演示）
+-- 门店收银：cashier / admin123（绑定 SH01，退款操作人演示）
 -- 开发桌台扫码：token=1001 / 1002 / 1003
--- 支付/退款样例单号：SEED-ORD-* / SEED-PAY-* / SEED-RF-*（幂等，可重复执行）
+-- 业务单号规则：业务2 + 门店编号(实际 store_no，固定4位) + 桌位3 + yyyyMMddHHmmss + 随机4（总长27）
+--   OT堂食 / OD外卖 / PW微信付 / PA支付宝付 / RW微信退 / RA支付宝退 / CU顾客
+-- 样例顾客：CU000000020260801100001S2C3 、 CU000000020260801100002S2C4
+-- 样例订单/支付由 SQL CONCAT(业务, store_no, 桌位, 固定时间, 固定随机) 生成；门店段用实际 store_no
+-- 例：OTSH0110020260801120101A2B3（SH01 + 桌1001→100）
 -- ============================================================================
 
 SET NAMES utf8mb4;
@@ -95,6 +100,13 @@ INSERT INTO permissions (code, name, module)
 SELECT 'system:manage', '系统管理', 'system' FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'system:manage');
 
+INSERT INTO permissions (code, name, module)
+SELECT 'coupon:read', '查看优惠券', 'coupon' FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'coupon:read');
+INSERT INTO permissions (code, name, module)
+SELECT 'coupon:manage', '管理优惠券', 'coupon' FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'coupon:manage');
+
 -- ============================================================================
 -- 三、角色权限矩阵
 -- ============================================================================
@@ -122,7 +134,8 @@ JOIN permissions p ON p.code IN (
   'welcome:manage',
   'payment:read', 'payment:refund',
   'table:manage',
-  'user:read', 'user:manage'
+  'user:read', 'user:manage',
+  'coupon:read', 'coupon:manage'
 )
 WHERE r.code = 'STORE_ADMIN'
   AND NOT EXISTS (
@@ -185,13 +198,29 @@ INSERT INTO member_levels (name, min_points, discount_rate)
 SELECT '金卡会员', 500, 0.9500 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '金卡会员');
 
--- ============================================================================
--- 五、门店（统一编号 SNH001）
+INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
+SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '新客满30减5');
+
+INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
+SELECT '满50享9折', 'PERCENT', 0.9000, 50.00, 14 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满50享9折');
+
+INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
+SELECT '10元无门槛代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '10元无门槛代金券');
+
+-- 五、门店（统一编号 SH01）
 -- ============================================================================
 INSERT INTO stores (store_no, name, address, phone, status)
-SELECT 'SNH001', '智能面馆总店', '太和大道100号', '400-000-0000', 1
+SELECT 'SH01', '智能面馆太和总店', '太和大道100号', '400-001-0000', 1
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM stores WHERE store_no = 'SNH001');
+WHERE NOT EXISTS (SELECT 1 FROM stores WHERE store_no = 'SH01');
+
+INSERT INTO stores (store_no, name, address, phone, status)
+SELECT 'SH02', '智能面馆城南店', '太和大道88号', '400-002-0000', 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM stores WHERE store_no = 'SH02');
 
 -- ============================================================================
 -- 六、默认超级管理员 admin / admin123
@@ -221,7 +250,7 @@ SELECT
 FROM roles r
 CROSS JOIN stores s
 WHERE r.code = 'CASHIER'
-  AND s.store_no = 'SNH001'
+  AND s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'cashier');
 
 -- ============================================================================
@@ -234,7 +263,7 @@ SELECT s.id, '1001', '1号桌', '1001',
   'pages/index/index?token=1001&channel=alipay',
   1
 FROM stores s
-WHERE s.store_no = 'SNH001'
+WHERE s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM `tables` t WHERE t.store_id = s.id AND t.table_no = '1001');
 
 INSERT INTO `tables` (store_id, table_no, table_name, qr_token, wechat_qr_url, alipay_qr_url, status)
@@ -243,7 +272,7 @@ SELECT s.id, '1002', '2号桌', '1002',
   'pages/index/index?token=1002&channel=alipay',
   1
 FROM stores s
-WHERE s.store_no = 'SNH001'
+WHERE s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM `tables` t WHERE t.store_id = s.id AND t.table_no = '1002');
 
 INSERT INTO `tables` (store_id, table_no, table_name, qr_token, wechat_qr_url, alipay_qr_url, status)
@@ -252,7 +281,7 @@ SELECT s.id, '1003', '3号桌', '1003',
   'pages/index/index?token=1003&channel=alipay',
   1
 FROM stores s
-WHERE s.store_no = 'SNH001'
+WHERE s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM `tables` t WHERE t.store_id = s.id AND t.table_no = '1003');
 
 -- ============================================================================
@@ -260,21 +289,21 @@ WHERE s.store_no = 'SNH001'
 -- ============================================================================
 INSERT INTO product_categories (store_id, name, description, sort_order, status)
 SELECT s.id, '招牌面', '本店招牌', 1, 1
-FROM stores s WHERE s.store_no = 'SNH001'
+FROM stores s WHERE s.store_no = 'SH01'
   AND NOT EXISTS (
     SELECT 1 FROM product_categories c WHERE c.store_id = s.id AND c.name = '招牌面'
   );
 
 INSERT INTO product_categories (store_id, name, description, sort_order, status)
 SELECT s.id, '小吃', '特色小吃', 2, 1
-FROM stores s WHERE s.store_no = 'SNH001'
+FROM stores s WHERE s.store_no = 'SH01'
   AND NOT EXISTS (
     SELECT 1 FROM product_categories c WHERE c.store_id = s.id AND c.name = '小吃'
   );
 
 INSERT INTO product_categories (store_id, name, description, sort_order, status)
 SELECT s.id, '饮品', '冷热饮品', 3, 1
-FROM stores s WHERE s.store_no = 'SNH001'
+FROM stores s WHERE s.store_no = 'SH01'
   AND NOT EXISTS (
     SELECT 1 FROM product_categories c WHERE c.store_id = s.id AND c.name = '饮品'
   );
@@ -370,7 +399,7 @@ SELECT s.id, c.id, 'P001', '牛肉面', '经典牛肉面',
   'ON_SALE', 1, 1, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '招牌面'
-WHERE s.store_no = 'SNH001'
+WHERE s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'P001');
 
 INSERT INTO products (
@@ -383,7 +412,7 @@ SELECT s.id, c.id, 'P002', '酸辣粉', '地道酸辣粉',
   'ON_SALE', 1, 0, 2
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '招牌面'
-WHERE s.store_no = 'SNH001'
+WHERE s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'P002');
 
 INSERT INTO products (
@@ -396,14 +425,14 @@ SELECT s.id, c.id, 'P003', '卤蛋', '入味卤蛋',
   'ON_SALE', 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '小吃'
-WHERE s.store_no = 'SNH001'
+WHERE s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'P003');
 
 -- 牛肉面：面量+辣度+麻度+加料
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 1
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'NOODLE_AMOUNT'
 WHERE p.product_no = 'P001'
   AND NOT EXISTS (
@@ -413,7 +442,7 @@ WHERE p.product_no = 'P001'
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 2
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'SPICY'
 WHERE p.product_no = 'P001'
   AND NOT EXISTS (
@@ -423,7 +452,7 @@ WHERE p.product_no = 'P001'
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 3
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'NUMB'
 WHERE p.product_no = 'P001'
   AND NOT EXISTS (
@@ -433,7 +462,7 @@ WHERE p.product_no = 'P001'
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 4
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'EXTRA'
 WHERE p.product_no = 'P001'
   AND NOT EXISTS (
@@ -444,7 +473,7 @@ WHERE p.product_no = 'P001'
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 1
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'SPICY'
 WHERE p.product_no = 'P002'
   AND NOT EXISTS (
@@ -454,7 +483,7 @@ WHERE p.product_no = 'P002'
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 2
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'NUMB'
 WHERE p.product_no = 'P002'
   AND NOT EXISTS (
@@ -464,7 +493,7 @@ WHERE p.product_no = 'P002'
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 3
 FROM products p
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
 JOIN option_groups g ON g.code = 'EXTRA'
 WHERE p.product_no = 'P002'
   AND NOT EXISTS (
@@ -500,29 +529,49 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'o
 
 -- ============================================================================
 -- 十二、测试顾客（微信 / 支付宝渠道 + 口味偏好）
+-- 单号：CU + 0000 + 000 + 时间 + 随机4
 -- ============================================================================
-INSERT INTO customers (customer_no, display_name, nickname, phone, member_level_id, status, last_order_at)
-SELECT 'SEED-C001', '测试微信顾客', '面友阿伟', '13800001001', ml.id, 1, NOW(3)
-FROM member_levels ml
-WHERE ml.name = '普通会员'
-  AND NOT EXISTS (SELECT 1 FROM customers WHERE customer_no = 'SEED-C001');
+
+-- 兼容旧种子顾客号
+UPDATE customers SET customer_no = 'CU000000020260801100001S2C3' WHERE customer_no = 'SEED-C001';
+UPDATE customers SET customer_no = 'CU000000020260801100002S2C4' WHERE customer_no = 'SEED-C002';
 
 INSERT INTO customers (customer_no, display_name, nickname, phone, member_level_id, status, last_order_at)
-SELECT 'SEED-C002', '测试支付宝顾客', '面友小支', '13800001002', ml.id, 1, NOW(3)
+SELECT 'CU000000020260801100001S2C3', '测试微信顾客', '面友阿伟', '13800001001', ml.id, 1, NOW(3)
+FROM member_levels ml
+WHERE ml.name = '普通会员'
+  AND NOT EXISTS (SELECT 1 FROM customers WHERE customer_no = 'CU000000020260801100001S2C3');
+
+INSERT INTO customers (customer_no, display_name, nickname, phone, member_level_id, status, last_order_at)
+SELECT 'CU000000020260801100002S2C4', '测试支付宝顾客', '面友小支', '13800001002', ml.id, 1, NOW(3)
 FROM member_levels ml
 WHERE ml.name = '银卡会员'
-  AND NOT EXISTS (SELECT 1 FROM customers WHERE customer_no = 'SEED-C002');
+  AND NOT EXISTS (SELECT 1 FROM customers WHERE customer_no = 'CU000000020260801100002S2C4');
 
 INSERT INTO customer_wechat_accounts (customer_id, openid, unionid)
 SELECT c.id, 'wx_dev_seed_c001', 'wx_union_seed_c001'
 FROM customers c
-WHERE c.customer_no = 'SEED-C001'
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
   AND NOT EXISTS (SELECT 1 FROM customer_wechat_accounts WHERE openid = 'wx_dev_seed_c001');
+
+INSERT INTO customer_coupons (customer_id, template_id, coupon_no, status, expires_at)
+SELECT c.id, t.id, 'CP000000020260801100001S2C3', 'AVAILABLE', DATE_ADD(NOW(3), INTERVAL 30 DAY)
+FROM customers c
+JOIN coupon_templates t ON t.name = '新客满30减5'
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
+  AND NOT EXISTS (SELECT 1 FROM customer_coupons WHERE coupon_no = 'CP000000020260801100001S2C3');
+
+INSERT INTO customer_coupons (customer_id, template_id, coupon_no, status, expires_at)
+SELECT c.id, t.id, 'VP000000020260801100001S2C3', 'AVAILABLE', DATE_ADD(NOW(3), INTERVAL 30 DAY)
+FROM customers c
+JOIN coupon_templates t ON t.name = '10元无门槛代金券'
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
+  AND NOT EXISTS (SELECT 1 FROM customer_coupons WHERE coupon_no = 'VP000000020260801100001S2C3');
 
 INSERT INTO customer_alipay_accounts (customer_id, alipay_user_id)
 SELECT c.id, 'ali_dev_seed_c002'
 FROM customers c
-WHERE c.customer_no = 'SEED-C002'
+WHERE c.customer_no = 'CU000000020260801100002S2C4'
   AND NOT EXISTS (SELECT 1 FROM customer_alipay_accounts WHERE alipay_user_id = 'ali_dev_seed_c002');
 
 INSERT INTO customer_preferences (
@@ -530,7 +579,7 @@ INSERT INTO customer_preferences (
 )
 SELECT c.id, '辣度', 'NORMAL', '正常辣', 0.8200, 5, NOW(3)
 FROM customers c
-WHERE c.customer_no = 'SEED-C001'
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
   AND NOT EXISTS (
     SELECT 1 FROM customer_preferences p
     WHERE p.customer_id = c.id AND p.category = '辣度' AND p.option_code = 'NORMAL'
@@ -541,7 +590,7 @@ INSERT INTO customer_preferences (
 )
 SELECT c.id, '面量', 'NORMAL', '正常', 0.7600, 4, NOW(3)
 FROM customers c
-WHERE c.customer_no = 'SEED-C001'
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
   AND NOT EXISTS (
     SELECT 1 FROM customer_preferences p
     WHERE p.customer_id = c.id AND p.category = '面量' AND p.option_code = 'NORMAL'
@@ -549,36 +598,47 @@ WHERE c.customer_no = 'SEED-C001'
 
 -- ============================================================================
 -- 十三、测试订单 / 支付 / 退款（覆盖看板与支付页退款运维）
--- 场景：
---   SEED-PAY-PAID     已支付可退
---   SEED-PAY-PARTIAL  部分退款成功（含操作人）
---   SEED-PAY-FULL     全额退款成功
---   SEED-PAY-INFLIGHT 处理中退款（可测「同步」按钮；mock 环境 sync 可能无变化）
---   SEED-PAY-ALIPAY   支付宝已支付（渠道统计）
+-- 单号：{OT|PW|PA|RW}{store_no}{桌位3}{yyyyMMddHHmmss}{随机4}；门店用实际编号如 SH01；桌号1001→100
+-- 场景备注仍含「种子：」便于识别；先清理旧 SEED-* 测试单避免并存
 -- ============================================================================
 
--- 13.1 已支付可退 — 微信
+DELETE pr FROM payment_refunds pr
+JOIN payments pay ON pay.id = pr.payment_id
+JOIN orders o ON o.id = pay.order_id
+WHERE o.order_no LIKE 'SEED-%' OR pay.payment_no LIKE 'SEED-%' OR pr.refund_no LIKE 'SEED-%';
+
+DELETE pay FROM payments pay
+JOIN orders o ON o.id = pay.order_id
+WHERE o.order_no LIKE 'SEED-%' OR pay.payment_no LIKE 'SEED-%';
+
+DELETE FROM orders WHERE order_no LIKE 'SEED-%';
+
+-- 13.1 已支付可退 — 微信 / 桌 1001
 INSERT INTO orders (
   order_no, customer_id, table_id, store_id, status, dining_type,
   subtotal, discount_amount, packing_fee, total_amount,
   payment_status, payment_method, channel, remark, ordered_at, paid_at
 )
 SELECT
-  'SEED-ORD-PAID', c.id, t.id, s.id, 'PAID', 'DINE_IN',
+  CONCAT('OT', s.store_no, '100', '20260801120101', 'A2B3'),
+  c.id, t.id, s.id, 'PAID', 'DINE_IN',
   18.00, 0.00, 0.00, 18.00,
   'PAID', 'WECHAT', 'WECHAT', '种子：已支付可退', NOW(3), NOW(3)
 FROM stores s
-JOIN customers c ON c.customer_no = 'SEED-C001'
+JOIN customers c ON c.customer_no = 'CU000000020260801100001S2C3'
 JOIN `tables` t ON t.store_id = s.id AND t.table_no = '1001'
-WHERE s.store_no = 'SNH001'
-  AND NOT EXISTS (SELECT 1 FROM orders WHERE order_no = 'SEED-ORD-PAID');
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (
+    SELECT 1 FROM orders o2
+    WHERE o2.order_no = CONCAT('OT', s.store_no, '100', '20260801120101', 'A2B3')
+  );
 
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 1, 18.00
 FROM orders o
 JOIN products p ON p.product_no = 'P001'
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
-WHERE o.order_no = 'SEED-ORD-PAID'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120101', 'A2B3')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
 
 INSERT INTO payments (
@@ -586,34 +646,42 @@ INSERT INTO payments (
   provider_trade_no, paid_at
 )
 SELECT
-  'SEED-PAY-PAID', o.id, o.customer_id, 'WECHAT', 'JSAPI', 18.00, 'CNY', 'PAID',
+  CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120102', 'C4D5'),
+  o.id, o.customer_id, 'WECHAT', 'JSAPI', 18.00, 'CNY', 'PAID',
   'wx_seed_trade_paid', o.paid_at
 FROM orders o
-WHERE o.order_no = 'SEED-ORD-PAID'
-  AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_no = 'SEED-PAY-PAID');
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120101', 'A2B3')
+  AND NOT EXISTS (
+    SELECT 1 FROM payments pay
+    WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120102', 'C4D5')
+  );
 
--- 13.2 部分退款 — 微信
+-- 13.2 部分退款 — 微信 / 桌 1001
 INSERT INTO orders (
   order_no, customer_id, table_id, store_id, status, dining_type,
   subtotal, discount_amount, packing_fee, total_amount,
   payment_status, payment_method, channel, remark, ordered_at, paid_at
 )
 SELECT
-  'SEED-ORD-PARTIAL', c.id, t.id, s.id, 'PAID', 'DINE_IN',
+  CONCAT('OT', s.store_no, '100', '20260801120201', 'E6F7'),
+  c.id, t.id, s.id, 'PAID', 'DINE_IN',
   36.00, 0.00, 0.00, 36.00,
   'PARTIAL_REFUND', 'WECHAT', 'WECHAT', '种子：部分退款', NOW(3), NOW(3)
 FROM stores s
-JOIN customers c ON c.customer_no = 'SEED-C001'
+JOIN customers c ON c.customer_no = 'CU000000020260801100001S2C3'
 JOIN `tables` t ON t.store_id = s.id AND t.table_no = '1001'
-WHERE s.store_no = 'SNH001'
-  AND NOT EXISTS (SELECT 1 FROM orders WHERE order_no = 'SEED-ORD-PARTIAL');
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (
+    SELECT 1 FROM orders o2
+    WHERE o2.order_no = CONCAT('OT', s.store_no, '100', '20260801120201', 'E6F7')
+  );
 
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 2, 36.00
 FROM orders o
 JOIN products p ON p.product_no = 'P001'
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
-WHERE o.order_no = 'SEED-ORD-PARTIAL'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120201', 'E6F7')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
 
 INSERT INTO payments (
@@ -621,47 +689,60 @@ INSERT INTO payments (
   provider_trade_no, paid_at
 )
 SELECT
-  'SEED-PAY-PARTIAL', o.id, o.customer_id, 'WECHAT', 'JSAPI', 36.00, 'CNY', 'PARTIAL_REFUND',
+  CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120202', 'G8H9'),
+  o.id, o.customer_id, 'WECHAT', 'JSAPI', 36.00, 'CNY', 'PARTIAL_REFUND',
   'wx_seed_trade_partial', o.paid_at
 FROM orders o
-WHERE o.order_no = 'SEED-ORD-PARTIAL'
-  AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_no = 'SEED-PAY-PARTIAL');
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120201', 'E6F7')
+  AND NOT EXISTS (
+    SELECT 1 FROM payments pay
+    WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120202', 'G8H9')
+  );
 
 INSERT INTO payment_refunds (
   refund_no, payment_id, order_id, amount, reason, status,
   provider_refund_no, fail_reason, succeeded_at, operator_id
 )
 SELECT
-  'SEED-RF-PARTIAL', pay.id, o.id, 10.00, '少上一份卤蛋协商退款', 'SUCCESS',
+  CONCAT('RW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120300', 'J2K3'),
+  pay.id, o.id, 10.00, '少上一份卤蛋协商退款', 'SUCCESS',
   'wx_seed_rf_partial', NULL, NOW(3), u.id
 FROM payments pay
-JOIN orders o ON o.id = pay.order_id AND o.order_no = 'SEED-ORD-PARTIAL'
+JOIN orders o ON o.id = pay.order_id
+  AND o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120201', 'E6F7')
 JOIN users u ON u.username = 'cashier'
-WHERE pay.payment_no = 'SEED-PAY-PARTIAL'
-  AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE refund_no = 'SEED-RF-PARTIAL');
+WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120202', 'G8H9')
+  AND NOT EXISTS (
+    SELECT 1 FROM payment_refunds r
+    WHERE r.refund_no = CONCAT('RW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120300', 'J2K3')
+  );
 
--- 13.3 全额退款 — 微信
+-- 13.3 全额退款 — 微信 / 桌 1002
 INSERT INTO orders (
   order_no, customer_id, table_id, store_id, status, dining_type,
   subtotal, discount_amount, packing_fee, total_amount,
   payment_status, payment_method, channel, remark, ordered_at, paid_at
 )
 SELECT
-  'SEED-ORD-FULL', c.id, t.id, s.id, 'CANCELLED', 'DINE_IN',
+  CONCAT('OT', s.store_no, '100', '20260801120401', 'L4M5'),
+  c.id, t.id, s.id, 'CANCELLED', 'DINE_IN',
   15.00, 0.00, 0.00, 15.00,
   'REFUNDED', 'WECHAT', 'WECHAT', '种子：全额退款', NOW(3), NOW(3)
 FROM stores s
-JOIN customers c ON c.customer_no = 'SEED-C001'
+JOIN customers c ON c.customer_no = 'CU000000020260801100001S2C3'
 JOIN `tables` t ON t.store_id = s.id AND t.table_no = '1002'
-WHERE s.store_no = 'SNH001'
-  AND NOT EXISTS (SELECT 1 FROM orders WHERE order_no = 'SEED-ORD-FULL');
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (
+    SELECT 1 FROM orders o2
+    WHERE o2.order_no = CONCAT('OT', s.store_no, '100', '20260801120401', 'L4M5')
+  );
 
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '酸辣粉', 15.00, 1, 15.00
 FROM orders o
 JOIN products p ON p.product_no = 'P002'
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
-WHERE o.order_no = 'SEED-ORD-FULL'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120401', 'L4M5')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
 
 INSERT INTO payments (
@@ -669,55 +750,68 @@ INSERT INTO payments (
   provider_trade_no, paid_at
 )
 SELECT
-  'SEED-PAY-FULL', o.id, o.customer_id, 'WECHAT', 'JSAPI', 15.00, 'CNY', 'REFUNDED',
+  CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120402', 'N6P7'),
+  o.id, o.customer_id, 'WECHAT', 'JSAPI', 15.00, 'CNY', 'REFUNDED',
   'wx_seed_trade_full', o.paid_at
 FROM orders o
-WHERE o.order_no = 'SEED-ORD-FULL'
-  AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_no = 'SEED-PAY-FULL');
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120401', 'L4M5')
+  AND NOT EXISTS (
+    SELECT 1 FROM payments pay
+    WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120402', 'N6P7')
+  );
 
 INSERT INTO payment_refunds (
   refund_no, payment_id, order_id, amount, reason, status,
   provider_refund_no, fail_reason, succeeded_at, operator_id
 )
 SELECT
-  'SEED-RF-FULL', pay.id, o.id, 15.00, '顾客取消全额退', 'SUCCESS',
+  CONCAT('RW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120500', 'Q8R9'),
+  pay.id, o.id, 15.00, '顾客取消全额退', 'SUCCESS',
   'wx_seed_rf_full', NULL, NOW(3), u.id
 FROM payments pay
-JOIN orders o ON o.id = pay.order_id AND o.order_no = 'SEED-ORD-FULL'
+JOIN orders o ON o.id = pay.order_id
+  AND o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120401', 'L4M5')
 JOIN users u ON u.username = 'admin'
-WHERE pay.payment_no = 'SEED-PAY-FULL'
-  AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE refund_no = 'SEED-RF-FULL');
+WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120402', 'N6P7')
+  AND NOT EXISTS (
+    SELECT 1 FROM payment_refunds r
+    WHERE r.refund_no = CONCAT('RW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120500', 'Q8R9')
+  );
 
--- 13.4 处理中退款 — 微信（支付页「处理中退款 / 同步」）
+-- 13.4 处理中退款 — 微信 / 桌 1002
 INSERT INTO orders (
   order_no, customer_id, table_id, store_id, status, dining_type,
   subtotal, discount_amount, packing_fee, total_amount,
   payment_status, payment_method, channel, remark, ordered_at, paid_at
 )
 SELECT
-  'SEED-ORD-INFLIGHT', c.id, t.id, s.id, 'PAID', 'DINE_IN',
+  CONCAT('OT', s.store_no, '100', '20260801120601', 'S2T3'),
+  c.id, t.id, s.id, 'PAID', 'DINE_IN',
   21.00, 0.00, 0.00, 21.00,
   'PAID', 'WECHAT', 'WECHAT', '种子：退款处理中', NOW(3), NOW(3)
 FROM stores s
-JOIN customers c ON c.customer_no = 'SEED-C001'
+JOIN customers c ON c.customer_no = 'CU000000020260801100001S2C3'
 JOIN `tables` t ON t.store_id = s.id AND t.table_no = '1002'
-WHERE s.store_no = 'SNH001'
-  AND NOT EXISTS (SELECT 1 FROM orders WHERE order_no = 'SEED-ORD-INFLIGHT');
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (
+    SELECT 1 FROM orders o2
+    WHERE o2.order_no = CONCAT('OT', s.store_no, '100', '20260801120601', 'S2T3')
+  );
 
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 1, 18.00
 FROM orders o
 JOIN products p ON p.product_no = 'P001'
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
-WHERE o.order_no = 'SEED-ORD-INFLIGHT'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120601', 'S2T3')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.product_name_snapshot = '牛肉面');
 
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '卤蛋', 3.00, 1, 3.00
 FROM orders o
 JOIN products p ON p.product_no = 'P003'
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
-WHERE o.order_no = 'SEED-ORD-INFLIGHT'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120601', 'S2T3')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.product_name_snapshot = '卤蛋');
 
 INSERT INTO payments (
@@ -725,47 +819,60 @@ INSERT INTO payments (
   provider_trade_no, paid_at
 )
 SELECT
-  'SEED-PAY-INFLIGHT', o.id, o.customer_id, 'WECHAT', 'JSAPI', 21.00, 'CNY', 'PAID',
+  CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120602', 'U4V5'),
+  o.id, o.customer_id, 'WECHAT', 'JSAPI', 21.00, 'CNY', 'PAID',
   'wx_seed_trade_inflight', o.paid_at
 FROM orders o
-WHERE o.order_no = 'SEED-ORD-INFLIGHT'
-  AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_no = 'SEED-PAY-INFLIGHT');
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120601', 'S2T3')
+  AND NOT EXISTS (
+    SELECT 1 FROM payments pay
+    WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120602', 'U4V5')
+  );
 
 INSERT INTO payment_refunds (
   refund_no, payment_id, order_id, amount, reason, status,
   provider_refund_no, fail_reason, succeeded_at, operator_id
 )
 SELECT
-  'SEED-RF-INFLIGHT', pay.id, o.id, 3.00, '卤蛋未出餐协商退', 'PROCESSING',
+  CONCAT('RW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120700', 'W6X7'),
+  pay.id, o.id, 3.00, '卤蛋未出餐协商退', 'PROCESSING',
   NULL, NULL, NULL, u.id
 FROM payments pay
-JOIN orders o ON o.id = pay.order_id AND o.order_no = 'SEED-ORD-INFLIGHT'
+JOIN orders o ON o.id = pay.order_id
+  AND o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120601', 'S2T3')
 JOIN users u ON u.username = 'cashier'
-WHERE pay.payment_no = 'SEED-PAY-INFLIGHT'
-  AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE refund_no = 'SEED-RF-INFLIGHT');
+WHERE pay.payment_no = CONCAT('PW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120602', 'U4V5')
+  AND NOT EXISTS (
+    SELECT 1 FROM payment_refunds r
+    WHERE r.refund_no = CONCAT('RW', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120700', 'W6X7')
+  );
 
--- 13.5 支付宝已支付（数据概览渠道）
+-- 13.5 支付宝已支付 — 桌 1003
 INSERT INTO orders (
   order_no, customer_id, table_id, store_id, status, dining_type,
   subtotal, discount_amount, packing_fee, total_amount,
   payment_status, payment_method, channel, remark, ordered_at, paid_at
 )
 SELECT
-  'SEED-ORD-ALIPAY', c.id, t.id, s.id, 'PAID', 'DINE_IN',
+  CONCAT('OT', s.store_no, '100', '20260801120801', 'Y8Z2'),
+  c.id, t.id, s.id, 'PAID', 'DINE_IN',
   18.00, 0.00, 0.00, 18.00,
   'PAID', 'ALIPAY', 'ALIPAY', '种子：支付宝已支付', NOW(3), NOW(3)
 FROM stores s
-JOIN customers c ON c.customer_no = 'SEED-C002'
+JOIN customers c ON c.customer_no = 'CU000000020260801100002S2C4'
 JOIN `tables` t ON t.store_id = s.id AND t.table_no = '1003'
-WHERE s.store_no = 'SNH001'
-  AND NOT EXISTS (SELECT 1 FROM orders WHERE order_no = 'SEED-ORD-ALIPAY');
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (
+    SELECT 1 FROM orders o2
+    WHERE o2.order_no = CONCAT('OT', s.store_no, '100', '20260801120801', 'Y8Z2')
+  );
 
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 1, 18.00
 FROM orders o
 JOIN products p ON p.product_no = 'P001'
-JOIN stores s ON s.id = p.store_id AND s.store_no = 'SNH001'
-WHERE o.order_no = 'SEED-ORD-ALIPAY'
+JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120801', 'Y8Z2')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
 
 INSERT INTO payments (
@@ -773,11 +880,15 @@ INSERT INTO payments (
   provider_trade_no, paid_at
 )
 SELECT
-  'SEED-PAY-ALIPAY', o.id, o.customer_id, 'ALIPAY', 'JSAPI', 18.00, 'CNY', 'PAID',
+  CONCAT('PA', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120802', 'A3B4'),
+  o.id, o.customer_id, 'ALIPAY', 'JSAPI', 18.00, 'CNY', 'PAID',
   'ali_seed_trade_paid', o.paid_at
 FROM orders o
-WHERE o.order_no = 'SEED-ORD-ALIPAY'
-  AND NOT EXISTS (SELECT 1 FROM payments WHERE payment_no = 'SEED-PAY-ALIPAY');
+WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120801', 'Y8Z2')
+  AND NOT EXISTS (
+    SELECT 1 FROM payments pay
+    WHERE pay.payment_no = CONCAT('PA', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120802', 'A3B4')
+  );
 
 -- 完成
 SELECT 'seed_ok' AS result,
@@ -787,6 +898,10 @@ SELECT 'seed_ok' AS result,
   (SELECT COUNT(*) FROM `tables`) AS tables_cnt,
   (SELECT COUNT(*) FROM products) AS products,
   (SELECT COUNT(*) FROM customers) AS customers,
-  (SELECT COUNT(*) FROM orders WHERE order_no LIKE 'SEED-%') AS seed_orders,
-  (SELECT COUNT(*) FROM payments WHERE payment_no LIKE 'SEED-%') AS seed_payments,
-  (SELECT COUNT(*) FROM payment_refunds WHERE refund_no LIKE 'SEED-%') AS seed_refunds;
+  (SELECT COUNT(*) FROM orders WHERE remark LIKE '种子：%') AS seed_orders,
+  (SELECT COUNT(*) FROM payments pay
+     JOIN orders o ON o.id = pay.order_id
+    WHERE o.remark LIKE '种子：%') AS seed_payments,
+  (SELECT COUNT(*) FROM payment_refunds r
+     JOIN orders o ON o.id = r.order_id
+    WHERE o.remark LIKE '种子：%') AS seed_refunds;

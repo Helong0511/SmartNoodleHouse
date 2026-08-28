@@ -62,6 +62,15 @@ async def _rollback_confirm(order_id: int | None, platform: str, platform_order_
         d_order.last_sync_at = now_local()
         order = await db.get(Order, d_order.order_id)
         if order and order.status == "CONFIRMED":
-            order.status = "PAID"
+            from app.services.order_lifecycle import apply_order_status
+
+            await apply_order_status(
+                db,
+                order,
+                "PAID",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark="平台接单失败回滚",
+            )
         await db.commit()
         logger.error("平台接单失败，已回滚本地状态 order_id=%s platform=%s", d_order.order_id, platform)

@@ -1,9 +1,10 @@
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import generate_no
+from app.core.biz_no import BIZ_CU, BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
 from app.models import (
@@ -12,14 +13,230 @@ from app.models import (
     CustomerPreference,
     CustomerWechatAccount,
     DiningTable,
+    MemberLevel,
     Order,
     OrderItem,
     OrderItemOption,
+    Store,
 )
 from app.services.order_service import OrderPriceCalculator
 
+DEFAULT_MEMBER_LEVEL_NAME = "普通会员"
+
 
 class CustomerService:
+    @staticmethod
+    def keyword_condition(keyword: str | None):
+        """昵称 / 显示名 / 手机 / 顾客编号 模糊匹配。"""
+        kw = (keyword or "").strip()
+        if not kw:
+            return None
+        like = f"%{kw}%"
+        return or_(
+            Customer.display_name.like(like),
+            Customer.nickname.like(like),
+            Customer.phone.like(like),
+            Customer.customer_no.like(like),
+        )
+
+    @staticmethod
+    async def search_active_customers(
+        db: AsyncSession,
+        keyword: str,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Customer], int]:
+        """全库搜索启用顾客（不受门店下单范围限制，供发券等场景）。"""
+        kw = (keyword or "").strip()
+        if not kw:
+            return [], 0
+        cond = CustomerService.keyword_condition(kw)
+        q = select(Customer).where(Customer.status == 1).where(cond)
+        total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
+        page = max(1, page)
+        page_size = min(max(1, page_size), 50)
+        rows = list(
+            (
+                await db.execute(
+                    q.order_by(Customer.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+                )
+            ).scalars().all()
+        )
+        return rows, int(total)
+
+    @staticmethod
+    def member_payload(customer: Customer, level: MemberLevel | None = None) -> dict:
+        """顾客会员关联摘要（列表/详情复用）。"""
+        registered = bool(
+            customer.member_level_id
+            or (customer.display_name and str(customer.display_name).strip())
+            or (customer.nickname and str(customer.nickname).strip())
+            or (customer.phone and str(customer.phone).strip())
+        )
+        return {
+            "is_member": registered,
+            "member_level_id": customer.member_level_id,
+            "member_level_name": level.name if level else None,
+            "member_discount_rate": str(level.discount_rate) if level else None,
+            "member_min_points": int(level.min_points) if level else None,
+            "member_points": int(customer.points or 0),
+        }
+
+    @staticmethod
+    def discount_display_text(rate: Decimal | None) -> str | None:
+        if rate is None:
+            return None
+        r = money(rate)
+        if r >= Decimal("1"):
+            return None
+        zhe = (r * Decimal("10")).quantize(Decimal("0.1"))
+        return f"{zhe}折"
+
+    @staticmethod
+    async def list_levels_ordered(db: AsyncSession) -> list[MemberLevel]:
+        return list(
+            (await db.execute(select(MemberLevel).order_by(MemberLevel.min_points.asc()))).scalars().all()
+        )
+
+    @staticmethod
+    async def recalculate_member_level(db: AsyncSession, customer: Customer) -> MemberLevel | None:
+        """按积分重算并写入会员等级（取可达最高档）。"""
+        levels = await CustomerService.list_levels_ordered(db)
+        if not levels:
+            return None
+        pts = int(customer.points or 0)
+        chosen = levels[0]
+        for lv in levels:
+            if pts >= int(lv.min_points):
+                chosen = lv
+        if customer.member_level_id != chosen.id:
+            customer.member_level_id = chosen.id
+            await db.flush()
+        return chosen
+
+    @staticmethod
+    async def award_points_for_paid_order(db: AsyncSession, order: Order) -> int:
+        """支付成功：实付 1 元 = 1 积分，并尝试升级等级。"""
+        if not order.customer_id:
+            return 0
+        customer = await db.get(Customer, int(order.customer_id))
+        if not customer:
+            return 0
+        earned = int(money(order.total_amount or 0))
+        if earned <= 0:
+            return 0
+        customer.points = int(customer.points or 0) + earned
+        await CustomerService.recalculate_member_level(db, customer)
+        await db.flush()
+        return earned
+
+    @staticmethod
+    def member_progress_payload(
+        customer: Customer, level: MemberLevel | None, all_levels: list[MemberLevel]
+    ) -> dict:
+        points = int(customer.points or 0)
+        current_min = int(level.min_points) if level else 0
+        next_level: MemberLevel | None = None
+        for lv in all_levels:
+            if int(lv.min_points) > points:
+                next_level = lv
+                break
+        points_to_next = max(0, int(next_level.min_points) - points) if next_level else 0
+        progress_pct = 100
+        if next_level and level:
+            span = int(next_level.min_points) - current_min
+            if span > 0:
+                progress_pct = min(100, max(0, int((points - current_min) / span * 100)))
+        levels_public = []
+        for lv in all_levels:
+            rate = money(lv.discount_rate)
+            levels_public.append(
+                {
+                    "id": lv.id,
+                    "name": lv.name,
+                    "min_points": int(lv.min_points),
+                    "discount_rate": str(rate),
+                    "discount_text": CustomerService.discount_display_text(rate),
+                    "is_current": bool(level and lv.id == level.id),
+                    "unlocked": points >= int(lv.min_points),
+                }
+            )
+        return {
+            "next_level_name": next_level.name if next_level else None,
+            "next_level_min_points": int(next_level.min_points) if next_level else None,
+            "points_to_next_level": points_to_next,
+            "level_progress_percent": progress_pct,
+            "member_levels": levels_public,
+            "points_rule": "实付1元=1积分，积分达标自动升级享对应折扣",
+        }
+
+    @staticmethod
+    async def build_member_profile(db: AsyncSession, customer: Customer) -> dict:
+        level = None
+        if customer.member_level_id:
+            level = await db.get(MemberLevel, customer.member_level_id)
+        all_levels = await CustomerService.list_levels_ordered(db)
+        if not level and all_levels:
+            level = all_levels[0]
+        return {
+            **CustomerService.member_payload(customer, level),
+            **CustomerService.member_progress_payload(customer, level, all_levels),
+        }
+
+    @staticmethod
+    async def load_levels_map(db: AsyncSession, level_ids: list[int | None]) -> dict[int, MemberLevel]:
+        ids = list({int(i) for i in level_ids if i})
+        if not ids:
+            return {}
+        rows = (await db.execute(select(MemberLevel).where(MemberLevel.id.in_(ids)))).scalars().all()
+        return {m.id: m for m in rows}
+
+    @staticmethod
+    async def ensure_default_member_level(db: AsyncSession, customer: Customer) -> MemberLevel | None:
+        """注册会员时若无等级则挂「普通会员」。"""
+        if customer.member_level_id:
+            return await db.get(MemberLevel, customer.member_level_id)
+        level = (
+            await db.execute(select(MemberLevel).where(MemberLevel.name == DEFAULT_MEMBER_LEVEL_NAME).limit(1))
+        ).scalar_one_or_none()
+        if not level:
+            level = (
+                await db.execute(select(MemberLevel).order_by(MemberLevel.min_points.asc()).limit(1))
+            ).scalar_one_or_none()
+        if level:
+            customer.member_level_id = level.id
+            await db.flush()
+        return level
+
+    @staticmethod
+    async def resolve_member_discount_rate(db: AsyncSession, customer_id: int | None) -> Decimal:
+        """会员等级折扣率（0~1）；无等级或无效时返回 1（不打折）。"""
+        if not customer_id:
+            return Decimal("1")
+        customer = await db.get(Customer, int(customer_id))
+        if not customer or not customer.member_level_id:
+            return Decimal("1")
+        level = await db.get(MemberLevel, customer.member_level_id)
+        if not level or level.discount_rate is None:
+            return Decimal("1")
+        rate = money(level.discount_rate)
+        if rate <= Decimal("0") or rate > Decimal("1"):
+            return Decimal("1")
+        return rate
+
+    @staticmethod
+    def calc_member_discount(subtotal: Decimal, packing_fee: Decimal, rate: Decimal) -> tuple[Decimal, Decimal]:
+        """按商品小计计算会员优惠（打包费不参与折扣）。返回 (discount_amount, total_amount)。"""
+        subtotal = money(subtotal)
+        packing_fee = money(packing_fee)
+        rate = money(rate)
+        if rate >= Decimal("1"):
+            return Decimal("0.00"), money(subtotal + packing_fee)
+        discount = money(subtotal * (Decimal("1") - rate))
+        total = money(subtotal - discount + packing_fee)
+        return discount, total
+
     @staticmethod
     async def get_or_create_by_wechat(db: AsyncSession, openid: str, unionid: str | None = None) -> Customer:
         result = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
@@ -37,16 +254,40 @@ class CustomerService:
             )
             union_acc = by_union.scalar_one_or_none()
             if union_acc:
-                db.add(CustomerWechatAccount(customer_id=union_acc.customer_id, openid=openid, unionid=unionid))
-                await db.flush()
-                return await db.get(Customer, union_acc.customer_id)
+                try:
+                    async with db.begin_nested():
+                        db.add(
+                            CustomerWechatAccount(
+                                customer_id=union_acc.customer_id, openid=openid, unionid=unionid
+                            )
+                        )
+                        await db.flush()
+                except IntegrityError:
+                    pass
+                else:
+                    return await db.get(Customer, union_acc.customer_id)
+                again = (
+                    await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
+                ).scalar_one_or_none()
+                if again:
+                    return await db.get(Customer, again.customer_id)
 
-        customer = Customer(customer_no=generate_no("C"), status=1)
-        db.add(customer)
-        await db.flush()
-        db.add(CustomerWechatAccount(customer_id=customer.id, openid=openid, unionid=unionid))
-        await db.flush()
-        return customer
+        try:
+            async with db.begin_nested():
+                customer = Customer(customer_no=generate_no(BIZ_CU), status=1)
+                db.add(customer)
+                await db.flush()
+                db.add(CustomerWechatAccount(customer_id=customer.id, openid=openid, unionid=unionid))
+                await db.flush()
+                return customer
+        except IntegrityError:
+            # 并发登录：另一请求已写入同一 openid
+            again = (
+                await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
+            ).scalar_one_or_none()
+            if again:
+                return await db.get(Customer, again.customer_id)
+            raise AppException(40002, "微信登录冲突，请重试")
 
     @staticmethod
     async def get_or_create_by_alipay(db: AsyncSession, alipay_user_id: str) -> Customer:
@@ -56,12 +297,23 @@ class CustomerService:
         account = result.scalar_one_or_none()
         if account:
             return await db.get(Customer, account.customer_id)
-        customer = Customer(customer_no=generate_no("C"), status=1)
-        db.add(customer)
-        await db.flush()
-        db.add(CustomerAlipayAccount(customer_id=customer.id, alipay_user_id=alipay_user_id))
-        await db.flush()
-        return customer
+        try:
+            async with db.begin_nested():
+                customer = Customer(customer_no=generate_no(BIZ_CU), status=1)
+                db.add(customer)
+                await db.flush()
+                db.add(CustomerAlipayAccount(customer_id=customer.id, alipay_user_id=alipay_user_id))
+                await db.flush()
+                return customer
+        except IntegrityError:
+            again = (
+                await db.execute(
+                    select(CustomerAlipayAccount).where(CustomerAlipayAccount.alipay_user_id == alipay_user_id)
+                )
+            ).scalar_one_or_none()
+            if again:
+                return await db.get(Customer, again.customer_id)
+            raise AppException(40002, "支付宝登录冲突，请重试")
 
     @staticmethod
     async def try_link_by_phone(db: AsyncSession, customer: Customer, phone: str) -> Customer:
@@ -94,6 +346,7 @@ class CustomerService:
         # 软禁用被合并的空壳顾客
         customer.status = 0
         customer.phone = None
+        customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
         await db.flush()
         return target
 
@@ -112,6 +365,8 @@ class OrderCreateService:
         idempotency_key: str | None = None,
         need_pack: bool = False,
         dining_type: str | None = None,
+        customer_coupon_id: int | None = None,
+        customer_voucher_id: int | None = None,
     ) -> Order:
         from sqlalchemy.exc import IntegrityError
 
@@ -124,15 +379,18 @@ class OrderCreateService:
                 return order
 
         table_id = None
+        table_no_raw: str | None = None
         table_token = (table_token or "").strip() or None
         if table_token:
             from app.services.table_resolve import resolve_dining_table
 
-            table = await resolve_dining_table(db, table_token, store_id=store_id)
+            # 有 table_token 时以桌台解析出门店为准，避免前端缓存 store_id 与桌台不一致
+            table = await resolve_dining_table(db, table_token)
             if not table:
                 raise AppException(40403, "无效桌台二维码（请扫桌码，或确认页选择桌号）")
             table_id = table.id
             store_id = table.store_id
+            table_no_raw = table.table_no
             # 开发用桌号作 token 时，后续支付/展示统一落到真实 qr_token 绑定的桌
         else:
             # 堂食（微信/支付宝）必须绑桌台，否则厨房/订单无法显示桌号
@@ -146,9 +404,12 @@ class OrderCreateService:
         if dtype not in ("DINE_IN", "TAKEAWAY"):
             dtype = "TAKEAWAY" if need_pack else "DINE_IN"
         pack = need_pack or dtype == "TAKEAWAY"
+        t_no, t_ph = resolve_table_parts(table_no_raw, channel=channel, dining_type=dtype)
+        store = await db.get(Store, int(store_id)) if store_id else None
+        sno = store.store_no if store else None
 
         order = Order(
-            order_no=generate_no("ORD"),
+            order_no=generate_no(BIZ_OT, sno, t_no, table_placeholder=t_ph),
             customer_id=customer_id,
             table_id=table_id,
             store_id=store_id,
@@ -176,10 +437,35 @@ class OrderCreateService:
         subtotal, packing_fee = await OrderPriceCalculator.build_order_items(
             db, order, items, deduct_stock=True, need_pack=pack
         )
+        rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
+        discount_amount, base_total = CustomerService.calc_member_discount(subtotal, packing_fee, rate)
+        eligible = money(subtotal) - money(discount_amount)
+        from app.services.coupon_service import CouponService
+
+        coupon_discount, coupon_id = await CouponService.resolve_discount(
+            db, customer_coupon_id, customer_id, eligible
+        )
+        payable_before_voucher = money(base_total - coupon_discount)
+        voucher_discount, voucher_id = await CouponService.resolve_voucher_discount(
+            db, customer_voucher_id, customer_id, payable_before_voucher
+        )
+        total_amount = money(payable_before_voucher - voucher_discount)
         order.subtotal = subtotal
-        order.discount_amount = Decimal("0.00")
+        order.discount_amount = discount_amount
+        order.customer_coupon_id = coupon_id
+        order.coupon_discount = coupon_discount
+        order.customer_voucher_id = voucher_id
+        order.voucher_discount = voucher_discount
         order.packing_fee = packing_fee
-        order.total_amount = money(subtotal + packing_fee)
+        order.total_amount = total_amount
+        if coupon_id:
+            await CouponService.reserve_for_order(
+                db, coupon_id, order_id=order.id, customer_id=customer_id
+            )
+        if voucher_id:
+            await CouponService.reserve_for_order(
+                db, voucher_id, order_id=order.id, customer_id=customer_id
+            )
         await record_order_status(
             db, order_id=order.id, from_status=None, to_status="PENDING_PAYMENT", source="SYSTEM"
         )
@@ -194,37 +480,19 @@ class OrderCreateService:
         *,
         operator_id: int | None = None,
     ) -> Order:
-        from app.services.order_state_machine import assert_staff_transition
-        from app.services.status_history import record_order_status
-        from app.services.stock_service import restore_stock
+        from app.services.order_lifecycle import apply_order_status
 
         order = await db.get(Order, order_id)
         if not order:
             raise AppException(40404, "订单不存在")
-        target = status.strip().upper()
-        assert_staff_transition(order.status, target)
-        already_completed = order.status == "COMPLETED"
-        old = order.status
-        order.status = target
-        if target == "COMPLETED" and not already_completed:
-            order.completed_at = now_local()
-            await PreferenceService.update_from_order(db, order_id)
-        elif target == "CANCELLED" and old != "CANCELLED":
-            order.cancelled_at = now_local()
-            # 回滚库存（未支付或已支付取消都回滚销量/库存）
-            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))).scalars().all()
-            for it in items:
-                await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
-        await record_order_status(
+        return await apply_order_status(
             db,
-            order_id=order.id,
-            from_status=old,
-            to_status=target,
+            order,
+            status,
             source="STAFF",
             operator_id=operator_id,
+            assert_kind="STAFF",
         )
-        await db.flush()
-        return order
 
 
 class PreferenceService:

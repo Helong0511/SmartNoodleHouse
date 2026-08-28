@@ -1,0 +1,95 @@
+<view class="page">
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+  />
+
+  <view class="tip">金额由服务器重新计算，防止篡改</view>
+
+  <view class="member-bar" wx:if="{{isMember && memberLevelName}}">
+    <text class="badge">{{memberLevelName}}</text>
+    <text wx:if="{{memberDiscountText}}">享 {{memberDiscountText}} 优惠（与结算金额一致）</text>
+    <text wx:elif="{{nextLevelName}}">再积 {{pointsToNext}} 分升级 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
+    <text wx:else>会员身份已识别</text>
+  </view>
+
+  <view class="table-box" wx:if="{{!needPack && !tableToken && (tableOptions.length || needScanHint)}}">
+    <view class="label">选择桌号（堂食必选）</view>
+    <button class="scan-btn" bindtap="scanTable">扫码绑桌</button>
+    <picker wx:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" bindchange="onPickTable">
+      <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
+    </picker>
+    <view wx:elif="{{needScanHint}}" class="scan-hint">请先扫描桌台二维码，或联系店员协助选桌</view>
+  </view>
+
+  <view class="cart-box">
+    <view class="label">已选商品</view>
+    <view class="cart-line" wx:for="{{cartPreview}}" wx:key="index">
+      <image wx:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" />
+      <view class="mini placeholder" wx:else>{{item.name[0] || '餐'}}</view>
+      <view class="cart-info">
+        <text>{{item.name}} ×{{item.quantity}}</text>
+        <text class="cart-price">¥{{item.subtotal}}</text>
+      </view>
+    </view>
+    <view class="sum-row">
+      <text>小计</text>
+      <text>¥{{subtotal}}</text>
+    </view>
+    <view class="sum-row discount" wx:if="{{hasDiscount}}">
+      <text>会员优惠{{memberDiscountText ? '（' + memberDiscountText + '）' : ''}}</text>
+      <text>-¥{{discountAmount}}</text>
+    </view>
+    <view class="sum-row discount" wx:if="{{hasCouponDiscount}}">
+      <text>优惠券{{selectedCouponLabel ? '（' + selectedCouponLabel + '）' : ''}}</text>
+      <text>-¥{{couponDiscountAmount}}</text>
+    </view>
+    <view class="sum-row discount" wx:if="{{hasVoucherDiscount}}">
+      <text>代金券{{selectedVoucherLabel ? '（' + selectedVoucherLabel + '）' : ''}}</text>
+      <text>-¥{{voucherDiscountAmount}}</text>
+    </view>
+    <view class="sum-row" wx:if="{{needPack}}">
+      <text>打包费（预估）</text>
+      <text>¥{{packingFee}}</text>
+    </view>
+    <view class="sum-row hint-row" wx:if="{{!hasDiscount && nextLevelName}}">
+      <text>升级提示</text>
+      <text class="hint-text">再积 {{pointsToNext}} 分可升 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
+    </view>
+    <view class="sum-row total">
+      <text>应付约</text>
+      <text>¥{{payEstimate}}</text>
+    </view>
+  </view>
+
+  <view class="coupon-box" wx:if="{{coupons.length}}">
+    <view class="label">优惠券</view>
+    <picker mode="selector" range="{{couponPickerLabels}}" bindchange="onPickCoupon">
+      <view class="coupon-pick">{{selectedCouponLabel}}</view>
+    </picker>
+  </view>
+
+  <view class="coupon-box" wx:if="{{vouchers.length}}">
+    <view class="label">代金券</view>
+    <picker mode="selector" range="{{voucherPickerLabels}}" bindchange="onPickVoucher">
+      <view class="coupon-pick">{{selectedVoucherLabel}}</view>
+    </picker>
+  </view>
+
+  <view class="pack-box">
+    <view class="label">用餐方式</view>
+    <view class="pack-row">
+      <view class="pack-opt {{!needPack ? 'on' : ''}}" data-pack="0" bindtap="onPack">堂食</view>
+      <view class="pack-opt {{needPack ? 'on' : ''}}" data-pack="1" bindtap="onPack">打包外带</view>
+    </view>
+    <view class="pack-tip" wx:if="{{needPack}}">打包按商品餐盒费加收，以服务器结算为准</view>
+  </view>
+
+  <textarea class="remark" placeholder="备注（如不要香菜）" value="{{remark}}" bindinput="onRemark" />
+  <view class="pay">支付方式：微信支付</view>
+  <button class="btn-primary" loading="{{loading}}" bindtap="submit">提交并支付</button>
+</view>

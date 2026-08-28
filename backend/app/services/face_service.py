@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import generate_no
+from app.core.biz_no import BIZ_VI, generate_no
 from app.core.redis_client import get_redis
 from app.core.response import now_local
-from app.models import Customer, FaceProfile, VisitorEvent, WelcomeLog
+from app.models import Camera, Customer, FaceProfile, Store, VisitorEvent, WelcomeLog
 
 
 class FaceEncryption:
@@ -106,8 +106,13 @@ class VisitorService:
 
         retention = await SystemSettingsService.get_int(db, "visitor_data_retention_days", settings.visitor_data_retention_days)
         expires = now_local() + timedelta(days=retention)
+        cam = await db.get(Camera, camera_id)
+        sno = None
+        if cam and cam.store_id:
+            store = await db.get(Store, cam.store_id)
+            sno = store.store_no if store else None
         event = VisitorEvent(
-            visitor_no=generate_no("V"),
+            visitor_no=generate_no(BIZ_VI, sno, None),
             camera_id=camera_id,
             event_type=event_type,
             event_time=now_local(),

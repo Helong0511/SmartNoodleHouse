@@ -2,15 +2,40 @@ page {
   background: #f7f7f7;
   color: #333;
   font-size: 28rpx;
+  --color-primary: #ff6b35;
+  --color-price: #e64340;
+  --radius-card: 20rpx;
+  --safe-bottom: env(safe-area-inset-bottom);
 }
 .btn-primary {
   background: #ff6b35;
   color: #fff;
   border-radius: 48rpx;
+  height: 88rpx;
+  padding: 0;
+  font-size: 30rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
+.btn-primary::after { border: none; }
 .btn-ghost {
   background: #fff;
   color: #ff6b35;
   border: 1px solid #ff6b35;
   border-radius: 48rpx;
+  height: 88rpx;
+  padding: 0;
+  font-size: 30rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.btn-ghost::after { border: none; }
+.safe-bottom {
+  padding-bottom: calc(24rpx + var(--safe-bottom));
 }

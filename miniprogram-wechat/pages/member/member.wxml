@@ -1,56 +1,243 @@
 <view class="page">
-  <view class="card">
+
+  <store-bar
+    storeName="{{storeName}}"
+
+    storeNo="{{storeNo}}"
+
+    storeAddress="{{storeAddress}}"
+
+    storePhone="{{storePhone}}"
+
+    tableName="{{tableName}}"
+
+    tableNo="{{tableNo}}"
+
+  />
+
+
+
+  <skeleton wx:if="{{loading}}" type="member" />
+
+
+
+  <block wx:else>
+
+  <view class="card member-card">
+
     <view class="profile">
+
       <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
+
       <view class="avatar placeholder" wx:else>{{avatarLetter}}</view>
+
       <view class="meta">
+
         <view class="name">{{displayName}}</view>
+
         <view class="no">编号 {{customerNo}}</view>
+
+        <view class="level-row" wx:if="{{isMember && memberLevelName}}">
+
+          <text class="badge">{{memberLevelName}}</text>
+
+          <text class="discount" wx:if="{{memberDiscountText}}">享 {{memberDiscountText}}</text>
+
+          <text class="discount muted-disc" wx:else>当前等级无额外折扣</text>
+
+        </view>
+
+        <view class="level-row" wx:elif="{{!isMember}}">
+
+          <text class="hint">注册会员享积分升级与专属折扣</text>
+
+        </view>
+
+        <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
+
+        <view class="phone" wx:if="{{phone}}">手机 {{phone}}</view>
+
       </view>
+
     </view>
-  </view>
-  <view class="card">
-    <view class="row">
-      <text>人脸迎宾</text>
-      <switch checked="{{faceOn}}" color="#ff6b35" bindchange="onFaceSwitch" />
-    </view>
-    <view class="tip">需摄像头实时采集授权。关闭后立即删除特征，不再识别身份。</view>
-  </view>
-  <view class="card">
-    <view class="title">智能记录的口味爱好</view>
-    <view class="tip" wx:if="{{!prefs.length}}">完成订单后，系统会自动累计您常点的规格口味，点餐时智能预选。</view>
-    <block wx:else>
-      <view class="tip">根据您历史订单自动学习，点餐时会智能预选常点口味。</view>
-      <view class="tag" wx:for="{{prefs}}" wx:key="option_code">
-        {{item.category}} · {{item.option_name || item.option_code}}
+
+    <view class="progress-box" wx:if="{{nextLevelName}}">
+
+      <view class="progress-head">
+
+        <text>距 {{nextLevelName}} 还差 {{pointsToNext}} 积分</text>
+
+        <text class="pct">{{levelProgress}}%</text>
+
       </view>
-      <button class="btn-primary" bindtap="goMenu">按爱好去点餐</button>
-    </block>
+
+      <view class="progress-track"><view class="progress-fill" style="width:{{levelProgress}}%"></view></view>
+
+      <view class="progress-tip">{{pointsRule}}</view>
+
+    </view>
+
+    <view class="progress-box done" wx:elif="{{isMember}}">
+
+      <view class="progress-tip">已达最高等级，继续消费可累积积分</view>
+
+    </view>
+
   </view>
 
+
+
   <view class="card">
-    <view class="title-row">
-      <view class="title">历史订单</view>
-      <text class="link" bindtap="loadOrders">刷新</text>
-    </view>
-    <view class="tip" wx:if="{{ordersLoading}}">加载中...</view>
-    <view class="tip" wx:elif="{{!orders.length}}">暂无订单。点餐完成后可在此查看，并一键再来一单。</view>
-    <view class="order" wx:for="{{orders}}" wx:key="id">
-      <view class="order-head">
-        <text class="ono">{{item.order_no}}</text>
-        <text class="st">{{item.status_label || item.status}}</text>
+
+    <view class="title">会员等级与权益</view>
+
+    <view class="level-item {{item.is_current ? 'current' : ''}} {{item.unlocked ? 'unlocked' : ''}}" wx:for="{{memberLevels}}" wx:key="id">
+
+      <view class="lv-head">
+
+        <text class="lv-name">{{item.name}}</text>
+
+        <text class="lv-tag" wx:if="{{item.is_current}}">当前</text>
+
+        <text class="lv-tag locked" wx:elif="{{!item.unlocked}}">未达成</text>
+
       </view>
-      <view class="order-body">{{item.item_summary}}</view>
-      <view class="order-foot">
-        <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}</text>
-        <button
-          class="btn-mini"
-          size="mini"
-          data-id="{{item.id}}"
-          bindtap="reorderOrder"
-          disabled="{{!item.can_reorder || reorderingId == item.id}}"
-        >再来一单</button>
-      </view>
+
+      <view class="lv-meta">{{item.min_points}} 积分起 · {{item.discount_text || '无额外折扣'}}</view>
+
     </view>
+
+    <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；新注册会员自动获赠新客券。</view>
+
   </view>
+
+
+
+  <view class="card">
+
+    <view class="title-row">
+
+      <view class="title">我的优惠券</view>
+
+      <text class="link" bindtap="loadWallet">刷新</text>
+
+    </view>
+
+    <view class="tip" wx:if="{{walletLoading}}">加载中...</view>
+
+    <view class="tip" wx:elif="{{!coupons.length}}">暂无可用优惠券</view>
+
+    <view class="wallet-item coupon" wx:for="{{coupons}}" wx:key="id">
+
+      <view class="wallet-main">
+
+        <view class="wallet-name">{{item.name}}</view>
+
+        <view class="wallet-rule">{{item.summary}}</view>
+
+      </view>
+
+      <view class="wallet-expire">{{item.expireText}}</view>
+
+    </view>
+
+  </view>
+
+
+
+  <view class="card">
+
+    <view class="title">我的代金券</view>
+
+    <view class="tip" wx:if="{{walletLoading}}">加载中...</view>
+
+    <view class="tip" wx:elif="{{!vouchers.length}}">暂无可用代金券</view>
+
+    <view class="wallet-item voucher" wx:for="{{vouchers}}" wx:key="id">
+
+      <view class="wallet-main">
+
+        <view class="wallet-name">{{item.name}}</view>
+
+        <view class="wallet-rule">{{item.summary}}</view>
+
+      </view>
+
+      <view class="wallet-expire">{{item.expireText}}</view>
+
+    </view>
+
+  </view>
+
+
+
+  <view class="card" wx:if="{{!phone}}">
+
+    <view class="title">绑定手机号</view>
+
+    <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
+
+    <button class="btn-primary wx-phone" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">微信一键绑定手机号</button>
+
+    <view class="or">或手动输入</view>
+
+    <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" bindinput="onPhoneInput" />
+
+    <button class="btn-ghost" bindtap="bindPhone">确认绑定</button>
+
+  </view>
+
+
+
+  <view class="card link-card" bindtap="goOrders">
+
+    <text>我的订单</text>
+
+    <text class="arrow">›</text>
+
+  </view>
+
+
+
+  <view class="card">
+
+    <view class="row">
+
+      <text>人脸迎宾</text>
+
+      <switch checked="{{faceOn}}" color="#ff6b35" bindchange="onFaceSwitch" />
+
+    </view>
+
+    <view class="tip">需摄像头实时采集授权。关闭后立即删除特征，不再识别身份。</view>
+
+  </view>
+
+
+
+  <view class="card">
+
+    <view class="title">智能记录的口味爱好</view>
+
+    <view class="tip" wx:if="{{!prefs.length}}">完成订单后，系统会自动累计您常点的规格口味，点餐时智能预选。</view>
+
+    <block wx:else>
+
+      <view class="tip">根据您历史订单自动学习，点餐时会智能预选常点口味。</view>
+
+      <view class="tag" wx:for="{{prefs}}" wx:key="option_code">
+
+        {{item.category}} · {{item.option_name || item.option_code}}
+
+      </view>
+
+      <button class="btn-primary" bindtap="goMenu">按爱好去点餐</button>
+
+    </block>
+
+  </view>
+
+  </block>
+
 </view>
+

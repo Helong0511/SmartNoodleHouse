@@ -1,46 +1,96 @@
 <view class="page">
-  <view class="card">
-    <view class="name">{{nickname || '面馆会员'}}</view>
-    <view class="no">编号 {{customerNo}}</view>
-  </view>
-  <view class="card">
-    <view class="row">
-      <text>人脸迎宾</text>
-      <switch checked="{{faceOn}}" onChange="onFaceSwitch" color="#1677ff" />
-    </view>
-    <view class="tip">需摄像头实时采集。关闭后立即失效特征。</view>
-  </view>
-  <view class="card">
-    <view class="title">智能记录的口味爱好</view>
-    <view class="tip" a:if="{{!prefs.length}}">完成订单后自动累计常点口味，点餐时智能预选。</view>
-    <block a:else>
-      <view class="tag" a:for="{{prefs}}" a:key="option_code">{{item.category}} · {{item.option_name || item.option_code}}</view>
-      <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
-    </block>
-  </view>
-  <view class="card">
-    <view class="title-row">
-      <view class="title">历史订单</view>
-      <text class="link" onTap="loadOrders">刷新</text>
-    </view>
-    <view class="tip" a:if="{{ordersLoading}}">加载中...</view>
-    <view class="tip" a:elif="{{!orders.length}}">暂无订单。完成后可在此再来一单。</view>
-    <view class="order" a:for="{{orders}}" a:key="id">
-      <view class="order-head">
-        <text class="ono">{{item.order_no}}</text>
-        <text class="st">{{item.status_label || item.status}}</text>
-      </view>
-      <view class="order-body">{{item.item_summary}}</view>
-      <view class="order-foot">
-        <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}</text>
-        <button
-          class="btn-mini"
-          size="mini"
-          data-id="{{item.id}}"
-          onTap="reorderOrder"
-          disabled="{{!item.can_reorder || reorderingId == item.id}}"
-        >再来一单</button>
+  <view class="tip loading-tip" a:if="{{loading}}">加载中...</view>
+
+  <block a:else>
+    <view class="card member-card">
+      <view class="profile">
+        <view class="avatar placeholder">{{avatarLetter}}</view>
+        <view class="meta">
+          <view class="name">{{displayName}}</view>
+          <view class="no">编号 {{customerNo}}</view>
+          <view class="level-row" a:if="{{isMember && memberLevelName}}">
+            <text class="badge">{{memberLevelName}}</text>
+            <text class="discount" a:if="{{memberDiscountText}}">享 {{memberDiscountText}}</text>
+          </view>
+          <view class="level-row" a:elif="{{!isMember}}">
+            <text class="hint">注册会员享积分升级与专属折扣</text>
+          </view>
+          <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
+          <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
+        </view>
       </view>
     </view>
-  </view>
+
+    <view class="card">
+      <view class="title-row">
+        <view class="title">我的优惠券</view>
+        <text class="link" onTap="loadWallet">刷新</text>
+      </view>
+      <view class="tip" a:if="{{walletLoading}}">加载中...</view>
+      <view class="tip" a:elif="{{!coupons.length}}">暂无可用优惠券</view>
+      <view class="wallet-item coupon" a:for="{{coupons}}" a:key="id">
+        <view class="wallet-main">
+          <view class="wallet-name">{{item.name}}</view>
+          <view class="wallet-rule">{{item.summary}}</view>
+        </view>
+        <view class="wallet-expire">{{item.expireText}}</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="title">我的代金券</view>
+      <view class="tip" a:if="{{walletLoading}}">加载中...</view>
+      <view class="tip" a:elif="{{!vouchers.length}}">暂无可用代金券</view>
+      <view class="wallet-item voucher" a:for="{{vouchers}}" a:key="id">
+        <view class="wallet-main">
+          <view class="wallet-name">{{item.name}}</view>
+          <view class="wallet-rule">{{item.summary}}</view>
+        </view>
+        <view class="wallet-expire">{{item.expireText}}</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="row">
+        <text>人脸迎宾</text>
+        <switch checked="{{faceOn}}" onChange="onFaceSwitch" color="#1677ff" />
+      </view>
+      <view class="tip">需摄像头实时采集。关闭后立即失效特征。</view>
+    </view>
+
+    <view class="card">
+      <view class="title">智能记录的口味爱好</view>
+      <view class="tip" a:if="{{!prefs.length}}">完成订单后自动累计常点口味，点餐时智能预选。</view>
+      <block a:else>
+        <view class="tag" a:for="{{prefs}}" a:key="option_code">{{item.category}} · {{item.option_name || item.option_code}}</view>
+        <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
+      </block>
+    </view>
+
+    <view class="card">
+      <view class="title-row">
+        <view class="title">历史订单</view>
+        <text class="link" onTap="loadOrders">刷新</text>
+      </view>
+      <view class="tip" a:if="{{ordersLoading}}">加载中...</view>
+      <view class="tip" a:elif="{{!orders.length}}">暂无订单。完成后可在此再来一单。</view>
+      <view class="order" a:for="{{orders}}" a:key="id">
+        <view class="order-head">
+          <text class="ono">{{item.order_no}}</text>
+          <text class="st">{{item.status_label || item.status}}</text>
+        </view>
+        <view class="order-body">{{item.item_summary}}</view>
+        <view class="order-foot">
+          <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}</text>
+          <button
+            class="btn-mini"
+            size="mini"
+            data-id="{{item.id}}"
+            onTap="reorderOrder"
+            disabled="{{!item.can_reorder || reorderingId == item.id}}"
+          >再来一单</button>
+        </view>
+      </view>
+    </view>
+  </block>
 </view>

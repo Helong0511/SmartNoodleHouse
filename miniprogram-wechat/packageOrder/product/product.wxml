@@ -1,0 +1,96 @@
+<wxs module="util">
+function hasId(list, id) {
+  if (!list || !list.length) return false
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] == id) return true
+  }
+  return false
+}
+module.exports.hasId = hasId
+</wxs>
+
+<view class="page" wx:if="{{loading}}">
+  <skeleton type="product" />
+</view>
+
+<view class="page" wx:elif="{{product}}">
+  <view class="hero-wrap" style="{{heroStyle}}">
+    <swiper
+      wx:if="{{gallery.length}}"
+      class="hero-swiper"
+      style="{{heroStyle}}"
+      circular
+      indicator-dots="{{gallery.length > 1}}"
+      autoplay="{{gallery.length > 1}}"
+      interval="4000"
+    >
+      <swiper-item wx:for="{{gallery}}" wx:key="*this">
+        <image
+          class="hero"
+          src="{{item}}"
+          mode="aspectFill"
+          bindtap="previewImage"
+          data-url="{{item}}"
+        />
+      </swiper-item>
+    </swiper>
+    <view wx:else class="hero placeholder">
+      <text class="ph-text">{{product.name[0] || '餐'}}</text>
+      <text class="ph-sub">暂无图片</text>
+    </view>
+  </view>
+
+  <view class="body">
+    <view class="title">{{product.name}}</view>
+    <view class="desc" wx:if="{{product.description}}">{{product.description}}</view>
+    <view class="pref-hint" wx:if="{{prefHint}}">{{prefHint}}</view>
+    <view class="price">
+      ¥{{displayPrice}}
+      <text class="base" wx:if="{{displayPrice != product.price}}">（基础 ¥{{product.price}}）</text>
+    </view>
+
+    <view class="group" wx:for="{{product.option_groups}}" wx:key="id">
+      <view class="gname">{{item.name}}</view>
+      <block wx:if="{{item.selection_type === 'SINGLE'}}">
+        <view
+          class="opt {{selected[item.id] === o.id || selected[item.id] == o.id ? 'on' : ''}}"
+          wx:for="{{item.options}}"
+          wx:for-item="o"
+          wx:key="id"
+          data-gid="{{item.id}}"
+          data-oid="{{o.id}}"
+          bindtap="selectSingle"
+        >
+          {{o.name}}<text wx:if="{{o.extra_price > 0}}"> +¥{{o.extra_price}}</text>
+        </view>
+      </block>
+      <block wx:else>
+        <view
+          class="opt {{util.hasId(multi[item.id], o.id) ? 'on' : ''}}"
+          wx:for="{{item.options}}"
+          wx:for-item="o"
+          wx:key="id"
+          data-gid="{{item.id}}"
+          data-oid="{{o.id}}"
+          bindtap="selectMulti"
+        >
+          {{o.name}}<text wx:if="{{o.extra_price > 0}}"> +¥{{o.extra_price}}</text>
+        </view>
+      </block>
+    </view>
+
+    <view class="qty-row">
+      <text class="qty-label">数量</text>
+      <view class="qty-ctrl">
+        <text class="qty-btn" data-delta="-1" bindtap="changeQty">−</text>
+        <text class="qty-num">{{quantity}}</text>
+        <text class="qty-btn" data-delta="1" bindtap="changeQty">+</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="footer-bar safe-bottom">
+    <view class="footer-sum">合计 ¥{{lineTotal}}</view>
+    <button class="btn-primary footer-btn" bindtap="addCart">加入购物车</button>
+  </view>
+</view>

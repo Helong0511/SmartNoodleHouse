@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     wechat_notify_url: str = ""
     # 退款结果回调；留空则复用 WECHAT_NOTIFY_URL（同一入口按 event_type 分流）
     wechat_refund_notify_url: str = ""
+    # 小程序订阅消息：出餐/待取餐提醒（微信公众平台申请模板后填入）
+    wechat_subscribe_template_order_ready: str = ""
 
     alipay_app_id: str = ""
     alipay_private_key: str = ""

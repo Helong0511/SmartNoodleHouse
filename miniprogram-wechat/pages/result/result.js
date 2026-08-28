@@ -1,17 +1,7 @@
-const api = require('../../utils/api')
+const { redirectToPackage } = require('../../utils/page-redirect')
 
 Page({
-  data: { order: {}, hasPacking: false },
-  async onLoad(query) {
-    try {
-      const order = await api.get(`/orders/${query.order_id}`)
-      const fee = Number(order && order.packing_fee)
-      this.setData({ order, hasPacking: fee > 0 })
-    } catch (e) {
-      wx.showToast({ title: e.message || '加载失败', icon: 'none' })
-    }
-  },
-  goMenu() {
-    wx.redirectTo({ url: '/pages/menu/menu' })
+  onLoad(query) {
+    redirectToPackage('/packageOrder/result/result', query)
   }
 })

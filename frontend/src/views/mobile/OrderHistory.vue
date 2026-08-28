@@ -13,7 +13,12 @@
       </div>
       <div class="summary">{{ o.item_summary }}</div>
       <div class="row foot">
-        <span class="meta">{{ formatTime(o.created_at) }} · ¥{{ o.total_amount }}</span>
+        <span class="meta">
+          {{ formatTime(o.created_at) }} · ¥{{ o.total_amount }}
+          <span v-if="Number(o.discount_amount) > 0 || Number(o.coupon_discount) > 0" class="discount">
+            （已优惠¥{{ (Number(o.discount_amount) + Number(o.coupon_discount || 0)).toFixed(2) }}）
+          </span>
+        </span>
         <el-button
           size="small"
           type="primary"
@@ -117,4 +122,5 @@ onMounted(loadOrders)
 .summary { margin-top:6px; font-weight:600; }
 .foot { margin-top:8px; }
 .meta { color:#999; font-size:12px; }
+.discount { color:#f56c6c; margin-left:4px; }
 </style>

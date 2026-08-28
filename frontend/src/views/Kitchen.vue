@@ -60,6 +60,7 @@
             </div>
             <div class="badges">
               <el-tag v-if="showStoreTag(o)" size="small" type="success" effect="plain">{{ o.store_name || `店#${o.store_id}` }}</el-tag>
+              <el-tag v-if="o.is_member && o.member_level_name" size="small" type="success" effect="plain">{{ o.member_level_name }}</el-tag>
               <el-tag size="small" :type="o.is_delivery ? 'danger' : 'info'">{{ o.channel_label || '堂食' }}</el-tag>
               <el-tag v-if="o.need_pack || o.dining_type === 'TAKEAWAY'" size="small" type="warning">打包</el-tag>
               <el-tag size="small" effect="dark" :type="statusTag(o.status)">{{ statusLabel(o.status) }}</el-tag>
@@ -113,6 +114,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
 import { KDS_ACTIONS, ORDER_STATUS, orderStatusTagType } from '@/utils/labels'
 
@@ -357,16 +359,12 @@ function connectWs() {
   } catch {
     /* */
   }
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const token = localStorage.getItem('snh_staff_token') || localStorage.getItem('token') || ''
-  // 开发：vite 代理 /api；生产同域
-  const host = location.host
   connStatus.value = 'connecting'
-  const qs = new URLSearchParams({ token })
+  const params: Record<string, string> = {}
   if (isSuperAdmin.value && selectedStoreId.value) {
-    qs.set('store_id', String(selectedStoreId.value))
+    params.store_id = String(selectedStoreId.value)
   }
-  ws = new WebSocket(`${proto}://${host}/api/v1/ws/kitchen?${qs.toString()}`)
+  ws = openStaffWebSocket('kitchen', params)
 
   ws.onopen = () => {
     reconnectAttempt = 0

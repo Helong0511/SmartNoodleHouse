@@ -16,6 +16,10 @@
         <span class="amt">¥{{ item.subtotal }}</span>
       </div>
       <div class="sum"><span>小计</span><span>¥{{ subtotal }}</span></div>
+      <div v-if="hasDiscount" class="sum discount-row">
+        <span>会员优惠{{ memberDiscountText ? `（${memberDiscountText}）` : '' }}</span>
+        <span>-¥{{ discountAmount }}</span>
+      </div>
       <div v-if="needPack" class="sum"><span>打包费（预估）</span><span>¥{{ packingFee }}</span></div>
       <div class="sum total"><span>应付约</span><span>¥{{ payEstimate }}</span></div>
     </div>
@@ -50,6 +54,15 @@ const channelRaw = localStorage.getItem('snh_channel') || localStorage.getItem('
 const channel = channelRaw.toUpperCase() === 'ALIPAY' ? 'ALIPAY' : 'WECHAT'
 const channelLabel = channel === 'ALIPAY' ? '支付宝' : '微信'
 const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
+const memberRate = ref(1)
+const isMember = ref(false)
+const memberLevelName = ref('')
+const memberDiscountText = ref('')
+
+function discountText(rate: number) {
+  if (!Number.isFinite(rate) || rate >= 1) return ''
+  return `${Math.round(rate * 100) / 10}折`
+}
 
 const subtotal = computed(() =>
   cart.value.reduce((s, i) => s + parseFloat(i.subtotal || i.price || 0), 0).toFixed(2),
@@ -61,10 +74,20 @@ const packingFee = computed(() => {
   }, 0)
   return fee.toFixed(2)
 })
+const discountAmount = computed(() => {
+  const sub = parseFloat(subtotal.value)
+  const rate = memberRate.value
+  if (rate > 0 && rate < 1) {
+    return (Math.round(sub * (1 - rate) * 100) / 100).toFixed(2)
+  }
+  return '0.00'
+})
+const hasDiscount = computed(() => parseFloat(discountAmount.value) > 0)
 const payEstimate = computed(() => {
   const sub = parseFloat(subtotal.value)
   const pack = needPack.value ? parseFloat(packingFee.value) : 0
-  return (sub + pack).toFixed(2)
+  const disc = parseFloat(discountAmount.value)
+  return Math.max(0, Math.round((sub - disc + pack) * 100) / 100).toFixed(2)
 })
 
 function idempotencyKey(): string {
@@ -121,7 +144,36 @@ async function submit() {
   }
 }
 
+async function ensureLogin() {
+  if (localStorage.getItem('customer_token')) return
+  const code = localStorage.getItem('h5_login_code') || `h5_member_${Date.now()}`
+  localStorage.setItem('h5_login_code', code)
+  const res = await api.post('/miniprogram/wechat/login', { code })
+  localStorage.setItem('customer_token', res.data.customer_token)
+  localStorage.setItem('customer_id', String(res.data.customer_id))
+}
+
+async function loadMember() {
+  try {
+    await ensureLogin()
+    const profile = (await api.get('/miniprogram/customers/me', { headers: { 'X-Client': 'customer' } })).data
+    const rate = profile?.is_member && profile.member_discount_rate
+      ? parseFloat(profile.member_discount_rate)
+      : 1
+    memberRate.value = Number.isFinite(rate) && rate > 0 && rate < 1 ? rate : 1
+    isMember.value = !!profile?.is_member
+    memberLevelName.value = profile?.member_level_name || ''
+    memberDiscountText.value = discountText(memberRate.value)
+  } catch {
+    memberRate.value = 1
+    isMember.value = false
+    memberLevelName.value = ''
+    memberDiscountText.value = ''
+  }
+}
+
 onMounted(async () => {
+  await loadMember()
   cart.value = cart.value.map((c) => ({
     ...c,
     imageUrl: c.imageUrl || mediaUrl(c.main_image),
@@ -165,6 +217,7 @@ onMounted(async () => {
 .amt { color:#ff6b35; font-weight:600; }
 .sum { display:flex; justify-content:space-between; margin-top:8px; color:#666; font-size:14px; }
 .sum.total { color:#333; font-weight:700; font-size:16px; margin-top:12px; }
+.discount-row { color:#f56c6c; }
 .pack-row { display:flex; gap:10px; }
 .pack-opt {
   flex:1; padding:10px 0; border-radius:8px; border:1px solid #ddd; background:#fff;

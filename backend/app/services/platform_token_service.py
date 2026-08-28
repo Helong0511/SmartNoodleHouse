@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
-from app.core.response import now_local
+from app.core.response import ensure_local_aware, now_local
 from app.models import PlatformStoreBinding
 from app.services.delivery_sign import eleme_shop_sign
 
@@ -35,7 +35,8 @@ class PlatformTokenService:
                 )
             )
             for binding in result.scalars():
-                if binding.token_expires_at and binding.token_expires_at > deadline:
+                expires = ensure_local_aware(binding.token_expires_at)
+                if expires and expires > deadline:
                     continue
                 ok = await cls._refresh_eleme_binding(binding)
                 if ok:

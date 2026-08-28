@@ -27,6 +27,17 @@
         </template>
 
         <div class="toolbar">
+          <el-select
+            v-if="auth.isSuperAdmin"
+            v-model="storeFilter"
+            placeholder="全部门店"
+            clearable
+            style="width: 160px"
+            @change="onStoreChange"
+          >
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+          <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
           <el-select v-model="filters.platform" placeholder="平台" clearable style="width: 110px" @change="reloadOrders">
             <el-option label="美团" value="MEITUAN" />
             <el-option label="饿了么" value="ELEME" />
@@ -54,6 +65,7 @@
             placeholder="流水#"
             style="width: 90px"
             @keyup.enter="reloadOrders"
+            @clear="reloadOrders"
           />
           <el-date-picker
             v-model="filters.dateRange"
@@ -84,9 +96,16 @@
             </template>
           </el-table-column>
           <el-table-column prop="platform_day_seq" label="#" width="56" />
-          <el-table-column label="金额" width="88">
+          <el-table-column prop="store_name" label="门店" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
+          </el-table-column>
+          <el-table-column prop="order_no" label="本系统单号" min-width="240" show-overflow-tooltip />
+          <el-table-column label="金额" width="110">
             <template #default="{ row }">
               <span class="money">¥{{ row.total_amount || '-' }}</span>
+              <div v-if="Number(row.discount_amount) > 0" class="discount-tip">会员 -¥{{ row.discount_amount }}</div>
+              <div v-if="Number(row.coupon_discount) > 0" class="discount-tip">券 -¥{{ row.coupon_discount }}</div>
+              <div v-if="Number(row.voucher_discount) > 0" class="discount-tip">代金 -¥{{ row.voucher_discount }}</div>
             </template>
           </el-table-column>
           <el-table-column label="接单" width="100">
@@ -336,7 +355,20 @@
           <el-descriptions :column="1" border size="small" class="mt">
             <el-descriptions-item label="平台单号">{{ detail.platform_order_id }}</el-descriptions-item>
             <el-descriptions-item label="本系统单号">{{ detail.order_no }}</el-descriptions-item>
-            <el-descriptions-item label="订单金额"><span class="money">¥{{ detail.total_amount }}</span></el-descriptions-item>
+            <el-descriptions-item label="商品小计">¥{{ detail.subtotal || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="会员优惠">
+              <span v-if="Number(detail.discount_amount) > 0" class="discount-text">-¥{{ detail.discount_amount }}</span>
+              <span v-else class="muted">—</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="优惠券">
+              <span v-if="Number(detail.coupon_discount) > 0" class="discount-text">-¥{{ detail.coupon_discount }}</span>
+              <span v-else class="muted">—</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="代金券">
+              <span v-if="Number(detail.voucher_discount) > 0" class="discount-text">-¥{{ detail.voucher_discount }}</span>
+              <span v-else class="muted">—</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="应付金额"><span class="money">¥{{ detail.total_amount }}</span></el-descriptions-item>
             <el-descriptions-item label="配送费">¥{{ detail.delivery_fee }}</el-descriptions-item>
             <el-descriptions-item label="餐盒费">¥{{ detail.packing_fee }}</el-descriptions-item>
             <el-descriptions-item label="物流">
@@ -440,6 +472,8 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { openStaffWebSocket } from '@/utils/ws'
+import { useAuthStore } from '@/stores/auth'
 import {
   DELIVERY_REFUND_STATUS,
   DELIVERY_STATUS,
@@ -448,6 +482,15 @@ import {
   deliveryStatusTagType,
   label,
 } from '@/utils/labels'
+
+const auth = useAuthStore()
+const stores = ref<any[]>([])
+const storeFilter = ref<number | undefined>()
+const boundStoreName = computed(() => {
+  const sid = auth.user?.store_id
+  if (!sid) return ''
+  return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
+})
 
 const tab = ref('orders')
 const pageLoading = ref(false)
@@ -466,6 +509,7 @@ const stats = reactive({
   today_meituan: 0,
   today_eleme: 0,
   today_revenue: '0',
+  today_member_discount: '0',
 })
 
 const filters = reactive({
@@ -504,6 +548,14 @@ const kpiCards = computed(() => [
     filter: '',
     alert: false,
     tone: 'tone-ok',
+  },
+  {
+    key: 'discount',
+    label: '今日会员优惠',
+    value: Number(stats.today_member_discount) > 0 ? `¥${stats.today_member_discount}` : '¥0',
+    filter: '',
+    alert: false,
+    tone: 'tone-discount',
   },
   {
     key: 'plat',
@@ -603,9 +655,24 @@ function applyQuick(filter: string) {
   reloadOrders()
 }
 
+async function loadStores() {
+  try {
+    const res = await api.get('/settings/stores/options')
+    stores.value = res.data.items || []
+  } catch {
+    stores.value = []
+  }
+}
+
+function onStoreChange() {
+  refreshAll()
+}
+
 async function loadStats() {
   try {
-    const res = await api.get('/delivery/stats')
+    const res = await api.get('/delivery/stats', {
+      params: { store_id: storeFilter.value },
+    })
     Object.assign(stats, res.data || {})
   } catch {
     /* */
@@ -616,6 +683,7 @@ async function loadOrders() {
   const params: Record<string, any> = {
     page: pager.page,
     page_size: pager.pageSize,
+    store_id: storeFilter.value,
   }
   if (filters.platform) params.platform = filters.platform
   if (filters.delivery_status) params.delivery_status = filters.delivery_status
@@ -641,6 +709,7 @@ async function loadRefunds() {
   const params: Record<string, any> = {
     page: refundPager.page,
     page_size: refundPager.pageSize,
+    store_id: storeFilter.value,
   }
   if (refundFilter.value) params.status = refundFilter.value
   const res = await api.get('/delivery/refunds', { params })
@@ -866,10 +935,8 @@ function connectWs() {
   } catch {
     /* */
   }
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const token = localStorage.getItem('snh_staff_token') || localStorage.getItem('token') || ''
   connStatus.value = 'connecting'
-  ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/orders?token=${encodeURIComponent(token)}`)
+  ws = openStaffWebSocket('orders')
   ws.onopen = () => {
     reconnectAttempt = 0
     connStatus.value = 'online'
@@ -909,6 +976,7 @@ watch(
 onMounted(async () => {
   pageLoading.value = true
   try {
+    await loadStores()
     await Promise.all([loadStats(), loadOrders(), loadRefunds()])
   } finally {
     pageLoading.value = false
@@ -966,6 +1034,9 @@ onUnmounted(() => {
 .kpi-card.tone-ok {
   background: #f0f9eb;
 }
+.kpi-card.tone-discount {
+  background: #fef0f0;
+}
 .kpi-val {
   font-size: 22px;
   font-weight: 700;
@@ -1020,6 +1091,15 @@ onUnmounted(() => {
 .money {
   font-weight: 600;
   color: #e6a23c;
+}
+.discount-tip {
+  font-size: 11px;
+  color: #f56c6c;
+  line-height: 1.2;
+}
+.discount-text {
+  color: #f56c6c;
+  font-weight: 600;
 }
 .muted {
   color: #c0c4cc;

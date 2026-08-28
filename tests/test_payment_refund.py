@@ -110,7 +110,7 @@ async def test_finalize_refund_marks_partial():
     db.flush = AsyncMock()
 
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
-        "app.services.payment_service.record_order_status", new_callable=AsyncMock
+        "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ):
         await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
 

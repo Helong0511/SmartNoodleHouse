@@ -6,6 +6,7 @@
       <el-descriptions :column="2" border>
         <el-descriptions-item label="门店">
           {{ order.store_name || (order.store_id ? `门店#${order.store_id}` : '—') }}
+          <span v-if="order.store_no" class="muted">（{{ order.store_no }}）</span>
         </el-descriptions-item>
         <el-descriptions-item label="订单状态">
           <el-tag :type="orderStatusTagType(order.status)">{{ label(ORDER_STATUS, order.status) }}</el-tag>
@@ -15,17 +16,56 @@
         </el-descriptions-item>
         <el-descriptions-item label="渠道">{{ label(CHANNEL, order.channel) }}</el-descriptions-item>
         <el-descriptions-item label="桌号">
-          {{ order.table?.table_name || order.table?.table_no || '—' }}
+          <template v-if="isDelivery">外卖</template>
+          <template v-else>{{ order.table?.table_name || order.table?.table_no || '—' }}</template>
         </el-descriptions-item>
         <el-descriptions-item label="用餐方式">
-          <el-tag v-if="order.dining_type === 'TAKEAWAY'" type="warning" size="small">打包外带</el-tag>
+          <el-tag v-if="isDelivery" type="info" size="small">外卖配送</el-tag>
+          <el-tag v-else-if="order.dining_type === 'TAKEAWAY'" type="warning" size="small">打包外带</el-tag>
           <span v-else>堂食</span>
         </el-descriptions-item>
-        <el-descriptions-item label="金额">¥{{ order.total_amount }}</el-descriptions-item>
         <el-descriptions-item label="小计">¥{{ order.subtotal }}</el-descriptions-item>
+        <el-descriptions-item label="会员优惠">
+          <span v-if="Number(order.discount_amount) > 0" class="discount">-¥{{ order.discount_amount }}</span>
+          <span v-else>—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="优惠券">
+          <span v-if="Number(order.coupon_discount) > 0" class="discount">-¥{{ order.coupon_discount }}</span>
+          <span v-else>—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="代金券">
+          <span v-if="Number(order.voucher_discount) > 0" class="discount">-¥{{ order.voucher_discount }}</span>
+          <span v-else>—</span>
+        </el-descriptions-item>
         <el-descriptions-item label="打包费">
           ¥{{ order.packing_fee || '0.00' }}
         </el-descriptions-item>
+        <el-descriptions-item label="应付金额">
+          <strong>¥{{ order.total_amount }}</strong>
+        </el-descriptions-item>
+        <el-descriptions-item label="顾客">
+          <template v-if="order.customer_name || order.customer_no || order.customer_id">
+            {{ order.customer_name || '—' }}
+            <span v-if="order.customer_no" class="muted">（{{ order.customer_no }}）</span>
+            <span v-else-if="order.customer_id" class="muted">（#{{ order.customer_id }}）</span>
+          </template>
+          <template v-else>—</template>
+        </el-descriptions-item>
+        <el-descriptions-item label="手机">{{ order.customer_phone || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="是否会员">
+          <el-tag size="small" :type="order.is_member ? 'success' : 'info'">
+            {{ order.is_member ? '已注册会员' : '未注册/游客' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="会员等级">{{ order.member_level_name || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="会员折扣">
+          {{
+            order.member_discount_rate != null && Number(order.member_discount_rate) < 1
+              ? `${(Number(order.member_discount_rate) * 10).toFixed(1)}折`
+              : (order.is_member ? '无折扣' : '—')
+          }}
+        </el-descriptions-item>
+        <el-descriptions-item label="下单时间">{{ order.created_at || '—' }}</el-descriptions-item>
         <el-descriptions-item label="备注" :span="2">{{ order.remark || '—' }}</el-descriptions-item>
       </el-descriptions>
 
@@ -81,6 +121,10 @@ const order = ref<any>(null)
 
 const nextActions = computed(() => ORDER_NEXT_ACTIONS[order.value?.status] || [])
 const canCancel = computed(() => order.value && cancelAllowed(order.value.status))
+const isDelivery = computed(() => {
+  const ch = order.value?.channel
+  return ch === 'MEITUAN' || ch === 'ELEME'
+})
 
 async function load() {
   loading.value = true
@@ -113,4 +157,5 @@ onMounted(load)
 <style scoped>
 .actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
 .muted { color: #999; }
+.discount { color: #f56c6c; font-weight: 600; }
 </style>

@@ -11,13 +11,22 @@ from app.core.security import create_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import Customer, DiningTable, FaceProfile
+from app.models import Customer, DiningTable, FaceProfile, Store
 from app.services.customer_service import CustomerService
+from app.services.coupon_service import CouponService
 from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
+
+
+def _issue_customer_token(customer: Customer, channel: str = "wechat") -> str:
+    return create_customer_token(
+        customer.id,
+        channel,
+        token_version=int(getattr(customer, "token_version", 0) or 0),
+    )
 
 
 class WechatMiniLoginRequest(BaseModel):
@@ -39,6 +48,26 @@ class MemberRegisterRequest(BaseModel):
     avatar_url: str | None = None
     phone: str | None = None
     enable_face: bool = False
+
+
+class PhoneBindRequest(BaseModel):
+    phone: str | None = Field(default=None, min_length=11, max_length=11, description="手动输入手机号")
+    phone_code: str | None = Field(default=None, description="button getPhoneNumber 返回的 code")
+
+
+@router.get("/config")
+async def miniprogram_config(request: Request):
+    """小程序前端配置（订阅模板等，不含密钥）。"""
+    settings = get_settings()
+    tmpl = (settings.wechat_subscribe_template_order_ready or "").strip()
+    return success(
+        {
+            "subscribe_templates": {
+                "order_ready": tmpl or None,
+            },
+        },
+        request=request,
+    )
 
 
 @router.get("/tables")
@@ -128,6 +157,7 @@ async def scan_entry(
     if not table:
         return success(None, message="无效桌台二维码", request=request)
 
+    store = await _store_brief(db, table.store_id)
     return success(
         {
             "table": {
@@ -137,6 +167,7 @@ async def scan_entry(
                 "store_id": table.store_id,
                 "qr_token": table.qr_token,
             },
+            "store": store,
             "channel": channel,
             "prompts": {
                 "ask_register_member": True,
@@ -162,7 +193,7 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
     await db.flush()
 
     has_nickname = bool(customer.nickname or customer.display_name)
-    customer_token = create_customer_token(customer.id, "wechat")
+    customer_token = _issue_customer_token(customer, "wechat")
     face_status = await _face_status(db, customer.id)
     table = await _resolve_table(db, data.table_token) if data.table_token else None
 
@@ -197,7 +228,7 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
     await db.flush()
 
     has_nickname = bool(customer.nickname or customer.display_name)
-    customer_token = create_customer_token(customer.id, "alipay")
+    customer_token = _issue_customer_token(customer, "alipay")
     face_status = await _face_status(db, customer.id)
     table = await _resolve_table(db, data.table_token) if data.table_token else None
 
@@ -233,7 +264,10 @@ async def register_member(
     if data.phone:
         customer = await CustomerService.try_link_by_phone(db, customer, data.phone)
 
+    level = await CustomerService.ensure_default_member_level(db, customer)
+    await CouponService.issue_welcome_coupon(db, customer)
     await db.flush()
+    profile = await CustomerService.build_member_profile(db, customer)
     payload = {
         "customer_id": customer.id,
         "customer_no": customer.customer_no,
@@ -242,13 +276,56 @@ async def register_member(
         "phone": customer.phone,
         "face_status": "NONE",
         "member_registered": True,
+        **profile,
         "need_face_consent": bool(data.enable_face),
         # 若因手机号合并到老顾客，前端需刷新 token
-        "customer_token": create_customer_token(customer.id, "merged"),
+        "customer_token": _issue_customer_token(customer, "merged"),
     }
     if data.enable_face:
         return success(payload, message="会员信息已保存，请完成摄像头人脸采集授权", request=request)
     return success(payload, request=request)
+
+
+@router.post("/member/phone")
+async def bind_member_phone(
+    data: PhoneBindRequest,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """绑定/更新会员手机号（可合并历史账号）。"""
+    import re
+
+    from app.services.wechat_mini_client import get_phone_by_code
+
+    raw_phone = (data.phone or "").strip()
+    if data.phone_code:
+        raw_phone = await get_phone_by_code(data.phone_code)
+    if not raw_phone:
+        raise AppException(40054, "请提供手机号或授权获取微信手机号")
+    if not re.fullmatch(r"1\d{10}", raw_phone):
+        raise AppException(40053, "手机号格式不正确")
+    customer = await CustomerService.try_link_by_phone(db, customer, raw_phone)
+    await db.flush()
+    profile = await CustomerService.build_member_profile(db, customer)
+    return success(
+        {
+            "phone": customer.phone,
+            "customer_id": customer.id,
+            "customer_token": _issue_customer_token(customer, "merged"),
+            **profile,
+        },
+        request=request,
+    )
+
+
+@router.get("/stores/{store_id}")
+async def get_public_store(store_id: int, request: Request, db: DbSession):
+    """小程序公开门店信息（无需登录）。"""
+    store = await _store_brief(db, store_id)
+    if not store:
+        raise AppException(40405, "门店不存在或已停业")
+    return success(store, request=request)
 
 
 @router.post("/face/consent")
@@ -336,6 +413,60 @@ async def revoke_face(request: Request, db: DbSession, customer: CurrentCustomer
     return success({"revoked": True}, request=request)
 
 
+@router.get("/coupons/mine")
+async def list_my_coupons(request: Request, db: DbSession, customer: CurrentCustomer):
+    """我的可用优惠券（满减/折扣，不含代金券）。"""
+    items = await CouponService.list_available(db, customer.id)
+    return success({"items": items}, request=request)
+
+
+@router.get("/vouchers/mine")
+async def list_my_vouchers(request: Request, db: DbSession, customer: CurrentCustomer):
+    """我的可用代金券。"""
+    items = await CouponService.list_available_vouchers(db, customer.id)
+    return success({"items": items}, request=request)
+
+
+@router.get("/member/levels")
+async def list_member_levels(request: Request, db: DbSession):
+    """会员等级说明（公开，不含顾客隐私）。"""
+    levels = await CustomerService.list_levels_ordered(db)
+    return success(
+        {
+            "points_rule": "实付1元=1积分，积分达标自动升级享对应折扣",
+            "levels": [
+                {
+                    "id": lv.id,
+                    "name": lv.name,
+                    "min_points": int(lv.min_points),
+                    "discount_rate": str(lv.discount_rate),
+                    "discount_text": CustomerService.discount_display_text(lv.discount_rate),
+                }
+                for lv in levels
+            ],
+        },
+        request=request,
+    )
+
+
+@router.get("/customers/me")
+async def get_my_profile(request: Request, db: DbSession, customer: CurrentCustomer):
+    """小程序会员中心：档案 + 等级 + 积分进度 + 人脸状态。"""
+    profile = await CustomerService.build_member_profile(db, customer)
+    return success(
+        {
+            "customer_id": customer.id,
+            "customer_no": customer.customer_no,
+            "nickname": customer.nickname or customer.display_name,
+            "avatar_url": customer.avatar_url,
+            "phone": customer.phone,
+            **profile,
+            "face_status": await _face_status(db, customer.id),
+        },
+        request=request,
+    )
+
+
 @router.get("/customers/me/face-status")
 async def get_my_face_status(request: Request, db: DbSession, customer: CurrentCustomer):
     return success(await _face_status(db, customer.id), request=request)
@@ -355,16 +486,35 @@ async def _face_status(db, customer_id: int) -> dict:
     }
 
 
+async def _store_brief(db, store_id: int | None) -> dict | None:
+    if not store_id:
+        return None
+    store = await db.get(Store, int(store_id))
+    if not store or int(store.status) != 1:
+        return None
+    return {
+        "id": store.id,
+        "store_no": store.store_no,
+        "name": store.name,
+        "address": store.address,
+        "phone": store.phone,
+    }
+
+
 async def _resolve_table(db, token: str) -> dict | None:
     from app.services.table_resolve import resolve_dining_table
 
     table = await resolve_dining_table(db, token)
     if not table:
         return None
-    return {
+    payload = {
         "id": table.id,
         "table_no": table.table_no,
         "table_name": table.table_name,
         "store_id": table.store_id,
         "qr_token": table.qr_token,
     }
+    store = await _store_brief(db, table.store_id)
+    if store:
+        payload["store"] = store
+    return payload

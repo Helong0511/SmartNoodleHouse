@@ -21,6 +21,8 @@ class OrderCreate(BaseModel):
     need_pack: bool = False
     dining_type: str | None = Field(default=None, description="DINE_IN / TAKEAWAY，可与 need_pack 二选一")
     idempotency_key: str | None = None
+    customer_coupon_id: int | None = Field(default=None, description="用户优惠券 ID（满减/折扣）")
+    customer_voucher_id: int | None = Field(default=None, description="用户代金券 ID")
 
 
 class OrderStatusUpdate(BaseModel):

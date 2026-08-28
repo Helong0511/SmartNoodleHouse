@@ -1,0 +1,87 @@
+<view class="page">
+  <skeleton wx:if="{{loading}}" type="order" rows="{{2}}" />
+
+  <block wx:else>
+    <store-bar
+      storeName="{{storeName}}"
+      storeNo="{{storeNo}}"
+      tableName="{{tableName}}"
+      tableNo="{{tableNo}}"
+      compact="{{true}}"
+    />
+
+    <view class="header {{order.status === 'CANCELLED' || order.status === 'REFUNDED' ? 'muted' : ''}}">
+      <view class="ok">{{headerIcon}}</view>
+      <view class="title">{{pageTitle}}</view>
+      <view class="sub" wx:if="{{order.status === 'READY'}}">请前往取餐台领取</view>
+    </view>
+
+    <view class="info-card">
+      <view class="info-row" wx:if="{{storeName}}">
+        <text class="k">门店</text>
+        <text class="v">{{storeName}}<text wx:if="{{storeNo}}" class="sub"> #{{storeNo}}</text></text>
+      </view>
+      <view class="info-row" wx:if="{{tableName}}">
+        <text class="k">桌号</text>
+        <text class="v highlight">{{tableName}}</text>
+      </view>
+      <view class="info-row" bindtap="copyOrderNo">
+        <text class="k">订单号</text>
+        <text class="v copy">{{order.order_no}} <text class="copy-hint">复制</text></text>
+      </view>
+      <view class="info-row">
+        <text class="k">用餐</text>
+        <text class="v">{{order.dining_type === 'TAKEAWAY' ? '打包外带' : '堂食'}}</text>
+      </view>
+      <view class="info-row" wx:if="{{hasDiscount}}">
+        <text class="k">会员优惠</text>
+        <text class="v discount">-¥{{discountAmount}}<text wx:if="{{memberLevelName}}" class="sub">（{{memberLevelName}}）</text></text>
+      </view>
+      <view class="info-row" wx:if="{{hasCouponDiscount}}">
+        <text class="k">优惠券</text>
+        <text class="v discount">-¥{{couponDiscountAmount}}</text>
+      </view>
+      <view class="info-row" wx:if="{{hasVoucherDiscount}}">
+        <text class="k">代金券</text>
+        <text class="v discount">-¥{{voucherDiscountAmount}}</text>
+      </view>
+      <view class="info-row" wx:if="{{hasPacking}}">
+        <text class="k">打包费</text>
+        <text class="v">¥{{order.packing_fee}}</text>
+      </view>
+      <view class="info-row" wx:if="{{pointsEarned > 0}}">
+        <text class="k">本单积分</text>
+        <text class="v highlight">+{{pointsEarned}} 分</text>
+      </view>
+      <view class="info-row">
+        <text class="k">应付</text>
+        <text class="v price">¥{{order.total_amount}}</text>
+      </view>
+      <view class="info-row">
+        <text class="k">支付</text>
+        <text class="v">{{payLabel}}</text>
+      </view>
+    </view>
+
+    <view class="items-card" wx:if="{{orderItems.length}}">
+      <view class="card-title">商品明细</view>
+      <view class="item-row" wx:for="{{orderItems}}" wx:key="index">
+        <text class="item-name">{{item.name}}{{item.optionText}}</text>
+        <text class="item-qty">×{{item.quantity}}</text>
+        <text class="item-price">¥{{item.subtotal}}</text>
+      </view>
+    </view>
+
+    <view class="timeline" wx:if="{{statusSteps.length}}">
+      <view class="tl-title">订单进度</view>
+      <view class="tl-item {{item.active ? 'active' : ''}} {{item.done ? 'done' : ''}}" wx:for="{{statusSteps}}" wx:key="key">
+        <view class="dot"></view>
+        <text>{{item.label}}</text>
+      </view>
+    </view>
+
+    <button class="btn-primary" wx:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" bindtap="repay">继续支付</button>
+    <button class="btn-ghost" open-type="share">分享给好友</button>
+    <button class="btn-primary" bindtap="goMenu">继续点餐</button>
+  </block>
+</view>

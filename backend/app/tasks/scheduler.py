@@ -5,13 +5,12 @@ from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
-from app.core.response import now_local
-from app.models import OperationLog, Order, OrderItem, VisitorEvent
+from app.core.response import naive_local_now
+from app.models import OperationLog, Order, VisitorEvent
 
 logger = logging.getLogger(__name__)
 
 from app.services.platform_token_service import PlatformTokenService
-from app.services.stock_service import restore_stock
 from app.services.webhook_inbox import process_pending_inbox
 
 
@@ -33,12 +32,13 @@ def register_tasks(scheduler) -> None:
     @scheduler.scheduled_job("interval", minutes=1)
     async def close_expired_orders():
         async with AsyncSessionLocal() as db:
+            from app.services.order_lifecycle import apply_order_status
             from app.services.system_settings_service import SystemSettingsService
 
             timeout_minutes = await SystemSettingsService.get_int(
                 db, "order_payment_timeout_minutes", settings.order_payment_timeout_minutes
             )
-            timeout = now_local() - timedelta(minutes=timeout_minutes)
+            timeout = naive_local_now() - timedelta(minutes=timeout_minutes)
             # FOR UPDATE 与支付回调行锁互斥，避免关单/入账竞态
             result = await db.execute(
                 select(Order)
@@ -55,14 +55,15 @@ def register_tasks(scheduler) -> None:
                 # 二次确认：锁内状态可能已被回调改写
                 if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
                     continue
-                order.status = "CANCELLED"
-                order.payment_status = "CANCELLED"
-                order.cancelled_at = now_local()
-                items = (
-                    await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
-                ).scalars().all()
-                for it in items:
-                    await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="TIMEOUT",
+                    payment_status="CANCELLED",
+                    assert_kind="SYSTEM",
+                    remark="支付超时自动关单",
+                )
                 closed += 1
             await db.commit()
             if closed:
@@ -79,7 +80,7 @@ def register_tasks(scheduler) -> None:
     @scheduler.scheduled_job("interval", hours=6)
     async def cleanup_visitor_data():
         async with AsyncSessionLocal() as db:
-            await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= now_local()))
+            await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= naive_local_now()))
             await db.commit()
             logger.info("Expired visitor data cleaned")
 
@@ -88,10 +89,8 @@ def register_tasks(scheduler) -> None:
         async with AsyncSessionLocal() as db:
             from app.services.system_settings_service import SystemSettingsService
 
-            retention = await SystemSettingsService.get_int(
-                db, "operation_log_retention_days", settings.operation_log_retention_days
-            )
-            cutoff = now_local() - timedelta(days=retention)
+            days = await SystemSettingsService.get_int(db, "operation_log_retain_days", 90)
+            cutoff = naive_local_now() - timedelta(days=days)
             await db.execute(delete(OperationLog).where(OperationLog.created_at < cutoff))
             await db.commit()
-            logger.info("Operation logs older than %s days cleaned", retention)
+            logger.info("Operation logs cleaned before %s", cutoff)

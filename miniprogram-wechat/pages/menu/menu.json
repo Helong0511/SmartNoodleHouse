@@ -1,3 +1,8 @@
 {
-  "navigationBarTitleText": "菜单"
+  "navigationBarTitleText": "点餐",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark",
+  "usingComponents": {
+    "skeleton": "/components/skeleton/skeleton"
+  }
 }

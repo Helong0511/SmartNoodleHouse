@@ -86,10 +86,79 @@ function cartSummary(cart) {
   return { count, total: total.toFixed(2), list }
 }
 
+function itemKey(item) {
+  const ids = (item.option_ids || []).slice().sort((a, b) => a - b).join(',')
+  return `${item.product_id}:${ids}`
+}
+
+/** 合并同商品同规格，返回新数组 */
+function mergeCartItem(cart, entry) {
+  const list = [...(cart || [])]
+  const key = itemKey(entry)
+  const idx = list.findIndex((x) => itemKey(x) === key)
+  if (idx >= 0) {
+    const cur = normalizeItem(list[idx])
+    const add = entry.quantity || 1
+    cur.quantity = (cur.quantity || 1) + add
+    cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
+    list[idx] = cur
+  } else {
+    list.push(normalizeItem({ ...entry }))
+  }
+  return list
+}
+
+/**
+ * 对照当前门店菜单校验购物车条目。
+ * @returns {{ list, invalidCount, validCount }}
+ */
+function reconcileWithProducts(cart, products) {
+  const map = {}
+  ;(products || []).forEach((p) => {
+    map[p.id] = p
+    map[String(p.id)] = p
+  })
+
+  let invalidCount = 0
+  const list = (cart || []).map((raw) => {
+    const item = normalizeItem({ ...raw })
+    const p = map[item.product_id]
+    let invalidReason = ''
+
+    if (!p) {
+      invalidReason = '已下架或不在本店菜单'
+    } else if (p.status && p.status !== 'ON_SALE') {
+      invalidReason = '暂不可售'
+    } else {
+      const stock = parseInt(p.stock, 10)
+      const qty = item.quantity || 1
+      if (Number.isFinite(stock) && stock >= 0 && stock < qty) {
+        invalidReason = stock === 0 ? '已售罄' : `仅剩 ${stock} 份`
+      }
+    }
+
+    if (invalidReason) invalidCount += 1
+    return {
+      ...item,
+      invalid: !!invalidReason,
+      invalidReason
+    }
+  })
+
+  return {
+    list,
+    invalidCount,
+    validCount: list.length - invalidCount
+  }
+}
+
 module.exports = {
   calcUnitPrice,
   buildOptionLabels,
   collectOptionIds,
   normalizeItem,
-  cartSummary
+  cartSummary,
+  itemKey,
+  mergeCartItem,
+  reconcileWithProducts
 }

@@ -1,9 +1,27 @@
-import uuid
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
+from app.core.biz_no import (  # noqa: F401 — 兼容旧 import 路径
+    BIZ_CU,
+    BIZ_OD,
+    BIZ_OT,
+    BIZ_PA,
+    BIZ_PW,
+    BIZ_RA,
+    BIZ_RW,
+    BIZ_VI,
+    TABLE_DELIVERY,
+    TABLE_NONE,
+    TABLE_TAKEAWAY,
+    generate_no,
+    payment_biz,
+    refund_biz,
+    resolve_table_parts,
+    store_code,
+    table_code,
+)
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -30,15 +48,3 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
-
-
-def generate_no(prefix: str) -> str:
-    """业务单号：前缀 + 本地日期时间(到秒) + 随机后缀，便于人工辨认下单时间。
-
-    示例：ORD20260827134405A1B2C3
-    """
-    from app.core.response import now_local
-
-    ts = now_local().strftime("%Y%m%d%H%M%S")
-    suffix = uuid.uuid4().hex[:6].upper()
-    return f"{prefix}{ts}{suffix}"

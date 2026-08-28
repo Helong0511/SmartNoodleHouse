@@ -1,42 +1,98 @@
 <view class="page">
-  <view class="top">
-    <text class="table" wx:if="{{tableName}}">桌号 {{tableName}}</text>
-    <text class="member" bindtap="goMember">会员 · 爱好</text>
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+    compact="{{true}}"
+  />
+
+  <view class="scan-bar" wx:if="{{!hasTable && !loading}}" bindtap="scanTable">
+    <text class="scan-icon">📷</text>
+    <text>未绑定桌台，点击扫描桌台二维码</text>
   </view>
+
+  <view class="search-wrap">
+    <input
+      class="search"
+      placeholder="搜索菜品"
+      value="{{keyword}}"
+      bindinput="onSearch"
+      confirm-type="search"
+    />
+  </view>
+
   <view class="pref-bar" wx:if="{{prefSummary}}" bindtap="goMember">
     <text>{{prefSummary}}</text>
     <text class="more">详情</text>
   </view>
-  <block wx:for="{{categories}}" wx:key="id">
-    <view class="cat">{{item.name}}</view>
-    <view
-      class="product {{isWide ? 'wide' : ''}}"
-      wx:for="{{item.products}}"
-      wx:for-item="p"
-      wx:key="id"
-      bindtap="openProduct"
-      data-id="{{p.id}}"
+
+  <skeleton wx:if="{{loading && !categories.length}}" type="menu" rows="{{5}}" />
+
+  <view class="menu-layout" wx:elif="{{categories.length}}">
+    <scroll-view class="cat-nav" scroll-y enhanced show-scrollbar="{{false}}">
+      <view
+        class="cat-item {{activeCat === item.id ? 'on' : ''}}"
+        wx:for="{{categories}}"
+        wx:key="id"
+        data-id="{{item.id}}"
+        bindtap="onCatTap"
+      >{{item.name}}</view>
+    </scroll-view>
+
+    <scroll-view
+      class="menu-body"
+      scroll-y
+      scroll-into-view="{{scrollInto}}"
+      scroll-with-animation
+      enhanced
+      show-scrollbar="{{false}}"
     >
-      <view class="thumb-wrap" style="{{p.thumbStyle}}">
-        <image
-          wx:if="{{p.imageUrl}}"
-          class="thumb"
-          src="{{p.imageUrl}}"
-          mode="aspectFill"
-          lazy-load
-        />
-        <view wx:else class="thumb placeholder">
-          <text class="ph-text">{{p.name[0] || '餐'}}</text>
+      <block wx:for="{{categories}}" wx:key="id">
+        <view id="cat-{{item.id}}" class="cat-section">
+          <view class="cat-title">{{item.name}}</view>
+          <view
+            class="product {{isWide ? 'wide' : ''}}"
+            wx:for="{{item.products}}"
+            wx:for-item="p"
+            wx:key="id"
+          >
+            <view class="main" bindtap="openProduct" data-id="{{p.id}}">
+              <view class="thumb-wrap" style="{{p.thumbStyle}}">
+                <image wx:if="{{p.imageUrl}}" class="thumb" src="{{p.imageUrl}}" mode="aspectFill" lazy-load />
+                <view wx:else class="thumb placeholder">
+                  <text class="ph-text">{{p.name[0] || '餐'}}</text>
+                </view>
+              </view>
+              <view class="info">
+                <view class="name">{{p.name}}</view>
+                <view class="desc" wx:if="{{p.description}}">{{p.description}}</view>
+                <view class="price">¥{{p.price}}</view>
+              </view>
+            </view>
+            <view
+              class="quick-add"
+              catchtap="quickAdd"
+              data-id="{{p.id}}"
+              data-name="{{p.name}}"
+              data-price="{{p.price}}"
+              data-image="{{p.imageUrl}}"
+              data-has-options="{{p.has_options}}"
+            >+</view>
+          </view>
         </view>
-      </view>
-      <view class="info">
-        <view class="name">{{p.name}}</view>
-        <view class="desc" wx:if="{{p.description}}">{{p.description}}</view>
-        <view class="price">¥{{p.price}}</view>
-      </view>
-    </view>
-  </block>
-  <view class="cart-bar" bindtap="goCart">
-    购物车 {{cartCount}} · ¥{{cartTotal}}
+      </block>
+      <view class="body-pad"></view>
+    </scroll-view>
+  </view>
+
+  <view class="empty-tip" wx:elif="{{!loading && !categories.length}}">暂无菜品</view>
+
+  <view class="cart-bar safe-bottom" bindtap="goCart" wx:if="{{cartCount > 0}}">
+    <text class="cart-icon">🛒</text>
+    <text>购物车 {{cartCount}} 件</text>
+    <text class="cart-total">¥{{cartTotal}}</text>
   </view>
 </view>

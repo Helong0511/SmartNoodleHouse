@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import generate_no
+from app.core.biz_no import BIZ_OD, TABLE_DELIVERY, generate_no
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
 from app.models import (
@@ -25,6 +25,7 @@ from app.models import (
     OrderItem,
     OrderItemOption,
     Product,
+    Store,
 )
 from app.services.delivery_context import PlatformCredentials, get_credentials_for_store, resolve_store_and_credentials
 from app.services.delivery_events import (
@@ -41,9 +42,11 @@ logger = logging.getLogger(__name__)
 STATUS_SYNC_MAP = {
     "CONFIRMED": "ACCEPTED",
     "PREPARING": "ACCEPTED",
+    "COOKING": "ACCEPTED",
     "READY": "READY",
     "COMPLETED": "DONE",
     "CANCELLED": "CANCELLED",
+    "REFUNDED": "CANCELLED",
 }
 
 
@@ -330,13 +333,17 @@ class DeliveryService:
             store_id=store_id,
         )
 
+        store = await db.get(Store, int(store_id)) if store_id else None
         order = Order(
-            order_no=generate_no("D"),
+            order_no=generate_no(
+                BIZ_OD, store.store_no if store else None, None, table_placeholder=TABLE_DELIVERY
+            ),
             store_id=store_id,
             status="PAID",
             payment_status="PAID",
             payment_method=platform,
             channel=platform,
+            dining_type="TAKEAWAY",
             subtotal=subtotal,
             discount_amount=Decimal("0.00"),
             total_amount=total,
@@ -378,12 +385,22 @@ class DeliveryService:
         db.add(d_order)
         await db.flush()
 
+        from app.services.status_history import record_order_status
+
+        await record_order_status(
+            db, order_id=order.id, from_status=None, to_status="PAID", source="DELIVERY", remark="外卖落单"
+        )
+
         settings = get_settings()
         deferred: list[dict] = []
         if settings.delivery_auto_confirm:
             # 本地先标记 ACCEPTED，平台 confirm 失败由 deferred 回滚任务处理
+            from app.services.order_lifecycle import apply_order_status
+
             d_order.delivery_status = "ACCEPTED"
-            order.status = "CONFIRMED"
+            await apply_order_status(
+                db, order, "CONFIRMED", source="DELIVERY", assert_kind="SYSTEM", remark="自动接单"
+            )
             deferred.append(
                 {
                     "action": "confirm_order",
@@ -397,7 +414,6 @@ class DeliveryService:
         else:
             # 默认：仅落库 PAID/PENDING，等待商家手动接单再调平台
             d_order.delivery_status = "PENDING"
-            order.status = "PAID"
 
         return order, deferred
 
@@ -416,8 +432,11 @@ class DeliveryService:
             raise AppException(40054, f"当前配送状态不可接单: {d_order.delivery_status}")
         credentials = await get_credentials_for_store(db, d_order.platform, order.store_id)
         d_order.delivery_status = "ACCEPTED"
-        order.status = "CONFIRMED"
-        await db.flush()
+        from app.services.order_lifecycle import apply_order_status
+
+        await apply_order_status(
+            db, order, "CONFIRMED", source="DELIVERY", assert_kind="SYSTEM", remark="商家接单"
+        )
         deferred = [
             {
                 "action": "confirm_order",
@@ -490,16 +509,19 @@ class DeliveryService:
         if not d_order:
             return None
         order = await db.get(Order, d_order.order_id)
-        if order and order.status not in ("COMPLETED", "CANCELLED"):
-            from app.services.stock_service import restore_stock
+        if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
+            from app.services.order_lifecycle import apply_order_status
 
-            order.status = "CANCELLED"
-            order.cancelled_at = now_local()
+            await apply_order_status(
+                db,
+                order,
+                "CANCELLED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark="平台取消",
+            )
             d_order.delivery_status = "CANCELLED"
             d_order.last_sync_at = now_local()
-            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
-            for it in items:
-                await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
             await db.flush()
         return order
 
@@ -509,9 +531,17 @@ class DeliveryService:
         if not d_order:
             return None
         order = await db.get(Order, d_order.order_id)
-        if order:
-            order.status = "COMPLETED"
-            order.completed_at = now_local()
+        if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
+            from app.services.order_lifecycle import apply_order_status
+
+            await apply_order_status(
+                db,
+                order,
+                "COMPLETED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark="平台完成",
+            )
             d_order.delivery_status = "DONE"
             d_order.logistics_status = "DELIVERED"
             d_order.completed_at = now_local()
@@ -526,7 +556,16 @@ class DeliveryService:
             return None
         order = await db.get(Order, d_order.order_id)
         if order and order.status == "PAID":
-            order.status = "CONFIRMED"
+            from app.services.order_lifecycle import apply_order_status
+
+            await apply_order_status(
+                db,
+                order,
+                "CONFIRMED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark="平台已确认",
+            )
             d_order.delivery_status = "ACCEPTED"
             d_order.last_sync_at = now_local()
             await db.flush()
@@ -580,9 +619,19 @@ class DeliveryService:
         d_order.last_sync_at = now_local()
 
         order = await db.get(Order, d_order.order_id)
+        # 仅向前推进：配送中 → 制作中；勿把 READY/COOKING 倒退
         if order and str(logistics_status).upper() in ("DELIVERING", "RIDER_TAKE", "PICKUP", "配送中"):
-            if order.status in ("CONFIRMED", "PREPARING", "READY"):
-                order.status = "PREPARING"
+            if order.status in ("PAID", "CONFIRMED"):
+                from app.services.order_lifecycle import apply_order_status
+
+                await apply_order_status(
+                    db,
+                    order,
+                    "PREPARING",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark=f"物流={logistics_status}",
+                )
         await db.flush()
         return order
 
@@ -667,9 +716,18 @@ class DeliveryService:
             if d_order:
                 d_order.refund_status = "APPROVED"
                 order = await db.get(Order, d_order.order_id)
-                if order and refund.refund_type == "FULL":
-                    order.status = "CANCELLED"
-                    order.cancelled_at = now_local()
+                if order and refund.refund_type == "FULL" and order.status not in ("CANCELLED", "REFUNDED"):
+                    from app.services.order_lifecycle import apply_order_status
+
+                    await apply_order_status(
+                        db,
+                        order,
+                        "REFUNDED",
+                        source="DELIVERY",
+                        payment_status="REFUNDED",
+                        assert_kind="SYSTEM",
+                        remark="外卖全额退款同意",
+                    )
                     d_order.delivery_status = "CANCELLED"
         else:
             ok = await provider.disagree_refund(
@@ -691,22 +749,25 @@ class DeliveryService:
         if not d_order:
             raise AppException(40454, "外卖订单不存在")
         order = await db.get(Order, d_order.order_id)
-        if order and order.status in ("COMPLETED", "CANCELLED"):
+        if order and order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
             raise AppException(40054, "订单已结束，无法取消")
 
         credentials = await get_credentials_for_store(db, d_order.platform, order.store_id if order else 1)
         provider = get_delivery_provider(d_order.platform, credentials)
         ok = await provider.cancel_order(d_order.platform_order_id, reason)
         if ok and order:
-            from app.services.stock_service import restore_stock
+            from app.services.order_lifecycle import apply_order_status
 
-            order.status = "CANCELLED"
-            order.cancelled_at = now_local()
+            await apply_order_status(
+                db,
+                order,
+                "CANCELLED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark=reason or "商家取消",
+            )
             d_order.delivery_status = "CANCELLED"
             d_order.last_sync_at = now_local()
-            items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
-            for it in items:
-                await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
             await db.flush()
         return {"ok": ok, "order_id": order.id if order else None}
 

@@ -1,11 +1,1 @@
-<view class="page">
-  <view class="ok">✓</view>
-  <view class="title">订单已提交</view>
-  <view>订单号：{{order.order_no}}</view>
-  <view wx:if="{{order.table}}">桌号：{{order.table.table_name || order.table.table_no}}</view>
-  <view>用餐：{{order.dining_type === 'TAKEAWAY' ? '打包外带' : '堂食'}}</view>
-  <view wx:if="{{hasPacking}}">打包费：¥{{order.packing_fee}}</view>
-  <view>金额：¥{{order.total_amount}}</view>
-  <view>支付状态：{{order.payment_status}}</view>
-  <button class="btn-primary" bindtap="goMenu">继续点餐</button>
-</view>
+<view class="redirect-tip">正在打开订单详情...</view>

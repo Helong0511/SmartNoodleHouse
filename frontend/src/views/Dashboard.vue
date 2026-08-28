@@ -1,6 +1,20 @@
 <template>
   <div v-loading="loading">
-    <el-button style="float:right" @click="load">刷新</el-button>
+    <div class="toolbar">
+      <el-select
+        v-if="auth.isSuperAdmin"
+        v-model="storeFilter"
+        placeholder="全部门店"
+        clearable
+        style="width:160px"
+        @change="load"
+      >
+        <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
+      <span v-if="auth.isSuperAdmin && !storeFilter" class="scope-hint">当前为全部门店汇总</span>
+      <el-button style="margin-left:auto" @click="load">刷新</el-button>
+    </div>
     <el-row :gutter="16">
       <el-col :xs="12" :sm="8" :md="4" v-for="item in cards" :key="item.label">
         <el-card shadow="hover" class="stat-card">
@@ -60,9 +74,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const data = ref<any>(null)
 const loading = ref(false)
+const stores = ref<any[]>([])
+const storeFilter = ref<number | undefined>()
+
+const boundStoreName = computed(() => {
+  const sid = auth.user?.store_id
+  if (!sid) return ''
+  return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
+})
 
 const cards = computed(() => [
   { label: '今日订单', value: data.value?.today_orders ?? '-', tone: '', hint: '按下单时间' },
@@ -70,7 +94,19 @@ const cards = computed(() => [
     label: '今日净营业额',
     value: data.value?.today_revenue != null ? `¥${data.value.today_revenue}` : '-',
     tone: '',
-    hint: data.value?.today_gross_revenue != null ? `毛收 ¥${data.value.today_gross_revenue}` : '',
+    hint: [
+      data.value?.today_gross_revenue != null ? `毛收 ¥${data.value.today_gross_revenue}` : '',
+      Number(data.value?.today_member_discount) > 0 ? `会员优惠 ¥${data.value.today_member_discount}` : '',
+    ].filter(Boolean).join(' · ') || undefined,
+  },
+  {
+    label: '今日会员优惠',
+    value:
+      data.value?.today_member_discount != null && Number(data.value.today_member_discount) > 0
+        ? `¥${data.value.today_member_discount}`
+        : '¥0',
+    tone: 'discount',
+    hint: '有效已付订单优惠合计',
   },
   {
     label: '今日退款',
@@ -118,26 +154,54 @@ const deliveryCards = computed(() => {
     { label: '待退款', value: d.refund_pending ?? 0, raw: d.refund_pending ?? 0, alert: true },
     { label: '今日外卖单', value: d.today_orders ?? 0, raw: d.today_orders ?? 0, alert: false },
     { label: '今日外卖净营收', value: d.today_revenue != null ? `¥${d.today_revenue}` : '¥0', raw: 0, alert: false },
+    {
+      label: '今日外卖优惠',
+      value: Number(d.today_member_discount) > 0 ? `¥${d.today_member_discount}` : '¥0',
+      raw: d.today_member_discount ?? 0,
+      alert: false,
+    },
   ]
 })
+
+async function loadStores() {
+  try {
+    const res = await api.get('/settings/stores/options')
+    stores.value = res.data.items || []
+  } catch {
+    stores.value = []
+  }
+}
 
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/dashboard/overview')
+    const res = await api.get('/dashboard/overview', {
+      params: { store_id: storeFilter.value },
+    })
     data.value = res.data
   } finally {
     loading.value = false
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await loadStores()
+  await load()
+})
 </script>
 
 <style scoped>
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.scope-hint { color: #909399; font-size: 13px; }
 .stat-card { margin-bottom: 8px; }
 .stat { font-size: 26px; font-weight: bold; color: #409eff; }
 .stat.warn { color: #e6a23c; }
+.stat.discount { color: #f56c6c; }
 .label { color: #999; margin-top: 8px; }
 .hint { color: #c0c4cc; font-size: 12px; margin-top: 4px; }
 .section-head {

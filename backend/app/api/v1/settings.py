@@ -29,7 +29,7 @@ class StoreBusinessUpdate(BaseModel):
     updates: dict[str, str | int | float] = Field(default_factory=dict)
 
 
-@router.get("/stores/options")
+@router.get("/stores/options", dependencies=[require_permission("order:read")])
 async def list_store_options(request: Request, db: DbSession, user: CurrentUser):
     """员工可选门店列表：超管看全部营业中门店；门店账号仅本店。"""
     effective = require_bound_store(user, None)
@@ -354,7 +354,7 @@ async def get_settings_overview(request: Request, db: DbSession):
                 "multi_worker_note": "多 worker 通过 Redis 版本号同步失效；无 Redis 时最长延迟约 TTL 秒",
             },
             "scripts": [
-                {"name": "初始化管理员", "command": "python scripts/init_admin.py", "note": "默认 admin / admin123"},
+                {"name": "初始化管理员", "command": "python scripts/init_admin.py", "note": "首次部署后执行并设置强密码"},
                 {"name": "数据库迁移", "command": "执行 sql/001_schema.sql 与 sql/002_seed_test.sql", "note": "首次部署必做"},
                 {"name": "启动后端", "command": "cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000", "note": "Windows PowerShell 同理"},
                 {"name": "启动前端", "command": "cd frontend && npm run dev", "note": "http://localhost:5173"},

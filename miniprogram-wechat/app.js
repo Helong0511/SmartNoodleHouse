@@ -1,15 +1,17 @@
+const privacy = require('./utils/privacy')
+const { parseTableTokenFromScan } = require('./utils/scan')
+const { resolveApiBase } = require('./config/env')
+
 App({
   globalData: {
-    // 开发者工具可用 127.0.0.1；真机预览请改成电脑局域网 IP，如 http://192.168.1.8:8000/api/v1
-    // 后端请监听 0.0.0.0：uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-    // 若出现 ERR_CONNECTION_RESET：多半是后端重启/崩溃，或未勾选「不校验合法域名」
-    apiBase: 'http://127.0.0.1:8000/api/v1',
+    apiBase: resolveApiBase(),
     customerId: null,
     customerNo: null,
     nickname: '',
     avatarUrl: '',
     tableToken: '',
     table: null,
+    store: null,
     channel: 'wechat',
     faceStatus: 'NONE',
     cart: []
@@ -22,7 +24,22 @@ App({
     this.globalData.customerToken = wx.getStorageSync('customer_token') || ''
     this.globalData.customerId = wx.getStorageSync('customer_id') || null
     this.globalData.customerNo = wx.getStorageSync('customer_no') || ''
+    this.globalData.store = wx.getStorageSync('dine_store') || null
+    this.globalData.table = wx.getStorageSync('dine_table') || null
     this.parseLaunch(options)
+    privacy.setupPrivacy()
+    privacy.onNeedPrivacyAuthorization((resolve) => {
+      wx.showModal({
+        title: '隐私保护提示',
+        content: '为提供登录、点餐、人脸迎宾等服务，需您同意《用户隐私保护指引》。',
+        confirmText: '同意',
+        cancelText: '拒绝',
+        success: (res) => {
+          if (res.confirm) resolve({ buttonId: 'agree-btn', event: 'agree' })
+          else resolve({ buttonId: 'disagree-btn', event: 'disagree' })
+        }
+      })
+    })
   },
   onShow(options) {
     // 从扫码/分享再次进入时补解析
@@ -38,14 +55,12 @@ App({
     if (!token && sceneRaw) {
       try {
         const scene = decodeURIComponent(String(sceneRaw))
-        if (scene.indexOf('token=') >= 0) {
+        token = parseTableTokenFromScan(scene)
+        if (!channel && scene.indexOf('channel=') >= 0) {
           scene.split('&').forEach((pair) => {
             const [k, v] = pair.split('=')
-            if (k === 'token' && v) token = v
             if (k === 'channel' && v) channel = v
           })
-        } else if (scene) {
-          token = scene
         }
       } catch (_) {}
     }

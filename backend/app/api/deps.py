@@ -44,6 +44,37 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_optional_staff_user(
+    request: Request,
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> User | None:
+    """可选员工身份：无 token / 非员工令牌时返回 None（供公开商品列表等）。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = decode_token(token)
+        if payload.get("typ") != "staff":
+            return None
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return None
+    result = await db.execute(
+        select(User).options(selectinload(User.role)).where(User.id == user_id, User.status == 1)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        return None
+    if int(payload.get("ver") or 0) != int(getattr(user, "token_version", 0) or 0):
+        return None
+    request.state.user = user
+    return user
+
+
+OptionalStaffUser = Annotated[User | None, Depends(get_optional_staff_user)]
+
+
 async def get_current_customer(
     request: Request,
     db: DbSession,
@@ -60,6 +91,8 @@ async def get_current_customer(
     customer = await db.get(Customer, customer_id)
     if not customer or customer.status != 1:
         raise HTTPException(status_code=401, detail="顾客不存在或已禁用")
+    if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
+        raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
     request.state.customer = customer
     return customer
 
@@ -78,8 +111,10 @@ async def get_staff_or_customer(
         payload = decode_token(token)
         if payload.get("typ") == "customer":
             customer = await db.get(Customer, int(payload["sub"]))
-            if not customer:
-                raise HTTPException(status_code=401, detail="顾客不存在")
+            if not customer or customer.status != 1:
+                raise HTTPException(status_code=401, detail="顾客不存在或已禁用")
+            if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
+                raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
             return None, customer
         user = (
             await db.execute(
@@ -88,6 +123,8 @@ async def get_staff_or_customer(
         ).scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=401, detail="用户不存在")
+        if int(payload.get("ver") or 0) != int(getattr(user, "token_version", 0) or 0):
+            raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
         return user, None
     except HTTPException:
         raise

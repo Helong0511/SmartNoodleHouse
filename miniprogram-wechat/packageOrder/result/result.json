@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "订单详情",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark",
+  "usingComponents": {
+    "store-bar": "/components/store-bar/store-bar",
+    "skeleton": "/components/skeleton/skeleton"
+  }
+}

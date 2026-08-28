@@ -40,6 +40,21 @@ def now_local() -> datetime:
     return datetime.now(ZoneInfo(get_settings().app_timezone))
 
 
+def ensure_local_aware(dt: datetime | None) -> datetime | None:
+    """MySQL 读出的本地时间常为 naive，与 now_local() 比较前补齐时区。"""
+    if dt is None:
+        return None
+    tz = ZoneInfo(get_settings().app_timezone)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=tz)
+    return dt.astimezone(tz)
+
+
+def naive_local_now() -> datetime:
+    """供 ORM/SQL 绑定的本地 naive 时间（与 MySQL DATETIME 一致）。"""
+    return now_local().replace(tzinfo=None)
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 

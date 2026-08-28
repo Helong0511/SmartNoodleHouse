@@ -1,46 +1,116 @@
 <view class="page">
+
   <view class="hero">
+
     <view class="brand">智能面馆</view>
-    <view class="sub" wx:if="{{table}}">桌号 {{table.table_name}}</view>
-    <view class="sub" wx:else>正在识别桌台...</view>
+
+    <view class="sub" wx:if="{{storeName}}">{{storeName}}</view>
+
+    <view class="sub addr" wx:if="{{storeAddress}}">{{storeAddress}}</view>
+
+    <view class="sub table-line" wx:if="{{table}}">{{table.table_name || table.table_no}}</view>
+
+    <view class="sub no-table" wx:elif="{{!loading && ready}}">尚未绑定桌台</view>
+
+    <view class="sub" wx:elif="{{loading}}">正在识别桌台...</view>
+
   </view>
+
+
 
   <view class="card" wx:if="{{loading}}">
+
     <text>登录中，请稍候...</text>
+
   </view>
 
-  <view class="card" wx:if="{{showMemberPrompt}}">
+
+
+  <view class="card scan-card" wx:elif="{{ready && !hasTable}}">
+
+    <view class="scan-icon">📷</view>
+
+    <view class="title">扫描桌台二维码</view>
+
+    <view class="desc">请扫描桌上的点餐二维码，绑定门店与桌号后即可开始点餐。也可先浏览菜单，结算前再扫码选桌。</view>
+
+    <button class="btn-primary" bindtap="scanTable">扫一扫</button>
+
+    <button class="btn-ghost skip" bindtap="goMenu">先浏览菜单</button>
+
+  </view>
+
+
+
+  <view class="card" wx:elif="{{showMemberPrompt}}">
+
     <view class="title">注册会员，智能记住您的口味</view>
+
     <view class="desc">{{memberText}}</view>
+
     <view class="profile-row">
+
       <button class="avatar-btn" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
+
         <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" wx:if="{{avatarUrl}}" />
+
         <view class="avatar ph" wx:else>头</view>
+
       </button>
+
       <input
+
         class="input nick"
+
         type="nickname"
+
         placeholder="微信昵称（点此授权）"
+
         value="{{nickname}}"
+
         bindinput="onNickname"
+
         bindblur="onNickname"
+
       />
+
     </view>
+
     <label class="check">
+
       <checkbox checked="{{enableFace}}" bindtap="toggleFace" color="#ff6b35" />
+
       <text>同时开启人脸迎宾（摄像头实时采集，可随时关闭）</text>
+
     </label>
+
     <view class="face-tip" wx:if="{{enableFace}}">{{faceText}}</view>
+
     <button class="btn-primary" bindtap="onRegister">注册并开始点餐</button>
+
     <button class="btn-ghost skip" bindtap="onSkip">暂不注册，先点餐</button>
+
   </view>
 
-  <view class="card" wx:elif="{{!loading && ready}}">
+
+
+  <view class="card" wx:elif="{{ready}}">
+
     <view class="welcome-row">
+
       <image wx:if="{{avatarUrl}}" class="avatar-sm" src="{{avatarUrl}}" mode="aspectFill" />
+
       <view class="title">欢迎{{nickname ? '，' + nickname : ''}}</view>
+
     </view>
+
     <button class="btn-primary" bindtap="goMenu">开始点餐</button>
+
+    <button class="btn-ghost skip" bindtap="scanTable">重新扫码换桌</button>
+
     <button class="btn-ghost skip" bindtap="goMember">会员中心 · 口味爱好</button>
+
   </view>
+
 </view>
+

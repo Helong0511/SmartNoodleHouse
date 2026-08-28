@@ -23,8 +23,7 @@ async def resolve_dining_table(
     )
     table = result.scalar_one_or_none()
     if table:
-        if store_id and int(table.store_id) != int(store_id):
-            return None
+        # qr_token 全局唯一，以桌台所属门店为准；不因请求 store_id 不一致而拒绝
         return table
 
     # 开发联调：可用桌号当 token；正式环境仅 qr_token

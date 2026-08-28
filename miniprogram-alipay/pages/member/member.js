@@ -2,6 +2,22 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const app = getApp()
 
+function discountText(rate) {
+  if (!rate) return ''
+  const n = parseFloat(rate)
+  if (!Number.isFinite(n) || n >= 1) return ''
+  const zhe = Math.round(n * 100) / 10
+  return `${zhe}折`
+}
+
+function formatExpire(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return `至 ${String(iso).slice(0, 10)}`
+  const pad = (n) => (n < 10 ? `0${n}` : `${n}`)
+  return `至 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 function resolveUrl(path) {
   if (!path) return ''
   const s = String(path).trim()
@@ -15,34 +31,101 @@ function resolveUrl(path) {
 
 Page({
   data: {
+    loading: true,
     nickname: '',
+    displayName: '面馆会员',
+    avatarLetter: '会',
     customerNo: '',
+    isMember: false,
+    memberLevelName: '',
+    memberDiscountText: '',
+    memberPoints: 0,
+    phone: '',
     faceOn: false,
     prefs: [],
+    coupons: [],
+    vouchers: [],
+    walletLoading: false,
     orders: [],
     ordersLoading: false,
     reorderingId: null
   },
 
-  async onShow() {
+  onShow() {
+    this.loadProfile()
+  },
+
+  applyProfile(profile, prefs) {
+    const nickname = profile.nickname || app.globalData.nickname || ''
+    const displayName = nickname || '面馆会员'
+    if (profile.nickname) app.globalData.nickname = profile.nickname
+    if (profile.customer_no) app.globalData.customerNo = profile.customer_no
+    const face = (profile && profile.face_status) || {}
+    this.setData({
+      nickname,
+      displayName,
+      avatarLetter: displayName.charAt(0) || '会',
+      customerNo: profile.customer_no || app.globalData.customerNo || '',
+      faceOn: !!(face && face.has_face),
+      prefs: prefs || [],
+      isMember: !!profile.is_member,
+      memberLevelName: profile.member_level_name || '',
+      memberDiscountText: discountText(profile.member_discount_rate),
+      memberPoints: profile.member_points || 0,
+      phone: profile.phone || '',
+      loading: false
+    })
+  },
+
+  applyWallet(couponRes, voucherRes) {
+    const coupons = ((couponRes && couponRes.items) || []).map((c) => ({
+      ...c,
+      expireText: formatExpire(c.expires_at)
+    }))
+    const vouchers = ((voucherRes && voucherRes.items) || []).map((v) => ({
+      ...v,
+      expireText: formatExpire(v.expires_at)
+    }))
+    this.setData({ coupons, vouchers, walletLoading: false })
+  },
+
+  async loadProfile() {
+    const hasCache = !!this.data.customerNo
+    if (!hasCache) this.setData({ loading: true })
     try {
       if (!app.globalData.customerToken) await auth.ensureLogin()
-      const face = await api.get('/miniprogram/customers/me/face-status')
-      let prefs = []
-      try {
-        const cid = app.globalData.customerId
-        const p = await api.get(`/customers/${cid}/preferences`)
-        prefs = (p && p.preferences) || []
-      } catch (_) {}
-      this.setData({
-        nickname: app.globalData.nickname || '',
-        customerNo: app.globalData.customerNo || '',
-        faceOn: !!(face && face.has_face),
-        prefs
-      })
+      const cid = app.globalData.customerId
+      this.setData({ walletLoading: true })
+      const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
+        api.get('/miniprogram/customers/me'),
+        cid
+          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [] }))
+          : Promise.resolve({ preferences: [] }),
+        api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
+        api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
+      ])
+      const prefs = (prefRes && prefRes.preferences) || []
+      app.globalData.prefs = prefs
+      this.applyProfile(profile, prefs)
+      this.applyWallet(couponRes, voucherRes)
       await this.loadOrders()
     } catch (e) {
-      my.showToast({ content: e.message || '加载失败', type: 'fail' })
+      this.setData({ loading: false, walletLoading: false })
+      if (!hasCache) my.showToast({ content: e.message || '加载失败', type: 'fail' })
+    }
+  },
+
+  async loadWallet() {
+    this.setData({ walletLoading: true })
+    try {
+      const [couponRes, voucherRes] = await Promise.all([
+        api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
+        api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
+      ])
+      this.applyWallet(couponRes, voucherRes)
+    } catch (e) {
+      this.setData({ walletLoading: false })
+      my.showToast({ content: e.message || '刷新失败', type: 'fail' })
     }
   },
 

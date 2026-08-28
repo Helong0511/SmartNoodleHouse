@@ -138,7 +138,9 @@ async def confirm_delivery_order(
 
 
 @router.get("/stats", dependencies=[require_permission("order:read")])
-async def delivery_stats(request: Request, db: DbSession, user: CurrentUser):
+async def delivery_stats(
+    request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None
+):
     """外卖运营台顶部 KPI。"""
     from sqlalchemy import func
 
@@ -146,7 +148,7 @@ async def delivery_stats(request: Request, db: DbSession, user: CurrentUser):
     from app.models import Order
     from app.services.store_scope import require_bound_store
 
-    store = require_bound_store(user)
+    store = require_bound_store(user, store_id)
     today = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
 
     async def _count(extra=None):
@@ -179,9 +181,12 @@ async def delivery_stats(request: Request, db: DbSession, user: CurrentUser):
         refund_pending_q = refund_pending_q.where(Order.store_id == store)
     refund_pending = int(await db.scalar(refund_pending_q) or 0)
 
-    from app.services.revenue_stats import net_revenue_since
+    from app.services.revenue_stats import member_discount_since, net_revenue_since
 
     today_revenue = await net_revenue_since(
+        db, since=today, store_id=store, channels=["MEITUAN", "ELEME"]
+    )
+    today_member_discount = await member_discount_since(
         db, since=today, store_id=store, channels=["MEITUAN", "ELEME"]
     )
 
@@ -196,6 +201,7 @@ async def delivery_stats(request: Request, db: DbSession, user: CurrentUser):
             "today_meituan": today_meituan,
             "today_eleme": today_eleme,
             "today_revenue": str(today_revenue),
+            "today_member_discount": str(today_member_discount),
         },
         request=request,
     )
@@ -214,6 +220,7 @@ async def list_delivery_orders(
     only_urge: bool = False,
     date_from: str | None = None,
     date_to: str | None = None,
+    store_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -228,7 +235,7 @@ async def list_delivery_orders(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     q = select(DeliveryOrder).join(Order, Order.id == DeliveryOrder.order_id)
-    store = require_bound_store(user)
+    store = require_bound_store(user, store_id)
     if store:
         q = q.where(Order.store_id == store)
     if platform:
@@ -287,15 +294,32 @@ async def list_delivery_orders(
             o.id: o
             for o in (await db.execute(select(Order).where(Order.id.in_(order_ids)))).scalars().all()
         }
+    store_ids = list({o.store_id for o in order_map.values() if o.store_id})
+    from app.models import Store
+
+    store_map: dict[int, Store] = {}
+    if store_ids:
+        store_map = {
+            s.id: s
+            for s in (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
+        }
 
     items = []
     for d in rows:
         o = order_map.get(d.order_id)
+        store = store_map.get(o.store_id) if o and o.store_id else None
         items.append(
             {
                 "id": d.id,
                 "order_id": d.order_id,
                 "order_no": o.order_no if o else None,
+                "store_id": o.store_id if o else None,
+                "store_name": store.name if store else None,
+                "store_no": store.store_no if store else None,
+                "subtotal": str(o.subtotal) if o else None,
+                "discount_amount": str(o.discount_amount) if o else None,
+                "coupon_discount": str(o.coupon_discount) if o else None,
+                "voucher_discount": str(o.voucher_discount) if o else None,
                 "total_amount": str(o.total_amount) if o else None,
                 "order_status": o.status if o else None,
                 "remark": o.remark if o else None,
@@ -373,6 +397,10 @@ async def get_delivery_order(delivery_order_id: int, request: Request, db: DbSes
             "id": d.id,
             "order_id": d.order_id,
             "order_no": order.order_no,
+            "subtotal": str(order.subtotal),
+            "discount_amount": str(order.discount_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
             "total_amount": str(order.total_amount),
             "order_status": order.status,
             "remark": order.remark,
@@ -407,6 +435,7 @@ async def list_refunds(
     db: DbSession,
     user: CurrentUser,
     status: str | None = None,
+    store_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -416,7 +445,7 @@ async def list_refunds(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     q = select(DeliveryRefund).join(Order, Order.id == DeliveryRefund.order_id)
-    store = require_bound_store(user)
+    store = require_bound_store(user, store_id)
     if store:
         q = q.where(Order.store_id == store)
     if status:

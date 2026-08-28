@@ -66,3 +66,23 @@ async def paid_order_count_since(
     if store_id is not None:
         q = q.where(Order.store_id == store_id)
     return int(await db.scalar(q) or 0)
+
+
+async def member_discount_since(
+    db: AsyncSession,
+    *,
+    since: datetime,
+    store_id: int | None = None,
+    channels: list[str] | None = None,
+) -> Decimal:
+    """期间内有效已付订单的会员优惠合计（discount_amount 之和）。"""
+    q = select(func.coalesce(func.sum(Order.discount_amount), 0)).where(
+        Order.payment_status.in_(("PAID", "PARTIAL_REFUND")),
+        Order.paid_at >= since,
+        Order.discount_amount > 0,
+    )
+    if store_id is not None:
+        q = q.where(Order.store_id == store_id)
+    if channels:
+        q = q.where(Order.channel.in_(channels))
+    return money(Decimal(str(await db.scalar(q) or 0)))

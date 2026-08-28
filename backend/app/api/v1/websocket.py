@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
+from app.core.database import AsyncSessionLocal
 from app.core.security import decode_token
+from app.models import Customer, User
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(tags=["WebSocket"])
@@ -15,6 +19,53 @@ CHANNEL_PERMS = {
 }
 
 
+def _extract_ws_token(websocket: WebSocket, query_token: str | None) -> str | None:
+    proto = websocket.headers.get("sec-websocket-protocol") or ""
+    if proto:
+        parts = [p.strip() for p in proto.split(",")]
+        if len(parts) >= 2 and parts[0].lower() in ("bearer", "access_token"):
+            return parts[1]
+        if len(parts) == 1 and parts[0].count(".") == 2:
+            return parts[0]
+    return query_token
+
+
+async def _load_staff_user(db, token: str) -> User | None:
+    try:
+        payload = decode_token(token)
+        if payload.get("typ") != "staff":
+            return None
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return None
+    user = (
+        await db.execute(
+            select(User).options(selectinload(User.role)).where(User.id == user_id, User.status == 1)
+        )
+    ).scalar_one_or_none()
+    if not user:
+        return None
+    if int(payload.get("ver") or 0) != int(getattr(user, "token_version", 0) or 0):
+        return None
+    return user
+
+
+async def _load_customer(db, token: str) -> Customer | None:
+    try:
+        payload = decode_token(token)
+        if payload.get("typ") != "customer":
+            return None
+        customer_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return None
+    customer = await db.get(Customer, customer_id)
+    if not customer or customer.status != 1:
+        return None
+    if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
+        return None
+    return customer
+
+
 @router.websocket("/ws/{channel}")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -22,16 +73,7 @@ async def websocket_endpoint(
     token: str | None = Query(default=None),
     store_id: int | None = Query(default=None),
 ):
-    proto = websocket.headers.get("sec-websocket-protocol") or ""
-    header_token = None
-    if proto:
-        parts = [p.strip() for p in proto.split(",")]
-        if len(parts) >= 2 and parts[0].lower() in ("bearer", "access_token"):
-            header_token = parts[1]
-        elif len(parts) == 1 and parts[0].count(".") == 2:
-            header_token = parts[0]
-
-    auth_token = header_token or token
+    auth_token = _extract_ws_token(websocket, token)
     user_store_id = None
     role = None
     is_super = False
@@ -40,38 +82,41 @@ async def websocket_endpoint(
         if not auth_token:
             await websocket.close(code=4401, reason="未登录")
             return
-        try:
-            payload = decode_token(auth_token)
-            typ = payload.get("typ")
-            if typ == "customer":
-                if channel != "orders":
-                    await websocket.close(code=4403, reason="无权订阅此频道")
-                    return
-            elif typ != "staff":
-                await websocket.close(code=4401, reason="无效令牌类型")
-                return
-            else:
-                role = payload.get("role")
-                is_super = role == "SUPER_ADMIN"
-                allowed = CHANNEL_PERMS.get(channel)
-                if allowed and role not in allowed and not is_super:
-                    await websocket.close(code=4403, reason="角色无权订阅")
-                    return
-                raw_store = payload.get("store_id")
-                if raw_store is not None:
-                    try:
-                        user_store_id = int(raw_store)
-                    except (TypeError, ValueError):
-                        user_store_id = None
-                if not is_super:
-                    if not user_store_id:
-                        await websocket.close(code=4403, reason="账号未绑定门店")
+        async with AsyncSessionLocal() as db:
+            try:
+                payload = decode_token(auth_token)
+                typ = payload.get("typ")
+                if typ == "customer":
+                    if channel != "orders":
+                        await websocket.close(code=4403, reason="无权订阅此频道")
                         return
-                    # 非超管忽略客户端传的 store_id，强制本店
-                    store_id = user_store_id
-        except JWTError:
-            await websocket.close(code=4401, reason="无效令牌")
-            return
+                    customer = await _load_customer(db, auth_token)
+                    if not customer:
+                        await websocket.close(code=4401, reason="无效令牌")
+                        return
+                elif typ != "staff":
+                    await websocket.close(code=4401, reason="无效令牌类型")
+                    return
+                else:
+                    user = await _load_staff_user(db, auth_token)
+                    if not user:
+                        await websocket.close(code=4401, reason="无效令牌")
+                        return
+                    role = user.role.code if user.role else None
+                    is_super = role == "SUPER_ADMIN"
+                    allowed = CHANNEL_PERMS.get(channel)
+                    if allowed and role not in allowed and not is_super:
+                        await websocket.close(code=4403, reason="角色无权订阅")
+                        return
+                    user_store_id = user.store_id
+                    if not is_super:
+                        if not user_store_id:
+                            await websocket.close(code=4403, reason="账号未绑定门店")
+                            return
+                        store_id = int(user_store_id)
+            except JWTError:
+                await websocket.close(code=4401, reason="无效令牌")
+                return
 
     effective_store = store_id if is_super else user_store_id
     await ws_manager.connect(

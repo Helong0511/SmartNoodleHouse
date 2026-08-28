@@ -94,6 +94,30 @@ class MemberLevel(Base):
     discount_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("1.0000"))
 
 
+class CouponTemplate(Base):
+    __tablename__ = "coupon_templates"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100))
+    coupon_type: Mapped[str] = mapped_column(String(20), default="FIXED")
+    discount_value: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    min_order_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    valid_days: Mapped[int] = mapped_column(Integer, default=30)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class CustomerCoupon(Base):
+    __tablename__ = "customer_coupons"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    template_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("coupon_templates.id"))
+    coupon_no: Mapped[str] = mapped_column(String(40), unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="AVAILABLE")
+    obtained_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_order_id: Mapped[int | None] = mapped_column(BigInteger)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -103,7 +127,9 @@ class Customer(Base, TimestampMixin):
     avatar_url: Mapped[str | None] = mapped_column(String(500))
     phone: Mapped[str | None] = mapped_column(String(20))
     member_level_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("member_levels.id"))
+    points: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -229,6 +255,10 @@ class Order(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="PENDING_PAYMENT")
     subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    customer_coupon_id: Mapped[int | None] = mapped_column(BigInteger)
+    coupon_discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    customer_voucher_id: Mapped[int | None] = mapped_column(BigInteger)
+    voucher_discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     packing_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     payment_status: Mapped[str] = mapped_column(String(20), default="UNPAID")

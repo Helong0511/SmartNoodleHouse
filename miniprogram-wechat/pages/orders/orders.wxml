@@ -1,0 +1,88 @@
+<view class="page">
+
+  <store-bar
+
+    storeName="{{storeName}}"
+
+    storeNo="{{storeNo}}"
+
+    storeAddress="{{storeAddress}}"
+
+    storePhone="{{storePhone}}"
+
+    tableName="{{tableName}}"
+
+    tableNo="{{tableNo}}"
+
+    compact="{{true}}"
+
+  />
+
+
+
+  <skeleton wx:if="{{loading && !orders.length}}" type="order" rows="{{4}}" />
+
+
+
+  <view class="empty" wx:elif="{{!loading && !orders.length}}">
+
+    <view class="empty-title">暂无订单</view>
+
+    <view class="empty-desc">点餐完成后可在此查看进度，并一键再来一单</view>
+
+    <button class="btn-primary" bindtap="goMenu">去点餐</button>
+
+  </view>
+
+
+
+  <block wx:else>
+
+    <view class="order" wx:for="{{orders}}" wx:key="id" bindtap="openOrder" data-id="{{item.id}}">
+
+      <view class="order-head">
+
+        <text class="ono">{{item.order_no}}</text>
+
+        <text class="st">{{item.status_label || item.status}}</text>
+
+      </view>
+
+      <view class="place" wx:if="{{item.placeText}}">{{item.placeText}}</view>
+
+      <view class="order-body">{{item.item_summary}}</view>
+
+      <view class="order-foot">
+
+        <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}<text wx:if="{{item.discount_amount > 0}}" class="discount">（已优惠¥{{item.discount_amount}}）</text> · {{item.payLabel}}</text>
+
+        <button
+
+          class="btn-mini"
+
+          size="mini"
+
+          catchtap="reorderOrder"
+
+          data-id="{{item.id}}"
+
+          disabled="{{!item.can_reorder || reorderingId == item.id}}"
+
+        >再来一单</button>
+
+      </view>
+
+    </view>
+
+    <view class="list-foot">
+
+      <text wx:if="{{loadingMore}}">加载中...</text>
+
+      <text wx:elif="{{noMore}}">— 没有更多了 —</text>
+
+    </view>
+
+  </block>
+
+</view>
+

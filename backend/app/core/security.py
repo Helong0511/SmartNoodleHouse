@@ -60,7 +60,12 @@ def create_stream_ticket(user_id: int, camera_id: int, *, token_version: int = 0
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_customer_token(customer_id: int, channel: str = "wechat") -> str:
+def create_customer_token(
+    customer_id: int,
+    channel: str = "wechat",
+    *,
+    token_version: int = 0,
+) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=settings.jwt_expire_minutes * 7)
@@ -73,6 +78,7 @@ def create_customer_token(customer_id: int, channel: str = "wechat") -> str:
         "iss": settings.app_name,
         "typ": "customer",
         "channel": channel,
+        "ver": int(token_version or 0),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 

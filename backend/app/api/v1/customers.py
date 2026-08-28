@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, require_permission
 from app.core.response import calc_pages, success
@@ -11,7 +11,7 @@ from app.models import (
     FaceProfile,
     Order,
 )
-from app.services.customer_service import PreferenceService
+from app.services.customer_service import CustomerService, PreferenceService
 
 router = APIRouter(prefix="/customers", tags=["顾客"])
 
@@ -47,16 +47,8 @@ async def list_customers(
                 ).distinct()
             )
         )
-    if keyword:
-        kw = keyword.strip()
-        q = q.where(
-            or_(
-                Customer.display_name.contains(kw),
-                Customer.nickname.contains(kw),
-                Customer.phone.contains(kw),
-                Customer.customer_no.contains(kw),
-            )
-        )
+    if keyword and keyword.strip():
+        q = q.where(CustomerService.keyword_condition(keyword))
     if channel:
         ch = channel.strip().upper()
         if ch == "WECHAT":
@@ -141,6 +133,8 @@ async def list_customers(
                 }
             )
 
+    level_map = await CustomerService.load_levels_map(db, [c.member_level_id for c in customers])
+
     items = [
         {
             "id": c.id,
@@ -158,6 +152,7 @@ async def list_customers(
             "order_count": order_counts.get(c.id, 0),
             "last_order_at": c.last_order_at.isoformat() if c.last_order_at else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
+            **CustomerService.member_payload(c, level_map.get(c.member_level_id) if c.member_level_id else None),
         }
         for c in customers
     ]
@@ -194,6 +189,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession):
     order_count = await db.scalar(
         select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
     ) or 0
+    profile = await CustomerService.build_member_profile(db, customer)
     return success(
         {
             "id": customer.id,
@@ -207,6 +203,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession):
             "order_count": int(order_count),
             "last_order_at": customer.last_order_at.isoformat() if customer.last_order_at else None,
             "created_at": customer.created_at.isoformat() if customer.created_at else None,
+            **profile,
             "wechat_accounts": [
                 {"openid": w.openid, "unionid": w.unionid, "is_mock": str(w.openid).startswith("wx_dev_")}
                 for w in wechat.scalars()

@@ -7,7 +7,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.response import money, now_local, success
 from app.models import (
     Camera,
@@ -21,7 +21,7 @@ from app.models import (
     Product,
     VisitorEvent,
 )
-from app.services.revenue_stats import net_revenue_since, paid_order_count_since
+from app.services.revenue_stats import member_discount_since, net_revenue_since, paid_order_count_since
 from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/dashboard", tags=["数据统计"])
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/dashboard", tags=["数据统计"])
 _PAID_LIKE = ("PAID", "PARTIAL_REFUND", "REFUNDED")
 
 
-@router.get("/overview")
+@router.get("/overview", dependencies=[require_permission("order:read")])
 async def dashboard_overview(
     request: Request,
     db: DbSession,
@@ -86,6 +86,7 @@ async def dashboard_overview(
     # ---------- 客单价：有效已付订单（未全额退）----------
     paid_count = await paid_order_count_since(db, since=today_start, store_id=effective_store)
     avg_order = round(float(today_revenue) / paid_count, 2) if paid_count else 0.0
+    today_member_discount = await member_discount_since(db, since=today_start, store_id=effective_store)
 
     # ---------- 热销：近 30 天有效已付（排除全额退款）----------
     hot_q = (
@@ -185,6 +186,9 @@ async def dashboard_overview(
     delivery_revenue = await net_revenue_since(
         db, since=today_start, store_id=effective_store, channels=["MEITUAN", "ELEME"]
     )
+    delivery_member_discount = await member_discount_since(
+        db, since=today_start, store_id=effective_store, channels=["MEITUAN", "ELEME"]
+    )
 
     return success(
         {
@@ -193,6 +197,7 @@ async def dashboard_overview(
             "today_gross_revenue": str(today_gross),
             "today_revenue": str(today_revenue),
             "today_refunded": str(today_refunded),
+            "today_member_discount": str(today_member_discount),
             "today_visitors": today_visitors,
             "today_new_members": today_new_members,
             "avg_order_amount": avg_order,
@@ -211,6 +216,7 @@ async def dashboard_overview(
                 "urging": delivery_urging,
                 "refund_pending": delivery_refund_pending,
                 "today_revenue": str(delivery_revenue),
+                "today_member_discount": str(delivery_member_discount),
             },
         },
         request=request,

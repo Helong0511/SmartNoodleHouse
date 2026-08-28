@@ -1,12 +1,15 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission
 from app.core.response import calc_pages, success
-from app.models import Order, Payment, PaymentRefund
+from app.models import CustomerWechatAccount, Order, Payment, PaymentRefund
 from app.schemas.order import PaymentCreate
 from app.services.payment_service import PaymentService
 from app.services.store_scope import assert_order_store_access, require_bound_store
@@ -15,9 +18,34 @@ from app.services.websocket_manager import ws_manager
 router = APIRouter(prefix="/payments", tags=["支付"])
 
 
+def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
+    if date_from:
+        try:
+            q = q.where(col >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = datetime.fromisoformat(date_to)
+            if len(date_to) <= 10:
+                end = end + timedelta(days=1)
+            q = q.where(col < end)
+        except ValueError:
+            pass
+    return q
+
+
 class RefundCreate(BaseModel):
     amount: Decimal = Field(..., gt=0)
     reason: str = Field(default="商家退款", max_length=200)
+
+
+async def _wechat_openid_for_customer(db: AsyncSession, customer_id: int) -> str | None:
+    return (
+        await db.execute(
+            select(CustomerWechatAccount.openid).where(CustomerWechatAccount.customer_id == customer_id)
+        )
+    ).scalar_one_or_none()
 
 
 @router.post("/orders/{order_id}/pay")
@@ -31,16 +59,35 @@ async def create_payment(
     order = await db.get(Order, order_id)
     if not order:
         return success(None, message="订单不存在", request=request)
-    if order.customer_id and order.customer_id != customer.id:
-        raise HTTPException(status_code=403, detail="无权支付此订单")
+    if order.customer_id:
+        if order.customer_id != customer.id:
+            raise HTTPException(status_code=403, detail="无权支付此订单")
+    else:
+        order.customer_id = customer.id
+        await db.flush()
+    extra: dict | None = None
+    if data.provider.upper() == "WECHAT" and data.channel_type.lower() == "miniprogram":
+        openid = await _wechat_openid_for_customer(db, customer.id)
+        if openid:
+            extra = {"openid": openid}
     payment, pay_data = await PaymentService.create_payment(
-        db, order, data.provider, data.channel_type, customer.id
+        db, order, data.provider, data.channel_type, customer.id, extra=extra
     )
     if pay_data.get("mock_settled"):
         await ws_manager.notify_order_event(
             "ORDER_PAID",
             {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
         )
+        if order.customer_id:
+            from app.models import Customer
+            from app.services.customer_service import CustomerService
+
+            cust = await db.get(Customer, order.customer_id)
+            if cust:
+                profile = await CustomerService.build_member_profile(db, cust)
+                pay_data["points_earned"] = int(order.total_amount or 0)
+                pay_data["member_points"] = profile.get("member_points", 0)
+                pay_data["member_level_name"] = profile.get("member_level_name")
     return success({"payment_no": payment.payment_no, "amount": str(payment.amount), **pay_data}, request=request)
 
 
@@ -177,7 +224,12 @@ async def list_payments(
     page_size: int = 20,
     status: str | None = None,
     store_id: int | None = None,
+    keyword: str | None = None,
+    provider: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ):
+    """支付列表。keyword 匹配支付号/订单号；date_* 按支付时间 paid_at（空则 created_at）。"""
     from app.models import Store
     from app.schemas.pagination import clamp_page
 
@@ -189,6 +241,14 @@ async def list_payments(
     effective_store = require_bound_store(user, store_id)
     if effective_store is not None:
         q = q.where(Order.store_id == effective_store)
+    if provider:
+        q = q.where(Payment.provider == provider.strip().upper())
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.where(or_(Payment.payment_no.like(kw), Order.order_no.like(kw)))
+    # 有支付时间用 paid_at，否则回落 created_at（未支付单）
+    time_col = func.coalesce(Payment.paid_at, Payment.created_at)
+    q = _apply_date_range(q, time_col, date_from, date_to)
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
     result = await db.execute(q.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
     rows = list(result.scalars())
@@ -206,6 +266,15 @@ async def list_payments(
         store_map = {
             s.id: s
             for s in (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
+        }
+    table_ids = list({o.table_id for o in order_map.values() if o.table_id})
+    from app.models import DiningTable
+
+    table_map: dict[int, DiningTable] = {}
+    if table_ids:
+        table_map = {
+            t.id: t
+            for t in (await db.execute(select(DiningTable).where(DiningTable.id.in_(table_ids)))).scalars().all()
         }
 
     refunded_map: dict[int, Decimal] = {}
@@ -238,6 +307,7 @@ async def list_payments(
             remain = Decimal("0")
         order = order_map.get(p.order_id)
         store = store_map.get(order.store_id) if order and order.store_id else None
+        table = table_map.get(order.table_id) if order and order.table_id else None
         items.append(
             {
                 "id": p.id,
@@ -246,6 +316,16 @@ async def list_payments(
                 "order_no": order.order_no if order else None,
                 "store_id": order.store_id if order else None,
                 "store_name": store.name if store else None,
+                "store_no": store.store_no if store else None,
+                "table_id": order.table_id if order else None,
+                "table_no": table.table_no if table else None,
+                "table_name": table.table_name if table else None,
+                "dining_type": order.dining_type if order else None,
+                "order_channel": order.channel if order else None,
+                "order_subtotal": str(order.subtotal) if order else None,
+                "order_discount_amount": str(order.discount_amount) if order else None,
+                "order_coupon_discount": str(order.coupon_discount) if order else None,
+                "order_voucher_discount": str(order.voucher_discount) if order else None,
                 "provider": p.provider,
                 "channel": p.channel,
                 "amount": str(p.amount),
@@ -269,6 +349,9 @@ async def list_refunds(
     payment_no: str | None = None,
     status: str | None = None,
     store_id: int | None = None,
+    keyword: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ):
     """退款单列表（运维：查处理中 / 按支付号钻取）。"""
     from app.models import Store, User
@@ -291,6 +374,16 @@ async def list_refunds(
     effective_store = require_bound_store(user, store_id)
     if effective_store is not None:
         q = q.where(Order.store_id == effective_store)
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.where(
+            or_(
+                PaymentRefund.refund_no.like(kw),
+                Payment.payment_no.like(kw),
+                Order.order_no.like(kw),
+            )
+        )
+    q = _apply_date_range(q, PaymentRefund.created_at, date_from, date_to)
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = list(

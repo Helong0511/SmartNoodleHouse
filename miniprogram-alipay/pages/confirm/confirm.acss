@@ -14,6 +14,13 @@
 .cart-info { flex: 1; display: flex; justify-content: space-between; align-items: center; font-size: 26rpx; }
 .cart-price { color: #1677ff; font-weight: 600; }
 .sum-row { display: flex; justify-content: space-between; margin-top: 12rpx; color: #666; font-size: 26rpx; }
+.sum-row.discount { color: #1677ff; }
+.coupon-box { background: #fff; border-radius: 12rpx; padding: 24rpx; margin-bottom: 20rpx; }
+.coupon-pick { margin-top: 8rpx; padding: 16rpx; background: #f0f7ff; border-radius: 8rpx; color: #1677ff; font-size: 26rpx; }
+.member-bar {
+  display: flex; align-items: center; gap: 12rpx; background: #f0f7ff; color: #1677ff;
+  border-radius: 12rpx; padding: 16rpx 20rpx; margin-bottom: 20rpx; font-size: 24rpx;
+}
 .sum-row.total { color: #333; font-size: 30rpx; font-weight: 700; margin-top: 16rpx; }
 .pack-row { display: flex; gap: 16rpx; margin-top: 8rpx; }
 .pack-opt { flex: 1; text-align: center; padding: 18rpx 0; border-radius: 10rpx; border: 1px solid #ddd; color: #666; }

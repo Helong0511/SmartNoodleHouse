@@ -1,0 +1,57 @@
+<view class="sk-wrap">
+  <!-- 菜单页骨架 -->
+  <view class="sk-menu" wx:if="{{type === 'menu'}}">
+    <view class="sk-search sk-block"></view>
+    <view class="sk-menu-layout">
+      <view class="sk-nav">
+        <view class="sk-block sk-nav-item" wx:for="{{[1,2,3,4,5,6]}}" wx:key="*this"></view>
+      </view>
+      <view class="sk-body">
+        <view class="sk-product" wx:for="{{rows}}" wx:key="*this">
+          <view class="sk-thumb sk-block"></view>
+          <view class="sk-lines">
+            <view class="sk-block sk-line sk-line-lg"></view>
+            <view class="sk-block sk-line"></view>
+            <view class="sk-block sk-line sk-line-sm"></view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 订单列表骨架 -->
+  <view class="sk-orders" wx:elif="{{type === 'order'}}">
+    <view class="sk-order-card" wx:for="{{rows}}" wx:key="*this">
+      <view class="sk-order-head">
+        <view class="sk-block sk-line sk-line-lg"></view>
+        <view class="sk-block sk-line sk-line-sm"></view>
+      </view>
+      <view class="sk-block sk-line"></view>
+      <view class="sk-block sk-line sk-line-sm"></view>
+    </view>
+  </view>
+
+  <!-- 商品详情骨架 -->
+  <view class="sk-product-detail" wx:elif="{{type === 'product'}}">
+    <view class="sk-block sk-hero"></view>
+    <view class="sk-pd-body">
+      <view class="sk-block sk-line sk-line-lg"></view>
+      <view class="sk-block sk-line"></view>
+      <view class="sk-block sk-line sk-line-sm"></view>
+      <view class="sk-block sk-price"></view>
+      <view class="sk-block sk-line sk-line-lg" wx:for="{{[1,2]}}" wx:key="*this"></view>
+    </view>
+  </view>
+
+  <!-- 会员中心骨架 -->
+  <view class="sk-member" wx:elif="{{type === 'member'}}">
+    <view class="sk-member-card">
+      <view class="sk-block sk-avatar"></view>
+      <view class="sk-m-lines">
+        <view class="sk-block sk-line sk-line-lg"></view>
+        <view class="sk-block sk-line"></view>
+      </view>
+    </view>
+    <view class="sk-block sk-card" wx:for="{{[1,2,3]}}" wx:key="*this"></view>
+  </view>
+</view>

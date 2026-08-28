@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_PATHS = (
     "/api/v1/payments/wechat/notify",
+    "/api/v1/payments/wechat/refund-notify",
     "/api/v1/payments/alipay/notify",
     "/api/v1/delivery/meituan/notify",
     "/api/v1/delivery/eleme/notify",

@@ -1,22 +1,34 @@
-from fastapi import APIRouter, HTTPException, Request
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission
-
-from app.core.response import calc_pages, success
-
+from app.core.response import calc_pages, ensure_local_aware, now_local, success
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Store
-
 from app.schemas.order import OrderCreate, OrderStatusUpdate
-
 from app.services.customer_service import OrderCreateService
-
 from app.services.delivery_service import DeliveryService
-
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/orders", tags=["订单"])
+
+
+def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
+    if date_from:
+        try:
+            q = q.where(col >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = datetime.fromisoformat(date_to)
+            if len(date_to) <= 10:
+                end = end + timedelta(days=1)
+            q = q.where(col < end)
+        except ValueError:
+            pass
+    return q
 
 
 def _table_payload(table: DiningTable | None) -> dict | None:
@@ -63,6 +75,8 @@ async def create_order(
         idempotency_key=data.idempotency_key,
         need_pack=data.need_pack,
         dining_type=data.dining_type,
+        customer_coupon_id=data.customer_coupon_id,
+        customer_voucher_id=data.customer_voucher_id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await ws_manager.notify_order_event(
@@ -83,6 +97,9 @@ async def create_order(
             "order_no": order.order_no,
             "total_amount": str(order.total_amount),
             "subtotal": str(order.subtotal),
+            "discount_amount": str(order.discount_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
             "packing_fee": str(order.packing_fee),
             "dining_type": order.dining_type,
             "status": order.status,
@@ -93,23 +110,23 @@ async def create_order(
         request=request,
     )
 
-@router.get("")
-
+@router.get("", dependencies=[require_permission("order:read")])
 async def list_orders(
-
     request: Request,
-
     db: DbSession,
-
     user: CurrentUser,
-
     page: int = 1,
     page_size: int = 20,
     status: str | None = None,
     payment_status: str | None = None,
     store_id: int | None = None,
+    keyword: str | None = None,
+    channel: str | None = None,
+    dining_type: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ):
-
+    """订单列表。keyword 匹配订单号/桌号；date_* 按下单 created_at。"""
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     q = select(Order)
@@ -118,37 +135,79 @@ async def list_orders(
     effective_store = require_bound_store(user, store_id)
     if effective_store:
         q = q.where(Order.store_id == effective_store)
-
     if status:
-
         q = q.where(Order.status == status)
-
     if payment_status:
-
         q = q.where(Order.payment_status == payment_status)
+    if channel:
+        q = q.where(Order.channel == channel.strip().upper())
+    if dining_type:
+        dt = dining_type.strip().upper()
+        if dt in ("DINE_IN", "TAKEAWAY"):
+            q = q.where(Order.dining_type == dt)
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.outerjoin(DiningTable, DiningTable.id == Order.table_id).where(
+            or_(
+                Order.order_no.like(kw),
+                DiningTable.table_no.like(kw),
+                DiningTable.table_name.like(kw),
+            )
+        )
+    q = _apply_date_range(q, Order.created_at, date_from, date_to)
 
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
-
     result = await db.execute(q.order_by(Order.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
     order_rows = list(result.scalars().all())
     table_map = await _load_tables(db, [o.table_id for o in order_rows if o.table_id])
     store_map = await _load_stores(db, [o.store_id for o in order_rows if o.store_id])
+    from app.models import Customer
+    from app.services.customer_service import CustomerService
+
+    cust_ids = list({o.customer_id for o in order_rows if o.customer_id})
+    cust_map: dict[int, Customer] = {}
+    if cust_ids:
+        cust_map = {
+            c.id: c
+            for c in (await db.execute(select(Customer).where(Customer.id.in_(cust_ids)))).scalars().all()
+        }
+    level_map = await CustomerService.load_levels_map(
+        db, [c.member_level_id for c in cust_map.values()]
+    )
 
     items = []
     for o in order_rows:
         t = table_map.get(o.table_id) if o.table_id else None
         store = store_map.get(o.store_id)
+        cust = cust_map.get(o.customer_id) if o.customer_id else None
+        level = level_map.get(cust.member_level_id) if cust and cust.member_level_id else None
+        member = CustomerService.member_payload(cust, level) if cust else {
+            "is_member": False,
+            "member_level_id": None,
+            "member_level_name": None,
+            "member_discount_rate": None,
+            "member_min_points": None,
+        }
         items.append(
             {
                 "id": o.id,
                 "order_no": o.order_no,
                 "store_id": o.store_id,
                 "store_name": store.name if store else None,
+                "store_no": store.store_no if store else None,
                 "customer_id": o.customer_id,
+                "customer_no": cust.customer_no if cust else None,
+                "customer_name": (cust.display_name or cust.nickname) if cust else None,
+                "customer_phone": cust.phone if cust else None,
+                **member,
                 "table_id": o.table_id,
                 "table_no": t.table_no if t else None,
                 "table_name": t.table_name if t else None,
                 "dining_type": o.dining_type,
+                "subtotal": str(o.subtotal),
+                "discount_amount": str(o.discount_amount),
+                "coupon_discount": str(o.coupon_discount or "0.00"),
+                "voucher_discount": str(o.voucher_discount or "0.00"),
                 "packing_fee": str(o.packing_fee),
                 "status": o.status,
                 "channel": o.channel,
@@ -158,7 +217,16 @@ async def list_orders(
             }
         )
 
-    return success({"items": items, "total": total or 0, "page": page, "page_size": page_size, "total_pages": calc_pages(total or 0, page_size)}, request=request)
+    return success(
+        {
+            "items": items,
+            "total": total or 0,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total or 0, page_size),
+        },
+        request=request,
+    )
 
 
 @router.get("/kitchen/stores", dependencies=[require_kitchen()])
@@ -234,6 +302,19 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
             s.id: s
             for s in (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
         }
+    from app.models import Customer
+    from app.services.customer_service import CustomerService
+
+    cust_ids = list({o.customer_id for o in order_list if o.customer_id})
+    cust_map: dict[int, Customer] = {}
+    if cust_ids:
+        cust_map = {
+            c.id: c
+            for c in (await db.execute(select(Customer).where(Customer.id.in_(cust_ids)))).scalars().all()
+        }
+    level_map = await CustomerService.load_levels_map(
+        db, [c.member_level_id for c in cust_map.values() if c.member_level_id]
+    )
 
     channel_label_map = {
         "WECHAT": "微信堂食",
@@ -272,17 +353,18 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
                 "rider_phone": d.rider_phone,
             }
         t = table_map.get(order.table_id) if order.table_id else None
-        anchor = order.paid_at or order.ordered_at or order.created_at
+        anchor = ensure_local_aware(order.paid_at or order.ordered_at or order.created_at)
         wait_seconds = 0
         if anchor is not None:
-            try:
-                a = anchor.replace(tzinfo=None) if getattr(anchor, "tzinfo", None) else anchor
-                n = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
-                wait_seconds = max(0, int((n - a).total_seconds()))
-            except Exception:
-                wait_seconds = 0
+            wait_seconds = max(0, int((now - anchor).total_seconds()))
         packing = float(order.packing_fee or 0)
         store = store_map.get(order.store_id)
+        cust = cust_map.get(order.customer_id) if order.customer_id else None
+        level = level_map.get(cust.member_level_id) if cust and cust.member_level_id else None
+        member = CustomerService.member_payload(cust, level) if cust else {
+            "is_member": False,
+            "member_level_name": None,
+        }
         orders.append(
             {
                 "id": order.id,
@@ -292,11 +374,14 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
                 "table_name": t.table_name if t else None,
                 "dining_type": order.dining_type,
                 "packing_fee": str(order.packing_fee or "0.00"),
+                "discount_amount": str(order.discount_amount or "0.00"),
                 "need_pack": (order.dining_type or "") == "TAKEAWAY" or packing > 0,
                 "remark": order.remark,
                 "store_id": order.store_id,
                 "store_name": store.name if store else None,
                 "store_no": store.store_no if store else None,
+                "is_member": member.get("is_member", False),
+                "member_level_name": member.get("member_level_name"),
                 "status": order.status,
                 "channel": order.channel,
                 "channel_label": channel_label_map.get(order.channel or "", order.channel or "堂食"),
@@ -318,13 +403,16 @@ async def list_my_orders(
     customer: CurrentCustomer,
     page: int = 1,
     page_size: int = 20,
+    store_id: int | None = None,
 ):
-    """顾客历史订单列表（会员中心）"""
+    """顾客历史订单列表（会员中心）。传 store_id 时仅返回该门店订单。"""
     from app.services.order_service import ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL
 
     page = max(1, page)
     page_size = min(max(1, page_size), 50)
     base = select(Order).where(Order.customer_id == customer.id)
+    if store_id is not None and int(store_id) > 0:
+        base = base.where(Order.store_id == int(store_id))
     total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = list(
         (
@@ -345,6 +433,7 @@ async def list_my_orders(
     for it in items:
         items_by_order.setdefault(it.order_id, []).append(it)
     table_map = await _load_tables(db, [o.table_id for o in rows if o.table_id])
+    store_map = await _load_stores(db, [o.store_id for o in rows if o.store_id])
 
     payload = []
     for o in rows:
@@ -353,16 +442,24 @@ async def list_my_orders(
         if len(o_items) > 3:
             names.append(f"等{len(o_items)}件")
         t = table_map.get(o.table_id) if o.table_id else None
+        store = store_map.get(o.store_id) if o.store_id else None
         payload.append(
             {
                 "id": o.id,
                 "order_no": o.order_no,
+                "store_id": o.store_id,
+                "store_name": store.name if store else None,
+                "store_no": store.store_no if store else None,
                 "status": o.status,
                 "status_label": ORDER_STATUS_LABEL.get(o.status or "", o.status or ""),
                 "payment_status": o.payment_status,
                 "payment_status_label": PAYMENT_STATUS_LABEL.get(o.payment_status or "", o.payment_status or ""),
                 "channel": o.channel,
                 "dining_type": o.dining_type,
+                "subtotal": str(o.subtotal),
+                "discount_amount": str(o.discount_amount),
+                "coupon_discount": str(o.coupon_discount or "0.00"),
+                "voucher_discount": str(o.voucher_discount or "0.00"),
                 "total_amount": str(o.total_amount),
                 "item_count": len(o_items),
                 "item_summary": "、".join(names) if names else "（无明细）",
@@ -401,7 +498,12 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
         raise HTTPException(status_code=401, detail="未登录")
 
     if user is not None:
+        from app.api.deps import get_user_permissions
         from app.services.store_scope import assert_order_store_access
+
+        perms = await get_user_permissions(db, user.role_id)
+        if user.role.code != "SUPER_ADMIN" and "order:read" not in perms:
+            raise HTTPException(status_code=403, detail="缺少权限: order:read")
         assert_order_store_access(user, order)
 
     if customer and order.customer_id != customer.id:
@@ -443,6 +545,24 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
         })
 
     store = await db.get(Store, order.store_id) if order.store_id else None
+    from app.models import Customer
+    from app.services.customer_service import CustomerService
+
+    cust = await db.get(Customer, order.customer_id) if order.customer_id else None
+    level = None
+    if cust and cust.member_level_id:
+        level = (await CustomerService.load_levels_map(db, [cust.member_level_id])).get(cust.member_level_id)
+    member = (
+        CustomerService.member_payload(cust, level)
+        if cust
+        else {
+            "is_member": False,
+            "member_level_id": None,
+            "member_level_name": None,
+            "member_discount_rate": None,
+            "member_min_points": None,
+        }
+    )
 
     return success(
 
@@ -456,6 +576,8 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
             "store_name": store.name if store else None,
 
+            "store_no": store.store_no if store else None,
+
             "status": order.status,
 
             "status_label": ORDER_STATUS_LABEL.get(order.status or "", order.status or ""),
@@ -468,6 +590,11 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
             "subtotal": str(order.subtotal),
 
+            "discount_amount": str(order.discount_amount),
+
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
+
             "total_amount": str(order.total_amount),
 
             "table_id": order.table_id,
@@ -479,6 +606,16 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "packing_fee": str(order.packing_fee),
 
             "remark": order.remark,
+
+            "customer_id": order.customer_id,
+
+            "customer_no": cust.customer_no if cust else None,
+
+            "customer_name": (cust.display_name or cust.nickname) if cust else None,
+
+            "customer_phone": cust.phone if cust else None,
+
+            **member,
 
             "created_at": order.created_at.isoformat() if order.created_at else None,
 

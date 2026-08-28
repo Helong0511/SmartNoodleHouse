@@ -1,4 +1,1 @@
-.page { padding: 80rpx 32rpx; text-align: center; }
-.ok { font-size: 80rpx; color: #67c23a; }
-.title { font-size: 40rpx; margin: 20rpx 0 40rpx; }
-.btn-primary { margin-top: 48rpx; }
+.redirect-tip { padding: 80rpx 32rpx; text-align: center; color: #999; font-size: 28rpx; }

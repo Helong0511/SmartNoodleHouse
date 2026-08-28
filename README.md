@@ -36,24 +36,33 @@
 
 ### 2. 数据库
 
-按顺序执行：
+**开发环境**按顺序执行：
 
 ```bash
-mysql -u root -p < sql/000_create_db_grant.sql   # 可选：建库+授权
 mysql -u root -p < sql/001_schema.sql
 mysql -u root -p < sql/002_seed_test.sql
 python scripts/init_admin.py
 ```
 
+**生产环境**请勿执行 `002_seed_test.sql`（含弱口令与测试数据），改用：
+
+```bash
+mysql -u root -p < sql/001_schema.sql
+mysql -u root -p < sql/002_seed_prod.sql
+python scripts/init_admin.py   # 设置强密码管理员
+```
+
 | 脚本 | 说明 |
 |------|------|
-| `000_create_db_grant.sql` | 建库与授权（需 root） |
-| `001_schema.sql` | 全量表结构（最终态 DDL） |
-| `002_seed_test.sql` | 测试/开发种子数据 |
-| `tools/003_capacity_audit.sql` | 容量审计（运维工具，非迁移） |
-| `archive/` | 历史增量脚本归档 |
+| `001_schema.sql` | 全量表结构（含建库语句，可按需删改 GRANT 段） |
+| `002_seed_prod.sql` | **生产**：角色/权限/会员等级/券模板/门店/系统参数 |
+| `002_seed_test.sql` | **仅开发**：含样例商品、桌台、测试订单与 admin123 |
+| `sql/tools/003_capacity_audit.sql` | 容量审计（运维工具，非迁移） |
+| `sql/tools/004_fix_delivery_dining_type.sql` | 历史外卖订单 dining_type 修复（幂等） |
+| `sql/tools/005_backfill_member_level.sql` | 已注册顾客补挂普通会员等级（幂等） |
+| `sql/tools/006_customer_token_version.sql` | 已有库补齐 customers.token_version（幂等） |
 
-默认管理员: `admin` / `admin123`
+开发种子默认管理员: `admin` / `admin123`（生产请用 `init_admin.py` 设置强密码）
 
 ### 3. 后端
 
@@ -149,7 +158,7 @@ npm run dev
 
 ```bash
 pip install -r tests/requirements.txt
-pytest                          # 单元测试（约 29 项）
+pytest                          # 单元测试（约 120+ 项）
 python tests/simulation_e2e.py  # 全链路模拟（堂食 + 外卖回调）
 python -m compileall backend
 ```
@@ -158,12 +167,13 @@ python -m compileall backend
 
 ## 生产部署（非 Docker）
 
-1. 安装 MySQL / Redis，按顺序执行全部 `sql/*.sql`
-2. `uvicorn` / `gunicorn` 跑后端（建议 systemd）
-3. `npm run build`，Nginx 托管 `frontend/dist`
-4. Nginx 反代 `/api` 到后端（参考 `deploy/nginx.conf`，改为 `127.0.0.1`）
-5. 小程序后台配置合法 request 域名（HTTPS）
-6. 美团 / 饿了么配置回调域名与验签密钥；关闭生产环境 `_dev_simulate`
+1. 安装 MySQL / Redis，执行 `sql/001_schema.sql` 与 `sql/002_seed_prod.sql`，再运行 `python scripts/init_admin.py`
+2. 复制 `.env.example` 为 `.env`，设置 `APP_ENV=production`、`JWT_SECRET`、`WEBHOOK_REQUIRE_ALLOWLIST=true` 等
+3. `uvicorn` / `gunicorn` 跑后端（建议 systemd，`PROCESS_ROLE=leader` 仅一个实例）
+4. 前端构建：`VITE_API_BASE_URL=/api/v1 npm run build`，Nginx 托管 `frontend/dist`
+5. Nginx 反代 `/api` 到后端（参考 `deploy/nginx.conf`，改为 `127.0.0.1`）
+6. 小程序后台配置合法 request 域名（HTTPS），修改 `miniprogram-wechat/app.js` 中 `apiBase`
+7. 美团 / 饿了么配置回调域名与验签密钥；关闭生产环境 `_dev_simulate`
 
 ## 安全说明
 

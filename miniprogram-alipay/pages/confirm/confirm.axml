@@ -1,11 +1,16 @@
 <view class="page">
   <view class="tip">金额由服务器重新计算，防止篡改</view>
-  <view class="table-box">
-    <view class="label">堂食桌号</view>
-    <view a:if="{{tableName}}" class="table-on">{{tableName}}</view>
-    <picker a:else mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
-      <view class="table-pick">{{pickedLabel || '请选择桌号（未扫码时）'}}</view>
+  <view class="member-bar" a:if="{{isMember && memberLevelName}}">
+    <text class="badge">{{memberLevelName}}</text>
+    <text a:if="{{memberDiscountText}}">享 {{memberDiscountText}} 优惠</text>
+  </view>
+  <view class="table-box" a:if="{{!needPack}}">
+    <view class="label">堂食桌号（必选）</view>
+    <view a:if="{{tableToken && tableName}}" class="table-on">{{tableName}}</view>
+    <picker a:elif="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
+      <view class="table-pick">{{pickedLabel || '请选择桌号'}}</view>
     </picker>
+    <view a:else class="table-pick hint">请先扫码进入或联系店员协助选桌</view>
   </view>
 
   <view class="cart-box">
@@ -22,6 +27,18 @@
       <text>小计</text>
       <text>¥{{subtotal}}</text>
     </view>
+    <view class="sum-row discount" a:if="{{hasDiscount}}">
+      <text>会员优惠{{memberDiscountText ? '（' + memberDiscountText + '）' : ''}}</text>
+      <text>-¥{{discountAmount}}</text>
+    </view>
+    <view class="sum-row discount" a:if="{{hasCouponDiscount}}">
+      <text>优惠券</text>
+      <text>-¥{{couponDiscountAmount}}</text>
+    </view>
+    <view class="sum-row discount" a:if="{{hasVoucherDiscount}}">
+      <text>代金券</text>
+      <text>-¥{{voucherDiscountAmount}}</text>
+    </view>
     <view class="sum-row" a:if="{{needPack}}">
       <text>打包费（预估）</text>
       <text>¥{{packingFee}}</text>
@@ -30,6 +47,19 @@
       <text>应付约</text>
       <text>¥{{payEstimate}}</text>
     </view>
+  </view>
+
+  <view class="coupon-box" a:if="{{coupons.length}}">
+    <view class="label">优惠券</view>
+    <picker mode="selector" range="{{couponPickerLabels}}" onChange="onPickCoupon">
+      <view class="coupon-pick">{{selectedCouponLabel}}</view>
+    </picker>
+  </view>
+  <view class="coupon-box" a:if="{{vouchers.length}}">
+    <view class="label">代金券</view>
+    <picker mode="selector" range="{{voucherPickerLabels}}" onChange="onPickVoucher">
+      <view class="coupon-pick">{{selectedVoucherLabel}}</view>
+    </picker>
   </view>
 
   <view class="pack-box">

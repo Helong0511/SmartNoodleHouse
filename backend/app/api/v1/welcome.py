@@ -18,14 +18,16 @@ async def revoke_face(request: Request, db: DbSession, customer: CurrentCustomer
 
 
 @router.get("/stats", dependencies=[require_permission("welcome:manage")])
-async def welcome_stats(request: Request, db: DbSession, user: CurrentUser):
+async def welcome_stats(
+    request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None
+):
     from app.models import Camera, WelcomeLog
 
     today = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
     q = select(func.count()).select_from(WelcomeLog)
     q_today = select(func.count()).select_from(WelcomeLog).where(WelcomeLog.created_at >= today)
-    # 非超管强制本店（未绑店 403）；超管看全店
-    effective_store = require_bound_store(user)
+    # 非超管强制本店（未绑店 403）；超管可传 store_id 或看全店
+    effective_store = require_bound_store(user, store_id)
     cam_ids = None
     if effective_store is not None:
         cam_ids = list(
@@ -56,6 +58,7 @@ async def welcome_logs(
     keyword: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    store_id: int | None = None,
     page: int = 1,
     page_size: int = 50,
     limit: int | None = None,
@@ -65,7 +68,7 @@ async def welcome_logs(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     q = select(WelcomeLog)
-    effective_store = require_bound_store(user)
+    effective_store = require_bound_store(user, store_id)
     if effective_store is not None:
         cam_ids = list(
             (await db.execute(select(Camera.id).where(Camera.store_id == effective_store))).scalars().all()

@@ -58,7 +58,7 @@ api.interceptors.response.use(
     if (status === 401) {
       localStorage.removeItem('snh_staff_token')
       localStorage.removeItem('token')
-      if (!location.pathname.includes('/login') && !location.pathname.startsWith('/m/')) {
+      if (!location.pathname.includes('/login') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member')) {
         ElMessage.error('登录已过期，请重新登录')
         location.href = '/login'
       }

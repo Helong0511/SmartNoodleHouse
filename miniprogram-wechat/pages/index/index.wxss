@@ -8,6 +8,13 @@
 }
 .brand { font-size: 48rpx; font-weight: 700; }
 .sub { margin-top: 12rpx; opacity: 0.95; }
+.sub.addr { font-size: 24rpx; opacity: 0.85; }
+.sub.table-line { font-size: 32rpx; font-weight: 600; margin-top: 16rpx; }
+.sub.no-table { font-size: 28rpx; opacity: 0.9; margin-top: 12rpx; }
+.scan-card { text-align: center; }
+.scan-icon { font-size: 72rpx; margin-bottom: 16rpx; }
+.scan-card .title { text-align: center; }
+.scan-card .desc { text-align: left; }
 .card {
   background: #fff;
   border-radius: 20rpx;

@@ -2,20 +2,64 @@
   "pages": [
     "pages/index/index",
     "pages/menu/menu",
-    "pages/product/product",
-    "pages/cart/cart",
-    "pages/confirm/confirm",
-    "pages/result/result",
-    "pages/member/member",
-    "pages/face/face"
+    "pages/orders/orders",
+    "pages/member/member"
   ],
+  "subPackages": [
+    {
+      "root": "packageOrder",
+      "name": "order",
+      "pages": [
+        "product/product",
+        "cart/cart",
+        "confirm/confirm",
+        "result/result",
+        "face/face"
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/menu/menu": {
+      "network": "all",
+      "packages": ["order"]
+    }
+  },
   "window": {
     "navigationBarTitleText": "智能面馆",
     "navigationBarBackgroundColor": "#ff6b35",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#f7f7f7"
   },
+  "tabBar": {
+    "color": "#999999",
+    "selectedColor": "#ff6b35",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/menu/menu",
+        "text": "点餐",
+        "iconPath": "assets/tab/menu.png",
+        "selectedIconPath": "assets/tab/menu-active.png"
+      },
+      {
+        "pagePath": "pages/orders/orders",
+        "text": "订单",
+        "iconPath": "assets/tab/orders.png",
+        "selectedIconPath": "assets/tab/orders-active.png"
+      },
+      {
+        "pagePath": "pages/member/member",
+        "text": "会员",
+        "iconPath": "assets/tab/member.png",
+        "selectedIconPath": "assets/tab/member-active.png"
+      }
+    ]
+  },
   "style": "v2",
-  "sitemapLocation": "sitemap.json"
+  "sitemapLocation": "sitemap.json",
+  "__usePrivacyCheck__": true,
+  "usingComponents": {
+    "store-bar": "/components/store-bar/store-bar"
+  }
 }
-
