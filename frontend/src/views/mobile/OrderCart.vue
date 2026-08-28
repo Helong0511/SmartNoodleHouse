@@ -25,6 +25,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { calcUnitPrice } from '@/utils/cart'
+import { mediaUrl } from '@/utils/media'
 
 const router = useRouter()
 const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
@@ -44,6 +45,7 @@ async function validateStock() {
       }
       if (!item.imageUrl) item.imageUrl = mediaUrl(p.main_image)
       item.box_price = p.box_price || item.box_price || '0'
+      item.no_member_discount = !!p.no_member_discount
       const stock = Number(p.stock ?? 999)
       if (stock < 999 && stock < (item.quantity || 1)) {
         item._stockError = `库存不足（剩余 ${stock}）`
