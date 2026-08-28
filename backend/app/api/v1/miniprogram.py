@@ -265,7 +265,7 @@ async def register_member(
         customer = await CustomerService.try_link_by_phone(db, customer, data.phone)
 
     level = await CustomerService.ensure_default_member_level(db, customer)
-    await CouponService.issue_welcome_coupon(db, customer)
+    await CouponService.issue_welcome_coupon(db, customer.id)
     await db.flush()
     profile = await CustomerService.build_member_profile(db, customer)
     payload = {

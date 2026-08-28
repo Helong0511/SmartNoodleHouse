@@ -89,7 +89,7 @@ def register_tasks(scheduler) -> None:
         async with AsyncSessionLocal() as db:
             from app.services.system_settings_service import SystemSettingsService
 
-            days = await SystemSettingsService.get_int(db, "operation_log_retain_days", 90)
+            days = await SystemSettingsService.get_int(db, "operation_log_retention_days", 90)
             cutoff = naive_local_now() - timedelta(days=days)
             await db.execute(delete(OperationLog).where(OperationLog.created_at < cutoff))
             await db.commit()
