@@ -72,21 +72,31 @@
           <span v-if="printRow.store_name"> · {{ printRow.store_name }}</span>
         </div>
         <div class="qr-row">
-          <div class="qr-item">
-            <img :src="qrImg(printRow.wechat_page)" alt="微信桌码" />
-            <div>微信小程序路径</div>
-          </div>
-          <div class="qr-item">
-            <img :src="qrImg(printRow.h5_full || printRow.h5_fallback)" alt="H5桌码" />
-            <div>H5 / 通用扫码</div>
+          <div class="qr-item primary">
+            <img :src="qrImg(printRow.scan_url || printRow.scan_full)" alt="一码通扫" />
+            <div class="qr-label">一码通扫（推荐）</div>
+            <div class="qr-desc">微信 / 支付宝均可扫</div>
           </div>
         </div>
-        <p class="hint">打印后贴桌；微信正式环境建议用「小程序码」后台生成替换本图。</p>
-        <el-input :model-value="printRow.wechat_page" readonly>
+        <p class="hint">贴桌请打印上方二维码。扫码后自动识别微信或支付宝并打开对应小程序。</p>
+        <el-input :model-value="printRow.scan_url || printRow.scan_full" readonly>
           <template #append>
-            <el-button @click="copyText(printRow.wechat_page)">复制路径</el-button>
+            <el-button @click="copyText(printRow.scan_url || printRow.scan_full)">复制链接</el-button>
           </template>
         </el-input>
+        <details class="more-links">
+          <summary>单独小程序路径（调试用）</summary>
+          <div class="qr-row sub">
+            <div class="qr-item">
+              <img :src="qrImg(printRow.wechat_page)" alt="微信" />
+              <div>微信小程序</div>
+            </div>
+            <div class="qr-item">
+              <img :src="qrImg(printRow.alipay_page)" alt="支付宝" />
+              <div>支付宝小程序</div>
+            </div>
+          </div>
+        </details>
       </div>
       <template #footer>
         <el-button @click="printVisible = false">关闭</el-button>
@@ -179,9 +189,12 @@ function openForm(row?: any) {
 }
 
 function openPrint(row: any) {
+  const scanUrl = row.scan_url || h5Full(`/scan?token=${encodeURIComponent(row.qr_token)}`)
   printRow.value = {
     ...row,
-    h5_full: h5Full(row.h5_fallback || `/order?token=${row.qr_token}`),
+    scan_url: scanUrl,
+    scan_full: scanUrl,
+    h5_full: h5Full(row.h5_order_url || row.h5_fallback || `/order?token=${row.qr_token}`),
   }
   printVisible.value = true
 }
@@ -267,6 +280,12 @@ onMounted(async () => {
 .qr-row { display: flex; justify-content: center; gap: 24px; margin-bottom: 12px; }
 .qr-item { font-size: 12px; color: #666; }
 .qr-item img { display: block; width: 180px; height: 180px; margin: 0 auto 8px; }
+.qr-item.primary img { width: 220px; height: 220px; }
+.qr-label { font-size: 14px; font-weight: 600; color: #333; margin-top: 4px; }
+.qr-desc { font-size: 12px; color: #888; }
+.more-links { margin-top: 16px; text-align: left; font-size: 13px; color: #666; }
+.qr-row.sub { margin-top: 12px; }
+.qr-row.sub .qr-item img { width: 140px; height: 140px; }
 .hint { color: #999; font-size: 12px; margin: 8px 0 12px; }
 @media print {
   body * { visibility: hidden; }

@@ -28,6 +28,7 @@ const router = createRouter({
         { path: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置', permission: 'system:manage' } },
       ]
     },
+    { path: '/scan', component: () => import('@/views/mobile/ScanLanding.vue') },
     { path: '/order', component: () => import('@/views/mobile/OrderMenu.vue') },
     { path: '/order/cart', component: () => import('@/views/mobile/OrderCart.vue') },
     { path: '/order/confirm', component: () => import('@/views/mobile/OrderConfirm.vue') },
@@ -40,7 +41,7 @@ const router = createRouter({
 router.beforeEach(async (to, _from, next) => {
   const token =
     localStorage.getItem('snh_staff_token') || localStorage.getItem('token')
-  const publicPaths = ['/login', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member']
+  const publicPaths = ['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member']
   const isPublic = publicPaths.some((p) => to.path.startsWith(p))
   if (!isPublic && !token) {
     next('/login')

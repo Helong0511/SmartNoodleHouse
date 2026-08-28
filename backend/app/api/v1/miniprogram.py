@@ -180,6 +180,40 @@ async def scan_entry(
     )
 
 
+@router.get("/scan-landing")
+async def scan_landing(
+    request: Request,
+    db: DbSession,
+    token: str,
+):
+    """一码通扫 H5 落地页：校验桌台并返回微信/支付宝跳转链接（公开接口）。"""
+    from app.services.qr_links import build_table_qr_links
+    from app.services.table_resolve import resolve_dining_table
+
+    table = await resolve_dining_table(db, token)
+    if not table:
+        return success(None, message="无效桌台二维码", request=request)
+
+    store = await _store_brief(db, table.store_id)
+    links = build_table_qr_links(table.qr_token)
+    return success(
+        {
+            "table": {
+                "id": table.id,
+                "table_no": table.table_no,
+                "table_name": table.table_name,
+                "store_id": table.store_id,
+            },
+            "store": store,
+            "wechat_scheme": links["wechat_scheme"],
+            "alipay_scheme": links["alipay_scheme"],
+            "h5_order_url": links["h5_order_url"],
+            "scan_url": links["scan_url"],
+        },
+        request=request,
+    )
+
+
 @router.post("/wechat/login")
 async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: DbSession):
     auth = WechatMiniAuth()

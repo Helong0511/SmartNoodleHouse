@@ -5,10 +5,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
-from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import DiningTable, Store
+from app.services.qr_links import build_table_qr_links
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/tables", tags=["桌台"])
@@ -26,28 +26,21 @@ class TableUpdate(BaseModel):
     status: int | None = None
 
 
-def _qr_urls(token: str) -> tuple[str, str]:
-    """生成微信/支付宝小程序扫码路径（不可用 table_no 伪造）"""
-    settings = get_settings()
-    wx_appid = settings.wechat_app_id or "YOUR_WECHAT_APPID"
-    ali_appid = settings.alipay_app_id or "YOUR_ALIPAY_APPID"
-    wechat = f"weixin://dl/business/?appid={wx_appid}&path=pages/index/index&query=token%3D{token}%26channel%3Dwechat"
-    alipay = f"alipays://platformapi/startapp?appId={ali_appid}&page=pages/index/index&query=token%3D{token}%26channel%3Dalipay"
-    return wechat, alipay
-
-
 def _serialize(t: DiningTable) -> dict:
+    links = build_table_qr_links(t.qr_token)
     return {
         "id": t.id,
         "store_id": t.store_id,
         "table_no": t.table_no,
         "table_name": t.table_name,
         "qr_token": t.qr_token,
-        "wechat_qr_url": t.wechat_qr_url,
-        "alipay_qr_url": t.alipay_qr_url,
-        "wechat_page": f"pages/index/index?token={t.qr_token}&channel=wechat",
-        "alipay_page": f"pages/index/index?token={t.qr_token}&channel=alipay",
-        "h5_fallback": f"/order?token={t.qr_token}",
+        "wechat_qr_url": t.wechat_qr_url or links["wechat_scheme"],
+        "alipay_qr_url": t.alipay_qr_url or links["alipay_scheme"],
+        "scan_url": links["scan_url"],
+        "wechat_page": links["wechat_page"],
+        "alipay_page": links["alipay_page"],
+        "h5_fallback": links["h5_fallback"],
+        "h5_order_url": links["h5_order_url"],
         "status": t.status,
     }
 
@@ -133,14 +126,14 @@ async def create_table(
         raise AppException(40062, f"本店桌号「{table_no}」已存在")
 
     token = secrets.token_urlsafe(32)
-    wechat_url, alipay_url = _qr_urls(token)
+    links = build_table_qr_links(token)
     table = DiningTable(
         store_id=sid,
         table_no=table_no,
         table_name=(data.table_name or table_no).strip() or table_no,
         qr_token=token,
-        wechat_qr_url=wechat_url,
-        alipay_qr_url=alipay_url,
+        wechat_qr_url=links["wechat_scheme"],
+        alipay_qr_url=links["alipay_scheme"],
     )
     db.add(table)
     await db.flush()
@@ -198,9 +191,9 @@ async def resolve_table(qr_token: str, request: Request, db: DbSession):
 async def regenerate_qr(table_id: int, request: Request, db: DbSession, user: CurrentUser):
     table = await _get_owned_table(db, user, table_id)
     token = secrets.token_urlsafe(32)
-    wechat_url, alipay_url = _qr_urls(token)
+    links = build_table_qr_links(token)
     table.qr_token = token
-    table.wechat_qr_url = wechat_url
-    table.alipay_qr_url = alipay_url
+    table.wechat_qr_url = links["wechat_scheme"]
+    table.alipay_qr_url = links["alipay_scheme"]
     await db.flush()
     return success(_serialize(table), request=request)

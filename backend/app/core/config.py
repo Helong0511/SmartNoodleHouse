@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # 顾客 H5/一码通扫对外域名（如 https://order.example.com）；留空则用 CORS 首项
+    h5_public_base_url: str = ""
 
     @property
     def is_production(self) -> bool:
