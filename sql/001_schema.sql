@@ -1,49 +1,22 @@
 -- ============================================================================
 -- 智能面馆 SmartNoodleHouse — 数据库结构（全量 DDL）
 -- ============================================================================
--- 适用：MySQL 8.0+ / utf8mb4_unicode_ci
--- 说明：本文件为「空库一键建表」最终态，已合并原 001～016 及优惠券/代金券/积分等增量。
+-- MySQL 8.0+ · utf8mb4_unicode_ci · 40 张业务表
 --
--- 执行顺序：
---   1) 000_create_db_grant.sql   （root：建库 + 授权，可选）
---   2) 001_schema.sql            （本文件：结构）
---   3) 002_seed_test.sql         （测试/开发种子数据）
+-- 全新部署（生产）：
+--   000_create_db_grant.sql  →  001_schema.sql  →  002_seed_prod.sql  →  init_admin.py
+-- 全新部署（开发）：
+--   001_schema.sql  →  002_seed_test.sql  →  init_admin.py
 --
--- 领域术语：
---   顾客 customers      — 扫码/小程序登录的 C 端用户，可成为会员
---   员工 users          — 后台登录的 B 端账号，受 RBAC 约束
---   门店 stores         — 物理经营单元，商品/桌台/订单均按门店隔离
---   上游渠道            — 美团 MEITUAN、饿了么 ELEME 等外卖平台
---
--- 金额字段（orders）计算顺序（由后端 OrderCreateService 统一计算）：
---   subtotal           商品行小计 + 规格加价 × 数量
---   discount_amount    会员等级折扣减免（基于折前 subtotal）
---   coupon_discount    优惠券减免（满减/折扣券，coupon_type≠VOUCHER）
---   voucher_discount   代金券抵扣（coupon_type=VOUCHER）
---   packing_fee        打包/餐盒费
---   total_amount       = subtotal - discount_amount - coupon_discount - voucher_discount + packing_fee
---
--- 订单状态 orders.status 枚举：
---   PENDING_PAYMENT 待支付 | PAID 已支付 | CONFIRMED 已接单 | PREPARING 备餐中
---   COOKING 制作中 | READY 待取餐 | COMPLETED 已完成 | CANCELLED 已取消 | REFUNDED 已退款
---
--- 支付状态 orders.payment_status 枚举：
---   UNPAID 未支付 | PAID 已支付 | REFUNDING 退款中 | REFUNDED 已退款
+-- 运维工具见 sql/tools/（非日常建库）
 -- ============================================================================
-CREATE DATABASE IF NOT EXISTS smart_noodle_house
-  DEFAULT CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
--- 将 remote 替换为你的应用账号（与 .env 中 DATABASE_URL 一致）
-GRANT ALL PRIVILEGES ON smart_noodle_house.* TO 'remote'@'localhost';
-FLUSH PRIVILEGES;
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 CREATE DATABASE IF NOT EXISTS smart_noodle_house
   DEFAULT CHARACTER SET utf8mb4
-  DEFAULT COLLATE utf8mb4_unicode_ci;
+  COLLATE utf8mb4_unicode_ci;
 
 USE smart_noodle_house;
 
@@ -54,7 +27,7 @@ USE smart_noodle_house;
 
 -- 后台角色定义（如超管、店长、收银、后厨、运营）
 CREATE TABLE IF NOT EXISTS roles (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   code VARCHAR(50) NOT NULL UNIQUE COMMENT '角色编码：SUPER_ADMIN=超管 | STORE_ADMIN=店长 | CASHIER=收银 | KITCHEN=后厨 | OPERATOR=运营',
   name VARCHAR(100) NOT NULL COMMENT '角色显示名称',
   description VARCHAR(255) DEFAULT NULL COMMENT '角色职责说明',
@@ -64,7 +37,7 @@ CREATE TABLE IF NOT EXISTS roles (
 
 -- 细粒度权限点（与 API require_permission 对应）
 CREATE TABLE IF NOT EXISTS permissions (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   code VARCHAR(100) NOT NULL UNIQUE COMMENT '权限码，如 product:read、order:update、welcome:manage',
   name VARCHAR(100) NOT NULL COMMENT '权限名称（中文展示）',
   module VARCHAR(50) NOT NULL COMMENT '所属模块：product/order/payment/customer 等',
@@ -82,7 +55,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 
 -- 后台员工账号（JWT typ=staff）
 CREATE TABLE IF NOT EXISTS users (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   username VARCHAR(50) NOT NULL UNIQUE COMMENT '登录用户名，全局唯一',
   password_hash VARCHAR(255) NOT NULL COMMENT 'bcrypt 等算法哈希后的密码，明文不入库',
   display_name VARCHAR(100) NOT NULL COMMENT '界面显示姓名',
@@ -99,7 +72,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- 敏感操作审计日志（谁在何时对什么对象做了什么）
 CREATE TABLE IF NOT EXISTS operation_logs (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   user_id BIGINT UNSIGNED DEFAULT NULL COMMENT '操作人 → users.id；系统自动任务可为 NULL',
   action VARCHAR(100) NOT NULL COMMENT '动作编码，如 order.cancel、product.update',
   module VARCHAR(50) NOT NULL COMMENT '业务模块',
@@ -121,7 +94,7 @@ CREATE TABLE IF NOT EXISTS operation_logs (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS stores (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_no VARCHAR(32) NOT NULL UNIQUE COMMENT '门店编号（写入业务单号前缀，如 TH01）',
   name VARCHAR(100) NOT NULL COMMENT '门店名称',
   address VARCHAR(255) DEFAULT NULL COMMENT '门店地址',
@@ -133,7 +106,7 @@ CREATE TABLE IF NOT EXISTS stores (
 
 -- 堂食桌台；qr_token 用于扫码点餐，不可伪造桌号
 CREATE TABLE IF NOT EXISTS tables (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   table_no VARCHAR(20) NOT NULL COMMENT '桌号编码（店内唯一，如 01、A12）',
   table_name VARCHAR(50) NOT NULL COMMENT '顾客端展示名（如 1号桌、包厢A）',
@@ -150,7 +123,7 @@ CREATE TABLE IF NOT EXISTS tables (
 
 -- 门店级 KV 配置（打包费开关、营业时间等可扩展项）
 CREATE TABLE IF NOT EXISTS store_settings (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   setting_key VARCHAR(100) NOT NULL COMMENT '参数键，如 packing_fee_enabled',
   setting_value VARCHAR(500) NOT NULL COMMENT '参数值（字符串存储，由业务解析类型）',
@@ -166,7 +139,7 @@ CREATE TABLE IF NOT EXISTS store_settings (
 
 -- 会员等级（积分达标自动升级，享 discount_rate 折扣）
 CREATE TABLE IF NOT EXISTS member_levels (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   name VARCHAR(50) NOT NULL COMMENT '等级名称，如 普通会员、银卡会员',
   min_points INT NOT NULL DEFAULT 0 COMMENT '升级所需累计积分下限',
   discount_rate DECIMAL(5,4) NOT NULL DEFAULT 1.0000 COMMENT '折扣率：1.0000=无折扣，0.9000=九折',
@@ -175,7 +148,7 @@ CREATE TABLE IF NOT EXISTS member_levels (
 
 -- 券模板（优惠券 + 代金券共用；coupon_type=VOUCHER 时代金券）
 CREATE TABLE IF NOT EXISTS coupon_templates (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   name VARCHAR(100) NOT NULL COMMENT '券名称（展示用）',
   coupon_type VARCHAR(20) NOT NULL DEFAULT 'FIXED' COMMENT 'FIXED=满减元 | PERCENT=折扣比例 | VOUCHER=代金券抵扣',
   discount_value DECIMAL(10,4) NOT NULL COMMENT 'FIXED/VOUCHER=减免金额；PERCENT=折扣比例如0.90表示九折',
@@ -187,7 +160,7 @@ CREATE TABLE IF NOT EXISTS coupon_templates (
 
 -- 顾客主档（小程序/H5 登录主体）
 CREATE TABLE IF NOT EXISTS customers (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_no VARCHAR(40) NOT NULL UNIQUE COMMENT '顾客编号（业务可读单号）',
   display_name VARCHAR(100) DEFAULT NULL COMMENT '展示名（可与昵称相同）',
   nickname VARCHAR(100) DEFAULT NULL COMMENT '微信昵称或用户自设昵称',
@@ -207,7 +180,7 @@ CREATE TABLE IF NOT EXISTS customers (
 
 -- 用户持有的券实例（一张模板可发放多张）
 CREATE TABLE IF NOT EXISTS customer_coupons (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '持有人 → customers.id',
   template_id BIGINT UNSIGNED NOT NULL COMMENT '券模板 → coupon_templates.id',
   coupon_no VARCHAR(40) NOT NULL UNIQUE COMMENT '券实例编号（全局唯一）',
@@ -223,7 +196,7 @@ CREATE TABLE IF NOT EXISTS customer_coupons (
 
 -- 微信小程序 openid 与顾客绑定（支付、订阅消息依赖 openid）
 CREATE TABLE IF NOT EXISTS customer_wechat_accounts (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   openid VARCHAR(64) NOT NULL UNIQUE COMMENT '微信 openid，小程序内唯一',
   unionid VARCHAR(64) DEFAULT NULL COMMENT '微信 unionid（同主体多应用打通）',
@@ -235,7 +208,7 @@ CREATE TABLE IF NOT EXISTS customer_wechat_accounts (
 
 -- 支付宝小程序用户 ID 与顾客绑定
 CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   alipay_user_id VARCHAR(64) NOT NULL UNIQUE COMMENT '支付宝 user_id',
   alipay_union_id VARCHAR(64) DEFAULT NULL COMMENT '支付宝 union_id（如有）',
@@ -246,7 +219,7 @@ CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
 
 -- 智能口味：按历史订单累计规格偏好，点餐时预选
 CREATE TABLE IF NOT EXISTS customer_preferences (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   category VARCHAR(50) NOT NULL COMMENT '规格组名称快照（如 辣度、份量）',
   option_code VARCHAR(50) NOT NULL COMMENT '选项编码快照',
@@ -267,7 +240,7 @@ CREATE TABLE IF NOT EXISTS customer_preferences (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS product_categories (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   name VARCHAR(100) NOT NULL COMMENT '分类名称（如 招牌面、小吃）',
   description VARCHAR(255) DEFAULT NULL COMMENT '分类描述',
@@ -280,7 +253,7 @@ CREATE TABLE IF NOT EXISTS product_categories (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品分类表（按门店）';
 
 CREATE TABLE IF NOT EXISTS products (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   category_id BIGINT UNSIGNED NOT NULL COMMENT '分类 → product_categories.id',
   product_no VARCHAR(32) NOT NULL COMMENT '店内商品编号（同店唯一）',
@@ -295,6 +268,7 @@ CREATE TABLE IF NOT EXISTS products (
   status VARCHAR(20) NOT NULL DEFAULT 'ON_SALE' COMMENT 'ON_SALE=在售 | OFF_SALE=停售 | SOLD_OUT=售罄',
   is_recommended TINYINT NOT NULL DEFAULT 0 COMMENT '是否推荐：1=是 0=否',
   is_hot TINYINT NOT NULL DEFAULT 0 COMMENT '是否热销标签：1=是 0=否',
+  no_member_discount TINYINT NOT NULL DEFAULT 0 COMMENT '特价/不参与会员折扣：1=是 0=否',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '分类内排序',
   sales_count INT NOT NULL DEFAULT 0 COMMENT '累计销量（冗余统计）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
@@ -307,7 +281,7 @@ CREATE TABLE IF NOT EXISTS products (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品表（按门店）';
 
 CREATE TABLE IF NOT EXISTS product_images (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   product_id BIGINT UNSIGNED NOT NULL COMMENT '商品 → products.id',
   image_url VARCHAR(500) NOT NULL COMMENT '图片 URL',
   image_type VARCHAR(20) NOT NULL DEFAULT 'DETAIL' COMMENT 'MAIN=主图 | DETAIL=详情图 | OPTION=规格示意图',
@@ -319,7 +293,7 @@ CREATE TABLE IF NOT EXISTS product_images (
 
 -- 分店库存/停售覆盖（未配置则沿用 products.stock / status）
 CREATE TABLE IF NOT EXISTS store_product_stocks (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   product_id BIGINT UNSIGNED NOT NULL COMMENT '商品 → products.id',
   stock INT NOT NULL DEFAULT 999 COMMENT '本店库存覆盖；999=不限',
@@ -334,7 +308,7 @@ CREATE TABLE IF NOT EXISTS store_product_stocks (
 
 -- 规格组（全局字典，如 份量、辣度、加料）
 CREATE TABLE IF NOT EXISTS option_groups (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   name VARCHAR(50) NOT NULL COMMENT '规格组显示名',
   code VARCHAR(50) NOT NULL UNIQUE COMMENT '规格组编码，如 NOODLE_AMOUNT、SPICY_LEVEL',
   selection_type VARCHAR(20) NOT NULL DEFAULT 'SINGLE' COMMENT 'SINGLE=单选 | MULTIPLE=多选',
@@ -347,7 +321,7 @@ CREATE TABLE IF NOT EXISTS option_groups (
 
 -- 规格选项（隶属于某规格组）
 CREATE TABLE IF NOT EXISTS options (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   group_id BIGINT UNSIGNED NOT NULL COMMENT '规格组 → option_groups.id',
   name VARCHAR(50) NOT NULL COMMENT '选项显示名，如 大份、微辣',
   code VARCHAR(50) NOT NULL COMMENT '选项编码（组内唯一）',
@@ -362,7 +336,7 @@ CREATE TABLE IF NOT EXISTS options (
 
 -- 商品与规格组多对多绑定
 CREATE TABLE IF NOT EXISTS product_option_groups (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   product_id BIGINT UNSIGNED NOT NULL COMMENT '商品 → products.id',
   group_id BIGINT UNSIGNED NOT NULL COMMENT '规格组 → option_groups.id',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '该商品下规格组展示顺序',
@@ -377,7 +351,7 @@ CREATE TABLE IF NOT EXISTS product_option_groups (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS orders (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   order_no VARCHAR(40) NOT NULL UNIQUE COMMENT '业务订单号（含门店/桌位/时间等可读信息）',
   customer_id BIGINT UNSIGNED DEFAULT NULL COMMENT '下单顾客 → customers.id；匿名单可为空',
   table_id BIGINT UNSIGNED DEFAULT NULL COMMENT '堂食桌台 → tables.id；外卖/打包可空',
@@ -392,7 +366,7 @@ CREATE TABLE IF NOT EXISTS orders (
   voucher_discount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '代金券抵扣金额',
   packing_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '打包/餐盒费合计',
   total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '应付总额（见文件头计算公式）',
-  payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID' COMMENT '支付状态：UNPAID/PAID/REFUNDING/REFUNDED',
+  payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID' COMMENT 'UNPAID/PAID/PARTIAL_REFUND/REFUNDING/REFUNDED',
   payment_method VARCHAR(20) DEFAULT NULL COMMENT '支付方式摘要，如 WECHAT、ALIPAY',
   channel VARCHAR(20) DEFAULT NULL COMMENT '下单渠道：WECHAT/ALIPAY/MEITUAN/ELEME/H5',
   remark VARCHAR(500) DEFAULT NULL COMMENT '顾客备注',
@@ -410,13 +384,14 @@ CREATE TABLE IF NOT EXISTS orders (
   INDEX idx_orders_payment (payment_status, created_at),
   INDEX idx_orders_status_paid (status, paid_at),
   INDEX idx_orders_store_created (store_id, created_at),
+  INDEX idx_orders_store_paid (store_id, paid_at),
   CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
   CONSTRAINT fk_orders_table FOREIGN KEY (table_id) REFERENCES tables(id),
   CONSTRAINT fk_orders_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单主表';
 
 CREATE TABLE IF NOT EXISTS order_items (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   order_id BIGINT UNSIGNED NOT NULL COMMENT '订单 → orders.id',
   product_id BIGINT UNSIGNED NOT NULL COMMENT '商品 → products.id（快照时有效 ID）',
   product_name_snapshot VARCHAR(100) NOT NULL COMMENT '下单时商品名称快照',
@@ -430,7 +405,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单商品明细表';
 
 CREATE TABLE IF NOT EXISTS order_item_options (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   order_item_id BIGINT UNSIGNED NOT NULL COMMENT '订单明细 → order_items.id',
   group_name_snapshot VARCHAR(50) NOT NULL COMMENT '规格组名称快照',
   option_name_snapshot VARCHAR(50) NOT NULL COMMENT '选项名称快照',
@@ -442,7 +417,7 @@ CREATE TABLE IF NOT EXISTS order_item_options (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单明细规格快照表';
 
 CREATE TABLE IF NOT EXISTS order_status_history (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   order_id BIGINT UNSIGNED NOT NULL COMMENT '订单 → orders.id',
   from_status VARCHAR(20) DEFAULT NULL COMMENT '变更前状态',
   to_status VARCHAR(20) NOT NULL COMMENT '变更后状态',
@@ -455,7 +430,7 @@ CREATE TABLE IF NOT EXISTS order_status_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单状态变更历史表';
 
 CREATE TABLE IF NOT EXISTS payments (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   payment_no VARCHAR(40) NOT NULL UNIQUE COMMENT '支付单号',
   order_id BIGINT UNSIGNED NOT NULL COMMENT '关联订单 → orders.id',
   customer_id BIGINT UNSIGNED DEFAULT NULL COMMENT '付款顾客 → customers.id',
@@ -463,7 +438,7 @@ CREATE TABLE IF NOT EXISTS payments (
   channel VARCHAR(30) NOT NULL COMMENT '细分渠道，如 miniprogram、native、h5',
   amount DECIMAL(10,2) NOT NULL COMMENT '支付金额（元）',
   currency VARCHAR(10) NOT NULL DEFAULT 'CNY' COMMENT '币种',
-  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/SUCCESS/FAILED/CLOSED 等',
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PAID/PARTIAL_REFUND/REFUNDED/CLOSED/FAILED',
   provider_trade_no VARCHAR(64) DEFAULT NULL COMMENT '第三方交易号',
   provider_order_no VARCHAR(64) DEFAULT NULL COMMENT '第三方商户订单号',
   callback_raw JSON DEFAULT NULL COMMENT '支付回调原文（审计）',
@@ -475,12 +450,13 @@ CREATE TABLE IF NOT EXISTS payments (
   INDEX idx_payments_no (payment_no),
   INDEX idx_payments_order_status (order_id, status),
   INDEX idx_payments_created (created_at),
+  INDEX idx_payments_paid_at (paid_at),
   CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders(id),
   CONSTRAINT fk_payments_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付单表';
 
 CREATE TABLE IF NOT EXISTS payment_refunds (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   refund_no VARCHAR(40) NOT NULL UNIQUE COMMENT '退款单号',
   payment_id BIGINT UNSIGNED NOT NULL COMMENT '原支付单 → payments.id',
   order_id BIGINT UNSIGNED NOT NULL COMMENT '关联订单 → orders.id',
@@ -497,12 +473,13 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
   INDEX idx_refunds_status (status),
   INDEX idx_refunds_payment (payment_id),
   INDEX idx_refunds_operator (operator_id),
+  INDEX idx_refunds_succeeded (status, succeeded_at),
   CONSTRAINT fk_refund_payment FOREIGN KEY (payment_id) REFERENCES payments(id),
   CONSTRAINT fk_refund_order FOREIGN KEY (order_id) REFERENCES orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付退款单表';
 
 CREATE TABLE IF NOT EXISTS payment_status_history (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   payment_id BIGINT UNSIGNED NOT NULL COMMENT '支付单 → payments.id',
   from_status VARCHAR(20) DEFAULT NULL COMMENT '变更前状态',
   to_status VARCHAR(20) NOT NULL COMMENT '变更后状态',
@@ -515,7 +492,7 @@ CREATE TABLE IF NOT EXISTS payment_status_history (
 
 -- 支付回调幂等回执（与 Redis 双保险，防重复入账）
 CREATE TABLE IF NOT EXISTS payment_callback_receipts (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   provider VARCHAR(20) NOT NULL COMMENT '支付渠道',
   receipt_key VARCHAR(128) NOT NULL COMMENT '幂等键（如 notify_id + 交易号）',
   payment_no VARCHAR(40) DEFAULT NULL COMMENT '关联支付单号',
@@ -525,7 +502,7 @@ CREATE TABLE IF NOT EXISTS payment_callback_receipts (
 
 -- Webhook 收件箱（先落库再异步消费，适用于外卖/支付等）
 CREATE TABLE IF NOT EXISTS webhook_inbox (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   channel VARCHAR(30) NOT NULL COMMENT 'WECHAT_PAY/ALIPAY/MEITUAN/ELEME',
   event_id VARCHAR(128) NOT NULL COMMENT '平台事件唯一 ID（幂等）',
   event_type VARCHAR(50) DEFAULT NULL COMMENT '事件类型',
@@ -545,7 +522,7 @@ CREATE TABLE IF NOT EXISTS webhook_inbox (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS delivery_product_maps (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   platform VARCHAR(20) NOT NULL COMMENT 'MEITUAN=美团 | ELEME=饿了么',
   platform_sku_id VARCHAR(64) NOT NULL COMMENT '平台 SKU ID',
@@ -565,7 +542,7 @@ CREATE TABLE IF NOT EXISTS delivery_product_maps (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外卖平台商品映射表';
 
 CREATE TABLE IF NOT EXISTS delivery_orders (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   order_id BIGINT UNSIGNED NOT NULL UNIQUE COMMENT '统一订单 → orders.id（一对一）',
   platform VARCHAR(20) NOT NULL COMMENT 'MEITUAN | ELEME',
   platform_order_id VARCHAR(64) NOT NULL COMMENT '平台订单号',
@@ -595,7 +572,7 @@ CREATE TABLE IF NOT EXISTS delivery_orders (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外卖订单扩展表';
 
 CREATE TABLE IF NOT EXISTS platform_store_bindings (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '本系统门店 → stores.id',
   platform VARCHAR(20) NOT NULL COMMENT 'MEITUAN | ELEME',
   platform_shop_id VARCHAR(64) NOT NULL COMMENT '平台门店 ID',
@@ -612,7 +589,7 @@ CREATE TABLE IF NOT EXISTS platform_store_bindings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外卖平台门店授权绑定表';
 
 CREATE TABLE IF NOT EXISTS delivery_refunds (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   delivery_order_id BIGINT UNSIGNED NOT NULL COMMENT '外卖扩展单 → delivery_orders.id',
   order_id BIGINT UNSIGNED NOT NULL COMMENT '统一订单 → orders.id',
   platform VARCHAR(20) NOT NULL COMMENT 'MEITUAN | ELEME',
@@ -630,7 +607,7 @@ CREATE TABLE IF NOT EXISTS delivery_refunds (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外卖退款单表';
 
 CREATE TABLE IF NOT EXISTS delivery_callback_logs (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   platform VARCHAR(20) NOT NULL COMMENT 'MEITUAN | ELEME',
   event_type VARCHAR(50) NOT NULL COMMENT '回调事件类型',
   event_id VARCHAR(128) DEFAULT NULL COMMENT '平台事件 ID（幂等去重）',
@@ -649,7 +626,7 @@ CREATE TABLE IF NOT EXISTS delivery_callback_logs (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS cameras (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   name VARCHAR(100) NOT NULL COMMENT '摄像头名称/位置',
   camera_type VARCHAR(20) NOT NULL COMMENT 'USB=本机摄像头 | RTSP=网络流 | HTTP=HTTP 流',
@@ -666,7 +643,7 @@ CREATE TABLE IF NOT EXISTS cameras (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='门店摄像头表';
 
 CREATE TABLE IF NOT EXISTS visitor_events (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   visitor_no VARCHAR(64) NOT NULL COMMENT '匿名访客编号（非会员）',
   camera_id BIGINT UNSIGNED NOT NULL COMMENT '摄像头 → cameras.id',
   event_type VARCHAR(30) NOT NULL COMMENT 'ENTER=进入 | EXIT=离开 | PASS=路过',
@@ -680,7 +657,7 @@ CREATE TABLE IF NOT EXISTS visitor_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='匿名客流事件表';
 
 CREATE TABLE IF NOT EXISTS face_profiles (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   feature_data BLOB NOT NULL COMMENT '加密后的人脸特征向量',
   feature_version VARCHAR(20) NOT NULL DEFAULT 'v1' COMMENT '特征提取算法版本',
@@ -694,7 +671,7 @@ CREATE TABLE IF NOT EXISTS face_profiles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员人脸特征档案表';
 
 CREATE TABLE IF NOT EXISTS welcome_logs (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '被识别顾客 → customers.id',
   camera_id BIGINT UNSIGNED DEFAULT NULL COMMENT '触发摄像头 → cameras.id',
   welcome_text VARCHAR(500) NOT NULL COMMENT '播报/展示的欢迎语（可含口味推荐）',
@@ -709,7 +686,7 @@ CREATE TABLE IF NOT EXISTS welcome_logs (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS system_settings (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   setting_key VARCHAR(100) NOT NULL UNIQUE COMMENT '配置键',
   setting_value TEXT NOT NULL COMMENT '配置值',
   description VARCHAR(255) DEFAULT NULL COMMENT '配置说明',
@@ -718,4 +695,4 @@ CREATE TABLE IF NOT EXISTS system_settings (
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 完成：请继续执行 002_seed_test.sql 导入测试数据
+-- 完成：生产 → 002_seed_prod.sql + init_admin.py；开发 → 002_seed_test.sql + init_admin.py

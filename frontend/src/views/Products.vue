@@ -169,6 +169,7 @@
         <el-form-item label="标签">
           <el-checkbox v-model="form.is_recommended">推荐</el-checkbox>
           <el-checkbox v-model="form.is_hot">热销</el-checkbox>
+          <el-checkbox v-model="form.no_member_discount">特价（不参与会员折扣/优惠券/代金券）</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -219,6 +220,7 @@ const form = reactive({
   sort_order: 0,
   is_recommended: false,
   is_hot: false,
+  no_member_discount: false,
   option_group_ids: [] as number[],
 })
 
@@ -332,6 +334,7 @@ function resetForm() {
     sort_order: 0,
     is_recommended: false,
     is_hot: false,
+    no_member_discount: false,
     option_group_ids: [],
   })
   form.category_id = formCategories.value[0]?.id
@@ -358,6 +361,7 @@ async function openForm(row?: any) {
       sort_order: detail.sort_order ?? 0,
       is_recommended: detail.is_recommended ?? false,
       is_hot: detail.is_hot ?? false,
+      no_member_discount: detail.no_member_discount ?? false,
       option_group_ids: detail.option_group_ids || [],
     })
   }
@@ -430,6 +434,7 @@ async function save() {
       sort_order: form.sort_order,
       is_recommended: form.is_recommended,
       is_hot: form.is_hot,
+      no_member_discount: form.no_member_discount,
       option_group_ids: form.option_group_ids,
     }
     if (form.original_price != null && form.original_price > 0) {

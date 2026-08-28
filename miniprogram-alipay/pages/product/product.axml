@@ -28,12 +28,17 @@
   </view>
 
   <view class="body">
-    <view class="title">{{product.name}}</view>
+    <view class="title-row">
+      <view class="title">{{product.name}}</view>
+      <text class="special-tag" a:if="{{product.no_member_discount}}">特价</text>
+    </view>
     <view class="desc" a:if="{{product.description}}">{{product.description}}</view>
+    <view class="special-tip" a:if="{{product.no_member_discount}}">特价商品不参与会员折扣、优惠券及代金券</view>
     <view class="price">
       ¥{{displayPrice}}
       <text class="base" a:if="{{displayPrice != product.price}}">（基础 ¥{{product.price}}）</text>
     </view>
+    <view class="pref-hint" a:if="{{prefHint}}">{{prefHint}}</view>
 
     <view class="group" a:for="{{product.option_groups}}" a:key="id">
       <view class="gname">{{item.name}}</view>

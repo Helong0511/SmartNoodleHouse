@@ -2,6 +2,8 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const payUtil = require('../../utils/pay')
+const voucherUtil = require('../../utils/voucher')
 const app = getApp()
 
 function memberDiscountText(rate) {
@@ -78,6 +80,27 @@ Page({
     hasVoucherDiscount: false,
     boxPriceMap: {},
     needScanHint: false,
+    hasSpecialItems: false,
+  },
+  storeId() {
+    return (app.globalData.table && app.globalData.table.store_id)
+      || (app.globalData.store && app.globalData.store.id)
+      || null
+  },
+  async loadProductCatalog() {
+    if (this._productCatalog && this._productCatalog.length) {
+      return this._productCatalog
+    }
+    const sid = this.storeId()
+    const products = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+    const items = (products && products.items) || []
+    this._productCatalog = items
+    const boxMap = {}
+    items.forEach((p) => {
+      boxMap[p.id] = parseFloat(p.box_price || 0) || 0
+    })
+    this.setData({ boxPriceMap: boxMap })
+    return items
   },
   onShow() {
     this._memberRate = 1
@@ -181,9 +204,9 @@ Page({
     }
     this.refreshSummary()
   },
-  calcCouponDiscount(afterMember, coupon) {
+  calcCouponDiscount(couponEligible, coupon) {
     if (!coupon || !coupon.id) return 0
-    const eligible = afterMember
+    const eligible = couponEligible
     const minAmt = parseFloat(coupon.min_order_amount || 0)
     if (eligible < minAmt) return 0
     if (coupon.coupon_type === 'PERCENT') {
@@ -194,29 +217,22 @@ Page({
     const fixed = parseFloat(coupon.discount_value) || 0
     return Math.min(fixed, eligible)
   },
-  calcVoucherDiscount(payable, voucher) {
-    if (!voucher || !voucher.id) return 0
-    const minAmt = parseFloat(voucher.min_order_amount || 0)
-    if (payable < minAmt) return 0
-    const face = parseFloat(voucher.discount_value) || 0
-    return Math.min(face, payable)
+  calcVoucherDiscount(payable, voucher, voucherEligible) {
+    return voucherUtil.calcVoucherDiscount(payable, voucher, voucherEligible)
   },
   async refreshSummary() {
     const cart = auth.getCart()
     const { list, total } = cartUtil.cartSummary(cart)
-    let boxMap = this.data.boxPriceMap || {}
-    if (!Object.keys(boxMap).length) {
-      try {
-        const sid = (app.globalData.table && app.globalData.table.store_id) || null
-        const products = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
-        const items = (products && products.items) || []
-        boxMap = {}
-        items.forEach((p) => { boxMap[p.id] = parseFloat(p.box_price || 0) || 0 })
-        this.setData({ boxPriceMap: boxMap })
-      } catch (_) {}
-    }
+    const boxMap = this.data.boxPriceMap || {}
+    let enrichedList = list
+    try {
+      const productItems = await this.loadProductCatalog()
+      if (productItems.length) {
+        enrichedList = cartUtil.enrichCartFromProducts(list, productItems)
+      }
+    } catch (_) {}
     let packing = 0
-    const cartPreview = list.map((item) => {
+    const cartPreview = enrichedList.map((item) => {
       const qty = item.quantity || 1
       packing += (boxMap[item.product_id] || 0) * qty
       return { ...item, imageUrl: item.imageUrl || media.resolveUrl(item.main_image || '') }
@@ -226,13 +242,17 @@ Page({
     const needPack = this.data.needPack
     const rate = this._memberRate || 1
     let discount = 0
-    if (rate > 0 && rate < 1) discount = Math.round(sub * (1 - rate) * 100) / 100
+    if (rate > 0 && rate < 1) {
+      const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
+      discount = Math.round(discountable * (1 - rate) * 100) / 100
+    }
     const afterMember = Math.max(0, sub - discount)
+    const couponEligible = cartUtil.calcCouponEligibleSubtotal(enrichedList, discount)
 
     if (!this._couponManualPick && (this.data.coupons || []).length) {
       const bestCoupon = pickBestCoupon(
         this.data.coupons,
-        afterMember,
+        couponEligible,
         (amt, c) => this.calcCouponDiscount(amt, c)
       )
       this._selectedCoupon = bestCoupon
@@ -242,15 +262,18 @@ Page({
       })
     }
 
-    const couponDisc = this.calcCouponDiscount(afterMember, this._selectedCoupon)
+    const couponDisc = this.calcCouponDiscount(couponEligible, this._selectedCoupon)
     let pay = afterMember - couponDisc
+    const voucherEligible = cartUtil.calcVoucherEligiblePayable(
+      couponEligible, couponDisc, pack, needPack
+    )
     if (needPack) pay += pack
 
     if (!this._voucherManualPick && (this.data.vouchers || []).length) {
       const bestVoucher = pickBestVoucher(
         this.data.vouchers,
-        pay,
-        (amt, v) => this.calcVoucherDiscount(amt, v)
+        voucherEligible,
+        (amt, v) => this.calcVoucherDiscount(pay, v, amt)
       )
       this._selectedVoucher = bestVoucher
       this.setData({
@@ -259,7 +282,23 @@ Page({
       })
     }
 
-    const voucherDisc = this.calcVoucherDiscount(pay, this._selectedVoucher)
+    let voucherDisc = this.calcVoucherDiscount(pay, this._selectedVoucher, voucherEligible)
+    if (this._selectedVoucher && voucherDisc <= 0) {
+      if (this._voucherManualPick) {
+        my.showToast({
+          content: '订单金额未满代金券面额，已取消使用',
+          type: 'none',
+          duration: 2500
+        })
+        this._voucherManualPick = false
+      }
+      this._selectedVoucher = null
+      this.setData({
+        selectedVoucherId: 0,
+        selectedVoucherLabel: '不使用代金券'
+      })
+      voucherDisc = 0
+    }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
     this.setData({
       cartPreview,
@@ -271,7 +310,8 @@ Page({
       hasCouponDiscount: couponDisc > 0,
       voucherDiscountAmount: voucherDisc.toFixed(2),
       hasVoucherDiscount: voucherDisc > 0,
-      payEstimate: pay.toFixed(2)
+      payEstimate: pay.toFixed(2),
+      hasSpecialItems: enrichedList.some((i) => i.no_member_discount)
     })
   },
   async resolveTable() {
@@ -395,19 +435,28 @@ Page({
           option_ids: c.option_ids || []
         }))
       })
-      await api.post(`/payments/orders/${order.id}/pay`, {
+      const payRes = await api.post(`/payments/orders/${order.id}/pay`, {
         provider: 'ALIPAY',
         channel_type: 'miniprogram'
       })
+      await payUtil.requestAlipayPay(payRes)
       auth.saveCart([])
-      my.redirectTo({ url: `/pages/result/result?order_id=${order.id}` })
+      const pts = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''
+      my.redirectTo({ url: `/pages/result/result?order_id=${order.id}${pts}` })
     } catch (e) {
       const msg = e.message || '下单失败'
       if (/无效桌台|桌台二维码|选择桌号/.test(msg)) {
         this.clearTableBinding()
         await this.resolveTable()
       }
-      my.showToast({ content: msg, type: 'fail' })
+      if (!/取消支付/.test(msg)) {
+        my.showToast({ content: msg, type: 'fail' })
+      } else {
+        my.alert({
+          title: '支付未完成',
+          content: '订单已创建，您可在「订单」页查看并重新支付'
+        })
+      }
     } finally {
       this.setData({ loading: false })
     }

@@ -12,7 +12,10 @@
       <div v-for="(item, idx) in cart" :key="idx" class="line">
         <img v-if="item.imageUrl" :src="item.imageUrl" class="mini" alt="" />
         <div v-else class="mini placeholder">{{ (item.name || '餐')[0] }}</div>
-        <span class="name">{{ item.name }} ×{{ item.quantity || 1 }}</span>
+        <span class="name">
+          {{ item.name }} ×{{ item.quantity || 1 }}
+          <span v-if="item.option_text" class="opts">（{{ item.option_text }}）</span>
+        </span>
         <span class="amt">¥{{ item.subtotal }}</span>
       </div>
       <div class="sum"><span>小计</span><span>¥{{ subtotal }}</span></div>
@@ -75,7 +78,10 @@ const packingFee = computed(() => {
   return fee.toFixed(2)
 })
 const discountAmount = computed(() => {
-  const sub = parseFloat(subtotal.value)
+  const sub = cart.value.reduce((s, i) => {
+    if (i.no_member_discount) return s
+    return s + parseFloat(i.subtotal || i.price || 0)
+  }, 0)
   const rate = memberRate.value
   if (rate > 0 && rate < 1) {
     return (Math.round(sub * (1 - rate) * 100) / 100).toFixed(2)
@@ -129,14 +135,20 @@ async function submit() {
       idempotency_key: idempotencyKey(),
     }, { headers: { 'X-Client': 'customer' } })
     const orderId = orderRes.data.id
-    await api.post(
-      `/payments/orders/${orderId}/pay`,
-      { provider: channel, channel_type: channel === 'ALIPAY' ? 'qr' : 'native' },
-      { headers: { 'X-Client': 'customer' } },
-    )
+    const payRes = (
+      await api.post(
+        `/payments/orders/${orderId}/pay`,
+        { provider: channel, channel_type: channel === 'ALIPAY' ? 'qr' : 'native' },
+        { headers: { 'X-Client': 'customer' } },
+      )
+    ).data
+    if (!payRes?.mock_settled && !payRes?._mock) {
+      ElMessage.warning('当前为 H5 演示：生产环境需展示支付二维码并轮询结果；测试环境请保持未配置支付密钥以自动 mock')
+    }
     localStorage.removeItem('snh_cart')
     localStorage.removeItem('cart')
-    router.push(`/order/result?order_id=${orderId}`)
+    const pts = payRes?.points_earned ? `&points_earned=${payRes.points_earned}` : ''
+    router.push(`/order/result?order_id=${orderId}${pts}`)
   } catch (e: any) {
     ElMessage.error(e.message || '下单失败')
   } finally {
@@ -194,6 +206,7 @@ onMounted(async () => {
     try {
       const p = (await api.get(`/products/${item.product_id}`)).data
       item.box_price = p.box_price || '0'
+      item.no_member_discount = !!p.no_member_discount
       if (!item.imageUrl) item.imageUrl = mediaUrl(p.main_image)
     } catch {
       item.box_price = '0'
@@ -214,6 +227,7 @@ onMounted(async () => {
   background:#ffe8df; color:#ff6b35; font-weight:700;
 }
 .name { flex:1; font-size:14px; }
+.opts { color:#888; font-size:12px; }
 .amt { color:#ff6b35; font-weight:600; }
 .sum { display:flex; justify-content:space-between; margin-top:8px; color:#666; font-size:14px; }
 .sum.total { color:#333; font-weight:700; font-size:16px; margin-top:12px; }

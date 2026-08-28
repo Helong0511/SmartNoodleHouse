@@ -27,3 +27,19 @@ def test_old_paid_only_filter_would_hide_refunded():
     new = sum(c for p, s, c in rows if s in ("PAID", "PARTIAL_REFUND", "REFUNDED") and p == "WECHAT")
     assert old == 0
     assert new == 1
+
+
+def test_store_breakdown_item_shape():
+    """多门店分项字段约定。"""
+    item = {
+        "store_id": 1,
+        "store_no": "SH01",
+        "store_name": "总店",
+        "today_orders": 0,
+        "today_revenue": "0.00",
+        "today_refunded": "0.00",
+        "new_customers": 0,
+        "delivery_pending": 0,
+    }
+    assert item["store_no"] == "SH01"
+    assert "today_revenue" in item

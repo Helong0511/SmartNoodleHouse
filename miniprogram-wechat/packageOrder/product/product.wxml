@@ -41,8 +41,12 @@ module.exports.hasId = hasId
   </view>
 
   <view class="body">
-    <view class="title">{{product.name}}</view>
+    <view class="title-row">
+      <view class="title">{{product.name}}</view>
+      <text class="special-tag" wx:if="{{product.no_member_discount}}">特价</text>
+    </view>
     <view class="desc" wx:if="{{product.description}}">{{product.description}}</view>
+    <view class="special-tip" wx:if="{{product.no_member_discount}}">特价商品不参与会员折扣、优惠券及代金券</view>
     <view class="pref-hint" wx:if="{{prefHint}}">{{prefHint}}</view>
     <view class="price">
       ¥{{displayPrice}}

@@ -7,8 +7,12 @@
         <view a:else class="thumb placeholder">{{item.name[0] || '餐'}}</view>
       </view>
       <view class="info">
-        <view class="name">{{item.name}}</view>
+        <view class="name-row">
+          <view class="name">{{item.name}}</view>
+          <text class="special-tag" a:if="{{item.no_member_discount}}">特价</text>
+        </view>
         <view class="opts" a:if="{{item.option_text}}">{{item.option_text}}</view>
+        <view class="special-tip" a:elif="{{item.no_member_discount}}">不参与会员/券优惠</view>
         <view class="unit">单价 ¥{{item.unit_price}}</view>
       </view>
       <view class="actions">

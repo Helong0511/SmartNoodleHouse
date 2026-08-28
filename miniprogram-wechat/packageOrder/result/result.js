@@ -1,6 +1,8 @@
 const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
 const subscribe = require('../../utils/subscribe')
+const prefUtil = require('../../utils/preferences')
+const app = getApp()
 
 const PAY_LABEL = {
   PAID: '已支付',
@@ -12,6 +14,7 @@ const PAY_LABEL = {
 
 const PAGE_TITLE = {
   PENDING_PAYMENT: '待支付',
+  PAID: '已支付',
   CONFIRMED: '已接单',
   PREPARING: '备餐中',
   COOKING: '制作中',
@@ -23,6 +26,7 @@ const PAGE_TITLE = {
 
 const STATUS_STEPS = [
   { key: 'PENDING_PAYMENT', label: '待支付' },
+  { key: 'PAID', label: '已支付' },
   { key: 'CONFIRMED', label: '已接单' },
   { key: 'PREPARING', label: '备餐中' },
   { key: 'COOKING', label: '制作中' },
@@ -91,10 +95,10 @@ Page({
     if (cur === 'CANCELLED') {
       return [{ key: 'CANCELLED', label: '已取消', done: true, active: true }]
     }
-    const order = ['PENDING_PAYMENT', 'CONFIRMED', 'PREPARING', 'COOKING', 'READY', 'COMPLETED']
-    const idx = order.indexOf(cur)
+    const flow = ['PENDING_PAYMENT', 'PAID', 'CONFIRMED', 'PREPARING', 'COOKING', 'READY', 'COMPLETED']
+    const idx = flow.indexOf(cur)
     return STATUS_STEPS.map((s) => {
-      const stepIdx = order.indexOf(s.key)
+      const stepIdx = flow.indexOf(s.key)
       return {
         ...s,
         done: idx >= 0 && stepIdx <= idx,
@@ -150,6 +154,9 @@ Page({
         tableNo: table.table_no || '',
         loading: false
       })
+      if (order.status === 'COMPLETED') {
+        prefUtil.clearPrefsCache(app)
+      }
     } catch (e) {
       this.setData({ loading: false })
       if (!silent) wx.showToast({ title: e.message || '加载失败', icon: 'none' })

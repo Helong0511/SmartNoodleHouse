@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
 Page({
@@ -24,15 +25,9 @@ Page({
     this.setData({ heroStyle: metrics.heroStyle, loading: true })
     try {
       const product = await api.get(`/products/${query.id}`, {}, false)
-      const selected = {}
-      ;(product.option_groups || []).forEach((g) => {
-        if (g.selection_type === 'SINGLE' && g.options && g.options.length) {
-          const normal = g.options.find((o) => o.code === 'NORMAL') || g.options[0]
-          selected[g.id] = normal.id
-        }
-      })
+      const { selected, multi } = prefUtil.defaultSelections(product)
       const gallery = media.galleryUrls(product)
-      this.setData({ product, selected, gallery, loading: false })
+      this.setData({ product, selected, multi, gallery, loading: false })
       this.updateDisplayPrice()
       await this.applyPreferences(product)
     } catch (e) {
@@ -43,39 +38,18 @@ Page({
 
   async applyPreferences(product) {
     let prefs = app.globalData.prefs || []
-    const cid = app.globalData.customerId
-    if ((!prefs || !prefs.length) && cid && app.globalData.customerToken) {
-      try {
-        const p = await api.get(`/customers/${cid}/preferences`)
-        prefs = (p && p.preferences) || []
-        app.globalData.prefs = prefs
-      } catch (_) {
-        return
-      }
+    if (!prefs.length) {
+      const view = await prefUtil.loadCustomerPrefs(app, api)
+      prefs = view.prefs || []
     }
     if (!prefs.length) return
 
-    const selected = { ...this.data.selected }
-    const multi = { ...(this.data.multi || {}) }
-    let applied = 0
-    for (const g of product.option_groups || []) {
-      const match = prefs.find((pr) => pr.category === g.name || pr.category === g.code)
-      if (!match) continue
-      const opt = (g.options || []).find((o) => o.code === match.option_code)
-      if (!opt) continue
-      if (g.selection_type === 'SINGLE') {
-        selected[g.id] = opt.id
-        applied += 1
-      } else {
-        multi[g.id] = [opt.id]
-        applied += 1
-      }
-    }
-    if (applied) {
+    const applied = prefUtil.applyPrefsToProduct(product, prefs)
+    if (applied.applied) {
       this.setData({
-        selected,
-        multi,
-        prefHint: '已按您的智能口味爱好预选规格，可随时修改'
+        selected: applied.selected,
+        multi: applied.multi,
+        prefHint: applied.prefHint
       })
       this.updateDisplayPrice()
     }
@@ -138,7 +112,8 @@ Page({
       option_text: optionLabels.join('、'),
       unit_price: unitPrice,
       subtotal: (unitPrice * qty).toFixed(2),
-      imageUrl
+      imageUrl,
+      no_member_discount: !!p.no_member_discount
     })
     auth.saveCart(cart)
     wx.showToast({ title: '已加入', icon: 'success' })

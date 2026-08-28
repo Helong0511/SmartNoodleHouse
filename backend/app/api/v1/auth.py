@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
-from app.core.response import success
+from app.core.response import now_local, success
 from app.core.security import create_access_token, verify_password
 from app.models import User
 from app.schemas.common import LoginRequest
@@ -21,6 +21,8 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
     user = result.scalar_one_or_none()
     if not user or not verify_password(data.password, user.password_hash):
         return {"code": 401, "message": "用户名或密码错误", "data": None}
+    user.last_login_at = now_local()
+    await db.flush()
     token = create_access_token(
         user.id,
         {"role": user.role.code, "store_id": user.store_id},

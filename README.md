@@ -49,14 +49,16 @@ python scripts/init_admin.py
 ```bash
 mysql -u root -p < sql/001_schema.sql
 mysql -u root -p < sql/002_seed_prod.sql
-python scripts/init_admin.py   # 设置强密码管理员
+set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
+python scripts/init_admin.py
 ```
 
 | 脚本 | 说明 |
 |------|------|
-| `001_schema.sql` | 全量表结构（含建库语句，可按需删改 GRANT 段） |
-| `002_seed_prod.sql` | **生产**：角色/权限/会员等级/券模板/门店/系统参数 |
-| `002_seed_test.sql` | **仅开发**：含样例商品、桌台、测试订单与 admin123 |
+| `000_create_db_grant.sql` | 可选：建库 + 应用账号授权 |
+| `001_schema.sql` | 全量表结构（40 表） |
+| `002_seed_prod.sql` | **生产**：角色/权限/会员/券/门店/系统参数 |
+| `002_seed_test.sql` | **仅开发**：样例商品、订单、admin/cashier/manager |
 | `sql/tools/003_capacity_audit.sql` | 容量审计（运维工具，非迁移） |
 | `sql/tools/004_fix_delivery_dining_type.sql` | 历史外卖订单 dining_type 修复（幂等） |
 | `sql/tools/005_backfill_member_level.sql` | 已注册顾客补挂普通会员等级（幂等） |

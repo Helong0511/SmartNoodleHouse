@@ -33,6 +33,28 @@
 .title-row .title { margin-bottom: 0; }
 .link { color: #1677ff; font-size: 24rpx; }
 .tag { display: inline-block; background: #e6f4ff; color: #1677ff; padding: 8rpx 16rpx; border-radius: 20rpx; margin: 12rpx 12rpx 0 0; }
+.pref-section { margin-top: 20rpx; }
+.pref-section-title { font-size: 24rpx; color: #666; margin-bottom: 8rpx; }
+.pref-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16rpx;
+  padding: 16rpx 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+.pref-item:last-child { border-bottom: none; }
+.pref-main { flex: 1; min-width: 0; }
+.pref-name { display: block; font-size: 28rpx; color: #333; }
+.pref-meta { display: block; font-size: 22rpx; color: #999; margin-top: 4rpx; }
+.pref-badge {
+  flex-shrink: 0;
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 16rpx;
+}
+.pref-badge.confirmed { background: #e6f4ff; color: #1677ff; }
+.pref-badge.learning { background: #f5f5f5; color: #999; }
 .btn-primary { margin-top: 20rpx; }
 .wallet-item {
   display: flex;

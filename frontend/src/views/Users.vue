@@ -32,7 +32,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="last_login_at" label="最近登录" width="170">
-        <template #default="{ row }">{{ row.last_login_at || '—' }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.last_login_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
@@ -140,6 +140,13 @@ const form = reactive<{
   role_id: undefined,
   store_id: undefined,
 })
+
+function formatDateTime(iso?: string | null) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
 
 function reload() {
   page.value = 1

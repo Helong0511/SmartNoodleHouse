@@ -4,6 +4,7 @@ const payUtil = require('../../utils/pay')
 const subscribe = require('../../utils/subscribe')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
 const app = getApp()
 
@@ -84,6 +85,7 @@ Page({
     selectedVoucherLabel: '不使用代金券',
     voucherDiscountAmount: '0.00',
     hasVoucherDiscount: false,
+    hasSpecialItems: false,
     storeName: '',
     storeNo: '',
     storeAddress: '',
@@ -167,6 +169,22 @@ Page({
       || null
   },
 
+  async loadProductCatalog() {
+    if (this._productCatalog && this._productCatalog.length) {
+      return this._productCatalog
+    }
+    const sid = this.storeId()
+    const products = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+    const items = (products && products.items) || []
+    this._productCatalog = items
+    const boxMap = {}
+    items.forEach((p) => {
+      boxMap[p.id] = parseFloat(p.box_price || 0) || 0
+    })
+    this.setData({ boxPriceMap: boxMap })
+    return items
+  },
+
   /** 下单门店：优先已绑桌台，避免与 table_token 所属门店不一致 */
   submitStoreId() {
     const table = app.globalData.table || wx.getStorageSync('dine_table') || {}
@@ -236,17 +254,13 @@ Page({
     this.refreshSummary()
   },
 
-  calcVoucherDiscount(payable, voucher) {
-    if (!voucher || !voucher.id) return 0
-    const minAmt = parseFloat(voucher.min_order_amount || 0)
-    if (payable < minAmt) return 0
-    const face = parseFloat(voucher.discount_value) || 0
-    return Math.min(face, payable)
+  calcVoucherDiscount(payable, voucher, voucherEligible) {
+    return voucherUtil.calcVoucherDiscount(payable, voucher, voucherEligible)
   },
 
-  calcCouponDiscount(afterMember, coupon) {
+  calcCouponDiscount(couponEligible, coupon) {
     if (!coupon || !coupon.id) return 0
-    const eligible = afterMember
+    const eligible = couponEligible
     const minAmt = parseFloat(coupon.min_order_amount || 0)
     if (eligible < minAmt) return 0
     if (coupon.coupon_type === 'PERCENT') {
@@ -261,21 +275,16 @@ Page({
   async refreshSummary() {
     const cart = auth.getCart()
     const { list, total } = cartUtil.cartSummary(cart)
-    let boxMap = this.data.boxPriceMap || {}
-    if (!Object.keys(boxMap).length) {
-      try {
-        const sid = this.storeId()
-        const products = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
-        const items = (products && products.items) || []
-        boxMap = {}
-        items.forEach((p) => {
-          boxMap[p.id] = parseFloat(p.box_price || 0) || 0
-        })
-        this.setData({ boxPriceMap: boxMap })
-      } catch (_) {}
-    }
+    const boxMap = this.data.boxPriceMap || {}
+    let enrichedList = list
+    try {
+      const productItems = await this.loadProductCatalog()
+      if (productItems.length) {
+        enrichedList = cartUtil.enrichCartFromProducts(list, productItems)
+      }
+    } catch (_) {}
     let packing = 0
-    const cartPreview = list.map((item) => {
+    const cartPreview = enrichedList.map((item) => {
       const qty = item.quantity || 1
       const box = boxMap[item.product_id] || 0
       packing += box * qty
@@ -290,14 +299,16 @@ Page({
     const rate = this._memberRate || 1
     let discount = 0
     if (rate > 0 && rate < 1) {
-      discount = Math.round(sub * (1 - rate) * 100) / 100
+      const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
+      discount = Math.round(discountable * (1 - rate) * 100) / 100
     }
     const afterMember = Math.max(0, sub - discount)
+    const couponEligible = cartUtil.calcCouponEligibleSubtotal(enrichedList, discount)
 
     if (!this._couponManualPick && (this.data.coupons || []).length) {
       const bestCoupon = pickBestCoupon(
         this.data.coupons,
-        afterMember,
+        couponEligible,
         (amt, c) => this.calcCouponDiscount(amt, c)
       )
       this._selectedCoupon = bestCoupon
@@ -307,15 +318,18 @@ Page({
       })
     }
 
-    const couponDisc = this.calcCouponDiscount(afterMember, this._selectedCoupon)
+    const couponDisc = this.calcCouponDiscount(couponEligible, this._selectedCoupon)
     let pay = afterMember - couponDisc
+    const voucherEligible = cartUtil.calcVoucherEligiblePayable(
+      couponEligible, couponDisc, pack, needPack
+    )
     if (needPack) pay += pack
 
     if (!this._voucherManualPick && (this.data.vouchers || []).length) {
       const bestVoucher = pickBestVoucher(
         this.data.vouchers,
-        pay,
-        (amt, v) => this.calcVoucherDiscount(amt, v)
+        voucherEligible,
+        (amt, v) => this.calcVoucherDiscount(pay, v, amt)
       )
       this._selectedVoucher = bestVoucher
       this.setData({
@@ -324,7 +338,23 @@ Page({
       })
     }
 
-    const voucherDisc = this.calcVoucherDiscount(pay, this._selectedVoucher)
+    let voucherDisc = this.calcVoucherDiscount(pay, this._selectedVoucher, voucherEligible)
+    if (this._selectedVoucher && voucherDisc <= 0) {
+      if (this._voucherManualPick) {
+        wx.showToast({
+          title: '订单金额未满代金券面额，已取消使用',
+          icon: 'none',
+          duration: 2500
+        })
+        this._voucherManualPick = false
+      }
+      this._selectedVoucher = null
+      this.setData({
+        selectedVoucherId: 0,
+        selectedVoucherLabel: '不使用代金券'
+      })
+      voucherDisc = 0
+    }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
     this.setData({
       cartPreview,
@@ -336,7 +366,8 @@ Page({
       voucherDiscountAmount: voucherDisc.toFixed(2),
       hasVoucherDiscount: voucherDisc > 0,
       payEstimate: pay.toFixed(2),
-      hasDiscount: discount > 0
+      hasDiscount: discount > 0,
+      hasSpecialItems: enrichedList.some((i) => i.no_member_discount)
     })
   },
 

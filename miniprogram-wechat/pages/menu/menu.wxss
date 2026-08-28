@@ -160,12 +160,31 @@
   justify-content: center;
 }
 
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
 .name {
   font-size: 28rpx;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.special-tag {
+  flex-shrink: 0;
+  font-size: 20rpx;
+  color: #ff6b35;
+  border: 1rpx solid #ffb899;
+  border-radius: 6rpx;
+  padding: 2rpx 8rpx;
+  line-height: 1.4;
 }
 
 .desc {

@@ -35,6 +35,100 @@ def test_ensure_local_aware_naive():
 
 
 @pytest.mark.asyncio
+async def test_resolve_voucher_skips_when_payable_less_than_face():
+    """应付低于代金券面额时不使用，避免一次性核销浪费余额。"""
+    tmpl = SimpleNamespace(
+        coupon_type="VOUCHER",
+        discount_value=Decimal("10"),
+        min_order_amount=Decimal("0"),
+    )
+    cc = SimpleNamespace(
+        id=2,
+        customer_id=1,
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=7),
+    )
+    row = MagicMock()
+    row.first.return_value = (cc, tmpl)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=row)
+    disc, vid = await CouponService.resolve_voucher_discount(db, 2, 1, Decimal("8"))
+    assert disc == Decimal("0.00")
+    assert vid is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_voucher_applies_when_payable_meets_face():
+    tmpl = SimpleNamespace(
+        coupon_type="VOUCHER",
+        discount_value=Decimal("10"),
+        min_order_amount=Decimal("0"),
+    )
+    cc = SimpleNamespace(
+        id=3,
+        customer_id=1,
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=7),
+    )
+    row = MagicMock()
+    row.first.return_value = (cc, tmpl)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=row)
+    disc, vid = await CouponService.resolve_voucher_discount(db, 3, 1, Decimal("12"))
+    assert disc == Decimal("10.00")
+    assert vid == 3
+
+
+@pytest.mark.asyncio
+async def test_resolve_voucher_skips_when_eligible_less_than_face():
+    """可参与代金券的基数（不含特价）不足面额时不使用。"""
+    tmpl = SimpleNamespace(
+        coupon_type="VOUCHER",
+        discount_value=Decimal("10"),
+        min_order_amount=Decimal("0"),
+    )
+    cc = SimpleNamespace(
+        id=4,
+        customer_id=1,
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=7),
+    )
+    row = MagicMock()
+    row.first.return_value = (cc, tmpl)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=row)
+    disc, vid = await CouponService.resolve_voucher_discount(
+        db, 4, 1, Decimal("48.00"), eligible_payable=Decimal("8.00")
+    )
+    assert disc == Decimal("0.00")
+    assert vid is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_voucher_uses_eligible_cap():
+    tmpl = SimpleNamespace(
+        coupon_type="VOUCHER",
+        discount_value=Decimal("10"),
+        min_order_amount=Decimal("0"),
+    )
+    cc = SimpleNamespace(
+        id=5,
+        customer_id=1,
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=7),
+    )
+    row = MagicMock()
+    row.first.return_value = (cc, tmpl)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=row)
+    disc, vid = await CouponService.resolve_voucher_discount(
+        db, 5, 1, Decimal("95.80"), eligible_payable=Decimal("60.80")
+    )
+    assert disc == Decimal("10.00")
+    assert vid == 5
+
+
+@pytest.mark.asyncio
 async def test_resolve_discount_naive_expires_at():
     """DB 读出 naive expires_at 时不应因时区比较抛 TypeError。"""
     tmpl = SimpleNamespace(

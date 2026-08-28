@@ -1,6 +1,8 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
+const prefUtil = require('../../utils/preferences')
+const { enableWxPhoneBind } = require('../../config/env')
 const app = getApp()
 
 function discountText(rate) {
@@ -31,6 +33,9 @@ Page({
     customerNo: '',
     faceOn: false,
     prefs: [],
+    prefsConfirmed: [],
+    prefsLearning: [],
+    prefsEmpty: true,
     isMember: false,
     memberLevelName: '',
     memberDiscountText: '',
@@ -45,6 +50,7 @@ Page({
     walletLoading: false,
     phone: '',
     phoneInput: '',
+    canWxPhone: false,
     storeName: '',
     storeNo: '',
     storeAddress: '',
@@ -54,6 +60,7 @@ Page({
   },
 
   onShow() {
+    this.setData({ canWxPhone: !!enableWxPhoneBind })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadProfile()
@@ -76,13 +83,14 @@ Page({
     this.setData({ coupons, vouchers, walletLoading: false })
   },
 
-  applyProfile(profile, prefs) {
+  applyProfile(profile, prefView) {
     const nickname = profile.nickname || app.globalData.nickname || ''
     const displayName = nickname || '面馆会员'
     if (profile.nickname) app.globalData.nickname = profile.nickname
     if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
     const face = (profile && profile.face_status) || {}
+    const view = prefView || prefUtil.buildPrefDisplay({})
     this.setData({
       nickname,
       displayName,
@@ -90,7 +98,10 @@ Page({
       avatarUrl: profile.avatar_url || app.globalData.avatarUrl || '',
       customerNo: profile.customer_no || app.globalData.customerNo || '',
       faceOn: !!(face && face.has_face),
-      prefs: prefs || [],
+      prefs: view.prefs || [],
+      prefsConfirmed: view.confirmed || [],
+      prefsLearning: view.learning || [],
+      prefsEmpty: !!view.isEmpty,
       isMember: !!profile.is_member,
       memberLevelName: profile.member_level_name || '',
       memberDiscountText: discountText(profile.member_discount_rate),
@@ -125,15 +136,16 @@ Page({
       const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
         cid
-          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [] }))
-          : Promise.resolve({ preferences: [] }),
+          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [], all: [] }))
+          : Promise.resolve({ preferences: [], all: [] }),
         api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
         api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
       ])
-      const prefs = (prefRes && prefRes.preferences) || []
-      app.globalData.prefs = prefs
+      const prefView = prefUtil.buildPrefDisplay(prefRes)
+      app.globalData.prefs = prefView.prefs
+      app.globalData.prefsView = prefView
       app.globalData.prefsAt = now
-      this.applyProfile(profile, prefs)
+      this.applyProfile(profile, prefView)
       this.applyWallet(couponRes, voucherRes)
       this._profileLoadedAt = now
     } catch (e) {
@@ -171,6 +183,14 @@ Page({
 
   async onGetPhoneNumber(e) {
     const detail = (e && e.detail) || {}
+    if (detail.errMsg && detail.errMsg.indexOf('privacy agreement') >= 0) {
+      wx.showModal({
+        title: '需配置隐私指引',
+        content: '请先在微信公众平台声明「手机号」收集项，并将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 设为 true；当前请使用下方手动输入绑定。',
+        showCancel: false
+      })
+      return
+    }
     if (!detail.code) {
       if (detail.errMsg && detail.errMsg.indexOf('deny') >= 0) {
         wx.showToast({ title: '您拒绝了手机号授权', icon: 'none' })

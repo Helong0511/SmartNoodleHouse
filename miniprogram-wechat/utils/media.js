@@ -29,14 +29,23 @@ function resolveUrl(path) {
  * 按当前屏宽计算展示尺寸（逻辑像素 px）
  * 常见视口 360~414；列表缩略约屏宽 22%，详情头图约 1:1 全宽
  */
-function layoutMetrics(sys) {
-  let w = 375
+function readWindowWidth() {
   try {
-    const info = sys || (typeof wx !== 'undefined' && wx.getSystemInfoSync
-      ? wx.getSystemInfoSync()
-      : (typeof my !== 'undefined' && my.getSystemInfoSync ? my.getSystemInfoSync() : null))
-    w = (info && (info.windowWidth || info.screenWidth)) || 375
+    if (typeof wx !== 'undefined' && wx.getWindowInfo) {
+      return wx.getWindowInfo().windowWidth
+    }
+    if (typeof wx !== 'undefined' && wx.getSystemInfoSync) {
+      return wx.getSystemInfoSync().windowWidth
+    }
+    if (typeof my !== 'undefined' && my.getSystemInfoSync) {
+      return my.getSystemInfoSync().windowWidth
+    }
   } catch (_) {}
+  return 375
+}
+
+function layoutMetrics(sys) {
+  const w = (sys && (sys.windowWidth || sys.screenWidth)) || readWindowWidth()
 
   const isWide = w >= 600
   // 列表缩略：窄屏 72~100，宽屏/Pad 略大

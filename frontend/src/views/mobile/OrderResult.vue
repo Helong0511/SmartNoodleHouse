@@ -1,7 +1,7 @@
 <template>
   <div class="result-page">
     <div class="icon">✓</div>
-    <h2>订单已提交</h2>
+    <h2>{{ paid ? '支付成功' : '订单已提交' }}</h2>
     <p>订单号: {{ order?.order_no }}</p>
     <p v-if="order?.store_name">门店: {{ order.store_name }}</p>
     <p v-if="order?.table">桌号: {{ order.table.table_name || order.table.table_no }}</p>
@@ -26,13 +26,27 @@
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api'
 const route = useRoute()
 const order = ref<any>(null)
+const paid = computed(() => {
+  const ps = order.value?.payment_status
+  return ps === 'PAID' || ps === 'PARTIAL_REFUND'
+})
 onMounted(async () => {
-  order.value = (await api.get(`/orders/${route.query.order_id}`, { headers: { 'X-Client': 'customer' } })).data
+  const id = route.query.order_id
+  if (!id) return
+  order.value = (await api.get(`/orders/${id}`, { headers: { 'X-Client': 'customer' } })).data
+  if (order.value?.payment_status === 'UNPAID') {
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 1500))
+      const latest = (await api.get(`/orders/${id}`, { headers: { 'X-Client': 'customer' } })).data
+      order.value = latest
+      if (latest?.payment_status !== 'UNPAID') break
+    }
+  }
 })
 </script>
 <style scoped>

@@ -1,6 +1,11 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/cart/cart",
+    "pages/confirm/confirm",
+    "pages/product/product",
+    "pages/result/result",
+    "pages/face/face",
     "pages/menu/menu",
     "pages/orders/orders",
     "pages/member/member"

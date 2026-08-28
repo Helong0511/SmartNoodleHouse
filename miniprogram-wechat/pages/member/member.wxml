@@ -177,9 +177,16 @@
 
     <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
 
-    <button class="btn-primary wx-phone" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber">微信一键绑定手机号</button>
+    <button
+      wx:if="{{canWxPhone}}"
+      class="btn-primary wx-phone"
+      open-type="getPhoneNumber"
+      bindgetphonenumber="onGetPhoneNumber"
+    >微信一键绑定手机号</button>
 
-    <view class="or">或手动输入</view>
+    <view class="or" wx:if="{{canWxPhone}}">或手动输入</view>
+
+    <view class="tip dev-tip" wx:if="{{!canWxPhone}}">开发提示：未在公众平台配置「手机号」隐私项时，请直接手动输入；配置完成后将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 改为 true。</view>
 
     <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" bindinput="onPhoneInput" />
 
@@ -219,16 +226,32 @@
 
     <view class="title">智能记录的口味爱好</view>
 
-    <view class="tip" wx:if="{{!prefs.length}}">完成订单后，系统会自动累计您常点的规格口味，点餐时智能预选。</view>
+    <view class="tip" wx:if="{{prefsEmpty}}">完成订单后，系统会自动累计您常点的规格口味（辣度、面量、加料等），点餐时智能预选。</view>
 
     <block wx:else>
 
-      <view class="tip">根据您历史订单自动学习，点餐时会智能预选常点口味。</view>
+      <view class="tip">根据历史订单自动学习；订单状态为「已完成」后更新画像，点餐时会智能预选。</view>
 
-      <view class="tag" wx:for="{{prefs}}" wx:key="option_code">
+      <view class="pref-section" wx:if="{{prefsConfirmed.length}}">
+        <view class="pref-section-title">已确认偏好</view>
+        <view class="pref-item" wx:for="{{prefsConfirmed}}" wx:key="key">
+          <view class="pref-main">
+            <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+            <text class="pref-meta">{{item.freqText}}</text>
+          </view>
+          <text class="pref-badge confirmed">{{item.statusText}}</text>
+        </view>
+      </view>
 
-        {{item.category}} · {{item.option_name || item.option_code}}
-
+      <view class="pref-section" wx:if="{{prefsLearning.length}}">
+        <view class="pref-section-title">学习中</view>
+        <view class="pref-item" wx:for="{{prefsLearning}}" wx:key="key">
+          <view class="pref-main">
+            <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+            <text class="pref-meta">{{item.freqText}}</text>
+          </view>
+          <text class="pref-badge learning">{{item.statusText}}</text>
+        </view>
       </view>
 
       <button class="btn-primary" bindtap="goMenu">按爱好去点餐</button>

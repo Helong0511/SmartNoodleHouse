@@ -355,7 +355,7 @@ async def get_settings_overview(request: Request, db: DbSession):
             },
             "scripts": [
                 {"name": "初始化管理员", "command": "python scripts/init_admin.py", "note": "首次部署后执行并设置强密码"},
-                {"name": "数据库迁移", "command": "执行 sql/001_schema.sql 与 sql/002_seed_test.sql", "note": "首次部署必做"},
+                {"name": "数据库初始化", "command": "生产: 001_schema + 002_seed_prod + init_admin", "note": "开发用 002_seed_test.sql"},
                 {"name": "启动后端", "command": "cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000", "note": "Windows PowerShell 同理"},
                 {"name": "启动前端", "command": "cd frontend && npm run dev", "note": "http://localhost:5173"},
                 {"name": "系统设置并发测试", "command": "pytest tests/test_settings_concurrency.py -q", "note": "高并发读写/校验"},

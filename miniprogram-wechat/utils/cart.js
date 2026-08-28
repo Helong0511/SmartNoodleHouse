@@ -101,6 +101,7 @@ function mergeCartItem(cart, entry) {
     const add = entry.quantity || 1
     cur.quantity = (cur.quantity || 1) + add
     cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
+    if (entry.no_member_discount != null) cur.no_member_discount = !!entry.no_member_discount
     list[idx] = cur
   } else {
     list.push(normalizeItem({ ...entry }))
@@ -140,6 +141,7 @@ function reconcileWithProducts(cart, products) {
     if (invalidReason) invalidCount += 1
     return {
       ...item,
+      no_member_discount: p ? !!p.no_member_discount : !!item.no_member_discount,
       invalid: !!invalidReason,
       invalidReason
     }
@@ -152,6 +154,42 @@ function reconcileWithProducts(cart, products) {
   }
 }
 
+function calcDiscountableSubtotal(cart) {
+  return (cart || []).reduce((s, raw) => {
+    const item = normalizeItem({ ...raw })
+    if (item.no_member_discount) return s
+    return s + parseMoney(item.subtotal)
+  }, 0)
+}
+
+/** 会员折后可用于优惠券的商品小计（不含特价） */
+function calcCouponEligibleSubtotal(cart, memberDiscount) {
+  const discountable = calcDiscountableSubtotal(cart)
+  const eligible = discountable - parseMoney(memberDiscount)
+  return Math.max(0, Math.round(eligible * 100) / 100)
+}
+
+/** 可用于代金券门槛/面额判断的基数（不含特价商品小计，可选含打包费） */
+function calcVoucherEligiblePayable(couponEligible, couponDiscount, packingFee, needPack) {
+  let base = Math.max(0, parseMoney(couponEligible) - parseMoney(couponDiscount))
+  if (needPack) base += parseMoney(packingFee)
+  return Math.round(base * 100) / 100
+}
+
+function enrichCartFromProducts(list, products) {
+  const map = {}
+  ;(products || []).forEach((p) => {
+    map[p.id] = p
+    map[String(p.id)] = p
+  })
+  return (list || []).map((raw) => {
+    const item = normalizeItem({ ...raw })
+    const p = map[item.product_id]
+    if (p) item.no_member_discount = !!p.no_member_discount
+    return item
+  })
+}
+
 module.exports = {
   calcUnitPrice,
   buildOptionLabels,
@@ -160,5 +198,9 @@ module.exports = {
   cartSummary,
   itemKey,
   mergeCartItem,
-  reconcileWithProducts
+  reconcileWithProducts,
+  calcDiscountableSubtotal,
+  calcCouponEligibleSubtotal,
+  calcVoucherEligiblePayable,
+  enrichCartFromProducts
 }

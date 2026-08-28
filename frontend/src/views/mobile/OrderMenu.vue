@@ -52,6 +52,7 @@
           <div v-else class="hero-img placeholder">{{ (currentProduct.name || '餐')[0] }}</div>
         </div>
         <h3>{{ currentProduct.name }} ¥{{ currentProduct.price }}</h3>
+        <p v-if="prefHint" class="pref-hint">{{ prefHint }}</p>
         <p v-if="currentProduct.description" class="desc">{{ currentProduct.description }}</p>
         <div v-for="g in currentProduct.option_groups" :key="g.id" class="option-group">
           <h4>{{ g.name }}</h4>
@@ -78,6 +79,13 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { mediaUrl, thumbSizePx } from '@/utils/media'
+import {
+  applyPreferencesToProduct,
+  buildOptionLabels,
+  calcUnitPrice,
+  collectOptionIds,
+  mergeCartItem,
+} from '@/utils/cart'
 
 const route = useRoute()
 const table = ref<any>(null)
@@ -111,26 +119,46 @@ function decorate(p: any) {
   return { ...p, description: p.description || '', _imageUrl: mediaUrl(p.main_image) }
 }
 
+const prefHint = ref('')
+
 async function openProduct(p: any) {
   const res = await api.get(`/products/${p.id}`)
   currentProduct.value = decorate(res.data)
-  // 默认选中每组第一个单选
+  prefHint.value = ''
+  Object.keys(selectedOptions).forEach((k) => delete selectedOptions[Number(k)])
+  Object.keys(multiOptions).forEach((k) => delete multiOptions[Number(k)])
   for (const g of currentProduct.value.option_groups || []) {
-    if (g.selection_type === 'SINGLE' && g.options?.length && !selectedOptions[g.id]) {
+    if (g.selection_type === 'SINGLE' && g.options?.length) {
       const normal = g.options.find((o: any) => o.code === 'NORMAL') || g.options[0]
       selectedOptions[g.id] = normal.id
+    }
+    if (g.selection_type === 'MULTIPLE') {
+      multiOptions[g.id] = []
+    }
+  }
+  if (customerId.value) {
+    try {
+      const prefRes = await api.get(`/customers/${customerId.value}/preferences`)
+      const prefs = prefRes.data?.preferences || []
+      const applied = applyPreferencesToProduct(
+        currentProduct.value,
+        prefs,
+        selectedOptions,
+        multiOptions,
+      )
+      if (applied > 0) prefHint.value = '已按您的智能口味爱好预选规格，可随时修改'
+    } catch {
+      /* ignore */
     }
   }
   showProduct.value = true
 }
 
 function addToCart() {
-  const optionIds: number[] = []
-  for (const g of currentProduct.value.option_groups) {
-    if (g.selection_type === 'SINGLE' && selectedOptions[g.id]) optionIds.push(selectedOptions[g.id])
-    if (g.selection_type === 'MULTIPLE' && multiOptions[g.id]) optionIds.push(...multiOptions[g.id])
-  }
-  for (const g of currentProduct.value.option_groups || []) {
+  const p = currentProduct.value
+  if (!p) return
+  const optionIds = collectOptionIds(p, selectedOptions, multiOptions)
+  for (const g of p.option_groups || []) {
     if (!g.is_required) continue
     const has =
       (g.selection_type === 'SINGLE' && selectedOptions[g.id]) ||
@@ -140,20 +168,26 @@ function addToCart() {
       return
     }
   }
-  const stock = Number(currentProduct.value.stock ?? 999)
+  const stock = Number(p.stock ?? 999)
   if (stock < 999 && stock < 1) {
     ElMessage.error('库存不足')
     return
   }
-  cart.value.push({
-    product_id: currentProduct.value.id,
-    name: currentProduct.value.name,
+  const optionLabels = buildOptionLabels(p, selectedOptions, multiOptions)
+  const unitPrice = calcUnitPrice(p, selectedOptions, multiOptions)
+  cart.value = mergeCartItem(cart.value, {
+    product_id: p.id,
+    name: p.name,
     quantity: 1,
     option_ids: optionIds,
-    price: currentProduct.value.price,
-    subtotal: currentProduct.value.price,
-    imageUrl: currentProduct.value._imageUrl || '',
-    box_price: currentProduct.value.box_price || '0',
+    option_labels: optionLabels,
+    option_text: optionLabels.join('、'),
+    unit_price: unitPrice,
+    price: p.price,
+    subtotal: unitPrice.toFixed(2),
+    imageUrl: p._imageUrl || '',
+    box_price: p.box_price || '0',
+    no_member_discount: !!p.no_member_discount,
   })
   localStorage.setItem('snh_cart', JSON.stringify(cart.value))
   localStorage.setItem('cart', JSON.stringify(cart.value))
@@ -273,6 +307,10 @@ header { background: linear-gradient(135deg, #ff6b35, #f7b733); color: #fff; pad
   background: linear-gradient(160deg, #ffe8df, #f0f0f0); color: #ff6b35; font-size: 48px; font-weight: 700;
 }
 .desc { color: #888; font-size: 13px; margin: 4px 0 12px; }
+.pref-hint {
+  font-size: 13px; color: #ff6b35; background: #fff3ee;
+  padding: 8px 12px; border-radius: 8px; margin-bottom: 8px;
+}
 .option-group { margin: 12px 0; }
 .prompt-mask {
   position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;

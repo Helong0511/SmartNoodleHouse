@@ -36,7 +36,17 @@
   background: #ffe8df;
 }
 .info { flex: 1; min-width: 0; }
-.name { font-size: 30rpx; font-weight: 600; }
+.name-row { display: flex; align-items: center; gap: 8rpx; }
+.name { font-size: 30rpx; font-weight: 600; flex: 1; min-width: 0; }
+.special-tag {
+  flex-shrink: 0;
+  font-size: 20rpx;
+  color: #ff6b35;
+  border: 1rpx solid #ffb899;
+  border-radius: 6rpx;
+  padding: 2rpx 8rpx;
+}
+.special-tip { color: #999; font-size: 22rpx; margin-top: 4rpx; }
 .invalid-tag { font-size: 24rpx; color: #e64340; margin-top: 8rpx; }
 .opts { font-size: 24rpx; color: #888; margin-top: 8rpx; }
 .unit { font-size: 24rpx; color: #666; margin-top: 8rpx; }

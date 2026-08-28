@@ -1,6 +1,7 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
+const { enableChooseAvatar } = require('../../config/env')
 const app = getApp()
 
 Page({
@@ -16,11 +17,13 @@ Page({
     nickname: '',
     avatarUrl: '',
     enableFace: false,
+    canChooseAvatar: false,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购与到店迎宾推荐。',
     faceText: '开启人脸迎宾后，到店可自动欢迎，并按您常点口味智能推荐。仅摄像头实时采集，可随时关闭。'
   },
 
   onLoad(query) {
+    this.setData({ canChooseAvatar: !!enableChooseAvatar })
     if (query.token) {
       app.globalData.tableToken = query.token
       wx.setStorageSync('table_token', query.token)

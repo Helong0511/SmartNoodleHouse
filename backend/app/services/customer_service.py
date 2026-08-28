@@ -226,16 +226,57 @@ class CustomerService:
         return rate
 
     @staticmethod
-    def calc_member_discount(subtotal: Decimal, packing_fee: Decimal, rate: Decimal) -> tuple[Decimal, Decimal]:
-        """按商品小计计算会员优惠（打包费不参与折扣）。返回 (discount_amount, total_amount)。"""
+    def calc_member_discount(
+        subtotal: Decimal,
+        packing_fee: Decimal,
+        rate: Decimal,
+        *,
+        discountable_subtotal: Decimal | None = None,
+    ) -> tuple[Decimal, Decimal]:
+        """按可打折商品小计计算会员优惠（打包费、特价商品不参与折扣）。返回 (discount_amount, total_amount)。"""
         subtotal = money(subtotal)
+        discountable_subtotal = money(discountable_subtotal if discountable_subtotal is not None else subtotal)
+        if discountable_subtotal > subtotal:
+            discountable_subtotal = subtotal
         packing_fee = money(packing_fee)
         rate = money(rate)
         if rate >= Decimal("1"):
             return Decimal("0.00"), money(subtotal + packing_fee)
-        discount = money(subtotal * (Decimal("1") - rate))
+        discount = money(discountable_subtotal * (Decimal("1") - rate))
         total = money(subtotal - discount + packing_fee)
         return discount, total
+
+    @staticmethod
+    def calc_coupon_eligible_subtotal(
+        subtotal: Decimal,
+        discountable_subtotal: Decimal,
+        discount_amount: Decimal,
+    ) -> Decimal:
+        """会员折后可用于优惠券的商品小计（不含特价商品）。"""
+        subtotal = money(subtotal)
+        discountable_subtotal = money(discountable_subtotal)
+        if discountable_subtotal > subtotal:
+            discountable_subtotal = subtotal
+        special_subtotal = money(subtotal - discountable_subtotal)
+        after_member = money(subtotal - money(discount_amount))
+        eligible = money(after_member - special_subtotal)
+        return eligible if eligible > Decimal("0") else Decimal("0.00")
+
+    @staticmethod
+    def calc_voucher_eligible_payable(
+        coupon_eligible_subtotal: Decimal,
+        coupon_discount: Decimal,
+        packing_fee: Decimal,
+        *,
+        need_pack: bool,
+    ) -> Decimal:
+        """可用于代金券门槛/面额判断的基数（不含特价商品小计，可选含打包费）。"""
+        base = money(coupon_eligible_subtotal) - money(coupon_discount)
+        if base < Decimal("0"):
+            base = Decimal("0.00")
+        if need_pack:
+            base = money(base + money(packing_fee))
+        return base
 
     @staticmethod
     async def get_or_create_by_wechat(db: AsyncSession, openid: str, unionid: str | None = None) -> Customer:
@@ -434,20 +475,31 @@ class OrderCreateService:
                     return order
             raise AppException(40901, "订单创建冲突，请重试")
 
-        subtotal, packing_fee = await OrderPriceCalculator.build_order_items(
+        subtotal, packing_fee, discountable_subtotal = await OrderPriceCalculator.build_order_items(
             db, order, items, deduct_stock=True, need_pack=pack
         )
         rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
-        discount_amount, base_total = CustomerService.calc_member_discount(subtotal, packing_fee, rate)
-        eligible = money(subtotal) - money(discount_amount)
+        discount_amount, base_total = CustomerService.calc_member_discount(
+            subtotal, packing_fee, rate, discountable_subtotal=discountable_subtotal
+        )
+        coupon_eligible = CustomerService.calc_coupon_eligible_subtotal(
+            subtotal, discountable_subtotal, discount_amount
+        )
         from app.services.coupon_service import CouponService
 
         coupon_discount, coupon_id = await CouponService.resolve_discount(
-            db, customer_coupon_id, customer_id, eligible
+            db, customer_coupon_id, customer_id, coupon_eligible
         )
         payable_before_voucher = money(base_total - coupon_discount)
+        voucher_eligible = CustomerService.calc_voucher_eligible_payable(
+            coupon_eligible, coupon_discount, packing_fee, need_pack=pack
+        )
         voucher_discount, voucher_id = await CouponService.resolve_voucher_discount(
-            db, customer_voucher_id, customer_id, payable_before_voucher
+            db,
+            customer_voucher_id,
+            customer_id,
+            payable_before_voucher,
+            eligible_payable=voucher_eligible,
         )
         total_amount = money(payable_before_voucher - voucher_discount)
         order.subtotal = subtotal

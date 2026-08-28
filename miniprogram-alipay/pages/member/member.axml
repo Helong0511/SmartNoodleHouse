@@ -60,9 +60,29 @@
 
     <view class="card">
       <view class="title">智能记录的口味爱好</view>
-      <view class="tip" a:if="{{!prefs.length}}">完成订单后自动累计常点口味，点餐时智能预选。</view>
+      <view class="tip" a:if="{{prefsEmpty}}">完成订单后自动累计常点口味（辣度、面量、加料等），点餐时智能预选。</view>
       <block a:else>
-        <view class="tag" a:for="{{prefs}}" a:key="option_code">{{item.category}} · {{item.option_name || item.option_code}}</view>
+        <view class="tip">订单状态为「已完成」后更新画像，点餐时会智能预选常点规格。</view>
+        <view class="pref-section" a:if="{{prefsConfirmed.length}}">
+          <view class="pref-section-title">已确认偏好</view>
+          <view class="pref-item" a:for="{{prefsConfirmed}}" a:key="key">
+            <view class="pref-main">
+              <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+              <text class="pref-meta">{{item.freqText}}</text>
+            </view>
+            <text class="pref-badge confirmed">{{item.statusText}}</text>
+          </view>
+        </view>
+        <view class="pref-section" a:if="{{prefsLearning.length}}">
+          <view class="pref-section-title">学习中</view>
+          <view class="pref-item" a:for="{{prefsLearning}}" a:key="key">
+            <view class="pref-main">
+              <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+              <text class="pref-meta">{{item.freqText}}</text>
+            </view>
+            <text class="pref-badge learning">{{item.statusText}}</text>
+          </view>
+        </view>
         <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
       </block>
     </view>

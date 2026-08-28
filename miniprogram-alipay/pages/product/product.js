@@ -2,6 +2,8 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const prefUtil = require('../../utils/preferences')
+const app = getApp()
 
 Page({
   data: {
@@ -10,7 +12,8 @@ Page({
     multi: {},
     displayPrice: '0.00',
     gallery: [],
-    heroStyle: ''
+    heroStyle: '',
+    prefHint: ''
   },
 
   async onLoad(query) {
@@ -18,18 +21,32 @@ Page({
     this.setData({ heroStyle: metrics.heroStyle })
     try {
       const product = await api.get(`/products/${query.id}`, {}, false)
-      const selected = {}
-      ;(product.option_groups || []).forEach(g => {
-        if (g.selection_type === 'SINGLE' && g.options && g.options.length) {
-          const normal = g.options.find(o => o.code === 'NORMAL') || g.options[0]
-          selected[g.id] = normal.id
-        }
-      })
+      const { selected, multi } = prefUtil.defaultSelections(product)
       const gallery = media.galleryUrls(product)
-      this.setData({ product, selected, gallery })
+      this.setData({ product, selected, multi, gallery })
       this.updateDisplayPrice()
+      await this.applyPreferences(product)
     } catch (e) {
       my.showToast({ content: e.message || '加载失败', type: 'fail' })
+    }
+  },
+
+  async applyPreferences(product) {
+    let prefs = app.globalData.prefs || []
+    if (!prefs.length) {
+      const view = await prefUtil.loadCustomerPrefs(app, api)
+      prefs = view.prefs || []
+    }
+    if (!prefs.length) return
+
+    const applied = prefUtil.applyPrefsToProduct(product, prefs)
+    if (applied.applied) {
+      this.setData({
+        selected: applied.selected,
+        multi: applied.multi,
+        prefHint: applied.prefHint
+      })
+      this.updateDisplayPrice()
     }
   },
 
@@ -78,7 +95,8 @@ Page({
       option_text: optionLabels.join('、'),
       unit_price: unitPrice,
       subtotal: unitPrice.toFixed(2),
-      imageUrl
+      imageUrl,
+      no_member_discount: !!p.no_member_discount
     })
     auth.saveCart(cart)
     my.showToast({ content: '已加入' })

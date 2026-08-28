@@ -67,7 +67,10 @@
                 </view>
               </view>
               <view class="info">
-                <view class="name">{{p.name}}</view>
+                <view class="name-row">
+                  <view class="name">{{p.name}}</view>
+                  <text class="special-tag" wx:if="{{p.no_member_discount}}">特价</text>
+                </view>
                 <view class="desc" wx:if="{{p.description}}">{{p.description}}</view>
                 <view class="price">¥{{p.price}}</view>
               </view>
@@ -80,6 +83,7 @@
               data-price="{{p.price}}"
               data-image="{{p.imageUrl}}"
               data-has-options="{{p.has_options}}"
+              data-no-member-discount="{{p.no_member_discount}}"
             >+</view>
           </view>
         </view>

@@ -33,10 +33,15 @@ App({
         title: '隐私保护提示',
         content: '为提供登录、点餐、人脸迎宾等服务，需您同意《用户隐私保护指引》。',
         confirmText: '同意',
-        cancelText: '拒绝',
+        cancelText: '查看协议',
         success: (res) => {
-          if (res.confirm) resolve({ buttonId: 'agree-btn', event: 'agree' })
-          else resolve({ buttonId: 'disagree-btn', event: 'disagree' })
+          if (res.confirm) {
+            resolve({ buttonId: 'agree-btn', event: 'agree' })
+            return
+          }
+          privacy.openPrivacyContract().then(() => {
+            resolve({ buttonId: 'disagree-btn', event: 'disagree' })
+          })
         }
       })
     })

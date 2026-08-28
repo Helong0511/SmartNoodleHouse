@@ -46,7 +46,7 @@
       </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
-      <el-button type="warning" plain @click="openInflightRefunds">处理中退款</el-button>
+      <el-button v-if="canManageRefund" type="warning" plain @click="openInflightRefunds">处理中退款</el-button>
     </el-form>
 
     <el-table :data="payments" border>
@@ -275,6 +275,8 @@ const refundPageSize = 20
 const refundTotal = ref(0)
 const syncingNo = ref('')
 
+const canManageRefund = computed(() => auth.hasPermission('payment:refund'))
+
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
   if (!sid) return ''
@@ -293,6 +295,7 @@ const refundDrawerTitle = computed(() => {
 })
 
 function canRefund(row: any) {
+  if (!canManageRefund.value) return false
   if (row.status === 'REFUNDED') return false
   if (!(row.status === 'PAID' || row.status === 'PARTIAL_REFUND')) return false
   const remain = parseFloat(row.refundable_amount ?? '0')
@@ -302,6 +305,7 @@ function canRefund(row: any) {
 }
 
 function canSyncRefund(row: any) {
+  if (!canManageRefund.value) return false
   return row.status === 'PENDING' || row.status === 'PROCESSING'
 }
 

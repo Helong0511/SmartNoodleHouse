@@ -498,7 +498,7 @@ async def list_refunds(
     )
 
 
-@router.post("/refunds/{refund_id}/action", dependencies=[require_permission("order:update")])
+@router.post("/refunds/{refund_id}/action", dependencies=[require_permission("payment:refund")])
 async def refund_action(refund_id: int, data: RefundAction, request: Request, db: DbSession, user: CurrentUser):
     from app.models import Order
     from app.services.store_scope import assert_order_store_access

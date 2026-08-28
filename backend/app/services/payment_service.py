@@ -217,6 +217,13 @@ class PaymentService:
         customer_id: int | None = None,
         extra: dict | None = None,
     ) -> tuple[Payment, dict]:
+        locked = (
+            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+        ).scalar_one_or_none()
+        if not locked:
+            raise AppException(40402, "订单不存在")
+        order = locked
+
         if order.payment_status == "PAID":
             raise AppException(40010, "订单已支付")
         if order.status == "CANCELLED":
@@ -224,29 +231,50 @@ class PaymentService:
         if order.status != "PENDING_PAYMENT":
             raise AppException(40012, f"当前订单状态不可支付: {order.status}")
 
+        provider_u = provider.upper()
         channel = cls.CHANNEL_MAP.get(
-            (provider.upper(), channel_type.lower()),
-            f"{provider.upper()}_{channel_type.upper()}",
+            (provider_u, channel_type.lower()),
+            f"{provider_u}_{channel_type.upper()}",
         )
-        t_no, t_ph = await _order_table_parts(db, order)
-        sno = await _order_store_no(db, order)
-        payment = Payment(
-            payment_no=generate_no(payment_biz(provider), sno, t_no, table_placeholder=t_ph),
-            order_id=order.id,
-            customer_id=customer_id or order.customer_id,
-            provider=provider.upper(),
-            channel=channel,
-            amount=order.total_amount,
-            status="PENDING",
-        )
-        db.add(payment)
-        await db.flush()
-        await record_payment_status(db, payment_id=payment.id, from_status=None, to_status="PENDING", source="CREATE")
+
+        existing = (
+            await db.execute(
+                select(Payment)
+                .where(
+                    Payment.order_id == order.id,
+                    Payment.status == "PENDING",
+                    Payment.provider == provider_u,
+                    Payment.channel == channel,
+                )
+                .order_by(Payment.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if existing and money(existing.amount) == money(order.total_amount):
+            payment = existing
+        else:
+            t_no, t_ph = await _order_table_parts(db, order)
+            sno = await _order_store_no(db, order)
+            payment = Payment(
+                payment_no=generate_no(payment_biz(provider_u), sno, t_no, table_placeholder=t_ph),
+                order_id=order.id,
+                customer_id=customer_id or order.customer_id,
+                provider=provider_u,
+                channel=channel,
+                amount=order.total_amount,
+                status="PENDING",
+            )
+            db.add(payment)
+            await db.flush()
+            await record_payment_status(
+                db, payment_id=payment.id, from_status=None, to_status="PENDING", source="CREATE"
+            )
 
         provider_inst = cls.get_provider(provider)
         pay_data = await provider_inst.create_payment(payment, order, extra)
         if pay_data.get("_mock"):
-            await cls._settle_mock_payment(db, payment, order, provider.upper())
+            await cls._settle_mock_payment(db, payment, order, provider_u)
             pay_data["status"] = "PAID"
             pay_data["mock_settled"] = True
         return payment, pay_data
@@ -386,6 +414,21 @@ class PaymentService:
             raise AppException(40402, "订单不存在")
         if order.status == "CANCELLED" or order.payment_status == "CANCELLED":
             raise AppException(40901, "订单已关闭，拒绝支付入账")
+        if order.payment_status == "PAID":
+            logger.warning(
+                "重复支付回调已拒绝 order=%s payment=%s",
+                order.order_no,
+                payment.payment_no,
+            )
+            if payment.status == "PENDING":
+                old_p = payment.status
+                payment.status = "CLOSED"
+                payment.fail_reason = "订单已支付，重复入账拒绝"
+                await record_payment_status(
+                    db, payment_id=payment.id, from_status=old_p, to_status="CLOSED", source="CALLBACK"
+                )
+            await db.flush()
+            return payment
 
         settings = get_settings()
         if provider_u == "WECHAT":

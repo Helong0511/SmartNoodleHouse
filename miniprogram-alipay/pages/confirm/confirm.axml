@@ -19,10 +19,14 @@
       <image a:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" />
       <view class="mini placeholder" a:else>{{item.name[0] || '餐'}}</view>
       <view class="cart-info">
-        <text>{{item.name}} ×{{item.quantity}}</text>
+        <view class="cart-name-row">
+          <text>{{item.name}} ×{{item.quantity}}</text>
+          <text class="special-tag" a:if="{{item.no_member_discount}}">特价</text>
+        </view>
         <text class="cart-price">¥{{item.subtotal}}</text>
       </view>
     </view>
+    <view class="special-hint" a:if="{{hasSpecialItems}}">含特价商品：不参与会员折扣、优惠券及代金券</view>
     <view class="sum-row">
       <text>小计</text>
       <text>¥{{subtotal}}</text>

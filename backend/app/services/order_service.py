@@ -308,8 +308,8 @@ class OrderPriceCalculator:
         *,
         deduct_stock: bool = True,
         need_pack: bool = False,
-    ) -> tuple[Decimal, Decimal]:
-        """返回 (商品小计, 打包费)。打包费 = Σ(商品 box_price × 数量)，仅 need_pack 时计。"""
+    ) -> tuple[Decimal, Decimal, Decimal]:
+        """返回 (商品小计, 打包费, 可参与会员折扣的小计)。打包费 = Σ(商品 box_price × 数量)，仅 need_pack 时计。"""
         rows = await OrderPriceCalculator.calculate_items_batch(db, items_data)
         if deduct_stock:
             await deduct_for_order_items(
@@ -320,6 +320,7 @@ class OrderPriceCalculator:
 
         total = Decimal("0.00")
         packing = Decimal("0.00")
+        discountable = Decimal("0.00")
         for (product, subtotal, options_detail, quantity), item in zip(rows, items_data):
             unit_extra = sum(o.extra_price for _, o, _ in options_detail)
             unit_price = money(product.price + unit_extra)
@@ -346,6 +347,8 @@ class OrderPriceCalculator:
                     )
                 )
             total += subtotal
+            if not getattr(product, "no_member_discount", False):
+                discountable += subtotal
             if need_pack:
                 packing += money((product.box_price or Decimal("0")) * quantity)
-        return money(total), money(packing)
+        return money(total), money(packing), money(discountable)

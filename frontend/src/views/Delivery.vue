@@ -228,10 +228,11 @@
           </el-table-column>
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
-              <template v-if="row.status === 'PENDING'">
+              <template v-if="row.status === 'PENDING' && canHandleRefund">
                 <el-button size="small" type="success" @click="handleRefund(row.id, true)">同意</el-button>
                 <el-button size="small" type="danger" @click="askRejectRefund(row)">拒绝</el-button>
               </template>
+              <span v-else-if="row.status === 'PENDING'" class="muted">仅店长可处理</span>
               <span v-else class="muted">已处理</span>
             </template>
           </el-table-column>
@@ -484,6 +485,7 @@ import {
 } from '@/utils/labels'
 
 const auth = useAuthStore()
+const canHandleRefund = computed(() => auth.hasPermission('payment:refund'))
 const stores = ref<any[]>([])
 const storeFilter = ref<number | undefined>()
 const boundStoreName = computed(() => {

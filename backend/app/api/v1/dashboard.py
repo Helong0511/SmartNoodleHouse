@@ -19,9 +19,16 @@ from app.models import (
     Payment,
     PaymentRefund,
     Product,
+    Store,
     VisitorEvent,
 )
-from app.services.revenue_stats import member_discount_since, net_revenue_since, paid_order_count_since
+from app.services.revenue_stats import (
+    member_discount_since,
+    net_revenue_since,
+    new_store_customers_since,
+    paid_order_count_since,
+    store_dashboard_breakdown,
+)
 from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/dashboard", tags=["数据统计"])
@@ -82,6 +89,10 @@ async def dashboard_overview(
         await db.scalar(select(func.count()).select_from(Customer).where(Customer.created_at >= today_start))
         or 0
     )
+    if effective_store is not None:
+        today_new_members = await new_store_customers_since(
+            db, since=today_start, store_id=effective_store
+        )
 
     # ---------- 客单价：有效已付订单（未全额退）----------
     paid_count = await paid_order_count_since(db, since=today_start, store_id=effective_store)
@@ -106,6 +117,30 @@ async def dashboard_overview(
     hot_products = [
         {"name": n, "sales": int(s)} for n, s in (await db.execute(hot_q)).all()
     ]
+
+    hot_by_store: list[dict] = []
+    if effective_store is None:
+        hot_store_q = (
+            select(
+                Store.name.label("store_name"),
+                Product.name,
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("sales"),
+            )
+            .join(OrderItem, OrderItem.product_id == Product.id)
+            .join(Order, Order.id == OrderItem.order_id)
+            .join(Store, Store.id == Order.store_id)
+            .where(
+                Order.payment_status.in_(("PAID", "PARTIAL_REFUND")),
+                Order.paid_at >= today_start - timedelta(days=30),
+            )
+            .group_by(Store.id, Store.name, Product.id, Product.name)
+            .order_by(func.sum(OrderItem.quantity).desc())
+            .limit(20)
+        )
+        hot_by_store = [
+            {"store_name": sn, "name": n, "sales": int(s)}
+            for sn, n, s in (await db.execute(hot_store_q)).all()
+        ]
 
     # ---------- 支付方式：按「今日成功支付笔数/金额」统计（含已退款笔，避免退款后归零）----------
     pay_stat_q = (
@@ -190,9 +225,23 @@ async def dashboard_overview(
         db, since=today_start, store_id=effective_store, channels=["MEITUAN", "ELEME"]
     )
 
+    store_breakdown: list[dict] = []
+    store_name: str | None = None
+    if effective_store is None:
+        store_breakdown = await store_dashboard_breakdown(db, since=today_start)
+    else:
+        row = (
+            await db.execute(select(Store.name).where(Store.id == effective_store))
+        ).scalar_one_or_none()
+        store_name = row
+
     return success(
         {
             "store_id": effective_store,
+            "store_name": store_name,
+            "multi_store": effective_store is None,
+            "store_count": len(store_breakdown) if store_breakdown else (1 if effective_store else 0),
+            "store_breakdown": store_breakdown,
             "today_orders": today_orders,
             "today_gross_revenue": str(today_gross),
             "today_revenue": str(today_revenue),
@@ -203,6 +252,7 @@ async def dashboard_overview(
             "avg_order_amount": avg_order,
             "paid_order_count": paid_count,
             "hot_products": hot_products,
+            "hot_products_by_store": hot_by_store,
             # 兼容旧前端字段（笔数）；同时给结构化明细
             "payment_ratio": {
                 "wechat": wechat_stat["count"],

@@ -302,7 +302,7 @@ class CouponService:
         customer_id: int | None,
         eligible_subtotal: Decimal,
     ) -> tuple[Decimal, int | None]:
-        """校验并计算优惠券减免。eligible_subtotal=会员折后商品小计。"""
+        """校验并计算优惠券减免。eligible_subtotal=会员折后可用商品小计（不含特价商品）。"""
         if not customer_coupon_id or not customer_id:
             return Decimal("0.00"), None
         row = (
@@ -346,8 +346,10 @@ class CouponService:
         customer_voucher_id: int | None,
         customer_id: int | None,
         payable_amount: Decimal,
+        *,
+        eligible_payable: Decimal | None = None,
     ) -> tuple[Decimal, int | None]:
-        """校验并计算代金券抵扣。payable_amount=会员折后小计+打包费-优惠券减免。"""
+        """校验并计算代金券抵扣。payable_amount=订单应付；eligible_payable=可参与代金券的基数（不含特价商品）。"""
         if not customer_voucher_id or not customer_id:
             return Decimal("0.00"), None
         row = (
@@ -372,11 +374,16 @@ class CouponService:
             cc.status = "EXPIRED"
             await db.flush()
             raise AppException(40074, "代金券已过期")
-        payable = money(payable_amount)
+        eligible = money(eligible_payable if eligible_payable is not None else payable_amount)
         min_amt = money(tmpl.min_order_amount or 0)
-        if payable < min_amt:
+        if eligible < min_amt:
             raise AppException(40075, f"应付未满{coupon_service_min_label(min_amt)}，不可用此代金券")
-        disc = min(money(tmpl.discount_value), payable)
+        face = money(tmpl.discount_value)
+        # 代金券一次性核销（支付后整券 USED），不支持找零/余额结转。
+        # 可参与代金券的基数不足面额时不使用，避免浪费。
+        if eligible < face:
+            return Decimal("0.00"), None
+        disc = min(face, eligible)
         return disc, cc.id
 
     @staticmethod

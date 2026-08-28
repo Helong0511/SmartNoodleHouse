@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
 Page({
@@ -10,13 +11,25 @@ Page({
     tableName: '',
     cartCount: 0,
     cartTotal: '0.00',
-    isWide: false
+    isWide: false,
+    prefSummary: ''
   },
 
   onShow() {
     this.refreshCart()
+    this.loadPrefs()
     this.loadMenu()
     this.ensureTable()
+  },
+
+  onPullDownRefresh() {
+    Promise.all([this.loadPrefs(true), this.loadMenu()])
+      .finally(() => my.stopPullDownRefresh())
+  },
+
+  async loadPrefs(force = false) {
+    const view = await prefUtil.loadCustomerPrefs(app, api, { force })
+    this.setData({ prefSummary: view.prefSummary || '' })
   },
 
   async ensureTable() {

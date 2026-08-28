@@ -9,10 +9,18 @@ function buildQuery(query) {
 
 function redirectToPackage(path, query) {
   const url = `${path}${buildQuery(query)}`
-  wx.redirectTo({
-    url,
-    fail: () => wx.reLaunch({ url })
-  })
+  const go = () => {
+    wx.redirectTo({
+      url,
+      fail: () => wx.reLaunch({ url })
+    })
+  }
+  // 延迟到当前页渲染完成后再跳转，避免热重载/首屏时 routeDone webview 竞态
+  if (typeof wx.nextTick === 'function') {
+    wx.nextTick(go)
+  } else {
+    setTimeout(go, 0)
+  }
 }
 
 module.exports = {

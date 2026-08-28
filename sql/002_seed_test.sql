@@ -2,11 +2,10 @@
 -- 智能面馆 SmartNoodleHouse — 测试 / 开发种子数据（**禁止用于生产**）
 -- ============================================================================
 -- 适用：本地开发、联调、自动化测试
--- 生产请使用：sql/002_seed_prod.sql + python scripts/init_admin.py
--- 说明：合并原 002 / 010 / 011 / 013 / 014 / 017 中业务种子与权限矩阵
--- 默认管理员：admin / admin123（若无法登录请再执行 python scripts/init_admin.py）
--- 门店收银：cashier / admin123（绑定 SH01，退款操作人演示）
--- 开发桌台扫码：token=1001 / 1002 / 1003
+-- 生产请使用：sql/002_seed_prod.sql + ADMIN_INITIAL_PASSWORD=强密码 python scripts/init_admin.py
+-- 测试账号：admin / cashier / manager 均为 admin123（仅开发）
+-- 退款：仅 admin(超管)、manager(店长) 可退款
+-- 开发桌台扫码：见 tables.qr_token
 -- 业务单号规则：业务2 + 门店编号(实际 store_no，固定4位) + 桌位3 + yyyyMMddHHmmss + 随机4（总长27）
 --   OT堂食 / OD外卖 / PW微信付 / PA支付宝付 / RW微信退 / RA支付宝退 / CU顾客
 -- 样例顾客：CU000000020260801100001S2C3 、 CU000000020260801100002S2C4
@@ -154,13 +153,13 @@ WHERE r.code = 'KITCHEN'
     WHERE rp.role_id = r.id AND rp.permission_id = p.id
   );
 
--- 3.4 收银：订单 + 支付
+-- 3.4 收银：订单 + 支付（不含退款，退款仅店长 STORE_ADMIN）
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r
 JOIN permissions p ON p.code IN (
   'order:read', 'order:update',
-  'payment:read', 'payment:refund',
+  'payment:read',
   'customer:read', 'product:read'
 )
 WHERE r.code = 'CASHIER'
@@ -182,6 +181,11 @@ WHERE r.code = 'OPERATOR'
     SELECT 1 FROM role_permissions rp
     WHERE rp.role_id = r.id AND rp.permission_id = p.id
   );
+
+DELETE rp FROM role_permissions rp
+JOIN roles r ON r.id = rp.role_id
+JOIN permissions p ON p.id = rp.permission_id
+WHERE r.code IN ('CASHIER', 'KITCHEN', 'OPERATOR') AND p.code = 'payment:refund';
 
 -- ============================================================================
 -- 四、会员等级
@@ -238,7 +242,7 @@ FROM roles r
 WHERE r.code = 'SUPER_ADMIN'
   AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
 
--- 门店收银（与 admin 同密码 admin123；用于退款 operator_id 展示）
+-- 门店收银（不可退款）
 INSERT INTO users (username, password_hash, display_name, role_id, store_id, status)
 SELECT
   'cashier',
@@ -253,36 +257,28 @@ WHERE r.code = 'CASHIER'
   AND s.store_no = 'SH01'
   AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'cashier');
 
+-- 门店店长（可退款，用于联调支付/外卖退款）
+INSERT INTO users (username, password_hash, display_name, role_id, store_id, status)
+SELECT
+  'manager',
+  '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm',
+  '总店店长',
+  r.id,
+  s.id,
+  1
+FROM roles r
+CROSS JOIN stores s
+WHERE r.code = 'STORE_ADMIN'
+  AND s.store_no = 'SH01'
+  AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'manager');
+
 -- ============================================================================
 -- 七、开发桌台（扫码 token = 桌号）
 -- 小程序/H5：?token=1001 即可点餐；无桌台时下单会报「无效桌台二维码」
 -- ============================================================================
-INSERT INTO `tables` (store_id, table_no, table_name, qr_token, wechat_qr_url, alipay_qr_url, status)
-SELECT s.id, '1001', '1号桌', '1001',
-  'pages/index/index?token=1001&channel=wechat',
-  'pages/index/index?token=1001&channel=alipay',
-  1
-FROM stores s
-WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM `tables` t WHERE t.store_id = s.id AND t.table_no = '1001');
-
-INSERT INTO `tables` (store_id, table_no, table_name, qr_token, wechat_qr_url, alipay_qr_url, status)
-SELECT s.id, '1002', '2号桌', '1002',
-  'pages/index/index?token=1002&channel=wechat',
-  'pages/index/index?token=1002&channel=alipay',
-  1
-FROM stores s
-WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM `tables` t WHERE t.store_id = s.id AND t.table_no = '1002');
-
-INSERT INTO `tables` (store_id, table_no, table_name, qr_token, wechat_qr_url, alipay_qr_url, status)
-SELECT s.id, '1003', '3号桌', '1003',
-  'pages/index/index?token=1003&channel=wechat',
-  'pages/index/index?token=1003&channel=alipay',
-  1
-FROM stores s
-WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM `tables` t WHERE t.store_id = s.id AND t.table_no = '1003');
+INSERT INTO `tables` VALUES (1, 1, 'A01', '1号桌', 'cbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DcbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DcbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE%26channel%3Dalipay', 1, '2026-08-28 12:38:58.111', '2026-08-28 12:44:52.000');
+INSERT INTO `tables` VALUES (2, 1, 'A02', '2号桌', 'J7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DJ7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DJ7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g%26channel%3Dalipay', 1, '2026-08-28 12:38:58.117', '2026-08-28 12:44:53.000');
+INSERT INTO `tables` VALUES (3, 1, 'W01', '外1号桌', 'k72g8pO1Df3vJOxQbTH2-O0e9rj76LTZ-jyq2UnixgI', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3Dk72g8pO1Df3vJOxQbTH2-O0e9rj76LTZ-jyq2UnixgI%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3Dk72g8pO1Df3vJOxQbTH2-O0e9rj76LTZ-jyq2UnixgI%26channel%3Dalipay', 1, '2026-08-28 12:38:58.120', '2026-08-28 12:44:53.000');
 
 -- ============================================================================
 -- 八、商品分类（挂总店）
@@ -594,6 +590,39 @@ WHERE c.customer_no = 'CU000000020260801100001S2C3'
   AND NOT EXISTS (
     SELECT 1 FROM customer_preferences p
     WHERE p.customer_id = c.id AND p.category = '面量' AND p.option_code = 'NORMAL'
+  );
+
+INSERT INTO customer_preferences (
+  customer_id, category, option_code, option_name, preference_score, order_count, last_used_at
+)
+SELECT c.id, '加料', 'SCALLION', '加葱', 0.6500, 4, NOW(3)
+FROM customers c
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
+  AND NOT EXISTS (
+    SELECT 1 FROM customer_preferences p
+    WHERE p.customer_id = c.id AND p.category = '加料' AND p.option_code = 'SCALLION'
+  );
+
+INSERT INTO customer_preferences (
+  customer_id, category, option_code, option_name, preference_score, order_count, last_used_at
+)
+SELECT c.id, '加料', 'CORIANDER', '加香菜', 0.5800, 3, NOW(3)
+FROM customers c
+WHERE c.customer_no = 'CU000000020260801100001S2C3'
+  AND NOT EXISTS (
+    SELECT 1 FROM customer_preferences p
+    WHERE p.customer_id = c.id AND p.category = '加料' AND p.option_code = 'CORIANDER'
+  );
+
+INSERT INTO customer_preferences (
+  customer_id, category, option_code, option_name, preference_score, order_count, last_used_at
+)
+SELECT c.id, '加料', 'FEICHANG', '加肥肠', 0.5200, 3, NOW(3)
+FROM customers c
+WHERE c.customer_no = 'CU000000020260801100002S2C4'
+  AND NOT EXISTS (
+    SELECT 1 FROM customer_preferences p
+    WHERE p.customer_id = c.id AND p.category = '加料' AND p.option_code = 'FEICHANG'
   );
 
 -- ============================================================================

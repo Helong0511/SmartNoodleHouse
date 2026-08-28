@@ -3,10 +3,10 @@ const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
+const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
 const MENU_CACHE_MS = 5 * 60 * 1000
-const PREFS_CACHE_MS = 60 * 1000
 
 Page({
   data: {
@@ -61,42 +61,11 @@ Page({
   },
 
   async loadPrefs(force = false) {
-    const cid = app.globalData.customerId
-    if (!cid || !app.globalData.customerToken) {
-      this.setData({ prefs: [], prefSummary: '' })
-      return
-    }
-    const now = Date.now()
-    if (
-      !force
-      && app.globalData.prefs
-      && app.globalData.prefsAt
-      && now - app.globalData.prefsAt < PREFS_CACHE_MS
-    ) {
-      const prefs = app.globalData.prefs
-      const summary = prefs
-        .slice(0, 3)
-        .map((x) => `${x.category}·${x.option_name || x.option_code}`)
-        .join('、')
-      this.setData({ prefs, prefSummary: summary ? `智能口味：${summary}` : '' })
-      return
-    }
-    try {
-      const p = await api.get(`/customers/${cid}/preferences`)
-      const prefs = (p && p.preferences) || []
-      const summary = prefs
-        .slice(0, 3)
-        .map((x) => `${x.category}·${x.option_name || x.option_code}`)
-        .join('、')
-      app.globalData.prefs = prefs
-      app.globalData.prefsAt = now
-      this.setData({
-        prefs,
-        prefSummary: summary ? `智能口味：${summary}` : ''
-      })
-    } catch (_) {
-      this.setData({ prefs: [], prefSummary: '' })
-    }
+    const view = await prefUtil.loadCustomerPrefs(app, api, { force })
+    this.setData({
+      prefs: view.prefs || [],
+      prefSummary: view.prefSummary || ''
+    })
   },
 
   buildCategories(cats, items, metrics, keyword) {
@@ -193,7 +162,7 @@ Page({
   },
 
   quickAdd(e) {
-    const { id, name, price, image, hasOptions } = e.currentTarget.dataset
+    const { id, name, price, image, hasOptions, noMemberDiscount } = e.currentTarget.dataset
     if (hasOptions === true || hasOptions === 'true' || hasOptions === 1 || hasOptions === '1') {
       wx.navigateTo({ url: `/packageOrder/product/product?id=${id}` })
       return
@@ -208,7 +177,8 @@ Page({
       option_text: '',
       unit_price: unit,
       subtotal: unit.toFixed(2),
-      imageUrl: image || ''
+      imageUrl: image || '',
+      no_member_discount: noMemberDiscount === true || noMemberDiscount === 'true' || noMemberDiscount === 1 || noMemberDiscount === '1'
     })
     auth.saveCart(cart)
     this.refreshCart()

@@ -86,10 +86,114 @@ function cartSummary(cart) {
   return { count, total: total.toFixed(2), list }
 }
 
+function calcDiscountableSubtotal(cart) {
+  return (cart || []).reduce((s, raw) => {
+    const item = normalizeItem({ ...raw })
+    if (item.no_member_discount) return s
+    return s + parseMoney(item.subtotal)
+  }, 0)
+}
+
+function calcCouponEligibleSubtotal(cart, memberDiscount) {
+  const discountable = calcDiscountableSubtotal(cart)
+  const eligible = discountable - parseMoney(memberDiscount)
+  return Math.max(0, Math.round(eligible * 100) / 100)
+}
+
+function calcVoucherEligiblePayable(couponEligible, couponDiscount, packingFee, needPack) {
+  let base = Math.max(0, parseMoney(couponEligible) - parseMoney(couponDiscount))
+  if (needPack) base += parseMoney(packingFee)
+  return Math.round(base * 100) / 100
+}
+
+function itemKey(item) {
+  const ids = (item.option_ids || []).slice().sort((a, b) => a - b).join(',')
+  return `${item.product_id}:${ids}`
+}
+
+function mergeCartItem(cart, entry) {
+  const list = [...(cart || [])]
+  const key = itemKey(entry)
+  const idx = list.findIndex((x) => itemKey(x) === key)
+  if (idx >= 0) {
+    const cur = normalizeItem(list[idx])
+    const add = entry.quantity || 1
+    cur.quantity = (cur.quantity || 1) + add
+    cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
+    if (entry.no_member_discount != null) cur.no_member_discount = !!entry.no_member_discount
+    list[idx] = cur
+  } else {
+    list.push(normalizeItem({ ...entry }))
+  }
+  return list
+}
+
+function reconcileWithProducts(cart, products) {
+  const map = {}
+  ;(products || []).forEach((p) => {
+    map[p.id] = p
+    map[String(p.id)] = p
+  })
+
+  let invalidCount = 0
+  const list = (cart || []).map((raw) => {
+    const item = normalizeItem({ ...raw })
+    const p = map[item.product_id]
+    let invalidReason = ''
+
+    if (!p) {
+      invalidReason = '已下架或不在本店菜单'
+    } else if (p.status && p.status !== 'ON_SALE') {
+      invalidReason = '暂不可售'
+    } else {
+      const stock = parseInt(p.stock, 10)
+      const qty = item.quantity || 1
+      if (Number.isFinite(stock) && stock >= 0 && stock < qty) {
+        invalidReason = stock === 0 ? '已售罄' : `仅剩 ${stock} 份`
+      }
+    }
+
+    if (invalidReason) invalidCount += 1
+    return {
+      ...item,
+      no_member_discount: p ? !!p.no_member_discount : !!item.no_member_discount,
+      invalid: !!invalidReason,
+      invalidReason
+    }
+  })
+
+  return {
+    list,
+    invalidCount,
+    validCount: list.length - invalidCount
+  }
+}
+
+function enrichCartFromProducts(list, products) {
+  const map = {}
+  ;(products || []).forEach((p) => {
+    map[p.id] = p
+    map[String(p.id)] = p
+  })
+  return (list || []).map((raw) => {
+    const item = normalizeItem({ ...raw })
+    const p = map[item.product_id]
+    if (p) item.no_member_discount = !!p.no_member_discount
+    return item
+  })
+}
+
 module.exports = {
   calcUnitPrice,
   buildOptionLabels,
   collectOptionIds,
   normalizeItem,
-  cartSummary
+  cartSummary,
+  itemKey,
+  mergeCartItem,
+  reconcileWithProducts,
+  calcDiscountableSubtotal,
+  calcCouponEligibleSubtotal,
+  calcVoucherEligiblePayable,
+  enrichCartFromProducts
 }

@@ -9,6 +9,7 @@
       </div>
       <div class="info">
         <div>{{ item.name }} ×{{ item.quantity }}</div>
+        <div v-if="item.option_text" class="opts">{{ item.option_text }}</div>
         <div v-if="item._stockError" class="err">{{ item._stockError }}</div>
       </div>
       <span class="price">¥{{ item.subtotal }}</span>
@@ -23,7 +24,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
-import { mediaUrl } from '@/utils/media'
+import { calcUnitPrice } from '@/utils/cart'
 
 const router = useRouter()
 const cart = ref<any[]>(JSON.parse(localStorage.getItem('snh_cart') || localStorage.getItem('cart') || '[]'))
@@ -47,7 +48,22 @@ async function validateStock() {
       if (stock < 999 && stock < (item.quantity || 1)) {
         item._stockError = `库存不足（剩余 ${stock}）`
       }
-      if (p.price != null && String(p.price) !== String(item.price) && item.price != null) {
+      if (p.price != null && item.option_ids?.length && p.option_groups?.length) {
+        const selected: Record<number, number> = {}
+        const multi: Record<number, number[]> = {}
+        for (const g of p.option_groups) {
+          const ids = (item.option_ids as number[]).filter((oid: number) =>
+            (g.options || []).some((o: any) => o.id === oid),
+          )
+          if (!ids.length) continue
+          if (g.selection_type === 'SINGLE') selected[g.id] = ids[0]
+          else multi[g.id] = ids
+        }
+        const unit = calcUnitPrice(p, selected, multi)
+        item.unit_price = unit
+        item.subtotal = (unit * (item.quantity || 1)).toFixed(2)
+      } else if (p.price != null) {
+        item.unit_price = Number(p.price)
         item.subtotal = (Number(p.price) * (item.quantity || 1)).toFixed(2)
       }
     } catch {
@@ -78,6 +94,7 @@ onMounted(validateStock)
   background:#ffe8df; color:#ff6b35; font-weight:700;
 }
 .info { flex:1; min-width:0; }
+.opts { color:#888; font-size:12px; margin-top:4px; line-height:1.4; }
 .price { color:#ff6b35; font-weight:600; }
 .err { color:#c45656; font-size:12px; margin-top:4px; }
 .empty { color:#999; padding:24px 0; text-align:center; }

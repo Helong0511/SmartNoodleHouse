@@ -1,5 +1,6 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
+const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
 function discountText(rate) {
@@ -43,6 +44,9 @@ Page({
     phone: '',
     faceOn: false,
     prefs: [],
+    prefsConfirmed: [],
+    prefsLearning: [],
+    prefsEmpty: true,
     coupons: [],
     vouchers: [],
     walletLoading: false,
@@ -55,19 +59,23 @@ Page({
     this.loadProfile()
   },
 
-  applyProfile(profile, prefs) {
+  applyProfile(profile, prefView) {
     const nickname = profile.nickname || app.globalData.nickname || ''
     const displayName = nickname || '面馆会员'
     if (profile.nickname) app.globalData.nickname = profile.nickname
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
     const face = (profile && profile.face_status) || {}
+    const view = prefView || prefUtil.buildPrefDisplay({})
     this.setData({
       nickname,
       displayName,
       avatarLetter: displayName.charAt(0) || '会',
       customerNo: profile.customer_no || app.globalData.customerNo || '',
       faceOn: !!(face && face.has_face),
-      prefs: prefs || [],
+      prefs: view.prefs || [],
+      prefsConfirmed: view.confirmed || [],
+      prefsLearning: view.learning || [],
+      prefsEmpty: !!view.isEmpty,
       isMember: !!profile.is_member,
       memberLevelName: profile.member_level_name || '',
       memberDiscountText: discountText(profile.member_discount_rate),
@@ -99,14 +107,16 @@ Page({
       const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
         cid
-          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [] }))
-          : Promise.resolve({ preferences: [] }),
+          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [], all: [] }))
+          : Promise.resolve({ preferences: [], all: [] }),
         api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
         api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
       ])
-      const prefs = (prefRes && prefRes.preferences) || []
-      app.globalData.prefs = prefs
-      this.applyProfile(profile, prefs)
+      const prefView = prefUtil.buildPrefDisplay(prefRes)
+      app.globalData.prefs = prefView.prefs
+      app.globalData.prefsView = prefView
+      app.globalData.prefsAt = Date.now()
+      this.applyProfile(profile, prefView)
       this.applyWallet(couponRes, voucherRes)
       await this.loadOrders()
     } catch (e) {

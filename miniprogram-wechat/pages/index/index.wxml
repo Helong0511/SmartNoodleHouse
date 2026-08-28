@@ -50,13 +50,14 @@
 
     <view class="profile-row">
 
-      <button class="avatar-btn" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
-
+      <button wx:if="{{canChooseAvatar}}" class="avatar-btn" open-type="chooseAvatar" bind:chooseavatar="onChooseAvatar">
         <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" wx:if="{{avatarUrl}}" />
-
         <view class="avatar ph" wx:else>头</view>
-
       </button>
+      <view wx:else class="avatar-btn avatar-static">
+        <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" wx:if="{{avatarUrl}}" />
+        <view class="avatar ph" wx:else>头</view>
+      </view>
 
       <input
 

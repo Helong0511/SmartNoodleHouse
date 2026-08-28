@@ -1,11 +1,16 @@
+const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const app = getApp()
 
 Page({
   data: {
     cart: [],
     total: '0.00',
+    count: 0,
+    loading: true,
+    invalidCount: 0,
     thumbStyle: ''
   },
 
@@ -13,24 +18,51 @@ Page({
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     this.setData({ thumbStyle: `width:${px}px;height:${px}px;` })
-    this.refresh()
+    this.refresh(true)
   },
 
-  refresh() {
-    const { list, total } = cartUtil.cartSummary(auth.getCart())
-    const cart = list.map(item => ({
+  onPullDownRefresh() {
+    this.refresh(true).finally(() => my.stopPullDownRefresh())
+  },
+
+  storeId() {
+    return (app.globalData.table && app.globalData.table.store_id)
+      || (app.globalData.store && app.globalData.store.id)
+      || null
+  },
+
+  async refresh(showLoading) {
+    if (showLoading) this.setData({ loading: true })
+    const rawCart = auth.getCart()
+    let products = []
+    try {
+      const sid = this.storeId()
+      const res = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+      products = (res && res.items) || []
+    } catch (_) {}
+
+    const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products)
+    const cart = list.map((item) => ({
       ...item,
       imageUrl: item.imageUrl || media.resolveUrl(item.main_image || '')
     }))
+    const validItems = cart.filter((i) => !i.invalid)
+    const { total, count } = cartUtil.cartSummary(validItems)
     auth.saveCart(cart)
-    this.setData({ cart, total })
+    this.setData({
+      cart,
+      total,
+      count,
+      invalidCount,
+      loading: false
+    })
   },
 
   changeQty(e) {
     const { index, delta } = e.currentTarget.dataset
     const cart = auth.getCart()
     const item = cart[index]
-    if (!item) return
+    if (!item || item.invalid) return
     const qty = (item.quantity || 1) + parseInt(delta, 10)
     if (qty <= 0) {
       cart.splice(index, 1)
@@ -40,7 +72,7 @@ Page({
       item.subtotal = (parseFloat(item.unit_price) * qty).toFixed(2)
     }
     auth.saveCart(cart)
-    this.refresh()
+    this.refresh(false)
   },
 
   removeItem(e) {
@@ -48,10 +80,29 @@ Page({
     const cart = auth.getCart()
     cart.splice(index, 1)
     auth.saveCart(cart)
-    this.refresh()
+    this.refresh(false)
+  },
+
+  clearInvalid() {
+    const cart = auth.getCart().filter((i) => !i.invalid)
+    auth.saveCart(cart)
+    my.showToast({ content: '已清除失效商品', type: 'success' })
+    this.refresh(false)
   },
 
   goConfirm() {
+    if (this.data.invalidCount > 0) {
+      my.confirm({
+        title: '有商品不可下单',
+        content: `${this.data.invalidCount} 件商品已失效或库存不足，请先清除后再结算`,
+        confirmButtonText: '清除失效',
+        cancelButtonText: '返回',
+        success: (res) => {
+          if (res.confirm) this.clearInvalid()
+        }
+      })
+      return
+    }
     if (!this.data.cart.length) {
       my.showToast({ content: '购物车为空', type: 'fail' })
       return
