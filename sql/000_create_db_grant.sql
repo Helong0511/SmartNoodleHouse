@@ -7,6 +7,9 @@
 --   mysql+aiomysql://remote:强密码@127.0.0.1:3306/smart_noodle_house
 -- ============================================================================
 
+-- 删除数据库
+DROP DATABASE IF EXISTS smart_noodle_house;
+
 CREATE DATABASE IF NOT EXISTS smart_noodle_house
   DEFAULT CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
