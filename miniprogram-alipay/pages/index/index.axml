@@ -1,13 +1,23 @@
 <view class="page">
   <view class="hero">
     <view class="brand">智能面馆</view>
-    <view class="sub" a:if="{{table}}">桌号 {{table.table_name}}</view>
+    <view class="sub" a:if="{{storeName}}">{{storeName}}</view>
+    <view class="sub" a:if="{{table}}">桌号 {{table.table_name || table.table_no}}</view>
+    <view class="sub" a:elif="{{!loading && ready}}">尚未绑定桌台</view>
     <view class="sub" a:else>正在识别桌台...</view>
   </view>
 
   <view class="card" a:if="{{loading}}"><text>登录中，请稍候...</text></view>
 
-  <view class="card" a:if="{{showMemberPrompt}}">
+  <view class="card scan-card" a:elif="{{ready && !hasTable}}">
+    <view class="scan-icon">📷</view>
+    <view class="title">扫描桌台二维码</view>
+    <view class="desc">请扫描桌上的点餐二维码，绑定门店与桌号后即可开始点餐。支持相机扫码或从相册选择二维码图片。</view>
+    <button class="btn-primary" onTap="scanTable">扫一扫</button>
+    <button class="btn-ghost skip" onTap="goMenu">先浏览菜单</button>
+  </view>
+
+  <view class="card" a:elif="{{showMemberPrompt}}">
     <view class="title">注册会员，享受更多便利</view>
     <view class="desc">{{memberText}}</view>
     <input class="input" placeholder="怎么称呼您（选填）" value="{{nickname}}" onInput="onNickname" />
@@ -24,5 +34,6 @@
     <view class="title">欢迎{{nickname ? '，' + nickname : ''}}</view>
     <button class="btn-primary" onTap="goMenu">开始点餐</button>
     <button class="btn-ghost skip" onTap="goMember">会员中心</button>
+    <button class="btn-ghost skip" onTap="scanTable">重新扫码换桌</button>
   </view>
 </view>

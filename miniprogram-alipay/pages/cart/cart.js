@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
+const dineCtx = require('../../utils/context')
 const app = getApp()
 
 Page({
@@ -11,14 +12,31 @@ Page({
     count: 0,
     loading: true,
     invalidCount: 0,
-    thumbStyle: ''
+    thumbStyle: '',
+    storeName: '',
+    storeNo: '',
+    storeAddress: '',
+    storePhone: '',
+    tableName: '',
+    tableNo: ''
   },
 
   onShow() {
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     this.setData({ thumbStyle: `width:${px}px;height:${px}px;` })
+    this.applyDineContext(dineCtx.currentDisplay())
+    dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.refresh(true)
+  },
+
+  applyDineContext(ctx) {
+    if (!ctx) return
+    this.setData(dineCtx.pageDineFields(ctx))
+  },
+
+  goMenu() {
+    my.switchTab({ url: '/pages/menu/menu' })
   },
 
   onPullDownRefresh() {

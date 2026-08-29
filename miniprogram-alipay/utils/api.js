@@ -1,29 +1,63 @@
-const app = getApp()
+const { resolveApiBase } = require('../config/env')
+
+const DEFAULT_API_BASE = resolveApiBase()
+
+function getAppSafe() {
+  try {
+    return getApp()
+  } catch (_) {
+    return null
+  }
+}
+
+function resolveBaseUrl() {
+  const app = getAppSafe()
+  if (app && app.globalData) {
+    const configured = String(app.globalData.apiBase || '').trim()
+    if (configured) return configured
+    app.globalData.apiBase = DEFAULT_API_BASE
+    return DEFAULT_API_BASE
+  }
+  return DEFAULT_API_BASE
+}
 
 function authHeader() {
+  const app = getAppSafe()
   const token =
     (app && app.globalData && app.globalData.customerToken) ||
     (my.getStorageSync({ key: 'customer_token' }) || {}).data
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+function parseResponseBody(raw) {
+  if (raw == null) return {}
+  if (typeof raw === 'string') {
+    const text = raw.trim()
+    if (!text) return {}
+    try {
+      return JSON.parse(text)
+    } catch (_) {
+      return { message: text }
+    }
+  }
+  if (typeof raw === 'object') return raw
+  return {}
+}
+
 function pickErrorMessage(resOrErr, fallback) {
   if (!resOrErr) return fallback
   if (typeof resOrErr === 'string') return resOrErr
-  const body = resOrErr.data
-  if (typeof body === 'string' && body.trim()) return body.trim()
-  if (body && typeof body === 'object') {
-    if (body.message) return body.message
-    if (body.detail) {
-      return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
-    }
+  const body = parseResponseBody(resOrErr.data)
+  if (body.message) return body.message
+  if (body.detail) {
+    return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
   }
-  if (resOrErr.status >= 400 || resOrErr.statusCode >= 400) {
-    const code = resOrErr.status || resOrErr.statusCode
-    return fallback || `请求失败(${code})`
+  const status = resOrErr.status != null ? resOrErr.status : resOrErr.statusCode
+  if (status >= 400) {
+    return fallback || `请求失败(${status})`
   }
   const errMsg = resOrErr.errorMessage || resOrErr.errMsg || resOrErr.message
-  if (errMsg) return errMsg
+  if (errMsg && errMsg !== 'request:ok') return errMsg
   return fallback
 }
 
@@ -42,10 +76,10 @@ function networkHint(base, msg) {
 }
 
 function request(method, path, data = {}, needAuth = true) {
-  const base = (app && app.globalData && app.globalData.apiBase) || ''
+  const base = resolveBaseUrl()
   return new Promise((resolve, reject) => {
     if (!base) {
-      reject(new Error('未配置 apiBase，请在 app.js 填写后端地址'))
+      reject(new Error('未配置 apiBase，请在 app.js 或 config/env.js 填写后端地址'))
       return
     }
     my.request({
@@ -58,8 +92,8 @@ function request(method, path, data = {}, needAuth = true) {
         ...(needAuth ? authHeader() : {})
       },
       success(res) {
-        const body = res.data || {}
         const status = res.status != null ? res.status : res.statusCode
+        const body = parseResponseBody(res.data)
         if (status >= 400) {
           reject(new Error(pickErrorMessage(res, `请求失败(${status})`)))
           return

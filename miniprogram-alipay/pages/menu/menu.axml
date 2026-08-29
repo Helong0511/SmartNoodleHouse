@@ -1,43 +1,100 @@
 <view class="page">
-  <view class="top">
-    <text class="table" a:if="{{tableName}}">桌号 {{tableName}}</text>
-    <text class="member" onTap="goMember">会员 · 口味</text>
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+    compact="{{true}}"
+  />
+
+  <view class="scan-bar" a:if="{{!hasTable && !loading}}" onTap="scanTable">
+    <text class="scan-icon">📷</text>
+    <text>未绑定桌台，点击扫描桌台二维码</text>
   </view>
+
+  <view class="search-wrap">
+    <input
+      class="search"
+      placeholder="搜索菜品"
+      value="{{keyword}}"
+      onInput="onSearch"
+      confirm-type="search"
+    />
+  </view>
+
   <view class="pref-bar" a:if="{{prefSummary}}" onTap="goMember">
     <text>{{prefSummary}}</text>
     <text class="more">详情</text>
   </view>
-  <block a:for="{{categories}}" a:key="id">
-    <view class="cat">{{item.name}}</view>
-    <view
-      class="product {{isWide ? 'wide' : ''}}"
-      a:for="{{item.products}}"
-      a:for-item="p"
-      a:key="id"
-      onTap="openProduct"
-      data-id="{{p.id}}"
+
+  <view class="loading-tip" a:if="{{loading && !categories.length}}">加载中...</view>
+
+  <view class="menu-layout" a:elif="{{categories.length}}">
+    <scroll-view class="cat-nav" scroll-y="{{true}}">
+      <view
+        class="cat-item {{activeCat === item.id ? 'on' : ''}}"
+        a:for="{{categories}}"
+        a:key="id"
+        data-id="{{item.id}}"
+        onTap="onCatTap"
+      >{{item.name}}</view>
+    </scroll-view>
+
+    <scroll-view
+      class="menu-body"
+      scroll-y="{{true}}"
+      scroll-into-view="{{scrollInto}}"
+      scroll-with-animation="{{true}}"
     >
-      <view class="thumb-wrap" style="{{p.thumbStyle}}">
-        <image
-          a:if="{{p.imageUrl}}"
-          class="thumb"
-          src="{{p.imageUrl}}"
-          mode="aspectFill"
-          lazy-load
-        />
-        <view a:else class="thumb placeholder">
-          <text class="ph-text">{{p.name[0] || '餐'}}</text>
+      <block a:for="{{categories}}" a:key="id">
+        <view id="cat-{{item.id}}" class="cat-section">
+          <view class="cat-title">{{item.name}}</view>
+          <view
+            class="product {{isWide ? 'wide' : ''}}"
+            a:for="{{item.products}}"
+            a:for-item="p"
+            a:key="id"
+          >
+            <view class="main" onTap="openProduct" data-id="{{p.id}}">
+              <view class="thumb-wrap" style="{{p.thumbStyle}}">
+                <image a:if="{{p.imageUrl}}" class="thumb" src="{{p.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
+                <view a:else class="thumb placeholder">
+                  <text class="ph-text">{{p.name[0] || '餐'}}</text>
+                </view>
+              </view>
+              <view class="info">
+                <view class="name-row">
+                  <view class="name">{{p.name}}</view>
+                  <text class="special-tag" a:if="{{p.no_member_discount}}">特价</text>
+                </view>
+                <view class="desc" a:if="{{p.description}}">{{p.description}}</view>
+                <view class="price">¥{{p.price}}</view>
+              </view>
+            </view>
+            <view
+              class="quick-add"
+              catchTap="quickAdd"
+              data-id="{{p.id}}"
+              data-name="{{p.name}}"
+              data-price="{{p.price}}"
+              data-image="{{p.imageUrl}}"
+              data-has-options="{{p.has_options}}"
+              data-no-member-discount="{{p.no_member_discount}}"
+            >+</view>
+          </view>
         </view>
-      </view>
-      <view class="info">
-        <view class="name-row">
-          <view class="name">{{p.name}}</view>
-          <text class="special-tag" a:if="{{p.no_member_discount}}">特价</text>
-        </view>
-        <view class="desc" a:if="{{p.description}}">{{p.description}}</view>
-        <view class="price">¥{{p.price}}</view>
-      </view>
-    </view>
-  </block>
-  <view class="cart-bar" onTap="goCart">购物车 {{cartCount}} · ¥{{cartTotal}}</view>
+      </block>
+      <view class="body-pad"></view>
+    </scroll-view>
+  </view>
+
+  <view class="empty-tip" a:elif="{{!loading && !categories.length}}">暂无菜品</view>
+
+  <view class="cart-bar" onTap="goCart" a:if="{{cartCount > 0}}">
+    <text class="cart-icon">🛒</text>
+    <text>购物车 {{cartCount}} 件</text>
+    <text class="cart-total">¥{{cartTotal}}</text>
+  </view>
 </view>

@@ -17,6 +17,9 @@ App({
     cart: []
   },
   onLaunch(options) {
+    if (!this.globalData.apiBase) {
+      this.globalData.apiBase = resolveApiBase()
+    }
     const cart = wx.getStorageSync('cart') || []
     this.globalData.cart = cart
     this.globalData.nickname = wx.getStorageSync('nickname') || ''

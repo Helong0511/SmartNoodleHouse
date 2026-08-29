@@ -1,5 +1,7 @@
 /** 智能口味：加载、展示、商品页预选 */
 
+const auth = require('./auth')
+
 const PREFS_CACHE_MS = 60 * 1000
 const MIN_ORDER_COUNT = 2
 
@@ -59,8 +61,11 @@ function buildPrefDisplay(prefRes) {
 
 async function loadCustomerPrefs(app, api, options = {}) {
   const force = !!options.force
-  const cid = app.globalData.customerId
-  if (!cid || !app.globalData.customerToken) {
+  const cid = app.globalData.customerId || auth.readStorage('customer_id')
+  const token = app.globalData.customerToken || auth.readStorage('customer_token')
+  if (cid) app.globalData.customerId = cid
+  if (token) app.globalData.customerToken = token
+  if (!cid || !token) {
     return buildPrefDisplay({})
   }
   const now = Date.now()

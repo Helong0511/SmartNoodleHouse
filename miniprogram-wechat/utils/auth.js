@@ -11,6 +11,23 @@ function wxLogin() {
 }
 
 async function ensureLogin(tableToken) {
+  const cachedToken = app.globalData.customerToken || wx.getStorageSync('customer_token')
+  if (cachedToken) {
+    app.globalData.customerToken = cachedToken
+    app.globalData.customerId = app.globalData.customerId || wx.getStorageSync('customer_id') || null
+    app.globalData.customerNo = app.globalData.customerNo || wx.getStorageSync('customer_no') || ''
+    app.globalData.nickname = app.globalData.nickname || wx.getStorageSync('nickname') || ''
+    app.globalData.avatarUrl = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || ''
+    return {
+      customer_id: app.globalData.customerId,
+      customer_no: app.globalData.customerNo,
+      customer_token: cachedToken,
+      nickname: app.globalData.nickname,
+      avatar_url: app.globalData.avatarUrl,
+      need_member_prompt: !app.globalData.nickname
+    }
+  }
+
   const loginRes = await wxLogin()
   if (!loginRes || !loginRes.code) {
     throw new Error('wx.login 未返回 code，请检查开发者工具登录状态')

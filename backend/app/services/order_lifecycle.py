@@ -36,7 +36,7 @@ async def apply_order_status(
 
     assert_kind: STAFF | PAYMENT | SYSTEM；默认按 source 推断。
     restore_inventory: None 时对 CANCELLED/REFUNDED 自动回库存（仅首次进入该终态）。
-    update_preferences: None 时对 COMPLETED 自动累计偏好。
+    update_preferences: None 时对 PAID 自动累计偏好（支付成功即记录所选规格）。
     """
     target = (target or "").strip().upper()
     if not target:
@@ -61,14 +61,10 @@ async def apply_order_status(
         order.payment_status = payment_status
 
     do_restore = restore_inventory if restore_inventory is not None else target in ("CANCELLED", "REFUNDED")
-    do_pref = update_preferences if update_preferences is not None else target == "COMPLETED"
+    do_pref = update_preferences if update_preferences is not None else target == "PAID"
 
     if target == "COMPLETED" and old != "COMPLETED":
         order.completed_at = now_local()
-        if do_pref:
-            from app.services.customer_service import PreferenceService
-
-            await PreferenceService.update_from_order(db, order.id)
     elif target in ("CANCELLED", "REFUNDED"):
         if old not in ("CANCELLED", "REFUNDED"):
             order.cancelled_at = order.cancelled_at or now_local()
@@ -88,13 +84,15 @@ async def apply_order_status(
             logger.exception("出餐订阅消息推送失败 order_id=%s", order.id)
     elif target == "PAID" and old != "PAID" and order.customer_id:
         try:
-            from app.services.customer_service import CustomerService
+            from app.services.customer_service import CustomerService, PreferenceService
             from app.services.coupon_service import CouponService
 
             await CustomerService.award_points_for_paid_order(db, order)
             await CouponService.mark_used(db, order)
+            if do_pref:
+                await PreferenceService.update_from_order(db, order.id)
         except Exception:
-            logger.exception("积分发放或券核销失败 order_id=%s", order.id)
+            logger.exception("积分发放、券核销或口味记录失败 order_id=%s", order.id)
 
     await record_order_status(
         db,

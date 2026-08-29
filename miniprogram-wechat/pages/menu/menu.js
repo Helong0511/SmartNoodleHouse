@@ -8,6 +8,12 @@ const app = getApp()
 
 const MENU_CACHE_MS = 5 * 60 * 1000
 
+function normalizeList(data) {
+  if (Array.isArray(data)) return data
+  if (data && Array.isArray(data.items)) return data.items
+  return []
+}
+
 Page({
   data: {
     categories: [],
@@ -61,19 +67,25 @@ Page({
   },
 
   async loadPrefs(force = false) {
-    const view = await prefUtil.loadCustomerPrefs(app, api, { force })
-    this.setData({
-      prefs: view.prefs || [],
-      prefSummary: view.prefSummary || ''
-    })
+    try {
+      const view = await prefUtil.loadCustomerPrefs(app, api, { force })
+      this.setData({
+        prefs: view.prefs || [],
+        prefSummary: view.prefSummary || ''
+      })
+    } catch (_) {}
   },
 
   buildCategories(cats, items, metrics, keyword) {
+    const m = metrics || media.layoutMetrics()
     const kw = (keyword || '').trim().toLowerCase()
-    return (cats || [])
+    const catList = normalizeList(cats)
+    const productList = normalizeList(items)
+    return catList
       .map((c) => {
-        const products = items
-          .filter((p) => p.category_id === c.id)
+        if (!c) return null
+        const products = productList
+          .filter((p) => p && p.category_id === c.id)
           .filter((p) => {
             if (!kw) return true
             return (
@@ -81,9 +93,10 @@ Page({
               || String(p.description || '').toLowerCase().includes(kw)
             )
           })
-          .map((p) => media.decorateProduct(p, metrics))
+          .map((p) => media.decorateProduct(p, m))
         return { ...c, products }
       })
+      .filter(Boolean)
       .filter((c) => c.products.length > 0 || !kw)
   },
 
@@ -91,39 +104,41 @@ Page({
     const sid = app.globalData.table && app.globalData.table.store_id
     const cacheKey = String(sid || 'all')
     const now = Date.now()
-    if (
-      this._menuCache
-      && this._menuCache.key === cacheKey
-      && now - this._menuCache.at < MENU_CACHE_MS
-      && !this.data.keyword
-    ) {
-      const { cats, items, metrics } = this._menuCache
-      const categories = this.buildCategories(cats, items, metrics, '')
-      this.applyCategories(categories, metrics)
-      return
-    }
     this.setData({ loading: true })
     try {
+      if (
+        this._menuCache
+        && this._menuCache.key === cacheKey
+        && now - this._menuCache.at < MENU_CACHE_MS
+        && !this.data.keyword
+      ) {
+        const { cats, items, metrics } = this._menuCache
+        const categories = this.buildCategories(cats, items, metrics, '')
+        this.applyCategories(categories, metrics)
+        return
+      }
       const metrics = media.layoutMetrics()
       const [cats, products] = await Promise.all([
         api.get('/categories', sid ? { store_id: sid } : {}, false),
         api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
       ])
-      const items = (products && products.items) || []
-      const categories = this.buildCategories(cats, items, metrics, this.data.keyword)
-      this._menuCache = { key: cacheKey, at: now, cats, items, metrics }
+      const items = normalizeList(products)
+      const catList = normalizeList(cats)
+      const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
+      this._menuCache = { key: cacheKey, at: now, cats: catList, items, metrics }
       this.applyCategories(categories, metrics)
     } catch (e) {
-      wx.showToast({ title: e.message || '加载失败', icon: 'none' })
+      wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
       this.setData({ loading: false })
     }
   },
 
   applyCategories(categories, metrics) {
+    const m = metrics || media.layoutMetrics()
     const activeCat = (categories[0] && categories[0].id) || null
     this.setData({
-      categories,
-      isWide: !!metrics.isWide,
+      categories: categories || [],
+      isWide: !!m.isWide,
       activeCat,
       scrollInto: activeCat ? `cat-${activeCat}` : '',
       loading: false

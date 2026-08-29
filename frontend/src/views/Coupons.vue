@@ -382,11 +382,11 @@ async function submitIssue() {
   const quantity = Math.max(1, Math.min(50, Number(issueForm.quantity) || 1))
   issuing.value = true
   try {
-    const res = await api.post('/coupons/issue', {
+    const res = (await api.post('/coupons/issue', {
       customer_id: issueForm.customer_id,
       template_id: issueForm.template_id,
       quantity,
-    })
+    })) as { message?: string }
     ElMessage.success(res.message || `已发放 ${quantity} 张`)
     issueDialog.value = false
     if (activeTab.value === 'issued') loadIssued()

@@ -1,17 +1,20 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
+const dineCtx = require('../../utils/context')
 const app = getApp()
 
 Page({
   data: {
     loading: true,
     ready: false,
+    hasTable: false,
     showMemberPrompt: false,
     table: null,
+    storeName: '',
     nickname: '',
     enableFace: false,
-    memberText: '注册会员后可查看历史订单、口味偏好，并支持一键复购。',
-    faceText: '开启人脸迎宾后，到店可自动欢迎并推荐您常点口味。仅在您主动授权后生效，可随时关闭。'
+    memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购与到店迎宾推荐。',
+    faceText: '开启人脸迎宾后，到店可自动欢迎，并按您常点口味智能推荐。仅摄像头实时采集，可随时关闭。'
   },
 
   onLoad(query) {
@@ -28,37 +31,77 @@ Page({
       this.setData({ loading: true })
       const token = app.globalData.tableToken || (my.getStorageSync({ key: 'table_token' }) || {}).data
       if (token) {
-        const entry = await api.get('/miniprogram/entry', { token, channel: 'alipay' }, false)
-        if (entry && entry.table) {
-          app.globalData.table = entry.table
-          this.setData({
-            table: entry.table,
-            memberText: entry.prompts.member_consent_text,
-            faceText: entry.prompts.face_consent_text
-          })
-        }
+        try {
+          await dineCtx.bindTableFromToken(token)
+        } catch (_) {}
       }
-      const login = await auth.ensureLogin(token)
-      const showMemberPrompt = !!login.need_member_prompt
+      const ctx = dineCtx.currentDisplay()
+      if (ctx.table) {
+        try {
+          const entry = await api.get('/miniprogram/entry', { token: ctx.table.qr_token || token, channel: 'alipay' }, false)
+          if (entry && entry.prompts) {
+            this.setData({
+              memberText: entry.prompts.member_consent_text,
+              faceText: entry.prompts.face_consent_text
+            })
+          }
+        } catch (_) {}
+      }
+      let login = null
+      try {
+        login = await auth.ensureLogin(token)
+      } catch (loginErr) {
+        console.error('[bootstrap login]', loginErr)
+        const loginMsg = auth.formatError(loginErr, '登录失败')
+        my.showToast({
+          content: loginMsg.length > 28 ? `${loginMsg.slice(0, 28)}…` : loginMsg,
+          type: 'none',
+          duration: 3500
+        })
+      }
+      const showMemberPrompt = !!(login && login.need_member_prompt)
       this.setData({
         loading: false,
-        nickname: login.nickname || '',
+        nickname: (login && login.nickname) || '',
         showMemberPrompt,
         ready: true,
-        enableFace: false
+        enableFace: false,
+        table: ctx.table,
+        storeName: ctx.storeName,
+        hasTable: ctx.hasTable
       })
-      if (login.nickname) {
+      if (login && login.nickname) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
       }
-      if (login.customer_no) {
+      if (login && login.customer_id) {
+        app.globalData.customerId = login.customer_id
+        my.setStorageSync({ key: 'customer_id', data: login.customer_id })
+      }
+      if (login && login.customer_no) {
         my.setStorageSync({ key: 'customer_no', data: login.customer_no })
       }
     } catch (e) {
-      this.setData({ loading: false, ready: true })
-      const msg = (e && e.message) || '登录失败'
-      console.error('[bootstrap login]', e)
-      my.alert({ title: '登录失败', content: msg })
+      this.setData({ loading: false, ready: true, hasTable: false })
+      const msg = auth.formatError(e, '初始化失败')
+      console.error('[bootstrap]', e)
+      my.alert({ title: '初始化失败', content: msg })
     }
+  },
+
+  scanTable() {
+    dineCtx.scanAndBindTable()
+      .then((ctx) => {
+        if (ctx) {
+          this.setData({
+            table: ctx.table,
+            storeName: ctx.storeName,
+            hasTable: ctx.hasTable
+          })
+        }
+      })
+      .catch((e) => {
+        my.showToast({ content: auth.formatError(e, '扫码失败'), type: 'none' })
+      })
   },
 
   onNickname(e) {
@@ -95,7 +138,7 @@ Page({
       }
       my.setStorageSync({ key: 'nickname', data: app.globalData.nickname })
       my.hideLoading()
-      if (this.data.enableFace) {
+      if (this.data.enableFace || (res && res.need_face_consent)) {
         my.navigateTo({ url: '/pages/face/face?from=register' })
         return
       }
@@ -107,6 +150,21 @@ Page({
   },
 
   onSkip() { this.goMenu() },
-  goMenu() { my.redirectTo({ url: '/pages/menu/menu' }) },
-  goMember() { my.navigateTo({ url: '/pages/member/member' }) }
+  goMenu() {
+    my.switchTab({
+      url: '/pages/menu/menu',
+      fail: (err) => {
+        my.showToast({ content: auth.formatError(err, '无法打开点餐页'), type: 'none' })
+      }
+    })
+  },
+
+  goMember() {
+    my.switchTab({
+      url: '/pages/member/member',
+      fail: (err) => {
+        my.showToast({ content: auth.formatError(err, '无法打开会员页'), type: 'none' })
+      }
+    })
+  }
 })

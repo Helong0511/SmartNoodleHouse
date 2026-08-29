@@ -58,15 +58,16 @@ function contextReady(table, store, token) {
 
 /** Tab 页 setData 用的门店/桌台字段 */
 function pageDineFields(ctx) {
+  const c = ctx || displayPayload(null, null)
   return {
-    storeId: ctx.storeId || null,
-    storeName: ctx.storeName,
-    storeNo: ctx.storeNo,
-    storeAddress: ctx.storeAddress,
-    storePhone: ctx.storePhone,
-    tableName: ctx.tableName,
-    tableNo: ctx.tableNo,
-    hasTable: ctx.hasTable
+    storeId: c.storeId || null,
+    storeName: c.storeName,
+    storeNo: c.storeNo,
+    storeAddress: c.storeAddress,
+    storePhone: c.storePhone,
+    tableName: c.tableName,
+    tableNo: c.tableNo,
+    hasTable: c.hasTable
   }
 }
 

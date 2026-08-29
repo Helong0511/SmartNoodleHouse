@@ -4,6 +4,7 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const payUtil = require('../../utils/pay')
 const voucherUtil = require('../../utils/voucher')
+const dineCtx = require('../../utils/context')
 const app = getApp()
 
 function memberDiscountText(rate) {
@@ -66,6 +67,14 @@ Page({
     isMember: false,
     memberLevelName: '',
     memberDiscountText: '',
+    nextLevelName: '',
+    nextLevelDiscountText: '',
+    pointsToNext: 0,
+    storeName: '',
+    storeNo: '',
+    storeAddress: '',
+    storePhone: '',
+    tableNo: '',
     coupons: [],
     couponPickerLabels: ['不使用优惠券'],
     selectedCouponId: 0,
@@ -117,6 +126,8 @@ Page({
     this.bootstrapCheckout()
   },
   async bootstrapCheckout() {
+    const ctx = await dineCtx.ensureDineContext()
+    this.setData(dineCtx.pageDineFields(ctx))
     await Promise.all([this.loadMember(), this.loadCoupons(), this.loadVouchers()])
     await this.resolveTable()
     await this.refreshSummary()
@@ -140,7 +151,15 @@ Page({
       this.setData({
         isMember: !!(profile && profile.is_member),
         memberLevelName: (profile && profile.member_level_name) || '',
-        memberDiscountText: memberDiscountText(profile && profile.member_discount_rate)
+        memberDiscountText: memberDiscountText(profile && profile.member_discount_rate),
+        nextLevelName: (profile && profile.next_level_name) || '',
+        nextLevelDiscountText: (profile && profile.member_levels && profile.next_level_name)
+          ? (() => {
+            const next = (profile.member_levels || []).find((l) => l.name === profile.next_level_name)
+            return next && next.discount_text ? next.discount_text : ''
+          })()
+          : '',
+        pointsToNext: (profile && profile.points_to_next_level) || 0
       })
     } catch (_) {
       this._memberRate = 1
@@ -369,6 +388,17 @@ Page({
       this.setData({ tableOptions: [], needScanHint: true })
     }
   },
+  async scanTable() {
+    const ctx = await dineCtx.scanAndBindTable()
+    if (!ctx) return
+    const table = ctx.table || app.globalData.table
+    this.setData({
+      tableName: ctx.tableName,
+      tableToken: (table && table.qr_token) || app.globalData.tableToken,
+      needScanHint: false,
+      pickedLabel: ctx.tableName
+    })
+  },
   async onPickTable(e) {
     const idx = Number(e.detail.value)
     const t = this.data.tableOptions[idx]
@@ -401,11 +431,24 @@ Page({
   },
   onRemark(e) { this.setData({ remark: e.detail.value }) },
   async submit() {
+    if (this.data.loading) return
     const cart = auth.getCart()
     if (!cart.length) {
       my.showToast({ content: '购物车为空', type: 'fail' })
       return
     }
+    try {
+      const productItems = await this.loadProductCatalog()
+      const optionIssues = cartUtil.validateRequiredOptions(cart, productItems)
+      if (optionIssues.length) {
+        const first = optionIssues[0]
+        const hint = optionIssues.length === 1
+          ? `「${first.name}」缺少必选规格：${first.group}`
+          : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
+        my.alert({ title: '无法下单', content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。` })
+        return
+      }
+    } catch (_) {}
     const tableToken = String(
       this.data.tableToken || app.globalData.tableToken || (my.getStorageSync({ key: 'table_token' }).data) || ''
     ).trim()
@@ -444,13 +487,17 @@ Page({
       const pts = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''
       my.redirectTo({ url: `/pages/result/result?order_id=${order.id}${pts}` })
     } catch (e) {
-      const msg = e.message || '下单失败'
+      const msg = (e && e.message) || '下单失败'
       if (/无效桌台|桌台二维码|选择桌号/.test(msg)) {
         this.clearTableBinding()
         await this.resolveTable()
       }
       if (!/取消支付/.test(msg)) {
-        my.showToast({ content: msg, type: 'fail' })
+        if (msg.length > 14) {
+          my.alert({ title: '下单失败', content: msg })
+        } else {
+          my.showToast({ content: msg, type: 'fail' })
+        }
       } else {
         my.alert({
           title: '支付未完成',

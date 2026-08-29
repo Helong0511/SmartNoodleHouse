@@ -1,3 +1,4 @@
 {
-  "defaultTitle": "菜单"
+  "defaultTitle": "点餐",
+  "pullRefresh": true
 }

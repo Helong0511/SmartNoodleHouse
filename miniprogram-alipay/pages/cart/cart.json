@@ -1,3 +1,4 @@
 {
-  "defaultTitle": "购物车"
+  "defaultTitle": "购物车",
+  "pullRefresh": true
 }

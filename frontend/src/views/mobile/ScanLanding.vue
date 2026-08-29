@@ -107,7 +107,10 @@ onMounted(async () => {
     return
   }
   try {
-    const res = await api.get('/miniprogram/scan-landing', { params: { token } })
+    const res = (await api.get('/miniprogram/scan-landing', { params: { token } })) as {
+      message?: string
+      data?: ScanInfo | null
+    }
     if (!res.data) {
       error.value = res.message || '桌台无效或已停用'
       return

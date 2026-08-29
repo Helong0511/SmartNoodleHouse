@@ -44,6 +44,9 @@ Page({
         }
       }
       const login = await auth.ensureLogin(token)
+      if (!login) {
+        throw new Error('登录失败，请检查网络或稍后重试')
+      }
       const showMemberPrompt = !!login.need_member_prompt
       const ctx = dineCtx.currentDisplay()
       this.setData({
@@ -63,6 +66,10 @@ Page({
       if (login.avatar_url) {
         app.globalData.avatarUrl = login.avatar_url
         wx.setStorageSync('avatar_url', login.avatar_url)
+      }
+      if (login.customer_id) {
+        app.globalData.customerId = login.customer_id
+        wx.setStorageSync('customer_id', login.customer_id)
       }
       if (login.customer_no) wx.setStorageSync('customer_no', login.customer_no)
     } catch (e) {
@@ -90,17 +97,21 @@ Page({
   },
 
   scanTable() {
-    dineCtx.scanAndBindTable().then((ctx) => {
-      if (ctx) {
-        this.setData({
-          table: ctx.table,
-          store: ctx.store,
-          storeName: ctx.storeName,
-          storeAddress: ctx.storeAddress,
-          hasTable: true
-        })
-      }
-    })
+    dineCtx.scanAndBindTable()
+      .then((ctx) => {
+        if (ctx) {
+          this.setData({
+            table: ctx.table,
+            store: ctx.store,
+            storeName: ctx.storeName,
+            storeAddress: ctx.storeAddress,
+            hasTable: true
+          })
+        }
+      })
+      .catch((e) => {
+        wx.showToast({ title: (e && e.message) || '扫码失败', icon: 'none' })
+      })
   },
 
   onChooseAvatar(e) {
@@ -169,10 +180,20 @@ Page({
   },
 
   goMenu() {
-    wx.switchTab({ url: '/pages/menu/menu' })
+    wx.switchTab({
+      url: '/pages/menu/menu',
+      fail: (err) => {
+        wx.showToast({ title: (err && err.errMsg) || '无法打开点餐页', icon: 'none' })
+      }
+    })
   },
 
   goMember() {
-    wx.switchTab({ url: '/pages/member/member' })
+    wx.switchTab({
+      url: '/pages/member/member',
+      fail: (err) => {
+        wx.showToast({ title: (err && err.errMsg) || '无法打开会员页', icon: 'none' })
+      }
+    })
   }
 })

@@ -1,5 +1,6 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
+const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
@@ -19,16 +20,7 @@ function formatExpire(iso) {
   return `至 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-function resolveUrl(path) {
-  if (!path) return ''
-  const s = String(path).trim()
-  if (!s) return ''
-  if (/^https?:\/\//i.test(s)) return s
-  const base = (app.globalData && app.globalData.apiBase) || ''
-  const origin = String(base).replace(/\/api\/v1\/?$/i, '')
-  if (!origin) return s.startsWith('/') ? s : `/${s}`
-  return s.startsWith('/') ? `${origin}${s}` : `${origin}/${s}`
-}
+const PROFILE_CACHE_MS = 30 * 1000
 
 Page({
   data: {
@@ -37,29 +29,61 @@ Page({
     displayName: '面馆会员',
     avatarLetter: '会',
     customerNo: '',
-    isMember: false,
-    memberLevelName: '',
-    memberDiscountText: '',
-    memberPoints: 0,
-    phone: '',
     faceOn: false,
     prefs: [],
     prefsConfirmed: [],
     prefsLearning: [],
     prefsEmpty: true,
+    isMember: false,
+    memberLevelName: '',
+    memberDiscountText: '',
+    memberPoints: 0,
+    nextLevelName: '',
+    pointsToNext: 0,
+    levelProgress: 0,
+    pointsRule: '',
+    memberLevels: [],
     coupons: [],
     vouchers: [],
     walletLoading: false,
-    orders: [],
-    ordersLoading: false,
-    reorderingId: null
+    phone: '',
+    phoneInput: '',
+    storeName: '',
+    storeNo: '',
+    storeAddress: '',
+    storePhone: '',
+    tableName: '',
+    tableNo: ''
   },
 
   onShow() {
+    this.applyDineContext(dineCtx.currentDisplay())
+    dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadProfile()
   },
 
+  applyDineContext(ctx) {
+    if (!ctx) return
+    this.setData(dineCtx.pageDineFields(ctx))
+  },
+
+  applyWallet(couponRes, voucherRes) {
+    const coupons = ((couponRes && couponRes.items) || []).map((c) => ({
+      ...c,
+      expireText: formatExpire(c.expires_at)
+    }))
+    const vouchers = ((voucherRes && voucherRes.items) || []).map((v) => ({
+      ...v,
+      expireText: formatExpire(v.expires_at)
+    }))
+    this.setData({ coupons, vouchers, walletLoading: false })
+  },
+
   applyProfile(profile, prefView) {
+    if (!profile || typeof profile !== 'object') {
+      this.setData({ loading: false, walletLoading: false })
+      return
+    }
     const nickname = profile.nickname || app.globalData.nickname || ''
     const displayName = nickname || '面馆会员'
     if (profile.nickname) app.globalData.nickname = profile.nickname
@@ -80,29 +104,33 @@ Page({
       memberLevelName: profile.member_level_name || '',
       memberDiscountText: discountText(profile.member_discount_rate),
       memberPoints: profile.member_points || 0,
+      nextLevelName: profile.next_level_name || '',
+      pointsToNext: profile.points_to_next_level || 0,
+      levelProgress: profile.level_progress_percent || 0,
+      pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
+      memberLevels: profile.member_levels || [],
       phone: profile.phone || '',
       loading: false
     })
   },
 
-  applyWallet(couponRes, voucherRes) {
-    const coupons = ((couponRes && couponRes.items) || []).map((c) => ({
-      ...c,
-      expireText: formatExpire(c.expires_at)
-    }))
-    const vouchers = ((voucherRes && voucherRes.items) || []).map((v) => ({
-      ...v,
-      expireText: formatExpire(v.expires_at)
-    }))
-    this.setData({ coupons, vouchers, walletLoading: false })
-  },
-
-  async loadProfile() {
+  async loadProfile(force = false) {
     const hasCache = !!this.data.customerNo
     if (!hasCache) this.setData({ loading: true })
+    const now = Date.now()
+    if (
+      !force
+      && hasCache
+      && this._profileLoadedAt
+      && now - this._profileLoadedAt < PROFILE_CACHE_MS
+    ) {
+      this.setData({ loading: false })
+      return
+    }
     try {
       if (!app.globalData.customerToken) await auth.ensureLogin()
-      const cid = app.globalData.customerId
+      const cid = app.globalData.customerId || auth.readStorage('customer_id')
+      if (cid) app.globalData.customerId = cid
       this.setData({ walletLoading: true })
       const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
@@ -115,10 +143,17 @@ Page({
       const prefView = prefUtil.buildPrefDisplay(prefRes)
       app.globalData.prefs = prefView.prefs
       app.globalData.prefsView = prefView
-      app.globalData.prefsAt = Date.now()
+      app.globalData.prefsAt = now
+      if (!profile || typeof profile !== 'object') {
+        throw new Error('会员资料加载失败，请稍后重试')
+      }
+      if (profile.customer_id) {
+        app.globalData.customerId = profile.customer_id
+        my.setStorageSync({ key: 'customer_id', data: profile.customer_id })
+      }
       this.applyProfile(profile, prefView)
       this.applyWallet(couponRes, voucherRes)
-      await this.loadOrders()
+      this._profileLoadedAt = now
     } catch (e) {
       this.setData({ loading: false, walletLoading: false })
       if (!hasCache) my.showToast({ content: e.message || '加载失败', type: 'fail' })
@@ -139,33 +174,52 @@ Page({
     }
   },
 
-  async loadOrders() {
-    this.setData({ ordersLoading: true })
+  onPhoneInput(e) {
+    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  },
+
+  async bindPhone() {
+    const phone = (this.data.phoneInput || '').trim()
+    if (!/^1\d{10}$/.test(phone)) {
+      my.showToast({ content: '请输入11位手机号', type: 'fail' })
+      return
+    }
+    await this._savePhone({ phone })
+  },
+
+  async _savePhone(payload) {
     try {
-      const res = await api.get('/orders/mine', { page: 1, page_size: 20 })
-      const orders = ((res && res.items) || []).map((o) => ({
-        ...o,
-        timeText: this.formatTime(o.created_at)
-      }))
-      this.setData({ orders })
-    } catch (_) {
-      this.setData({ orders: [] })
-    } finally {
-      this.setData({ ordersLoading: false })
+      my.showLoading({ content: '绑定中' })
+      const res = await api.post('/miniprogram/member/phone', payload)
+      if (res && res.customer_token) {
+        app.globalData.customerToken = res.customer_token
+        my.setStorageSync({ key: 'customer_token', data: res.customer_token })
+      }
+      my.hideLoading()
+      my.showToast({ content: '绑定成功', type: 'success' })
+      this.setData({ phone: res.phone || this.data.phoneInput, phoneInput: '' })
+    } catch (e) {
+      my.hideLoading()
+      my.showToast({ content: e.message || '绑定失败', type: 'fail' })
     }
   },
 
-  formatTime(iso) {
-    if (!iso) return ''
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16).replace('T', ' ')
-    const pad = (n) => (n < 10 ? `0${n}` : `${n}`)
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  },
-
   onFaceSwitch(e) {
-    if (e.detail.value) my.navigateTo({ url: '/pages/face/face' })
-    else this.revokeFace()
+    const on = e.detail.value
+    if (on) {
+      my.navigateTo({ url: '/pages/face/face' })
+    } else {
+      my.confirm({
+        title: '关闭人脸迎宾',
+        content: '关闭后将立即删除人脸特征，不再到店识别。确定关闭吗？',
+        confirmButtonText: '确定关闭',
+        cancelButtonText: '取消',
+        success: (res) => {
+          if (res.confirm) this.revokeFace()
+          else this.setData({ faceOn: true })
+        }
+      })
+    }
   },
 
   async revokeFace() {
@@ -173,7 +227,7 @@ Page({
       await api.post('/miniprogram/face/revoke', {})
       app.globalData.faceStatus = 'REVOKED'
       this.setData({ faceOn: false })
-      my.showToast({ content: '已关闭人脸迎宾' })
+      my.showToast({ content: '已关闭人脸迎宾', type: 'success' })
     } catch (e) {
       this.setData({ faceOn: true })
       my.showToast({ content: e.message || '操作失败', type: 'fail' })
@@ -181,45 +235,10 @@ Page({
   },
 
   goMenu() {
-    my.navigateTo({ url: '/pages/menu/menu' })
+    my.switchTab({ url: '/pages/menu/menu' })
   },
 
-  async reorderOrder(e) {
-    const id = e.currentTarget.dataset.id
-    if (!id || this.data.reorderingId) return
-    this.setData({ reorderingId: id })
-    try {
-      my.showLoading({ content: '生成订单中' })
-      const res = await api.post(`/orders/${id}/reorder`, {})
-      const items = (res && res.cart_items) || []
-      if (!items.length) throw new Error('没有可复购商品')
-      const cart = items.map((it) => ({
-        product_id: it.product_id,
-        name: it.name,
-        quantity: it.quantity || 1,
-        option_ids: it.option_ids || [],
-        option_labels: it.option_labels || [],
-        option_text: it.option_text || (it.option_labels || []).join('、'),
-        unit_price: it.unit_price,
-        subtotal: it.subtotal,
-        imageUrl: resolveUrl(it.imageUrl || it.main_image || ''),
-        main_image: it.main_image || ''
-      }))
-      auth.saveCart(cart)
-      my.hideLoading()
-      const skipped = (res && res.skipped) || []
-      my.alert({
-        title: '已加入购物车',
-        content: skipped.length
-          ? `已加入 ${cart.length} 件；${skipped.length} 件不可用已跳过`
-          : `已按历史订单加入 ${cart.length} 件`,
-        success: () => my.navigateTo({ url: '/pages/cart/cart' })
-      })
-    } catch (err) {
-      my.hideLoading()
-      my.showToast({ content: err.message || '复购失败', type: 'fail' })
-    } finally {
-      this.setData({ reorderingId: null })
-    }
+  goOrders() {
+    my.switchTab({ url: '/pages/orders/orders' })
   }
 })

@@ -1,12 +1,30 @@
 <view class="page">
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+    compact="{{true}}"
+  />
   <view class="tip">金额由服务器重新计算，防止篡改</view>
   <view class="member-bar" a:if="{{isMember && memberLevelName}}">
     <text class="badge">{{memberLevelName}}</text>
-    <text a:if="{{memberDiscountText}}">享 {{memberDiscountText}} 优惠</text>
+    <text a:if="{{memberDiscountText}}">享 {{memberDiscountText}} 优惠（与结算金额一致）</text>
+    <text a:elif="{{nextLevelName}}">再积 {{pointsToNext}} 分升级 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
+    <text a:else>会员身份已识别</text>
   </view>
   <view class="table-box" a:if="{{!needPack}}">
     <view class="label">堂食桌号（必选）</view>
     <view a:if="{{tableToken && tableName}}" class="table-on">{{tableName}}</view>
+    <block a:elif="{{!tableToken}}">
+      <button class="scan-btn" onTap="scanTable">扫码绑桌</button>
+      <picker a:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
+        <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
+      </picker>
+      <view a:elif="{{needScanHint}}" class="table-pick hint">开发环境可在后台复制桌台 token，或使用真机扫码</view>
+    </block>
     <picker a:elif="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
       <view class="table-pick">{{pickedLabel || '请选择桌号'}}</view>
     </picker>
@@ -36,12 +54,15 @@
       <text>-¥{{discountAmount}}</text>
     </view>
     <view class="sum-row discount" a:if="{{hasCouponDiscount}}">
-      <text>优惠券</text>
+      <text>优惠券{{selectedCouponLabel && selectedCouponLabel != '不使用优惠券' ? '（' + selectedCouponLabel + '）' : ''}}</text>
       <text>-¥{{couponDiscountAmount}}</text>
     </view>
     <view class="sum-row discount" a:if="{{hasVoucherDiscount}}">
-      <text>代金券</text>
+      <text>代金券{{selectedVoucherLabel && selectedVoucherLabel != '不使用代金券' ? '（' + selectedVoucherLabel + '）' : ''}}</text>
       <text>-¥{{voucherDiscountAmount}}</text>
+    </view>
+    <view class="sum-row hint-row" a:if="{{!hasDiscount && nextLevelName}}">
+      <text class="hint-text">再积 {{pointsToNext}} 分可升 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
     </view>
     <view class="sum-row" a:if="{{needPack}}">
       <text>打包费（预估）</text>

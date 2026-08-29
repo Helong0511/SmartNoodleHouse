@@ -22,17 +22,50 @@
   font-weight: 600;
 }
 .discount { color: #1677ff; font-size: 24rpx; font-weight: 600; }
+.muted-disc { color: #999; font-weight: 400; }
 .hint { color: #999; font-size: 24rpx; }
 .points-line { color: #666; font-size: 24rpx; margin-top: 10rpx; }
 .pts { color: #1677ff; font-weight: 700; font-size: 28rpx; }
 .phone { color: #666; font-size: 24rpx; margin-top: 8rpx; }
+.progress-box { margin-top: 24rpx; padding-top: 20rpx; border-top: 1px solid #f0f0f0; }
+.progress-box.done { margin-top: 20rpx; }
+.progress-head { display: flex; justify-content: space-between; font-size: 24rpx; color: #666; margin-bottom: 10rpx; }
+.pct { color: #1677ff; font-weight: 600; }
+.progress-track { height: 12rpx; background: #f0f0f0; border-radius: 8rpx; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #1677ff, #69b1ff); border-radius: 8rpx; }
+.progress-tip { margin-top: 10rpx; font-size: 22rpx; color: #bbb; line-height: 1.4; }
+.level-item { padding: 16rpx 0; border-bottom: 1px solid #f5f5f5; }
+.level-item:last-child { border-bottom: none; }
+.level-item.current { background: #f0f7ff; margin: 0 -12rpx; padding: 16rpx 12rpx; border-radius: 12rpx; }
+.level-item.unlocked .lv-name { color: #333; }
+.lv-head { display: flex; align-items: center; gap: 12rpx; }
+.lv-name { font-weight: 600; font-size: 28rpx; color: #999; }
+.lv-meta { font-size: 24rpx; color: #999; margin-top: 6rpx; }
+.lv-tag { font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 16rpx; background: #1677ff; color: #fff; }
+.lv-tag.locked { background: #eee; color: #aaa; }
+.coupon-note { margin-top: 16rpx; font-size: 22rpx; color: #ccc; }
+.link-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+.link-card .arrow { color: #ccc; font-size: 40rpx; line-height: 1; }
+.phone-input {
+  border: 1px solid #eee;
+  border-radius: 12rpx;
+  padding: 20rpx;
+  margin: 16rpx 0;
+  font-size: 30rpx;
+}
+.btn-ghost { margin-top: 8rpx; }
 .row { display: flex; justify-content: space-between; align-items: center; }
 .tip { color: #999; font-size: 24rpx; margin-top: 16rpx; line-height: 1.5; }
 .title { font-weight: 600; margin-bottom: 4rpx; }
 .title-row { display: flex; justify-content: space-between; align-items: center; }
 .title-row .title { margin-bottom: 0; }
 .link { color: #1677ff; font-size: 24rpx; }
-.tag { display: inline-block; background: #e6f4ff; color: #1677ff; padding: 8rpx 16rpx; border-radius: 20rpx; margin: 12rpx 12rpx 0 0; }
 .pref-section { margin-top: 20rpx; }
 .pref-section-title { font-size: 24rpx; color: #666; margin-bottom: 8rpx; }
 .pref-item {
@@ -72,11 +105,3 @@
 .wallet-name { font-size: 28rpx; font-weight: 600; color: #333; }
 .wallet-rule { margin-top: 6rpx; font-size: 24rpx; color: #666; line-height: 1.4; }
 .wallet-expire { flex-shrink: 0; font-size: 22rpx; color: #999; white-space: nowrap; }
-.order { margin-top: 20rpx; padding-top: 20rpx; border-top: 1px solid #f2f2f2; }
-.order-head { display: flex; justify-content: space-between; }
-.ono { font-size: 24rpx; color: #666; }
-.st { font-size: 24rpx; color: #1677ff; }
-.order-body { margin-top: 10rpx; font-size: 28rpx; font-weight: 560; }
-.order-foot { margin-top: 12rpx; display: flex; justify-content: space-between; align-items: center; gap: 12rpx; }
-.meta-t { color: #999; font-size: 22rpx; flex: 1; }
-.btn-mini { margin: 0; background: #1677ff; color: #fff; border-radius: 24rpx; font-size: 22rpx; }

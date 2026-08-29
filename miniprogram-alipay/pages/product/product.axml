@@ -1,6 +1,10 @@
 <import-sjs name="util" from="../../utils/cart.sjs" />
 
-<view class="page" a:if="{{product}}">
+<view class="page loading-page" a:if="{{loading}}">
+  <text class="loading-tip">加载中...</text>
+</view>
+
+<view class="page" a:elif="{{product}}">
   <view class="hero-wrap" style="{{heroStyle}}">
     <swiper
       a:if="{{gallery.length}}"
@@ -34,11 +38,11 @@
     </view>
     <view class="desc" a:if="{{product.description}}">{{product.description}}</view>
     <view class="special-tip" a:if="{{product.no_member_discount}}">特价商品不参与会员折扣、优惠券及代金券</view>
+    <view class="pref-hint" a:if="{{prefHint}}">{{prefHint}}</view>
     <view class="price">
       ¥{{displayPrice}}
       <text class="base" a:if="{{displayPrice != product.price}}">（基础 ¥{{product.price}}）</text>
     </view>
-    <view class="pref-hint" a:if="{{prefHint}}">{{prefHint}}</view>
 
     <view class="group" a:for="{{product.option_groups}}" a:key="id">
       <view class="gname">{{item.name}}</view>
@@ -70,6 +74,18 @@
       </block>
     </view>
 
-    <button class="btn-primary" onTap="addCart">加入购物车</button>
+    <view class="qty-row">
+      <text class="qty-label">数量</text>
+      <view class="qty-ctrl">
+        <text class="qty-btn" data-delta="-1" onTap="changeQty">−</text>
+        <text class="qty-num">{{quantity}}</text>
+        <text class="qty-btn" data-delta="1" onTap="changeQty">+</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="footer-bar">
+    <view class="footer-sum">合计 ¥{{lineTotal}}</view>
+    <button class="btn-primary footer-btn" onTap="addCart">加入购物车</button>
   </view>
 </view>

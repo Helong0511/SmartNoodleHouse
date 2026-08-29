@@ -1,5 +1,17 @@
 <view class="page">
-  <view class="empty" a:if="{{!cart.length}}">购物车是空的</view>
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+    compact="{{true}}"
+  />
+  <view class="empty" a:if="{{!loading && !cart.length}}">
+    <text>购物车是空的</text>
+    <button class="btn-ghost" onTap="goMenu">继续点餐</button>
+  </view>
   <block a:else>
     <view class="item" a:for="{{cart}}" a:key="index">
       <view class="thumb-wrap" style="{{thumbStyle}}">
@@ -26,6 +38,7 @@
       </view>
     </view>
     <view class="footer">
+      <button class="btn-ghost footer-link" onTap="goMenu">继续点餐</button>
       <text class="sum">合计 ¥{{total}}</text>
       <button class="btn-primary" onTap="goConfirm">去结算</button>
     </view>

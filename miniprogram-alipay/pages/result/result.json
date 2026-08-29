@@ -1,3 +1,4 @@
 {
-  "defaultTitle": "下单结果"
+  "defaultTitle": "订单详情",
+  "pullRefresh": true
 }

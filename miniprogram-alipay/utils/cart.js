@@ -183,6 +183,30 @@ function enrichCartFromProducts(list, products) {
   })
 }
 
+/** 检查购物车是否满足商品必选规格（与后端下单校验一致） */
+function validateRequiredOptions(cart, products) {
+  const map = {}
+  ;(products || []).forEach((p) => {
+    map[p.id] = p
+    map[String(p.id)] = p
+  })
+  const issues = []
+  ;(cart || []).forEach((raw) => {
+    const item = normalizeItem({ ...raw })
+    const p = map[item.product_id]
+    if (!p) return
+    const selected = new Set((item.option_ids || []).map((id) => String(id)))
+    ;(p.option_groups || []).forEach((g) => {
+      if (!g.is_required) return
+      const ok = (g.options || []).some((o) => selected.has(String(o.id)))
+      if (!ok) {
+        issues.push({ name: p.name, group: g.name || '规格' })
+      }
+    })
+  })
+  return issues
+}
+
 module.exports = {
   calcUnitPrice,
   buildOptionLabels,
@@ -195,5 +219,6 @@ module.exports = {
   calcDiscountableSubtotal,
   calcCouponEligibleSubtotal,
   calcVoucherEligiblePayable,
-  enrichCartFromProducts
+  enrichCartFromProducts,
+  validateRequiredOptions
 }

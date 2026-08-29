@@ -1,20 +1,32 @@
+const { parseTableTokenFromScan } = require('./utils/scan')
+const { resolveApiBase } = require('./config/env')
+const auth = require('./utils/auth')
+
 App({
   globalData: {
-    // 开发者工具可用 127.0.0.1；真机请改局域网 IP，如 http://192.168.1.8:8000/api/v1
-    // 后端：uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-    apiBase: 'http://127.0.0.1:8000/api/v1',
+    apiBase: resolveApiBase(),
     customerId: null,
     customerNo: null,
     nickname: '',
     tableToken: '',
     table: null,
+    store: null,
     channel: 'alipay',
     faceStatus: 'NONE',
     cart: []
   },
   onLaunch(options) {
-    const cart = (my.getStorageSync({ key: 'cart' }).data) || []
-    this.globalData.cart = cart
+    if (!this.globalData.apiBase) {
+      this.globalData.apiBase = resolveApiBase()
+    }
+    this.globalData.cart = auth.readStorage('cart') || []
+    this.globalData.nickname = auth.readStorage('nickname') || ''
+    this.globalData.customerToken = auth.readStorage('customer_token') || ''
+    this.globalData.customerId = auth.readStorage('customer_id') || null
+    this.globalData.customerNo = auth.readStorage('customer_no') || ''
+    this.globalData.store = auth.readStorage('dine_store') || null
+    this.globalData.table = auth.readStorage('dine_table') || null
+    this.globalData.tableToken = auth.readStorage('table_token') || ''
     this.parseLaunch(options)
   },
   onShow(options) {
@@ -25,19 +37,16 @@ App({
     let token = q.token || ''
     let channel = q.channel || ''
 
-    // 支付宝扫码 / 小程序码可能带 query 或 scene
     const sceneRaw = (options && options.scene) || q.scene || ''
     if (!token && sceneRaw) {
       try {
         const scene = decodeURIComponent(String(sceneRaw))
-        if (scene.indexOf('token=') >= 0) {
+        token = parseTableTokenFromScan(scene)
+        if (!channel && scene.indexOf('channel=') >= 0) {
           scene.split('&').forEach((pair) => {
             const [k, v] = pair.split('=')
-            if (k === 'token' && v) token = v
             if (k === 'channel' && v) channel = v
           })
-        } else if (scene) {
-          token = scene
         }
       } catch (_) {}
     }

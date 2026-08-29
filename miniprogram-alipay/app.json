@@ -2,15 +2,45 @@
   "pages": [
     "pages/index/index",
     "pages/menu/menu",
+    "pages/orders/orders",
+    "pages/member/member",
     "pages/product/product",
     "pages/cart/cart",
     "pages/confirm/confirm",
     "pages/result/result",
-    "pages/member/member",
     "pages/face/face"
   ],
   "window": {
     "defaultTitle": "智能面馆",
-    "titleBarColor": "#ff6b35"
+    "titleBarColor": "#ff6b35",
+    "backgroundColor": "#f7f7f7"
+  },
+  "tabBar": {
+    "textColor": "#999999",
+    "selectedColor": "#1677ff",
+    "backgroundColor": "#ffffff",
+    "items": [
+      {
+        "pagePath": "pages/menu/menu",
+        "name": "点餐",
+        "icon": "assets/tab/menu.png",
+        "activeIcon": "assets/tab/menu-active.png"
+      },
+      {
+        "pagePath": "pages/orders/orders",
+        "name": "订单",
+        "icon": "assets/tab/orders.png",
+        "activeIcon": "assets/tab/orders-active.png"
+      },
+      {
+        "pagePath": "pages/member/member",
+        "name": "会员",
+        "icon": "assets/tab/member.png",
+        "activeIcon": "assets/tab/member-active.png"
+      }
+    ]
+  },
+  "usingComponents": {
+    "store-bar": "/components/store-bar/store-bar"
   }
 }

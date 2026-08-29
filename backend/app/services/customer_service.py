@@ -556,7 +556,7 @@ class PreferenceService:
     @staticmethod
     async def update_from_order(db: AsyncSession, order_id: int) -> None:
         order = await db.get(Order, order_id)
-        if not order or not order.customer_id or order.status != "COMPLETED":
+        if not order or not order.customer_id or order.status not in ("PAID", "COMPLETED"):
             return
 
         # 批量加载明细与规格，消除 N+1
@@ -596,7 +596,8 @@ class PreferenceService:
 
         total_orders = await db.scalar(
             select(func.count()).select_from(Order).where(
-                Order.customer_id == order.customer_id, Order.status == "COMPLETED"
+                Order.customer_id == order.customer_id,
+                Order.status.in_(("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY", "COMPLETED")),
             )
         ) or 1
 

@@ -1,40 +1,118 @@
-.page { padding: 24rpx 24rpx 140rpx; }
-.top { display: flex; justify-content: space-between; margin-bottom: 16rpx; }
-.table { font-weight: 600; }
-.member { color: #1677ff; }
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+  background: #f7f7f7;
+}
+.search-wrap { flex-shrink: 0; padding: 0 24rpx 12rpx; }
+.scan-bar {
+  flex-shrink: 0;
+  margin: 0 24rpx 12rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  background: #fff7e6;
+  color: #d48806;
+  border-radius: 12rpx;
+  padding: 18rpx 20rpx;
+  font-size: 24rpx;
+}
+.scan-bar .scan-icon { font-size: 32rpx; }
+.search {
+  background: #fff;
+  border-radius: 32rpx;
+  padding: 16rpx 28rpx;
+  font-size: 26rpx;
+}
 .pref-bar {
+  flex-shrink: 0;
+  margin: 0 24rpx 12rpx;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #e6f4ff;
+  background: #f0f7ff;
   color: #1677ff;
   border-radius: 12rpx;
   padding: 16rpx 20rpx;
   font-size: 24rpx;
-  margin-bottom: 16rpx;
 }
 .pref-bar .more { color: #999; }
-.cat { font-size: 30rpx; font-weight: 600; margin: 24rpx 0 8rpx; }
-
+.loading-tip, .empty-tip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+}
+.menu-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.cat-nav {
+  width: 168rpx;
+  flex-shrink: 0;
+  background: #f0f0f0;
+  height: 100%;
+}
+.cat-item {
+  padding: 28rpx 16rpx;
+  font-size: 26rpx;
+  color: #666;
+  text-align: center;
+  line-height: 1.4;
+  border-left: 6rpx solid transparent;
+}
+.cat-item.on {
+  background: #fff;
+  color: #1677ff;
+  font-weight: 600;
+  border-left-color: #1677ff;
+}
+.menu-body { flex: 1; height: 100%; background: #fff; }
+.cat-section { padding: 0 16rpx; }
+.cat-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #333;
+  padding: 20rpx 8rpx 12rpx;
+}
 .product {
   display: flex;
   align-items: stretch;
-  gap: 20rpx;
-  background: #fff;
-  padding: 20rpx;
-  border-radius: 16rpx;
-  margin-bottom: 16rpx;
+  gap: 8rpx;
+  padding: 16rpx 8rpx;
+  border-bottom: 1px solid #f5f5f5;
 }
-
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 16rpx;
+}
+.quick-add {
+  flex-shrink: 0;
+  width: 56rpx;
+  height: 56rpx;
+  align-self: center;
+  line-height: 52rpx;
+  text-align: center;
+  background: #e6f4ff;
+  color: #1677ff;
+  border-radius: 50%;
+  font-size: 36rpx;
+  font-weight: 700;
+}
 .thumb-wrap {
   flex-shrink: 0;
   border-radius: 12rpx;
   overflow: hidden;
   background: #f3f3f3;
 }
-
 .thumb { width: 100%; height: 100%; display: block; }
-
 .thumb.placeholder {
   width: 100%;
   height: 100%;
@@ -43,9 +121,7 @@
   justify-content: center;
   background: linear-gradient(145deg, #e6f4ff, #f5f5f5);
 }
-
-.ph-text { font-size: 40rpx; color: #1677ff; font-weight: 700; }
-
+.ph-text { font-size: 36rpx; color: #1677ff; font-weight: 700; }
 .info {
   flex: 1;
   min-width: 0;
@@ -53,16 +129,14 @@
   flex-direction: column;
   justify-content: center;
 }
-
 .name-row { display: flex; align-items: center; gap: 8rpx; min-width: 0; }
 .name {
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
-  min-width: 0;
 }
 .special-tag {
   flex-shrink: 0;
@@ -72,35 +146,28 @@
   border-radius: 6rpx;
   padding: 2rpx 8rpx;
 }
-
 .desc {
   color: #999;
-  font-size: 24rpx;
-  margin-top: 8rpx;
+  font-size: 22rpx;
+  margin-top: 6rpx;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  white-space: normal;
 }
-
-.price { color: #1677ff; font-size: 34rpx; font-weight: 700; margin-top: 12rpx; }
-
+.price { color: #1677ff; font-size: 32rpx; font-weight: 700; margin-top: 8rpx; }
+.body-pad { height: 140rpx; }
 .cart-bar {
   position: fixed;
   left: 24rpx;
   right: 24rpx;
-  bottom: 40rpx;
-  background: #1677ff;
+  bottom: 24rpx;
+  background: #333;
   color: #fff;
-  text-align: center;
-  padding: 28rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 24rpx 32rpx;
   border-radius: 48rpx;
-  z-index: 10;
+  z-index: 20;
 }
-
-@media (min-width: 600px) {
-  .product.wide { padding: 24rpx; }
-  .name { font-size: 32rpx; }
-}
+.cart-icon { font-size: 32rpx; }
+.cart-total { margin-left: auto; font-weight: 700; font-size: 32rpx; color: #91caff; }

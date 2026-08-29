@@ -84,6 +84,10 @@ Page({
   },
 
   applyProfile(profile, prefView) {
+    if (!profile || typeof profile !== 'object') {
+      this.setData({ loading: false, walletLoading: false })
+      return
+    }
     const nickname = profile.nickname || app.globalData.nickname || ''
     const displayName = nickname || '面馆会员'
     if (profile.nickname) app.globalData.nickname = profile.nickname
@@ -145,6 +149,9 @@ Page({
       app.globalData.prefs = prefView.prefs
       app.globalData.prefsView = prefView
       app.globalData.prefsAt = now
+      if (!profile || typeof profile !== 'object') {
+        throw new Error('会员资料加载失败，请稍后重试')
+      }
       this.applyProfile(profile, prefView)
       this.applyWallet(couponRes, voucherRes)
       this._profileLoadedAt = now

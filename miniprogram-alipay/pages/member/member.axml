@@ -1,4 +1,13 @@
 <view class="page">
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+  />
+
   <view class="tip loading-tip" a:if="{{loading}}">加载中...</view>
 
   <block a:else>
@@ -11,6 +20,7 @@
           <view class="level-row" a:if="{{isMember && memberLevelName}}">
             <text class="badge">{{memberLevelName}}</text>
             <text class="discount" a:if="{{memberDiscountText}}">享 {{memberDiscountText}}</text>
+            <text class="discount muted-disc" a:else>当前等级无额外折扣</text>
           </view>
           <view class="level-row" a:elif="{{!isMember}}">
             <text class="hint">注册会员享积分升级与专属折扣</text>
@@ -19,6 +29,30 @@
           <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
         </view>
       </view>
+      <view class="progress-box" a:if="{{nextLevelName}}">
+        <view class="progress-head">
+          <text>距 {{nextLevelName}} 还差 {{pointsToNext}} 积分</text>
+          <text class="pct">{{levelProgress}}%</text>
+        </view>
+        <view class="progress-track"><view class="progress-fill" style="width:{{levelProgress}}%"></view></view>
+        <view class="progress-tip">{{pointsRule}}</view>
+      </view>
+      <view class="progress-box done" a:elif="{{isMember}}">
+        <view class="progress-tip">已达最高等级，继续消费可累积积分</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="title">会员等级与权益</view>
+      <view class="level-item {{item.is_current ? 'current' : ''}} {{item.unlocked ? 'unlocked' : ''}}" a:for="{{memberLevels}}" a:key="id">
+        <view class="lv-head">
+          <text class="lv-name">{{item.name}}</text>
+          <text class="lv-tag" a:if="{{item.is_current}}">当前</text>
+          <text class="lv-tag locked" a:elif="{{!item.unlocked}}">未达成</text>
+        </view>
+        <view class="lv-meta">{{item.min_points}} 积分起 · {{item.discount_text || '无额外折扣'}}</view>
+      </view>
+      <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；新注册会员自动获赠新客券。</view>
     </view>
 
     <view class="card">
@@ -50,19 +84,31 @@
       </view>
     </view>
 
+    <view class="card" a:if="{{!phone}}">
+      <view class="title">绑定手机号</view>
+      <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
+      <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" onInput="onPhoneInput" />
+      <button class="btn-ghost" onTap="bindPhone">确认绑定</button>
+    </view>
+
+    <view class="card link-card" onTap="goOrders">
+      <text>我的订单</text>
+      <text class="arrow">›</text>
+    </view>
+
     <view class="card">
       <view class="row">
         <text>人脸迎宾</text>
         <switch checked="{{faceOn}}" onChange="onFaceSwitch" color="#1677ff" />
       </view>
-      <view class="tip">需摄像头实时采集。关闭后立即失效特征。</view>
+      <view class="tip">需摄像头实时采集授权。关闭后立即删除特征，不再识别身份。</view>
     </view>
 
     <view class="card">
       <view class="title">智能记录的口味爱好</view>
-      <view class="tip" a:if="{{prefsEmpty}}">完成订单后自动累计常点口味（辣度、面量、加料等），点餐时智能预选。</view>
+      <view class="tip" a:if="{{prefsEmpty}}">支付成功后，系统会自动累计您常点的规格口味（辣度、面量、加料等），点餐时智能预选。</view>
       <block a:else>
-        <view class="tip">订单状态为「已完成」后更新画像，点餐时会智能预选常点规格。</view>
+        <view class="tip">根据历史订单自动学习；支付成功后更新画像，点餐时会智能预选常点规格。</view>
         <view class="pref-section" a:if="{{prefsConfirmed.length}}">
           <view class="pref-section-title">已确认偏好</view>
           <view class="pref-item" a:for="{{prefsConfirmed}}" a:key="key">
@@ -85,32 +131,6 @@
         </view>
         <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
       </block>
-    </view>
-
-    <view class="card">
-      <view class="title-row">
-        <view class="title">历史订单</view>
-        <text class="link" onTap="loadOrders">刷新</text>
-      </view>
-      <view class="tip" a:if="{{ordersLoading}}">加载中...</view>
-      <view class="tip" a:elif="{{!orders.length}}">暂无订单。完成后可在此再来一单。</view>
-      <view class="order" a:for="{{orders}}" a:key="id">
-        <view class="order-head">
-          <text class="ono">{{item.order_no}}</text>
-          <text class="st">{{item.status_label || item.status}}</text>
-        </view>
-        <view class="order-body">{{item.item_summary}}</view>
-        <view class="order-foot">
-          <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}</text>
-          <button
-            class="btn-mini"
-            size="mini"
-            data-id="{{item.id}}"
-            onTap="reorderOrder"
-            disabled="{{!item.can_reorder || reorderingId == item.id}}"
-          >再来一单</button>
-        </view>
-      </view>
     </view>
   </block>
 </view>

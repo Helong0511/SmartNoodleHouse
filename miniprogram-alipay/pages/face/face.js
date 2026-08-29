@@ -62,7 +62,7 @@ Page({
       my.hideLoading()
       my.showToast({ content: '授权成功' })
       setTimeout(() => {
-        if (this.data.from === 'register') my.redirectTo({ url: '/pages/menu/menu' })
+        if (this.data.from === 'register') my.switchTab({ url: '/pages/menu/menu' })
         else my.navigateBack()
       }, 500)
     } catch (e) {
@@ -74,7 +74,7 @@ Page({
   },
 
   cancel() {
-    if (this.data.from === 'register') my.redirectTo({ url: '/pages/menu/menu' })
+    if (this.data.from === 'register') my.switchTab({ url: '/pages/menu/menu' })
     else my.navigateBack()
   }
 })
