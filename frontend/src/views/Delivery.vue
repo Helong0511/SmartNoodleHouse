@@ -507,11 +507,11 @@ const stats = reactive({
   delivering: 0,
   urging: 0,
   refund_pending: 0,
-  today_orders: 0,
-  today_meituan: 0,
-  today_eleme: 0,
-  today_revenue: '0',
-  today_member_discount: '0',
+  orders: 0,
+  meituan_orders: 0,
+  eleme_orders: 0,
+  revenue: '0',
+  member_discount: '0',
 })
 
 const filters = reactive({
@@ -542,11 +542,11 @@ const kpiCards = computed(() => [
   { key: 'urging', label: '催单中', value: stats.urging, filter: 'urge', alert: true, tone: 'tone-warn' },
   { key: 'refund', label: '待退款', value: stats.refund_pending, filter: 'refund', alert: true, tone: 'tone-warn' },
   { key: 'accepted', label: '制作/待送', value: stats.accepted, filter: 'accepted', alert: false, tone: '' },
-  { key: 'today', label: '今日单量', value: stats.today_orders, filter: 'today', alert: false, tone: '' },
+  { key: 'today', label: '今日单量', value: stats.orders, filter: 'today', alert: false, tone: '' },
   {
     key: 'rev',
-    label: '今日外卖营收',
-    value: `¥${stats.today_revenue}`,
+    label: '今日外卖净营收',
+    value: `¥${stats.revenue}`,
     filter: '',
     alert: false,
     tone: 'tone-ok',
@@ -554,7 +554,7 @@ const kpiCards = computed(() => [
   {
     key: 'discount',
     label: '今日会员优惠',
-    value: Number(stats.today_member_discount) > 0 ? `¥${stats.today_member_discount}` : '¥0',
+    value: Number(stats.member_discount) > 0 ? `¥${stats.member_discount}` : '¥0',
     filter: '',
     alert: false,
     tone: 'tone-discount',
@@ -562,7 +562,7 @@ const kpiCards = computed(() => [
   {
     key: 'plat',
     label: '美团 / 饿了么',
-    value: `${stats.today_meituan} / ${stats.today_eleme}`,
+    value: `${stats.meituan_orders} / ${stats.eleme_orders}`,
     filter: '',
     alert: false,
     tone: '',

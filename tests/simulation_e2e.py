@@ -708,13 +708,14 @@ async def run_all_simulations() -> bool:
         results.append(ok("伪造桌台 token 被拒绝", r.json().get("data") is None))
 
         # Dashboard
-        r = await client.get("/api/v1/dashboard/overview", headers={"Authorization": f"Bearer {admin_token}"})
+        r = await client.get("/api/v1/dashboard", params={"period": "today"}, headers={"Authorization": f"Bearer {admin_token}"})
         dash = r.json().get("data", {})
+        summary = dash.get("summary") or {}
         results.append(
             ok(
                 "Dashboard 统计",
-                dash.get("today_orders", 0) >= 1,
-                f"今日订单 {dash.get('today_orders')} 营业额 {dash.get('today_revenue')} 元",
+                summary.get("order_count", 0) >= 1,
+                f"今日订单 {summary.get('order_count')} 净营收 {summary.get('net_revenue')} 元",
             )
         )
 

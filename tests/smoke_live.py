@@ -69,7 +69,7 @@ def main() -> int:
     check("GET /auth/me", code == 200 and data.get("code") == 0, f"user={ (data.get('data') or {}).get('username') }")
 
     apis = [
-        ("GET", "/api/v1/dashboard/overview"),
+        ("GET", "/api/v1/dashboard"),
         ("GET", "/api/v1/products"),
         ("GET", "/api/v1/categories"),
         ("GET", "/api/v1/options/groups"),

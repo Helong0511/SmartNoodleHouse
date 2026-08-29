@@ -142,69 +142,13 @@ async def delivery_stats(
     request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None
 ):
     """外卖运营台顶部 KPI。"""
-    from sqlalchemy import func
-
     from app.core.response import now_local
-    from app.models import Order
+    from app.services.revenue_stats import delivery_kpi
     from app.services.store_scope import require_bound_store
 
     store = require_bound_store(user, store_id)
     today = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    async def _count(extra=None):
-        q = select(func.count()).select_from(DeliveryOrder).join(Order, Order.id == DeliveryOrder.order_id)
-        if store:
-            q = q.where(Order.store_id == store)
-        if extra is not None:
-            q = q.where(extra)
-        return int(await db.scalar(q) or 0)
-
-    pending = await _count(DeliveryOrder.delivery_status == "PENDING")
-    accepted = await _count(DeliveryOrder.delivery_status.in_(["ACCEPTED", "READY"]))
-    delivering = await _count(
-        DeliveryOrder.delivery_status.notin_(["PENDING", "ACCEPTED", "READY", "DONE", "CANCELLED"])
-    )
-    urging = await _count(
-        (DeliveryOrder.urge_count > 0) & (DeliveryOrder.delivery_status.notin_(["DONE", "CANCELLED"]))
-    )
-    today_cnt = await _count(DeliveryOrder.created_at >= today)
-    today_meituan = await _count((DeliveryOrder.created_at >= today) & (DeliveryOrder.platform == "MEITUAN"))
-    today_eleme = await _count((DeliveryOrder.created_at >= today) & (DeliveryOrder.platform == "ELEME"))
-
-    refund_pending_q = (
-        select(func.count())
-        .select_from(DeliveryRefund)
-        .join(Order, Order.id == DeliveryRefund.order_id)
-        .where(DeliveryRefund.status == "PENDING")
-    )
-    if store:
-        refund_pending_q = refund_pending_q.where(Order.store_id == store)
-    refund_pending = int(await db.scalar(refund_pending_q) or 0)
-
-    from app.services.revenue_stats import member_discount_since, net_revenue_since
-
-    today_revenue = await net_revenue_since(
-        db, since=today, store_id=store, channels=["MEITUAN", "ELEME"]
-    )
-    today_member_discount = await member_discount_since(
-        db, since=today, store_id=store, channels=["MEITUAN", "ELEME"]
-    )
-
-    return success(
-        {
-            "pending": pending,
-            "accepted": accepted,
-            "delivering": delivering,
-            "urging": urging,
-            "refund_pending": refund_pending,
-            "today_orders": today_cnt,
-            "today_meituan": today_meituan,
-            "today_eleme": today_eleme,
-            "today_revenue": str(today_revenue),
-            "today_member_discount": str(today_member_discount),
-        },
-        request=request,
-    )
+    return success(await delivery_kpi(db, since=today, store_id=store), request=request)
 
 
 @router.get("/orders", dependencies=[require_permission("order:read")])
