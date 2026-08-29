@@ -56,3 +56,10 @@ npm run dev -- --host 127.0.0.1 --port 5173
 # npm run dev -- --host 0.0.0.0 --port 5173
 
 # 本地: http://127.0.0.1:5173
+
+# ────────── Windows 11：联调冒烟（后端须已启动）──────────
+# cd E:\SmartNoodleHouse
+# python tests/live_miniprogram_smoke.py
+#
+# 全链路内存模拟（不依赖 MySQL，约 1~2 分钟）：
+# python tests/simulation_e2e.py
