@@ -1,4 +1,5 @@
 const api = require('./api')
+const auth = require('./auth')
 
 function getAppSafe() {
   try {
@@ -38,9 +39,9 @@ function applyContext(table, store) {
 function readCachedContext() {
   const g = getAppSafe()
   if (!g) return { table: null, store: null, token: '' }
-  let table = g.globalData.table || (my.getStorageSync({ key: 'dine_table' }).data) || null
-  const store = g.globalData.store || (my.getStorageSync({ key: 'dine_store' }).data) || null
-  const token = g.globalData.tableToken || (my.getStorageSync({ key: 'table_token' }).data) || ''
+  let table = g.globalData.table || auth.readStorage('dine_table') || null
+  const store = g.globalData.store || auth.readStorage('dine_store') || null
+  const token = g.globalData.tableToken || auth.readStorage('table_token') || ''
   if (table && !g.globalData.table) g.globalData.table = table
   if (store && !g.globalData.store) g.globalData.store = store
   return { table, store, token }

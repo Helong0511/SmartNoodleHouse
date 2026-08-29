@@ -1,7 +1,10 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
-const app = getApp()
+
+function appRef() {
+  return auth.getAppSafe()
+}
 
 Page({
   data: {
@@ -18,18 +21,21 @@ Page({
   },
 
   onLoad(query) {
-    if (query.token) {
+    const app = appRef()
+    if (query.token && app) {
       app.globalData.tableToken = query.token
       my.setStorageSync({ key: 'table_token', data: query.token })
     }
-    if (query.channel) app.globalData.channel = query.channel
+    if (query.channel && app) app.globalData.channel = query.channel
     this.bootstrap()
   },
 
   async bootstrap() {
     try {
       this.setData({ loading: true })
-      const token = app.globalData.tableToken || (my.getStorageSync({ key: 'table_token' }) || {}).data
+      const app = appRef()
+      const gd = (app && app.globalData) || {}
+      const token = gd.tableToken || auth.readStorage('table_token') || ''
       if (token) {
         try {
           await dineCtx.bindTableFromToken(token)
@@ -73,7 +79,7 @@ Page({
       if (login && login.nickname) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
       }
-      if (login && login.customer_id) {
+      if (login && login.customer_id && app) {
         app.globalData.customerId = login.customer_id
         my.setStorageSync({ key: 'customer_id', data: login.customer_id })
       }
@@ -113,7 +119,8 @@ Page({
   },
 
   async onRegister() {
-    if (!app.globalData.customerToken) {
+    const app = appRef()
+    if (!app || !app.globalData.customerToken) {
       my.showToast({ content: '请先登录', type: 'fail' })
       return
     }

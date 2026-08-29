@@ -4,7 +4,15 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
 const dineCtx = require('../../utils/context')
-const app = getApp()
+
+function appGlobal() {
+  try {
+    const a = getApp()
+    return (a && a.globalData) || {}
+  } catch (_) {
+    return {}
+  }
+}
 
 const MENU_CACHE_MS = 5 * 60 * 1000
 
@@ -68,10 +76,11 @@ Page({
 
   async loadPrefs(force = false) {
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      const gd = appGlobal()
+      if (!gd.customerToken) await auth.ensureLogin()
     } catch (_) {}
     try {
-      const view = await prefUtil.loadCustomerPrefs(app, api, { force })
+      const view = await prefUtil.loadCustomerPrefs({ globalData: appGlobal() }, api, { force })
       this.setData({ prefSummary: (view && view.prefSummary) || '' })
     } catch (_) {}
   },
@@ -101,8 +110,9 @@ Page({
   },
 
   async loadMenu() {
-    const sid = (app.globalData.table && app.globalData.table.store_id)
-      || (app.globalData.store && app.globalData.store.id)
+    const gd = appGlobal()
+    const sid = (gd.table && gd.table.store_id)
+      || (gd.store && gd.store.id)
       || null
     const cacheKey = String(sid || 'all')
     const now = Date.now()

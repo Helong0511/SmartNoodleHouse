@@ -1,7 +1,19 @@
-# SmartNoodleHouse 本地启动命令（PowerShell）
-# 在项目根目录 E:\SmartNoodleHouse 执行；前后端各开一个终端。
+# SmartNoodleHouse 启动命令
+# ═══════════════════════════════════════════════════════════════
+# 本地开发  Windows 11（本机路径 E:\SmartNoodleHouse）
+# 生产部署  Ubuntu 22.04.5（见 scripts/生产部署-ubuntu.txt）
+# ═══════════════════════════════════════════════════════════════
+#
+# 环境文件：
+#   本地  copy .env.development.example .env
+#   生产  cp .env.production.example .env
+#
+# 小程序 API 地址：miniprogram-*/config/env.js
+#   模拟器     DEV_USE_LAN = false  → 127.0.0.1:8000
+#   真机调试   DEV_USE_LAN = true   → 192.168.1.110:8000
+#   正式版     PROD_API_BASE        → https://your-domain.com/api/v1
 
-# ---------- 0. 先检查端口，占用则杀进程 ----------
+# ────────── Windows 11：释放端口（PowerShell）──────────
 foreach ($port in 8000, 5173) {
   $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
   if ($conns) {
@@ -14,24 +26,33 @@ foreach ($port in 8000, 5173) {
     Write-Host "端口 $port 空闲"
   }
 }
-# 残留 uvicorn（--reload 父子进程）
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match 'uvicorn' } | ForEach-Object {
   Write-Host "结束 uvicorn PID=$($_.ProcessId)"
   Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 Start-Sleep -Seconds 1
 
-# ---------- 后端 ----------
+# ────────── Windows 11：后端（PowerShell 终端 1）──────────
 cd E:\SmartNoodleHouse\backend
+
+# 模拟器调试（仅本机访问）
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# 真机调试（手机需能访问电脑局域网 IP）
+# python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-# 地址: http://127.0.0.1:8000
-# 文档: http://127.0.0.1:8000/docs
+# 本地 API: http://127.0.0.1:8000
+# 真机 API: http://192.168.1.110:8000
+# 文档:     http://127.0.0.1:8000/docs
 
-# ---------- 前端（另开终端） ----------
+# ────────── Windows 11：前端（PowerShell 终端 2）──────────
 cd E:\SmartNoodleHouse\frontend
-# 首次或缺依赖时先: npm install
+# 首次: npm install
+
+# 仅本机浏览器
 npm run dev -- --host 127.0.0.1 --port 5173
-# 地址: http://127.0.0.1:5173
+
+# 手机访问 H5 扫码页（需 .env 中 H5_PUBLIC_BASE_URL=http://192.168.1.110:5173）
+# npm run dev -- --host 0.0.0.0 --port 5173
+
+# 本地: http://127.0.0.1:5173

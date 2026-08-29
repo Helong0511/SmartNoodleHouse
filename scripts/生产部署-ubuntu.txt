@@ -1,0 +1,59 @@
+# SmartNoodleHouse 生产部署 — Ubuntu 22.04.5
+# ═══════════════════════════════════════════════════════════════
+# 与 Windows 本地开发的区别见下表：
+#
+#   项目          本地 Windows 11              生产 Ubuntu 22.04.5
+#   ─────────────────────────────────────────────────────────────
+#   环境文件      .env.development.example     .env.production.example
+#   APP_ENV       development                  production
+#   后端监听      0.0.0.0:8000（真机）或       127.0.0.1:8000（Nginx 反代）
+#                 127.0.0.1:8000（模拟器）
+#   对外访问      http://127.0.0.1 / 局域网 IP   https://your-domain.com
+#   小程序 API    config/env.js DEV_*          config/env.js PROD_API_BASE
+#   Mock 开关     ALLOW_*_MOCK=true            全部 false
+#   日志          JSON_LOGS=false              JSON_LOGS=true
+#
+# ═══════════════════════════════════════════════════════════════
+
+# ── 1. 环境配置 ──
+cd /path/to/SmartNoodleHouse
+cp .env.production.example .env
+nano .env
+# 必改：JWT_SECRET、DATABASE_URL、域名、微信/支付宝密钥
+
+# ── 2. 后端依赖与迁移 ──
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+
+# ── 3. 前端构建 ──
+cd ../frontend
+npm ci
+npm run build
+# 静态文件在 frontend/dist
+
+# ── 4. 启动后端（systemd 示例，监听本机供 Nginx 反代）──
+# /etc/systemd/system/smart-noodle.service
+#   ExecStart=/path/to/SmartNoodleHouse/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+#   WorkingDirectory=/path/to/SmartNoodleHouse/backend
+#   EnvironmentFile=/path/to/SmartNoodleHouse/.env
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now smart-noodle
+
+# ── 5. Nginx（参考 deploy/nginx.conf）──
+#   server_name 改为真实域名
+#   root 指向 frontend/dist
+#   /api 与 /uploads 反代到 http://127.0.0.1:8000
+sudo nginx -t && sudo systemctl reload nginx
+
+# ── 6. 小程序发布前 ──
+#   miniprogram-wechat/config/env.js  → PROD_API_BASE = https://your-domain.com/api/v1
+#   miniprogram-alipay/config/env.js  → 同上
+#   微信/支付宝公众平台配置 request 合法域名为 your-domain.com
+
+# ── 7. 健康检查 ──
+curl -s http://127.0.0.1:8000/api/v1/health
+curl -sI https://your-domain.com/

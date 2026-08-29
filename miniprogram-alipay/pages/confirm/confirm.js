@@ -335,7 +335,7 @@ Page({
   },
   async resolveTable() {
     let token = String(
-      app.globalData.tableToken || (my.getStorageSync({ key: 'table_token' }).data) || ''
+      app.globalData.tableToken || auth.readStorage('table_token') || ''
     ).trim()
 
     if (token) {
@@ -450,7 +450,7 @@ Page({
       }
     } catch (_) {}
     const tableToken = String(
-      this.data.tableToken || app.globalData.tableToken || (my.getStorageSync({ key: 'table_token' }).data) || ''
+      this.data.tableToken || app.globalData.tableToken || auth.readStorage('table_token') || ''
     ).trim()
     if (!tableToken) {
       my.showToast({ content: '请先扫描或选择桌号', type: 'fail' })
@@ -460,8 +460,7 @@ Page({
     this.setData({ loading: true })
     try {
       if (!app.globalData.customerToken) await auth.ensureLogin()
-      const table = app.globalData.table
-        || ((my.getStorageSync({ key: 'dine_table' }).data) || null)
+      const table = app.globalData.table || auth.readStorage('dine_table') || null
       const order = await api.post('/orders', {
         store_id: (table && table.store_id) || (app.globalData.store && app.globalData.store.id),
         table_token: tableToken,

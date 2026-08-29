@@ -1,5 +1,20 @@
 const api = require('./api')
-const app = getApp()
+
+function getAppSafe() {
+  try {
+    return getApp()
+  } catch (_) {
+    return null
+  }
+}
+
+function requireApp() {
+  const app = getAppSafe()
+  if (!app || !app.globalData) {
+    throw new Error('应用未就绪，请重新打开小程序')
+  }
+  return app
+}
 
 function readStorage(key) {
   try {
@@ -12,6 +27,7 @@ function readStorage(key) {
 }
 
 function isDevApiBase() {
+  const app = getAppSafe()
   const base = String((app && app.globalData && app.globalData.apiBase) || '')
   return /127\.0\.0\.1|localhost|192\.168\.|10\.\d+\.|172\.(1[6-9]|2\d|3[01])\./.test(base)
 }
@@ -41,6 +57,7 @@ function getAuthCode() {
 }
 
 async function ensureLogin(tableToken) {
+  const app = requireApp()
   const cachedToken = app.globalData.customerToken || readStorage('customer_token')
   if (cachedToken) {
     app.globalData.customerToken = cachedToken
@@ -56,12 +73,12 @@ async function ensureLogin(tableToken) {
     }
   }
 
-  const auth = await getAuthCode()
-  if (!auth || !auth.authCode) {
+  const authRes = await getAuthCode()
+  if (!authRes || !authRes.authCode) {
     throw new Error('getAuthCode 未返回 authCode，请检查支付宝登录授权')
   }
   const data = await api.post('/miniprogram/alipay/login', {
-    auth_code: auth.authCode,
+    auth_code: authRes.authCode,
     table_token: tableToken || app.globalData.tableToken || readStorage('table_token') || null,
     nickname: app.globalData.nickname || readStorage('nickname') || null
   }, false)
@@ -86,12 +103,14 @@ async function ensureLogin(tableToken) {
 }
 
 function saveCart(cart) {
+  const app = requireApp()
   app.globalData.cart = cart
   my.setStorageSync({ key: 'cart', data: cart })
 }
 
 function getCart() {
-  return app.globalData.cart || readStorage('cart') || []
+  const app = getAppSafe()
+  return (app && app.globalData && app.globalData.cart) || readStorage('cart') || []
 }
 
-module.exports = { ensureLogin, saveCart, getCart, formatError, readStorage }
+module.exports = { ensureLogin, saveCart, getCart, formatError, readStorage, getAppSafe }
