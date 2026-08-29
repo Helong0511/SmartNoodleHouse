@@ -133,6 +133,7 @@ async def new_store_customers_since(
     db: AsyncSession,
     *,
     since: datetime,
+    until: datetime | None = None,
     store_id: int,
 ) -> int:
     """门店维度：期间内首次在本店下单的顾客数（去重）。"""
@@ -146,6 +147,8 @@ async def new_store_customers_since(
         .subquery()
     )
     q = select(func.count()).select_from(first_order_sq).where(first_order_sq.c.first_at >= since)
+    if until is not None:
+        q = q.where(first_order_sq.c.first_at < until)
     return int(await db.scalar(q) or 0)
 
 
@@ -363,7 +366,9 @@ async def build_period_stats(
     )
     new_store_customers = 0
     if store_id is not None:
-        new_store_customers = await new_store_customers_since(db, since=since, store_id=store_id)
+        new_store_customers = await new_store_customers_since(
+            db, since=since, until=until, store_id=store_id
+        )
 
     return {
         "period_label": period_label,
@@ -657,6 +662,12 @@ async def delivery_kpi(
             q = q.where(extra)
         return int(await db.scalar(q) or 0)
 
+    async def _status_count(extra=None) -> int:
+        """周期视图（有 until）按下单时间过滤；实时视图返回当前全量状态数。"""
+        if until is not None:
+            return await _period_count(extra)
+        return await _count(extra)
+
     orders = await _period_count()
 
     gross = await gross_revenue_since(
@@ -686,12 +697,12 @@ async def delivery_kpi(
         "orders": orders,
         "revenue": str(revenue),
         "member_discount": str(member_discount),
-        "pending": await _count(DeliveryOrder.delivery_status == "PENDING"),
-        "accepted": await _count(DeliveryOrder.delivery_status.in_(["ACCEPTED", "READY"])),
-        "delivering": await _count(
+        "pending": await _status_count(DeliveryOrder.delivery_status == "PENDING"),
+        "accepted": await _status_count(DeliveryOrder.delivery_status.in_(["ACCEPTED", "READY"])),
+        "delivering": await _status_count(
             DeliveryOrder.delivery_status.notin_(["PENDING", "ACCEPTED", "READY", "DONE", "CANCELLED"])
         ),
-        "urging": await _count(
+        "urging": await _status_count(
             (DeliveryOrder.urge_count > 0)
             & (DeliveryOrder.delivery_status.notin_(["DONE", "CANCELLED"]))
         ),
