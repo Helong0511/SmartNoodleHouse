@@ -63,3 +63,6 @@ npm run dev -- --host 127.0.0.1 --port 5173
 #
 # 全链路内存模拟（不依赖 MySQL，约 1~2 分钟）：
 # python tests/simulation_e2e.py
+#
+# 会员等级 / 偏好评分单测：
+# python -m pytest tests/test_member_levels_admin.py tests/test_preference_scoring.py -v

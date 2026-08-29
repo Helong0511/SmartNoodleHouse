@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from app.models import (
 from app.services.order_service import OrderPriceCalculator
 
 DEFAULT_MEMBER_LEVEL_NAME = "普通会员"
+MEMBER_DISCOUNT_QUANT = Decimal("0.0001")
 
 
 class CustomerService:
@@ -100,6 +101,114 @@ class CustomerService:
         )
 
     @staticmethod
+    def level_admin_payload(level: MemberLevel, member_count: int = 0) -> dict:
+        """后台会员等级配置展示。"""
+        rate = Decimal(str(level.discount_rate)).quantize(MEMBER_DISCOUNT_QUANT)
+        is_base = level.name == DEFAULT_MEMBER_LEVEL_NAME
+        return {
+            "id": level.id,
+            "name": level.name,
+            "min_points": int(level.min_points),
+            "discount_rate": str(rate),
+            "discount_text": CustomerService.discount_display_text(rate),
+            "is_base": is_base,
+            "editable_min_points": not is_base,
+            "member_count": int(member_count),
+        }
+
+    @staticmethod
+    def resolve_level_updates(levels: list, items: list[dict]) -> list[tuple]:
+        """校验银卡/金卡等升级积分与折扣；返回 [(level, min_points, discount_rate), ...]。"""
+        if not items:
+            raise AppException(40090, "未提交任何修改")
+        by_id = {int(lv.id): lv for lv in levels}
+        seen: set[int] = set()
+        patch: dict[int, dict] = {}
+        for raw in items:
+            lid = int(raw["id"])
+            if lid in seen:
+                raise AppException(40091, "提交的等级 ID 重复")
+            seen.add(lid)
+            if lid not in by_id:
+                raise AppException(40091, f"会员等级不存在: {lid}")
+            patch[lid] = raw
+
+        planned: list[tuple] = []
+        for lv in levels:
+            raw = patch.get(int(lv.id))
+            min_pts = int(raw["min_points"]) if raw and "min_points" in raw else int(lv.min_points)
+            if raw and raw.get("discount_rate") is not None:
+                rate = Decimal(str(raw["discount_rate"])).quantize(MEMBER_DISCOUNT_QUANT)
+            else:
+                rate = Decimal(str(lv.discount_rate)).quantize(MEMBER_DISCOUNT_QUANT)
+            if min_pts < 0:
+                raise AppException(40092, f"「{lv.name}」升级积分不能为负数")
+            if rate <= Decimal("0") or rate > Decimal("1"):
+                raise AppException(40093, f"「{lv.name}」折扣率须在 0 到 1 之间（如 0.98 表示 9.8 折）")
+            if lv.name == DEFAULT_MEMBER_LEVEL_NAME and min_pts != 0:
+                raise AppException(40094, "普通会员为起始档，升级积分须为 0")
+            planned.append((lv, min_pts, rate))
+
+        ordered = planned
+        for i in range(1, len(ordered)):
+            prev_name, prev_pts = ordered[i - 1][0].name, ordered[i - 1][1]
+            name, pts = ordered[i][0].name, ordered[i][1]
+            if pts <= prev_pts:
+                raise AppException(
+                    40095,
+                    f"升级积分须随等级递增：{prev_name}（{prev_pts}）须低于 {name}（{pts}）",
+                )
+        return planned
+
+    @staticmethod
+    async def apply_level_updates(
+        db: AsyncSession, items: list[dict], *, recalculate: bool = True
+    ) -> dict:
+        """批量更新会员等级门槛/折扣，可选按积分重算全部顾客等级。"""
+        levels = await CustomerService.list_levels_ordered(db)
+        if not levels:
+            raise AppException(40096, "尚未配置会员等级")
+        planned = CustomerService.resolve_level_updates(levels, items)
+        changed: list[dict] = []
+        for lv, min_pts, rate in planned:
+            before_pts = int(lv.min_points)
+            before_rate = Decimal(str(lv.discount_rate)).quantize(MEMBER_DISCOUNT_QUANT)
+            if before_pts == min_pts and before_rate == rate:
+                continue
+            lv.min_points = min_pts
+            lv.discount_rate = rate
+            changed.append(
+                {
+                    "id": lv.id,
+                    "name": lv.name,
+                    "before": {"min_points": before_pts, "discount_rate": str(before_rate)},
+                    "after": {"min_points": min_pts, "discount_rate": str(rate)},
+                }
+            )
+        await db.flush()
+        recalc_count = 0
+        if recalculate:
+            recalc_count = await CustomerService.recalculate_all_member_levels(db)
+        return {"changed": changed, "recalculated": recalc_count}
+
+    @staticmethod
+    async def recalculate_all_member_levels(db: AsyncSession) -> int:
+        """按当前门槛把全部顾客挂到可达最高档。"""
+        levels = await CustomerService.list_levels_ordered(db)
+        if not levels:
+            return 0
+        total = int(await db.scalar(select(func.count()).select_from(Customer)) or 0)
+        await db.execute(update(Customer).values(member_level_id=levels[0].id))
+        for lv in levels[1:]:
+            await db.execute(
+                update(Customer)
+                .where(Customer.points >= int(lv.min_points))
+                .values(member_level_id=lv.id)
+            )
+        await db.flush()
+        return total
+
+    @staticmethod
     async def recalculate_member_level(db: AsyncSession, customer: Customer) -> MemberLevel | None:
         """按积分重算并写入会员等级（取可达最高档）。"""
         levels = await CustomerService.list_levels_ordered(db)
@@ -130,6 +239,22 @@ class CustomerService:
         await CustomerService.recalculate_member_level(db, customer)
         await db.flush()
         return earned
+
+    @staticmethod
+    async def deduct_points_for_refund(db: AsyncSession, order: Order, refund_amount: Decimal) -> int:
+        """退款成功：按退款金额 1 元扣 1 积分，并尝试降级等级。"""
+        if not order.customer_id:
+            return 0
+        customer = await db.get(Customer, int(order.customer_id))
+        if not customer:
+            return 0
+        deducted = int(money(refund_amount or 0))
+        if deducted <= 0:
+            return 0
+        customer.points = max(0, int(customer.points or 0) - deducted)
+        await CustomerService.recalculate_member_level(db, customer)
+        await db.flush()
+        return deducted
 
     @staticmethod
     def member_progress_payload(

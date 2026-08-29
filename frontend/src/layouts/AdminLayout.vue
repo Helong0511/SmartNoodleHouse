@@ -9,6 +9,7 @@
         <el-menu-item v-if="auth.hasPermission('product:read')" index="/options">规格管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('order:read')" index="/orders">订单管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('customer:read')" index="/customers">顾客管理</el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('customer:read')" index="/member-levels">会员等级</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('coupon:read')" index="/coupons">优惠券管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('table:manage')" index="/tables">桌台管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('user:read')" index="/users">员工管理</el-menu-item>

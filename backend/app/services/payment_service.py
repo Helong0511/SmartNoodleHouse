@@ -597,6 +597,15 @@ class PaymentService:
                     )
                 else:
                     order.payment_status = payment.status
+                if order.customer_id:
+                    try:
+                        from app.services.customer_service import CustomerService
+
+                        await CustomerService.deduct_points_for_refund(db, order, row.amount)
+                    except Exception:
+                        logger.exception(
+                            "退款扣减积分失败 order_id=%s refund_no=%s", order.id, row.refund_no
+                        )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status if new_status != "ABNORMAL" else "FAILED"
             row.fail_reason = row.fail_reason or fail_reason or new_status

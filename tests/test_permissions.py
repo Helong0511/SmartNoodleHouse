@@ -5,7 +5,7 @@ import pytest
 ROLES = ["SUPER_ADMIN", "STORE_ADMIN", "CASHIER", "KITCHEN", "OPERATOR"]
 PERMISSIONS = [
     "product:read", "product:create", "product:update", "product:delete",
-    "order:read", "order:update", "customer:read",
+    "order:read", "order:update", "customer:read", "customer:manage",
     "camera:read", "camera:manage", "welcome:manage",
     "payment:read", "payment:refund", "system:manage",
 ]
@@ -19,3 +19,4 @@ def test_roles_defined():
 def test_permissions_defined():
     assert "payment:refund" in PERMISSIONS
     assert "camera:manage" in PERMISSIONS
+    assert "customer:manage" in PERMISSIONS

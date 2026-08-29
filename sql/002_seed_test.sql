@@ -65,6 +65,9 @@ WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'order:update');
 INSERT INTO permissions (code, name, module)
 SELECT 'customer:read', '查看顾客', 'customer' FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'customer:read');
+INSERT INTO permissions (code, name, module)
+SELECT 'customer:manage', '管理会员等级', 'customer' FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'customer:manage');
 
 INSERT INTO permissions (code, name, module)
 SELECT 'camera:read', '查看摄像头', 'camera' FROM DUAL
@@ -128,7 +131,7 @@ FROM roles r
 JOIN permissions p ON p.code IN (
   'product:read', 'product:create', 'product:update', 'product:delete',
   'order:read', 'order:update',
-  'customer:read',
+  'customer:read', 'customer:manage',
   'camera:read', 'camera:manage',
   'welcome:manage',
   'payment:read', 'payment:refund',

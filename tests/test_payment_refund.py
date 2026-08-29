@@ -87,6 +87,7 @@ async def test_finalize_refund_marks_partial():
     order.id = 9
     order.status = "PAID"
     order.payment_status = "PAID"
+    order.customer_id = None
 
     row = MagicMock()
     row.status = "PROCESSING"
@@ -111,9 +112,61 @@ async def test_finalize_refund_marks_partial():
 
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
-    ):
+    ), patch(
+        "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
+    ) as deduct:
         await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
 
     assert row.status == "SUCCESS"
     assert payment.status == "PARTIAL_REFUND"
     assert order.payment_status == "PARTIAL_REFUND"
+    deduct.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_refund_deducts_points_for_customer():
+    from app.services.payment_service import PaymentService
+
+    payment = MagicMock()
+    payment.id = 1
+    payment.amount = Decimal("100.00")
+    payment.status = "PAID"
+
+    order = MagicMock()
+    order.id = 9
+    order.status = "PAID"
+    order.payment_status = "PAID"
+    order.customer_id = 42
+
+    row = MagicMock()
+    row.status = "PROCESSING"
+    row.payment_id = 1
+    row.order_id = 9
+    row.refund_no = "RF1"
+    row.amount = Decimal("40.00")
+    row.fail_reason = None
+    row.callback_raw = None
+    row.provider_refund_no = None
+    row.succeeded_at = None
+
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=Decimal("40.00"))
+
+    payment_result = MagicMock()
+    payment_result.scalar_one_or_none.return_value = payment
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = order
+    db.execute = AsyncMock(side_effect=[payment_result, order_result])
+    db.flush = AsyncMock()
+
+    with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
+        "app.services.payment_service.apply_order_status", new_callable=AsyncMock
+    ), patch(
+        "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
+    ) as deduct:
+        await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
+
+    deduct.assert_awaited_once()
+    args = deduct.await_args
+    assert args[0][1] is order
+    assert args[0][2] == Decimal("40.00")

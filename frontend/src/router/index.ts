@@ -16,6 +16,7 @@ const router = createRouter({
         { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理', permission: 'order:read' } },
         { path: 'orders/:id', component: () => import('@/views/OrderDetail.vue'), meta: { title: '订单详情', permission: 'order:read' } },
         { path: 'customers', component: () => import('@/views/Customers.vue'), meta: { title: '顾客管理', permission: 'customer:read' } },
+        { path: 'member-levels', component: () => import('@/views/MemberLevels.vue'), meta: { title: '会员等级', permission: 'customer:read' } },
         { path: 'coupons', component: () => import('@/views/Coupons.vue'), meta: { title: '优惠券管理', permission: 'coupon:read' } },
         { path: 'tables', component: () => import('@/views/Tables.vue'), meta: { title: '桌台管理', permission: 'table:manage' } },
         { path: 'users', component: () => import('@/views/Users.vue'), meta: { title: '员工管理', permission: 'user:read' } },

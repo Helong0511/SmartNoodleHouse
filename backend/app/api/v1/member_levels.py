@@ -1,0 +1,87 @@
+import json
+
+from fastapi import APIRouter, Request
+from sqlalchemy import func, select
+
+from app.api.deps import CurrentUser, DbSession, require_permission
+from app.core.exceptions import AppException
+from app.core.response import success
+from app.models import Customer, OperationLog
+from app.schemas.member_level import MemberLevelsBatchUpdate
+from app.services.customer_service import CustomerService
+
+router = APIRouter(prefix="/member-levels", tags=["会员等级"])
+
+
+@router.get("", dependencies=[require_permission("customer:read")])
+async def list_member_levels(request: Request, db: DbSession, user: CurrentUser):
+    """后台：银卡/金卡升级积分门槛与折扣。"""
+    levels = await CustomerService.list_levels_ordered(db)
+    counts_q = (
+        select(Customer.member_level_id, func.count())
+        .where(Customer.status == 1)
+        .group_by(Customer.member_level_id)
+    )
+    counts = {row[0]: int(row[1]) for row in (await db.execute(counts_q)).all()}
+    return success(
+        {
+            "points_rule": "实付1元=1积分，积分达标自动升级享对应折扣",
+            "items": [
+                CustomerService.level_admin_payload(lv, counts.get(lv.id, 0)) for lv in levels
+            ],
+        },
+        request=request,
+    )
+
+
+@router.put("", dependencies=[require_permission("customer:manage")])
+async def update_member_levels(
+    data: MemberLevelsBatchUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """调整银卡/金卡升级积分与折扣；默认保存后重算顾客等级。"""
+    try:
+        result = await CustomerService.apply_level_updates(
+            db, [item.model_dump() for item in data.items], recalculate=data.recalculate
+        )
+    except AppException:
+        raise
+    db.add(
+        OperationLog(
+            user_id=user.id,
+            action="member_level.update",
+            module="customer",
+            target_type="member_levels",
+            target_id=None,
+            ip=request.client.host if request.client else None,
+            user_agent=(request.headers.get("user-agent") or "")[:500],
+            request_id=getattr(request.state, "request_id", None),
+            detail=json.dumps(
+                {"changed": result["changed"], "recalculated": result["recalculated"]},
+                ensure_ascii=False,
+            )[:4000],
+        )
+    )
+    await db.flush()
+    levels = await CustomerService.list_levels_ordered(db)
+    counts_q = (
+        select(Customer.member_level_id, func.count())
+        .where(Customer.status == 1)
+        .group_by(Customer.member_level_id)
+    )
+    counts = {row[0]: int(row[1]) for row in (await db.execute(counts_q)).all()}
+    return success(
+        {
+            "changed": result["changed"],
+            "recalculated": result["recalculated"],
+            "items": [
+                CustomerService.level_admin_payload(lv, counts.get(lv.id, 0)) for lv in levels
+            ],
+        },
+        message="会员等级已保存；已按新积分门槛重算顾客等级"
+        if data.recalculate
+        else "会员等级已保存",
+        request=request,
+    )

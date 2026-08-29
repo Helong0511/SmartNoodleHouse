@@ -7,6 +7,7 @@ from app.api.v1 import (
     customers,
     dashboard,
     delivery,
+    member_levels,
     miniprogram,
     orders,
     payments,
@@ -25,6 +26,7 @@ api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(payments.router)
 api_router.include_router(customers.router)
+api_router.include_router(member_levels.router)
 api_router.include_router(coupons.router)
 api_router.include_router(tables.router)
 api_router.include_router(cameras.router)

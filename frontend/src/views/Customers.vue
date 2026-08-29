@@ -31,6 +31,7 @@
       </el-form-item>
       <el-button type="primary" @click="reload">搜索</el-button>
       <el-button @click="resetFilters">重置</el-button>
+      <el-button @click="goMemberLevels">会员等级设置</el-button>
     </el-form>
 
     <el-table :data="customers" border>
@@ -226,9 +227,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
+const router = useRouter()
 const auth = useAuthStore()
 const loading = ref(false)
 const customers = ref<any[]>([])
@@ -279,6 +282,10 @@ function resetFilters() {
   keyword.value = ''
   channel.value = undefined
   reload()
+}
+
+function goMemberLevels() {
+  router.push('/member-levels')
 }
 
 async function loadStores() {

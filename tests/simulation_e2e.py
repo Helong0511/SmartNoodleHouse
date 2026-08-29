@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sys
 from decimal import Decimal
@@ -25,11 +26,13 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import (
     Customer,
+    DeliveryProductMap,
     DiningTable,
     MemberLevel,
     Option,
     OptionGroup,
     Permission,
+    PlatformStoreBinding,
     Product,
     ProductCategory,
     ProductOptionGroup,
@@ -67,6 +70,7 @@ class FakeRedis:
 
     def __init__(self):
         self._data: dict[str, str] = {}
+        self._lists: dict[str, list[str]] = {}
 
     async def exists(self, key: str) -> int:
         return 1 if key in self._data else 0
@@ -74,9 +78,77 @@ class FakeRedis:
     async def setex(self, key: str, ttl: int, value: str):
         self._data[key] = value
 
+    async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if nx and key in self._data:
+            return False
+        self._data[key] = value
+        return True
+
+    def pipeline(self):
+        return _FakeRedisPipeline(self)
+
+
+class _FakeRedisPipeline:
+    def __init__(self, redis: FakeRedis):
+        self._redis = redis
+        self._ops: list[tuple[str, tuple]] = []
+
+    def rpush(self, key: str, value: str):
+        self._ops.append(("rpush", (key, value)))
+        return self
+
+    def ltrim(self, key: str, start: int, end: int):
+        self._ops.append(("ltrim", (key, start, end)))
+        return self
+
+    def expire(self, key: str, ttl: int):
+        self._ops.append(("expire", (key, ttl)))
+        return self
+
+    def llen(self, key: str):
+        self._ops.append(("llen", (key,)))
+        return self
+
+    def lrange(self, key: str, start: int, end: int):
+        self._ops.append(("lrange", (key, start, end)))
+        return self
+
+    async def execute(self):
+        results = []
+        for op, args in self._ops:
+            if op == "rpush":
+                key, value = args
+                self._redis._lists.setdefault(key, []).append(value)
+                results.append(len(self._redis._lists[key]))
+            elif op == "ltrim":
+                key, start, end = args
+                items = self._redis._lists.get(key, [])
+                if end == -1:
+                    self._redis._lists[key] = items[start:]
+                else:
+                    self._redis._lists[key] = items[start : end + 1]
+                results.append(True)
+            elif op == "expire":
+                results.append(True)
+            elif op == "llen":
+                (key,) = args
+                results.append(len(self._redis._lists.get(key, [])))
+            elif op == "lrange":
+                key, start, end = args
+                items = self._redis._lists.get(key, [])
+                if end == -1:
+                    results.append(items[start:])
+                else:
+                    results.append(items[start : end + 1])
+            else:
+                results.append(None)
+        return results
+
 
 fake_redis = FakeRedis()
 ADMIN_PWD_HASH = hash_password("admin123")
+# 满足 consent-base64 最小长度校验（b64>=800，raw>=1024）
+SIM_FACE_B64 = base64.b64encode(b"\xff" * 2048).decode("ascii")
 
 
 async def seed_database():
@@ -103,9 +175,9 @@ async def seed_database():
             id=1, store_id=1, table_no="A08", table_name="A08",
             qr_token="TEST_QR_TOKEN_SIM_001", status=1,
         ))
-        db.add(ProductCategory(id=1, name="招牌面", sort_order=1, status=1))
+        db.add(ProductCategory(id=1, store_id=1, name="招牌面", sort_order=1, status=1))
         db.add(Product(
-            id=1, category_id=1, product_no="P001", name="牛肉面",
+            id=1, store_id=1, category_id=1, product_no="P001", name="牛肉面",
             price=Decimal("18.00"), status="ON_SALE", sort_order=1,
         ))
 
@@ -126,10 +198,55 @@ async def seed_database():
                 oid += 1
             db.add(ProductOptionGroup(id=gid, product_id=1, group_id=gid, sort_order=gid))
 
+        db.add(
+            DeliveryProductMap(
+                id=1,
+                store_id=1,
+                platform="MEITUAN",
+                platform_sku_id="P001",
+                app_food_code="P001",
+                product_id=1,
+                status=1,
+            )
+        )
+        db.add(
+            DeliveryProductMap(
+                id=2,
+                store_id=1,
+                platform="ELEME",
+                platform_sku_id="P001",
+                app_food_code="P001",
+                product_id=1,
+                status=1,
+            )
+        )
+        db.add(
+            PlatformStoreBinding(
+                id=1,
+                store_id=1,
+                platform="MEITUAN",
+                platform_shop_id="SIM_MT_SHOP",
+                platform_shop_name="测试美团店",
+                status=1,
+            )
+        )
+        db.add(
+            PlatformStoreBinding(
+                id=2,
+                store_id=1,
+                platform="ELEME",
+                platform_shop_id="SIM_EL_SHOP",
+                platform_shop_name="测试饿了么店",
+                status=1,
+            )
+        )
+
         await db.commit()
 
         CTX.update({
             "store_id": 1,
+            "meituan_shop_id": "SIM_MT_SHOP",
+            "eleme_shop_id": "SIM_EL_SHOP",
             "table_token": "TEST_QR_TOKEN_SIM_001",
             "table_id": 1,
             "product_id": 1,
@@ -151,7 +268,10 @@ def ok(name: str, passed: bool, detail: str = ""):
     line = f"  [{sym}] [{status}] {name}"
     if detail:
         line += f" -- {detail}"
-    print(line)
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        print(line.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
     return passed
 
 
@@ -174,6 +294,11 @@ def cust_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def mt_simulate(**fields) -> dict:
+    """美团开发模式回调公共字段（须含平台门店 ID）。"""
+    return {"_dev_simulate": True, "app_poi_code": CTX["meituan_shop_id"], **fields}
+
+
 async def run_all_simulations() -> bool:
     print("\n" + "=" * 60)
     print("面馆智能经营系统 — 全链路模拟测试")
@@ -191,12 +316,36 @@ async def run_all_simulations() -> bool:
     rc.get_redis = _fake_get_redis
     fs.get_redis = _fake_get_redis
 
+    import app.core.config as cfg
+    import app.core.database as dbmod
+    import app.services.payment_verify as pv
+    import app.services.delivery_providers as dp
+    import app.services.webhook_inbox as wi
+
+    dbmod.AsyncSessionLocal = SessionLocal
+    wi.AsyncSessionLocal = SessionLocal
+
+    _settings = cfg.get_settings()
+    _settings.allow_payment_mock = True
+    _settings.allow_auth_mock = True
+    _settings.allow_delivery_mock = True
+    _settings.app_debug = True
+    pv._dev_mode_allowed = lambda: True
+    dp._dev_mode_allowed = lambda: True
+
     import app.services.face_extractor as fe
     import app.api.v1.miniprogram as mp
 
-    _fake_extract = lambda image_bytes: mock_feature("sim_face")
-    fe.extract_face_embedding = _fake_extract
-    mp.extract_face_embedding = _fake_extract
+    def _fake_extract_with_quality(_image_bytes: bytes):
+        return mock_feature("sim_face"), {
+            "sharpness": 120.0,
+            "brightness": 0.55,
+            "face_ratio": 0.2,
+            "liveness": 0.9,
+        }
+
+    fe.extract_face_embedding_with_quality = _fake_extract_with_quality
+    mp.extract_face_embedding_with_quality = _fake_extract_with_quality
 
     await seed_database()
     results: list[bool] = []
@@ -258,15 +407,15 @@ async def run_all_simulations() -> bool:
         reg = r.json().get("data", {})
         r = await client.post(
             "/api/v1/miniprogram/face/consent-base64",
-            json={"image_base64": "c2ltX2ZhY2U="},
+            json={"image_base64": SIM_FACE_B64},
             headers=cust_headers(wx_token),
         )
-        face = r.json().get("data", {})
+        face = r.json().get("data") or {}
         results.append(
             ok(
                 "注册会员并授权人脸",
                 reg.get("member_registered") and face.get("consent_status") == "AUTHORIZED",
-                f"face={face.get('consent_status')}",
+                f"face={face.get('consent_status') or r.json().get('message', '')}",
             )
         )
 
@@ -294,7 +443,7 @@ async def run_all_simulations() -> bool:
             ok(
                 "微信下单（服务端计价）",
                 wx_order.get("total_amount") == "22.00",
-                f"金额 ¥{wx_order.get('total_amount')}（预期 22.00）",
+                f"金额 {wx_order.get('total_amount')} 元（预期 22.00）",
             )
         )
 
@@ -446,7 +595,7 @@ async def run_all_simulations() -> bool:
             ok(
                 "支付宝下单",
                 ali_order.get("total_amount") == "44.00",
-                f"金额 ¥{ali_order.get('total_amount')}（预期 44.00）",
+                f"金额 {ali_order.get('total_amount')} 元（预期 44.00）",
             )
         )
 
@@ -550,7 +699,7 @@ async def run_all_simulations() -> bool:
             ok(
                 "服务端计价（忽略前端篡改）",
                 price_order.get("total_amount") == "18.00",
-                "正常规格 ¥18.00",
+                "正常规格 18.00 元",
             )
         )
 
@@ -565,7 +714,7 @@ async def run_all_simulations() -> bool:
             ok(
                 "Dashboard 统计",
                 dash.get("today_orders", 0) >= 1,
-                f"今日订单 {dash.get('today_orders')} 营业额 ¥{dash.get('today_revenue')}",
+                f"今日订单 {dash.get('today_orders')} 营业额 {dash.get('today_revenue')} 元",
             )
         )
 
@@ -579,19 +728,22 @@ async def run_all_simulations() -> bool:
         # ═══════════════════════════════════════
         print("\n--- 流程5：外卖平台回调 ---")
 
-        mt_new = {
-            "_dev_simulate": True,
-            "order_id": "SIM_MT001",
-            "store_id": CTX["store_id"],
-            "day_seq": "101",
-            "total": "18.00",
-            "recipient_name": "外卖用户",
-            "recipient_phone": "13800001111",
-            "recipient_address": "测试地址 5 号",
-            "items": [{"sku_id": "P001", "name": "牛肉面", "quantity": 1, "price": "18.00"}],
-        }
+        mt_new = mt_simulate(
+            order_id="SIM_MT001",
+            store_id=CTX["store_id"],
+            day_seq="101",
+            total="18.00",
+            recipient_name="外卖用户",
+            recipient_phone="13800001111",
+            recipient_address="测试地址 5 号",
+            items=[{"sku_id": "P001", "name": "牛肉面", "quantity": 1, "price": "18.00"}],
+        )
         r = await client.post("/api/v1/delivery/meituan/notify", json=mt_new)
         results.append(ok("美团新单回调", r.json().get("data") == "ok"))
+
+        from app.services.webhook_inbox import process_pending_inbox
+
+        await process_pending_inbox()
 
         r = await client.get("/api/v1/delivery/orders", headers={"Authorization": f"Bearer {admin_token}"})
         d_orders = r.json().get("data", {}).get("items", [])
@@ -599,27 +751,32 @@ async def run_all_simulations() -> bool:
 
         r = await client.post(
             "/api/v1/delivery/meituan/notify",
-            json={"_dev_simulate": True, "notify_type": "urge", "order_id": "SIM_MT001"},
+            json=mt_simulate(notify_type="urge", order_id="SIM_MT001"),
         )
         results.append(ok("美团催单回调", r.json().get("data") == "ok"))
 
         r = await client.post(
             "/api/v1/delivery/meituan/notify",
-            json={
-                "_dev_simulate": True,
-                "logistics_status": "DELIVERING",
-                "order_id": "SIM_MT001",
-                "rider_name": "李骑手",
-                "rider_phone": "13900002222",
-            },
+            json=mt_simulate(
+                logistics_status="DELIVERING",
+                order_id="SIM_MT001",
+                rider_name="李骑手",
+                rider_phone="13900002222",
+            ),
         )
         results.append(ok("美团配送状态回调", r.json().get("data") == "ok"))
 
         r = await client.post(
             "/api/v1/delivery/meituan/notify",
-            json={"_dev_simulate": True, "refund_id": "RF_SIM001", "order_id": "SIM_MT001", "refund_amount": "18.00", "reason": "测试退款"},
+            json=mt_simulate(
+                refund_id="RF_SIM001",
+                order_id="SIM_MT001",
+                refund_amount="18.00",
+                reason="测试退款",
+            ),
         )
         results.append(ok("美团退款申请回调", r.json().get("data") == "ok"))
+        await process_pending_inbox()
 
         r = await client.get("/api/v1/delivery/refunds", headers={"Authorization": f"Bearer {admin_token}"})
         refunds = r.json().get("data", {}).get("items", [])
@@ -627,16 +784,18 @@ async def run_all_simulations() -> bool:
 
         r = await client.post(
             "/api/v1/delivery/meituan/notify",
-            json={"_dev_simulate": True, "status": 9, "order_id": "SIM_MT001"},
+            json=mt_simulate(status=9, order_id="SIM_MT001"),
         )
         results.append(ok("美团取消回调", r.json().get("data") == "ok"))
 
         el_new = {
             "_dev_simulate": True,
             "type": "217",
+            "shopId": CTX["eleme_shop_id"],
             "message": {
                 "order": {
                     "id": "SIM_EL001",
+                    "shopId": CTX["eleme_shop_id"],
                     "daySn": "22",
                     "totalPrice": "18.00",
                     "consignee": {"name": "饿了么用户", "phone": "13700003333"},
