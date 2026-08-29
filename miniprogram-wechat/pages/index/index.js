@@ -1,7 +1,7 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
-const { enableChooseAvatar } = require('../../config/env')
+const { enableChooseAvatar, enableNicknameInput } = require('../../config/env')
 const app = getApp()
 
 Page({
@@ -18,12 +18,16 @@ Page({
     avatarUrl: '',
     enableFace: false,
     canChooseAvatar: false,
+    useWxNickname: false,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购与到店迎宾推荐。',
     faceText: '开启人脸迎宾后，到店可自动欢迎，并按您常点口味智能推荐。仅摄像头实时采集，可随时关闭。'
   },
 
   onLoad(query) {
-    this.setData({ canChooseAvatar: !!enableChooseAvatar })
+    this.setData({
+      canChooseAvatar: !!enableChooseAvatar,
+      useWxNickname: !!enableNicknameInput
+    })
     if (query.token) {
       app.globalData.tableToken = query.token
       wx.setStorageSync('table_token', query.token)
@@ -147,16 +151,15 @@ Page({
       app.globalData.nickname = (res && res.nickname) || this.data.nickname
       app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
       if (res && res.customer_token) {
-        app.globalData.customerToken = res.customer_token
-        wx.setStorageSync('customer_token', res.customer_token)
-      }
-      if (res && res.customer_id) {
-        app.globalData.customerId = res.customer_id
-        wx.setStorageSync('customer_id', res.customer_id)
-      }
-      if (res && res.customer_no) {
-        app.globalData.customerNo = res.customer_no
-        wx.setStorageSync('customer_no', res.customer_no)
+        auth.refreshCustomerToken(res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
+      } else if (res && res.customer_id) {
+        auth.refreshCustomerToken(app.globalData.customerToken, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
       }
       if (res && res.is_member != null) app.globalData.isMember = res.is_member
       if (res && res.member_level_name) app.globalData.memberLevelName = res.member_level_name

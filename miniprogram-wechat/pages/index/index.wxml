@@ -60,20 +60,25 @@
       </view>
 
       <input
-
+        wx:if="{{useWxNickname}}"
         class="input nick"
-
         type="nickname"
-
         placeholder="微信昵称（点此授权）"
-
         value="{{nickname}}"
-
         bindinput="onNickname"
-
         bindblur="onNickname"
-
       />
+      <input
+        wx:else
+        class="input nick"
+        type="text"
+        maxlength="20"
+        placeholder="请输入昵称（2-20字）"
+        value="{{nickname}}"
+        bindinput="onNickname"
+        bindblur="onNickname"
+      />
+      <view class="dev-tip" wx:if="{{!useWxNickname}}">开发提示：未在公众平台配置「昵称」隐私项时可直接手动输入；配置完成后将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 改为 true。</view>
 
     </view>
 

@@ -126,7 +126,7 @@ Page({
       ) {
         const { cats, items, metrics } = this._menuCache
         const categories = this.buildCategories(cats, items, metrics, '')
-        this.applyCategories(categories, metrics)
+        await this.applyCategories(categories, metrics)
         return
       }
       const metrics = media.layoutMetrics()
@@ -138,15 +138,21 @@ Page({
       const catList = normalizeList(cats)
       const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
       this._menuCache = { key: cacheKey, at: now, cats: catList, items, metrics }
-      this.applyCategories(categories, metrics)
+      await this.applyCategories(categories, metrics)
     } catch (e) {
       my.showToast({ content: (e && e.message) || '加载失败', type: 'fail' })
       this.setData({ loading: false })
     }
   },
 
-  applyCategories(categories, metrics) {
+  async applyCategories(categories, metrics) {
     const m = metrics || media.layoutMetrics()
+    const flat = []
+    ;(categories || []).forEach((c) => {
+      ;(c.products || []).forEach((p) => flat.push(p))
+    })
+    await media.hydrateImageUrls(flat, 'imageUrl')
+    await media.hydrateImageUrls(flat, 'coverUrl')
     const activeCat = (categories[0] && categories[0].id) || null
     this.setData({
       categories: categories || [],

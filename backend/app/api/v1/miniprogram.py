@@ -11,8 +11,8 @@ from app.core.security import create_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import Customer, DiningTable, FaceProfile, Store
-from app.services.customer_service import CustomerService
+from app.models import Customer, CustomerPreference, DiningTable, FaceProfile, Store
+from app.services.customer_service import CustomerService, PreferenceService
 from app.services.coupon_service import CouponService
 from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
@@ -499,6 +499,28 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
         },
         request=request,
     )
+
+
+@router.get("/customers/me/preferences")
+async def get_my_preferences(request: Request, db: DbSession, customer: CurrentCustomer):
+    """当前会员口味偏好（小程序专用，以令牌身份为准，避免本地 customer_id 过期）。"""
+    prefs = await PreferenceService.get_recommendations(db, customer.id)
+    result = await db.execute(
+        select(CustomerPreference)
+        .where(CustomerPreference.customer_id == customer.id)
+        .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+    )
+    prefs["all"] = [
+        {
+            "category": p.category,
+            "option_code": p.option_code,
+            "option_name": p.option_name or p.option_code,
+            "score": float(p.preference_score),
+            "order_count": p.order_count,
+        }
+        for p in result.scalars()
+    ]
+    return success(prefs, request=request)
 
 
 @router.get("/customers/me/face-status")

@@ -356,6 +356,7 @@ Page({
       voucherDisc = 0
     }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
+    await media.hydrateImageUrls(cartPreview, 'imageUrl')
     this.setData({
       cartPreview,
       subtotal: sub.toFixed(2),
@@ -500,6 +501,38 @@ Page({
     const cart = auth.getCart()
     if (!cart.length) {
       wx.showToast({ title: '购物车为空', icon: 'none' })
+      return
+    }
+    let productItems
+    try {
+      productItems = await this.loadProductCatalog()
+    } catch (e) {
+      wx.showModal({
+        title: '无法校验规格',
+        content: (e && e.message) || '商品信息加载失败，请检查网络后重试',
+        showCancel: false
+      })
+      return
+    }
+    if (!Array.isArray(productItems) || !productItems.length) {
+      wx.showModal({
+        title: '无法校验规格',
+        content: '未能加载商品规格，请返回菜单刷新后重试',
+        showCancel: false
+      })
+      return
+    }
+    const optionIssues = cartUtil.validateRequiredOptions(cart, productItems)
+    if (optionIssues.length) {
+      const first = optionIssues[0]
+      const hint = optionIssues.length === 1
+        ? `「${first.name}」缺少必选规格：${first.group}`
+        : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
+      wx.showModal({
+        title: '无法下单',
+        content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。`,
+        showCancel: false
+      })
       return
     }
     const tableToken = String(

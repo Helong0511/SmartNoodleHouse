@@ -25,6 +25,55 @@ function resolveUrl(path) {
   return s.startsWith('/') ? `${origin}${s}` : `${origin}/${s}`
 }
 
+const _localImageCache = {}
+
+/** 开发环境 HTTP 图：downloadFile 转本地临时路径 */
+function ensureLocalImage(url) {
+  const full = resolveUrl(url)
+  if (!full) return Promise.resolve('')
+  if (/^https:\/\//i.test(full)) return Promise.resolve(full)
+  if (!/^http:\/\//i.test(full)) return Promise.resolve(full)
+  if (_localImageCache[full]) return Promise.resolve(_localImageCache[full])
+
+  const downloader = (typeof my !== 'undefined' && my.downloadFile)
+    ? (opts) => my.downloadFile(opts)
+    : (typeof wx !== 'undefined' && wx.downloadFile)
+      ? wx.downloadFile.bind(wx)
+      : null
+  if (!downloader) return Promise.resolve('')
+
+  return new Promise((resolve) => {
+    downloader({
+      url: full,
+      success: (res) => {
+        const path = res.apFilePath || res.tempFilePath
+        if (path && (!res.statusCode || res.statusCode === 200)) {
+          _localImageCache[full] = path
+          resolve(path)
+        } else {
+          resolve('')
+        }
+      },
+      fail: () => resolve('')
+    })
+  })
+}
+
+async function hydrateImageUrls(items, field = 'imageUrl') {
+  const list = items || []
+  await Promise.all(list.map(async (item) => {
+    if (!item || !item[field]) return
+    item[field] = await ensureLocalImage(item[field])
+  }))
+  return list
+}
+
+/** 批量转换 URL 字符串列表（商品详情轮播等） */
+async function hydrateUrlList(urls) {
+  const list = urls || []
+  return Promise.all(list.map((u) => ensureLocalImage(u)))
+}
+
 /**
  * 按当前屏宽计算展示尺寸（逻辑像素 px）
  * 常见视口 360~414；列表缩略约屏宽 22%，详情头图约 1:1 全宽
@@ -86,6 +135,9 @@ function galleryUrls(product) {
 
 module.exports = {
   resolveUrl,
+  ensureLocalImage,
+  hydrateImageUrls,
+  hydrateUrlList,
   layoutMetrics,
   decorateProduct,
   galleryUrls

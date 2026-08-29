@@ -65,7 +65,7 @@ async function loadCustomerPrefs(app, api, options = {}) {
   const token = app.globalData.customerToken || auth.readStorage('customer_token')
   if (cid) app.globalData.customerId = cid
   if (token) app.globalData.customerToken = token
-  if (!cid || !token) {
+  if (!token) {
     return buildPrefDisplay({})
   }
   const now = Date.now()
@@ -78,7 +78,7 @@ async function loadCustomerPrefs(app, api, options = {}) {
     return app.globalData.prefsView
   }
   try {
-    const prefRes = await api.get(`/customers/${cid}/preferences`)
+    const prefRes = await api.get('/miniprogram/customers/me/preferences')
     const view = buildPrefDisplay(prefRes)
     app.globalData.prefs = view.prefs
     app.globalData.prefsView = view

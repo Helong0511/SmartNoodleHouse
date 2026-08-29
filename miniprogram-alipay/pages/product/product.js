@@ -29,7 +29,7 @@ Page({
       }
       const product = await api.get(`/products/${query.id}`, {}, false)
       const { selected, multi } = prefUtil.defaultSelections(product)
-      const gallery = media.galleryUrls(product)
+      const gallery = await media.hydrateUrlList(media.galleryUrls(product))
       this.setData({ product, selected, multi, gallery, loading: false })
       this.updateDisplayPrice()
       await this.applyPreferences(product)

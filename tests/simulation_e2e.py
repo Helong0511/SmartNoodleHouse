@@ -386,6 +386,20 @@ async def run_all_simulations() -> bool:
             )
         )
 
+        r = await client.get(
+            "/api/v1/miniprogram/customers/me/preferences",
+            headers=cust_headers(wx_token),
+        )
+        mp_prefs = r.json().get("data", {}) or {}
+        mp_all = mp_prefs.get("all", [])
+        results.append(
+            ok(
+                "小程序偏好 API（令牌身份）",
+                r.status_code == 200 and len(mp_all) == len(all_prefs),
+                f"小程序 {len(mp_all)} 条 / 旧接口 {len(all_prefs)} 条",
+            )
+        )
+
         # ═══════════════════════════════════════
         # 流程2：支付宝扫码点餐
         # ═══════════════════════════════════════

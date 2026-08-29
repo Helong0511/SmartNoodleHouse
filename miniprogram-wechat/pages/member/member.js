@@ -139,9 +139,7 @@ Page({
       this.setData({ walletLoading: true })
       const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
-        cid
-          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [], all: [] }))
-          : Promise.resolve({ preferences: [], all: [] }),
+        api.get('/miniprogram/customers/me/preferences').catch(() => ({ preferences: [], all: [] })),
         api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
         api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
       ])
@@ -151,6 +149,14 @@ Page({
       app.globalData.prefsAt = now
       if (!profile || typeof profile !== 'object') {
         throw new Error('会员资料加载失败，请稍后重试')
+      }
+      if (profile.customer_id) {
+        app.globalData.customerId = profile.customer_id
+        wx.setStorageSync('customer_id', profile.customer_id)
+      }
+      if (profile.customer_no) {
+        app.globalData.customerNo = profile.customer_no
+        wx.setStorageSync('customer_no', profile.customer_no)
       }
       this.applyProfile(profile, prefView)
       this.applyWallet(couponRes, voucherRes)
@@ -212,8 +218,10 @@ Page({
       wx.showLoading({ title: '绑定中' })
       const res = await api.post('/miniprogram/member/phone', payload)
       if (res && res.customer_token) {
-        app.globalData.customerToken = res.customer_token
-        wx.setStorageSync('customer_token', res.customer_token)
+        auth.refreshCustomerToken(res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
       }
       wx.hideLoading()
       wx.showToast({ title: '绑定成功', icon: 'success' })

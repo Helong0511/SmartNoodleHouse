@@ -56,6 +56,62 @@ function getAuthCode() {
   })
 }
 
+function clearPrefsCache(app) {
+  app.globalData.prefs = []
+  app.globalData.prefsView = null
+  app.globalData.prefsAt = 0
+}
+
+function shouldSyncCustomerId(app, token) {
+  return app.globalData._customerIdSyncedForToken !== token
+}
+
+async function syncCustomerIdFromMe(app, token) {
+  if (!token || !shouldSyncCustomerId(app, token)) return
+  try {
+    const me = await api.get('/miniprogram/customers/me')
+    if (me && me.customer_id) {
+      app.globalData.customerId = me.customer_id
+      my.setStorageSync({ key: 'customer_id', data: me.customer_id })
+    }
+    if (me && me.customer_no) {
+      app.globalData.customerNo = me.customer_no
+      my.setStorageSync({ key: 'customer_no', data: me.customer_no })
+    }
+    app.globalData._customerIdSyncedForToken = token
+  } catch (_) {
+    /* 失败不标记，下次 ensureLogin 重试 */
+  }
+}
+
+function applyLoginSession(app, data) {
+  app.globalData.customerId = data.customer_id
+  app.globalData.customerNo = data.customer_no
+  app.globalData.customerToken = data.customer_token
+  app.globalData._customerIdSyncedForToken = data.customer_token
+  clearPrefsCache(app)
+}
+
+function refreshCustomerToken(app, token, patch = {}) {
+  if (token && token !== app.globalData.customerToken) {
+    app.globalData._customerIdSyncedForToken = null
+    clearPrefsCache(app)
+  }
+  if (token) {
+    app.globalData.customerToken = token
+    my.setStorageSync({ key: 'customer_token', data: token })
+  }
+  if (patch.customer_id != null) {
+    app.globalData.customerId = patch.customer_id
+    my.setStorageSync({ key: 'customer_id', data: patch.customer_id })
+    if (token) app.globalData._customerIdSyncedForToken = token
+  }
+  if (patch.customer_no != null) {
+    app.globalData.customerNo = patch.customer_no
+    my.setStorageSync({ key: 'customer_no', data: patch.customer_no || '' })
+  }
+}
+
 async function ensureLogin(tableToken) {
   const app = requireApp()
   const cachedToken = app.globalData.customerToken || readStorage('customer_token')
@@ -64,6 +120,7 @@ async function ensureLogin(tableToken) {
     app.globalData.customerId = app.globalData.customerId || readStorage('customer_id')
     app.globalData.customerNo = app.globalData.customerNo || readStorage('customer_no')
     app.globalData.nickname = app.globalData.nickname || readStorage('nickname') || ''
+    await syncCustomerIdFromMe(app, cachedToken)
     return {
       customer_id: app.globalData.customerId,
       customer_no: app.globalData.customerNo,
@@ -85,9 +142,7 @@ async function ensureLogin(tableToken) {
   if (!data || !data.customer_token) {
     throw new Error('登录成功但未返回 customer_token')
   }
-  app.globalData.customerId = data.customer_id
-  app.globalData.customerNo = data.customer_no
-  app.globalData.customerToken = data.customer_token
+  applyLoginSession(app, data)
   app.globalData.nickname = data.nickname || ''
   app.globalData.faceStatus = (data.face_status && data.face_status.consent_status) || 'NONE'
   if (data.table) {
@@ -113,4 +168,12 @@ function getCart() {
   return (app && app.globalData && app.globalData.cart) || readStorage('cart') || []
 }
 
-module.exports = { ensureLogin, saveCart, getCart, formatError, readStorage, getAppSafe }
+module.exports = {
+  ensureLogin,
+  saveCart,
+  getCart,
+  formatError,
+  readStorage,
+  getAppSafe,
+  refreshCustomerToken
+}

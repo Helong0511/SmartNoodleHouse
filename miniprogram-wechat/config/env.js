@@ -36,8 +36,10 @@ function resolveApiBase() {
 }
 
 /**
- * 微信隐私接口开关（getPhoneNumber / chooseAvatar 等）
- * 须在公众平台 → 设置 → 服务内容声明 → 用户隐私保护指引 中声明对应信息类型后改为 true
+ * 微信隐私接口开关（getPhoneNumber / chooseAvatar / input type=nickname 等）
+ * 须在公众平台 → 设置 → 服务内容声明 → 用户隐私保护指引 中声明：
+ *   - 昵称、头像、手机号（按实际使用勾选）
+ * 配置完成并审核通过后改为 true
  */
 const ENABLE_WX_PRIVACY_APIS = false
 
@@ -48,6 +50,8 @@ module.exports = {
   DEV_LAN_HOST,
   DEV_USE_LAN,
   DEV_LAN_API,
+  enableWxPrivacyApis: ENABLE_WX_PRIVACY_APIS,
   enableWxPhoneBind: ENABLE_WX_PRIVACY_APIS,
-  enableChooseAvatar: ENABLE_WX_PRIVACY_APIS
+  enableChooseAvatar: ENABLE_WX_PRIVACY_APIS,
+  enableNicknameInput: ENABLE_WX_PRIVACY_APIS
 }

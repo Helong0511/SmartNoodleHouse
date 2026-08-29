@@ -552,11 +552,14 @@ class PreferenceService:
     HIGH_PREFERENCE_THRESHOLD = Decimal("0.25")
     MIN_ORDER_COUNT = 2
     TOP_N = 8
+    # 偏好分母：已支付订单（与 PAID 迁移时写入偏好一致，不依赖厨房态 status）
+    PREFERENCE_SCORE_PAYMENT_STATUSES = ("PAID", "PARTIAL_REFUND")
 
     @staticmethod
     async def update_from_order(db: AsyncSession, order_id: int) -> None:
         order = await db.get(Order, order_id)
-        if not order or not order.customer_id or order.status not in ("PAID", "COMPLETED"):
+        # 仅在支付成功当下写入（order_lifecycle 在 target=PAID 时调用）
+        if not order or not order.customer_id or order.status != "PAID":
             return
 
         # 批量加载明细与规格，消除 N+1
@@ -597,7 +600,7 @@ class PreferenceService:
         total_orders = await db.scalar(
             select(func.count()).select_from(Order).where(
                 Order.customer_id == order.customer_id,
-                Order.status.in_(("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY", "COMPLETED")),
+                Order.payment_status.in_(PreferenceService.PREFERENCE_SCORE_PAYMENT_STATUSES),
             )
         ) or 1
 

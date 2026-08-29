@@ -134,9 +134,7 @@ Page({
       this.setData({ walletLoading: true })
       const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
-        cid
-          ? api.get(`/customers/${cid}/preferences`).catch(() => ({ preferences: [], all: [] }))
-          : Promise.resolve({ preferences: [], all: [] }),
+        api.get('/miniprogram/customers/me/preferences').catch(() => ({ preferences: [], all: [] })),
         api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
         api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
       ])
@@ -192,8 +190,10 @@ Page({
       my.showLoading({ content: '绑定中' })
       const res = await api.post('/miniprogram/member/phone', payload)
       if (res && res.customer_token) {
-        app.globalData.customerToken = res.customer_token
-        my.setStorageSync({ key: 'customer_token', data: res.customer_token })
+        auth.refreshCustomerToken(app, res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
       }
       my.hideLoading()
       my.showToast({ content: '绑定成功', type: 'success' })

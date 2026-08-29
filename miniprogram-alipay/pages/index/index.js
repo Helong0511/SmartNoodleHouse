@@ -132,16 +132,15 @@ Page({
       })
       app.globalData.nickname = (res && res.nickname) || this.data.nickname
       if (res && res.customer_token) {
-        app.globalData.customerToken = res.customer_token
-        my.setStorageSync({ key: 'customer_token', data: res.customer_token })
-      }
-      if (res && res.customer_id) {
-        app.globalData.customerId = res.customer_id
-        my.setStorageSync({ key: 'customer_id', data: res.customer_id })
-      }
-      if (res && res.customer_no) {
-        app.globalData.customerNo = res.customer_no
-        my.setStorageSync({ key: 'customer_no', data: res.customer_no })
+        auth.refreshCustomerToken(app, res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
+      } else if (res && res.customer_id) {
+        auth.refreshCustomerToken(app, app.globalData.customerToken, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
       }
       my.setStorageSync({ key: 'nickname', data: app.globalData.nickname })
       my.hideLoading()

@@ -274,7 +274,7 @@ async def get_preferences(
     result = await db.execute(
         select(CustomerPreference)
         .where(CustomerPreference.customer_id == customer_id)
-        .order_by(CustomerPreference.preference_score.desc())
+        .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
     )
     prefs["all"] = [
         {

@@ -319,6 +319,7 @@ Page({
       voucherDisc = 0
     }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
+    await media.hydrateImageUrls(cartPreview, 'imageUrl')
     this.setData({
       cartPreview,
       subtotal: sub.toFixed(2),
@@ -437,18 +438,32 @@ Page({
       my.showToast({ content: '购物车为空', type: 'fail' })
       return
     }
+    let productItems
     try {
-      const productItems = await this.loadProductCatalog()
-      const optionIssues = cartUtil.validateRequiredOptions(cart, productItems)
-      if (optionIssues.length) {
-        const first = optionIssues[0]
-        const hint = optionIssues.length === 1
-          ? `「${first.name}」缺少必选规格：${first.group}`
-          : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
-        my.alert({ title: '无法下单', content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。` })
-        return
-      }
-    } catch (_) {}
+      productItems = await this.loadProductCatalog()
+    } catch (e) {
+      my.alert({
+        title: '无法校验规格',
+        content: (e && e.message) || '商品信息加载失败，请检查网络后重试'
+      })
+      return
+    }
+    if (!Array.isArray(productItems) || !productItems.length) {
+      my.alert({
+        title: '无法校验规格',
+        content: '未能加载商品规格，请返回菜单刷新后重试'
+      })
+      return
+    }
+    const optionIssues = cartUtil.validateRequiredOptions(cart, productItems)
+    if (optionIssues.length) {
+      const first = optionIssues[0]
+      const hint = optionIssues.length === 1
+        ? `「${first.name}」缺少必选规格：${first.group}`
+        : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
+      my.alert({ title: '无法下单', content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。` })
+      return
+    }
     const tableToken = String(
       this.data.tableToken || app.globalData.tableToken || auth.readStorage('table_token') || ''
     ).trim()
