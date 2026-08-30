@@ -9,7 +9,7 @@
 - 微信小程序: `miniprogram-wechat/`
 - 支付宝小程序: `miniprogram-alipay/`
 - 摄像头: OpenCV（海康 RTSP）
-- 实时: WebSocket（厨房 / 订单）
+- 实时: WebSocket（厨房 / 订单 / 顾客叫号屏）
 
 > **不使用 Docker**。请在本机安装 MySQL、Redis、Python、Node.js 后按下方步骤启动。
 
@@ -18,8 +18,10 @@
 | 模块 | 能力 |
 |------|------|
 | 堂食 | 微信 / 支付宝扫码点餐、服务端计价、支付回调验签 |
-| 厨房 KDS | 实时 WebSocket、外卖催单 / 退款高亮、出餐回传平台 |
-| 会员 | 注册、口味画像、一键复购 |
+| 厨房 KDS | 实时 WebSocket、状态流转、外卖催单 / 退款高亮、出餐回传平台 |
+| 顾客叫号屏 | 大厅电视只读展示「制作中 / 请取餐」，堂食桌号 + 打包取餐号 |
+| 免烹饪直出 | 卤味等现成品可跳过制作流程，KDS 一键「直接出餐」 |
+| 会员 | 注册、口味画像、一键复购；订单页醒目显示桌号 / 取餐号 |
 | 人脸迎宾 | 仅主动授权、多帧确认、冷却、TTS 播报 |
 | 外卖 | 美团 / 饿了么：新单、取消、退款、催单、配送、隐私号、商品同步 |
 | 后台 | 商品 / 规格 / 订单 / 桌台 / 支付 / 摄像头 / **外卖管理** / RBAC |
@@ -64,6 +66,7 @@ python scripts/init_admin.py
 | `sql/tools/005_backfill_member_level.sql` | 已注册顾客补挂普通会员等级（幂等） |
 | `sql/tools/006_customer_token_version.sql` | 已有库补齐 customers.token_version（幂等） |
 | `sql/tools/008_member_level_manage.sql` | 会员等级管理权限（幂等） |
+| `sql/tools/010_product_no_cooking.sql` | 商品表增加 `no_cooking`（免烹饪 / 直出餐，幂等） |
 
 开发种子默认管理员: `admin` / `admin123`（生产请用 `init_admin.py` 设置强密码）
 
@@ -91,18 +94,25 @@ npm run dev
 
 侧边栏含：**厨房 KDS**、**外卖管理**（订单 / 退款 / 门店绑定 / 商品映射 / 回调日志）。
 
+大厅可另开浏览器标签页作为 **顾客叫号屏**（见下文「厨房 KDS 与顾客叫号屏」），无需登录。
+
 ### 5. 微信小程序
 
 1. 用微信开发者工具打开 `miniprogram-wechat`
 2. 填写 AppID（或测试号），开发阶段可关闭域名校验
-3. 修改 `app.js` 中 `apiBase` 为后端地址
+3. 修改 `config/env.js` 或 `app.js` 中 API 地址为后端地址
 4. 扫桌台二维码，或编译参数: `token=桌台token&channel=wechat`
+5. **取餐进度**（与大厅叫号屏同步，无需手填 `store_id`）：
+   - 支付成功页、**订单** Tab 列表 / 详情会醒目显示 **桌号**（堂食）或 **取餐号**（打包，订单号末 4 位）
+   - 状态：排队中 → 制作中 → **请取餐**（变绿后可对照大厅 `/display?store_id=门店ID` 屏自取）
+   - 订单页每 8 秒自动刷新；打包单可点击取餐号卡片复制
 
 ### 6. 支付宝小程序
 
 1. 打开 `miniprogram-alipay`，填写 AppID
-2. 修改 `app.js` 中 `apiBase`
+2. 修改 `config/env.js` 或 `app.js` 中 API 地址
 3. 扫码参数: `token=桌台token&channel=alipay`
+4. **取餐进度**：与微信小程序相同（`pages/result`、`pages/orders` + `utils/pickup.js`）
 
 ## 堂食流程
 
@@ -112,11 +122,94 @@ npm run dev
   → 识别 qr_token（不可伪造桌号）
   → 提示注册会员 / 可选人脸迎宾
   → 选规格下单支付
-  → 厨房 KDS 出餐
+  → 厨房 KDS 制作 → 顾客叫号屏 / 小程序同步状态
+  → 送到桌 或 顾客自取
 ```
 
 - **注册会员**：历史订单、口味偏好、一键复购
 - **人脸迎宾**：仅主动授权后生效，可随时关闭；未授权只做匿名客流
+
+## 厨房 KDS 与顾客叫号屏
+
+店内通常有 **两块屏 + 顾客手机**，职责不同，勿混用：
+
+| | 厨房 KDS | 顾客叫号屏 | 小程序订单页 |
+|--|---------|-----------|-------------|
+| **位置** | 厨房内 | 收银台 / 等位区 | 顾客手机 |
+| **地址** | `/kitchen` | `/display?store_id=门店ID` | 订单详情 / 订单列表 |
+| **登录** | 需厨房 / 店长账号 | 不需要（可选令牌） | 顾客登录 |
+| **内容** | 菜品明细、备注、操作按钮 | 桌号或取餐号 + 制作中 / 请取餐 | 大号桌号 / 取餐号 + 进度 |
+| **能否操作** | 是（改订单状态） | 否（只读） | 否 |
+
+### 厨房 KDS
+
+1. 浏览器打开后台 → 侧边栏 **厨房 KDS**，或直接访问 `http://127.0.0.1:5173/kitchen`（生产为 `https://你的域名/kitchen`）
+2. 使用 **厨房 / 店长 / 超管** 账号登录
+3. 触屏设备：用 Chrome / Edge 打开上述地址即可触摸操作，无需专用驱动；建议点 **全屏**
+4. 状态按钮流程：**开始制作** → **进入烹饪** → **制作完成** → **出餐**（`READY` 后顾客侧显示「请取餐」）
+5. 刷新：WebSocket 正常时为实时推送；断线后每 **8 秒** 轮询兜底
+
+**免烹饪 / 卤味直出**（需先执行 `sql/tools/010_product_no_cooking.sql`，并在后台商品勾选「免烹饪」）：
+
+- 订单内 **全部为** 免烹饪商品时，KDS 显示「现成品·直出」，可直接点 **直接出餐**（跳过制作流程）
+- 含需烹饪商品的单禁止直出，须按正常流程操作
+
+### 顾客叫号屏
+
+面向等餐顾客，只展示 **本店堂食 / 打包自取** 订单（不含美团 / 饿了么外卖单）。
+
+**打开方式**
+
+```
+http://127.0.0.1:5173/display?store_id=1          # 本地开发，1 换成实际门店 ID
+https://你的域名/display?store_id=1               # 生产环境
+```
+
+生产环境建议在 `.env` 设置访问令牌，并在 URL 带上 `token` 参数：
+
+```bash
+DISPLAY_SCREEN_TOKEN=随机一串
+# 访问：https://你的域名/display?store_id=1&token=随机一串
+```
+
+留空 `DISPLAY_SCREEN_TOKEN` 时不校验令牌（仅建议开发环境）。
+
+**屏上展示**
+
+- 左栏 **制作中**：排队中 / 制作中的单
+- 右栏 **请取餐**：厨房点「制作完成」后进入；忙时顾客可 **自行到取餐台领取**，无需等人工叫号
+- **堂食**：显示 **桌号**（如 `A01`）
+- **打包自取**：显示 **取餐号**（订单号末 4 位，如 `K7M2`）
+- 新进入「请取餐」时有提示音；WebSocket 实时更新，断线每 8 秒轮询
+
+**部署建议**
+
+- 厨房触屏一体机 → `/kitchen`（员工登录）
+- 大厅电视 / 非触屏 + 电视棒 → `/display?store_id=…`（常亮全屏，无需触摸）
+
+### 小程序取餐对照
+
+支付成功页与 **订单列表 / 订单详情** 会醒目显示：
+
+| 用餐方式 | 小程序显示 | 与叫号屏对照 |
+|---------|-----------|-------------|
+| 堂食（送到桌） | 大号 **桌号** | 叫号屏「制作中 / 请取餐」中的同一桌号 |
+| 打包外带 | 大号 **取餐号**（订单号末 4 位） | 叫号屏「请取餐」中的同一号码 |
+
+状态变为 **请取餐** 时，小程序卡片变绿，并提示可到取餐台自取。订单页每 8 秒自动刷新，与叫号屏、KDS 同步。
+
+**送到桌**：顾客看小程序或大厅屏均可；服务员按桌号送餐。  
+**前台自取**：顾客对照取餐号，看到「请取餐」即可自取，减轻忙时人工叫号压力。
+
+### 相关 API（联调参考）
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/v1/orders/kitchen/active` | 厨房 KDS 数据（需厨房权限） |
+| `GET /api/v1/orders/display/active?store_id=` | 叫号屏数据（公开，可选 `token`） |
+| `WS /api/v1/ws/kitchen` | 厨房推送（需员工 token） |
+| `WS /api/v1/ws/display?store_id=` | 叫号屏推送（公开，可选 `token`） |
+| `GET /api/v1/orders/{id}`、`GET /api/v1/orders/mine` | 含 `pickup_code`、`pickup_label`、`customer_status_label` 等字段 |
 
 ## 外卖接入（美团 / 饿了么）
 
@@ -154,6 +247,7 @@ npm run dev
 - `MEITUAN_*` / `ELEME_*` — 外卖开放平台
 - `FACE_ENCRYPTION_KEY` — 人脸特征加密
 - `JWT_SECRET` — 鉴权密钥
+- `DISPLAY_SCREEN_TOKEN` — 顾客叫号屏访问令牌（留空则不校验）
 
 未配置第三方密钥时，相关接口进入开发 mock，便于本地联调。
 
@@ -233,6 +327,7 @@ python -m compileall backend
 [店内局域网]
   4×海康摄像头 ──RTSP──┐
   厨房KDS / 收银电脑 ──┼── 千兆交换机
+  大厅叫号屏(电视) ────┘
                        │
               [物理服务器 8C16G]
                 Ubuntu 22.04
@@ -309,6 +404,7 @@ ALLOW_AUTH_MOCK=false
 ALLOW_DELIVERY_MOCK=false
 CORS_ORIGINS=https://你的域名.com
 H5_PUBLIC_BASE_URL=https://你的域名.com
+DISPLAY_SCREEN_TOKEN=随机一串
 UPLOAD_DIR=/var/www/smart-noodle/uploads
 PROCESS_ROLE=leader
 ENABLE_RECOGNITION_WORKER=1
@@ -324,6 +420,7 @@ cd /var/www/smart-noodle
 mysql -u snh -p smart_noodle_house < sql/001_schema.sql
 mysql -u snh -p smart_noodle_house < sql/002_seed_prod.sql
 mysql -u snh -p smart_noodle_house < sql/tools/008_member_level_manage.sql
+mysql -u snh -p smart_noodle_house < sql/tools/010_product_no_cooking.sql
 
 export ADMIN_INITIAL_PASSWORD='超管强密码'
 python3 scripts/init_admin.py
@@ -421,6 +518,8 @@ MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
 | 项目 | 操作 |
 |------|------|
 | 微信/支付宝小程序 | `miniprogram-*/config/env.js` → `PROD_API_BASE=https://你的域名.com/api/v1` |
+| 顾客叫号屏 | 电视浏览器常开 `https://你的域名/display?store_id=1&token=…`（见上文） |
+| 厨房 KDS | 厨房平板 `https://你的域名/kitchen`，员工登录 |
 | 公众平台 | 配置 request 合法域名 |
 | 美团/饿了么 | 回调 URL 填 `https://你的域名.com/api/v1/delivery/.../notify` |
 | 微信支付 | PEM 证书放 `/etc/smart-noodle/certs/`，`.env` 配置路径 |
@@ -485,5 +584,5 @@ curl -sI https://你的域名.com/
 - 支付 / 外卖回调验签（开发模式可模拟）
 - 支付金额由服务端从数据库重新计算
 - 桌台二维码使用不可预测 token
-- 厨房与外卖 WebSocket 需鉴权
+- 厨房与外卖 WebSocket 需鉴权；顾客叫号屏 WebSocket 为公开频道（建议配置 `DISPLAY_SCREEN_TOKEN`）
 - 摄像头密码加密存储；操作日志定期清理

@@ -1,6 +1,7 @@
 const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
 const prefUtil = require('../../utils/preferences')
+const pickupUtil = require('../../utils/pickup')
 const app = getApp()
 
 const PAY_LABEL = {
@@ -60,7 +61,15 @@ Page({
     storeName: '',
     storeNo: '',
     tableName: '',
-    tableNo: ''
+    tableNo: '',
+    showPickupBanner: false,
+    pickupCode: '',
+    pickupLabel: '',
+    pickupSub: '',
+    customerStatusLabel: '',
+    pickupHint: '',
+    isTakeaway: false,
+    isReady: false
   },
 
   onLoad(query) {
@@ -118,10 +127,12 @@ Page({
       const couponDisc = parseFloat(order && order.coupon_discount) || 0
       const voucherDisc = parseFloat(order && order.voucher_discount) || 0
       const table = order.table || {}
+      const pickup = pickupUtil.decorate(order)
       const pageTitle = PAGE_TITLE[order.status] || order.status_label || '订单详情'
       my.setNavigationBar({ title: pageTitle })
       this.setData({
         order,
+        ...pickup,
         orderItems: this.formatItems(order.items),
         hasPacking: fee > 0,
         hasDiscount: discount > 0,
@@ -155,6 +166,12 @@ Page({
     const no = this.data.order && this.data.order.order_no
     if (!no) return
     my.setClipboard({ text: no, success: () => my.showToast({ content: '已复制订单号', type: 'success' }) })
+  },
+
+  copyPickupCode() {
+    const code = this.data.pickupCode
+    if (!code) return
+    my.setClipboard({ text: code, success: () => my.showToast({ content: '已复制取餐号', type: 'success' }) })
   },
 
   async repay() {

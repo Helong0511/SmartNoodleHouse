@@ -36,12 +36,13 @@ const router = createRouter({
     { path: '/order/confirm', component: () => import('@/views/mobile/OrderConfirm.vue') },
     { path: '/order/result', component: () => import('@/views/mobile/OrderResult.vue') },
     { path: '/order/history', component: () => import('@/views/mobile/OrderHistory.vue') },
-    { path: '/member', component: () => import('@/views/mobile/MemberCenter.vue') }
+    { path: '/member', component: () => import('@/views/mobile/MemberCenter.vue') },
+    { path: '/display', component: () => import('@/views/CustomerDisplay.vue'), meta: { title: '取餐叫号' } },
   ]
 })
 
 router.beforeEach(async (to, _from, next) => {
-  const publicPaths = ['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member']
+  const publicPaths = ['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member', '/display']
   const isPublic = publicPaths.some((p) => to.path.startsWith(p))
   // 进入登录页：清除会话，必须重新输入账号密码
   if (to.path === '/login' && getStaffToken()) {

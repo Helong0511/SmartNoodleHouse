@@ -3,6 +3,7 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.security import decode_token
 from app.models import Customer, User
@@ -77,6 +78,25 @@ async def websocket_endpoint(
     user_store_id = None
     role = None
     is_super = False
+
+    if channel == "display":
+        if not store_id or int(store_id) <= 0:
+            await websocket.close(code=4400, reason="缺少 store_id")
+            return
+        settings = get_settings()
+        expected = (settings.display_screen_token or "").strip()
+        if expected:
+            supplied = (auth_token or "").strip()
+            if supplied != expected:
+                await websocket.close(code=4401, reason="无效令牌")
+                return
+        await ws_manager.connect("display", websocket, store_id=int(store_id))
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            ws_manager.disconnect("display", websocket)
+        return
 
     if channel in PROTECTED_CHANNELS:
         if not auth_token:

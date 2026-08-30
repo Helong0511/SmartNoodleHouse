@@ -170,6 +170,7 @@
           <el-checkbox v-model="form.is_recommended">推荐</el-checkbox>
           <el-checkbox v-model="form.is_hot">热销</el-checkbox>
           <el-checkbox v-model="form.no_member_discount">特价（不参与会员折扣/优惠券/代金券）</el-checkbox>
+          <el-checkbox v-model="form.no_cooking">免烹饪（卤味等现成品，KDS 可直出餐）</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -221,6 +222,7 @@ const form = reactive({
   is_recommended: false,
   is_hot: false,
   no_member_discount: false,
+  no_cooking: false,
   option_group_ids: [] as number[],
 })
 
@@ -335,6 +337,7 @@ function resetForm() {
     is_recommended: false,
     is_hot: false,
     no_member_discount: false,
+    no_cooking: false,
     option_group_ids: [],
   })
   form.category_id = formCategories.value[0]?.id
@@ -362,6 +365,7 @@ async function openForm(row?: any) {
       is_recommended: detail.is_recommended ?? false,
       is_hot: detail.is_hot ?? false,
       no_member_discount: detail.no_member_discount ?? false,
+      no_cooking: detail.no_cooking ?? false,
       option_group_ids: detail.option_group_ids || [],
     })
   }
@@ -435,6 +439,7 @@ async function save() {
       is_recommended: form.is_recommended,
       is_hot: form.is_hot,
       no_member_discount: form.no_member_discount,
+      no_cooking: form.no_cooking,
       option_group_ids: form.option_group_ids,
     }
     if (form.original_price != null && form.original_price > 0) {

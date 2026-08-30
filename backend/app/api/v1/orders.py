@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission
 from app.core.response import calc_pages, ensure_local_aware, now_local, success
-from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Store
+from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
 from app.schemas.order import OrderCreate, OrderStatusUpdate
 from app.services.customer_service import OrderCreateService
 from app.services.delivery_service import DeliveryService
@@ -294,6 +294,13 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
     for it in items:
         items_by_order.setdefault(it.order_id, []).append(it)
     delivery_by_order = {d.order_id: d for d in deliveries}
+    product_ids = list({it.product_id for it in items if it.product_id})
+    product_flags: dict[int, bool] = {}
+    if product_ids:
+        product_flags = {
+            int(p.id): bool(p.no_cooking)
+            for p in (await db.execute(select(Product).where(Product.id.in_(product_ids)))).scalars().all()
+        }
     table_map = await _load_tables(db, [o.table_id for o in order_list if o.table_id])
     store_ids = list({o.store_id for o in order_list if o.store_id})
     store_map = {}
@@ -328,6 +335,7 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
     for order in order_list:
         order_items = []
         for item in items_by_order.get(order.id, []):
+            no_cooking = product_flags.get(int(item.product_id), False)
             order_items.append(
                 {
                     "id": item.id,
@@ -335,8 +343,10 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
                     "quantity": item.quantity,
                     "options": [o.option_name_snapshot for o in opts_by_item.get(item.id, [])],
                     "remark": item.remark,
+                    "no_cooking": no_cooking,
                 }
             )
+        all_no_cooking = bool(order_items) and all(i["no_cooking"] for i in order_items)
         delivery_info = None
         d = delivery_by_order.get(order.id)
         if d:
@@ -391,9 +401,69 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
                 "wait_seconds": wait_seconds,
                 "delivery": delivery_info,
                 "items": order_items,
+                "all_no_cooking": all_no_cooking,
             }
         )
     return success(orders, request=request)
+
+
+def _verify_display_token(token: str | None) -> None:
+    from app.core.config import get_settings
+
+    expected = (get_settings().display_screen_token or "").strip()
+    if expected and (token or "").strip() != expected:
+        raise HTTPException(status_code=403, detail="叫号屏访问令牌无效")
+
+
+@router.get("/display/active")
+async def display_active_orders(
+    request: Request,
+    db: DbSession,
+    store_id: int = Query(..., ge=1, description="门店 ID"),
+    token: str | None = Query(default=None, description="叫号屏令牌（与 DISPLAY_SCREEN_TOKEN 一致）"),
+):
+    """顾客叫号屏：仅展示本店堂食/自取订单状态，不含明细与操作。"""
+    from app.services.customer_display import (
+        DISPLAY_ACTIVE_STATUSES,
+        PREPARING_STATUSES,
+        build_display_item,
+        is_in_store_order,
+    )
+
+    _verify_display_token(token)
+    store = await db.get(Store, int(store_id))
+    if not store or int(store.status) != 1:
+        raise HTTPException(status_code=404, detail="门店不存在或已停业")
+
+    q = (
+        select(Order)
+        .where(
+            Order.store_id == int(store_id),
+            Order.status.in_(DISPLAY_ACTIVE_STATUSES),
+        )
+        .order_by(Order.paid_at.is_(None), Order.paid_at, Order.id)
+    )
+    order_list = [o for o in (await db.execute(q)).scalars().all() if is_in_store_order(o)]
+    table_map = await _load_tables(db, [o.table_id for o in order_list if o.table_id])
+
+    preparing = []
+    ready = []
+    for order in order_list:
+        item = build_display_item(order, table_map.get(order.table_id) if order.table_id else None)
+        if order.status in PREPARING_STATUSES:
+            preparing.append(item)
+        else:
+            ready.append(item)
+
+    return success(
+        {
+            "store": {"id": store.id, "name": store.name, "store_no": store.store_no},
+            "preparing": preparing,
+            "ready": ready,
+            "updated_at": now_local().isoformat(),
+        },
+        request=request,
+    )
 
 
 @router.get("/mine")
@@ -443,6 +513,9 @@ async def list_my_orders(
             names.append(f"等{len(o_items)}件")
         t = table_map.get(o.table_id) if o.table_id else None
         store = store_map.get(o.store_id) if o.store_id else None
+        from app.services.customer_display import pickup_fields
+
+        pickup = pickup_fields(o, t)
         payload.append(
             {
                 "id": o.id,
@@ -466,6 +539,7 @@ async def list_my_orders(
                 "table": _table_payload(t),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "can_reorder": o.status not in ("PENDING_PAYMENT",) and len(o_items) > 0,
+                **pickup,
             }
         )
 
@@ -546,7 +620,11 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
     store = await db.get(Store, order.store_id) if order.store_id else None
     from app.models import Customer
+    from app.services.customer_display import pickup_fields
     from app.services.customer_service import CustomerService
+
+    table_obj = await db.get(DiningTable, order.table_id) if order.table_id else None
+    pickup = pickup_fields(order, table_obj)
 
     cust = await db.get(Customer, order.customer_id) if order.customer_id else None
     level = None
@@ -599,7 +677,7 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
             "table_id": order.table_id,
 
-            "table": _table_payload(await db.get(DiningTable, order.table_id) if order.table_id else None),
+            "table": _table_payload(table_obj),
 
             "dining_type": order.dining_type,
 
@@ -622,6 +700,8 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "items": items,
 
             "can_reorder": bool(items) and order.status not in ("PENDING_PAYMENT",),
+
+            **pickup,
 
         },
 

@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
+const pickupUtil = require('../../utils/pickup')
 const app = getApp()
 
 const ORDERS_CACHE_MS = 30 * 1000
@@ -89,6 +90,7 @@ Page({
       const res = await api.get('/orders/mine', params)
       const batch = ((res && res.items) || []).map((o) => ({
         ...o,
+        ...pickupUtil.decorate(o),
         discount_amount: Number(o.discount_amount || 0),
         timeText: this.formatTime(o.created_at),
         payLabel: this.payLabel(o.payment_status),

@@ -175,6 +175,7 @@ class Product(Base, TimestampMixin):
     is_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
     is_hot: Mapped[bool] = mapped_column(Boolean, default=False)
     no_member_discount: Mapped[bool] = mapped_column(Boolean, default=False)
+    no_cooking: Mapped[bool] = mapped_column(Boolean, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     sales_count: Mapped[int] = mapped_column(Integer, default=0)
     stock: Mapped[int] = mapped_column(Integer, default=999)

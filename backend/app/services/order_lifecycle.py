@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.core.response import now_local
-from app.models import Order, OrderItem
+from app.models import Order, OrderItem, Product
 from app.services.order_state_machine import (
     assert_payment_transition,
     assert_staff_transition,
@@ -17,6 +17,19 @@ from app.services.order_state_machine import (
 from app.services.status_history import record_order_status
 
 logger = logging.getLogger(__name__)
+
+
+async def order_all_no_cooking(db: AsyncSession, order_id: int) -> bool:
+    """订单内全部明细均为免烹饪商品（如纯卤味单）。"""
+    items = list((await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))).scalars().all())
+    if not items:
+        return False
+    product_ids = list({int(i.product_id) for i in items})
+    rows = (
+        await db.execute(select(Product.id, Product.no_cooking).where(Product.id.in_(product_ids)))
+    ).all()
+    flags = {int(pid): bool(nc) for pid, nc in rows}
+    return all(flags.get(int(i.product_id), False) for i in items)
 
 
 async def apply_order_status(
@@ -49,6 +62,9 @@ async def apply_order_status(
         return order
 
     kind = (assert_kind or _infer_assert_kind(source)).upper()
+    if kind == "STAFF" and target == "COMPLETED" and old in ("PAID", "CONFIRMED"):
+        if not await order_all_no_cooking(db, order.id):
+            raise AppException(40026, "订单含需烹饪商品，请按「开始制作」流程操作")
     if kind == "STAFF":
         assert_staff_transition(old, target)
     elif kind == "PAYMENT":
@@ -65,6 +81,11 @@ async def apply_order_status(
 
     if target == "COMPLETED" and old != "COMPLETED":
         order.completed_at = now_local()
+        if old in ("PAID", "CONFIRMED"):
+            try:
+                await notify_order_ready_subscribe(db, order)
+            except Exception:
+                logger.exception("直出餐订阅消息推送失败 order_id=%s", order.id)
     elif target in ("CANCELLED", "REFUNDED"):
         if old not in ("CANCELLED", "REFUNDED"):
             order.cancelled_at = order.cancelled_at or now_local()

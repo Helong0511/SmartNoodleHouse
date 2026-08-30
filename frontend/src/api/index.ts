@@ -58,7 +58,7 @@ api.interceptors.response.use(
     const msg = parseApiError(err)
     if (status === 401) {
       clearStaffToken()
-      if (!location.pathname.includes('/login') && !location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member')) {
+      if (!location.pathname.includes('/login') && !location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member') && !location.pathname.startsWith('/display')) {
         ElMessage.error('登录已过期，请重新登录')
         location.href = '/login'
       }

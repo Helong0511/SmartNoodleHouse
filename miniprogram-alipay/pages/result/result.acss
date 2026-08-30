@@ -4,7 +4,63 @@
 .header.muted .ok { color: #bbb; }
 .ok { font-size: 72rpx; color: #67c23a; line-height: 1; }
 .title { font-size: 38rpx; margin-top: 16rpx; font-weight: 700; }
-.sub { font-size: 24rpx; color: #1677ff; margin-top: 8rpx; }
+.sub { font-size: 24rpx; color: #1677ff; margin-top: 8rpx; line-height: 1.5; padding: 0 16rpx; }
+.pickup-banner {
+  background: linear-gradient(135deg, #e6f4ff 0%, #fff 100%);
+  border: 2rpx solid #91caff;
+  border-radius: 20rpx;
+  padding: 28rpx 32rpx;
+  margin-bottom: 20rpx;
+  text-align: center;
+}
+.pickup-banner.ready {
+  background: linear-gradient(135deg, #f6ffed 0%, #fff 100%);
+  border-color: #b7eb8f;
+  box-shadow: 0 8rpx 24rpx rgba(82, 196, 26, 0.12);
+}
+.pickup-banner-head {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16rpx;
+  margin-bottom: 12rpx;
+}
+.pickup-type {
+  font-size: 24rpx;
+  color: #888;
+  background: rgba(0,0,0,0.04);
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+}
+.pickup-status {
+  font-size: 26rpx;
+  color: #1677ff;
+  font-weight: 600;
+}
+.pickup-banner.ready .pickup-status { color: #52c41a; }
+.pickup-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 12rpx;
+}
+.pickup-label {
+  font-size: 88rpx;
+  font-weight: 800;
+  letter-spacing: 4rpx;
+  color: #0958d9;
+  line-height: 1.1;
+}
+.pickup-banner.ready .pickup-label { color: #389e0d; }
+.pickup-unit {
+  font-size: 28rpx;
+  color: #999;
+}
+.pickup-foot {
+  margin-top: 12rpx;
+  font-size: 22rpx;
+  color: #aaa;
+}
 .info-card, .items-card, .timeline {
   background: #fff;
   border-radius: 16rpx;

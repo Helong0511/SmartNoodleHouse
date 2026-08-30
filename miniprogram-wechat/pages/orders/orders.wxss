@@ -9,8 +9,17 @@
   padding: 24rpx;
   margin-bottom: 16rpx;
 }
-.order-head { display: flex; justify-content: space-between; align-items: center; }
-.ono { font-size: 24rpx; color: #666; }
+.order-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12rpx; }
+.head-left { flex: 1; min-width: 0; }
+.ono { font-size: 24rpx; color: #666; word-break: break-all; }
+.pickup-chip {
+  display: inline-block;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #d46b08;
+  letter-spacing: 1rpx;
+}
+.pickup-chip.ready { color: #389e0d; }
 .st { font-size: 24rpx; color: #ff6b35; font-weight: 600; }
 .place { font-size: 22rpx; color: #888; margin-top: 8rpx; }
 .order-body { margin-top: 10rpx; font-size: 28rpx; font-weight: 560; line-height: 1.4; }

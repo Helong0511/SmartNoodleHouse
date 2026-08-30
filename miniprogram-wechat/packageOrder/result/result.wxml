@@ -13,7 +13,21 @@
     <view class="header {{order.status === 'CANCELLED' || order.status === 'REFUNDED' ? 'muted' : ''}}">
       <view class="ok">{{headerIcon}}</view>
       <view class="title">{{pageTitle}}</view>
-      <view class="sub" wx:if="{{order.status === 'READY'}}">请前往取餐台领取</view>
+      <view class="sub" wx:if="{{pickupHint}}">{{pickupHint}}</view>
+      <view class="sub" wx:elif="{{order.status === 'READY'}}">请前往取餐台领取</view>
+    </view>
+
+    <view class="pickup-banner {{isReady ? 'ready' : ''}}" wx:if="{{showPickupBanner}}" bindtap="copyPickupCode">
+      <view class="pickup-banner-head">
+        <text class="pickup-type">{{pickupSub}}</text>
+        <text class="pickup-status">{{customerStatusLabel}}</text>
+      </view>
+      <view class="pickup-main">
+        <text class="pickup-label">{{isTakeaway ? pickupCode : pickupLabel}}</text>
+        <text class="pickup-unit">{{isTakeaway ? '取餐号' : '桌号'}}</text>
+      </view>
+      <view class="pickup-foot" wx:if="{{isTakeaway}}">完整订单号末 4 位，与大厅叫号屏一致 · 点击复制</view>
+      <view class="pickup-foot" wx:else>请在大厅叫号屏对照此桌号</view>
     </view>
 
     <view class="info-card">

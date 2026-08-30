@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
 const subscribe = require('../../utils/subscribe')
 const prefUtil = require('../../utils/preferences')
+const pickupUtil = require('../../utils/pickup')
 const app = getApp()
 
 const PAY_LABEL = {
@@ -62,7 +63,15 @@ Page({
     storeAddress: '',
     storePhone: '',
     tableName: '',
-    tableNo: ''
+    tableNo: '',
+    showPickupBanner: false,
+    pickupCode: '',
+    pickupLabel: '',
+    pickupSub: '',
+    customerStatusLabel: '',
+    pickupHint: '',
+    isTakeaway: false,
+    isReady: false
   },
 
   onLoad(query) {
@@ -130,10 +139,12 @@ Page({
       const couponDisc = parseFloat(order && order.coupon_discount) || 0
       const voucherDisc = parseFloat(order && order.voucher_discount) || 0
       const table = order.table || {}
+      const pickup = pickupUtil.decorate(order)
       const pageTitle = PAGE_TITLE[order.status] || order.status_label || '订单详情'
       wx.setNavigationBarTitle({ title: pageTitle })
       this.setData({
         order,
+        ...pickup,
         orderItems: this.formatItems(order.items),
         hasPacking: fee > 0,
         hasDiscount: discount > 0,
@@ -169,6 +180,15 @@ Page({
     wx.setClipboardData({
       data: no,
       success: () => wx.showToast({ title: '已复制订单号', icon: 'success' })
+    })
+  },
+
+  copyPickupCode() {
+    const code = this.data.pickupCode
+    if (!code) return
+    wx.setClipboardData({
+      data: code,
+      success: () => wx.showToast({ title: '已复制取餐号', icon: 'success' })
     })
   },
 

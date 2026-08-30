@@ -63,6 +63,7 @@
               <el-tag v-if="o.is_member && o.member_level_name" size="small" type="success" effect="plain">{{ o.member_level_name }}</el-tag>
               <el-tag size="small" :type="o.is_delivery ? 'danger' : 'info'">{{ o.channel_label || '堂食' }}</el-tag>
               <el-tag v-if="o.need_pack || o.dining_type === 'TAKEAWAY'" size="small" type="warning">打包</el-tag>
+              <el-tag v-if="o.all_no_cooking" size="small" type="warning" effect="plain">现成品·直出</el-tag>
               <el-tag size="small" effect="dark" :type="statusTag(o.status)">{{ statusLabel(o.status) }}</el-tag>
             </div>
           </div>
@@ -91,7 +92,10 @@
             :class="qtyClass(item.quantity)"
           >
             <strong class="item-line">
-              <span class="item-name">{{ item.product_name }}</span>
+              <span class="item-name">
+                {{ item.product_name }}
+                <el-tag v-if="item.no_cooking" size="small" type="warning" effect="plain" class="item-tag">免烹饪</el-tag>
+              </span>
               <span class="item-qty">×{{ item.quantity }}</span>
             </strong>
             <div v-if="item.options?.length" class="opts">{{ item.options.join(' / ') }}</div>
@@ -103,7 +107,7 @@
 
         <div class="actions">
           <el-button
-            v-for="act in actionsFor(o.status)"
+            v-for="act in actionsForOrder(o)"
             :key="act.status"
             :type="(act.type || 'default') as any"
             :plain="!!act.plain"
@@ -224,13 +228,17 @@ function statusLabel(s: string) {
 function statusTag(s: string) {
   return orderStatusTagType(s)
 }
-const KDS_MAIN_BTN_LABELS = new Set(['开始制作', '进入烹饪', '制作完成', '出餐'])
+const KDS_MAIN_BTN_LABELS = new Set(['开始制作', '进入烹饪', '制作完成', '出餐', '直接出餐'])
 
 function isMainKdsBtn(label: string) {
   return KDS_MAIN_BTN_LABELS.has(label)
 }
 
-function actionsFor(status: string) {
+function actionsForOrder(order: any) {
+  const status = order?.status
+  if (order?.all_no_cooking && (status === 'PAID' || status === 'CONFIRMED')) {
+    return [{ status: 'COMPLETED', label: '直接出餐', type: 'success' }]
+  }
   return KDS_ACTIONS[status] || []
 }
 
@@ -244,6 +252,7 @@ function displayItems(items: any[] | undefined) {
     const cur = map.get(key)
     if (cur) {
       cur.quantity += qty
+      cur.no_cooking = cur.no_cooking || !!raw.no_cooking
       if (raw.id != null) cur.ids.push(raw.id)
     } else {
       map.set(key, {
@@ -251,6 +260,7 @@ function displayItems(items: any[] | undefined) {
         quantity: qty,
         options: raw.options || [],
         remark: raw.remark,
+        no_cooking: !!raw.no_cooking,
         ids: raw.id != null ? [raw.id] : [],
       })
     }
@@ -616,7 +626,8 @@ h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
 .item { margin: 8px 0; padding-bottom: 6px; border-bottom: 1px dashed #2a335a; }
 .item:last-child { border-bottom: none; }
 .item-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.item-name { flex: 1; min-width: 0; }
+.item-name { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.item-tag { vertical-align: middle; }
 .item-qty {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;

@@ -7,8 +7,8 @@ from app.core.exceptions import AppException
 STAFF_TRANSITIONS: dict[str, set[str]] = {
     "PENDING_PAYMENT": {"CANCELLED"},
     # 厨房可一键：已支付 → 开始制作；也可先确认
-    "PAID": {"CONFIRMED", "PREPARING", "CANCELLED"},
-    "CONFIRMED": {"PREPARING", "COOKING", "CANCELLED"},
+    "PAID": {"CONFIRMED", "PREPARING", "COMPLETED", "CANCELLED"},
+    "CONFIRMED": {"PREPARING", "COOKING", "COMPLETED", "CANCELLED"},
     "PREPARING": {"COOKING", "READY", "CANCELLED"},
     "COOKING": {"READY", "CANCELLED"},
     "READY": {"COMPLETED", "CANCELLED"},

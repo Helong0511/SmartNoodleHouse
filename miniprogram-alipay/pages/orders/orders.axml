@@ -20,7 +20,12 @@
   <block a:else>
     <view class="order" a:for="{{orders}}" a:key="id" onTap="openOrder" data-id="{{item.id}}">
       <view class="order-head">
-        <text class="ono">{{item.order_no}}</text>
+        <view class="head-left">
+          <text class="pickup-chip {{item.isReady ? 'ready' : ''}}" a:if="{{item.showPickupBanner}}">
+            {{item.isTakeaway ? item.pickupCode : item.pickupLabel}} · {{item.customerStatusLabel}}
+          </text>
+          <text class="ono" a:else>{{item.order_no}}</text>
+        </view>
         <text class="st">{{item.status_label || item.status}}</text>
       </view>
       <view class="place" a:if="{{item.placeText}}">{{item.placeText}}</view>

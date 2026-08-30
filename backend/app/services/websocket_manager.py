@@ -76,6 +76,7 @@ class ConnectionManager:
         store_id = order_data.get("store_id")
         await self.broadcast("kitchen", event, order_data, store_id=store_id)
         await self.broadcast("orders", event, order_data, store_id=store_id)
+        await self.broadcast("display", event, order_data, store_id=store_id)
 
 
 ws_manager = ConnectionManager()

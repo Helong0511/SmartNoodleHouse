@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS products (
   is_recommended TINYINT NOT NULL DEFAULT 0 COMMENT '是否推荐：1=是 0=否',
   is_hot TINYINT NOT NULL DEFAULT 0 COMMENT '是否热销标签：1=是 0=否',
   no_member_discount TINYINT NOT NULL DEFAULT 0 COMMENT '特价/不参与会员折扣：1=是 0=否',
+  no_cooking TINYINT NOT NULL DEFAULT 0 COMMENT '免烹饪/现成品（卤味等）：1=KDS可直出餐 0=需正常制作',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '分类内排序',
   sales_count INT NOT NULL DEFAULT 0 COMMENT '累计销量（冗余统计）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',

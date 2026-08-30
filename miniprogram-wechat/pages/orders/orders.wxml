@@ -42,7 +42,12 @@
 
       <view class="order-head">
 
-        <text class="ono">{{item.order_no}}</text>
+        <view class="head-left">
+          <text class="pickup-chip {{item.isReady ? 'ready' : ''}}" wx:if="{{item.showPickupBanner}}">
+            {{item.isTakeaway ? item.pickupCode : item.pickupLabel}} · {{item.customerStatusLabel}}
+          </text>
+          <text class="ono" wx:else>{{item.order_no}}</text>
+        </view>
 
         <text class="st">{{item.status_label || item.status}}</text>
 

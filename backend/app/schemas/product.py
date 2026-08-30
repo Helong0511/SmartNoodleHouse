@@ -43,6 +43,7 @@ class ProductCreate(BaseModel):
     is_recommended: bool = False
     is_hot: bool = False
     no_member_discount: bool = False
+    no_cooking: bool = False
     sort_order: int = 0
     stock: int = 999
     box_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="餐盒/打包费（单价）")
@@ -61,6 +62,7 @@ class ProductUpdate(BaseModel):
     is_recommended: bool | None = None
     is_hot: bool | None = None
     no_member_discount: bool | None = None
+    no_cooking: bool | None = None
     sort_order: int | None = None
     stock: int | None = None
     box_price: Decimal | None = None
@@ -82,6 +84,7 @@ class ProductOut(BaseModel):
     is_recommended: bool
     is_hot: bool
     no_member_discount: bool
+    no_cooking: bool
     sort_order: int
     sales_count: int
 
