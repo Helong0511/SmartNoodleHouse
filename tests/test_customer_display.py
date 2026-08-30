@@ -52,10 +52,14 @@ def test_build_display_item_takeaway():
         table_id=None,
         channel="H5",
     )
-    item = build_display_item(order, None)
+    from datetime import datetime, timezone
+
+    ready_at = datetime(2026, 8, 27, 10, 0, tzinfo=timezone.utc)
+    item = build_display_item(order, None, ready_at=ready_at)
     assert item["pickup_label"] == pickup_code_from_order_no(order.order_no)
     assert item["pickup_sub"] == "打包自取"
     assert item["status_label"] == "请取餐"
+    assert item["ready_at"] == ready_at.isoformat()
 
 
 def test_pickup_fields():

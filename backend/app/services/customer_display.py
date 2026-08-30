@@ -1,8 +1,13 @@
 """顾客叫号屏：脱敏展示字段与状态文案。"""
 from __future__ import annotations
 
+from datetime import datetime
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.biz_no import parse_biz_no
-from app.models import DiningTable, Order
+from app.models import DiningTable, Order, OrderStatusHistory
 
 DISPLAY_ACTIVE_STATUSES = ("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY")
 PREPARING_STATUSES = ("PAID", "CONFIRMED", "PREPARING", "COOKING")
@@ -24,7 +29,12 @@ def pickup_code_from_order_no(order_no: str) -> str:
     return s[-4:] if len(s) >= 4 else (s or "-")
 
 
-def build_display_item(order: Order, table: DiningTable | None) -> dict:
+def build_display_item(
+    order: Order,
+    table: DiningTable | None,
+    *,
+    ready_at: datetime | None = None,
+) -> dict:
     is_takeaway = (order.dining_type or "").upper() == "TAKEAWAY"
     code = pickup_code_from_order_no(order.order_no)
     if table and not is_takeaway:
@@ -36,7 +46,7 @@ def build_display_item(order: Order, table: DiningTable | None) -> dict:
         pickup_sub = "打包自取" if is_takeaway else "取餐"
         mode = "TAKEAWAY" if is_takeaway else "PICKUP"
     status = order.status or ""
-    return {
+    item = {
         "id": order.id,
         "pickup_code": code,
         "pickup_label": pickup_label,
@@ -48,6 +58,29 @@ def build_display_item(order: Order, table: DiningTable | None) -> dict:
         "is_takeaway": is_takeaway,
         "paid_at": order.paid_at.isoformat() if order.paid_at else None,
     }
+    if status == "READY":
+        at = ready_at or getattr(order, "updated_at", None)
+        item["ready_at"] = at.isoformat() if at else None
+    return item
+
+
+async def load_ready_at_map(db: AsyncSession, order_ids: list[int]) -> dict[int, datetime]:
+    """订单首次进入 READY 的时间（用于叫号屏超时提醒）。"""
+    if not order_ids:
+        return {}
+    q = (
+        select(
+            OrderStatusHistory.order_id,
+            func.min(OrderStatusHistory.created_at).label("ready_at"),
+        )
+        .where(
+            OrderStatusHistory.order_id.in_(order_ids),
+            OrderStatusHistory.to_status == "READY",
+        )
+        .group_by(OrderStatusHistory.order_id)
+    )
+    rows = (await db.execute(q)).all()
+    return {int(row.order_id): row.ready_at for row in rows if row.ready_at}
 
 
 def is_in_store_order(order: Order) -> bool:

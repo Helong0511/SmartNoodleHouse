@@ -428,6 +428,7 @@ async def display_active_orders(
         PREPARING_STATUSES,
         build_display_item,
         is_in_store_order,
+        load_ready_at_map,
     )
 
     _verify_display_token(token)
@@ -445,11 +446,18 @@ async def display_active_orders(
     )
     order_list = [o for o in (await db.execute(q)).scalars().all() if is_in_store_order(o)]
     table_map = await _load_tables(db, [o.table_id for o in order_list if o.table_id])
+    ready_ids = [o.id for o in order_list if o.status == "READY"]
+    ready_at_map = await load_ready_at_map(db, ready_ids)
 
     preparing = []
     ready = []
     for order in order_list:
-        item = build_display_item(order, table_map.get(order.table_id) if order.table_id else None)
+        ready_at = ready_at_map.get(order.id) if order.status == "READY" else None
+        item = build_display_item(
+            order,
+            table_map.get(order.table_id) if order.table_id else None,
+            ready_at=ready_at,
+        )
         if order.status in PREPARING_STATUSES:
             preparing.append(item)
         else:

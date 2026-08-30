@@ -101,6 +101,7 @@ type DisplayItem = {
   pickup_sub: string
   pickup_code: string
   status_label: string
+  ready_at?: string | null
 }
 
 /** 首次进入请取餐后的重复播报间隔（毫秒）：2 分 → 3 分 → 5 分 → 5 分 → 10 分 */
@@ -108,7 +109,7 @@ const REMIND_INTERVALS_MS = [120_000, 180_000, 300_000, 300_000, 600_000]
 const MAX_REMIND_PER_ORDER = 6
 const REMIND_TICK_MS = 30_000
 /** 超过此时长仍待取餐：屏幕闪烁高亮 + 超时语音 */
-const OVERDUE_READY_MS = 5 * 60_000
+const OVERDUE_READY_MS = 3 * 60_000
 /** 超时后重复语音间隔 */
 const OVERDUE_REMIND_MS = 3 * 60_000
 
@@ -212,6 +213,15 @@ function clearOverdueTimer(id: number) {
   }
 }
 
+function readySinceMs(item: DisplayItem): number {
+  if (item.ready_at) {
+    const t = Date.parse(item.ready_at)
+    if (Number.isFinite(t)) return t
+  }
+  const track = readyVoiceTrack.get(item.id)
+  return track?.firstAt ?? Date.now()
+}
+
 function syncReadyTrack(items: DisplayItem[]) {
   const ids = new Set(items.map((x) => x.id))
   for (const id of readyVoiceTrack.keys()) {
@@ -222,8 +232,20 @@ function syncReadyTrack(items: DisplayItem[]) {
   }
   const now = Date.now()
   for (const item of items) {
-    if (!readyVoiceTrack.has(item.id)) {
-      readyVoiceTrack.set(item.id, { count: 0, lastAt: 0, firstAt: now, overdue: false })
+    const since = readySinceMs(item)
+    const existing = readyVoiceTrack.get(item.id)
+    if (!existing) {
+      readyVoiceTrack.set(item.id, { count: 0, lastAt: 0, firstAt: since, overdue: false })
+      scheduleOverdueAlert(item)
+      continue
+    }
+    if (item.ready_at) {
+      existing.firstAt = since
+      if (!existing.overdue && Date.now() - since >= OVERDUE_READY_MS) {
+        scheduleOverdueAlert(item)
+      }
+    } else if (!existing.firstAt) {
+      existing.firstAt = now
       scheduleOverdueAlert(item)
     }
   }
@@ -233,7 +255,8 @@ function scheduleOverdueAlert(item: DisplayItem) {
   clearOverdueTimer(item.id)
   const track = readyVoiceTrack.get(item.id)
   if (!track || track.overdue) return
-  const delay = Math.max(0, OVERDUE_READY_MS - (Date.now() - track.firstAt))
+  const elapsed = Date.now() - readySinceMs(item)
+  const delay = elapsed >= OVERDUE_READY_MS ? 0 : OVERDUE_READY_MS - elapsed
   overdueTimers.set(item.id, setTimeout(() => {
     overdueTimers.delete(item.id)
     if (!ready.value.some((x) => x.id === item.id)) return
@@ -243,9 +266,9 @@ function scheduleOverdueAlert(item: DisplayItem) {
 
 function isReadyOverdue(id: number) {
   void overdueTick.value
-  const track = readyVoiceTrack.get(id)
-  if (!track) return false
-  return track.overdue || Date.now() - track.firstAt >= OVERDUE_READY_MS
+  const item = ready.value.find((x) => x.id === id)
+  if (!item) return false
+  return Date.now() - readySinceMs(item) >= OVERDUE_READY_MS
 }
 
 const hasOverdueReady = computed(() => ready.value.some((item) => isReadyOverdue(item.id)))
@@ -281,19 +304,17 @@ function triggerOverdueAlert(item: DisplayItem) {
 
 function ensureOverdueAlerts() {
   for (const item of ready.value) {
+    if (!isReadyOverdue(item.id)) continue
     const track = readyVoiceTrack.get(item.id)
-    if (!track || track.overdue) continue
-    if (Date.now() - track.firstAt >= OVERDUE_READY_MS) {
-      triggerOverdueAlert(item)
-      return
-    }
+    if (track?.overdue) continue
+    triggerOverdueAlert(item)
+    return
   }
 }
 
 /** 新进入请取餐的单：首次播报；久等未取：按间隔重复播报（每次只播一条，避免叠音） */
 function processReadyVoice(items: DisplayItem[], allowNewAlert: boolean) {
   if (!soundOn.value) return
-  syncReadyTrack(items)
   const now = Date.now()
 
   if (allowNewAlert) {
@@ -347,10 +368,14 @@ async function load() {
     const res = await publicApi.get('/orders/display/active', { params: displayParams() })
     const data = res.data || {}
     const nextReady = (data.ready || []) as DisplayItem[]
-    processReadyVoice(nextReady, displaySnapshotReady)
+    syncReadyTrack(nextReady)
+    const allowNewAlert = displaySnapshotReady
     displaySnapshotReady = true
     preparing.value = data.preparing || []
     ready.value = nextReady
+    processReadyVoice(nextReady, allowNewAlert)
+    ensureOverdueAlerts()
+    overdueTick.value += 1
     if (data.store?.name) storeName.value = data.store.name
   } catch (e: any) {
     const msg = e?.message || ''
