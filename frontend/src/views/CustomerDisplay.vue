@@ -145,8 +145,8 @@ let clockTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
 let displaySnapshotReady = false
-/** 待取餐语音：count=已播次数，lastAt=上次播报时间，firstAt=首次进入请取餐区，overdue=已触发超时提醒 */
-const readyVoiceTrack = new Map<number, { count: number; lastAt: number; firstAt: number; overdue: boolean }>()
+/** 待取餐语音：count=已播次数，lastAt=上次播报时间，firstAt=首次进入请取餐区（null=未设置），overdue=已触发超时提醒 */
+const readyVoiceTrack = new Map<number, { count: number; lastAt: number; firstAt: number | null; overdue: boolean }>()
 const overdueTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let remindTimer: ReturnType<typeof setInterval> | null = null
 /** 驱动超时高亮每秒刷新 */
@@ -214,12 +214,13 @@ function clearOverdueTimer(id: number) {
 }
 
 function readySinceMs(item: DisplayItem): number {
-  if (item.ready_at) {
+  if (item.ready_at != null && item.ready_at !== '') {
     const t = Date.parse(item.ready_at)
     if (Number.isFinite(t)) return t
   }
   const track = readyVoiceTrack.get(item.id)
-  return track?.firstAt ?? Date.now()
+  if (track?.firstAt != null) return track.firstAt
+  return Date.now()
 }
 
 function syncReadyTrack(items: DisplayItem[]) {
@@ -239,12 +240,12 @@ function syncReadyTrack(items: DisplayItem[]) {
       scheduleOverdueAlert(item)
       continue
     }
-    if (item.ready_at) {
+    if (item.ready_at != null && item.ready_at !== '') {
       existing.firstAt = since
       if (!existing.overdue && Date.now() - since >= OVERDUE_READY_MS) {
         scheduleOverdueAlert(item)
       }
-    } else if (!existing.firstAt) {
+    } else if (existing.firstAt == null) {
       existing.firstAt = now
       scheduleOverdueAlert(item)
     }
@@ -273,11 +274,11 @@ function isReadyOverdue(id: number) {
 
 const hasOverdueReady = computed(() => ready.value.some((item) => isReadyOverdue(item.id)))
 
-function markVoicePlayed(item: DisplayItem, track: { count: number; lastAt: number; firstAt: number; overdue: boolean }) {
+function markVoicePlayed(item: DisplayItem, track: { count: number; lastAt: number; firstAt: number | null; overdue: boolean }) {
   const now = Date.now()
   track.count += 1
   track.lastAt = now
-  if (!track.firstAt) track.firstAt = now
+  if (track.firstAt == null) track.firstAt = now
   readyVoiceTrack.set(item.id, track)
 }
 
