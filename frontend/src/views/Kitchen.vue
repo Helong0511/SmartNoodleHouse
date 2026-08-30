@@ -84,8 +84,16 @@
         <div v-if="o.remark" class="remark">备注：{{ o.remark }}</div>
 
         <div class="items">
-          <div v-for="item in o.items" :key="item.id || item.product_name" class="item">
-            <strong>{{ item.product_name }} ×{{ item.quantity }}</strong>
+          <div
+            v-for="item in displayItems(o.items)"
+            :key="itemKey(item)"
+            class="item"
+            :class="qtyClass(item.quantity)"
+          >
+            <strong class="item-line">
+              <span class="item-name">{{ item.product_name }}</span>
+              <span class="item-qty">×{{ item.quantity }}</span>
+            </strong>
             <div v-if="item.options?.length" class="opts">{{ item.options.join(' / ') }}</div>
             <div v-if="item.remark" class="item-remark">{{ item.remark }}</div>
           </div>
@@ -99,6 +107,7 @@
             :key="act.status"
             :type="(act.type || 'default') as any"
             :plain="!!act.plain"
+            :class="{ 'kds-btn-main': isMainKdsBtn(act.label) }"
             :loading="busyId === o.id"
             @click="updateStatus(o.id, act.status)"
           >
@@ -215,8 +224,51 @@ function statusLabel(s: string) {
 function statusTag(s: string) {
   return orderStatusTagType(s)
 }
+const KDS_MAIN_BTN_LABELS = new Set(['开始制作', '进入烹饪', '制作完成', '出餐'])
+
+function isMainKdsBtn(label: string) {
+  return KDS_MAIN_BTN_LABELS.has(label)
+}
+
 function actionsFor(status: string) {
   return KDS_ACTIONS[status] || []
+}
+
+/** 相同品名+规格+备注合并为一行，份数相加（如两条 ×2 显示 ×4） */
+function displayItems(items: any[] | undefined) {
+  const map = new Map<string, any>()
+  for (const raw of items || []) {
+    const opts = [...(raw.options || [])].sort().join('|')
+    const key = `${raw.product_name || ''}\0${opts}\0${raw.remark || ''}`
+    const qty = Number(raw.quantity) || 1
+    const cur = map.get(key)
+    if (cur) {
+      cur.quantity += qty
+      if (raw.id != null) cur.ids.push(raw.id)
+    } else {
+      map.set(key, {
+        product_name: raw.product_name,
+        quantity: qty,
+        options: raw.options || [],
+        remark: raw.remark,
+        ids: raw.id != null ? [raw.id] : [],
+      })
+    }
+  }
+  return Array.from(map.values())
+}
+
+function itemKey(item: any) {
+  const opts = [...(item.options || [])].sort().join('|')
+  return `${item.product_name}|${opts}|${item.remark || ''}|${item.quantity}`
+}
+
+/** 1 份正常色；2 份醒目；3 份及以上更醒目 */
+function qtyClass(quantity: number) {
+  const q = Number(quantity) || 1
+  if (q >= 3) return 'qty-high'
+  if (q >= 2) return 'qty-multi'
+  return 'qty-one'
 }
 
 function waitSeconds(o: any) {
@@ -563,8 +615,47 @@ h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
 .items { margin: 4px 0 8px; }
 .item { margin: 8px 0; padding-bottom: 6px; border-bottom: 1px dashed #2a335a; }
 .item:last-child { border-bottom: none; }
+.item-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.item-name { flex: 1; min-width: 0; }
+.item-qty {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+/* 1 份：与正文同色 */
+.item.qty-one .item-qty { color: #eef2ff; font-size: 16px; }
+/* 2 份：琥珀色提醒 */
+.item.qty-multi .item-qty {
+  color: #fbbf24;
+  font-size: 22px;
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.45);
+}
+.item.qty-multi .item-name { color: #fde68a; }
+/* 3 份及以上：红色高亮 */
+.item.qty-high .item-qty {
+  color: #f87171;
+  font-size: 26px;
+  text-shadow: 0 0 12px rgba(248, 113, 113, 0.55);
+}
+.item.qty-high .item-name { color: #fecaca; font-weight: 700; }
+.item.qty-high {
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-left: -8px;
+  margin-right: -8px;
+}
 .opts { color: #94a3b8; font-size: 13px; margin-top: 2px; }
 .item-remark { color: #fdba74; font-size: 12px; margin-top: 2px; }
 .pack-fee { color: #fbbf24; font-size: 12px; margin-bottom: 8px; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.actions :deep(.el-button.kds-btn-main) {
+  flex: 1 1 100%;
+  width: 100%;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 14px 20px;
+  min-height: 50px;
+  letter-spacing: 0.5px;
+}
 </style>

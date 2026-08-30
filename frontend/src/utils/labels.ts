@@ -176,7 +176,7 @@ export const KDS_ACTIONS: Record<string, { status: string; label: string; type: 
     { status: 'READY', label: '跳过烹饪', type: 'success', plain: true },
   ],
   COOKING: [{ status: 'READY', label: '制作完成', type: 'success' }],
-  READY: [{ status: 'COMPLETED', label: '已出餐', type: 'primary' }],
+  READY: [{ status: 'COMPLETED', label: '出餐', type: 'primary' }],
 }
 
 export function cancelAllowed(status: string) {
