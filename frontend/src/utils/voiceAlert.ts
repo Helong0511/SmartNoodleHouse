@@ -266,6 +266,13 @@ export function pickupReadyText(label?: string | null): string {
   return `请取餐号${l}，可以取餐了`
 }
 
+export function pickupOverdueText(label?: string | null): string {
+  const l = String(label || '').trim()
+  if (!l) return '餐品等待已久，请尽快取餐'
+  if (l.includes('桌')) return `请${l}尽快取餐，餐品等待已久`
+  return `取餐号${l}，餐品等待已久，请尽快取餐`
+}
+
 export function announceKitchenNew(order?: Record<string, any>, enabled = true) {
   return speakAlert(kitchenNewOrderText(order), enabled, { beep: true, beepKind: 'new' })
 }
@@ -276,6 +283,10 @@ export function announceKitchenUrge(enabled = true) {
 
 export function announcePickupReady(label?: string | null, enabled = true) {
   return speakAlert(pickupReadyText(label), enabled, { beep: true, beepKind: 'ready' })
+}
+
+export function announcePickupOverdue(label?: string | null, enabled = true) {
+  return speakAlert(pickupOverdueText(label), enabled, { beep: true, beepKind: 'urge' })
 }
 
 ensureVoices()

@@ -43,18 +43,26 @@
         </ul>
       </section>
 
-      <section class="panel ready">
+      <section class="panel ready" :class="{ 'has-overdue': hasOverdueReady }">
         <div class="panel-head">
           <h2>请取餐</h2>
           <span class="count highlight">{{ ready.length }}</span>
         </div>
         <p class="ready-tip">忙时可自行到取餐台领取，无需等待叫号</p>
+        <p v-if="hasOverdueReady" class="overdue-banner">以下餐品等待较久，请尽快取餐</p>
         <div v-if="!ready.length" class="empty">请留意此区域</div>
         <ul v-else class="ticket-list ready-list">
-          <li v-for="item in ready" :key="item.id" class="ticket ready-ticket" :class="{ overdue: isReadyOverdue(item.id) }">
+          <li
+            v-for="item in ready"
+            :key="item.id"
+            class="ticket ready-ticket"
+            :class="{ overdue: isReadyOverdue(item.id) }"
+          >
             <span class="label">{{ item.pickup_label }}</span>
             <span class="sub">{{ item.pickup_sub }}</span>
-            <span class="state pulse">请取餐</span>
+            <span class="state" :class="isReadyOverdue(item.id) ? 'overdue-flash' : 'pulse'">
+              {{ isReadyOverdue(item.id) ? '请尽快取餐' : '请取餐' }}
+            </span>
           </li>
         </ul>
       </section>
@@ -75,6 +83,7 @@ import { ElMessage } from 'element-plus'
 import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openPublicWebSocket } from '@/utils/publicWs'
 import {
+  announcePickupOverdue,
   announcePickupReady,
   bindAutoVoiceUnlock,
   isVoiceUnlocked,
@@ -98,8 +107,10 @@ type DisplayItem = {
 const REMIND_INTERVALS_MS = [120_000, 180_000, 300_000, 300_000, 600_000]
 const MAX_REMIND_PER_ORDER = 6
 const REMIND_TICK_MS = 30_000
-/** 超过此时长仍待取餐，屏幕条目高亮（视觉提醒） */
+/** 超过此时长仍待取餐：屏幕闪烁高亮 + 超时语音 */
 const OVERDUE_READY_MS = 5 * 60_000
+/** 超时后重复语音间隔 */
+const OVERDUE_REMIND_MS = 3 * 60_000
 
 const route = useRoute()
 const storeId = computed(() => {
@@ -133,9 +144,12 @@ let clockTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
 let displaySnapshotReady = false
-/** 待取餐语音：count=已播次数，lastAt=上次播报时间，firstAt=首次进入请取餐区 */
-const readyVoiceTrack = new Map<number, { count: number; lastAt: number; firstAt: number }>()
+/** 待取餐语音：count=已播次数，lastAt=上次播报时间，firstAt=首次进入请取餐区，overdue=已触发超时提醒 */
+const readyVoiceTrack = new Map<number, { count: number; lastAt: number; firstAt: number; overdue: boolean }>()
+const overdueTimers = new Map<number, ReturnType<typeof setTimeout>>()
 let remindTimer: ReturnType<typeof setInterval> | null = null
+/** 驱动超时高亮每秒刷新 */
+const overdueTick = ref(0)
 
 async function enableVoice() {
   voiceUnlocked.value = await unlockVoice('取餐语音已开启')
@@ -190,35 +204,90 @@ function displayParams() {
   return params
 }
 
+function clearOverdueTimer(id: number) {
+  const t = overdueTimers.get(id)
+  if (t) {
+    clearTimeout(t)
+    overdueTimers.delete(id)
+  }
+}
+
 function syncReadyTrack(items: DisplayItem[]) {
   const ids = new Set(items.map((x) => x.id))
   for (const id of readyVoiceTrack.keys()) {
-    if (!ids.has(id)) readyVoiceTrack.delete(id)
+    if (!ids.has(id)) {
+      readyVoiceTrack.delete(id)
+      clearOverdueTimer(id)
+    }
   }
   const now = Date.now()
   for (const item of items) {
     if (!readyVoiceTrack.has(item.id)) {
-      readyVoiceTrack.set(item.id, { count: 0, lastAt: 0, firstAt: now })
+      readyVoiceTrack.set(item.id, { count: 0, lastAt: 0, firstAt: now, overdue: false })
+      scheduleOverdueAlert(item)
     }
   }
 }
 
-function isReadyOverdue(id: number) {
-  const track = readyVoiceTrack.get(id)
-  if (!track) return false
-  return Date.now() - track.firstAt >= OVERDUE_READY_MS
+function scheduleOverdueAlert(item: DisplayItem) {
+  clearOverdueTimer(item.id)
+  const track = readyVoiceTrack.get(item.id)
+  if (!track || track.overdue) return
+  const delay = Math.max(0, OVERDUE_READY_MS - (Date.now() - track.firstAt))
+  overdueTimers.set(item.id, setTimeout(() => {
+    overdueTimers.delete(item.id)
+    if (!ready.value.some((x) => x.id === item.id)) return
+    triggerOverdueAlert(item)
+  }, delay))
 }
 
-function announceReadyItem(item: DisplayItem) {
-  if (!soundOn.value || !isVoiceUnlocked()) return false
-  announcePickupReady(item.pickup_label, true)
+function isReadyOverdue(id: number) {
+  void overdueTick.value
+  const track = readyVoiceTrack.get(id)
+  if (!track) return false
+  return track.overdue || Date.now() - track.firstAt >= OVERDUE_READY_MS
+}
+
+const hasOverdueReady = computed(() => ready.value.some((item) => isReadyOverdue(item.id)))
+
+function markVoicePlayed(item: DisplayItem, track: { count: number; lastAt: number; firstAt: number; overdue: boolean }) {
   const now = Date.now()
-  const track = readyVoiceTrack.get(item.id) || { count: 0, lastAt: 0, firstAt: now }
   track.count += 1
   track.lastAt = now
   if (!track.firstAt) track.firstAt = now
   readyVoiceTrack.set(item.id, track)
+}
+
+function announceReadyItem(item: DisplayItem, overdue = false) {
+  if (!soundOn.value || !isVoiceUnlocked()) return false
+  const ok = overdue
+    ? announcePickupOverdue(item.pickup_label, true)
+    : announcePickupReady(item.pickup_label, true)
+  if (!ok) return false
+  const now = Date.now()
+  const track = readyVoiceTrack.get(item.id) || { count: 0, lastAt: 0, firstAt: now, overdue: false }
+  markVoicePlayed(item, track)
   return true
+}
+
+function triggerOverdueAlert(item: DisplayItem) {
+  const track = readyVoiceTrack.get(item.id)
+  if (!track || track.overdue) return
+  track.overdue = true
+  readyVoiceTrack.set(item.id, track)
+  overdueTick.value += 1
+  announceReadyItem(item, true)
+}
+
+function ensureOverdueAlerts() {
+  for (const item of ready.value) {
+    const track = readyVoiceTrack.get(item.id)
+    if (!track || track.overdue) continue
+    if (Date.now() - track.firstAt >= OVERDUE_READY_MS) {
+      triggerOverdueAlert(item)
+      return
+    }
+  }
 }
 
 /** 新进入请取餐的单：首次播报；久等未取：按间隔重复播报（每次只播一条，避免叠音） */
@@ -248,21 +317,27 @@ function processReadyVoice(items: DisplayItem[], allowNewAlert: boolean) {
 
   let pick: DisplayItem | null = null
   let pickElapsed = 0
+  let pickOverdue = false
   for (const item of items) {
     const track = readyVoiceTrack.get(item.id)!
     if (track.count >= MAX_REMIND_PER_ORDER || track.count < 1) continue
-    const interval = REMIND_INTERVALS_MS[Math.min(track.count - 1, REMIND_INTERVALS_MS.length - 1)]
+    const overdue = track.overdue
+    const interval = overdue
+      ? OVERDUE_REMIND_MS
+      : REMIND_INTERVALS_MS[Math.min(track.count - 1, REMIND_INTERVALS_MS.length - 1)]
     const elapsed = now - track.lastAt
     if (elapsed >= interval && elapsed > pickElapsed) {
       pick = item
       pickElapsed = elapsed
+      pickOverdue = overdue
     }
   }
-  if (pick) announceReadyItem(pick)
+  if (pick) announceReadyItem(pick, pickOverdue)
 }
 
 function tickReadyRemind() {
   if (!storeId.value || !ready.value.length) return
+  ensureOverdueAlerts()
   processReadyVoice(ready.value, false)
 }
 
@@ -372,6 +447,7 @@ function onFsChange() {
 
 function tickClock() {
   clockText.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  if (ready.value.length) overdueTick.value += 1
 }
 
 let unbindVoice: (() => void) | null = null
@@ -396,6 +472,7 @@ onMounted(async () => {
 onUnmounted(() => {
   unbindVoice?.()
   stopPoll()
+  for (const id of overdueTimers.keys()) clearOverdueTimer(id)
   if (remindTimer) clearInterval(remindTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (reconnectTimer) clearTimeout(reconnectTimer)
@@ -513,6 +590,14 @@ onUnmounted(() => {
   border-top: 4px solid #52c41a;
   box-shadow: 0 0 40px rgba(82, 196, 26, 0.08);
 }
+.panel.ready.has-overdue {
+  animation: panel-overdue-glow 1.4s ease-in-out infinite;
+  border-color: rgba(255, 77, 79, 0.55);
+}
+@keyframes panel-overdue-glow {
+  0%, 100% { box-shadow: 0 0 24px rgba(255, 77, 79, 0.25); }
+  50% { box-shadow: 0 0 48px rgba(255, 77, 79, 0.55); }
+}
 
 .panel-head {
   display: flex;
@@ -536,6 +621,18 @@ onUnmounted(() => {
   margin: 0 0 16px;
   color: #7dcea0;
   font-size: 15px;
+}
+.overdue-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 77, 79, 0.18);
+  border: 1px solid rgba(255, 77, 79, 0.45);
+  color: #ffccc7;
+  font-size: clamp(16px, 2vw, 22px);
+  font-weight: 600;
+  text-align: center;
+  animation: overdue-flash 1.2s ease-in-out infinite;
 }
 
 .empty {
@@ -585,23 +682,49 @@ onUnmounted(() => {
   font-size: 18px;
 }
 .ready-ticket.overdue {
-  background: rgba(250, 173, 20, 0.12);
-  border-radius: 10px;
-  margin: 0 -8px;
-  padding-left: 20px;
-  padding-right: 20px;
+  border-radius: 12px;
+  margin: 6px -8px;
+  padding: 16px 20px;
+  border: 2px solid rgba(255, 77, 79, 0.75);
+  animation: overdue-card-flash 1.2s ease-in-out infinite;
 }
-.ready-ticket.overdue .label { color: #ffd666; }
+.ready-ticket.overdue .label {
+  color: #fff1b8;
+  text-shadow: 0 0 12px rgba(255, 214, 102, 0.45);
+}
+.ready-ticket.overdue .sub { color: #ffccc7; }
 .ready-ticket.overdue .state {
-  color: #faad14;
-  font-size: 20px;
+  color: #fff;
+  font-size: clamp(18px, 2.5vw, 24px);
+  font-weight: 800;
 }
 .pulse {
   animation: pulse 1.6s ease-in-out infinite;
 }
+.overdue-flash {
+  animation: overdue-text-flash 0.9s ease-in-out infinite;
+}
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+@keyframes overdue-card-flash {
+  0%, 100% {
+    background: rgba(255, 77, 79, 0.28);
+    box-shadow: 0 0 16px rgba(255, 77, 79, 0.35);
+  }
+  50% {
+    background: rgba(250, 173, 20, 0.38);
+    box-shadow: 0 0 32px rgba(255, 77, 79, 0.65);
+  }
+}
+@keyframes overdue-text-flash {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.06); }
+}
+@keyframes overdue-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
 }
 
 .footer {
