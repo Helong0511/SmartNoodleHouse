@@ -13,6 +13,9 @@ const speechQueue: string[] = []
 let speaking = false
 let voicesReady = false
 
+/** 业务语音（新单/取餐/催单）每次连续播报次数 */
+const VOICE_ALERT_REPEAT = 3
+
 function ensureVoices() {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
   const voices = window.speechSynthesis.getVoices()
@@ -225,11 +228,15 @@ export function beepTone(kind: 'new' | 'urge' | 'ready' | 'default' = 'default')
 export function speakAlert(
   text: string,
   enabled = true,
-  opts?: { beep?: boolean; beepKind?: 'new' | 'urge' | 'ready' | 'default' },
+  opts?: { beep?: boolean; beepKind?: 'new' | 'urge' | 'ready' | 'default'; repeat?: number },
 ) {
   if (!enabled || !text.trim()) return false
   if (!unlocked) return false
-  speechQueue.push(text.trim())
+  const trimmed = text.trim()
+  const times = Math.max(1, Math.min(5, opts?.repeat ?? VOICE_ALERT_REPEAT))
+  for (let i = 0; i < times; i++) {
+    speechQueue.push(trimmed)
+  }
   if (opts?.beep !== false) beepTone(opts?.beepKind || 'default')
   processQueue()
   return true
