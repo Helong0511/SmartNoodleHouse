@@ -1,11 +1,10 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import api from '@/api'
-
-const STAFF_KEY = 'snh_staff_token'
+import { clearStaffToken, getStaffToken, setStaffToken } from '@/utils/staffAuth'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem(STAFF_KEY) || localStorage.getItem('token') || '')
+  const token = ref(getStaffToken())
   const user = ref<any>(null)
 
   const permissions = computed<string[]>(() => user.value?.permissions || [])
@@ -28,16 +27,14 @@ export const useAuthStore = defineStore('auth', () => {
     const res = await api.post('/auth/login', { username, password })
     token.value = res.data.access_token
     user.value = res.data.user
-    localStorage.setItem(STAFF_KEY, token.value)
-    localStorage.setItem('token', token.value)
+    setStaffToken(token.value)
     await fetchMe()
   }
 
   function logout() {
     token.value = ''
     user.value = null
-    localStorage.removeItem(STAFF_KEY)
-    localStorage.removeItem('token')
+    clearStaffToken()
   }
 
   async function fetchMe() {

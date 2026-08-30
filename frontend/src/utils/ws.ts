@@ -1,10 +1,11 @@
 /** 员工 WebSocket：token 走 Sec-WebSocket-Protocol，避免写入 URL 日志 */
+import { getStaffToken } from '@/utils/staffAuth'
+
 export function openStaffWebSocket(
   channel: string,
   params?: Record<string, string | number | undefined | null>
 ): WebSocket {
-  const token =
-    localStorage.getItem('snh_staff_token') || localStorage.getItem('token') || ''
+  const token = getStaffToken()
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const qs = new URLSearchParams()
   if (params) {

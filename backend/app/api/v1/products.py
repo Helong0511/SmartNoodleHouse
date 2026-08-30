@@ -31,6 +31,16 @@ from app.schemas.product import (
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.utils.upload import save_upload
 
+
+async def _clear_main_product_images(db: DbSession, product_id: int) -> None:
+    """换主图时移除历史 MAIN 记录，避免详情轮播仍展示旧图。"""
+    await db.execute(
+        delete(ProductImage).where(
+            ProductImage.product_id == product_id,
+            ProductImage.image_type == "MAIN",
+        )
+    )
+
 router = APIRouter(tags=["商品"])
 
 
@@ -194,6 +204,7 @@ async def list_products(
                 "name": p.name,
                 "description": p.description or "",
                 "main_image": p.main_image,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
                 "price": str(p.price),
                 "original_price": str(p.original_price) if p.original_price else None,
                 "status": p.status,
@@ -384,6 +395,7 @@ async def get_product(product_id: int, request: Request, db: DbSession):
             "name": product.name,
             "description": product.description or "",
             "main_image": product.main_image,
+            "updated_at": product.updated_at.isoformat() if product.updated_at else None,
             "price": str(product.price),
             "original_price": str(product.original_price) if product.original_price else None,
             "status": product.status,
@@ -473,6 +485,8 @@ async def update_product(
 
     for k, v in payload.items():
         setattr(product, k, v)
+    if "main_image" in payload and not payload["main_image"]:
+        await _clear_main_product_images(db, product_id)
     if data.option_group_ids is not None:
         await db.execute(delete(ProductOptionGroup).where(ProductOptionGroup.product_id == product_id))
         for idx, gid in enumerate(data.option_group_ids):
@@ -495,6 +509,7 @@ async def upload_product_image(
         return success(None, message="商品不存在", request=request)
     assert_store_access(user, product.store_id)
     url = await save_upload(file, subdir="products")
+    await _clear_main_product_images(db, product_id)
     product.main_image = url
     db.add(
         ProductImage(
@@ -505,7 +520,15 @@ async def upload_product_image(
         )
     )
     await db.flush()
-    return success({"id": product.id, "main_image": url, "url": url}, request=request)
+    return success(
+        {
+            "id": product.id,
+            "main_image": url,
+            "url": url,
+            "updated_at": product.updated_at.isoformat() if product.updated_at else None,
+        },
+        request=request,
+    )
 
 
 @router.delete("/products/{product_id}", dependencies=[require_permission("product:delete")])

@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
 
 function parseApiError(err: unknown): string {
   if (!err || typeof err !== 'object') return '网络错误'
@@ -30,7 +31,7 @@ api.interceptors.request.use((config) => {
     /\/orders\/\d+\/reorder/.test(url) ||
     url.includes('/welcome/face') ||
     (config.headers?.['X-Client'] === 'customer')
-  const staffToken = localStorage.getItem('snh_staff_token') || localStorage.getItem('token')
+  const staffToken = getStaffToken()
   const customerToken = localStorage.getItem('snh_customer_token') || localStorage.getItem('customer_token')
   // 顾客订单列表/复购强制用顾客 token，避免后台登录态抢占
   const forceCustomer =
@@ -56,8 +57,7 @@ api.interceptors.response.use(
     const status = err.response?.status
     const msg = parseApiError(err)
     if (status === 401) {
-      localStorage.removeItem('snh_staff_token')
-      localStorage.removeItem('token')
+      clearStaffToken()
       if (!location.pathname.includes('/login') && !location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member')) {
         ElMessage.error('登录已过期，请重新登录')
         location.href = '/login'

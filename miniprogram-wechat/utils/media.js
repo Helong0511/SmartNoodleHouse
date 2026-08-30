@@ -14,15 +14,27 @@ function apiOrigin() {
   return String(base).replace(/\/api\/v1\/?$/i, '')
 }
 
-/** 相对路径 /uploads/... → 完整 URL；已是 http(s) 则原样返回 */
-function resolveUrl(path) {
+/** 相对路径 /uploads/... → 完整 URL；已是 http(s) 则原样返回；version 用于破除小程序/Nginx 缓存 */
+function resolveUrl(path, version) {
   if (!path) return ''
   const s = String(path).trim()
   if (!s) return ''
-  if (/^https?:\/\//i.test(s)) return s
-  const origin = apiOrigin()
-  if (!origin) return s.startsWith('/') ? s : `/${s}`
-  return s.startsWith('/') ? `${origin}${s}` : `${origin}/${s}`
+  let url = s
+  if (!/^https?:\/\//i.test(s)) {
+    const origin = apiOrigin()
+    if (!origin) url = s.startsWith('/') ? s : `/${s}`
+    else url = s.startsWith('/') ? `${origin}${s}` : `${origin}/${s}`
+  }
+  const v = version != null && version !== '' ? String(version) : ''
+  if (v && !/[?&]v=/.test(url)) {
+    url += `${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(v)}`
+  }
+  return url
+}
+
+function imageVersion(source) {
+  if (!source || typeof source !== 'object') return ''
+  return source.updated_at || source.image_version || ''
 }
 
 const _localImageCache = {}
@@ -114,14 +126,15 @@ function layoutMetrics(sys) {
 
 /** 给商品列表项补 imageUrl / cover */
 function decorateProduct(p, metrics) {
+  const version = imageVersion(p)
   const raw = (p && (p.main_image || p.image_url)) || ''
-  const imageUrl = resolveUrl(raw)
-  const cover = (p && p.images && p.images[0] && p.images[0].url) || raw
+  const imageUrl = resolveUrl(raw, version)
+  const cover = raw
   return {
     ...p,
     description: (p && p.description) || '',
     imageUrl,
-    coverUrl: resolveUrl(cover),
+    coverUrl: resolveUrl(cover, version),
     thumbStyle: (metrics && metrics.thumbStyle) || ''
   }
 }
@@ -129,8 +142,9 @@ function decorateProduct(p, metrics) {
 function galleryUrls(product) {
   const list = []
   const seen = {}
+  const version = imageVersion(product)
   const push = (u) => {
-    const full = resolveUrl(u)
+    const full = resolveUrl(u, version)
     if (full && !seen[full]) {
       seen[full] = true
       list.push(full)
@@ -138,13 +152,17 @@ function galleryUrls(product) {
   }
   if (product) {
     push(product.main_image)
-    ;(product.images || []).forEach((img) => push(img.url || img.image_url))
+    ;(product.images || []).forEach((img) => {
+      if (img && img.type === 'MAIN') return
+      push(img.url || img.image_url)
+    })
   }
   return list
 }
 
 module.exports = {
   resolveUrl,
+  imageVersion,
   ensureLocalImage,
   hydrateImageUrls,
   hydrateUrlList,

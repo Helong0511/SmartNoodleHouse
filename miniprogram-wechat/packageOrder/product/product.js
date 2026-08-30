@@ -102,7 +102,7 @@ Page({
     const optionIds = cartUtil.collectOptionIds(p, this.data.selected, this.data.multi)
     const unitPrice = cartUtil.calcUnitPrice(p, this.data.selected, this.data.multi)
     const optionLabels = cartUtil.buildOptionLabels(p, this.data.selected, this.data.multi)
-    const imageUrl = media.resolveUrl(p.main_image)
+    const imageUrl = media.resolveUrl(p.main_image, media.imageVersion(p))
     const cart = cartUtil.mergeCartItem(auth.getCart(), {
       product_id: p.id,
       name: p.name,

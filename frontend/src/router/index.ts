@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getStaffToken } from '@/utils/staffAuth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -40,10 +41,14 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, _from, next) => {
-  const token =
-    localStorage.getItem('snh_staff_token') || localStorage.getItem('token')
   const publicPaths = ['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member']
   const isPublic = publicPaths.some((p) => to.path.startsWith(p))
+  // 进入登录页：清除会话，必须重新输入账号密码
+  if (to.path === '/login' && getStaffToken()) {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore().logout()
+  }
+  const token = getStaffToken()
   if (!isPublic && !token) {
     next('/login')
     return

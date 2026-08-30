@@ -49,7 +49,7 @@ Page({
   },
 
   onPullDownRefresh() {
-    this._menuCache = null
+    this._catsCache = null
     Promise.all([
       dineCtx.ensureDineContext({ force: true }).then((ctx) => this.applyDineContext(ctx)),
       this.loadPrefs(true),
@@ -61,7 +61,7 @@ Page({
     const ctx = await dineCtx.scanAndBindTable()
     if (ctx) {
       this.applyDineContext(ctx)
-      this._menuCache = null
+      this._catsCache = null
       this.loadMenu()
     }
   },
@@ -106,26 +106,28 @@ Page({
     const now = Date.now()
     this.setData({ loading: true })
     try {
-      if (
-        this._menuCache
-        && this._menuCache.key === cacheKey
-        && now - this._menuCache.at < MENU_CACHE_MS
-        && !this.data.keyword
-      ) {
-        const { cats, items, metrics } = this._menuCache
-        const categories = this.buildCategories(cats, items, metrics, '')
-        await this.applyCategories(categories, metrics)
-        return
-      }
       const metrics = media.layoutMetrics()
+      let catList = null
+      if (
+        this._catsCache
+        && this._catsCache.key === cacheKey
+        && now - this._catsCache.at < MENU_CACHE_MS
+      ) {
+        catList = this._catsCache.cats
+      }
       const [cats, products] = await Promise.all([
-        api.get('/categories', sid ? { store_id: sid } : {}, false),
+        catList ? Promise.resolve(catList) : api.get('/categories', sid ? { store_id: sid } : {}, false),
         api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
       ])
+      if (!catList) {
+        catList = normalizeList(cats)
+        this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
+      } else if (this._catsCache) {
+        this._catsCache.metrics = metrics
+      }
       const items = normalizeList(products)
-      const catList = normalizeList(cats)
+      this._lastProductItems = items
       const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
-      this._menuCache = { key: cacheKey, at: now, cats: catList, items, metrics }
       await this.applyCategories(categories, metrics)
     } catch (e) {
       wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
@@ -154,11 +156,12 @@ Page({
   onSearch(e) {
     const keyword = (e.detail && e.detail.value) || ''
     this.setData({ keyword })
-    if (!this._menuCache) {
+    if (!this._catsCache || !this._lastProductItems) {
       this.loadMenu()
       return
     }
-    const { cats, items, metrics } = this._menuCache
+    const { cats, metrics } = this._catsCache
+    const items = this._lastProductItems
     const rebuilt = this.buildCategories(cats, items, metrics, keyword)
     const activeCat = (rebuilt[0] && rebuilt[0].id) || null
     this.setData({

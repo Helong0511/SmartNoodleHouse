@@ -63,6 +63,7 @@ python scripts/init_admin.py
 | `sql/tools/004_fix_delivery_dining_type.sql` | 历史外卖订单 dining_type 修复（幂等） |
 | `sql/tools/005_backfill_member_level.sql` | 已注册顾客补挂普通会员等级（幂等） |
 | `sql/tools/006_customer_token_version.sql` | 已有库补齐 customers.token_version（幂等） |
+| `sql/tools/008_member_level_manage.sql` | 会员等级管理权限（幂等） |
 
 开发种子默认管理员: `admin` / `admin123`（生产请用 `init_admin.py` 设置强密码）
 
@@ -167,15 +168,315 @@ python -m compileall backend
 
 数据库脚本在 `sql/`，测试程序在 `tests/`。
 
-## 生产部署（非 Docker）
+## 生产部署硬件建议
+
+目标环境：**Ubuntu 22.04 LTS**，不使用 Docker。组件包括 Nginx、FastAPI、MySQL 8、Redis 7，可选 InsightFace 人脸 + 海康 RTSP 拉流。
+
+### 单店 + 4 路摄像头（推荐配置）
+
+4 路同时拉流 + 人脸识别，CPU 是主要瓶颈，**不建议 4核8G**。
+
+| 项目 | 规格 | 说明 |
+|------|------|------|
+| CPU | **8 核** | 4 路解码 + 识别 |
+| 内存 | **16 GB** | MySQL + Redis + Python + 模型 |
+| 系统盘 | 40～60 GB SSD | Ubuntu + 应用 |
+| 数据盘 | **200 GB SSD** | MySQL、日志、上传、模型 |
+| 公网带宽 | **10 Mbps 固定** | 小程序、外卖回调、HTTPS |
+| 内网 | 千兆交换机 | 摄像头与服务器同网段，RTSP 不走公网 |
+
+同机部署：Nginx + gunicorn（2～3 worker，`PROCESS_ROLE=leader` 仅 1 实例）+ MySQL + Redis。
+
+### 配置与 4 路摄像头
+
+| 配置 | 表现 | 结论 |
+|------|------|------|
+| 4C8G | 拉流勉强，识别易满载 | 不推荐 |
+| 4C16G | 降 `detect_fps` 到 2 可能勉强 | 预算极紧可考虑 |
+| **8C16G** | 4 路 @3fps 较稳 | **单店 4 路推荐** |
+| 8C16G + GPU | 延迟更低 | 单店 4 路通常不必 |
+
+### 参考价格（2026，人民币）
+
+**云主机（8核16G + 200G 盘 + 10M 带宽）**
+
+| 计费 | 约计 |
+|------|------|
+| 包年（含活动） | **5300～7400 元/年**（约 440～620 元/月） |
+| 按月（常规） | **610～810 元/月** |
+
+经济型实例更便宜但高负载可能卡顿；生产建议通用型 u1 / 计算型 c 系列。腾讯云、华为云同档价格接近。
+
+**店内物理机（一次投入）**
+
+| 项目 | 参考价 |
+|------|--------|
+| 8核16G + 512G NVMe 主机 | 3500～4500 元 |
+| 千兆 8 口交换机 | 150～300 元 |
+| UPS 600VA | 300～600 元 |
+| 企业宽带 100M | 约 100～200 元/月 |
+| 域名 | 约 50～80 元/年 |
+
+**首年合计约 6500～7500 元**（含宽带）；3 年以上长期运行通常比云主机更省。
+
+更完整命令见 `scripts/生产部署-ubuntu.txt`。
+
+---
+
+## 店内物理机部署
+
+适用于 **单店、4 路摄像头、服务器放店内** 的场景。
+
+### 架构
+
+```
+[店内局域网]
+  4×海康摄像头 ──RTSP──┐
+  厨房KDS / 收银电脑 ──┼── 千兆交换机
+                       │
+              [物理服务器 8C16G]
+                Ubuntu 22.04
+                Nginx :443
+                Python API :8000（本机）
+                MySQL + Redis
+                       │
+              [企业宽带 / 固定IP或DDNS]
+                       │
+         微信小程序 / 外卖平台回调 / 远程后台
+```
+
+要点：摄像头只走店内局域网；公网仅暴露 HTTPS（443）；全机只跑 **一个** `PROCESS_ROLE=leader` 实例。
+
+### 1. 网络（装机前）
+
+1. 服务器固定内网 IP（如 `192.168.1.10`），与摄像头同网段
+2. 路由器 **443 端口映射** → 服务器
+3. 域名解析到门店公网 IP（或 DDNS）；小程序必须 HTTPS
+4. 建议接 UPS
+
+### 2. 安装系统与依赖
+
+```bash
+sudo apt update && sudo apt upgrade -y
+
+sudo apt install -y git curl wget vim nginx certbot python3-certbot-nginx \
+  mysql-server redis-server build-essential python3.11 python3.11-venv python3-pip
+
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+### 3. 初始化 MySQL
+
+```bash
+sudo mysql_secure_installation
+
+sudo mysql -e "
+CREATE DATABASE smart_noodle_house CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'snh'@'127.0.0.1' IDENTIFIED BY '你的强密码';
+GRANT ALL ON smart_noodle_house.* TO 'snh'@'127.0.0.1';
+FLUSH PRIVILEGES;
+"
+
+sudo systemctl enable redis-server && sudo systemctl start redis-server
+```
+
+### 4. 部署代码
+
+```bash
+sudo mkdir -p /var/www/smart-noodle
+sudo chown $USER:$USER /var/www/smart-noodle
+cd /var/www/smart-noodle
+git clone <仓库地址> .
+
+cp .env.production.example .env
+nano .env
+```
+
+`.env` 必改项：
+
+```bash
+APP_ENV=production
+APP_DEBUG=false
+APP_HOST=127.0.0.1
+APP_PORT=8000
+DATABASE_URL=mysql+aiomysql://snh:密码@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4
+REDIS_URL=redis://127.0.0.1:6379/0
+JWT_SECRET=随机32位以上
+FACE_ENCRYPTION_KEY=随机32位以上
+ALLOW_PAYMENT_MOCK=false
+ALLOW_AUTH_MOCK=false
+ALLOW_DELIVERY_MOCK=false
+CORS_ORIGINS=https://你的域名.com
+H5_PUBLIC_BASE_URL=https://你的域名.com
+UPLOAD_DIR=/var/www/smart-noodle/uploads
+PROCESS_ROLE=leader
+ENABLE_RECOGNITION_WORKER=1
+# 微信/支付宝/外卖回调 URL 改为 https://你的域名.com/...
+```
+
+生成随机密钥：`python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
+
+### 5. 数据库
+
+```bash
+cd /var/www/smart-noodle
+mysql -u snh -p smart_noodle_house < sql/001_schema.sql
+mysql -u snh -p smart_noodle_house < sql/002_seed_prod.sql
+mysql -u snh -p smart_noodle_house < sql/tools/008_member_level_manage.sql
+
+export ADMIN_INITIAL_PASSWORD='超管强密码'
+python3 scripts/init_admin.py
+```
+
+### 6. 后端与前端
+
+```bash
+cd /var/www/smart-noodle/backend
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -U pip && pip install -r requirements.txt
+
+mkdir -p /var/www/smart-noodle/uploads /etc/smart-noodle/certs
+alembic upgrade head   # 若项目使用 Alembic
+
+cd /var/www/smart-noodle/frontend
+npm ci && VITE_API_BASE_URL=/api/v1 npm run build
+```
+
+### 7. Nginx + HTTPS
+
+```bash
+sudo cp /var/www/smart-noodle/deploy/nginx.conf /etc/nginx/sites-available/smart-noodle
+sudo nano /etc/nginx/sites-available/smart-noodle
+# 修改 server_name、root、uploads alias 路径
+
+sudo ln -sf /etc/nginx/sites-available/smart-noodle /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo certbot --nginx -d 你的域名.com
+sudo systemctl enable nginx && sudo systemctl reload nginx
+```
+
+### 8. systemd 开机自启
+
+创建 `/etc/systemd/system/smart-noodle.service`：
+
+```ini
+[Unit]
+Description=SmartNoodleHouse API
+After=network.target mysql.service redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/smart-noodle/backend
+EnvironmentFile=/var/www/smart-noodle/.env
+Environment=PYTHONPATH=/var/www/smart-noodle/backend:/var/www/smart-noodle
+ExecStart=/var/www/smart-noodle/backend/.venv/bin/gunicorn app.main:app \
+  -k uvicorn.workers.UvicornWorker \
+  -w 2 \
+  -b 127.0.0.1:8000 \
+  --timeout 120 \
+  --access-logfile - \
+  --error-logfile -
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo chown -R www-data:www-data /var/www/smart-noodle/uploads
+sudo chmod 640 /var/www/smart-noodle/.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now smart-noodle
+```
+
+### 9. 防火墙
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 443/tcp
+sudo ufw enable
+```
+
+MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
+
+### 10. 4 路摄像头
+
+1. 海康摄像头设固定内网 IP（如 `.101`～`.104`）
+2. 后台 → **摄像头** 添加 RTSP，示例：
+
+   `rtsp://admin:密码@192.168.1.101:554/Streaming/Channels/101`
+
+3. 每路 **detect_fps 建议 2～3**
+4. 测试拉流：`ffprobe -rtsp_transport tcp "rtsp://..."`
+5. 查看日志：`sudo journalctl -u smart-noodle -f`（应出现 `Restored 4 cameras`）
+
+### 11. 小程序与外卖
+
+| 项目 | 操作 |
+|------|------|
+| 微信/支付宝小程序 | `miniprogram-*/config/env.js` → `PROD_API_BASE=https://你的域名.com/api/v1` |
+| 公众平台 | 配置 request 合法域名 |
+| 美团/饿了么 | 回调 URL 填 `https://你的域名.com/api/v1/delivery/.../notify` |
+| 微信支付 | PEM 证书放 `/etc/smart-noodle/certs/`，`.env` 配置路径 |
+
+### 12. 日常运维
+
+```bash
+sudo systemctl status smart-noodle nginx mysql redis-server
+sudo journalctl -u smart-noodle -f
+
+# 更新发布
+cd /var/www/smart-noodle && git pull
+source backend/.venv/bin/activate && pip install -r backend/requirements.txt
+cd frontend && npm ci && VITE_API_BASE_URL=/api/v1 npm run build
+sudo systemctl restart smart-noodle
+
+# 每日备份（建议 crontab 凌晨 3 点）
+mysqldump -u snh -p smart_noodle_house | gzip > /backup/snh_$(date +%F).sql.gz
+```
+
+### 13. 常见问题
+
+| 现象 | 处理 |
+|------|------|
+| 摄像头 OFFLINE | 查 RTSP 账号、同网段；`ffprobe` 测连通 |
+| CPU 100% | 降低 `detect_fps`；确认仅 1 个 leader |
+| 小程序连不上 | HTTPS、合法域名、路由器 443 映射 |
+| 外卖回调失败 | 配置 `WEBHOOK_IP_ALLOWLIST`；Nginx 2s 内响应 |
+
+健康检查：
+
+```bash
+curl -s http://127.0.0.1:8000/health
+curl -sI https://你的域名.com/
+```
+
+---
+
+## 生产部署（云主机 / 简要）
+
+与店内物理机步骤相同，差异主要在：
+
+1. 云盘选 **200 GB ESSD**，带宽 **10 Mbps**
+2. 无需路由器端口映射，安全组放行 **443**
+3. 摄像头仍建议在店内局域网，RTSP 通过 **VPN/专线** 或 **店内物理机** 拉流（不建议 RTSP 走公网）
+
+通用步骤：
 
 1. 安装 MySQL / Redis，执行 `sql/001_schema.sql` 与 `sql/002_seed_prod.sql`，再运行 `python scripts/init_admin.py`
-2. 复制 `.env.example` 为 `.env`，设置 `APP_ENV=production`、`JWT_SECRET`、`WEBHOOK_REQUIRE_ALLOWLIST=true` 等
-3. `uvicorn` / `gunicorn` 跑后端（建议 systemd，`PROCESS_ROLE=leader` 仅一个实例）
+2. 复制 `.env.production.example` 为 `.env`，设置 `APP_ENV=production`、`JWT_SECRET`、`WEBHOOK_REQUIRE_ALLOWLIST=true` 等
+3. `gunicorn` 跑后端（systemd，`PROCESS_ROLE=leader` 仅一个实例）
 4. 前端构建：`VITE_API_BASE_URL=/api/v1 npm run build`，Nginx 托管 `frontend/dist`
-5. Nginx 反代 `/api` 到后端（参考 `deploy/nginx.conf`，改为 `127.0.0.1`）
-6. 小程序后台配置合法 request 域名（HTTPS），修改 `miniprogram-wechat/app.js` 中 `apiBase`
-7. 美团 / 饿了么配置回调域名与验签密钥；关闭生产环境 `_dev_simulate`
+5. Nginx 反代 `/api` 到后端（参考 `deploy/nginx.conf`）
+6. 小程序配置合法 request 域名（HTTPS）
+7. 美团 / 饿了么配置回调与验签；关闭 `_dev_simulate`
+
 
 ## 安全说明
 
