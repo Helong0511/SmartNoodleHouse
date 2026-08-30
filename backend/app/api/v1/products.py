@@ -41,6 +41,21 @@ async def _clear_main_product_images(db: DbSession, product_id: int) -> None:
         )
     )
 
+
+async def _set_main_product_image(db: DbSession, product: Product, url: str | None) -> None:
+    """更新主图并同步 product_images（仅保留一条 MAIN）。"""
+    await _clear_main_product_images(db, product.id)
+    product.main_image = url or None
+    if url:
+        db.add(
+            ProductImage(
+                product_id=product.id,
+                image_url=url,
+                image_type="MAIN",
+                sort_order=0,
+            )
+        )
+
 router = APIRouter(tags=["商品"])
 
 
@@ -483,10 +498,15 @@ async def update_product(
         if int(cat.store_id) != int(product.store_id):
             raise AppException(40001, "分类与商品不在同一门店")
 
+    old_main_image = product.main_image
     for k, v in payload.items():
+        if k == "main_image":
+            continue
         setattr(product, k, v)
-    if "main_image" in payload and not payload["main_image"]:
-        await _clear_main_product_images(db, product_id)
+    if "main_image" in payload:
+        new_main_image = payload["main_image"] or None
+        if new_main_image != old_main_image:
+            await _set_main_product_image(db, product, new_main_image)
     if data.option_group_ids is not None:
         await db.execute(delete(ProductOptionGroup).where(ProductOptionGroup.product_id == product_id))
         for idx, gid in enumerate(data.option_group_ids):
@@ -509,16 +529,7 @@ async def upload_product_image(
         return success(None, message="商品不存在", request=request)
     assert_store_access(user, product.store_id)
     url = await save_upload(file, subdir="products")
-    await _clear_main_product_images(db, product_id)
-    product.main_image = url
-    db.add(
-        ProductImage(
-            product_id=product.id,
-            image_url=url,
-            image_type="MAIN",
-            sort_order=0,
-        )
-    )
+    await _set_main_product_image(db, product, url)
     await db.flush()
     return success(
         {
