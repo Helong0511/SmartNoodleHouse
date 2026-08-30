@@ -63,8 +63,10 @@ async def apply_order_status(
 
     kind = (assert_kind or _infer_assert_kind(source)).upper()
     if kind == "STAFF" and target == "COMPLETED" and old in ("PAID", "CONFIRMED"):
+        raise AppException(40026, "请先点击「制作完成」，叫号屏提醒取餐后再出餐")
+    if kind == "STAFF" and target == "READY" and old in ("PAID", "CONFIRMED"):
         if not await order_all_no_cooking(db, order.id):
-            raise AppException(40026, "订单含需烹饪商品，请按「开始制作」流程操作")
+            raise AppException(40027, "订单含需烹饪商品，请按「开始制作」流程操作")
     if kind == "STAFF":
         assert_staff_transition(old, target)
     elif kind == "PAYMENT":
@@ -81,11 +83,6 @@ async def apply_order_status(
 
     if target == "COMPLETED" and old != "COMPLETED":
         order.completed_at = now_local()
-        if old in ("PAID", "CONFIRMED"):
-            try:
-                await notify_order_ready_subscribe(db, order)
-            except Exception:
-                logger.exception("直出餐订阅消息推送失败 order_id=%s", order.id)
     elif target in ("CANCELLED", "REFUNDED"):
         if old not in ("CANCELLED", "REFUNDED"):
             order.cancelled_at = order.cancelled_at or now_local()

@@ -210,9 +210,24 @@ async function save() {
     ElMessage.warning('请填写姓名和角色')
     return
   }
-  if (!form.id && (!form.username.trim() || !form.password)) {
-    ElMessage.warning('请填写用户名和密码')
-    return
+  if (!form.id) {
+    if (!form.username.trim() || !form.password) {
+      ElMessage.warning('请填写用户名和密码')
+      return
+    }
+    if (form.username.trim().length < 3) {
+      ElMessage.warning('用户名至少 3 个字符')
+      return
+    }
+    if (form.password.length < 6) {
+      ElMessage.warning('密码至少 6 位')
+      return
+    }
+    const role = roles.value.find((r) => r.id === form.role_id)
+    if (auth.isSuperAdmin && role?.code !== 'SUPER_ADMIN' && !form.store_id) {
+      ElMessage.warning('非超管账号必须选择门店')
+      return
+    }
   }
   saving.value = true
   try {

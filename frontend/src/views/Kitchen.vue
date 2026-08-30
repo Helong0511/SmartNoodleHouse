@@ -1,9 +1,14 @@
 <template>
-  <div class="kitchen" :class="{ fullscreen }">
+  <div class="kitchen" :class="{ fullscreen, standalone }">
     <header class="toolbar">
       <div class="left">
-        <h2>厨房 KDS</h2>
-        <span class="store-chip" :title="storeHint">{{ storeLabel }}</span>
+        <div class="head-brand">
+          <div class="store-name" :title="storeHint">{{ storeLabel }}</div>
+          <div class="head-sub">
+            <span class="kds-label">厨房 KDS</span>
+            <span class="clock">{{ clockText }}</span>
+          </div>
+        </div>
         <el-select
           v-if="isSuperAdmin"
           v-model="selectedStoreId"
@@ -20,7 +25,6 @@
           <i class="dot" />
           {{ connLabel }}
         </span>
-        <span class="clock">{{ clockText }}</span>
       </div>
       <div class="right">
         <el-radio-group v-model="filter" size="small" class="filters">
@@ -30,14 +34,21 @@
           <el-radio-button label="READY">待出餐 {{ counts.READY }}</el-radio-button>
           <el-radio-button label="DELIVERY">外卖 {{ counts.DELIVERY }}</el-radio-button>
           <el-radio-button label="DINE">堂食 {{ counts.DINE }}</el-radio-button>
+          <el-radio-button label="PACK">打包 {{ counts.PACK }}</el-radio-button>
         </el-radio-group>
-        <el-switch v-model="soundOn" inline-prompt active-text="音" inactive-text="静" />
+        <VoiceSwitch v-model="soundOn" />
+        <el-button size="small" type="warning" plain @click="testVoice">试听语音</el-button>
         <el-button size="small" @click="load(true)">刷新</el-button>
         <el-button size="small" type="primary" @click="toggleFullscreen">
           {{ fullscreen ? '退出全屏' : '全屏' }}
         </el-button>
       </div>
     </header>
+
+    <div v-if="soundOn && !voiceUnlocked" class="voice-unlock" @click.stop="enableVoice">
+      点击此处或点击屏幕任意位置，启用厨房语音提示
+      <span v-if="voiceSessionHint" class="voice-hint-sub">（本页需点击一次，浏览器才允许自动播报）</span>
+    </div>
 
     <div v-if="!filtered.length" class="empty">当前无活跃订单</div>
 
@@ -46,24 +57,30 @@
         v-for="o in filtered"
         :key="o.id"
         class="order-card"
-        :class="[o.status, ageClass(o), { delivery: o.is_delivery, pack: o.need_pack || o.dining_type === 'TAKEAWAY' }]"
+        :class="[
+          o.status,
+          ageClass(o),
+          {
+            delivery: o.is_delivery,
+            'dine-in': isDineInOrder(o),
+            'pack-order': isPackOrder(o) && !o.is_delivery,
+          },
+        ]"
       >
+        <div v-if="o.is_delivery" class="mode-banner delivery">{{ deliveryBanner(o) }}</div>
+        <div v-else-if="isPackOrder(o)" class="mode-banner pack">打包出餐</div>
+        <div v-else-if="isDineInOrder(o)" class="mode-banner dine">堂食</div>
+
         <div class="order-header">
           <div class="title-block">
-            <div class="table">
-              <template v-if="o.is_delivery">
-                {{ o.channel_label }} #{{ o.delivery?.day_seq || '-' }}
-              </template>
-              <template v-else>
-                桌 {{ o.table_name || o.table_no || o.table_id || '-' }}
-              </template>
-            </div>
+            <div class="table">{{ orderTitle(o) }}</div>
             <div class="badges">
               <el-tag v-if="showStoreTag(o)" size="small" type="success" effect="plain">{{ o.store_name || `店#${o.store_id}` }}</el-tag>
               <el-tag v-if="o.is_member && o.member_level_name" size="small" type="success" effect="plain">{{ o.member_level_name }}</el-tag>
-              <el-tag size="small" :type="o.is_delivery ? 'danger' : 'info'">{{ o.channel_label || '堂食' }}</el-tag>
-              <el-tag v-if="o.need_pack || o.dining_type === 'TAKEAWAY'" size="small" type="warning">打包</el-tag>
-              <el-tag v-if="o.all_no_cooking" size="small" type="warning" effect="plain">现成品·直出</el-tag>
+              <el-tag v-if="o.is_delivery" size="small" type="danger" effect="dark" class="mode-tag delivery">{{ o.channel_label || '外卖' }}</el-tag>
+              <el-tag v-else-if="isPackOrder(o)" size="small" type="warning" effect="dark" class="mode-tag pack">打包</el-tag>
+              <el-tag v-else size="small" type="primary" effect="dark" class="mode-tag dine">堂食</el-tag>
+              <el-tag v-if="o.all_no_cooking" size="small" type="warning" effect="plain">现成品·免烹饪</el-tag>
               <el-tag size="small" effect="dark" :type="statusTag(o.status)">{{ statusLabel(o.status) }}</el-tag>
             </div>
           </div>
@@ -124,20 +141,43 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
 import { KDS_ACTIONS, ORDER_STATUS, orderStatusTagType } from '@/utils/labels'
+import {
+  announceKitchenNew,
+  announceKitchenUrge,
+  bindAutoVoiceUnlock,
+  hasVoiceSessionHint,
+  isVoiceUnlocked,
+  readVoiceSoundOn,
+  stopAllVoice,
+  unlockVoice,
+  VOICE_SOUND_KEYS,
+  writeVoiceSoundOn,
+} from '@/utils/voiceAlert'
 
 type Conn = 'connecting' | 'online' | 'offline' | 'polling'
 
+const route = useRoute()
+const standalone = computed(() => route.path === '/kds' || !!route.meta?.standalone)
 const auth = useAuthStore()
 const isSuperAdmin = computed(() => auth.isSuperAdmin)
 const orders = ref<any[]>([])
 const filter = ref('ALL')
-const soundOn = ref(true)
+const soundOn = ref(readVoiceSoundOn(VOICE_SOUND_KEYS.kds, true))
+
+watch(soundOn, (on) => {
+  writeVoiceSoundOn(VOICE_SOUND_KEYS.kds, on)
+  if (!on) stopAllVoice()
+})
+const voiceUnlocked = ref(isVoiceUnlocked())
+const voiceSessionHint = ref(hasVoiceSessionHint())
 const fullscreen = ref(false)
 const connStatus = ref<Conn>('connecting')
 const clockText = ref('')
@@ -175,7 +215,42 @@ let ageTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
 let knownIds = new Set<number>()
-let audioCtx: AudioContext | null = null
+/** 首次列表快照完成后才做 diff，避免与 WS 触发的并发 load 互相覆盖导致漏报 */
+let loadSnapshotReady = false
+let loadChain: Promise<void> = Promise.resolve()
+const recentlyAlertedIds = new Set<number>()
+
+const KITCHEN_NEW_EVENTS = new Set(['ORDER_PAID', 'ORDER_NEW'])
+
+async function enableVoice() {
+  voiceUnlocked.value = await unlockVoice('厨房语音已开启')
+  if (voiceUnlocked.value) {
+    voiceSessionHint.value = false
+    ElMessage.success('语音提示已开启')
+  } else {
+    ElMessage.warning('无法播放，请检查浏览器与系统音量')
+  }
+}
+
+async function testVoice() {
+  if (!soundOn.value) {
+    ElMessage.info('请先打开右上角「语音」开关')
+    return
+  }
+  voiceUnlocked.value = await unlockVoice('厨房语音已开启')
+  if (!voiceUnlocked.value) {
+    ElMessage.warning('无法播放，请检查浏览器与系统音量')
+    return
+  }
+  setTimeout(() => {
+    announceKitchenNew({ table_name: '8号桌', table_id: 8 }, true)
+  }, 700)
+}
+
+async function ensureVoiceFromGesture() {
+  if (!soundOn.value || voiceUnlocked.value) return
+  voiceUnlocked.value = await unlockVoice()
+}
 
 const connLabel = computed(() => {
   const m: Record<Conn, string> = {
@@ -194,7 +269,8 @@ const counts = computed(() => {
     COOKING: list.filter((o) => o.status === 'PREPARING' || o.status === 'COOKING').length,
     READY: list.filter((o) => o.status === 'READY').length,
     DELIVERY: list.filter((o) => o.is_delivery).length,
-    DINE: list.filter((o) => !o.is_delivery).length,
+    DINE: list.filter((o) => isDineInOrder(o)).length,
+    PACK: list.filter((o) => isPackOrder(o) && !o.is_delivery).length,
   }
 })
 
@@ -216,7 +292,9 @@ const filtered = computed(() => {
     case 'DELIVERY':
       return list.filter((o) => o.is_delivery)
     case 'DINE':
-      return list.filter((o) => !o.is_delivery)
+      return list.filter((o) => isDineInOrder(o))
+    case 'PACK':
+      return list.filter((o) => isPackOrder(o) && !o.is_delivery)
     default:
       return list
   }
@@ -225,10 +303,44 @@ const filtered = computed(() => {
 function statusLabel(s: string) {
   return ORDER_STATUS[s] || s
 }
+
+function isPackOrder(o: any) {
+  return !!(o?.need_pack || String(o?.dining_type || '').toUpperCase() === 'TAKEAWAY')
+}
+
+function isDineInOrder(o: any) {
+  return !o?.is_delivery && !isPackOrder(o)
+}
+
+function orderTitle(o: any) {
+  if (o?.is_delivery) {
+    const label = o.channel_label || deliveryPlatformLabel(o.channel)
+    return `${label} #${o.delivery?.day_seq || '-'}`
+  }
+  const table = o.table_name || o.table_no || (o.table_id ? `${o.table_id}号桌` : '')
+  if (isPackOrder(o)) {
+    return table ? `打包 · ${table}` : '打包取餐'
+  }
+  return `桌 ${table || '-'}`
+}
+
+function deliveryPlatformLabel(channel?: string) {
+  const c = String(channel || '').toUpperCase()
+  if (c === 'MEITUAN') return '美团外卖'
+  if (c === 'ELEME') return '饿了么'
+  return '外卖'
+}
+
+function deliveryBanner(o: any) {
+  const label = o.channel_label || deliveryPlatformLabel(o.channel)
+  const seq = o.delivery?.day_seq
+  return seq ? `${label} · 序号 ${seq}` : `${label} · 请制作`
+}
+
 function statusTag(s: string) {
   return orderStatusTagType(s)
 }
-const KDS_MAIN_BTN_LABELS = new Set(['开始制作', '进入烹饪', '制作完成', '出餐', '直接出餐'])
+const KDS_MAIN_BTN_LABELS = new Set(['开始制作', '进入烹饪', '制作完成', '出餐'])
 
 function isMainKdsBtn(label: string) {
   return KDS_MAIN_BTN_LABELS.has(label)
@@ -237,7 +349,7 @@ function isMainKdsBtn(label: string) {
 function actionsForOrder(order: any) {
   const status = order?.status
   if (order?.all_no_cooking && (status === 'PAID' || status === 'CONFIRMED')) {
-    return [{ status: 'COMPLETED', label: '直接出餐', type: 'success' }]
+    return [{ status: 'READY', label: '制作完成', type: 'success' }]
   }
   return KDS_ACTIONS[status] || []
 }
@@ -304,27 +416,67 @@ function ageClass(o: any) {
   return 'age-ok'
 }
 
-function beep(kind: 'new' | 'urge' = 'new') {
+function alertNewOrder(order: any) {
+  if (!soundOn.value) return false
+  return announceKitchenNew(order, true)
+}
+
+/** 仅在实际解锁后去重，避免未解锁时 WS 抢先占位导致 load 也不再播报 */
+function alertNewOrderOnce(order: any) {
   if (!soundOn.value) return
-  try {
-    if (!audioCtx) audioCtx = new AudioContext()
-    const ctx = audioCtx
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.frequency.value = kind === 'urge' ? 880 : 660
-    gain.gain.value = 0.08
-    osc.start()
-    setTimeout(() => {
-      osc.stop()
-    }, kind === 'urge' ? 280 : 160)
-    if (kind === 'urge') {
-      setTimeout(() => beep('new'), 320)
-    }
-  } catch {
-    /* ignore */
+  const id = Number(order?.order_id ?? order?.id)
+  if (id && recentlyAlertedIds.has(id)) return
+  const spoke = alertNewOrder(order)
+  if (!spoke && !isVoiceUnlocked()) return
+  if (id) {
+    recentlyAlertedIds.add(id)
+    setTimeout(() => recentlyAlertedIds.delete(id), 60_000)
   }
+}
+
+function alertUrge() {
+  if (!soundOn.value) return false
+  return announceKitchenUrge(true)
+}
+
+function alertUrgeOnce() {
+  if (!soundOn.value) return
+  if (!isVoiceUnlocked()) {
+    announceKitchenUrge(true)
+    return
+  }
+  alertUrge()
+}
+
+function tryAlertNewOrders(prevIds: Set<number> | null, data: any[]) {
+  if (!prevIds || !soundOn.value) return
+  for (const o of data) {
+    const isNew = !prevIds.has(o.id)
+    const needAlert = isNew && ['PAID', 'CONFIRMED', 'PREPARING'].includes(o.status)
+    if (needAlert) {
+      alertNewOrderOnce(o)
+      return
+    }
+    if ((o.delivery?.urge_count || 0) > 0) {
+      const prev = orders.value.find((x) => x.id === o.id)
+      if (!prev || (prev.delivery?.urge_count || 0) < o.delivery.urge_count) {
+        alertUrgeOnce()
+      }
+    }
+  }
+}
+
+function tryAlertFromWsEvent(event: string, data: Record<string, any>, beforeIds: Set<number>) {
+  if (!soundOn.value) return
+  if (event === 'ORDER_URGE') {
+    alertUrgeOnce()
+    return
+  }
+  if (!KITCHEN_NEW_EVENTS.has(event)) return
+  const oid = Number(data.order_id)
+  if (!oid || beforeIds.has(oid)) return
+  const full = orders.value.find((o) => o.id === oid)
+  alertNewOrderOnce(full || data)
 }
 
 async function loadStores() {
@@ -350,24 +502,21 @@ function kitchenParams() {
 }
 
 async function load(manual = false) {
+  loadChain = loadChain.then(() => loadOnce(manual)).catch(() => loadOnce(manual))
+  await loadChain
+}
+
+async function loadOnce(manual = false) {
+  if (manual && soundOn.value && !voiceUnlocked.value) {
+    voiceUnlocked.value = await unlockVoice('厨房语音已开启')
+  }
   try {
     const data = (await api.get('/orders/kitchen/active', { params: kitchenParams() })).data || []
     const nextIds = new Set<number>(data.map((o: any) => o.id))
-    if (knownIds.size) {
-      for (const o of data) {
-        if (!knownIds.has(o.id) && (o.status === 'PAID' || o.status === 'CONFIRMED')) {
-          beep('new')
-          break
-        }
-        if ((o.delivery?.urge_count || 0) > 0) {
-          const prev = orders.value.find((x) => x.id === o.id)
-          if (!prev || (prev.delivery?.urge_count || 0) < o.delivery.urge_count) {
-            beep('urge')
-          }
-        }
-      }
-    }
+    const prevIds = loadSnapshotReady ? new Set(knownIds) : null
+    tryAlertNewOrders(prevIds, data)
     knownIds = nextIds
+    loadSnapshotReady = true
     orders.value = data
     if (manual) ElMessage.success('已刷新')
   } catch (e: any) {
@@ -377,11 +526,14 @@ async function load(manual = false) {
 
 function onStoreChange() {
   knownIds = new Set()
+  loadSnapshotReady = false
+  recentlyAlertedIds.clear()
   load(true)
   connectWs()
 }
 
 async function updateStatus(id: number, status: string) {
+  await ensureVoiceFromGesture()
   busyId.value = id
   try {
     await api.patch(`/orders/${id}/status`, { status })
@@ -433,16 +585,19 @@ function connectWs() {
     connStatus.value = 'online'
     stopPoll()
   }
-  ws.onmessage = (ev) => {
+  ws.onmessage = async (ev) => {
+    let event = ''
+    let data: Record<string, any> = {}
     try {
       const msg = JSON.parse(ev.data || '{}')
-      const event = msg.event || ''
-      if (event === 'ORDER_URGE') beep('urge')
-      else if (event === 'ORDER_PAID' || event === 'ORDER_CREATED' || event === 'ORDER_NEW') beep('new')
+      event = String(msg.event || '')
+      data = msg.data || {}
     } catch {
-      /* */
+      /* ignore malformed ws payload */
     }
-    load()
+    const beforeIds = new Set(knownIds)
+    await load()
+    tryAlertFromWsEvent(event, data, beforeIds)
   }
   ws.onerror = () => {
     connStatus.value = 'offline'
@@ -455,6 +610,11 @@ function connectWs() {
 }
 
 function toggleFullscreen() {
+  if (soundOn.value && !voiceUnlocked.value) {
+    unlockVoice('厨房语音已开启').then((ok) => {
+      voiceUnlocked.value = ok
+    })
+  }
   const el = document.documentElement
   if (!document.fullscreenElement) {
     el.requestFullscreen?.().then(() => {
@@ -481,9 +641,20 @@ function tickClock() {
   nowTick.value = d.getTime()
 }
 
+let unbindVoice: (() => void) | null = null
+
 onMounted(async () => {
+  if (standalone.value) document.title = '厨房 KDS'
+  voiceUnlocked.value = isVoiceUnlocked()
+  unbindVoice = bindAutoVoiceUnlock((ok) => {
+    if (ok) {
+      voiceUnlocked.value = true
+      voiceSessionHint.value = false
+    }
+  })
+
   await loadStores()
-  load()
+  await load()
   connectWs()
   tickClock()
   clockTimer = setInterval(tickClock, 1000)
@@ -494,6 +665,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unbindVoice?.()
   ws?.close()
   stopPoll()
   if (reconnectTimer) clearTimeout(reconnectTimer)
@@ -509,6 +681,9 @@ onUnmounted(() => {
   background: #0f1220;
   min-height: calc(100vh - 56px);
   color: #eef2ff;
+}
+.kitchen.standalone {
+  min-height: 100vh;
 }
 .kitchen.fullscreen {
   position: fixed;
@@ -532,16 +707,43 @@ onUnmounted(() => {
   backdrop-filter: blur(6px);
 }
 .left, .right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.store-chip {
-  font-size: 13px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: rgba(64, 158, 255, 0.18);
-  color: #93c5fd;
-  border: 1px solid rgba(147, 197, 253, 0.35);
+.head-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
-.clock { color: #9aa4c7; font-variant-numeric: tabular-nums; font-size: 14px; }
+.store-name {
+  font-size: clamp(22px, 3.2vw, 32px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.5px;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(420px, 42vw);
+}
+.head-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.kds-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.clock {
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(20px, 2.6vw, 28px);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
 
 .conn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -567,6 +769,35 @@ h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
   margin-top: 80px; text-align: center; color: #64748b; font-size: 18px;
 }
 
+.voice-unlock {
+  margin: 8px 0 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.22);
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  color: #fde68a;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  position: sticky;
+  top: 72px;
+  z-index: 6;
+  animation: voice-pulse 2s ease-in-out infinite;
+}
+.voice-unlock:hover { background: rgba(245, 158, 11, 0.32); }
+.voice-hint-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+}
+
 .orders-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -575,10 +806,12 @@ h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
 }
 
 .order-card {
+  position: relative;
   background: #16213e;
   border: 1px solid #243056;
   color: #eef2ff;
   border-radius: 12px;
+  overflow: hidden;
   --el-card-bg-color: #16213e;
   --el-card-border-color: #243056;
 }
@@ -587,12 +820,87 @@ h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
 .order-card.PREPARING { border-left: 4px solid #409eff; }
 .order-card.COOKING { border-left: 4px solid #a78bfa; }
 .order-card.READY { border-left: 4px solid #67c23a; }
-.order-card.delivery { background: #1a2740; }
-.order-card.pack { box-shadow: inset 0 0 0 1px rgba(230, 162, 60, 0.35); }
+.order-card.delivery {
+  background: linear-gradient(160deg, #2a1020 0%, #1a1528 55%, #141828 100%);
+  border: 2px solid #e11d48;
+  box-shadow:
+    0 0 0 1px rgba(244, 63, 94, 0.4),
+    inset 0 0 28px rgba(225, 29, 72, 0.1);
+  animation: delivery-glow 2.6s ease-in-out infinite;
+}
+.order-card.delivery.PAID,
+.order-card.delivery.CONFIRMED { border-left-width: 6px; border-left-color: #fb7185; }
+.order-card.delivery .table {
+  color: #fda4af;
+  text-shadow: 0 0 14px rgba(251, 113, 133, 0.35);
+}
+.order-card.delivery.age-critical {
+  animation: delivery-glow 2.6s ease-in-out infinite, pulse 1.6s ease-in-out infinite;
+}
+.order-card.dine-in {
+  background: linear-gradient(160deg, #121c33 0%, #16213e 100%);
+  border-color: #2d4a6f;
+  box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.18);
+}
+.order-card.dine-in .table { color: #bfdbfe; }
+.order-card.pack-order {
+  background: linear-gradient(160deg, #2a1808 0%, #221a12 55%, #1a1520 100%);
+  border: 2px solid #f59e0b;
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 11, 0.45),
+    inset 0 0 28px rgba(245, 158, 11, 0.1);
+  animation: pack-glow 2.4s ease-in-out infinite;
+}
+.order-card.pack-order.PAID,
+.order-card.pack-order.CONFIRMED { border-left-width: 6px; border-left-color: #fb923c; }
+.order-card.pack-order .table {
+  color: #fde68a;
+  text-shadow: 0 0 14px rgba(251, 191, 36, 0.35);
+}
 .order-card.age-warn { outline: 1px solid rgba(245, 158, 11, 0.55); }
 .order-card.age-critical {
   outline: 2px solid rgba(239, 68, 68, 0.7);
   animation: pulse 1.6s ease-in-out infinite;
+}
+.order-card.pack-order.age-critical {
+  animation: pack-glow 2.4s ease-in-out infinite, pulse 1.6s ease-in-out infinite;
+}
+
+.mode-banner {
+  margin: -14px -14px 10px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.mode-banner.dine {
+  background: rgba(59, 130, 246, 0.22);
+  color: #93c5fd;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.35);
+}
+.mode-banner.delivery {
+  background: linear-gradient(90deg, #be123c, #e11d48);
+  color: #fff1f2;
+  border-bottom: 1px solid rgba(251, 113, 133, 0.55);
+}
+.mode-banner.pack {
+  background: linear-gradient(90deg, #ea580c, #f59e0b);
+  color: #1a1208;
+  border-bottom: 1px solid rgba(251, 191, 36, 0.6);
+}
+.mode-tag.dine { font-weight: 700; }
+.mode-tag.delivery { font-weight: 800; }
+.mode-tag.pack { font-weight: 800; }
+
+@keyframes delivery-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.4), inset 0 0 28px rgba(225, 29, 72, 0.08); }
+  50% { box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.5), inset 0 0 36px rgba(225, 29, 72, 0.14); }
+}
+
+@keyframes pack-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), inset 0 0 28px rgba(245, 158, 11, 0.08); }
+  50% { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55), inset 0 0 36px rgba(245, 158, 11, 0.16); }
 }
 
 @keyframes pulse {
@@ -613,7 +921,16 @@ h2 { margin: 0; font-size: 22px; letter-spacing: 1px; }
 .wait.age-critical { color: #f87171; }
 .ono { font-size: 11px; color: #94a3b8; margin-top: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 
-.delivery-info { font-size: 13px; color: #f5a623; margin-bottom: 8px; line-height: 1.45; }
+.delivery-info {
+  font-size: 13px;
+  color: #fecdd3;
+  background: rgba(190, 18, 60, 0.18);
+  border: 1px solid rgba(251, 113, 133, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
 .remark {
   background: #2a1f14; color: #fdba74; padding: 6px 8px; border-radius: 6px;
   font-size: 13px; margin-bottom: 8px;

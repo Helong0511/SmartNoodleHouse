@@ -6,9 +6,9 @@ from app.core.exceptions import AppException
 # 后台/厨房可手动推进的状态迁移（不含 PAID / REFUNDED）
 STAFF_TRANSITIONS: dict[str, set[str]] = {
     "PENDING_PAYMENT": {"CANCELLED"},
-    # 厨房可一键：已支付 → 开始制作；也可先确认
-    "PAID": {"CONFIRMED", "PREPARING", "COMPLETED", "CANCELLED"},
-    "CONFIRMED": {"PREPARING", "COOKING", "COMPLETED", "CANCELLED"},
+    # 免烹饪单：PAID/CONFIRMED → READY（制作完成）；出餐必须 READY → COMPLETED
+    "PAID": {"CONFIRMED", "PREPARING", "READY", "CANCELLED"},
+    "CONFIRMED": {"PREPARING", "COOKING", "READY", "CANCELLED"},
     "PREPARING": {"COOKING", "READY", "CANCELLED"},
     "COOKING": {"READY", "CANCELLED"},
     "READY": {"COMPLETED", "CANCELLED"},

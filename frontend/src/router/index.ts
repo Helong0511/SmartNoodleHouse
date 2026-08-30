@@ -38,6 +38,7 @@ const router = createRouter({
     { path: '/order/history', component: () => import('@/views/mobile/OrderHistory.vue') },
     { path: '/member', component: () => import('@/views/mobile/MemberCenter.vue') },
     { path: '/display', component: () => import('@/views/CustomerDisplay.vue'), meta: { title: '取餐叫号' } },
+    { path: '/kds', component: () => import('@/views/Kitchen.vue'), meta: { title: '厨房 KDS', kitchen: true, standalone: true } },
   ]
 })
 

@@ -63,6 +63,13 @@ async def _get_role(db, role_id: int) -> Role:
     return role
 
 
+async def _load_user_with_role(db, user_id: int) -> User:
+    u = (
+        await db.execute(select(User).options(selectinload(User.role)).where(User.id == user_id))
+    ).scalar_one()
+    return u
+
+
 def _assert_can_assign_role(actor: User, role: Role) -> None:
     if actor.role.code == "SUPER_ADMIN":
         return
@@ -166,8 +173,13 @@ async def create_user(data: UserCreate, request: Request, db: DbSession, user: C
     )
     db.add(u)
     await db.flush()
-    await db.refresh(u, attribute_names=["role"])
-    return success(_ser(u, {sid: (await db.get(Store, sid)).name} if sid else {}), request=request)
+    u = await _load_user_with_role(db, u.id)
+    store_names: dict[int, str] = {}
+    if sid:
+        store = await db.get(Store, sid)
+        if store:
+            store_names[sid] = store.name
+    return success(_ser(u, store_names), request=request)
 
 
 @router.put("/{user_id}", dependencies=[require_permission("user:manage")])
@@ -218,7 +230,7 @@ async def update_user(
         target.store_id = int(data.store_id)
 
     await db.flush()
-    await db.refresh(target, attribute_names=["role"])
+    target = await _load_user_with_role(db, target.id)
     store_names = {}
     if target.store_id:
         s = await db.get(Store, target.store_id)

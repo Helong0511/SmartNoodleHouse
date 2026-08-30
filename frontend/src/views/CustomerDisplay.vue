@@ -8,6 +8,8 @@
       <div class="meta">
         <span class="conn" :class="connStatus">{{ connLabel }}</span>
         <span class="clock">{{ clockText }}</span>
+        <VoiceSwitch v-model="soundOn" />
+        <el-button v-if="storeId" size="small" type="warning" plain @click="testVoice">试听语音</el-button>
         <el-button v-if="storeId" size="small" type="primary" plain @click="toggleFullscreen">
           {{ fullscreen ? '退出全屏' : '全屏' }}
         </el-button>
@@ -21,7 +23,11 @@
       <p v-if="needToken" class="hint">生产环境还需 <code>&amp;token=您的叫号屏令牌</code></p>
     </div>
 
-    <div v-else class="board">
+    <div v-if="storeId && soundOn && !voiceUnlocked" class="voice-unlock" @click.stop="enableVoice">
+      点击此处或点击屏幕任意位置，启用取餐语音播报
+    </div>
+
+    <div v-if="storeId" class="board">
       <section class="panel preparing">
         <div class="panel-head">
           <h2>制作中</h2>
@@ -45,7 +51,7 @@
         <p class="ready-tip">忙时可自行到取餐台领取，无需等待叫号</p>
         <div v-if="!ready.length" class="empty">请留意此区域</div>
         <ul v-else class="ticket-list ready-list">
-          <li v-for="item in ready" :key="item.id" class="ticket ready-ticket">
+          <li v-for="item in ready" :key="item.id" class="ticket ready-ticket" :class="{ overdue: isReadyOverdue(item.id) }">
             <span class="label">{{ item.pickup_label }}</span>
             <span class="sub">{{ item.pickup_sub }}</span>
             <span class="state pulse">请取餐</span>
@@ -62,10 +68,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import { ElMessage } from 'element-plus'
+import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openPublicWebSocket } from '@/utils/publicWs'
+import {
+  announcePickupReady,
+  bindAutoVoiceUnlock,
+  isVoiceUnlocked,
+  readVoiceSoundOn,
+  stopAllVoice,
+  unlockVoice,
+  VOICE_SOUND_KEYS,
+  writeVoiceSoundOn,
+} from '@/utils/voiceAlert'
 
 type Conn = 'connecting' | 'online' | 'offline' | 'polling'
 type DisplayItem = {
@@ -75,6 +93,13 @@ type DisplayItem = {
   pickup_code: string
   status_label: string
 }
+
+/** 首次进入请取餐后的重复播报间隔（毫秒）：2 分 → 3 分 → 5 分 → 5 分 → 10 分 */
+const REMIND_INTERVALS_MS = [120_000, 180_000, 300_000, 300_000, 600_000]
+const MAX_REMIND_PER_ORDER = 6
+const REMIND_TICK_MS = 30_000
+/** 超过此时长仍待取餐，屏幕条目高亮（视觉提醒） */
+const OVERDUE_READY_MS = 5 * 60_000
 
 const route = useRoute()
 const storeId = computed(() => {
@@ -94,14 +119,47 @@ const connStatus = ref<Conn>('connecting')
 const clockText = ref('')
 const fullscreen = ref(false)
 const needToken = ref(false)
+const soundOn = ref(readVoiceSoundOn(VOICE_SOUND_KEYS.display, true))
+
+watch(soundOn, (on) => {
+  writeVoiceSoundOn(VOICE_SOUND_KEYS.display, on)
+  if (!on) stopAllVoice()
+})
+const voiceUnlocked = ref(isVoiceUnlocked())
 
 let ws: WebSocket | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
-let knownReadyIds = new Set<number>()
-let audioCtx: AudioContext | null = null
+let displaySnapshotReady = false
+/** 待取餐语音：count=已播次数，lastAt=上次播报时间，firstAt=首次进入请取餐区 */
+const readyVoiceTrack = new Map<number, { count: number; lastAt: number; firstAt: number }>()
+let remindTimer: ReturnType<typeof setInterval> | null = null
+
+async function enableVoice() {
+  voiceUnlocked.value = await unlockVoice('取餐语音已开启')
+  if (voiceUnlocked.value) {
+    ElMessage.success('取餐语音已开启')
+  } else {
+    ElMessage.warning('无法播放，请检查浏览器与系统音量')
+  }
+}
+
+async function testVoice() {
+  if (!soundOn.value) {
+    ElMessage.info('请先打开「语音提示」开关')
+    return
+  }
+  voiceUnlocked.value = await unlockVoice('取餐语音已开启')
+  if (!voiceUnlocked.value) {
+    ElMessage.warning('无法播放，请检查浏览器与系统音量')
+    return
+  }
+  setTimeout(() => {
+    announcePickupReady('8号桌', true)
+  }, 700)
+}
 
 const connLabel = computed(() => {
   const m: Record<Conn, string> = {
@@ -132,20 +190,96 @@ function displayParams() {
   return params
 }
 
-function beepReady() {
+function syncReadyTrack(items: DisplayItem[]) {
+  const ids = new Set(items.map((x) => x.id))
+  for (const id of readyVoiceTrack.keys()) {
+    if (!ids.has(id)) readyVoiceTrack.delete(id)
+  }
+  const now = Date.now()
+  for (const item of items) {
+    if (!readyVoiceTrack.has(item.id)) {
+      readyVoiceTrack.set(item.id, { count: 0, lastAt: 0, firstAt: now })
+    }
+  }
+}
+
+function isReadyOverdue(id: number) {
+  const track = readyVoiceTrack.get(id)
+  if (!track) return false
+  return Date.now() - track.firstAt >= OVERDUE_READY_MS
+}
+
+function announceReadyItem(item: DisplayItem) {
+  if (!soundOn.value || !isVoiceUnlocked()) return false
+  announcePickupReady(item.pickup_label, true)
+  const now = Date.now()
+  const track = readyVoiceTrack.get(item.id) || { count: 0, lastAt: 0, firstAt: now }
+  track.count += 1
+  track.lastAt = now
+  if (!track.firstAt) track.firstAt = now
+  readyVoiceTrack.set(item.id, track)
+  return true
+}
+
+/** 新进入请取餐的单：首次播报；久等未取：按间隔重复播报（每次只播一条，避免叠音） */
+function processReadyVoice(items: DisplayItem[], allowNewAlert: boolean) {
+  if (!soundOn.value) return
+  syncReadyTrack(items)
+  const now = Date.now()
+
+  if (allowNewAlert) {
+    for (const item of items) {
+      const track = readyVoiceTrack.get(item.id)!
+      if (track.count === 0) {
+        announceReadyItem(item)
+        return
+      }
+    }
+  } else {
+    // 首屏加载：已有待取餐单只标记，不播报（避免打开/刷新叫号屏时连播）
+    for (const item of items) {
+      const track = readyVoiceTrack.get(item.id)!
+      if (track.count === 0) {
+        track.count = 1
+        track.lastAt = now
+      }
+    }
+  }
+
+  let pick: DisplayItem | null = null
+  let pickElapsed = 0
+  for (const item of items) {
+    const track = readyVoiceTrack.get(item.id)!
+    if (track.count >= MAX_REMIND_PER_ORDER || track.count < 1) continue
+    const interval = REMIND_INTERVALS_MS[Math.min(track.count - 1, REMIND_INTERVALS_MS.length - 1)]
+    const elapsed = now - track.lastAt
+    if (elapsed >= interval && elapsed > pickElapsed) {
+      pick = item
+      pickElapsed = elapsed
+    }
+  }
+  if (pick) announceReadyItem(pick)
+}
+
+function tickReadyRemind() {
+  if (!storeId.value || !ready.value.length) return
+  processReadyVoice(ready.value, false)
+}
+
+async function load() {
+  if (!storeId.value) return
   try {
-    if (!audioCtx) audioCtx = new AudioContext()
-    const ctx = audioCtx
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.frequency.value = 784
-    gain.gain.value = 0.12
-    osc.start()
-    setTimeout(() => osc.stop(), 220)
-  } catch {
-    /* ignore */
+    const res = await publicApi.get('/orders/display/active', { params: displayParams() })
+    const data = res.data || {}
+    const nextReady = (data.ready || []) as DisplayItem[]
+    processReadyVoice(nextReady, displaySnapshotReady)
+    displaySnapshotReady = true
+    preparing.value = data.preparing || []
+    ready.value = nextReady
+    if (data.store?.name) storeName.value = data.store.name
+  } catch (e: any) {
+    const msg = e?.message || ''
+    if (msg.includes('令牌')) needToken.value = true
   }
 }
 
@@ -156,28 +290,6 @@ async function loadStoreName() {
     storeName.value = res.data?.name || ''
   } catch {
     storeName.value = `门店 #${storeId.value}`
-  }
-}
-
-async function load() {
-  if (!storeId.value) return
-  try {
-    const res = await publicApi.get('/orders/display/active', { params: displayParams() })
-    const data = res.data || {}
-    const nextReady = (data.ready || []) as DisplayItem[]
-    for (const item of nextReady) {
-      if (!knownReadyIds.has(item.id)) {
-        beepReady()
-        break
-      }
-    }
-    knownReadyIds = new Set(nextReady.map((x) => x.id))
-    preparing.value = data.preparing || []
-    ready.value = nextReady
-    if (data.store?.name) storeName.value = data.store.name
-  } catch (e: any) {
-    const msg = e?.message || ''
-    if (msg.includes('令牌')) needToken.value = true
   }
 }
 
@@ -233,6 +345,12 @@ function connectWs() {
 
 function toggleFullscreen() {
   const el = document.documentElement
+  const goFull = !document.fullscreenElement
+  if (goFull && soundOn.value && !voiceUnlocked.value) {
+    unlockVoice('取餐语音已开启').then((ok) => {
+      voiceUnlocked.value = ok
+    })
+  }
   if (!document.fullscreenElement) {
     el.requestFullscreen?.().then(() => {
       fullscreen.value = true
@@ -256,7 +374,13 @@ function tickClock() {
   clockText.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+let unbindVoice: (() => void) | null = null
+
 onMounted(async () => {
+  unbindVoice = bindAutoVoiceUnlock((ok) => {
+    if (ok) voiceUnlocked.value = true
+  })
+
   document.title = '取餐叫号'
   tickClock()
   clockTimer = setInterval(tickClock, 1000)
@@ -265,11 +389,14 @@ onMounted(async () => {
     await loadStoreName()
     await load()
     connectWs()
+    remindTimer = setInterval(tickReadyRemind, REMIND_TICK_MS)
   }
 })
 
 onUnmounted(() => {
+  unbindVoice?.()
   stopPoll()
+  if (remindTimer) clearInterval(remindTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (reconnectTimer) clearTimeout(reconnectTimer)
   try {
@@ -347,6 +474,19 @@ onUnmounted(() => {
   font-size: 18px;
 }
 .hint { color: #faad14; }
+
+.voice-unlock {
+  margin: 0 0 16px;
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: rgba(82, 196, 26, 0.12);
+  border: 1px solid rgba(82, 196, 26, 0.45);
+  color: #b7eb8f;
+  font-size: clamp(16px, 2vw, 22px);
+  cursor: pointer;
+  text-align: center;
+}
+.voice-unlock:hover { background: rgba(82, 196, 26, 0.2); }
 
 .board {
   flex: 1;
@@ -443,6 +583,18 @@ onUnmounted(() => {
   color: #52c41a;
   font-weight: 700;
   font-size: 18px;
+}
+.ready-ticket.overdue {
+  background: rgba(250, 173, 20, 0.12);
+  border-radius: 10px;
+  margin: 0 -8px;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+.ready-ticket.overdue .label { color: #ffd666; }
+.ready-ticket.overdue .state {
+  color: #faad14;
+  font-size: 20px;
 }
 .pulse {
   animation: pulse 1.6s ease-in-out infinite;
