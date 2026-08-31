@@ -87,11 +87,11 @@ Page({
     } catch (_) {}
     try {
       const view = await prefUtil.loadCustomerPrefs(app, api, { force })
-      const prefCount = view.prefCount || 0
+      const prefCount = (view && view.prefCount) || 0
       this.setData({
-        prefs: view.prefs || [],
-        prefSummary: view.prefSummary || '',
-        prefItems: view.prefItems || [],
+        prefs: (view && view.prefs) || [],
+        prefSummary: (view && view.prefSummary) || '',
+        prefItems: (view && view.prefItems) || [],
         prefCount,
         prefExpanded: prefCount > 3 ? this.data.prefExpanded : false
       })
