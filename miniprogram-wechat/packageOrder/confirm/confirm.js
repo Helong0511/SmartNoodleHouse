@@ -112,6 +112,11 @@ Page({
   },
 
   async bootstrapCheckout() {
+    try {
+      await auth.ensureLogin()
+    } catch (e) {
+      wx.showToast({ title: (e && e.message) || '登录失败', icon: 'none' })
+    }
     await this.loadDineContext()
     await Promise.all([
       this.loadMember(),
@@ -220,7 +225,7 @@ Page({
     }
 
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const sid = this.storeId()
       if (!sid) {
         this.setData({ tableOptions: [], needScanHint: true })
@@ -274,7 +279,7 @@ Page({
 
   async loadMember() {
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const profile = await api.get('/miniprogram/customers/me')
       const rate = profile && profile.is_member && profile.member_discount_rate
         ? parseFloat(profile.member_discount_rate)
@@ -329,7 +334,7 @@ Page({
 
   async loadCoupons() {
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const res = await api.get('/miniprogram/coupons/mine')
       const items = (res && res.items) || []
       this.setData({
@@ -360,7 +365,7 @@ Page({
 
   async loadVouchers() {
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const res = await api.get('/miniprogram/vouchers/mine')
       const items = (res && res.items) || []
       this.setData({
@@ -603,7 +608,7 @@ Page({
     }
     this.setData({ loading: true })
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const order = await api.post('/orders', {
         store_id: this.submitStoreId(),
         table_token: tableToken,

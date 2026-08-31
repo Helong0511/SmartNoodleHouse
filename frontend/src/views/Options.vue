@@ -2,8 +2,9 @@
   <div v-loading="loading">
     <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
     <el-button @click="load">刷新</el-button>
+    <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="load">显示已禁用</el-checkbox>
 
-    <el-table :data="groups" style="margin-top:12px" border row-key="id">
+    <el-table :key="tableKey" :data="groups" style="margin-top:12px" border row-key="id">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="opts-panel">
@@ -15,14 +16,26 @@
                 <template #default="{ row: o }">¥{{ o.extra_price }}</template>
               </el-table-column>
               <el-table-column prop="sort_order" label="排序" width="70" />
+              <el-table-column label="默认" width="70">
+                <template #default="{ row: o }">
+                  <el-tag v-if="isDefaultOption(o)" type="warning" size="small">默认</el-tag>
+                  <span v-else class="muted">-</span>
+                </template>
+              </el-table-column>
               <el-table-column label="状态" width="80">
                 <template #default="{ row: o }">
                   <el-tag :type="o.status === 1 ? 'success' : 'info'" size="small">{{ o.status === 1 ? '启用' : '禁用' }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="140">
+              <el-table-column label="操作" width="220">
                 <template #default="{ row: o }">
                   <el-button link type="primary" @click="openOptionForm(row, o)">编辑</el-button>
+                  <el-button
+                    v-if="row.selection_type === 'SINGLE' && !isDefaultOption(o) && o.status === 1"
+                    link
+                    type="warning"
+                    @click="setDefaultOption(o)"
+                  >设为默认</el-button>
                   <el-button link type="danger" @click="removeOption(o)">删除</el-button>
                 </template>
               </el-table-column>
@@ -80,6 +93,10 @@
         <el-form-item label="编码" required><el-input v-model="optionForm.code" :disabled="!!optionForm.id" /></el-form-item>
         <el-form-item label="加价"><el-input-number v-model="optionForm.extra_price" :min="0" :precision="2" :step="0.5" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="optionForm.sort_order" :min="0" /></el-form-item>
+        <el-form-item v-if="optionGroupType === 'SINGLE'" label="默认项">
+          <el-switch v-model="optionForm.is_default" active-text="设为默认" inactive-text="否" />
+          <div class="form-tip">菜单页点「+」将按默认规格加购</div>
+        </el-form-item>
         <el-form-item v-if="optionForm.id" label="状态">
           <el-switch v-model="optionForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
         </el-form-item>
@@ -100,8 +117,11 @@ import api from '@/api'
 const loading = ref(false)
 const saving = ref(false)
 const groups = ref<any[]>([])
+const tableKey = ref(0)
+const showDisabled = ref(false)
 const groupDialog = ref(false)
 const optionDialog = ref(false)
+const optionGroupType = ref('SINGLE')
 
 const groupForm = reactive({
   id: 0,
@@ -120,13 +140,21 @@ const optionForm = reactive({
   code: '',
   extra_price: 0,
   sort_order: 0,
+  is_default: false,
   status: 1,
 })
+
+function isDefaultOption(o: any) {
+  return o?.is_default === true || o?.is_default === 1 || o?.is_default === '1'
+}
 
 async function load() {
   loading.value = true
   try {
-    groups.value = (await api.get('/options/groups', { params: { include_disabled: true } })).data
+    groups.value = (await api.get('/options/groups', {
+      params: showDisabled.value ? { include_disabled: true } : {},
+    })).data || []
+    tableKey.value += 1
   } finally {
     loading.value = false
   }
@@ -179,13 +207,24 @@ async function saveGroup() {
 }
 
 async function removeGroup(row: any) {
-  await ElMessageBox.confirm(`确定删除规格组「${row.name}」？关联选项将一并禁用。`, '确认')
-  await api.delete(`/options/groups/${row.id}`)
-  ElMessage.success('已删除')
-  load()
+  try {
+    await ElMessageBox.confirm(
+      `确定删除规格组「${row.name}」？将禁用该组及下属选项（历史订单数据保留，默认从列表隐藏）。`,
+      '确认删除',
+      { type: 'warning' },
+    )
+    await api.delete(`/options/groups/${row.id}`)
+    ElMessage.success('已禁用并从列表移除')
+    load()
+  } catch (e: any) {
+    if (e !== 'cancel' && e?.message !== 'cancel') {
+      ElMessage.error(e.message || '删除失败')
+    }
+  }
 }
 
 function openOptionForm(group: any, opt?: any) {
+  optionGroupType.value = group.selection_type || 'SINGLE'
   if (opt) {
     Object.assign(optionForm, {
       id: opt.id,
@@ -194,10 +233,20 @@ function openOptionForm(group: any, opt?: any) {
       code: opt.code,
       extra_price: parseFloat(opt.extra_price),
       sort_order: opt.sort_order,
+      is_default: isDefaultOption(opt),
       status: opt.status ?? 1,
     })
   } else {
-    Object.assign(optionForm, { id: 0, group_id: group.id, name: '', code: '', extra_price: 0, sort_order: 0, status: 1 })
+    Object.assign(optionForm, {
+      id: 0,
+      group_id: group.id,
+      name: '',
+      code: '',
+      extra_price: 0,
+      sort_order: 0,
+      is_default: false,
+      status: 1,
+    })
   }
   optionDialog.value = true
 }
@@ -215,13 +264,19 @@ async function saveOption() {
       code: optionForm.code,
       extra_price: optionForm.extra_price,
       sort_order: optionForm.sort_order,
+      is_default: optionGroupType.value === 'SINGLE' ? !!optionForm.is_default : false,
     }
+    let saved: any
     if (optionForm.id) {
-      await api.put(`/options/${optionForm.id}`, { ...payload, status: optionForm.status })
+      saved = (await api.put(`/options/${optionForm.id}`, { ...payload, status: optionForm.status })).data
     } else {
-      await api.post('/options', payload)
+      saved = (await api.post('/options', payload)).data
     }
-    ElMessage.success('保存成功')
+    if (payload.is_default && saved && !isDefaultOption(saved)) {
+      ElMessage.warning('默认项未生效：请确认已执行 sql/tools/009_option_is_default.sql 并重启后端')
+    } else {
+      ElMessage.success(payload.is_default ? '已保存并设为默认' : '保存成功')
+    }
     optionDialog.value = false
     load()
   } catch (e: any) {
@@ -231,11 +286,34 @@ async function saveOption() {
   }
 }
 
+async function setDefaultOption(opt: any) {
+  saving.value = true
+  try {
+    await api.put(`/options/${opt.id}/default`)
+    ElMessage.success(`已将「${opt.name}」设为默认`)
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '设置默认失败')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function removeOption(opt: any) {
-  await ElMessageBox.confirm(`确定删除选项「${opt.name}」？`, '确认')
-  await api.delete(`/options/${opt.id}`)
-  ElMessage.success('已删除')
-  load()
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选项「${opt.name}」？将禁用该选项（默认从列表隐藏）。`,
+      '确认删除',
+      { type: 'warning' },
+    )
+    await api.delete(`/options/${opt.id}`)
+    ElMessage.success('已禁用并从列表移除')
+    load()
+  } catch (e: any) {
+    if (e !== 'cancel' && e?.message !== 'cancel') {
+      ElMessage.error(e.message || '删除失败')
+    }
+  }
 }
 
 onMounted(load)
@@ -243,4 +321,6 @@ onMounted(load)
 
 <style scoped>
 .opts-panel { padding: 8px 16px 16px 48px; }
+.muted { color: #999; font-size: 12px; }
+.form-tip { font-size: 12px; color: #909399; margin-top: 4px; }
 </style>

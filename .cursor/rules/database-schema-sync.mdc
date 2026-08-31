@@ -1,0 +1,28 @@
+# 数据库表结构变更同步
+
+修改数据库表结构时，**必须**同步更新主 schema，不能只写 `sql/tools/` 迁移脚本就结束。
+
+## 必须同步的文件
+
+| 变更类型 | 更新位置 |
+|---------|---------|
+| 新建/改表、改列、索引、约束 | `sql/001_schema.sql`（全量建表脚本，供新环境初始化） |
+| 已有库升级 | `sql/tools/NNN_*.sql`（幂等迁移脚本） |
+
+## 工作流程
+
+1. 先改 `sql/001_schema.sql`，保证全新 `mysql < 001_schema.sql` 即包含最新结构
+2. 再写 `sql/tools/` 迁移，供已部署库幂等升级
+3. 同步改 `backend/app/models/`、API、前端/小程序（如有依赖）
+
+## 禁止
+
+- 只加 `sql/tools/` 而不改 `001_schema.sql`
+- 只改 SQLAlchemy 模型而不改 `001_schema.sql`
+
+## 示例
+
+新增 `options.is_default`：
+- `sql/001_schema.sql` → `options` 表加列
+- `sql/tools/009_option_is_default.sql` → 老库 ALTER
+- `backend/app/models/__init__.py` → ORM 字段

@@ -213,6 +213,7 @@ class Option(Base, TimestampMixin):
     code: Mapped[str] = mapped_column(String(50))
     extra_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[int] = mapped_column(Integer, default=1)
 
 

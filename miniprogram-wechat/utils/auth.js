@@ -21,6 +21,36 @@ function shouldSyncCustomerId(token) {
   return app.globalData._customerIdSyncedForToken !== token
 }
 
+function clearCustomerSession() {
+  app.globalData.customerToken = ''
+  app.globalData.customerId = null
+  app.globalData.customerNo = ''
+  app.globalData._customerIdSyncedForToken = null
+  clearPrefsCache()
+  try {
+    wx.removeStorageSync('customer_token')
+    wx.removeStorageSync('customer_id')
+    wx.removeStorageSync('customer_no')
+  } catch (_) {}
+}
+
+function isStaleCustomerAuthError(err) {
+  const msg = String((err && err.message) || '')
+  return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(msg)
+}
+
+async function validateCustomerToken(token) {
+  if (!token) return false
+  try {
+    await api.get('/miniprogram/customers/me')
+    return true
+  } catch (e) {
+    if (isStaleCustomerAuthError(e)) return false
+    // 网络抖动等：保留本地 token，避免反复登出
+    return true
+  }
+}
+
 async function syncCustomerIdFromMe(token) {
   if (!token || !shouldSyncCustomerId(token)) return
   try {
@@ -34,8 +64,12 @@ async function syncCustomerIdFromMe(token) {
       wx.setStorageSync('customer_no', me.customer_no)
     }
     app.globalData._customerIdSyncedForToken = token
-  } catch (_) {
-    /* 失败不标记，下次 ensureLogin 重试 */
+  } catch (e) {
+    if (isStaleCustomerAuthError(e)) {
+      clearCustomerSession()
+      throw e
+    }
+    /* 其它失败不标记，下次 ensureLogin 重试 */
   }
 }
 
@@ -75,15 +109,19 @@ async function ensureLogin(tableToken) {
     app.globalData.customerNo = app.globalData.customerNo || wx.getStorageSync('customer_no') || ''
     app.globalData.nickname = app.globalData.nickname || wx.getStorageSync('nickname') || ''
     app.globalData.avatarUrl = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || ''
-    await syncCustomerIdFromMe(cachedToken)
-    return {
-      customer_id: app.globalData.customerId,
-      customer_no: app.globalData.customerNo,
-      customer_token: cachedToken,
-      nickname: app.globalData.nickname,
-      avatar_url: app.globalData.avatarUrl,
-      need_member_prompt: !app.globalData.nickname
+    const valid = await validateCustomerToken(cachedToken)
+    if (valid) {
+      await syncCustomerIdFromMe(cachedToken)
+      return {
+        customer_id: app.globalData.customerId,
+        customer_no: app.globalData.customerNo,
+        customer_token: cachedToken,
+        nickname: app.globalData.nickname,
+        avatar_url: app.globalData.avatarUrl,
+        need_member_prompt: !app.globalData.nickname
+      }
     }
+    clearCustomerSession()
   }
 
   const loginRes = await wxLogin()

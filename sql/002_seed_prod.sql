@@ -138,10 +138,10 @@ INSERT INTO member_levels (name, min_points, discount_rate)
 SELECT '普通会员', 0, 1.0000 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '普通会员');
 INSERT INTO member_levels (name, min_points, discount_rate)
-SELECT '银卡会员', 100, 0.9800 FROM DUAL
+SELECT '银卡会员', 200, 0.9800 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '银卡会员');
 INSERT INTO member_levels (name, min_points, discount_rate)
-SELECT '金卡会员', 500, 0.9500 FROM DUAL
+SELECT '金卡会员', 400, 0.9500 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '金卡会员');
 
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
@@ -199,3 +199,125 @@ SELECT
 
 -- 添加管理员账号
 INSERT INTO users (username, password_hash, display_name, role_id, store_id, status) VALUES ('admin', '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm', '系统管理员', 1, NULL, 1);
+
+
+-- 添加分类
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '特价品', '超级优惠', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
+
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '绵阳米粉', '经典绵阳米粉', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
+
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '面', '面', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
+
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '小吃', '小吃', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
+
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '卤味', '卤味', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
+
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '饮料', '饮料', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
+
+-- 添加规格租
+INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('量', 'Liang', 'SINGLE', 1, 0, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
+
+INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('辣', 'La', 'SINGLE', 1, 1, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
+
+INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('麻', 'Ma', 'SINGLE', 1, 1, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
+
+INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('蒜末', 'Sm', 'SINGLE', 1, 1, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
+
+-- 添加规格组明细
+  -- 量
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (1, '小碗', 'XW', 0.00, 0, 1, 1, '2026-08-31 11:53:36.282', '2026-08-31 11:53:47.000');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (1, '中碗', 'ZW', 1.00, 1, 0, 1, '2026-08-31 11:54:09.206', '2026-08-31 11:54:09.206');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (1, '大碗', 'DW', 2.00, 2, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+
+  -- 辣
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (2, '不辣', 'BL', 0.00, 0, 1, 1, '2026-08-31 11:53:36.282', '2026-08-31 11:53:47.000');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (2, '微辣', 'WL', 0.00, 1, 0, 1, '2026-08-31 11:54:09.206', '2026-08-31 11:54:09.206');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (2, '正常辣', 'ZCL', 0.00, 2, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (2, '加辣', 'JL', 0.00, 3, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+
+  -- 麻
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (3, '不麻', 'BM', 0.00, 0, 1, 1, '2026-08-31 11:53:36.282', '2026-08-31 11:53:47.000');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (3, '微麻', 'WM', 0.00, 1, 0, 1, '2026-08-31 11:54:09.206', '2026-08-31 11:54:09.206');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (3, '正常麻', 'ZCM', 0.00, 2, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (3, '加麻', 'JM', 0.00, 3, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+
+  -- 蒜
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (4, '不加蒜末', 'BSm', 0.00, 0, 1, 1, '2026-08-31 11:53:36.282', '2026-08-31 11:53:47.000');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (4, '微量蒜末', 'WSm', 0.00, 1, 0, 1, '2026-08-31 11:54:09.206', '2026-08-31 11:54:09.206');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (4, '正常蒜末', 'ZCSm', 0.00, 2, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (4, '加量蒜末', 'JSm', 0.00, 3, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
+
+
+-- 添加桌号
+INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_name`, `qr_token`, `wechat_qr_url`, `alipay_qr_url`, `status`, `created_at`, `updated_at`) VALUES 
+(1, 1, 'WM', '外卖订单', 'cAY3TvcOi5iDOLXVL9q6CokznisJTflR6chIcFnQvI4', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DcAY3TvcOi5iDOLXVL9q6CokznisJTflR6chIcFnQvI4%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DcAY3TvcOi5iDOLXVL9q6CokznisJTflR6chIcFnQvI4%26channel%3Dalipay', 1, '2026-08-31 12:25:41.769', '2026-08-31 12:25:41.769'),
+(2, 1, 'A01', '1号桌', 'cbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DcbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DcbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE%26channel%3Dalipay', 1, '2026-08-28 12:38:58.111', '2026-08-28 12:44:52.000'),
+(3, 1, 'A02', '2号桌', 'J7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DJ7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DJ7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g%26channel%3Dalipay', 1, '2026-08-28 12:38:58.117', '2026-08-28 12:44:53.000');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

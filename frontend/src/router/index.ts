@@ -11,9 +11,9 @@ const router = createRouter({
       redirect: '/dashboard',
       children: [
         { path: 'dashboard', component: () => import('@/views/Dashboard.vue'), meta: { title: '数据概览', permission: 'order:read' } },
-        { path: 'products', component: () => import('@/views/Products.vue'), meta: { title: '商品管理', permission: 'product:read' } },
         { path: 'categories', component: () => import('@/views/Categories.vue'), meta: { title: '分类管理', permission: 'product:read' } },
         { path: 'options', component: () => import('@/views/Options.vue'), meta: { title: '规格管理', permission: 'product:read' } },
+        { path: 'products', component: () => import('@/views/Products.vue'), meta: { title: '商品管理', permission: 'product:read' } },
         { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理', permission: 'order:read' } },
         { path: 'orders/:id', component: () => import('@/views/OrderDetail.vue'), meta: { title: '订单详情', permission: 'order:read' } },
         { path: 'customers', component: () => import('@/views/Customers.vue'), meta: { title: '顾客管理', permission: 'customer:read' } },

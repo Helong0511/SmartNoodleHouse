@@ -27,6 +27,7 @@ Page({
   data: {
     categories: [],
     isWide: false,
+    prefs: [],
     prefSummary: '',
     activeCat: null,
     scrollInto: '',
@@ -80,7 +81,10 @@ Page({
     } catch (_) {}
     try {
       const view = await prefUtil.loadCustomerPrefs({ globalData: appGlobal() }, api, { force })
-      this.setData({ prefSummary: (view && view.prefSummary) || '' })
+      this.setData({
+        prefs: (view && view.prefs) || [],
+        prefSummary: (view && view.prefSummary) || ''
+      })
     } catch (_) {}
   },
 
@@ -191,27 +195,83 @@ Page({
     my.navigateTo({ url: `/pages/product/product?id=${e.currentTarget.dataset.id}` })
   },
 
-  quickAdd(e) {
-    const { id, name, price, image, hasOptions, noMemberDiscount } = e.currentTarget.dataset
-    if (hasOptions === true || hasOptions === 'true' || hasOptions === 1 || hasOptions === '1') {
-      my.navigateTo({ url: `/pages/product/product?id=${id}` })
+  fetchProductDetail(id) {
+    if (!this._productDetailCache) this._productDetailCache = {}
+    const key = String(id)
+    if (this._productDetailCache[key]) return Promise.resolve(this._productDetailCache[key])
+    return api.get(`/products/${id}`, {}, false).then((product) => {
+      this._productDetailCache[key] = product
+      return product
+    })
+  },
+
+  addSimpleToCart(entry) {
+    const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
+    auth.saveCart(cart)
+  },
+
+  async quickAdd(e) {
+    const ds = e.currentTarget.dataset
+    const id = Number(ds.id)
+    const hasOptions = ds.hasOptions === true || ds.hasOptions === 'true' || ds.hasOptions === 1 || ds.hasOptions === '1'
+    const noMemberDiscount = ds.noMemberDiscount === true || ds.noMemberDiscount === 'true' || ds.noMemberDiscount === 1 || ds.noMemberDiscount === '1'
+
+    if (!hasOptions) {
+      const unit = parseFloat(ds.price) || 0
+      this.addSimpleToCart({
+        product_id: id,
+        name: ds.name,
+        quantity: 1,
+        option_ids: [],
+        option_labels: [],
+        option_text: '',
+        unit_price: unit,
+        subtotal: unit.toFixed(2),
+        imageUrl: ds.image || '',
+        no_member_discount: noMemberDiscount
+      })
+      my.showToast({ content: '已加入', type: 'success' })
       return
     }
-    const unit = parseFloat(price) || 0
-    const cart = cartUtil.mergeCartItem(auth.getCart(), {
-      product_id: Number(id),
-      name,
-      quantity: 1,
-      option_ids: [],
-      option_labels: [],
-      option_text: '',
-      unit_price: unit,
-      subtotal: unit.toFixed(2),
-      imageUrl: image || '',
-      no_member_discount: noMemberDiscount === true || noMemberDiscount === 'true' || noMemberDiscount === 1 || noMemberDiscount === '1'
-    })
-    auth.saveCart(cart)
-    my.showToast({ content: '已加入', type: 'success' })
+
+    try {
+      my.showLoading({ content: '加入中' })
+      const product = await this.fetchProductDetail(id)
+      const { selected, multi } = prefUtil.defaultSelections(product)
+      if (!prefUtil.selectionsComplete(product, selected, multi)) {
+        my.hideLoading()
+        my.navigateTo({ url: `/pages/product/product?id=${id}` })
+        return
+      }
+      const unitPrice = cartUtil.calcUnitPrice(product, selected, multi)
+      const optionLabels = cartUtil.buildOptionLabels(product, selected, multi)
+      this.addSimpleToCart({
+        product_id: id,
+        name: product.name || ds.name,
+        quantity: 1,
+        option_ids: cartUtil.collectOptionIds(product, selected, multi),
+        option_labels: optionLabels,
+        option_text: optionLabels.join('、'),
+        unit_price: unitPrice,
+        subtotal: unitPrice.toFixed(2),
+        imageUrl: ds.image || media.resolveUrl(product.main_image, media.imageVersion(product)),
+        no_member_discount: noMemberDiscount || !!product.no_member_discount
+      })
+      my.hideLoading()
+      const gd = appGlobal()
+      const prefs = this.data.prefs || gd.prefs || []
+      if (prefUtil.productPrefMatches(product, prefs)) {
+        my.alert({
+          title: '已按默认规格加入',
+          content: '您有智能口味爱好。如需按爱好下单，请点击菜品进入详情调整规格。'
+        })
+      } else {
+        my.showToast({ content: '已加入', type: 'success' })
+      }
+    } catch (err) {
+      my.hideLoading()
+      my.showToast({ content: (err && err.message) || '加入失败', type: 'fail' })
+    }
   },
 
   goMember() {

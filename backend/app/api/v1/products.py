@@ -386,7 +386,7 @@ async def get_product(product_id: int, request: Request, db: DbSession):
             "selection_type": group.selection_type,
             "is_required": group.is_required,
             "options": [
-                {"id": o.id, "name": o.name, "code": o.code, "extra_price": str(o.extra_price)}
+                {"id": o.id, "name": o.name, "code": o.code, "extra_price": str(o.extra_price), "is_default": bool(o.is_default)}
                 for o in opts_result.scalars()
             ],
         })
@@ -533,12 +533,14 @@ async def upload_product_image(
     url = await save_upload(file, subdir="products")
     await _set_main_product_image(db, product, url)
     await db.flush()
+    await db.refresh(product)
+    updated_at = product.updated_at.isoformat() if product.updated_at else None
     return success(
         {
             "id": product.id,
             "main_image": url,
             "url": url,
-            "updated_at": product.updated_at.isoformat() if product.updated_at else None,
+            "updated_at": updated_at,
         },
         request=request,
     )
@@ -559,6 +561,42 @@ async def delete_product(product_id: int, request: Request, db: DbSession, user:
     await db.delete(product)
     await db.flush()
     return success({"id": product_id}, request=request)
+
+
+def _option_dict(o: Option) -> dict:
+    return {
+        "id": o.id,
+        "group_id": o.group_id,
+        "name": o.name,
+        "code": o.code,
+        "extra_price": str(o.extra_price),
+        "sort_order": o.sort_order,
+        "is_default": bool(o.is_default),
+        "status": o.status,
+    }
+
+
+async def _clear_sibling_defaults(db: DbSession, group_id: int, keep_id: int) -> None:
+    """同规格组仅保留一个默认项（单选组）。"""
+    group = await db.get(OptionGroup, group_id)
+    if not group or group.selection_type != "SINGLE":
+        return
+    result = await db.execute(
+        select(Option).where(Option.group_id == group_id, Option.id != keep_id, Option.is_default.is_(True))
+    )
+    for sibling in result.scalars():
+        sibling.is_default = False
+    await db.flush()
+
+
+async def _apply_option_default_flag(db: DbSession, opt: Option, want_default: bool | None) -> None:
+    if want_default is True:
+        opt.is_default = True
+        await db.flush()
+        await _clear_sibling_defaults(db, opt.group_id, opt.id)
+    elif want_default is False:
+        opt.is_default = False
+        await db.flush()
 
 
 @router.get("/options/groups")
@@ -582,15 +620,7 @@ async def list_option_groups(request: Request, db: DbSession, include_disabled: 
             "sort_order": g.sort_order,
             "status": g.status,
             "options": [
-                {
-                    "id": o.id,
-                    "group_id": o.group_id,
-                    "name": o.name,
-                    "code": o.code,
-                    "extra_price": str(o.extra_price),
-                    "sort_order": o.sort_order,
-                    "status": o.status,
-                }
+                _option_dict(o)
                 for o in opts.scalars()
             ],
         })
@@ -607,10 +637,15 @@ async def create_option_group(data: OptionGroupCreate, request: Request, db: DbS
 
 @router.post("/options", dependencies=[require_permission("product:create")])
 async def create_option(data: OptionCreate, request: Request, db: DbSession):
-    opt = Option(**data.model_dump())
+    payload = data.model_dump()
+    want_default = payload.pop("is_default", False)
+    opt = Option(**payload, is_default=bool(want_default))
     db.add(opt)
     await db.flush()
-    return success({"id": opt.id}, request=request)
+    if opt.is_default:
+        await _clear_sibling_defaults(db, opt.group_id, opt.id)
+    await db.refresh(opt)
+    return success(_option_dict(opt), request=request)
 
 
 @router.put("/options/groups/{group_id}", dependencies=[require_permission("product:update")])
@@ -642,10 +677,33 @@ async def update_option(option_id: int, data: OptionUpdate, request: Request, db
     opt = await db.get(Option, option_id)
     if not opt:
         return success(None, message="规格选项不存在", request=request)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    want_default = fields.pop("is_default", None)
+    for k, v in fields.items():
         setattr(opt, k, v)
     await db.flush()
-    return success({"id": opt.id}, request=request)
+    if want_default is not None:
+        await _apply_option_default_flag(db, opt, want_default)
+    await db.refresh(opt)
+    return success(_option_dict(opt), request=request)
+
+
+@router.put("/options/{option_id}/default", dependencies=[require_permission("product:update")])
+async def set_default_option(option_id: int, request: Request, db: DbSession):
+    """将单选规格组内某选项设为唯一默认（菜单 + 一键加购）。"""
+    opt = await db.get(Option, option_id)
+    if not opt:
+        return success(None, message="规格选项不存在", request=request)
+    group = await db.get(OptionGroup, opt.group_id)
+    if not group:
+        return success(None, message="规格组不存在", request=request)
+    if group.selection_type != "SINGLE":
+        raise AppException(40036, "仅单选规格组可设置默认项")
+    if opt.status != 1:
+        raise AppException(40037, "已停用的选项不能设为默认")
+    await _apply_option_default_flag(db, opt, True)
+    await db.refresh(opt)
+    return success(_option_dict(opt), request=request)
 
 
 @router.delete("/options/{option_id}", dependencies=[require_permission("product:delete")])

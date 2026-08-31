@@ -95,16 +95,54 @@ function clearPrefsCache(app) {
   app.globalData.prefsAt = 0
 }
 
+function pickSelected(map, gid) {
+  if (!map) return null
+  if (map[gid] != null) return map[gid]
+  return map[String(gid)]
+}
+
 function defaultSelections(product) {
   const selected = {}
   const multi = {}
   ;(product.option_groups || []).forEach((g) => {
-    if (g.selection_type === 'SINGLE' && g.options && g.options.length) {
-      const normal = g.options.find((o) => o.code === 'NORMAL') || g.options[0]
-      selected[g.id] = normal.id
+    const opts = (g.options || []).filter((o) => o.status !== 0)
+    if (g.selection_type === 'SINGLE' && opts.length) {
+      const def = opts.find((o) => o.is_default)
+        || opts.find((o) => o.code === 'NORMAL')
+        || opts[0]
+      selected[g.id] = def.id
+    }
+    if (g.selection_type === 'MULTIPLE' && opts.length) {
+      const defs = opts.filter((o) => o.is_default)
+      if (defs.length) multi[g.id] = defs.map((o) => o.id)
     }
   })
   return { selected, multi }
+}
+
+function selectionsComplete(product, selected, multi) {
+  for (const g of product.option_groups || []) {
+    if (!g.is_required) continue
+    if (g.selection_type === 'SINGLE') {
+      const sid = pickSelected(selected, g.id)
+      if (sid == null || sid === '') return false
+    } else {
+      const ids = pickSelected(multi, g.id) || []
+      if (!ids.length) return false
+    }
+  }
+  return true
+}
+
+function productPrefMatches(product, prefs) {
+  if (!prefs || !prefs.length) return false
+  for (const g of product.option_groups || []) {
+    const match = prefs.find((pr) => pr.category === g.name || pr.category === g.code)
+    if (!match) continue
+    const opt = (g.options || []).find((o) => o.code === match.option_code)
+    if (opt) return true
+  }
+  return false
 }
 
 function applyPrefsToProduct(product, prefs) {
@@ -148,6 +186,9 @@ module.exports = {
   buildPrefDisplay,
   loadCustomerPrefs,
   clearPrefsCache,
+  pickSelected,
   defaultSelections,
+  selectionsComplete,
+  productPrefMatches,
   applyPrefsToProduct
 }

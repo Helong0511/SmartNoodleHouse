@@ -66,6 +66,35 @@ function shouldSyncCustomerId(app, token) {
   return app.globalData._customerIdSyncedForToken !== token
 }
 
+function clearCustomerSession(app) {
+  app.globalData.customerToken = ''
+  app.globalData.customerId = null
+  app.globalData.customerNo = ''
+  app.globalData._customerIdSyncedForToken = null
+  clearPrefsCache(app)
+  try {
+    my.removeStorageSync({ key: 'customer_token' })
+    my.removeStorageSync({ key: 'customer_id' })
+    my.removeStorageSync({ key: 'customer_no' })
+  } catch (_) {}
+}
+
+function isStaleCustomerAuthError(err) {
+  const msg = String((err && err.message) || '')
+  return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(msg)
+}
+
+async function validateCustomerToken(token) {
+  if (!token) return false
+  try {
+    await api.get('/miniprogram/customers/me')
+    return true
+  } catch (e) {
+    if (isStaleCustomerAuthError(e)) return false
+    return true
+  }
+}
+
 async function syncCustomerIdFromMe(app, token) {
   if (!token || !shouldSyncCustomerId(app, token)) return
   try {
@@ -79,8 +108,12 @@ async function syncCustomerIdFromMe(app, token) {
       my.setStorageSync({ key: 'customer_no', data: me.customer_no })
     }
     app.globalData._customerIdSyncedForToken = token
-  } catch (_) {
-    /* 失败不标记，下次 ensureLogin 重试 */
+  } catch (e) {
+    if (isStaleCustomerAuthError(e)) {
+      clearCustomerSession(app)
+      throw e
+    }
+    /* 其它失败不标记，下次 ensureLogin 重试 */
   }
 }
 
@@ -120,14 +153,18 @@ async function ensureLogin(tableToken) {
     app.globalData.customerId = app.globalData.customerId || readStorage('customer_id')
     app.globalData.customerNo = app.globalData.customerNo || readStorage('customer_no')
     app.globalData.nickname = app.globalData.nickname || readStorage('nickname') || ''
-    await syncCustomerIdFromMe(app, cachedToken)
-    return {
-      customer_id: app.globalData.customerId,
-      customer_no: app.globalData.customerNo,
-      customer_token: cachedToken,
-      nickname: app.globalData.nickname,
-      need_member_prompt: !app.globalData.nickname
+    const valid = await validateCustomerToken(cachedToken)
+    if (valid) {
+      await syncCustomerIdFromMe(app, cachedToken)
+      return {
+        customer_id: app.globalData.customerId,
+        customer_no: app.globalData.customerNo,
+        customer_token: cachedToken,
+        nickname: app.globalData.nickname,
+        need_member_prompt: !app.globalData.nickname
+      }
     }
+    clearCustomerSession(app)
   }
 
   const authRes = await getAuthCode()

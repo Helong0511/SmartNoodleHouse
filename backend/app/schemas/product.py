@@ -110,6 +110,7 @@ class OptionOut(BaseModel):
     code: str
     extra_price: Decimal
     sort_order: int
+    is_default: bool = False
     status: int
 
     model_config = {"from_attributes": True}
@@ -138,6 +139,7 @@ class OptionCreate(BaseModel):
     code: str
     extra_price: Decimal = Decimal("0.00")
     sort_order: int = 0
+    is_default: bool = False
 
 
 class OptionUpdate(BaseModel):
@@ -145,4 +147,5 @@ class OptionUpdate(BaseModel):
     code: str | None = None
     extra_price: Decimal | None = None
     sort_order: int | None = None
+    is_default: bool | None = None
     status: int | None = None

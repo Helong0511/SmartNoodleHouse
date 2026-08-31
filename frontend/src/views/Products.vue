@@ -381,9 +381,7 @@ async function uploadImage(option: { file: File }) {
   try {
     const fd = new FormData()
     fd.append('file', option.file)
-    const res = await api.post(`/products/${form.id}/image`, fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+    const res = await api.post(`/products/${form.id}/image`, fd)
     form.main_image = res.data.main_image || res.data.url || ''
     ElMessage.success('图片已上传')
     load()

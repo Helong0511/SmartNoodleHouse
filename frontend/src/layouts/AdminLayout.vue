@@ -4,9 +4,9 @@
       <div class="logo">🍜 智能面馆</div>
       <el-menu :default-active="$route.path" router background-color="#1d1e1f" text-color="#bbb" active-text-color="#409eff">
         <el-menu-item v-if="auth.hasPermission('order:read')" index="/dashboard">数据概览</el-menu-item>
-        <el-menu-item v-if="auth.hasPermission('product:read')" index="/products">商品管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('product:read')" index="/categories">分类管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('product:read')" index="/options">规格管理</el-menu-item>
+        <el-menu-item v-if="auth.hasPermission('product:read')" index="/products">商品管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('order:read')" index="/orders">订单管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('customer:read')" index="/customers">顾客管理</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('customer:read')" index="/member-levels">会员等级</el-menu-item>
