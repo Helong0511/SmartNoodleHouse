@@ -145,10 +145,17 @@ SELECT '金卡会员', 400, 0.9500 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '金卡会员');
 
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
-INSERT INTO `smart_noodle_house`.`coupon_templates` (`id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`, `status`, `created_at`) VALUES (1, '新客满30减5', 'FIXED', 5.0000, 30.00, 30, 1, '2026-08-31 12:29:52.345');
-INSERT INTO `smart_noodle_house`.`coupon_templates` (`id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`, `status`, `created_at`) VALUES (2, '满50享9折', 'PERCENT', 0.9000, 50.00, 14, 1, '2026-08-31 12:29:52.348');
-INSERT INTO `smart_noodle_house`.`coupon_templates` (`id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`, `status`, `created_at`) VALUES (3, '10元无门槛代金券', 'VOUCHER', 10.0000, 0.00, 30, 1, '2026-08-31 12:29:52.349');
+INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
+SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '新客满30减5');
 
+INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
+SELECT '满50享9折', 'PERCENT', 0.9000, 50.00, 14 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满50享9折');
+
+INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
+SELECT '10元无门槛代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '10元无门槛代金券');
 
 -- 六、门店
 INSERT INTO stores (store_no, name, address, phone, status)
@@ -238,12 +245,57 @@ INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_p
 
 
 -- 添加餐品
-INSERT INTO `smart_noodle_house`.`products` 
-(`id`, `store_id`, `category_id`, `product_no`, `name`, `description`, `main_image`, `price`, `original_price`, `stock`, `box_price`, `min_order_count`, `status`, `is_recommended`, `is_hot`, `no_member_discount`, `no_cooking`, `sort_order`, `sales_count`, `created_at`, `updated_at`) VALUES 
-(1, 1, 3, 'M001', '牛肉面', '好吃的牛肉面', '/uploads/products/25985ea8d2fe4d08b074f5b4e443d57d.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 12:43:01.277', '2026-08-31 13:42:32.894'),
-(2, 1, 3, 'M002', '肥肠面', '好吃的肥肠面', '/uploads/products/8681823f4fd646789b1915d1a82b4eab.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 13:38:06.752', '2026-08-31 13:42:32.897'),
-(3, 1, 2, 'F001', '绵阳米粉（牛肉）', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 13:39:22.193', '2026-08-31 13:42:32.887'),
-(4, 1, 2, 'F002', '绵阳米粉（肥肠）', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 13:40:13.290', '2026-08-31 13:42:32.890');
+INSERT INTO products (
+  store_id, category_id, product_no, name, description, main_image,
+  price, original_price, stock, box_price, min_order_count,
+  status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
+)
+SELECT s.id, c.id, 'M001', '牛肉面', '好吃的牛肉面', '/uploads/products/25985ea8d2fe4d08b074f5b4e443d57d.png',
+  7.00, 6.00, 9999, 1.00, 1,
+  'ON_SALE', 1, 1, 0, 0, 0, 1
+FROM stores s
+JOIN product_categories c ON c.store_id = s.id AND c.name = '面'
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'M001');
+
+INSERT INTO products (
+  store_id, category_id, product_no, name, description, main_image,
+  price, original_price, stock, box_price, min_order_count,
+  status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
+)
+SELECT s.id, c.id, 'M002', '肥肠面', '好吃的肥肠面', '/uploads/products/8681823f4fd646789b1915d1a82b4eab.png',
+  7.00, 6.00, 9999, 1.00, 1,
+  'ON_SALE', 1, 1, 0, 0, 0, 1
+FROM stores s
+JOIN product_categories c ON c.store_id = s.id AND c.name = '面'
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'M002');
+
+INSERT INTO products (
+  store_id, category_id, product_no, name, description, main_image,
+  price, original_price, stock, box_price, min_order_count,
+  status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
+)
+SELECT s.id, c.id, 'F001', '绵阳米粉（牛肉）', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
+  7.00, 6.00, 9999, 1.00, 1,
+  'ON_SALE', 1, 1, 0, 0, 0, 1
+FROM stores s
+JOIN product_categories c ON c.store_id = s.id AND c.name = '绵阳米粉'
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'F001');
+
+INSERT INTO products (
+  store_id, category_id, product_no, name, description, main_image,
+  price, original_price, stock, box_price, min_order_count,
+  status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
+)
+SELECT s.id, c.id, 'F002', '绵阳米粉（肥肠）', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
+  7.00, 6.00, 9999, 1.00, 1,
+  'ON_SALE', 1, 1, 0, 0, 0, 1
+FROM stores s
+JOIN product_categories c ON c.store_id = s.id AND c.name = '绵阳米粉'
+WHERE s.store_no = 'SH01'
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'F002');
 
 -- 添加桌号
 INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_name`, `qr_token`, `wechat_qr_url`, `alipay_qr_url`, `status`, `created_at`, `updated_at`) VALUES 
