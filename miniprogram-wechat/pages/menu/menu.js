@@ -87,11 +87,13 @@ Page({
     } catch (_) {}
     try {
       const view = await prefUtil.loadCustomerPrefs(app, api, { force })
+      const prefCount = view.prefCount || 0
       this.setData({
         prefs: view.prefs || [],
         prefSummary: view.prefSummary || '',
         prefItems: view.prefItems || [],
-        prefCount: view.prefCount || 0
+        prefCount,
+        prefExpanded: prefCount > 3 ? this.data.prefExpanded : false
       })
     } catch (_) {}
   },
@@ -279,7 +281,11 @@ Page({
   },
 
   togglePrefExpand() {
-    if ((this.data.prefCount || 0) <= 3) return
+    const prefCount = this.data.prefCount || 0
+    if (prefCount <= 3) {
+      if (this.data.prefExpanded) this.setData({ prefExpanded: false })
+      return
+    }
     this.setData({ prefExpanded: !this.data.prefExpanded })
   },
 
