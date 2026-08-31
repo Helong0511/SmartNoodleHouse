@@ -63,7 +63,7 @@ Page({
     try {
       await auth.ensureLogin()
     } catch (e) {
-      this.setData({ uploading: false, capturing: false })
+      this.setData({ uploading: false })
       wx.showToast({ title: auth.formatError(e, '请先登录'), icon: 'none' })
       return
     }

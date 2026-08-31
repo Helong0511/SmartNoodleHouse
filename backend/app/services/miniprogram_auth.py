@@ -46,6 +46,13 @@ def _mock_allowed(*, provider_configured: bool = False) -> bool:
     return s.is_development and not provider_configured
 
 
+def _allow_explicit_mock_code(code: str) -> bool:
+    """mock: 前缀为开发者显式信号，非生产环境一律走 mock（即使已配置真实密钥）。"""
+    if not code or not str(code).startswith("mock:"):
+        return False
+    return not get_settings().is_production
+
+
 def _mock_wechat_openid(code: str) -> dict:
     """开发 mock：禁止用一次性 code 当 openid，同一设备身份须稳定。"""
     if code.startswith("mock:") and len(code) > 5:
@@ -70,7 +77,7 @@ def _mock_alipay_user_id(auth_code: str) -> dict:
 class WechatMiniAuth:
     async def code2session(self, code: str) -> dict:
         settings = get_settings()
-        if code.startswith("mock:") and _mock_allowed(provider_configured=True):
+        if _allow_explicit_mock_code(code):
             return _mock_wechat_openid(code)
         configured = bool(settings.wechat_app_id and settings.wechat_app_secret)
         if not configured:
@@ -106,7 +113,7 @@ class WechatMiniAuth:
 class AlipayMiniAuth:
     async def auth_code2user(self, auth_code: str) -> dict:
         settings = get_settings()
-        if auth_code.startswith("mock:") and _mock_allowed(provider_configured=True):
+        if _allow_explicit_mock_code(auth_code):
             return _mock_alipay_user_id(auth_code)
         configured = bool(settings.alipay_app_id and settings.alipay_private_key)
         if not configured:
