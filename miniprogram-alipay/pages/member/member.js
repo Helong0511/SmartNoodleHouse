@@ -130,7 +130,7 @@ Page({
       return
     }
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const cid = app.globalData.customerId || auth.readStorage('customer_id')
       if (cid) app.globalData.customerId = cid
       this.setData({ walletLoading: true })

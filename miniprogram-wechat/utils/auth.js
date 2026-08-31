@@ -1,6 +1,28 @@
 const api = require('./api')
-const app = getApp()
-const tabCartBadge = require('./tabCartBadge')
+
+function getAppSafe() {
+  try {
+    return getApp()
+  } catch (_) {
+    return null
+  }
+}
+
+function requireApp() {
+  const app = getAppSafe()
+  if (!app || !app.globalData) {
+    throw new Error('应用未就绪，请重新打开小程序')
+  }
+  return app
+}
+
+function readStorage(key) {
+  try {
+    return wx.getStorageSync(key)
+  } catch (_) {
+    return null
+  }
+}
 
 function wxLogin() {
   return new Promise((resolve, reject) => {
@@ -11,22 +33,22 @@ function wxLogin() {
   })
 }
 
-function clearPrefsCache() {
+function clearPrefsCache(app) {
   app.globalData.prefs = []
   app.globalData.prefsView = null
   app.globalData.prefsAt = 0
 }
 
-function shouldSyncCustomerId(token) {
+function shouldSyncCustomerId(app, token) {
   return app.globalData._customerIdSyncedForToken !== token
 }
 
-function clearCustomerSession() {
+function clearCustomerSession(app) {
   app.globalData.customerToken = ''
   app.globalData.customerId = null
   app.globalData.customerNo = ''
   app.globalData._customerIdSyncedForToken = null
-  clearPrefsCache()
+  clearPrefsCache(app)
   try {
     wx.removeStorageSync('customer_token')
     wx.removeStorageSync('customer_id')
@@ -51,8 +73,8 @@ async function validateCustomerToken(token) {
   }
 }
 
-async function syncCustomerIdFromMe(token) {
-  if (!token || !shouldSyncCustomerId(token)) return
+async function syncCustomerIdFromMe(app, token) {
+  if (!token || !shouldSyncCustomerId(app, token)) return
   try {
     const me = await api.get('/miniprogram/customers/me')
     if (me && me.customer_id) {
@@ -66,25 +88,25 @@ async function syncCustomerIdFromMe(token) {
     app.globalData._customerIdSyncedForToken = token
   } catch (e) {
     if (isStaleCustomerAuthError(e)) {
-      clearCustomerSession()
+      clearCustomerSession(app)
       throw e
     }
     /* 其它失败不标记，下次 ensureLogin 重试 */
   }
 }
 
-function applyLoginSession(data) {
+function applyLoginSession(app, data) {
   app.globalData.customerId = data.customer_id
   app.globalData.customerNo = data.customer_no
   app.globalData.customerToken = data.customer_token
   app.globalData._customerIdSyncedForToken = data.customer_token
-  clearPrefsCache()
+  clearPrefsCache(app)
 }
 
-function refreshCustomerToken(token, patch = {}) {
+function refreshCustomerToken(app, token, patch = {}) {
   if (token && token !== app.globalData.customerToken) {
     app.globalData._customerIdSyncedForToken = null
-    clearPrefsCache()
+    clearPrefsCache(app)
   }
   if (token) {
     app.globalData.customerToken = token
@@ -102,16 +124,17 @@ function refreshCustomerToken(token, patch = {}) {
 }
 
 async function ensureLogin(tableToken) {
-  const cachedToken = app.globalData.customerToken || wx.getStorageSync('customer_token')
+  const app = requireApp()
+  const cachedToken = app.globalData.customerToken || readStorage('customer_token')
   if (cachedToken) {
     app.globalData.customerToken = cachedToken
-    app.globalData.customerId = app.globalData.customerId || wx.getStorageSync('customer_id') || null
-    app.globalData.customerNo = app.globalData.customerNo || wx.getStorageSync('customer_no') || ''
-    app.globalData.nickname = app.globalData.nickname || wx.getStorageSync('nickname') || ''
-    app.globalData.avatarUrl = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || ''
+    app.globalData.customerId = app.globalData.customerId || readStorage('customer_id')
+    app.globalData.customerNo = app.globalData.customerNo || readStorage('customer_no')
+    app.globalData.nickname = app.globalData.nickname || readStorage('nickname') || ''
+    app.globalData.avatarUrl = app.globalData.avatarUrl || readStorage('avatar_url') || ''
     const valid = await validateCustomerToken(cachedToken)
     if (valid) {
-      await syncCustomerIdFromMe(cachedToken)
+      await syncCustomerIdFromMe(app, cachedToken)
       return {
         customer_id: app.globalData.customerId,
         customer_no: app.globalData.customerNo,
@@ -121,25 +144,25 @@ async function ensureLogin(tableToken) {
         need_member_prompt: !app.globalData.nickname
       }
     }
-    clearCustomerSession()
+    clearCustomerSession(app)
   }
 
   const loginRes = await wxLogin()
   if (!loginRes || !loginRes.code) {
     throw new Error('wx.login 未返回 code，请检查开发者工具登录状态')
   }
-  const nickname = app.globalData.nickname || wx.getStorageSync('nickname') || null
-  const avatarUrl = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || null
+  const nickname = app.globalData.nickname || readStorage('nickname') || null
+  const avatarUrl = app.globalData.avatarUrl || readStorage('avatar_url') || null
   const data = await api.post('/miniprogram/wechat/login', {
     code: loginRes.code,
-    table_token: tableToken || app.globalData.tableToken || wx.getStorageSync('table_token') || null,
+    table_token: tableToken || app.globalData.tableToken || readStorage('table_token') || null,
     nickname,
     avatar_url: avatarUrl
   }, false)
   if (!data || !data.customer_token) {
     throw new Error('登录成功但未返回 customer_token')
   }
-  applyLoginSession(data)
+  applyLoginSession(app, data)
   app.globalData.nickname = data.nickname || nickname || ''
   app.globalData.avatarUrl = data.avatar_url || avatarUrl || ''
   app.globalData.faceStatus = (data.face_status && data.face_status.consent_status) || 'NONE'
@@ -161,18 +184,22 @@ async function ensureLogin(tableToken) {
 }
 
 function saveCart(cart) {
+  const app = requireApp()
   app.globalData.cart = cart
   wx.setStorageSync('cart', cart)
-  tabCartBadge.updateTabCartBadge(cart)
+  require('./tabCartBadge').updateTabCartBadge(cart)
 }
 
 function getCart() {
-  return app.globalData.cart || wx.getStorageSync('cart') || []
+  const app = getAppSafe()
+  return (app && app.globalData && app.globalData.cart) || readStorage('cart') || []
 }
 
 module.exports = {
   ensureLogin,
   saveCart,
   getCart,
+  readStorage,
+  getAppSafe,
   refreshCustomerToken
 }

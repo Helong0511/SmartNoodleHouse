@@ -76,8 +76,7 @@ Page({
 
   async loadPrefs(force = false) {
     try {
-      const gd = appGlobal()
-      if (!gd.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
     } catch (_) {}
     try {
       const view = await prefUtil.loadCustomerPrefs({ globalData: appGlobal() }, api, { force })

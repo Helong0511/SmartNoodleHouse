@@ -25,9 +25,7 @@ Page({
     const metrics = media.layoutMetrics()
     this.setData({ heroStyle: metrics.heroStyle, loading: true })
     try {
-      if (!app.globalData.customerToken) {
-        try { await auth.ensureLogin() } catch (_) {}
-      }
+      try { await auth.ensureLogin() } catch (_) {}
       const product = await api.get(`/products/${query.id}`, {}, false)
       const { selected, multi } = prefUtil.defaultSelections(product)
       const gallery = await media.hydrateUrlList(media.galleryUrls(product))

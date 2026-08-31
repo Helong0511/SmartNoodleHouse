@@ -151,12 +151,12 @@ Page({
       app.globalData.nickname = (res && res.nickname) || this.data.nickname
       app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
       if (res && res.customer_token) {
-        auth.refreshCustomerToken(res.customer_token, {
+        auth.refreshCustomerToken(app, res.customer_token, {
           customer_id: res.customer_id,
           customer_no: res.customer_no
         })
       } else if (res && res.customer_id) {
-        auth.refreshCustomerToken(app.globalData.customerToken, {
+        auth.refreshCustomerToken(app, app.globalData.customerToken, {
           customer_id: res.customer_id,
           customer_no: res.customer_no
         })

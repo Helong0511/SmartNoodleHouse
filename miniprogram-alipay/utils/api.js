@@ -21,11 +21,31 @@ function resolveBaseUrl() {
   return DEFAULT_API_BASE
 }
 
-function authHeader() {
+function readStorage(key) {
+  try {
+    const res = my.getStorageSync({ key })
+    if (res && Object.prototype.hasOwnProperty.call(res, 'data')) return res.data
+    return res
+  } catch (_) {
+    return null
+  }
+}
+
+function resolveCustomerToken() {
   const app = getAppSafe()
-  const token =
-    (app && app.globalData && app.globalData.customerToken) ||
-    (my.getStorageSync({ key: 'customer_token' }) || {}).data
+  const token = String(
+    (app && app.globalData && app.globalData.customerToken)
+    || readStorage('customer_token')
+    || ''
+  ).trim()
+  if (app && app.globalData && token) {
+    app.globalData.customerToken = token
+  }
+  return token || null
+}
+
+function authHeader() {
+  const token = resolveCustomerToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 

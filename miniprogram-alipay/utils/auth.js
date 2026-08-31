@@ -86,6 +86,8 @@ function isStaleCustomerAuthError(err) {
 
 async function validateCustomerToken(token) {
   if (!token) return false
+  const app = requireApp()
+  app.globalData.customerToken = token
   try {
     await api.get('/miniprogram/customers/me')
     return true
@@ -97,6 +99,7 @@ async function validateCustomerToken(token) {
 
 async function syncCustomerIdFromMe(app, token) {
   if (!token || !shouldSyncCustomerId(app, token)) return
+  app.globalData.customerToken = token
   try {
     const me = await api.get('/miniprogram/customers/me')
     if (me && me.customer_id) {

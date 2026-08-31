@@ -220,7 +220,7 @@ Page({
       wx.showLoading({ title: '绑定中' })
       const res = await api.post('/miniprogram/member/phone', payload)
       if (res && res.customer_token) {
-        auth.refreshCustomerToken(res.customer_token, {
+        auth.refreshCustomerToken(app, res.customer_token, {
           customer_id: res.customer_id,
           customer_no: res.customer_no
         })

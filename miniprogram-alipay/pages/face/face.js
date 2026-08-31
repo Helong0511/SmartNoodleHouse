@@ -1,4 +1,5 @@
 const api = require('../../utils/api')
+const auth = require('../../utils/auth')
 const cameraAuth = require('../../utils/cameraAuth')
 const app = getApp()
 
@@ -64,9 +65,11 @@ Page({
   },
 
   async uploadFace(base64) {
-    if (!app.globalData.customerToken) {
+    try {
+      await auth.ensureLogin()
+    } catch (e) {
       this.setData({ capturing: false })
-      my.showToast({ content: '请先登录', type: 'fail' })
+      my.showToast({ content: auth.formatError(e, '请先登录'), type: 'fail' })
       return
     }
     try {

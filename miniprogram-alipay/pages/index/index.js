@@ -120,8 +120,14 @@ Page({
 
   async onRegister() {
     const app = appRef()
-    if (!app || !app.globalData.customerToken) {
-      my.showToast({ content: '请先登录', type: 'fail' })
+    if (!app) {
+      my.showToast({ content: '应用未就绪', type: 'fail' })
+      return
+    }
+    try {
+      await auth.ensureLogin()
+    } catch (e) {
+      my.showToast({ content: auth.formatError(e, '请先登录'), type: 'fail' })
       return
     }
     try {
