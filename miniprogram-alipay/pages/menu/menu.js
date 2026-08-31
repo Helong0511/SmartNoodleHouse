@@ -23,6 +23,19 @@ function normalizeList(data) {
   return []
 }
 
+function askUsePrefsOnQuickAdd(prompt) {
+  return new Promise((resolve) => {
+    my.confirm({
+      title: prompt.title,
+      content: prompt.content,
+      confirmButtonText: '是',
+      cancelButtonText: '否',
+      success: (res) => resolve(!!res.confirm),
+      fail: () => resolve(false)
+    })
+  })
+}
+
 Page({
   data: {
     categories: [],
@@ -236,7 +249,16 @@ Page({
     try {
       my.showLoading({ content: '加入中' })
       const product = await this.fetchProductDetail(id)
-      const { selected, multi } = prefUtil.defaultSelections(product)
+      const gd = appGlobal()
+      const prefs = this.data.prefs || gd.prefs || []
+      const prefPrompt = prefUtil.buildQuickAddPrefPrompt(product, prefs)
+      let usePrefs = false
+      if (prefPrompt) {
+        my.hideLoading()
+        usePrefs = await askUsePrefsOnQuickAdd(prefPrompt)
+        my.showLoading({ content: '加入中' })
+      }
+      const { selected, multi } = prefUtil.resolveQuickAddSelections(product, prefs, usePrefs)
       if (!prefUtil.selectionsComplete(product, selected, multi)) {
         my.hideLoading()
         my.navigateTo({ url: `/pages/product/product?id=${id}` })
@@ -257,16 +279,7 @@ Page({
         no_member_discount: noMemberDiscount || !!product.no_member_discount
       })
       my.hideLoading()
-      const gd = appGlobal()
-      const prefs = this.data.prefs || gd.prefs || []
-      if (prefUtil.productPrefMatches(product, prefs)) {
-        my.alert({
-          title: '已按默认规格加入',
-          content: '您有智能口味爱好。如需按爱好下单，请点击菜品进入详情调整规格。'
-        })
-      } else {
-        my.showToast({ content: '已加入', type: 'success' })
-      }
+      my.showToast({ content: usePrefs ? '已按爱好加入' : '已加入', type: 'success' })
     } catch (err) {
       my.hideLoading()
       my.showToast({ content: (err && err.message) || '加入失败', type: 'fail' })

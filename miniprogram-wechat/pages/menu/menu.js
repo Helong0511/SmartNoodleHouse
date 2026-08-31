@@ -15,6 +15,19 @@ function normalizeList(data) {
   return []
 }
 
+function askUsePrefsOnQuickAdd(prompt) {
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: prompt.title,
+      content: prompt.content,
+      cancelText: '否',
+      confirmText: '是',
+      success: (res) => resolve(!!res.confirm),
+      fail: () => resolve(false)
+    })
+  })
+}
+
 Page({
   data: {
     categories: [],
@@ -224,7 +237,15 @@ Page({
     try {
       wx.showLoading({ title: '加入中', mask: true })
       const product = await this.fetchProductDetail(id)
-      const { selected, multi } = prefUtil.defaultSelections(product)
+      const prefs = this.data.prefs || app.globalData.prefs || []
+      const prefPrompt = prefUtil.buildQuickAddPrefPrompt(product, prefs)
+      let usePrefs = false
+      if (prefPrompt) {
+        wx.hideLoading()
+        usePrefs = await askUsePrefsOnQuickAdd(prefPrompt)
+        wx.showLoading({ title: '加入中', mask: true })
+      }
+      const { selected, multi } = prefUtil.resolveQuickAddSelections(product, prefs, usePrefs)
       if (!prefUtil.selectionsComplete(product, selected, multi)) {
         wx.hideLoading()
         wx.navigateTo({ url: `/packageOrder/product/product?id=${id}` })
@@ -245,17 +266,7 @@ Page({
         no_member_discount: noMemberDiscount || !!product.no_member_discount
       })
       wx.hideLoading()
-      const prefs = this.data.prefs || app.globalData.prefs || []
-      if (prefUtil.productPrefMatches(product, prefs)) {
-        wx.showModal({
-          title: '已按默认规格加入',
-          content: '您有智能口味爱好。如需按爱好下单，请点击菜品进入详情调整规格。',
-          showCancel: false,
-          confirmText: '知道了'
-        })
-      } else {
-        wx.showToast({ title: '已加入', icon: 'success' })
-      }
+      wx.showToast({ title: usePrefs ? '已按爱好加入' : '已加入', icon: 'success' })
     } catch (err) {
       wx.hideLoading()
       wx.showToast({ title: (err && err.message) || '加入失败', icon: 'none' })

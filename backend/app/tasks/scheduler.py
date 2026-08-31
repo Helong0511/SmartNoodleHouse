@@ -70,6 +70,37 @@ def register_tasks(scheduler) -> None:
                 logger.info("Expired orders closed: %s", closed)
 
     @scheduler.scheduled_job("interval", minutes=1)
+    async def auto_complete_kitchen_orders():
+        async with AsyncSessionLocal() as db:
+            from app.services.kitchen_auto_service import auto_complete_stale_kitchen_orders
+            from app.services.system_settings_service import SystemSettingsService
+            from app.services.websocket_manager import ws_manager
+
+            timeout_minutes = await SystemSettingsService.get_int(
+                db, "kitchen_auto_complete_minutes", settings.kitchen_auto_complete_minutes
+            )
+            completed = await auto_complete_stale_kitchen_orders(db, timeout_minutes=timeout_minutes)
+            await db.commit()
+            for order in completed:
+                try:
+                    await ws_manager.notify_order_event(
+                        "ORDER_COMPLETED",
+                        {
+                            "order_id": order.id,
+                            "order_no": order.order_no,
+                            "status": order.status,
+                            "channel": order.channel,
+                            "store_id": order.store_id,
+                            "table_id": order.table_id,
+                            "auto_kitchen": True,
+                        },
+                    )
+                except Exception:
+                    logger.exception("KDS auto-complete ws notify failed order_id=%s", order.id)
+            if completed:
+                logger.info("Kitchen auto-completed orders: %s", len(completed))
+
+    @scheduler.scheduled_job("interval", minutes=1)
     async def poll_payment_refunds():
         from app.services.payment_service import PaymentService
 

@@ -145,15 +145,10 @@ SELECT '金卡会员', 400, 0.9500 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '金卡会员');
 
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
-INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '新客满30减5');
-INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '满50享9折', 'PERCENT', 0.9000, 50.00, 14 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满50享9折');
-INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '10元无门槛代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '10元无门槛代金券');
+INSERT INTO `smart_noodle_house`.`coupon_templates` (`id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`, `status`, `created_at`) VALUES (1, '新客满30减5', 'FIXED', 5.0000, 30.00, 30, 1, '2026-08-31 12:29:52.345');
+INSERT INTO `smart_noodle_house`.`coupon_templates` (`id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`, `status`, `created_at`) VALUES (2, '满50享9折', 'PERCENT', 0.9000, 50.00, 14, 1, '2026-08-31 12:29:52.348');
+INSERT INTO `smart_noodle_house`.`coupon_templates` (`id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`, `status`, `created_at`) VALUES (3, '10元无门槛代金券', 'VOUCHER', 10.0000, 0.00, 30, 1, '2026-08-31 12:29:52.349');
+
 
 -- 六、门店
 INSERT INTO stores (store_no, name, address, phone, status)
@@ -183,6 +178,9 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'f
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'operation_log_retention_days', '60', '操作日志保留天数'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'operation_log_retention_days');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'kitchen_auto_complete_minutes', '20', '厨房 KDS 未处理自动出餐（分钟，0=关闭）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'kitchen_auto_complete_minutes');
 
 -- 八、校正（幂等）：非店长角色不得持有 payment:refund
 DELETE rp FROM role_permissions rp
@@ -200,27 +198,18 @@ SELECT
 -- 添加管理员账号
 INSERT INTO users (username, password_hash, display_name, role_id, store_id, status) VALUES ('admin', '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm', '系统管理员', 1, NULL, 1);
 
-
 -- 添加分类
 INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '特价品', '超级优惠', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
-
 INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '绵阳米粉', '经典绵阳米粉', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
-
 INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '面', '面', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
-
 INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '小吃', '小吃', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
-
 INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '卤味', '卤味', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
-
 INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES (1, '饮料', '饮料', 0, 1, '2026-08-31 11:30:51.435', '2026-08-31 11:30:51.435');
 
 -- 添加规格租
 INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('量', 'Liang', 'SINGLE', 1, 0, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
-
 INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('辣', 'La', 'SINGLE', 1, 1, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
-
 INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('麻', 'Ma', 'SINGLE', 1, 1, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
-
 INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES ('蒜末', 'Sm', 'SINGLE', 1, 1, 1, '2026-08-31 11:53:14.384', '2026-08-31 11:53:14.384');
 
 -- 添加规格组明细
@@ -248,76 +237,17 @@ INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_p
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES (4, '加量蒜末', 'JSm', 0.00, 3, 0, 1, '2026-08-31 11:54:26.517', '2026-08-31 11:54:26.517');
 
 
+-- 添加餐品
+INSERT INTO `smart_noodle_house`.`products` 
+(`id`, `store_id`, `category_id`, `product_no`, `name`, `description`, `main_image`, `price`, `original_price`, `stock`, `box_price`, `min_order_count`, `status`, `is_recommended`, `is_hot`, `no_member_discount`, `no_cooking`, `sort_order`, `sales_count`, `created_at`, `updated_at`) VALUES 
+(1, 1, 3, 'M001', '牛肉面', '好吃的牛肉面', '/uploads/products/25985ea8d2fe4d08b074f5b4e443d57d.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 12:43:01.277', '2026-08-31 13:42:32.894'),
+(2, 1, 3, 'M002', '肥肠面', '好吃的肥肠面', '/uploads/products/8681823f4fd646789b1915d1a82b4eab.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 13:38:06.752', '2026-08-31 13:42:32.897'),
+(3, 1, 2, 'F001', '绵阳米粉（牛肉）', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 13:39:22.193', '2026-08-31 13:42:32.887'),
+(4, 1, 2, 'F002', '绵阳米粉（肥肠）', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png', 7.00, 6.00, 9999, 1.00, 1, 'ON_SALE', 1, 1, 0, 0, 0, 1, '2026-08-31 13:40:13.290', '2026-08-31 13:42:32.890');
+
 -- 添加桌号
 INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_name`, `qr_token`, `wechat_qr_url`, `alipay_qr_url`, `status`, `created_at`, `updated_at`) VALUES 
 (1, 1, 'WM', '外卖订单', 'cAY3TvcOi5iDOLXVL9q6CokznisJTflR6chIcFnQvI4', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DcAY3TvcOi5iDOLXVL9q6CokznisJTflR6chIcFnQvI4%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DcAY3TvcOi5iDOLXVL9q6CokznisJTflR6chIcFnQvI4%26channel%3Dalipay', 1, '2026-08-31 12:25:41.769', '2026-08-31 12:25:41.769'),
 (2, 1, 'A01', '1号桌', 'cbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DcbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DcbqIjy3tT-ZaulwX9K0ICJ3LBwYTsO1H4MJPaooc3sE%26channel%3Dalipay', 1, '2026-08-28 12:38:58.111', '2026-08-28 12:44:52.000'),
 (3, 1, 'A02', '2号桌', 'J7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g', 'weixin://dl/business/?appid=YOUR_WECHAT_APPID&path=pages/index/index&query=token%3DJ7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g%26channel%3Dwechat', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages/index/index&query=token%3DJ7aG8hvHA1lg2QUldWnYvV9yX9Y_C0y3ZLxVfZsHS-g%26channel%3Dalipay', 1, '2026-08-28 12:38:58.117', '2026-08-28 12:44:53.000');
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

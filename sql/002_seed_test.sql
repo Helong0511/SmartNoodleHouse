@@ -526,6 +526,10 @@ INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'operation_log_retention_days', '90', '操作日志保留天数'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'operation_log_retention_days');
 
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'kitchen_auto_complete_minutes', '20', '支付后厨房 KDS 未处理超过该分钟数则自动完成出餐；0=关闭'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'kitchen_auto_complete_minutes');
+
 -- ============================================================================
 -- 十二、测试顾客（微信 / 支付宝渠道 + 口味偏好）
 -- 单号：CU + 0000 + 000 + 时间 + 随机4

@@ -143,6 +143,38 @@ function productPrefMatches(product, prefs) {
   return false
 }
 
+/** 本商品可匹配的智能口味标签（菜单 + 加购确认用） */
+function prefLabelsForProduct(product, prefs) {
+  const labels = []
+  if (!product || !prefs || !prefs.length) return labels
+  for (const g of product.option_groups || []) {
+    const match = prefs.find((pr) => pr.category === g.name || pr.category === g.code)
+    if (!match) continue
+    const opt = (g.options || []).find((o) => o.code === match.option_code)
+    if (opt) labels.push(`${g.name}·${opt.name}`)
+  }
+  return labels
+}
+
+/** 菜单快捷加购：有爱好时弹窗文案；无匹配返回 null */
+function buildQuickAddPrefPrompt(product, prefs) {
+  const labels = prefLabelsForProduct(product, prefs)
+  if (!labels.length) return null
+  return {
+    title: '按口味爱好加购？',
+    content: `检测到您的爱好：${labels.join('、')}。是否按爱好选规格？`
+  }
+}
+
+/** 快捷加购规格：usePrefs=true 时按爱好，否则默认规格 */
+function resolveQuickAddSelections(product, prefs, usePrefs) {
+  if (usePrefs && prefs && prefs.length) {
+    const applied = applyPrefsToProduct(product, prefs)
+    return { selected: applied.selected, multi: applied.multi }
+  }
+  return defaultSelections(product)
+}
+
 function applyPrefsToProduct(product, prefs) {
   const { selected, multi } = defaultSelections(product)
   let applied = 0
@@ -188,5 +220,8 @@ module.exports = {
   defaultSelections,
   selectionsComplete,
   productPrefMatches,
+  prefLabelsForProduct,
+  buildQuickAddPrefPrompt,
+  resolveQuickAddSelections,
   applyPrefsToProduct
 }

@@ -134,6 +134,7 @@ class Settings(BaseSettings):
         return self.app_env.lower() in ("development", "dev", "local")
 
     order_payment_timeout_minutes: int = 15
+    kitchen_auto_complete_minutes: int = 20
     visitor_data_retention_days: int = 7
     operation_log_retention_days: int = 90
     welcome_cooldown_seconds: int = 60

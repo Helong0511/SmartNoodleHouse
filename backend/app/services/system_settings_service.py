@@ -23,6 +23,14 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "max": 1440,
         "description": "未支付订单自动关闭时间",
     },
+    "kitchen_auto_complete_minutes": {
+        "label": "厨房自动出餐",
+        "unit": "分钟",
+        "type": "int",
+        "min": 0,
+        "max": 1440,
+        "description": "支付后厨房 KDS 未处理超过该时间则自动完成出餐；0 表示关闭",
+    },
     "visitor_data_retention_days": {
         "label": "访客数据保留",
         "unit": "天",

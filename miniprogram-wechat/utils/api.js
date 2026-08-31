@@ -76,7 +76,11 @@ function networkHint(base, msg) {
   return m || '网络请求失败'
 }
 
-function request(method, path, data = {}, needAuth = true) {
+function isTransientNetworkError(msg) {
+  return /CONNECTION_RESET|ERR_CONNECTION_RESET|reset by peer|CONNECTION_REFUSED|ECONNREFUSED|timeout/i.test(String(msg || ''))
+}
+
+function requestOnce(method, path, data = {}, needAuth = true) {
   const base = resolveBaseUrl()
   return new Promise((resolve, reject) => {
     if (!base) {
@@ -109,6 +113,19 @@ function request(method, path, data = {}, needAuth = true) {
         reject(new Error(networkHint(base, pickErrorMessage(err, '网络请求失败'))))
       }
     })
+  })
+}
+
+function request(method, path, data = {}, needAuth = true, retries = 1) {
+  return requestOnce(method, path, data, needAuth).catch((err) => {
+    if (retries > 0 && isTransientNetworkError(err && err.message)) {
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          request(method, path, data, needAuth, retries - 1).then(resolve).catch(reject)
+        }, 400)
+      })
+    }
+    throw err
   })
 }
 

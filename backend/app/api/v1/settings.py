@@ -263,6 +263,7 @@ def _build_env_groups(settings) -> list[dict]:
             "description": "仅当 system_settings 表无对应键时作为种子默认值；正式运行以「业务参数」页为准",
             "items": [
                 _env_item("ORDER_PAYMENT_TIMEOUT_MINUTES", str(settings.order_payment_timeout_minutes), "订单支付超时（分钟）", restart=False),
+                _env_item("KITCHEN_AUTO_COMPLETE_MINUTES", str(settings.kitchen_auto_complete_minutes), "厨房 KDS 未处理自动出餐（分钟，0=关闭）", restart=False),
                 _env_item("VISITOR_DATA_RETENTION_DAYS", str(settings.visitor_data_retention_days), "访客数据保留（天）", restart=False),
                 _env_item("OPERATION_LOG_RETENTION_DAYS", str(settings.operation_log_retention_days), "操作日志保留（天）", restart=False),
                 _env_item("WELCOME_COOLDOWN_SECONDS", str(settings.welcome_cooldown_seconds), "迎宾冷却（秒）", restart=False),

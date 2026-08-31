@@ -11,7 +11,7 @@ from app.services.order_state_machine import (
 
 def test_staff_kitchen_flow():
     assert_staff_transition("PAID", "PREPARING")
-    assert_staff_transition("PAID", "COMPLETED")
+    assert_staff_transition("PAID", "READY")
     assert_staff_transition("PREPARING", "COOKING")
     assert_staff_transition("COOKING", "READY")
     assert_staff_transition("READY", "COMPLETED")
