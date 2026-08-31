@@ -3,6 +3,7 @@ const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 const ORDERS_CACHE_MS = 30 * 1000
@@ -27,6 +28,7 @@ Page({
   },
 
   onShow() {
+    tabCartBadge.syncTabCartBadge()
     const ctx = dineCtx.currentDisplay()
     this.applyDineContext(ctx)
     const silent = this.data.orders.length > 0
@@ -172,11 +174,11 @@ Page({
           title: '已加入购物车',
           content: `已加入 ${cart.length} 件；${skipped.length} 件不可用已跳过`,
           showCancel: false,
-          success: () => wx.navigateTo({ url: '/packageOrder/cart/cart' })
+          success: () => wx.switchTab({ url: '/pages/cart/cart' })
         })
       } else {
         wx.showToast({ title: '已加入购物车', icon: 'success' })
-        setTimeout(() => wx.navigateTo({ url: '/packageOrder/cart/cart' }), 500)
+        setTimeout(() => wx.switchTab({ url: '/pages/cart/cart' }), 500)
       }
     } catch (err) {
       wx.hideLoading()

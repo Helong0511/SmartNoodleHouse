@@ -93,10 +93,4 @@
   </view>
 
   <view class="empty-tip" wx:elif="{{!loading && !categories.length}}">暂无菜品</view>
-
-  <view class="cart-bar safe-bottom" bindtap="goCart" wx:if="{{cartCount > 0}}">
-    <text class="cart-icon">🛒</text>
-    <text>购物车 {{cartCount}} 件</text>
-    <text class="cart-total">¥{{cartTotal}}</text>
-  </view>
 </view>

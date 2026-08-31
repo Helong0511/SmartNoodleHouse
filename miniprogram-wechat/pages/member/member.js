@@ -3,6 +3,7 @@ const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const { enableWxPhoneBind } = require('../../config/env')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 function discountText(rate) {
@@ -60,6 +61,7 @@ Page({
   },
 
   onShow() {
+    tabCartBadge.syncTabCartBadge()
     this.setData({ canWxPhone: !!enableWxPhoneBind })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))

@@ -17,13 +17,16 @@
     <text wx:else>会员身份已识别</text>
   </view>
 
-  <view class="table-box" wx:if="{{!needPack && !tableToken && (tableOptions.length || needScanHint)}}">
-    <view class="label">选择桌号（堂食必选）</view>
-    <button class="scan-btn" bindtap="scanTable">扫码绑桌</button>
-    <picker wx:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" bindchange="onPickTable">
-      <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
-    </picker>
-    <view wx:elif="{{needScanHint}}" class="scan-hint">请先扫描桌台二维码，或联系店员协助选桌</view>
+  <view class="table-box" wx:if="{{!needPack}}">
+    <view class="label">堂食桌号（必选）</view>
+    <view wx:if="{{tableToken && tableName}}" class="table-on">{{tableName}}</view>
+    <block wx:elif="{{!tableToken}}">
+      <view class="scan-btn" hover-class="scan-btn-hover" bindtap="scanTable">扫码绑桌</view>
+      <picker wx:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" bindchange="onPickTable">
+        <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
+      </picker>
+      <view wx:elif="{{needScanHint}}" class="scan-hint">请先扫描桌台二维码，或联系店员协助选桌</view>
+    </block>
   </view>
 
   <view class="cart-box">

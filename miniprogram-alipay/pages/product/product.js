@@ -3,6 +3,7 @@ const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 Page({
@@ -120,6 +121,10 @@ Page({
     })
     auth.saveCart(cart)
     my.showToast({ content: '已加入', type: 'success' })
-    setTimeout(() => my.navigateBack(), 500)
+    setTimeout(() => {
+      my.navigateBack({
+        complete: () => tabCartBadge.syncTabCartBadge()
+      })
+    }, 500)
   }
 })

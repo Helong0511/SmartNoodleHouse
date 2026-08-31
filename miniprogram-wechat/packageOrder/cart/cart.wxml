@@ -13,7 +13,7 @@
     <view class="empty-icon">🛒</view>
     <view class="empty-title">购物车是空的</view>
     <view class="empty-desc">去菜单挑选喜欢的面食吧</view>
-    <button class="btn-primary empty-btn" bindtap="goMenu">去点餐</button>
+    <button class="btn-ghost empty-btn" bindtap="goMenu">继续点餐</button>
   </view>
 
   <block wx:else>
@@ -49,11 +49,20 @@
     </view>
 
     <view class="footer safe-bottom">
+      <view class="footer-action">
+        <view class="footer-link" hover-class="footer-link-hover" bindtap="goMenu">继续点餐</view>
+      </view>
       <view class="sum-wrap">
         <text class="sum">合计 ¥{{total}}</text>
         <text class="sum-sub" wx:if="{{count}}">共 {{count}} 件</text>
       </view>
-      <button class="btn-primary footer-btn" bindtap="goConfirm" disabled="{{invalidCount > 0 || count === 0}}">去结算</button>
+      <view class="footer-action">
+        <view
+          class="footer-btn {{invalidCount > 0 || count === 0 ? 'is-disabled' : ''}}"
+          hover-class="{{invalidCount > 0 || count === 0 ? 'none' : 'footer-btn-hover'}}"
+          bindtap="goConfirm"
+        >去结算</view>
+      </view>
     </view>
   </block>
 </view>

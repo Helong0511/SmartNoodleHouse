@@ -19,7 +19,7 @@
     <view class="label">堂食桌号（必选）</view>
     <view a:if="{{tableToken && tableName}}" class="table-on">{{tableName}}</view>
     <block a:elif="{{!tableToken}}">
-      <button class="scan-btn" onTap="scanTable">扫码绑桌</button>
+      <view class="scan-btn" onTap="scanTable">扫码绑桌</view>
       <picker a:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
         <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
       </picker>

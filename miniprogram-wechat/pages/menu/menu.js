@@ -4,6 +4,7 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 const MENU_CACHE_MS = 5 * 60 * 1000
@@ -17,8 +18,6 @@ function normalizeList(data) {
 Page({
   data: {
     categories: [],
-    cartCount: 0,
-    cartTotal: '0.00',
     isWide: false,
     prefs: [],
     prefSummary: '',
@@ -36,7 +35,7 @@ Page({
   },
 
   onShow() {
-    this.refreshCart()
+    tabCartBadge.syncTabCartBadge()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadPrefs()
@@ -176,11 +175,6 @@ Page({
     this.setData({ activeCat: id, scrollInto: `cat-${id}` })
   },
 
-  refreshCart() {
-    const { count, total } = cartUtil.cartSummary(auth.getCart())
-    this.setData({ cartCount: count, cartTotal: total })
-  },
-
   openProduct(e) {
     wx.navigateTo({ url: `/packageOrder/product/product?id=${e.currentTarget.dataset.id}` })
   },
@@ -205,12 +199,7 @@ Page({
       no_member_discount: noMemberDiscount === true || noMemberDiscount === 'true' || noMemberDiscount === 1 || noMemberDiscount === '1'
     })
     auth.saveCart(cart)
-    this.refreshCart()
     wx.showToast({ title: '已加入', icon: 'success' })
-  },
-
-  goCart() {
-    wx.navigateTo({ url: '/packageOrder/cart/cart' })
   },
 
   goMember() {

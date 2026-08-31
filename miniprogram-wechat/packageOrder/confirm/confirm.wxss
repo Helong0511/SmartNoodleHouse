@@ -20,15 +20,20 @@
 }
 .scan-btn {
   margin: 0 0 16rpx;
+  padding: 0;
   background: #fff;
   color: #ff6b35;
   border: 1px solid #ff6b35;
   border-radius: 48rpx;
   height: 72rpx;
-  line-height: 72rpx;
   font-size: 28rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
-.scan-btn::after { border: none; }
+.scan-btn-hover { opacity: 0.82; }
 .sum-row { display: flex; justify-content: space-between; margin-top: 12rpx; color: #666; font-size: 26rpx; }
 .sum-row.discount { color: #ff6b35; }
 .label { color: #666; font-size: 26rpx; margin-bottom: 8rpx; }

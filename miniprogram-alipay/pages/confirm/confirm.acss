@@ -4,13 +4,18 @@
 .label { color: #666; font-size: 26rpx; margin-bottom: 8rpx; }
 .scan-btn {
   margin: 0 0 16rpx;
+  padding: 0;
   background: #fff;
   color: #1677ff;
   border: 1px solid #1677ff;
   border-radius: 48rpx;
   height: 72rpx;
-  line-height: 72rpx;
   font-size: 28rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 .table-on { font-size: 36rpx; font-weight: 600; color: #1677ff; }
 .table-pick.hint { color: #999; font-size: 24rpx; border-bottom: none; }

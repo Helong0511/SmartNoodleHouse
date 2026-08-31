@@ -3,6 +3,7 @@ const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 const ORDERS_CACHE_MS = 30 * 1000
@@ -27,6 +28,7 @@ Page({
   },
 
   onShow() {
+    tabCartBadge.syncTabCartBadge()
     const ctx = dineCtx.currentDisplay()
     this.applyDineContext(ctx)
     const silent = this.data.orders.length > 0
@@ -171,7 +173,7 @@ Page({
         content: skipped.length
           ? `已加入 ${cart.length} 件；${skipped.length} 件不可用已跳过`
           : `已按历史订单加入 ${cart.length} 件`,
-        success: () => my.navigateTo({ url: '/pages/cart/cart' })
+        success: () => my.switchTab({ url: '/pages/cart/cart' })
       })
     } catch (err) {
       my.hideLoading()

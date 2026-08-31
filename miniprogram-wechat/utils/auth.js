@@ -1,5 +1,6 @@
 const api = require('./api')
 const app = getApp()
+const tabCartBadge = require('./tabCartBadge')
 
 function wxLogin() {
   return new Promise((resolve, reject) => {
@@ -124,6 +125,7 @@ async function ensureLogin(tableToken) {
 function saveCart(cart) {
   app.globalData.cart = cart
   wx.setStorageSync('cart', cart)
+  tabCartBadge.updateTabCartBadge(cart)
 }
 
 function getCart() {

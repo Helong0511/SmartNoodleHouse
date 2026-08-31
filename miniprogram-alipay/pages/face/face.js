@@ -1,20 +1,34 @@
 const api = require('../../utils/api')
+const cameraAuth = require('../../utils/cameraAuth')
 const app = getApp()
 
 Page({
-  data: { cameraOn: false, from: '', capturing: false },
+  data: { cameraOn: false, from: '', capturing: false, openingCamera: false },
 
   onLoad(query) {
     this.setData({ from: query.from || '' })
   },
 
-  startCamera() {
-    this.setData({ cameraOn: true })
+  async startCamera() {
+    if (this.data.openingCamera || this.data.cameraOn) return
+    this.setData({ openingCamera: true })
+    try {
+      await cameraAuth.ensureCameraReady()
+      this.setData({ cameraOn: true })
+    } catch (e) {
+      my.alert({
+        title: '无法打开摄像头',
+        content: (e && e.message) || cameraAuth.CAMERA_DENIED_HINT
+      })
+    } finally {
+      this.setData({ openingCamera: false })
+    }
   },
 
-  onCameraError() {
-    my.showToast({ content: '摄像头不可用，请检查权限', type: 'fail' })
+  async onCameraError() {
     this.setData({ cameraOn: false })
+    const ok = await cameraAuth.handleCameraError('摄像头不可用，请检查权限')
+    if (ok) this.setData({ cameraOn: true })
   },
 
   /** 仅用页面内 camera 实拍，禁止相册选图 */

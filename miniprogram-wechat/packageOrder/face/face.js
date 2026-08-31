@@ -1,19 +1,44 @@
 const api = require('../../utils/api')
+const cameraAuth = require('../../utils/cameraAuth')
 const app = getApp()
 
 Page({
-  data: { cameraOn: false, from: '', uploading: false },
+  data: { cameraOn: false, from: '', uploading: false, openingCamera: false },
 
   onLoad(query) {
     this.setData({ from: query.from || '' })
   },
 
-  startCamera() {
-    this.setData({ cameraOn: true })
+  async startCamera() {
+    if (this.data.openingCamera || this.data.cameraOn) return
+    this.setData({ openingCamera: true })
+    try {
+      await cameraAuth.ensureCameraReady()
+      this.setData({ cameraOn: true })
+    } catch (e) {
+      wx.showModal({
+        title: '无法打开摄像头',
+        content: (e && e.message) || cameraAuth.CAMERA_DENIED_HINT,
+        showCancel: false
+      })
+    } finally {
+      this.setData({ openingCamera: false })
+    }
+  },
+
+  async onCameraError(e) {
+    const msg = (e && e.detail && e.detail.errMsg) || '摄像头不可用'
+    this.setData({ cameraOn: false })
+    const ok = await cameraAuth.handleCameraError(msg)
+    if (ok) this.setData({ cameraOn: true })
   },
 
   /** 仅从 live camera 取帧，不走相册 / chooseMedia 读图文件 */
   captureAndConsent() {
+    if (!this.data.cameraOn) {
+      wx.showToast({ title: '请先打开摄像头', icon: 'none' })
+      return
+    }
     if (this.data.uploading) return
     const ctx = wx.createCameraContext('faceCamera', this)
     ctx.takePhoto({

@@ -19,8 +19,19 @@ const DEV_LAN_HOST = '192.168.1.110'
 const DEV_USE_LAN = false
 const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api/v1`
 
+function isDevtools() {
+  try {
+    const sys = my.getSystemInfoSync()
+    return sys.platform === 'devtools' || /devtools/i.test(sys.model || '')
+  } catch (e) {
+    return false
+  }
+}
+
+/** 模拟器用 127.0.0.1；真机自动用 DEV_LAN_HOST */
 function resolveDevApiBase() {
-  return DEV_USE_LAN ? DEV_LAN_API : DEV_SIMULATOR_API
+  if (DEV_USE_LAN || !isDevtools()) return DEV_LAN_API
+  return DEV_SIMULATOR_API
 }
 
 /** 按运行环境选择 API 根地址 */

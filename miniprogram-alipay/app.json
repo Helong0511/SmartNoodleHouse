@@ -1,11 +1,11 @@
 {
   "pages": [
-    "pages/index/index",
     "pages/menu/menu",
+    "pages/cart/cart",
     "pages/orders/orders",
     "pages/member/member",
+    "pages/index/index",
     "pages/product/product",
-    "pages/cart/cart",
     "pages/confirm/confirm",
     "pages/result/result",
     "pages/face/face"
@@ -25,6 +25,12 @@
         "name": "点餐",
         "icon": "assets/tab/menu.png",
         "activeIcon": "assets/tab/menu-active.png"
+      },
+      {
+        "pagePath": "pages/cart/cart",
+        "name": "购物车",
+        "icon": "assets/tab/cart.png",
+        "activeIcon": "assets/tab/cart-active.png"
       },
       {
         "pagePath": "pages/orders/orders",

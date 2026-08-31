@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 function discountText(rate) {
@@ -57,6 +58,7 @@ Page({
   },
 
   onShow() {
+    tabCartBadge.syncTabCartBadge()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadProfile()

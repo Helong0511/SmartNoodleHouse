@@ -1,6 +1,7 @@
 const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
+const tabCartBadge = require('./utils/tabCartBadge')
 
 App({
   globalData: {
@@ -22,6 +23,7 @@ App({
     }
     const cart = wx.getStorageSync('cart') || []
     this.globalData.cart = cart
+    tabCartBadge.updateTabCartBadge(cart)
     this.globalData.nickname = wx.getStorageSync('nickname') || ''
     this.globalData.avatarUrl = wx.getStorageSync('avatar_url') || ''
     this.globalData.customerToken = wx.getStorageSync('customer_token') || ''
@@ -32,26 +34,41 @@ App({
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.onNeedPrivacyAuthorization((resolve) => {
-      wx.showModal({
-        title: '隐私保护提示',
-        content: '为提供登录、点餐、人脸迎宾等服务，需您同意《用户隐私保护指引》。',
-        confirmText: '同意',
-        cancelText: '查看协议',
-        success: (res) => {
-          if (res.confirm) {
-            resolve({ buttonId: 'agree-btn', event: 'agree' })
-            return
-          }
-          privacy.openPrivacyContract().then(() => {
-            resolve({ buttonId: 'disagree-btn', event: 'disagree' })
-          })
-        }
-      })
+      const ask = () => {
+        wx.showModal({
+          title: '隐私保护提示',
+          content: '为提供登录、点餐、人脸迎宾等服务，需您同意《用户隐私保护指引》。使用摄像头采集人脸前须先同意。',
+          confirmText: '同意',
+          cancelText: '查看协议',
+          success: (res) => {
+            if (res.confirm) {
+              resolve({ buttonId: 'agree-btn', event: 'agree' })
+              return
+            }
+            privacy.openPrivacyContract().then(() => {
+              wx.showModal({
+                title: '是否同意隐私指引',
+                content: '阅读完成后，请选择是否同意《用户隐私保护指引》',
+                confirmText: '同意',
+                cancelText: '拒绝',
+                success: (r2) => {
+                  if (r2.confirm) resolve({ buttonId: 'agree-btn', event: 'agree' })
+                  else resolve({ event: 'disagree' })
+                },
+                fail: () => resolve({ event: 'disagree' })
+              })
+            })
+          },
+          fail: () => resolve({ event: 'disagree' })
+        })
+      }
+      ask()
     })
   },
   onShow(options) {
     // 从扫码/分享再次进入时补解析
     if (options) this.parseLaunch(options)
+    tabCartBadge.updateTabCartBadge(this.globalData.cart || wx.getStorageSync('cart') || [])
   },
   parseLaunch(options) {
     const q = (options && options.query) || {}

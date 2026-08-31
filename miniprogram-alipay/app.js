@@ -1,6 +1,7 @@
 const { parseTableTokenFromScan } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
+const tabCartBadge = require('./utils/tabCartBadge')
 
 App({
   globalData: {
@@ -27,10 +28,12 @@ App({
     this.globalData.store = auth.readStorage('dine_store') || null
     this.globalData.table = auth.readStorage('dine_table') || null
     this.globalData.tableToken = auth.readStorage('table_token') || ''
+    tabCartBadge.updateTabCartBadge(this.globalData.cart)
     this.parseLaunch(options)
   },
   onShow(options) {
     if (options) this.parseLaunch(options)
+    tabCartBadge.updateTabCartBadge(this.globalData.cart || auth.readStorage('cart') || [])
   },
   parseLaunch(options) {
     const q = (options && options.query) || {}

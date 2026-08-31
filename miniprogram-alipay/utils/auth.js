@@ -161,6 +161,7 @@ function saveCart(cart) {
   const app = requireApp()
   app.globalData.cart = cart
   my.setStorageSync({ key: 'cart', data: cart })
+  require('./tabCartBadge').updateTabCartBadge(cart)
 }
 
 function getCart() {

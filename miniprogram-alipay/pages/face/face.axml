@@ -10,7 +10,7 @@
   ></camera>
   <view class="hint" a:if="{{cameraOn}}">请正对摄像头，光线充足，画面中仅您一人</view>
   <view class="actions">
-    <button class="btn-primary" onTap="startCamera" a:if="{{!cameraOn}}">打开摄像头采集</button>
+    <button class="btn-primary" onTap="startCamera" a:if="{{!cameraOn}}" loading="{{openingCamera}}">打开摄像头采集</button>
     <button class="btn-primary" onTap="confirmConsent" a:if="{{cameraOn}}" disabled="{{capturing}}">拍照并授权</button>
     <button class="btn-ghost" onTap="cancel">取消</button>
   </view>

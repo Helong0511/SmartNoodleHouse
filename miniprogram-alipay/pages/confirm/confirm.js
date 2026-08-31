@@ -112,6 +112,7 @@ Page({
     return items
   },
   onShow() {
+    if (this._bindingTable) return
     this._memberRate = 1
     this._couponManualPick = false
     this._voucherManualPick = false
@@ -127,9 +128,24 @@ Page({
   },
   async bootstrapCheckout() {
     const ctx = await dineCtx.ensureDineContext()
-    this.setData(dineCtx.pageDineFields(ctx))
-    await Promise.all([this.loadMember(), this.loadCoupons(), this.loadVouchers()])
-    await this.resolveTable()
+    const token = String(
+      (ctx.table && ctx.table.qr_token)
+      || app.globalData.tableToken
+      || auth.readStorage('table_token')
+      || ''
+    ).trim()
+    this.setData({
+      ...dineCtx.pageDineFields(ctx),
+      ...(token && ctx.hasTable
+        ? { tableToken: token, needScanHint: false, pickedLabel: ctx.tableName }
+        : {}),
+    })
+    await Promise.all([
+      this.loadMember(),
+      this.loadCoupons(),
+      this.loadVouchers(),
+      this.resolveTable(),
+    ])
     await this.refreshSummary()
   },
   clearTableBinding() {
@@ -140,6 +156,109 @@ Page({
       my.removeStorageSync({ key: 'dine_table' })
     } catch (_) {}
     this.setData({ tableName: '', tableToken: '', pickedLabel: '' })
+  },
+  _applyBoundTable(table, store, token) {
+    const t = table || {}
+    const tok = String(token || t.qr_token || '').trim()
+    if (!tok) return false
+    app.globalData.table = t
+    app.globalData.tableToken = tok
+    if (store) {
+      app.globalData.store = store
+      my.setStorageSync({ key: 'dine_store', data: store })
+    }
+    my.setStorageSync({ key: 'table_token', data: tok })
+    my.setStorageSync({ key: 'dine_table', data: t })
+    const name = t.table_name || t.table_no || ''
+    this.setData({
+      tableName: name,
+      tableToken: tok,
+      needScanHint: false,
+      pickedLabel: name,
+    })
+    return true
+  },
+  _readCachedTable() {
+    return app.globalData.table || auth.readStorage('dine_table') || null
+  },
+  async resolveTable() {
+    const cached = this._readCachedTable()
+    let token = String(
+      app.globalData.tableToken
+      || auth.readStorage('table_token')
+      || (cached && cached.qr_token)
+      || ''
+    ).trim()
+
+    if (token && cached && (cached.table_name || cached.table_no)) {
+      if (!cached.qr_token || String(cached.qr_token) === token) {
+        this._applyBoundTable(cached, app.globalData.store || auth.readStorage('dine_store'), token)
+        this._softRefreshTable(token)
+        return
+      }
+    }
+
+    if (token) {
+      try {
+        const entry = await api.get('/miniprogram/entry', { token, channel: 'alipay' }, false)
+        if (entry && entry.table && entry.table.qr_token) {
+          this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token)
+          return
+        }
+        this.clearTableBinding()
+      } catch (_) {
+        if (cached && (cached.table_name || cached.table_no)) {
+          this._applyBoundTable(cached, app.globalData.store || auth.readStorage('dine_store'), token)
+          return
+        }
+        this.setData({ needScanHint: true })
+        return
+      }
+    }
+
+    try {
+      if (!app.globalData.customerToken) await auth.ensureLogin()
+      const sid = (app.globalData.table && app.globalData.table.store_id)
+        || (app.globalData.store && app.globalData.store.id)
+        || null
+      if (!sid) {
+        this.setData({ tableOptions: [], needScanHint: true })
+        return
+      }
+      const list = await api.get('/miniprogram/tables', { store_id: sid })
+      const options = (list || []).map((t) => ({
+        label: t.table_name || t.table_no,
+        id: t.id,
+        qr_token: t.qr_token || '',
+        store_id: t.store_id,
+        table_no: t.table_no,
+        table_name: t.table_name,
+      }))
+      this.setData({ tableOptions: options, needScanHint: !options.length })
+    } catch (_) {
+      this.setData({ tableOptions: [], needScanHint: true })
+    }
+  },
+  async _softRefreshTable(token) {
+    try {
+      const entry = await api.get('/miniprogram/entry', { token, channel: 'alipay' }, false)
+      if (!(entry && entry.table && entry.table.qr_token)) return
+      this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token)
+    } catch (_) {}
+  },
+  async scanTable() {
+    this._bindingTable = true
+    try {
+      const ctx = await dineCtx.scanAndBindTable()
+      if (!ctx) return
+      const table = ctx.table || app.globalData.table
+      const token = (table && table.qr_token) || app.globalData.tableToken || ''
+      if (table && token) {
+        this._applyBoundTable(table, ctx.store || app.globalData.store, token)
+      }
+    } finally {
+      this._bindingTable = false
+    }
   },
   async loadMember() {
     try {
@@ -334,72 +453,6 @@ Page({
       hasSpecialItems: enrichedList.some((i) => i.no_member_discount)
     })
   },
-  async resolveTable() {
-    let token = String(
-      app.globalData.tableToken || auth.readStorage('table_token') || ''
-    ).trim()
-
-    if (token) {
-      try {
-        const entry = await api.get('/miniprogram/entry', { token, channel: 'alipay' }, false)
-        if (entry && entry.table && entry.table.qr_token) {
-          const table = entry.table
-          app.globalData.table = table
-          app.globalData.tableToken = table.qr_token
-          token = table.qr_token
-          if (entry.store) {
-            app.globalData.store = entry.store
-            my.setStorageSync({ key: 'dine_store', data: entry.store })
-          }
-          my.setStorageSync({ key: 'table_token', data: table.qr_token })
-          my.setStorageSync({ key: 'dine_table', data: table })
-          this.setData({
-            tableName: table.table_name || table.table_no,
-            tableToken: token,
-            needScanHint: false,
-          })
-          return
-        }
-      } catch (_) {}
-      this.clearTableBinding()
-    } else {
-      this.clearTableBinding()
-    }
-
-    try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
-      const sid = (app.globalData.table && app.globalData.table.store_id)
-        || (app.globalData.store && app.globalData.store.id)
-        || null
-      if (!sid) {
-        this.setData({ tableOptions: [], needScanHint: true })
-        return
-      }
-      const list = await api.get('/miniprogram/tables', { store_id: sid })
-      const options = (list || []).map((t) => ({
-        label: t.table_name || t.table_no,
-        id: t.id,
-        qr_token: t.qr_token || '',
-        store_id: t.store_id,
-        table_no: t.table_no,
-        table_name: t.table_name,
-      }))
-      this.setData({ tableOptions: options, needScanHint: !options.length })
-    } catch (_) {
-      this.setData({ tableOptions: [], needScanHint: true })
-    }
-  },
-  async scanTable() {
-    const ctx = await dineCtx.scanAndBindTable()
-    if (!ctx) return
-    const table = ctx.table || app.globalData.table
-    this.setData({
-      tableName: ctx.tableName,
-      tableToken: (table && table.qr_token) || app.globalData.tableToken,
-      needScanHint: false,
-      pickedLabel: ctx.tableName
-    })
-  },
   async onPickTable(e) {
     const idx = Number(e.detail.value)
     const t = this.data.tableOptions[idx]
@@ -422,10 +475,7 @@ Page({
       my.showToast({ content: '无法获取桌台令牌', type: 'fail' })
       return
     }
-    app.globalData.table = { ...t, qr_token: token }
-    app.globalData.tableToken = token
-    my.setStorageSync({ key: 'table_token', data: token })
-    this.setData({ tableName: t.label, tableToken: token, pickedLabel: t.label })
+    this._applyBoundTable({ ...t, qr_token: token, table_name: t.label || t.table_name }, app.globalData.store, token)
   },
   onPack(e) {
     this.setData({ needPack: String(e.currentTarget.dataset.pack) === '1' }, () => this.refreshSummary())

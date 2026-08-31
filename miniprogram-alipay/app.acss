@@ -1,3 +1,30 @@
 page { background: #f7f7f7; color: #333; font-size: 28rpx; }
-.btn-primary { background: #1677ff; color: #fff; border-radius: 48rpx; }
-.btn-ghost { background: #fff; color: #1677ff; border: 1px solid #1677ff; border-radius: 48rpx; }
+.btn-primary {
+  background: #1677ff;
+  color: #fff;
+  border-radius: 48rpx;
+  height: 88rpx;
+  padding: 0;
+  margin: 0;
+  font-size: 30rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.btn-ghost {
+  background: #fff;
+  color: #1677ff;
+  border: 1px solid #1677ff;
+  border-radius: 48rpx;
+  height: 88rpx;
+  padding: 0;
+  margin: 0;
+  font-size: 30rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}

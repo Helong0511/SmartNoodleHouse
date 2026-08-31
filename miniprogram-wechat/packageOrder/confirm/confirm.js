@@ -95,6 +95,8 @@ Page({
   },
 
   onShow() {
+    // 扫码相机返回会触发 onShow；跳过整页重载，避免与「识别桌台」叠请求变慢
+    if (this._bindingTable) return
     this._memberRate = 1
     this._couponManualPick = false
     this._voucherManualPick = false
@@ -111,8 +113,12 @@ Page({
 
   async bootstrapCheckout() {
     await this.loadDineContext()
-    await Promise.all([this.loadMember(), this.loadCoupons(), this.loadVouchers()])
-    await this.resolveTable()
+    await Promise.all([
+      this.loadMember(),
+      this.loadCoupons(),
+      this.loadVouchers(),
+      this.resolveTable(),
+    ])
     await this.refreshSummary()
   },
 
@@ -129,12 +135,141 @@ Page({
 
   async loadDineContext() {
     const ctx = await dineCtx.ensureDineContext()
+    const token = String(
+      (ctx.table && ctx.table.qr_token)
+      || app.globalData.tableToken
+      || wx.getStorageSync('table_token')
+      || ''
+    ).trim()
     this.setData({
       storeName: ctx.storeName,
       storeNo: ctx.storeNo,
       storeAddress: ctx.storeAddress,
       storePhone: ctx.storePhone,
+      tableName: ctx.tableName || this.data.tableName || '',
+      tableNo: ctx.tableNo || this.data.tableNo || '',
+      ...(token && ctx.hasTable
+        ? { tableToken: token, needScanHint: false, pickedLabel: ctx.tableName }
+        : {}),
     })
+  },
+
+  _applyBoundTable(table, store, token) {
+    const t = table || {}
+    const tok = String(token || t.qr_token || '').trim()
+    if (!tok) return false
+    app.globalData.table = t
+    app.globalData.tableToken = tok
+    if (store) {
+      app.globalData.store = store
+      wx.setStorageSync('dine_store', store)
+    }
+    wx.setStorageSync('table_token', tok)
+    wx.setStorageSync('dine_table', t)
+    const name = t.table_name || t.table_no || ''
+    this.setData({
+      tableName: name,
+      tableNo: t.table_no || '',
+      tableToken: tok,
+      needScanHint: false,
+      pickedLabel: name,
+    })
+    return true
+  },
+
+  _readCachedTable() {
+    return app.globalData.table || wx.getStorageSync('dine_table') || null
+  },
+
+  async resolveTable() {
+    const cached = this._readCachedTable()
+    let token = String(
+      app.globalData.tableToken
+      || wx.getStorageSync('table_token')
+      || (cached && cached.qr_token)
+      || ''
+    ).trim()
+
+    // 本地已有桌台：先展示，后台静默校验（网络失败不清除）
+    if (token && cached && (cached.table_name || cached.table_no)) {
+      if (!cached.qr_token || String(cached.qr_token) === token) {
+        this._applyBoundTable(cached, app.globalData.store || wx.getStorageSync('dine_store'), token)
+        this._softRefreshTable(token)
+        return
+      }
+    }
+
+    if (token) {
+      try {
+        const entry = await api.get('/miniprogram/entry', { token, channel: 'wechat' }, false)
+        if (entry && entry.table && entry.table.qr_token) {
+          this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token)
+          return
+        }
+        // 服务端明确无效：才清绑定
+        this.clearTableBinding()
+      } catch (_) {
+        // 网络抖动：保留本地绑定，避免真机反复要求扫码
+        if (cached && (cached.table_name || cached.table_no)) {
+          this._applyBoundTable(cached, app.globalData.store || wx.getStorageSync('dine_store'), token)
+          return
+        }
+        this.setData({ needScanHint: true })
+        return
+      }
+    }
+
+    try {
+      if (!app.globalData.customerToken) await auth.ensureLogin()
+      const sid = this.storeId()
+      if (!sid) {
+        this.setData({ tableOptions: [], needScanHint: true })
+        return
+      }
+      const list = await api.get('/miniprogram/tables', { store_id: sid })
+      const options = (list || []).map((t) => ({
+        label: t.table_name || t.table_no,
+        id: t.id,
+        qr_token: t.qr_token || '',
+        store_id: t.store_id,
+        table_no: t.table_no,
+        table_name: t.table_name,
+      }))
+      this.setData({ tableOptions: options, needScanHint: !options.length })
+    } catch (_) {
+      this.setData({ tableOptions: [], needScanHint: true })
+    }
+  },
+
+  async _softRefreshTable(token) {
+    try {
+      const entry = await api.get('/miniprogram/entry', { token, channel: 'wechat' }, false)
+      if (!(entry && entry.table && entry.table.qr_token)) return
+      this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token)
+    } catch (_) {
+      /* 静默失败，保留本地 */
+    }
+  },
+
+  async scanTable() {
+    this._bindingTable = true
+    try {
+      const ctx = await dineCtx.scanAndBindTable()
+      if (!ctx) return
+      const table = ctx.table || app.globalData.table
+      const token = (table && table.qr_token) || app.globalData.tableToken || ''
+      if (table && token) {
+        this._applyBoundTable(table, ctx.store || app.globalData.store, token)
+      }
+      this.setData({
+        storeName: ctx.storeName || this.data.storeName,
+        storeNo: ctx.storeNo || this.data.storeNo,
+        storeAddress: ctx.storeAddress || this.data.storeAddress,
+        storePhone: ctx.storePhone || this.data.storePhone,
+      })
+    } finally {
+      this._bindingTable = false
+    }
   },
 
   async loadMember() {
@@ -372,78 +507,6 @@ Page({
     })
   },
 
-  async resolveTable() {
-    let token = String(
-      app.globalData.tableToken || wx.getStorageSync('table_token') || ''
-    ).trim()
-
-    if (token) {
-      try {
-        const entry = await api.get('/miniprogram/entry', { token, channel: 'wechat' }, false)
-        if (entry && entry.table && entry.table.qr_token) {
-          const table = entry.table
-          app.globalData.table = table
-          app.globalData.tableToken = table.qr_token
-          token = table.qr_token
-          if (entry.store) {
-            app.globalData.store = entry.store
-            wx.setStorageSync('dine_store', entry.store)
-          }
-          wx.setStorageSync('table_token', table.qr_token)
-          wx.setStorageSync('dine_table', table)
-          this.setData({
-            tableName: table.table_name || table.table_no,
-            tableToken: token,
-            needScanHint: false,
-            tableNo: table.table_no || '',
-          })
-          return
-        }
-      } catch (_) {}
-      this.clearTableBinding()
-    } else {
-      this.clearTableBinding()
-    }
-
-    try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
-      const sid = this.storeId()
-      if (!sid) {
-        this.setData({ tableOptions: [], needScanHint: true })
-        return
-      }
-      const list = await api.get('/miniprogram/tables', { store_id: sid })
-      const options = (list || []).map((t) => ({
-        label: t.table_name || t.table_no,
-        id: t.id,
-        qr_token: t.qr_token || '',
-        store_id: t.store_id,
-        table_no: t.table_no,
-        table_name: t.table_name,
-      }))
-      this.setData({ tableOptions: options, needScanHint: !options.length })
-    } catch (_) {
-      this.setData({ tableOptions: [], needScanHint: true })
-    }
-  },
-
-  async scanTable() {
-    const ctx = await dineCtx.scanAndBindTable()
-    if (!ctx) return
-    const table = ctx.table || app.globalData.table
-    this.setData({
-      storeName: ctx.storeName,
-      storeNo: ctx.storeNo,
-      storeAddress: ctx.storeAddress,
-      storePhone: ctx.storePhone,
-      tableName: ctx.tableName,
-      tableNo: ctx.tableNo,
-      tableToken: (table && table.qr_token) || app.globalData.tableToken,
-      needScanHint: false,
-      pickedLabel: ctx.tableName
-    })
-  },
-
   async onPickTable(e) {
     const idx = Number(e.detail.value)
     const t = this.data.tableOptions[idx]
@@ -469,16 +532,11 @@ Page({
       wx.showToast({ title: '无法获取桌台令牌', icon: 'none' })
       return
     }
-    app.globalData.table = { ...t, qr_token: token }
-    app.globalData.tableToken = token
-    wx.setStorageSync('table_token', token)
-    this.setData({
-      tableName: t.label,
-      tableToken: token,
-      pickedLabel: t.label,
-      needScanHint: false,
-      tableNo: t.table_no || ''
-    })
+    this._applyBoundTable(
+      { ...t, qr_token: token, table_name: t.label || t.table_name },
+      app.globalData.store || wx.getStorageSync('dine_store'),
+      token
+    )
   },
 
   onPack(e) {

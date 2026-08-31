@@ -9,10 +9,11 @@
     device-position="front"
     flash="off"
     class="camera"
+    binderror="onCameraError"
   ></camera>
   <view class="hint" wx:if="{{cameraOn}}">请正对镜头，画面中仅本人一人</view>
   <view class="actions">
-    <button class="btn-primary" bindtap="startCamera" wx:if="{{!cameraOn}}">打开摄像头采集</button>
+    <button class="btn-primary" bindtap="startCamera" wx:if="{{!cameraOn}}" loading="{{openingCamera}}">打开摄像头采集</button>
     <button class="btn-primary" bindtap="captureAndConsent" wx:if="{{cameraOn}}" loading="{{uploading}}">拍照并授权</button>
     <button class="btn-ghost" bindtap="cancel">取消</button>
   </view>

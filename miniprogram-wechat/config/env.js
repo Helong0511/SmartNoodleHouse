@@ -19,8 +19,18 @@ const DEV_LAN_HOST = '192.168.1.110'
 const DEV_USE_LAN = false
 const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api/v1`
 
+function isDevtools() {
+  try {
+    return wx.getSystemInfoSync().platform === 'devtools'
+  } catch (e) {
+    return false
+  }
+}
+
+/** 模拟器用 127.0.0.1；真机自动用 DEV_LAN_HOST（手机无法访问电脑 localhost） */
 function resolveDevApiBase() {
-  return DEV_USE_LAN ? DEV_LAN_API : DEV_SIMULATOR_API
+  if (DEV_USE_LAN || !isDevtools()) return DEV_LAN_API
+  return DEV_SIMULATOR_API
 }
 
 /** 按运行环境选择 API 根地址 */
@@ -39,6 +49,7 @@ function resolveApiBase() {
  * 微信隐私接口开关（getPhoneNumber / chooseAvatar / input type=nickname 等）
  * 须在公众平台 → 设置 → 服务内容声明 → 用户隐私保护指引 中声明：
  *   - 昵称、头像、手机号（按实际使用勾选）
+ *   - 摄像头（人脸迎宾页 camera 组件，必填）
  * 配置完成并审核通过后改为 true
  */
 const ENABLE_WX_PRIVACY_APIS = false

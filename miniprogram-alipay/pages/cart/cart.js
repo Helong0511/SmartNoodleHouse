@@ -3,6 +3,7 @@ const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
+const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 Page({
@@ -22,6 +23,7 @@ Page({
   },
 
   onShow() {
+    tabCartBadge.syncTabCartBadge()
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     this.setData({ thumbStyle: `width:${px}px;height:${px}px;` })
@@ -121,7 +123,7 @@ Page({
       })
       return
     }
-    if (!this.data.cart.length) {
+    if (!this.data.cart.length || this.data.count === 0) {
       my.showToast({ content: '购物车为空', type: 'fail' })
       return
     }
