@@ -137,8 +137,10 @@ Page({
   },
 
   async onRegister() {
-    if (!app.globalData.customerToken) {
-      wx.showToast({ title: '请先登录', icon: 'none' })
+    try {
+      await auth.ensureLogin()
+    } catch (e) {
+      wx.showToast({ title: auth.formatError(e, '请先登录'), icon: 'none' })
       return
     }
     try {

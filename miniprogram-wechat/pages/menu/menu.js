@@ -67,6 +67,9 @@ Page({
 
   async loadPrefs(force = false) {
     try {
+      await auth.ensureLogin()
+    } catch (_) {}
+    try {
       const view = await prefUtil.loadCustomerPrefs(app, api, { force })
       this.setData({
         prefs: view.prefs || [],

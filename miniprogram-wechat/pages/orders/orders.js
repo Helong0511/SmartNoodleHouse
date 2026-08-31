@@ -86,7 +86,7 @@ Page({
     const page = reset ? 1 : this.data.page + 1
     const sid = storeId != null ? storeId : this.data.storeId
     try {
-      if (!app.globalData.customerToken) await auth.ensureLogin()
+      await auth.ensureLogin()
       const params = { page, page_size: this.data.pageSize }
       if (sid) params.store_id = sid
       const res = await api.get('/orders/mine', params)

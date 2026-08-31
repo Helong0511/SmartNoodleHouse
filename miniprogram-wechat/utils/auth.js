@@ -24,6 +24,13 @@ function readStorage(key) {
   }
 }
 
+function formatError(err, fallback) {
+  if (!err) return fallback || '未知错误'
+  if (typeof err === 'string') return err
+  if (err.message) return err.message
+  return err.errorMessage || err.errMsg || err.memo || fallback || '未知错误'
+}
+
 function wxLogin() {
   return new Promise((resolve, reject) => {
     wx.login({
@@ -202,6 +209,7 @@ module.exports = {
   ensureLogin,
   saveCart,
   getCart,
+  formatError,
   readStorage,
   getAppSafe,
   refreshCustomerToken
