@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS operation_logs (
 -- 用途：多店经营、扫码绑桌、门店级参数
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS stores (
+CREATE TABLE IF NOT EXISTS `stores` (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_no VARCHAR(32) NOT NULL UNIQUE COMMENT '门店编号（写入业务单号前缀，如 TH01）',
   name VARCHAR(100) NOT NULL COMMENT '门店名称',
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS stores (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='门店表';
 
 -- 堂食桌台；qr_token 用于扫码点餐，不可伪造桌号
-CREATE TABLE IF NOT EXISTS tables (
+CREATE TABLE IF NOT EXISTS `tables` (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   table_no VARCHAR(20) NOT NULL COMMENT '桌号编码（店内唯一，如 01、A12）',

@@ -91,3 +91,12 @@ npm run dev -- --host 127.0.0.1 --port 5173
 #
 # 会员等级 / 偏好评分单测：
 # python -m pytest tests/test_member_levels_admin.py tests/test_preference_scoring.py -v
+
+
+叫号屏地址（调试环境）
+http://127.0.0.1:5173/display?store_id=1
+
+
+选择 餐品后   点击 【加入购物车】按钮成功后 直接跳转到  购物车页面
+微信、支付宝 小程序 同步
+

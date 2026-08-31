@@ -70,11 +70,6 @@
   "style": "v2",
   "sitemapLocation": "sitemap.json",
   "__usePrivacyCheck__": true,
-  "permission": {
-    "scope.camera": {
-      "desc": "用于人脸迎宾授权，仅在本页通过前置摄像头实时采集"
-    }
-  },
   "usingComponents": {
     "store-bar": "/components/store-bar/store-bar"
   }
