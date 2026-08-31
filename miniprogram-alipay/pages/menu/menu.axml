@@ -24,9 +24,18 @@
     />
   </view>
 
-  <view class="pref-bar" a:if="{{prefSummary}}" onTap="goMember">
-    <text>{{prefSummary}}</text>
-    <text class="more">详情</text>
+  <view class="pref-bar" a:if="{{prefCount}}">
+    <view class="pref-main" onTap="togglePrefExpand">
+      <text class="pref-title">智能口味</text>
+      <view class="pref-tags" a:if="{{prefExpanded}}">
+        <text class="pref-tag" a:for="{{prefItems}}" a:key="{{item}}">{{item}}</text>
+      </view>
+      <text class="pref-brief" a:else>{{prefSummary}}</text>
+    </view>
+    <view class="pref-actions">
+      <text class="pref-toggle" a:if="{{prefCount > 3}}" catchTap="togglePrefExpand">{{prefExpanded ? '收起' : '展开'}}</text>
+      <text class="pref-link" catchTap="goMember">会员</text>
+    </view>
   </view>
 
   <view class="loading-tip" a:if="{{loading && !categories.length}}">加载中...</view>

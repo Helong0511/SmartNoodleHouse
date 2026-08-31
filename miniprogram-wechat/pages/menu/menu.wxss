@@ -37,7 +37,8 @@
   margin: 0 24rpx 12rpx;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 12rpx;
   background: #fff3ee;
   color: #ff6b35;
   border-radius: 12rpx;
@@ -45,7 +46,59 @@
   font-size: 24rpx;
 }
 
-.pref-bar .more { color: #999; }
+.pref-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pref-title {
+  display: block;
+  font-weight: 600;
+  font-size: 22rpx;
+  margin-bottom: 6rpx;
+  color: #ff6b35;
+}
+
+.pref-brief {
+  color: #666;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.pref-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+
+.pref-tag {
+  background: #fff;
+  color: #666;
+  border: 1rpx solid #ffd4c2;
+  border-radius: 8rpx;
+  padding: 4rpx 12rpx;
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.pref-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8rpx;
+}
+
+.pref-toggle,
+.pref-link {
+  font-size: 22rpx;
+  color: #999;
+  padding: 4rpx 0;
+}
+
+.pref-link {
+  color: #ff6b35;
+}
 
 .loading-tip, .empty-tip {
   flex: 1;

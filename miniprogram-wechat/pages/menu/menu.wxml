@@ -24,9 +24,18 @@
     />
   </view>
 
-  <view class="pref-bar" wx:if="{{prefSummary}}" bindtap="goMember">
-    <text>{{prefSummary}}</text>
-    <text class="more">详情</text>
+  <view class="pref-bar" wx:if="{{prefCount}}">
+    <view class="pref-main" bindtap="togglePrefExpand">
+      <text class="pref-title">智能口味</text>
+      <view class="pref-tags" wx:if="{{prefExpanded}}">
+        <text class="pref-tag" wx:for="{{prefItems}}" wx:key="*this">{{item}}</text>
+      </view>
+      <text class="pref-brief" wx:else>{{prefSummary}}</text>
+    </view>
+    <view class="pref-actions">
+      <text class="pref-toggle" wx:if="{{prefCount > 3}}" catchtap="togglePrefExpand">{{prefExpanded ? '收起' : '展开'}}</text>
+      <text class="pref-link" catchtap="goMember">会员</text>
+    </view>
   </view>
 
   <skeleton wx:if="{{loading && !categories.length}}" type="menu" rows="{{5}}" />

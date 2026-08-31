@@ -11,14 +11,23 @@ function scoreText(score) {
   return `${Math.round(n * 100)}%`
 }
 
+function formatPrefLabel(p) {
+  return `${p.category}·${p.option_name || p.option_code}`
+}
+
 function formatPrefSummary(prefs, max = 3) {
   const list = prefs || []
   if (!list.length) return ''
-  const text = list
-    .slice(0, max)
-    .map((x) => `${x.category}·${x.option_name || x.option_code}`)
-    .join('、')
+  const text = list.slice(0, max).map(formatPrefLabel).join('、')
   return `智能口味：${text}`
+}
+
+function formatPrefBriefBody(prefs, maxShow = 3) {
+  const list = prefs || []
+  if (!list.length) return ''
+  const shown = list.slice(0, maxShow).map(formatPrefLabel)
+  if (list.length > maxShow) return `${shown.join('、')} 等${list.length}项`
+  return shown.join('、')
 }
 
 function decoratePref(p, status) {
@@ -60,12 +69,15 @@ function buildPrefDisplay(prefRes) {
     .map((p) => decoratePref(p, 'learning'))
 
   const prefs = buildPrefsForApply(all)
+  const displayList = prefs.length ? prefs : (confirmed.length ? confirmed : learning)
 
   return {
     confirmed,
     learning,
     prefs,
-    prefSummary: formatPrefSummary(confirmed.length ? confirmed : learning),
+    prefSummary: formatPrefBriefBody(displayList),
+    prefItems: displayList.map(formatPrefLabel),
+    prefCount: displayList.length,
     hasAny: confirmed.length > 0 || learning.length > 0,
     isEmpty: all.length === 0
   }
@@ -224,6 +236,8 @@ module.exports = {
   PREFS_CACHE_MS,
   MIN_ORDER_COUNT,
   formatPrefSummary,
+  formatPrefBriefBody,
+  formatPrefLabel,
   buildPrefDisplay,
   loadCustomerPrefs,
   clearPrefsCache,

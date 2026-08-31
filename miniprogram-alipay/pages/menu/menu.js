@@ -42,6 +42,9 @@ Page({
     isWide: false,
     prefs: [],
     prefSummary: '',
+    prefItems: [],
+    prefCount: 0,
+    prefExpanded: false,
     activeCat: null,
     scrollInto: '',
     keyword: '',
@@ -95,7 +98,9 @@ Page({
       const view = await prefUtil.loadCustomerPrefs({ globalData: appGlobal() }, api, { force })
       this.setData({
         prefs: (view && view.prefs) || [],
-        prefSummary: (view && view.prefSummary) || ''
+        prefSummary: (view && view.prefSummary) || '',
+        prefItems: (view && view.prefItems) || [],
+        prefCount: (view && view.prefCount) || 0
       })
     } catch (_) {}
   },
@@ -284,6 +289,11 @@ Page({
       my.hideLoading()
       my.showToast({ content: (err && err.message) || '加入失败', type: 'fail' })
     }
+  },
+
+  togglePrefExpand() {
+    if ((this.data.prefCount || 0) <= 3) return
+    this.setData({ prefExpanded: !this.data.prefExpanded })
   },
 
   goMember() {

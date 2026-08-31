@@ -34,6 +34,9 @@ Page({
     isWide: false,
     prefs: [],
     prefSummary: '',
+    prefItems: [],
+    prefCount: 0,
+    prefExpanded: false,
     activeCat: null,
     scrollInto: '',
     keyword: '',
@@ -86,7 +89,9 @@ Page({
       const view = await prefUtil.loadCustomerPrefs(app, api, { force })
       this.setData({
         prefs: view.prefs || [],
-        prefSummary: view.prefSummary || ''
+        prefSummary: view.prefSummary || '',
+        prefItems: view.prefItems || [],
+        prefCount: view.prefCount || 0
       })
     } catch (_) {}
   },
@@ -271,6 +276,11 @@ Page({
       wx.hideLoading()
       wx.showToast({ title: (err && err.message) || '加入失败', icon: 'none' })
     }
+  },
+
+  togglePrefExpand() {
+    if ((this.data.prefCount || 0) <= 3) return
+    this.setData({ prefExpanded: !this.data.prefExpanded })
   },
 
   goMember() {
