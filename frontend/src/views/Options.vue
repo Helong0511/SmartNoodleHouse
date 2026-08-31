@@ -10,8 +10,8 @@
           <div class="opts-panel">
             <el-button size="small" type="primary" @click="openOptionForm(row)">新增选项</el-button>
             <el-table :data="row.options" size="small" border style="margin-top:8px">
-              <el-table-column prop="name" label="选项名" />
-              <el-table-column prop="code" label="编码" width="120" />
+              <el-table-column prop="name" label="选项名" width="180"/>
+              <el-table-column prop="code" label="编码" width="200"/>
               <el-table-column prop="extra_price" label="加价" width="90">
                 <template #default="{ row: o }">¥{{ o.extra_price }}</template>
               </el-table-column>
@@ -27,7 +27,7 @@
                   <el-tag :type="o.status === 1 ? 'success' : 'info'" size="small">{{ o.status === 1 ? '启用' : '禁用' }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="220">
+              <el-table-column label="操作" width="320">
                 <template #default="{ row: o }">
                   <el-button link type="primary" @click="openOptionForm(row, o)">编辑</el-button>
                   <el-button
@@ -43,8 +43,8 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="name" label="规格组" />
-      <el-table-column prop="code" label="编码" width="120" />
+      <el-table-column prop="name" label="规格组" width="180" />
+      <el-table-column prop="code" label="编码" width="200" />
       <el-table-column label="类型" width="100">
         <template #default="{ row }">{{ row.selection_type === 'MULTIPLE' ? '多选' : '单选' }}</template>
       </el-table-column>
@@ -57,7 +57,7 @@
           <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140">
+      <el-table-column label="操作" width="340">
         <template #default="{ row }">
           <el-button link type="primary" @click="openGroupForm(row)">编辑</el-button>
           <el-button link type="danger" @click="removeGroup(row)">删除</el-button>
