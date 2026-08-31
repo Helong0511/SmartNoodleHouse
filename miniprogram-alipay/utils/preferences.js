@@ -37,6 +37,18 @@ function decoratePref(p, status) {
   }
 }
 
+function buildPrefsForApply(all) {
+  return [...(all || [])].sort((a, b) => (b.order_count || 0) - (a.order_count || 0))
+}
+
+function bestPrefForGroup(prefs, group) {
+  const matches = (prefs || []).filter(
+    (pr) => pr.category === group.name || pr.category === group.code
+  )
+  if (!matches.length) return null
+  return matches.sort((a, b) => (b.order_count || 0) - (a.order_count || 0))[0]
+}
+
 function buildPrefDisplay(prefRes) {
   const rec = (prefRes && prefRes.preferences) || []
   const all = (prefRes && prefRes.all) || []
@@ -47,7 +59,7 @@ function buildPrefDisplay(prefRes) {
     .filter((p) => !recKeys.has(`${p.category}::${p.option_code}`))
     .map((p) => decoratePref(p, 'learning'))
 
-  const prefs = confirmed.length ? confirmed : learning
+  const prefs = buildPrefsForApply(all)
 
   return {
     confirmed,
@@ -193,7 +205,7 @@ function applyPrefsToProduct(product, prefs) {
       }
       continue
     }
-    const match = (prefs || []).find((pr) => pr.category === g.name || pr.category === g.code)
+    const match = bestPrefForGroup(prefs, g)
     if (!match) continue
     const opt = (g.options || []).find((o) => o.code === match.option_code)
     if (!opt) continue

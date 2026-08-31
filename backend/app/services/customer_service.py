@@ -676,6 +676,7 @@ class PreferenceService:
     # 相对阈值阈值过高会导致推荐为空；改为 Top-N + 最低出现次数
     HIGH_PREFERENCE_THRESHOLD = Decimal("0.25")
     MIN_ORDER_COUNT = 2
+    # 迎宾 TTS 等场景自行 slice；口味爱好应用须返回全部分项（7 组 + 多项加料可 >8）
     TOP_N = 8
     # 偏好分母：已支付订单（与 PAID 迁移时写入偏好一致，不依赖厨房态 status）
     PREFERENCE_SCORE_PAYMENT_STATUSES = ("PAID", "PARTIAL_REFUND")
@@ -748,7 +749,6 @@ class PreferenceService:
                 CustomerPreference.order_count >= PreferenceService.MIN_ORDER_COUNT,
             )
             .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
-            .limit(PreferenceService.TOP_N)
         )
         prefs = list(prefs_result.scalars().all())
         # 若无达到阈值的，退回 Top-N 不限次数
@@ -759,7 +759,6 @@ class PreferenceService:
                         select(CustomerPreference)
                         .where(CustomerPreference.customer_id == customer_id)
                         .order_by(CustomerPreference.preference_score.desc())
-                        .limit(PreferenceService.TOP_N)
                     )
                 ).scalars().all()
             )

@@ -153,3 +153,41 @@ async def test_update_from_order_skips_non_paid_status(db_session):
         ).scalars()
     )
     assert prefs == []
+
+
+@pytest.mark.asyncio
+async def test_get_recommendations_includes_all_confirmed_prefs(db_session):
+    """规格组 + 多项加料可超过 TOP_N=8，推荐列表不得截断末位规格（如蒜末）。"""
+    customer = Customer(id=920, customer_no="C-PREF-MANY", nickname="多规格", status=1)
+    db_session.add(customer)
+    await db_session.flush()
+
+    rows = [
+        ("量", "Liang-DaWAN", "大碗", 5),
+        ("加料", "JiaLiao-FeiChang", "加肥肠", 5),
+        ("加料", "JiaLiao-NiuRou", "加牛肉", 5),
+        ("加料", "JiaLiao-LuDan", "加卤蛋", 5),
+        ("辣", "La-WeiLa", "微辣", 5),
+        ("麻", "Ma-WeiMa", "微麻", 5),
+        ("葱", "Cong-ZhengChangCong", "正常葱", 5),
+        ("香菜", "XiangCai-ZhengChangXiangCai", "正常香菜", 5),
+        ("蒜末", "SuanMo-ZhengChangSuanMo", "正常蒜末", 5),
+    ]
+    for i, (cat, code, name, cnt) in enumerate(rows, start=1):
+        db_session.add(
+            CustomerPreference(
+                id=930 + i,
+                customer_id=customer.id,
+                category=cat,
+                option_code=code,
+                option_name=name,
+                preference_score=Decimal("0.50"),
+                order_count=cnt,
+            )
+        )
+    await db_session.commit()
+
+    rec = await PreferenceService.get_recommendations(db_session, customer.id)
+    codes = {p["option_code"] for p in rec["preferences"]}
+    assert len(rec["preferences"]) == 9
+    assert "SuanMo-ZhengChangSuanMo" in codes

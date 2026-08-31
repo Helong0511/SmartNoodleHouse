@@ -92,6 +92,18 @@ export function mergeCartItem(cart: any[], entry: any) {
   return list
 }
 
+export function sortPrefsForApply(prefs: any[]) {
+  return [...(prefs || [])].sort((a, b) => (b.order_count || 0) - (a.order_count || 0))
+}
+
+function bestPrefForGroup(prefs: any[], group: any) {
+  const matches = (prefs || []).filter(
+    (pr) => pr.category === group.name || pr.category === group.code,
+  )
+  if (!matches.length) return null
+  return matches.sort((a, b) => (b.order_count || 0) - (a.order_count || 0))[0]
+}
+
 export function applyPreferencesToProduct(
   product: any,
   prefs: any[],
@@ -115,7 +127,7 @@ export function applyPreferencesToProduct(
       }
       continue
     }
-    const match = (prefs || []).find((pr) => pr.category === g.name || pr.category === g.code)
+    const match = bestPrefForGroup(prefs, g)
     if (!match) continue
     const opt = (g.options || []).find((o: any) => o.code === match.option_code)
     if (!opt) continue

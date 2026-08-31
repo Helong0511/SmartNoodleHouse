@@ -81,6 +81,7 @@ import api from '@/api'
 import { mediaUrl, thumbSizePx } from '@/utils/media'
 import {
   applyPreferencesToProduct,
+  sortPrefsForApply,
   buildOptionLabels,
   calcUnitPrice,
   collectOptionIds,
@@ -139,7 +140,8 @@ async function openProduct(p: any) {
   if (customerId.value) {
     try {
       const prefRes = await api.get(`/customers/${customerId.value}/preferences`)
-      const prefs = prefRes.data?.preferences || []
+      const raw = prefRes.data?.all?.length ? prefRes.data.all : (prefRes.data?.preferences || [])
+      const prefs = sortPrefsForApply(raw)
       const applied = applyPreferencesToProduct(
         currentProduct.value,
         prefs,
