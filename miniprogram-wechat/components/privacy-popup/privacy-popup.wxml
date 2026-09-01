@@ -1,0 +1,18 @@
+<view class="mask" wx:if="{{visible}}" catchtouchmove="noop">
+  <view class="panel">
+    <view class="title">隐私保护提示</view>
+    <view class="content">
+      为提供会员注册、头像昵称展示等服务，需你阅读并同意
+      <text class="link" bindtap="openContract">《用户隐私保护指引》</text>。
+    </view>
+    <view class="actions">
+      <button class="btn-reject" bindtap="onReject">拒绝</button>
+      <button
+        id="agree-btn"
+        class="btn-agree"
+        open-type="agreePrivacyAuthorization"
+        bindagreeprivacyauthorization="onAgree"
+      >同意</button>
+    </view>
+  </view>
+</view>

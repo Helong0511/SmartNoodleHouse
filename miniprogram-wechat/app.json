@@ -1,10 +1,10 @@
 {
   "pages": [
+    "pages/index/index",
     "pages/menu/menu",
     "pages/cart/cart",
     "pages/orders/orders",
     "pages/member/member",
-    "pages/index/index",
     "pages/confirm/confirm",
     "pages/product/product",
     "pages/result/result"
@@ -69,6 +69,7 @@
   "sitemapLocation": "sitemap.json",
   "__usePrivacyCheck__": true,
   "usingComponents": {
-    "store-bar": "/components/store-bar/store-bar"
+    "store-bar": "/components/store-bar/store-bar",
+    "privacy-popup": "/components/privacy-popup/privacy-popup"
   }
 }

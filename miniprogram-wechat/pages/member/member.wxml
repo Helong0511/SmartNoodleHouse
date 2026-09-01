@@ -1,4 +1,5 @@
 <view class="page">
+  <privacy-popup />
 
   <store-bar
     storeName="{{storeName}}"
@@ -33,7 +34,36 @@
 
       <view class="meta">
 
-        <view class="name">{{displayName}}</view>
+        <view class="name-row" wx:if="{{!editingName}}">
+          <view class="name">{{displayName}}</view>
+          <text class="link edit-name" bindtap="startEditName">修改</text>
+        </view>
+        <view class="name-edit" wx:else>
+          <input
+            wx:if="{{useWxNickname}}"
+            class="name-input"
+            type="nickname"
+            maxlength="20"
+            placeholder="微信昵称（点此授权）"
+            value="{{nicknameDraft}}"
+            bindinput="onNicknameDraft"
+            bindblur="onNicknameDraft"
+          />
+          <input
+            wx:else
+            class="name-input"
+            type="text"
+            maxlength="20"
+            placeholder="请输入昵称（2-20字）"
+            value="{{nicknameDraft}}"
+            bindinput="onNicknameDraft"
+            focus="{{editingName}}"
+          />
+          <view class="name-edit-actions">
+            <text class="link muted" bindtap="cancelEditName">取消</text>
+            <button class="btn-save-name" size="mini" loading="{{savingName}}" bindtap="saveNickname">保存</button>
+          </view>
+        </view>
 
         <view class="no">编号 {{customerNo}}</view>
 

@@ -14,7 +14,9 @@ App({
     table: null,
     store: null,
     channel: 'wechat',
-    cart: []
+    cart: [],
+    needPrivacyPopup: false,
+    privacyResolve: null
   },
   onLaunch(options) {
     if (!this.globalData.apiBase) {
@@ -32,40 +34,16 @@ App({
     this.globalData.table = wx.getStorageSync('dine_table') || null
     this.parseLaunch(options)
     privacy.setupPrivacy()
+    // 必须用 open-type=agreePrivacyAuthorization 的真实按钮同意，showModal 无效
     privacy.onNeedPrivacyAuthorization((resolve) => {
-      const ask = () => {
-        wx.showModal({
-          title: '隐私保护提示',
-          content: '为提供登录、点餐、会员等服务，需您同意《用户隐私保护指引》。',
-          confirmText: '同意',
-          cancelText: '查看协议',
-          success: (res) => {
-            if (res.confirm) {
-              resolve({ buttonId: 'agree-btn', event: 'agree' })
-              return
-            }
-            privacy.openPrivacyContract().then(() => {
-              wx.showModal({
-                title: '是否同意隐私指引',
-                content: '阅读完成后，请选择是否同意《用户隐私保护指引》',
-                confirmText: '同意',
-                cancelText: '拒绝',
-                success: (r2) => {
-                  if (r2.confirm) resolve({ buttonId: 'agree-btn', event: 'agree' })
-                  else resolve({ event: 'disagree' })
-                },
-                fail: () => resolve({ event: 'disagree' })
-              })
-            })
-          },
-          fail: () => resolve({ event: 'disagree' })
-        })
+      this.globalData.privacyResolve = resolve
+      this.globalData.needPrivacyPopup = true
+      if (this._privacyPopup && this._privacyPopup.show) {
+        this._privacyPopup.show()
       }
-      ask()
     })
   },
   onShow(options) {
-    // 从扫码/分享再次进入时补解析
     if (options) this.parseLaunch(options)
     tabCartBadge.updateTabCartBadge(this.globalData.cart || wx.getStorageSync('cart') || [])
   },
@@ -74,7 +52,6 @@ App({
     let token = q.token || ''
     let channel = q.channel || ''
 
-    // 微信小程序码 scene（需短参数；支持 token=xxx 或纯 token）
     const sceneRaw = (options && options.scene) || q.scene || ''
     if (!token && sceneRaw) {
       try {

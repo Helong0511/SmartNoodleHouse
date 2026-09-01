@@ -7,7 +7,34 @@
   background: #fff3ee; color: #ff6b35; font-weight: 700; font-size: 36rpx;
 }
 .meta { flex: 1; min-width: 0; }
-.name { font-size: 36rpx; font-weight: 700; }
+.name-row { display: flex; align-items: center; gap: 16rpx; }
+.name { font-size: 36rpx; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edit-name { flex-shrink: 0; font-size: 24rpx; }
+.name-edit { margin-top: 4rpx; }
+.name-input {
+  border: 1px solid #eee;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
+  font-size: 30rpx;
+  background: #fff;
+}
+.name-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 24rpx;
+  margin-top: 16rpx;
+}
+.name-edit-actions .muted { color: #999; }
+.btn-save-name {
+  margin: 0;
+  background: #ff6b35;
+  color: #fff;
+  border-radius: 24rpx;
+  font-size: 24rpx;
+  padding: 0 24rpx;
+  line-height: 52rpx;
+}
 .no { color: #999; margin-top: 8rpx; font-size: 24rpx; }
 .level-row { margin-top: 12rpx; display: flex; align-items: center; flex-wrap: wrap; gap: 12rpx; }
 .badge {

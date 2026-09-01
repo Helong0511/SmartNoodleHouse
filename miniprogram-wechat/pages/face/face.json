@@ -1,1 +1,4 @@
-{ "navigationBarTitleText": "人脸授权", "usingComponents": {} }
+{
+  "navigationBarTitleText": "人脸授权",
+  "usingComponents": {}
+}

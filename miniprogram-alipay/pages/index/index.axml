@@ -9,26 +9,55 @@
 
   <view class="card" a:if="{{loading}}"><text>登录中，请稍候...</text></view>
 
-  <view class="card scan-card" a:elif="{{ready && !hasTable}}">
-    <view class="scan-icon">📷</view>
-    <view class="title">扫描桌台二维码</view>
-    <view class="desc">请扫描桌上的点餐二维码，绑定门店与桌号后即可开始点餐。支持相机扫码或从相册选择二维码图片。</view>
-    <button class="btn-primary" onTap="scanTable">扫一扫</button>
-    <button class="btn-ghost skip" onTap="goMenu">先浏览菜单</button>
-  </view>
+  <view class="card" a:elif="{{ready}}">
+    <view class="title">{{showMemberPrompt ? '注册会员，享受更多便利' : '欢迎回来'}}</view>
+    <view class="desc">{{showMemberPrompt ? memberText : '可获取支付宝头像昵称，或手动输入后开始点餐。'}}</view>
 
-  <view class="card" a:elif="{{showMemberPrompt}}">
-    <view class="title">注册会员，享受更多便利</view>
-    <view class="desc">{{memberText}}</view>
-    <input class="input" placeholder="怎么称呼您（选填）" value="{{nickname}}" onInput="onNickname" />
-    <button class="btn-primary" onTap="onRegister">注册并开始点餐</button>
-    <button class="btn-ghost skip" onTap="onSkip">暂不注册，先点餐</button>
-  </view>
+    <view class="profile-block">
+      <view class="avatar-wrap">
+        <button
+          a:if="{{canUseAlipayProfile}}"
+          class="avatar-btn"
+          open-type="getAuthorize"
+          scope="userInfo"
+          onGetAuthorize="onGetAlipayProfile"
+          onError="onGetAlipayProfileFail"
+        >
+          <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
+          <view class="avatar ph" a:else>头</view>
+        </button>
+        <view a:else class="avatar-btn avatar-static">
+          <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
+          <view class="avatar ph" a:else>头</view>
+        </view>
+        <text class="avatar-label">点头像授权</text>
+      </view>
 
-  <view class="card" a:elif="{{!loading && ready}}">
-    <view class="title">欢迎{{nickname ? '，' + nickname : ''}}</view>
-    <button class="btn-primary" onTap="goMenu">开始点餐</button>
+      <view class="nick-wrap">
+        <input
+          class="input nick"
+          maxlength="20"
+          placeholder="请输入昵称（2-20字）"
+          value="{{nickname}}"
+          onInput="onNickname"
+        />
+        <text class="avatar-label">可手输，或点头像自动填入</text>
+      </view>
+    </view>
+
+    <button
+      a:if="{{canUseAlipayProfile}}"
+      class="btn-ghost profile-btn"
+      open-type="getAuthorize"
+      scope="userInfo"
+      onGetAuthorize="onGetAlipayProfile"
+      onError="onGetAlipayProfileFail"
+    >获取支付宝头像和昵称</button>
+    <view class="dev-tip">授权后会自动填入支付宝昵称与头像，也可手动修改。</view>
+
+    <button class="btn-primary" loading="{{saving}}" onTap="onSaveAndGo">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
+    <button class="btn-ghost skip" onTap="goMenu">先点餐，稍后再改</button>
+    <button class="btn-ghost skip" onTap="scanTable">{{hasTable ? '重新扫码换桌' : '扫一扫绑桌'}}</button>
     <button class="btn-ghost skip" onTap="goMember">会员中心</button>
-    <button class="btn-ghost skip" onTap="scanTable">重新扫码换桌</button>
   </view>
 </view>

@@ -1,9 +1,33 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
+const { enableAlipayUserProfile } = require('../../config/env')
 
 function appRef() {
   return auth.getAppSafe()
+}
+
+const PLACEHOLDER_NICKS = new Set(['联调员', '面馆会员', '微信用户', '支付宝用户'])
+
+function isPlaceholderNickname(name) {
+  const n = String(name || '').trim()
+  return !n || PLACEHOLDER_NICKS.has(n)
+}
+
+function parseAlipayUserInfo(res) {
+  if (!res) return { nickname: '', avatarUrl: '' }
+  let raw = res.response != null ? res.response : res
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw)
+    } catch (_) {
+      return { nickname: '', avatarUrl: '' }
+    }
+  }
+  const info = (raw && raw.response) || raw || {}
+  const nickname = String(info.nickName || info.nick || info.userName || '').trim()
+  const avatarUrl = String(info.avatar || info.avatarUrl || '').trim()
+  return { nickname, avatarUrl }
 }
 
 Page({
@@ -12,9 +36,12 @@ Page({
     ready: false,
     hasTable: false,
     showMemberPrompt: false,
+    saving: false,
     table: null,
     storeName: '',
     nickname: '',
+    avatarUrl: '',
+    canUseAlipayProfile: !!enableAlipayUserProfile,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
   },
 
@@ -62,17 +89,20 @@ Page({
           duration: 3500
         })
       }
-      const showMemberPrompt = !!(login && login.need_member_prompt)
+      const nickname = (login && login.nickname) || gd.nickname || ''
+      const showMemberPrompt = !!(login && login.need_member_prompt) || isPlaceholderNickname(nickname)
+      const avatarUrl = (login && login.avatar_url) || gd.avatarUrl || ''
       this.setData({
         loading: false,
-        nickname: (login && login.nickname) || '',
+        nickname: isPlaceholderNickname(nickname) ? '' : nickname,
+        avatarUrl,
         showMemberPrompt,
         ready: true,
         table: ctx.table,
         storeName: ctx.storeName,
         hasTable: ctx.hasTable
       })
-      if (login && login.nickname) {
+      if (login && login.nickname && !isPlaceholderNickname(login.nickname)) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
       }
       if (login && login.customer_id && app) {
@@ -110,10 +140,64 @@ Page({
     this.setData({ nickname: e.detail.value })
   },
 
-  async onRegister() {
+  applyProfile(nickname, avatarUrl) {
+    const app = appRef()
+    const patch = {}
+    if (nickname) {
+      patch.nickname = nickname
+      if (app) app.globalData.nickname = nickname
+      my.setStorageSync({ key: 'nickname', data: nickname })
+    }
+    if (avatarUrl) {
+      patch.avatarUrl = avatarUrl
+      if (app) app.globalData.avatarUrl = avatarUrl
+      my.setStorageSync({ key: 'avatar_url', data: avatarUrl })
+    }
+    if (Object.keys(patch).length) this.setData(patch)
+  },
+
+  fetchAlipayOpenUserInfo() {
+    return new Promise((resolve, reject) => {
+      if (!my.getOpenUserInfo) {
+        reject(new Error('当前支付宝版本不支持获取昵称'))
+        return
+      }
+      my.getOpenUserInfo({
+        success: (res) => resolve(parseAlipayUserInfo(res)),
+        fail: (err) => reject(err || new Error('获取支付宝资料失败'))
+      })
+    })
+  },
+
+  async onGetAlipayProfile() {
+    try {
+      const profile = await this.fetchAlipayOpenUserInfo()
+      if (!profile.nickname && !profile.avatarUrl) {
+        my.showToast({ content: '未获取到支付宝昵称', type: 'none' })
+        return
+      }
+      this.applyProfile(profile.nickname, profile.avatarUrl)
+      my.showToast({ content: profile.nickname ? `已填入 ${profile.nickname}` : '已获取头像', type: 'success' })
+    } catch (e) {
+      my.showToast({ content: auth.formatError(e, '获取失败，请手动输入'), type: 'none' })
+    }
+  },
+
+  onGetAlipayProfileFail(e) {
+    const msg = (e && (e.errorMessage || e.error)) || '未授权'
+    my.showToast({ content: String(msg), type: 'none' })
+  },
+
+  async onSaveAndGo() {
+    if (this.data.saving) return
     const app = appRef()
     if (!app) {
       my.showToast({ content: '应用未就绪', type: 'fail' })
+      return
+    }
+    const nickname = (this.data.nickname || '').trim()
+    if (nickname && (nickname.length < 2 || nickname.length > 20)) {
+      my.showToast({ content: '昵称需 2-20 个字', type: 'fail' })
       return
     }
     try {
@@ -123,11 +207,14 @@ Page({
       return
     }
     try {
-      my.showLoading({ content: '注册中' })
+      this.setData({ saving: true })
+      my.showLoading({ content: '保存中' })
       const res = await api.post('/miniprogram/member/register', {
-        nickname: this.data.nickname || '面馆会员'
+        nickname: nickname || '面馆会员',
+        avatar_url: this.data.avatarUrl || null
       })
-      app.globalData.nickname = (res && res.nickname) || this.data.nickname
+      app.globalData.nickname = (res && res.nickname) || nickname || '面馆会员'
+      app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
           customer_id: res.customer_id,
@@ -143,15 +230,23 @@ Page({
       if (res && res.member_level_name) app.globalData.memberLevelName = res.member_level_name
       if (res && res.member_discount_rate) app.globalData.memberDiscountRate = res.member_discount_rate
       my.setStorageSync({ key: 'nickname', data: app.globalData.nickname })
+      if (app.globalData.avatarUrl) {
+        my.setStorageSync({ key: 'avatar_url', data: app.globalData.avatarUrl })
+      }
+      this.setData({
+        nickname: app.globalData.nickname,
+        showMemberPrompt: false,
+        saving: false
+      })
       my.hideLoading()
       this.goMenu()
     } catch (e) {
+      this.setData({ saving: false })
       my.hideLoading()
-      my.showToast({ content: e.message || '注册失败', type: 'fail' })
+      my.showToast({ content: e.message || '保存失败', type: 'fail' })
     }
   },
 
-  onSkip() { this.goMenu() },
   goMenu() {
     my.switchTab({
       url: '/pages/menu/menu',

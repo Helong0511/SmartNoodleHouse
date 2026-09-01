@@ -28,6 +28,15 @@ function isDevtools() {
   }
 }
 
+function miniEnvVersion() {
+  try {
+    const info = wx.getAccountInfoSync()
+    return (info && info.miniProgram && info.miniProgram.envVersion) || ''
+  } catch (e) {
+    return ''
+  }
+}
+
 /** 模拟器用 127.0.0.1；真机自动用 DEV_LAN_HOST（手机无法访问电脑 localhost） */
 function resolveDevApiBase() {
   if (DEV_USE_LAN || !isDevtools()) return DEV_LAN_API
@@ -36,23 +45,26 @@ function resolveDevApiBase() {
 
 /** 按运行环境选择 API 根地址 */
 function resolveApiBase() {
-  try {
-    const info = wx.getAccountInfoSync()
-    const ver = info && info.miniProgram && info.miniProgram.envVersion
-    if (ver === 'release') return PROD_API_BASE
-  } catch (e) {
-    /* 开发者工具可能无 accountInfo */
-  }
+  if (miniEnvVersion() === 'release') return PROD_API_BASE
   return resolveDevApiBase()
 }
 
 /**
  * 微信隐私接口开关（getPhoneNumber / chooseAvatar / input type=nickname 等）
- * 须在公众平台 → 设置 → 服务内容声明 → 用户隐私保护指引 中声明：
- *   - 昵称、头像、手机号（按实际使用勾选）
- * 配置完成并审核通过后改为 true
+ * 正式版须在公众平台声明「昵称、头像、手机号」后改为 true。
+ * 开发版 / 体验版（含真机调试）默认开启昵称与头像，便于联调。
  */
 const ENABLE_WX_PRIVACY_APIS = false
+
+function resolveNicknameAvatarApisEnabled() {
+  if (ENABLE_WX_PRIVACY_APIS) return true
+  const ver = miniEnvVersion()
+  if (ver === 'develop' || ver === 'trial') return true
+  if (isDevtools()) return true
+  return false
+}
+
+const enableNicknameAvatarApis = resolveNicknameAvatarApisEnabled()
 
 module.exports = {
   resolveApiBase,
@@ -63,6 +75,6 @@ module.exports = {
   DEV_LAN_API,
   enableWxPrivacyApis: ENABLE_WX_PRIVACY_APIS,
   enableWxPhoneBind: ENABLE_WX_PRIVACY_APIS,
-  enableChooseAvatar: ENABLE_WX_PRIVACY_APIS,
-  enableNicknameInput: ENABLE_WX_PRIVACY_APIS
+  enableChooseAvatar: enableNicknameAvatarApis,
+  enableNicknameInput: enableNicknameAvatarApis
 }

@@ -50,5 +50,7 @@ module.exports = {
   DEV_SIMULATOR_API,
   DEV_LAN_HOST,
   DEV_USE_LAN,
-  DEV_LAN_API
+  DEV_LAN_API,
+  /** 首页注册是否展示「使用支付宝昵称」 */
+  enableAlipayUserProfile: true
 }

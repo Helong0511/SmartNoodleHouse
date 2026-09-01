@@ -9,6 +9,7 @@ App({
     customerId: null,
     customerNo: null,
     nickname: '',
+    avatarUrl: '',
     tableToken: '',
     table: null,
     store: null,
@@ -21,6 +22,7 @@ App({
     }
     this.globalData.cart = auth.readStorage('cart') || []
     this.globalData.nickname = auth.readStorage('nickname') || ''
+    this.globalData.avatarUrl = auth.readStorage('avatar_url') || ''
     this.globalData.customerToken = auth.readStorage('customer_token') || ''
     this.globalData.customerId = auth.readStorage('customer_id') || null
     this.globalData.customerNo = auth.readStorage('customer_no') || ''

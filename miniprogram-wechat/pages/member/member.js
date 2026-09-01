@@ -2,7 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
-const { enableWxPhoneBind } = require('../../config/env')
+const { enableWxPhoneBind, enableNicknameInput } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
@@ -29,6 +29,10 @@ Page({
     loading: true,
     nickname: '',
     displayName: '面馆会员',
+    editingName: false,
+    nicknameDraft: '',
+    savingName: false,
+    useWxNickname: false,
     avatarLetter: '会',
     avatarUrl: '',
     customerNo: '',
@@ -61,7 +65,10 @@ Page({
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
-    this.setData({ canWxPhone: !!enableWxPhoneBind })
+    this.setData({
+      canWxPhone: !!enableWxPhoneBind,
+      useWxNickname: !!enableNicknameInput
+    })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadProfile()
@@ -178,6 +185,60 @@ Page({
     } catch (e) {
       this.setData({ walletLoading: false })
       wx.showToast({ title: e.message || '刷新失败', icon: 'none' })
+    }
+  },
+
+  startEditName() {
+    this.setData({
+      editingName: true,
+      nicknameDraft: this.data.nickname || this.data.displayName || ''
+    })
+  },
+
+  cancelEditName() {
+    if (this.data.savingName) return
+    this.setData({ editingName: false, nicknameDraft: '' })
+  },
+
+  onNicknameDraft(e) {
+    this.setData({ nicknameDraft: (e.detail && e.detail.value) || '' })
+  },
+
+  async saveNickname() {
+    if (this.data.savingName) return
+    const nickname = (this.data.nicknameDraft || '').trim()
+    if (nickname.length < 2 || nickname.length > 20) {
+      wx.showToast({ title: '昵称需 2-20 个字', icon: 'none' })
+      return
+    }
+    try {
+      this.setData({ savingName: true })
+      const res = await api.post('/miniprogram/member/register', {
+        nickname,
+        avatar_url: this.data.avatarUrl || app.globalData.avatarUrl || null
+      })
+      const saved = (res && res.nickname) || nickname
+      app.globalData.nickname = saved
+      wx.setStorageSync('nickname', saved)
+      if (res && res.customer_token) {
+        auth.refreshCustomerToken(app, res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
+      }
+      this._profileLoadedAt = 0
+      this.setData({
+        nickname: saved,
+        displayName: saved,
+        avatarLetter: saved.charAt(0) || '会',
+        editingName: false,
+        nicknameDraft: '',
+        savingName: false
+      })
+      wx.showToast({ title: '已更新昵称', icon: 'success' })
+    } catch (e) {
+      this.setData({ savingName: false })
+      wx.showToast({ title: e.message || '保存失败', icon: 'none' })
     }
   },
 

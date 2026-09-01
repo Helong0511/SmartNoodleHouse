@@ -28,6 +28,9 @@ Page({
     loading: true,
     nickname: '',
     displayName: '面馆会员',
+    editingName: false,
+    nicknameDraft: '',
+    savingName: false,
     avatarLetter: '会',
     customerNo: '',
     prefs: [],
@@ -168,6 +171,57 @@ Page({
     } catch (e) {
       this.setData({ walletLoading: false })
       my.showToast({ content: e.message || '刷新失败', type: 'fail' })
+    }
+  },
+
+  startEditName() {
+    this.setData({
+      editingName: true,
+      nicknameDraft: this.data.nickname || this.data.displayName || ''
+    })
+  },
+
+  cancelEditName() {
+    if (this.data.savingName) return
+    this.setData({ editingName: false, nicknameDraft: '' })
+  },
+
+  onNicknameDraft(e) {
+    this.setData({ nicknameDraft: (e.detail && e.detail.value) || '' })
+  },
+
+  async saveNickname() {
+    if (this.data.savingName) return
+    const nickname = (this.data.nicknameDraft || '').trim()
+    if (nickname.length < 2 || nickname.length > 20) {
+      my.showToast({ content: '昵称需 2-20 个字', type: 'fail' })
+      return
+    }
+    try {
+      this.setData({ savingName: true })
+      const res = await api.post('/miniprogram/member/register', { nickname })
+      const saved = (res && res.nickname) || nickname
+      app.globalData.nickname = saved
+      my.setStorageSync({ key: 'nickname', data: saved })
+      if (res && res.customer_token) {
+        auth.refreshCustomerToken(app, res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
+      }
+      this._profileLoadedAt = 0
+      this.setData({
+        nickname: saved,
+        displayName: saved,
+        avatarLetter: saved.charAt(0) || '会',
+        editingName: false,
+        nicknameDraft: '',
+        savingName: false
+      })
+      my.showToast({ content: '已更新昵称', type: 'success' })
+    } catch (e) {
+      this.setData({ savingName: false })
+      my.showToast({ content: e.message || '保存失败', type: 'fail' })
     }
   },
 

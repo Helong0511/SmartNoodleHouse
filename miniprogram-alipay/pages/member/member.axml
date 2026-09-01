@@ -15,7 +15,23 @@
       <view class="profile">
         <view class="avatar placeholder">{{avatarLetter}}</view>
         <view class="meta">
-          <view class="name">{{displayName}}</view>
+          <view class="name-row" a:if="{{!editingName}}">
+            <view class="name">{{displayName}}</view>
+            <text class="link edit-name" onTap="startEditName">修改</text>
+          </view>
+          <view class="name-edit" a:else>
+            <input
+              class="name-input"
+              maxlength="20"
+              placeholder="请输入昵称（2-20字）"
+              value="{{nicknameDraft}}"
+              onInput="onNicknameDraft"
+            />
+            <view class="name-edit-actions">
+              <text class="link muted" onTap="cancelEditName">取消</text>
+              <button class="btn-save-name" size="mini" loading="{{savingName}}" onTap="saveNickname">保存</button>
+            </view>
+          </view>
           <view class="no">编号 {{customerNo}}</view>
           <view class="level-row" a:if="{{isMember && memberLevelName}}">
             <text class="badge">{{memberLevelName}}</text>
