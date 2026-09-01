@@ -1,6 +1,4 @@
 .page { padding-bottom: 160rpx; background: #f7f7f7; min-height: 100vh; }
-.loading-page { display: flex; align-items: center; justify-content: center; min-height: 60vh; }
-.loading-tip { color: #999; font-size: 28rpx; }
 
 .hero-wrap {
   width: 100%;

@@ -7,7 +7,7 @@
         <view class="sk-block sk-nav-item" wx:for="{{[1,2,3,4,5,6]}}" wx:key="*this"></view>
       </view>
       <view class="sk-body">
-        <view class="sk-product" wx:for="{{rows}}" wx:key="*this">
+        <view class="sk-product" wx:for="{{rowList}}" wx:key="*this">
           <view class="sk-thumb sk-block"></view>
           <view class="sk-lines">
             <view class="sk-block sk-line sk-line-lg"></view>
@@ -21,7 +21,7 @@
 
   <!-- 订单列表骨架 -->
   <view class="sk-orders" wx:elif="{{type === 'order'}}">
-    <view class="sk-order-card" wx:for="{{rows}}" wx:key="*this">
+    <view class="sk-order-card" wx:for="{{rowList}}" wx:key="*this">
       <view class="sk-order-head">
         <view class="sk-block sk-line sk-line-lg"></view>
         <view class="sk-block sk-line sk-line-sm"></view>

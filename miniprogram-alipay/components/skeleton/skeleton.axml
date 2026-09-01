@@ -6,7 +6,7 @@
         <view class="sk-block sk-nav-item" a:for="{{[1,2,3,4,5,6]}}" a:key="*this"></view>
       </view>
       <view class="sk-body">
-        <view class="sk-product" a:for="{{rows}}" a:key="*this">
+        <view class="sk-product" a:for="{{rowList}}" a:key="*this">
           <view class="sk-thumb sk-block"></view>
           <view class="sk-lines">
             <view class="sk-block sk-line sk-line-lg"></view>
@@ -19,7 +19,7 @@
   </view>
 
   <view class="sk-orders" a:elif="{{type === 'order'}}">
-    <view class="sk-order-card" a:for="{{rows}}" a:key="*this">
+    <view class="sk-order-card" a:for="{{rowList}}" a:key="*this">
       <view class="sk-order-head">
         <view class="sk-block sk-line sk-line-lg"></view>
         <view class="sk-block sk-line sk-line-sm"></view>
