@@ -247,6 +247,7 @@ Page({
         unit_price: unit,
         subtotal: unit.toFixed(2),
         imageUrl: ds.image || '',
+        main_image: '',
         no_member_discount: noMemberDiscount
       })
       my.showToast({ content: '已加入', type: 'success' })
@@ -282,7 +283,8 @@ Page({
         option_text: optionLabels.join('、'),
         unit_price: unitPrice,
         subtotal: unitPrice.toFixed(2),
-        imageUrl: ds.image || media.resolveUrl(product.main_image, media.imageVersion(product)),
+        main_image: product.main_image || '',
+        imageUrl: media.resolveUrl(product.main_image, media.imageVersion(product)) || ds.image || '',
         no_member_discount: noMemberDiscount || !!product.no_member_discount
       })
       my.hideLoading()

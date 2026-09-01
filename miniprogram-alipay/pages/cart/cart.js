@@ -64,7 +64,7 @@ Page({
     const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products)
     const cart = list.map((item) => ({
       ...item,
-      imageUrl: item.imageUrl || media.resolveUrl(item.main_image || '')
+      imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
     }))
     const validItems = cart.filter((i) => !i.invalid)
     const { total, count } = cartUtil.cartSummary(validItems)

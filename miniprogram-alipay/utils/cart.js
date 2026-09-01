@@ -121,6 +121,8 @@ function mergeCartItem(cart, entry) {
     cur.quantity = (cur.quantity || 1) + add
     cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
     if (entry.no_member_discount != null) cur.no_member_discount = !!entry.no_member_discount
+    if (!cur.imageUrl && entry.imageUrl) cur.imageUrl = entry.imageUrl
+    if (!cur.main_image && entry.main_image) cur.main_image = entry.main_image
     list[idx] = cur
   } else {
     list.push(normalizeItem({ ...entry }))
@@ -156,6 +158,8 @@ function reconcileWithProducts(cart, products) {
     if (invalidReason) invalidCount += 1
     return {
       ...item,
+      main_image: (p && p.main_image) || item.main_image || '',
+      imageUrl: item.imageUrl || '',
       no_member_discount: p ? !!p.no_member_discount : !!item.no_member_discount,
       invalid: !!invalidReason,
       invalidReason
@@ -178,7 +182,11 @@ function enrichCartFromProducts(list, products) {
   return (list || []).map((raw) => {
     const item = normalizeItem({ ...raw })
     const p = map[item.product_id]
-    if (p) item.no_member_discount = !!p.no_member_discount
+    if (p) {
+      item.no_member_discount = !!p.no_member_discount
+      if (p.main_image) item.main_image = p.main_image
+      if (p.main_image) item._productUpdatedAt = p.updated_at || ''
+    }
     return item
   })
 }

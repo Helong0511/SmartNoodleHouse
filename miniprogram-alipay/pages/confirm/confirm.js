@@ -378,7 +378,11 @@ Page({
     const cartPreview = enrichedList.map((item) => {
       const qty = item.quantity || 1
       packing += (boxMap[item.product_id] || 0) * qty
-      return { ...item, imageUrl: item.imageUrl || media.resolveUrl(item.main_image || '') }
+      const rawImg = item.main_image || item.imageUrl || ''
+      return {
+        ...item,
+        imageUrl: media.resolveUrl(rawImg, item._productUpdatedAt || '')
+      }
     })
     const sub = parseFloat(total) || 0
     const pack = Math.round(packing * 100) / 100

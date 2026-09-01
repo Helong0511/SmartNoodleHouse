@@ -114,6 +114,7 @@ Page({
       option_text: optionLabels.join('、'),
       unit_price: unitPrice,
       subtotal: (unitPrice * qty).toFixed(2),
+      main_image: p.main_image || '',
       imageUrl,
       no_member_discount: !!p.no_member_discount
     })

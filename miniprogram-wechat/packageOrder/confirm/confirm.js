@@ -428,9 +428,11 @@ Page({
       const qty = item.quantity || 1
       const box = boxMap[item.product_id] || 0
       packing += box * qty
+      // 优先 main_image（服务端路径），再回退购物车里已有的 imageUrl
+      const rawImg = item.main_image || item.imageUrl || ''
       return {
         ...item,
-        imageUrl: item.imageUrl || media.resolveUrl(item.main_image || '')
+        imageUrl: media.resolveUrl(rawImg, item._productUpdatedAt || '')
       }
     })
     const sub = parseFloat(total) || 0
