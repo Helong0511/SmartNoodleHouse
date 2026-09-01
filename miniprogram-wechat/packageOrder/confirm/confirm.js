@@ -385,7 +385,7 @@ Page({
       const items = (res && res.items) || []
       this.setData({
         coupons: items,
-        couponPickerLabels: ['不使用优惠券'].concat(items.map((c) => c.summary || c.name))
+        couponPickerLabels: ['不使用优惠券'].concat(items.map((c) => voucherUtil.holdDisplayName(c)))
       })
     } catch (_) {
       this.setData({ coupons: [] })
@@ -403,7 +403,7 @@ Page({
       this._selectedCoupon = picked || null
       this.setData({
         selectedCouponId: picked ? picked.id : 0,
-        selectedCouponLabel: picked ? (picked.summary || picked.name) : '不使用优惠券'
+        selectedCouponLabel: picked ? voucherUtil.holdDisplayName(picked) : '不使用优惠券'
       })
     }
     this.refreshSummary()
@@ -416,7 +416,7 @@ Page({
       const items = (res && res.items) || []
       this.setData({
         vouchers: items,
-        voucherPickerLabels: ['不使用代金券'].concat(items.map((c) => c.summary || c.name))
+        voucherPickerLabels: ['不使用代金券'].concat(items.map((c) => voucherUtil.holdDisplayName(c)))
       })
     } catch (_) {
       this.setData({ vouchers: [] })
@@ -434,7 +434,7 @@ Page({
       this._selectedVoucher = picked || null
       this.setData({
         selectedVoucherId: picked ? picked.id : 0,
-        selectedVoucherLabel: picked ? (picked.summary || picked.name) : '不使用代金券'
+        selectedVoucherLabel: picked ? voucherUtil.holdDisplayName(picked) : '不使用代金券'
       })
     }
     this.refreshSummary()
@@ -502,7 +502,7 @@ Page({
       this._selectedCoupon = bestCoupon
       this.setData({
         selectedCouponId: bestCoupon ? bestCoupon.id : 0,
-        selectedCouponLabel: bestCoupon ? (bestCoupon.summary || bestCoupon.name) : '不使用优惠券',
+        selectedCouponLabel: bestCoupon ? voucherUtil.holdDisplayName(bestCoupon) : '不使用优惠券',
       })
     }
 
@@ -522,7 +522,7 @@ Page({
       this._selectedVoucher = bestVoucher
       this.setData({
         selectedVoucherId: bestVoucher ? bestVoucher.id : 0,
-        selectedVoucherLabel: bestVoucher ? (bestVoucher.summary || bestVoucher.name) : '不使用代金券',
+        selectedVoucherLabel: bestVoucher ? voucherUtil.holdDisplayName(bestVoucher) : '不使用代金券',
       })
     }
 

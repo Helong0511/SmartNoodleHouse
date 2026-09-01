@@ -1,5 +1,11 @@
 /** 代金券计价：一次性核销，不支持余额结转 */
 
+/** 券/代金券展示名：优先模板名称，规则 summary 仅作兜底 */
+function holdDisplayName(hold) {
+  if (!hold) return ''
+  return String(hold.name || hold.template_name || hold.summary || '').trim()
+}
+
 function voucherFaceValue(voucher) {
   const face = parseFloat(voucher && voucher.discount_value)
   return Number.isFinite(face) ? face : 0
@@ -21,6 +27,7 @@ function calcVoucherDiscount(payable, voucher, eligiblePayable) {
 }
 
 module.exports = {
+  holdDisplayName,
   voucherFaceValue,
   isVoucherApplicable,
   calcVoucherDiscount

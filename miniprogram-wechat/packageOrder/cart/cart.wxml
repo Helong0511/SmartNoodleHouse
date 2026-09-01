@@ -40,14 +40,14 @@
       <view class="actions">
         <view class="actions-top">
           <view class="qty" wx:if="{{!item.invalid}}">
-            <text class="btn" data-index="{{index}}" data-delta="-1" bindtap="changeQty">−</text>
-            <text class="num">{{item.quantity}}</text>
-            <text class="btn" data-index="{{index}}" data-delta="1" bindtap="changeQty">+</text>
+            <view class="qty-btn" data-index="{{index}}" data-delta="-1" bindtap="changeQty">−</view>
+            <text class="qty-num">{{item.quantity}}</text>
+            <view class="qty-btn" data-index="{{index}}" data-delta="1" bindtap="changeQty">+</view>
           </view>
           <view class="line-total" wx:if="{{!item.invalid}}">¥{{item.subtotal}}</view>
         </view>
         <view class="del-wrap">
-          <text class="del" data-index="{{index}}" bindtap="removeItem">删除</text>
+          <view class="del" data-index="{{index}}" bindtap="removeItem">删除</view>
         </view>
       </view>
     </view>

@@ -21,7 +21,7 @@
   margin-bottom: 8rpx;
 }
 .row:last-child { margin-bottom: 0; }
-.label {
+.bar-label {
   flex-shrink: 0;
   width: 64rpx;
   font-size: 22rpx;

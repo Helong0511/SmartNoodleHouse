@@ -60,11 +60,13 @@ Page({
     } catch (_) {}
 
     const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products)
-    const cart = list.map((item) => ({
-      ...item,
-      // 优先用目录主图，保证缩略图可展示
-      imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
-    }))
+    const cart = list.map((raw) => {
+      const item = cartUtil.normalizeItem({ ...raw })
+      return {
+        ...item,
+        imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
+      }
+    })
     const validItems = cart.filter((i) => !i.invalid)
     const { total, count } = cartUtil.cartSummary(validItems)
     auth.saveCart(cart)

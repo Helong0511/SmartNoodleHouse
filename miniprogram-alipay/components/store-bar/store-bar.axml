@@ -1,13 +1,13 @@
 <view class="bar {{compact ? 'compact' : ''}}" a:if="{{storeName || tableName}}">
   <view class="row" a:if="{{storeName}}">
-    <text class="label">门店</text>
+    <text class="bar-label">门店</text>
     <view class="val">
       <text class="name">{{storeName}}</text>
       <text class="sub" a:if="{{storeNo}}">#{{storeNo}}</text>
     </view>
   </view>
   <view class="row" a:if="{{tableName}}">
-    <text class="label">桌号</text>
+    <text class="bar-label">桌号</text>
     <view class="val">
       <text class="name table">{{tableName}}</text>
       <text class="sub" a:if="{{tableNo && tableNo != tableName}}">{{tableNo}}</text>

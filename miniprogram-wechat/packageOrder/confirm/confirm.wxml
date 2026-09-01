@@ -52,11 +52,11 @@
       <text>-¥{{discountAmount}}</text>
     </view>
     <view class="sum-row discount" wx:if="{{hasCouponDiscount}}">
-      <text>优惠券{{selectedCouponLabel ? '（' + selectedCouponLabel + '）' : ''}}</text>
+      <text>优惠券{{selectedCouponLabel && selectedCouponLabel != '不使用优惠券' ? '（' + selectedCouponLabel + '）' : ''}}</text>
       <text>-¥{{couponDiscountAmount}}</text>
     </view>
     <view class="sum-row discount" wx:if="{{hasVoucherDiscount}}">
-      <text>代金券{{selectedVoucherLabel ? '（' + selectedVoucherLabel + '）' : ''}}</text>
+      <text>代金券{{selectedVoucherLabel && selectedVoucherLabel != '不使用代金券' ? '（' + selectedVoucherLabel + '）' : ''}}</text>
       <text>-¥{{voucherDiscountAmount}}</text>
     </view>
     <view class="sum-row" wx:if="{{needPack}}">
