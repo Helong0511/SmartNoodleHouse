@@ -15,9 +15,7 @@ Page({
     table: null,
     storeName: '',
     nickname: '',
-    enableFace: false,
-    memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购与到店迎宾推荐。',
-    faceText: '开启人脸迎宾后，到店可自动欢迎，并按您常点口味智能推荐。仅摄像头实时采集，可随时关闭。'
+    memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
   },
 
   onLoad(query) {
@@ -47,8 +45,7 @@ Page({
           const entry = await api.get('/miniprogram/entry', { token: ctx.table.qr_token || token, channel: 'alipay' }, false)
           if (entry && entry.prompts) {
             this.setData({
-              memberText: entry.prompts.member_consent_text,
-              faceText: entry.prompts.face_consent_text
+              memberText: entry.prompts.member_consent_text
             })
           }
         } catch (_) {}
@@ -71,7 +68,6 @@ Page({
         nickname: (login && login.nickname) || '',
         showMemberPrompt,
         ready: true,
-        enableFace: false,
         table: ctx.table,
         storeName: ctx.storeName,
         hasTable: ctx.hasTable
@@ -114,10 +110,6 @@ Page({
     this.setData({ nickname: e.detail.value })
   },
 
-  toggleFace() {
-    this.setData({ enableFace: !this.data.enableFace })
-  },
-
   async onRegister() {
     const app = appRef()
     if (!app) {
@@ -133,8 +125,7 @@ Page({
     try {
       my.showLoading({ content: '注册中' })
       const res = await api.post('/miniprogram/member/register', {
-        nickname: this.data.nickname || '面馆会员',
-        enable_face: this.data.enableFace
+        nickname: this.data.nickname || '面馆会员'
       })
       app.globalData.nickname = (res && res.nickname) || this.data.nickname
       if (res && res.customer_token) {
@@ -148,12 +139,11 @@ Page({
           customer_no: res.customer_no
         })
       }
+      if (res && res.is_member != null) app.globalData.isMember = res.is_member
+      if (res && res.member_level_name) app.globalData.memberLevelName = res.member_level_name
+      if (res && res.member_discount_rate) app.globalData.memberDiscountRate = res.member_discount_rate
       my.setStorageSync({ key: 'nickname', data: app.globalData.nickname })
       my.hideLoading()
-      if (this.data.enableFace || (res && res.need_face_consent)) {
-        my.navigateTo({ url: '/pages/face/face?from=register' })
-        return
-      }
       this.goMenu()
     } catch (e) {
       my.hideLoading()

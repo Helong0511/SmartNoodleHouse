@@ -13,7 +13,6 @@ App({
     table: null,
     store: null,
     channel: 'alipay',
-    faceStatus: 'NONE',
     cart: []
   },
   onLaunch(options) {

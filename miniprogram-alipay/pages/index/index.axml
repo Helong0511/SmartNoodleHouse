@@ -21,11 +21,6 @@
     <view class="title">注册会员，享受更多便利</view>
     <view class="desc">{{memberText}}</view>
     <input class="input" placeholder="怎么称呼您（选填）" value="{{nickname}}" onInput="onNickname" />
-    <label class="check">
-      <checkbox checked="{{enableFace}}" onTap="toggleFace" />
-      <text>同时开启人脸迎宾（主动授权，可随时关闭）</text>
-    </label>
-    <view class="face-tip" a:if="{{enableFace}}">{{faceText}}</view>
     <button class="btn-primary" onTap="onRegister">注册并开始点餐</button>
     <button class="btn-ghost skip" onTap="onSkip">暂不注册，先点餐</button>
   </view>

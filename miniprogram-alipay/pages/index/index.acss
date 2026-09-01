@@ -13,6 +13,4 @@
 .scan-card .title { text-align: center; }
 .scan-card .desc { text-align: left; }
 .input { border: 1px solid #eee; border-radius: 12rpx; padding: 20rpx; margin-bottom: 20rpx; }
-.check { display: flex; gap: 12rpx; margin: 16rpx 0; color: #444; }
-.face-tip { color: #999; font-size: 24rpx; margin-bottom: 20rpx; }
 .skip { margin-top: 20rpx; }

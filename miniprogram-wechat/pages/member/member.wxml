@@ -208,22 +208,6 @@
 
   <view class="card">
 
-    <view class="row">
-
-      <text>人脸迎宾</text>
-
-      <switch checked="{{faceOn}}" color="#ff6b35" bindchange="onFaceSwitch" />
-
-    </view>
-
-    <view class="tip">需摄像头实时采集授权。关闭后立即删除特征，不再识别身份。</view>
-
-  </view>
-
-
-
-  <view class="card">
-
     <view class="title">智能记录的口味爱好</view>
 
     <view class="tip" wx:if="{{prefsEmpty}}">完成订单后，系统会自动累计您常点的规格口味（辣度、面量、加料等），点餐时智能预选。</view>

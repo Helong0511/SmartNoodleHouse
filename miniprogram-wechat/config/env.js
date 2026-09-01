@@ -50,9 +50,6 @@ function resolveApiBase() {
  * 微信隐私接口开关（getPhoneNumber / chooseAvatar / input type=nickname 等）
  * 须在公众平台 → 设置 → 服务内容声明 → 用户隐私保护指引 中声明：
  *   - 昵称、头像、手机号（按实际使用勾选）
- *   - 摄像头（人脸迎宾页 camera 组件，必填）
- * 注意：摄像头不在 app.json permission 中配置（该字段仅支持定位类 scope）；
- * 运行时授权见 utils/cameraAuth.js + 隐私指引说明文案。
  * 配置完成并审核通过后改为 true
  */
 const ENABLE_WX_PRIVACY_APIS = false

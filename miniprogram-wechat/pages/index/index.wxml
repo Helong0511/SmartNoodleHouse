@@ -82,16 +82,6 @@
 
     </view>
 
-    <label class="check">
-
-      <checkbox checked="{{enableFace}}" bindtap="toggleFace" color="#ff6b35" />
-
-      <text>同时开启人脸迎宾（摄像头实时采集，可随时关闭）</text>
-
-    </label>
-
-    <view class="face-tip" wx:if="{{enableFace}}">{{faceText}}</view>
-
     <button class="btn-primary" bindtap="onRegister">注册并开始点餐</button>
 
     <button class="btn-ghost skip" bindtap="onSkip">暂不注册，先点餐</button>

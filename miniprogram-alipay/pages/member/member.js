@@ -30,7 +30,6 @@ Page({
     displayName: '面馆会员',
     avatarLetter: '会',
     customerNo: '',
-    faceOn: false,
     prefs: [],
     prefsConfirmed: [],
     prefsLearning: [],
@@ -90,14 +89,12 @@ Page({
     const displayName = nickname || '面馆会员'
     if (profile.nickname) app.globalData.nickname = profile.nickname
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
-    const face = (profile && profile.face_status) || {}
     const view = prefView || prefUtil.buildPrefDisplay({})
     this.setData({
       nickname,
       displayName,
       avatarLetter: displayName.charAt(0) || '会',
       customerNo: profile.customer_no || app.globalData.customerNo || '',
-      faceOn: !!(face && face.has_face),
       prefs: view.prefs || [],
       prefsConfirmed: view.confirmed || [],
       prefsLearning: view.learning || [],
@@ -203,36 +200,6 @@ Page({
     } catch (e) {
       my.hideLoading()
       my.showToast({ content: e.message || '绑定失败', type: 'fail' })
-    }
-  },
-
-  onFaceSwitch(e) {
-    const on = e.detail.value
-    if (on) {
-      my.navigateTo({ url: '/pages/face/face' })
-    } else {
-      my.confirm({
-        title: '关闭人脸迎宾',
-        content: '关闭后将立即删除人脸特征，不再到店识别。确定关闭吗？',
-        confirmButtonText: '确定关闭',
-        cancelButtonText: '取消',
-        success: (res) => {
-          if (res.confirm) this.revokeFace()
-          else this.setData({ faceOn: true })
-        }
-      })
-    }
-  },
-
-  async revokeFace() {
-    try {
-      await api.post('/miniprogram/face/revoke', {})
-      app.globalData.faceStatus = 'REVOKED'
-      this.setData({ faceOn: false })
-      my.showToast({ content: '已关闭人脸迎宾', type: 'success' })
-    } catch (e) {
-      this.setData({ faceOn: true })
-      my.showToast({ content: e.message || '操作失败', type: 'fail' })
     }
   },
 

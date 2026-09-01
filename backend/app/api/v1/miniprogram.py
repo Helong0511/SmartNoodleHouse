@@ -171,9 +171,9 @@ async def scan_entry(
             "channel": channel,
             "prompts": {
                 "ask_register_member": True,
-                "ask_face_welcome": True,
-                "face_consent_text": "开启人脸迎宾后，到店可自动欢迎，并按您常点口味智能推荐。仅摄像头实时采集，可随时关闭。",
-                "member_consent_text": "注册会员后系统会智能记录您的口味爱好，支持一键复购与到店迎宾推荐。",
+                "ask_face_welcome": False,
+                "face_consent_text": "",
+                "member_consent_text": "注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。",
             },
         },
         request=request,

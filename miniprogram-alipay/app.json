@@ -7,8 +7,7 @@
     "pages/index/index",
     "pages/product/product",
     "pages/confirm/confirm",
-    "pages/result/result",
-    "pages/face/face"
+    "pages/result/result"
   ],
   "window": {
     "defaultTitle": "智能面馆",

@@ -7,8 +7,7 @@
     "pages/index/index",
     "pages/confirm/confirm",
     "pages/product/product",
-    "pages/result/result",
-    "pages/face/face"
+    "pages/result/result"
   ],
   "subPackages": [
     {
@@ -18,8 +17,7 @@
         "product/product",
         "cart/cart",
         "confirm/confirm",
-        "result/result",
-        "face/face"
+        "result/result"
       ]
     }
   ],

@@ -16,11 +16,9 @@ Page({
     storeAddress: '',
     nickname: '',
     avatarUrl: '',
-    enableFace: false,
     canChooseAvatar: false,
     useWxNickname: false,
-    memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购与到店迎宾推荐。',
-    faceText: '开启人脸迎宾后，到店可自动欢迎，并按您常点口味智能推荐。仅摄像头实时采集，可随时关闭。'
+    memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
   },
 
   onLoad(query) {
@@ -59,7 +57,6 @@ Page({
         avatarUrl: login.avatar_url || app.globalData.avatarUrl || '',
         showMemberPrompt,
         ready: true,
-        enableFace: false,
         table: ctx.table || app.globalData.table,
         store: ctx.store || app.globalData.store,
         storeName: ctx.storeName,
@@ -132,10 +129,6 @@ Page({
     app.globalData.nickname = nickname
   },
 
-  toggleFace() {
-    this.setData({ enableFace: !this.data.enableFace })
-  },
-
   async onRegister() {
     try {
       await auth.ensureLogin()
@@ -147,8 +140,7 @@ Page({
       wx.showLoading({ title: '保存中' })
       const res = await api.post('/miniprogram/member/register', {
         nickname: this.data.nickname || '面馆会员',
-        avatar_url: this.data.avatarUrl || null,
-        enable_face: this.data.enableFace
+        avatar_url: this.data.avatarUrl || null
       })
       app.globalData.nickname = (res && res.nickname) || this.data.nickname
       app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
@@ -169,10 +161,6 @@ Page({
       wx.setStorageSync('nickname', app.globalData.nickname)
       if (app.globalData.avatarUrl) wx.setStorageSync('avatar_url', app.globalData.avatarUrl)
       wx.hideLoading()
-      if (this.data.enableFace || (res && res.need_face_consent)) {
-        wx.navigateTo({ url: '/packageOrder/face/face?from=register' })
-        return
-      }
       this.goMenu()
     } catch (e) {
       wx.hideLoading()

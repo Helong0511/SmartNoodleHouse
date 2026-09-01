@@ -1,7 +1,0 @@
-.page { padding: 32rpx; }
-.title { font-size: 36rpx; font-weight: 700; }
-.desc { color: #666; line-height: 1.7; margin: 20rpx 0 28rpx; }
-.hint { color: #1677ff; font-size: 24rpx; margin-top: 16rpx; }
-.camera { width: 100%; height: 420rpx; border-radius: 16rpx; background: #111; }
-.actions { margin-top: 32rpx; }
-.btn-ghost { margin-top: 16rpx; }

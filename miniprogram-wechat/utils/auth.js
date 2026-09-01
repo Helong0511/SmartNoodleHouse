@@ -175,7 +175,6 @@ async function ensureLogin(tableToken) {
   applyLoginSession(app, data)
   app.globalData.nickname = data.nickname || nickname || ''
   app.globalData.avatarUrl = data.avatar_url || avatarUrl || ''
-  app.globalData.faceStatus = (data.face_status && data.face_status.consent_status) || 'NONE'
   if (data.table) {
     app.globalData.table = data.table
     app.globalData.tableToken = data.table.qr_token

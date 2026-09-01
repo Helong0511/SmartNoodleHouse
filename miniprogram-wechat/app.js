@@ -14,7 +14,6 @@ App({
     table: null,
     store: null,
     channel: 'wechat',
-    faceStatus: 'NONE',
     cart: []
   },
   onLaunch(options) {
@@ -37,7 +36,7 @@ App({
       const ask = () => {
         wx.showModal({
           title: '隐私保护提示',
-          content: '为提供登录、点餐、人脸迎宾等服务，需您同意《用户隐私保护指引》。使用摄像头采集人脸前须先同意。',
+          content: '为提供登录、点餐、会员等服务，需您同意《用户隐私保护指引》。',
           confirmText: '同意',
           cancelText: '查看协议',
           success: (res) => {

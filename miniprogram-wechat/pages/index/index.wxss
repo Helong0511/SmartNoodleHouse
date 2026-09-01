@@ -62,7 +62,5 @@
 .input.nick { flex: 1; margin-bottom: 0; }
 .welcome-row { display: flex; align-items: center; gap: 16rpx; margin-bottom: 8rpx; }
 .avatar-sm { width: 64rpx; height: 64rpx; border-radius: 50%; }
-.check { display: flex; align-items: flex-start; gap: 12rpx; margin: 16rpx 0; color: #444; }
-.face-tip { color: #999; font-size: 24rpx; margin-bottom: 20rpx; line-height: 1.5; }
 .dev-tip { color: #999; font-size: 22rpx; line-height: 1.5; margin-top: 8rpx; }
 .skip { margin-top: 20rpx; }
