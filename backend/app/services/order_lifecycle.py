@@ -83,9 +83,13 @@ async def apply_order_status(
 
     if target == "COMPLETED" and old != "COMPLETED":
         order.completed_at = now_local()
+        order.kitchen_claimed_by = None
+        order.kitchen_claimed_at = None
     elif target in ("CANCELLED", "REFUNDED"):
         if old not in ("CANCELLED", "REFUNDED"):
             order.cancelled_at = order.cancelled_at or now_local()
+            order.kitchen_claimed_by = None
+            order.kitchen_claimed_at = None
             if do_restore:
                 await _restore_order_stock(db, order)
             if target == "CANCELLED" and old == "PENDING_PAYMENT":

@@ -323,6 +323,16 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
         db, [c.member_level_id for c in cust_map.values() if c.member_level_id]
     )
 
+    from app.models import User
+
+    claimer_ids = list({o.kitchen_claimed_by for o in order_list if o.kitchen_claimed_by})
+    claimer_map: dict[int, User] = {}
+    if claimer_ids:
+        claimer_map = {
+            u.id: u
+            for u in (await db.execute(select(User).where(User.id.in_(claimer_ids)))).scalars().all()
+        }
+
     channel_label_map = {
         "WECHAT": "微信堂食",
         "ALIPAY": "支付宝堂食",
@@ -375,6 +385,10 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
             "is_member": False,
             "member_level_name": None,
         }
+        claimer = claimer_map.get(order.kitchen_claimed_by) if order.kitchen_claimed_by else None
+        claimer_name = None
+        if claimer:
+            claimer_name = (claimer.display_name or claimer.username or "").strip() or f"#{claimer.id}"
         orders.append(
             {
                 "id": order.id,
@@ -402,6 +416,12 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
                 "delivery": delivery_info,
                 "items": order_items,
                 "all_no_cooking": all_no_cooking,
+                "kitchen_claimed_by": order.kitchen_claimed_by,
+                "kitchen_claimed_by_name": claimer_name,
+                "kitchen_claimed_at": order.kitchen_claimed_at.isoformat() if order.kitchen_claimed_at else None,
+                "kitchen_claimed_by_me": bool(
+                    order.kitchen_claimed_by and user.id and int(order.kitchen_claimed_by) == int(user.id)
+                ),
             }
         )
     return success(orders, request=request)
@@ -738,21 +758,24 @@ async def reorder_order(order_id: int, request: Request, db: DbSession, customer
 
 
 @router.patch("/{order_id}/status", dependencies=[require_kitchen()])
-
 async def update_order_status(order_id: int, data: OrderStatusUpdate, request: Request, db: DbSession, user: CurrentUser):
     from app.services.store_scope import assert_order_store_access
     existing = await db.get(Order, order_id)
     if not existing:
         raise HTTPException(status_code=404, detail="订单不存在")
     assert_order_store_access(user, existing)
-    order = await OrderCreateService.update_status(db, order_id, data.status, operator_id=user.id)
+    order = await OrderCreateService.update_status(
+        db,
+        order_id,
+        data.status,
+        operator_id=user.id,
+        force_takeover=bool(data.force_takeover),
+    )
 
     await DeliveryService.sync_kitchen_status(db, order)
 
     await ws_manager.notify_order_event(
-
         f"ORDER_{data.status}",
-
         {
             "order_id": order.id,
             "order_no": order.order_no,
@@ -760,9 +783,53 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
             "channel": order.channel,
             "store_id": order.store_id,
             "table_id": order.table_id,
+            "kitchen_claimed_by": order.kitchen_claimed_by,
         },
-
     )
 
-    return success({"id": order.id, "status": order.status}, request=request)
+    return success(
+        {
+            "id": order.id,
+            "status": order.status,
+            "kitchen_claimed_by": order.kitchen_claimed_by,
+        },
+        request=request,
+    )
 
+
+@router.post("/{order_id}/kitchen-takeover", dependencies=[require_kitchen()])
+async def kitchen_takeover(order_id: int, request: Request, db: DbSession, user: CurrentUser):
+    """接管已被他人认领的厨房单（不改状态）。"""
+    from app.services.kitchen_claim import claimer_display_name, takeover_kitchen_claim
+    from app.services.store_scope import assert_order_store_access
+
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
+    prev = order.kitchen_claimed_by
+    prev_name = await claimer_display_name(db, prev) if prev else ""
+    order = await takeover_kitchen_claim(db, order, operator_id=user.id)
+    await ws_manager.notify_order_event(
+        "ORDER_KITCHEN_CLAIM",
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "status": order.status,
+            "store_id": order.store_id,
+            "table_id": order.table_id,
+            "kitchen_claimed_by": order.kitchen_claimed_by,
+            "previous_claimed_by": prev,
+        },
+    )
+    my_name = await claimer_display_name(db, user.id)
+    return success(
+        {
+            "id": order.id,
+            "status": order.status,
+            "kitchen_claimed_by": order.kitchen_claimed_by,
+            "kitchen_claimed_by_name": my_name,
+            "previous_claimed_by_name": prev_name or None,
+        },
+        request=request,
+    )

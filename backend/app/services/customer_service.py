@@ -656,13 +656,22 @@ class OrderCreateService:
         status: str,
         *,
         operator_id: int | None = None,
+        force_takeover: bool = False,
     ) -> Order:
+        from app.services.kitchen_claim import apply_kitchen_claim_for_status
         from app.services.order_lifecycle import apply_order_status
 
         order = await db.get(Order, order_id)
         if not order:
             raise AppException(40404, "订单不存在")
-        return await apply_order_status(
+        await apply_kitchen_claim_for_status(
+            db,
+            order,
+            status,
+            operator_id=operator_id,
+            force_takeover=force_takeover,
+        )
+        order = await apply_order_status(
             db,
             order,
             status,
@@ -670,6 +679,7 @@ class OrderCreateService:
             operator_id=operator_id,
             assert_kind="STAFF",
         )
+        return order
 
 
 class PreferenceService:

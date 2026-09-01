@@ -82,6 +82,13 @@
               <el-tag v-else size="small" type="primary" effect="dark" class="mode-tag dine">堂食</el-tag>
               <el-tag v-if="o.all_no_cooking" size="small" type="warning" effect="plain">现成品·免烹饪</el-tag>
               <el-tag size="small" effect="dark" :type="statusTag(o.status)">{{ statusLabel(o.status) }}</el-tag>
+              <el-tag
+                v-if="claimLabel(o)"
+                size="small"
+                :type="o.kitchen_claimed_by_me ? 'success' : 'info'"
+                effect="plain"
+                class="claim-tag"
+              >{{ claimLabel(o) }}</el-tag>
             </div>
           </div>
           <div class="meta">
@@ -123,17 +130,28 @@
         <div v-if="Number(o.packing_fee) > 0" class="pack-fee">含打包费 ¥{{ o.packing_fee }}</div>
 
         <div class="actions">
-          <el-button
-            v-for="act in actionsForOrder(o)"
-            :key="act.status"
-            :type="(act.type || 'default') as any"
-            :plain="!!act.plain"
-            :class="{ 'kds-btn-main': isMainKdsBtn(act.label) }"
-            :loading="busyId === o.id"
-            @click="updateStatus(o.id, act.status)"
-          >
-            {{ act.label }}
-          </el-button>
+          <template v-if="isClaimedByOther(o)">
+            <div class="claim-hint">已被「{{ o.kitchen_claimed_by_name || '同事' }}」认领，仅可查看或接管</div>
+            <el-button
+              type="danger"
+              plain
+              :loading="busyId === o.id"
+              @click="takeoverOrder(o)"
+            >接管</el-button>
+          </template>
+          <template v-else>
+            <el-button
+              v-for="act in actionsForOrder(o)"
+              :key="act.status"
+              :type="(act.type || 'default') as any"
+              :plain="!!act.plain"
+              :class="{ 'kds-btn-main': isMainKdsBtn(act.label) }"
+              :loading="busyId === o.id"
+              @click="updateStatus(o.id, act.status)"
+            >
+              {{ act.label }}
+            </el-button>
+          </template>
         </div>
       </el-card>
     </div>
@@ -143,7 +161,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openStaffWebSocket } from '@/utils/ws'
@@ -346,7 +364,25 @@ function isMainKdsBtn(label: string) {
   return KDS_MAIN_BTN_LABELS.has(label)
 }
 
+function isClaimedByOther(order: any) {
+  return !!(order?.kitchen_claimed_by && !order.kitchen_claimed_by_me)
+}
+
+/** 制作中/烹饪中显示认领人；待出餐也显示便于交接 */
+function claimLabel(order: any) {
+  const name = (order?.kitchen_claimed_by_name || '').trim()
+  if (!name) return ''
+  if (order.status === 'PREPARING' || order.status === 'COOKING') {
+    return order.kitchen_claimed_by_me ? `制作中 · 我（${name}）` : `制作中 · ${name}`
+  }
+  if (order.status === 'READY') {
+    return order.kitchen_claimed_by_me ? `已认领 · 我（${name}）` : `已认领 · ${name}`
+  }
+  return ''
+}
+
 function actionsForOrder(order: any) {
+  if (isClaimedByOther(order)) return []
   const status = order?.status
   if (order?.all_no_cooking && (status === 'PAID' || status === 'CONFIRMED')) {
     return [{ status: 'READY', label: '制作完成', type: 'success' }]
@@ -532,14 +568,54 @@ function onStoreChange() {
   connectWs()
 }
 
-async function updateStatus(id: number, status: string) {
+async function updateStatus(id: number, status: string, forceTakeover = false) {
   await ensureVoiceFromGesture()
   busyId.value = id
   try {
-    await api.patch(`/orders/${id}/status`, { status })
+    await api.patch(`/orders/${id}/status`, { status, force_takeover: forceTakeover })
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message || '操作失败')
+    const msg = e.message || '操作失败'
+    // 40028：已被他人认领 → 引导接管
+    if (String(msg).includes('认领') || String(msg).includes('接管')) {
+      try {
+        await ElMessageBox.confirm(`${msg}\n是否立即接管并继续？`, '订单已被认领', {
+          confirmButtonText: '接管并继续',
+          cancelButtonText: '取消',
+          type: 'warning',
+        })
+        await api.patch(`/orders/${id}/status`, { status, force_takeover: true })
+        await load()
+        return
+      } catch {
+        /* 用户取消 */
+      }
+    }
+    ElMessage.error(msg)
+  } finally {
+    busyId.value = null
+  }
+}
+
+async function takeoverOrder(o: any) {
+  await ensureVoiceFromGesture()
+  const name = o.kitchen_claimed_by_name || '同事'
+  try {
+    await ElMessageBox.confirm(`订单当前由「${name}」认领，确定接管？`, '接管订单', {
+      confirmButtonText: '确认接管',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  busyId.value = o.id
+  try {
+    await api.post(`/orders/${o.id}/kitchen-takeover`)
+    ElMessage.success('已接管')
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '接管失败')
   } finally {
     busyId.value = null
   }
@@ -977,6 +1053,13 @@ onUnmounted(() => {
 .item-remark { color: #fdba74; font-size: 12px; margin-top: 2px; }
 .pack-fee { color: #fbbf24; font-size: 12px; margin-bottom: 8px; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.claim-hint {
+  width: 100%;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.4;
+}
+.claim-tag { max-width: 100%; }
 .actions :deep(.el-button.kds-btn-main) {
   flex: 1 1 100%;
   width: 100%;

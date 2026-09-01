@@ -91,6 +91,12 @@ npm run dev -- --host 127.0.0.1 --port 5173
 #
 # 会员等级 / 偏好评分单测：
 # python -m pytest tests/test_member_levels_admin.py tests/test_preference_scoring.py -v
+#
+# 厨房软认领单测：
+# python -m pytest tests/test_kitchen_claim.py -v
+#
+# 已有库补厨房认领列：
+# mysql ... < sql/tools/012_kitchen_claim.sql
 
 
 叫号屏地址（调试环境）

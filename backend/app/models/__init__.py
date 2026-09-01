@@ -274,6 +274,8 @@ class Order(Base, TimestampMixin):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kitchen_claimed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), default=None)
+    kitchen_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class OrderItem(Base):

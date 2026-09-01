@@ -377,6 +377,8 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at DATETIME(3) DEFAULT NULL COMMENT '支付成功时间',
   completed_at DATETIME(3) DEFAULT NULL COMMENT '订单完成时间',
   cancelled_at DATETIME(3) DEFAULT NULL COMMENT '取消时间',
+  kitchen_claimed_by BIGINT UNSIGNED DEFAULT NULL COMMENT '厨房认领人 → users.id；点「开始制作」写入',
+  kitchen_claimed_at DATETIME(3) DEFAULT NULL COMMENT '厨房认领时间',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '记录更新时间',
   UNIQUE KEY uk_idempotency (idempotency_key),
@@ -387,9 +389,11 @@ CREATE TABLE IF NOT EXISTS orders (
   INDEX idx_orders_status_paid (status, paid_at),
   INDEX idx_orders_store_created (store_id, created_at),
   INDEX idx_orders_store_paid (store_id, paid_at),
+  INDEX idx_orders_kitchen_claim (kitchen_claimed_by, status),
   CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
   CONSTRAINT fk_orders_table FOREIGN KEY (table_id) REFERENCES tables(id),
-  CONSTRAINT fk_orders_store FOREIGN KEY (store_id) REFERENCES stores(id)
+  CONSTRAINT fk_orders_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_orders_kitchen_claim FOREIGN KEY (kitchen_claimed_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单主表';
 
 CREATE TABLE IF NOT EXISTS order_items (

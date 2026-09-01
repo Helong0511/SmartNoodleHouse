@@ -32,6 +32,10 @@ class OrderStatusUpdate(BaseModel):
         description="CONFIRMED/PREPARING/COOKING/READY/COMPLETED/CANCELLED",
         pattern=r"^(CONFIRMED|PREPARING|COOKING|READY|COMPLETED|CANCELLED)$",
     )
+    force_takeover: bool = Field(
+        default=False,
+        description="订单已被他人认领时，设为 true 表示接管并继续推进状态",
+    )
 
 
 class PaymentCreate(BaseModel):
