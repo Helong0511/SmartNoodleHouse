@@ -4,7 +4,7 @@ const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
-const { enableWxPhoneBind, enableNicknameInput } = require('../../config/env')
+const { enableWxPhoneBind, enableNicknameInput, shouldShowDevTips } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
@@ -57,6 +57,7 @@ Page({
     phone: '',
     phoneInput: '',
     canWxPhone: false,
+    showDevTips: false,
     needPrivacyAgree: false,
     nicknameReviewFail: false,
     storeName: '',
@@ -74,7 +75,8 @@ Page({
     }
     this.setData({
       canWxPhone: !!enableWxPhoneBind,
-      useWxNickname: !!enableNicknameInput
+      useWxNickname: !!enableNicknameInput,
+      showDevTips: shouldShowDevTips()
     })
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })

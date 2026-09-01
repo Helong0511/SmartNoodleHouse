@@ -68,6 +68,10 @@
   "style": "v2",
   "sitemapLocation": "sitemap.json",
   "__usePrivacyCheck__": true,
+  "requiredPrivateInfos": [
+    "chooseAvatar",
+    "getPhoneNumber"
+  ],
   "usingComponents": {
     "store-bar": "/components/store-bar/store-bar",
     "privacy-popup": "/components/privacy-popup/privacy-popup"

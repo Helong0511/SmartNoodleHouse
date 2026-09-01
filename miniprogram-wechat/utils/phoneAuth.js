@@ -24,7 +24,7 @@ function markPrivacyNeed(page, scene) {
   if (!page || typeof page.setData !== 'function') return
   const patch = { needPrivacyAgree: true }
   if (typeof page.buildDebugInfo === 'function') {
-    patch.debugInfo = getEnvDebugInfo().envVersion === 'release' ? '' : page.buildDebugInfo(scene || '手机:隐私')
+    patch.debugInfo = getEnvDebugInfo().isRelease ? '' : page.buildDebugInfo(scene || '手机:隐私')
   }
   page.setData(patch)
 }

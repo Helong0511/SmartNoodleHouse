@@ -123,7 +123,14 @@
       <view class="title">绑定手机号</view>
       <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
       <button
-        a:if="{{canAlipayPhone}}"
+        a:if="{{canAlipayPhone && needPrivacyAgree}}"
+        id="agree-phone-btn"
+        class="btn-primary ali-phone"
+        open-type="agreePrivacyAuthorization"
+        onAgreePrivacyAuthorization="onPrivacyAgreeForPhone"
+      >同意隐私并绑定手机号</button>
+      <button
+        a:elif="{{canAlipayPhone}}"
         class="btn-primary ali-phone"
         open-type="getAuthorize"
         scope="phoneNumber"
@@ -131,6 +138,7 @@
         onError="onGetPhoneAuthorizeFail"
       >支付宝一键绑定手机号</button>
       <view class="or" a:if="{{canAlipayPhone}}">或手动输入</view>
+      <view class="tip dev-tip" a:if="{{showDevTips && !canAlipayPhone}}">开发提示：未在开放平台配置隐私/手机号能力时，请直接手动输入；配置完成后将 config/env.js 中 ENABLE_ALIPAY_PRIVACY_APIS 改为 true。</view>
       <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" onInput="onPhoneInput" />
       <button class="btn-ghost" onTap="bindPhone">确认绑定</button>
     </view>

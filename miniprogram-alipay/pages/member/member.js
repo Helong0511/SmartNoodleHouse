@@ -4,7 +4,7 @@ const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
-const { enableAlipayPhoneBind, enableNicknameInput } = require('../../config/env')
+const { enableAlipayPhoneBind, enableNicknameInput, shouldShowDevTips } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
@@ -56,6 +56,7 @@ Page({
     phone: '',
     phoneInput: '',
     canAlipayPhone: false,
+    showDevTips: false,
     useAlipayNickname: false,
     needPrivacyAgree: false,
     nicknameReviewFail: false,
@@ -74,7 +75,8 @@ Page({
     }
     this.setData({
       canAlipayPhone: !!enableAlipayPhoneBind,
-      useAlipayNickname: !!enableNicknameInput
+      useAlipayNickname: !!enableNicknameInput,
+      showDevTips: shouldShowDevTips()
     })
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
@@ -277,6 +279,12 @@ Page({
 
   onPhoneInput(e) {
     this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  },
+
+  onPrivacyAgreeForPhone() {
+    privacy.finishPrivacyAgree('agree-phone-btn')
+    this.setData({ needPrivacyAgree: false })
+    my.showToast({ content: '已同意，请再点授权手机号', type: 'success' })
   },
 
   onGetPhoneAuthorize() {

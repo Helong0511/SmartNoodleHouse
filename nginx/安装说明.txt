@@ -1,0 +1,59 @@
+# SmartNoodleHouse — Nginx 安装（Ubuntu 22.04.5）
+# ═══════════════════════════════════════════════════════════════
+# 【备案】生产环境域名须已完成工信部 ICP 备案，并解析到本机公网 IP。
+#       未备案域名在国内云厂商可能无法开通 443，微信/支付宝也无法配置合法域名。
+#       本地开发用局域网 IP，无需备案。
+# ═══════════════════════════════════════════════════════════════
+# 配置文件目录：项目 nginx/
+#   smart-noodle.conf          主站点（HTTPS + 反代 + 静态资源）
+#   snippets/ssl-params.conf   SSL 参数（TLS 1.2/1.3）
+#   snippets/proxy-common.conf 反代公共请求头
+#
+# 后端由 systemd 监听 127.0.0.1:8000，见 ../systemd/
+# ═══════════════════════════════════════════════════════════════
+
+# ── 1. 安装 Nginx 与 certbot ──
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable nginx
+
+# ── 2. 修改配置中的占位符 ──
+# 编辑 nginx/smart-noodle.conf，全局替换：
+#   REPLACE_DOMAIN       → 你的域名（如 order.example.com）
+#   REPLACE_WEB_ROOT     → /var/www/smart-noodle/frontend/dist
+#   REPLACE_UPLOADS_DIR  → /var/www/smart-noodle/uploads
+#
+# 若项目不在 /var/www/smart-noodle，按实际路径修改。
+
+# ── 3. 复制 snippets 到系统目录 ──
+sudo cp nginx/snippets/ssl-params.conf   /etc/nginx/snippets/ssl-params.conf
+sudo cp nginx/snippets/proxy-common.conf /etc/nginx/snippets/proxy-common.conf
+
+# ── 4. 安装站点配置 ──
+sudo cp nginx/smart-noodle.conf /etc/nginx/sites-available/smart-noodle.conf
+sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# ── 5. 首次申请 SSL 证书（域名须已解析到本机）──
+# 若 HTTP 跳转导致 certbot 失败，可临时注释 smart-noodle.conf 中
+# server { listen 80; return 301 ... } 整段，申请完再恢复。
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d 你的域名.com
+
+# certbot 会自动写入 ssl_certificate 路径；也可手动取消 smart-noodle.conf 内注释
+
+# ── 6. 验证 ──
+sudo nginx -t
+sudo systemctl reload nginx
+curl -sI https://你的域名.com/
+curl -s http://127.0.0.1:8000/api/v1/health   # 须先启动 smart-noodle.service
+
+# ── 7. 证书自动续期 ──
+sudo certbot renew --dry-run
+# Ubuntu 22.04 certbot 默认带 systemd timer，无需额外 cron
+
+# ── 常见问题 ──
+# 502 Bad Gateway     → systemctl status smart-noodle 未运行或 8000 端口未监听
+# 413 Request Entity  → 调大 client_max_body_size 与 .env MAX_UPLOAD_SIZE_MB
+# WebSocket 断连      → 确认 location /api/v1/ws/ 存在且 proxy Upgrade 头正确
+# 上传图 404          → 检查 REPLACE_UPLOADS_DIR 与 .env UPLOAD_DIR 一致

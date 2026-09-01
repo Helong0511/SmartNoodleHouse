@@ -1,0 +1,55 @@
+# SmartNoodleHouse — systemd 服务安装（Ubuntu 22.04.5）
+# ═══════════════════════════════════════════════════════════════
+# 服务单元：systemd/smart-noodle.service
+# 作用：开机自启 gunicorn，监听 127.0.0.1:8000
+# 配套：../nginx/smart-noodle.conf（Nginx 反代 HTTPS）
+# ═══════════════════════════════════════════════════════════════
+
+# ── 前提 ──
+# 1. 已 clone 代码到 /var/www/smart-noodle（或你的路径）
+# 2. 已 cp .env.production.example .env 并填写密钥
+# 3. 已创建 venv 并 pip install -r backend/requirements.txt
+# 4. MySQL / Redis 已启动
+
+# ── 1. 替换部署路径 ──
+# 编辑 systemd/smart-noodle.service，全局替换：
+#   REPLACE_DEPLOY_ROOT → /var/www/smart-noodle
+#
+# 若使用其他路径，所有 REPLACE_DEPLOY_ROOT 须一致。
+
+# ── 2. 目录权限 ──
+sudo mkdir -p /var/www/smart-noodle/uploads /etc/smart-noodle/certs
+sudo chown -R www-data:www-data /var/www/smart-noodle/uploads
+sudo chmod 640 /var/www/smart-noodle/.env
+# 项目代码可读即可；venv 须 www-data 可执行
+sudo chown -R root:www-data /var/www/smart-noodle/backend/.venv
+
+# ── 3. 安装单元文件 ──
+sudo cp systemd/smart-noodle.service /etc/systemd/system/smart-noodle.service
+sudo systemctl daemon-reload
+sudo systemctl enable smart-noodle
+sudo systemctl start smart-noodle
+
+# ── 4. 验证 ──
+sudo systemctl status smart-noodle
+curl -s http://127.0.0.1:8000/api/v1/health
+sudo journalctl -u smart-noodle -f
+
+# ── 5. 更新发布（拉代码后）──
+cd /var/www/smart-noodle
+git pull
+source backend/.venv/bin/activate && pip install -r backend/requirements.txt
+cd frontend && npm ci && npm run build
+sudo systemctl restart smart-noodle
+sudo systemctl reload nginx
+
+# ── 6. 多实例注意 ──
+# PROCESS_ROLE=leader 全机只能有一个实例跑调度/人脸识别。
+# 勿在同一台机器启动第二个 smart-noodle.service。
+# 水平扩展时：仅 leader 设 PROCESS_ROLE=leader，其余 worker 设 follower 并关闭 ENABLE_RECOGNITION_WORKER。
+
+# ── 常见问题 ──
+# failed (code=exited)  → journalctl -u smart-noodle -n 50 看 Python 报错
+# .env 权限拒绝          → chmod 640 .env && chgrp www-data .env
+# 数据库连不上           → 检查 DATABASE_URL、mysql 是否 listen 127.0.0.1
+# 生产 mock 被拒绝       → .env 中 ALLOW_*_MOCK 须全部为 false

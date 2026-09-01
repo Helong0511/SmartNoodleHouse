@@ -1,5 +1,5 @@
 {
-  "description": "面馆智能经营系统 - 微信小程序点餐",
+  "description": "面馆智能经营系统 - 微信小程序。本地调试：urlCheck=false + 勾选不校验合法域名；正式发布前改 urlCheck=true 并配置 mp.weixin.qq.com 服务器域名。API 地址见 config/env.js",
   "packOptions": {
     "ignore": [],
     "include": []

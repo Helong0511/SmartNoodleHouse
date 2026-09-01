@@ -8,7 +8,9 @@ const {
   enableNicknameInput,
   enableAlipayPhoneBind,
   resolveApiBase,
-  getEnvDebugInfo
+  getEnvDebugInfo,
+  shouldShowDevTips,
+  appendDevApiHint
 } = require('../../config/env')
 
 function appRef() {
@@ -33,6 +35,7 @@ Page({
     useAlipayNickname: false,
     canAlipayPhone: false,
     privacyTip: '',
+    showDevTips: false,
     debugInfo: '',
     nicknameReviewFail: false,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
@@ -55,7 +58,8 @@ Page({
       canChooseAvatar: !!enableChooseAvatar,
       useAlipayNickname: !!enableNicknameInput,
       canAlipayPhone: !!enableAlipayPhoneBind,
-      debugInfo: env.envVersion === 'release' ? '' : this.buildDebugInfo()
+      showDevTips: shouldShowDevTips(),
+      debugInfo: env.isRelease ? '' : this.buildDebugInfo()
     })
     const app = appRef()
     if (query.token && app) {
@@ -82,8 +86,8 @@ Page({
       : '点头像选支付宝头像，点昵称框后在键盘上方选支付宝昵称。'
     this.setData({
       needPrivacyAgree: need,
-      privacyTip: `${baseTip} 接口：${apiHint}`,
-      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo()
+      privacyTip: appendDevApiHint(baseTip, apiHint),
+      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo()
     })
     return !need
   },
@@ -96,10 +100,26 @@ Page({
     privacy.finishPrivacyAgree('agree-btn')
     this.setData({
       needPrivacyAgree: false,
-      privacyTip: `已同意隐私政策。请点头像选头像，点昵称框获取支付宝昵称。 接口：${(appRef() && appRef().globalData.apiBase) || resolveApiBase()}`,
-      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('隐私已同意')
+      privacyTip: appendDevApiHint(
+        '已同意隐私政策。请点头像选头像，点昵称框获取支付宝昵称。',
+        (appRef() && appRef().globalData.apiBase) || resolveApiBase()
+      ),
+      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('隐私已同意')
     })
     my.showToast({ content: '已同意，请继续操作', type: 'success' })
+  },
+
+  onPrivacyAgreeForPhone() {
+    privacy.finishPrivacyAgree('agree-phone-btn')
+    this.setData({
+      needPrivacyAgree: false,
+      privacyTip: appendDevApiHint(
+        '已同意隐私政策，请再次点击「支付宝授权手机号」。',
+        (appRef() && appRef().globalData.apiBase) || resolveApiBase()
+      ),
+      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('隐私已同意(手机号)')
+    })
+    my.showToast({ content: '已同意，请再点授权手机号', type: 'success' })
   },
 
   async bootstrap() {
@@ -197,7 +217,7 @@ Page({
       if (/privacy|authorize|协议|声明|agree|scope/i.test(errMsg)) {
         this.setData({
           needPrivacyAgree: true,
-          debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('头像:隐私')
+          debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:隐私')
         })
         privacy.showPrivacyPopup()
         my.alert({
@@ -276,7 +296,7 @@ Page({
   },
 
   onGetPhoneAuthorize() {
-    phoneAuth.handleGetPhoneAuthorize(this, null, (encrypted) => {
+    phoneAuth.handleGetPhoneAuthorize(this, null, async (encrypted) => {
       try {
         my.showLoading({ content: '绑定中' })
         const res = await api.post('/miniprogram/member/phone', { alipay_phone_encrypted: encrypted })

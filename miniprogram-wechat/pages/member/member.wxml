@@ -229,7 +229,7 @@
 
     <view class="or" wx:if="{{canWxPhone}}">或手动输入</view>
 
-    <view class="tip dev-tip" wx:if="{{!canWxPhone}}">开发提示：未在公众平台配置「手机号」隐私项时，请直接手动输入；配置完成后将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 改为 true。</view>
+    <view class="tip dev-tip" wx:if="{{showDevTips && !canWxPhone}}">开发提示：未在公众平台配置「手机号」隐私项时，请直接手动输入；配置完成后将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 改为 true。</view>
 
     <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" bindinput="onPhoneInput" />
 

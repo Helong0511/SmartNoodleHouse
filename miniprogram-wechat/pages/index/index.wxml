@@ -18,7 +18,7 @@
     <view class="title">{{showMemberPrompt ? '注册会员，智能记住您的口味' : '欢迎回来'}}</view>
     <view class="desc">{{showMemberPrompt ? memberText : '完善头像、昵称、手机号后开始点餐。'}}</view>
 
-    <view class="mp-config-hint" wx:if="{{debugInfo}}">
+    <view class="mp-config-hint" wx:if="{{showDevTips && debugInfo}}">
       <text class="mp-config-title">真机微信头像/昵称报错？</text>
       <text class="mp-config-desc">须登录 mp.weixin.qq.com，在 AppID wxd0964c5d02b1549d 下配置「用户隐私保护指引」，勾选「收集你的昵称、头像」并提交审核。审核通过后约 5 分钟生效。等待期间请用「从相册选择头像」+ 手输昵称。</text>
     </view>
@@ -119,8 +119,8 @@
       </block>
     </view>
 
-    <view class="dev-tip">{{privacyTip}}</view>
-    <view class="dev-tip debug" wx:if="{{debugInfo}}">{{debugInfo}}</view>
+    <view class="dev-tip" wx:if="{{showDevTips && privacyTip}}">{{privacyTip}}</view>
+    <view class="dev-tip debug" wx:if="{{showDevTips && debugInfo}}">{{debugInfo}}</view>
 
     <button class="btn-primary" form-type="submit" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     </form>

@@ -4,14 +4,55 @@
 # 生产部署  Ubuntu 22.04.5（见 scripts/生产部署-ubuntu.txt）
 # ═══════════════════════════════════════════════════════════════
 #
-# 环境文件：
-#   本地  copy .env.development.example .env
-#   生产  cp .env.production.example .env
+# 环境文件（项目根目录，三选一复制为 .env）：
+#   .env.development.example  → 本地 Windows 联调（copy 为 .env）
+#   .env.production.example   → 生产 Ubuntu 部署（cp 为 .env）
+#   .env.example              → 全量字段参考模板
 #
-# 小程序 API 地址：miniprogram-*/config/env.js
+# 小程序 API 地址：miniprogram-*/config/env.js（见同目录 环境说明.txt）
 #   模拟器     自动 → 127.0.0.1:8000
 #   真机       自动 → 192.168.1.110:8000（改 DEV_LAN_HOST 即可）
 #   正式版     PROD_API_BASE → https://your-domain.com/api/v1
+#               ENABLE_WX_PRIVACY_APIS / ENABLE_ALIPAY_PRIVACY_APIS → true
+#
+# ── 正式版上线检查清单（微信 / 支付宝分开）──
+#
+# 【后端 .env 生产】cp .env.production.example .env
+#   APP_ENV=production、APP_DEBUG=false
+#   H5_PUBLIC_BASE_URL=https://你的域名
+#   MINI_PROGRAM_ENV_VERSION=release
+#   WECHAT_* / ALIPAY_* 支付与小程序密钥齐全
+#   ALIPAY_AES_KEY=开放平台接口内容加密 AES（支付宝手机号解密）
+#
+# 【微信小程序 miniprogram-wechat】
+#   config/env.js：PROD_API_BASE=https://你的域名/api/v1
+#   config/env.js：ENABLE_WX_PRIVACY_APIS=true
+#   mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
+#   mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
+#     勾选：收集昵称头像、收集手机号；提交并发布
+#   主体须非个人且已认证（getPhoneNumber 要求）
+#   桌台一码通扫：开通 URL Link、明文 Scheme（开发版用 getwxacode 调试码）
+#   上传前 project.config.json → setting.urlCheck=true 并真机验证合法域名
+#   app.json 已含 __usePrivacyCheck__、requiredPrivateInfos
+#   文档：https://developers.weixin.qq.com/miniprogram/dev/framework/user-privacy/PrivacyAuthorize.html
+#
+# 【支付宝小程序 miniprogram-alipay】
+#   config/env.js：PROD_API_BASE=https://你的域名/api/v1
+#   config/env.js：ENABLE_ALIPAY_PRIVACY_APIS=true
+#   open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单（HTTPS）
+#   基础设置 → 小程序隐私政策（声明手机号等收集类型）
+#   能力申请 → 获取会员手机号；开发设置 → 接口内容加密方式 → ALIPAY_AES_KEY
+#   app.json 已 usePrivacyCheck:true；手机号须两步按钮（先隐私同意再 getAuthorize）
+#   文档：https://opendocs.alipay.com/mini/api/getphonenumber
+#
+# 【调试版 vs 正式版 对照】
+#   项              调试 develop/trial          正式 release
+#   小程序 API      DEV_LAN / 127.0.0.1         PROD_API_BASE HTTPS
+#   隐私 API 开关   自动开启                    ENABLE_*_PRIVACY_APIS=true
+#   合法域名校验    可关闭 urlCheck             必须开启并配置域名
+#   桌台码跳转      MINI_PROGRAM_ENV_VERSION=develop  =release
+#   H5 扫码地址     http://局域网IP:5173        https://域名
+#   支付 mock       ALLOW_PAYMENT_MOCK=true     false
 #
 # ── 微信真机调试「ws://10.8.x.x:8001 失败」──
 # 这是开发者工具调试通道（8001），不是业务 API（8000）。

@@ -86,7 +86,14 @@
         <view class="phone-ok" a:if="{{phone}}">已绑定 {{phone}}</view>
         <block a:else>
           <button
-            a:if="{{canAlipayPhone}}"
+            a:if="{{canAlipayPhone && needPrivacyAgree}}"
+            id="agree-phone-btn"
+            class="btn-ghost phone-btn"
+            open-type="agreePrivacyAuthorization"
+            onAgreePrivacyAuthorization="onPrivacyAgreeForPhone"
+          >同意隐私并授权手机号</button>
+          <button
+            a:elif="{{canAlipayPhone}}"
             class="btn-ghost phone-btn"
             open-type="getAuthorize"
             scope="phoneNumber"
@@ -104,8 +111,8 @@
         </block>
       </view>
 
-      <view class="dev-tip">{{privacyTip}}</view>
-      <view class="dev-tip debug" a:if="{{debugInfo}}">{{debugInfo}}</view>
+      <view class="dev-tip" a:if="{{showDevTips && privacyTip}}">{{privacyTip}}</view>
+      <view class="dev-tip debug" a:if="{{showDevTips && debugInfo}}">{{debugInfo}}</view>
 
       <button class="btn-primary" formType="submit" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     </form>

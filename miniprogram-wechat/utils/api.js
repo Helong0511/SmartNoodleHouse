@@ -71,7 +71,7 @@ function networkHint(base, msg) {
     return '无法连接后端，请先启动：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000'
   }
   if (/127\.0\.0\.1|localhost/.test(base || '') && /fail|timeout|CONNECTION|reset/i.test(m)) {
-    return `${m}；真机/部分模拟器请把 app.js 的 apiBase 改为电脑局域网 IP（如 http://192.168.x.x:8000/api/v1），并勾选「不校验合法域名」`
+    return `${m}；真机/部分模拟器请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP，并勾选「不校验合法域名」`
   }
   return m || '网络请求失败'
 }
@@ -84,7 +84,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
   const base = resolveBaseUrl()
   return new Promise((resolve, reject) => {
     if (!base) {
-      reject(new Error('未配置 apiBase，请在 app.js 或 config/env.js 填写后端地址'))
+      reject(new Error('未配置 apiBase，请在 miniprogram-wechat/config/env.js 填写 PROD_API_BASE 或 DEV_LAN_HOST'))
       return
     }
     wx.request({

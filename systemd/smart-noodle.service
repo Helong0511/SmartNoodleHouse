@@ -1,0 +1,54 @@
+# =============================================================================
+# SmartNoodleHouse API — systemd 单元（Ubuntu 22.04.5）
+#
+# 安装：见同目录 安装说明.txt
+# 监听 127.0.0.1:8000，由 Nginx 反代对外提供 HTTPS
+#
+# 部署前必改：
+#   REPLACE_DEPLOY_ROOT  → 项目根目录，默认 /var/www/smart-noodle
+# =============================================================================
+
+[Unit]
+Description=SmartNoodleHouse API (FastAPI + gunicorn)
+Documentation=file://REPLACE_DEPLOY_ROOT/README.md
+After=network-online.target mysql.service redis-server.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+
+WorkingDirectory=REPLACE_DEPLOY_ROOT/backend
+EnvironmentFile=REPLACE_DEPLOY_ROOT/.env
+Environment=PYTHONPATH=REPLACE_DEPLOY_ROOT/backend:REPLACE_DEPLOY_ROOT
+Environment=PYTHONUNBUFFERED=1
+
+# gunicorn + uvicorn worker；worker 数可按 CPU 调整（2～4）
+ExecStart=REPLACE_DEPLOY_ROOT/backend/.venv/bin/gunicorn app.main:app \
+  -k uvicorn.workers.UvicornWorker \
+  -w 2 \
+  -b 127.0.0.1:8000 \
+  --timeout 120 \
+  --graceful-timeout 30 \
+  --keep-alive 5 \
+  --access-logfile - \
+  --error-logfile -
+
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+# 上传目录与日志需可写
+ReadWritePaths=REPLACE_DEPLOY_ROOT/uploads
+ReadWritePaths=/var/log
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

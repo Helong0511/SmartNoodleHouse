@@ -7,7 +7,9 @@ const {
   enableNicknameInput,
   enableWxPhoneBind,
   resolveApiBase,
-  getEnvDebugInfo
+  getEnvDebugInfo,
+  shouldShowDevTips,
+  appendDevApiHint
 } = require('../../config/env')
 const app = getApp()
 const phoneAuth = require('../../utils/phoneAuth')
@@ -32,6 +34,7 @@ Page({
     useWxNickname: false,
     canWxPhone: false,
     privacyTip: '',
+    showDevTips: false,
     debugInfo: '',
     nicknameReviewFail: false,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
@@ -54,7 +57,8 @@ Page({
       canChooseAvatar: !!enableChooseAvatar,
       useWxNickname: !!enableNicknameInput,
       canWxPhone: !!enableWxPhoneBind,
-      debugInfo: env.envVersion === 'release' ? '' : this.buildDebugInfo()
+      showDevTips: shouldShowDevTips(),
+      debugInfo: env.isRelease ? '' : this.buildDebugInfo()
     })
     if (query.token) {
       app.globalData.tableToken = query.token
@@ -79,8 +83,8 @@ Page({
       : '微信头像、昵称需分开操作：点头像选头像，点昵称框后在键盘上方选「用微信昵称」。'
     this.setData({
       needPrivacyAgree: need,
-      privacyTip: `${baseTip} 接口：${apiHint}`,
-      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo()
+      privacyTip: appendDevApiHint(baseTip, apiHint),
+      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo()
     })
     return !need
   },
@@ -95,8 +99,11 @@ Page({
     privacy.finishPrivacyAgree('agree-btn')
     this.setData({
       needPrivacyAgree: false,
-      privacyTip: `已同意隐私指引。请点头像选微信头像，点昵称框后在键盘上方选「用微信昵称」。 接口：${app.globalData.apiBase || resolveApiBase()}`,
-      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('隐私已同意')
+      privacyTip: appendDevApiHint(
+        '已同意隐私指引。请点头像选微信头像，点昵称框后在键盘上方选「用微信昵称」。',
+        app.globalData.apiBase || resolveApiBase()
+      ),
+      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('隐私已同意')
     })
     wx.showToast({ title: '已同意，请继续操作', icon: 'success' })
   },
@@ -189,7 +196,7 @@ Page({
       if (/privacy|authorize|声明|agree|scope|declared/i.test(errMsg)) {
         this.setData({
           needPrivacyAgree: true,
-          debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('头像:隐私未声明')
+          debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:隐私未声明')
         })
         privacy.showPrivacyPopup()
         wx.showModal({
@@ -209,7 +216,7 @@ Page({
     }
     this.setData({
       avatarUrl: url,
-      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('头像:已选')
+      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:已选')
     })
     app.globalData.avatarUrl = url
     wx.setStorageSync('avatar_url', url)
