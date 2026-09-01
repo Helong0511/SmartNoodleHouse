@@ -3,7 +3,7 @@
 /** 券/代金券展示名：优先模板名称，规则 summary 仅作兜底 */
 function holdDisplayName(hold) {
   if (!hold) return ''
-  return String(hold.name || hold.template_name || hold.summary || '').trim()
+  return String(hold.template_name || hold.name || hold.summary || '').trim()
 }
 
 function voucherFaceValue(voucher) {
