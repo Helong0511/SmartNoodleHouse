@@ -38,13 +38,17 @@
         <view class="unit" wx:if="{{!item.invalid}}">单价 ¥{{item.unit_price}}</view>
       </view>
       <view class="actions">
-        <view class="qty" wx:if="{{!item.invalid}}">
-          <text class="btn" data-index="{{index}}" data-delta="-1" bindtap="changeQty">−</text>
-          <text class="num">{{item.quantity}}</text>
-          <text class="btn" data-index="{{index}}" data-delta="1" bindtap="changeQty">+</text>
+        <view class="actions-top">
+          <view class="qty" wx:if="{{!item.invalid}}">
+            <text class="btn" data-index="{{index}}" data-delta="-1" bindtap="changeQty">−</text>
+            <text class="num">{{item.quantity}}</text>
+            <text class="btn" data-index="{{index}}" data-delta="1" bindtap="changeQty">+</text>
+          </view>
+          <view class="line-total" wx:if="{{!item.invalid}}">¥{{item.subtotal}}</view>
         </view>
-        <view class="line-total" wx:if="{{!item.invalid}}">¥{{item.subtotal}}</view>
-        <text class="del" data-index="{{index}}" bindtap="removeItem">删除</text>
+        <view class="del-wrap">
+          <text class="del" data-index="{{index}}" bindtap="removeItem">删除</text>
+        </view>
       </view>
     </view>
 

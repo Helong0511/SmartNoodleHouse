@@ -14,8 +14,8 @@
 .warn-action { color: #1677ff; font-weight: 600; }
 .item {
   display: flex;
-  align-items: flex-start;
-  gap: 16rpx;
+  flex-direction: row;
+  align-items: stretch;
   background: #fff;
   padding: 20rpx;
   margin-bottom: 12rpx;
@@ -24,6 +24,7 @@
 .item.invalid { opacity: 0.72; background: #fafafa; }
 .thumb-wrap {
   flex-shrink: 0;
+  margin-right: 16rpx;
   border-radius: 10rpx;
   overflow: hidden;
   background: #f3f3f3;
@@ -35,11 +36,24 @@
   color: #1677ff; font-weight: 700; font-size: 32rpx;
   background: #e6f4ff;
 }
-.info { flex: 1; min-width: 0; }
-.name-row { display: flex; align-items: center; gap: 8rpx; }
-.name { font-size: 30rpx; font-weight: 600; flex: 1; min-width: 0; }
+.info {
+  flex: 1;
+  min-width: 0;
+}
+.name-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.name {
+  font-size: 30rpx;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
 .special-tag {
   flex-shrink: 0;
+  margin-left: 8rpx;
   font-size: 20rpx;
   color: #1677ff;
   border: 1rpx solid #91caff;
@@ -48,31 +62,98 @@
 }
 .special-tip { color: #999; font-size: 22rpx; margin-top: 4rpx; }
 .invalid-tag { font-size: 24rpx; color: #ff4d4f; margin-top: 8rpx; }
-.opts { font-size: 24rpx; color: #888; margin-top: 8rpx; }
-.unit { font-size: 24rpx; color: #666; margin-top: 8rpx; }
-.actions { text-align: right; flex-shrink: 0; margin-left: 8rpx; }
-.qty { display: flex; align-items: center; justify-content: flex-end; gap: 16rpx; }
-.btn {
-  width: 48rpx; height: 48rpx; line-height: 48rpx; text-align: center;
-  background: #f5f5f5; border-radius: 8rpx; font-size: 32rpx;
+.opts {
+  font-size: 24rpx;
+  color: #888;
+  margin-top: 8rpx;
+  line-height: 1.5;
+  word-wrap: break-word;
 }
-.num { min-width: 40rpx; text-align: center; font-size: 28rpx; }
-.line-total { font-size: 28rpx; color: #1677ff; margin-top: 12rpx; font-weight: 600; }
-.del { display: inline-block; font-size: 24rpx; color: #999; margin-top: 12rpx; }
+.unit { font-size: 24rpx; color: #666; margin-top: 8rpx; }
+.actions {
+  flex-shrink: 0;
+  margin-left: 8rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: stretch;
+}
+.actions-top {
+  flex-shrink: 0;
+  width: 100%;
+  text-align: right;
+}
+.qty {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+}
+.qty-btn {
+  width: 48rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  text-align: center;
+  background: #f5f5f5;
+  border-radius: 8rpx;
+  font-size: 32rpx;
+  color: #333;
+}
+.qty-num {
+  min-width: 40rpx;
+  margin: 0 16rpx;
+  text-align: center;
+  font-size: 28rpx;
+  line-height: 48rpx;
+  color: #333;
+}
+.line-total {
+  display: block;
+  font-size: 28rpx;
+  color: #e64340;
+  margin-top: 12rpx;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+  width: 100%;
+}
+.del-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  min-height: 0;
+}
+.del {
+  font-size: 24rpx;
+  color: #999;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
 .footer {
   position: fixed; left: 0; right: 0;
   bottom: calc(100rpx + env(safe-area-inset-bottom));
   background: #fff; padding: 20rpx 20rpx;
   box-shadow: 0 -4rpx 16rpx rgba(0,0,0,.06);
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 16rpx;
   box-sizing: border-box;
   z-index: 10;
 }
 .footer-action {
   width: 168rpx;
   flex-shrink: 0;
+}
+.footer-action + .sum-wrap {
+  margin-left: 16rpx;
+}
+.sum-wrap + .footer-action {
+  margin-left: 16rpx;
 }
 .sum-wrap {
   flex: 1;
@@ -86,7 +167,7 @@
 .sum {
   font-size: 28rpx;
   font-weight: 600;
-  color: #1677ff;
+  color: #e64340;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -102,13 +183,11 @@
 .footer-btn {
   width: 100%;
   height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  line-height: 72rpx;
+  text-align: center;
   font-size: 26rpx;
   border-radius: 48rpx;
   box-sizing: border-box;
-  line-height: 1;
 }
 .footer-link {
   color: #1677ff;
@@ -138,9 +217,4 @@
   width: 280rpx;
   height: 72rpx;
   font-size: 28rpx;
-  padding: 0;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }

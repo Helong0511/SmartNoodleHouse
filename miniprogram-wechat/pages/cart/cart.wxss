@@ -14,7 +14,7 @@
 .warn-action { color: #ff6b35; font-weight: 600; }
 .item {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 16rpx;
   background: #fff;
   padding: 20rpx;
@@ -50,15 +50,42 @@
 .invalid-tag { font-size: 24rpx; color: #e64340; margin-top: 8rpx; }
 .opts { font-size: 24rpx; color: #888; margin-top: 8rpx; }
 .unit { font-size: 24rpx; color: #666; margin-top: 8rpx; }
-.actions { text-align: right; flex-shrink: 0; margin-left: 8rpx; }
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  margin-left: 8rpx;
+  align-self: stretch;
+}
+.actions-top {
+  flex-shrink: 0;
+  width: 100%;
+  text-align: right;
+}
 .qty { display: flex; align-items: center; justify-content: flex-end; gap: 16rpx; }
 .btn {
   width: 48rpx; height: 48rpx; line-height: 48rpx; text-align: center;
   background: #f5f5f5; border-radius: 8rpx; font-size: 32rpx;
 }
 .num { min-width: 40rpx; text-align: center; font-size: 28rpx; }
-.line-total { font-size: 28rpx; color: #e64340; margin-top: 12rpx; font-weight: 600; }
-.del { display: inline-block; font-size: 24rpx; color: #999; margin-top: 12rpx; }
+.line-total {
+  font-size: 28rpx;
+  color: #e64340;
+  margin-top: 12rpx;
+  font-weight: 600;
+  text-align: right;
+  width: 100%;
+}
+.del-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  min-height: 0;
+}
+.del { font-size: 24rpx; color: #999; }
 .footer {
   position: fixed; left: 0; right: 0;
   bottom: calc(100rpx + env(safe-area-inset-bottom));

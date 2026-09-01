@@ -35,6 +35,8 @@ function calcUnitPrice(product, selected, multi) {
   return Math.round(total * 100) / 100
 }
 
+const OPTION_TEXT_SEP = '、'
+
 /** 已选规格名称（用于购物车展示） */
 function buildOptionLabels(product, selected, multi) {
   const labels = []
@@ -52,6 +54,48 @@ function buildOptionLabels(product, selected, multi) {
     }
   })
   return labels
+}
+
+/** 根据已存 option_ids 还原规格名称（购物车刷新时与微信展示一致） */
+function buildOptionLabelsFromIds(product, optionIds) {
+  if (!product || !optionIds || !optionIds.length) return []
+  const selectedSet = new Set(optionIds.map((id) => String(id)))
+  const labels = []
+  ;(product.option_groups || []).forEach((g) => {
+    if (g.selection_type === 'SINGLE') {
+      const opt = (g.options || []).find((o) => selectedSet.has(String(o.id)))
+      if (opt && opt.code !== 'NORMAL') labels.push(opt.name)
+    }
+    if (g.selection_type === 'MULTIPLE') {
+      ;(g.options || []).forEach((o) => {
+        if (selectedSet.has(String(o.id))) labels.push(o.name)
+      })
+    }
+  })
+  return labels
+}
+
+function normalizeOptionText(text) {
+  if (!text) return ''
+  return String(text)
+    .replace(/[,，;；]\s*/g, OPTION_TEXT_SEP)
+    .replace(new RegExp(`${OPTION_TEXT_SEP}+`, 'g'), OPTION_TEXT_SEP)
+    .replace(new RegExp(`^${OPTION_TEXT_SEP}|${OPTION_TEXT_SEP}$`, 'g'), '')
+}
+
+/** 统一购物车规格展示字段（option_labels + option_text） */
+function resolveOptionDisplay(item, product) {
+  const rebuilt = product ? buildOptionLabelsFromIds(product, item.option_ids) : []
+  let labels = rebuilt.length
+    ? rebuilt
+    : (Array.isArray(item.option_labels) ? item.option_labels.filter(Boolean) : [])
+  if (!labels.length && item.option_text) {
+    labels = normalizeOptionText(item.option_text).split(OPTION_TEXT_SEP).filter(Boolean)
+  }
+  const option_text = labels.length
+    ? labels.join(OPTION_TEXT_SEP)
+    : normalizeOptionText(item.option_text || '')
+  return { option_labels: labels, option_text }
 }
 
 function collectOptionIds(product, selected, multi) {
@@ -156,8 +200,11 @@ function reconcileWithProducts(cart, products) {
     }
 
     if (invalidReason) invalidCount += 1
+    const display = resolveOptionDisplay(item, p)
     return {
       ...item,
+      option_labels: display.option_labels,
+      option_text: display.option_text,
       main_image: (p && p.main_image) || item.main_image || '',
       imageUrl: item.imageUrl || '',
       no_member_discount: p ? !!p.no_member_discount : !!item.no_member_discount,
@@ -218,6 +265,8 @@ function validateRequiredOptions(cart, products) {
 module.exports = {
   calcUnitPrice,
   buildOptionLabels,
+  buildOptionLabelsFromIds,
+  resolveOptionDisplay,
   collectOptionIds,
   normalizeItem,
   cartSummary,
