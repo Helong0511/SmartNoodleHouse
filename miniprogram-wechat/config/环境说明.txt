@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 # 主配置文件：config/env.js（改 API 地址、隐私开关）
 # 工程配置：  project.config.json（域名校验 urlCheck）
-# 应用配置：  app.json（隐私检查 __usePrivacyCheck__、requiredPrivateInfos）
+# 应用配置：  app.json（隐私检查 __usePrivacyCheck__；头像/手机号在公众平台隐私指引声明）
 # 后端对应：  项目根 .env（WECHAT_APP_ID、MINI_PROGRAM_ENV_VERSION、DEV_LAN_HOST）
 # ═══════════════════════════════════════════════════════════════
 

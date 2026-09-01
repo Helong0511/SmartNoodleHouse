@@ -1,4 +1,4 @@
-# 面馆智能经营系统
+﻿# 面馆智能经营系统
 
 微信 / 支付宝小程序扫码点餐 + 统一订单 + 厨房 KDS + 会员 / 人脸迎宾 + 美团 / 饿了么外卖 + 后台 RBAC
 
@@ -255,7 +255,7 @@ DISPLAY_SCREEN_TOKEN=随机一串
 | 微信/支付宝小程序 API | `miniprogram-*/config/env.js` | `PROD_API_BASE` / `DEV_LAN_HOST` |
 | 小程序环境说明 | `miniprogram-*/config/环境说明.txt` | 本地 vs 正式版对照表 |
 | 微信域名校验 | `miniprogram-wechat/project.config.json` | `setting.urlCheck` |
-| 微信隐私声明 | `miniprogram-wechat/app.json` | `__usePrivacyCheck__`、`requiredPrivateInfos` |
+| 微信隐私声明 | `miniprogram-wechat/app.json` | `__usePrivacyCheck__`；头像/手机号在公众平台隐私指引配置 |
 | 支付宝隐私检查 | `miniprogram-alipay/app.json` | `usePrivacyCheck: true` |
 | 前端开发代理 | `frontend/vite.config.ts` | 本地 `/api` 代理到 `127.0.0.1:8000` |
 | Nginx 反代 | `nginx/smart-noodle.conf` | HTTPS、静态资源、WebSocket |
@@ -527,7 +527,7 @@ MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
 |------|----------|
 | `miniprogram-wechat/config/env.js` | `PROD_API_BASE=https://你的域名.com/api/v1`；`ENABLE_WX_PRIVACY_APIS=true` |
 | `miniprogram-wechat/project.config.json` | `setting.urlCheck: true` |
-| `miniprogram-wechat/app.json` | 已含 `__usePrivacyCheck__`、`requiredPrivateInfos` |
+| `miniprogram-wechat/app.json` | 已含 `__usePrivacyCheck__` |
 
 **微信公众平台 [mp.weixin.qq.com](https://mp.weixin.qq.com)**
 

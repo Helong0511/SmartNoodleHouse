@@ -33,7 +33,7 @@
 #   主体须非个人且已认证（getPhoneNumber 要求）
 #   桌台一码通扫：开通 URL Link、明文 Scheme（开发版用 getwxacode 调试码）
 #   上传前 project.config.json → setting.urlCheck=true 并真机验证合法域名
-#   app.json 已含 __usePrivacyCheck__、requiredPrivateInfos
+#   app.json 已含 __usePrivacyCheck__；头像/手机号在公众平台「用户隐私保护指引」声明
 #   文档：https://developers.weixin.qq.com/miniprogram/dev/framework/user-privacy/PrivacyAuthorize.html
 #
 # 【支付宝小程序 miniprogram-alipay】

@@ -150,7 +150,7 @@ SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '新客满30减5');
 
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '满50享9折', 'PERCENT', 0.9000, 50.00, 14 FROM DUAL
+SELECT '满50享9折', 'PERCENT', 0.9000, 50.00, 30 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满50享9折');
 
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)

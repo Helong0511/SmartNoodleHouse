@@ -98,9 +98,10 @@
       <el-table-column prop="created_at" label="注册时间" width="160">
         <template #default="{ row }">{{ row.created_at || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="showDetail(row.id)">详情</el-button>
+          <el-button v-if="canIssueCoupon" link type="success" @click="openIssueDialog(row)">发券</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -144,7 +145,10 @@
         </el-descriptions>
 
         <div class="pref-block">
-          <h4>优惠券</h4>
+          <div class="section-head">
+            <h4>优惠券</h4>
+            <el-button v-if="canIssueCoupon" type="success" size="small" @click="openIssueDialog(detail)">手动发券</el-button>
+          </div>
           <p v-if="couponsLoading" class="muted">加载中…</p>
           <el-table v-else-if="customerCoupons.length" :data="customerCoupons" size="small" border>
             <el-table-column prop="template_name" label="名称" min-width="100" />
@@ -222,12 +226,39 @@
         </ul>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="issueDialog" title="手动发券" width="480px" destroy-on-close>
+      <el-form :model="issueForm" label-width="90px">
+        <el-form-item label="顾客">
+          <span>{{ issueCustomerLabel }}</span>
+        </el-form-item>
+        <el-form-item label="券模板" required>
+          <el-select v-model="issueForm.template_id" placeholder="选择模板" style="width: 100%">
+            <el-option
+              v-for="t in enabledTemplates"
+              :key="t.id"
+              :label="`${t.name} — ${t.summary}`"
+              :value="t.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="issueQuantityLabel" required>
+          <el-input-number v-model="issueForm.quantity" :min="1" :max="50" :step="1" style="width: 100%" />
+          <div class="hint">单次最多发放 50 张，适用于优惠券与代金券</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="issueDialog = false">取消</el-button>
+        <el-button type="primary" :loading="issuing" @click="submitIssue">发放</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
@@ -247,6 +278,35 @@ const detail = ref<any>(null)
 const customerCoupons = ref<any[]>([])
 const customerVouchers = ref<any[]>([])
 const couponsLoading = ref(false)
+const canIssueCoupon = computed(() => auth.hasPermission('coupon:manage'))
+
+const couponTemplates = ref<any[]>([])
+const issueDialog = ref(false)
+const issueTarget = ref<any>(null)
+const issuing = ref(false)
+const issueForm = reactive({
+  template_id: undefined as number | undefined,
+  quantity: 1,
+})
+
+const enabledTemplates = computed(() => couponTemplates.value.filter((t) => t.status === 1))
+
+const issueCustomerLabel = computed(() => {
+  const c = issueTarget.value
+  if (!c) return '—'
+  const name = c.display_name || c.nickname || '顾客'
+  return `${name}（${c.customer_no}）`
+})
+
+const selectedIssueTemplate = computed(() =>
+  enabledTemplates.value.find((t) => t.id === issueForm.template_id),
+)
+
+const issueQuantityLabel = computed(() => {
+  const t = selectedIssueTemplate.value
+  if (!t) return '发放张数'
+  return t.coupon_type === 'VOUCHER' ? '代金券张数' : '优惠券张数'
+})
 
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
@@ -347,6 +407,51 @@ async function showDetail(id: number) {
   detail.value = detailRes.data
 }
 
+async function loadCouponTemplates() {
+  if (couponTemplates.value.length) return
+  try {
+    const res = await api.get('/coupons/templates', { params: { all: true } })
+    couponTemplates.value = res.data?.items || []
+  } catch {
+    couponTemplates.value = []
+  }
+}
+
+async function openIssueDialog(customer: any) {
+  if (!customer?.id) return
+  await loadCouponTemplates()
+  issueTarget.value = customer
+  issueForm.template_id = enabledTemplates.value[0]?.id
+  issueForm.quantity = 1
+  issueDialog.value = true
+}
+
+async function submitIssue() {
+  const customerId = issueTarget.value?.id
+  if (!customerId || !issueForm.template_id) {
+    ElMessage.warning('请选择券模板')
+    return
+  }
+  const quantity = Math.max(1, Math.min(50, Number(issueForm.quantity) || 1))
+  issuing.value = true
+  try {
+    const res = (await api.post('/coupons/issue', {
+      customer_id: customerId,
+      template_id: issueForm.template_id,
+      quantity,
+    })) as { message?: string }
+    ElMessage.success(res.message || `已发放 ${quantity} 张`)
+    issueDialog.value = false
+    if (drawer.value && detail.value?.id === customerId) {
+      await loadCustomerCoupons(customerId)
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '发券失败')
+  } finally {
+    issuing.value = false
+  }
+}
+
 onMounted(async () => {
   await loadStores()
   await load()
@@ -358,7 +463,14 @@ onMounted(async () => {
 .muted { color: #999; }
 .tip { font-size: 13px; margin: 4px 0 10px; }
 .pref-block { margin-top: 18px; }
-.pref-block h4 { margin: 0 0 4px; }
+.pref-block h4 { margin: 0; }
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.hint { color: #999; font-size: 12px; margin-top: 4px; }
 .acct { padding-left: 18px; word-break: break-all; }
 .acct code { font-size: 12px; }
 </style>
