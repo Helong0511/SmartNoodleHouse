@@ -169,7 +169,7 @@ function productPrefMatches(product, prefs) {
   return false
 }
 
-/** 本商品可匹配的智能口味标签（菜单 + 加购确认用；多选组如加料须列出全部匹配项） */
+/** 本商品可匹配的智能口味标签（菜单 + 加购确认用；多选组如加料合并为「加料·A、B、C」） */
 function prefLabelsForProduct(product, prefs) {
   const labels = []
   if (!product || !prefs || !prefs.length) return labels
@@ -178,10 +178,12 @@ function prefLabelsForProduct(product, prefs) {
       const matches = (prefs || []).filter(
         (pr) => pr.category === g.name || pr.category === g.code
       )
+      const names = []
       matches.forEach((match) => {
         const opt = (g.options || []).find((o) => o.code === match.option_code)
-        if (opt) labels.push(`${g.name}·${opt.name}`)
+        if (opt) names.push(opt.name)
       })
+      if (names.length) labels.push(`${g.name}·${names.join('、')}`)
       continue
     }
     const match = bestPrefForGroup(prefs, g)
