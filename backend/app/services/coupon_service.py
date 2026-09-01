@@ -206,6 +206,7 @@ class CouponService:
             "id": cc.id,
             "coupon_no": cc.coupon_no,
             "name": tmpl.name,
+            "template_name": tmpl.name,
             "coupon_type": tmpl.coupon_type,
             "kind": "VOUCHER" if CouponService.is_voucher_type(tmpl.coupon_type) else "COUPON",
             "discount_value": str(tmpl.discount_value),

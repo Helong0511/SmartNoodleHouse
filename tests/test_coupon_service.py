@@ -26,6 +26,20 @@ def test_discount_label_voucher():
     assert "代金券" in CouponService.discount_label(tmpl)
 
 
+def test_hold_payload_includes_template_name():
+    cc = SimpleNamespace(id=1, coupon_no="C001", expires_at=None)
+    tmpl = SimpleNamespace(
+        name="新客满30减5",
+        coupon_type="FIXED",
+        discount_value=Decimal("5"),
+        min_order_amount=Decimal("30"),
+    )
+    payload = CouponService._hold_payload(cc, tmpl)
+    assert payload["name"] == "新客满30减5"
+    assert payload["template_name"] == "新客满30减5"
+    assert payload["summary"] == CouponService.summary_label(tmpl)
+
+
 def test_ensure_local_aware_naive():
     naive = datetime(2026, 8, 28, 12, 0, 0)
     aware = ensure_local_aware(naive)

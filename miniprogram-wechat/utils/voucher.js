@@ -1,6 +1,6 @@
 /** 代金券计价：一次性核销，不支持余额结转 */
 
-/** 券/代金券展示名：优先模板名称，规则 summary 仅作兜底 */
+/** 券/代金券展示名：优先 template_name（与后台一致），name 为兼容别名，summary 仅作规则文案兜底 */
 function holdDisplayName(hold) {
   if (!hold) return ''
   return String(hold.template_name || hold.name || hold.summary || '').trim()
