@@ -1,7 +1,7 @@
 <import-sjs name="util" from="../../utils/cart.sjs" />
 
-<view class="page loading-page" a:if="{{loading}}">
-  <text class="loading-tip">加载中...</text>
+<view class="page" a:if="{{loading}}">
+  <skeleton type="product" />
 </view>
 
 <view class="page" a:elif="{{product}}">

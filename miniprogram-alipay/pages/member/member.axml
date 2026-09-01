@@ -10,7 +10,7 @@
     tableNo="{{tableNo}}"
   />
 
-  <view class="tip loading-tip" a:if="{{loading}}">加载中...</view>
+  <skeleton a:if="{{loading}}" type="member" />
 
   <block a:else>
     <view class="card member-card">
@@ -99,7 +99,7 @@
       <view class="tip" a:elif="{{!coupons.length}}">暂无可用优惠券</view>
       <view class="wallet-item coupon" a:for="{{coupons}}" a:key="id">
         <view class="wallet-main">
-          <view class="wallet-name">{{item.name}}</view>
+          <view class="wallet-name">{{item.displayName}}</view>
           <view class="wallet-rule">{{item.summary}}</view>
         </view>
         <view class="wallet-expire">{{item.expireText}}</view>
@@ -112,7 +112,7 @@
       <view class="tip" a:elif="{{!vouchers.length}}">暂无可用代金券</view>
       <view class="wallet-item voucher" a:for="{{vouchers}}" a:key="id">
         <view class="wallet-main">
-          <view class="wallet-name">{{item.name}}</view>
+          <view class="wallet-name">{{item.displayName}}</view>
           <view class="wallet-rule">{{item.summary}}</view>
         </view>
         <view class="wallet-expire">{{item.expireText}}</view>

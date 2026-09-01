@@ -16,6 +16,8 @@ Page({
     thumbStyle: '',
     storeName: '',
     storeNo: '',
+    storeAddress: '',
+    storePhone: '',
     tableName: '',
     tableNo: ''
   },
@@ -25,7 +27,8 @@ Page({
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     this.setData({ thumbStyle: `width:${px}px;height:${px}px;` })
-    this.loadDineContext()
+    this.applyDineContext(dineCtx.currentDisplay())
+    dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.refresh(true)
   },
 
@@ -33,14 +36,9 @@ Page({
     this.refresh(true).finally(() => wx.stopPullDownRefresh())
   },
 
-  async loadDineContext() {
-    const ctx = await dineCtx.ensureDineContext()
-    this.setData({
-      storeName: ctx.storeName,
-      storeNo: ctx.storeNo,
-      tableName: ctx.tableName,
-      tableNo: ctx.tableNo
-    })
+  applyDineContext(ctx) {
+    if (!ctx) return
+    this.setData(dineCtx.pageDineFields(ctx))
   },
 
   storeId() {

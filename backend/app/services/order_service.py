@@ -173,6 +173,7 @@ class OrderReorderService:
                     "subtotal": str(money(line_subtotal)),
                     "imageUrl": product.main_image or "",
                     "main_image": product.main_image or "",
+                    "no_member_discount": bool(getattr(product, "no_member_discount", False)),
                 }
             )
 

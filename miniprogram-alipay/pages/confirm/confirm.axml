@@ -23,7 +23,7 @@
       <picker a:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
         <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
       </picker>
-      <view a:elif="{{needScanHint}}" class="table-pick hint">开发环境可在后台复制桌台 token，或使用真机扫码</view>
+      <view a:elif="{{needScanHint}}" class="scan-hint">请先扫描桌台二维码，或联系店员协助选桌</view>
     </block>
   </view>
 
@@ -57,12 +57,13 @@
       <text>代金券{{selectedVoucherLabel && selectedVoucherLabel != '不使用代金券' ? '（' + selectedVoucherLabel + '）' : ''}}</text>
       <text>-¥{{voucherDiscountAmount}}</text>
     </view>
-    <view class="sum-row hint-row" a:if="{{!hasDiscount && nextLevelName}}">
-      <text class="hint-text">再积 {{pointsToNext}} 分可升 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
-    </view>
     <view class="sum-row" a:if="{{needPack}}">
       <text>打包费（预估）</text>
       <text>¥{{packingFee}}</text>
+    </view>
+    <view class="sum-row hint-row" a:if="{{!hasDiscount && nextLevelName}}">
+      <text>升级提示</text>
+      <text class="hint-text">再积 {{pointsToNext}} 分可升 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
     </view>
     <view class="sum-row total">
       <text>应付约</text>

@@ -111,6 +111,20 @@ Page({
     this.setData({ boxPriceMap: boxMap })
     return items
   },
+
+  /** 下单门店：优先已绑桌台，避免与 table_token 所属门店不一致 */
+  submitStoreId() {
+    const table = app.globalData.table || auth.readStorage('dine_table') || {}
+    if (table && table.store_id) return table.store_id
+    return this.storeId()
+  },
+
+  makeIdempotencyKey() {
+    const cid = app.globalData.customerId || '0'
+    const rand = Math.random().toString(36).slice(2, 10)
+    return `ali_${cid}_${Date.now()}_${rand}`
+  },
+
   onShow() {
     if (this._bindingTable) return
     this._memberRate = 1
@@ -180,7 +194,7 @@ Page({
       my.removeStorageSync({ key: 'table_token' })
       my.removeStorageSync({ key: 'dine_table' })
     } catch (_) {}
-    this.setData({ tableName: '', tableToken: '', pickedLabel: '' })
+    this.setData({ tableName: '', tableNo: '', tableToken: '', pickedLabel: '' })
   },
   _applyBoundTable(table, store, token) {
     const t = table || {}
@@ -197,6 +211,7 @@ Page({
     const name = t.table_name || t.table_no || ''
     this.setData({
       tableName: name,
+      tableNo: t.table_no || '',
       tableToken: tok,
       needScanHint: false,
       pickedLabel: name,
@@ -309,6 +324,12 @@ Page({
       if (table && token) {
         this._applyBoundTable(table, ctx.store || app.globalData.store, token)
       }
+      this.setData({
+        storeName: ctx.storeName || this.data.storeName,
+        storeNo: ctx.storeNo || this.data.storeNo,
+        storeAddress: ctx.storeAddress || this.data.storeAddress,
+        storePhone: ctx.storePhone || this.data.storePhone,
+      })
     } finally {
       this._bindingTable = false
     }
@@ -580,15 +601,14 @@ Page({
     this.setData({ loading: true })
     try {
       await auth.ensureLogin()
-      const table = app.globalData.table || auth.readStorage('dine_table') || null
       const order = await api.post('/orders', {
-        store_id: (table && table.store_id) || (app.globalData.store && app.globalData.store.id),
+        store_id: this.submitStoreId(),
         table_token: tableToken,
         channel: 'ALIPAY',
         need_pack: !!this.data.needPack,
         dining_type: this.data.needPack ? 'TAKEAWAY' : 'DINE_IN',
         remark: this.data.remark,
-        idempotency_key: `ali_${app.globalData.customerId}_${Date.now()}`,
+        idempotency_key: this.makeIdempotencyKey(),
         customer_coupon_id: this.data.selectedCouponId || undefined,
         customer_voucher_id: this.data.selectedVoucherId || undefined,
         items: cart.map((c) => ({

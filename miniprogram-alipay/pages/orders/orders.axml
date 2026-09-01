@@ -9,7 +9,7 @@
     compact="{{true}}"
   />
 
-  <view class="loading-tip" a:if="{{loading && !orders.length}}">加载中...</view>
+  <skeleton a:if="{{loading && !orders.length}}" type="order" rows="{{4}}" />
 
   <view class="empty" a:elif="{{!loading && !orders.length}}">
     <view class="empty-title">暂无订单</view>

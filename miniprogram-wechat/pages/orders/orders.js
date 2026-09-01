@@ -164,7 +164,8 @@ Page({
         unit_price: it.unit_price,
         subtotal: it.subtotal,
         imageUrl: media.resolveUrl(it.imageUrl || it.main_image || ''),
-        main_image: it.main_image || ''
+        main_image: it.main_image || '',
+        no_member_discount: !!it.no_member_discount
       }))
       auth.saveCart(cart)
       wx.hideLoading()

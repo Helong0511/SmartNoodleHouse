@@ -1,3 +1,6 @@
 {
-  "defaultTitle": "会员中心"
+  "defaultTitle": "会员中心",
+  "usingComponents": {
+    "skeleton": "/components/skeleton/skeleton"
+  }
 }

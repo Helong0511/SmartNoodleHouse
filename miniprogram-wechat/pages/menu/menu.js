@@ -123,7 +123,9 @@ Page({
   },
 
   async loadMenu() {
-    const sid = app.globalData.table && app.globalData.table.store_id
+    const sid = (app.globalData.table && app.globalData.table.store_id)
+      || (app.globalData.store && app.globalData.store.id)
+      || null
     const cacheKey = String(sid || 'all')
     const now = Date.now()
     this.setData({ loading: true })

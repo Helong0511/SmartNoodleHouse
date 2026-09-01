@@ -1,0 +1,53 @@
+<view class="sk-wrap">
+  <view class="sk-menu" a:if="{{type === 'menu'}}">
+    <view class="sk-search sk-block"></view>
+    <view class="sk-menu-layout">
+      <view class="sk-nav">
+        <view class="sk-block sk-nav-item" a:for="{{[1,2,3,4,5,6]}}" a:key="*this"></view>
+      </view>
+      <view class="sk-body">
+        <view class="sk-product" a:for="{{rows}}" a:key="*this">
+          <view class="sk-thumb sk-block"></view>
+          <view class="sk-lines">
+            <view class="sk-block sk-line sk-line-lg"></view>
+            <view class="sk-block sk-line"></view>
+            <view class="sk-block sk-line sk-line-sm"></view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="sk-orders" a:elif="{{type === 'order'}}">
+    <view class="sk-order-card" a:for="{{rows}}" a:key="*this">
+      <view class="sk-order-head">
+        <view class="sk-block sk-line sk-line-lg"></view>
+        <view class="sk-block sk-line sk-line-sm"></view>
+      </view>
+      <view class="sk-block sk-line"></view>
+      <view class="sk-block sk-line sk-line-sm"></view>
+    </view>
+  </view>
+
+  <view class="sk-product-detail" a:elif="{{type === 'product'}}">
+    <view class="sk-block sk-hero"></view>
+    <view class="sk-pd-body">
+      <view class="sk-block sk-line sk-line-lg"></view>
+      <view class="sk-block sk-line"></view>
+      <view class="sk-block sk-line sk-line-sm"></view>
+      <view class="sk-block sk-price"></view>
+      <view class="sk-block sk-line sk-line-lg" a:for="{{[1,2]}}" a:key="*this"></view>
+    </view>
+  </view>
+
+  <view class="sk-member" a:elif="{{type === 'member'}}">
+    <view class="sk-member-card">
+      <view class="sk-block sk-avatar"></view>
+      <view class="sk-m-lines">
+        <view class="sk-block sk-line sk-line-lg"></view>
+        <view class="sk-block sk-line"></view>
+      </view>
+    </view>
+    <view class="sk-block sk-card" a:for="{{[1,2,3]}}" a:key="*this"></view>
+  </view>
+</view>

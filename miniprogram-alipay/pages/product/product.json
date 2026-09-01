@@ -1,3 +1,6 @@
 {
-  "defaultTitle": "选规格"
+  "defaultTitle": "选规格",
+  "usingComponents": {
+    "skeleton": "/components/skeleton/skeleton"
+  }
 }

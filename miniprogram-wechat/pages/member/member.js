@@ -4,6 +4,7 @@ const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
+const voucherUtil = require('../../utils/voucher')
 const { enableWxPhoneBind, enableNicknameInput, shouldShowDevTips } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
@@ -94,10 +95,12 @@ Page({
   applyWallet(couponRes, voucherRes) {
     const coupons = ((couponRes && couponRes.items) || []).map((c) => ({
       ...c,
+      displayName: voucherUtil.holdDisplayName(c),
       expireText: formatExpire(c.expires_at)
     }))
     const vouchers = ((voucherRes && voucherRes.items) || []).map((v) => ({
       ...v,
+      displayName: voucherUtil.holdDisplayName(v),
       expireText: formatExpire(v.expires_at)
     }))
     this.setData({ coupons, vouchers, walletLoading: false })

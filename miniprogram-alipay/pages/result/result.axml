@@ -1,5 +1,5 @@
 <view class="page">
-  <view class="loading-tip" a:if="{{loading}}">加载中...</view>
+  <skeleton a:if="{{loading}}" type="order" rows="{{2}}" />
 
   <block a:else>
     <store-bar

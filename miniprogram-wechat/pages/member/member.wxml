@@ -166,7 +166,7 @@
 
       <view class="wallet-main">
 
-        <view class="wallet-name">{{item.name}}</view>
+        <view class="wallet-name">{{item.displayName}}</view>
 
         <view class="wallet-rule">{{item.summary}}</view>
 
@@ -192,7 +192,7 @@
 
       <view class="wallet-main">
 
-        <view class="wallet-name">{{item.name}}</view>
+        <view class="wallet-name">{{item.displayName}}</view>
 
         <view class="wallet-rule">{{item.summary}}</view>
 

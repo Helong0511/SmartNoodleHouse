@@ -206,6 +206,10 @@ async function ensureLogin(tableToken) {
     app.globalData.table = data.table
     app.globalData.tableToken = data.table.qr_token
     my.setStorageSync({ key: 'table_token', data: data.table.qr_token })
+    if (data.table.store) {
+      app.globalData.store = data.table.store
+      my.setStorageSync({ key: 'dine_store', data: data.table.store })
+    }
   }
   my.setStorageSync({ key: 'customer_id', data: data.customer_id })
   my.setStorageSync({ key: 'customer_token', data: data.customer_token })

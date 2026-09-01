@@ -38,7 +38,7 @@
     </view>
   </view>
 
-  <view class="loading-tip" a:if="{{loading && !categories.length}}">加载中...</view>
+  <skeleton a:if="{{loading && !categories.length}}" type="menu" rows="{{5}}" />
 
   <view class="menu-layout" a:elif="{{categories.length}}">
     <scroll-view class="cat-nav" scroll-y="{{true}}">

@@ -46,6 +46,9 @@ async def main() -> None:
                 "cart=",
                 len(((body2.get("data") or {}).get("cart_items") or [])),
             )
+            if r2.status_code == 200 and body2.get("code") == 0:
+                for it in (body2.get("data") or {}).get("cart_items") or []:
+                    assert "no_member_discount" in it, "reorder cart_items should include no_member_discount"
         else:
             print("SKIP reorder: no order for customer", cust.id)
 

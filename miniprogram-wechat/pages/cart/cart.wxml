@@ -2,6 +2,8 @@
   <store-bar
     storeName="{{storeName}}"
     storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
     compact="{{true}}"
