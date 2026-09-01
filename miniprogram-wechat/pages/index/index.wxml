@@ -16,12 +16,26 @@
 
   <view class="card" wx:elif="{{ready}}">
     <view class="title">{{showMemberPrompt ? '注册会员，智能记住您的口味' : '欢迎回来'}}</view>
-    <view class="desc">{{showMemberPrompt ? memberText : '可获取微信头像昵称，或手动输入后开始点餐。'}}</view>
+    <view class="desc">{{showMemberPrompt ? memberText : '完善头像、昵称、手机号后开始点餐。'}}</view>
+
+    <!-- 必须先点同意，chooseAvatar / 昵称 / 手机号才可用 -->
+    <view class="privacy-box" wx:if="{{needPrivacyAgree}}">
+      <view class="privacy-text">
+        使用微信头像、昵称、手机号前，请先阅读并同意
+        <text class="link" bindtap="openPrivacyContract">《用户隐私保护指引》</text>
+      </view>
+      <button
+        id="agree-btn"
+        class="btn-primary privacy-agree"
+        open-type="agreePrivacyAuthorization"
+        bindagreeprivacyauthorization="onPrivacyAgree"
+      >同意隐私指引</button>
+    </view>
 
     <view class="profile-block">
       <view class="avatar-wrap">
         <button
-          wx:if="{{canChooseAvatar}}"
+          wx:if="{{canChooseAvatar && !needPrivacyAgree}}"
           class="avatar-btn"
           open-type="chooseAvatar"
           bindchooseavatar="onChooseAvatar"
@@ -30,16 +44,16 @@
           <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" wx:if="{{avatarUrl}}" />
           <view class="avatar ph" wx:else>头</view>
         </button>
-        <view wx:else class="avatar-btn avatar-static" bindtap="onAvatarDisabledTap">
+        <view wx:else class="avatar-btn avatar-static" bindtap="onPickLocalAvatar">
           <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" wx:if="{{avatarUrl}}" />
           <view class="avatar ph" wx:else>头</view>
         </view>
-        <text class="avatar-label">点选微信头像</text>
+        <text class="avatar-label">{{canChooseAvatar && !needPrivacyAgree ? '微信头像' : '点选头像'}}</text>
       </view>
 
       <view class="nick-wrap">
         <input
-          wx:if="{{useWxNickname}}"
+          wx:if="{{useWxNickname && !needPrivacyAgree}}"
           class="input nick"
           type="nickname"
           maxlength="20"
@@ -59,11 +73,34 @@
           bindinput="onNickname"
           bindblur="onNickname"
         />
-        <text class="avatar-label">{{useWxNickname ? '点输入框获取微信昵称' : '手动输入昵称'}}</text>
+        <text class="avatar-label">{{useWxNickname && !needPrivacyAgree ? '点框取微信昵称，也可手输' : '手动输入昵称'}}</text>
       </view>
     </view>
 
-    <view class="dev-tip">微信规定：头像、昵称须分开授权。先点头像，再点昵称输入框；也可全部手输。</view>
+    <button class="btn-ghost album-btn" bindtap="onPickLocalAvatar">从相册选择头像</button>
+
+    <view class="phone-box">
+      <view class="phone-title">手机号</view>
+      <view class="phone-ok" wx:if="{{phone}}">已绑定 {{phone}}</view>
+      <block wx:else>
+        <button
+          wx:if="{{canWxPhone && !needPrivacyAgree}}"
+          class="btn-ghost"
+          open-type="getPhoneNumber"
+          bindgetphonenumber="onGetPhoneNumber"
+        >微信授权手机号</button>
+        <input
+          class="input phone-input"
+          type="number"
+          maxlength="11"
+          placeholder="或手动输入11位手机号"
+          value="{{phoneInput}}"
+          bindinput="onPhoneInput"
+        />
+      </block>
+    </view>
+
+    <view class="dev-tip">{{privacyTip}}</view>
 
     <button class="btn-primary" loading="{{saving}}" bindtap="onSaveAndGo">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     <button class="btn-ghost skip" bindtap="goMenu">先点餐，稍后再改</button>

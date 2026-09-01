@@ -11,7 +11,7 @@
 
   <view class="card" a:elif="{{ready}}">
     <view class="title">{{showMemberPrompt ? '注册会员，享受更多便利' : '欢迎回来'}}</view>
-    <view class="desc">{{showMemberPrompt ? memberText : '可获取支付宝头像昵称，或手动输入后开始点餐。'}}</view>
+    <view class="desc">{{showMemberPrompt ? memberText : '完善头像、昵称、手机号后开始点餐。'}}</view>
 
     <view class="profile-block">
       <view class="avatar-wrap">
@@ -26,7 +26,7 @@
           <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
           <view class="avatar ph" a:else>头</view>
         </button>
-        <view a:else class="avatar-btn avatar-static">
+        <view a:else class="avatar-btn avatar-static" onTap="onPickLocalAvatar">
           <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
           <view class="avatar ph" a:else>头</view>
         </view>
@@ -53,7 +53,24 @@
       onGetAuthorize="onGetAlipayProfile"
       onError="onGetAlipayProfileFail"
     >获取支付宝头像和昵称</button>
-    <view class="dev-tip">授权后会自动填入支付宝昵称与头像，也可手动修改。</view>
+    <button class="btn-ghost album-btn" onTap="onPickLocalAvatar">从相册选择头像</button>
+
+    <view class="phone-box">
+      <view class="phone-title">手机号</view>
+      <view class="phone-ok" a:if="{{phone}}">已绑定 {{phone}}</view>
+      <block a:else>
+        <input
+          class="input phone-input"
+          type="number"
+          maxlength="11"
+          placeholder="请输入11位手机号"
+          value="{{phoneInput}}"
+          onInput="onPhoneInput"
+        />
+      </block>
+    </view>
+
+    <view class="dev-tip">支付宝可点头像一键取昵称头像；手机号请手输绑定（保存时一并提交）。</view>
 
     <button class="btn-primary" loading="{{saving}}" onTap="onSaveAndGo">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     <button class="btn-ghost skip" onTap="goMenu">先点餐，稍后再改</button>

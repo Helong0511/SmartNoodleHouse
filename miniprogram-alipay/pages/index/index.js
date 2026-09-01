@@ -41,6 +41,8 @@ Page({
     storeName: '',
     nickname: '',
     avatarUrl: '',
+    phone: '',
+    phoneInput: '',
     canUseAlipayProfile: !!enableAlipayUserProfile,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
   },
@@ -92,10 +94,16 @@ Page({
       const nickname = (login && login.nickname) || gd.nickname || ''
       const showMemberPrompt = !!(login && login.need_member_prompt) || isPlaceholderNickname(nickname)
       const avatarUrl = (login && login.avatar_url) || gd.avatarUrl || ''
+      let phone = ''
+      try {
+        const me = await api.get('/miniprogram/customers/me').catch(() => null)
+        if (me && me.phone) phone = me.phone
+      } catch (_) {}
       this.setData({
         loading: false,
         nickname: isPlaceholderNickname(nickname) ? '' : nickname,
         avatarUrl,
+        phone,
         showMemberPrompt,
         ready: true,
         table: ctx.table,
@@ -138,6 +146,26 @@ Page({
 
   onNickname(e) {
     this.setData({ nickname: e.detail.value })
+  },
+
+  onPhoneInput(e) {
+    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  },
+
+  onPickLocalAvatar() {
+    my.chooseImage({
+      count: 1,
+      sourceType: ['album', 'camera'],
+      success: (res) => {
+        const url = (res.apFilePaths && res.apFilePaths[0]) || (res.tempFilePaths && res.tempFilePaths[0]) || ''
+        if (!url) {
+          my.showToast({ content: '未选择图片', type: 'none' })
+          return
+        }
+        this.applyProfile('', url)
+        my.showToast({ content: '头像已选择', type: 'success' })
+      }
+    })
   },
 
   applyProfile(nickname, avatarUrl) {
@@ -200,6 +228,11 @@ Page({
       my.showToast({ content: '昵称需 2-20 个字', type: 'fail' })
       return
     }
+    const phoneInput = (this.data.phoneInput || '').trim()
+    if (phoneInput && !/^1\d{10}$/.test(phoneInput)) {
+      my.showToast({ content: '请输入11位手机号', type: 'fail' })
+      return
+    }
     try {
       await auth.ensureLogin()
     } catch (e) {
@@ -211,7 +244,8 @@ Page({
       my.showLoading({ content: '保存中' })
       const res = await api.post('/miniprogram/member/register', {
         nickname: nickname || '面馆会员',
-        avatar_url: this.data.avatarUrl || null
+        avatar_url: this.data.avatarUrl || null,
+        phone: phoneInput || null
       })
       app.globalData.nickname = (res && res.nickname) || nickname || '面馆会员'
       app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
@@ -235,6 +269,8 @@ Page({
       }
       this.setData({
         nickname: app.globalData.nickname,
+        phone: (res && res.phone) || this.data.phone || phoneInput || '',
+        phoneInput: '',
         showMemberPrompt: false,
         saving: false
       })

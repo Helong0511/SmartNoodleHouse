@@ -3,6 +3,10 @@
 .card { background: #fff; border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
 .member-card { background: linear-gradient(135deg, #f0f7ff, #fff); }
 .profile { display: flex; align-items: center; gap: 20rpx; }
+.avatar {
+  width: 96rpx; height: 96rpx; border-radius: 50%;
+  flex-shrink: 0; background: #f5f5f5;
+}
 .avatar.placeholder {
   width: 96rpx; height: 96rpx; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

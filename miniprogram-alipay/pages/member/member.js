@@ -32,6 +32,7 @@ Page({
     nicknameDraft: '',
     savingName: false,
     avatarLetter: '会',
+    avatarUrl: '',
     customerNo: '',
     prefs: [],
     prefsConfirmed: [],
@@ -91,12 +92,14 @@ Page({
     const nickname = profile.nickname || app.globalData.nickname || ''
     const displayName = nickname || '面馆会员'
     if (profile.nickname) app.globalData.nickname = profile.nickname
+    if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
     const view = prefView || prefUtil.buildPrefDisplay({})
     this.setData({
       nickname,
       displayName,
       avatarLetter: displayName.charAt(0) || '会',
+      avatarUrl: profile.avatar_url || app.globalData.avatarUrl || '',
       customerNo: profile.customer_no || app.globalData.customerNo || '',
       prefs: view.prefs || [],
       prefsConfirmed: view.confirmed || [],
@@ -199,9 +202,17 @@ Page({
     }
     try {
       this.setData({ savingName: true })
-      const res = await api.post('/miniprogram/member/register', { nickname })
+      const res = await api.post('/miniprogram/member/register', {
+        nickname,
+        avatar_url: this.data.avatarUrl || app.globalData.avatarUrl || null
+      })
       const saved = (res && res.nickname) || nickname
+      const savedAvatar = (res && res.avatar_url) || this.data.avatarUrl || app.globalData.avatarUrl || ''
       app.globalData.nickname = saved
+      if (savedAvatar) {
+        app.globalData.avatarUrl = savedAvatar
+        my.setStorageSync({ key: 'avatar_url', data: savedAvatar })
+      }
       my.setStorageSync({ key: 'nickname', data: saved })
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
@@ -214,6 +225,7 @@ Page({
         nickname: saved,
         displayName: saved,
         avatarLetter: saved.charAt(0) || '会',
+        avatarUrl: savedAvatar,
         editingName: false,
         nicknameDraft: '',
         savingName: false

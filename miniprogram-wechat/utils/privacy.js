@@ -30,8 +30,22 @@ function openPrivacyContract() {
   })
 }
 
+/** 主动触发隐私授权（会回调 onNeedPrivacyAuthorization） */
+function requirePrivacyAuthorize() {
+  if (!wx.requirePrivacyAuthorize) {
+    return Promise.resolve(true)
+  }
+  return new Promise((resolve) => {
+    wx.requirePrivacyAuthorize({
+      success: () => resolve(true),
+      fail: () => resolve(false)
+    })
+  })
+}
+
 module.exports = {
   setupPrivacy,
   onNeedPrivacyAuthorization,
-  openPrivacyContract
+  openPrivacyContract,
+  requirePrivacyAuthorize
 }

@@ -46,6 +46,17 @@ Component({
       if (typeof resolve === 'function') {
         resolve({ buttonId: 'agree-btn', event: 'agree' })
       }
+      try {
+        const pages = getCurrentPages()
+        const page = pages && pages[pages.length - 1]
+        if (page && typeof page.setData === 'function') {
+          page.setData({
+            needPrivacyAgree: false,
+            privacyTip: '已同意隐私指引。请点头像选微信头像，点输入框取微信昵称，并可授权手机号。'
+          })
+        }
+      } catch (_) {}
+      wx.showToast({ title: '已同意', icon: 'success' })
     },
 
     onReject() {

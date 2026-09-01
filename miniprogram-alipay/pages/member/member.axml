@@ -13,7 +13,8 @@
   <block a:else>
     <view class="card member-card">
       <view class="profile">
-        <view class="avatar placeholder">{{avatarLetter}}</view>
+        <image a:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
+        <view class="avatar placeholder" a:else>{{avatarLetter}}</view>
         <view class="meta">
           <view class="name-row" a:if="{{!editingName}}">
             <view class="name">{{displayName}}</view>

@@ -218,7 +218,12 @@ Page({
         avatar_url: this.data.avatarUrl || app.globalData.avatarUrl || null
       })
       const saved = (res && res.nickname) || nickname
+      const savedAvatar = (res && res.avatar_url) || this.data.avatarUrl || app.globalData.avatarUrl || ''
       app.globalData.nickname = saved
+      if (savedAvatar) {
+        app.globalData.avatarUrl = savedAvatar
+        wx.setStorageSync('avatar_url', savedAvatar)
+      }
       wx.setStorageSync('nickname', saved)
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
@@ -231,6 +236,7 @@ Page({
         nickname: saved,
         displayName: saved,
         avatarLetter: saved.charAt(0) || '会',
+        avatarUrl: savedAvatar,
         editingName: false,
         nicknameDraft: '',
         savingName: false

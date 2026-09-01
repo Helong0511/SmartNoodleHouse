@@ -51,12 +51,12 @@ function resolveApiBase() {
 
 /**
  * 微信隐私接口开关（getPhoneNumber / chooseAvatar / input type=nickname 等）
- * 正式版须在公众平台声明「昵称、头像、手机号」后改为 true。
- * 开发版 / 体验版（含真机调试）默认开启昵称与头像，便于联调。
+ * 正式版须在公众平台声明「用户信息/手机号」后改为 true。
+ * 开发版 / 体验版（含真机调试）默认开启。
  */
 const ENABLE_WX_PRIVACY_APIS = false
 
-function resolveNicknameAvatarApisEnabled() {
+function resolvePrivacyApisEnabled() {
   if (ENABLE_WX_PRIVACY_APIS) return true
   const ver = miniEnvVersion()
   if (ver === 'develop' || ver === 'trial') return true
@@ -64,7 +64,7 @@ function resolveNicknameAvatarApisEnabled() {
   return false
 }
 
-const enableNicknameAvatarApis = resolveNicknameAvatarApisEnabled()
+const enablePrivacyApis = resolvePrivacyApisEnabled()
 
 module.exports = {
   resolveApiBase,
@@ -73,8 +73,8 @@ module.exports = {
   DEV_LAN_HOST,
   DEV_USE_LAN,
   DEV_LAN_API,
-  enableWxPrivacyApis: ENABLE_WX_PRIVACY_APIS,
-  enableWxPhoneBind: ENABLE_WX_PRIVACY_APIS,
-  enableChooseAvatar: enableNicknameAvatarApis,
-  enableNicknameInput: enableNicknameAvatarApis
+  enableWxPrivacyApis: ENABLE_WX_PRIVACY_APIS || enablePrivacyApis,
+  enableWxPhoneBind: enablePrivacyApis,
+  enableChooseAvatar: enablePrivacyApis,
+  enableNicknameInput: enablePrivacyApis
 }
