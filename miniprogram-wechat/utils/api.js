@@ -91,7 +91,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
       url: `${base}${path}`,
       method,
       data,
-      timeout: 20000,
+      timeout: 10000,
       header: {
         'Content-Type': 'application/json',
         ...(needAuth ? authHeader() : {})

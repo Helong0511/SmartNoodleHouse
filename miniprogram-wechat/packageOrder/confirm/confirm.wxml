@@ -19,7 +19,7 @@
 
   <view class="table-box" wx:if="{{!needPack}}">
     <view class="label">堂食桌号（必选）</view>
-    <view wx:if="{{tableToken && tableName}}" class="table-on">{{tableName}}</view>
+    <view wx:if="{{tableToken}}" class="table-on">{{tableName || pickedLabel || '已绑桌'}}</view>
     <block wx:elif="{{!tableToken}}">
       <view class="scan-btn" hover-class="scan-btn-hover" bindtap="scanTable">扫码绑桌</view>
       <picker wx:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" bindchange="onPickTable">

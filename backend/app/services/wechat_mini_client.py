@@ -91,6 +91,148 @@ async def get_phone_by_code(code: str) -> str:
     return phone
 
 
+def _url_link_error_hint(errcode: int | None, errmsg: str = "") -> str:
+    code = int(errcode or 0)
+    msg = (errmsg or "").lower()
+    if code == 85407 or "no scheme permission" in msg:
+        return (
+            "微信未开通 URL Link/Scheme 权限：公众平台 → 账号设置 → 基本设置 → 隐私与安全 "
+            "→ 开启「明文 Scheme 拉起此小程序」，并确认已开通「URL Link」能力"
+        )
+    if code in (40165, 85079) or "invalid weapp pagepath" in msg or "page path" in msg:
+        return "页面路径须已在正式版存在；本地开发可改用系统浏览器打开本页再点「微信点餐」"
+    if code:
+        return f"微信 URL Link 失败({code}): {errmsg or 'unknown'}"
+    return "微信 URL Link 生成失败"
+
+
+async def generate_url_link(
+    *,
+    path: str = "pages/index/index",
+    query: str = "",
+    env_version: str | None = None,
+) -> tuple[str | None, str | None]:
+    """生成可在微信内打开的 URL Link。返回 (link, error_hint)。"""
+    settings = get_settings()
+    if not settings.wechat_app_id or not settings.wechat_app_secret:
+        return None, "未配置 WECHAT_APP_ID / WECHAT_APP_SECRET"
+    ver = (env_version or settings.resolved_mini_program_env_version or "release").strip().lower()
+    if ver not in ("develop", "trial", "release"):
+        ver = "release"
+    page = (path or "pages/index/index").strip().lstrip("/")
+    q = (query or "").strip().lstrip("?")
+    try:
+        token = await get_access_token()
+    except AppException as e:
+        logger.warning("生成 URL Link 跳过：%s", e.message)
+        return None, e.message
+    url = f"https://api.weixin.qq.com/wxa/generate_urllink?access_token={token}"
+    payload: dict[str, Any] = {
+        "path": page,
+        "env_version": ver,
+        "expire_type": 1,
+        "expire_interval": 1,
+    }
+    if q:
+        payload["query"] = q
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload)
+            data = resp.json()
+        if data.get("errcode") in (40001, 42001):
+            token = await get_access_token(force=True)
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"https://api.weixin.qq.com/wxa/generate_urllink?access_token={token}",
+                    json=payload,
+                )
+                data = resp.json()
+        if data.get("errcode"):
+            logger.warning("微信 URL Link 失败: %s", data)
+            return None, _url_link_error_hint(data.get("errcode"), str(data.get("errmsg") or ""))
+        link = (data.get("url_link") or "").strip()
+        if not link:
+            return None, "微信未返回 url_link"
+        return link, None
+    except Exception as e:
+        logger.warning("微信 URL Link 异常: %s", e)
+        return None, f"微信 URL Link 异常: {e}"
+
+
+async def generate_wxacode(
+    *,
+    path: str = "pages/index/index",
+    query: str = "",
+    env_version: str | None = None,
+    width: int = 280,
+) -> tuple[bytes | None, str | None]:
+    """生成微信小程序码图片（扫码直接进小程序，比 weixin:// 明文 Scheme 可靠）。"""
+    settings = get_settings()
+    if not settings.wechat_app_id or not settings.wechat_app_secret:
+        return None, "未配置 WECHAT_APP_ID / WECHAT_APP_SECRET"
+    ver = (env_version or settings.resolved_mini_program_env_version or "release").strip().lower()
+    if ver not in ("develop", "trial", "release"):
+        ver = "release"
+    page = (path or "pages/index/index").strip().lstrip("/")
+    q = (query or "").strip().lstrip("?")
+    # getwxacode 的 path 可带 query；总长度须 < 1024
+    full_path = f"{page}?{q}" if q else page
+    if len(full_path) > 1024:
+        return None, "小程序码 path 过长，请缩短 token"
+    try:
+        token = await get_access_token()
+    except AppException as e:
+        return None, e.message
+
+    async def _post(access: str) -> httpx.Response:
+        url = f"https://api.weixin.qq.com/wxa/getwxacode?access_token={access}"
+        payload: dict[str, Any] = {
+            "path": full_path,
+            "width": max(280, min(int(width or 280), 1280)),
+            "env_version": ver,
+            "check_path": False,
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            return await client.post(url, json=payload)
+
+    try:
+        resp = await _post(token)
+        ctype = (resp.headers.get("content-type") or "").lower()
+        raw = resp.content
+        if "application/json" in ctype or (raw[:1] == b"{"):
+            data = resp.json()
+            if data.get("errcode") in (40001, 42001):
+                token = await get_access_token(force=True)
+                resp = await _post(token)
+                ctype = (resp.headers.get("content-type") or "").lower()
+                raw = resp.content
+                if "application/json" in ctype or (raw[:1] == b"{"):
+                    data = resp.json()
+                    logger.warning("微信小程序码失败: %s", data)
+                    return None, _wxacode_error_hint(data.get("errcode"), str(data.get("errmsg") or ""))
+            else:
+                logger.warning("微信小程序码失败: %s", data)
+                return None, _wxacode_error_hint(data.get("errcode"), str(data.get("errmsg") or ""))
+        if not raw or len(raw) < 100:
+            return None, "微信未返回小程序码图片"
+        return raw, None
+    except Exception as e:
+        logger.warning("微信小程序码异常: %s", e)
+        return None, f"微信小程序码异常: {e}"
+
+
+def _wxacode_error_hint(errcode: int | None, errmsg: str = "") -> str:
+    code = int(errcode or 0)
+    msg = (errmsg or "").lower()
+    if code in (41030, 40165, 85079) or "invalid page" in msg or "page path" in msg:
+        return "页面路径无效：请确认 pages/index/index 存在，开发版请在开发者工具编译并真机预览过"
+    if code == 45009:
+        return "小程序码调用频率超限，请稍后重试"
+    if code:
+        return f"微信小程序码失败({code}): {errmsg or 'unknown'}"
+    return "微信小程序码生成失败"
+
+
 async def send_order_ready_subscribe(
     *,
     openid: str,

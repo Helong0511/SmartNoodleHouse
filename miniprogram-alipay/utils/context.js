@@ -23,6 +23,10 @@ function applyContext(table, store) {
   const g = getAppSafe()
   if (!g) return
   if (table) {
+    const storedToken = g.globalData.tableToken || auth.readStorage('table_token') || ''
+    if (!table.qr_token && storedToken) {
+      table = { ...table, qr_token: storedToken }
+    }
     g.globalData.table = table
     my.setStorageSync({ key: 'dine_table', data: table })
     if (table.qr_token) {
@@ -125,6 +129,40 @@ async function bindTableFromToken(token) {
   return null
 }
 
+async function refreshTableBinding(options = {}) {
+  const channel = (options && options.channel) || 'alipay'
+  const cached = readCachedContext()
+  const { table, store } = cached
+  let token = String(cached.token || (table && table.qr_token) || '').trim()
+
+  if (token) {
+    try {
+      const entry = await api.get('/miniprogram/entry', { token, channel }, false)
+      if (entry && entry.table) {
+        applyContext(entry.table, entry.store || store || null)
+        const ctx = displayPayload(entry.store || store, entry.table)
+        return { ok: true, token: entry.table.qr_token || token, ctx }
+      }
+    } catch (_) {}
+  }
+
+  const tableId = table && table.id
+  const sid = (table && table.store_id) || (store && store.id)
+  if (tableId && sid) {
+    try {
+      const bound = await api.post('/miniprogram/tables/bind', {
+        table_id: tableId,
+        store_id: sid
+      })
+      if (bound && bound.qr_token) {
+        applyContext(bound, store)
+        return { ok: true, token: bound.qr_token, ctx: displayPayload(store, bound) }
+      }
+    } catch (_) {}
+  }
+  return { ok: false, token }
+}
+
 function scanAndBindTable() {
   const { parseTableTokenFromScan } = require('./scan')
   return new Promise((resolve) => {
@@ -189,5 +227,6 @@ module.exports = {
   displayPayload,
   pageDineFields,
   bindTableFromToken,
+  refreshTableBinding,
   scanAndBindTable
 }

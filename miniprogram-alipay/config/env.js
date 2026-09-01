@@ -28,6 +28,15 @@ function isDevtools() {
   }
 }
 
+function miniEnvVersion() {
+  try {
+    const info = my.getAccountInfoSync && my.getAccountInfoSync()
+    return (info && info.miniProgram && info.miniProgram.envVersion) || ''
+  } catch (e) {
+    return ''
+  }
+}
+
 /** 模拟器用 127.0.0.1；真机自动用 DEV_LAN_HOST */
 function resolveDevApiBase() {
   if (DEV_USE_LAN || !isDevtools()) return DEV_LAN_API
@@ -37,20 +46,49 @@ function resolveDevApiBase() {
 /** 按运行环境选择 API 根地址 */
 function resolveApiBase() {
   try {
-    const info = my.getAccountInfoSync && my.getAccountInfoSync()
-    const ver = info && info.miniProgram && info.miniProgram.envVersion
+    const ver = miniEnvVersion()
     if (ver === 'release') return PROD_API_BASE
   } catch (_) {}
   return resolveDevApiBase()
 }
 
+/**
+ * 支付宝隐私接口开关（chooseAvatar / nickname / getPhoneNumber 等）
+ * 正式版须在开放平台配置「小程序隐私政策」后改为 true。
+ */
+const ENABLE_ALIPAY_PRIVACY_APIS = false
+
+function resolvePrivacyApisEnabled() {
+  if (ENABLE_ALIPAY_PRIVACY_APIS) return true
+  const ver = miniEnvVersion()
+  if (ver === 'develop' || ver === 'trial') return true
+  if (isDevtools()) return true
+  return false
+}
+
+const enablePrivacyApis = resolvePrivacyApisEnabled()
+
+function getEnvDebugInfo() {
+  return {
+    envVersion: miniEnvVersion() || 'unknown',
+    isDevtools: isDevtools(),
+    apiBase: resolveApiBase(),
+    privacyApis: enablePrivacyApis
+  }
+}
+
 module.exports = {
   resolveApiBase,
+  getEnvDebugInfo,
   PROD_API_BASE,
   DEV_SIMULATOR_API,
   DEV_LAN_HOST,
   DEV_USE_LAN,
   DEV_LAN_API,
-  /** 首页注册是否展示「使用支付宝昵称」 */
-  enableAlipayUserProfile: true
+  enableAlipayPrivacyApis: ENABLE_ALIPAY_PRIVACY_APIS || enablePrivacyApis,
+  enableChooseAvatar: enablePrivacyApis,
+  enableNicknameInput: enablePrivacyApis,
+  enableAlipayPhoneBind: enablePrivacyApis,
+  /** @deprecated 请用 enableChooseAvatar */
+  enableAlipayUserProfile: enablePrivacyApis
 }

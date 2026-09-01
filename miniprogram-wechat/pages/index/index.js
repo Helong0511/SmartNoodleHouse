@@ -5,16 +5,12 @@ const privacy = require('../../utils/privacy')
 const {
   enableChooseAvatar,
   enableNicknameInput,
-  enableWxPhoneBind
+  enableWxPhoneBind,
+  resolveApiBase,
+  getEnvDebugInfo
 } = require('../../config/env')
 const app = getApp()
-
-const PLACEHOLDER_NICKS = new Set(['联调员', '面馆会员', '微信用户', '支付宝用户'])
-
-function isPlaceholderNickname(name) {
-  const n = String(name || '').trim()
-  return !n || PLACEHOLDER_NICKS.has(n)
-}
+const phoneAuth = require('../../utils/phoneAuth')
 
 Page({
   data: {
@@ -36,14 +32,29 @@ Page({
     useWxNickname: false,
     canWxPhone: false,
     privacyTip: '',
+    debugInfo: '',
+    nicknameReviewFail: false,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
   },
 
+  buildDebugInfo(extra) {
+    const env = getEnvDebugInfo()
+    const parts = [
+      `环境:${env.envVersion}`,
+      `微信能力:${env.privacyApis ? '开' : '关'}`,
+      `隐私待同意:${this.data.needPrivacyAgree ? '是' : '否'}`
+    ]
+    if (extra) parts.push(extra)
+    return `${parts.join(' | ')} | ${env.apiBase}`
+  },
+
   onLoad(query) {
+    const env = getEnvDebugInfo()
     this.setData({
       canChooseAvatar: !!enableChooseAvatar,
       useWxNickname: !!enableNicknameInput,
-      canWxPhone: !!enableWxPhoneBind
+      canWxPhone: !!enableWxPhoneBind,
+      debugInfo: env.envVersion === 'release' ? '' : this.buildDebugInfo()
     })
     if (query.token) {
       app.globalData.tableToken = query.token
@@ -62,16 +73,15 @@ Page({
   async refreshPrivacyState() {
     const setting = await privacy.setupPrivacy()
     const need = !!setting.needAuthorization
+    const apiHint = app.globalData.apiBase || resolveApiBase()
+    const baseTip = need
+      ? '请先点击上方「同意隐私指引」，再获取微信头像/昵称/手机号；也可手输昵称与手机号，或从相册选头像。'
+      : '微信头像、昵称需分开操作：点头像选头像，点昵称框后在键盘上方选「用微信昵称」。'
     this.setData({
       needPrivacyAgree: need,
-      privacyTip: need
-        ? '请先点击「同意隐私指引」，再获取微信头像/昵称/手机号；也可手输昵称与手机号，或从相册选头像。'
-        : '微信头像、昵称需分开点选；手机号可一键授权。若微信接口不可用，请用手输或相册。'
+      privacyTip: `${baseTip} 接口：${apiHint}`,
+      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo()
     })
-    if (need) {
-      // 主动触发，配合 privacy-popup / 页内同意按钮
-      privacy.requirePrivacyAuthorize()
-    }
     return !need
   },
 
@@ -79,21 +89,16 @@ Page({
     privacy.openPrivacyContract()
   },
 
-  onPrivacyAgree() {
-    const resolve = app.globalData && app.globalData.privacyResolve
-    if (app.globalData) {
-      app.globalData.needPrivacyPopup = false
-      app.globalData.privacyResolve = null
-    }
-    if (app._privacyPopup && app._privacyPopup.hide) app._privacyPopup.hide()
-    if (typeof resolve === 'function') {
-      resolve({ buttonId: 'agree-btn', event: 'agree' })
-    }
+  async onPrivacyAgree(e) {
+    const detail = (e && e.detail) || {}
+    console.log('[privacyAgree]', detail)
+    privacy.finishPrivacyAgree('agree-btn')
     this.setData({
       needPrivacyAgree: false,
-      privacyTip: '已同意隐私指引。请点头像选微信头像，点输入框取微信昵称，并可授权手机号。'
+      privacyTip: `已同意隐私指引。请点头像选微信头像，点昵称框后在键盘上方选「用微信昵称」。 接口：${app.globalData.apiBase || resolveApiBase()}`,
+      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('隐私已同意')
     })
-    wx.showToast({ title: '已同意，请继续授权', icon: 'success' })
+    wx.showToast({ title: '已同意，请继续操作', icon: 'success' })
   },
 
   async bootstrap() {
@@ -112,18 +117,13 @@ Page({
         throw new Error('登录失败，请检查网络或稍后重试')
       }
       const nickname = login.nickname || app.globalData.nickname || ''
-      const showMemberPrompt = !!login.need_member_prompt || isPlaceholderNickname(nickname)
+      const showMemberPrompt = !!login.need_member_prompt || auth.isPlaceholderNickname(nickname)
       const ctx = dineCtx.currentDisplay()
-      let phone = ''
-      try {
-        const me = await api.get('/miniprogram/customers/me').catch(() => null)
-        if (me && me.phone) phone = me.phone
-      } catch (_) {}
       this.setData({
         loading: false,
-        nickname: isPlaceholderNickname(nickname) ? '' : nickname,
+        nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
         avatarUrl: login.avatar_url || app.globalData.avatarUrl || '',
-        phone,
+        phone: '',
         showMemberPrompt,
         ready: true,
         table: ctx.table || app.globalData.table,
@@ -132,7 +132,12 @@ Page({
         storeAddress: ctx.storeAddress,
         hasTable: ctx.hasTable
       })
-      if (login.nickname && !isPlaceholderNickname(login.nickname)) {
+      api.get('/miniprogram/customers/me')
+        .then((me) => {
+          if (me && me.phone) this.setData({ phone: me.phone })
+        })
+        .catch(() => {})
+      if (login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         wx.setStorageSync('nickname', login.nickname)
       }
       if (login.avatar_url) {
@@ -145,6 +150,10 @@ Page({
       }
       if (login.customer_no) wx.setStorageSync('customer_no', login.customer_no)
       await this.refreshPrivacyState()
+      if (auth.isProfileComplete(login)) {
+        this.goMenu()
+        return
+      }
     } catch (e) {
       this.setData({ loading: false, ready: true })
       const msg = (e && e.message) || '登录失败'
@@ -174,24 +183,34 @@ Page({
   onChooseAvatar(e) {
     const detail = (e && e.detail) || {}
     const url = detail.avatarUrl || ''
+    const errMsg = String(detail.errMsg || '')
     console.log('[chooseAvatar]', detail)
     if (!url) {
-      const errMsg = String(detail.errMsg || '')
-      if (/privacy|authorize|声明|agree|scope/i.test(errMsg)) {
-        this.setData({ needPrivacyAgree: true })
-        privacy.requirePrivacyAuthorize()
+      if (/privacy|authorize|声明|agree|scope|declared/i.test(errMsg)) {
+        this.setData({
+          needPrivacyAgree: true,
+          debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('头像:隐私未声明')
+        })
+        privacy.showPrivacyPopup()
         wx.showModal({
-          title: '无法获取微信头像',
-          content: '请先同意隐私指引；若仍失败，请确认公众平台已声明「用户信息」，或改用「从相册选择头像」。',
+          title: '公众平台未声明头像能力',
+          content: '请在 mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引 中勾选「收集你的昵称、头像」，提交后等待审核/约5分钟生效。小程序内也需先点「同意隐私指引」。临时可用「从相册选择头像」+手输昵称。',
           showCancel: false
         })
         return
       }
-      // 微信头像接口失败时自动降级相册
-      this.onPickLocalAvatar()
+      if (/cancel/i.test(errMsg)) return
+      if (errMsg) {
+        wx.showToast({ title: errMsg.replace(/^chooseAvatar:fail\s*/i, ''), icon: 'none' })
+        return
+      }
+      wx.showToast({ title: '未选头像，可试相册选图', icon: 'none' })
       return
     }
-    this.setData({ avatarUrl: url })
+    this.setData({
+      avatarUrl: url,
+      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('头像:已选')
+    })
     app.globalData.avatarUrl = url
     wx.setStorageSync('avatar_url', url)
     wx.showToast({ title: '头像已选择', icon: 'success' })
@@ -237,20 +256,42 @@ Page({
         }
       })
     }
-    if (this.data.needPrivacyAgree) {
-      privacy.requirePrivacyAuthorize().then((ok) => {
-        if (ok) this.setData({ needPrivacyAgree: false })
-        pick()
-      })
-      return
-    }
     pick()
   },
 
-  onNickname(e) {
+  onNicknameInput(e) {
     const nickname = (e.detail && e.detail.value) || ''
     this.setData({ nickname })
     app.globalData.nickname = nickname
+  },
+
+  onNicknameChange(e) {
+    const nickname = (e.detail && e.detail.value) || ''
+    if (!nickname) return
+    this.setData({ nickname })
+    app.globalData.nickname = nickname
+  },
+
+  onNicknameBlur(e) {
+    const nickname = (e.detail && e.detail.value) || ''
+    if (!nickname) return
+    this.setData({ nickname })
+    app.globalData.nickname = nickname
+  },
+
+  onNicknameReview(e) {
+    const detail = (e.detail) || {}
+    console.log('[nicknamereview]', detail)
+    if (detail.pass === false) {
+      this.setData({ nicknameReviewFail: true, nickname: '' })
+      wx.showToast({ title: '昵称未通过审核，请修改', icon: 'none' })
+    } else if (detail.pass === true) {
+      this.setData({ nicknameReviewFail: false })
+    }
+  },
+
+  onNickname(e) {
+    this.onNicknameInput(e)
   },
 
   onPhoneInput(e) {
@@ -260,45 +301,39 @@ Page({
   async onGetPhoneNumber(e) {
     const detail = (e && e.detail) || {}
     console.log('[getPhoneNumber]', detail)
-    if (detail.errMsg && detail.errMsg.indexOf('privacy') >= 0) {
-      this.setData({ needPrivacyAgree: true })
-      privacy.requirePrivacyAuthorize()
-      wx.showModal({
-        title: '需先同意隐私指引',
-        content: '请先点击「同意隐私指引」。若仍失败，请在公众平台声明「手机号」，或手动输入手机号。',
-        showCancel: false
-      })
-      return
-    }
-    if (!detail.code) {
-      if (detail.errMsg && /deny|cancel/i.test(detail.errMsg)) {
-        wx.showToast({ title: '已取消手机号授权', icon: 'none' })
-      } else {
-        wx.showToast({ title: '未拿到手机号，请手输', icon: 'none' })
+    phoneAuth.handleGetPhoneNumber(this, detail, async (code) => {
+      try {
+        wx.showLoading({ title: '绑定中' })
+        const res = await api.post('/miniprogram/member/phone', { phone_code: code })
+        if (res && res.customer_token) {
+          auth.refreshCustomerToken(app, res.customer_token, {
+            customer_id: res.customer_id,
+            customer_no: res.customer_no
+          })
+        }
+        wx.hideLoading()
+        this.setData({ phone: res.phone || '', phoneInput: '' })
+        wx.showToast({ title: '手机号已绑定', icon: 'success' })
+      } catch (err) {
+        wx.hideLoading()
+        wx.showToast({ title: (err && err.message) || '绑定失败，请手输', icon: 'none' })
       }
-      return
-    }
-    try {
-      wx.showLoading({ title: '绑定中' })
-      const res = await api.post('/miniprogram/member/phone', { phone_code: detail.code })
-      if (res && res.customer_token) {
-        auth.refreshCustomerToken(app, res.customer_token, {
-          customer_id: res.customer_id,
-          customer_no: res.customer_no
-        })
-      }
-      wx.hideLoading()
-      this.setData({ phone: res.phone || '', phoneInput: '' })
-      wx.showToast({ title: '手机号已绑定', icon: 'success' })
-    } catch (err) {
-      wx.hideLoading()
-      wx.showToast({ title: (err && err.message) || '绑定失败，请手输', icon: 'none' })
-    }
+    })
   },
 
-  async onSaveAndGo() {
+  onFormSubmit(e) {
     if (this.data.saving) return
-    const nickname = (this.data.nickname || '').trim()
+    const formVal = (e.detail && e.detail.value) || {}
+    const formNick = String(formVal.nickname || '').trim()
+    const nickname = formNick || String(this.data.nickname || '').trim()
+    this.doSaveAndGo(nickname)
+  },
+
+  async doSaveAndGo(nickname) {
+    if (this.data.useWxNickname && this.data.nicknameReviewFail) {
+      wx.showToast({ title: '昵称未通过审核，请修改', icon: 'none' })
+      return
+    }
     if (nickname && (nickname.length < 2 || nickname.length > 20)) {
       wx.showToast({ title: '昵称需 2-20 个字', icon: 'none' })
       return

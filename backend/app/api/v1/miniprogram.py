@@ -7,7 +7,7 @@ from sqlalchemy import select
 from fastapi import APIRouter, File, Request, UploadFile
 
 from app.api.deps import CurrentCustomer, DbSession
-from app.core.security import create_customer_token
+from app.core.security import create_customer_token, decode_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
@@ -52,7 +52,8 @@ class MemberRegisterRequest(BaseModel):
 
 class PhoneBindRequest(BaseModel):
     phone: str | None = Field(default=None, min_length=11, max_length=11, description="手动输入手机号")
-    phone_code: str | None = Field(default=None, description="button getPhoneNumber 返回的 code")
+    phone_code: str | None = Field(default=None, description="微信 getPhoneNumber 返回的 code")
+    alipay_phone_encrypted: str | None = Field(default=None, description="支付宝 my.getPhoneNumber 返回的 response 密文")
 
 
 @router.get("/config")
@@ -196,6 +197,13 @@ async def scan_landing(
 
     store = await _store_brief(db, table.store_id)
     links = build_table_qr_links(table.qr_token)
+    from app.services.wechat_mini_client import generate_url_link
+
+    wechat_url_link, wechat_url_link_error = await generate_url_link(
+        path="pages/index/index",
+        query=f"token={table.qr_token}&channel=wechat",
+        env_version=links.get("mini_program_env_version"),
+    )
     return success(
         {
             "table": {
@@ -206,11 +214,48 @@ async def scan_landing(
             },
             "store": store,
             "wechat_scheme": links["wechat_scheme"],
+            "wechat_url_link": wechat_url_link,
+            "wechat_url_link_error": wechat_url_link_error,
             "alipay_scheme": links["alipay_scheme"],
             "h5_order_url": links["h5_order_url"],
             "scan_url": links["scan_url"],
+            "mini_program_env_version": links.get("mini_program_env_version"),
+            "wechat_app_configured": bool(links.get("wechat_app_id") and links["wechat_app_id"] != "YOUR_WECHAT_APPID"),
+            "alipay_app_configured": bool(links.get("alipay_app_id") and links["alipay_app_id"] != "YOUR_ALIPAY_APPID"),
         },
         request=request,
+    )
+
+
+@router.get("/wechat-debug-qrcode")
+async def wechat_debug_qrcode(
+    request: Request,
+    db: DbSession,
+    token: str,
+):
+    """本地调试：返回微信小程序码 PNG（扫码进 develop/trial/release，不走 weixin://）。"""
+    from fastapi.responses import Response
+
+    from app.core.config import get_settings
+    from app.services.table_resolve import resolve_dining_table
+    from app.services.wechat_mini_client import generate_wxacode
+
+    table = await resolve_dining_table(db, token)
+    if not table:
+        raise AppException(40403, "无效桌台二维码")
+    settings = get_settings()
+    png, err = await generate_wxacode(
+        path="pages/index/index",
+        query=f"token={table.qr_token}&channel=wechat",
+        env_version=settings.resolved_mini_program_env_version,
+        width=280,
+    )
+    if not png:
+        raise AppException(50034, err or "生成微信小程序码失败")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -330,13 +375,26 @@ async def bind_member_phone(
     """绑定/更新会员手机号（可合并历史账号）。"""
     import re
 
+    from app.services.alipay_mini_client import decrypt_phone_response
     from app.services.wechat_mini_client import get_phone_by_code
+
+    channel = "wechat"
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        try:
+            channel = decode_customer_token(auth_header.split(" ", 1)[1]).get("channel") or "wechat"
+        except Exception:
+            channel = "wechat"
 
     raw_phone = (data.phone or "").strip()
     if data.phone_code:
+        if channel == "alipay":
+            raise AppException(40054, "支付宝端请使用 alipay_phone_encrypted 字段")
         raw_phone = await get_phone_by_code(data.phone_code)
+    elif data.alipay_phone_encrypted:
+        raw_phone = decrypt_phone_response(data.alipay_phone_encrypted)
     if not raw_phone:
-        raise AppException(40054, "请提供手机号或授权获取微信手机号")
+        raise AppException(40054, "请提供手机号或授权获取手机号")
     if not re.fullmatch(r"1\d{10}", raw_phone):
         raise AppException(40053, "手机号格式不正确")
     customer = await CustomerService.try_link_by_phone(db, customer, raw_phone)

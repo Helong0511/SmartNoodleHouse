@@ -1,4 +1,6 @@
 <view class="page">
+  <privacy-popup id="privacy-popup" />
+
   <store-bar
     storeName="{{storeName}}"
     storeNo="{{storeNo}}"
@@ -21,8 +23,23 @@
             <text class="link edit-name" onTap="startEditName">修改</text>
           </view>
           <view class="name-edit" a:else>
+            <form onSubmit="onSaveNicknameForm">
             <input
+              a:if="{{useAlipayNickname}}"
               class="name-input"
+              type="nickname"
+              name="nickname"
+              maxlength="20"
+              placeholder="支付宝昵称（点此授权）"
+              value="{{nicknameDraft}}"
+              onInput="onNicknameDraft"
+              onNicknameReview="onNicknameDraftReview"
+            />
+            <input
+              a:else
+              class="name-input"
+              type="text"
+              name="nickname"
               maxlength="20"
               placeholder="请输入昵称（2-20字）"
               value="{{nicknameDraft}}"
@@ -30,8 +47,9 @@
             />
             <view class="name-edit-actions">
               <text class="link muted" onTap="cancelEditName">取消</text>
-              <button class="btn-save-name" size="mini" loading="{{savingName}}" onTap="saveNickname">保存</button>
+              <button class="btn-save-name" size="mini" formType="submit" loading="{{savingName}}">保存</button>
             </view>
+            </form>
           </view>
           <view class="no">编号 {{customerNo}}</view>
           <view class="level-row" a:if="{{isMember && memberLevelName}}">
@@ -104,6 +122,15 @@
     <view class="card" a:if="{{!phone}}">
       <view class="title">绑定手机号</view>
       <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
+      <button
+        a:if="{{canAlipayPhone}}"
+        class="btn-primary ali-phone"
+        open-type="getAuthorize"
+        scope="phoneNumber"
+        onGetAuthorize="onGetPhoneAuthorize"
+        onError="onGetPhoneAuthorizeFail"
+      >支付宝一键绑定手机号</button>
+      <view class="or" a:if="{{canAlipayPhone}}">或手动输入</view>
       <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" onInput="onPhoneInput" />
       <button class="btn-ghost" onTap="bindPhone">确认绑定</button>
     </view>

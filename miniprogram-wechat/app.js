@@ -34,14 +34,7 @@ App({
     this.globalData.table = wx.getStorageSync('dine_table') || null
     this.parseLaunch(options)
     privacy.setupPrivacy()
-    // 必须用 open-type=agreePrivacyAuthorization 的真实按钮同意，showModal 无效
-    privacy.onNeedPrivacyAuthorization((resolve) => {
-      this.globalData.privacyResolve = resolve
-      this.globalData.needPrivacyPopup = true
-      if (this._privacyPopup && this._privacyPopup.show) {
-        this._privacyPopup.show()
-      }
-    })
+    privacy.bindAppPrivacyHandler(this)
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

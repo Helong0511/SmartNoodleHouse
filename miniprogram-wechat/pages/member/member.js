@@ -2,6 +2,8 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const privacy = require('../../utils/privacy')
+const phoneAuth = require('../../utils/phoneAuth')
 const { enableWxPhoneBind, enableNicknameInput } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
@@ -55,6 +57,8 @@ Page({
     phone: '',
     phoneInput: '',
     canWxPhone: false,
+    needPrivacyAgree: false,
+    nicknameReviewFail: false,
     storeName: '',
     storeNo: '',
     storeAddress: '',
@@ -65,9 +69,15 @@ Page({
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
+    if (app._privacyPopup && app.globalData.needPrivacyPopup) {
+      app._privacyPopup.show()
+    }
     this.setData({
       canWxPhone: !!enableWxPhoneBind,
       useWxNickname: !!enableNicknameInput
+    })
+    privacy.setupPrivacy().then((setting) => {
+      this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
     })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
@@ -204,9 +214,30 @@ Page({
     this.setData({ nicknameDraft: (e.detail && e.detail.value) || '' })
   },
 
-  async saveNickname() {
+  onNicknameDraftReview(e) {
+    const detail = (e.detail) || {}
+    if (detail.pass === false) {
+      this.setData({ nicknameReviewFail: true, nicknameDraft: '' })
+      wx.showToast({ title: '昵称未通过审核，请修改', icon: 'none' })
+    } else if (detail.pass === true) {
+      this.setData({ nicknameReviewFail: false })
+    }
+  },
+
+  onSaveNicknameForm(e) {
     if (this.data.savingName) return
-    const nickname = (this.data.nicknameDraft || '').trim()
+    const formVal = (e.detail && e.detail.value) || {}
+    const nickname = String(formVal.nickname || this.data.nicknameDraft || '').trim()
+    this.saveNickname(nickname)
+  },
+
+  async saveNickname(nicknameArg) {
+    if (this.data.savingName) return
+    const nickname = String(nicknameArg != null ? nicknameArg : this.data.nicknameDraft || '').trim()
+    if (this.data.useWxNickname && this.data.nicknameReviewFail) {
+      wx.showToast({ title: '昵称未通过审核，请修改', icon: 'none' })
+      return
+    }
     if (nickname.length < 2 || nickname.length > 20) {
       wx.showToast({ title: '昵称需 2-20 个字', icon: 'none' })
       return
@@ -263,21 +294,14 @@ Page({
 
   async onGetPhoneNumber(e) {
     const detail = (e && e.detail) || {}
-    if (detail.errMsg && detail.errMsg.indexOf('privacy agreement') >= 0) {
-      wx.showModal({
-        title: '需配置隐私指引',
-        content: '请先在微信公众平台声明「手机号」收集项，并将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 设为 true；当前请使用下方手动输入绑定。',
-        showCancel: false
-      })
-      return
-    }
-    if (!detail.code) {
-      if (detail.errMsg && detail.errMsg.indexOf('deny') >= 0) {
-        wx.showToast({ title: '您拒绝了手机号授权', icon: 'none' })
-      }
-      return
-    }
-    await this._savePhone({ phone_code: detail.code })
+    phoneAuth.handleGetPhoneNumber(this, detail, (code) => {
+      this._savePhone({ phone_code: code })
+    })
+  },
+
+  onPrivacyAgree() {
+    privacy.finishPrivacyAgree('agree-btn-phone')
+    this.setData({ needPrivacyAgree: false })
   },
 
   async _savePhone(payload) {

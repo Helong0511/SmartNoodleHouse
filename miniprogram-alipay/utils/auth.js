@@ -1,5 +1,23 @@
 const api = require('./api')
 
+const PLACEHOLDER_NICKS = new Set(['联调员', '面馆会员', '微信用户', '支付宝用户'])
+
+function isPlaceholderNickname(name) {
+  const n = String(name || '').trim()
+  return !n || PLACEHOLDER_NICKS.has(n)
+}
+
+function isProfileComplete(source) {
+  const src = source || {}
+  const token = src.customer_token || src.customerToken || readStorage('customer_token')
+  if (!token) return false
+  const nickname = src.nickname
+    || (src.globalData && src.globalData.nickname)
+    || readStorage('nickname')
+    || ''
+  return !isPlaceholderNickname(nickname)
+}
+
 function getAppSafe() {
   try {
     return getApp()
@@ -164,7 +182,7 @@ async function ensureLogin(tableToken) {
         customer_no: app.globalData.customerNo,
         customer_token: cachedToken,
         nickname: app.globalData.nickname,
-        need_member_prompt: !app.globalData.nickname
+        need_member_prompt: isPlaceholderNickname(app.globalData.nickname)
       }
     }
     clearCustomerSession(app)
@@ -215,5 +233,7 @@ module.exports = {
   formatError,
   readStorage,
   getAppSafe,
-  refreshCustomerToken
+  refreshCustomerToken,
+  isPlaceholderNickname,
+  isProfileComplete
 }

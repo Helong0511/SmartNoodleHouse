@@ -37,10 +37,13 @@ def _serialize(t: DiningTable) -> dict:
         "wechat_qr_url": t.wechat_qr_url or links["wechat_scheme"],
         "alipay_qr_url": t.alipay_qr_url or links["alipay_scheme"],
         "scan_url": links["scan_url"],
+        "wechat_scheme": links["wechat_scheme"],
+        "alipay_scheme": links["alipay_scheme"],
         "wechat_page": links["wechat_page"],
         "alipay_page": links["alipay_page"],
         "h5_fallback": links["h5_fallback"],
         "h5_order_url": links["h5_order_url"],
+        "mini_program_env_version": links.get("mini_program_env_version"),
         "status": t.status,
     }
 

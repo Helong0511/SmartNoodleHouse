@@ -1,5 +1,5 @@
 <view class="page">
-  <privacy-popup />
+  <privacy-popup id="privacy-popup" />
 
   <store-bar
     storeName="{{storeName}}"
@@ -39,20 +39,24 @@
           <text class="link edit-name" bindtap="startEditName">修改</text>
         </view>
         <view class="name-edit" wx:else>
+          <form bindsubmit="onSaveNicknameForm">
           <input
             wx:if="{{useWxNickname}}"
             class="name-input"
             type="nickname"
+            name="nickname"
             maxlength="20"
             placeholder="微信昵称（点此授权）"
             value="{{nicknameDraft}}"
             bindinput="onNicknameDraft"
             bindblur="onNicknameDraft"
+            bindnicknamereview="onNicknameDraftReview"
           />
           <input
             wx:else
             class="name-input"
             type="text"
+            name="nickname"
             maxlength="20"
             placeholder="请输入昵称（2-20字）"
             value="{{nicknameDraft}}"
@@ -61,8 +65,9 @@
           />
           <view class="name-edit-actions">
             <text class="link muted" bindtap="cancelEditName">取消</text>
-            <button class="btn-save-name" size="mini" loading="{{savingName}}" bindtap="saveNickname">保存</button>
+            <button class="btn-save-name" size="mini" form-type="submit" loading="{{savingName}}">保存</button>
           </view>
+          </form>
         </view>
 
         <view class="no">编号 {{customerNo}}</view>
@@ -208,7 +213,15 @@
     <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
 
     <button
-      wx:if="{{canWxPhone}}"
+      wx:if="{{canWxPhone && needPrivacyAgree}}"
+      class="btn-primary wx-phone"
+      open-type="getPhoneNumber|agreePrivacyAuthorization"
+      bindgetphonenumber="onGetPhoneNumber"
+      bindagreeprivacyauthorization="onPrivacyAgree"
+    >同意隐私并绑定手机号</button>
+
+    <button
+      wx:elif="{{canWxPhone}}"
       class="btn-primary wx-phone"
       open-type="getPhoneNumber"
       bindgetphonenumber="onGetPhoneNumber"

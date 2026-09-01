@@ -17,7 +17,7 @@
   </view>
   <view class="table-box" a:if="{{!needPack}}">
     <view class="label">堂食桌号（必选）</view>
-    <view a:if="{{tableToken && tableName}}" class="table-on">{{tableName}}</view>
+    <view a:if="{{tableToken}}" class="table-on">{{tableName || pickedLabel || '已绑桌'}}</view>
     <block a:elif="{{!tableToken}}">
       <view class="scan-btn" onTap="scanTable">扫码绑桌</view>
       <picker a:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
@@ -25,10 +25,6 @@
       </picker>
       <view a:elif="{{needScanHint}}" class="table-pick hint">开发环境可在后台复制桌台 token，或使用真机扫码</view>
     </block>
-    <picker a:elif="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
-      <view class="table-pick">{{pickedLabel || '请选择桌号'}}</view>
-    </picker>
-    <view a:else class="table-pick hint">请先扫码进入或联系店员协助选桌</view>
   </view>
 
   <view class="cart-box">

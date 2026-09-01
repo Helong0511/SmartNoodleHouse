@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission
 from app.core.response import calc_pages, success
-from app.models import CustomerWechatAccount, Order, Payment, PaymentRefund
+from app.models import Order, Payment, PaymentRefund
 from app.schemas.order import PaymentCreate
+from app.services.customer_service import CustomerService
 from app.services.payment_service import PaymentService
 from app.services.store_scope import assert_order_store_access, require_bound_store
 from app.services.websocket_manager import ws_manager
@@ -41,11 +42,7 @@ class RefundCreate(BaseModel):
 
 
 async def _wechat_openid_for_customer(db: AsyncSession, customer_id: int) -> str | None:
-    return (
-        await db.execute(
-            select(CustomerWechatAccount.openid).where(CustomerWechatAccount.customer_id == customer_id)
-        )
-    ).scalar_one_or_none()
+    return await CustomerService.resolve_wechat_openid(db, customer_id)
 
 
 @router.post("/orders/{order_id}/pay")

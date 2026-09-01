@@ -46,6 +46,8 @@
     ]
   },
   "usingComponents": {
-    "store-bar": "/components/store-bar/store-bar"
-  }
+    "store-bar": "/components/store-bar/store-bar",
+    "privacy-popup": "/components/privacy-popup/privacy-popup"
+  },
+  "usePrivacyCheck": true
 }

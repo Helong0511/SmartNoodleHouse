@@ -66,8 +66,18 @@ function resolvePrivacyApisEnabled() {
 
 const enablePrivacyApis = resolvePrivacyApisEnabled()
 
+function getEnvDebugInfo() {
+  return {
+    envVersion: miniEnvVersion() || 'unknown',
+    isDevtools: isDevtools(),
+    apiBase: resolveApiBase(),
+    privacyApis: enablePrivacyApis
+  }
+}
+
 module.exports = {
   resolveApiBase,
+  getEnvDebugInfo,
   PROD_API_BASE,
   DEV_SIMULATOR_API,
   DEV_LAN_HOST,

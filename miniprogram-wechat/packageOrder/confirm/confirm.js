@@ -111,7 +111,22 @@ Page({
     this.bootstrapCheckout()
   },
 
+  _checkoutStale(gen) {
+    return gen !== this._checkoutGen || this._bindingTable
+  },
+
+  _readStoredTableToken(cached, ctx) {
+    return String(
+      (ctx && ctx.table && ctx.table.qr_token)
+      || app.globalData.tableToken
+      || wx.getStorageSync('table_token')
+      || (cached && cached.qr_token)
+      || ''
+    ).trim()
+  },
+
   async bootstrapCheckout() {
+    const gen = (this._checkoutGen = (this._checkoutGen || 0) + 1)
     try {
       await auth.ensureLogin()
     } catch (e) {
@@ -122,8 +137,9 @@ Page({
       this.loadMember(),
       this.loadCoupons(),
       this.loadVouchers(),
-      this.resolveTable(),
+      this.resolveTable(gen),
     ])
+    if (this._checkoutStale(gen)) return
     await this.refreshSummary()
   },
 
@@ -140,21 +156,25 @@ Page({
 
   async loadDineContext() {
     const ctx = await dineCtx.ensureDineContext()
-    const token = String(
-      (ctx.table && ctx.table.qr_token)
-      || app.globalData.tableToken
-      || wx.getStorageSync('table_token')
+    const cached = this._readCachedTable()
+    const token = this._readStoredTableToken(cached, ctx)
+    const tableLabel = ctx.tableName
+      || (cached && (cached.table_name || cached.table_no))
+      || this.data.tableName
       || ''
-    ).trim()
     this.setData({
       storeName: ctx.storeName,
       storeNo: ctx.storeNo,
       storeAddress: ctx.storeAddress,
       storePhone: ctx.storePhone,
-      tableName: ctx.tableName || this.data.tableName || '',
-      tableNo: ctx.tableNo || this.data.tableNo || '',
-      ...(token && ctx.hasTable
-        ? { tableToken: token, needScanHint: false, pickedLabel: ctx.tableName }
+      tableName: tableLabel,
+      tableNo: ctx.tableNo || (cached && cached.table_no) || this.data.tableNo || '',
+      ...(token
+        ? {
+          tableToken: token,
+          needScanHint: false,
+          pickedLabel: tableLabel || this.data.pickedLabel || '已绑桌'
+        }
         : {}),
     })
   },
@@ -186,20 +206,16 @@ Page({
     return app.globalData.table || wx.getStorageSync('dine_table') || null
   },
 
-  async resolveTable() {
+  async resolveTable(checkoutGen) {
+    const gen = checkoutGen != null ? checkoutGen : this._checkoutGen
     const cached = this._readCachedTable()
-    let token = String(
-      app.globalData.tableToken
-      || wx.getStorageSync('table_token')
-      || (cached && cached.qr_token)
-      || ''
-    ).trim()
+    let token = this._readStoredTableToken(cached, null)
 
     // 本地已有桌台：先展示，后台静默校验（网络失败不清除）
     if (token && cached && (cached.table_name || cached.table_no)) {
       if (!cached.qr_token || String(cached.qr_token) === token) {
         this._applyBoundTable(cached, app.globalData.store || wx.getStorageSync('dine_store'), token)
-        this._softRefreshTable(token)
+        this._softRefreshTable(token, gen)
         return
       }
     }
@@ -207,13 +223,24 @@ Page({
     if (token) {
       try {
         const entry = await api.get('/miniprogram/entry', { token, channel: 'wechat' }, false)
-        if (entry && entry.table && entry.table.qr_token) {
-          this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token)
+        if (this._checkoutStale(gen)) return
+        if (entry && entry.table) {
+          this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token || token)
           return
         }
-        // 服务端明确无效：才清绑定
-        this.clearTableBinding()
+        const rebound = await dineCtx.refreshTableBinding({ channel: 'wechat' })
+        if (this._checkoutStale(gen)) return
+        if (rebound.ok && rebound.token) {
+          this._applyBoundTable(rebound.ctx.table, rebound.ctx.store, rebound.token)
+          return
+        }
+        if (cached && (cached.table_name || cached.table_no)) {
+          this._applyBoundTable(cached, app.globalData.store || wx.getStorageSync('dine_store'), token)
+          return
+        }
+        if (!this._checkoutStale(gen)) this.clearTableBinding()
       } catch (_) {
+        if (this._checkoutStale(gen)) return
         // 网络抖动：保留本地绑定，避免真机反复要求扫码
         if (cached && (cached.table_name || cached.table_no)) {
           this._applyBoundTable(cached, app.globalData.store || wx.getStorageSync('dine_store'), token)
@@ -228,10 +255,13 @@ Page({
       await auth.ensureLogin()
       const sid = this.storeId()
       if (!sid) {
-        this.setData({ tableOptions: [], needScanHint: true })
+        if (!this._checkoutStale(gen)) {
+          this.setData({ tableOptions: [], needScanHint: !token })
+        }
         return
       }
       const list = await api.get('/miniprogram/tables', { store_id: sid })
+      if (this._checkoutStale(gen)) return
       const options = (list || []).map((t) => ({
         label: t.table_name || t.table_no,
         id: t.id,
@@ -240,24 +270,40 @@ Page({
         table_no: t.table_no,
         table_name: t.table_name,
       }))
-      this.setData({ tableOptions: options, needScanHint: !options.length })
+      this.setData({ tableOptions: options, needScanHint: !token && !options.length })
     } catch (_) {
-      this.setData({ tableOptions: [], needScanHint: true })
+      if (!this._checkoutStale(gen)) {
+        this.setData({ tableOptions: [], needScanHint: !token })
+      }
     }
   },
 
-  async _softRefreshTable(token) {
-    try {
-      const entry = await api.get('/miniprogram/entry', { token, channel: 'wechat' }, false)
-      if (!(entry && entry.table && entry.table.qr_token)) return
-      this._applyBoundTable(entry.table, entry.store || null, entry.table.qr_token)
-    } catch (_) {
-      /* 静默失败，保留本地 */
+  async _softRefreshTable(token, checkoutGen) {
+    const gen = checkoutGen != null ? checkoutGen : this._checkoutGen
+    if (this._checkoutStale(gen)) return
+    const refreshed = await dineCtx.refreshTableBinding({ channel: 'wechat' })
+    if (this._checkoutStale(gen)) return
+    if (refreshed.ok && refreshed.ctx) {
+      this._applyBoundTable(refreshed.ctx.table, refreshed.ctx.store, refreshed.token)
     }
+  },
+
+  async _ensureTableTokenForSubmit() {
+    const refreshed = await dineCtx.refreshTableBinding({ channel: 'wechat' })
+    if (refreshed.ok && refreshed.token) {
+      if (refreshed.ctx) {
+        this._applyBoundTable(refreshed.ctx.table, refreshed.ctx.store, refreshed.token)
+      }
+      return refreshed.token
+    }
+    return String(
+      this.data.tableToken || app.globalData.tableToken || wx.getStorageSync('table_token') || ''
+    ).trim()
   },
 
   async scanTable() {
     this._bindingTable = true
+    this._checkoutGen = (this._checkoutGen || 0) + 1
     try {
       const ctx = await dineCtx.scanAndBindTable()
       if (!ctx) return
@@ -600,9 +646,7 @@ Page({
       })
       return
     }
-    const tableToken = String(
-      this.data.tableToken || app.globalData.tableToken || wx.getStorageSync('table_token') || ''
-    ).trim()
+    let tableToken = await this._ensureTableTokenForSubmit()
     if (!tableToken) {
       wx.showToast({ title: '请先扫描或选择桌号', icon: 'none' })
       await this.resolveTable()
@@ -639,8 +683,16 @@ Page({
     } catch (e) {
       const msg = (e && e.message) || '下单失败'
       if (/无效桌台|桌台二维码|选择桌号/.test(msg)) {
-        this.clearTableBinding()
-        await this.resolveTable()
+        const retry = await dineCtx.refreshTableBinding({ channel: 'wechat' })
+        if (retry.ok && retry.token) {
+          wx.showToast({ title: '桌台已刷新，请再次提交', icon: 'none', duration: 2500 })
+          if (retry.ctx) {
+            this._applyBoundTable(retry.ctx.table, retry.ctx.store, retry.token)
+          }
+        } else {
+          this.clearTableBinding()
+          await this.resolveTable()
+        }
       }
       if (!/取消支付/.test(msg)) {
         wx.showToast({ title: msg, icon: 'none', duration: 2500 })

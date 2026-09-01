@@ -404,6 +404,37 @@ class CustomerService:
         return base
 
     @staticmethod
+    async def resolve_wechat_openid(
+        db: AsyncSession,
+        customer_id: int,
+        *,
+        prefer_openid: str | None = None,
+    ) -> str | None:
+        """同一顾客可能绑定多个微信 openid（手机号合并/unionid），取优先或最新一条。"""
+        prefer = (prefer_openid or "").strip()
+        if prefer:
+            matched = (
+                await db.execute(
+                    select(CustomerWechatAccount.openid)
+                    .where(
+                        CustomerWechatAccount.customer_id == customer_id,
+                        CustomerWechatAccount.openid == prefer,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if matched:
+                return matched
+        return (
+            await db.execute(
+                select(CustomerWechatAccount.openid)
+                .where(CustomerWechatAccount.customer_id == customer_id)
+                .order_by(CustomerWechatAccount.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
     async def get_or_create_by_wechat(db: AsyncSession, openid: str, unionid: str | None = None) -> Customer:
         result = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
         account = result.scalar_one_or_none()
@@ -551,7 +582,7 @@ class OrderCreateService:
             from app.services.table_resolve import resolve_dining_table
 
             # 有 table_token 时以桌台解析出门店为准，避免前端缓存 store_id 与桌台不一致
-            table = await resolve_dining_table(db, table_token)
+            table = await resolve_dining_table(db, table_token, store_id=store_id)
             if not table:
                 raise AppException(40403, "无效桌台二维码（请扫桌码，或确认页选择桌号）")
             table_id = table.id

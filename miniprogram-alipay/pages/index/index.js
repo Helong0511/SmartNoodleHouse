@@ -1,33 +1,18 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
-const { enableAlipayUserProfile } = require('../../config/env')
+const privacy = require('../../utils/privacy')
+const phoneAuth = require('../../utils/phoneAuth')
+const {
+  enableChooseAvatar,
+  enableNicknameInput,
+  enableAlipayPhoneBind,
+  resolveApiBase,
+  getEnvDebugInfo
+} = require('../../config/env')
 
 function appRef() {
   return auth.getAppSafe()
-}
-
-const PLACEHOLDER_NICKS = new Set(['联调员', '面馆会员', '微信用户', '支付宝用户'])
-
-function isPlaceholderNickname(name) {
-  const n = String(name || '').trim()
-  return !n || PLACEHOLDER_NICKS.has(n)
-}
-
-function parseAlipayUserInfo(res) {
-  if (!res) return { nickname: '', avatarUrl: '' }
-  let raw = res.response != null ? res.response : res
-  if (typeof raw === 'string') {
-    try {
-      raw = JSON.parse(raw)
-    } catch (_) {
-      return { nickname: '', avatarUrl: '' }
-    }
-  }
-  const info = (raw && raw.response) || raw || {}
-  const nickname = String(info.nickName || info.nick || info.userName || '').trim()
-  const avatarUrl = String(info.avatar || info.avatarUrl || '').trim()
-  return { nickname, avatarUrl }
 }
 
 Page({
@@ -37,17 +22,41 @@ Page({
     hasTable: false,
     showMemberPrompt: false,
     saving: false,
+    needPrivacyAgree: false,
     table: null,
     storeName: '',
     nickname: '',
     avatarUrl: '',
     phone: '',
     phoneInput: '',
-    canUseAlipayProfile: !!enableAlipayUserProfile,
+    canChooseAvatar: false,
+    useAlipayNickname: false,
+    canAlipayPhone: false,
+    privacyTip: '',
+    debugInfo: '',
+    nicknameReviewFail: false,
     memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
   },
 
+  buildDebugInfo(extra) {
+    const env = getEnvDebugInfo()
+    const parts = [
+      `环境:${env.envVersion}`,
+      `支付宝能力:${env.privacyApis ? '开' : '关'}`,
+      `隐私待同意:${this.data.needPrivacyAgree ? '是' : '否'}`
+    ]
+    if (extra) parts.push(extra)
+    return `${parts.join(' | ')} | ${env.apiBase}`
+  },
+
   onLoad(query) {
+    const env = getEnvDebugInfo()
+    this.setData({
+      canChooseAvatar: !!enableChooseAvatar,
+      useAlipayNickname: !!enableNicknameInput,
+      canAlipayPhone: !!enableAlipayPhoneBind,
+      debugInfo: env.envVersion === 'release' ? '' : this.buildDebugInfo()
+    })
     const app = appRef()
     if (query.token && app) {
       app.globalData.tableToken = query.token
@@ -55,6 +64,42 @@ Page({
     }
     if (query.channel && app) app.globalData.channel = query.channel
     this.bootstrap()
+  },
+
+  onShow() {
+    const app = appRef()
+    if (app && app._privacyPopup && app.globalData.needPrivacyPopup) {
+      app._privacyPopup.show()
+    }
+  },
+
+  async refreshPrivacyState() {
+    const setting = await privacy.setupPrivacy()
+    const need = !!setting.needAuthorization
+    const apiHint = (appRef() && appRef().globalData.apiBase) || resolveApiBase()
+    const baseTip = need
+      ? '请先点击上方「同意隐私政策」，再获取头像/昵称/手机号；也可手输昵称与手机号，或从相册选头像。'
+      : '点头像选支付宝头像，点昵称框后在键盘上方选支付宝昵称。'
+    this.setData({
+      needPrivacyAgree: need,
+      privacyTip: `${baseTip} 接口：${apiHint}`,
+      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo()
+    })
+    return !need
+  },
+
+  openPrivacyContract() {
+    privacy.openPrivacyContract()
+  },
+
+  onPrivacyAgree() {
+    privacy.finishPrivacyAgree('agree-btn')
+    this.setData({
+      needPrivacyAgree: false,
+      privacyTip: `已同意隐私政策。请点头像选头像，点昵称框获取支付宝昵称。 接口：${(appRef() && appRef().globalData.apiBase) || resolveApiBase()}`,
+      debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('隐私已同意')
+    })
+    my.showToast({ content: '已同意，请继续操作', type: 'success' })
   },
 
   async bootstrap() {
@@ -73,9 +118,7 @@ Page({
         try {
           const entry = await api.get('/miniprogram/entry', { token: ctx.table.qr_token || token, channel: 'alipay' }, false)
           if (entry && entry.prompts) {
-            this.setData({
-              memberText: entry.prompts.member_consent_text
-            })
+            this.setData({ memberText: entry.prompts.member_consent_text })
           }
         } catch (_) {}
       }
@@ -84,33 +127,32 @@ Page({
         login = await auth.ensureLogin(token)
       } catch (loginErr) {
         console.error('[bootstrap login]', loginErr)
-        const loginMsg = auth.formatError(loginErr, '登录失败')
         my.showToast({
-          content: loginMsg.length > 28 ? `${loginMsg.slice(0, 28)}…` : loginMsg,
+          content: auth.formatError(loginErr, '登录失败'),
           type: 'none',
           duration: 3500
         })
       }
       const nickname = (login && login.nickname) || gd.nickname || ''
-      const showMemberPrompt = !!(login && login.need_member_prompt) || isPlaceholderNickname(nickname)
+      const showMemberPrompt = !!(login && login.need_member_prompt) || auth.isPlaceholderNickname(nickname)
       const avatarUrl = (login && login.avatar_url) || gd.avatarUrl || ''
-      let phone = ''
-      try {
-        const me = await api.get('/miniprogram/customers/me').catch(() => null)
-        if (me && me.phone) phone = me.phone
-      } catch (_) {}
       this.setData({
         loading: false,
-        nickname: isPlaceholderNickname(nickname) ? '' : nickname,
+        nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
         avatarUrl,
-        phone,
+        phone: '',
         showMemberPrompt,
         ready: true,
         table: ctx.table,
         storeName: ctx.storeName,
         hasTable: ctx.hasTable
       })
-      if (login && login.nickname && !isPlaceholderNickname(login.nickname)) {
+      api.get('/miniprogram/customers/me')
+        .then((me) => {
+          if (me && me.phone) this.setData({ phone: me.phone })
+        })
+        .catch(() => {})
+      if (login && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
       }
       if (login && login.customer_id && app) {
@@ -120,11 +162,14 @@ Page({
       if (login && login.customer_no) {
         my.setStorageSync({ key: 'customer_no', data: login.customer_no })
       }
+      await this.refreshPrivacyState()
+      if (login && auth.isProfileComplete(login)) {
+        this.goMenu()
+        return
+      }
     } catch (e) {
       this.setData({ loading: false, ready: true, hasTable: false })
-      const msg = auth.formatError(e, '初始化失败')
-      console.error('[bootstrap]', e)
-      my.alert({ title: '初始化失败', content: msg })
+      my.alert({ title: '初始化失败', content: auth.formatError(e, '初始化失败') })
     }
   },
 
@@ -144,12 +189,29 @@ Page({
       })
   },
 
-  onNickname(e) {
-    this.setData({ nickname: e.detail.value })
-  },
-
-  onPhoneInput(e) {
-    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  onChooseAvatar(e) {
+    const detail = (e && e.detail) || {}
+    const url = detail.avatarUrl || detail.avatar || ''
+    const errMsg = String(detail.errMsg || detail.errorMessage || '')
+    if (!url) {
+      if (/privacy|authorize|协议|声明|agree|scope/i.test(errMsg)) {
+        this.setData({
+          needPrivacyAgree: true,
+          debugInfo: getEnvDebugInfo().envVersion === 'release' ? '' : this.buildDebugInfo('头像:隐私')
+        })
+        privacy.showPrivacyPopup()
+        my.alert({
+          title: '需配置隐私政策',
+          content: '请在开放平台配置小程序隐私政策并声明头像能力；临时可用相册选图+手输昵称。'
+        })
+        return
+      }
+      if (/cancel/i.test(errMsg)) return
+      my.showToast({ content: errMsg || '未选头像', type: 'none' })
+      return
+    }
+    this.applyProfile('', url)
+    my.showToast({ content: '头像已选择', type: 'success' })
   },
 
   onPickLocalAvatar() {
@@ -184,46 +246,79 @@ Page({
     if (Object.keys(patch).length) this.setData(patch)
   },
 
-  fetchAlipayOpenUserInfo() {
-    return new Promise((resolve, reject) => {
-      if (!my.getOpenUserInfo) {
-        reject(new Error('当前支付宝版本不支持获取昵称'))
-        return
-      }
-      my.getOpenUserInfo({
-        success: (res) => resolve(parseAlipayUserInfo(res)),
-        fail: (err) => reject(err || new Error('获取支付宝资料失败'))
-      })
-    })
+  onNicknameInput(e) {
+    const nickname = (e.detail && e.detail.value) || ''
+    this.setData({ nickname })
+    const app = appRef()
+    if (app) app.globalData.nickname = nickname
   },
 
-  async onGetAlipayProfile() {
-    try {
-      const profile = await this.fetchAlipayOpenUserInfo()
-      if (!profile.nickname && !profile.avatarUrl) {
-        my.showToast({ content: '未获取到支付宝昵称', type: 'none' })
-        return
-      }
-      this.applyProfile(profile.nickname, profile.avatarUrl)
-      my.showToast({ content: profile.nickname ? `已填入 ${profile.nickname}` : '已获取头像', type: 'success' })
-    } catch (e) {
-      my.showToast({ content: auth.formatError(e, '获取失败，请手动输入'), type: 'none' })
+  onNicknameBlur(e) {
+    const nickname = (e.detail && e.detail.value) || ''
+    if (!nickname) return
+    this.setData({ nickname })
+    const app = appRef()
+    if (app) app.globalData.nickname = nickname
+  },
+
+  onNicknameReview(e) {
+    const detail = (e.detail) || {}
+    if (detail.pass === false) {
+      this.setData({ nicknameReviewFail: true, nickname: '' })
+      my.showToast({ content: '昵称未通过审核，请修改', type: 'none' })
+    } else if (detail.pass === true) {
+      this.setData({ nicknameReviewFail: false })
     }
   },
 
-  onGetAlipayProfileFail(e) {
-    const msg = (e && (e.errorMessage || e.error)) || '未授权'
-    my.showToast({ content: String(msg), type: 'none' })
+  onPhoneInput(e) {
+    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
   },
 
-  async onSaveAndGo() {
+  onGetPhoneAuthorize() {
+    phoneAuth.handleGetPhoneAuthorize(this, null, (encrypted) => {
+      try {
+        my.showLoading({ content: '绑定中' })
+        const res = await api.post('/miniprogram/member/phone', { alipay_phone_encrypted: encrypted })
+        const app = appRef()
+        if (res && res.customer_token && app) {
+          auth.refreshCustomerToken(app, res.customer_token, {
+            customer_id: res.customer_id,
+            customer_no: res.customer_no
+          })
+        }
+        my.hideLoading()
+        this.setData({ phone: res.phone || '', phoneInput: '' })
+        my.showToast({ content: '手机号已绑定', type: 'success' })
+      } catch (err) {
+        my.hideLoading()
+        my.showToast({ content: (err && err.message) || '绑定失败，请手输', type: 'none' })
+      }
+    })
+  },
+
+  onGetPhoneAuthorizeFail(e) {
+    phoneAuth.handleGetPhoneAuthorize(this, e || { errorMessage: '未授权' }, null)
+  },
+
+  onFormSubmit(e) {
     if (this.data.saving) return
+    const formVal = (e.detail && e.detail.value) || {}
+    const formNick = String(formVal.nickname || '').trim()
+    const nickname = formNick || String(this.data.nickname || '').trim()
+    this.doSaveAndGo(nickname)
+  },
+
+  async doSaveAndGo(nickname) {
     const app = appRef()
     if (!app) {
       my.showToast({ content: '应用未就绪', type: 'fail' })
       return
     }
-    const nickname = (this.data.nickname || '').trim()
+    if (this.data.useAlipayNickname && this.data.nicknameReviewFail) {
+      my.showToast({ content: '昵称未通过审核，请修改', type: 'fail' })
+      return
+    }
     if (nickname && (nickname.length < 2 || nickname.length > 20)) {
       my.showToast({ content: '昵称需 2-20 个字', type: 'fail' })
       return

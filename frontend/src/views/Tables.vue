@@ -78,24 +78,46 @@
             <div class="qr-desc">微信 / 支付宝均可扫</div>
           </div>
         </div>
-        <p class="hint">贴桌请打印上方二维码。扫码后自动识别微信或支付宝并打开对应小程序。</p>
+        <p class="hint">
+          贴桌请用「一码通扫」。正式环境：开通 URL Link / 明文 Scheme 或「普通链接二维码」后，微信扫码可进小程序。
+          本地开发：微信内扫通扫码只能开 H5；请用下方「微信开发调试码」（官方小程序码），或开发者工具真机调试后再在小程序内扫码绑桌。
+        </p>
         <el-input :model-value="printRow.scan_url || printRow.scan_full" readonly>
           <template #append>
             <el-button @click="copyText(printRow.scan_url || printRow.scan_full)">复制链接</el-button>
           </template>
         </el-input>
-        <details class="more-links">
-          <summary>单独小程序路径（调试用）</summary>
+        <details class="more-links" open>
+          <summary>本地调试码（微信 / 支付宝单独扫）</summary>
           <div class="qr-row sub">
             <div class="qr-item">
-              <img :src="qrImg(printRow.wechat_page)" alt="微信" />
-              <div>微信小程序</div>
+              <img
+                v-if="printRow.wechatMinicodeUrl"
+                :src="printRow.wechatMinicodeUrl"
+                alt="微信小程序码"
+              />
+              <div v-else-if="printRow.wechatMinicodeError" class="qr-error">
+                {{ printRow.wechatMinicodeError }}
+              </div>
+              <div v-else class="qr-loading">正在生成微信小程序码…</div>
+              <div>微信开发调试码</div>
+              <div class="qr-desc">官方小程序码（develop），请用微信扫；勿用 weixin:// 普通二维码</div>
             </div>
             <div class="qr-item">
-              <img :src="qrImg(printRow.alipay_page)" alt="支付宝" />
-              <div>支付宝小程序</div>
+              <img :src="qrImg(printRow.alipay_scheme || printRow.alipay_qr_url)" alt="支付宝" />
+              <div>支付宝 Scheme</div>
+              <div class="qr-desc">需配置 ALIPAY_APP_ID；开发版先开联调</div>
             </div>
           </div>
+          <p class="hint debug-steps">
+            若仍无法打开：1）开发者工具先「真机预览/真机调试」一次；2）手机微信号须是该小程序的开发者/体验者；
+            3）公众平台确认 AppID 与 .env 一致。
+          </p>
+          <el-button
+            class="copy-scheme"
+            size="small"
+            @click="copyText(printRow.wechat_scheme || printRow.wechat_qr_url)"
+          >复制微信 Scheme（备用，系统浏览器打开）</el-button>
         </details>
       </div>
       <template #footer>
@@ -188,15 +210,55 @@ function openForm(row?: any) {
   dialogVisible.value = true
 }
 
-function openPrint(row: any) {
+async function openPrint(row: any) {
   const scanUrl = row.scan_url || h5Full(`/scan?token=${encodeURIComponent(row.qr_token)}`)
+  if (printRow.value?.wechatMinicodeUrl?.startsWith('blob:')) {
+    URL.revokeObjectURL(printRow.value.wechatMinicodeUrl)
+  }
   printRow.value = {
     ...row,
     scan_url: scanUrl,
     scan_full: scanUrl,
+    // 优先用接口现算的 scheme（含 env_version），勿用库里可能过期的 wechat_qr_url
+    wechat_scheme: row.wechat_scheme || row.wechat_qr_url,
+    alipay_scheme: row.alipay_scheme || row.alipay_qr_url,
     h5_full: h5Full(row.h5_order_url || row.h5_fallback || `/order?token=${row.qr_token}`),
+    wechatMinicodeUrl: '',
+    wechatMinicodeError: '',
   }
   printVisible.value = true
+  await loadWechatMinicode(row.qr_token)
+}
+
+async function loadWechatMinicode(token: string) {
+  if (!token || !printRow.value) return
+  try {
+    const res = await api.get('/miniprogram/wechat-debug-qrcode', {
+      params: { token },
+      responseType: 'blob',
+    })
+    const blob = res instanceof Blob ? res : (res as any)?.data
+    if (!(blob instanceof Blob)) {
+      printRow.value.wechatMinicodeError = '小程序码返回格式异常'
+      return
+    }
+    if (blob.type && blob.type.includes('json')) {
+      const text = await blob.text()
+      try {
+        const j = JSON.parse(text)
+        printRow.value.wechatMinicodeError = j.message || '生成微信小程序码失败'
+      } catch {
+        printRow.value.wechatMinicodeError = '生成微信小程序码失败'
+      }
+      return
+    }
+    printRow.value.wechatMinicodeUrl = URL.createObjectURL(blob)
+    printRow.value.wechatMinicodeError = ''
+  } catch (e: any) {
+    if (printRow.value) {
+      printRow.value.wechatMinicodeError = e.message || '生成微信小程序码失败'
+    }
+  }
 }
 
 async function copyText(text: string) {
@@ -283,7 +345,25 @@ onMounted(async () => {
 .qr-item.primary img { width: 220px; height: 220px; }
 .qr-label { font-size: 14px; font-weight: 600; color: #333; margin-top: 4px; }
 .qr-desc { font-size: 12px; color: #888; }
+.qr-loading, .qr-error {
+  width: 140px;
+  height: 140px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: #f5f5f5;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+.qr-error { color: #c45656; background: #fff1f0; }
+.hint.debug-steps { text-align: left; margin-top: 10px; }
 .more-links { margin-top: 16px; text-align: left; font-size: 13px; color: #666; }
+.copy-scheme { margin-top: 10px; }
 .qr-row.sub { margin-top: 12px; }
 .qr-row.sub .qr-item img { width: 140px; height: 140px; }
 .hint { color: #999; font-size: 12px; margin: 8px 0 12px; }

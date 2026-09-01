@@ -13,20 +13,69 @@ function formatPrefLabel(p) {
   return `${p.category}·${p.option_name || p.option_code}`
 }
 
+/** 同规格组（如加料）合并为一项，避免菜单重复显示「加料·xxx」 */
+function groupPrefsByCategory(prefs) {
+  const groups = []
+  const map = new Map()
+  for (const p of prefs || []) {
+    const cat = String(p.category || '').trim()
+    if (!cat) continue
+    if (!map.has(cat)) {
+      const group = { category: cat, options: [], items: [], key: cat }
+      map.set(cat, group)
+      groups.push(group)
+    }
+    const group = map.get(cat)
+    const name = String(p.option_name || p.option_code || '').trim()
+    if (name && group.options.indexOf(name) < 0) group.options.push(name)
+    group.items.push(p)
+  }
+  return groups
+}
+
+function formatGroupedPrefLabel(group) {
+  const opts = (group.options || []).join('、')
+  return opts ? `${group.category}·${opts}` : group.category
+}
+
 function formatPrefSummary(prefs, max = 3) {
-  const list = prefs || []
-  if (!list.length) return ''
-  const text = list.slice(0, max).map(formatPrefLabel).join('、')
+  const grouped = groupPrefsByCategory(prefs)
+  if (!grouped.length) return ''
+  const text = grouped.slice(0, max).map(formatGroupedPrefLabel).join('、')
   return `智能口味：${text}`
 }
 
-/** 菜单顶栏摘要：超过 maxShow 条时显示「等 N 项」 */
+/** 菜单顶栏摘要：超过 maxShow 组时显示「等 N 项」 */
 function formatPrefBriefBody(prefs, maxShow = 3) {
-  const list = prefs || []
-  if (!list.length) return ''
-  const shown = list.slice(0, maxShow).map(formatPrefLabel)
-  if (list.length > maxShow) return `${shown.join('、')} 等${list.length}项`
+  const grouped = groupPrefsByCategory(prefs)
+  if (!grouped.length) return ''
+  const shown = grouped.slice(0, maxShow).map(formatGroupedPrefLabel)
+  if (grouped.length > maxShow) return `${shown.join('、')} 等${grouped.length}项`
   return shown.join('、')
+}
+
+function groupDecoratedPrefs(items) {
+  return groupPrefsByCategory(items).map((g) => {
+    const status = g.items.some((i) => i.status === 'learning') ? 'learning' : 'confirmed'
+    const totalCount = g.items.reduce((sum, i) => sum + (i.order_count || 0), 0)
+    let statusText = '已确认'
+    if (status === 'learning') {
+      statusText = totalCount >= MIN_ORDER_COUNT
+        ? '学习中'
+        : `再点${Math.max(0, MIN_ORDER_COUNT - totalCount)}次更准`
+    }
+    const names = g.options.join('、')
+    return {
+      key: g.key,
+      category: g.category,
+      option_name: names,
+      option_code: g.items.map((i) => i.option_code).filter(Boolean).join(','),
+      status,
+      statusText,
+      freqText: totalCount > 0 ? `点过${totalCount}次` : '',
+      scoreText: scoreText(g.items[0] && g.items[0].score)
+    }
+  })
 }
 
 function decoratePref(p, status) {
@@ -70,14 +119,15 @@ function buildPrefDisplay(prefRes) {
   // 加购/预选须用全量爱好（含加料多项、末位规格组），不能只取 API 已确认子集
   const prefs = buildPrefsForApply(all)
   const displayList = prefs.length ? prefs : (confirmed.length ? confirmed : learning)
+  const groupedDisplay = groupPrefsByCategory(displayList)
 
   return {
-    confirmed,
-    learning,
+    confirmed: groupDecoratedPrefs(confirmed),
+    learning: groupDecoratedPrefs(learning),
     prefs,
     prefSummary: formatPrefBriefBody(displayList),
-    prefItems: displayList.map(formatPrefLabel),
-    prefCount: displayList.length,
+    prefItems: groupedDisplay.map(formatGroupedPrefLabel),
+    prefCount: groupedDisplay.length,
     hasAny: confirmed.length > 0 || learning.length > 0,
     isEmpty: all.length === 0
   }
@@ -253,6 +303,9 @@ module.exports = {
   formatPrefSummary,
   formatPrefBriefBody,
   formatPrefLabel,
+  groupPrefsByCategory,
+  formatGroupedPrefLabel,
+  groupDecoratedPrefs,
   buildPrefDisplay,
   loadCustomerPrefs,
   clearPrefsCache,

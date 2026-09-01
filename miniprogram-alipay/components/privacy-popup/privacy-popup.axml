@@ -1,0 +1,18 @@
+<view class="mask" a:if="{{visible}}" catchTouchMove="noop">
+  <view class="panel">
+    <view class="title">隐私保护提示</view>
+    <view class="content">
+      为提供会员注册、头像昵称展示等服务，需你阅读并同意
+      <text class="link" onTap="openContract">《小程序隐私政策》</text>。
+    </view>
+    <view class="actions">
+      <button class="btn-reject" onTap="onReject">拒绝</button>
+      <button
+        id="agree-btn"
+        class="btn-agree"
+        open-type="agreePrivacyAuthorization"
+        onAgreePrivacyAuthorization="onAgree"
+      >同意</button>
+    </view>
+  </view>
+</view>

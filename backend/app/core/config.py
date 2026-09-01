@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     alipay_app_id: str = ""
     alipay_private_key: str = ""
     alipay_public_key: str = ""
+    alipay_aes_key: str = ""
     alipay_gateway: str = "https://openapi.alipay.com/gateway.do"
     alipay_notify_url: str = ""
     alipay_return_url: str = ""
@@ -122,6 +123,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     # 顾客 H5/一码通扫对外域名（如 https://order.example.com）；留空则用 CORS 首项
     h5_public_base_url: str = ""
+    # 本地真机扫 H5 桌台码：与 miniprogram-*/config/env.js 的 DEV_LAN_HOST 保持一致
+    dev_lan_host: str = ""
+    # 桌台码跳转小程序版本：develop | trial | release；留空则 development→develop，production→release
+    mini_program_env_version: str = ""
     # 顾客叫号屏访问令牌（留空=不校验；生产建议设置后写入屏端 URL ?token=）
     display_screen_token: str = ""
 
@@ -132,6 +137,13 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.app_env.lower() in ("development", "dev", "local")
+
+    @property
+    def resolved_mini_program_env_version(self) -> str:
+        ver = (self.mini_program_env_version or "").strip().lower()
+        if ver in ("develop", "trial", "release"):
+            return ver
+        return "release" if self.is_production else "develop"
 
     order_payment_timeout_minutes: int = 15
     kitchen_auto_complete_minutes: int = 20

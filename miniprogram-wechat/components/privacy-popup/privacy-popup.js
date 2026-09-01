@@ -36,16 +36,8 @@ Component({
     },
 
     onAgree() {
-      const app = getApp()
-      const resolve = app && app.globalData && app.globalData.privacyResolve
       this.hide()
-      if (app && app.globalData) {
-        app.globalData.needPrivacyPopup = false
-        app.globalData.privacyResolve = null
-      }
-      if (typeof resolve === 'function') {
-        resolve({ buttonId: 'agree-btn', event: 'agree' })
-      }
+      privacy.finishPrivacyAgree('agree-btn')
       try {
         const pages = getCurrentPages()
         const page = pages && pages[pages.length - 1]
@@ -60,16 +52,7 @@ Component({
     },
 
     onReject() {
-      const app = getApp()
-      const resolve = app && app.globalData && app.globalData.privacyResolve
-      this.hide()
-      if (app && app.globalData) {
-        app.globalData.needPrivacyPopup = false
-        app.globalData.privacyResolve = null
-      }
-      if (typeof resolve === 'function') {
-        resolve({ event: 'disagree' })
-      }
+      privacy.finishPrivacyReject()
       wx.showToast({ title: '需同意后才能获取头像昵称', icon: 'none' })
     }
   }

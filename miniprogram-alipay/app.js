@@ -1,3 +1,4 @@
+const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
@@ -14,7 +15,9 @@ App({
     table: null,
     store: null,
     channel: 'alipay',
-    cart: []
+    cart: [],
+    needPrivacyPopup: false,
+    privacyResolve: null
   },
   onLaunch(options) {
     if (!this.globalData.apiBase) {
@@ -31,6 +34,8 @@ App({
     this.globalData.tableToken = auth.readStorage('table_token') || ''
     tabCartBadge.updateTabCartBadge(this.globalData.cart)
     this.parseLaunch(options)
+    privacy.setupPrivacy()
+    privacy.bindAppPrivacyHandler(this)
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

@@ -2,6 +2,9 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const privacy = require('../../utils/privacy')
+const phoneAuth = require('../../utils/phoneAuth')
+const { enableAlipayPhoneBind, enableNicknameInput } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
@@ -52,6 +55,10 @@ Page({
     walletLoading: false,
     phone: '',
     phoneInput: '',
+    canAlipayPhone: false,
+    useAlipayNickname: false,
+    needPrivacyAgree: false,
+    nicknameReviewFail: false,
     storeName: '',
     storeNo: '',
     storeAddress: '',
@@ -62,6 +69,16 @@ Page({
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
+    if (app._privacyPopup && app.globalData.needPrivacyPopup) {
+      app._privacyPopup.show()
+    }
+    this.setData({
+      canAlipayPhone: !!enableAlipayPhoneBind,
+      useAlipayNickname: !!enableNicknameInput
+    })
+    privacy.setupPrivacy().then((setting) => {
+      this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
+    })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadProfile()
@@ -193,9 +210,30 @@ Page({
     this.setData({ nicknameDraft: (e.detail && e.detail.value) || '' })
   },
 
-  async saveNickname() {
+  onNicknameDraftReview(e) {
+    const detail = (e.detail) || {}
+    if (detail.pass === false) {
+      this.setData({ nicknameReviewFail: true, nicknameDraft: '' })
+      my.showToast({ content: '昵称未通过审核，请修改', type: 'none' })
+    } else if (detail.pass === true) {
+      this.setData({ nicknameReviewFail: false })
+    }
+  },
+
+  onSaveNicknameForm(e) {
     if (this.data.savingName) return
-    const nickname = (this.data.nicknameDraft || '').trim()
+    const formVal = (e.detail && e.detail.value) || {}
+    const nickname = String(formVal.nickname || this.data.nicknameDraft || '').trim()
+    this.saveNickname(nickname)
+  },
+
+  async saveNickname(nicknameArg) {
+    if (this.data.savingName) return
+    const nickname = String(nicknameArg != null ? nicknameArg : this.data.nicknameDraft || '').trim()
+    if (this.data.useAlipayNickname && this.data.nicknameReviewFail) {
+      my.showToast({ content: '昵称未通过审核，请修改', type: 'fail' })
+      return
+    }
     if (nickname.length < 2 || nickname.length > 20) {
       my.showToast({ content: '昵称需 2-20 个字', type: 'fail' })
       return
@@ -239,6 +277,16 @@ Page({
 
   onPhoneInput(e) {
     this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  },
+
+  onGetPhoneAuthorize() {
+    phoneAuth.handleGetPhoneAuthorize(this, null, (encrypted) => {
+      this._savePhone({ alipay_phone_encrypted: encrypted })
+    })
+  },
+
+  onGetPhoneAuthorizeFail(e) {
+    phoneAuth.handleGetPhoneAuthorize(this, e || { errorMessage: '未授权' }, null)
   },
 
   async bindPhone() {

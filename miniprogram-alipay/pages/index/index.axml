@@ -1,4 +1,6 @@
 <view class="page">
+  <privacy-popup id="privacy-popup" />
+
   <view class="hero">
     <view class="brand">智能面馆</view>
     <view class="sub" a:if="{{storeName}}">{{storeName}}</view>
@@ -13,66 +15,101 @@
     <view class="title">{{showMemberPrompt ? '注册会员，享受更多便利' : '欢迎回来'}}</view>
     <view class="desc">{{showMemberPrompt ? memberText : '完善头像、昵称、手机号后开始点餐。'}}</view>
 
-    <view class="profile-block">
-      <view class="avatar-wrap">
-        <button
-          a:if="{{canUseAlipayProfile}}"
-          class="avatar-btn"
-          open-type="getAuthorize"
-          scope="userInfo"
-          onGetAuthorize="onGetAlipayProfile"
-          onError="onGetAlipayProfileFail"
-        >
-          <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
-          <view class="avatar ph" a:else>头</view>
-        </button>
-        <view a:else class="avatar-btn avatar-static" onTap="onPickLocalAvatar">
-          <image class="avatar" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
-          <view class="avatar ph" a:else>头</view>
+    <view class="privacy-box" a:if="{{needPrivacyAgree}}">
+      <view class="privacy-text">
+        使用头像、昵称、手机号前，请先阅读并同意
+        <text class="link" onTap="openPrivacyContract">《小程序隐私政策》</text>
+      </view>
+      <button
+        id="agree-btn"
+        class="btn-primary privacy-agree"
+        open-type="agreePrivacyAuthorization"
+        onAgreePrivacyAuthorization="onPrivacyAgree"
+      >同意隐私政策</button>
+    </view>
+
+    <form onSubmit="onFormSubmit">
+      <view class="profile-block">
+        <view class="avatar-wrap">
+          <button
+            a:if="{{canChooseAvatar}}"
+            class="avatar-btn"
+            open-type="chooseAvatar"
+            onChooseAvatar="onChooseAvatar"
+          >
+            <view class="avatar-inner">
+              <image class="avatar-img" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
+              <text class="avatar-ph" a:else>头</text>
+            </view>
+          </button>
+          <view a:else class="avatar-btn avatar-static" onTap="onPickLocalAvatar">
+            <view class="avatar-inner">
+              <image class="avatar-img" src="{{avatarUrl}}" mode="aspectFill" a:if="{{avatarUrl}}" />
+              <text class="avatar-ph" a:else>头</text>
+            </view>
+          </view>
+          <text class="avatar-label">{{canChooseAvatar ? '支付宝头像' : '点选头像'}}</text>
         </view>
-        <text class="avatar-label">点头像授权</text>
+
+        <view class="nick-wrap">
+          <input
+            a:if="{{useAlipayNickname}}"
+            class="input nick"
+            type="nickname"
+            name="nickname"
+            maxlength="20"
+            placeholder="点此获取支付宝昵称"
+            value="{{nickname}}"
+            onInput="onNicknameInput"
+            onBlur="onNicknameBlur"
+            onNicknameReview="onNicknameReview"
+          />
+          <input
+            a:else
+            class="input nick"
+            type="text"
+            name="nickname"
+            maxlength="20"
+            placeholder="请输入昵称（2-20字）"
+            value="{{nickname}}"
+            onInput="onNicknameInput"
+            onBlur="onNicknameBlur"
+          />
+          <text class="avatar-label">{{useAlipayNickname ? '点输入框→键盘上方选昵称' : '手动输入昵称'}}</text>
+        </view>
       </view>
 
-      <view class="nick-wrap">
-        <input
-          class="input nick"
-          maxlength="20"
-          placeholder="请输入昵称（2-20字）"
-          value="{{nickname}}"
-          onInput="onNickname"
-        />
-        <text class="avatar-label">可手输，或点头像自动填入</text>
+      <button class="btn-ghost album-btn" catchTap="onPickLocalAvatar">从相册选择头像</button>
+
+      <view class="phone-box">
+        <view class="phone-title">手机号</view>
+        <view class="phone-ok" a:if="{{phone}}">已绑定 {{phone}}</view>
+        <block a:else>
+          <button
+            a:if="{{canAlipayPhone}}"
+            class="btn-ghost phone-btn"
+            open-type="getAuthorize"
+            scope="phoneNumber"
+            onGetAuthorize="onGetPhoneAuthorize"
+            onError="onGetPhoneAuthorizeFail"
+          >支付宝授权手机号</button>
+          <input
+            class="input phone-input"
+            type="number"
+            maxlength="11"
+            placeholder="或手动输入11位手机号"
+            value="{{phoneInput}}"
+            onInput="onPhoneInput"
+          />
+        </block>
       </view>
-    </view>
 
-    <button
-      a:if="{{canUseAlipayProfile}}"
-      class="btn-ghost profile-btn"
-      open-type="getAuthorize"
-      scope="userInfo"
-      onGetAuthorize="onGetAlipayProfile"
-      onError="onGetAlipayProfileFail"
-    >获取支付宝头像和昵称</button>
-    <button class="btn-ghost album-btn" onTap="onPickLocalAvatar">从相册选择头像</button>
+      <view class="dev-tip">{{privacyTip}}</view>
+      <view class="dev-tip debug" a:if="{{debugInfo}}">{{debugInfo}}</view>
 
-    <view class="phone-box">
-      <view class="phone-title">手机号</view>
-      <view class="phone-ok" a:if="{{phone}}">已绑定 {{phone}}</view>
-      <block a:else>
-        <input
-          class="input phone-input"
-          type="number"
-          maxlength="11"
-          placeholder="请输入11位手机号"
-          value="{{phoneInput}}"
-          onInput="onPhoneInput"
-        />
-      </block>
-    </view>
+      <button class="btn-primary" formType="submit" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
+    </form>
 
-    <view class="dev-tip">支付宝可点头像一键取昵称头像；手机号请手输绑定（保存时一并提交）。</view>
-
-    <button class="btn-primary" loading="{{saving}}" onTap="onSaveAndGo">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     <button class="btn-ghost skip" onTap="goMenu">先点餐，稍后再改</button>
     <button class="btn-ghost skip" onTap="scanTable">{{hasTable ? '重新扫码换桌' : '扫一扫绑桌'}}</button>
     <button class="btn-ghost skip" onTap="goMember">会员中心</button>

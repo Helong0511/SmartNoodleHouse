@@ -31,11 +31,49 @@
 # 4. 若仍失败：设置 → 微信 → 小程序 → 找到本测试号 → 打开摄像头
 # 5. 拍照后失败再看后端（uvicorn --host 0.0.0.0:8000、人脸检测报错文案）
 #
+# ── 微信头像/昵称/手机号 chooseAvatar:fail scope not declared ──
+# 报错：chooseAvatar:fail api scope is not declared in the privacy agreement
+# 原因：公众平台《用户隐私保护指引》未声明对应能力（代码无法替代，与 app.json 无关）
+# 1. 登录 https://mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引 → 更新/去完善
+# 2. 在「开发者处理的信息」中勾选（用途示例：会员注册与展示）：
+#      ☑ 收集你的昵称、头像   → chooseAvatar、input type=nickname
+#      ☑ 收集你的手机号       → getPhoneNumber（须非个人主体且已认证）
+# 3. 填写联系方式、存储期限等必填项 → 提交审核（测试号也要配）
+# 4. 审核通过后等待约 5 分钟生效；开发者工具清缓存 → 重新编译
+# 5. 小程序内须先点「同意隐私指引」，再点头像/昵称/手机号
+# 6. 相册选头像不受此限制，可先用手输昵称 +「从相册选择头像」完成注册
+#
+# ── 支付宝头像/昵称/手机号（2024-07 组件化 + 隐私政策）──
+# 1. 开放平台 → 小程序详情 → 基础设置 → 小程序隐私政策（2025 起含 SDK/插件声明）
+# 2. app.json 已启用 usePrivacyCheck: true；真机预览隐私弹窗（开发者工具不支持）
+# 3. 绑定「获取会员手机号」并完成用户信息申请；开发设置配置 AES 密钥 → .env ALIPAY_AES_KEY
+# 4. 发正式版前将 miniprogram-alipay/config/env.js 中 ENABLE_ALIPAY_PRIVACY_APIS 改为 true
+# 5. 头像/昵称使用 chooseAvatar + input type=nickname（勿再用 my.getOpenUserInfo 一键取）
+#
 # ── 规格「默认项」不保存/不显示 ──
 # 1. 执行 sql/tools/009_option_is_default.sql（老库加 is_default 列）
 # 2. 修改 backend 代码后必须重启 uvicorn（否则 API 仍返回旧字段，保存会被静默丢弃）
 # 3. 规格管理页可点「设为默认」，或编辑选项打开「设为默认」开关
 # 4. 仍不显示：netstat -ano | findstr :8000 若同时出现 127.0.0.1 与 0.0.0.0 两个 LISTENING，
+#    关掉多余进程，只保留 --host 0.0.0.0:8000 那一个。
+#
+# ── 真机扫「二合一桌台码」显示 127.0.0.1 / 网络出错 ──
+# 原因：.env 里 H5_PUBLIC_BASE_URL 或已打印的二维码仍是 http://127.0.0.1:5173
+#       手机访问 127.0.0.1 等于访问手机自身，不是开发电脑。
+# 处理：
+#   1. .env 设置 H5_PUBLIC_BASE_URL=http://192.168.1.110:5173、DEV_LAN_HOST=192.168.1.110
+#   2. VITE_API_BASE_URL=/api/v1（勿写 127.0.0.1:8000）
+#   3. 前端 npm run dev 须监听 0.0.0.0（vite.config 已 host:0.0.0.0）
+#   4. 重启后端 + 前端；后台「桌台管理」重新打印/下载二维码（旧 BMP 内 URL 不会自动变）
+#   5. 手机与电脑同一 WiFi；浏览器可先测 http://192.168.1.110:5173/scan?token=桌台token
+# 说明：微信「真机调试」专用码在开发者工具里生成；桌台二合一码先开 H5 再跳小程序 develop 版。
+# 小程序跳转：
+#   - 微信 Scheme 须带 env_version=develop（.env MINI_PROGRAM_ENV_VERSION）
+#   - 微信内浏览器优先用 URL Link；若报 85407：公众平台开启明文 Scheme / URL Link
+#   - 本地最稳：后台桌码弹窗「微信开发调试码」= 官方小程序码（getwxacode）；勿扫 weixin:// 普通二维码
+#   - 或：系统浏览器打开 H5 再点「微信点餐」；或开发者工具「真机调试」码
+#   - 支付宝须配置 ALIPAY_APP_ID；开发版需先 IDE 预览扫码并开「联调设置」
+#
 #    说明旧 uvicorn 子进程占用了本机地址，先执行下方「释放端口」再启动后端
 
 # ────────── Windows 11：释放端口（PowerShell）──────────
@@ -75,7 +113,7 @@ cd E:\SmartNoodleHouse\frontend
 # 首次: npm install
 
 # 仅本机浏览器
-npm run dev -- --host 127.0.0.1 --port 5173
+npm run dev -- --host 0.0.0.0 --port 5173
 
 # 手机访问 H5 扫码页（需 .env 中 H5_PUBLIC_BASE_URL=http://192.168.1.110:5173）
 # npm run dev -- --host 0.0.0.0 --port 5173
