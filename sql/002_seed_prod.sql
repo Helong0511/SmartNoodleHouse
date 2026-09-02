@@ -146,25 +146,21 @@ WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '金卡会员');
 
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '新客满30减5');
+SELECT '满30减5元', 'FIXED', 5.00, 30.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满30减5元');
 
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '满50享9折', 'PERCENT', 0.9000, 50.00, 30 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满50享9折');
+SELECT '满50享打9折', 'PERCENT', 0.9000, 50.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满50享打9折');
 
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '10元无门槛代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '10元无门槛代金券');
+SELECT '10元代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '10元代金券');
 
 -- 六、门店
 INSERT INTO stores (store_no, name, address, phone, status)
-SELECT 'SH01', '智能面馆总店', '请修改为实际地址', '400-001-0001', 1
+SELECT 'SH01', '肠旺面', '城南红砖路88号', '151-9691-4600', 1
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM stores WHERE store_no = 'SH01');
-
-INSERT INTO stores (store_no, name, address, phone, status)
-SELECT 'SH02', '智能面馆分店', '请修改为分店地址', '400-001-0002', 1
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM stores WHERE store_no = 'SH02');
 
 -- 七、系统参数
 INSERT INTO system_settings (setting_key, setting_value, description)
