@@ -266,6 +266,115 @@ class PaymentService:
         return p()
 
     @classmethod
+    async def paid_amount(cls, db: AsyncSession, order_id: int) -> Decimal:
+        """订单已成功入账金额（PAID 支付单合计）。"""
+        total = await db.scalar(
+            select(func.coalesce(func.sum(Payment.amount), 0)).where(
+                Payment.order_id == int(order_id),
+                Payment.status == "PAID",
+            )
+        )
+        return money(total or 0)
+
+    @classmethod
+    async def remaining_amount(cls, db: AsyncSession, order: Order) -> Decimal:
+        rem = money(order.total_amount) - await cls.paid_amount(db, order.id)
+        return rem if rem > 0 else money(0)
+
+    @classmethod
+    async def list_paid_tenders(cls, db: AsyncSession, order_id: int) -> list[dict]:
+        rows = (
+            await db.execute(
+                select(Payment)
+                .where(Payment.order_id == int(order_id), Payment.status == "PAID")
+                .order_by(Payment.id.asc())
+            )
+        ).scalars().all()
+        out = []
+        for p in rows:
+            out.append(
+                {
+                    "payment_no": p.payment_no,
+                    "provider": p.provider,
+                    "channel": p.channel,
+                    "amount": str(money(p.amount)),
+                    "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+                }
+            )
+        return out
+
+    @classmethod
+    async def payment_progress(cls, db: AsyncSession, order: Order) -> dict:
+        paid = await cls.paid_amount(db, order.id)
+        remaining = await cls.remaining_amount(db, order)
+        return {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "total_amount": str(money(order.total_amount)),
+            "paid_amount": str(paid),
+            "remaining_amount": str(remaining),
+            "payment_status": order.payment_status,
+            "order_status": order.status,
+            "fully_paid": remaining <= 0 and order.payment_status == "PAID",
+            "tenders": await cls.list_paid_tenders(db, order.id),
+        }
+
+    @classmethod
+    async def _resolve_payment_method(cls, db: AsyncSession, order_id: int) -> str:
+        rows = (
+            await db.execute(
+                select(Payment.provider).where(
+                    Payment.order_id == int(order_id),
+                    Payment.status == "PAID",
+                )
+            )
+        ).scalars().all()
+        providers = {str(p or "").upper() for p in rows if p}
+        if len(providers) > 1:
+            return "MIXED"
+        if len(providers) == 1:
+            return next(iter(providers))
+        return "MIXED"
+
+    @classmethod
+    async def _finalize_tender(
+        cls,
+        db: AsyncSession,
+        *,
+        payment: Payment,
+        order: Order,
+        provider: str,
+        source: str,
+    ) -> dict:
+        """本笔支付单已标 PAID 后：未结清→PARTIAL_PAID；结清→订单 PAID。"""
+        paid = await cls.paid_amount(db, order.id)
+        remaining = money(order.total_amount) - paid
+        method = await cls._resolve_payment_method(db, order.id)
+        if remaining > 0:
+            order.payment_status = "PARTIAL_PAID"
+            order.payment_method = method
+            await db.flush()
+            return {
+                "fully_paid": False,
+                "paid_amount": str(paid),
+                "remaining_amount": str(money(remaining)),
+                "payment_status": "PARTIAL_PAID",
+            }
+
+        order.payment_method = method
+        order.paid_at = now_local()
+        await apply_order_status(
+            db, order, "PAID", source=source, payment_status="PAID", assert_kind="PAYMENT"
+        )
+        await db.flush()
+        return {
+            "fully_paid": True,
+            "paid_amount": str(paid),
+            "remaining_amount": "0.00",
+            "payment_status": "PAID",
+        }
+
+    @classmethod
     async def create_payment(
         cls,
         db: AsyncSession,
@@ -275,6 +384,7 @@ class PaymentService:
         customer_id: int | None = None,
         operator_id: int | None = None,
         extra: dict | None = None,
+        amount: Decimal | None = None,
     ) -> tuple[Payment, dict]:
         locked = (
             await db.execute(select(Order).where(Order.id == order.id).with_for_update())
@@ -290,27 +400,49 @@ class PaymentService:
         if order.status != "PENDING_PAYMENT":
             raise AppException(40012, f"当前订单状态不可支付: {order.status}")
 
+        remaining = await cls.remaining_amount(db, order)
+        if remaining <= 0:
+            raise AppException(40010, "订单已支付")
+
+        pay_amount = money(amount) if amount is not None else remaining
+        if pay_amount <= 0:
+            raise AppException(40051, "收款金额非法")
+        if pay_amount > remaining:
+            raise AppException(40052, f"本笔金额超过待收余额 ¥{remaining}")
+        logger.info(
+            "创建支付单 order=%s provider=%s channel=%s pay_amount=%s remaining=%s total=%s",
+            order.order_no,
+            provider,
+            channel_type,
+            pay_amount,
+            remaining,
+            money(order.total_amount),
+        )
+
         provider_u = provider.upper()
         channel = cls.CHANNEL_MAP.get(
             (provider_u, channel_type.lower()),
             f"{provider_u}_{channel_type.upper()}",
         )
 
-        existing = (
-            await db.execute(
-                select(Payment)
-                .where(
-                    Payment.order_id == order.id,
-                    Payment.status == "PENDING",
-                    Payment.provider == provider_u,
-                    Payment.channel == channel,
+        # 全额待付且金额一致时可复用未支付单；分笔始终新建
+        existing = None
+        if pay_amount == remaining == money(order.total_amount):
+            existing = (
+                await db.execute(
+                    select(Payment)
+                    .where(
+                        Payment.order_id == order.id,
+                        Payment.status == "PENDING",
+                        Payment.provider == provider_u,
+                        Payment.channel == channel,
+                    )
+                    .order_by(Payment.id.desc())
+                    .limit(1)
                 )
-                .order_by(Payment.id.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+            ).scalar_one_or_none()
 
-        if existing and money(existing.amount) == money(order.total_amount):
+        if existing and money(existing.amount) == pay_amount:
             payment = existing
             if operator_id is not None:
                 payment.operator_id = operator_id
@@ -324,7 +456,7 @@ class PaymentService:
                 operator_id=operator_id,
                 provider=provider_u,
                 channel=channel,
-                amount=order.total_amount,
+                amount=pay_amount,
                 status="PENDING",
             )
             db.add(payment)
@@ -343,6 +475,8 @@ class PaymentService:
             trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
             await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
             pay_data["status"] = "PAID"
+        progress = await cls.payment_progress(db, order)
+        pay_data.update(progress)
         return payment, pay_data
 
     @classmethod
@@ -353,7 +487,7 @@ class PaymentService:
         order: Order,
         provider: str,
     ) -> None:
-        """开发 mock 支付：跳过真实收银台，直接标记订单已支付。"""
+        """开发 mock 支付：跳过真实收银台，直接标记支付单已支付。"""
         if payment.status == "PAID":
             return
         old_p = payment.status
@@ -361,12 +495,8 @@ class PaymentService:
         payment.provider_trade_no = f"mock_{payment.payment_no}"
         payment.paid_at = now_local()
         payment.callback_raw = {"source": "MOCK", "settled": True}
-        order.paid_at = now_local()
-        order.payment_method = provider
         await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="MOCK")
-        await apply_order_status(
-            db, order, "PAID", source="MOCK_PAYMENT", payment_status="PAID", assert_kind="PAYMENT"
-        )
+        await cls._finalize_tender(db, payment=payment, order=order, provider=provider, source="MOCK_PAYMENT")
         logger.warning("MOCK 支付已自动入账 order=%s payment=%s", order.order_no, payment.payment_no)
 
     @classmethod
@@ -385,12 +515,8 @@ class PaymentService:
         payment.provider_trade_no = provider_trade_no or f"{provider.lower()}_{payment.payment_no}"
         payment.paid_at = now_local()
         payment.callback_raw = {"source": "BARCODE_PAY", "provider": provider}
-        order.paid_at = now_local()
-        order.payment_method = provider
         await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="BARCODE_PAY")
-        await apply_order_status(
-            db, order, "PAID", source="BARCODE_PAY", payment_status="PAID", assert_kind="PAYMENT"
-        )
+        await cls._finalize_tender(db, payment=payment, order=order, provider=provider, source="BARCODE_PAY")
 
     @classmethod
     async def settle_cash_payment(
@@ -399,11 +525,27 @@ class PaymentService:
         order: Order,
         *,
         operator_id: int | None = None,
+        amount: Decimal | None = None,
         received_amount: Decimal | None = None,
         change_amount: Decimal | None = None,
     ) -> tuple[Payment, dict]:
-        """收银台现金入账（生产可用，不依赖第三方支付配置）。"""
-        if order.payment_status == "PAID" or order.status in ("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY", "COMPLETED"):
+        """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
+        locked = (
+            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+        ).scalar_one_or_none()
+        if not locked:
+            raise AppException(40402, "订单不存在")
+        order = locked
+
+        if order.payment_status == "PAID" or order.status in (
+            "PAID",
+            "CONFIRMED",
+            "PREPARING",
+            "COOKING",
+            "READY",
+            "COMPLETED",
+        ):
+            progress = await cls.payment_progress(db, order)
             existing = (
                 await db.execute(
                     select(Payment)
@@ -412,17 +554,35 @@ class PaymentService:
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if existing:
-                return existing, {"status": "PAID", "already_paid": True}
+            if existing and progress.get("fully_paid"):
+                return existing, {"status": "PAID", "already_paid": True, **progress}
         if order.status == "CANCELLED" or order.payment_status == "REFUNDED":
             raise AppException(40009, "订单已取消或已退款，无法收款")
+        if order.status != "PENDING_PAYMENT":
+            raise AppException(40012, f"当前订单状态不可收款: {order.status}")
+
+        remaining = await cls.remaining_amount(db, order)
+        if remaining <= 0:
+            raise AppException(40010, "订单已支付")
+
+        pay_amount = money(amount) if amount is not None else remaining
+        if pay_amount <= 0:
+            raise AppException(40051, "收款金额非法")
+        if pay_amount > remaining:
+            raise AppException(40052, f"本笔金额超过待收余额 ¥{remaining}")
+
+        # 实收校验：至少覆盖本笔入账
+        if received_amount is not None and money(received_amount) < pay_amount:
+            raise AppException(40009, f"实收金额不足，本笔应收 ¥{pay_amount}")
+        if change_amount is None and received_amount is not None:
+            change_amount = money(received_amount) - pay_amount
 
         sno = await _order_store_no(db, order)
         t_no, t_ph = await _order_table_parts(db, order)
         payment = Payment(
             payment_no=generate_no(payment_biz("CASH"), sno, t_no, table_placeholder=t_ph),
             order_id=order.id,
-            amount=order.total_amount,
+            amount=pay_amount,
             provider="CASH",
             channel="POS",
             operator_id=operator_id,
@@ -438,26 +598,28 @@ class PaymentService:
         payment.callback_raw = {
             "source": "POS_CASH",
             "operator_id": operator_id,
-            **(
-                {"received_amount": str(received_amount)}
-                if received_amount is not None
-                else {}
-            ),
-            **(
-                {"change_amount": str(change_amount)}
-                if change_amount is not None
-                else {}
-            ),
+            **({"received_amount": str(received_amount)} if received_amount is not None else {}),
+            **({"change_amount": str(change_amount)} if change_amount is not None else {}),
         }
-        order.paid_at = now_local()
-        order.payment_method = "CASH"
         await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="POS_CASH")
-        await apply_order_status(
-            db, order, "PAID", source="POS_CASH", payment_status="PAID", assert_kind="PAYMENT"
+        tender = await cls._finalize_tender(
+            db, payment=payment, order=order, provider="CASH", source="POS_CASH"
         )
-        await db.flush()
-        logger.info("收银现金入账 order=%s payment=%s operator=%s", order.order_no, payment.payment_no, operator_id)
-        return payment, {"status": "PAID", "provider": "CASH"}
+        progress = await cls.payment_progress(db, order)
+        logger.info(
+            "收银现金入账 order=%s payment=%s amount=%s operator=%s fully=%s",
+            order.order_no,
+            payment.payment_no,
+            pay_amount,
+            operator_id,
+            tender.get("fully_paid"),
+        )
+        return payment, {
+            "status": "PAID",
+            "provider": "CASH",
+            "change_amount": str(change_amount) if change_amount is not None else None,
+            **progress,
+        }
 
     @classmethod
     async def handle_callback(
@@ -612,13 +774,12 @@ class PaymentService:
             payment.provider_trade_no = parsed.get("provider_trade_no")
             payment.paid_at = now_local()
             payment.callback_raw = {"receipt": receipt}
-            order.paid_at = now_local()
-            order.payment_method = provider_u
             await record_payment_status(
                 db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="CALLBACK"
             )
-            await apply_order_status(
-                db, order, "PAID", source="PAYMENT", payment_status="PAID", assert_kind="PAYMENT"
+            # 与扫码/现金一致：分笔未结清仅 PARTIAL_PAID，结清才订单 PAID
+            await cls._finalize_tender(
+                db, payment=payment, order=order, provider=provider_u, source="CALLBACK"
             )
 
         await db.flush()

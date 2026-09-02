@@ -43,6 +43,9 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and settings.allow_delivery_mock:
         errors.append("生产环境禁止 ALLOW_DELIVERY_MOCK=true")
 
+    if is_prod and settings.allow_print_mock:
+        errors.append("生产环境禁止 ALLOW_PRINT_MOCK=true（会导致厨房以为已出票实际未打印）")
+
     if is_prod and (settings.storage_backend or "local").lower() == "local":
         warnings.append("生产环境建议 STORAGE_BACKEND=s3，避免本地 uploads 直出")
 
@@ -56,12 +59,34 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and process_role not in ("leader", "worker"):
         warnings.append("生产建议显式设置 PROCESS_ROLE=leader|worker（仅一个实例为 leader）")
 
-    # 生产至少配置一种支付通道的关键项（可只配一种）
+    # 生产至少配置一种支付通道（微信 V3 或支付宝）；否则小程序/扫码收款不可用
     if is_prod:
-        wechat_ok = bool(settings.wechat_mch_id and settings.wechat_api_v3_key and settings.wechat_cert_serial_no)
+        wechat_ok = bool(
+            settings.wechat_mch_id
+            and settings.wechat_api_v3_key
+            and settings.wechat_cert_serial_no
+            and settings.wechat_app_id
+        )
         alipay_ok = bool(settings.alipay_app_id and settings.alipay_private_key and settings.alipay_public_key)
         if not wechat_ok and not alipay_ok:
-            warnings.append("生产未配置微信或支付宝支付密钥，支付能力不可用")
+            errors.append(
+                "生产须至少配置微信（MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID）或支付宝（APP_ID/私钥/公钥）之一"
+            )
+
+    # 打印：开启则须配齐凭证，禁止「开了开关却静默跳过」
+    if is_prod:
+        if settings.xpyun_enabled:
+            if not (
+                (settings.xpyun_user or "").strip()
+                and (settings.xpyun_user_key or "").strip()
+                and (settings.xpyun_printer_sn or "").strip()
+            ):
+                errors.append(
+                    "XPYUN_ENABLED=true 时须配置 XPYUN_USER / XPYUN_USER_KEY / XPYUN_PRINTER_SN；"
+                    "暂无打印机请改 XPYUN_ENABLED=false"
+                )
+        else:
+            warnings.append("XPYUN_ENABLED=false：厨房小票不会自动打印")
 
     for w in warnings:
         logger.warning("启动校验: %s", w)

@@ -143,7 +143,7 @@
       <div v-if="!tables.length" class="empty-tables">暂无可用桌台</div>
     </el-dialog>
 
-    <!-- 规格选择：大按钮触控 -->
+    <!-- 规格选择：平板分栏触控，少滑动 -->
     <el-drawer
       v-model="productVisible"
       title="选择规格"
@@ -151,49 +151,97 @@
       :size="drawerSize"
       class="spec-drawer"
       :show-close="true"
+      destroy-on-close
     >
       <div v-if="currentProduct" class="drawer-body">
         <div class="drawer-head">
-          <h3 class="drawer-title">{{ currentProduct.name }}</h3>
+          <div class="drawer-head-main">
+            <h3 class="drawer-title">{{ currentProduct.name }}</h3>
+            <div v-if="drawerSelectedSummary" class="drawer-summary">{{ drawerSelectedSummary }}</div>
+          </div>
           <div class="drawer-price-live">¥{{ drawerUnitPrice }}</div>
         </div>
-        <div class="opt-scroll">
-          <div v-for="g in currentProduct.option_groups || []" :key="g.id" class="opt-group">
-            <h4 class="opt-group-title">
-              {{ g.name }}
-              <span v-if="g.is_required" class="req">必选</span>
-            </h4>
-            <div class="opt-chips">
-              <template v-if="g.selection_type === 'SINGLE'">
+
+        <div class="opt-split">
+          <div
+            v-if="(currentProduct.option_groups || []).length > 1"
+            class="opt-nav"
+          >
+            <button
+              v-for="g in currentProduct.option_groups"
+              :key="g.id"
+              type="button"
+              class="opt-nav-item"
+              :class="{
+                on: activeOptGroupId === g.id,
+                done: isGroupFilled(g),
+                missing: !!groupNavById[g.id]?.missing,
+              }"
+              @click="activeOptGroupId = g.id"
+            >
+              <span class="nav-name">{{ g.name }}</span>
+              <span
+                v-if="groupNavById[g.id]?.text"
+                class="nav-value"
+                :class="{ missing: !!groupNavById[g.id]?.missing }"
+              >{{ groupNavById[g.id].text }}</span>
+            </button>
+          </div>
+
+          <div class="opt-pane">
+            <template v-if="activeOptGroup">
+              <h4 class="opt-pane-title">
+                {{ activeOptGroup.name }}
+                <span v-if="activeOptGroup.is_required" class="req">必选</span>
+                <span v-else class="opt-hint">可多选或不选</span>
+              </h4>
+              <div
+                class="opt-tiles"
+                :class="{
+                  'few': (activeOptGroup.options || []).length <= 4,
+                  'many': (activeOptGroup.options || []).length > 6,
+                }"
+              >
                 <button
-                  v-for="o in g.options"
+                  v-for="o in activeOptGroup.options"
                   :key="o.id"
                   type="button"
-                  class="opt-chip"
-                  :class="{ on: selectedOptions[g.id] === o.id }"
-                  @click="selectedOptions[g.id] = o.id"
+                  class="opt-tile"
+                  :class="{
+                    on:
+                      activeOptGroup.selection_type === 'SINGLE'
+                        ? selectedOptions[activeOptGroup.id] === o.id
+                        : isMultiSelected(activeOptGroup.id, o.id),
+                  }"
+                  @click="onPickOption(activeOptGroup, o)"
                 >
-                  <span class="chip-name">{{ o.name }}</span>
-                  <span v-if="+o.extra_price" class="chip-extra">+¥{{ o.extra_price }}</span>
+                  <span class="tile-name">{{ o.name }}</span>
+                  <span v-if="+o.extra_price" class="tile-extra">+¥{{ o.extra_price }}</span>
+                  <span v-else class="tile-extra muted">不加价</span>
                 </button>
-              </template>
-              <template v-else>
-                <button
-                  v-for="o in g.options"
-                  :key="o.id"
-                  type="button"
-                  class="opt-chip"
-                  :class="{ on: isMultiSelected(g.id, o.id) }"
-                  @click="toggleMultiOption(g.id, o.id)"
-                >
-                  <span class="chip-name">{{ o.name }}</span>
-                  <span v-if="+o.extra_price" class="chip-extra">+¥{{ o.extra_price }}</span>
-                </button>
-              </template>
-            </div>
+              </div>
+            </template>
+            <div v-else class="opt-empty">该商品无需选择规格</div>
           </div>
         </div>
+
         <div class="drawer-foot">
+          <el-button
+            v-if="activeOptGroupIndex > 0"
+            size="large"
+            class="nav-step-btn"
+            @click="goPrevOptGroup"
+          >
+            上一组
+          </el-button>
+          <el-button
+            v-if="activeOptGroupIndex >= 0 && activeOptGroupIndex < optGroupCount - 1"
+            size="large"
+            class="nav-step-btn"
+            @click="goNextOptGroup"
+          >
+            下一组
+          </el-button>
           <el-button type="primary" class="add-cart-btn" @click="addToCart">
             加入购物车 ¥{{ drawerUnitPrice }}
           </el-button>
@@ -201,20 +249,38 @@
       </div>
     </el-drawer>
 
-    <!-- 收款 -->
+    <!-- 收款：支持组合分笔（微信/支付宝/现金） -->
     <el-dialog
       v-model="payDialogVisible"
       title="收款"
-      width="520px"
+      width="560px"
       class="pay-dialog"
       :close-on-click-modal="false"
       @closed="resetCheckout"
     >
-      <div class="pay-total-row">
-        <span>应收金额</span>
-        <span class="pay-total">¥{{ payableAmount }}</span>
+      <div class="pay-summary">
+        <div class="pay-summary-row">
+          <span>应收</span>
+          <b class="pay-total">¥{{ checkoutAmount }}</b>
+        </div>
+        <div class="pay-summary-row">
+          <span>已收</span>
+          <b class="pay-paid">¥{{ paidAmountDisplay }}</b>
+        </div>
+        <div class="pay-summary-row remain">
+          <span>待收</span>
+          <b class="pay-remain">¥{{ remainingAmountDisplay }}</b>
+        </div>
       </div>
-      <div v-if="diningType === 'TAKEAWAY'" class="pay-pack-row">
+
+      <div v-if="tenders.length" class="tender-list">
+        <div v-for="(t, i) in tenders" :key="t.payment_no || i" class="tender-item">
+          <span>{{ tenderLabel(t.provider) }}</span>
+          <span>¥{{ t.amount }}</span>
+        </div>
+      </div>
+
+      <div v-if="diningType === 'TAKEAWAY' && !tenders.length" class="pay-pack-row">
         <div class="pay-pack-info">
           <span>商品 ¥{{ cartSubtotal }}</span>
           <span v-if="waivePackingFee" class="waived">打包费已免收</span>
@@ -232,29 +298,50 @@
         <el-button v-else size="large" @click="toggleWaivePacking(false)">恢复打包费</el-button>
       </div>
 
-      <!-- 选择支付方式 -->
-      <div v-if="payStep === 'pick'" class="pay-methods">
-        <button type="button" class="pay-method scan" :disabled="paying" @click="startBarcodePay">
-          <span class="pm-icon">扫</span>
-          <span class="pm-label-wrap">
-            <span class="pm-label">扫码收款</span>
-            <span class="pm-sub">自动识别微信 / 支付宝</span>
-          </span>
-        </button>
-        <button type="button" class="pay-method cash" :disabled="paying" @click="openCashPay">
-          <span class="pm-icon">¥</span>
-          <span class="pm-label">现金收款</span>
-        </button>
+      <!-- 本笔金额 + 选方式 -->
+      <div v-if="payStep === 'pick'" class="pay-pick">
+        <div class="tender-amt-wrap">
+          <label>本笔收款</label>
+          <div class="tender-quick">
+            <button type="button" class="cash-quick-btn exact" @click="setTenderExact">收清待收</button>
+            <button type="button" class="cash-quick-btn" @click="setTenderQuick(10)">¥10</button>
+            <button type="button" class="cash-quick-btn" @click="setTenderQuick(20)">¥20</button>
+            <button type="button" class="cash-quick-btn" @click="setTenderQuick(50)">¥50</button>
+          </div>
+          <el-input
+            v-model="tenderAmount"
+            size="large"
+            inputmode="decimal"
+            class="cash-input"
+            @input="onTenderInput"
+          >
+            <template #prefix>¥</template>
+          </el-input>
+          <p class="tender-tip">可分多笔：如微信 10 + 支付宝 5 + 现金收清</p>
+        </div>
+        <div class="pay-methods">
+          <button type="button" class="pay-method scan" :disabled="paying || !tenderAmountOk" @click="startBarcodePay">
+            <span class="pm-icon">扫</span>
+            <span class="pm-label-wrap">
+              <span class="pm-label">扫码收 ¥{{ tenderAmountDisplay }}</span>
+              <span class="pm-sub">自动识别微信 / 支付宝</span>
+            </span>
+          </button>
+          <button type="button" class="pay-method cash" :disabled="paying || !tenderAmountOk" @click="openCashPay">
+            <span class="pm-icon">¥</span>
+            <span class="pm-label">现金收 ¥{{ tenderAmountDisplay }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- 现金 -->
       <div v-else-if="payStep === 'cash'" class="cash-panel">
         <div class="cash-row">
-          <span>应收</span>
-          <span class="cash-amt">¥{{ checkoutAmount }}</span>
+          <span>本笔入账</span>
+          <span class="cash-amt">¥{{ activeTenderAmount }}</span>
         </div>
         <div class="cash-input-wrap">
-          <label>实收金额</label>
+          <label>顾客实付现金</label>
           <div class="cash-quick">
             <button type="button" class="cash-quick-btn" @click="setCashQuick(20)">¥20</button>
             <button type="button" class="cash-quick-btn" @click="setCashQuick(50)">¥50</button>
@@ -277,7 +364,7 @@
           <span class="change-amt" :class="{ warn: cashChangeWarn }">¥{{ cashChangeDisplay }}</span>
         </div>
         <div class="cash-actions">
-          <el-button size="large" @click="payStep = 'pick'">返回</el-button>
+          <el-button size="large" @click="cancelCashPay">返回</el-button>
           <el-button
             type="primary"
             size="large"
@@ -286,14 +373,14 @@
             :disabled="cashConfirmDisabled"
             @click="confirmCashPay"
           >
-            确认收款
+            确认本笔现金
           </el-button>
         </div>
       </div>
 
       <!-- 扫顾客付款码 -->
       <div v-else-if="payStep === 'barcode'" class="barcode-panel">
-        <div class="scan-provider">请扫描顾客付款码</div>
+        <div class="scan-provider">本笔扫码 ¥{{ activeTenderAmount }}</div>
         <p v-if="barcodeProviderHint" class="scan-detected" :class="{ warn: !detectBarcodeProvider(barcodeInput.trim()) }">
           {{ barcodeProviderHint }}
         </p>
@@ -309,7 +396,7 @@
         <div class="cash-actions">
           <el-button size="large" @click="cancelBarcode">返回</el-button>
           <el-button type="primary" size="large" class="cash-confirm" :loading="paying" @click="submitBarcodePay">
-            确认收款
+            确认本笔扫码
           </el-button>
         </div>
       </div>
@@ -389,13 +476,25 @@
     </el-drawer>
 
     <!-- 申请退款 -->
-    <el-dialog v-model="refundApplyVisible" title="申请退款" width="420px" :close-on-click-modal="false">
-      <p v-if="refundTarget" class="refund-hint">订单 {{ refundTarget.order_no }} · 实收 ¥{{ refundTarget.total_amount }}</p>
+    <el-dialog v-model="refundApplyVisible" title="申请退款" width="460px" :close-on-click-modal="false">
+      <template v-if="refundTarget">
+        <p class="refund-hint">
+          订单 {{ refundTarget.order_no }} · 实收 ¥{{ refundTarget.total_amount }}
+          · 可退 <b>¥{{ refundTargetRefundable }}</b>
+        </p>
+        <div v-if="refundTargetTenders.length" class="refund-tenders">
+          <div v-for="(t, i) in refundTargetTenders" :key="t.payment_no || i" class="refund-tender-row">
+            <span>{{ tenderLabel(t.provider) }}</span>
+            <span>实收 ¥{{ t.amount }} · 可退 ¥{{ t.refundable }}</span>
+          </div>
+          <p class="refund-alloc-tip">组合支付退款：优先退现金，不足再退微信/支付宝原路返回</p>
+        </div>
+      </template>
       <el-input
         v-model="refundAmount"
         size="large"
         inputmode="decimal"
-        placeholder="退款金额（默认全额）"
+        placeholder="退款金额（默认全额可退）"
         style="margin-bottom:12px"
       >
         <template #prefix>¥</template>
@@ -489,6 +588,12 @@ const payStep = ref<'pick' | 'cash' | 'barcode'>('pick')
 const checkoutOrderId = ref<number | null>(null)
 const checkoutOrderNo = ref('')
 const checkoutAmount = ref('0.00')
+const paidAmount = ref('0.00')
+const remainingAmount = ref('0.00')
+const tenders = ref<any[]>([])
+const tenderAmount = ref('')
+/** 进入现金/扫码步骤后锁定的本笔金额，避免建单或进度回写改掉 */
+const lockedTenderAmount = ref('')
 const cashReceived = ref('')
 const barcodeInput = ref('')
 const barcodeInputRef = ref<any>(null)
@@ -530,7 +635,46 @@ const refundTarget = ref<any>(null)
 const refundAmount = ref('')
 const refundReason = ref('')
 
-const drawerSize = computed(() => (window.innerWidth >= 768 ? '58%' : '78%'))
+const drawerSize = computed(() => {
+  if (typeof window === 'undefined') return '88%'
+  if (window.innerWidth >= 900) return '92%'
+  if (window.innerWidth >= 768) return '90%'
+  return '88%'
+})
+
+const activeOptGroupId = ref<number | null>(null)
+
+const optGroups = computed(() => currentProduct.value?.option_groups || [])
+
+const groupNavById = computed(() => {
+  const map: Record<number, { text: string; missing: boolean }> = {}
+  for (const g of optGroups.value) {
+    map[g.id] = groupNavMeta(g)
+  }
+  return map
+})
+
+const optGroupCount = computed(() => optGroups.value.length)
+
+const activeOptGroupIndex = computed(() =>
+  optGroups.value.findIndex((g: any) => g.id === activeOptGroupId.value),
+)
+
+const activeOptGroup = computed(() => {
+  const list = optGroups.value
+  if (!list.length) return null
+  return list.find((g: any) => g.id === activeOptGroupId.value) || list[0]
+})
+
+const drawerSelectedSummary = computed(() => {
+  if (!currentProduct.value) return ''
+  return buildOptionLabels(currentProduct.value, selectedOptions, multiOptions).join(' · ')
+})
+
+const drawerUnitPrice = computed(() => {
+  if (!currentProduct.value) return '0.00'
+  return calcUnitPrice(currentProduct.value, selectedOptions, multiOptions).toFixed(2)
+})
 
 const tableLabel = computed(() => {
   if (diningType.value !== 'DINE_IN') return ''
@@ -568,14 +712,29 @@ const payableAmount = computed(() =>
   checkoutOrderId.value ? checkoutAmount.value : cartTotal.value,
 )
 
-const drawerUnitPrice = computed(() => {
-  if (!currentProduct.value) return '0.00'
-  return calcUnitPrice(currentProduct.value, selectedOptions, multiOptions).toFixed(2)
+const paidAmountDisplay = computed(() => paidAmount.value || '0.00')
+const remainingAmountDisplay = computed(() => remainingAmount.value || checkoutAmount.value || '0.00')
+const tenderAmountDisplay = computed(() => {
+  const n = parseFloat(tenderAmount.value)
+  if (!Number.isFinite(n) || n <= 0) return remainingAmountDisplay.value
+  return n.toFixed(2)
+})
+/** 现金/扫码步骤展示与提交用的本笔金额 */
+const activeTenderAmount = computed(() => {
+  if ((payStep.value === 'cash' || payStep.value === 'barcode') && lockedTenderAmount.value) {
+    return lockedTenderAmount.value
+  }
+  return tenderAmountDisplay.value
+})
+const tenderAmountOk = computed(() => {
+  const n = parseFloat(tenderAmountDisplay.value)
+  const rem = parseFloat(remainingAmountDisplay.value)
+  return Number.isFinite(n) && n > 0 && Number.isFinite(rem) && n <= rem + 0.001
 })
 
 const cashChangeNum = computed(() => {
   const received = parseFloat(cashReceived.value)
-  const due = parseFloat(checkoutAmount.value)
+  const due = parseFloat(activeTenderAmount.value)
   if (!Number.isFinite(received) || !Number.isFinite(due)) return null
   return Math.round((received - due) * 100) / 100
 })
@@ -613,8 +772,123 @@ function toggleMultiOption(gId: number, optId: number) {
   multiOptions[gId] = arr
 }
 
+function isFlagOn(v: unknown) {
+  return v === true || v === 1 || v === '1'
+}
+
+function isDefaultOption(o: any) {
+  return isFlagOn(o?.is_default)
+}
+
+function activeOptionsOf(g: any) {
+  return (g?.options || []).filter((o: any) => o && o.status !== 0)
+}
+
+function findOptionById(g: any, optionId: number | string | null | undefined) {
+  if (optionId == null || optionId === '') return null
+  return (g?.options || []).find((o: any) => String(o.id) === String(optionId)) || null
+}
+
+/** 组内默认项：is_default，其次单选 NORMAL */
+function defaultOptionsOf(g: any) {
+  const opts = activeOptionsOf(g)
+  if (!opts.length) return []
+  if (g.selection_type === 'SINGLE') {
+    const def = opts.find(isDefaultOption) || opts.find((o: any) => o.code === 'NORMAL')
+    return def ? [def] : []
+  }
+  return opts.filter(isDefaultOption)
+}
+
+function selectedNamesOf(g: any): string[] {
+  if (!g) return []
+  if (g.selection_type === 'SINGLE') {
+    const opt = findOptionById(g, selectedOptions[g.id])
+    return opt?.name ? [opt.name] : []
+  }
+  return (multiOptions[g.id] || [])
+    .map((id: number) => findOptionById(g, id)?.name)
+    .filter(Boolean)
+}
+
+/** 左侧摘要：已选 > 默认 > 必选未选显示【未选】 */
+function groupNavMeta(g: any): { text: string; missing: boolean } {
+  const selected = selectedNamesOf(g)
+  if (selected.length) return { text: selected.join('、'), missing: false }
+  const defs = defaultOptionsOf(g).map((o: any) => o.name).filter(Boolean)
+  if (defs.length) return { text: defs.join('、'), missing: false }
+  if (isFlagOn(g?.is_required)) return { text: '【未选】', missing: true }
+  return { text: '', missing: false }
+}
+
+function isGroupFilled(g: any) {
+  if (!g) return false
+  if (g.selection_type === 'SINGLE') return !!findOptionById(g, selectedOptions[g.id])
+  return (multiOptions[g.id] || []).length > 0
+}
+
+function applyGroupDefaults(groups: any[]) {
+  for (const g of groups || []) {
+    const defs = defaultOptionsOf(g)
+    if (g.selection_type === 'SINGLE') {
+      if (defs[0]) selectedOptions[g.id] = defs[0].id
+    } else {
+      multiOptions[g.id] = defs.map((o: any) => o.id)
+    }
+  }
+}
+
+function goNextOptGroup() {
+  const list = optGroups.value
+  const idx = activeOptGroupIndex.value
+  if (idx >= 0 && idx < list.length - 1) activeOptGroupId.value = list[idx + 1].id
+}
+
+function goPrevOptGroup() {
+  const list = optGroups.value
+  const idx = activeOptGroupIndex.value
+  if (idx > 0) activeOptGroupId.value = list[idx - 1].id
+}
+
+/** 单选后自动跳下一组，加快触控点餐 */
+function onPickOption(g: any, o: any) {
+  if (g.selection_type === 'SINGLE') {
+    selectedOptions[g.id] = o.id
+    goNextOptGroup()
+  } else {
+    toggleMultiOption(g.id, o.id)
+  }
+}
+
 function onCashInput() {
   cashReceived.value = cashReceived.value.replace(/[^\d.]/g, '')
+}
+
+function onTenderInput() {
+  tenderAmount.value = tenderAmount.value.replace(/[^\d.]/g, '')
+}
+
+function tenderLabel(provider: string) {
+  const u = (provider || '').toUpperCase()
+  if (u === 'WECHAT') return '微信'
+  if (u === 'ALIPAY') return '支付宝'
+  if (u === 'CASH') return '现金'
+  if (u === 'MIXED') return '组合支付'
+  return provider || '支付'
+}
+
+function applyPayProgress(data: any) {
+  if (!data) return
+  if (data.total_amount != null) checkoutAmount.value = String(data.total_amount)
+  if (data.paid_amount != null) paidAmount.value = String(data.paid_amount)
+  if (data.remaining_amount != null) remainingAmount.value = String(data.remaining_amount)
+  if (Array.isArray(data.tenders)) tenders.value = data.tenders
+  const rem = parseFloat(remainingAmount.value)
+  if (Number.isFinite(rem) && rem > 0) {
+    tenderAmount.value = rem.toFixed(2)
+  } else {
+    tenderAmount.value = '0.00'
+  }
 }
 
 async function loadStores() {
@@ -689,6 +963,10 @@ function toggleWaivePacking(waive: boolean) {
   invalidateCheckoutOrder()
   if (payDialogVisible.value) {
     checkoutAmount.value = cartTotal.value
+    paidAmount.value = '0.00'
+    remainingAmount.value = cartTotal.value
+    tenders.value = []
+    tenderAmount.value = cartTotal.value
   }
 }
 
@@ -722,29 +1000,33 @@ async function openProduct(p: any) {
   currentProduct.value = decorate(res.data)
   Object.keys(selectedOptions).forEach((k) => delete selectedOptions[Number(k)])
   Object.keys(multiOptions).forEach((k) => delete multiOptions[Number(k)])
-  for (const g of currentProduct.value.option_groups || []) {
-    if (g.selection_type === 'SINGLE' && g.options?.length) {
-      const normal = g.options.find((o: any) => o.code === 'NORMAL') || g.options[0]
-      selectedOptions[g.id] = normal.id
-    }
-    if (g.selection_type === 'MULTIPLE') multiOptions[g.id] = []
-  }
+  const groups = currentProduct.value.option_groups || []
+  applyGroupDefaults(groups)
+  activeOptGroupId.value = groups[0]?.id ?? null
   productVisible.value = true
+}
+
+function addToCartFocusMissing() {
+  const p = currentProduct.value
+  if (!p) return
+  for (const g of p.option_groups || []) {
+    if (!isFlagOn(g.is_required)) continue
+    const has =
+      (g.selection_type === 'SINGLE' && selectedOptions[g.id]) ||
+      (g.selection_type === 'MULTIPLE' && (multiOptions[g.id] || []).length)
+    if (!has) {
+      activeOptGroupId.value = g.id
+      ElMessage.warning(`请选择：${g.name}`)
+      return true
+    }
+  }
+  return false
 }
 
 function addToCart() {
   const p = currentProduct.value
   if (!p) return
-  for (const g of p.option_groups || []) {
-    if (!g.is_required) continue
-    const has =
-      (g.selection_type === 'SINGLE' && selectedOptions[g.id]) ||
-      (g.selection_type === 'MULTIPLE' && (multiOptions[g.id] || []).length)
-    if (!has) {
-      ElMessage.warning(`请选择：${g.name}`)
-      return
-    }
-  }
+  if (addToCartFocusMissing()) return
   const optionIds = collectOptionIds(p, selectedOptions, multiOptions)
   const optionLabels = buildOptionLabels(p, selectedOptions, multiOptions)
   const unitPrice = calcUnitPrice(p, selectedOptions, multiOptions)
@@ -819,6 +1101,11 @@ function resetCheckout() {
   invalidateCheckoutOrder()
   cashReceived.value = ''
   barcodeInput.value = ''
+  paidAmount.value = '0.00'
+  remainingAmount.value = '0.00'
+  tenders.value = []
+  tenderAmount.value = ''
+  lockedTenderAmount.value = ''
 }
 
 function setCashQuick(amt: number) {
@@ -826,7 +1113,20 @@ function setCashQuick(amt: number) {
 }
 
 function setCashExact() {
-  cashReceived.value = checkoutAmount.value || cartTotal.value
+  cashReceived.value = activeTenderAmount.value
+}
+
+function setTenderExact() {
+  tenderAmount.value = remainingAmountDisplay.value
+}
+
+function setTenderQuick(amt: number) {
+  const rem = parseFloat(remainingAmountDisplay.value)
+  if (!Number.isFinite(rem)) {
+    tenderAmount.value = String(amt)
+    return
+  }
+  tenderAmount.value = Math.min(amt, rem).toFixed(2)
 }
 
 function finishCheckout(msg: string) {
@@ -887,6 +1187,7 @@ function payMethodLabel(method: string | null | undefined) {
   if (m === 'CASH') return '现金'
   if (m === 'WECHAT') return '微信'
   if (m === 'ALIPAY') return '支付宝'
+  if (m === 'MIXED') return '组合支付'
   return method || '—'
 }
 
@@ -939,12 +1240,25 @@ function canApplyRefund(o: any) {
   if (ps === 'REFUNDED') return false
   const st = o.refund_request?.status
   if (st === 'PENDING' || st === 'SUCCESS') return false
+  const rem = parseFloat(o.refundable_amount ?? o.total_amount ?? '0')
+  if (Number.isFinite(rem) && rem <= 0) return false
   return true
 }
 
+const refundTargetRefundable = computed(() => {
+  const o = refundTarget.value
+  if (!o) return '0.00'
+  return String(o.refundable_amount ?? o.total_amount ?? '0.00')
+})
+
+const refundTargetTenders = computed(() => {
+  const list = refundTarget.value?.payment_tenders
+  return Array.isArray(list) ? list : []
+})
+
 function openRefundApply(o: any) {
   refundTarget.value = o
-  refundAmount.value = o.total_amount || ''
+  refundAmount.value = o.refundable_amount || o.total_amount || ''
   refundReason.value = ''
   refundApplyVisible.value = true
 }
@@ -1042,14 +1356,30 @@ function openCheckout() {
   invalidateCheckoutOrder()
   payStep.value = 'pick'
   checkoutAmount.value = cartTotal.value
+  paidAmount.value = '0.00'
+  remainingAmount.value = cartTotal.value
+  tenders.value = []
+  tenderAmount.value = cartTotal.value
   payDialogVisible.value = true
 }
 
 async function ensureOrder() {
   if (checkoutOrderId.value) return checkoutOrderId.value
+  // 建单前先记住本笔金额，避免被重置成全额待收
+  const keepTender = tenderAmount.value
   paying.value = true
   try {
     const data = await createPosOrder()
+    checkoutAmount.value = data.total_amount || cartTotal.value
+    paidAmount.value = '0.00'
+    remainingAmount.value = checkoutAmount.value
+    const keep = parseFloat(keepTender)
+    const rem = parseFloat(String(remainingAmount.value))
+    if (Number.isFinite(keep) && keep > 0 && Number.isFinite(rem) && keep <= rem + 0.001) {
+      tenderAmount.value = keep.toFixed(2)
+    } else {
+      tenderAmount.value = remainingAmount.value
+    }
     return data.id as number
   } finally {
     paying.value = false
@@ -1057,25 +1387,51 @@ async function ensureOrder() {
 }
 
 function openCashPay() {
+  if (!tenderAmountOk.value) {
+    ElMessage.warning('请输入正确的本笔金额（不超过待收）')
+    return
+  }
+  lockedTenderAmount.value = tenderAmountDisplay.value
   payStep.value = 'cash'
-  cashReceived.value = checkoutAmount.value || cartTotal.value
+  cashReceived.value = lockedTenderAmount.value
 }
 
 async function confirmCashPay() {
   if (!validateBeforeCheckout()) return
+  const amount = lockedTenderAmount.value || tenderAmountDisplay.value
+  const amt = parseFloat(amount)
+  const rem = parseFloat(remainingAmountDisplay.value)
+  if (!Number.isFinite(amt) || amt <= 0 || (Number.isFinite(rem) && amt > rem + 0.001)) {
+    ElMessage.warning('本笔金额无效')
+    return
+  }
   paying.value = true
   try {
     const orderId = await ensureOrder()
-    const body: { received_amount?: string } = {}
+    const body: { amount: string; received_amount?: string } = { amount }
     if (cashReceived.value.trim()) {
       body.received_amount = cashReceived.value.trim()
     }
-    const payRes = await api.post(`/payments/orders/${orderId}/cash`, body || {})
+    const payRes = await api.post(`/payments/orders/${orderId}/cash`, body)
+    applyPayProgress(payRes.data)
     const change = payRes.data?.change_amount
-    const msg = change != null
-      ? `收款成功 · ${payRes.data?.order_no} · 找零 ¥${change}`
-      : `收款成功 · ${payRes.data?.order_no || checkoutOrderNo.value}`
-    finishCheckout(msg)
+    const remLeft = parseFloat(String(payRes.data?.remaining_amount ?? '0'))
+    const done = payRes.data?.fully_paid === true || (Number.isFinite(remLeft) && remLeft <= 0.001)
+    if (done) {
+      const msg = change != null && Number(change) > 0
+        ? `收款完成 · ${payRes.data?.order_no} · 找零 ¥${change}`
+        : `收款完成 · ${payRes.data?.order_no || checkoutOrderNo.value}`
+      finishCheckout(msg)
+      return
+    }
+    ElMessage.success(
+      change != null && Number(change) > 0
+        ? `本笔现金已收 · 找零 ¥${change} · 待收 ¥${payRes.data?.remaining_amount}`
+        : `本笔现金已收 · 待收 ¥${payRes.data?.remaining_amount}`,
+    )
+    lockedTenderAmount.value = ''
+    payStep.value = 'pick'
+    cashReceived.value = ''
   } catch (e: any) {
     ElMessage.error(e.message || '收款失败')
   } finally {
@@ -1085,6 +1441,22 @@ async function confirmCashPay() {
 
 async function startBarcodePay() {
   if (!validateBeforeCheckout()) return
+  if (!tenderAmountOk.value) {
+    ElMessage.warning('请输入正确的本笔金额（不超过待收）')
+    return
+  }
+  // 先锁定本笔金额，再建单（建单不得改本笔）
+  lockedTenderAmount.value = tenderAmountDisplay.value
+  paying.value = true
+  try {
+    await ensureOrder()
+  } catch (e: any) {
+    lockedTenderAmount.value = ''
+    ElMessage.error(e.message || '创建订单失败')
+    return
+  } finally {
+    paying.value = false
+  }
   payStep.value = 'barcode'
   barcodeInput.value = ''
   await nextTick()
@@ -1103,9 +1475,16 @@ async function submitBarcodePay() {
     return
   }
   if (!validateBeforeCheckout()) return
+  const amount = lockedTenderAmount.value || tenderAmountDisplay.value
+  const amt = parseFloat(amount)
+  const rem = parseFloat(remainingAmountDisplay.value)
+  if (!Number.isFinite(amt) || amt <= 0 || (Number.isFinite(rem) && amt > rem + 0.001)) {
+    ElMessage.warning('本笔金额无效')
+    return
+  }
   paying.value = true
   const payingMsg = ElMessage({
-    message: '正在收款，请顾客确认支付…',
+    message: `正在收款 ¥${amount}，请顾客确认支付…`,
     type: 'info',
     duration: 0,
   })
@@ -1113,17 +1492,35 @@ async function submitBarcodePay() {
     const orderId = await ensureOrder()
     const payRes = await api.post(
       `/payments/orders/${orderId}/pos-scan`,
-      { auth_code: code },
+      { auth_code: code, amount },
       { timeout: 90000 },
     )
-    if (payRes.data?.mock_settled || payRes.data?.status === 'PAID') {
-      finishCheckout(`支付成功 · ${payRes.data?.order_no || checkoutOrderNo.value}`)
+    applyPayProgress(payRes.data)
+    const remLeft = parseFloat(String(payRes.data?.remaining_amount ?? '0'))
+    const charged = String(payRes.data?.amount ?? '')
+    // 必须待收归零才关窗；禁止把「本笔 PAID」当成整单成功
+    const done = payRes.data?.fully_paid === true || (Number.isFinite(remLeft) && remLeft <= 0.001)
+    if (done) {
+      finishCheckout(`收款完成 · ${payRes.data?.order_no || checkoutOrderNo.value}`)
+      return
+    }
+    if (
+      payRes.data?.mock_settled
+      || payRes.data?.status === 'PAID'
+      || payRes.data?.payment_status === 'PARTIAL_PAID'
+    ) {
+      ElMessage.success(
+        `${tenderLabel(payRes.data?.provider)} ¥${charged || amount} 已收 · 还差 ¥${payRes.data?.remaining_amount}`,
+      )
+      lockedTenderAmount.value = ''
+      payStep.value = 'pick'
+      barcodeInput.value = ''
       return
     }
     ElMessage.error('支付未完成，请重试')
   } catch (e: any) {
     const msg = e.message || '收款失败'
-    if (msg.includes('已支付')) {
+    if (msg.includes('已支付') && !msg.includes('部分')) {
       finishCheckout('订单已支付')
       return
     }
@@ -1137,6 +1534,13 @@ async function submitBarcodePay() {
 function cancelBarcode() {
   payStep.value = 'pick'
   barcodeInput.value = ''
+  lockedTenderAmount.value = ''
+}
+
+function cancelCashPay() {
+  payStep.value = 'pick'
+  cashReceived.value = ''
+  lockedTenderAmount.value = ''
 }
 
 function toggleFullscreen() {
@@ -1366,10 +1770,10 @@ watch(() => auth.user?.store_id, () => {
 .table-chip.on { border-color: #ff6b35; background: #fff8f5; color: #ff6b35; }
 .empty-tables { text-align: center; color: #999; padding: 24px; font-size: 16px; }
 
-/* 规格抽屉 */
+/* 规格抽屉：分栏触控，少纵向滑动 */
 .spec-drawer :deep(.el-drawer__header) {
   margin-bottom: 0;
-  padding: 16px 20px;
+  padding: 12px 20px;
   font-size: 20px;
   font-weight: 700;
 }
@@ -1378,6 +1782,7 @@ watch(() => auth.user?.store_id, () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  height: calc(100% - 56px);
 }
 .drawer-body {
   display: flex;
@@ -1388,102 +1793,275 @@ watch(() => auth.user?.store_id, () => {
 .drawer-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 0 20px 12px;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 4px 20px 12px;
   border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
 }
+.drawer-head-main { min-width: 0; flex: 1; }
 .drawer-title {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
   color: #222;
 }
+.drawer-summary {
+  margin-top: 6px;
+  font-size: 15px;
+  color: #666;
+  line-height: 1.4;
+  word-break: break-all;
+}
 .drawer-price-live {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 800;
   color: #ff6b35;
+  flex-shrink: 0;
+  line-height: 1.1;
 }
-.opt-scroll {
+.opt-split {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.opt-nav {
+  width: 168px;
+  flex-shrink: 0;
   overflow-y: auto;
-  padding: 12px 20px 16px;
-}
-.opt-group { margin-bottom: 20px; }
-.opt-group-title {
-  margin: 0 0 12px;
-  font-size: 18px;
-  font-weight: 700;
-  color: #333;
-}
-.opt-group-title .req {
-  font-size: 13px;
-  color: #ff6b35;
-  font-weight: 600;
-  margin-left: 6px;
-}
-.opt-chips {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 10px;
-}
-@media (min-width: 768px) {
-  .opt-chips {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
-  }
-}
-@media (min-width: 1024px) {
-  .opt-chips {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-.opt-chip {
-  display: inline-flex;
+  background: #f7f7f7;
+  border-right: 1px solid #eee;
+  padding: 10px 8px;
+  display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  gap: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.opt-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   width: 100%;
-  min-width: 0;
-  min-height: 56px;
-  padding: 12px 18px;
-  border: 2px solid #e0e0e0;
+  min-height: 64px;
+  padding: 12px 14px;
+  border: 2px solid transparent;
   border-radius: 12px;
   background: #fff;
+  text-align: left;
   cursor: pointer;
-  transition: border-color .15s, background .15s;
+  color: #333;
 }
-.opt-chip.on {
+.opt-nav-item.on {
   border-color: #ff6b35;
   background: #fff8f5;
   color: #ff6b35;
 }
-.chip-name { font-size: 17px; font-weight: 600; }
-.chip-extra { font-size: 14px; margin-top: 2px; opacity: .85; }
-.drawer-foot {
-  padding: 14px 20px 20px;
-  border-top: 1px solid #eee;
-  background: #fafafa;
+.opt-nav-item.done:not(.on) {
+  border-color: #d9f7be;
+  background: #f6ffed;
 }
-.add-cart-btn {
-  width: 100%;
-  height: 64px;
+.opt-nav-item.missing:not(.on) {
+  border-color: #ffccc7;
+  background: #fff1f0;
+}
+.nav-name { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.nav-value {
+  font-size: 12px;
+  color: #666;
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.opt-nav-item.on .nav-value { color: #ff6b35; }
+.nav-value.missing,
+.opt-nav-item.on .nav-value.missing,
+.opt-nav-item.missing .nav-value {
+  color: #f5222d;
+  font-weight: 700;
+}
+.opt-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 14px 18px 18px;
+  -webkit-overflow-scrolling: touch;
+}
+.opt-pane-title {
+  margin: 0 0 14px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.opt-pane-title .req {
+  font-size: 13px;
+  color: #ff6b35;
+  font-weight: 600;
+}
+.opt-hint { font-size: 13px; color: #999; font-weight: 500; }
+.opt-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.opt-tiles.few {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.opt-tiles.many {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (min-width: 1024px) {
+  .opt-nav { width: 200px; }
+  .opt-tiles,
+  .opt-tiles.few {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .opt-tiles.many {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.opt-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  padding: 16px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, transform .08s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.opt-tile:active { transform: scale(0.98); }
+.opt-tile.on {
+  border-color: #ff6b35;
+  background: #fff8f5;
+  color: #ff6b35;
+  box-shadow: inset 0 0 0 1px #ff6b35;
+}
+.tile-name {
   font-size: 20px;
   font-weight: 700;
-  border-radius: 12px;
+  text-align: center;
+  line-height: 1.25;
+}
+.tile-extra {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  opacity: .9;
+}
+.tile-extra.muted { color: #aaa; font-weight: 500; }
+.opt-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: #999;
+  font-size: 16px;
+}
+.drawer-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid #eee;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+.nav-step-btn {
+  height: 64px !important;
+  min-width: 96px;
+  font-size: 16px !important;
+  font-weight: 600;
+  border-radius: 12px !important;
+  flex-shrink: 0;
+}
+.add-cart-btn {
+  flex: 1;
+  height: 64px !important;
+  font-size: 20px !important;
+  font-weight: 700;
+  border-radius: 12px !important;
+}
+@media (max-width: 640px) {
+  .opt-nav { width: 120px; }
+  .opt-nav-item { min-height: 56px; padding: 10px; }
+  .nav-name { font-size: 15px; }
+  .opt-tiles,
+  .opt-tiles.few,
+  .opt-tiles.many {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .opt-tile { min-height: 76px; }
+  .tile-name { font-size: 17px; }
+  .nav-step-btn { display: none; }
 }
 
-/* 收款弹窗 */
+
+/* 收款弹窗：组合分笔 */
 .pay-dialog :deep(.el-dialog__body) { padding-top: 8px; }
-.pay-total-row {
+.pay-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.pay-summary-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 18px;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
+  font-size: 16px;
+  color: #666;
 }
-.pay-total { font-size: 32px; font-weight: 800; color: #ff6b35; }
+.pay-summary-row.remain { margin-top: 2px; }
+.pay-total { font-size: 22px; font-weight: 800; color: #333; }
+.pay-paid { font-size: 22px; font-weight: 700; color: #52c41a; }
+.pay-remain { font-size: 30px; font-weight: 800; color: #ff6b35; }
+.tender-list {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #f7f7f7;
+  border-radius: 10px;
+}
+.tender-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  color: #444;
+  padding: 4px 0;
+}
+.tender-amt-wrap { margin-bottom: 16px; }
+.tender-amt-wrap label {
+  display: block;
+  font-size: 16px;
+  color: #666;
+  margin-bottom: 8px;
+}
+.tender-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.tender-tip {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #999;
+  line-height: 1.4;
+}
 .pay-pack-row {
   display: flex;
   flex-wrap: wrap;
@@ -1628,6 +2206,27 @@ watch(() => auth.user?.store_id, () => {
 .so-refund-tag.ok { color: #67c23a; }
 .so-refund-tag.bad { color: #f56c6c; }
 .refund-hint { margin: 0 0 12px; color: #666; font-size: 15px; }
+.refund-hint b { color: #ff6b35; }
+.refund-tenders {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  background: #f7f7f7;
+  border-radius: 10px;
+}
+.refund-tender-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  color: #444;
+  padding: 4px 0;
+}
+.refund-alloc-tip {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #999;
+  line-height: 1.4;
+}
 
 .lock-overlay {
   position: fixed;

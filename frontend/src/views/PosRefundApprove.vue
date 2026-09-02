@@ -27,8 +27,13 @@
       <el-table-column label="金额" width="100">
         <template #default="{ row }"><b class="amt">¥{{ row.amount }}</b></template>
       </el-table-column>
-      <el-table-column label="支付方式" width="90">
-        <template #default="{ row }">{{ payLabel(row.payment_method) }}</template>
+      <el-table-column label="支付方式" width="110">
+        <template #default="{ row }">
+          <div>{{ payLabel(row.payment_method) }}</div>
+          <div v-if="row.tenders?.length > 1" class="tender-tip">
+            {{ row.tenders.map((t: any) => `${payLabel(t.provider)}¥${t.refundable}`).join(' · ') }}
+          </div>
+        </template>
       </el-table-column>
       <el-table-column prop="reason" label="原因" min-width="140" show-overflow-tooltip />
       <el-table-column label="桌台/外带" width="100">
@@ -88,6 +93,7 @@ function payLabel(m: string) {
   if (u === 'CASH') return '现金'
   if (u === 'WECHAT') return '微信'
   if (u === 'ALIPAY') return '支付宝'
+  if (u === 'MIXED') return '组合支付'
   return m || '—'
 }
 
@@ -139,9 +145,13 @@ async function load() {
 }
 
 async function approve(row: any) {
+  const tenderHint =
+    row.tenders?.length > 1
+      ? `\n分摊预览（现金优先）：${row.tenders.map((t: any) => `${payLabel(t.provider)}可退¥${t.refundable}`).join(' · ')}`
+      : ''
   try {
     await ElMessageBox.confirm(
-      `确认通过并对订单 ${row.order_no} 退款 ¥${row.amount}？\n微信/支付宝将原路退回，现金需当面退给顾客。`,
+      `确认通过并对订单 ${row.order_no} 退款 ¥${row.amount}？\n微信/支付宝原路退回，现金当面退给顾客。${tenderHint}`,
       '审批并执行退款',
       { type: 'warning', confirmButtonText: '通过并退款' },
     )
@@ -196,6 +206,7 @@ onMounted(async () => {
 .refund-page { padding: 8px 4px 24px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .amt { color: #ff6b35; }
+.tender-tip { font-size: 12px; color: #888; margin-top: 2px; line-height: 1.3; }
 .empty { text-align: center; color: #aaa; padding: 40px; }
 .muted { color: #999; font-size: 13px; }
 </style>

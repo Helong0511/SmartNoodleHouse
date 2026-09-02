@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+from app.core.ip_allowlist import client_ip
 from app.core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -37,12 +38,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 limit, window = cfg
                 break
 
-        client_ip = request.client.host if request.client else "unknown"
-        # 优先 X-Forwarded-For 第一跳（需 Nginx 可信）
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            client_ip = xff.split(",")[0].strip()
-        key = f"snh:rl:{client_ip}:{path.split('?')[0]}"
+        key = f"snh:rl:{client_ip(request) or 'unknown'}:{path.split('?')[0]}"
 
         try:
             r = await get_redis()

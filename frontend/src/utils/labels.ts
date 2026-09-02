@@ -13,6 +13,7 @@ export const ORDER_STATUS: Record<string, string> = {
 
 export const PAYMENT_STATUS: Record<string, string> = {
   UNPAID: '未支付',
+  PARTIAL_PAID: '部分支付',
   PAID: '已支付',
   REFUNDING: '退款中',
   REFUNDED: '已退款',
@@ -42,11 +43,14 @@ export const CHANNEL: Record<string, string> = {
   MEITUAN: '美团外卖',
   ELEME: '饿了么',
   H5: 'H5点餐',
+  POS: '收银POS',
 }
 
 export const PAYMENT_PROVIDER: Record<string, string> = {
   WECHAT: '微信支付',
   ALIPAY: '支付宝',
+  CASH: '现金',
+  MIXED: '组合支付',
   MOCK: '模拟支付',
 }
 
@@ -127,6 +131,7 @@ export function orderStatusTagType(status: string) {
 export function paymentStatusTagType(status: string) {
   const m: Record<string, string> = {
     UNPAID: 'info',
+    PARTIAL_PAID: 'warning',
     PAID: 'success',
     REFUNDING: 'warning',
     REFUNDED: 'danger',

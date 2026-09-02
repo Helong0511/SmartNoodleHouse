@@ -1,14 +1,18 @@
 -- ============================================================================
 -- 智能面馆 SmartNoodleHouse — 数据库结构（全量 DDL）
 -- ============================================================================
--- MySQL 8.0+ · utf8mb4_unicode_ci · 40 张业务表
+-- MySQL 8.0+ · utf8mb4_unicode_ci · 43 张业务表
 --
 -- 全新部署（生产）：
 --   000_create_db_grant.sql  →  001_schema.sql  →  002_seed_prod.sql  →  init_admin.py
 -- 全新部署（开发）：
 --   001_schema.sql  →  002_seed_test.sql  →  init_admin.py
 --
--- 运维工具见 sql/tools/（非日常建库）
+-- 已有库升级（本文件不重复执行；按需跑增量脚本）：
+--   sql/003_pos_settlement.sql      → payments.operator_id + cashier_shifts
+--   sql/004_pos_refund_requests.sql → pos_refund_requests
+--   sql/tools/006~012               → token_version / 特价 / is_default / 免烹饪 / KDS 认领等
+--     （上述字段均已并入本全量 DDL；tools 仅供旧库补丁）
 -- ============================================================================
 
 SET NAMES utf8mb4;
@@ -368,8 +372,8 @@ CREATE TABLE IF NOT EXISTS orders (
   voucher_discount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '代金券抵扣金额',
   packing_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '打包/餐盒费合计',
   total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '应付总额（见文件头计算公式）',
-  payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID' COMMENT 'UNPAID/PAID/PARTIAL_REFUND/REFUNDING/REFUNDED',
-  payment_method VARCHAR(20) DEFAULT NULL COMMENT '支付方式摘要，如 WECHAT、ALIPAY',
+  payment_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID' COMMENT 'UNPAID/PARTIAL_PAID/PAID/PARTIAL_REFUND/REFUNDING/REFUNDED',
+  payment_method VARCHAR(20) DEFAULT NULL COMMENT '支付方式摘要：WECHAT/ALIPAY/CASH/MIXED',
   channel VARCHAR(20) DEFAULT NULL COMMENT '下单渠道：WECHAT/ALIPAY/MEITUAN/ELEME/H5',
   remark VARCHAR(500) DEFAULT NULL COMMENT '顾客备注',
   idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '下单幂等键，防重复提交',
@@ -510,6 +514,33 @@ CREATE TABLE IF NOT EXISTS cashier_shifts (
   CONSTRAINT fk_shift_store FOREIGN KEY (store_id) REFERENCES stores(id),
   CONSTRAINT fk_shift_operator FOREIGN KEY (operator_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='收银班次表';
+
+-- POS 退款申请：收银员申请 → 店长/超管审批并执行
+CREATE TABLE IF NOT EXISTS pos_refund_requests (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  order_id BIGINT UNSIGNED NOT NULL COMMENT '订单 → orders.id',
+  payment_id BIGINT UNSIGNED NOT NULL COMMENT '主支付单（组合支付时为分摊首笔）→ payments.id',
+  amount DECIMAL(10,2) NOT NULL COMMENT '申请退款金额（元）',
+  executed_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '已成功执行退款合计（组合分摊）',
+  reason VARCHAR(255) NOT NULL COMMENT '申请原因',
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/REJECTED/CANCELLED/SUCCESS/FAILED',
+  requested_by BIGINT UNSIGNED NOT NULL COMMENT '申请人（收银员）→ users.id',
+  reviewed_by BIGINT UNSIGNED DEFAULT NULL COMMENT '审批人 → users.id',
+  reviewed_at DATETIME(3) DEFAULT NULL COMMENT '审批时间',
+  review_remark VARCHAR(500) DEFAULT NULL COMMENT '审批备注（拒绝原因等）',
+  refund_id BIGINT UNSIGNED DEFAULT NULL COMMENT '执行后的退款单 → payment_refunds.id',
+  fail_reason VARCHAR(255) DEFAULT NULL COMMENT '执行失败原因',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  INDEX idx_pos_refund_store_status (store_id, status, created_at),
+  INDEX idx_pos_refund_order (order_id),
+  INDEX idx_pos_refund_requester (requested_by, created_at),
+  CONSTRAINT fk_pos_refund_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_pos_refund_order FOREIGN KEY (order_id) REFERENCES orders(id),
+  CONSTRAINT fk_pos_refund_payment FOREIGN KEY (payment_id) REFERENCES payments(id),
+  CONSTRAINT fk_pos_refund_requester FOREIGN KEY (requested_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='收银退款申请';
 
 CREATE TABLE IF NOT EXISTS payment_status_history (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',

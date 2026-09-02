@@ -52,15 +52,17 @@ class PosOrderCreate(BaseModel):
 
 
 class PosCashPay(BaseModel):
-    """收银台现金收款（可选实收金额以计算找零）。"""
+    """收银台现金收款（支持分笔；可选实收金额以计算找零）。"""
 
+    amount: Decimal | None = Field(default=None, gt=0, description="本笔入账金额，默认=待收余额")
     received_amount: Decimal | None = Field(default=None, ge=0, description="顾客实收现金")
 
 
 class PosScanPay(BaseModel):
-    """收银台扫顾客付款码（自动识别微信/支付宝）。"""
+    """收银台扫顾客付款码（支持分笔；自动识别微信/支付宝）。"""
 
     auth_code: str = Field(min_length=6, description="顾客付款码（扫码枪录入）")
+    amount: Decimal | None = Field(default=None, gt=0, description="本笔收款金额，默认=待收余额")
     provider: str | None = Field(default=None, description="可选；不传则按付款码自动识别")
 
 

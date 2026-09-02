@@ -21,11 +21,27 @@ WEBHOOK_PATHS = (
 )
 
 
-def _client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
+def client_ip(request: Request) -> str:
+    """解析真实客户端 IP（须配合 Nginx 设置 X-Real-IP=$remote_addr）。
+
+    优先 X-Real-IP（反代写入的直连 peer，不可被客户端伪造）；
+    其次取 X-Forwarded-For **最后一段**（Nginx 用 proxy_add_x_forwarded_for 时追加的 $remote_addr）；
+    勿取 XFF 首段——客户端可伪造。
+    """
+    real = (request.headers.get("x-real-ip") or "").strip()
+    if real:
+        return real
+    xff = (request.headers.get("x-forwarded-for") or "").strip()
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else ""
+
+
+def _client_ip(request: Request) -> str:
+    """兼容旧名。"""
+    return client_ip(request)
 
 
 def _parse_allowlist(raw: str) -> list[ipaddress._BaseNetwork | ipaddress._BaseAddress]:
@@ -78,7 +94,7 @@ class WebhookAllowlistMiddleware(BaseHTTPMiddleware):
                 )
             return await call_next(request)
 
-        ip = _client_ip(request)
+        ip = client_ip(request)
         if not ip_allowed(ip, allowlist):
             logger.warning("Webhook IP 拒绝 path=%s ip=%s", path, ip)
             return JSONResponse(

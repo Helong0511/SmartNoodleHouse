@@ -3,10 +3,13 @@
 -- ============================================================================
 -- 前置：sql/001_schema.sql
 -- 后续：python scripts/init_admin.py（创建超管，勿写入弱口令 SQL）
---
--- payment:refund 仅 SUPER_ADMIN / STORE_ADMIN
 -- 多门店：第六节按实际增删 store_no
--- 幂等：INSERT … WHERE NOT EXISTS；第七节校正历史误配
+-- 幂等：INSERT … WHERE NOT EXISTS；第八节校正历史误配
+--
+-- 退款权限策略：
+--   1) 收银员 CASHIER：无 payment:refund；收银渠道须「本班订单申请 → 店长审批」
+--   2) 店长 STORE_ADMIN / 超管 SUPER_ADMIN：持有 payment:refund，可管理端直连或走 POS 审批页
+--   3) 后厨/运营：不得持有 payment:refund（见文末 DELETE 校正）
 -- ============================================================================
 
 SET NAMES utf8mb4;
@@ -201,7 +204,8 @@ SELECT
 -- 添加管理员账号
 INSERT INTO `smart_noodle_house`.`users` (`id`, `username`, `password_hash`, `display_name`, `role_id`, `store_id`, `token_version`, `status`, `last_login_at`, `created_at`, `updated_at`) VALUES 
 (1, 'admin', '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm', '系统管理员', 1, NULL, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(2, 'hsf', '$2b$12$5YuLHbzaVpVkUufQVLzI7.kgcmx8llwd8orUyt9APM8C.r1VLGSj.', '贺师傅', 4, 1, 1, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(2, 'hsf', '$2b$12$5YuLHbzaVpVkUufQVLzI7.kgcmx8llwd8orUyt9APM8C.r1VLGSj.', '贺师傅', 4, 1, 1, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, 'syxm', '$2b$12$0wcpcyCEiMt022onlYQ7AuwB9NHNIpzWjB0.Cx5bkOyCRDbZXcSiO', '收银小妹', 3, 1, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 
 -- 添加分类

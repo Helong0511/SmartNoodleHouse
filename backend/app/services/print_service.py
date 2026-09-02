@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import parse_biz_no
 from app.core.config import get_settings
+from app.core.exceptions import AppException
 from app.core.response import now_local
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store, StoreSetting
 from app.services.customer_display import pickup_code_from_order_no
@@ -248,7 +249,7 @@ class PrintService:
         sn = await cls.resolve_printer_sn(db, ctx.order.store_id)
         content = build_ticket_content(ctx, ticket_type=ticket_type)
 
-        if not sn or not get_settings().xpyun_user or not get_settings().xpyun_user_key:
+        if not sn or not (settings.xpyun_user or "").strip() or not (settings.xpyun_user_key or "").strip():
             if settings.allow_print_mock:
                 logger.warning(
                     "MOCK 打印 ticket=%s order=%s sn=%s\n%s",
@@ -258,8 +259,11 @@ class PrintService:
                     content.replace("<BR>", "\n"),
                 )
                 return {"mock": True, "order_no": ctx.order.order_no}
-            logger.error("芯烨云未配置完整，跳过打印 order=%s", ctx.order.order_no)
-            return None
+            # 已开启打印却凭证不全：必须失败，禁止静默跳过造成厨房漏单
+            raise AppException(
+                50040,
+                f"芯烨云未配置完整（USER/USER_KEY/打印机SN），无法出票 order={ctx.order.order_no}",
+            )
 
         client = XpyunClient()
         data = await client.print_ticket(

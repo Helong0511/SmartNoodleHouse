@@ -364,6 +364,7 @@ class PosRefundRequest(Base, TimestampMixin):
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
     payment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("payments.id"))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    executed_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     reason: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     requested_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))

@@ -563,6 +563,8 @@ async def daily_series(
 _PAYMENT_CHANNELS = (
     ("WECHAT", "微信"),
     ("ALIPAY", "支付宝"),
+    ("CASH", "现金"),
+    ("MIXED", "组合支付"),
 )
 
 

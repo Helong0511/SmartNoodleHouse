@@ -281,6 +281,7 @@ class PosShiftService:
         for o in orders:
             table = tables.get(o.table_id) if o.table_id else None
             rr = refund_map.get(o.id)
+            summary = await PosRefundService.order_refund_summary(db, o.id)
             items.append(
                 {
                     "id": o.id,
@@ -295,6 +296,8 @@ class PosShiftService:
                     "table_no": table.table_no if table else None,
                     "table_name": table.table_name if table else None,
                     "remark": o.remark,
+                    "refundable_amount": summary["refundable_amount"],
+                    "payment_tenders": summary["tenders"],
                     "refund_request": (
                         {
                             "id": rr.id,

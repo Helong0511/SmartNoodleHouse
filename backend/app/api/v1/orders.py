@@ -416,6 +416,7 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
         "MEITUAN": "美团外卖",
         "ELEME": "饿了么",
         "H5": "H5点餐",
+        "POS": "收银POS",
     }
     now = now_local()
     orders = []
@@ -931,7 +932,12 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
     assert_order_store_access(user, order)
+    from app.core.config import get_settings
+
+    if not get_settings().xpyun_enabled:
+        return success({"printed": False, "message": "打印未启用（XPYUN_ENABLED=false）"}, request=request)
     result = await PrintService.print_order(db, order_id)
     if result is None:
-        return success({"printed": False, "message": "打印未启用或未配置"}, request=request)
+        # 订单已取消等业务跳过（非配置缺失；配置缺失会抛 AppException）
+        return success({"printed": False, "message": "当前订单状态不可打印"}, request=request)
     return success({"printed": True, "order_no": order.order_no, "result": result}, request=request)
