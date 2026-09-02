@@ -11,6 +11,7 @@ from app.core.response import now_local
 from app.models import DeliveryOrder, Order
 from app.services.delivery_context import PlatformCredentials
 from app.services.delivery_providers import get_delivery_provider
+from app.services.print_tasks import handle_deferred_print
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,12 @@ async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
         return
     for task in tasks:
         action = task.get("action")
+        if action == "print_ticket":
+            try:
+                await handle_deferred_print(task)
+            except Exception as e:
+                logger.exception("deferred print 失败 order_id=%s: %s", task.get("order_id"), e)
+            continue
         platform = task.get("platform", "").upper()
         platform_order_id = task.get("platform_order_id", "")
         creds_data = task.get("credentials") or {}

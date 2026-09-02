@@ -2,7 +2,7 @@
   <privacy-popup id="privacy-popup" />
 
   <view class="hero">
-    <view class="brand">智能面馆</view>
+    <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
     <view class="sub" wx:if="{{storeName}}">{{storeName}}</view>
     <view class="sub addr" wx:if="{{storeAddress}}">{{storeAddress}}</view>
     <view class="sub table-line" wx:if="{{table}}">{{table.table_name || table.table_no}}</view>

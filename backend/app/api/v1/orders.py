@@ -833,3 +833,19 @@ async def kitchen_takeover(order_id: int, request: Request, db: DbSession, user:
         },
         request=request,
     )
+
+
+@router.post("/{order_id}/print", dependencies=[require_kitchen()])
+async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession, user: CurrentUser):
+    """厨房补打制作单（芯烨云）。"""
+    from app.services.print_service import PrintService
+    from app.services.store_scope import assert_order_store_access
+
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
+    result = await PrintService.print_order(db, order_id)
+    if result is None:
+        return success({"printed": False, "message": "打印未启用或未配置"}, request=request)
+    return success({"printed": True, "order_no": order.order_no, "result": result}, request=request)

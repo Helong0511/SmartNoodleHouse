@@ -75,6 +75,9 @@ async def create_payment(
             "ORDER_PAID",
             {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
         )
+        from app.services.print_tasks import schedule_print
+
+        schedule_print(order.id)
         if order.customer_id:
             from app.models import Customer
             from app.services.customer_service import CustomerService
@@ -184,6 +187,9 @@ async def _notify_paid_or_refunded(db: DbSession, result) -> None:
                 "ORDER_PAID",
                 {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
             )
+            from app.services.print_tasks import schedule_print
+
+            schedule_print(order.id)
 
 
 @router.post("/wechat/notify")

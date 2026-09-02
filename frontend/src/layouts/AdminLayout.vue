@@ -1,7 +1,9 @@
 <template>
   <el-container class="layout">
     <el-aside width="220px" class="aside">
-      <div class="logo">🍜 智能面馆</div>
+      <div class="logo">
+        <img src="/logo.png" alt="肠旺面" class="logo-img" />
+      </div>
       <el-menu :default-active="$route.path" router background-color="#1d1e1f" text-color="#bbb" active-text-color="#409eff">
         <el-menu-item v-if="auth.hasPermission('order:read')" index="/dashboard">数据概览</el-menu-item>
         <el-menu-item v-if="auth.hasPermission('product:read')" index="/categories">分类管理</el-menu-item>
@@ -56,7 +58,15 @@ onMounted(() => {
 <style scoped>
 .layout { height: 100vh; }
 .aside { background: #1d1e1f; }
-.logo { color: #fff; padding: 20px; font-size: 18px; font-weight: bold; text-align: center; }
+.logo { padding: 16px 12px; text-align: center; }
+.logo-img {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 8px;
+}
 .header {
   display: flex;
   justify-content: space-between;

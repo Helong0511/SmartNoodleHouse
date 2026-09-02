@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     allow_opencv_face_fallback: bool = False
     # 外卖新单是否自动向平台 confirm（默认 false：本地 PENDING，需商家确认）
     delivery_auto_confirm: bool = False
+
+    # 芯烨云打印（XP-80T USB+WiFi 等）
+    xpyun_enabled: bool = False
+    xpyun_user: str = ""
+    xpyun_user_key: str = ""
+    xpyun_printer_sn: str = ""
+    xpyun_api_base: str = "https://open.xpyun.net/api/openapi/xprinter"
+    xpyun_print_copies: int = 1
+    xpyun_voice: int = 2  # 0取消单 1静音 2来单 3退单
+    allow_print_mock: bool = False
     enable_rate_limit: bool = True
     # 未配置平台密钥时，同步接口是否允许返回 mock 成功（生产必须 false）
     allow_delivery_mock: bool = False

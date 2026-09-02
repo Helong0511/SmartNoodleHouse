@@ -1,7 +1,8 @@
 <template>
   <div class="mobile-order">
     <header>
-      <h1>智能面馆 · 扫码点餐</h1>
+      <img src="/logo.png" alt="肠旺面" class="header-logo" />
+      <h1>扫码点餐</h1>
       <p v-if="table">桌号: {{ table.table_name }}</p>
     </header>
 
@@ -283,6 +284,15 @@ onMounted(async () => {
 <style scoped>
 .mobile-order { max-width: 480px; margin: 0 auto; padding-bottom: 60px; position: relative; }
 header { background: linear-gradient(135deg, #ff6b35, #f7b733); color: #fff; padding: 16px; text-align: center; }
+.header-logo {
+  display: block;
+  width: 72px;
+  height: auto;
+  margin: 0 auto 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+header h1 { font-size: 18px; font-weight: 600; }
 .section { padding: 12px; }
 .product {
   display: flex; gap: 12px; align-items: stretch;

@@ -1,6 +1,7 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
+      <img src="/logo.png" alt="肠旺面" class="login-logo" />
       <h2>面馆智能经营系统</h2>
       <el-form @submit.prevent="handleLogin">
         <el-form-item><el-input v-model="username" placeholder="用户名" /></el-form-item>
@@ -39,5 +40,12 @@ async function handleLogin() {
 <style scoped>
 .login-page { display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
 .login-card { width: 400px; padding: 20px; }
+.login-logo {
+  display: block;
+  width: 120px;
+  height: auto;
+  margin: 0 auto 16px;
+  border-radius: 8px;
+}
 h2 { text-align: center; margin-bottom: 24px; }
 </style>

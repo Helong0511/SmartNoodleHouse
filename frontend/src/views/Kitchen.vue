@@ -3,10 +3,13 @@
     <header class="toolbar">
       <div class="left">
         <div class="head-brand">
-          <div class="store-name" :title="storeHint">{{ storeLabel }}</div>
-          <div class="head-sub">
-            <span class="kds-label">厨房 KDS</span>
-            <span class="clock">{{ clockText }}</span>
+          <img src="/logo.png" alt="肠旺面" class="head-logo" />
+          <div class="head-text">
+            <div class="store-name" :title="storeHint">{{ storeLabel }}</div>
+            <div class="head-sub">
+              <span class="kds-label">厨房 KDS</span>
+              <span class="clock">{{ clockText }}</span>
+            </div>
           </div>
         </div>
         <el-select
@@ -784,6 +787,19 @@ onUnmounted(() => {
 }
 .left, .right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .head-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.head-logo {
+  flex-shrink: 0;
+  width: 48px;
+  height: auto;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.head-text {
   display: flex;
   flex-direction: column;
   gap: 2px;

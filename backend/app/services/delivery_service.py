@@ -128,7 +128,12 @@ class DeliveryService:
     ) -> DeliveryNotifyResult:
         if event == DeliveryEvent.ORDER_CANCEL:
             order = await cls._handle_cancel(db, platform, platform_order_id, raw)
-            return DeliveryNotifyResult(event=event, order=order)
+            deferred = []
+            if order:
+                from app.services.print_service import deferred_print_task, TICKET_CANCEL
+
+                deferred.append(deferred_print_task(order.id, TICKET_CANCEL))
+            return DeliveryNotifyResult(event=event, order=order, deferred_tasks=deferred)
 
         if event == DeliveryEvent.REFUND:
             order = await cls._handle_refund(db, platform, parsed, raw)
@@ -136,6 +141,10 @@ class DeliveryService:
 
         if event == DeliveryEvent.URGE:
             order, tasks = await cls._handle_urge(db, platform, platform_order_id, raw, credentials)
+            if order:
+                from app.services.print_service import deferred_print_task, TICKET_URGE
+
+                tasks = list(tasks) + [deferred_print_task(order.id, TICKET_URGE)]
             return DeliveryNotifyResult(event=event, order=order, deferred_tasks=tasks, extra={"urge": True})
 
         if event == DeliveryEvent.DELIVERY:
@@ -414,6 +423,10 @@ class DeliveryService:
         else:
             # 默认：仅落库 PAID/PENDING，等待商家手动接单再调平台
             d_order.delivery_status = "PENDING"
+
+        from app.services.print_service import deferred_print_task
+
+        deferred.append(deferred_print_task(order.id))
 
         return order, deferred
 

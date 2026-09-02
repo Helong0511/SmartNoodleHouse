@@ -1,4 +1,7 @@
 <view class="bar {{compact ? 'compact' : ''}}" wx:if="{{storeName || tableName}}">
+  <view class="bar-top">
+    <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
+    <view class="bar-main">
   <view class="row" wx:if="{{storeName}}">
     <text class="bar-label">门店</text>
     <view class="val">
@@ -17,7 +20,12 @@
     <text wx:if="{{storeAddress}}">{{storeAddress}}</text>
     <text wx:if="{{storePhone}}" class="phone">{{storePhone}}</text>
   </view>
+    </view>
+  </view>
 </view>
 <view class="bar empty" wx:else>
-  <text class="hint">请扫描桌台二维码进入门店</text>
+  <view class="bar-top">
+    <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
+    <text class="hint">请扫描桌台二维码进入门店</text>
+  </view>
 </view>

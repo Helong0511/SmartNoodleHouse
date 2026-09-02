@@ -6,6 +6,15 @@
   border: 1px solid #d6e8ff;
 }
 .bar.compact { margin: 0 0 12rpx; padding: 16rpx 20rpx; }
+.bar-top { display: flex; align-items: flex-start; gap: 16rpx; }
+.brand-logo {
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 88rpx;
+  border-radius: 8rpx;
+  background: #fff;
+}
+.bar-main { flex: 1; min-width: 0; }
 .bar.empty { background: #fafafa; border-color: #eee; }
 .hint { color: #999; font-size: 24rpx; }
 .row { display: flex; align-items: center; gap: 16rpx; margin-bottom: 8rpx; }

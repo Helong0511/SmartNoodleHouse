@@ -9,6 +9,19 @@
   margin: 0 0 12rpx;
   padding: 16rpx 20rpx;
 }
+.bar-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+.brand-logo {
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 88rpx;
+  border-radius: 8rpx;
+  background: #fff;
+}
+.bar-main { flex: 1; min-width: 0; }
 .bar.empty {
   background: #fafafa;
   border-color: #eee;

@@ -11,6 +11,7 @@
     </div>
 
     <div v-else class="card">
+      <img src="/logo.png" alt="肠旺面" class="page-logo" />
       <p class="store" v-if="storeName">{{ storeName }}</p>
       <h1>{{ tableLabel }}</h1>
       <p class="sub">扫码点餐 · 桌号 {{ info?.table?.table_no }}</p>
@@ -273,6 +274,13 @@ onMounted(async () => {
   text-align: center;
 }
 .card.error h2 { color: #c45656; margin-bottom: 8px; }
+.page-logo {
+  display: block;
+  width: 88px;
+  height: auto;
+  margin: 0 auto 12px;
+  border-radius: 10px;
+}
 .store { color: #888; font-size: 14px; margin-bottom: 4px; }
 h1 { font-size: 28px; margin: 0 0 8px; color: #222; }
 .sub { color: #666; font-size: 14px; margin-bottom: 20px; }

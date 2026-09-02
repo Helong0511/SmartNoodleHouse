@@ -2,8 +2,11 @@
   <div class="customer-display" :class="{ fullscreen }">
     <header class="header">
       <div class="brand">
-        <h1>{{ storeName || '取餐叫号' }}</h1>
-        <p class="subtitle">堂食看桌号 · 打包看取餐号 · 制作完成请自取</p>
+        <img src="/logo.png" alt="肠旺面" class="brand-logo" />
+        <div class="brand-text">
+          <h1>{{ storeName || '取餐叫号' }}</h1>
+          <p class="subtitle">堂食看桌号 · 打包看取餐号 · 制作完成请自取</p>
+        </div>
       </div>
       <div class="meta">
         <span class="conn" :class="connStatus">{{ connLabel }}</span>
@@ -530,6 +533,20 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 20px;
 }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.brand-logo {
+  flex-shrink: 0;
+  width: 56px;
+  height: auto;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.brand-text { min-width: 0; }
 .brand h1 {
   margin: 0;
   font-size: clamp(28px, 4vw, 42px);
