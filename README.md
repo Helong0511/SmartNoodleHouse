@@ -98,6 +98,14 @@ npm run dev
 
 ### 5. 微信小程序
 
+开放平台入口：
+
+| 平台 | 网址 |
+|------|------|
+| 微信公众平台（小程序后台） | https://mp.weixin.qq.com |
+| 微信开放平台 | https://open.weixin.qq.com |
+| 微信小程序开发文档 | https://developers.weixin.qq.com/miniprogram/dev/framework/ |
+
 1. 用微信开发者工具打开 `miniprogram-wechat`
 2. 填写 AppID（或测试号），开发阶段可关闭域名校验
 3. 修改 `miniprogram-wechat/config/env.js` 中 `DEV_LAN_HOST`（真机联调）；API 地址由该文件按环境自动选择
@@ -108,6 +116,13 @@ npm run dev
    - 订单页每 8 秒自动刷新；打包单可点击取餐号卡片复制
 
 ### 6. 支付宝小程序
+
+开放平台入口：
+
+| 平台 | 网址 |
+|------|------|
+| 支付宝开放平台 | https://open.alipay.com |
+| 支付宝开放文档 | https://opendocs.alipay.com |
 
 1. 打开 `miniprogram-alipay`，填写 AppID
 2. 修改 `miniprogram-alipay/config/env.js` 中 `DEV_LAN_HOST`（与项目根 `.env` 一致）
@@ -312,7 +327,7 @@ python -m compileall backend
 
 - 须备案的访问入口：`https://你的域名/`（后台、叫号屏）、`/scan`（桌台 H5）、`/api/v1`（小程序 API）、支付/外卖回调 URL
 - 微信 [mp.weixin.qq.com](https://mp.weixin.qq.com) → 开发设置 → **服务器域名**：只接受已备案且 HTTPS 的域名
-- 支付宝开放平台 → **服务器域名白名单**：同样要求可公网访问的合规域名
+- 支付宝开放平台 [open.alipay.com](https://open.alipay.com) → **服务器域名白名单**：同样要求可公网访问的合规域名
 - 云厂商（阿里云 / 腾讯云 / 华为云等）购买**大陆地域**云主机时，未备案域名通常**无法**开通 80/443 或绑定证书
 
 **建议上线顺序：**
@@ -529,7 +544,7 @@ MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
 | `miniprogram-wechat/project.config.json` | `setting.urlCheck: true` |
 | `miniprogram-wechat/app.json` | 已含 `__usePrivacyCheck__` |
 
-**微信公众平台 [mp.weixin.qq.com](https://mp.weixin.qq.com)**
+**微信公众平台** https://mp.weixin.qq.com （开放平台 https://open.weixin.qq.com ）
 
 | 配置项 | 说明 |
 |--------|------|
@@ -548,7 +563,7 @@ MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
 | 项目根 `.env` | `ALIPAY_AES_KEY`（接口内容加密 AES） |
 | `miniprogram-alipay/app.json` | 已设 `usePrivacyCheck: true` |
 
-**支付宝开放平台 [open.alipay.com](https://open.alipay.com)**
+**支付宝开放平台** https://open.alipay.com （文档 https://opendocs.alipay.com ）
 
 | 配置项 | 说明 |
 |--------|------|

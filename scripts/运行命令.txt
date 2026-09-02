@@ -15,6 +15,13 @@
 #   正式版     PROD_API_BASE → https://your-domain.com/api/v1
 #               ENABLE_WX_PRIVACY_APIS / ENABLE_ALIPAY_PRIVACY_APIS → true
 #
+# ── 开放平台入口（常用）──
+#   微信公众平台（小程序）：https://mp.weixin.qq.com
+#   微信开放平台：          https://open.weixin.qq.com
+#   微信小程序开发文档：    https://developers.weixin.qq.com/miniprogram/dev/framework/
+#   支付宝开放平台：        https://open.alipay.com
+#   支付宝开放文档：        https://opendocs.alipay.com
+#
 # ── 正式版上线检查清单（微信 / 支付宝分开）──
 #
 # 【后端 .env 生产】cp .env.production.example .env
@@ -25,10 +32,11 @@
 #   ALIPAY_AES_KEY=开放平台接口内容加密 AES（支付宝手机号解密）
 #
 # 【微信小程序 miniprogram-wechat】
+#   入口：https://mp.weixin.qq.com （开放平台 https://open.weixin.qq.com ）
 #   config/env.js：PROD_API_BASE=https://你的域名/api/v1
 #   config/env.js：ENABLE_WX_PRIVACY_APIS=true
-#   mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
-#   mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
+#   https://mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
+#   https://mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
 #     勾选：收集昵称头像、收集手机号；提交并发布
 #   主体须非个人且已认证（getPhoneNumber 要求）
 #   桌台一码通扫：开通 URL Link、明文 Scheme（开发版用 getwxacode 调试码）
@@ -37,9 +45,10 @@
 #   文档：https://developers.weixin.qq.com/miniprogram/dev/framework/user-privacy/PrivacyAuthorize.html
 #
 # 【支付宝小程序 miniprogram-alipay】
+#   入口：https://open.alipay.com （文档 https://opendocs.alipay.com ）
 #   config/env.js：PROD_API_BASE=https://你的域名/api/v1
 #   config/env.js：ENABLE_ALIPAY_PRIVACY_APIS=true
-#   open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单（HTTPS）
+#   https://open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单（HTTPS）
 #   基础设置 → 小程序隐私政策（声明手机号等收集类型）
 #   能力申请 → 获取会员手机号；开发设置 → 接口内容加密方式 → ALIPAY_AES_KEY
 #   app.json 已 usePrivacyCheck:true；手机号须两步按钮（先隐私同意再 getAuthorize）
@@ -65,7 +74,7 @@
 #
 # ── 微信真机「人脸迎宾」打不开摄像头 / 授权失败 ──
 # 现象：设置页只有「选中的照片或视频」，没有「摄像头」→ 公众平台未声明摄像头
-# 1. 登录 mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
+# 1. 登录 https://mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
 #    → 勾选「摄像头（访问你的摄像头）」→ 保存并发布（测试号也要配）
 # 2. 重新编译上传小程序后，真机点「打开摄像头采集」
 # 3. iPhone 额外检查：设置 → 微信 → 摄像头 → 允许
@@ -85,11 +94,12 @@
 # 6. 相册选头像不受此限制，可先用手输昵称 +「从相册选择头像」完成注册
 #
 # ── 支付宝头像/昵称/手机号（2024-07 组件化 + 隐私政策）──
-# 1. 开放平台 → 小程序详情 → 基础设置 → 小程序隐私政策（2025 起含 SDK/插件声明）
+# 1. https://open.alipay.com → 小程序详情 → 基础设置 → 小程序隐私政策（2025 起含 SDK/插件声明）
 # 2. app.json 已启用 usePrivacyCheck: true；真机预览隐私弹窗（开发者工具不支持）
 # 3. 绑定「获取会员手机号」并完成用户信息申请；开发设置配置 AES 密钥 → .env ALIPAY_AES_KEY
 # 4. 发正式版前将 miniprogram-alipay/config/env.js 中 ENABLE_ALIPAY_PRIVACY_APIS 改为 true
 # 5. 头像/昵称使用 chooseAvatar + input type=nickname（勿再用 my.getOpenUserInfo 一键取）
+# 文档：https://opendocs.alipay.com/mini/api/getphonenumber
 #
 # ── 规格「默认项」不保存/不显示 ──
 # 1. 执行 sql/tools/009_option_is_default.sql（老库加 is_default 列）
