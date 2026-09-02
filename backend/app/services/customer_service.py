@@ -564,6 +564,7 @@ class OrderCreateService:
         dining_type: str | None = None,
         customer_coupon_id: int | None = None,
         customer_voucher_id: int | None = None,
+        waive_packing_fee: bool = False,
     ) -> Order:
         from sqlalchemy.exc import IntegrityError
 
@@ -601,6 +602,7 @@ class OrderCreateService:
         if dtype not in ("DINE_IN", "TAKEAWAY"):
             dtype = "TAKEAWAY" if need_pack else "DINE_IN"
         pack = need_pack or dtype == "TAKEAWAY"
+        charge_pack = pack and not waive_packing_fee
         t_no, t_ph = resolve_table_parts(table_no_raw, channel=channel, dining_type=dtype)
         store = await db.get(Store, int(store_id)) if store_id else None
         sno = store.store_no if store else None
@@ -632,7 +634,7 @@ class OrderCreateService:
             raise AppException(40901, "订单创建冲突，请重试")
 
         subtotal, packing_fee, discountable_subtotal = await OrderPriceCalculator.build_order_items(
-            db, order, items, deduct_stock=True, need_pack=pack
+            db, order, items, deduct_stock=True, need_pack=charge_pack
         )
         rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
         discount_amount, base_total = CustomerService.calc_member_discount(

@@ -63,6 +63,14 @@ Page({
     this.setData(dineCtx.pageDineFields(ctx))
   },
 
+  onTableChange(e) {
+    const ctx = e.detail
+    if (!ctx) return
+    this.applyDineContext(ctx)
+    this._catsCache = null
+    this.loadMenu()
+  },
+
   onPullDownRefresh() {
     this._catsCache = null
     Promise.all([

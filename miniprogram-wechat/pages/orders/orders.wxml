@@ -16,6 +16,8 @@
 
     compact="{{true}}"
 
+    bind:tablechange="onTableChange"
+
   />
 
 

@@ -67,7 +67,7 @@ api.interceptors.response.use(
     } else if (status === 429) {
       ElMessage.error('请求过于频繁')
     }
-    return Promise.reject(err instanceof Error ? err : new Error(msg))
+    return Promise.reject(new Error(msg))
   },
 )
 

@@ -43,7 +43,7 @@ def _configured() -> bool:
     return bool(s.alipay_app_id and s.alipay_private_key and s.alipay_public_key)
 
 
-async def _gateway_call(method: str, biz_content: dict[str, Any]) -> dict[str, Any]:
+async def _gateway_call(method: str, biz_content: dict[str, Any], *, allow_codes: set[str] | None = None) -> dict[str, Any]:
     if not _configured():
         raise AppException(50020, "支付宝未完整配置（app_id/private_key/public_key）")
     settings = get_settings()
@@ -58,13 +58,13 @@ async def _gateway_call(method: str, biz_content: dict[str, Any]) -> dict[str, A
         "biz_content": json.dumps(biz_content, ensure_ascii=False, separators=(",", ":")),
     }
     params["sign"] = _sign(params, settings.alipay_private_key)
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(settings.alipay_gateway, data=params)
     data = resp.json()
-    # 响应 key 形如 alipay_trade_precreate_response
     resp_key = method.replace(".", "_") + "_response"
     body = data.get(resp_key) or data
-    if str(body.get("code")) not in ("10000",):
+    ok_codes = allow_codes or {"10000"}
+    if str(body.get("code")) not in ok_codes:
         logger.error("支付宝 API 错误 %s: %s", method, body)
         raise AppException(50021, f"支付宝失败: {body.get('sub_msg') or body.get('msg') or body}")
     return body
@@ -85,6 +85,65 @@ async def trade_precreate(*, payment_no: str, amount_yuan: Decimal, subject: str
         "qr_code": body.get("qr_code"),
         "amount": f"{amount_yuan:.2f}",
     }
+
+
+async def trade_bar_pay(
+    *,
+    payment_no: str,
+    amount_yuan: Decimal,
+    subject: str,
+    auth_code: str,
+) -> dict[str, Any]:
+    """付款码支付（扫顾客支付宝付款码）。10000=成功；10003=等待用户付款需轮询查单。"""
+    body = await _gateway_call(
+        "alipay.trade.pay",
+        {
+            "out_trade_no": payment_no,
+            "scene": "bar_code",
+            "auth_code": auth_code.strip(),
+            "total_amount": f"{amount_yuan:.2f}",
+            "subject": subject[:256],
+            "product_code": "FACE_TO_FACE_PAYMENT",
+        },
+        allow_codes={"10000", "10003"},
+    )
+    code = str(body.get("code") or "")
+    trade_status = (body.get("trade_status") or "").upper()
+    if code == "10003" or trade_status == "WAIT_BUYER_PAY":
+        return {
+            "provider": "ALIPAY",
+            "payment_no": payment_no,
+            "trade_status": "WAIT_BUYER_PAY",
+            "waiting_payment": True,
+            "amount": f"{amount_yuan:.2f}",
+            "raw": body,
+        }
+    paid = trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED")
+    return {
+        "provider": "ALIPAY",
+        "payment_no": payment_no,
+        "trade_no": body.get("trade_no"),
+        "trade_status": trade_status or "TRADE_SUCCESS",
+        "amount": f"{amount_yuan:.2f}",
+        "immediate_paid": paid,
+        "provider_trade_no": body.get("trade_no"),
+        "raw": body,
+    }
+
+
+async def trade_query(*, payment_no: str) -> dict[str, Any]:
+    body = await _gateway_call("alipay.trade.query", {"out_trade_no": payment_no})
+    return {
+        "trade_no": body.get("trade_no"),
+        "trade_status": body.get("trade_status"),
+        "raw": body,
+    }
+
+
+async def trade_cancel(*, payment_no: str) -> dict[str, Any]:
+    """撤销未支付订单（当面付建议超时后撤销，避免误付）。"""
+    body = await _gateway_call("alipay.trade.cancel", {"out_trade_no": payment_no})
+    return body
 
 
 async def trade_refund(

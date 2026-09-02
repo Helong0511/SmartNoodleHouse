@@ -46,6 +46,12 @@ Page({
     this.setData(dineCtx.pageDineFields(ctx))
   },
 
+  onTableChange(e) {
+    const ctx = e.detail
+    if (!ctx) return
+    this.applyDineContext(ctx)
+  },
+
   onPullDownRefresh() {
     this._ordersLoadedAt = 0
     dineCtx.ensureDineContext({ force: true })

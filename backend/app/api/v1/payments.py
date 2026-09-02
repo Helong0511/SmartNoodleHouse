@@ -7,10 +7,11 @@ from sqlalchemy import func, or_, select
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission
+from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission, require_pos
+from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import Order, Payment, PaymentRefund
-from app.schemas.order import PaymentCreate
+from app.schemas.order import PaymentCreate, PosCashPay, PosScanPay
 from app.services.customer_service import CustomerService
 from app.services.payment_service import PaymentService
 from app.services.store_scope import assert_order_store_access, require_bound_store
@@ -75,9 +76,6 @@ async def create_payment(
             "ORDER_PAID",
             {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
         )
-        from app.services.print_tasks import schedule_print
-
-        schedule_print(order.id)
         if order.customer_id:
             from app.models import Customer
             from app.services.customer_service import CustomerService
@@ -89,6 +87,101 @@ async def create_payment(
                 pay_data["member_points"] = profile.get("member_points", 0)
                 pay_data["member_level_name"] = profile.get("member_level_name")
     return success({"payment_no": payment.payment_no, "amount": str(payment.amount), **pay_data}, request=request)
+
+
+@router.post("/orders/{order_id}/cash", dependencies=[require_pos()])
+async def pay_order_cash(
+    order_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    data: PosCashPay | None = None,
+):
+    """收银台现金收款：标记订单已支付，可选实收金额计算找零。"""
+    body = data or PosCashPay()
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
+    change_amount = None
+    if body.received_amount is not None and body.received_amount < order.total_amount:
+        raise AppException(40009, f"实收金额不足，应收 ¥{order.total_amount}")
+    if body.received_amount is not None:
+        change_amount = body.received_amount - order.total_amount
+    payment, pay_data = await PaymentService.settle_cash_payment(
+        db,
+        order,
+        operator_id=user.id,
+        received_amount=body.received_amount,
+        change_amount=change_amount,
+    )
+    await ws_manager.notify_order_event(
+        "ORDER_PAID",
+        {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id, "channel": order.channel},
+    )
+    return success(
+        {
+            "payment_no": payment.payment_no,
+            "amount": str(payment.amount),
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "status": order.status,
+            "received_amount": str(body.received_amount) if body.received_amount is not None else None,
+            "change_amount": str(change_amount) if change_amount is not None else None,
+            **pay_data,
+        },
+        request=request,
+    )
+
+
+@router.post("/orders/{order_id}/pos-scan", dependencies=[require_pos()])
+async def create_pos_scan_payment(
+    order_id: int,
+    data: PosScanPay,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """收银台扫顾客付款码（自动识别微信/支付宝）。"""
+    from app.services.payment_barcode import resolve_barcode_provider
+
+    auth_code = (data.auth_code or "").strip()
+    provider = resolve_barcode_provider(auth_code, data.provider)
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    assert_order_store_access(user, order)
+    channel_type = "micropay" if provider == "WECHAT" else "barcode"
+    payment, pay_data = await PaymentService.create_payment(
+        db,
+        order,
+        provider,
+        channel_type,
+        customer_id=None,
+        operator_id=user.id,
+        extra={"auth_code": auth_code},
+    )
+    if pay_data.get("mock_settled") or pay_data.get("status") == "PAID":
+        await ws_manager.notify_order_event(
+            "ORDER_PAID",
+            {
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "store_id": order.store_id,
+                "channel": order.channel,
+            },
+        )
+    return success(
+        {
+            "payment_no": payment.payment_no,
+            "amount": str(payment.amount),
+            "provider": provider,
+            "order_id": order.id,
+            "order_no": order.order_no,
+            **pay_data,
+        },
+        request=request,
+    )
 
 
 @router.post("/{payment_no}/refund", dependencies=[require_permission("payment:refund")])
@@ -187,9 +280,6 @@ async def _notify_paid_or_refunded(db: DbSession, result) -> None:
                 "ORDER_PAID",
                 {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
             )
-            from app.services.print_tasks import schedule_print
-
-            schedule_print(order.id)
 
 
 @router.post("/wechat/notify")

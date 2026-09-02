@@ -3,12 +3,14 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import func, or_, select
 
-from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission
+from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission, require_pos
+from app.core.exceptions import AppException
 from app.core.response import calc_pages, ensure_local_aware, now_local, success
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
-from app.schemas.order import OrderCreate, OrderStatusUpdate
+from app.schemas.order import OrderCreate, OrderStatusUpdate, PosOrderCreate
 from app.services.customer_service import OrderCreateService
 from app.services.delivery_service import DeliveryService
+from app.services.store_scope import assert_order_store_access, assert_store_access, require_bound_store
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/orders", tags=["订单"])
@@ -109,6 +111,81 @@ async def create_order(
         },
         request=request,
     )
+
+
+@router.post("/pos", dependencies=[require_pos()])
+async def create_pos_order(
+    data: PosOrderCreate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """门店收银台下单（现金/扫码收款前创建待支付订单）。"""
+    dtype = (data.dining_type or "").strip().upper()
+    if dtype not in ("DINE_IN", "TAKEAWAY"):
+        dtype = "TAKEAWAY" if data.need_pack else "DINE_IN"
+    need_pack = data.need_pack or dtype == "TAKEAWAY"
+
+    store_id = require_bound_store(user, data.store_id)
+    table_token: str | None = None
+    if dtype == "DINE_IN":
+        if not data.table_id:
+            raise AppException(40008, "堂食请先选择桌号")
+        table = await db.get(DiningTable, int(data.table_id))
+        if not table or table.status != 1:
+            raise AppException(40403, "桌台不存在或已停用")
+        assert_store_access(user, table.store_id)
+        store_id = table.store_id
+        table_token = (table.qr_token or "").strip() or None
+        if not table_token:
+            raise AppException(40008, "桌台未配置二维码，请在后台重新生成桌码")
+    elif store_id is None:
+        raise AppException(40008, "外带下单请选择门店")
+
+    order = await OrderCreateService.create_order(
+        db,
+        store_id=store_id,
+        table_token=table_token,
+        customer_id=None,
+        items=[i.model_dump() for i in data.items],
+        remark=data.remark,
+        channel="POS",
+        idempotency_key=data.idempotency_key,
+        need_pack=need_pack,
+        dining_type=dtype,
+        waive_packing_fee=bool(data.waive_packing_fee),
+    )
+    table = await db.get(DiningTable, order.table_id) if order.table_id else None
+    await ws_manager.notify_order_event(
+        "ORDER_CREATED",
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "status": order.status,
+            "store_id": order.store_id,
+            "table_id": order.table_id,
+            "table_no": table.table_no if table else None,
+            "dining_type": order.dining_type,
+            "channel": "POS",
+        },
+    )
+    return success(
+        {
+            "id": order.id,
+            "order_no": order.order_no,
+            "total_amount": str(order.total_amount),
+            "subtotal": str(order.subtotal),
+            "discount_amount": str(order.discount_amount),
+            "packing_fee": str(order.packing_fee),
+            "dining_type": order.dining_type,
+            "status": order.status,
+            "payment_status": order.payment_status,
+            "table_id": order.table_id,
+            "table": _table_payload(table),
+        },
+        request=request,
+    )
+
 
 @router.get("", dependencies=[require_permission("order:read")])
 async def list_orders(
@@ -764,6 +841,7 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
     if not existing:
         raise HTTPException(status_code=404, detail="订单不存在")
     assert_order_store_access(user, existing)
+    old_status = (existing.status or "").strip().upper()
     order = await OrderCreateService.update_status(
         db,
         order_id,
@@ -773,6 +851,14 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
     )
 
     await DeliveryService.sync_kitchen_status(db, order)
+
+    target = (data.status or "").strip().upper()
+    if target == "PREPARING" and old_status in ("PAID", "CONFIRMED"):
+        from app.services.order_lifecycle import order_all_no_cooking
+        from app.services.print_tasks import schedule_print
+
+        if not await order_all_no_cooking(db, order.id):
+            schedule_print(order.id)
 
     await ws_manager.notify_order_event(
         f"ORDER_{data.status}",

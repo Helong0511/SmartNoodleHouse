@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import parse_biz_no
 from app.core.config import get_settings
 from app.core.response import now_local
-from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Store, StoreSetting
+from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store, StoreSetting
 from app.services.customer_display import pickup_code_from_order_no
 from app.services.xpyun_client import XpyunClient
 
@@ -41,6 +41,7 @@ class OrderPrintContext:
     delivery: DeliveryOrder | None
     items: list[OrderItem]
     options_by_item: dict[int, list[OrderItemOption]]
+    no_cooking_by_product: dict[int, bool]
 
 
 def deferred_print_task(order_id: int, ticket_type: str = TICKET_KITCHEN) -> dict[str, Any]:
@@ -119,10 +120,18 @@ def build_ticket_content(ctx: OrderPrintContext, ticket_type: str = TICKET_KITCH
     ]
 
     if ticket_type == TICKET_KITCHEN:
-        for item in ctx.items:
+        kitchen_items = [
+            item
+            for item in ctx.items
+            if not ctx.no_cooking_by_product.get(int(item.product_id or 0), False)
+        ]
+        if not kitchen_items:
+            kitchen_items = ctx.items
+        for item in kitchen_items:
             name = _escape_print_text(item.product_name_snapshot or "商品")
             qty = int(item.quantity or 1)
-            lines.append(f"<B>{name} x{qty}</B>")
+            lines.append(f"<B>{name}</B>")
+            lines.append(f"<C><B2>x{qty}</B2></C>")
             opts = _format_options(ctx.options_by_item.get(item.id, []))
             if opts:
                 lines.append(f"  {_escape_print_text(opts)}")
@@ -192,6 +201,13 @@ class PrintService:
                 await db.execute(select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids)))
             ).scalars().all():
                 opts_by_item.setdefault(opt.order_item_id, []).append(opt)
+        product_ids = list({int(i.product_id) for i in items if i.product_id})
+        no_cooking_by_product: dict[int, bool] = {}
+        if product_ids:
+            for pid, nc in (
+                await db.execute(select(Product.id, Product.no_cooking).where(Product.id.in_(product_ids)))
+            ).all():
+                no_cooking_by_product[int(pid)] = bool(nc)
         store = await db.get(Store, order.store_id) if order.store_id else None
         table = await db.get(DiningTable, order.table_id) if order.table_id else None
         delivery = (
@@ -204,6 +220,7 @@ class PrintService:
             delivery=delivery,
             items=items,
             options_by_item=opts_by_item,
+            no_cooking_by_product=no_cooking_by_product,
         )
 
     @classmethod

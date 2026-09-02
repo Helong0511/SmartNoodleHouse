@@ -179,6 +179,17 @@ Page({
     })
   },
 
+  onTableChange(e) {
+    const ctx = e.detail
+    if (!ctx || !ctx.table) return
+    const token = String(
+      ctx.table.qr_token || wx.getStorageSync('table_token') || this.data.tableToken || ''
+    ).trim()
+    if (this._applyBoundTable(ctx.table, ctx.store, token)) {
+      this.refreshSummary()
+    }
+  },
+
   _applyBoundTable(table, store, token) {
     const t = table || {}
     const tok = String(token || t.qr_token || '').trim()

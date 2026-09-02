@@ -9,11 +9,18 @@
       <text class="sub" wx:if="{{storeNo}}">#{{storeNo}}</text>
     </view>
   </view>
-  <view class="row" wx:if="{{tableName}}">
+  <view
+    class="row row-table-action"
+    wx:if="{{tableName}}"
+    hover-class="table-row-hover"
+    hover-stay-time="80"
+    bindtap="onTapTable"
+  >
     <text class="bar-label">桌号</text>
     <view class="val">
       <text class="name table">{{tableName}}</text>
       <text class="sub" wx:if="{{tableNo && tableNo != tableName}}">{{tableNo}}</text>
+      <text class="change-hint" wx:if="{{changeable}}">更换</text>
     </view>
   </view>
   <view class="extra" wx:if="{{!compact && (storeAddress || storePhone)}}">

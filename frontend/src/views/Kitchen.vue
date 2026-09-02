@@ -141,6 +141,11 @@
               :loading="busyId === o.id"
               @click="takeoverOrder(o)"
             >接管</el-button>
+            <el-button
+              plain
+              :loading="printBusyId === o.id"
+              @click="reprintTicket(o)"
+            >补打小票</el-button>
           </template>
           <template v-else>
             <el-button
@@ -153,6 +158,13 @@
               @click="updateStatus(o.id, act.status)"
             >
               {{ act.label }}
+            </el-button>
+            <el-button
+              plain
+              :loading="printBusyId === o.id"
+              @click="reprintTicket(o)"
+            >
+              补打小票
             </el-button>
           </template>
         </div>
@@ -203,6 +215,7 @@ const fullscreen = ref(false)
 const connStatus = ref<Conn>('connecting')
 const clockText = ref('')
 const busyId = ref<number | null>(null)
+const printBusyId = ref<number | null>(null)
 const nowTick = ref(Date.now())
 const storeOptions = ref<{ id: number; name: string; store_no?: string }[]>([])
 const selectedStoreId = ref<number | null>(null)
@@ -597,6 +610,23 @@ async function updateStatus(id: number, status: string, forceTakeover = false) {
     ElMessage.error(msg)
   } finally {
     busyId.value = null
+  }
+}
+
+async function reprintTicket(o: any) {
+  printBusyId.value = o.id
+  try {
+    const res: any = await api.post(`/orders/${o.id}/print`)
+    const data = res?.data ?? res
+    if (data?.printed) {
+      ElMessage.success('已发送补打')
+    } else {
+      ElMessage.warning(data?.message || '打印未启用或未配置')
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '补打失败')
+  } finally {
+    printBusyId.value = null
   }
 }
 
@@ -1042,8 +1072,8 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   font-weight: 800;
 }
-/* 1 份：与正文同色 */
-.item.qty-one .item-qty { color: #eef2ff; font-size: 16px; }
+/* 1 份：略放大便于辨认 */
+.item.qty-one .item-qty { color: #eef2ff; font-size: 20px; }
 /* 2 份：琥珀色提醒 */
 .item.qty-multi .item-qty {
   color: #fbbf24;

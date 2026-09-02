@@ -9,11 +9,12 @@
       <text class="sub" a:if="{{storeNo}}">#{{storeNo}}</text>
     </view>
   </view>
-  <view class="row" a:if="{{tableName}}">
+  <view class="row row-table-action" a:if="{{tableName}}" onTap="onTapTable">
     <text class="bar-label">桌号</text>
     <view class="val">
       <text class="name table">{{tableName}}</text>
       <text class="sub" a:if="{{tableNo && tableNo != tableName}}">{{tableNo}}</text>
+      <text class="change-hint" a:if="{{changeable}}">更换</text>
     </view>
   </view>
   <view class="extra" a:if="{{!compact && (storeAddress || storePhone)}}">

@@ -1,4 +1,5 @@
-.page { padding: 24rpx 24rpx calc(300rpx + env(safe-area-inset-bottom)); }
+/* TabBar 页：视口已在底栏之上，只需给结算条留空 */
+.page { padding: 24rpx 24rpx 160rpx; }
 .loading-tip { text-align: center; color: #999; padding: 80rpx 0; font-size: 26rpx; }
 .warn-bar {
   display: flex;
@@ -136,7 +137,7 @@
 }
 .footer {
   position: fixed; left: 0; right: 0;
-  bottom: calc(100rpx + env(safe-area-inset-bottom));
+  bottom: 0;
   background: #fff; padding: 20rpx 20rpx;
   box-shadow: 0 -4rpx 16rpx rgba(0,0,0,.06);
   display: flex;

@@ -8,6 +8,7 @@
       tableName="{{tableName}}"
       tableNo="{{tableNo}}"
       compact="{{true}}"
+      changeable="{{false}}"
     />
 
     <view class="header {{order.status === 'CANCELLED' || order.status === 'REFUNDED' ? 'muted' : ''}}">

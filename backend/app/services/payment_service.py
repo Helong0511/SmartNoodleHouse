@@ -40,7 +40,7 @@ async def _order_store_no(db: AsyncSession, order: Order) -> str | None:
 
 def _wechat_pay_configured() -> bool:
     s = get_settings()
-    return bool(s.wechat_mch_id and s.wechat_api_v3_key and s.wechat_cert_serial_no)
+    return bool(s.wechat_mch_id and s.wechat_api_v3_key and s.wechat_app_id)
 
 
 def _alipay_pay_configured() -> bool:
@@ -61,6 +61,34 @@ def _payment_mock_allowed(*, configured: bool) -> bool:
 class WechatPayProvider:
     async def create_payment(self, payment: Payment, order: Order, extra: dict | None = None) -> dict:
         settings = get_settings()
+        channel = (payment.channel or "").upper()
+        desc = f"订单{order.order_no}"
+        auth_code = (extra or {}).get("auth_code")
+        if "MICROPAY" in channel:
+            if not auth_code:
+                raise AppException(40041, "请扫描顾客微信付款码")
+            if not _wechat_pay_configured():
+                if _payment_mock_allowed(configured=False):
+                    logger.warning("微信付款码 MOCK（仅开发）")
+                    return {
+                        "provider": "WECHAT",
+                        "payment_no": payment.payment_no,
+                        "trade_state": "SUCCESS",
+                        "amount": str(payment.amount),
+                        "_mock": True,
+                    }
+                raise AppException(50011, "微信支付未配置")
+            from app.services.barcode_pay_service import settle_wechat_barcode
+
+            data = await settle_wechat_barcode(
+                payment_no=payment.payment_no,
+                description=desc,
+                amount_yuan=payment.amount,
+                auth_code=str(auth_code),
+            )
+            data["amount"] = str(payment.amount)
+            return data
+
         if not _wechat_pay_configured():
             if _payment_mock_allowed(configured=False):
                 logger.warning("微信支付 MOCK 下单（仅开发）")
@@ -77,8 +105,6 @@ class WechatPayProvider:
                 "微信支付未配置，拒绝创建支付（开发可在 .env 设 ALLOW_PAYMENT_MOCK=true，或未配商户号时自动 mock）",
             )
 
-        channel = (payment.channel or "").upper()
-        desc = f"订单{order.order_no}"
         if "MINIPROGRAM" in channel or "JSAPI" in channel:
             openid = (extra or {}).get("openid")
             if not openid:
@@ -138,8 +164,21 @@ class WechatPayProvider:
 
 class AlipayProvider:
     async def create_payment(self, payment: Payment, order: Order, extra: dict | None = None) -> dict:
+        channel = (payment.channel or "").upper()
+        auth_code = (extra or {}).get("auth_code")
+        if "BARCODE" in channel and not auth_code:
+            raise AppException(40041, "请扫描顾客支付宝付款码")
         if not _alipay_pay_configured():
             if _payment_mock_allowed(configured=False):
+                if auth_code:
+                    logger.warning("支付宝付款码 MOCK（仅开发）")
+                    return {
+                        "provider": "ALIPAY",
+                        "payment_no": payment.payment_no,
+                        "trade_status": "TRADE_SUCCESS",
+                        "amount": str(payment.amount),
+                        "_mock": True,
+                    }
                 logger.warning("支付宝 MOCK 下单（仅开发）")
                 return {
                     "provider": "ALIPAY",
@@ -152,6 +191,16 @@ class AlipayProvider:
                 50020,
                 "支付宝未配置，拒绝创建支付（开发可在 .env 设 ALLOW_PAYMENT_MOCK=true，或未配密钥时自动 mock）",
             )
+        if "BARCODE" in channel:
+            from app.services.barcode_pay_service import settle_alipay_barcode
+
+            data = await settle_alipay_barcode(
+                payment_no=payment.payment_no,
+                amount_yuan=payment.amount,
+                subject=f"订单{order.order_no}",
+                auth_code=str(auth_code),
+            )
+            return data
         return await alipay_client.trade_precreate(
             payment_no=payment.payment_no,
             amount_yuan=payment.amount,
@@ -194,8 +243,10 @@ class PaymentService:
     CHANNEL_MAP = {
         ("WECHAT", "h5"): "WECHAT_H5",
         ("WECHAT", "native"): "WECHAT_NATIVE",
+        ("WECHAT", "micropay"): "WECHAT_MICROPAY",
         ("WECHAT", "miniprogram"): "WECHAT_MINIPROGRAM",
         ("ALIPAY", "qr"): "ALIPAY_QR",
+        ("ALIPAY", "barcode"): "ALIPAY_BARCODE",
         ("ALIPAY", "h5"): "ALIPAY_H5",
         ("ALIPAY", "miniprogram"): "ALIPAY_MINIAPP",
     }
@@ -215,6 +266,7 @@ class PaymentService:
         provider: str,
         channel_type: str = "native",
         customer_id: int | None = None,
+        operator_id: int | None = None,
         extra: dict | None = None,
     ) -> tuple[Payment, dict]:
         locked = (
@@ -253,6 +305,8 @@ class PaymentService:
 
         if existing and money(existing.amount) == money(order.total_amount):
             payment = existing
+            if operator_id is not None:
+                payment.operator_id = operator_id
         else:
             t_no, t_ph = await _order_table_parts(db, order)
             sno = await _order_store_no(db, order)
@@ -260,6 +314,7 @@ class PaymentService:
                 payment_no=generate_no(payment_biz(provider_u), sno, t_no, table_placeholder=t_ph),
                 order_id=order.id,
                 customer_id=customer_id or order.customer_id,
+                operator_id=operator_id,
                 provider=provider_u,
                 channel=channel,
                 amount=order.total_amount,
@@ -277,6 +332,10 @@ class PaymentService:
             await cls._settle_mock_payment(db, payment, order, provider_u)
             pay_data["status"] = "PAID"
             pay_data["mock_settled"] = True
+        elif pay_data.get("immediate_paid"):
+            trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
+            await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
+            pay_data["status"] = "PAID"
         return payment, pay_data
 
     @classmethod
@@ -302,6 +361,96 @@ class PaymentService:
             db, order, "PAID", source="MOCK_PAYMENT", payment_status="PAID", assert_kind="PAYMENT"
         )
         logger.warning("MOCK 支付已自动入账 order=%s payment=%s", order.order_no, payment.payment_no)
+
+    @classmethod
+    async def _settle_immediate_payment(
+        cls,
+        db: AsyncSession,
+        payment: Payment,
+        order: Order,
+        provider: str,
+        provider_trade_no: str,
+    ) -> None:
+        if payment.status == "PAID":
+            return
+        old_p = payment.status
+        payment.status = "PAID"
+        payment.provider_trade_no = provider_trade_no or f"{provider.lower()}_{payment.payment_no}"
+        payment.paid_at = now_local()
+        payment.callback_raw = {"source": "BARCODE_PAY", "provider": provider}
+        order.paid_at = now_local()
+        order.payment_method = provider
+        await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="BARCODE_PAY")
+        await apply_order_status(
+            db, order, "PAID", source="BARCODE_PAY", payment_status="PAID", assert_kind="PAYMENT"
+        )
+
+    @classmethod
+    async def settle_cash_payment(
+        cls,
+        db: AsyncSession,
+        order: Order,
+        *,
+        operator_id: int | None = None,
+        received_amount: Decimal | None = None,
+        change_amount: Decimal | None = None,
+    ) -> tuple[Payment, dict]:
+        """收银台现金入账（生产可用，不依赖第三方支付配置）。"""
+        if order.payment_status == "PAID" or order.status in ("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY", "COMPLETED"):
+            existing = (
+                await db.execute(
+                    select(Payment)
+                    .where(Payment.order_id == order.id, Payment.status == "PAID")
+                    .order_by(Payment.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing:
+                return existing, {"status": "PAID", "already_paid": True}
+        if order.status == "CANCELLED" or order.payment_status == "REFUNDED":
+            raise AppException(40009, "订单已取消或已退款，无法收款")
+
+        sno = await _order_store_no(db, order)
+        t_no, t_ph = await _order_table_parts(db, order)
+        payment = Payment(
+            payment_no=generate_no(payment_biz("CASH"), sno, t_no, table_placeholder=t_ph),
+            order_id=order.id,
+            amount=order.total_amount,
+            provider="CASH",
+            channel="POS",
+            operator_id=operator_id,
+            status="PENDING",
+        )
+        db.add(payment)
+        await db.flush()
+        await record_payment_status(db, payment_id=payment.id, from_status=None, to_status="PENDING", source="POS_CASH")
+        old_p = payment.status
+        payment.status = "PAID"
+        payment.provider_trade_no = f"cash_{payment.payment_no}"
+        payment.paid_at = now_local()
+        payment.callback_raw = {
+            "source": "POS_CASH",
+            "operator_id": operator_id,
+            **(
+                {"received_amount": str(received_amount)}
+                if received_amount is not None
+                else {}
+            ),
+            **(
+                {"change_amount": str(change_amount)}
+                if change_amount is not None
+                else {}
+            ),
+        }
+        order.paid_at = now_local()
+        order.payment_method = "CASH"
+        await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="POS_CASH")
+        await apply_order_status(
+            db, order, "PAID", source="POS_CASH", payment_status="PAID", assert_kind="PAYMENT"
+        )
+        await db.flush()
+        logger.info("收银现金入账 order=%s payment=%s operator=%s", order.order_no, payment.payment_no, operator_id)
+        return payment, {"status": "PAID", "provider": "CASH"}
 
     @classmethod
     async def handle_callback(
@@ -690,9 +839,19 @@ class PaymentService:
         db.add(row)
         await db.flush()
 
-        provider_inst = cls.get_provider(payment.provider)
+        provider_inst = cls.get_provider(payment.provider) if (payment.provider or "").upper() != "CASH" else None
         try:
-            result = await provider_inst.refund_payment(payment, amount, reason, refund_no)
+            if provider_inst is None:
+                # 现金：本地退款入账，无需第三方
+                result = {
+                    "refund_no": refund_no,
+                    "status": "SUCCESS",
+                    "amount": str(amount),
+                    "provider_refund_no": f"cash_rf_{refund_no}",
+                    "_mock": False,
+                }
+            else:
+                result = await provider_inst.refund_payment(payment, amount, reason, refund_no)
         except Exception as e:
             row.status = "FAILED"
             row.fail_reason = str(e)[:255]

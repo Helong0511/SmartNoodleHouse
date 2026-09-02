@@ -6,6 +6,7 @@
     storePhone="{{storePhone}}"
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
+    bind:tablechange="onTableChange"
   />
 
   <view class="tip">金额由服务器重新计算，防止篡改</view>

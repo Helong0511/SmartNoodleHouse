@@ -7,8 +7,13 @@ from app.core.response import now_local, success
 from app.core.security import create_access_token, verify_password
 from app.models import User
 from app.schemas.common import LoginRequest
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+class VerifyPasswordRequest(BaseModel):
+    password: str = Field(min_length=1)
 
 
 @router.post("/login")
@@ -67,3 +72,12 @@ async def me(request: Request, db: DbSession, user: CurrentUser):
         },
         request=request,
     )
+
+
+@router.post("/verify-password")
+async def verify_password_api(data: VerifyPasswordRequest, request: Request, db: DbSession, user: CurrentUser):
+    """锁屏解锁：校验当前登录用户密码。"""
+    row = await db.get(User, user.id)
+    if not row or not verify_password(data.password, row.password_hash):
+        return {"code": 401, "message": "密码错误", "data": None}
+    return success({"ok": True}, request=request)

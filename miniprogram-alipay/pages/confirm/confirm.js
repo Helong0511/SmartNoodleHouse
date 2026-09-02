@@ -218,6 +218,17 @@ Page({
     })
     return true
   },
+
+  onTableChange(ctx) {
+    if (!ctx || !ctx.table) return
+    const token = String(
+      ctx.table.qr_token || auth.readStorage('table_token') || this.data.tableToken || ''
+    ).trim()
+    if (this._applyBoundTable(ctx.table, ctx.store, token)) {
+      this.refreshSummary()
+    }
+  },
+
   _readCachedTable() {
     return app.globalData.table || auth.readStorage('dine_table') || null
   },

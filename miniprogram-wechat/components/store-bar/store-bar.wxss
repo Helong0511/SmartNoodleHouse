@@ -44,6 +44,19 @@
 .name { font-size: 28rpx; font-weight: 600; color: #333; }
 .name.table { color: #ff6b35; }
 .sub { font-size: 22rpx; color: #bbb; }
+.row-table-action {
+  margin-left: -8rpx;
+  margin-right: -8rpx;
+  padding: 4rpx 8rpx;
+  border-radius: 8rpx;
+}
+.table-row-hover { background: rgba(255, 107, 53, 0.1); }
+.change-hint {
+  margin-left: auto;
+  font-size: 22rpx;
+  color: #ff6b35;
+  opacity: 0.75;
+}
 .extra {
   margin-top: 12rpx;
   padding-top: 12rpx;

@@ -17,6 +17,7 @@ from app.api.v1 import (
     users,
     welcome,
     websocket,
+    pos,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -25,6 +26,7 @@ api_router.include_router(users.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(payments.router)
+api_router.include_router(pos.router)
 api_router.include_router(customers.router)
 api_router.include_router(member_levels.router)
 api_router.include_router(coupons.router)

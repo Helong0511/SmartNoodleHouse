@@ -95,6 +95,40 @@ async def create_native_order(
     return {"code_url": data.get("code_url"), "provider": "WECHAT", "payment_no": payment_no}
 
 
+async def create_micropay_order(
+    *,
+    payment_no: str,
+    description: str,
+    amount_yuan: Decimal,
+    auth_code: str,
+    notify_url: str,
+) -> dict[str, Any]:
+    """付款码支付（扫顾客微信付款码）。"""
+    settings = get_settings()
+    total_fen = int((amount_yuan * 100).quantize(Decimal("1")))
+    data = await _request(
+        "POST",
+        "/v3/pay/transactions/micropay",
+        {
+            "appid": settings.wechat_app_id,
+            "mchid": settings.wechat_mch_id,
+            "description": description[:127],
+            "out_trade_no": payment_no,
+            "notify_url": notify_url or settings.wechat_notify_url,
+            "amount": {"total": total_fen, "currency": "CNY"},
+            "payer": {"auth_code": auth_code.strip()},
+        },
+    )
+    return {
+        "provider": "WECHAT",
+        "payment_no": payment_no,
+        "trade_state": data.get("trade_state"),
+        "transaction_id": data.get("transaction_id"),
+        "amount": str(amount_yuan),
+        "raw": data,
+    }
+
+
 async def create_jsapi_order(
     *,
     payment_no: str,

@@ -28,7 +28,7 @@ SELECT 'STORE_ADMIN', '门店管理员', '本店运营（不含全局系统配�
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM roles WHERE code = 'STORE_ADMIN');
 
 INSERT INTO roles (code, name, description)
-SELECT 'CASHIER', '收银员', '订单与支付'
+SELECT 'CASHIER', '收银员', '订单、支付与收银点餐'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM roles WHERE code = 'CASHIER');
 
 INSERT INTO roles (code, name, description)

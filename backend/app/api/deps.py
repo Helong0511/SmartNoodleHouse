@@ -162,3 +162,15 @@ def require_kitchen():
         raise HTTPException(status_code=403, detail="无权访问厨房系统")
 
     return Depends(checker)
+
+
+def require_pos():
+    """收银点餐：收银员 / 店长 / 有 order:update 权限的员工。"""
+
+    async def checker(user: CurrentUser, db: DbSession):
+        perms = await get_user_permissions(db, user.role_id)
+        if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN", "CASHIER") or "order:update" in perms:
+            return user
+        raise HTTPException(status_code=403, detail="无权使用收银点餐")
+
+    return Depends(checker)

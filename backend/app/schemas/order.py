@@ -38,6 +38,32 @@ class OrderStatusUpdate(BaseModel):
     )
 
 
+class PosOrderCreate(BaseModel):
+    """门店收银台下单（员工操作，channel=POS）。"""
+
+    store_id: int | None = None
+    table_id: int | None = Field(default=None, description="堂食必选桌台 ID")
+    items: list[OrderItemCreate]
+    remark: str | None = None
+    need_pack: bool = False
+    dining_type: str | None = Field(default=None, description="DINE_IN / TAKEAWAY")
+    idempotency_key: str | None = None
+    waive_packing_fee: bool = Field(default=False, description="收银员免收打包费（仅 POS）")
+
+
+class PosCashPay(BaseModel):
+    """收银台现金收款（可选实收金额以计算找零）。"""
+
+    received_amount: Decimal | None = Field(default=None, ge=0, description="顾客实收现金")
+
+
+class PosScanPay(BaseModel):
+    """收银台扫顾客付款码（自动识别微信/支付宝）。"""
+
+    auth_code: str = Field(min_length=6, description="顾客付款码（扫码枪录入）")
+    provider: str | None = Field(default=None, description="可选；不传则按付款码自动识别")
+
+
 class PaymentCreate(BaseModel):
     provider: str = Field(description="WECHAT or ALIPAY")
     channel_type: str = "native"

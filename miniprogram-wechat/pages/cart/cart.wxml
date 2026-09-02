@@ -7,6 +7,7 @@
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
     compact="{{true}}"
+    bind:tablechange="onTableChange"
   />
 
   <view class="loading-tip" wx:if="{{loading}}">正在校验购物车...</view>

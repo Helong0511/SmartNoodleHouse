@@ -424,10 +424,6 @@ class DeliveryService:
             # 默认：仅落库 PAID/PENDING，等待商家手动接单再调平台
             d_order.delivery_status = "PENDING"
 
-        from app.services.print_service import deferred_print_task
-
-        deferred.append(deferred_print_task(order.id))
-
         return order, deferred
 
     @classmethod

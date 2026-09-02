@@ -57,10 +57,12 @@ def test_build_ticket_contains_barcode_and_order_no():
         delivery=None,
         items=[item],
         options_by_item={},
+        no_cooking_by_product={},
     )
     content = build_ticket_content(ctx, ticket_type=TICKET_KITCHEN)
     assert "厨房制作单" in content
     assert order.order_no in content
+    assert "<B2>x1</B2>" in content
     assert '<BARCODE t="CODE128"' in content
     assert _barcode_payload(order.order_no) in content
     assert "<CUT>" in content

@@ -7,6 +7,7 @@
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
     compact="{{true}}"
+    onTableChange="onTableChange"
   />
 
   <skeleton a:if="{{loading && !orders.length}}" type="order" rows="{{4}}" />

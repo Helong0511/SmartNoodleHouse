@@ -28,7 +28,13 @@ async function handleLogin() {
   loading.value = true
   try {
     await auth.login(username.value, password.value)
-    router.push('/dashboard')
+    if (auth.user?.role === 'CASHIER') {
+      router.push('/pos-terminal')
+    } else if (auth.user?.role === 'KITCHEN') {
+      router.push('/kds')
+    } else {
+      router.push('/dashboard')
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '登录失败')
   } finally {

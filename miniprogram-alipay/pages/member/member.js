@@ -92,6 +92,11 @@ Page({
     this.setData(dineCtx.pageDineFields(ctx))
   },
 
+  onTableChange(ctx) {
+    if (!ctx) return
+    this.applyDineContext(ctx)
+  },
+
   applyWallet(couponRes, voucherRes) {
     const coupons = ((couponRes && couponRes.items) || []).map((c) => ({
       ...c,

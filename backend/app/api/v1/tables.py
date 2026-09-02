@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession, require_permission
+from app.api.deps import CurrentUser, DbSession, require_permission, require_pos
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import DiningTable, Store
@@ -54,6 +54,37 @@ async def _get_owned_table(db, user, table_id: int) -> DiningTable:
         raise AppException(40430, "桌台不存在")
     assert_store_access(user, table.store_id)
     return table
+
+
+@router.get("/pos", dependencies=[require_pos()])
+async def list_tables_for_pos(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+):
+    """收银点餐：列出本店可用桌台（无需 table:manage）。"""
+    effective = require_bound_store(user, store_id)
+    q = select(DiningTable).where(DiningTable.status == 1)
+    if effective is not None:
+        q = q.where(DiningTable.store_id == effective)
+    rows = (await db.execute(q.order_by(DiningTable.store_id, DiningTable.table_no))).scalars().all()
+    return success(
+        {
+            "items": [
+                {
+                    "id": t.id,
+                    "store_id": t.store_id,
+                    "table_no": t.table_no,
+                    "table_name": t.table_name,
+                    "label": (t.table_name or t.table_no or "").strip(),
+                }
+                for t in rows
+            ],
+            "effective_store_id": effective,
+        },
+        request=request,
+    )
 
 
 @router.get("", dependencies=[require_permission("table:manage")])

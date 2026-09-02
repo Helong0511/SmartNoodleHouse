@@ -308,6 +308,7 @@ class Payment(Base, TimestampMixin):
     payment_no: Mapped[str] = mapped_column(String(40), unique=True)
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     provider: Mapped[str] = mapped_column(String(20))
     channel: Mapped[str] = mapped_column(String(30))
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
@@ -333,6 +334,44 @@ class PaymentRefund(Base, TimestampMixin):
     fail_reason: Mapped[str | None] = mapped_column(String(255))
     succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     operator_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class CashierShift(Base, TimestampMixin):
+    __tablename__ = "cashier_shifts"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    operator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    opening_float: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    status: Mapped[str] = mapped_column(String(20), default="OPEN")
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    total_cash: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    total_wechat: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    total_alipay: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    closing_cash: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    cash_difference: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    closed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
+    remark: Mapped[str | None] = mapped_column(String(500))
+
+
+class PosRefundRequest(Base, TimestampMixin):
+    """收银退款申请：收银员提交，店长/超管审批并执行。"""
+
+    __tablename__ = "pos_refund_requests"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"))
+    payment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("payments.id"))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    reason: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    requested_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    reviewed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_remark: Mapped[str | None] = mapped_column(String(500))
+    refund_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("payment_refunds.id"))
+    fail_reason: Mapped[str | None] = mapped_column(String(255))
 
 
 class CustomerPreference(Base):

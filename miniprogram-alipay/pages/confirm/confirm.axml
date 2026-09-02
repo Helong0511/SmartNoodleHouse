@@ -7,6 +7,7 @@
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
     compact="{{true}}"
+    onTableChange="onTableChange"
   />
   <view class="tip">金额由服务器重新计算，防止篡改</view>
   <view class="member-bar" a:if="{{isMember && memberLevelName}}">
