@@ -39,6 +39,13 @@ async def _order_store_no(db: AsyncSession, order: Order) -> str | None:
 
 
 def _wechat_pay_configured() -> bool:
+    """与 wechat_pay_client._configured 一致：APIv3 签名需要证书序列号。"""
+    s = get_settings()
+    return bool(s.wechat_mch_id and s.wechat_api_v3_key and s.wechat_cert_serial_no and s.wechat_app_id)
+
+
+def _wechat_micropay_configured() -> bool:
+    """付款码走 V2，只需商户号 / AppID / API 密钥（无证书序列号）。"""
     s = get_settings()
     return bool(s.wechat_mch_id and s.wechat_api_v3_key and s.wechat_app_id)
 
@@ -67,7 +74,7 @@ class WechatPayProvider:
         if "MICROPAY" in channel:
             if not auth_code:
                 raise AppException(40041, "请扫描顾客微信付款码")
-            if not _wechat_pay_configured():
+            if not _wechat_micropay_configured():
                 if _payment_mock_allowed(configured=False):
                     logger.warning("微信付款码 MOCK（仅开发）")
                     return {
