@@ -309,7 +309,7 @@ Page({
       app.globalData.avatarUrl = localOrRemoteUrl
       wx.setStorageSync('avatar_url', localOrRemoteUrl)
       wx.showToast({
-        title: auth.formatError(e, '头像上传失败，注册时将重试'),
+        title: avatarUtil.formatUploadError(e, '头像上传失败，注册时将重试'),
         icon: 'none',
         duration: 2500
       })

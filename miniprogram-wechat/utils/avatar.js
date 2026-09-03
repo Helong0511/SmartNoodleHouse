@@ -1,5 +1,6 @@
-/** 会员头像：本地临时路径需上传后才能持久展示 */
+/** 会员头像：本地临时路径需上传；chooseAvatar 若返回 CDN 地址则走服务端转存 */
 
+const api = require('./api')
 const auth = require('./auth')
 const media = require('./media')
 
@@ -9,6 +10,25 @@ function isPersistableAvatarUrl(url) {
   if (s.startsWith('/uploads/')) return true
   if (/^https?:\/\//i.test(s) && s.includes('/uploads/')) return true
   return false
+}
+
+/** uploadFile 可接受的本地路径（支付宝 https://resource/、微信 wxfile/tmp 等） */
+function isLocalUploadPath(url) {
+  const s = String(url || '').trim()
+  if (!s) return false
+  if (/^https:\/\/resource\//i.test(s)) return true
+  if (/^(wxfile|apfile|file|content):\/\//i.test(s)) return true
+  if (/^http:\/\/tmp\//i.test(s)) return true
+  if (/^http:\/\/127\.0\.0\.1(?::\d+)?\//i.test(s)) return true
+  if (!/^https?:\/\//i.test(s) && !s.startsWith('data:')) return true
+  return false
+}
+
+function isRemoteHttpUrl(url) {
+  const s = String(url || '').trim()
+  if (!/^https?:\/\//i.test(s)) return false
+  if (isPersistableAvatarUrl(s) || isLocalUploadPath(s)) return false
+  return true
 }
 
 function needsUpload(url) {
@@ -32,6 +52,14 @@ function parseUploadBody(raw) {
   } catch (_) {
     return { message: String(raw) }
   }
+}
+
+function formatUploadError(err, fallback) {
+  const msg = String((err && err.message) || err || '')
+  if (/filePath|invalid path|无效/i.test(msg)) {
+    return '头像转存失败，请改用「从相册选择头像」'
+  }
+  return msg || fallback || '头像上传失败，注册时将重试'
 }
 
 /**
@@ -75,31 +103,56 @@ async function uploadLocalAvatar(filePath) {
       },
       fail(err) {
         reject({
-          message: (err && (err.errMsg || err.message)) || '头像上传失败'
+          message: (err && (err.errorMessage || err.errMsg || err.message)) || '头像上传失败'
         })
       }
     })
   })
 }
 
-/** 已是持久地址则原样返回；本地临时路径则上传 */
+async function importRemoteAvatar(sourceUrl) {
+  const url = String(sourceUrl || '').trim()
+  if (!url) throw new Error('未选择头像文件')
+  await auth.ensureLogin()
+  const data = await api.post('/miniprogram/member/avatar-from-url', { source_url: url })
+  const avatarUrl = (data && data.avatar_url) || ''
+  if (!avatarUrl) throw new Error('导入头像未返回地址')
+  return avatarUrl
+}
+
+function persistablePath(url) {
+  const s = String(url || '')
+  if (s.includes('/uploads/')) {
+    return s.slice(s.indexOf('/uploads/')).split('?')[0]
+  }
+  return s
+}
+
+/** 已是持久地址则原样返回；CDN 网络图走服务端转存；本地临时路径则 uploadFile */
 async function ensureRemoteAvatar(url) {
   const s = String(url || '').trim()
   if (!s) return ''
-  if (!needsUpload(s)) {
-    if (s.includes('/uploads/')) {
-      const idx = s.indexOf('/uploads/')
-      return s.slice(idx).split('?')[0]
+  if (!needsUpload(s)) return persistablePath(s)
+  if (isRemoteHttpUrl(s)) return importRemoteAvatar(s)
+  try {
+    return await uploadLocalAvatar(s)
+  } catch (e) {
+    const msg = String((e && e.message) || '')
+    if (/filePath|invalid|无效/i.test(msg) && /^https?:\/\//i.test(s) && !isPersistableAvatarUrl(s)) {
+      return importRemoteAvatar(s)
     }
-    return s
+    throw e
   }
-  return uploadLocalAvatar(s)
 }
 
 module.exports = {
   isPersistableAvatarUrl,
+  isLocalUploadPath,
+  isRemoteHttpUrl,
   needsUpload,
   resolveDisplayUrl,
+  formatUploadError,
   uploadLocalAvatar,
+  importRemoteAvatar,
   ensureRemoteAvatar
 }

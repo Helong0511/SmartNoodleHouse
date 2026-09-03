@@ -17,7 +17,7 @@ from app.services.coupon_service import CouponService
 from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
-from app.utils.upload import save_upload
+from app.utils.upload import fetch_and_save_remote_image, save_upload
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
@@ -424,6 +424,30 @@ async def upload_member_avatar(
             name = "avatar.jpg"
         file.filename = name
     url = await save_upload(file, subdir="avatars")
+    customer.avatar_url = url
+    await db.flush()
+    return success(
+        {
+            "avatar_url": customer.avatar_url,
+            "customer_id": customer.id,
+        },
+        request=request,
+    )
+
+
+class AvatarFromUrlRequest(BaseModel):
+    source_url: str = Field(..., min_length=8, max_length=1024, description="支付宝/微信头像网络地址")
+
+
+@router.post("/member/avatar-from-url")
+async def import_member_avatar_from_url(
+    data: AvatarFromUrlRequest,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """chooseAvatar 在支付宝真机常返回 CDN 地址，无法作为 uploadFile 的 filePath，改由服务端拉取转存。"""
+    url = await fetch_and_save_remote_image(data.source_url, subdir="avatars")
     customer.avatar_url = url
     await db.flush()
     return success(

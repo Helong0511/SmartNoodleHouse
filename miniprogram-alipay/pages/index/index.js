@@ -243,6 +243,7 @@ Page({
     const detail = (e && e.detail) || {}
     const url = detail.avatarUrl || detail.avatar || ''
     const errMsg = String(detail.errMsg || detail.errorMessage || '')
+    console.log('[chooseAvatar]', detail)
     if (!url) {
       if (/privacy|authorize|协议|声明|agree|scope/i.test(errMsg)) {
         this.setData({
@@ -290,7 +291,7 @@ Page({
       // 上传失败仍先本地预览，注册时再试上传
       this.applyProfile('', localOrRemoteUrl)
       my.showToast({
-        content: auth.formatError(e, '头像上传失败，注册时将重试'),
+        content: avatarUtil.formatUploadError(e, '头像上传失败，注册时将重试'),
         type: 'none',
         duration: 2500
       })
