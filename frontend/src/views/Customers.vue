@@ -34,7 +34,7 @@
       <el-button @click="goMemberLevels">会员等级设置</el-button>
     </el-form>
 
-    <el-table :data="customers" border>
+    <el-table :data="customers" border class="customer-table">
       <el-table-column prop="customer_no" label="编号" min-width="260" show-overflow-tooltip />
       <el-table-column label="昵称" min-width="100">
         <template #default="{ row }">{{ row.display_name || row.nickname || '—' }}</template>
@@ -76,7 +76,7 @@
           <el-tag size="small" :type="row.has_face ? 'success' : 'info'">{{ row.has_face ? '已开' : '未开' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="智能口味" min-width="260" class-name="pref-col">
+      <el-table-column label="智能口味" min-width="380" class-name="pref-col">
         <template #default="{ row }">
           <div
             v-if="row.preferences?.length"
@@ -85,11 +85,13 @@
           >
             <el-tag
               v-for="(p, i) in row.preferences"
-              :key="i"
+              :key="`${p.option_code || i}-${i}`"
               size="small"
               type="danger"
               effect="plain"
+              class="pref-tag"
             >{{ p.label }}</el-tag>
+            <span class="pref-count">共{{ row.preferences.length }}项</span>
           </div>
           <span v-else class="muted">待累计</span>
         </template>
@@ -479,12 +481,30 @@ onMounted(async () => {
 .pref-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 4px 6px;
   align-items: center;
+  max-width: 100%;
 }
-:deep(.pref-col .cell) {
-  white-space: normal;
+.pref-tag {
+  max-width: 100%;
+  height: auto !important;
+  white-space: normal !important;
+  line-height: 1.35 !important;
+  padding: 2px 6px !important;
+}
+.pref-count {
+  color: #909399;
+  font-size: 12px;
+  white-space: nowrap;
+}
+:deep(.customer-table .pref-col .cell) {
+  white-space: normal !important;
+  word-break: break-word;
   line-height: 1.5;
-  overflow: visible;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+:deep(.customer-table .pref-col) {
+  vertical-align: top;
 }
 </style>

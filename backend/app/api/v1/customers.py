@@ -106,7 +106,7 @@ async def list_customers(
             ).scalars().all()
         )
 
-    # 智能口味偏好摘要（每位顾客 Top6，列表可换行展示）
+    # 智能口味：列表与详情一致，返回全部偏好（按分数排序）
     pref_map: dict[int, list[dict]] = {i: [] for i in ids}
     if ids:
         pref_rows = (
@@ -117,10 +117,7 @@ async def list_customers(
             )
         ).scalars().all()
         for p in pref_rows:
-            bucket = pref_map.setdefault(p.customer_id, [])
-            if len(bucket) >= 6:
-                continue
-            bucket.append(
+            pref_map.setdefault(p.customer_id, []).append(
                 {
                     "category": p.category,
                     "option_code": p.option_code,
