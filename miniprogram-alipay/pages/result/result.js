@@ -2,7 +2,28 @@ const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
 const prefUtil = require('../../utils/preferences')
 const pickupUtil = require('../../utils/pickup')
+const dineCtx = require('../../utils/context')
 const app = getApp()
+
+function seatFieldsFromOrder(order) {
+  const table = (order && order.table) || null
+  const dine = dineCtx.displayPayload(null, table)
+  const takeaway =
+    dine.isTakeawayChannel ||
+    String((order && order.dining_type) || '').toUpperCase() === 'TAKEAWAY'
+  if (takeaway) {
+    return {
+      tableName: dine.tableName || '外带自取',
+      tableNo: '',
+      seatLabel: '用餐'
+    }
+  }
+  return {
+    tableName: dine.tableName || '',
+    tableNo: dine.tableNo || '',
+    seatLabel: dine.seatLabel || '桌号'
+  }
+}
 
 const PAY_LABEL = {
   PAID: '已支付',
@@ -62,6 +83,7 @@ Page({
     storeNo: '',
     tableName: '',
     tableNo: '',
+    seatLabel: '桌号',
     showPickupBanner: false,
     pickupCode: '',
     pickupLabel: '',
@@ -126,7 +148,6 @@ Page({
       const discount = parseFloat(order && order.discount_amount) || 0
       const couponDisc = parseFloat(order && order.coupon_discount) || 0
       const voucherDisc = parseFloat(order && order.voucher_discount) || 0
-      const table = order.table || {}
       const pickup = pickupUtil.decorate(order)
       const pageTitle = PAGE_TITLE[order.status] || order.status_label || '订单详情'
       my.setNavigationBar({ title: pageTitle })
@@ -149,8 +170,7 @@ Page({
         statusSteps: this.buildSteps(order.status),
         storeName: order.store_name || '',
         storeNo: order.store_no || '',
-        tableName: table.table_name || table.table_no || '',
-        tableNo: table.table_no || '',
+        ...seatFieldsFromOrder(order),
         loading: false
       })
       if (order && (order.status === 'PAID' || order.status === 'COMPLETED' || order.payment_status === 'PAID')) {

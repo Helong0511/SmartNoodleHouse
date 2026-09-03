@@ -91,7 +91,8 @@ Page({
     storeAddress: '',
     storePhone: '',
     tableName: '',
-    tableNo: ''
+    tableNo: '',
+    seatLabel: '桌号'
   },
 
   onShow() {
@@ -151,7 +152,7 @@ Page({
       wx.removeStorageSync('table_token')
       wx.removeStorageSync('dine_table')
     } catch (_) {}
-    this.setData({ tableName: '', tableNo: '', tableToken: '', pickedLabel: '' })
+    this.setData({ tableName: '', tableNo: '', seatLabel: '桌号', tableToken: '', pickedLabel: '' })
   },
 
   async loadDineContext() {
@@ -163,12 +164,9 @@ Page({
       || this.data.tableName
       || ''
     this.setData({
-      storeName: ctx.storeName,
-      storeNo: ctx.storeNo,
-      storeAddress: ctx.storeAddress,
-      storePhone: ctx.storePhone,
-      tableName: tableLabel,
-      tableNo: ctx.tableNo || (cached && cached.table_no) || this.data.tableNo || '',
+      ...dineCtx.pageDineFields(ctx),
+      tableName: tableLabel || ctx.tableName || '',
+      tableNo: ctx.tableNo || (cached && !ctx.isTakeawayChannel && cached.table_no) || this.data.tableNo || '',
       ...(token
         ? {
           tableToken: token,
@@ -202,13 +200,12 @@ Page({
     }
     wx.setStorageSync('table_token', tok)
     wx.setStorageSync('dine_table', t)
-    const name = t.table_name || t.table_no || ''
+    const dine = dineCtx.displayPayload(store || null, t)
     this.setData({
-      tableName: name,
-      tableNo: t.table_no || '',
+      ...dineCtx.pageDineFields(dine),
       tableToken: tok,
       needScanHint: false,
-      pickedLabel: name,
+      pickedLabel: dine.tableName || '已绑桌',
     })
     return true
   },

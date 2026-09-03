@@ -75,6 +75,7 @@ Page({
     storeAddress: '',
     storePhone: '',
     tableNo: '',
+    seatLabel: '桌号',
     coupons: [],
     couponPickerLabels: ['不使用优惠券'],
     selectedCouponId: 0,
@@ -168,8 +169,8 @@ Page({
       || ''
     this.setData({
       ...dineCtx.pageDineFields(ctx),
-      tableName: tableLabel,
-      tableNo: ctx.tableNo || (cached && cached.table_no) || this.data.tableNo || '',
+      tableName: tableLabel || ctx.tableName || '',
+      tableNo: ctx.tableNo || (cached && !ctx.isTakeawayChannel && cached.table_no) || this.data.tableNo || '',
       ...(token
         ? {
           tableToken: token,
@@ -194,7 +195,7 @@ Page({
       my.removeStorageSync({ key: 'table_token' })
       my.removeStorageSync({ key: 'dine_table' })
     } catch (_) {}
-    this.setData({ tableName: '', tableNo: '', tableToken: '', pickedLabel: '' })
+    this.setData({ tableName: '', tableNo: '', seatLabel: '桌号', tableToken: '', pickedLabel: '' })
   },
   _applyBoundTable(table, store, token) {
     const t = table || {}
@@ -208,13 +209,12 @@ Page({
     }
     my.setStorageSync({ key: 'table_token', data: tok })
     my.setStorageSync({ key: 'dine_table', data: t })
-    const name = t.table_name || t.table_no || ''
+    const dine = dineCtx.displayPayload(store || null, t)
     this.setData({
-      tableName: name,
-      tableNo: t.table_no || '',
+      ...dineCtx.pageDineFields(dine),
       tableToken: tok,
       needScanHint: false,
-      pickedLabel: name,
+      pickedLabel: dine.tableName || '已绑桌',
     })
     return true
   },
