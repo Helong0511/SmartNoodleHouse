@@ -2,7 +2,7 @@
   <el-container class="layout">
     <el-aside width="220px" class="aside">
       <div class="logo">
-        <img src="/logo.png" alt="肠旺面" class="logo-img" />
+        <img src="/logo.png?v=202609031501" alt="肠旺面" class="logo-img" />
       </div>
       <el-menu
         :key="openGroup"
@@ -16,6 +16,14 @@
       >
         <el-menu-item v-if="showDashboard" index="/dashboard">数据概览</el-menu-item>
 
+        <el-sub-menu v-if="showCatalog" index="g-catalog">
+          <template #title>菜品</template>
+          <el-menu-item index="/categories">分类管理</el-menu-item>
+          <el-menu-item index="/options">规格管理</el-menu-item>
+          <el-menu-item index="/products">商品管理</el-menu-item>
+          <el-menu-item index="/store-stocks">分店库存</el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="showOps" index="g-ops">
           <template #title>营业</template>
           <el-menu-item v-if="showPos" index="/pos">收银点餐</el-menu-item>
@@ -27,12 +35,10 @@
           <el-menu-item v-if="showSettlement" index="/pos-refunds">退款审批</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="showCatalog" index="g-catalog">
-          <template #title>菜品</template>
-          <el-menu-item index="/categories">分类管理</el-menu-item>
-          <el-menu-item index="/options">规格管理</el-menu-item>
-          <el-menu-item index="/products">商品管理</el-menu-item>
-          <el-menu-item index="/store-stocks">分店库存</el-menu-item>
+        <el-sub-menu v-if="showStore" index="g-store">
+          <template #title>门店</template>
+          <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
+          <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showMember" index="g-member">
@@ -40,12 +46,6 @@
           <el-menu-item v-if="showCustomers" index="/customers">顾客管理</el-menu-item>
           <el-menu-item v-if="showCustomers" index="/member-levels">会员等级</el-menu-item>
           <el-menu-item v-if="showCoupons" index="/coupons">优惠券</el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu v-if="showStore" index="g-store">
-          <template #title>门店</template>
-          <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
-          <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showSmart" index="g-smart">
@@ -148,11 +148,12 @@ onMounted(async () => {
 .logo { padding: 16px 12px; text-align: center; }
 .logo-img {
   display: block;
-  width: 100%;
-  max-width: 160px;
-  height: auto;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
   margin: 0 auto;
-  border-radius: 8px;
+  border-radius: 12px;
+  background: #fff;
 }
 .side-menu {
   border-right: none;

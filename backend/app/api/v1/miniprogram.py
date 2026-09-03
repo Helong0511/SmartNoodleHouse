@@ -283,6 +283,13 @@ async def wechat_debug_qrcode(
     )
     if not png:
         raise AppException(50034, err or "生成微信小程序码失败")
+    try:
+        from app.utils.logo_overlay import overlay_center_logo
+
+        png = overlay_center_logo(png, ratio=0.30)
+    except Exception:
+        # Logo 叠加失败时仍返回官方小程序码
+        pass
     return Response(
         content=png,
         media_type="image/png",

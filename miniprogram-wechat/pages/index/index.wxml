@@ -2,7 +2,7 @@
   <privacy-popup id="privacy-popup" />
 
   <view class="hero">
-    <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
+    <image class="brand-logo" src="/assets/logo.png" mode="aspectFill" />
     <view class="sub" wx:if="{{storeName}}">{{storeName}}</view>
     <view class="sub addr" wx:if="{{storeAddress}}">{{storeAddress}}</view>
     <view class="sub table-line" wx:if="{{hasTable}}">{{seatLabel}} {{tableName}}</view>

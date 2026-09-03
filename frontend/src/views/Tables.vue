@@ -66,7 +66,7 @@
 
     <el-dialog v-model="printVisible" :title="`桌码 · ${printRow?.table_name || printRow?.table_no || ''}`" width="480px">
       <div v-if="printRow" class="print-box" id="table-qr-print">
-        <img src="/logo.png" alt="肠旺面" class="print-logo" />
+        <img src="/logo.png?v=202609031443" alt="肠旺面" class="print-logo" />
         <div class="print-title">{{ printRow.table_name || printRow.table_no }}</div>
         <div class="print-sub">
           扫码点餐 · 桌号 {{ printRow.table_no }}
@@ -74,9 +74,14 @@
         </div>
         <div class="qr-row">
           <div class="qr-item primary">
-            <img :src="qrImg(printRow.scan_url || printRow.scan_full)" alt="一码通扫" />
+            <img
+              v-if="printRow.scanQrDataUrl"
+              :src="printRow.scanQrDataUrl"
+              alt="一码通扫"
+            />
+            <div v-else class="qr-loading primary-loading">正在生成二维码…</div>
             <div class="qr-label">一码通扫（推荐）</div>
-            <div class="qr-desc">微信 / 支付宝均可扫</div>
+            <div class="qr-desc">微信 / 支付宝均可扫 · 中间为门店 Logo</div>
           </div>
         </div>
         <p class="hint">
@@ -105,7 +110,12 @@
               <div class="qr-desc">官方小程序码（develop），请用微信扫；勿用 weixin:// 普通二维码</div>
             </div>
             <div class="qr-item">
-              <img :src="qrImg(printRow.alipay_scheme || printRow.alipay_qr_url)" alt="支付宝" />
+              <img
+                v-if="printRow.alipayQrDataUrl"
+                :src="printRow.alipayQrDataUrl"
+                alt="支付宝"
+              />
+              <div v-else class="qr-loading">正在生成…</div>
               <div>支付宝 Scheme</div>
               <div class="qr-desc">需配置 ALIPAY_APP_ID；开发版先开联调</div>
             </div>
@@ -134,6 +144,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { qrDataUrlWithLogo } from '@/utils/qrWithLogo'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -157,16 +168,23 @@ const boundStoreName = computed(() => {
   return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
 })
 
-function qrImg(content: string) {
-  const data = encodeURIComponent(content || '')
-  return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${data}`
-}
-
 function h5Full(path: string) {
   const origin = window.location.origin
   if (!path) return origin
   if (path.startsWith('http')) return path
   return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
+}
+
+async function buildPrintQrs(row: any) {
+  const scan = row.scan_url || row.scan_full || ''
+  const alipay = row.alipay_scheme || row.alipay_qr_url || ''
+  const [scanQrDataUrl, alipayQrDataUrl] = await Promise.all([
+    scan ? qrDataUrlWithLogo(scan, { size: 440 }) : Promise.resolve(''),
+    alipay ? qrDataUrlWithLogo(alipay, { size: 360 }) : Promise.resolve(''),
+  ])
+  if (!printRow.value || printRow.value.id !== row.id) return
+  printRow.value.scanQrDataUrl = scanQrDataUrl
+  printRow.value.alipayQrDataUrl = alipayQrDataUrl
 }
 
 async function loadStores() {
@@ -226,9 +244,14 @@ async function openPrint(row: any) {
     h5_full: h5Full(row.h5_order_url || row.h5_fallback || `/order?token=${row.qr_token}`),
     wechatMinicodeUrl: '',
     wechatMinicodeError: '',
+    scanQrDataUrl: '',
+    alipayQrDataUrl: '',
   }
   printVisible.value = true
-  await loadWechatMinicode(row.qr_token)
+  await Promise.all([
+    buildPrintQrs(printRow.value),
+    loadWechatMinicode(row.qr_token),
+  ])
 }
 
 async function loadWechatMinicode(token: string) {
@@ -340,10 +363,12 @@ onMounted(async () => {
 .print-box { text-align: center; }
 .print-logo {
   display: block;
-  width: 72px;
-  height: auto;
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
   margin: 0 auto 12px;
-  border-radius: 8px;
+  border-radius: 12px;
+  background: #fff;
 }
 .print-title { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
 .print-sub { color: #666; margin-bottom: 16px; }
@@ -351,6 +376,10 @@ onMounted(async () => {
 .qr-item { font-size: 12px; color: #666; }
 .qr-item img { display: block; width: 180px; height: 180px; margin: 0 auto 8px; }
 .qr-item.primary img { width: 220px; height: 220px; }
+.qr-loading.primary-loading {
+  width: 220px;
+  height: 220px;
+}
 .qr-label { font-size: 14px; font-weight: 600; color: #333; margin-top: 4px; }
 .qr-desc { font-size: 12px; color: #888; }
 .qr-loading, .qr-error {

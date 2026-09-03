@@ -2,7 +2,7 @@
   <div class="pos" :class="{ fullscreen, standalone }">
     <header class="toolbar">
       <div class="left">
-        <img src="/logo.png" alt="logo" class="head-logo" />
+        <img src="/logo.png?v=202609031501" alt="logo" class="head-logo" />
         <div class="head-text">
           <div class="title">收银点餐</div>
           <div class="sub">{{ storeLabel }}</div>
@@ -516,7 +516,7 @@
     <!-- 锁屏 -->
     <div v-if="locked" class="lock-overlay">
       <div class="lock-card">
-        <img src="/logo.png" alt="" class="lock-logo" />
+        <img src="/logo.png?v=202609031501" alt="" class="lock-logo" />
         <div class="lock-user">{{ auth.user?.display_name || auth.user?.username }}</div>
         <el-input
           v-model="unlockPassword"
@@ -1607,7 +1607,7 @@ watch(() => auth.user?.store_id, () => {
   z-index: 10;
 }
 .left, .right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.head-logo { width: 48px; height: auto; border-radius: 8px; }
+.head-logo { width: 48px; height: 48px; object-fit: contain; border-radius: 8px; background: #fff; }
 .head-text .title { font-size: 22px; font-weight: 700; color: #222; }
 .head-text .sub { font-size: 14px; color: #888; }
 .store-select { width: 180px; }
@@ -2244,7 +2244,7 @@ watch(() => auth.user?.store_id, () => {
   padding: 32px 24px;
   text-align: center;
 }
-.lock-logo { width: 80px; border-radius: 10px; margin-bottom: 12px; }
+.lock-logo { width: 80px; height: 80px; object-fit: contain; border-radius: 12px; margin-bottom: 12px; background: #fff; }
 .lock-user { font-size: 20px; font-weight: 700; margin-bottom: 20px; color: #333; }
 .lock-input { margin-bottom: 16px; }
 .lock-input :deep(.el-input__inner) { font-size: 18px; height: 52px; }

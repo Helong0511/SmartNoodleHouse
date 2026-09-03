@@ -2,7 +2,7 @@
   <privacy-popup id="privacy-popup" />
 
   <view class="hero">
-    <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
+    <image class="brand-logo" src="/assets/logo.png" mode="aspectFill" />
     <view class="sub" a:if="{{storeName}}">{{storeName}}</view>
     <view class="sub" a:if="{{hasTable}}">{{seatLabel}} {{tableName}}</view>
     <view class="sub" a:elif="{{!loading && ready}}">尚未绑定桌台</view>

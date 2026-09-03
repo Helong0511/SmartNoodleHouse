@@ -1,7 +1,7 @@
 <template>
   <div class="mobile-order">
     <header>
-      <img src="/logo.png" alt="肠旺面" class="header-logo" />
+      <img src="/logo.png?v=202609031501" alt="肠旺面" class="header-logo" />
       <h1>扫码点餐</h1>
       <p v-if="table">桌号: {{ table.table_name }}</p>
     </header>
@@ -287,9 +287,10 @@ header { background: linear-gradient(135deg, #ff6b35, #f7b733); color: #fff; pad
 .header-logo {
   display: block;
   width: 72px;
-  height: auto;
+  height: 72px;
+  object-fit: contain;
   margin: 0 auto 8px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
 }
 header h1 { font-size: 18px; font-weight: 600; }

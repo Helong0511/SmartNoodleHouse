@@ -10,8 +10,8 @@
 .brand-logo {
   flex-shrink: 0;
   width: 72rpx;
-  height: 88rpx;
-  border-radius: 8rpx;
+  height: 72rpx;
+  border-radius: 10rpx;
   background: #fff;
 }
 .bar-main { flex: 1; min-width: 0; }

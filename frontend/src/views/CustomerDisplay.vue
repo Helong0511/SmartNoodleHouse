@@ -2,7 +2,7 @@
   <div class="customer-display" :class="{ fullscreen }">
     <header class="header">
       <div class="brand">
-        <img src="/logo.png" alt="肠旺面" class="brand-logo" />
+        <img src="/logo.png?v=202609031501" alt="肠旺面" class="brand-logo" />
         <div class="brand-text">
           <h1>{{ storeName || '取餐叫号' }}</h1>
           <p class="subtitle">堂食看桌号 · 打包看取餐号 · 制作完成请自取</p>
@@ -542,7 +542,8 @@ onUnmounted(() => {
 .brand-logo {
   flex-shrink: 0;
   width: 56px;
-  height: auto;
+  height: 56px;
+  object-fit: contain;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
 }

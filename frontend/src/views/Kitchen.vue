@@ -3,7 +3,7 @@
     <header class="toolbar">
       <div class="left">
         <div class="head-brand">
-          <img src="/logo.png" alt="肠旺面" class="head-logo" />
+          <img src="/logo.png?v=202609031501" alt="肠旺面" class="head-logo" />
           <div class="head-text">
             <div class="store-name" :title="storeHint">{{ storeLabel }}</div>
             <div class="head-sub">
@@ -825,7 +825,8 @@ onUnmounted(() => {
 .head-logo {
   flex-shrink: 0;
   width: 48px;
-  height: auto;
+  height: 48px;
+  object-fit: contain;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
 }
