@@ -122,7 +122,7 @@
     <view class="dev-tip" wx:if="{{showDevTips && privacyTip}}">{{privacyTip}}</view>
     <view class="dev-tip debug" wx:if="{{showDevTips && debugInfo}}">{{debugInfo}}</view>
 
-    <button class="btn-primary" form-type="submit" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
+    <button class="btn-primary" catchtap="onSubmitRegister" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     </form>
     <button class="btn-ghost skip" bindtap="goMenu">先点餐，稍后再改</button>
     <button class="btn-ghost skip" bindtap="scanTable">{{hasTable ? '重新扫码换桌' : '扫一扫绑桌'}}</button>

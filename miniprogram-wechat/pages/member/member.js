@@ -120,13 +120,19 @@ Page({
       this.setData({ loading: false, walletLoading: false })
       return
     }
-    const nickname = profile.nickname || app.globalData.nickname || ''
+    const pending = !!profile.need_member_prompt
+    const draft = pending ? auth.readRegDraft() : { nickname: '', avatarUrl: '' }
+    const nickname = pending
+      ? String(draft.nickname || '')
+      : (profile.nickname || app.globalData.nickname || '')
     const displayName = nickname || '面馆会员'
-    if (profile.nickname) app.globalData.nickname = profile.nickname
-    if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
+    if (!pending && profile.nickname) app.globalData.nickname = profile.nickname
+    if (!pending && profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
     const view = prefView || prefUtil.buildPrefDisplay({})
-    const rawAvatar = profile.avatar_url || app.globalData.avatarUrl || ''
+    const rawAvatar = pending
+      ? String(draft.avatarUrl || '')
+      : (profile.avatar_url || app.globalData.avatarUrl || '')
     this.setData({
       nickname,
       displayName,
@@ -137,16 +143,16 @@ Page({
       prefsConfirmed: view.confirmed || [],
       prefsLearning: view.learning || [],
       prefsEmpty: !!view.isEmpty,
-      isMember: !!profile.is_member,
-      memberLevelName: profile.member_level_name || '',
-      memberDiscountText: discountText(profile.member_discount_rate),
-      memberPoints: profile.member_points || 0,
-      nextLevelName: profile.next_level_name || '',
-      pointsToNext: profile.points_to_next_level || 0,
-      levelProgress: profile.level_progress_percent || 0,
+      isMember: pending ? false : !!profile.is_member,
+      memberLevelName: pending ? '' : (profile.member_level_name || ''),
+      memberDiscountText: pending ? '' : discountText(profile.member_discount_rate),
+      memberPoints: pending ? 0 : (profile.member_points || 0),
+      nextLevelName: pending ? '' : (profile.next_level_name || ''),
+      pointsToNext: pending ? 0 : (profile.points_to_next_level || 0),
+      levelProgress: pending ? 0 : (profile.level_progress_percent || 0),
       pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
       memberLevels: profile.member_levels || [],
-      phone: profile.phone || '',
+      phone: pending ? '' : (profile.phone || ''),
       loading: false
     })
   },

@@ -23,6 +23,7 @@ from app.services.order_service import OrderPriceCalculator
 
 DEFAULT_MEMBER_LEVEL_NAME = "普通会员"
 MEMBER_DISCOUNT_QUANT = Decimal("0.0001")
+PLACEHOLDER_NICKNAMES = frozenset({"联调员", "面馆会员", "微信用户", "支付宝用户"})
 
 
 class CustomerService:
@@ -467,7 +468,10 @@ class CustomerService:
                     async with db.begin_nested():
                         db.add(
                             CustomerWechatAccount(
-                                customer_id=union_acc.customer_id, openid=openid, unionid=unionid
+                                customer_id=union_acc.customer_id,
+                                openid=openid,
+                                unionid=unionid,
+                                profile_completed=int(getattr(union_acc, "profile_completed", 0) or 0),
                             )
                         )
                         await db.flush()
@@ -525,6 +529,63 @@ class CustomerService:
             raise AppException(40002, "支付宝登录冲突，请重试")
 
     @staticmethod
+    def is_meaningful_nickname(name: str | None) -> bool:
+        n = (name or "").strip()
+        return bool(n) and n not in PLACEHOLDER_NICKNAMES
+
+    @staticmethod
+    async def is_channel_profile_completed(db: AsyncSession, customer_id: int, channel: str) -> bool:
+        """当前渠道是否已点过「注册」；未完成时不得沿用另一端（微信/支付宝）资料。"""
+        ch = (channel or "").strip().lower()
+        if ch == "wechat":
+            row = (
+                await db.execute(
+                    select(CustomerWechatAccount)
+                    .where(CustomerWechatAccount.customer_id == customer_id)
+                    .order_by(CustomerWechatAccount.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        elif ch == "alipay":
+            row = (
+                await db.execute(
+                    select(CustomerAlipayAccount)
+                    .where(CustomerAlipayAccount.customer_id == customer_id)
+                    .order_by(CustomerAlipayAccount.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        else:
+            customer = await db.get(Customer, customer_id)
+            return bool(
+                customer and CustomerService.is_meaningful_nickname(customer.nickname or customer.display_name)
+            )
+        if not row:
+            return False
+        return int(getattr(row, "profile_completed", 0) or 0) == 1
+
+    @staticmethod
+    async def mark_channel_profile_completed(db: AsyncSession, customer_id: int, channel: str) -> None:
+        ch = (channel or "").strip().lower()
+        if ch == "wechat":
+            rows = (
+                await db.execute(
+                    select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == customer_id)
+                )
+            ).scalars().all()
+        elif ch == "alipay":
+            rows = (
+                await db.execute(
+                    select(CustomerAlipayAccount).where(CustomerAlipayAccount.customer_id == customer_id)
+                )
+            ).scalars().all()
+        else:
+            return
+        for row in rows:
+            row.profile_completed = 1
+        await db.flush()
+
+    @staticmethod
     async def try_link_by_phone(db: AsyncSession, customer: Customer, phone: str) -> Customer:
         """注册填手机号时：若已有同号顾客，合并渠道账号到老顾客，避免微信/支付宝各建一套。"""
         phone = (phone or "").strip()
@@ -546,10 +607,14 @@ class CustomerService:
             rows = (await db.execute(select(Acc).where(getattr(Acc, fk) == customer.id))).scalars().all()
             for row in rows:
                 row.customer_id = target.id
-        if not target.nickname and customer.nickname:
+        # 当前端正在提交的资料优先，避免支付宝注册被微信旧昵称/头像覆盖
+        if CustomerService.is_meaningful_nickname(customer.nickname):
+            target.nickname = customer.nickname
+            target.display_name = customer.display_name or customer.nickname
+        elif not target.nickname and customer.nickname:
             target.nickname = customer.nickname
             target.display_name = target.display_name or customer.display_name or customer.nickname
-        if not target.avatar_url and customer.avatar_url:
+        if customer.avatar_url:
             target.avatar_url = customer.avatar_url
         target.phone = phone
         # 软禁用被合并的空壳顾客

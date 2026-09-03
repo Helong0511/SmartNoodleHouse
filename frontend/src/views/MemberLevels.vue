@@ -142,7 +142,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const res = await api.put('/member-levels', {
+    const res: any = await api.put('/member-levels', {
       items: rows.value.map((r) => ({
         id: r.id,
         min_points: r.min_points,

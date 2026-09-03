@@ -115,7 +115,7 @@
       <view class="dev-tip" a:if="{{showDevTips && privacyTip}}">{{privacyTip}}</view>
       <view class="dev-tip debug" a:if="{{showDevTips && debugInfo}}">{{debugInfo}}</view>
 
-      <button class="btn-primary" formType="submit" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
+      <button class="btn-primary" catchTap="onSubmitRegister" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
     </form>
 
     <button class="btn-ghost skip" onTap="goMenu">先点餐，稍后再改</button>

@@ -12,7 +12,15 @@ from app.core.security import create_customer_token, decode_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import Customer, CustomerPreference, DiningTable, FaceProfile, Store
+from app.models import (
+    Customer,
+    CustomerAlipayAccount,
+    CustomerPreference,
+    CustomerWechatAccount,
+    DiningTable,
+    FaceProfile,
+    Store,
+)
 from app.services.customer_service import CustomerService, PreferenceService
 from app.services.coupon_service import CouponService
 from app.services.face_extractor import extract_face_embedding_with_quality
@@ -29,6 +37,55 @@ def _issue_customer_token(customer: Customer, channel: str = "wechat") -> str:
         channel,
         token_version=int(getattr(customer, "token_version", 0) or 0),
     )
+
+
+def _customer_channel_from_request(
+    request: Request,
+    default: str = "wechat",
+    body_channel: str | None = None,
+) -> str:
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        try:
+            ch = str(decode_customer_token(auth_header.split(" ", 1)[1]).get("channel") or "").strip().lower()
+            if ch in ("wechat", "alipay"):
+                return ch
+        except Exception:
+            pass
+    body = str(body_channel or "").strip().lower()
+    if body in ("wechat", "alipay"):
+        return body
+    if default in ("wechat", "alipay"):
+        return default
+    return "wechat"
+
+
+async def _channel_login_payload(
+    db,
+    customer: Customer,
+    channel: str,
+    *,
+    is_mock: bool,
+    table,
+    channel_ready: bool | None = None,
+) -> dict:
+    if channel_ready is None:
+        channel_ready = await CustomerService.is_channel_profile_completed(db, customer.id, channel)
+    need_prompt = not channel_ready
+    return {
+        "customer_id": customer.id,
+        "customer_no": customer.customer_no,
+        "customer_token": _issue_customer_token(customer, channel),
+        # 本渠道尚未点过注册时，不把另一端（微信/支付宝）的昵称头像手机号带给前端
+        "nickname": None if need_prompt else (customer.nickname or customer.display_name),
+        "avatar_url": None if need_prompt else customer.avatar_url,
+        "phone": None if need_prompt else customer.phone,
+        "is_new": need_prompt,
+        "need_member_prompt": need_prompt,
+        "face_status": await _face_status(db, customer.id),
+        "table": table,
+        "is_mock": bool(is_mock),
+    }
 
 
 def _persistable_avatar_url(url: str | None) -> str | None:
@@ -65,12 +122,14 @@ class MemberRegisterRequest(BaseModel):
     avatar_url: str | None = None
     phone: str | None = None
     enable_face: bool = False
+    channel: str | None = None
 
 
 class PhoneBindRequest(BaseModel):
     phone: str | None = Field(default=None, min_length=11, max_length=11, description="手动输入手机号")
     phone_code: str | None = Field(default=None, description="微信 getPhoneNumber 返回的 code")
     alipay_phone_encrypted: str | None = Field(default=None, description="支付宝 my.getPhoneNumber 返回的 response 密文")
+    channel: str | None = None
 
 
 @router.get("/config")
@@ -302,8 +361,11 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
     auth = WechatMiniAuth()
     session = await auth.code2session(data.code)
     customer = await CustomerService.get_or_create_by_wechat(db, session["openid"], session.get("unionid"))
+    acc = (
+        await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == session["openid"]))
+    ).scalar_one_or_none()
     # 登录不接受客户端缓存写回新客；资料完善只走 /member/register
-    profile_ready = bool(customer.nickname or customer.display_name)
+    profile_ready = bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1
     if profile_ready:
         if data.nickname:
             customer.nickname = data.nickname
@@ -312,27 +374,16 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
             customer.avatar_url = data.avatar_url
     await db.flush()
 
-    has_nickname = bool(customer.nickname or customer.display_name)
-    customer_token = _issue_customer_token(customer, "wechat")
-    face_status = await _face_status(db, customer.id)
     table = await _resolve_table(db, data.table_token) if data.table_token else None
-
-    return success(
-        {
-            "customer_id": customer.id,
-            "customer_no": customer.customer_no,
-            "customer_token": customer_token,
-            "nickname": customer.nickname or customer.display_name,
-            "avatar_url": customer.avatar_url,
-            # is_new = 库里刚创建且尚无昵称；禁止用 is_mock 冒充新客（否则开发环境每次都弹注册）
-            "is_new": not has_nickname,
-            "need_member_prompt": not has_nickname,
-            "face_status": face_status,
-            "table": table,
-            "is_mock": bool(session.get("is_mock")),
-        },
-        request=request,
+    payload = await _channel_login_payload(
+        db,
+        customer,
+        "wechat",
+        is_mock=bool(session.get("is_mock")),
+        table=table,
+        channel_ready=bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1,
     )
+    return success(payload, request=request)
 
 
 @router.post("/alipay/login")
@@ -340,8 +391,13 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
     auth = AlipayMiniAuth()
     session = await auth.auth_code2user(data.auth_code)
     customer = await CustomerService.get_or_create_by_alipay(db, session["alipay_user_id"])
+    acc = (
+        await db.execute(
+            select(CustomerAlipayAccount).where(CustomerAlipayAccount.alipay_user_id == session["alipay_user_id"])
+        )
+    ).scalar_one_or_none()
     # 登录不接受客户端缓存写回新客；资料完善只走 /member/register
-    profile_ready = bool(customer.nickname or customer.display_name)
+    profile_ready = bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1
     if profile_ready:
         if data.nickname:
             customer.nickname = data.nickname
@@ -350,26 +406,16 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
             customer.avatar_url = data.avatar_url
     await db.flush()
 
-    has_nickname = bool(customer.nickname or customer.display_name)
-    customer_token = _issue_customer_token(customer, "alipay")
-    face_status = await _face_status(db, customer.id)
     table = await _resolve_table(db, data.table_token) if data.table_token else None
-
-    return success(
-        {
-            "customer_id": customer.id,
-            "customer_no": customer.customer_no,
-            "customer_token": customer_token,
-            "nickname": customer.nickname or customer.display_name,
-            "avatar_url": customer.avatar_url,
-            "is_new": not has_nickname,
-            "need_member_prompt": not has_nickname,
-            "face_status": face_status,
-            "table": table,
-            "is_mock": bool(session.get("is_mock")),
-        },
-        request=request,
+    payload = await _channel_login_payload(
+        db,
+        customer,
+        "alipay",
+        is_mock=bool(session.get("is_mock")),
+        table=table,
+        channel_ready=bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1,
     )
+    return success(payload, request=request)
 
 
 @router.post("/member/register")
@@ -388,6 +434,9 @@ async def register_member(
     if data.phone:
         customer = await CustomerService.try_link_by_phone(db, customer, data.phone)
 
+    channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
+    await CustomerService.mark_channel_profile_completed(db, customer.id, channel)
+
     await CustomerService.ensure_default_member_level(db, customer)
     issued = await CouponService.issue_welcome_coupon(db, customer.id)
     await db.flush()
@@ -401,10 +450,10 @@ async def register_member(
         "phone": customer.phone,
         "face_status": "NONE",
         "member_registered": True,
+        "need_member_prompt": False,
         **profile,
         "need_face_consent": bool(data.enable_face),
-        # 若因手机号合并到老顾客，前端需刷新 token
-        "customer_token": _issue_customer_token(customer, "merged"),
+        "customer_token": _issue_customer_token(customer, channel),
         "welcome_coupon_issued": welcome is not None,
         "welcome_coupon": welcome,
         "welcome_coupon_name": CouponService.welcome_template_name(),
@@ -439,11 +488,13 @@ async def upload_member_avatar(
             name = "avatar.jpg"
         file.filename = name
     url = await save_upload(file, subdir="avatars")
-    customer.avatar_url = url
-    await db.flush()
+    channel = _customer_channel_from_request(request, "wechat")
+    if await CustomerService.is_channel_profile_completed(db, customer.id, channel):
+        customer.avatar_url = url
+        await db.flush()
     return success(
         {
-            "avatar_url": customer.avatar_url,
+            "avatar_url": url,
             "customer_id": customer.id,
         },
         request=request,
@@ -463,11 +514,13 @@ async def import_member_avatar_from_url(
 ):
     """chooseAvatar 在支付宝真机常返回 CDN 地址，无法作为 uploadFile 的 filePath，改由服务端拉取转存。"""
     url = await fetch_and_save_remote_image(data.source_url, subdir="avatars")
-    customer.avatar_url = url
-    await db.flush()
+    channel = _customer_channel_from_request(request, "wechat")
+    if await CustomerService.is_channel_profile_completed(db, customer.id, channel):
+        customer.avatar_url = url
+        await db.flush()
     return success(
         {
-            "avatar_url": customer.avatar_url,
+            "avatar_url": url,
             "customer_id": customer.id,
         },
         request=request,
@@ -487,13 +540,7 @@ async def bind_member_phone(
     from app.services.alipay_mini_client import decrypt_phone_response
     from app.services.wechat_mini_client import get_phone_by_code
 
-    channel = "wechat"
-    auth_header = request.headers.get("authorization") or ""
-    if auth_header.startswith("Bearer "):
-        try:
-            channel = decode_customer_token(auth_header.split(" ", 1)[1]).get("channel") or "wechat"
-        except Exception:
-            channel = "wechat"
+    channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
 
     raw_phone = (data.phone or "").strip()
     if data.phone_code:
@@ -509,13 +556,15 @@ async def bind_member_phone(
     customer = await CustomerService.try_link_by_phone(db, customer, raw_phone)
     issued = await CouponService.issue_welcome_coupon(db, customer.id)
     await db.flush()
+    channel_ready = await CustomerService.is_channel_profile_completed(db, customer.id, channel)
     profile = await CustomerService.build_member_profile(db, customer)
     welcome = await CouponService.welcome_coupon_payload(db, issued)
     return success(
         {
             "phone": customer.phone,
             "customer_id": customer.id,
-            "customer_token": _issue_customer_token(customer, "merged"),
+            "customer_token": _issue_customer_token(customer, channel),
+            "need_member_prompt": not channel_ready,
             "welcome_coupon_issued": welcome is not None,
             "welcome_coupon": welcome,
             "welcome_coupon_name": CouponService.welcome_template_name(),
@@ -659,13 +708,16 @@ async def list_member_levels(request: Request, db: DbSession):
 async def get_my_profile(request: Request, db: DbSession, customer: CurrentCustomer):
     """小程序会员中心：档案 + 等级 + 积分进度 + 人脸状态。"""
     profile = await CustomerService.build_member_profile(db, customer)
+    channel = _customer_channel_from_request(request, "wechat")
+    need_prompt = not await CustomerService.is_channel_profile_completed(db, customer.id, channel)
     return success(
         {
             "customer_id": customer.id,
             "customer_no": customer.customer_no,
-            "nickname": customer.nickname or customer.display_name,
-            "avatar_url": customer.avatar_url,
-            "phone": customer.phone,
+            "nickname": None if need_prompt else (customer.nickname or customer.display_name),
+            "avatar_url": None if need_prompt else customer.avatar_url,
+            "phone": None if need_prompt else customer.phone,
+            "need_member_prompt": need_prompt,
             **profile,
             "face_status": await _face_status(db, customer.id),
         },

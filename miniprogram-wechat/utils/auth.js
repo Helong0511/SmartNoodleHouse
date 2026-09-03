@@ -1,6 +1,8 @@
 const api = require('./api')
 
 const PLACEHOLDER_NICKS = new Set(['联调员', '面馆会员', '微信用户', '支付宝用户'])
+const DRAFT_NICK_KEY = 'reg_draft_nickname'
+const DRAFT_AVATAR_KEY = 'reg_draft_avatar'
 
 function isPlaceholderNickname(name) {
   const n = String(name || '').trim()
@@ -43,6 +45,49 @@ function readStorage(key) {
   }
 }
 
+function writeStorage(key, data) {
+  try {
+    wx.setStorageSync(key, data)
+  } catch (_) {}
+}
+
+function removeStorage(key) {
+  try { wx.removeStorageSync(key) } catch (_) {}
+}
+
+function readRegDraft() {
+  return {
+    nickname: String(readStorage(DRAFT_NICK_KEY) || '').trim(),
+    avatarUrl: String(readStorage(DRAFT_AVATAR_KEY) || '').trim()
+  }
+}
+
+function writeRegDraft(patch) {
+  if (!patch) return
+  if (Object.prototype.hasOwnProperty.call(patch, 'nickname')) {
+    const n = String(patch.nickname || '').trim()
+    if (n) writeStorage(DRAFT_NICK_KEY, n)
+    else removeStorage(DRAFT_NICK_KEY)
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'avatarUrl')) {
+    const a = String(patch.avatarUrl || '').trim()
+    if (a) writeStorage(DRAFT_AVATAR_KEY, a)
+    else removeStorage(DRAFT_AVATAR_KEY)
+  }
+}
+
+function clearRegDraft() {
+  removeStorage(DRAFT_NICK_KEY)
+  removeStorage(DRAFT_AVATAR_KEY)
+}
+
+function resolveNeedMemberPrompt(data) {
+  if (data && Object.prototype.hasOwnProperty.call(data, 'need_member_prompt')) {
+    return !!data.need_member_prompt
+  }
+  return isPlaceholderNickname(data && data.nickname)
+}
+
 function formatError(err, fallback) {
   if (!err) return fallback || '未知错误'
   if (typeof err === 'string') return err
@@ -76,6 +121,7 @@ function clearCustomerSession(app) {
   app.globalData.customerNo = ''
   app.globalData.nickname = ''
   app.globalData.avatarUrl = ''
+  app.globalData.needMemberPrompt = null
   app.globalData._customerIdSyncedForToken = null
   clearPrefsCache(app)
   try {
@@ -168,6 +214,14 @@ function applyMeProfile(app, token, me) {
     app.globalData.customerNo = me.customer_no
     wx.setStorageSync('customer_no', me.customer_no)
   }
+  const needPrompt = resolveNeedMemberPrompt(me)
+  app.globalData.needMemberPrompt = needPrompt
+  if (needPrompt) {
+    app.globalData.nickname = ''
+    app.globalData.avatarUrl = ''
+    if (token) app.globalData._customerIdSyncedForToken = token
+    return
+  }
   // 以服务端资料为准，避免沿用已删除顾客的本地昵称
   if (Object.prototype.hasOwnProperty.call(me, 'nickname') || me.display_name) {
     const nick = me.nickname || me.display_name || ''
@@ -248,8 +302,15 @@ function applyLoginSession(app, data) {
   app.globalData.customerNo = data.customer_no
   app.globalData.customerToken = data.customer_token
   app.globalData._customerIdSyncedForToken = data.customer_token
-  app.globalData.nickname = data.nickname || ''
-  if (data.avatar_url != null) app.globalData.avatarUrl = data.avatar_url || ''
+  const needPrompt = resolveNeedMemberPrompt(data)
+  app.globalData.needMemberPrompt = needPrompt
+  if (needPrompt) {
+    app.globalData.nickname = ''
+    app.globalData.avatarUrl = ''
+  } else {
+    app.globalData.nickname = data.nickname || ''
+    if (data.avatar_url != null) app.globalData.avatarUrl = data.avatar_url || ''
+  }
   clearPrefsCache(app)
 }
 
@@ -273,10 +334,11 @@ function refreshCustomerToken(app, token, patch = {}) {
   }
 }
 
-async function ensureLogin(tableToken) {
+async function ensureLogin(tableToken, opts) {
   const app = requireApp()
+  const forceRelogin = !!(opts && opts.forceRelogin)
   const cachedToken = app.globalData.customerToken || readStorage('customer_token')
-  if (cachedToken) {
+  if (!forceRelogin && cachedToken) {
     app.globalData.customerToken = cachedToken
     app.globalData.customerId = app.globalData.customerId || readStorage('customer_id')
     app.globalData.customerNo = app.globalData.customerNo || readStorage('customer_no')
@@ -285,15 +347,16 @@ async function ensureLogin(tableToken) {
       await syncCustomerIdFromMe(app, cachedToken)
       // 若 sync 发现失效已清会话，继续下方重新登录
       if (app.globalData.customerToken) {
-        const nickname = app.globalData.nickname || ''
+        const needPrompt = app.globalData.needMemberPrompt
+        const nickname = needPrompt ? '' : (app.globalData.nickname || '')
         return {
           customer_id: app.globalData.customerId,
           customer_no: app.globalData.customerNo,
           customer_token: app.globalData.customerToken,
           nickname,
-          avatar_url: app.globalData.avatarUrl || '',
-          need_member_prompt: isPlaceholderNickname(nickname),
-          is_new: isPlaceholderNickname(nickname)
+          avatar_url: needPrompt ? '' : (app.globalData.avatarUrl || ''),
+          need_member_prompt: needPrompt == null ? isPlaceholderNickname(app.globalData.nickname || '') : !!needPrompt,
+          is_new: needPrompt == null ? isPlaceholderNickname(app.globalData.nickname || '') : !!needPrompt
         }
       }
     } else {
@@ -326,13 +389,18 @@ async function ensureLogin(tableToken) {
   wx.setStorageSync('customer_id', data.customer_id)
   wx.setStorageSync('customer_token', data.customer_token)
   wx.setStorageSync('customer_no', data.customer_no || '')
-  if (data.nickname) wx.setStorageSync('nickname', data.nickname)
-  else {
+  if (resolveNeedMemberPrompt(data)) {
     try { wx.removeStorageSync('nickname') } catch (_) {}
-  }
-  if (data.avatar_url) wx.setStorageSync('avatar_url', data.avatar_url)
-  else {
     try { wx.removeStorageSync('avatar_url') } catch (_) {}
+  } else {
+    if (data.nickname) wx.setStorageSync('nickname', data.nickname)
+    else {
+      try { wx.removeStorageSync('nickname') } catch (_) {}
+    }
+    if (data.avatar_url) wx.setStorageSync('avatar_url', data.avatar_url)
+    else {
+      try { wx.removeStorageSync('avatar_url') } catch (_) {}
+    }
   }
   return data
 }
@@ -340,13 +408,17 @@ async function ensureLogin(tableToken) {
 /** 会员注册（完善资料）；遇旧 token 自动清会话重登后重试一次 */
 async function registerMember(payload) {
   await ensureLogin()
+  const app = requireApp()
+  const channel = (app.globalData && app.globalData.channel) || ''
+  const body = Object.assign({}, payload || {})
+  if (channel === 'wechat' || channel === 'alipay') body.channel = channel
   try {
-    return await api.post('/miniprogram/member/register', payload || {})
+    return await api.post('/miniprogram/member/register', body)
   } catch (e) {
     if (!isStaleCustomerAuthError(e)) throw e
     clearCustomerSession(requireApp())
     await ensureLogin()
-    return api.post('/miniprogram/member/register', payload || {})
+    return api.post('/miniprogram/member/register', body)
   }
 }
 
@@ -376,5 +448,8 @@ module.exports = {
   isProfileComplete,
   isStaleCustomerAuthError,
   fetchCustomerMeSilent,
-  purgeStaleSessionIfNeeded
+  purgeStaleSessionIfNeeded,
+  readRegDraft,
+  writeRegDraft,
+  clearRegDraft
 }

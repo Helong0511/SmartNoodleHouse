@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS customer_wechat_accounts (
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   openid VARCHAR(64) NOT NULL UNIQUE COMMENT '微信 openid，小程序内唯一',
   unionid VARCHAR(64) DEFAULT NULL COMMENT '微信 unionid（同主体多应用打通）',
+  profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否已完成会员注册引导',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次绑定时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   INDEX idx_wechat_unionid (unionid),
@@ -216,6 +217,7 @@ CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   alipay_user_id VARCHAR(64) NOT NULL UNIQUE COMMENT '支付宝 user_id',
   alipay_union_id VARCHAR(64) DEFAULT NULL COMMENT '支付宝 union_id（如有）',
+  profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否已完成会员注册引导',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次绑定时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   CONSTRAINT fk_caa_customer FOREIGN KEY (customer_id) REFERENCES customers(id)

@@ -127,7 +127,7 @@ Page({
       }
       let login = null
       try {
-        login = await auth.ensureLogin(token)
+        login = await auth.ensureLogin(token, { forceRelogin: true })
       } catch (loginErr) {
         console.error('[bootstrap login]', loginErr)
         wx.showToast({
@@ -138,17 +138,24 @@ Page({
       }
       // 未登录不得沿用本地缓存资料，必须展示注册引导
       const loginOk = !!(login && login.customer_token)
-      const nickname = loginOk ? String(login.nickname || '') : ''
+      const nicknameFromServer = loginOk ? String(login.nickname || '') : ''
       const showMemberPrompt = loginOk
-        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname))
+        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nicknameFromServer))
         : true
       const ctx = dineCtx.currentDisplay()
-      const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
+      const draft = showMemberPrompt ? auth.readRegDraft() : { nickname: '', avatarUrl: '' }
+      const nickname = showMemberPrompt
+        ? String(draft.nickname || '')
+        : nicknameFromServer
+      const avatarUrl = showMemberPrompt
+        ? String(draft.avatarUrl || '')
+        : (loginOk ? String(login.avatar_url || '') : '')
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
         avatarUrl: avatarUtil.resolveDisplayUrl(avatarUrl) || avatarUrl,
         phone: '',
+        phoneInput: '',
         showMemberPrompt,
         ready: true,
         table: ctx.table || app.globalData.table,
@@ -156,20 +163,23 @@ Page({
         ...dineCtx.pageDineFields(ctx)
       })
       auth.fetchCustomerMeSilent().then((me) => {
+        if (this.data.showMemberPrompt) return
         if (me && me.phone) this.setData({ phone: me.phone })
         if (me && me.avatar_url) {
           app.globalData.avatarUrl = me.avatar_url
           this.setData({ avatarUrl: avatarUtil.resolveDisplayUrl(me.avatar_url) })
         }
       })
-      if (loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
+      if (!showMemberPrompt && loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         wx.setStorageSync('nickname', login.nickname)
-      } else if (loginOk) {
+      } else if (loginOk && !showMemberPrompt) {
         try { wx.removeStorageSync('nickname') } catch (_) {}
       }
-      if (loginOk && login.avatar_url) {
+      if (!showMemberPrompt && loginOk && login.avatar_url) {
         app.globalData.avatarUrl = login.avatar_url
         wx.setStorageSync('avatar_url', login.avatar_url)
+      } else if (loginOk && showMemberPrompt) {
+        app.globalData.avatarUrl = draft.avatarUrl || ''
       } else if (loginOk) {
         app.globalData.avatarUrl = ''
         try { wx.removeStorageSync('avatar_url') } catch (_) {}
@@ -296,6 +306,7 @@ Page({
       })
       app.globalData.avatarUrl = remote
       wx.setStorageSync('avatar_url', remote)
+      auth.writeRegDraft({ avatarUrl: remote })
       wx.hideLoading()
       wx.showToast({ title: '头像已保存', icon: 'success' })
     } catch (e) {
@@ -306,6 +317,7 @@ Page({
       })
       app.globalData.avatarUrl = localOrRemoteUrl
       wx.setStorageSync('avatar_url', localOrRemoteUrl)
+      auth.writeRegDraft({ avatarUrl: localOrRemoteUrl })
       wx.showToast({
         title: avatarUtil.formatUploadError(e, '头像上传失败，注册时将重试'),
         icon: 'none',
@@ -318,6 +330,7 @@ Page({
     const nickname = (e.detail && e.detail.value) || ''
     this.setData({ nickname })
     app.globalData.nickname = nickname
+    auth.writeRegDraft({ nickname })
   },
 
   onNicknameChange(e) {
@@ -325,6 +338,7 @@ Page({
     if (!nickname) return
     this.setData({ nickname })
     app.globalData.nickname = nickname
+    auth.writeRegDraft({ nickname })
   },
 
   onNicknameBlur(e) {
@@ -332,6 +346,7 @@ Page({
     if (!nickname) return
     this.setData({ nickname })
     app.globalData.nickname = nickname
+    auth.writeRegDraft({ nickname })
   },
 
   onNicknameReview(e) {
@@ -383,6 +398,11 @@ Page({
     const formNick = String(formVal.nickname || '').trim()
     const nickname = formNick || String(this.data.nickname || '').trim()
     this.doSaveAndGo(nickname)
+  },
+
+  onSubmitRegister() {
+    if (this.data.saving) return
+    this.doSaveAndGo(String(this.data.nickname || '').trim())
   },
 
   async doSaveAndGo(nickname) {
@@ -443,6 +463,7 @@ Page({
       if (res && res.member_discount_rate) app.globalData.memberDiscountRate = res.member_discount_rate
       wx.setStorageSync('nickname', app.globalData.nickname)
       if (app.globalData.avatarUrl) wx.setStorageSync('avatar_url', app.globalData.avatarUrl)
+      auth.clearRegDraft()
       this.setData({
         nickname: app.globalData.nickname,
         avatarUrl: avatarUtil.resolveDisplayUrl(app.globalData.avatarUrl),

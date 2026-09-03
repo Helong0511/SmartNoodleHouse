@@ -150,7 +150,7 @@ Page({
       }
       let login = null
       try {
-        login = await auth.ensureLogin(token)
+        login = await auth.ensureLogin(token, { forceRelogin: true })
       } catch (loginErr) {
         console.error('[bootstrap login]', loginErr)
         my.showToast({
@@ -161,37 +161,47 @@ Page({
       }
       // 未登录不得沿用本地缓存资料，必须展示注册引导
       const loginOk = !!(login && login.customer_token)
-      const nickname = loginOk ? String(login.nickname || '') : ''
+      const nicknameFromServer = loginOk ? String(login.nickname || '') : ''
       const showMemberPrompt = loginOk
-        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname))
+        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nicknameFromServer))
         : true
-      const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
+      const draft = showMemberPrompt ? auth.readRegDraft() : { nickname: '', avatarUrl: '' }
+      const nickname = showMemberPrompt
+        ? String(draft.nickname || '')
+        : nicknameFromServer
+      const avatarUrl = showMemberPrompt
+        ? String(draft.avatarUrl || '')
+        : (loginOk ? String(login.avatar_url || '') : '')
       const dine = dineCtx.currentDisplay()
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
         avatarUrl: avatarUtil.resolveDisplayUrl(avatarUrl) || avatarUrl,
         phone: '',
+        phoneInput: '',
         showMemberPrompt,
         ready: true,
         table: dine.table,
         ...dineCtx.pageDineFields(dine)
       })
       auth.fetchCustomerMeSilent().then((me) => {
+        if (this.data.showMemberPrompt) return
         if (me && me.phone) this.setData({ phone: me.phone })
         if (me && me.avatar_url) {
           app && (app.globalData.avatarUrl = me.avatar_url)
           this.setData({ avatarUrl: avatarUtil.resolveDisplayUrl(me.avatar_url) })
         }
       })
-      if (loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
+      if (!showMemberPrompt && loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
-      } else if (loginOk) {
+      } else if (loginOk && !showMemberPrompt) {
         try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
       }
-      if (loginOk && login.avatar_url) {
+      if (!showMemberPrompt && loginOk && login.avatar_url) {
         if (app) app.globalData.avatarUrl = login.avatar_url
         my.setStorageSync({ key: 'avatar_url', data: login.avatar_url })
+      } else if (loginOk && showMemberPrompt) {
+        if (app) app.globalData.avatarUrl = draft.avatarUrl || ''
       } else if (loginOk) {
         if (app) app.globalData.avatarUrl = ''
         try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
@@ -306,6 +316,7 @@ Page({
       patch.nickname = nickname
       if (app) app.globalData.nickname = nickname
       my.setStorageSync({ key: 'nickname', data: nickname })
+      auth.writeRegDraft({ nickname })
     }
     if (avatarUrl) {
       const storePath = avatarUtil.isPersistableAvatarUrl(avatarUrl)
@@ -316,6 +327,7 @@ Page({
       patch.avatarUrl = avatarUtil.resolveDisplayUrl(storePath) || storePath
       if (app) app.globalData.avatarUrl = storePath
       my.setStorageSync({ key: 'avatar_url', data: storePath })
+      auth.writeRegDraft({ avatarUrl: storePath })
     }
     if (Object.keys(patch).length) this.setData(patch)
   },
@@ -325,6 +337,7 @@ Page({
     this.setData({ nickname })
     const app = appRef()
     if (app) app.globalData.nickname = nickname
+    auth.writeRegDraft({ nickname })
   },
 
   onNicknameBlur(e) {
@@ -333,6 +346,7 @@ Page({
     this.setData({ nickname })
     const app = appRef()
     if (app) app.globalData.nickname = nickname
+    auth.writeRegDraft({ nickname })
   },
 
   onNicknameReview(e) {
@@ -382,6 +396,11 @@ Page({
     const formNick = String(formVal.nickname || '').trim()
     const nickname = formNick || String(this.data.nickname || '').trim()
     this.doSaveAndGo(nickname)
+  },
+
+  onSubmitRegister() {
+    if (this.data.saving) return
+    this.doSaveAndGo(String(this.data.nickname || '').trim())
   },
 
   async doSaveAndGo(nickname) {
@@ -450,6 +469,7 @@ Page({
       if (app.globalData.avatarUrl) {
         my.setStorageSync({ key: 'avatar_url', data: app.globalData.avatarUrl })
       }
+      auth.clearRegDraft()
       this.setData({
         nickname: app.globalData.nickname,
         avatarUrl: avatarUtil.resolveDisplayUrl(app.globalData.avatarUrl),
