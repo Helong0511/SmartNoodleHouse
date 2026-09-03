@@ -46,6 +46,10 @@ async def _wechat_openid_for_customer(db: AsyncSession, customer_id: int) -> str
     return await CustomerService.resolve_wechat_openid(db, customer_id)
 
 
+async def _alipay_buyer_id_for_customer(db: AsyncSession, customer_id: int) -> str | None:
+    return await CustomerService.resolve_alipay_user_id(db, customer_id)
+
+
 @router.post("/orders/{order_id}/pay")
 async def create_payment(
     order_id: int,
@@ -64,10 +68,16 @@ async def create_payment(
         order.customer_id = customer.id
         await db.flush()
     extra: dict | None = None
-    if data.provider.upper() == "WECHAT" and data.channel_type.lower() == "miniprogram":
+    provider_u = data.provider.upper()
+    channel_l = data.channel_type.lower()
+    if provider_u == "WECHAT" and channel_l == "miniprogram":
         openid = await _wechat_openid_for_customer(db, customer.id)
         if openid:
             extra = {"openid": openid}
+    elif provider_u == "ALIPAY" and channel_l == "miniprogram":
+        buyer_id = await _alipay_buyer_id_for_customer(db, customer.id)
+        if buyer_id:
+            extra = {"buyer_id": buyer_id}
     payment, pay_data = await PaymentService.create_payment(
         db, order, data.provider, data.channel_type, customer.id, extra=extra
     )

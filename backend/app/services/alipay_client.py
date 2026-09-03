@@ -41,8 +41,62 @@ async def _gateway_call(method: str, biz_content: dict[str, Any], *, allow_codes
     ok_codes = allow_codes or {"10000"}
     if str(body.get("code")) not in ok_codes:
         logger.error("支付宝 API 错误 %s: %s", method, body)
-        raise AppException(50021, f"支付宝失败: {body.get('sub_msg') or body.get('msg') or body}")
+        raise AppException(50021, _friendly_alipay_error(method, body))
     return body
+
+
+def _friendly_alipay_error(method: str, body: dict[str, Any]) -> str:
+    sub_code = str(body.get("sub_code") or "")
+    sub_msg = str(body.get("sub_msg") or body.get("msg") or body)
+    raw = f"支付宝失败: {sub_msg}"
+    if (
+        "ACCESS_FORBIDDEN" in sub_code
+        or "权限不足" in sub_msg
+        or "无权限" in sub_msg
+    ):
+        if method in ("alipay.trade.create", "alipay.trade.precreate"):
+            return (
+                "支付宝支付权限未开通：请在开放平台签约「JSAPI支付」，"
+                "并在产品中心关联本小程序 AppID；当面付不能用于小程序内支付。"
+                f"（{sub_msg}）"
+            )
+        return f"支付宝接口权限不足，请到开放平台开通对应产品。（{sub_msg}）"
+    return raw
+
+
+async def trade_create(
+    *,
+    payment_no: str,
+    amount_yuan: Decimal,
+    subject: str,
+    buyer_id: str,
+    op_app_id: str | None = None,
+) -> dict[str, Any]:
+    """小程序 JSAPI 创单，返回 trade_no 供 my.tradePay。"""
+    buyer = str(buyer_id or "").strip()
+    if not buyer:
+        raise AppException(40042, "小程序支付缺少买家支付宝用户号")
+    biz: dict[str, Any] = {
+        "out_trade_no": payment_no,
+        "total_amount": f"{amount_yuan:.2f}",
+        "subject": subject[:256],
+        "product_code": "JSAPI_PAY",
+        "buyer_id": buyer,
+    }
+    app_id = str(op_app_id or "").strip()
+    if app_id:
+        biz["op_app_id"] = app_id
+    body = await _gateway_call("alipay.trade.create", biz)
+    trade_no = body.get("trade_no")
+    if not trade_no:
+        raise AppException(50021, "支付宝创单成功但未返回 trade_no")
+    return {
+        "provider": "ALIPAY",
+        "payment_no": payment_no,
+        "trade_no": trade_no,
+        "amount": f"{amount_yuan:.2f}",
+        "raw": body,
+    }
 
 
 async def trade_precreate(*, payment_no: str, amount_yuan: Decimal, subject: str) -> dict[str, Any]:

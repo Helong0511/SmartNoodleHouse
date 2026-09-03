@@ -435,6 +435,18 @@ class CustomerService:
         ).scalar_one_or_none()
 
     @staticmethod
+    async def resolve_alipay_user_id(db: AsyncSession, customer_id: int) -> str | None:
+        """取顾客绑定的支付宝用户号（buyer_id），供小程序 JSAPI 创单。"""
+        return (
+            await db.execute(
+                select(CustomerAlipayAccount.alipay_user_id)
+                .where(CustomerAlipayAccount.customer_id == customer_id)
+                .order_by(CustomerAlipayAccount.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
     async def get_or_create_by_wechat(db: AsyncSession, openid: str, unionid: str | None = None) -> Customer:
         result = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
         account = result.scalar_one_or_none()

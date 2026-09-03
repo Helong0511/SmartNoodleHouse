@@ -175,6 +175,7 @@ class AlipayProvider:
         auth_code = (extra or {}).get("auth_code")
         if "BARCODE" in channel and not auth_code:
             raise AppException(40041, "请扫描顾客支付宝付款码")
+        is_mini = "MINIAPP" in channel or "MINIPROGRAM" in channel or "JSAPI" in channel
         if not _alipay_pay_configured():
             if _payment_mock_allowed(configured=False):
                 if auth_code:
@@ -187,6 +188,14 @@ class AlipayProvider:
                         "_mock": True,
                     }
                 logger.warning("支付宝 MOCK 下单（仅开发）")
+                if is_mini:
+                    return {
+                        "provider": "ALIPAY",
+                        "payment_no": payment.payment_no,
+                        "trade_no": f"mock_ali_{payment.payment_no}",
+                        "amount": str(payment.amount),
+                        "_mock": True,
+                    }
                 return {
                     "provider": "ALIPAY",
                     "payment_no": payment.payment_no,
@@ -208,6 +217,35 @@ class AlipayProvider:
                 auth_code=str(auth_code),
             )
             return data
+        # 小程序内必须用 JSAPI（alipay.trade.create + my.tradePay），不能用当面付预下单
+        if is_mini:
+            buyer_id = str((extra or {}).get("buyer_id") or "").strip()
+            if not buyer_id:
+                raise AppException(40042, "小程序支付缺少买家支付宝用户号，请重新登录后再支付")
+            if buyer_id.startswith("ali_dev_"):
+                if _payment_mock_allowed(configured=True):
+                    logger.warning("支付宝小程序 MOCK（开发买家） payment=%s", payment.payment_no)
+                    return {
+                        "provider": "ALIPAY",
+                        "payment_no": payment.payment_no,
+                        "trade_no": f"mock_ali_{payment.payment_no}",
+                        "amount": str(payment.amount),
+                        "_mock": True,
+                    }
+                raise AppException(
+                    40043,
+                    "当前为开发 Mock 买家，无法调真实支付宝支付；请用真机授权登录，或设 ALLOW_PAYMENT_MOCK=true",
+                )
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            return await alipay_client.trade_create(
+                payment_no=payment.payment_no,
+                amount_yuan=payment.amount,
+                subject=f"订单{order.order_no}",
+                buyer_id=buyer_id,
+                op_app_id=settings.alipay_app_id or None,
+            )
         return await alipay_client.trade_precreate(
             payment_no=payment.payment_no,
             amount_yuan=payment.amount,
