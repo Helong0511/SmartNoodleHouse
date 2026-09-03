@@ -127,6 +127,7 @@ Page({
   async bootstrap() {
     try {
       this.setData({ loading: true })
+      await auth.purgeStaleSessionIfNeeded()
       const app = appRef()
       const gd = (app && app.globalData) || {}
       const token = gd.tableToken || auth.readStorage('table_token') || ''
@@ -155,9 +156,15 @@ Page({
           duration: 3500
         })
       }
-      const nickname = (login && login.nickname) || gd.nickname || ''
-      const showMemberPrompt = !!(login && login.need_member_prompt) || auth.isPlaceholderNickname(nickname)
-      const avatarUrl = (login && login.avatar_url) || gd.avatarUrl || ''
+      const nickname = login
+        ? String(login.nickname || '')
+        : String(gd.nickname || '')
+      const showMemberPrompt = login
+        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname))
+        : auth.isPlaceholderNickname(nickname)
+      const avatarUrl = login
+        ? String(login.avatar_url || '')
+        : String(gd.avatarUrl || '')
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
@@ -174,6 +181,8 @@ Page({
       })
       if (login && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
+      } else if (login && auth.isPlaceholderNickname(login.nickname)) {
+        try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
       }
       if (login && login.customer_id && app) {
         app.globalData.customerId = login.customer_id
@@ -183,7 +192,11 @@ Page({
         my.setStorageSync({ key: 'customer_no', data: login.customer_no })
       }
       await this.refreshPrivacyState()
-      if (login && auth.isProfileComplete(login)) {
+      // 以服务端 need_member_prompt / 昵称为准，禁止仅凭本地缓存跳过注册
+      const shouldSkipPrompt = login
+        && login.need_member_prompt === false
+        && !auth.isPlaceholderNickname(login.nickname)
+      if (shouldSkipPrompt) {
         this.goMenu()
         return
       }

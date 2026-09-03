@@ -85,15 +85,21 @@ function shouldSyncCustomerId(app, token) {
 }
 
 function clearCustomerSession(app) {
+  if (!app || !app.globalData) return
   app.globalData.customerToken = ''
   app.globalData.customerId = null
   app.globalData.customerNo = ''
+  app.globalData.nickname = ''
+  app.globalData.avatarUrl = ''
   app.globalData._customerIdSyncedForToken = null
   clearPrefsCache(app)
   try {
     my.removeStorageSync({ key: 'customer_token' })
     my.removeStorageSync({ key: 'customer_id' })
     my.removeStorageSync({ key: 'customer_no' })
+    // 库重置后本地昵称/头像属于已删除顾客，必须清掉，否则会写回新客并跳过注册
+    my.removeStorageSync({ key: 'nickname' })
+    my.removeStorageSync({ key: 'avatar_url' })
   } catch (_) {}
 }
 
@@ -106,8 +112,19 @@ function isStaleAuthMessage(msg) {
   return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(String(msg || ''))
 }
 
+function extractRequestFailMessage(err) {
+  if (!err) return ''
+  if (typeof err === 'string') return err
+  const data = err.data
+  if (data && typeof data === 'object') {
+    if (data.message) return String(data.message)
+    if (typeof data.detail === 'string') return data.detail
+  }
+  return String(err.errorMessage || err.errMsg || err.message || err.error || '')
+}
+
 /**
- * 静默探测顾客令牌是否有效（永不 reject，避免支付宝把 401 打成 Uncaught Error）
+ * 静默探测顾客令牌是否有效（永不 reject，避免把 401 打成 Uncaught Error）
  */
 function probeCustomerMe(token) {
   const base = String((getAppSafe() && getAppSafe().globalData && getAppSafe().globalData.apiBase) || '')
@@ -124,22 +141,32 @@ function probeCustomerMe(token) {
         Authorization: `Bearer ${token}`
       },
       success(res) {
-        const status = res.status != null ? res.status : res.statusCode
+        const status = Number(res.status != null ? res.status : res.statusCode)
         let body = res.data
         if (typeof body === 'string') {
           try { body = JSON.parse(body) } catch (_) { body = { message: body } }
         }
         body = body || {}
         const msg = body.message || (typeof body.detail === 'string' ? body.detail : '') || ''
-        if (status >= 400 || (body.code !== 0 && body.code !== undefined)) {
-          resolve({ ok: false, stale: isStaleAuthMessage(msg) || status === 401, data: null, message: msg })
+        if ((status && status >= 400) || (body.code !== 0 && body.code !== undefined)) {
+          resolve({
+            ok: false,
+            stale: isStaleAuthMessage(msg) || status === 401,
+            data: null,
+            message: msg
+          })
           return
         }
         resolve({ ok: true, stale: false, data: body.data || null })
       },
-      fail() {
-        // 网络失败：不判失效，保留本地 token
-        resolve({ ok: false, stale: false, data: null, network: true })
+      fail(err) {
+        const msg = extractRequestFailMessage(err)
+        // 部分真机把 HTTP 401 走 fail，须按失效处理；纯网络失败标记 network，由 validate 统一判无效
+        if (isStaleAuthMessage(msg)) {
+          resolve({ ok: false, stale: true, data: null, message: msg })
+          return
+        }
+        resolve({ ok: false, stale: false, data: null, network: true, message: msg })
       }
     })
   })
@@ -155,6 +182,22 @@ function applyMeProfile(app, token, me) {
     app.globalData.customerNo = me.customer_no
     my.setStorageSync({ key: 'customer_no', data: me.customer_no })
   }
+  // 以服务端资料为准，避免沿用已删除顾客的本地昵称
+  if (Object.prototype.hasOwnProperty.call(me, 'nickname') || me.display_name) {
+    const nick = me.nickname || me.display_name || ''
+    app.globalData.nickname = nick
+    if (nick) my.setStorageSync({ key: 'nickname', data: nick })
+    else {
+      try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(me, 'avatar_url')) {
+    app.globalData.avatarUrl = me.avatar_url || ''
+    if (me.avatar_url) my.setStorageSync({ key: 'avatar_url', data: me.avatar_url })
+    else {
+      try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
+    }
+  }
   if (token) app.globalData._customerIdSyncedForToken = token
 }
 
@@ -167,9 +210,8 @@ async function validateCustomerToken(token) {
     applyMeProfile(app, token, probed.data)
     return true
   }
-  if (probed.stale) return false
-  // 网络抖动：暂视为有效，避免反复登出
-  return true
+  // 失效或无法确认（含真机 401→fail / 网络失败）：一律视为无效，走重新登录
+  return false
 }
 
 async function syncCustomerIdFromMe(app, token) {
@@ -220,6 +262,8 @@ function applyLoginSession(app, data) {
   app.globalData.customerNo = data.customer_no
   app.globalData.customerToken = data.customer_token
   app.globalData._customerIdSyncedForToken = data.customer_token
+  app.globalData.nickname = data.nickname || ''
+  if (data.avatar_url != null) app.globalData.avatarUrl = data.avatar_url || ''
   clearPrefsCache(app)
 }
 
@@ -250,18 +294,20 @@ async function ensureLogin(tableToken) {
     app.globalData.customerToken = cachedToken
     app.globalData.customerId = app.globalData.customerId || readStorage('customer_id')
     app.globalData.customerNo = app.globalData.customerNo || readStorage('customer_no')
-    app.globalData.nickname = app.globalData.nickname || readStorage('nickname') || ''
     const valid = await validateCustomerToken(cachedToken)
     if (valid) {
       await syncCustomerIdFromMe(app, cachedToken)
       // 若 sync 发现失效已清会话，继续下方重新登录
       if (app.globalData.customerToken) {
+        const nickname = app.globalData.nickname || ''
         return {
           customer_id: app.globalData.customerId,
           customer_no: app.globalData.customerNo,
           customer_token: app.globalData.customerToken,
-          nickname: app.globalData.nickname,
-          need_member_prompt: isPlaceholderNickname(app.globalData.nickname)
+          nickname,
+          avatar_url: app.globalData.avatarUrl || '',
+          need_member_prompt: isPlaceholderNickname(nickname),
+          is_new: isPlaceholderNickname(nickname)
         }
       }
     } else {
@@ -273,16 +319,15 @@ async function ensureLogin(tableToken) {
   if (!authRes || !authRes.authCode) {
     throw new Error('getAuthCode 未返回 authCode，请检查支付宝登录授权')
   }
+  // 不传本地缓存昵称/头像：新客资料只走 register，避免清库后本地昵称冒充已注册
   const data = await api.post('/miniprogram/alipay/login', {
     auth_code: authRes.authCode,
-    table_token: tableToken || app.globalData.tableToken || readStorage('table_token') || null,
-    nickname: app.globalData.nickname || readStorage('nickname') || null
+    table_token: tableToken || app.globalData.tableToken || readStorage('table_token') || null
   }, false)
   if (!data || !data.customer_token) {
     throw new Error('登录成功但未返回 customer_token')
   }
   applyLoginSession(app, data)
-  app.globalData.nickname = data.nickname || ''
   if (data.table) {
     app.globalData.table = data.table
     app.globalData.tableToken = data.table.qr_token
@@ -296,6 +341,13 @@ async function ensureLogin(tableToken) {
   my.setStorageSync({ key: 'customer_token', data: data.customer_token })
   my.setStorageSync({ key: 'customer_no', data: data.customer_no || '' })
   if (data.nickname) my.setStorageSync({ key: 'nickname', data: data.nickname })
+  else {
+    try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
+  }
+  if (data.avatar_url) my.setStorageSync({ key: 'avatar_url', data: data.avatar_url })
+  else {
+    try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
+  }
   return data
 }
 
@@ -333,8 +385,10 @@ module.exports = {
   readStorage,
   getAppSafe,
   refreshCustomerToken,
+  clearCustomerSession,
   isPlaceholderNickname,
   isProfileComplete,
+  isStaleCustomerAuthError,
   fetchCustomerMeSilent,
   purgeStaleSessionIfNeeded
 }

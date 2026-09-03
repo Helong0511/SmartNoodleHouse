@@ -271,11 +271,14 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
     auth = WechatMiniAuth()
     session = await auth.code2session(data.code)
     customer = await CustomerService.get_or_create_by_wechat(db, session["openid"], session.get("unionid"))
-    if data.nickname:
-        customer.nickname = data.nickname
-        customer.display_name = customer.display_name or data.nickname
-    if data.avatar_url:
-        customer.avatar_url = data.avatar_url
+    # 登录不接受客户端缓存写回新客；资料完善只走 /member/register
+    profile_ready = bool(customer.nickname or customer.display_name)
+    if profile_ready:
+        if data.nickname:
+            customer.nickname = data.nickname
+            customer.display_name = customer.display_name or data.nickname
+        if data.avatar_url:
+            customer.avatar_url = data.avatar_url
     await db.flush()
 
     has_nickname = bool(customer.nickname or customer.display_name)
@@ -306,11 +309,14 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
     auth = AlipayMiniAuth()
     session = await auth.auth_code2user(data.auth_code)
     customer = await CustomerService.get_or_create_by_alipay(db, session["alipay_user_id"])
-    if data.nickname:
-        customer.nickname = data.nickname
-        customer.display_name = customer.display_name or data.nickname
-    if data.avatar_url:
-        customer.avatar_url = data.avatar_url
+    # 登录不接受客户端缓存写回新客；资料完善只走 /member/register
+    profile_ready = bool(customer.nickname or customer.display_name)
+    if profile_ready:
+        if data.nickname:
+            customer.nickname = data.nickname
+            customer.display_name = customer.display_name or data.nickname
+        if data.avatar_url:
+            customer.avatar_url = data.avatar_url
     await db.flush()
 
     has_nickname = bool(customer.nickname or customer.display_name)

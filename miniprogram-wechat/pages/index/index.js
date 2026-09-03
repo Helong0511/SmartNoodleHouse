@@ -113,6 +113,7 @@ Page({
   async bootstrap() {
     try {
       this.setData({ loading: true })
+      await auth.purgeStaleSessionIfNeeded()
       const token = app.globalData.tableToken || wx.getStorageSync('table_token')
       if (token) {
         try {
@@ -125,13 +126,13 @@ Page({
       if (!login) {
         throw new Error('登录失败，请检查网络或稍后重试')
       }
-      const nickname = login.nickname || app.globalData.nickname || ''
-      const showMemberPrompt = !!login.need_member_prompt || auth.isPlaceholderNickname(nickname)
+      const nickname = String(login.nickname || '')
+      const showMemberPrompt = login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname)
       const ctx = dineCtx.currentDisplay()
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
-        avatarUrl: login.avatar_url || app.globalData.avatarUrl || '',
+        avatarUrl: login.avatar_url || '',
         phone: '',
         showMemberPrompt,
         ready: true,
@@ -146,10 +147,15 @@ Page({
       })
       if (login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         wx.setStorageSync('nickname', login.nickname)
+      } else {
+        try { wx.removeStorageSync('nickname') } catch (_) {}
       }
       if (login.avatar_url) {
         app.globalData.avatarUrl = login.avatar_url
         wx.setStorageSync('avatar_url', login.avatar_url)
+      } else {
+        app.globalData.avatarUrl = ''
+        try { wx.removeStorageSync('avatar_url') } catch (_) {}
       }
       if (login.customer_id) {
         app.globalData.customerId = login.customer_id
@@ -157,7 +163,10 @@ Page({
       }
       if (login.customer_no) wx.setStorageSync('customer_no', login.customer_no)
       await this.refreshPrivacyState()
-      if (auth.isProfileComplete(login)) {
+      const shouldSkipPrompt = login
+        && login.need_member_prompt === false
+        && !auth.isPlaceholderNickname(login.nickname)
+      if (shouldSkipPrompt) {
         this.goMenu()
         return
       }

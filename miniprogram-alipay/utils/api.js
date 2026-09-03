@@ -99,11 +99,30 @@ function isTransientNetworkError(msg) {
   return /CONNECTION_RESET|ERR_CONNECTION_RESET|reset by peer|CONNECTION_REFUSED|ECONNREFUSED|timeout/i.test(String(msg || ''))
 }
 
+function isStaleAuthMessage(msg) {
+  return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌/.test(String(msg || ''))
+}
+
+/** 用普通对象 reject，避免支付宝真机把 Error 打成 Uncaught Error */
+function makeRequestError(message, extra) {
+  return Object.assign({ message: String(message || '请求失败') }, extra || {})
+}
+
+function clearStaleCustomerAuthQuietly() {
+  try {
+    const auth = require('./auth')
+    const app = getAppSafe()
+    if (auth && typeof auth.clearCustomerSession === 'function') {
+      auth.clearCustomerSession(app || { globalData: {} })
+    }
+  } catch (_) {}
+}
+
 function requestOnce(method, path, data = {}, needAuth = true) {
   const base = resolveBaseUrl()
   return new Promise((resolve, reject) => {
     if (!base) {
-      reject(new Error('未配置 apiBase，请在 miniprogram-alipay/config/env.js 填写 PROD_API_BASE 或 DEV_LAN_HOST'))
+      reject(makeRequestError('未配置 apiBase，请在 miniprogram-alipay/config/env.js 填写 PROD_API_BASE 或 DEV_LAN_HOST'))
       return
     }
     my.request({
@@ -116,20 +135,28 @@ function requestOnce(method, path, data = {}, needAuth = true) {
         ...(needAuth ? authHeader() : {})
       },
       success(res) {
-        const status = res.status != null ? res.status : res.statusCode
+        const status = Number(res.status != null ? res.status : res.statusCode)
         const body = parseResponseBody(res.data)
-        if (status >= 400) {
-          reject(new Error(pickErrorMessage(res, `请求失败(${status})`)))
-          return
-        }
-        if (body.code !== 0 && body.code !== undefined) {
-          reject(new Error(body.message || '请求失败'))
+        const msg = pickErrorMessage(res, `请求失败(${status || '?'})`)
+        if ((status && status >= 400) || (body.code !== 0 && body.code !== undefined)) {
+          if (needAuth && (status === 401 || isStaleAuthMessage(msg))) {
+            clearStaleCustomerAuthQuietly()
+            reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))
+            return
+          }
+          reject(makeRequestError(msg, { status, code: body.code }))
           return
         }
         resolve(body.data)
       },
       fail(err) {
-        reject(new Error(networkHint(base, pickErrorMessage(err, '网络请求失败'))))
+        const msg = networkHint(base, pickErrorMessage(err, '网络请求失败'))
+        if (needAuth && isStaleAuthMessage(msg)) {
+          clearStaleCustomerAuthQuietly()
+          reject(makeRequestError(msg, { code: 'AUTH_STALE' }))
+          return
+        }
+        reject(makeRequestError(msg))
       }
     })
   })
