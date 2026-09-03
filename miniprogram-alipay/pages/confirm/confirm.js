@@ -170,7 +170,10 @@ Page({
     this.setData({
       ...dineCtx.pageDineFields(ctx),
       tableName: tableLabel || ctx.tableName || '',
-      tableNo: ctx.tableNo || (cached && !ctx.isTakeawayChannel && cached.table_no) || this.data.tableNo || '',
+      // 外带虚拟桌 tableNo 必须为空；勿回退到 this.data.tableNo（会残留上次堂食桌号）
+      tableNo: ctx.isTakeawayChannel
+        ? ''
+        : (ctx.tableNo || (cached && cached.table_no) || ''),
       ...(token
         ? {
           tableToken: token,
