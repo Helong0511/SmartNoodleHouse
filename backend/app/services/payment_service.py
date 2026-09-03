@@ -71,7 +71,33 @@ class WechatPayProvider:
         channel = (payment.channel or "").upper()
         desc = f"订单{order.order_no}"
         auth_code = (extra or {}).get("auth_code")
-        if "MICROPAY" in channel:
+        is_mini = "MINIPROGRAM" in channel or "JSAPI" in channel
+        is_micropay = "MICROPAY" in channel
+        configured = _wechat_micropay_configured() if is_micropay else _wechat_pay_configured()
+        # 显式 ALLOW_PAYMENT_MOCK：即使已配商户号也跳过真实网关（未开通支付产品时可联调）
+        if configured and _payment_mock_allowed(configured=True):
+            logger.warning(
+                "微信支付 MOCK（ALLOW_PAYMENT_MOCK=true） payment=%s channel=%s",
+                payment.payment_no,
+                channel,
+            )
+            if is_micropay or auth_code:
+                return {
+                    "provider": "WECHAT",
+                    "payment_no": payment.payment_no,
+                    "trade_state": "SUCCESS",
+                    "amount": str(payment.amount),
+                    "_mock": True,
+                }
+            return {
+                "provider": "WECHAT",
+                "payment_no": payment.payment_no,
+                "prepay_id": f"wx_mock_{payment.payment_no}",
+                "code_url": f"weixin://wxpay/bizpayurl?pr={payment.payment_no}",
+                "amount": str(payment.amount),
+                "_mock": True,
+            }
+        if is_micropay:
             if not auth_code:
                 raise AppException(40041, "请扫描顾客微信付款码")
             if not _wechat_micropay_configured():
@@ -112,7 +138,7 @@ class WechatPayProvider:
                 "微信支付未配置，拒绝创建支付（开发可在 .env 设 ALLOW_PAYMENT_MOCK=true，或未配商户号时自动 mock）",
             )
 
-        if "MINIPROGRAM" in channel or "JSAPI" in channel:
+        if is_mini:
             openid = (extra or {}).get("openid")
             if not openid:
                 raise AppException(40040, "小程序支付缺少 openid")
@@ -134,7 +160,10 @@ class WechatPayProvider:
         return data
 
     async def refund_payment(self, payment: Payment, amount: Decimal, reason: str, refund_no: str) -> dict:
-        if not _wechat_pay_configured():
+        configured = _wechat_pay_configured()
+        if configured and _payment_mock_allowed(configured=True):
+            return {"refund_no": refund_no, "status": "SUCCESS", "amount": str(amount), "_mock": True}
+        if not configured:
             if _payment_mock_allowed(configured=False):
                 return {"refund_no": refund_no, "status": "SUCCESS", "amount": str(amount), "_mock": True}
             raise AppException(50011, "微信支付未配置，拒绝退款")
@@ -275,7 +304,10 @@ class AlipayProvider:
         )
 
     async def refund_payment(self, payment: Payment, amount: Decimal, reason: str, refund_no: str) -> dict:
-        if not _alipay_pay_configured():
+        configured = _alipay_pay_configured()
+        if configured and _payment_mock_allowed(configured=True):
+            return {"refund_no": refund_no, "status": "SUCCESS", "amount": str(amount), "_mock": True}
+        if not configured:
             if _payment_mock_allowed(configured=False):
                 return {"refund_no": refund_no, "status": "SUCCESS", "amount": str(amount), "_mock": True}
             raise AppException(50020, "支付宝未配置，拒绝退款")
