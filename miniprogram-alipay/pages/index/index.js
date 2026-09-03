@@ -26,6 +26,8 @@ Page({
     needPrivacyAgree: false,
     table: null,
     storeName: '',
+    tableName: '',
+    seatLabel: '桌号',
     nickname: '',
     avatarUrl: '',
     phone: '',
@@ -164,6 +166,7 @@ Page({
         ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname))
         : true
       const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
+      const dine = dineCtx.currentDisplay()
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
@@ -171,9 +174,8 @@ Page({
         phone: '',
         showMemberPrompt,
         ready: true,
-        table: ctx.table,
-        storeName: ctx.storeName,
-        hasTable: ctx.hasTable
+        table: dine.table,
+        ...dineCtx.pageDineFields(dine)
       })
       auth.fetchCustomerMeSilent().then((me) => {
         if (me && me.phone) this.setData({ phone: me.phone })
@@ -229,8 +231,7 @@ Page({
         if (ctx) {
           this.setData({
             table: ctx.table,
-            storeName: ctx.storeName,
-            hasTable: ctx.hasTable
+            ...dineCtx.pageDineFields(ctx)
           })
         }
       })

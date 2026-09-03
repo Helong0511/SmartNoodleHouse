@@ -389,9 +389,9 @@ INSERT INTO `smart_noodle_house`.`product_option_groups` (`id`, `product_id`, `g
 (22, 4, 1, 0), (23, 4, 2, 1), (24, 4, 3, 2), (25, 4, 4, 3), (26, 4, 5, 4), (27, 4, 6, 5), (28, 4, 7, 6);
 
 
--- 添加桌号
+-- 添加桌号（WM=外带虚拟通道，非实体桌；堂食用 A01/A02）
 INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_name`, `qr_token`, `wechat_qr_url`, `alipay_qr_url`, `status`, `created_at`, `updated_at`) VALUES 
-(1, 1, 'WM', '外卖订单', 'M7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, 1, 'WM', '外带自取', 'M7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (2, 1, 'A01', '1号桌', '6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (3, 1, 'A02', '2号桌', 'wJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 

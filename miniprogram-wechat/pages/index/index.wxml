@@ -5,7 +5,7 @@
     <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
     <view class="sub" wx:if="{{storeName}}">{{storeName}}</view>
     <view class="sub addr" wx:if="{{storeAddress}}">{{storeAddress}}</view>
-    <view class="sub table-line" wx:if="{{table}}">{{table.table_name || table.table_no}}</view>
+    <view class="sub table-line" wx:if="{{hasTable}}">{{seatLabel}} {{tableName}}</view>
     <view class="sub no-table" wx:elif="{{!loading && ready}}">尚未绑定桌台</view>
     <view class="sub" wx:elif="{{loading}}">正在识别桌台...</view>
   </view>

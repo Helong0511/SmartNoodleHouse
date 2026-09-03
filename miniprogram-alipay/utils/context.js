@@ -9,9 +9,24 @@ function getAppSafe() {
   }
 }
 
-function tableLabel(table) {
+/** 外带/外卖虚拟桌（种子 table_no=WM），不是堂食实体桌 */
+function isTakeawayChannelTable(table) {
+  if (!table) return false
+  const no = String(table.table_no || '').trim().toUpperCase()
+  if (no === 'WM' || no === 'TKW' || no === 'TAKEAWAY') return true
+  const name = String(table.table_name || '')
+  return /外卖|外带自取/.test(name)
+}
+
+function tableLabelRaw(table) {
   if (!table) return ''
   return table.table_name || table.table_no || ''
+}
+
+function tableLabel(table) {
+  if (!table) return ''
+  if (isTakeawayChannelTable(table)) return '外带自取'
+  return tableLabelRaw(table)
 }
 
 function storeLabel(store) {
@@ -61,6 +76,8 @@ function contextReady(table, store, token) {
 
 function displayPayload(store, table) {
   const storeId = (store && store.id) || (table && table.store_id) || null
+  const takeaway = isTakeawayChannelTable(table)
+  const name = tableLabel(table)
   return {
     store,
     table,
@@ -69,10 +86,12 @@ function displayPayload(store, table) {
     storeNo: (store && store.store_no) || '',
     storeAddress: (store && store.address) || '',
     storePhone: (store && store.phone) || '',
-    tableName: tableLabel(table),
-    tableNo: (table && table.table_no) || '',
+    tableName: name,
+    tableNo: takeaway ? '' : ((table && table.table_no) || ''),
+    seatLabel: takeaway ? '用餐' : '桌号',
+    isTakeawayChannel: takeaway,
     hasStore: !!(store && store.name),
-    hasTable: !!tableLabel(table)
+    hasTable: !!name
   }
 }
 
@@ -216,6 +235,8 @@ function pageDineFields(ctx) {
     storePhone: c.storePhone,
     tableName: c.tableName,
     tableNo: c.tableNo,
+    seatLabel: c.seatLabel,
+    isTakeawayChannel: c.isTakeawayChannel,
     hasTable: c.hasTable
   }
 }
@@ -226,6 +247,7 @@ module.exports = {
   applyContext,
   displayPayload,
   pageDineFields,
+  isTakeawayChannelTable,
   bindTableFromToken,
   refreshTableBinding,
   scanAndBindTable

@@ -25,6 +25,8 @@ Page({
     store: null,
     storeName: '',
     storeAddress: '',
+    tableName: '',
+    seatLabel: '桌号',
     nickname: '',
     avatarUrl: '',
     phone: '',
@@ -151,9 +153,7 @@ Page({
         ready: true,
         table: ctx.table || app.globalData.table,
         store: ctx.store || app.globalData.store,
-        storeName: ctx.storeName,
-        storeAddress: ctx.storeAddress,
-        hasTable: ctx.hasTable
+        ...dineCtx.pageDineFields(ctx)
       })
       auth.fetchCustomerMeSilent().then((me) => {
         if (me && me.phone) this.setData({ phone: me.phone })
@@ -209,9 +209,7 @@ Page({
           this.setData({
             table: ctx.table,
             store: ctx.store,
-            storeName: ctx.storeName,
-            storeAddress: ctx.storeAddress,
-            hasTable: true
+            ...dineCtx.pageDineFields(ctx)
           })
         }
       })

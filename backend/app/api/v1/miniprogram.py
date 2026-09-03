@@ -1,5 +1,6 @@
 """小程序登录与扫码点餐入口"""
 import base64
+import re
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -115,6 +116,13 @@ async def list_dine_tables(
         .order_by(DiningTable.table_no)
     )
     rows = (await db.execute(q)).scalars().all()
+    # 外带虚拟桌（table_no=WM）不参与堂食选桌
+    rows = [
+        t
+        for t in rows
+        if str(t.table_no or "").strip().upper() not in ("WM", "TKW", "TAKEAWAY")
+        and not re.search(r"外卖|外带自取", str(t.table_name or ""))
+    ]
     expose_token = settings.is_development
     return success(
         [

@@ -16,7 +16,7 @@
     hover-stay-time="80"
     bindtap="onTapTable"
   >
-    <text class="bar-label">桌号</text>
+    <text class="bar-label">{{seatLabel || '桌号'}}</text>
     <view class="val">
       <text class="name table">{{tableName}}</text>
       <text class="sub" wx:if="{{tableNo && tableNo != tableName}}">{{tableNo}}</text>

@@ -4,7 +4,7 @@
   <view class="hero">
     <image class="brand-logo" src="/assets/logo.png" mode="aspectFit" />
     <view class="sub" a:if="{{storeName}}">{{storeName}}</view>
-    <view class="sub" a:if="{{table}}">桌号 {{table.table_name || table.table_no}}</view>
+    <view class="sub" a:if="{{hasTable}}">{{seatLabel}} {{tableName}}</view>
     <view class="sub" a:elif="{{!loading && ready}}">尚未绑定桌台</view>
     <view class="sub" a:else>正在识别桌台...</view>
   </view>

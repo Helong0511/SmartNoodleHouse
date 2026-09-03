@@ -8,6 +8,7 @@
     storePhone="{{storePhone}}"
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
+    seatLabel="{{seatLabel}}"
     onTableChange="onTableChange"
   />
 

@@ -273,7 +273,9 @@ Page({
       }
       const list = await api.get('/miniprogram/tables', { store_id: sid })
       if (this._checkoutStale(gen)) return
-      const options = (list || []).map((t) => ({
+      const options = (list || [])
+        .filter((t) => !dineCtx.isTakeawayChannelTable(t))
+        .map((t) => ({
         label: t.table_name || t.table_no,
         id: t.id,
         qr_token: t.qr_token || '',

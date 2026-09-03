@@ -6,6 +6,7 @@
     storePhone="{{storePhone}}"
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
+    seatLabel="{{seatLabel}}"
     compact="{{true}}"
     onTableChange="onTableChange"
   />
