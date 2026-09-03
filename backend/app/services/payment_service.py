@@ -1008,12 +1008,14 @@ class PaymentService:
                     order.payment_status = payment.status
                 if order.customer_id:
                     try:
-                        from app.services.customer_service import CustomerService
+                        from app.services.customer_service import CustomerService, PreferenceService
 
                         await CustomerService.deduct_points_for_refund(db, order, row.amount)
+                        # 退款后按剩余已付订单重算口味，避免已退订单继续撑着旧偏好
+                        await PreferenceService.recompute_for_customer(db, order.customer_id)
                     except Exception:
                         logger.exception(
-                            "退款扣减积分失败 order_id=%s refund_no=%s", order.id, row.refund_no
+                            "退款扣减积分或口味重算失败 order_id=%s refund_no=%s", order.id, row.refund_no
                         )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status if new_status != "ABNORMAL" else "FAILED"

@@ -76,18 +76,21 @@
           <el-tag size="small" :type="row.has_face ? 'success' : 'info'">{{ row.has_face ? '已开' : '未开' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="智能口味" min-width="200">
+      <el-table-column label="智能口味" min-width="260" class-name="pref-col">
         <template #default="{ row }">
-          <template v-if="row.preferences?.length">
+          <div
+            v-if="row.preferences?.length"
+            class="pref-tags"
+            :title="row.preferences.map((p: any) => p.label).join('、')"
+          >
             <el-tag
               v-for="(p, i) in row.preferences"
               :key="i"
               size="small"
               type="danger"
               effect="plain"
-              style="margin:2px"
             >{{ p.label }}</el-tag>
-          </template>
+          </div>
           <span v-else class="muted">待累计</span>
         </template>
       </el-table-column>
@@ -473,4 +476,15 @@ onMounted(async () => {
 .hint { color: #999; font-size: 12px; margin-top: 4px; }
 .acct { padding-left: 18px; word-break: break-all; }
 .acct code { font-size: 12px; }
+.pref-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+:deep(.pref-col .cell) {
+  white-space: normal;
+  line-height: 1.5;
+  overflow: visible;
+}
 </style>
