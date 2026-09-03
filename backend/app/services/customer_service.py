@@ -472,6 +472,8 @@ class CustomerService:
                                 openid=openid,
                                 unionid=unionid,
                                 profile_completed=int(getattr(union_acc, "profile_completed", 0) or 0),
+                                nickname=getattr(union_acc, "nickname", None),
+                                avatar_url=getattr(union_acc, "avatar_url", None),
                             )
                         )
                         await db.flush()
@@ -534,56 +536,130 @@ class CustomerService:
         return bool(n) and n not in PLACEHOLDER_NICKNAMES
 
     @staticmethod
+    async def _channel_accounts(db: AsyncSession, customer_id: int, channel: str):
+        ch = (channel or "").strip().lower()
+        if ch == "wechat":
+            return list(
+                (
+                    await db.execute(
+                        select(CustomerWechatAccount)
+                        .where(CustomerWechatAccount.customer_id == customer_id)
+                        .order_by(CustomerWechatAccount.id.desc())
+                    )
+                ).scalars().all()
+            )
+        if ch == "alipay":
+            return list(
+                (
+                    await db.execute(
+                        select(CustomerAlipayAccount)
+                        .where(CustomerAlipayAccount.customer_id == customer_id)
+                        .order_by(CustomerAlipayAccount.id.desc())
+                    )
+                ).scalars().all()
+            )
+        return []
+
+    @staticmethod
     async def is_channel_profile_completed(db: AsyncSession, customer_id: int, channel: str) -> bool:
         """当前渠道是否已点过「注册」；未完成时不得沿用另一端（微信/支付宝）资料。"""
         ch = (channel or "").strip().lower()
-        if ch == "wechat":
-            row = (
-                await db.execute(
-                    select(CustomerWechatAccount)
-                    .where(CustomerWechatAccount.customer_id == customer_id)
-                    .order_by(CustomerWechatAccount.id.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-        elif ch == "alipay":
-            row = (
-                await db.execute(
-                    select(CustomerAlipayAccount)
-                    .where(CustomerAlipayAccount.customer_id == customer_id)
-                    .order_by(CustomerAlipayAccount.id.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-        else:
+        if ch not in ("wechat", "alipay"):
             customer = await db.get(Customer, customer_id)
             return bool(
                 customer and CustomerService.is_meaningful_nickname(customer.nickname or customer.display_name)
             )
-        if not row:
+        rows = await CustomerService._channel_accounts(db, customer_id, ch)
+        if not rows:
             return False
-        return int(getattr(row, "profile_completed", 0) or 0) == 1
+        return int(getattr(rows[0], "profile_completed", 0) or 0) == 1
 
     @staticmethod
     async def mark_channel_profile_completed(db: AsyncSession, customer_id: int, channel: str) -> None:
-        ch = (channel or "").strip().lower()
-        if ch == "wechat":
-            rows = (
-                await db.execute(
-                    select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == customer_id)
-                )
-            ).scalars().all()
-        elif ch == "alipay":
-            rows = (
-                await db.execute(
-                    select(CustomerAlipayAccount).where(CustomerAlipayAccount.customer_id == customer_id)
-                )
-            ).scalars().all()
-        else:
+        await CustomerService.save_channel_profile(db, customer_id, channel, completed=True)
+
+    @staticmethod
+    async def save_channel_profile(
+        db: AsyncSession,
+        customer_id: int,
+        channel: str,
+        *,
+        nickname: str | None = None,
+        avatar_url: str | None = None,
+        completed: bool | None = None,
+    ) -> None:
+        """只写本渠道账号上的昵称/头像，不覆盖另一端。"""
+        rows = await CustomerService._channel_accounts(db, customer_id, channel)
+        if not rows:
             return
         for row in rows:
-            row.profile_completed = 1
+            if nickname is not None:
+                n = str(nickname).strip()
+                if n:
+                    row.nickname = n
+            if avatar_url is not None:
+                a = str(avatar_url).strip()
+                if a:
+                    row.avatar_url = a
+            if completed is True:
+                row.profile_completed = 1
         await db.flush()
+
+    @staticmethod
+    def fill_customer_display_if_empty(
+        customer: Customer,
+        *,
+        nickname: str | None = None,
+        avatar_url: str | None = None,
+    ) -> None:
+        """收银台/后台只有一份展示名：仅在顾客表为空时用本渠道资料补上，不覆盖已有值。"""
+        if CustomerService.is_meaningful_nickname(nickname) and not CustomerService.is_meaningful_nickname(
+            customer.nickname or customer.display_name
+        ):
+            n = str(nickname).strip()
+            customer.nickname = n
+            customer.display_name = customer.display_name or n
+        if avatar_url and not str(customer.avatar_url or "").strip():
+            customer.avatar_url = str(avatar_url).strip()
+
+    @staticmethod
+    async def resolve_channel_profile(db: AsyncSession, customer: Customer, channel: str) -> dict:
+        """小程序展示用：只返回本渠道昵称头像，不读对端资料。"""
+        ch = (channel or "").strip().lower()
+        rows = await CustomerService._channel_accounts(db, customer.id, ch)
+        row = rows[0] if rows else None
+        completed = bool(row) and int(getattr(row, "profile_completed", 0) or 0) == 1
+        if not completed:
+            return {"nickname": None, "avatar_url": None, "completed": False}
+        nick = str(getattr(row, "nickname", None) or "").strip()
+        avatar = str(getattr(row, "avatar_url", None) or "").strip()
+        # 仅当另一端尚未注册时，才从顾客表回填到本渠道（避免把微信名抄到支付宝）
+        other = "alipay" if ch == "wechat" else "wechat"
+        other_rows = await CustomerService._channel_accounts(db, customer.id, other)
+        other_done = any(int(getattr(r, "profile_completed", 0) or 0) == 1 for r in other_rows)
+        if not other_done:
+            fallback_nick = str(customer.nickname or customer.display_name or "").strip()
+            fallback_avatar = str(customer.avatar_url or "").strip()
+            dirty = False
+            if not nick and CustomerService.is_meaningful_nickname(fallback_nick):
+                for r in rows:
+                    if not str(getattr(r, "nickname", None) or "").strip():
+                        r.nickname = fallback_nick
+                nick = fallback_nick
+                dirty = True
+            if not avatar and fallback_avatar:
+                for r in rows:
+                    if not str(getattr(r, "avatar_url", None) or "").strip():
+                        r.avatar_url = fallback_avatar
+                avatar = fallback_avatar
+                dirty = True
+            if dirty:
+                await db.flush()
+        return {
+            "nickname": nick or None,
+            "avatar_url": avatar or None,
+            "completed": True,
+        }
 
     @staticmethod
     async def try_link_by_phone(db: AsyncSession, customer: Customer, phone: str) -> Customer:
@@ -599,7 +675,7 @@ class CustomerService:
             customer.phone = phone
             return customer
 
-        # 把当前顾客的微信/支付宝账号迁到已有顾客
+        # 把当前顾客的微信/支付宝账号迁到已有顾客（渠道昵称/头像跟着账号走，互不覆盖）
         for Acc, fk in (
             (CustomerWechatAccount, "customer_id"),
             (CustomerAlipayAccount, "customer_id"),
@@ -607,15 +683,11 @@ class CustomerService:
             rows = (await db.execute(select(Acc).where(getattr(Acc, fk) == customer.id))).scalars().all()
             for row in rows:
                 row.customer_id = target.id
-        # 当前端正在提交的资料优先，避免支付宝注册被微信旧昵称/头像覆盖
-        if CustomerService.is_meaningful_nickname(customer.nickname):
-            target.nickname = customer.nickname
-            target.display_name = customer.display_name or customer.nickname
-        elif not target.nickname and customer.nickname:
-            target.nickname = customer.nickname
-            target.display_name = target.display_name or customer.display_name or customer.nickname
-        if customer.avatar_url:
-            target.avatar_url = customer.avatar_url
+        CustomerService.fill_customer_display_if_empty(
+            target,
+            nickname=customer.nickname,
+            avatar_url=customer.avatar_url,
+        )
         target.phone = phone
         # 软禁用被合并的空壳顾客
         customer.status = 0

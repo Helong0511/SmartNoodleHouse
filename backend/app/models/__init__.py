@@ -140,6 +140,8 @@ class CustomerWechatAccount(Base, TimestampMixin):
     openid: Mapped[str] = mapped_column(String(64), unique=True)
     unionid: Mapped[str | None] = mapped_column(String(64))
     profile_completed: Mapped[int] = mapped_column(Integer, default=0)
+    nickname: Mapped[str | None] = mapped_column(String(100))
+    avatar_url: Mapped[str | None] = mapped_column(String(500))
 
 
 class CustomerAlipayAccount(Base, TimestampMixin):
@@ -149,6 +151,8 @@ class CustomerAlipayAccount(Base, TimestampMixin):
     alipay_user_id: Mapped[str] = mapped_column(String(64), unique=True)
     alipay_union_id: Mapped[str | None] = mapped_column(String(64))
     profile_completed: Mapped[int] = mapped_column(Integer, default=0)
+    nickname: Mapped[str | None] = mapped_column(String(100))
+    avatar_url: Mapped[str | None] = mapped_column(String(500))
 
 
 class ProductCategory(Base, TimestampMixin):

@@ -205,6 +205,8 @@ CREATE TABLE IF NOT EXISTS customer_wechat_accounts (
   openid VARCHAR(64) NOT NULL UNIQUE COMMENT '微信 openid，小程序内唯一',
   unionid VARCHAR(64) DEFAULT NULL COMMENT '微信 unionid（同主体多应用打通）',
   profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否已完成会员注册引导',
+  nickname VARCHAR(100) DEFAULT NULL COMMENT '本渠道展示昵称（与支付宝互不覆盖）',
+  avatar_url VARCHAR(500) DEFAULT NULL COMMENT '本渠道展示头像（与支付宝互不覆盖）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次绑定时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   INDEX idx_wechat_unionid (unionid),
@@ -218,6 +220,8 @@ CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
   alipay_user_id VARCHAR(64) NOT NULL UNIQUE COMMENT '支付宝 user_id',
   alipay_union_id VARCHAR(64) DEFAULT NULL COMMENT '支付宝 union_id（如有）',
   profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否已完成会员注册引导',
+  nickname VARCHAR(100) DEFAULT NULL COMMENT '本渠道展示昵称（与微信互不覆盖）',
+  avatar_url VARCHAR(500) DEFAULT NULL COMMENT '本渠道展示头像（与微信互不覆盖）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次绑定时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   CONSTRAINT fk_caa_customer FOREIGN KEY (customer_id) REFERENCES customers(id)

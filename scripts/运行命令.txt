@@ -199,6 +199,9 @@ npm run dev -- --host 0.0.0.0 --port 5173
 #
 # 已有库补微信/支付宝分渠道注册标记：
 # mysql ... < sql/tools/013_channel_profile_completed.sql
+#
+# 已有库补微信/支付宝分渠道昵称头像：
+# mysql ... < sql/tools/014_channel_profile_display.sql
 
 
 叫号屏地址（调试环境）

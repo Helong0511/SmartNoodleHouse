@@ -67,18 +67,16 @@ async def _channel_login_payload(
     *,
     is_mock: bool,
     table,
-    channel_ready: bool | None = None,
 ) -> dict:
-    if channel_ready is None:
-        channel_ready = await CustomerService.is_channel_profile_completed(db, customer.id, channel)
-    need_prompt = not channel_ready
+    disp = await CustomerService.resolve_channel_profile(db, customer, channel)
+    need_prompt = not disp["completed"]
     return {
         "customer_id": customer.id,
         "customer_no": customer.customer_no,
         "customer_token": _issue_customer_token(customer, channel),
         # 本渠道尚未点过注册时，不把另一端（微信/支付宝）的昵称头像手机号带给前端
-        "nickname": None if need_prompt else (customer.nickname or customer.display_name),
-        "avatar_url": None if need_prompt else customer.avatar_url,
+        "nickname": None if need_prompt else disp["nickname"],
+        "avatar_url": None if need_prompt else disp["avatar_url"],
         "phone": None if need_prompt else customer.phone,
         "is_new": need_prompt,
         "need_member_prompt": need_prompt,
@@ -367,12 +365,19 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
     # 登录不接受客户端缓存写回新客；资料完善只走 /member/register
     profile_ready = bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1
     if profile_ready:
-        if data.nickname:
-            customer.nickname = data.nickname
-            customer.display_name = customer.display_name or data.nickname
-        if data.avatar_url:
-            customer.avatar_url = data.avatar_url
-    await db.flush()
+        await CustomerService.save_channel_profile(
+            db,
+            customer.id,
+            "wechat",
+            nickname=data.nickname,
+            avatar_url=_persistable_avatar_url(data.avatar_url),
+        )
+        CustomerService.fill_customer_display_if_empty(
+            customer,
+            nickname=data.nickname,
+            avatar_url=_persistable_avatar_url(data.avatar_url),
+        )
+        await db.flush()
 
     table = await _resolve_table(db, data.table_token) if data.table_token else None
     payload = await _channel_login_payload(
@@ -381,7 +386,6 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
         "wechat",
         is_mock=bool(session.get("is_mock")),
         table=table,
-        channel_ready=bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1,
     )
     return success(payload, request=request)
 
@@ -399,12 +403,19 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
     # 登录不接受客户端缓存写回新客；资料完善只走 /member/register
     profile_ready = bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1
     if profile_ready:
-        if data.nickname:
-            customer.nickname = data.nickname
-            customer.display_name = customer.display_name or data.nickname
-        if data.avatar_url:
-            customer.avatar_url = data.avatar_url
-    await db.flush()
+        await CustomerService.save_channel_profile(
+            db,
+            customer.id,
+            "alipay",
+            nickname=data.nickname,
+            avatar_url=_persistable_avatar_url(data.avatar_url),
+        )
+        CustomerService.fill_customer_display_if_empty(
+            customer,
+            nickname=data.nickname,
+            avatar_url=_persistable_avatar_url(data.avatar_url),
+        )
+        await db.flush()
 
     table = await _resolve_table(db, data.table_token) if data.table_token else None
     payload = await _channel_login_payload(
@@ -413,7 +424,6 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
         "alipay",
         is_mock=bool(session.get("is_mock")),
         table=table,
-        channel_ready=bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1,
     )
     return success(payload, request=request)
 
@@ -425,28 +435,40 @@ async def register_member(
     db: DbSession,
     customer: CurrentCustomer,
 ):
-    if data.nickname:
-        customer.nickname = data.nickname
-        customer.display_name = data.nickname
+    channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
-    if avatar:
-        customer.avatar_url = avatar
+    # 先写入本渠道账号，再按手机号合并；合并只搬家账号，不覆盖对端昵称头像
+    await CustomerService.save_channel_profile(
+        db,
+        customer.id,
+        channel,
+        nickname=data.nickname,
+        avatar_url=avatar,
+        completed=True,
+    )
     if data.phone:
         customer = await CustomerService.try_link_by_phone(db, customer, data.phone)
-
-    channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
-    await CustomerService.mark_channel_profile_completed(db, customer.id, channel)
+        await CustomerService.save_channel_profile(
+            db,
+            customer.id,
+            channel,
+            nickname=data.nickname,
+            avatar_url=avatar,
+            completed=True,
+        )
+    CustomerService.fill_customer_display_if_empty(customer, nickname=data.nickname, avatar_url=avatar)
 
     await CustomerService.ensure_default_member_level(db, customer)
     issued = await CouponService.issue_welcome_coupon(db, customer.id)
     await db.flush()
     profile = await CustomerService.build_member_profile(db, customer)
     welcome = await CouponService.welcome_coupon_payload(db, issued)
+    disp = await CustomerService.resolve_channel_profile(db, customer, channel)
     payload = {
         "customer_id": customer.id,
         "customer_no": customer.customer_no,
-        "nickname": customer.nickname,
-        "avatar_url": customer.avatar_url,
+        "nickname": disp["nickname"] or data.nickname,
+        "avatar_url": disp["avatar_url"] or avatar,
         "phone": customer.phone,
         "face_status": "NONE",
         "member_registered": True,
@@ -490,7 +512,8 @@ async def upload_member_avatar(
     url = await save_upload(file, subdir="avatars")
     channel = _customer_channel_from_request(request, "wechat")
     if await CustomerService.is_channel_profile_completed(db, customer.id, channel):
-        customer.avatar_url = url
+        await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url)
+        CustomerService.fill_customer_display_if_empty(customer, avatar_url=url)
         await db.flush()
     return success(
         {
@@ -516,7 +539,8 @@ async def import_member_avatar_from_url(
     url = await fetch_and_save_remote_image(data.source_url, subdir="avatars")
     channel = _customer_channel_from_request(request, "wechat")
     if await CustomerService.is_channel_profile_completed(db, customer.id, channel):
-        customer.avatar_url = url
+        await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url)
+        CustomerService.fill_customer_display_if_empty(customer, avatar_url=url)
         await db.flush()
     return success(
         {
@@ -709,13 +733,14 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
     """小程序会员中心：档案 + 等级 + 积分进度 + 人脸状态。"""
     profile = await CustomerService.build_member_profile(db, customer)
     channel = _customer_channel_from_request(request, "wechat")
-    need_prompt = not await CustomerService.is_channel_profile_completed(db, customer.id, channel)
+    disp = await CustomerService.resolve_channel_profile(db, customer, channel)
+    need_prompt = not disp["completed"]
     return success(
         {
             "customer_id": customer.id,
             "customer_no": customer.customer_no,
-            "nickname": None if need_prompt else (customer.nickname or customer.display_name),
-            "avatar_url": None if need_prompt else customer.avatar_url,
+            "nickname": None if need_prompt else disp["nickname"],
+            "avatar_url": None if need_prompt else disp["avatar_url"],
             "phone": None if need_prompt else customer.phone,
             "need_member_prompt": need_prompt,
             **profile,
