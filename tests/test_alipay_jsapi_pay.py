@@ -76,6 +76,10 @@ async def test_alipay_provider_mini_uses_trade_create(monkeypatch):
         "app.services.payment_service._alipay_pay_configured",
         lambda: True,
     )
+    monkeypatch.setattr(
+        "app.services.payment_service._payment_mock_allowed",
+        lambda *, configured: False,
+    )
     monkeypatch.setattr(alipay_client, "trade_create", fake_trade_create)
     monkeypatch.setattr(
         "app.services.payment_service.alipay_client.trade_create",
@@ -99,3 +103,42 @@ async def test_alipay_provider_mini_uses_trade_create(monkeypatch):
     assert called["buyer_id"] == "2088000000000001"
     assert called["payment_no"] == "PAYX"
     assert called["subject"] == "订单ORDX"
+
+
+@pytest.mark.asyncio
+async def test_alipay_provider_respects_allow_payment_mock_when_configured(monkeypatch):
+    """已配密钥 + 真实买家时，ALLOW_PAYMENT_MOCK=true 仍应跳过真实网关。"""
+    from app.services.payment_service import AlipayProvider
+
+    async def boom(**kwargs):
+        raise AssertionError("不应调用真实 trade_create")
+
+    monkeypatch.setattr(
+        "app.services.payment_service._alipay_pay_configured",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.services.payment_service._payment_mock_allowed",
+        lambda *, configured: True,
+    )
+    monkeypatch.setattr(
+        "app.services.payment_service.alipay_client.trade_create",
+        boom,
+    )
+
+    payment = type(
+        "P",
+        (),
+        {
+            "payment_no": "PAYMOCK",
+            "channel": "ALIPAY_MINIAPP",
+            "amount": Decimal("21.00"),
+        },
+    )()
+    order = type("O", (), {"order_no": "ORDMOCK"})()
+    data = await AlipayProvider().create_payment(
+        payment, order, extra={"buyer_id": "2088123456789012"}
+    )
+    assert data["_mock"] is True
+    assert data["trade_no"].startswith("mock_ali_")
+

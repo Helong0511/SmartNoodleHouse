@@ -176,7 +176,38 @@ class AlipayProvider:
         if "BARCODE" in channel and not auth_code:
             raise AppException(40041, "请扫描顾客支付宝付款码")
         is_mini = "MINIAPP" in channel or "MINIPROGRAM" in channel or "JSAPI" in channel
-        if not _alipay_pay_configured():
+        configured = _alipay_pay_configured()
+        # 显式 ALLOW_PAYMENT_MOCK：即使已配密钥也跳过真实网关（JSAPI 未签约时可联调）
+        if configured and _payment_mock_allowed(configured=True):
+            logger.warning(
+                "支付宝支付 MOCK（ALLOW_PAYMENT_MOCK=true） payment=%s channel=%s",
+                payment.payment_no,
+                channel,
+            )
+            if "BARCODE" in channel or auth_code:
+                return {
+                    "provider": "ALIPAY",
+                    "payment_no": payment.payment_no,
+                    "trade_status": "TRADE_SUCCESS",
+                    "amount": str(payment.amount),
+                    "_mock": True,
+                }
+            if is_mini:
+                return {
+                    "provider": "ALIPAY",
+                    "payment_no": payment.payment_no,
+                    "trade_no": f"mock_ali_{payment.payment_no}",
+                    "amount": str(payment.amount),
+                    "_mock": True,
+                }
+            return {
+                "provider": "ALIPAY",
+                "payment_no": payment.payment_no,
+                "qr_code": f"https://qr.alipay.com/{payment.payment_no}",
+                "amount": str(payment.amount),
+                "_mock": True,
+            }
+        if not configured:
             if _payment_mock_allowed(configured=False):
                 if auth_code:
                     logger.warning("支付宝付款码 MOCK（仅开发）")
@@ -223,15 +254,6 @@ class AlipayProvider:
             if not buyer_id:
                 raise AppException(40042, "小程序支付缺少买家支付宝用户号，请重新登录后再支付")
             if buyer_id.startswith("ali_dev_"):
-                if _payment_mock_allowed(configured=True):
-                    logger.warning("支付宝小程序 MOCK（开发买家） payment=%s", payment.payment_no)
-                    return {
-                        "provider": "ALIPAY",
-                        "payment_no": payment.payment_no,
-                        "trade_no": f"mock_ali_{payment.payment_no}",
-                        "amount": str(payment.amount),
-                        "_mock": True,
-                    }
                 raise AppException(
                     40043,
                     "当前为开发 Mock 买家，无法调真实支付宝支付；请用真机授权登录，或设 ALLOW_PAYMENT_MOCK=true",
