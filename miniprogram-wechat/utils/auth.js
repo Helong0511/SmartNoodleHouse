@@ -412,6 +412,9 @@ async function registerMember(payload) {
   const channel = (app.globalData && app.globalData.channel) || ''
   const body = Object.assign({}, payload || {})
   if (channel === 'wechat' || channel === 'alipay') body.channel = channel
+  if (!body.table_token) {
+    body.table_token = (app.globalData && app.globalData.tableToken) || readStorage('table_token') || null
+  }
   try {
     return await api.post('/miniprogram/member/register', body)
   } catch (e) {

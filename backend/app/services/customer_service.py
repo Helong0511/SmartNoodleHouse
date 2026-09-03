@@ -688,6 +688,9 @@ class CustomerService:
             nickname=customer.nickname,
             avatar_url=customer.avatar_url,
         )
+        if not getattr(target, "registered_store_id", None) and getattr(customer, "registered_store_id", None):
+            target.registered_store_id = customer.registered_store_id
+            target.registered_table_id = getattr(customer, "registered_table_id", None)
         target.phone = phone
         # 软禁用被合并的空壳顾客
         customer.status = 0
@@ -695,6 +698,56 @@ class CustomerService:
         customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
         await db.flush()
         return target
+
+    @staticmethod
+    async def remember_registered_scan(
+        db: AsyncSession,
+        customer: Customer,
+        table_token: str | None,
+    ) -> None:
+        """扫码注册只记第一次门店/桌台，后续换店点餐不覆盖。"""
+        if getattr(customer, "registered_store_id", None):
+            return
+        token = (table_token or "").strip()
+        if not token:
+            return
+        from app.services.table_resolve import resolve_dining_table
+
+        table = await resolve_dining_table(db, token)
+        if not table:
+            return
+        customer.registered_store_id = table.store_id
+        customer.registered_table_id = table.id
+        await db.flush()
+
+    @staticmethod
+    async def registered_scan_map(db: AsyncSession, customers: list[Customer]) -> dict[int, dict]:
+        """批量补注册门店/桌台展示字段。"""
+        store_ids = {int(c.registered_store_id) for c in customers if getattr(c, "registered_store_id", None)}
+        table_ids = {int(c.registered_table_id) for c in customers if getattr(c, "registered_table_id", None)}
+        stores: dict[int, Store] = {}
+        tables: dict[int, DiningTable] = {}
+        if store_ids:
+            rows = (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
+            stores = {int(s.id): s for s in rows}
+        if table_ids:
+            rows = (await db.execute(select(DiningTable).where(DiningTable.id.in_(table_ids)))).scalars().all()
+            tables = {int(t.id): t for t in rows}
+        out: dict[int, dict] = {}
+        for c in customers:
+            sid = getattr(c, "registered_store_id", None)
+            tid = getattr(c, "registered_table_id", None)
+            store = stores.get(int(sid)) if sid else None
+            table = tables.get(int(tid)) if tid else None
+            out[c.id] = {
+                "registered_store_id": int(sid) if sid else None,
+                "registered_store_no": store.store_no if store else None,
+                "registered_store_name": store.name if store else None,
+                "registered_table_id": int(tid) if tid else None,
+                "registered_table_no": table.table_no if table else None,
+                "registered_table_name": table.table_name if table else None,
+            }
+        return out
 
 
 class OrderCreateService:

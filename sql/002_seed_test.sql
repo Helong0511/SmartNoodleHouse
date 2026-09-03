@@ -551,8 +551,16 @@ FROM member_levels ml
 WHERE ml.name = '银卡会员'
   AND NOT EXISTS (SELECT 1 FROM customers WHERE customer_no = 'CU000000020260801100002S2C4');
 
-INSERT INTO customer_wechat_accounts (customer_id, openid, unionid)
-SELECT c.id, 'wx_dev_seed_c001', 'wx_union_seed_c001'
+-- 联调顾客视为在总店 1 号桌扫码注册（方便后台顾客管理核对注册门店）
+UPDATE customers c
+JOIN stores s ON s.store_no = 'SH01'
+JOIN `tables` t ON t.store_id = s.id AND t.table_no = 'A01'
+SET c.registered_store_id = s.id, c.registered_table_id = t.id
+WHERE c.customer_no IN ('CU000000020260801100001S2C3', 'CU000000020260801100002S2C4')
+  AND c.registered_store_id IS NULL;
+
+INSERT INTO customer_wechat_accounts (customer_id, openid, unionid, profile_completed, nickname)
+SELECT c.id, 'wx_dev_seed_c001', 'wx_union_seed_c001', 1, c.nickname
 FROM customers c
 WHERE c.customer_no = 'CU000000020260801100001S2C3'
   AND NOT EXISTS (SELECT 1 FROM customer_wechat_accounts WHERE openid = 'wx_dev_seed_c001');
@@ -571,8 +579,8 @@ JOIN coupon_templates t ON t.name = '10元无门槛代金券'
 WHERE c.customer_no = 'CU000000020260801100001S2C3'
   AND NOT EXISTS (SELECT 1 FROM customer_coupons WHERE coupon_no = 'VP000000020260801100001S2C3');
 
-INSERT INTO customer_alipay_accounts (customer_id, alipay_user_id)
-SELECT c.id, 'ali_dev_seed_c002'
+INSERT INTO customer_alipay_accounts (customer_id, alipay_user_id, profile_completed, nickname)
+SELECT c.id, 'ali_dev_seed_c002', 1, c.nickname
 FROM customers c
 WHERE c.customer_no = 'CU000000020260801100002S2C4'
   AND NOT EXISTS (SELECT 1 FROM customer_alipay_accounts WHERE alipay_user_id = 'ali_dev_seed_c002');

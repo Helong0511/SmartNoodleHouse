@@ -167,19 +167,24 @@ CREATE TABLE IF NOT EXISTS customers (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_no VARCHAR(40) NOT NULL UNIQUE COMMENT '顾客编号（业务可读单号）',
   display_name VARCHAR(100) DEFAULT NULL COMMENT '展示名（可与昵称相同）',
-  nickname VARCHAR(100) DEFAULT NULL COMMENT '微信昵称或用户自设昵称',
-  avatar_url VARCHAR(500) DEFAULT NULL COMMENT '头像 URL',
+  nickname VARCHAR(100) DEFAULT NULL COMMENT '收银台/后台展示昵称（小程序微信/支付宝各存在对应账号表）',
+  avatar_url VARCHAR(500) DEFAULT NULL COMMENT '收银台/后台展示头像（小程序按渠道账号分存）',
   phone VARCHAR(11) DEFAULT NULL COMMENT '手机号；绑定后可合并历史账号',
   member_level_id BIGINT UNSIGNED DEFAULT NULL COMMENT '当前会员等级 → member_levels.id',
   points INT NOT NULL DEFAULT 0 COMMENT '累计积分；实付1元=1分，达门槛自动升级',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '顾客状态：1=正常 0=禁用',
   token_version INT NOT NULL DEFAULT 0 COMMENT 'JWT 版本号；禁用/合并账号时递增，使旧令牌失效',
+  registered_store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '扫码注册时的门店 → stores.id；只记第一次',
+  registered_table_id BIGINT UNSIGNED DEFAULT NULL COMMENT '扫码注册时的桌台 → tables.id；只记第一次',
   last_order_at DATETIME(3) DEFAULT NULL COMMENT '最近下单时间',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '注册时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   INDEX idx_customers_phone (phone),
   INDEX idx_customers_last_order (last_order_at),
-  CONSTRAINT fk_customers_level FOREIGN KEY (member_level_id) REFERENCES member_levels(id)
+  INDEX idx_customers_reg_store (registered_store_id),
+  CONSTRAINT fk_customers_level FOREIGN KEY (member_level_id) REFERENCES member_levels(id),
+  CONSTRAINT fk_customers_reg_store FOREIGN KEY (registered_store_id) REFERENCES stores(id),
+  CONSTRAINT fk_customers_reg_table FOREIGN KEY (registered_table_id) REFERENCES tables(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客/会员主表';
 
 -- 用户持有的券实例（一张模板可发放多张）

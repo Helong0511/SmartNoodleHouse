@@ -130,6 +130,8 @@ class Customer(Base, TimestampMixin):
     points: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[int] = mapped_column(Integer, default=1)
     token_version: Mapped[int] = mapped_column(Integer, default=0)
+    registered_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
+    registered_table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"), default=None)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

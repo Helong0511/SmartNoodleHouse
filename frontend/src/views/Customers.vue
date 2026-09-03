@@ -35,9 +35,31 @@
     </el-form>
 
     <el-table :data="customers" border class="customer-table">
+      <el-table-column label="头像" width="72" align="center">
+        <template #default="{ row }">
+          <el-image
+            v-if="row.avatar_url"
+            :src="mediaUrl(row.avatar_url)"
+            fit="cover"
+            class="avatar-thumb"
+            :preview-src-list="[mediaUrl(row.avatar_url)]"
+            preview-teleported
+          />
+          <span v-else class="no-avatar">无</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="customer_no" label="编号" min-width="260" show-overflow-tooltip />
       <el-table-column label="昵称" min-width="100">
         <template #default="{ row }">{{ row.display_name || row.nickname || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="注册门店" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.registered_store_name">
+            {{ row.registered_store_name }}
+            <span v-if="row.registered_table_name" class="muted"> · {{ row.registered_table_name }}</span>
+          </span>
+          <span v-else class="muted">—</span>
+        </template>
       </el-table-column>
       <el-table-column prop="phone" label="手机" width="120">
         <template #default="{ row }">{{ row.phone || '—' }}</template>
@@ -122,9 +144,32 @@
 
     <el-drawer v-model="drawer" title="顾客详情 · 会员与口味档案" size="560px">
       <template v-if="detail">
+        <div class="detail-head">
+          <el-image
+            v-if="detail.avatar_url"
+            :src="mediaUrl(detail.avatar_url)"
+            fit="cover"
+            class="avatar-lg"
+            :preview-src-list="[mediaUrl(detail.avatar_url)]"
+            preview-teleported
+          />
+          <div v-else class="avatar-lg placeholder">无头像</div>
+          <div class="detail-head-meta">
+            <div class="detail-name">{{ detail.display_name || detail.nickname || '—' }}</div>
+            <div class="muted">{{ detail.customer_no }}</div>
+          </div>
+        </div>
         <el-descriptions :column="1" border>
           <el-descriptions-item label="编号">{{ detail.customer_no }}</el-descriptions-item>
           <el-descriptions-item label="昵称">{{ detail.display_name || detail.nickname || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="注册门店">
+            <template v-if="detail.registered_store_name">
+              {{ detail.registered_store_name }}
+              <span v-if="detail.registered_table_name"> · {{ detail.registered_table_name }}</span>
+              <span v-if="detail.registered_table_no" class="muted">（{{ detail.registered_table_no }}）</span>
+            </template>
+            <span v-else>—</span>
+          </el-descriptions-item>
           <el-descriptions-item label="手机">{{ detail.phone || '—' }}</el-descriptions-item>
           <el-descriptions-item label="是否会员">
             <el-tag size="small" :type="detail.is_member ? 'success' : 'info'">
@@ -215,18 +260,40 @@
         <h4 style="margin-top:16px">微信账号</h4>
         <p v-if="!detail.wechat_accounts?.length" class="muted">无</p>
         <ul v-else class="acct">
-          <li v-for="(w, i) in detail.wechat_accounts" :key="'w'+i">
-            <code>{{ w.openid }}</code>
-            <el-tag v-if="w.is_mock" size="small" type="info" style="margin-left:6px">开发 Mock</el-tag>
+          <li v-for="(w, i) in detail.wechat_accounts" :key="'w'+i" class="acct-row">
+            <el-image
+              v-if="w.avatar_url"
+              :src="mediaUrl(w.avatar_url)"
+              fit="cover"
+              class="avatar-sm"
+              :preview-src-list="[mediaUrl(w.avatar_url)]"
+              preview-teleported
+            />
+            <div class="acct-meta">
+              <div v-if="w.nickname">{{ w.nickname }}</div>
+              <code>{{ w.openid }}</code>
+              <el-tag v-if="w.is_mock" size="small" type="info" style="margin-left:6px">开发 Mock</el-tag>
+            </div>
           </li>
         </ul>
 
         <h4>支付宝账号</h4>
         <p v-if="!detail.alipay_accounts?.length" class="muted">无</p>
         <ul v-else class="acct">
-          <li v-for="(a, i) in detail.alipay_accounts" :key="'a'+i">
-            <code>{{ a.alipay_user_id }}</code>
-            <el-tag v-if="a.is_mock" size="small" type="info" style="margin-left:6px">开发 Mock</el-tag>
+          <li v-for="(a, i) in detail.alipay_accounts" :key="'a'+i" class="acct-row">
+            <el-image
+              v-if="a.avatar_url"
+              :src="mediaUrl(a.avatar_url)"
+              fit="cover"
+              class="avatar-sm"
+              :preview-src-list="[mediaUrl(a.avatar_url)]"
+              preview-teleported
+            />
+            <div class="acct-meta">
+              <div v-if="a.nickname">{{ a.nickname }}</div>
+              <code>{{ a.alipay_user_id }}</code>
+              <el-tag v-if="a.is_mock" size="small" type="info" style="margin-left:6px">开发 Mock</el-tag>
+            </div>
           </li>
         </ul>
       </template>
@@ -265,6 +332,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { mediaUrl } from '@/utils/media'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -467,6 +535,47 @@ onMounted(async () => {
 .toolbar { margin-bottom: 12px; }
 .muted { color: #999; }
 .tip { font-size: 13px; margin: 4px 0 10px; }
+.avatar-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: block;
+  margin: 0 auto;
+}
+.avatar-sm {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.avatar-lg {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.avatar-lg.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f2f3f5;
+  color: #909399;
+  font-size: 12px;
+}
+.no-avatar { color: #c0c4cc; font-size: 12px; }
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.detail-head-meta { min-width: 0; }
+.detail-name {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: break-word;
+}
 .pref-block { margin-top: 18px; }
 .pref-block h4 { margin: 0; }
 .section-head {
@@ -476,7 +585,14 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 .hint { color: #999; font-size: 12px; margin-top: 4px; }
-.acct { padding-left: 18px; word-break: break-all; }
+.acct { padding-left: 0; list-style: none; word-break: break-all; }
+.acct-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.acct-meta { min-width: 0; }
 .acct code { font-size: 12px; }
 .pref-tags {
   display: flex;

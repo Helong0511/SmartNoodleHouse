@@ -121,6 +121,7 @@ class MemberRegisterRequest(BaseModel):
     phone: str | None = None
     enable_face: bool = False
     channel: str | None = None
+    table_token: str | None = None
 
 
 class PhoneBindRequest(BaseModel):
@@ -457,6 +458,7 @@ async def register_member(
             completed=True,
         )
     CustomerService.fill_customer_display_if_empty(customer, nickname=data.nickname, avatar_url=avatar)
+    await CustomerService.remember_registered_scan(db, customer, data.table_token)
 
     await CustomerService.ensure_default_member_level(db, customer)
     issued = await CouponService.issue_welcome_coupon(db, customer.id)

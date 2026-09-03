@@ -71,6 +71,8 @@ async def list_customers(
     wechat_ids: set[int] = set()
     alipay_ids: set[int] = set()
     face_ids: set[int] = set()
+    wx_avatar_map: dict[int, str] = {}
+    ali_avatar_map: dict[int, str] = {}
     if ids:
         oc_q = (
             select(Order.customer_id, func.count())
@@ -95,6 +97,32 @@ async def list_customers(
                 )
             ).scalars().all()
         )
+        for cid, av in (
+            await db.execute(
+                select(CustomerWechatAccount.customer_id, CustomerWechatAccount.avatar_url)
+                .where(
+                    CustomerWechatAccount.customer_id.in_(ids),
+                    CustomerWechatAccount.avatar_url.is_not(None),
+                    CustomerWechatAccount.avatar_url != "",
+                )
+                .order_by(CustomerWechatAccount.id.desc())
+            )
+        ).all():
+            if cid not in wx_avatar_map and av:
+                wx_avatar_map[int(cid)] = str(av).strip()
+        for cid, av in (
+            await db.execute(
+                select(CustomerAlipayAccount.customer_id, CustomerAlipayAccount.avatar_url)
+                .where(
+                    CustomerAlipayAccount.customer_id.in_(ids),
+                    CustomerAlipayAccount.avatar_url.is_not(None),
+                    CustomerAlipayAccount.avatar_url != "",
+                )
+                .order_by(CustomerAlipayAccount.id.desc())
+            )
+        ).all():
+            if cid not in ali_avatar_map and av:
+                ali_avatar_map[int(cid)] = str(av).strip()
         face_ids = set(
             (
                 await db.execute(
@@ -131,6 +159,13 @@ async def list_customers(
             )
 
     level_map = await CustomerService.load_levels_map(db, [c.member_level_id for c in customers])
+    scan_map = await CustomerService.registered_scan_map(db, customers)
+
+    def _avatar_for(c: Customer) -> str | None:
+        raw = str(c.avatar_url or "").strip()
+        if raw:
+            return raw
+        return wx_avatar_map.get(c.id) or ali_avatar_map.get(c.id)
 
     items = [
         {
@@ -138,6 +173,7 @@ async def list_customers(
             "customer_no": c.customer_no,
             "display_name": c.display_name or c.nickname,
             "nickname": c.nickname,
+            "avatar_url": _avatar_for(c),
             "phone": c.phone,
             "status": c.status,
             "channels": [
@@ -149,6 +185,7 @@ async def list_customers(
             "order_count": order_counts.get(c.id, 0),
             "last_order_at": c.last_order_at.isoformat() if c.last_order_at else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
+            **scan_map.get(c.id, {}),
             **CustomerService.member_payload(c, level_map.get(c.member_level_id) if c.member_level_id else None),
         }
         for c in customers
@@ -187,6 +224,22 @@ async def get_customer(customer_id: int, request: Request, db: DbSession):
         select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
     ) or 0
     profile = await CustomerService.build_member_profile(db, customer)
+    wechat_list = list(wechat.scalars().all())
+    alipay_list = list(alipay.scalars().all())
+    scan = (await CustomerService.registered_scan_map(db, [customer])).get(customer.id) or {}
+    avatar = str(customer.avatar_url or "").strip() or None
+    if not avatar:
+        for w in wechat_list:
+            a = str(getattr(w, "avatar_url", None) or "").strip()
+            if a:
+                avatar = a
+                break
+    if not avatar:
+        for a_row in alipay_list:
+            a = str(getattr(a_row, "avatar_url", None) or "").strip()
+            if a:
+                avatar = a
+                break
     return success(
         {
             "id": customer.id,
@@ -195,22 +248,33 @@ async def get_customer(customer_id: int, request: Request, db: DbSession):
             "nickname": customer.nickname,
             "phone": customer.phone,
             "status": customer.status,
-            "avatar_url": customer.avatar_url,
+            "avatar_url": avatar,
             "has_face": face.scalar_one_or_none() is not None,
             "order_count": int(order_count),
             "last_order_at": customer.last_order_at.isoformat() if customer.last_order_at else None,
             "created_at": customer.created_at.isoformat() if customer.created_at else None,
+            **scan,
             **profile,
             "wechat_accounts": [
-                {"openid": w.openid, "unionid": w.unionid, "is_mock": str(w.openid).startswith("wx_dev_")}
-                for w in wechat.scalars()
+                {
+                    "openid": w.openid,
+                    "unionid": w.unionid,
+                    "nickname": getattr(w, "nickname", None),
+                    "avatar_url": getattr(w, "avatar_url", None),
+                    "profile_completed": int(getattr(w, "profile_completed", 0) or 0),
+                    "is_mock": str(w.openid).startswith("wx_dev_"),
+                }
+                for w in wechat_list
             ],
             "alipay_accounts": [
                 {
                     "alipay_user_id": a.alipay_user_id,
+                    "nickname": getattr(a, "nickname", None),
+                    "avatar_url": getattr(a, "avatar_url", None),
+                    "profile_completed": int(getattr(a, "profile_completed", 0) or 0),
                     "is_mock": str(a.alipay_user_id).startswith("ali_dev_"),
                 }
-                for a in alipay.scalars()
+                for a in alipay_list
             ],
             "preferences": [
                 {
