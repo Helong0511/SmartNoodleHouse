@@ -141,11 +141,9 @@ Page({
         storeAddress: ctx.storeAddress,
         hasTable: ctx.hasTable
       })
-      api.get('/miniprogram/customers/me')
-        .then((me) => {
-          if (me && me.phone) this.setData({ phone: me.phone })
-        })
-        .catch(() => {})
+      auth.fetchCustomerMeSilent().then((me) => {
+        if (me && me.phone) this.setData({ phone: me.phone })
+      })
       if (login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         wx.setStorageSync('nickname', login.nickname)
       }

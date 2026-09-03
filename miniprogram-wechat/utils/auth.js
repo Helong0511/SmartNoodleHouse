@@ -87,41 +87,115 @@ function isStaleCustomerAuthError(err) {
   return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(msg)
 }
 
+function isStaleAuthMessage(msg) {
+  return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(String(msg || ''))
+}
+
+/**
+ * 静默探测顾客令牌是否有效（永不 reject，避免开发者工具把 401 打成 Uncaught Error）
+ */
+function probeCustomerMe(token) {
+  const base = String((getAppSafe() && getAppSafe().globalData && getAppSafe().globalData.apiBase) || '')
+  if (!base || !token) {
+    return Promise.resolve({ ok: false, stale: true, data: null })
+  }
+  return new Promise((resolve) => {
+    wx.request({
+      url: `${base}/miniprogram/customers/me`,
+      method: 'GET',
+      timeout: 15000,
+      header: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      success(res) {
+        const status = res.statusCode
+        let body = res.data
+        if (typeof body === 'string') {
+          try { body = JSON.parse(body) } catch (_) { body = { message: body } }
+        }
+        body = body || {}
+        const msg = body.message || (typeof body.detail === 'string' ? body.detail : '') || ''
+        if (status >= 400 || (body.code !== 0 && body.code !== undefined)) {
+          resolve({ ok: false, stale: isStaleAuthMessage(msg) || status === 401, data: null, message: msg })
+          return
+        }
+        resolve({ ok: true, stale: false, data: body.data || null })
+      },
+      fail() {
+        resolve({ ok: false, stale: false, data: null, network: true })
+      }
+    })
+  })
+}
+
+function applyMeProfile(app, token, me) {
+  if (!me) return
+  if (me.customer_id) {
+    app.globalData.customerId = me.customer_id
+    wx.setStorageSync('customer_id', me.customer_id)
+  }
+  if (me.customer_no) {
+    app.globalData.customerNo = me.customer_no
+    wx.setStorageSync('customer_no', me.customer_no)
+  }
+  if (token) app.globalData._customerIdSyncedForToken = token
+}
+
 async function validateCustomerToken(token) {
   if (!token) return false
   const app = requireApp()
   app.globalData.customerToken = token
-  try {
-    await api.get('/miniprogram/customers/me')
-    return true
-  } catch (e) {
-    if (isStaleCustomerAuthError(e)) return false
-    // 网络抖动等：保留本地 token，避免反复登出
+  const probed = await probeCustomerMe(token)
+  if (probed.ok) {
+    applyMeProfile(app, token, probed.data)
     return true
   }
+  if (probed.stale) return false
+  return true
 }
 
 async function syncCustomerIdFromMe(app, token) {
   if (!token || !shouldSyncCustomerId(app, token)) return
   app.globalData.customerToken = token
-  try {
-    const me = await api.get('/miniprogram/customers/me')
-    if (me && me.customer_id) {
-      app.globalData.customerId = me.customer_id
-      wx.setStorageSync('customer_id', me.customer_id)
-    }
-    if (me && me.customer_no) {
-      app.globalData.customerNo = me.customer_no
-      wx.setStorageSync('customer_no', me.customer_no)
-    }
-    app.globalData._customerIdSyncedForToken = token
-  } catch (e) {
-    if (isStaleCustomerAuthError(e)) {
-      clearCustomerSession(app)
-      throw e
-    }
-    /* 其它失败不标记，下次 ensureLogin 重试 */
+  const probed = await probeCustomerMe(token)
+  if (probed.stale) {
+    clearCustomerSession(app)
+    return
   }
+  if (!probed.ok || !probed.data) return
+  applyMeProfile(app, token, probed.data)
+}
+
+/** 静默拉取 /customers/me；失效则清会话，永不抛错 */
+async function fetchCustomerMeSilent() {
+  const app = getAppSafe()
+  const token = (app && app.globalData && app.globalData.customerToken) || readStorage('customer_token')
+  if (!token) return null
+  const probed = await probeCustomerMe(token)
+  if (probed.stale) {
+    if (app && app.globalData) clearCustomerSession(app)
+    return null
+  }
+  if (probed.ok && probed.data && app && app.globalData) {
+    applyMeProfile(app, token, probed.data)
+  }
+  return probed.ok ? probed.data : null
+}
+
+/** 启动时清掉库重置后残留的本地 token（不阻塞、不抛错） */
+function purgeStaleSessionIfNeeded() {
+  const app = getAppSafe()
+  const token = (app && app.globalData && app.globalData.customerToken) || readStorage('customer_token')
+  if (!token || !app) return Promise.resolve(false)
+  return probeCustomerMe(token).then((probed) => {
+    if (probed.stale) {
+      clearCustomerSession(app)
+      return true
+    }
+    if (probed.ok) applyMeProfile(app, token, probed.data)
+    return false
+  })
 }
 
 function applyLoginSession(app, data) {
@@ -163,19 +237,16 @@ async function ensureLogin(tableToken) {
     app.globalData.avatarUrl = app.globalData.avatarUrl || readStorage('avatar_url') || ''
     const valid = await validateCustomerToken(cachedToken)
     if (valid) {
-      try {
-        await syncCustomerIdFromMe(app, cachedToken)
+      await syncCustomerIdFromMe(app, cachedToken)
+      if (app.globalData.customerToken) {
         return {
           customer_id: app.globalData.customerId,
           customer_no: app.globalData.customerNo,
-          customer_token: cachedToken,
+          customer_token: app.globalData.customerToken,
           nickname: app.globalData.nickname,
           avatar_url: app.globalData.avatarUrl,
           need_member_prompt: isPlaceholderNickname(app.globalData.nickname)
         }
-      } catch (e) {
-        if (!isStaleCustomerAuthError(e)) throw e
-        // sync 已清会话，继续下方重新登录
       }
     } else {
       clearCustomerSession(app)
@@ -252,5 +323,7 @@ module.exports = {
   getAppSafe,
   refreshCustomerToken,
   isPlaceholderNickname,
-  isProfileComplete
+  isProfileComplete,
+  fetchCustomerMeSilent,
+  purgeStaleSessionIfNeeded
 }

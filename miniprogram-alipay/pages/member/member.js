@@ -333,7 +333,7 @@ Page({
       }
       my.hideLoading()
       if (res && res.welcome_coupon_issued) {
-        const cname = (res.welcome_coupon && res.welcome_coupon.name) || '新客券'
+        const cname = (res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'
         my.showToast({ content: `绑定成功，已赠送「${cname}」`, type: 'success' })
       } else {
         my.showToast({ content: '绑定成功', type: 'success' })

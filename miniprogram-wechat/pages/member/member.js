@@ -334,7 +334,7 @@ Page({
       }
       wx.hideLoading()
       if (res && res.welcome_coupon_issued) {
-        const cname = (res.welcome_coupon && res.welcome_coupon.name) || '新客券'
+        const cname = (res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'
         wx.showToast({ title: `绑定成功，已赠送「${cname}」`, icon: 'success' })
       } else {
         wx.showToast({ title: '绑定成功', icon: 'success' })

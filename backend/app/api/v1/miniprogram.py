@@ -423,6 +423,7 @@ async def bind_member_phone(
             "customer_token": _issue_customer_token(customer, "merged"),
             "welcome_coupon_issued": welcome is not None,
             "welcome_coupon": welcome,
+            "welcome_coupon_name": CouponService.welcome_template_name(),
             **profile,
         },
         request=request,

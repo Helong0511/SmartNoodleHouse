@@ -90,3 +90,50 @@ def test_encode_alipay_query_puts_charset_in_query():
     assert "charset=utf-8" in q
     assert "sign=" in q
     assert " " not in q
+
+
+@pytest.mark.asyncio
+async def test_alipay_gateway_request_uses_post(monkeypatch):
+    from app.utils import alipay_keys
+    import httpx
+
+    captured: dict = {}
+
+    class _Resp:
+        content = b'{"alipay_system_oauth_token_response":{"code":"10000"}}'
+        headers = {"content-type": "application/json;charset=utf-8"}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, content=None, headers=None, **kwargs):
+            captured["method"] = "POST"
+            captured["url"] = url
+            captured["content"] = content
+            captured["headers"] = headers or {}
+            return _Resp()
+
+        async def get(self, *a, **k):
+            raise AssertionError("支付宝网关不得使用 GET")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(
+        "app.core.config.get_settings",
+        lambda: type("S", (), {"alipay_gateway": "https://openapi.alipay.com/gateway.do"})(),
+    )
+
+    data = await alipay_keys.alipay_gateway_request(
+        {"app_id": "1", "method": "alipay.system.oauth.token", "charset": "utf-8", "sign": "abc"}
+    )
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://openapi.alipay.com/gateway.do"
+    assert b"charset=utf-8" in captured["content"]
+    assert "application/x-www-form-urlencoded" in captured["headers"].get("Content-Type", "")
+    assert "alipay_system_oauth_token_response" in data

@@ -1,6 +1,7 @@
 const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
+const auth = require('./utils/auth')
 const tabCartBadge = require('./utils/tabCartBadge')
 const clientConfig = require('./utils/clientConfig')
 
@@ -41,6 +42,7 @@ App({
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
     clientConfig.loadClientConfig().catch(() => {})
+    auth.purgeStaleSessionIfNeeded().catch(() => {})
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

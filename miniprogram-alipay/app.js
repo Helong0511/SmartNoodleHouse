@@ -42,6 +42,8 @@ App({
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
     clientConfig.loadClientConfig().catch(() => {})
+    // 库重置后本地 customer_token 会失效；静默探测并清理，避免启动期 Uncaught
+    auth.purgeStaleSessionIfNeeded().catch(() => {})
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

@@ -132,15 +132,22 @@ def encode_alipay_query(params: dict[str, Any]) -> str:
 
 
 async def alipay_gateway_request(params: dict[str, Any], *, timeout: float = 20.0) -> dict[str, Any]:
-    """向 openapi.alipay.com 发 GET（参数全部在 URL 查询串）。"""
+    """向 openapi.alipay.com 发 POST（application/x-www-form-urlencoded）。
+
+    支付宝网关约定用 POST；GET 易受 URL 长度限制，且与官方 SDK 不一致。
+    表单体编码与验签一致：quote（空格→%20），保证 charset/sign 等参数完整提交。
+    """
     import httpx
 
     from app.core.config import get_settings
 
     settings = get_settings()
     gateway = (settings.alipay_gateway or "https://openapi.alipay.com/gateway.do").strip().rstrip("?&")
-    query = encode_alipay_query(params)
-    url = f"{gateway}?{query}"
+    body = encode_alipay_query(params)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(url)
+        resp = await client.post(
+            gateway,
+            content=body.encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"},
+        )
     return parse_alipay_http_json(resp.content, resp.headers.get("content-type"))
