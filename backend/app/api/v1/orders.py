@@ -924,7 +924,7 @@ async def kitchen_takeover(order_id: int, request: Request, db: DbSession, user:
 
 @router.post("/{order_id}/print", dependencies=[require_kitchen()])
 async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession, user: CurrentUser):
-    """厨房补打制作单（芯烨云）。"""
+    """厨房补打制作单（局域网 ESC/POS 或芯烨云）。"""
     from app.services.print_service import PrintService
     from app.services.store_scope import assert_order_store_access
 

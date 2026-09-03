@@ -291,6 +291,10 @@ DISPLAY_SCREEN_TOKEN=随机一串
 | `ALLOW_*_MOCK` | `true` | 全部 `false` |
 | `ALIPAY_AES_KEY` | 可留空（手输手机号） | **必填**（解密授权手机号） |
 | `DISPLAY_SCREEN_TOKEN` | 可留空 | 建议设置 |
+| `XPYUN_ENABLED` | `false` 或 `true` | 打印总开关 |
+| `PRINTER_MODE` | `local`（XP-80T WiFi） | `local` 或 `xpyun` |
+| `PRINTER_HOST` | 打印机局域网 IP | 与后端同网段 |
+| `ALLOW_PRINT_MOCK` | 无打印机可 `true` | 必须 `false` |
 
 未配置第三方密钥时，开发环境相关接口可进入 mock，便于本地联调；生产启动会拒绝 mock 开关。
 
@@ -615,6 +619,8 @@ https://你的域名.com/scan?token=桌台token
 - [ ] `JWT_SECRET`、`FACE_ENCRYPTION_KEY` 已换随机强密钥
 - [ ] `H5_PUBLIC_BASE_URL`、`MINI_PROGRAM_ENV_VERSION=release`
 - [ ] `ALIPAY_AES_KEY`、`DISPLAY_SCREEN_TOKEN` 已配置
+- [ ] 厨房打印机：`XPYUN_ENABLED=true`、`PRINTER_MODE=local`、`PRINTER_HOST` 已填（XP-80T WiFi）
+- [ ] `ALLOW_PRINT_MOCK=false`（生产禁止模拟打印）
 - [ ] `systemctl status smart-noodle` 为 active
 
 **微信小程序**

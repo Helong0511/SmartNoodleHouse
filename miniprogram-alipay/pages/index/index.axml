@@ -98,16 +98,17 @@
             open-type="getAuthorize"
             scope="phoneNumber"
             onGetAuthorize="onGetPhoneAuthorize"
-            onError="onGetPhoneAuthorizeFail"
+            onAuthError="onGetPhoneAuthorizeFail"
           >支付宝授权手机号</button>
           <input
             class="input phone-input"
             type="number"
             maxlength="11"
-            placeholder="或手动输入11位手机号"
+            placeholder="请输入11位手机号"
             value="{{phoneInput}}"
             onInput="onPhoneInput"
           />
+          <view class="dev-tip" a:if="{{!canAlipayPhone}}">个人主体请手输手机号；企业开通能力后在 .env 设 ENABLE_ALIPAY_PHONE_BIND=true 并重启后端</view>
         </block>
       </view>
 

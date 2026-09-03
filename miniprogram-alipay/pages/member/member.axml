@@ -136,10 +136,11 @@
         open-type="getAuthorize"
         scope="phoneNumber"
         onGetAuthorize="onGetPhoneAuthorize"
-        onError="onGetPhoneAuthorizeFail"
+        onAuthError="onGetPhoneAuthorizeFail"
       >支付宝一键绑定手机号</button>
       <view class="or" a:if="{{canAlipayPhone}}">或手动输入</view>
-      <view class="tip dev-tip" a:if="{{showDevTips && !canAlipayPhone}}">开发提示：未在开放平台配置隐私/手机号能力时，请直接手动输入；配置完成后将 config/env.js 中 ENABLE_ALIPAY_PRIVACY_APIS 改为 true。</view>
+      <view class="tip" a:if="{{!canAlipayPhone}}">请输入 11 位手机号完成绑定。一键取号开关：.env → ENABLE_ALIPAY_PHONE_BIND（个人主体请保持 false）。</view>
+      <view class="tip dev-tip" a:if="{{showDevTips}}">隐私开关：ENABLE_ALIPAY_AVATAR / NICKNAME / PHONE_BIND（改后重启后端）</view>
       <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" onInput="onPhoneInput" />
       <button class="btn-ghost" onTap="bindPhone">确认绑定</button>
     </view>

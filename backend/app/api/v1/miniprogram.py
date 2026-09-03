@@ -58,7 +58,7 @@ class PhoneBindRequest(BaseModel):
 
 @router.get("/config")
 async def miniprogram_config(request: Request):
-    """小程序前端配置（订阅模板等，不含密钥）。"""
+    """小程序前端配置（订阅模板、隐私能力开关等，不含密钥）。"""
     settings = get_settings()
     tmpl = (settings.wechat_subscribe_template_order_ready or "").strip()
     return success(
@@ -66,6 +66,13 @@ async def miniprogram_config(request: Request):
             "subscribe_templates": {
                 "order_ready": tmpl or None,
             },
+            # 与项目根 .env 的 ENABLE_{WX|ALIPAY}_{AVATAR|NICKNAME|PHONE_BIND} 对应
+            "enable_alipay_avatar": bool(settings.enable_alipay_avatar),
+            "enable_alipay_nickname": bool(settings.enable_alipay_nickname),
+            "enable_alipay_phone_bind": bool(settings.enable_alipay_phone_bind),
+            "enable_wx_avatar": bool(settings.enable_wx_avatar),
+            "enable_wx_nickname": bool(settings.enable_wx_nickname),
+            "enable_wx_phone_bind": bool(settings.enable_wx_phone_bind),
         },
         request=request,
     )
@@ -343,10 +350,11 @@ async def register_member(
     if data.phone:
         customer = await CustomerService.try_link_by_phone(db, customer, data.phone)
 
-    level = await CustomerService.ensure_default_member_level(db, customer)
-    await CouponService.issue_welcome_coupon(db, customer.id)
+    await CustomerService.ensure_default_member_level(db, customer)
+    issued = await CouponService.issue_welcome_coupon(db, customer.id)
     await db.flush()
     profile = await CustomerService.build_member_profile(db, customer)
+    welcome = await CouponService.welcome_coupon_payload(db, issued)
     payload = {
         "customer_id": customer.id,
         "customer_no": customer.customer_no,
@@ -359,10 +367,16 @@ async def register_member(
         "need_face_consent": bool(data.enable_face),
         # 若因手机号合并到老顾客，前端需刷新 token
         "customer_token": _issue_customer_token(customer, "merged"),
+        "welcome_coupon_issued": welcome is not None,
+        "welcome_coupon": welcome,
+        "welcome_coupon_name": CouponService.welcome_template_name(),
     }
     if data.enable_face:
         return success(payload, message="会员信息已保存，请完成摄像头人脸采集授权", request=request)
-    return success(payload, request=request)
+    msg = "注册成功"
+    if welcome:
+        msg = f"注册成功，已赠送「{welcome.get('name') or CouponService.welcome_template_name()}」"
+    return success(payload, message=msg, request=request)
 
 
 @router.post("/member/phone")
@@ -398,13 +412,17 @@ async def bind_member_phone(
     if not re.fullmatch(r"1\d{10}", raw_phone):
         raise AppException(40053, "手机号格式不正确")
     customer = await CustomerService.try_link_by_phone(db, customer, raw_phone)
+    issued = await CouponService.issue_welcome_coupon(db, customer.id)
     await db.flush()
     profile = await CustomerService.build_member_profile(db, customer)
+    welcome = await CouponService.welcome_coupon_payload(db, issued)
     return success(
         {
             "phone": customer.phone,
             "customer_id": customer.id,
             "customer_token": _issue_customer_token(customer, "merged"),
+            "welcome_coupon_issued": welcome is not None,
+            "welcome_coupon": welcome,
             **profile,
         },
         request=request,

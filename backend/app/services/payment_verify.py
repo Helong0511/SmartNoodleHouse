@@ -26,18 +26,11 @@ def _dev_mode_allowed() -> bool:
 
 
 def _load_pem(key_str: str, is_private: bool = False):
-    from cryptography.hazmat.backends import default_backend
+    from app.utils.alipay_keys import load_alipay_private_key, load_alipay_public_key
 
-    key_str = key_str.strip()
-    if not key_str.startswith("-----"):
-        key_str = (
-            f"-----BEGIN {'RSA PRIVATE' if is_private else 'PUBLIC'} KEY-----\n"
-            + "\n".join(key_str[i : i + 64] for i in range(0, len(key_str), 64))
-            + f"\n-----END {'RSA PRIVATE' if is_private else 'PUBLIC'} KEY-----"
-        )
     if is_private:
-        return serialization.load_pem_private_key(key_str.encode(), password=None, backend=default_backend())
-    return serialization.load_pem_public_key(key_str.encode(), backend=default_backend())
+        return load_alipay_private_key(key_str)
+    return load_alipay_public_key(key_str)
 
 
 def _load_wechat_platform_public_key() -> Any:

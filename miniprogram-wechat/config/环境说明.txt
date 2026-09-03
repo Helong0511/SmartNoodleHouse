@@ -1,43 +1,18 @@
 # 微信小程序 — 环境配置说明
 # ═══════════════════════════════════════════════════════════════
-# 主配置文件：config/env.js（改 API 地址、隐私开关）
-# 工程配置：  project.config.json（域名校验 urlCheck）
-# 应用配置：  app.json（隐私检查 __usePrivacyCheck__；头像/手机号在公众平台隐私指引声明）
-# 后端对应：  项目根 .env（WECHAT_APP_ID、MINI_PROGRAM_ENV_VERSION、DEV_LAN_HOST）
+# 主配置：config/env.js（仅 API 地址、域名校验说明）
+# 隐私开关：项目根 .env（经 /miniprogram/config 下发，改后重启后端）
+#   ENABLE_WX_AVATAR / ENABLE_WX_NICKNAME / ENABLE_WX_PHONE_BIND
 # ═══════════════════════════════════════════════════════════════
 
-【本地调试 develop / 体验 trial】
-──────────────────────────────────────────────────────────────
-  文件                          配置项                    典型值
-  ────────────────────────────────────────────────────────────
-  项目根 .env                   APP_ENV                   development
-  项目根 .env                   APP_HOST                  0.0.0.0（真机须监听全网卡）
-  项目根 .env                   H5_PUBLIC_BASE_URL        http://192.168.x.x:5173
-  项目根 .env                   DEV_LAN_HOST              192.168.x.x（与下方一致）
-  项目根 .env                   MINI_PROGRAM_ENV_VERSION  develop
-  config/env.js                 DEV_LAN_HOST              192.168.x.x（改 IP 只改这里+上面）
-  config/env.js                 DEV_USE_LAN               false（模拟器用 127.0.0.1）
-  config/env.js                 ENABLE_WX_PRIVACY_APIS    false（develop 自动开，无需改）
-  project.config.json           setting.urlCheck          false（不校验合法域名）
-  微信开发者工具                详情→本地设置             勾选「不校验合法域名」
+【个人主体 / 未开通手机号能力】
+  ENABLE_WX_AVATAR=true
+  ENABLE_WX_NICKNAME=true
+  ENABLE_WX_PHONE_BIND=false   ← 请手输手机号
 
-【生产 release】
-──────────────────────────────────────────────────────────────
-  文件                          配置项                    典型值
-  ────────────────────────────────────────────────────────────
-  项目根 .env                   APP_ENV                   production
-  项目根 .env                   H5_PUBLIC_BASE_URL        https://你的域名
-  项目根 .env                   MINI_PROGRAM_ENV_VERSION  release
-  config/env.js                 PROD_API_BASE             https://你的域名/api/v1
-  config/env.js                 ENABLE_WX_PRIVACY_APIS    true
-  project.config.json           setting.urlCheck          true（上传前必改）
-  mp.weixin.qq.com              服务器域名                request/upload 填你的域名
+【企业正式】
+  三项均可 true（须公众平台隐私指引 + 已声明手机号）
 
-【三处 IP/域名必须对齐】
-  1. .env DEV_LAN_HOST + H5_PUBLIC_BASE_URL（H5 桌台码）
-  2. config/env.js DEV_LAN_HOST（小程序 request）
-  3. 后端 uvicorn --host 0.0.0.0:8000（真机才能连上）
-
-【与支付宝差异】
-  微信手机号可用 open-type="getPhoneNumber|agreePrivacyAuthorization" 组合按钮
-  支付宝须分两步（见 miniprogram-alipay/config/环境说明.txt）
+【改局域网 IP】
+  config/env.js → DEV_LAN_HOST；真机勿用 127.0.0.1
+  project.config.json → urlCheck（开发 false / 上传前 true）

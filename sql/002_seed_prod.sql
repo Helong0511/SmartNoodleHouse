@@ -2,9 +2,10 @@
 -- 智能面馆 — 生产环境种子数据
 -- ============================================================================
 -- 前置：sql/001_schema.sql
--- 后续：python scripts/init_admin.py（创建超管，勿写入弱口令 SQL）
+-- 后续：python scripts/init_admin.py（如需重置超管密码；本文件已含 admin/hsf/syxm）
 -- 多门店：第六节按实际增删 store_no
--- 幂等：INSERT … WHERE NOT EXISTS；第八节校正历史误配
+--
+-- ⚠ 会先清空 001_schema.sql 中全部业务表数据，再写入种子（不可对线上有业务数据的库随意执行）
 --
 -- 退款权限策略：
 --   1) 收银员 CASHIER：无 payment:refund；收银渠道须「本班订单申请 → 店长审批」
@@ -14,6 +15,57 @@
 
 SET NAMES utf8mb4;
 USE smart_noodle_house;
+
+-- ---------------------------------------------------------------------------
+-- 〇、清空全部业务表（对齐 sql/001_schema.sql；TRUNCATE 同时重置自增）
+-- ---------------------------------------------------------------------------
+SET FOREIGN_KEY_CHECKS = 0;
+
+TRUNCATE TABLE welcome_logs;
+TRUNCATE TABLE face_profiles;
+TRUNCATE TABLE visitor_events;
+TRUNCATE TABLE cameras;
+TRUNCATE TABLE delivery_callback_logs;
+TRUNCATE TABLE delivery_refunds;
+TRUNCATE TABLE platform_store_bindings;
+TRUNCATE TABLE delivery_orders;
+TRUNCATE TABLE delivery_product_maps;
+TRUNCATE TABLE webhook_inbox;
+TRUNCATE TABLE payment_callback_receipts;
+TRUNCATE TABLE payment_status_history;
+TRUNCATE TABLE pos_refund_requests;
+TRUNCATE TABLE cashier_shifts;
+TRUNCATE TABLE payment_refunds;
+TRUNCATE TABLE payments;
+TRUNCATE TABLE order_status_history;
+TRUNCATE TABLE order_item_options;
+TRUNCATE TABLE order_items;
+TRUNCATE TABLE orders;
+TRUNCATE TABLE product_option_groups;
+TRUNCATE TABLE `options`;
+TRUNCATE TABLE option_groups;
+TRUNCATE TABLE store_product_stocks;
+TRUNCATE TABLE product_images;
+TRUNCATE TABLE products;
+TRUNCATE TABLE product_categories;
+TRUNCATE TABLE customer_preferences;
+TRUNCATE TABLE customer_alipay_accounts;
+TRUNCATE TABLE customer_wechat_accounts;
+TRUNCATE TABLE customer_coupons;
+TRUNCATE TABLE customers;
+TRUNCATE TABLE coupon_templates;
+TRUNCATE TABLE member_levels;
+TRUNCATE TABLE store_settings;
+TRUNCATE TABLE `tables`;
+TRUNCATE TABLE stores;
+TRUNCATE TABLE operation_logs;
+TRUNCATE TABLE users;
+TRUNCATE TABLE role_permissions;
+TRUNCATE TABLE permissions;
+TRUNCATE TABLE roles;
+TRUNCATE TABLE system_settings;
+
+SET FOREIGN_KEY_CHECKS = 1;
 
 -- 一、角色
 INSERT INTO roles (code, name, description)
@@ -148,9 +200,10 @@ SELECT '金卡会员', 500, 0.9500 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM member_levels WHERE name = '金卡会员');
 
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
+-- 注册赠券：名称须与 .env WELCOME_COUPON_NAME 一致（默认「新客满30减5」）
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
-SELECT '满30减5元', 'FIXED', 5.00, 30.00, 30 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '满30减5元');
+SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '新客满30减5');
 
 INSERT INTO coupon_templates (name, coupon_type, discount_value, min_order_amount, valid_days)
 SELECT '满50享打9折', 'PERCENT', 0.9000, 50.00, 30 FROM DUAL

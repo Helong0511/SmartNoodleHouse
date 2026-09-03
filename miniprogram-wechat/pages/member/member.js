@@ -5,7 +5,8 @@ const prefUtil = require('../../utils/preferences')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
 const voucherUtil = require('../../utils/voucher')
-const { enableWxPhoneBind, enableNicknameInput, shouldShowDevTips } = require('../../config/env')
+const clientConfig = require('../../utils/clientConfig')
+const { shouldShowDevTips } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
@@ -75,9 +76,10 @@ Page({
       app._privacyPopup.show()
     }
     this.setData({
-      canWxPhone: !!enableWxPhoneBind,
-      useWxNickname: !!enableNicknameInput,
       showDevTips: shouldShowDevTips()
+    })
+    clientConfig.loadClientConfig().then(() => {
+      this.setData(clientConfig.wxPrivacyPageData())
     })
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
@@ -255,7 +257,7 @@ Page({
     }
     try {
       this.setData({ savingName: true })
-      const res = await api.post('/miniprogram/member/register', {
+      const res = await auth.registerMember({
         nickname,
         avatar_url: this.data.avatarUrl || app.globalData.avatarUrl || null
       })
@@ -283,7 +285,11 @@ Page({
         nicknameDraft: '',
         savingName: false
       })
-      wx.showToast({ title: '已更新昵称', icon: 'success' })
+      const tip = (res && res.welcome_coupon_issued)
+        ? `已赠送「${(res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'}」`
+        : '已更新昵称'
+      wx.showToast({ title: tip, icon: 'success' })
+      if (res && res.welcome_coupon_issued) this.loadWallet()
     } catch (e) {
       this.setData({ savingName: false })
       wx.showToast({ title: e.message || '保存失败', icon: 'none' })
@@ -315,9 +321,10 @@ Page({
     this.setData({ needPrivacyAgree: false })
   },
 
-  async _savePhone(payload) {
+  async _savePhone(payload, retried = false) {
     try {
       wx.showLoading({ title: '绑定中' })
+      await auth.ensureLogin()
       const res = await api.post('/miniprogram/member/phone', payload)
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
@@ -326,11 +333,28 @@ Page({
         })
       }
       wx.hideLoading()
-      wx.showToast({ title: '绑定成功', icon: 'success' })
+      if (res && res.welcome_coupon_issued) {
+        const cname = (res.welcome_coupon && res.welcome_coupon.name) || '新客券'
+        wx.showToast({ title: `绑定成功，已赠送「${cname}」`, icon: 'success' })
+      } else {
+        wx.showToast({ title: '绑定成功', icon: 'success' })
+      }
       this.setData({ phone: res.phone || this.data.phoneInput, phoneInput: '' })
+      if (res && res.welcome_coupon_issued) {
+        this._profileLoadedAt = 0
+        this.loadWallet()
+      }
     } catch (e) {
+      const msg = String((e && e.message) || '')
+      if (!retried && /顾客不存在|已禁用|令牌已失效|请先登录|无效顾客|401/.test(msg)) {
+        try {
+          wx.hideLoading()
+          await auth.ensureLogin()
+          return this._savePhone(payload, true)
+        } catch (_) { /* fallthrough */ }
+      }
       wx.hideLoading()
-      wx.showToast({ title: e.message || '绑定失败', icon: 'none' })
+      wx.showToast({ title: msg || '绑定失败', icon: 'none' })
     }
   },
 

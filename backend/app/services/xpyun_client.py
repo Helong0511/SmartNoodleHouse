@@ -1,4 +1,4 @@
-"""芯烨云开放 API 客户端（XP-80T 等云打印机）。"""
+"""芯烨云开放 API 客户端（云打印机型号，非 XP-80T 局域网版）。"""
 from __future__ import annotations
 
 import hashlib

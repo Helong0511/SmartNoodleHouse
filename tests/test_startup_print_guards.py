@@ -29,6 +29,8 @@ def _base_prod(**kwargs):
         alipay_private_key="",
         alipay_public_key="",
         xpyun_enabled=False,
+        printer_mode="local",
+        printer_host="",
         xpyun_user="",
         xpyun_user_key="",
         xpyun_printer_sn="",
@@ -44,13 +46,43 @@ def test_prod_rejects_print_mock():
 
 def test_prod_rejects_xpyun_enabled_without_creds():
     with pytest.raises(SystemExit):
-        validate_settings(_base_prod(xpyun_enabled=True, xpyun_user="", xpyun_user_key="", xpyun_printer_sn=""))
+        validate_settings(
+            _base_prod(
+                xpyun_enabled=True,
+                printer_mode="xpyun",
+                xpyun_user="",
+                xpyun_user_key="",
+                xpyun_printer_sn="",
+            )
+        )
 
 
-def test_prod_ok_when_xpyun_fully_configured():
+def test_prod_rejects_local_enabled_without_host():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                xpyun_enabled=True,
+                printer_mode="local",
+                printer_host="",
+            )
+        )
+
+
+def test_prod_ok_when_local_configured():
     validate_settings(
         _base_prod(
             xpyun_enabled=True,
+            printer_mode="local",
+            printer_host="192.168.1.200",
+        )
+    )
+
+
+def test_prod_ok_when_xpyun_fully_configured():
+        validate_settings(
+        _base_prod(
+            xpyun_enabled=True,
+            printer_mode="xpyun",
             xpyun_user="u@test.com",
             xpyun_user_key="key",
             xpyun_printer_sn="XPY123",
@@ -81,10 +113,9 @@ async def test_print_order_raises_when_enabled_but_incomplete(db_session, monkey
 
     get_settings.cache_clear()
     monkeypatch.setenv("XPYUN_ENABLED", "true")
+    monkeypatch.setenv("PRINTER_MODE", "local")
     monkeypatch.setenv("ALLOW_PRINT_MOCK", "false")
-    monkeypatch.setenv("XPYUN_USER", "")
-    monkeypatch.setenv("XPYUN_USER_KEY", "")
-    monkeypatch.setenv("XPYUN_PRINTER_SN", "")
+    monkeypatch.setenv("PRINTER_HOST", "")
     get_settings.cache_clear()
 
     store = Store(id=902, store_no="SH02", name="面馆", status=1)

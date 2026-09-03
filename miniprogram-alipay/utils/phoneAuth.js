@@ -1,23 +1,39 @@
-/** 支付宝手机号授权辅助 */
+/** 支付宝手机号授权：须由 button open-type=getAuthorize 用户点击触发，不可静默调用 */
 
 const privacy = require('./privacy')
 
-function handleGetPhoneAuthorize(page, err, onEncrypted) {
-  if (err) {
-    const msg = String((err && (err.errorMessage || err.error)) || '未授权')
-    if (/privacy|授权|协议/i.test(msg)) {
-      if (page && typeof page.setData === 'function') {
-        page.setData({ needPrivacyAgree: true })
-      }
-      privacy.showPrivacyPopup()
-      my.showModal({
-        title: '需先同意隐私政策',
-        content: '请先在小程序内同意隐私政策，并在开放平台配置手机号权限；也可手动输入手机号。',
-        confirmText: '知道了'
-      })
-    } else {
-      my.showToast({ content: msg, type: 'none' })
+function normalizePhoneEncrypted(res) {
+  const response = res && res.response
+  if (response == null || response === '') return ''
+  if (typeof response === 'object') {
+    try {
+      return JSON.stringify(response)
+    } catch (_) {
+      return ''
     }
+  }
+  return String(response)
+}
+
+function resolveAuthScope(e) {
+  if (!e) return ''
+  return String(
+    e.authScope
+    || (e.detail && e.detail.authScope)
+    || ''
+  ).trim()
+}
+
+/**
+ * button onGetAuthorize 回调：仅在用户主动授权 phoneNumber 后调用 my.getPhoneNumber
+ * @param {object} page 页面实例
+ * @param {object} e 授权成功事件
+ * @param {(encrypted: string) => void} onEncrypted 拿到密文后的回调
+ */
+function handleGetAuthorizeSuccess(page, e, onEncrypted) {
+  const scope = resolveAuthScope(e)
+  // 官方：仅当 authScope === phoneNumber 时再取号；部分基础库不回传 scope，默认视为手机号授权按钮触发
+  if (scope && scope !== 'phoneNumber') {
     return
   }
   if (!my.getPhoneNumber) {
@@ -26,20 +42,50 @@ function handleGetPhoneAuthorize(page, err, onEncrypted) {
   }
   my.getPhoneNumber({
     success: (res) => {
-      const encrypted = (res && res.response) || ''
+      const encrypted = normalizePhoneEncrypted(res)
       if (!encrypted) {
         my.showToast({ content: '未获取到手机号密文，请手输', type: 'none' })
         return
       }
       if (typeof onEncrypted === 'function') onEncrypted(encrypted)
     },
-    fail: (e) => {
-      const msg = String((e && (e.errorMessage || e.error)) || '获取手机号失败')
+    fail: (err) => {
+      const msg = String((err && (err.errorMessage || err.error)) || '获取手机号失败')
       my.showToast({ content: msg, type: 'none' })
     }
   })
 }
 
+/** button onAuthError：用户拒绝授权 */
+function handleAuthError(page, err) {
+  const msg = String((err && (err.errorMessage || err.error || err.message)) || '用户拒绝授权')
+  if (/privacy|隐私|协议/i.test(msg)) {
+    if (page && typeof page.setData === 'function') {
+      page.setData({ needPrivacyAgree: true })
+    }
+    privacy.showPrivacyPopup()
+    my.showModal({
+      title: '需先同意隐私政策',
+      content: '请先在小程序内同意隐私政策，并在开放平台开通「获取会员手机号」；也可手动输入手机号。',
+      confirmText: '知道了'
+    })
+    return
+  }
+  my.showToast({ content: /拒绝|cancel|deny/i.test(msg) ? '已取消手机号授权' : msg, type: 'none' })
+}
+
+/** @deprecated 请用 handleGetAuthorizeSuccess / handleAuthError */
+function handleGetPhoneAuthorize(page, err, onEncrypted) {
+  if (err) {
+    handleAuthError(page, err)
+    return
+  }
+  handleGetAuthorizeSuccess(page, { authScope: 'phoneNumber' }, onEncrypted)
+}
+
 module.exports = {
-  handleGetPhoneAuthorize
+  handleGetAuthorizeSuccess,
+  handleAuthError,
+  handleGetPhoneAuthorize,
+  normalizePhoneEncrypted
 }

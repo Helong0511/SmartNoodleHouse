@@ -73,18 +73,29 @@ def validate_settings(settings: Settings) -> None:
                 "生产须至少配置微信（MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID）或支付宝（APP_ID/私钥/公钥）之一"
             )
 
-    # 打印：开启则须配齐凭证，禁止「开了开关却静默跳过」
+    # 打印：开启则须按模式配齐，禁止「开了开关却静默跳过」
     if is_prod:
         if settings.xpyun_enabled:
-            if not (
-                (settings.xpyun_user or "").strip()
-                and (settings.xpyun_user_key or "").strip()
-                and (settings.xpyun_printer_sn or "").strip()
-            ):
-                errors.append(
-                    "XPYUN_ENABLED=true 时须配置 XPYUN_USER / XPYUN_USER_KEY / XPYUN_PRINTER_SN；"
-                    "暂无打印机请改 XPYUN_ENABLED=false"
-                )
+            mode = (getattr(settings, "printer_mode", "local") or "local").strip().lower()
+            if mode == "xpyun":
+                if not (
+                    (settings.xpyun_user or "").strip()
+                    and (settings.xpyun_user_key or "").strip()
+                    and (settings.xpyun_printer_sn or "").strip()
+                ):
+                    errors.append(
+                        "PRINTER_MODE=xpyun 且 XPYUN_ENABLED=true 时须配置 "
+                        "XPYUN_USER / XPYUN_USER_KEY / XPYUN_PRINTER_SN；"
+                        "暂无云打印机请改 PRINTER_MODE=local 或 XPYUN_ENABLED=false"
+                    )
+            elif mode == "local":
+                if not (getattr(settings, "printer_host", "") or "").strip():
+                    errors.append(
+                        "PRINTER_MODE=local 且 XPYUN_ENABLED=true 时须配置 PRINTER_HOST（打印机局域网 IP）；"
+                        "暂无打印机请改 XPYUN_ENABLED=false"
+                    )
+            else:
+                errors.append(f"PRINTER_MODE 无效: {settings.printer_mode!r}，仅支持 local 或 xpyun")
         else:
             warnings.append("XPYUN_ENABLED=false：厨房小票不会自动打印")
 

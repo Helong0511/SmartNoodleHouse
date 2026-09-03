@@ -3,10 +3,8 @@ const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
+const clientConfig = require('../../utils/clientConfig')
 const {
-  enableChooseAvatar,
-  enableNicknameInput,
-  enableAlipayPhoneBind,
   resolveApiBase,
   getEnvDebugInfo,
   shouldShowDevTips,
@@ -43,9 +41,12 @@ Page({
 
   buildDebugInfo(extra) {
     const env = getEnvDebugInfo()
+    const p = clientConfig.alipayPrivacyPageData()
     const parts = [
       `环境:${env.envVersion}`,
-      `支付宝能力:${env.privacyApis ? '开' : '关'}`,
+      `头像:${p.canChooseAvatar ? '开' : '关'}`,
+      `昵称:${p.useAlipayNickname ? '开' : '关'}`,
+      `手机:${p.canAlipayPhone ? '开' : '关'}`,
       `隐私待同意:${this.data.needPrivacyAgree ? '是' : '否'}`
     ]
     if (extra) parts.push(extra)
@@ -55,11 +56,12 @@ Page({
   onLoad(query) {
     const env = getEnvDebugInfo()
     this.setData({
-      canChooseAvatar: !!enableChooseAvatar,
-      useAlipayNickname: !!enableNicknameInput,
-      canAlipayPhone: !!enableAlipayPhoneBind,
+      ...clientConfig.alipayPrivacyPageData(),
       showDevTips: shouldShowDevTips(),
       debugInfo: env.isRelease ? '' : this.buildDebugInfo()
+    })
+    clientConfig.loadClientConfig().then(() => {
+      this.setData(clientConfig.alipayPrivacyPageData())
     })
     const app = appRef()
     if (query.token && app) {
@@ -295,10 +297,11 @@ Page({
     this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
   },
 
-  onGetPhoneAuthorize() {
-    phoneAuth.handleGetPhoneAuthorize(this, null, async (encrypted) => {
+  onGetPhoneAuthorize(e) {
+    phoneAuth.handleGetAuthorizeSuccess(this, e || {}, async (encrypted) => {
       try {
         my.showLoading({ content: '绑定中' })
+        await auth.ensureLogin()
         const res = await api.post('/miniprogram/member/phone', { alipay_phone_encrypted: encrypted })
         const app = appRef()
         if (res && res.customer_token && app) {
@@ -318,7 +321,7 @@ Page({
   },
 
   onGetPhoneAuthorizeFail(e) {
-    phoneAuth.handleGetPhoneAuthorize(this, e || { errorMessage: '未授权' }, null)
+    phoneAuth.handleAuthError(this, e || { errorMessage: '用户拒绝授权' })
   },
 
   onFormSubmit(e) {
@@ -357,7 +360,7 @@ Page({
     try {
       this.setData({ saving: true })
       my.showLoading({ content: '保存中' })
-      const res = await api.post('/miniprogram/member/register', {
+      const res = await auth.registerMember({
         nickname: nickname || '面馆会员',
         avatar_url: this.data.avatarUrl || null,
         phone: phoneInput || null
@@ -390,6 +393,10 @@ Page({
         saving: false
       })
       my.hideLoading()
+      if (res && res.welcome_coupon_issued) {
+        const cname = (res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'
+        my.showToast({ content: `已赠送「${cname}」`, type: 'success' })
+      }
       this.goMenu()
     } catch (e) {
       this.setData({ saving: false })

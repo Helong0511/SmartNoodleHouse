@@ -2,22 +2,14 @@
  * 支付宝小程序环境配置
  * ─────────────────────────────────────────────────────────────
  * 【调试 / 体验】develop | trial | 开发者工具
- *   - API 自动走 DEV_SIMULATOR_API 或 DEV_LAN_API
- *   - 隐私接口在 develop/trial/模拟器下自动开启
- *   - 真机预览隐私弹窗（开发者工具不支持）；IDE「联调设置」开启
+ *   - API：DEV_SIMULATOR_API / DEV_LAN_API
+ *   - 头像 / 昵称 / 手机号开关在项目根 .env：
+ *     ENABLE_ALIPAY_AVATAR / ENABLE_ALIPAY_NICKNAME / ENABLE_ALIPAY_PHONE_BIND
+ *     （经后端 GET /api/v1/miniprogram/config 下发；改后须重启后端）
  *
  * 【正式版】release
- *   1. PROD_API_BASE → 真实 HTTPS 域名（与开放平台服务器域名白名单一致）
- *   2. ENABLE_ALIPAY_PRIVACY_APIS → true（且开放平台已配置「小程序隐私政策」）
- *   3. 开放平台：申请「获取会员手机号」、配置接口内容加密 AES → 后端 ALIPAY_AES_KEY
- *   4. 头像昵称用 chooseAvatar + input type=nickname（勿用已废弃 my.getOpenUserInfo）
- *   5. 支付宝隐私按钮不能 pipe 组合：须先 agreePrivacyAuthorization，再 getAuthorize
- *   6. 后端 .env：APP_ENV=production、ALIPAY_AES_KEY、ALIPAY_APP_ID 等
- *
- * 官方文档：
- *   隐私规则 https://opendocs.alipay.com/common/0fc513
- *   手机号   https://opendocs.alipay.com/mini/api/getphonenumber
- *   隐私授权 https://opendocs.alipay.com/mini/0b1o5r
+ *   1. PROD_API_BASE → HTTPS 域名
+ *   2. .env 按能力打开三项开关；手机号须企业主体已开通「获取会员手机号」
  * ─────────────────────────────────────────────────────────────
  * 改局域网 IP：只改 DEV_LAN_HOST
  * 详细对照表：同目录 环境说明.txt
@@ -36,12 +28,6 @@ const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api/v1`
 
 /** 体验版是否连生产 API（默认 false） */
 const TRIAL_USE_PROD_API = false
-
-/**
- * 支付宝隐私接口总开关
- * 发正式版前须在开放平台配置「小程序隐私政策」后改为 true
- */
-const ENABLE_ALIPAY_PRIVACY_APIS = false
 
 function isDevtools() {
   try {
@@ -93,22 +79,12 @@ function resolveApiBase() {
   return resolveDevApiBase()
 }
 
-function resolvePrivacyApisEnabled() {
-  if (ENABLE_ALIPAY_PRIVACY_APIS) return true
-  if (isDevelopOrTrial()) return true
-  if (isDevtools()) return true
-  return false
-}
-
-const enablePrivacyApis = resolvePrivacyApisEnabled()
-
 function getEnvDebugInfo() {
   return {
     envVersion: miniEnvVersion() || 'unknown',
     isDevtools: isDevtools(),
     isRelease: isRelease(),
-    apiBase: resolveApiBase(),
-    privacyApis: enablePrivacyApis
+    apiBase: resolveApiBase()
   }
 }
 
@@ -125,10 +101,10 @@ module.exports = {
   DEV_USE_LAN,
   DEV_LAN_API,
   TRIAL_USE_PROD_API,
-  enableAlipayPrivacyApis: ENABLE_ALIPAY_PRIVACY_APIS || enablePrivacyApis,
-  enableChooseAvatar: enablePrivacyApis,
-  enableNicknameInput: enablePrivacyApis,
-  enableAlipayPhoneBind: enablePrivacyApis,
-  /** @deprecated 请用 enableChooseAvatar */
-  enableAlipayUserProfile: enablePrivacyApis
+  /** @deprecated 隐私开关已迁至项目根 .env，由 /miniprogram/config 下发 */
+  enableChooseAvatar: false,
+  enableNicknameInput: false,
+  enableAlipayPhoneBind: false,
+  enableAlipayPrivacyApis: false,
+  enableAlipayUserProfile: false
 }

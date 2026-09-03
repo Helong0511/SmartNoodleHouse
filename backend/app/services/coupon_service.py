@@ -1,6 +1,7 @@
 """优惠券：发券、校验、计价、核销。"""
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -8,14 +9,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import generate_no
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import ensure_local_aware, money, now_local, naive_local_now
 from app.models import CouponTemplate, CustomerCoupon, Order
 
-WELCOME_COUPON_NAME = "新客满30减5"
+logger = logging.getLogger(__name__)
 
 
 class CouponService:
+    @staticmethod
+    def welcome_template_name() -> str:
+        """注册赠券对应的模板名（.env WELCOME_COUPON_NAME，默认「新客满30减5」）。"""
+        name = (get_settings().welcome_coupon_name or "").strip()
+        return name or "新客满30减5"
     @staticmethod
     def discount_label(tmpl: CouponTemplate) -> str:
         if tmpl.coupon_type == "PERCENT":
@@ -277,15 +284,20 @@ class CouponService:
 
     @staticmethod
     async def issue_welcome_coupon(db: AsyncSession, customer_id: int) -> CustomerCoupon | None:
-        """注册会员赠送新客券（每人一张）。"""
+        """注册会员赠送新客券（每人限领该欢迎模板一张；模板缺失时打日志并跳过）。"""
+        welcome_name = CouponService.welcome_template_name()
         tmpl = (
             await db.execute(
                 select(CouponTemplate).where(
-                    CouponTemplate.name == WELCOME_COUPON_NAME, CouponTemplate.status == 1
+                    CouponTemplate.name == welcome_name, CouponTemplate.status == 1
                 )
             )
         ).scalar_one_or_none()
         if not tmpl:
+            logger.warning(
+                "欢迎券未发放：模板不存在或未启用 name=%r（请检查 coupon_templates 与 .env WELCOME_COUPON_NAME）",
+                welcome_name,
+            )
             return None
         exists = await db.scalar(
             select(CustomerCoupon.id)
@@ -294,7 +306,16 @@ class CouponService:
         )
         if exists:
             return None
-        return await CouponService.issue_from_template(db, customer_id, WELCOME_COUPON_NAME)
+        return await CouponService.issue_from_template(db, customer_id, welcome_name)
+
+    @staticmethod
+    async def welcome_coupon_payload(db: AsyncSession, issued: CustomerCoupon | None) -> dict | None:
+        if not issued:
+            return None
+        tmpl = await db.get(CouponTemplate, issued.template_id)
+        if not tmpl:
+            return None
+        return CouponService._hold_payload(issued, tmpl)
 
     @staticmethod
     async def resolve_discount(

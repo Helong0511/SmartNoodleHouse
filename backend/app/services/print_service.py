@@ -1,4 +1,4 @@
-"""厨房小票打印：芯烨云 XP-80T，含订单号 CODE128 条码。"""
+"""厨房小票打印：局域网 ESC/POS（芯烨 XP-80T WiFi）或芯烨云 API。"""
 from __future__ import annotations
 
 import logging
@@ -15,6 +15,7 @@ from app.core.exceptions import AppException
 from app.core.response import now_local
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store, StoreSetting
 from app.services.customer_display import pickup_code_from_order_no
+from app.services.escpos_client import EscposClient
 from app.services.xpyun_client import XpyunClient
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,22 @@ def build_ticket_content(ctx: OrderPrintContext, ticket_type: str = TICKET_KITCH
 
 class PrintService:
     @classmethod
+    async def resolve_printer_host(cls, db: AsyncSession, store_id: int | None) -> str:
+        settings = get_settings()
+        if store_id:
+            row = (
+                await db.execute(
+                    select(StoreSetting.setting_value).where(
+                        StoreSetting.store_id == int(store_id),
+                        StoreSetting.setting_key == "printer_host",
+                    )
+                )
+            ).scalar_one_or_none()
+            if row and str(row).strip():
+                return str(row).strip()
+        return (settings.printer_host or "").strip()
+
+    @classmethod
     async def resolve_printer_sn(cls, db: AsyncSession, store_id: int | None) -> str:
         settings = get_settings()
         if store_id:
@@ -247,32 +264,53 @@ class PrintService:
             return None
 
         sn = await cls.resolve_printer_sn(db, ctx.order.store_id)
+        host = await cls.resolve_printer_host(db, ctx.order.store_id)
         content = build_ticket_content(ctx, ticket_type=ticket_type)
+        mode = (settings.printer_mode or "local").strip().lower()
 
-        if not sn or not (settings.xpyun_user or "").strip() or not (settings.xpyun_user_key or "").strip():
+        if mode == "xpyun":
+            if not sn or not (settings.xpyun_user or "").strip() or not (settings.xpyun_user_key or "").strip():
+                if settings.allow_print_mock:
+                    logger.warning(
+                        "MOCK 打印 ticket=%s order=%s sn=%s\n%s",
+                        ticket_type,
+                        ctx.order.order_no,
+                        sn or "(未配置)",
+                        content.replace("<BR>", "\n"),
+                    )
+                    return {"mock": True, "order_no": ctx.order.order_no}
+                raise AppException(
+                    50040,
+                    f"芯烨云未配置完整（USER/USER_KEY/打印机SN），无法出票 order={ctx.order.order_no}",
+                )
+            client = XpyunClient()
+            data = await client.print_ticket(
+                sn,
+                content,
+                copies=settings.xpyun_print_copies,
+                cutter=1,
+                voice=0 if ticket_type != TICKET_KITCHEN else settings.xpyun_voice,
+                mode=1,
+            )
+            logger.info("厨房小票已发送(云) order=%s sn=%s type=%s", ctx.order.order_no, sn, ticket_type)
+            return data
+
+        if not host:
             if settings.allow_print_mock:
                 logger.warning(
-                    "MOCK 打印 ticket=%s order=%s sn=%s\n%s",
+                    "MOCK 打印 ticket=%s order=%s host=%s\n%s",
                     ticket_type,
                     ctx.order.order_no,
-                    sn or "(未配置)",
+                    host or "(未配置)",
                     content.replace("<BR>", "\n"),
                 )
                 return {"mock": True, "order_no": ctx.order.order_no}
-            # 已开启打印却凭证不全：必须失败，禁止静默跳过造成厨房漏单
             raise AppException(
                 50040,
-                f"芯烨云未配置完整（USER/USER_KEY/打印机SN），无法出票 order={ctx.order.order_no}",
+                f"未配置打印机 IP（PRINTER_HOST），无法出票 order={ctx.order.order_no}",
             )
 
-        client = XpyunClient()
-        data = await client.print_ticket(
-            sn,
-            content,
-            copies=settings.xpyun_print_copies,
-            cutter=1,
-            voice=0 if ticket_type != TICKET_KITCHEN else settings.xpyun_voice,
-            mode=1,
-        )
-        logger.info("厨房小票已发送 order=%s sn=%s type=%s", ctx.order.order_no, sn, ticket_type)
+        client = EscposClient(host=host, port=settings.printer_port)
+        data = await client.print_ticket(content, copies=settings.xpyun_print_copies)
+        logger.info("厨房小票已发送(局域网) order=%s host=%s type=%s", ctx.order.order_no, host, ticket_type)
         return data

@@ -57,6 +57,9 @@ sudo nginx -t && sudo systemctl reload nginx
 #     MINI_PROGRAM_ENV_VERSION=release
 #     H5_PUBLIC_BASE_URL=https://your-domain.com
 #     ALIPAY_AES_KEY=（支付宝手机号解密，必填）
+#   厨房打印机（芯烨 XP-80T WiFi = 局域网，不是云打印）：
+#     XPYUN_ENABLED=true、PRINTER_MODE=local、PRINTER_HOST=打印机IP、PRINTER_PORT=9100
+#     ALLOW_PRINT_MOCK=false
 #   miniprogram-wechat/config/env.js：
 #     PROD_API_BASE = https://your-domain.com/api/v1
 #     ENABLE_WX_PRIVACY_APIS = true

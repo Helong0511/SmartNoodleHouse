@@ -163,17 +163,23 @@ async function ensureLogin(tableToken) {
     app.globalData.avatarUrl = app.globalData.avatarUrl || readStorage('avatar_url') || ''
     const valid = await validateCustomerToken(cachedToken)
     if (valid) {
-      await syncCustomerIdFromMe(app, cachedToken)
-      return {
-        customer_id: app.globalData.customerId,
-        customer_no: app.globalData.customerNo,
-        customer_token: cachedToken,
-        nickname: app.globalData.nickname,
-        avatar_url: app.globalData.avatarUrl,
-        need_member_prompt: isPlaceholderNickname(app.globalData.nickname)
+      try {
+        await syncCustomerIdFromMe(app, cachedToken)
+        return {
+          customer_id: app.globalData.customerId,
+          customer_no: app.globalData.customerNo,
+          customer_token: cachedToken,
+          nickname: app.globalData.nickname,
+          avatar_url: app.globalData.avatarUrl,
+          need_member_prompt: isPlaceholderNickname(app.globalData.nickname)
+        }
+      } catch (e) {
+        if (!isStaleCustomerAuthError(e)) throw e
+        // sync 已清会话，继续下方重新登录
       }
+    } else {
+      clearCustomerSession(app)
     }
-    clearCustomerSession(app)
   }
 
   const loginRes = await wxLogin()
@@ -211,6 +217,19 @@ async function ensureLogin(tableToken) {
   return data
 }
 
+/** 会员注册（完善资料）；遇旧 token 自动清会话重登后重试一次 */
+async function registerMember(payload) {
+  await ensureLogin()
+  try {
+    return await api.post('/miniprogram/member/register', payload || {})
+  } catch (e) {
+    if (!isStaleCustomerAuthError(e)) throw e
+    clearCustomerSession(requireApp())
+    await ensureLogin()
+    return api.post('/miniprogram/member/register', payload || {})
+  }
+}
+
 function saveCart(cart) {
   const app = requireApp()
   app.globalData.cart = cart
@@ -225,6 +244,7 @@ function getCart() {
 
 module.exports = {
   ensureLogin,
+  registerMember,
   saveCart,
   getCart,
   formatError,

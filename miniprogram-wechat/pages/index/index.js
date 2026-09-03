@@ -3,9 +3,6 @@ const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const privacy = require('../../utils/privacy')
 const {
-  enableChooseAvatar,
-  enableNicknameInput,
-  enableWxPhoneBind,
   resolveApiBase,
   getEnvDebugInfo,
   shouldShowDevTips,
@@ -13,6 +10,7 @@ const {
 } = require('../../config/env')
 const app = getApp()
 const phoneAuth = require('../../utils/phoneAuth')
+const clientConfig = require('../../utils/clientConfig')
 
 Page({
   data: {
@@ -42,9 +40,12 @@ Page({
 
   buildDebugInfo(extra) {
     const env = getEnvDebugInfo()
+    const p = clientConfig.wxPrivacyPageData()
     const parts = [
       `环境:${env.envVersion}`,
-      `微信能力:${env.privacyApis ? '开' : '关'}`,
+      `头像:${p.canChooseAvatar ? '开' : '关'}`,
+      `昵称:${p.useWxNickname ? '开' : '关'}`,
+      `手机:${p.canWxPhone ? '开' : '关'}`,
       `隐私待同意:${this.data.needPrivacyAgree ? '是' : '否'}`
     ]
     if (extra) parts.push(extra)
@@ -54,11 +55,12 @@ Page({
   onLoad(query) {
     const env = getEnvDebugInfo()
     this.setData({
-      canChooseAvatar: !!enableChooseAvatar,
-      useWxNickname: !!enableNicknameInput,
-      canWxPhone: !!enableWxPhoneBind,
+      ...clientConfig.wxPrivacyPageData(),
       showDevTips: shouldShowDevTips(),
       debugInfo: env.isRelease ? '' : this.buildDebugInfo()
+    })
+    clientConfig.loadClientConfig().then(() => {
+      this.setData(clientConfig.wxPrivacyPageData())
     })
     if (query.token) {
       app.globalData.tableToken = query.token
@@ -311,6 +313,7 @@ Page({
     phoneAuth.handleGetPhoneNumber(this, detail, async (code) => {
       try {
         wx.showLoading({ title: '绑定中' })
+        await auth.ensureLogin()
         const res = await api.post('/miniprogram/member/phone', { phone_code: code })
         if (res && res.customer_token) {
           auth.refreshCustomerToken(app, res.customer_token, {
@@ -359,7 +362,7 @@ Page({
     try {
       this.setData({ saving: true })
       wx.showLoading({ title: '保存中' })
-      const res = await api.post('/miniprogram/member/register', {
+      const res = await auth.registerMember({
         nickname: nickname || '面馆会员',
         avatar_url: this.data.avatarUrl || null,
         phone: phoneInput || null
@@ -390,6 +393,10 @@ Page({
         saving: false
       })
       wx.hideLoading()
+      if (res && res.welcome_coupon_issued) {
+        const cname = (res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'
+        wx.showToast({ title: `已赠送「${cname}」`, icon: 'success' })
+      }
       this.goMenu()
     } catch (e) {
       this.setData({ saving: false })

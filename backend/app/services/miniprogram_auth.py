@@ -1,38 +1,15 @@
 """微信/支付宝小程序登录（code2session）—— 生产禁止 mock"""
-import base64
 import hashlib
 import logging
 from datetime import datetime
 
 import httpx
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException
+from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa2
 
 logger = logging.getLogger(__name__)
-
-
-def _load_private_key(key_str: str):
-    from cryptography.hazmat.backends import default_backend
-
-    key_str = key_str.strip()
-    if not key_str.startswith("-----") and "BEGIN" not in key_str:
-        key_str = (
-            "-----BEGIN RSA PRIVATE KEY-----\n"
-            + "\n".join(key_str[i : i + 64] for i in range(0, len(key_str), 64))
-            + "\n-----END RSA PRIVATE KEY-----"
-        )
-    return serialization.load_pem_private_key(key_str.encode(), password=None, backend=default_backend())
-
-
-def _sign_alipay_rsa2(params: dict, private_key_pem: str) -> str:
-    items = sorted((k, v) for k, v in params.items() if v is not None and v != "" and k not in ("sign", "sign_type"))
-    content = "&".join(f"{k}={v}" for k, v in items)
-    private_key = _load_private_key(private_key_pem)
-    signature = private_key.sign(content.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
-    return base64.b64encode(signature).decode("utf-8")
 
 
 def _mock_allowed(*, provider_configured: bool = False) -> bool:
@@ -124,6 +101,7 @@ class AlipayMiniAuth:
         params = {
             "app_id": settings.alipay_app_id,
             "method": "alipay.system.oauth.token",
+            "format": "JSON",
             "charset": "utf-8",
             "sign_type": "RSA2",
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -132,16 +110,21 @@ class AlipayMiniAuth:
             "code": auth_code,
         }
         try:
-            params["sign"] = _sign_alipay_rsa2(params, settings.alipay_private_key)
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(settings.alipay_gateway, data=params)
-                data = resp.json()
+            params["sign"] = sign_alipay_params_rsa2(params, settings.alipay_private_key)
+            data = await alipay_gateway_request(params, timeout=10.0)
             token_resp = data.get("alipay_system_oauth_token_response") or {}
+            # 错误体也可能在 error_response
+            if not token_resp and data.get("error_response"):
+                err = data["error_response"]
+                raise AppException(50033, err.get("sub_msg") or err.get("msg") or "支付宝 OAuth 失败")
             if token_resp.get("code") and token_resp.get("code") != "10000":
                 raise AppException(50033, token_resp.get("sub_msg") or token_resp.get("msg") or "支付宝 OAuth 失败")
             user_id = token_resp.get("user_id") or token_resp.get("open_id")
             if not user_id:
-                raise AppException(50033, "支付宝未返回用户标识")
+                # 便于排查：常见是签名错误、app_id 不匹配
+                preview = {k: data.get(k) for k in ("error_response", "alipay_system_oauth_token_response") if k in data}
+                logger.error("支付宝 OAuth 无 user_id，响应摘要=%s", preview or list(data.keys())[:8])
+                raise AppException(50033, "支付宝未返回用户标识（请核对 ALIPAY_APP_ID / 应用私钥是否与开放平台一致）")
             return {"alipay_user_id": user_id, "is_mock": False}
         except AppException:
             raise

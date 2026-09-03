@@ -5,7 +5,8 @@ const prefUtil = require('../../utils/preferences')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
 const voucherUtil = require('../../utils/voucher')
-const { enableAlipayPhoneBind, enableNicknameInput, shouldShowDevTips } = require('../../config/env')
+const clientConfig = require('../../utils/clientConfig')
+const { shouldShowDevTips } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
@@ -75,9 +76,10 @@ Page({
       app._privacyPopup.show()
     }
     this.setData({
-      canAlipayPhone: !!enableAlipayPhoneBind,
-      useAlipayNickname: !!enableNicknameInput,
       showDevTips: shouldShowDevTips()
+    })
+    clientConfig.loadClientConfig().then(() => {
+      this.setData(clientConfig.alipayPrivacyPageData())
     })
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
@@ -250,7 +252,7 @@ Page({
     }
     try {
       this.setData({ savingName: true })
-      const res = await api.post('/miniprogram/member/register', {
+      const res = await auth.registerMember({
         nickname,
         avatar_url: this.data.avatarUrl || app.globalData.avatarUrl || null
       })
@@ -278,7 +280,11 @@ Page({
         nicknameDraft: '',
         savingName: false
       })
-      my.showToast({ content: '已更新昵称', type: 'success' })
+      const tip = (res && res.welcome_coupon_issued)
+        ? `已赠送「${(res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'}」`
+        : '已更新昵称'
+      my.showToast({ content: tip, type: 'success' })
+      if (res && res.welcome_coupon_issued) this.loadWallet()
     } catch (e) {
       this.setData({ savingName: false })
       my.showToast({ content: e.message || '保存失败', type: 'fail' })
@@ -295,14 +301,14 @@ Page({
     my.showToast({ content: '已同意，请再点授权手机号', type: 'success' })
   },
 
-  onGetPhoneAuthorize() {
-    phoneAuth.handleGetPhoneAuthorize(this, null, (encrypted) => {
+  onGetPhoneAuthorize(e) {
+    phoneAuth.handleGetAuthorizeSuccess(this, e || {}, (encrypted) => {
       this._savePhone({ alipay_phone_encrypted: encrypted })
     })
   },
 
   onGetPhoneAuthorizeFail(e) {
-    phoneAuth.handleGetPhoneAuthorize(this, e || { errorMessage: '未授权' }, null)
+    phoneAuth.handleAuthError(this, e || { errorMessage: '用户拒绝授权' })
   },
 
   async bindPhone() {
@@ -314,9 +320,10 @@ Page({
     await this._savePhone({ phone })
   },
 
-  async _savePhone(payload) {
+  async _savePhone(payload, retried = false) {
     try {
       my.showLoading({ content: '绑定中' })
+      await auth.ensureLogin()
       const res = await api.post('/miniprogram/member/phone', payload)
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
@@ -325,11 +332,28 @@ Page({
         })
       }
       my.hideLoading()
-      my.showToast({ content: '绑定成功', type: 'success' })
+      if (res && res.welcome_coupon_issued) {
+        const cname = (res.welcome_coupon && res.welcome_coupon.name) || '新客券'
+        my.showToast({ content: `绑定成功，已赠送「${cname}」`, type: 'success' })
+      } else {
+        my.showToast({ content: '绑定成功', type: 'success' })
+      }
       this.setData({ phone: res.phone || this.data.phoneInput, phoneInput: '' })
+      if (res && res.welcome_coupon_issued) {
+        this._profileLoadedAt = 0
+        this.loadWallet()
+      }
     } catch (e) {
+      const msg = String((e && e.message) || '')
+      if (!retried && /顾客不存在|已禁用|令牌已失效|请先登录|无效顾客|401/.test(msg)) {
+        try {
+          my.hideLoading()
+          await auth.ensureLogin()
+          return this._savePhone(payload, true)
+        } catch (_) { /* fallthrough */ }
+      }
       my.hideLoading()
-      my.showToast({ content: e.message || '绑定失败', type: 'fail' })
+      my.showToast({ content: msg || '绑定失败', type: 'fail' })
     }
   },
 

@@ -1,41 +1,17 @@
 """支付宝开放平台客户端（预下单 / 退款，RSA2）"""
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
-from urllib.parse import urlencode
-
-import httpx
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException
+from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa2
 
 logger = logging.getLogger(__name__)
-
-
-def _load_private_key(pem: str):
-    pem = pem.strip()
-    if not pem.startswith("-----"):
-        pem = (
-            "-----BEGIN RSA PRIVATE KEY-----\n"
-            + "\n".join(pem[i : i + 64] for i in range(0, len(pem), 64))
-            + "\n-----END RSA PRIVATE KEY-----"
-        )
-    return serialization.load_pem_private_key(pem.encode(), password=None)
-
-
-def _sign(params: dict[str, str], private_key_pem: str) -> str:
-    items = sorted((k, v) for k, v in params.items() if v is not None and v != "" and k not in ("sign", "sign_type"))
-    content = "&".join(f"{k}={v}" for k, v in items)
-    key = _load_private_key(private_key_pem)
-    sig = key.sign(content.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
-    return base64.b64encode(sig).decode("utf-8")
 
 
 def _configured() -> bool:
@@ -50,6 +26,7 @@ async def _gateway_call(method: str, biz_content: dict[str, Any], *, allow_codes
     params = {
         "app_id": settings.alipay_app_id,
         "method": method,
+        "format": "JSON",
         "charset": "utf-8",
         "sign_type": "RSA2",
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -57,12 +34,10 @@ async def _gateway_call(method: str, biz_content: dict[str, Any], *, allow_codes
         "notify_url": settings.alipay_notify_url,
         "biz_content": json.dumps(biz_content, ensure_ascii=False, separators=(",", ":")),
     }
-    params["sign"] = _sign(params, settings.alipay_private_key)
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.post(settings.alipay_gateway, data=params)
-    data = resp.json()
+    params["sign"] = sign_alipay_params_rsa2(params, settings.alipay_private_key)
+    data = await alipay_gateway_request(params, timeout=20.0)
     resp_key = method.replace(".", "_") + "_response"
-    body = data.get(resp_key) or data
+    body = data.get(resp_key) or data.get("error_response") or data
     ok_codes = allow_codes or {"10000"}
     if str(body.get("code")) not in ok_codes:
         logger.error("支付宝 API 错误 %s: %s", method, body)

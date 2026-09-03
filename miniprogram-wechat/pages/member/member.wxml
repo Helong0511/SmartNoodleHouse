@@ -230,8 +230,8 @@
     >微信一键绑定手机号</button>
 
     <view class="or" wx:if="{{canWxPhone}}">或手动输入</view>
-
-    <view class="tip dev-tip" wx:if="{{showDevTips && !canWxPhone}}">开发提示：未在公众平台配置「手机号」隐私项时，请直接手动输入；配置完成后将 config/env.js 中 ENABLE_WX_PRIVACY_APIS 改为 true。</view>
+    <view class="tip" wx:if="{{!canWxPhone}}">请输入 11 位手机号完成绑定。一键取号开关：.env → ENABLE_WX_PHONE_BIND。</view>
+    <view class="tip dev-tip" wx:if="{{showDevTips}}">隐私开关：ENABLE_WX_AVATAR / NICKNAME / PHONE_BIND（改后重启后端）</view>
 
     <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" bindinput="onPhoneInput" />
 

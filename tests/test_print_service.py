@@ -1,4 +1,4 @@
-"""芯烨云厨房小票打印测试"""
+"""厨房小票打印测试"""
 import re
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -7,6 +7,7 @@ import pytest
 
 from app.core.biz_no import BIZ_OT, generate_no
 from app.models import Order, OrderItem, Store
+from app.services.escpos_client import xpyun_markup_to_escpos
 from app.services.print_service import (
     PrintService,
     TICKET_KITCHEN,
@@ -101,12 +102,69 @@ async def test_print_order_mock_when_not_configured(db_session, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_xpyun_markup_to_escpos_contains_cut_and_text():
+    raw = "<C><B>厨房制作单</B></C><BR>牛肉面<BR><CUT>"
+    data = xpyun_markup_to_escpos(raw)
+    assert b"\x1dV\x01" in data
+    assert "厨房制作单".encode("gbk") in data
+
+
+@pytest.mark.asyncio
+async def test_print_order_calls_local_escpos(db_session, monkeypatch):
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("XPYUN_ENABLED", "true")
+    monkeypatch.setenv("PRINTER_MODE", "local")
+    monkeypatch.setenv("PRINTER_HOST", "192.168.1.200")
+    monkeypatch.setenv("PRINTER_PORT", "9100")
+    get_settings.cache_clear()
+
+    store = Store(id=901, store_no="SH01", name="面馆", status=1)
+    db_session.add(store)
+    await db_session.flush()
+    order = Order(
+        id=9001,
+        order_no=generate_no(BIZ_OT, store.store_no),
+        store_id=store.id,
+        status="PAID",
+        payment_status="PAID",
+        subtotal=Decimal("10.00"),
+        total_amount=Decimal("10.00"),
+        channel="WECHAT",
+    )
+    db_session.add(order)
+    await db_session.flush()
+    db_session.add(
+        OrderItem(
+            id=9002,
+            order_id=order.id,
+            product_id=1,
+            product_name_snapshot="测试面",
+            unit_price_snapshot=Decimal("10.00"),
+            quantity=1,
+            subtotal=Decimal("10.00"),
+        )
+    )
+    await db_session.flush()
+
+    with patch("app.services.print_service.EscposClient.print_ticket", new_callable=AsyncMock) as mock_print:
+        mock_print.return_value = {"code": 0, "msg": "ok", "mode": "local"}
+        result = await PrintService.print_order(db_session, order.id)
+        assert result == {"code": 0, "msg": "ok", "mode": "local"}
+        mock_print.assert_awaited_once()
+        assert order.order_no in mock_print.call_args.args[0]
+
+    get_settings.cache_clear()
+
+
 @pytest.mark.asyncio
 async def test_print_order_calls_xpyun_api(db_session, monkeypatch):
     from app.core.config import get_settings
 
     get_settings.cache_clear()
     monkeypatch.setenv("XPYUN_ENABLED", "true")
+    monkeypatch.setenv("PRINTER_MODE", "xpyun")
     monkeypatch.setenv("XPYUN_USER", "dev@example.com")
     monkeypatch.setenv("XPYUN_USER_KEY", "testkey")
     monkeypatch.setenv("XPYUN_PRINTER_SN", "XPY123456789A")

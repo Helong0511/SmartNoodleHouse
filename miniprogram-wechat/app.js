@@ -2,6 +2,7 @@ const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const tabCartBadge = require('./utils/tabCartBadge')
+const clientConfig = require('./utils/clientConfig')
 
 App({
   globalData: {
@@ -16,7 +17,11 @@ App({
     channel: 'wechat',
     cart: [],
     needPrivacyPopup: false,
-    privacyResolve: null
+    privacyResolve: null,
+    enableWxPhoneBind: false,
+    enableWxAvatar: true,
+    enableWxNickname: true,
+    clientConfig: null
   },
   onLaunch(options) {
     if (!this.globalData.apiBase) {
@@ -35,6 +40,7 @@ App({
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
+    clientConfig.loadClientConfig().catch(() => {})
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

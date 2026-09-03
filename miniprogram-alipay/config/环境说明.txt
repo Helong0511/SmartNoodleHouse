@@ -1,43 +1,17 @@
 # 支付宝小程序 — 环境配置说明
 # ═══════════════════════════════════════════════════════════════
-# 主配置文件：config/env.js（改 API 地址、隐私开关）
-# 工程配置：  mini.project.json（IDE 工程格式）
-# 应用配置：  app.json（usePrivacyCheck: true）
-# 后端对应：  项目根 .env（ALIPAY_APP_ID、ALIPAY_AES_KEY、DEV_LAN_HOST）
+# 主配置：config/env.js（仅 API 地址等）
+# 隐私开关：项目根 .env（经 /miniprogram/config 下发，改后重启后端）
+#   ENABLE_ALIPAY_AVATAR / ENABLE_ALIPAY_NICKNAME / ENABLE_ALIPAY_PHONE_BIND
 # ═══════════════════════════════════════════════════════════════
 
-【本地调试 develop / 体验 trial】
-──────────────────────────────────────────────────────────────
-  文件                          配置项                    典型值
-  ────────────────────────────────────────────────────────────
-  项目根 .env                   APP_ENV                   development
-  项目根 .env                   APP_HOST                  0.0.0.0
-  项目根 .env                   H5_PUBLIC_BASE_URL        http://192.168.x.x:5173
-  项目根 .env                   DEV_LAN_HOST              192.168.x.x
-  项目根 .env                   MINI_PROGRAM_ENV_VERSION  develop
-  项目根 .env                   ALIPAY_AES_KEY            留空可手输手机号；测授权时填写
-  config/env.js                 DEV_LAN_HOST              192.168.x.x
-  config/env.js                 ENABLE_ALIPAY_PRIVACY_APIS false（develop 自动开）
-  支付宝开发者工具              联调设置                  开启；真机预览测隐私弹窗
+【个人主体测试】
+  ENABLE_ALIPAY_AVATAR=true
+  ENABLE_ALIPAY_NICKNAME=true
+  ENABLE_ALIPAY_PHONE_BIND=false   ← 个人无法申请一键取号，手输手机号
 
-【生产 release】
-──────────────────────────────────────────────────────────────
-  文件                          配置项                    典型值
-  ────────────────────────────────────────────────────────────
-  项目根 .env                   APP_ENV                   production
-  项目根 .env                   H5_PUBLIC_BASE_URL        https://你的域名
-  项目根 .env                   MINI_PROGRAM_ENV_VERSION  release
-  项目根 .env                   ALIPAY_AES_KEY            开放平台接口内容加密 AES（必填）
-  config/env.js                 PROD_API_BASE             https://你的域名/api/v1
-  config/env.js                 ENABLE_ALIPAY_PRIVACY_APIS true
-  open.alipay.com               服务器域名白名单          HTTPS 域名
-  open.alipay.com               小程序隐私政策            声明手机号等
-  open.alipay.com               能力申请                  获取会员手机号
+【企业正式】
+  三项均可 true（须开放平台隐私政策 + 已开通「获取会员手机号」）
 
-【与微信差异】
-  支付宝不支持 getPhoneNumber|agreePrivacyAuthorization 组合
-  须先点「同意隐私并授权手机号」(agreePrivacyAuthorization)
-  再点「支付宝一键绑定手机号」(getAuthorize scope=phoneNumber)
-
-【三处 IP/域名必须对齐】
-  同 miniprogram-wechat/config/环境说明.txt
+【改局域网 IP】
+  config/env.js → DEV_LAN_HOST

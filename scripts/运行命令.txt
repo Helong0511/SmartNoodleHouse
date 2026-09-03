@@ -101,6 +101,16 @@
 # 5. 头像/昵称使用 chooseAvatar + input type=nickname（勿再用 my.getOpenUserInfo 一键取）
 # 文档：https://opendocs.alipay.com/mini/api/getphonenumber
 #
+# ── 厨房热敏打印机（芯烨 XP-80T USB+WiFi）──
+# XP-80T WiFi 是局域网 ESC/POS 打印，不是芯烨云打印。
+#   1. 打印机连店内 WiFi，打印自检页查看 IP（如 192.168.1.200）
+#   2. .env：XPYUN_ENABLED=true、PRINTER_MODE=local、PRINTER_HOST=打印机IP、PRINTER_PORT=9100
+#   3. 后端须与打印机同一局域网（或路由可达）；重启 uvicorn
+#   4. KDS 点「开始制作」或订单「补打小票」测试
+# 若使用芯烨「云打印机」型号（非 XP-80T 局域网版）：
+#   PRINTER_MODE=xpyun，并配置 XPYUN_USER / XPYUN_USER_KEY / XPYUN_PRINTER_SN
+#   开放平台 https://www.xpyun.net
+#
 # ── 规格「默认项」不保存/不显示 ──
 # 1. 执行 sql/tools/009_option_is_default.sql（老库加 is_default 列）
 # 2. 修改 backend 代码后必须重启 uvicorn（否则 API 仍返回旧字段，保存会被静默丢弃）
@@ -194,4 +204,26 @@ http://127.0.0.1:5173/display?store_id=1
 
 选择 餐品后   点击 【加入购物车】按钮成功后 直接跳转到  购物车页面
 微信、支付宝 小程序 同步
+
+cd E:\SmartNoodleHouse\backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+cd E:\SmartNoodleHouse\frontend
+npm run dev -- --host 0.0.0.0 --port 5173
+
+
+应用公钥：
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAij05v/+ipLl+U3qxXOPNmgCqmZ/jtegmAIE06ghkOUZZeqiJcInjGzccAi5l1j3pjpjYS7Iv6QFsHzjPafHlODURG6LHnnckuCN4oENVkRae/HMGLce6B+oEqMjWy8KbLLdf2q+to5+pdC5Ue8Akf/sSCNV0EKv7EeKWruDxeI+WdjsUlfMKV85Xv4jI5DRhrVn8FIzQtYWTwz9arPZD8E7TE63KwA1s0Em/+fM4fBm4n3AzcbareK+XRlttWGZ7i8byNI9+SrZAwqVHBIXaBWOsXMhvbSzQ5ms+Xh/kWO1b9ytVe5f94BUX9yLvGpYptLkNbfnfkQSFXGik11ceqQIDAQAB
+
+应用私钥：
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCKPTm//6KkuX5TerFc482aAKqZn+O16CYAgTTqCGQ5Rll6qIlwieMbNxwCLmXWPemOmNhLsi/pAWwfOM9p8eU4NREboseedyS4I3igQ1WRFp78cwYtx7oH6gSoyNbLwpsst1/ar62jn6l0LlR7wCR/+xII1XQQq/sR4pau4PF4j5Z2OxSV8wpXzle/iMjkNGGtWfwUjNC1hZPDP1qs9kPwTtMTrcrADWzQSb/58zh8GbifcDNxtqt4r5dGW21YZnuLxvI0j35KtkDCpUcEhdoFY6xcyG9tLNDmaz5eH+RY7Vv3K1V7l/3gFRf3Iu8alim0uQ1t+d+RBIVcaKTXVx6pAgMBAAECggEAJDth3IHLBjOb+ZNJ01fdtoSAMl2m2DGtbCpxTPnAEwbuQujThQyO2r45+BRjGqEFixtibYyZZA+8X/6K1nDRLEc0YbLrcQw3MpAReKfNUIbGStJ3Bx63EoXyjK5/Jc6uzyyM0guDjkQ1rL7L49d7eZO7qVcQ4aHB33EtH07T204ZRIDDVdTxfdlrrIqwNDQ5KpF36vklV+2230pxM0ypB4OVK1FqRrkMrUSyqiC0v20JfXuNjiHKM2vT1eQRyHAzZTwmb3OSWOYZ53hXYoX/ag/NapMRsi/NKfkZK/37dwEVaf+P3bYnrkg09dvFoIyryrDUZpQXRf9rWhUCNTHUgQKBgQDyr3iOccZWwsctXi1x4P+t589ujVdrnZpChzVSU6nNEl/G3jQZKhgPhk0ngOyJLzfwWYQM6d3sujfgzibWqOlwlQUpdGU2qo4UrNpZifAPEH5g9w9ZyrDCphArQND3WYEFPpJN+TF2yKhx/Xs/DatqaWZ+dTqxSY+rcBQt9TF8uQKBgQCR0s0yibGyZJep3d8TuWG4e/t0pbr06ZzaQjRhp8S7XIvLSkHbE1K3BOcXM3rrkZdLjTiLym5XzSW1hRk3KRKaesPvaqmt318cKNX9Aq33qqwaIprIBw/ZldMEX5jyBT4KskOah6GhNgnGHxUDfb+BtPropA6TIXyNHf+ZQ1kZcQKBgDNiG7BtPoVYMDvW2OBntzrm/fB2VLAgamzzm8KWnDkjTswYeAdr9jQzR1q53VseeEWXbnIdgjOBKhubCnYgxWxk4PbqAhQVAIg4IPMcVYua/mchaEqms85CwuGlk5kLhlnJ6chAnsx7p86a0OGEz2p0bpMP1yF6ZcTyshMY+yVhAoGASRvPxsuj7FVkeESFZ+UkahK2wgepEMri2cYhbuhmyKygZZ5oIAazDJEHrukfcmU+3iECPYuTALAYfMYrGy2bZxmvjCQEx+haTcrnZf7m62mE+WFqCmkH+EWWUvX+vzADp+cx35KqZSGrisnghiyQS95JgUNnDzrVsAZfNB7A1/ECgYEA3EqD2KmlPKRWl7GCfBYbxv+I1PwqeJLFv2kZ9P3dUbU7sX34dYicKtnxiqT/DVXVBAv6dSliSt+1cOMCIiAUmRBYtemAGEJIZFPq2xHraTCpAyIHJx91Axfs5Ga/9FwjZhMCl4uDkUrPugIN/eHyUvzS853Fp12ApoHd1lh0Ex4=
+
+支付宝公钥：
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqummNLrbN+ZlyVPa6evP87Bu555+FgaSOd/AoeIdtXddXF1GBd0abyo+XbgT3VXJRC5+ULGl0hvVVOGCczDyS5rQix/WAPg9/8H8EoI2Y8aPhFCPilNcu/CgF4DT7950EerlT+NuhIWOrS9PfAI3WcTTZr/fMXrgL5a6obX+0ekpPUwhJvbc5pd44etsSZPJrWaRmLg4gDD9dfznX14/7LPKEzcjPmSZujnaB/6wAdJhzSPKiOEDp43fg2kzt37jH2bNUo9VgLamJdQJRNBE3XiRdHDR8W72CVIjMWoMrWPYzqIgXYXk7/nK/GLrLXe1YAwVKatZ5AFXUEyAMOvRQQIDAQAB
+
+
+
+
+
+
 
