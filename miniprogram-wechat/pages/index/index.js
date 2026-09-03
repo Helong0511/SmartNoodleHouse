@@ -11,6 +11,7 @@ const {
 const app = getApp()
 const phoneAuth = require('../../utils/phoneAuth')
 const clientConfig = require('../../utils/clientConfig')
+const avatarUtil = require('../../utils/avatar')
 
 Page({
   data: {
@@ -122,17 +123,29 @@ Page({
           this.setData({ hasTable: false, table: null })
         }
       }
-      const login = await auth.ensureLogin(token)
-      if (!login) {
-        throw new Error('登录失败，请检查网络或稍后重试')
+      let login = null
+      try {
+        login = await auth.ensureLogin(token)
+      } catch (loginErr) {
+        console.error('[bootstrap login]', loginErr)
+        wx.showToast({
+          title: auth.formatError(loginErr, '登录失败'),
+          icon: 'none',
+          duration: 3500
+        })
       }
-      const nickname = String(login.nickname || '')
-      const showMemberPrompt = login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname)
+      // 未登录不得沿用本地缓存资料，必须展示注册引导
+      const loginOk = !!(login && login.customer_token)
+      const nickname = loginOk ? String(login.nickname || '') : ''
+      const showMemberPrompt = loginOk
+        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname))
+        : true
       const ctx = dineCtx.currentDisplay()
+      const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
-        avatarUrl: login.avatar_url || '',
+        avatarUrl: avatarUtil.resolveDisplayUrl(avatarUrl) || avatarUrl,
         phone: '',
         showMemberPrompt,
         ready: true,
@@ -144,26 +157,31 @@ Page({
       })
       auth.fetchCustomerMeSilent().then((me) => {
         if (me && me.phone) this.setData({ phone: me.phone })
+        if (me && me.avatar_url) {
+          app.globalData.avatarUrl = me.avatar_url
+          this.setData({ avatarUrl: avatarUtil.resolveDisplayUrl(me.avatar_url) })
+        }
       })
-      if (login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
+      if (loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         wx.setStorageSync('nickname', login.nickname)
-      } else {
+      } else if (loginOk) {
         try { wx.removeStorageSync('nickname') } catch (_) {}
       }
-      if (login.avatar_url) {
+      if (loginOk && login.avatar_url) {
         app.globalData.avatarUrl = login.avatar_url
         wx.setStorageSync('avatar_url', login.avatar_url)
-      } else {
+      } else if (loginOk) {
         app.globalData.avatarUrl = ''
         try { wx.removeStorageSync('avatar_url') } catch (_) {}
       }
-      if (login.customer_id) {
+      if (loginOk && login.customer_id) {
         app.globalData.customerId = login.customer_id
         wx.setStorageSync('customer_id', login.customer_id)
       }
-      if (login.customer_no) wx.setStorageSync('customer_no', login.customer_no)
+      if (loginOk && login.customer_no) wx.setStorageSync('customer_no', login.customer_no)
       await this.refreshPrivacyState()
-      const shouldSkipPrompt = login
+      // 以服务端 need_member_prompt / 昵称为准，禁止仅凭本地缓存跳过注册
+      const shouldSkipPrompt = loginOk
         && login.need_member_prompt === false
         && !auth.isPlaceholderNickname(login.nickname)
       if (shouldSkipPrompt) {
@@ -171,8 +189,14 @@ Page({
         return
       }
     } catch (e) {
-      this.setData({ loading: false, ready: true })
-      const msg = (e && e.message) || '登录失败'
+      this.setData({
+        loading: false,
+        ready: true,
+        showMemberPrompt: true,
+        nickname: '',
+        avatarUrl: ''
+      })
+      const msg = auth.formatError(e, '登录失败')
       console.error('[bootstrap login]', e)
       wx.showModal({ title: '登录失败', content: msg, showCancel: false })
     }
@@ -223,13 +247,7 @@ Page({
       wx.showToast({ title: '未选头像，可试相册选图', icon: 'none' })
       return
     }
-    this.setData({
-      avatarUrl: url,
-      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:已选')
-    })
-    app.globalData.avatarUrl = url
-    wx.setStorageSync('avatar_url', url)
-    wx.showToast({ title: '头像已选择', icon: 'success' })
+    this.persistChosenAvatar(url)
   },
 
   onPickLocalAvatar() {
@@ -246,10 +264,7 @@ Page({
               wx.showToast({ title: '未选择图片', icon: 'none' })
               return
             }
-            this.setData({ avatarUrl: url })
-            app.globalData.avatarUrl = url
-            wx.setStorageSync('avatar_url', url)
-            wx.showToast({ title: '头像已选择', icon: 'success' })
+            this.persistChosenAvatar(url)
           },
           fail: (err) => {
             if (err && err.errMsg && err.errMsg.indexOf('cancel') >= 0) return
@@ -265,14 +280,40 @@ Page({
         success: (res) => {
           const url = (res.tempFilePaths && res.tempFilePaths[0]) || ''
           if (!url) return
-          this.setData({ avatarUrl: url })
-          app.globalData.avatarUrl = url
-          wx.setStorageSync('avatar_url', url)
-          wx.showToast({ title: '头像已选择', icon: 'success' })
+          this.persistChosenAvatar(url)
         }
       })
     }
     pick()
+  },
+
+  async persistChosenAvatar(localOrRemoteUrl) {
+    wx.showLoading({ title: '上传头像' })
+    try {
+      const remote = await avatarUtil.ensureRemoteAvatar(localOrRemoteUrl)
+      const display = avatarUtil.resolveDisplayUrl(remote) || remote
+      this.setData({
+        avatarUrl: display,
+        debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:已保存')
+      })
+      app.globalData.avatarUrl = remote
+      wx.setStorageSync('avatar_url', remote)
+      wx.hideLoading()
+      wx.showToast({ title: '头像已保存', icon: 'success' })
+    } catch (e) {
+      wx.hideLoading()
+      this.setData({
+        avatarUrl: localOrRemoteUrl,
+        debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:待重试')
+      })
+      app.globalData.avatarUrl = localOrRemoteUrl
+      wx.setStorageSync('avatar_url', localOrRemoteUrl)
+      wx.showToast({
+        title: auth.formatError(e, '头像上传失败，注册时将重试'),
+        icon: 'none',
+        duration: 2500
+      })
+    }
   },
 
   onNicknameInput(e) {
@@ -369,13 +410,25 @@ Page({
     try {
       this.setData({ saving: true })
       wx.showLoading({ title: '保存中' })
+      let avatarPath = this.data.avatarUrl || app.globalData.avatarUrl || ''
+      const storedAvatar = wx.getStorageSync('avatar_url') || app.globalData.avatarUrl || ''
+      if (avatarUtil.isPersistableAvatarUrl(storedAvatar)) {
+        avatarPath = storedAvatar
+      }
+      try {
+        avatarPath = await avatarUtil.ensureRemoteAvatar(avatarPath)
+      } catch (upErr) {
+        if (avatarUtil.needsUpload(avatarPath)) {
+          throw upErr
+        }
+      }
       const res = await auth.registerMember({
         nickname: nickname || '面馆会员',
-        avatar_url: this.data.avatarUrl || null,
+        avatar_url: avatarUtil.isPersistableAvatarUrl(avatarPath) ? avatarPath : null,
         phone: phoneInput || null
       })
       app.globalData.nickname = (res && res.nickname) || nickname || '面馆会员'
-      app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
+      app.globalData.avatarUrl = (res && res.avatar_url) || (avatarUtil.isPersistableAvatarUrl(avatarPath) ? avatarPath : '') || ''
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
           customer_id: res.customer_id,
@@ -394,6 +447,7 @@ Page({
       if (app.globalData.avatarUrl) wx.setStorageSync('avatar_url', app.globalData.avatarUrl)
       this.setData({
         nickname: app.globalData.nickname,
+        avatarUrl: avatarUtil.resolveDisplayUrl(app.globalData.avatarUrl),
         phone: (res && res.phone) || this.data.phone || phoneInput || '',
         phoneInput: '',
         showMemberPrompt: false,

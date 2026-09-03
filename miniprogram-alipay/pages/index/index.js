@@ -4,6 +4,7 @@ const dineCtx = require('../../utils/context')
 const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
 const clientConfig = require('../../utils/clientConfig')
+const avatarUtil = require('../../utils/avatar')
 const {
   resolveApiBase,
   getEnvDebugInfo,
@@ -156,19 +157,17 @@ Page({
           duration: 3500
         })
       }
-      const nickname = login
-        ? String(login.nickname || '')
-        : String(gd.nickname || '')
-      const showMemberPrompt = login
+      // 未登录不得沿用本地缓存资料，必须展示注册引导
+      const loginOk = !!(login && login.customer_token)
+      const nickname = loginOk ? String(login.nickname || '') : ''
+      const showMemberPrompt = loginOk
         ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nickname))
-        : auth.isPlaceholderNickname(nickname)
-      const avatarUrl = login
-        ? String(login.avatar_url || '')
-        : String(gd.avatarUrl || '')
+        : true
+      const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
       this.setData({
         loading: false,
         nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
-        avatarUrl,
+        avatarUrl: avatarUtil.resolveDisplayUrl(avatarUrl) || avatarUrl,
         phone: '',
         showMemberPrompt,
         ready: true,
@@ -178,22 +177,26 @@ Page({
       })
       auth.fetchCustomerMeSilent().then((me) => {
         if (me && me.phone) this.setData({ phone: me.phone })
+        if (me && me.avatar_url) {
+          app && (app.globalData.avatarUrl = me.avatar_url)
+          this.setData({ avatarUrl: avatarUtil.resolveDisplayUrl(me.avatar_url) })
+        }
       })
-      if (login && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
+      if (loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
         my.setStorageSync({ key: 'nickname', data: login.nickname })
-      } else if (login && auth.isPlaceholderNickname(login.nickname)) {
+      } else if (loginOk) {
         try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
       }
-      if (login && login.customer_id && app) {
+      if (loginOk && login.customer_id && app) {
         app.globalData.customerId = login.customer_id
         my.setStorageSync({ key: 'customer_id', data: login.customer_id })
       }
-      if (login && login.customer_no) {
+      if (loginOk && login.customer_no) {
         my.setStorageSync({ key: 'customer_no', data: login.customer_no })
       }
       await this.refreshPrivacyState()
       // 以服务端 need_member_prompt / 昵称为准，禁止仅凭本地缓存跳过注册
-      const shouldSkipPrompt = login
+      const shouldSkipPrompt = loginOk
         && login.need_member_prompt === false
         && !auth.isPlaceholderNickname(login.nickname)
       if (shouldSkipPrompt) {
@@ -201,7 +204,14 @@ Page({
         return
       }
     } catch (e) {
-      this.setData({ loading: false, ready: true, hasTable: false })
+      this.setData({
+        loading: false,
+        ready: true,
+        hasTable: false,
+        showMemberPrompt: true,
+        nickname: '',
+        avatarUrl: ''
+      })
       my.alert({ title: '初始化失败', content: auth.formatError(e, '初始化失败') })
     }
   },
@@ -243,8 +253,7 @@ Page({
       my.showToast({ content: errMsg || '未选头像', type: 'none' })
       return
     }
-    this.applyProfile('', url)
-    my.showToast({ content: '头像已选择', type: 'success' })
+    this.persistChosenAvatar(url)
   },
 
   onPickLocalAvatar() {
@@ -257,10 +266,28 @@ Page({
           my.showToast({ content: '未选择图片', type: 'none' })
           return
         }
-        this.applyProfile('', url)
-        my.showToast({ content: '头像已选择', type: 'success' })
+        this.persistChosenAvatar(url)
       }
     })
+  },
+
+  async persistChosenAvatar(localOrRemoteUrl) {
+    my.showLoading({ content: '上传头像' })
+    try {
+      const remote = await avatarUtil.ensureRemoteAvatar(localOrRemoteUrl)
+      this.applyProfile('', remote)
+      my.hideLoading()
+      my.showToast({ content: '头像已保存', type: 'success' })
+    } catch (e) {
+      my.hideLoading()
+      // 上传失败仍先本地预览，注册时再试上传
+      this.applyProfile('', localOrRemoteUrl)
+      my.showToast({
+        content: auth.formatError(e, '头像上传失败，注册时将重试'),
+        type: 'none',
+        duration: 2500
+      })
+    }
   },
 
   applyProfile(nickname, avatarUrl) {
@@ -272,9 +299,14 @@ Page({
       my.setStorageSync({ key: 'nickname', data: nickname })
     }
     if (avatarUrl) {
-      patch.avatarUrl = avatarUrl
-      if (app) app.globalData.avatarUrl = avatarUrl
-      my.setStorageSync({ key: 'avatar_url', data: avatarUrl })
+      const storePath = avatarUtil.isPersistableAvatarUrl(avatarUrl)
+        ? (avatarUrl.includes('/uploads/')
+          ? avatarUrl.slice(avatarUrl.indexOf('/uploads/')).split('?')[0]
+          : avatarUrl)
+        : avatarUrl
+      patch.avatarUrl = avatarUtil.resolveDisplayUrl(storePath) || storePath
+      if (app) app.globalData.avatarUrl = storePath
+      my.setStorageSync({ key: 'avatar_url', data: storePath })
     }
     if (Object.keys(patch).length) this.setData(patch)
   },
@@ -371,13 +403,26 @@ Page({
     try {
       this.setData({ saving: true })
       my.showLoading({ content: '保存中' })
+      let avatarPath = this.data.avatarUrl || (app && app.globalData.avatarUrl) || ''
+      // data 里可能已是完整可展示 URL，优先用 storage / global 的持久路径
+      const storedAvatar = auth.readStorage('avatar_url') || (app && app.globalData.avatarUrl) || ''
+      if (avatarUtil.isPersistableAvatarUrl(storedAvatar)) {
+        avatarPath = storedAvatar
+      }
+      try {
+        avatarPath = await avatarUtil.ensureRemoteAvatar(avatarPath)
+      } catch (upErr) {
+        if (avatarUtil.needsUpload(avatarPath)) {
+          throw upErr
+        }
+      }
       const res = await auth.registerMember({
         nickname: nickname || '面馆会员',
-        avatar_url: this.data.avatarUrl || null,
+        avatar_url: avatarUtil.isPersistableAvatarUrl(avatarPath) ? avatarPath : null,
         phone: phoneInput || null
       })
       app.globalData.nickname = (res && res.nickname) || nickname || '面馆会员'
-      app.globalData.avatarUrl = (res && res.avatar_url) || this.data.avatarUrl || ''
+      app.globalData.avatarUrl = (res && res.avatar_url) || (avatarUtil.isPersistableAvatarUrl(avatarPath) ? avatarPath : '') || ''
       if (res && res.customer_token) {
         auth.refreshCustomerToken(app, res.customer_token, {
           customer_id: res.customer_id,
@@ -398,6 +443,7 @@ Page({
       }
       this.setData({
         nickname: app.globalData.nickname,
+        avatarUrl: avatarUtil.resolveDisplayUrl(app.globalData.avatarUrl),
         phone: (res && res.phone) || this.data.phone || phoneInput || '',
         phoneInput: '',
         showMemberPrompt: false,

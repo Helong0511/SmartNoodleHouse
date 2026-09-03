@@ -120,6 +120,7 @@ function extractRequestFailMessage(err) {
     if (data.message) return String(data.message)
     if (typeof data.detail === 'string') return data.detail
   }
+  // 支付宝 fail 常用 errorMessage，微信常用 errMsg；两端都检查以保持同步
   return String(err.errorMessage || err.errMsg || err.message || err.error || '')
 }
 

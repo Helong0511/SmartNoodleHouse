@@ -17,6 +17,7 @@ from app.services.coupon_service import CouponService
 from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
+from app.utils.upload import save_upload
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
@@ -27,6 +28,21 @@ def _issue_customer_token(customer: Customer, channel: str = "wechat") -> str:
         channel,
         token_version=int(getattr(customer, "token_version", 0) or 0),
     )
+
+
+def _persistable_avatar_url(url: str | None) -> str | None:
+    """只接受已上传到本系统的头像路径，拒绝小程序本地临时路径。"""
+    if not url:
+        return None
+    u = str(url).strip()
+    if not u:
+        return None
+    if u.startswith("/uploads/"):
+        return u.split("?", 1)[0]
+    marker = "/uploads/"
+    if marker in u and (u.startswith("http://") or u.startswith("https://")):
+        return u[u.find(marker) :].split("?", 1)[0]
+    return None
 
 
 class WechatMiniLoginRequest(BaseModel):
@@ -351,8 +367,9 @@ async def register_member(
     if data.nickname:
         customer.nickname = data.nickname
         customer.display_name = data.nickname
-    if data.avatar_url:
-        customer.avatar_url = data.avatar_url
+    avatar = _persistable_avatar_url(data.avatar_url)
+    if avatar:
+        customer.avatar_url = avatar
     if data.phone:
         customer = await CustomerService.try_link_by_phone(db, customer, data.phone)
 
@@ -383,6 +400,39 @@ async def register_member(
     if welcome:
         msg = f"注册成功，已赠送「{welcome.get('name') or CouponService.welcome_template_name()}」"
     return success(payload, message=msg, request=request)
+
+
+@router.post("/member/avatar")
+async def upload_member_avatar(
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+    file: UploadFile = File(...),
+):
+    """小程序上传会员头像（微信/支付宝 chooseAvatar 仅返回本地临时路径，须先上传）。"""
+    name = (file.filename or "").strip() or "avatar.jpg"
+    if "." not in name:
+        # 部分端上传无扩展名，按 jpeg 兜底（save_upload 会做魔数校验）
+        ct = (file.content_type or "").lower()
+        if "png" in ct:
+            name = "avatar.png"
+        elif "webp" in ct:
+            name = "avatar.webp"
+        elif "gif" in ct:
+            name = "avatar.gif"
+        else:
+            name = "avatar.jpg"
+        file.filename = name
+    url = await save_upload(file, subdir="avatars")
+    customer.avatar_url = url
+    await db.flush()
+    return success(
+        {
+            "avatar_url": customer.avatar_url,
+            "customer_id": customer.id,
+        },
+        request=request,
+    )
 
 
 @router.post("/member/phone")

@@ -6,6 +6,7 @@ const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
 const voucherUtil = require('../../utils/voucher')
 const clientConfig = require('../../utils/clientConfig')
+const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
@@ -124,11 +125,12 @@ Page({
     if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
     const view = prefView || prefUtil.buildPrefDisplay({})
+    const rawAvatar = profile.avatar_url || app.globalData.avatarUrl || ''
     this.setData({
       nickname,
       displayName,
       avatarLetter: displayName.charAt(0) || '会',
-      avatarUrl: profile.avatar_url || app.globalData.avatarUrl || '',
+      avatarUrl: avatarUtil.resolveDisplayUrl(rawAvatar),
       customerNo: profile.customer_no || app.globalData.customerNo || '',
       prefs: view.prefs || [],
       prefsConfirmed: view.confirmed || [],
@@ -254,12 +256,15 @@ Page({
       this.setData({ savingName: true })
       const res = await auth.registerMember({
         nickname,
-        avatar_url: this.data.avatarUrl || app.globalData.avatarUrl || null
+        avatar_url: (() => {
+          const raw = app.globalData.avatarUrl || auth.readStorage('avatar_url') || ''
+          return avatarUtil.isPersistableAvatarUrl(raw) ? raw : null
+        })()
       })
       const saved = (res && res.nickname) || nickname
-      const savedAvatar = (res && res.avatar_url) || this.data.avatarUrl || app.globalData.avatarUrl || ''
+      const savedAvatar = (res && res.avatar_url) || app.globalData.avatarUrl || ''
       app.globalData.nickname = saved
-      if (savedAvatar) {
+      if (savedAvatar && avatarUtil.isPersistableAvatarUrl(savedAvatar)) {
         app.globalData.avatarUrl = savedAvatar
         my.setStorageSync({ key: 'avatar_url', data: savedAvatar })
       }
@@ -275,7 +280,7 @@ Page({
         nickname: saved,
         displayName: saved,
         avatarLetter: saved.charAt(0) || '会',
-        avatarUrl: savedAvatar,
+        avatarUrl: avatarUtil.resolveDisplayUrl(savedAvatar),
         editingName: false,
         nicknameDraft: '',
         savingName: false
