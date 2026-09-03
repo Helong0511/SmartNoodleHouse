@@ -187,6 +187,13 @@ Page({
       } else if (loginOk) {
         try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
       }
+      if (loginOk && login.avatar_url) {
+        if (app) app.globalData.avatarUrl = login.avatar_url
+        my.setStorageSync({ key: 'avatar_url', data: login.avatar_url })
+      } else if (loginOk) {
+        if (app) app.globalData.avatarUrl = ''
+        try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
+      }
       if (loginOk && login.customer_id && app) {
         app.globalData.customerId = login.customer_id
         my.setStorageSync({ key: 'customer_id', data: login.customer_id })
