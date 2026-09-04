@@ -1,5 +1,5 @@
 const privacy = require('./utils/privacy')
-const { parseTableTokenFromScan } = require('./utils/scan')
+const { parseTableTokenFromScan, normalizeLaunchQuery } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
 const tabCartBadge = require('./utils/tabCartBadge')
@@ -50,20 +50,30 @@ App({
     tabCartBadge.updateTabCartBadge(this.globalData.cart || auth.readStorage('cart') || [])
   },
   parseLaunch(options) {
-    const q = (options && options.query) || {}
-    let token = q.token || ''
-    let channel = q.channel || ''
+    if (!options) return
+    // 支付宝：query 可能是对象，也可能是 "token=xx&channel=alipay" 字符串
+    const q = normalizeLaunchQuery(options.query)
+    let token = (q.token || '').trim()
+    let channel = (q.channel || '').trim()
 
-    const sceneRaw = (options && options.scene) || q.scene || ''
+    // page / path 上偶发带 ?token=
+    if (!token) {
+      const fromPage = parseTableTokenFromScan(
+        [options.page, options.path, options.query && options.query.page]
+          .filter(Boolean)
+          .join('&')
+      )
+      if (fromPage) token = fromPage
+    }
+
+    const sceneRaw = options.scene || q.scene || ''
     if (!token && sceneRaw) {
       try {
-        const scene = decodeURIComponent(String(sceneRaw))
+        const scene = String(sceneRaw)
         token = parseTableTokenFromScan(scene)
-        if (!channel && scene.indexOf('channel=') >= 0) {
-          scene.split('&').forEach((pair) => {
-            const [k, v] = pair.split('=')
-            if (k === 'channel' && v) channel = v
-          })
+        if (!channel) {
+          const nested = normalizeLaunchQuery(scene)
+          if (nested.channel) channel = nested.channel
         }
       } catch (_) {}
     }

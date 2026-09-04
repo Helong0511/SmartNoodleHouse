@@ -5,6 +5,7 @@ const privacy = require('../../utils/privacy')
 const phoneAuth = require('../../utils/phoneAuth')
 const clientConfig = require('../../utils/clientConfig')
 const avatarUtil = require('../../utils/avatar')
+const { normalizeLaunchQuery } = require('../../utils/scan')
 const {
   resolveApiBase,
   getEnvDebugInfo,
@@ -67,11 +68,19 @@ Page({
       this.setData(clientConfig.alipayPrivacyPageData())
     })
     const app = appRef()
-    if (query.token && app) {
-      app.globalData.tableToken = query.token
-      my.setStorageSync({ key: 'table_token', data: query.token })
+    const q = normalizeLaunchQuery(query)
+    if (q.token && app) {
+      app.globalData.tableToken = q.token
+      my.setStorageSync({ key: 'table_token', data: q.token })
     }
-    if (query.channel && app) app.globalData.channel = query.channel
+    if (q.channel && app) app.globalData.channel = q.channel
+    // IDE/真机：补一次启动参数（Scheme 打开时 onLoad query 偶发为空）
+    try {
+      if (app && typeof app.parseLaunch === 'function') {
+        const launch = (my.getLaunchOptionsSync && my.getLaunchOptionsSync()) || {}
+        app.parseLaunch(launch)
+      }
+    } catch (_) {}
     this.bootstrap()
   },
 

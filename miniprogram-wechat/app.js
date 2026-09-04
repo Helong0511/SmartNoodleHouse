@@ -1,5 +1,5 @@
 const privacy = require('./utils/privacy')
-const { parseTableTokenFromScan } = require('./utils/scan')
+const { parseTableTokenFromScan, normalizeLaunchQuery } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
 const tabCartBadge = require('./utils/tabCartBadge')
@@ -49,20 +49,28 @@ App({
     tabCartBadge.updateTabCartBadge(this.globalData.cart || wx.getStorageSync('cart') || [])
   },
   parseLaunch(options) {
-    const q = (options && options.query) || {}
-    let token = q.token || ''
-    let channel = q.channel || ''
+    if (!options) return
+    const q = normalizeLaunchQuery(options.query)
+    let token = (q.token || '').trim()
+    let channel = (q.channel || '').trim()
 
-    const sceneRaw = (options && options.scene) || q.scene || ''
+    if (!token) {
+      const fromPage = parseTableTokenFromScan(
+        [options.path, options.query && options.query.path]
+          .filter(Boolean)
+          .join('&')
+      )
+      if (fromPage) token = fromPage
+    }
+
+    const sceneRaw = options.scene || q.scene || ''
     if (!token && sceneRaw) {
       try {
-        const scene = decodeURIComponent(String(sceneRaw))
+        const scene = String(sceneRaw)
         token = parseTableTokenFromScan(scene)
-        if (!channel && scene.indexOf('channel=') >= 0) {
-          scene.split('&').forEach((pair) => {
-            const [k, v] = pair.split('=')
-            if (k === 'channel' && v) channel = v
-          })
+        if (!channel) {
+          const nested = normalizeLaunchQuery(scene)
+          if (nested.channel) channel = nested.channel
         }
       } catch (_) {}
     }

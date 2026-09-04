@@ -12,6 +12,7 @@ const app = getApp()
 const phoneAuth = require('../../utils/phoneAuth')
 const clientConfig = require('../../utils/clientConfig')
 const avatarUtil = require('../../utils/avatar')
+const { normalizeLaunchQuery } = require('../../utils/scan')
 
 Page({
   data: {
@@ -65,11 +66,18 @@ Page({
     clientConfig.loadClientConfig().then(() => {
       this.setData(clientConfig.wxPrivacyPageData())
     })
-    if (query.token) {
-      app.globalData.tableToken = query.token
-      wx.setStorageSync('table_token', query.token)
+    const q = normalizeLaunchQuery(query)
+    if (q.token) {
+      app.globalData.tableToken = q.token
+      wx.setStorageSync('table_token', q.token)
     }
-    if (query.channel) app.globalData.channel = query.channel
+    if (q.channel) app.globalData.channel = q.channel
+    try {
+      if (typeof app.parseLaunch === 'function') {
+        const launch = (wx.getLaunchOptionsSync && wx.getLaunchOptionsSync()) || {}
+        app.parseLaunch(launch)
+      }
+    } catch (_) {}
     this.bootstrap()
   },
 

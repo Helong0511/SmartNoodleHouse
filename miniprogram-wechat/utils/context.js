@@ -216,8 +216,10 @@ function scanAndBindTable() {
       onlyFromCamera: false,
       scanType: ['qrCode', 'barCode'],
       success: async (res) => {
-        const token = parseTableTokenFromScan(res.result || res.path || '')
+        const raw = res.result || res.path || res.rawData || ''
+        const token = parseTableTokenFromScan(raw)
         if (!token) {
+          console.warn('[scan] 未解析到 token', raw)
           wx.showToast({ title: '未识别到桌台码', icon: 'none' })
           resolve(null)
           return

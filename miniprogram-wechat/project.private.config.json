@@ -1,6 +1,6 @@
 {
   "libVersion": "3.17.2",
-  "projectname": "%E9%9D%A2%E9%A6%86",
+  "projectname": "%E8%82%A0%E6%97%BA%E9%9D%A2",
   "condition": {},
   "setting": {
     "urlCheck": false,
@@ -14,7 +14,7 @@
     "useStaticServer": false,
     "useLanDebug": false,
     "showES6CompileOption": false,
-    "compileHotReLoad": false,
+    "compileHotReLoad": true,
     "checkInvalidKey": true,
     "ignoreDevUnusedFiles": true,
     "bigPackageSizeSupport": true

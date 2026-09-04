@@ -103,13 +103,16 @@ function getAuthCode() {
       scopes: 'auth_user',
       success: resolve,
       fail: (err) => {
+        const msg = formatError(err, '')
         const env = getEnvDebugInfo()
-        if (env && env.isDevtools) {
+        // IDE 未「选择关联小程序」时平台会弹此错；开发联调允许 mock，避免卡死注册
+        const ideAuthGap = /关联小程序|选择关联|请先\[选择/i.test(msg)
+        if ((env && env.isDevtools) || ideAuthGap) {
           console.warn('[auth] getAuthCode 失败，开发者工具使用 mock 登录', err)
           resolve({ authCode: 'mock:simulator' })
           return
         }
-        reject(new Error(formatError(err, 'getAuthCode 失败，请确认 IDE 已登录支付宝沙箱账号')))
+        reject(new Error(formatError(err, 'getAuthCode 失败，请确认 IDE 已登录并关联小程序')))
       }
     })
   })

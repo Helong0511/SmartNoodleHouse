@@ -31,11 +31,17 @@ const TRIAL_USE_PROD_API = false
 
 function isDevtools() {
   try {
-    const sys = my.getSystemInfoSync()
-    return sys.platform === 'devtools' || /devtools/i.test(sys.model || '')
-  } catch (e) {
-    return false
-  }
+    // 支付宝 IDE 部分版本 platform 会伪装成 iOS/Android，不能只看 platform
+    if (typeof my !== 'undefined' && my.isIDE === true) return true
+  } catch (_) {}
+  try {
+    const sys = my.getSystemInfoSync() || {}
+    const blob = [sys.platform, sys.model, sys.brand, sys.system].filter(Boolean).join(' ')
+    if (/devtools|simulator|模拟器/i.test(blob)) return true
+    // 无真机标识时，开发者工具里常见的桌面环境
+    if (!sys.platform && !sys.model) return true
+  } catch (_) {}
+  return false
 }
 
 function miniEnvVersion() {

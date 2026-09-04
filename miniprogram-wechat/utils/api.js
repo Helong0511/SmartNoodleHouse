@@ -98,6 +98,18 @@ function clearStaleCustomerAuthQuietly() {
   } catch (_) {}
 }
 
+function buildQueryUrl(path, data) {
+  if (!data || typeof data !== 'object') return path
+  const parts = []
+  Object.keys(data).forEach((key) => {
+    const val = data[key]
+    if (val == null || val === '') return
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(val))}`)
+  })
+  if (!parts.length) return path
+  return `${path}${path.indexOf('?') >= 0 ? '&' : '?'}${parts.join('&')}`
+}
+
 function requestOnce(method, path, data = {}, needAuth = true) {
   const base = resolveBaseUrl()
   return new Promise((resolve, reject) => {
@@ -105,10 +117,13 @@ function requestOnce(method, path, data = {}, needAuth = true) {
       reject(makeRequestError('未配置 apiBase，请在 miniprogram-wechat/config/env.js 填写 PROD_API_BASE 或 DEV_LAN_HOST'))
       return
     }
+    const upper = String(method || 'GET').toUpperCase()
+    const urlPath = upper === 'GET' ? buildQueryUrl(path, data) : path
+    const payload = upper === 'GET' ? undefined : data
     wx.request({
-      url: `${base}${path}`,
-      method,
-      data,
+      url: `${base}${urlPath}`,
+      method: upper,
+      data: payload,
       timeout: 10000,
       header: {
         'Content-Type': 'application/json',
@@ -118,7 +133,8 @@ function requestOnce(method, path, data = {}, needAuth = true) {
         const status = Number(res.statusCode)
         const body = parseResponseBody(res.data)
         const msg = pickErrorMessage(res, `请求失败(${status || '?'})`)
-        if ((status && status >= 400) || (body.code !== 0 && body.code !== undefined)) {
+        const codeNum = body.code == null ? undefined : Number(body.code)
+        if ((status && status >= 400) || (codeNum !== undefined && codeNum !== 0 && !Number.isNaN(codeNum))) {
           if (needAuth && (status === 401 || isStaleAuthMessage(msg))) {
             clearStaleCustomerAuthQuietly()
             reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))

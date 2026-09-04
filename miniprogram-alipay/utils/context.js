@@ -148,6 +148,55 @@ async function bindTableFromToken(token) {
   return null
 }
 
+function scoreScanCandidate(s) {
+  const t = String(s || '')
+  if (!t) return -1
+  if (/^https?:\/\//i.test(t) || /^alipays?:\/\//i.test(t) || /^weixin:\/\//i.test(t)) return 100
+  if (/token=/i.test(t)) return 90
+  if (t.includes('://')) return 80
+  if (t.length >= 20) return 60
+  // 避免把接口状态码 "0"/"10"/"9000" 当成码内容
+  if (/^\d{1,5}$/.test(t)) return 1
+  return 20
+}
+
+function decodeScanRawData(b64) {
+  if (!b64 || typeof b64 !== 'string') return ''
+  try {
+    const binary = typeof atob === 'function' ? atob(b64) : ''
+    if (!binary) return ''
+    // rawData 多为 UTF-8/ASCII 的码内容
+    try {
+      return decodeURIComponent(escape(binary))
+    } catch (_) {
+      return binary
+    }
+  } catch (_) {
+    return ''
+  }
+}
+
+/** 支付宝扫码字段不稳定：优先 result/qrCode，避免 code 实为状态码 */
+function extractScanRaw(res) {
+  if (res == null) return ''
+  if (typeof res === 'string' || typeof res === 'number') return String(res).trim()
+  if (typeof res !== 'object') return ''
+  const list = [res.result, res.qrCode, res.code, res.barCode]
+    .map((v) => (v == null ? '' : String(v).trim()))
+    .filter(Boolean)
+  list.sort((a, b) => scoreScanCandidate(b) - scoreScanCandidate(a))
+  if (list.length && scoreScanCandidate(list[0]) >= 20) return list[0]
+  const fromB64 = decodeScanRawData(res.rawData)
+  if (fromB64) return fromB64.trim()
+  return list[0] || ''
+}
+
+function showScanDebug(title, content) {
+  try {
+    my.alert({ title: title || '扫码调试', content: String(content || '').slice(0, 500) })
+  } catch (_) {}
+}
+
 async function refreshTableBinding(options = {}) {
   const channel = (options && options.channel) || 'alipay'
   const cached = readCachedContext()
@@ -182,40 +231,128 @@ async function refreshTableBinding(options = {}) {
   return { ok: false, token }
 }
 
-function scanAndBindTable() {
+function isIdeFakeScanRaw(raw) {
+  const s = String(raw || '').trim().toLowerCase()
+  if (!s) return true
+  // 支付宝开发者工具模拟器扫码常固定返回 fake_code，并非真实二维码内容
+  return (
+    s === 'fake_code'
+    || s === 'fakecode'
+    || s === 'scan_code'
+    || s === 'scancode'
+    || s === 'test'
+    || s === 'mock'
+  )
+}
+
+async function bindParsedScanRaw(raw, resolve) {
   const { parseTableTokenFromScan } = require('./scan')
+  const { getEnvDebugInfo } = require('../config/env')
+  const text = String(raw || '').trim()
+  const devtools = !!(getEnvDebugInfo() && getEnvDebugInfo().isDevtools)
+
+  if (devtools && isIdeFakeScanRaw(text)) {
+    console.warn('[scan] IDE 模拟扫码返回 fake_code，改为粘贴一码通链接')
+    my.showToast({ content: '模拟器扫码无效，请粘贴桌台链接', type: 'none', duration: 2500 })
+    promptPasteTableToken(resolve)
+    return
+  }
+
+  const token = parseTableTokenFromScan(text)
+  console.warn('[scan] raw=', text.slice(0, 180), 'token=', token)
+  if (!token) {
+    const tip = text
+      ? `未识别到桌台码\n原文: ${text.slice(0, 120)}`
+      : '未识别到桌台码'
+    my.showToast({ content: '未识别到桌台码', type: 'none' })
+    if (devtools) {
+      showScanDebug('未识别到桌台码', tip)
+      promptPasteTableToken(resolve)
+      return
+    }
+    resolve(null)
+    return
+  }
+  my.showLoading({ content: '识别桌台' })
+  try {
+    const ctx = await bindTableFromToken(token)
+    my.hideLoading()
+    if (ctx && ctx.hasTable) {
+      my.showToast({ content: '桌台已绑定', type: 'success' })
+      resolve(ctx)
+      return
+    }
+    my.showToast({ content: '无效桌台二维码', type: 'none' })
+    const debugMsg = `token=${token}\n原文=${text.slice(0, 200)}\n请扫「一码通扫」链接码，不要扫微信小程序码`
+    if (devtools) {
+      showScanDebug('无效桌台二维码', `${debugMsg}\n\n模拟器请改用粘贴一码通链接`)
+      promptPasteTableToken(resolve)
+      return
+    }
+    showScanDebug('无效桌台二维码', debugMsg)
+    resolve(null)
+  } catch (e) {
+    my.hideLoading()
+    const msg = (e && e.message) || '识别失败'
+    my.showToast({ content: msg, type: 'none', duration: 3500 })
+    showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)
+    if (devtools) {
+      promptPasteTableToken(resolve)
+      return
+    }
+    resolve(null)
+  }
+}
+
+function promptPasteTableToken(resolve) {
+  const sample = 'http://192.168.1.110:5173/scan?token=6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs'
+  my.prompt({
+    title: '粘贴桌台码（模拟器）',
+    message: '支付宝模拟器扫码只会返回 fake_code。请粘贴后台「一码通扫」完整链接，或直接粘贴 token。',
+    placeholder: sample,
+    okButtonText: '绑定',
+    cancelButtonText: '取消',
+    success: (res) => {
+      if (!res || !res.ok) {
+        resolve(null)
+        return
+      }
+      const input = String(res.inputValue || '').trim()
+      if (!input || isIdeFakeScanRaw(input)) {
+        my.showToast({ content: '请粘贴真实一码通链接', type: 'none' })
+        resolve(null)
+        return
+      }
+      bindParsedScanRaw(input, resolve)
+    },
+    fail: () => resolve(null)
+  })
+}
+
+function scanAndBindTable() {
+  const { getEnvDebugInfo } = require('../config/env')
   return new Promise((resolve) => {
     my.scan({
+      type: 'qr',
       scanType: ['qrCode'],
       hideAlbum: false,
-      success: async (res) => {
-        const token = parseTableTokenFromScan(res.result || res.code || '')
-        if (!token) {
-          my.showToast({ content: '未识别到桌台码', type: 'none' })
-          resolve(null)
-          return
-        }
-        my.showLoading({ content: '识别桌台' })
-        try {
-          const ctx = await bindTableFromToken(token)
-          my.hideLoading()
-          if (ctx && ctx.hasTable) {
-            my.showToast({ content: '桌台已绑定', type: 'success' })
-            resolve(ctx)
-          } else {
-            my.showToast({ content: '无效桌台二维码', type: 'none' })
-            resolve(null)
-          }
-        } catch (e) {
-          my.hideLoading()
-          my.showToast({ content: (e && e.message) || '识别失败', type: 'none' })
-          resolve(null)
-        }
+      success: (res) => {
+        const raw = extractScanRaw(res)
+        bindParsedScanRaw(raw, resolve)
       },
       fail: (err) => {
         const msg = (err && (err.errorMessage || err.errMsg || err.message)) || ''
-        if (msg.indexOf('cancel') >= 0 || msg.indexOf('取消') >= 0) {
+        if (msg.indexOf('cancel') >= 0 || msg.indexOf('取消') >= 0 || String(err && err.error) === '10') {
+          // 开发者工具扫码常不可用：允许粘贴一码通链接
+          if (getEnvDebugInfo().isDevtools) {
+            promptPasteTableToken(resolve)
+            return
+          }
           resolve(null)
+          return
+        }
+        if (getEnvDebugInfo().isDevtools) {
+          promptPasteTableToken(resolve)
           return
         }
         my.showToast({ content: '扫码失败', type: 'none' })
