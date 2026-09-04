@@ -209,41 +209,185 @@ async function refreshTableBinding(options = {}) {
 }
 
 /** 调起扫码并绑定桌台 */
-function scanAndBindTable() {
+function scoreScanCandidate(s) {
+  const t = String(s || '')
+  if (!t) return -1
+  if (/^https?:\/\//i.test(t) || /^alipays?:\/\//i.test(t) || /^weixin:\/\//i.test(t)) return 100
+  if (/token=/i.test(t)) return 90
+  if (t.includes('://')) return 80
+  if (t.length >= 20) return 60
+  if (/^\d{1,5}$/.test(t)) return 1
+  return 20
+}
+
+function decodeScanRawData(b64) {
+  if (!b64 || typeof b64 !== 'string') return ''
+  try {
+    const binary = typeof atob === 'function' ? atob(b64) : ''
+    if (!binary) return ''
+    try {
+      return decodeURIComponent(escape(binary))
+    } catch (_) {
+      return binary
+    }
+  } catch (_) {
+    return ''
+  }
+}
+
+/** 扫码字段优先取 URL/query；避免短数字状态码干扰 */
+function extractScanRaw(res) {
+  if (res == null) return ''
+  if (typeof res === 'string' || typeof res === 'number') return String(res).trim()
+  if (typeof res !== 'object') return ''
+  const list = [res.result, res.path, res.qrCode, res.code, res.barCode]
+    .map((v) => (v == null ? '' : String(v).trim()))
+    .filter(Boolean)
+  list.sort((a, b) => scoreScanCandidate(b) - scoreScanCandidate(a))
+  if (list.length && scoreScanCandidate(list[0]) >= 20) return list[0]
+  const fromB64 = decodeScanRawData(res.rawData)
+  if (fromB64) return fromB64.trim()
+  return list[0] || ''
+}
+
+function showScanDebug(title, content) {
+  try {
+    wx.showModal({
+      title: title || '扫码调试',
+      content: String(content || '').slice(0, 500),
+      showCancel: false
+    })
+  } catch (_) {}
+}
+
+function isIdeFakeScanRaw(raw) {
+  const s = String(raw || '').trim().toLowerCase()
+  if (!s) return true
+  return (
+    s === 'fake_code'
+    || s === 'fakecode'
+    || s === 'scan_code'
+    || s === 'scancode'
+    || s === 'test'
+    || s === 'mock'
+  )
+}
+
+async function bindParsedScanRaw(raw, resolve) {
   const { parseTableTokenFromScan } = require('./scan')
+  const { getEnvDebugInfo } = require('../config/env')
+  const text = String(raw || '').trim()
+  const devtools = !!(getEnvDebugInfo() && getEnvDebugInfo().isDevtools)
+
+  if (devtools && isIdeFakeScanRaw(text)) {
+    console.warn('[scan] IDE 模拟扫码无效，改为剪贴板/提示粘贴一码通链接')
+    wx.showToast({ title: '模拟器扫码无效，请用剪贴板', icon: 'none', duration: 2500 })
+    promptPasteTableToken(resolve)
+    return
+  }
+
+  const token = parseTableTokenFromScan(text)
+  console.warn('[scan] raw=', text.slice(0, 180), 'token=', token)
+  if (!token) {
+    const tip = text
+      ? `未识别到桌台码\n原文: ${text.slice(0, 120)}`
+      : '未识别到桌台码'
+    wx.showToast({ title: '未识别到桌台码', icon: 'none' })
+    if (devtools) {
+      showScanDebug('未识别到桌台码', tip)
+      promptPasteTableToken(resolve)
+      return
+    }
+    resolve(null)
+    return
+  }
+  wx.showLoading({ title: '识别桌台' })
+  try {
+    const ctx = await bindTableFromToken(token)
+    wx.hideLoading()
+    if (ctx && ctx.hasTable) {
+      wx.showToast({ title: '桌台已绑定', icon: 'success' })
+      resolve(ctx)
+      return
+    }
+    wx.showToast({ title: '无效桌台二维码', icon: 'none' })
+    const debugMsg = `token=${token}\n原文=${text.slice(0, 200)}\n请扫「一码通扫」链接码，不要扫微信小程序码以外的无关码`
+    if (devtools) {
+      showScanDebug('无效桌台二维码', `${debugMsg}\n\n开发者工具可复制一码通链接到剪贴板后再试`)
+      promptPasteTableToken(resolve)
+      return
+    }
+    showScanDebug('无效桌台二维码', debugMsg)
+    resolve(null)
+  } catch (e) {
+    wx.hideLoading()
+    const msg = (e && e.message) || '识别失败'
+    wx.showToast({ title: msg, icon: 'none', duration: 3500 })
+    showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)
+    if (devtools) {
+      promptPasteTableToken(resolve)
+      return
+    }
+    resolve(null)
+  }
+}
+
+/** 微信无 prompt 输入框：开发联调读剪贴板中的一码通链接 */
+function promptPasteTableToken(resolve) {
+  const { DEV_LAN_HOST } = require('../config/env')
+  const sample = `http://${DEV_LAN_HOST || '192.168.1.110'}:5173/scan?token=…`
+  wx.getClipboardData({
+    success: (clip) => {
+      const input = String((clip && clip.data) || '').trim()
+      if (!input || isIdeFakeScanRaw(input)) {
+        wx.showModal({
+          title: '模拟器绑桌',
+          content: `请先复制一码通完整链接到剪贴板（如 ${sample}），再点扫码；或用编译模式启动参数 token=&channel=wechat`,
+          showCancel: false
+        })
+        resolve(null)
+        return
+      }
+      wx.showModal({
+        title: '使用剪贴板绑桌？',
+        content: input.slice(0, 160),
+        confirmText: '绑定',
+        success: (r) => {
+          if (r.confirm) bindParsedScanRaw(input, resolve)
+          else resolve(null)
+        },
+        fail: () => resolve(null)
+      })
+    },
+    fail: () => {
+      wx.showToast({ title: '请先复制一码通链接', icon: 'none' })
+      resolve(null)
+    }
+  })
+}
+
+function scanAndBindTable() {
+  const { getEnvDebugInfo } = require('../config/env')
   return new Promise((resolve) => {
     wx.scanCode({
       onlyFromCamera: false,
       scanType: ['qrCode', 'barCode'],
-      success: async (res) => {
-        const raw = res.result || res.path || res.rawData || ''
-        const token = parseTableTokenFromScan(raw)
-        if (!token) {
-          console.warn('[scan] 未解析到 token', raw)
-          wx.showToast({ title: '未识别到桌台码', icon: 'none' })
+      success: (res) => {
+        const raw = extractScanRaw(res)
+        bindParsedScanRaw(raw, resolve)
+      },
+      fail: (err) => {
+        const msg = (err && (err.errMsg || err.message)) || ''
+        if (msg.indexOf('cancel') >= 0 || msg.indexOf('取消') >= 0) {
+          if (getEnvDebugInfo().isDevtools) {
+            promptPasteTableToken(resolve)
+            return
+          }
           resolve(null)
           return
         }
-        wx.showLoading({ title: '识别桌台' })
-        try {
-          const ctx = await bindTableFromToken(token)
-          wx.hideLoading()
-          if (ctx && ctx.hasTable) {
-            wx.showToast({ title: '桌台已绑定', icon: 'success' })
-            resolve(ctx)
-          } else {
-            wx.showToast({ title: '无效桌台二维码', icon: 'none' })
-            resolve(null)
-          }
-        } catch (e) {
-          wx.hideLoading()
-          wx.showToast({ title: (e && e.message) || '识别失败', icon: 'none' })
-          resolve(null)
-        }
-      },
-      fail: (err) => {
-        if (err && String(err.errMsg || '').indexOf('cancel') >= 0) {
-          resolve(null)
+        if (getEnvDebugInfo().isDevtools) {
+          promptPasteTableToken(resolve)
           return
         }
         wx.showToast({ title: '扫码失败', icon: 'none' })

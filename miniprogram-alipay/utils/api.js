@@ -140,11 +140,9 @@ function requestOnce(method, path, data = {}, needAuth = true) {
     const upper = String(method || 'GET').toUpperCase()
     // 支付宝部分基础库 GET + data + application/json 不会把参数拼到 URL，导致 entry 收不到 token
     const urlPath = upper === 'GET' ? buildQueryUrl(path, data) : path
-    const payload = upper === 'GET' ? {} : data
-    my.request({
+    const req = {
       url: `${base}${urlPath}`,
       method: upper,
-      data: payload,
       dataType: 'json',
       timeout: 20000,
       headers: {
@@ -176,7 +174,9 @@ function requestOnce(method, path, data = {}, needAuth = true) {
         }
         reject(makeRequestError(msg))
       }
-    })
+    }
+    if (upper !== 'GET') req.data = data
+    my.request(req)
   })
 }
 

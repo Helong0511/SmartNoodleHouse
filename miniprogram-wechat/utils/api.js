@@ -119,11 +119,9 @@ function requestOnce(method, path, data = {}, needAuth = true) {
     }
     const upper = String(method || 'GET').toUpperCase()
     const urlPath = upper === 'GET' ? buildQueryUrl(path, data) : path
-    const payload = upper === 'GET' ? undefined : data
-    wx.request({
+    const req = {
       url: `${base}${urlPath}`,
       method: upper,
-      data: payload,
       timeout: 10000,
       header: {
         'Content-Type': 'application/json',
@@ -154,7 +152,9 @@ function requestOnce(method, path, data = {}, needAuth = true) {
         }
         reject(makeRequestError(msg))
       }
-    })
+    }
+    if (upper !== 'GET') req.data = data
+    wx.request(req)
   })
 }
 

@@ -31,11 +31,19 @@ const TRIAL_USE_PROD_API = false
 
 function isDevtools() {
   try {
-    if (wx.getDeviceInfo) return wx.getDeviceInfo().platform === 'devtools'
-    return wx.getSystemInfoSync().platform === 'devtools'
-  } catch (e) {
-    return false
-  }
+    if (typeof wx !== 'undefined' && wx.getDeviceInfo) {
+      const d = wx.getDeviceInfo() || {}
+      if (d.platform === 'devtools') return true
+    }
+  } catch (_) {}
+  try {
+    const sys = wx.getSystemInfoSync() || {}
+    const blob = [sys.platform, sys.model, sys.brand, sys.system].filter(Boolean).join(' ')
+    if (/devtools|simulator|模拟器/i.test(blob)) return true
+    // 无真机标识时，开发者工具里偶发缺省 platform/model
+    if (!sys.platform && !sys.model) return true
+  } catch (_) {}
+  return false
 }
 
 function miniEnvVersion() {
