@@ -54,9 +54,10 @@ App({
     let token = (q.token || '').trim()
     let channel = (q.channel || '').trim()
 
+    // path 偶发带 ?token=；query 内 path 须用归一化后的 q（query 可能是字符串）
     if (!token) {
       const fromPage = parseTableTokenFromScan(
-        [options.path, options.query && options.query.path]
+        [options.path, q.path]
           .filter(Boolean)
           .join('&')
       )

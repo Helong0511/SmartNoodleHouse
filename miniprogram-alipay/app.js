@@ -56,10 +56,10 @@ App({
     let token = (q.token || '').trim()
     let channel = (q.channel || '').trim()
 
-    // Scheme 的 page 会落到 options.path（支付宝无 options.page）
+    // Scheme 的 page 会落到 options.path；query 内 path 须用归一化后的 q（query 可能是字符串）
     if (!token) {
       const fromPage = parseTableTokenFromScan(
-        [options.path, options.query && options.query.path]
+        [options.path, q.path]
           .filter(Boolean)
           .join('&')
       )
