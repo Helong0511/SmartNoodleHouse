@@ -116,6 +116,8 @@ class Settings(BaseSettings):
     xpyun_api_base: str = "https://open.xpyun.net/api/openapi/xprinter"
     xpyun_print_copies: int = 1
     xpyun_voice: int = 2  # 0取消单 1静音 2来单 3退单（仅 xpyun 模式）
+    # 制作单底部订单号：barcode=CODE-128+单号 | text=仅单号 | off=不打印
+    kitchen_ticket_order_no: str = "barcode"
     allow_print_mock: bool = False
     enable_rate_limit: bool = True
     # 未配置平台密钥时，同步接口是否允许返回 mock 成功（生产必须 false）

@@ -105,7 +105,8 @@
 # XP-80T WiFi 是局域网 ESC/POS 打印，不是芯烨云打印。
 #   1. 打印机连店内 WiFi，打印自检页查看 IP（如 192.168.1.200）
 #   2. .env：XPYUN_ENABLED=true、PRINTER_MODE=local、PRINTER_HOST=打印机IP、PRINTER_PORT=9100
-#   3. 后端须与打印机同一局域网（或路由可达）；重启 uvicorn
+#   3. 制作单订单号开关 KITCHEN_TICKET_ORDER_NO=barcode|text|off（barcode=CODE-128+单号；改后重启 uvicorn）
+#   4. 后端须与打印机同一局域网（或路由可达）；重启 uvicorn
 #   4. KDS 点「开始制作」或订单「补打小票」测试
 # 若使用芯烨「云打印机」型号（非 XP-80T 局域网版）：
 #   PRINTER_MODE=xpyun，并配置 XPYUN_USER / XPYUN_USER_KEY / XPYUN_PRINTER_SN
