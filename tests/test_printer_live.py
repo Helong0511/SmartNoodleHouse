@@ -7,12 +7,13 @@
 
 用法
 ----
-  python tests/test_printer_live.py
+  python tests/test_printer_live.py                  # 默认：字体/字号/粗细样张
+  python tests/test_printer_live.py --ticket         # 原来的厨房票样
   python tests/test_printer_live.py --host 192.168.1.150
   python tests/test_printer_live.py --port 9100
   python tests/test_printer_live.py --check          # 只测连通，不出纸
 
-改票样：主要改 build_escpos() 里各段文字与指令。
+改票样：build_escpos()；改字号样张：build_font_specimen()。
 改默认 IP/端口：看 main() 里 argparse 的 default。
 """
 from __future__ import annotations
@@ -52,6 +53,165 @@ def _text(s: str) -> bytes:
 def _display_width(s: str) -> int:
     """估算半角列宽：ASCII=1，中文等全角≈2（用于左右对齐算空格）。"""
     return sum(2 if ord(c) > 0x7F else 1 for c in s or "")
+
+
+def _gs_size(width_mult: int, height_mult: int) -> bytes:
+    """GS ! n：宽/高倍率 1~8 → n = ((高-1)<<4) | (宽-1)。"""
+    w = max(1, min(int(width_mult), 8)) - 1
+    h = max(1, min(int(height_mult), 8)) - 1
+    return GS + b"!" + bytes([(h << 4) | w])
+
+
+def _line_spacing(height_mult: int, *, font_dots: int = 24) -> bytes:
+    """按字高设行距，避免倍高字被下一行盖住。"""
+    n = min(255, int(font_dots) * max(1, int(height_mult)) + 10)
+    return ESC + b"3" + bytes([n])
+
+
+def _reset_style(out: bytearray) -> None:
+    """恢复 Font A、1x1、不加粗、左对齐、默认行距。"""
+    out.extend(ESC + b"M\x00")  # Font A
+    out.extend(GS + b"!\x00")
+    out.extend(ESC + b"E\x00")
+    out.extend(ESC + b"G\x00")  # 叠打关
+    out.extend(ESC + b"-\x00")  # 下划线关
+    out.extend(ESC + b"a\x00")
+    out.extend(ESC + b"3\x2c")
+
+
+def _caption(out: bytearray, s: str) -> None:
+    """样张说明行：始终用普通字，避免被上一档字号带跑。"""
+    _reset_style(out)
+    out.extend(_text(s))
+    out.extend(b"\n")
+
+
+def _sample(
+    out: bytearray,
+    text: str,
+    *,
+    font: int = 0,
+    w: int = 1,
+    h: int = 1,
+    bold: bool = False,
+    double_strike: bool = False,
+) -> None:
+    """打一行样本文字（指定字体/宽高/粗细），打完立刻复位。"""
+    font_dots = 17 if font else 24
+    out.extend(ESC + b"M" + bytes([0 if font == 0 else 1]))
+    out.extend(_line_spacing(h, font_dots=font_dots))
+    out.extend(_gs_size(w, h))
+    out.extend(ESC + b"E" + (b"\x01" if bold else b"\x00"))
+    out.extend(ESC + b"G" + (b"\x01" if double_strike else b"\x00"))
+    out.extend(_text(text))
+    out.extend(b"\n")
+    _reset_style(out)
+
+
+def build_font_specimen() -> bytes:
+    """打印一张字体 / 字号 / 粗细对照样张（80mm）。
+
+    指令对照（Epson / 芯烨 XP-80T）：
+      ESC M n   字体：0=Font A(约12x24)  1=Font B(约9x17，更密更小)
+      GS  ! n   宽高倍率：n=((高-1)<<4)|(宽-1)，各 1~8 倍
+      ESC E n   强调加粗（厨房票 <B> 用这个）
+      ESC G n   叠打加粗（另一种「黑」，可与 E 叠加）
+
+    厨房票当前用法：标题 FontA + ESC E；菜名 GS ! 0x11（2x2）。
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    out = bytearray()
+    out.extend(ESC + b"@")
+    _reset_style(out)
+
+    # ---- 封面 ----
+    out.extend(ESC + b"a\x01")
+    out.extend(ESC + b"E\x01")
+    out.extend(_text("字体 / 字号 / 粗细样张"))
+    out.extend(ESC + b"E\x00")
+    out.extend(b"\n")
+    out.extend(_text(now))
+    out.extend(b"\n")
+    out.extend(ESC + b"a\x00")
+    out.extend(_text(_LINE))
+    out.extend(b"\n")
+
+    # ---- 1) 字体 A / B ----
+    _caption(out, "【1】字体  ESC M")
+    _caption(out, "--- Font A  12x24  标准 ---")
+    _sample(out, "正常  绵阳米粉 ABC123", font=0, bold=False)
+    _sample(out, "加粗  绵阳米粉 ABC123", font=0, bold=True)
+    _caption(out, "--- Font B  9x17  压缩 ---")
+    _sample(out, "正常  绵阳米粉 ABC123", font=1, bold=False)
+    _sample(out, "加粗  绵阳米粉 ABC123", font=1, bold=True)
+    out.extend(_text(_LINE))
+    out.extend(b"\n")
+
+    # ---- 2) 字号（Font A）----
+    # 80mm 约 576 点；4x 宽时中文大约一行 6 个字，样本文案要短
+    sizes = [
+        (1, 1, "1x1  n=00  正常字"),
+        (1, 2, "1x2  n=10  只倍高"),
+        (2, 1, "2x1  n=01  只倍宽"),
+        (2, 2, "2x2  n=11  倍高倍宽=厨房菜名"),
+        (2, 3, "2x3  n=21  宽2 高3"),
+        (3, 2, "3x2  n=12  宽3 高2"),
+        (3, 3, "3x3  n=22  宽3 高3"),
+        (4, 2, "4x2  n=13  宽4 高2"),
+        (4, 4, "4x4  n=33  宽4 高4"),
+    ]
+    _caption(out, "【2】字号  GS !  Font A")
+    _caption(out, "每档：上行正常 / 下行加粗")
+    for w, h, label in sizes:
+        n = ((h - 1) << 4) | (w - 1)
+        _caption(out, f"--- {label} (0x{n:02X}) ---")
+        sample = "米粉x1" if w >= 3 else "绵阳米粉 x1"
+        _sample(out, f"正常 {sample}", w=w, h=h, bold=False)
+        _sample(out, f"加粗 {sample}", w=w, h=h, bold=True)
+    out.extend(_text(_LINE))
+    out.extend(b"\n")
+
+    # ---- 3) 粗细对比（固定 2x2，最常用档）----
+    _caption(out, "【3】粗细对比  固定 2x2")
+    _caption(out, "--- 不加粗 ---")
+    _sample(out, "米粉 x1", w=2, h=2, bold=False)
+    _caption(out, "--- ESC E 强调加粗 ---")
+    _sample(out, "米粉 x1", w=2, h=2, bold=True)
+    _caption(out, "--- ESC G 叠打加粗 ---")
+    _sample(out, "米粉 x1", w=2, h=2, double_strike=True)
+    _caption(out, "--- E+G 强调+叠打 ---")
+    _sample(out, "米粉 x1", w=2, h=2, bold=True, double_strike=True)
+    out.extend(_text(_LINE))
+    out.extend(b"\n")
+
+    # ---- 4) 厨房票当前三档对照 ----
+    _caption(out, "【4】厨房票当前实际用法")
+    _caption(out, "--- 标题 1x1+加粗 居中 ---")
+    out.extend(ESC + b"a\x01")
+    out.extend(ESC + b"E\x01")
+    out.extend(_text("SmartNoodleHouse 厨房制作单"))
+    out.extend(ESC + b"E\x00")
+    out.extend(b"\n")
+    out.extend(ESC + b"a\x00")
+    _caption(out, "--- 堂食桌名 1x1+加粗 ---")
+    _sample(out, "堂食 2号桌", bold=True)
+    _caption(out, "--- 菜名 2x2 不加粗 ---")
+    _sample(out, "绵阳米粉 x1", w=2, h=2, bold=False)
+    _caption(out, "--- 菜名 2x2+加粗（可改用）---")
+    _sample(out, "绵阳米粉 x1", w=2, h=2, bold=True)
+    _caption(out, "--- 选项 1x1 普通 ---")
+    _sample(out, "  大碗、微辣、正常葱")
+
+    out.extend(_text(_LINE))
+    out.extend(b"\n")
+    out.extend(ESC + b"a\x01")
+    out.extend(_text("看完告诉我要用哪一档"))
+    out.extend(b"\n")
+    out.extend(ESC + b"a\x00")
+
+    out.extend(b"\n\n")
+    out.extend(GS + b"V\x41" + bytes([5]))
+    return bytes(out)
 
 
 def build_escpos() -> bytes:
@@ -138,7 +298,7 @@ def build_escpos() -> bytes:
     # 先走纸，让条码离开刀口；刀在打印头下方约 12~15mm
     out.extend(b"\n\n")
     # GS V 65 n : 走纸 n 单位后再切；n 越大尾部空白越多（当前 18）
-    out.extend(GS + b"V\x41" + bytes([18]))
+    out.extend(GS + b"V\x41" + bytes([5]))
     # 注意：不要再追加 GS V 0 全切，否则会感觉切了两刀
     return bytes(out)
 
@@ -164,6 +324,11 @@ def main(argv: list[str] | None = None) -> int:
         help="端口，默认 9100",
     )
     parser.add_argument("--check", action="store_true", help="只测 TCP，不出纸")
+    parser.add_argument(
+        "--ticket",
+        action="store_true",
+        help="打原来的厨房票样（默认打字体/字号/粗细样张）",
+    )
     args = parser.parse_args(argv)
 
     host = (args.host or "").strip() or "192.168.1.150"
@@ -181,8 +346,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         return 0
 
-    payload = build_escpos()
-    print(f"正在出测试票（{len(payload)} 字节）…")
+    if args.ticket:
+        payload = build_escpos()
+        kind = "厨房票样"
+    else:
+        payload = build_font_specimen()
+        kind = "字体/字号/粗细样张"
+    print(f"正在出{kind}（{len(payload)} 字节）…")
     try:
         send(host, port, payload)
     except OSError as exc:

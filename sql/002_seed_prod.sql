@@ -360,7 +360,7 @@ INSERT INTO products (
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'F001', '绵阳米粉（牛肉）', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
+SELECT s.id, c.id, 'F001', '绵阳米粉(牛肉)', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
@@ -373,7 +373,7 @@ INSERT INTO products (
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'F002', '绵阳米粉（肥肠）', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
+SELECT s.id, c.id, 'F002', '绵阳米粉(肥肠)', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
