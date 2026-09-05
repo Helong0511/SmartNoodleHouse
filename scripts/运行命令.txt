@@ -107,7 +107,10 @@
 #   2. .env：XPYUN_ENABLED=true、PRINTER_MODE=local、PRINTER_HOST=打印机IP、PRINTER_PORT=9100
 #   3. 制作单订单号开关 KITCHEN_TICKET_ORDER_NO=barcode|text|off（barcode=CODE-128+单号；改后重启 uvicorn）
 #   4. 后端须与打印机同一局域网（或路由可达）；重启 uvicorn
-#   4. KDS 点「开始制作」或订单「补打小票」测试
+#   5. 联调脚本（独立，不读 .env、不引用业务代码）：
+#        python tests/test_printer_live.py
+#        python tests/test_printer_live.py --host 192.168.1.150 --check
+#   6. KDS 点「开始制作」或订单「补打小票」测试
 # 若使用芯烨「云打印机」型号（非 XP-80T 局域网版）：
 #   PRINTER_MODE=xpyun，并配置 XPYUN_USER / XPYUN_USER_KEY / XPYUN_PRINTER_SN
 #   开放平台 https://www.xpyun.net
