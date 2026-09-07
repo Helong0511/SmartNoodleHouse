@@ -42,6 +42,15 @@ def test_resolve_product_requires_inherit_and_override():
     assert cats3 == [] and prods3 == [] and inherited3 is False
 
 
+def test_store_require_lists_inherit_vs_custom():
+    """创建商品未传依赖时应 custom=False → NULL，才能继续继承分类变更。"""
+    from app.api.v1.products import _store_require_lists
+
+    assert _store_require_lists([10], [], custom=False) == (None, None)
+    assert _store_require_lists([10], [], custom=True) == ([10], [])
+    assert _store_require_lists([], [], custom=True) == ([], [])
+
+
 @pytest.mark.asyncio
 async def test_addon_inherits_category_require(db_session):
     store = Store(id=801, store_no="T-REQ-01", name="依赖测试店", status=1)

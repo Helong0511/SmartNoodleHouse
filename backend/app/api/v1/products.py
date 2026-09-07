@@ -813,18 +813,13 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         if missing:
             raise AppException(40003, f"规格组不存在或已禁用: {missing}")
 
-    # 未传依赖字段：把分类默认带入商品（方案 A）
+    # 未传依赖字段：存 NULL，运行时继承分类默认（方案 A）；勿把分类列表写入商品
     if data.require_category_ids is None and data.require_product_ids is None:
-        req_cats = await _validate_require_category_ids(
-            db, int(sid), normalize_require_category_ids(cat.require_category_ids)
-        )
-        req_prods: list[int] = []
-        custom = bool(req_cats)
+        stored_cats, stored_prods = _store_require_lists(None, None, custom=False)
     else:
         req_cats = await _validate_require_category_ids(db, int(sid), data.require_category_ids)
         req_prods = await _validate_require_product_ids(db, int(sid), data.require_product_ids)
-        custom = True
-    stored_cats, stored_prods = _store_require_lists(req_cats, req_prods, custom=custom)
+        stored_cats, stored_prods = _store_require_lists(req_cats, req_prods, custom=True)
 
     try:
         payload = data.model_dump(
