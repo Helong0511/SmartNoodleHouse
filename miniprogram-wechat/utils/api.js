@@ -64,6 +64,12 @@ function pickErrorMessage(resOrErr, fallback) {
 
 function networkHint(base, msg) {
   const m = String(msg || '')
+  if (/合法域名|不在以下 request 合法域名|url not in domain list|urlCheck/i.test(m)) {
+    return (
+      '未放行请求域名：微信开发者工具 → 右上角「详情」→「本地设置」→ 勾选「不校验合法域名…」；' +
+      '正式版须在 mp.weixin.qq.com 配置 HTTPS request 合法域名'
+    )
+  }
   if (/CONNECTION_RESET|ERR_CONNECTION_RESET|reset by peer/i.test(m)) {
     return '连接被重置：请确认后端已启动且未崩溃重启。开发：cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'
   }
@@ -71,7 +77,7 @@ function networkHint(base, msg) {
     return '无法连接后端，请先启动：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000'
   }
   if (/127\.0\.0\.1|localhost/.test(base || '') && /fail|timeout|CONNECTION|reset/i.test(m)) {
-    return `${m}；真机/部分模拟器请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP，并勾选「不校验合法域名」`
+    return `${m}；真机请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP，并勾选「不校验合法域名」`
   }
   return m || '网络请求失败'
 }

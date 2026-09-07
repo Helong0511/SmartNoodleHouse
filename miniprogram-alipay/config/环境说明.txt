@@ -1,17 +1,53 @@
 # 支付宝小程序 — 环境配置说明
 # ═══════════════════════════════════════════════════════════════
-# 主配置：config/env.js（仅 API 地址等）
+# 主配置：config/env.js（仅 API 地址等；正式/调试同一份代码，按 envVersion 自动切换）
 # 隐私开关：项目根 .env（经 /miniprogram/config 下发，改后重启后端）
 #   ENABLE_ALIPAY_AVATAR / ENABLE_ALIPAY_NICKNAME / ENABLE_ALIPAY_PHONE_BIND
 # ═══════════════════════════════════════════════════════════════
 
+【三种场景对照】（正式上线前可只测前两行）
+
+  场景              API 自动选择              域名校验怎么做
+  ──────────────  ───────────────────────  ──────────────────────────────────
+  ① 本机 IDE 模拟   http://127.0.0.1:8000    IDE「详情→域名信息」勾选忽略 httpRequest
+  ② 真机调试/预览   http://局域网IP:8000      同上勾选忽略；后端 --host 0.0.0.0
+  ③ 正式版 release  PROD_API_BASE（HTTPS）   开放平台配置服务器域名白名单；不可忽略
+
+【你现在的报错】
+  「未配置域名白名单，无权访问域名」（错误码 81）
+  → 不是代码写错。本机测 127.0.0.1 本来就不会进开放平台白名单。
+  → 处理：支付宝开发者工具右上角「详情」→「域名信息」→ 勾选
+     「忽略 httpRequest 域名合法性检查（仅本地模拟、预览和远程调试生效）」
+  → 勾选后重新编译/刷新即可。正式版上线前再配 HTTPS 白名单，不影响本机联调。
+
+【本机 IDE 步骤】
+  1. 后端：cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+     （本机模拟器用 127.0.0.1 也能连；真机必须 0.0.0.0）
+  2. 打开 miniprogram-alipay，确认页面底部 debug 行 API 为 http://127.0.0.1:8000/api/v1
+  3. 详情 → 域名信息 → 勾选「忽略 httpRequest…」
+  4. 编译运行（普通编译 / 模拟器即可，不必真机）
+
+【真机调试步骤】
+  1. config/env.js 改 DEV_LAN_HOST=你的电脑局域网 IP（ipconfig 看）
+  2. 后端必须 --host 0.0.0.0:8000；手机与电脑同一 WiFi；关 VPN 更稳
+  3. IDE 仍勾选「忽略 httpRequest…」（真机调试/预览同样依赖此开关）
+  4. 点「真机调试」或「预览」用支付宝扫码
+  5. 页面 debug 行应显示 http://192.168.x.x:8000/api/v1（不是 127.0.0.1）
+     若仍是 127.0.0.1：说明被当成 IDE；可设 DEV_USE_LAN=true 强制走局域网
+
+【正式上线（暂无商家也可先预留）】
+  1. config/env.js：PROD_API_BASE=https://你的域名/api/v1
+  2. open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单加该 HTTPS 域名
+  3. 上传/审核后的 release 会自动走 PROD_API_BASE；勿依赖「忽略域名检查」
+  4. 体验版默认仍走本地 API；若体验版要连生产，设 TRIAL_USE_PROD_API=true
+
 【个人主体测试】
   ENABLE_ALIPAY_AVATAR=true
   ENABLE_ALIPAY_NICKNAME=true
-  ENABLE_ALIPAY_PHONE_BIND=false   ← 个人无法申请一键取号，手输手机号
+  ENABLE_ALIPAY_PHONE_BIND=false   ← 个人无法一键取号，手输手机号
 
 【企业正式】
   三项均可 true（须开放平台隐私政策 + 已开通「获取会员手机号」）
 
 【改局域网 IP】
-  config/env.js → DEV_LAN_HOST
+  只改 config/env.js → DEV_LAN_HOST

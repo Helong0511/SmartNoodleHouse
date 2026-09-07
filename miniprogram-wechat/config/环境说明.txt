@@ -1,9 +1,37 @@
 # 微信小程序 — 环境配置说明
 # ═══════════════════════════════════════════════════════════════
-# 主配置：config/env.js（仅 API 地址、域名校验说明）
+# 主配置：config/env.js（仅 API 地址；正式/调试同一份代码，按 envVersion 自动切换）
 # 隐私开关：项目根 .env（经 /miniprogram/config 下发，改后重启后端）
 #   ENABLE_WX_AVATAR / ENABLE_WX_NICKNAME / ENABLE_WX_PHONE_BIND
 # ═══════════════════════════════════════════════════════════════
+
+【三种场景对照】（正式上线前可只测前两行）
+
+  场景              API 自动选择              域名校验怎么做
+  ──────────────  ───────────────────────  ──────────────────────────────────
+  ① 本机 IDE 模拟   http://127.0.0.1:8000    详情→本地设置→不校验合法域名；urlCheck=false
+  ② 真机调试/预览   http://局域网IP:8000      同上不校验；后端 --host 0.0.0.0
+  ③ 正式版 release  PROD_API_BASE（HTTPS）   mp.weixin.qq.com 配置 request 合法域名；urlCheck=true
+
+【本机 IDE 步骤】
+  1. 后端：cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+  2. 打开 miniprogram-wechat
+  3. 右上角「详情」→「本地设置」→ 勾选「不校验合法域名、web-view…」
+  4. project.config.json 开发阶段保持 setting.urlCheck=false
+  5. 编译；确认 API 为 http://127.0.0.1:8000/api/v1
+
+【真机调试步骤】
+  1. config/env.js 改 DEV_LAN_HOST=电脑局域网 IP
+  2. 后端 --host 0.0.0.0:8000；手机与电脑同一 WiFi；VPN 易导致调试通道 IP 错乱
+  3. 仍勾选「不校验合法域名」
+  4. 「真机调试」扫码；API 应为 http://192.168.x.x:8000/api/v1
+     若仍 127.0.0.1：可设 DEV_USE_LAN=true 强制局域网
+
+【正式上线】
+  1. config/env.js：PROD_API_BASE=https://你的域名/api/v1
+  2. mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
+  3. 上传前 project.config.json → urlCheck=true，并用真机验证合法域名
+  4. release 自动走 PROD_API_BASE
 
 【个人主体 / 未开通手机号能力】
   ENABLE_WX_AVATAR=true
