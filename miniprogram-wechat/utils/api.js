@@ -77,7 +77,7 @@ function networkHint(base, msg) {
     return '无法连接后端，请先启动：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000'
   }
   if (/127\.0\.0\.1|localhost/.test(base || '') && /fail|timeout|CONNECTION|reset/i.test(m)) {
-    return `${m}；真机请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP，并勾选「不校验合法域名」`
+    return `${m}；真机请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP（如 192.168.x.x），后端须 --host 0.0.0.0，并勾选「不校验合法域名」`
   }
   return m || '网络请求失败'
 }
