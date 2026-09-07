@@ -161,10 +161,24 @@ async def trade_bar_pay(
 
 
 async def trade_query(*, payment_no: str) -> dict[str, Any]:
-    body = await _gateway_call("alipay.trade.query", {"out_trade_no": payment_no})
+    try:
+        body = await _gateway_call("alipay.trade.query", {"out_trade_no": payment_no})
+    except AppException as exc:
+        msg = str(exc.message or "")
+        if "TRADE_NOT_EXIST" in msg or "交易不存在" in msg:
+            return {
+                "trade_no": None,
+                "trade_status": "WAIT_BUYER_PAY",
+                "total_amount": None,
+                "app_id": None,
+                "raw": {"sub_code": "ACQ.TRADE_NOT_EXIST", "message": msg},
+            }
+        raise
     return {
         "trade_no": body.get("trade_no"),
         "trade_status": body.get("trade_status"),
+        "total_amount": body.get("total_amount"),
+        "app_id": body.get("app_id"),
         "raw": body,
     }
 

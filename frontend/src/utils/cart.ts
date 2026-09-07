@@ -136,3 +136,113 @@ export function applyPreferencesToProduct(
   }
   return applied
 }
+
+function normalizeRequireCategoryIds(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return []
+  const out: number[] = []
+  const seen = new Set<number>()
+  for (const x of raw) {
+    const id = Number(x)
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+}
+
+function productMap(products: any[]) {
+  const map: Record<string, any> = {}
+  for (const p of products || []) {
+    if (!p) continue
+    map[p.id] = p
+    map[String(p.id)] = p
+  }
+  return map
+}
+
+function categoryMap(categories: any[]) {
+  const map: Record<string, any> = {}
+  for (const c of categories || []) {
+    if (!c) continue
+    map[c.id] = c
+    map[String(c.id)] = c
+  }
+  return map
+}
+
+function resolveProductRequires(product: any, categories?: any[]) {
+  if (!product) return { cats: [] as number[], prods: [] as number[] }
+  let cats = normalizeRequireCategoryIds(product.require_category_ids)
+  let prods = normalizeRequireCategoryIds(product.require_product_ids)
+  if (!cats.length && !prods.length) {
+    const cat = categoryMap(categories || [])[product.category_id]
+    cats = normalizeRequireCategoryIds(cat?.require_category_ids)
+  }
+  return { cats, prods }
+}
+
+function cartCategoryIds(cart: any[], products?: any[]) {
+  const map = productMap(products || [])
+  const ids = new Set<number>()
+  for (const raw of cart || []) {
+    let cid = raw?.category_id != null ? Number(raw.category_id) : NaN
+    if (!Number.isFinite(cid) || cid <= 0) {
+      const p = map[raw?.product_id]
+      cid = p?.category_id != null ? Number(p.category_id) : NaN
+    }
+    if (Number.isFinite(cid) && cid > 0) ids.add(cid)
+  }
+  return ids
+}
+
+function cartProductIds(cart: any[]) {
+  const ids = new Set<number>()
+  for (const raw of cart || []) {
+    const pid = Number(raw?.product_id)
+    if (Number.isFinite(pid) && pid > 0) ids.add(pid)
+  }
+  return ids
+}
+
+/** 检查加入商品是否满足购买依赖（分类 OR 指定商品） */
+export function checkCategoryRequire(
+  product: any,
+  cart: any[],
+  products?: any[],
+  categories?: any[],
+): { ok: boolean; message: string } {
+  const { cats: requireCats, prods: requireProds } = resolveProductRequires(product, categories)
+  if (!requireCats.length && !requireProds.length) return { ok: true, message: '' }
+  const haveCats = cartCategoryIds(cart, products)
+  const haveProds = cartProductIds(cart)
+  if (requireCats.some((id) => haveCats.has(id))) return { ok: true, message: '' }
+  if (requireProds.some((id) => haveProds.has(id))) return { ok: true, message: '' }
+  const cats = categoryMap(categories || [])
+  const pmap = productMap(products || [])
+  const labels: string[] = []
+  requireCats.forEach((id) => labels.push(`「${cats[id]?.name || `分类#${id}`}」类`))
+  requireProds.forEach((id) => labels.push(`「${pmap[id]?.name || `商品#${id}`}」`))
+  const name = product?.name || '该商品'
+  return {
+    ok: false,
+    message: `请先点${labels.join('或')}，再点「${name}」`,
+  }
+}
+
+/** 整单校验购买依赖（结算前） */
+export function validateCategoryRequires(cart: any[], products?: any[], categories?: any[]) {
+  const map = productMap(products || [])
+  const issues: { name: string; message: string }[] = []
+  for (const raw of cart || []) {
+    const p = map[raw?.product_id] || {
+      id: raw?.product_id,
+      name: raw?.name,
+      category_id: raw?.category_id,
+      require_category_ids: raw?.require_category_ids,
+      require_product_ids: raw?.require_product_ids,
+    }
+    const r = checkCategoryRequire(p, cart, products, categories)
+    if (!r.ok) issues.push({ name: p.name || raw?.name, message: r.message })
+  }
+  return issues
+}

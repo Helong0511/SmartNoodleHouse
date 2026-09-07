@@ -1,8 +1,68 @@
-/** 微信小程序支付：mock 环境跳过收银台，生产调 wx.requestPayment */
+/** 微信小程序支付：mock 环境跳过收银台，生产调 wx.requestPayment；支持待确认查单 */
+
+const PENDING_KEY = 'pending_pay'
 
 function isMockPay(payData) {
   if (!payData) return false
   return !!(payData.mock_settled || payData._mock)
+}
+
+function savePending(info) {
+  if (!info || !info.orderId) return
+  try {
+    wx.setStorageSync(PENDING_KEY, {
+      orderId: String(info.orderId),
+      paymentNo: info.paymentNo ? String(info.paymentNo) : '',
+      provider: info.provider || 'WECHAT',
+      at: Date.now()
+    })
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function readPending() {
+  try {
+    return wx.getStorageSync(PENDING_KEY) || null
+  } catch (e) {
+    return null
+  }
+}
+
+function clearPending(orderId) {
+  try {
+    const cur = readPending()
+    if (!orderId || (cur && String(cur.orderId) === String(orderId))) {
+      wx.removeStorageSync(PENDING_KEY)
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+/** 向后端主动查单；返回 { paid, data } */
+async function confirmPending(api, opts) {
+  const o = opts || {}
+  const pending = readPending()
+  const orderId = o.orderId || (pending && pending.orderId)
+  const paymentNo = o.paymentNo || (pending && pending.paymentNo)
+  if (!api || (!orderId && !paymentNo)) {
+    return { paid: false, data: null }
+  }
+  try {
+    let data = null
+    if (paymentNo) {
+      data = await api.post(`/payments/${paymentNo}/sync`, {})
+    } else {
+      data = await api.post(`/payments/orders/${orderId}/sync`, {})
+    }
+    const paid =
+      !!(data && (data.status === 'PAID' || data.payment_status === 'PAID' || data.already_paid))
+    if (paid && orderId) clearPending(orderId)
+    return { paid, data }
+  } catch (e) {
+    return { paid: false, data: null, error: e }
+  }
 }
 
 function requestWechatPay(payData) {
@@ -12,7 +72,7 @@ function requestWechatPay(payData) {
       return
     }
     if (isMockPay(payData)) {
-      resolve(payData)
+      resolve({ ok: true, mock: true, payData })
       return
     }
     const { timeStamp, nonceStr, package: pkg, paySign, signType } = payData
@@ -26,20 +86,56 @@ function requestWechatPay(payData) {
       package: pkg,
       signType: signType || 'RSA',
       paySign,
-      success: (res) => resolve(res),
+      success: (res) => resolve({ ok: true, res, payData }),
       fail: (err) => {
         const msg = (err && err.errMsg) || '支付已取消'
-        if (/cancel/i.test(msg)) {
-          reject(new Error('您已取消支付'))
-        } else {
-          reject(new Error(msg))
-        }
+        const cancel = /cancel/i.test(msg)
+        const e = new Error(cancel ? '您已取消支付' : msg)
+        e.payCancel = cancel
+        e.payUncertain = !cancel
+        e.payData = payData
+        reject(e)
       }
     })
   })
 }
 
+/**
+ * 拉起支付并在成功/不明结果后主动查单，避免回调丢失导致重复扣款或状态滞后。
+ * @returns {{ paid: boolean, payRes: object, sync: object|null }}
+ */
+async function payAndConfirm(api, payRes, orderId) {
+  const paymentNo = payRes && payRes.payment_no
+  savePending({
+    orderId,
+    paymentNo,
+    provider: (payRes && payRes.provider) || 'WECHAT'
+  })
+  if (isMockPay(payRes) || (payRes && payRes.status === 'PAID') || (payRes && payRes.already_paid)) {
+    clearPending(orderId)
+    return { paid: true, payRes, sync: null }
+  }
+  try {
+    await requestWechatPay(payRes)
+  } catch (e) {
+    const synced = await confirmPending(api, { orderId, paymentNo })
+    if (synced.paid) {
+      return { paid: true, payRes, sync: synced.data, recovered: true }
+    }
+    throw e
+  }
+  const synced = await confirmPending(api, { orderId, paymentNo })
+  // 收银台成功即视为用户侧已付；若查单未到账则保留 pending 供结果页继续对账
+  if (synced.paid) clearPending(orderId)
+  return { paid: true, confirmed: !!synced.paid, payRes, sync: synced.data }
+}
+
 module.exports = {
   isMockPay,
-  requestWechatPay
+  requestWechatPay,
+  savePending,
+  readPending,
+  clearPending,
+  confirmPending,
+  payAndConfirm
 }

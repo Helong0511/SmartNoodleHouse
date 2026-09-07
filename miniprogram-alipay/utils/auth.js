@@ -99,20 +99,26 @@ function formatError(err, fallback) {
 
 function getAuthCode() {
   return new Promise((resolve, reject) => {
+    const env = getEnvDebugInfo()
+    // 开发者工具统一用稳定 mock，避免 IDE 真实 authCode / mock 混用导致重复建客
+    if (env && env.isDevtools) {
+      console.warn('[auth] 开发者工具使用稳定 mock 登录（mock:simulator）')
+      resolve({ authCode: 'mock:simulator' })
+      return
+    }
     my.getAuthCode({
       scopes: 'auth_user',
       success: resolve,
       fail: (err) => {
         const msg = formatError(err, '')
-        const env = getEnvDebugInfo()
-        // IDE 未「选择关联小程序」时平台会弹此错；开发联调允许 mock，避免卡死注册
+        // 真机偶发「未关联」类错误时仍允许 mock，避免卡死联调
         const ideAuthGap = /关联小程序|选择关联|请先\[选择/i.test(msg)
-        if ((env && env.isDevtools) || ideAuthGap) {
-          console.warn('[auth] getAuthCode 失败，开发者工具使用 mock 登录', err)
+        if (ideAuthGap) {
+          console.warn('[auth] getAuthCode 失败，使用 mock 登录', err)
           resolve({ authCode: 'mock:simulator' })
           return
         }
-        reject(new Error(formatError(err, 'getAuthCode 失败，请确认 IDE 已登录并关联小程序')))
+        reject(new Error(formatError(err, 'getAuthCode 失败，请确认已登录支付宝并授权')))
       }
     })
   })

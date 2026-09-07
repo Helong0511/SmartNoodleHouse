@@ -99,6 +99,80 @@ async def create_payment(
     return success({"payment_no": payment.payment_no, "amount": str(payment.amount), **pay_data}, request=request)
 
 
+@router.post("/orders/{order_id}/sync")
+async def sync_order_payment(
+    order_id: int,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+    provider: str | None = None,
+):
+    """主动查单：按订单同步最近一笔待支付单（防回调丢失/支付结果不明）。"""
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.customer_id and order.customer_id != customer.id:
+        raise HTTPException(status_code=403, detail="无权同步此订单支付")
+    if not order.customer_id:
+        order.customer_id = customer.id
+        await db.flush()
+    payment, meta = await PaymentService.sync_order_pending_payment(
+        db, order, provider=provider
+    )
+    if meta.get("synced") and payment and payment.status == "PAID":
+        await _notify_paid_or_refunded(db, payment)
+    return success(
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "payment_no": payment.payment_no if payment else meta.get("payment_no"),
+            "payment_status": order.payment_status,
+            "order_status": order.status,
+            **meta,
+        },
+        request=request,
+    )
+
+
+@router.post("/{payment_no}/sync")
+async def sync_payment(
+    payment_no: str,
+    request: Request,
+    db: DbSession,
+    auth: StaffOrCustomer,
+):
+    """主动向微信/支付宝查单并幂等入账。"""
+    user, customer = auth
+    result = await db.execute(select(Payment).where(Payment.payment_no == payment_no))
+    payment = result.scalar_one_or_none()
+    if not payment:
+        raise HTTPException(status_code=404, detail="支付记录不存在")
+    order = await db.get(Order, payment.order_id)
+    if customer:
+        if payment.customer_id and payment.customer_id != customer.id:
+            raise HTTPException(status_code=403, detail="无权同步此支付")
+        if order and order.customer_id and order.customer_id != customer.id:
+            raise HTTPException(status_code=403, detail="无权同步此支付")
+    if user is not None and order:
+        assert_order_store_access(user, order)
+    before = payment.status
+    payment, meta = await PaymentService.sync_payment_status(db, payment)
+    if before != "PAID" and payment.status == "PAID":
+        await _notify_paid_or_refunded(db, payment)
+    progress = await PaymentService.payment_progress(db, order) if order else {}
+    return success(
+        {
+            "payment_no": payment.payment_no,
+            "status": payment.status,
+            "provider": payment.provider,
+            "amount": str(payment.amount),
+            **meta,
+            **progress,
+        },
+        request=request,
+    )
+
+
 @router.post("/orders/{order_id}/cash", dependencies=[require_pos()])
 async def pay_order_cash(
     order_id: int,

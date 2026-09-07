@@ -545,8 +545,10 @@ import { mediaUrl } from '@/utils/media'
 import {
   buildOptionLabels,
   calcUnitPrice,
+  checkCategoryRequire,
   collectOptionIds,
   mergeCartItem,
+  validateCategoryRequires,
 } from '@/utils/cart'
 
 const route = useRoute()
@@ -1027,6 +1029,11 @@ function addToCart() {
   const p = currentProduct.value
   if (!p) return
   if (addToCartFocusMissing()) return
+  const requireCheck = checkCategoryRequire(p, cart.value, products.value, categories.value)
+  if (!requireCheck.ok) {
+    ElMessage.warning(requireCheck.message)
+    return
+  }
   const optionIds = collectOptionIds(p, selectedOptions, multiOptions)
   const optionLabels = buildOptionLabels(p, selectedOptions, multiOptions)
   const unitPrice = calcUnitPrice(p, selectedOptions, multiOptions)
@@ -1042,6 +1049,9 @@ function addToCart() {
     box_price: p.box_price ?? '0',
     subtotal: unitPrice.toFixed(2),
     imageUrl: p._imageUrl || '',
+    category_id: p.category_id,
+    require_category_ids: p.require_category_ids || [],
+    require_product_ids: p.require_product_ids || [],
   })
   productVisible.value = false
 }
@@ -1069,6 +1079,11 @@ function validateBeforeCheckout(): boolean {
   const sid = effectiveStoreId()
   if (!sid) {
     ElMessage.warning('请先选择门店')
+    return false
+  }
+  const catIssues = validateCategoryRequires(cart.value, products.value, categories.value)
+  if (catIssues.length) {
+    ElMessage.warning(catIssues[0].message)
     return false
   }
   return true

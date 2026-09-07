@@ -5,6 +5,7 @@ const media = require('../../utils/media')
 const payUtil = require('../../utils/pay')
 const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
+const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
 function memberDiscountText(rate) {
@@ -608,6 +609,11 @@ Page({
       my.alert({ title: '无法下单', content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。` })
       return
     }
+    const catIssues = cartUtil.validateCategoryRequires(cart, productItems)
+    if (catIssues.length) {
+      my.alert({ title: '无法下单', content: catIssues[0].message || '加料类商品须先点主餐' })
+      return
+    }
     let tableToken = await this._ensureTableTokenForSubmit()
     if (!tableToken) {
       my.showToast({ content: '请先扫描或选择桌号', type: 'fail' })
@@ -637,9 +643,32 @@ Page({
         provider: 'ALIPAY',
         channel_type: 'miniprogram'
       })
-      await payUtil.requestAlipayPay(payRes)
+      let payOutcome
+      try {
+        payOutcome = await payUtil.payAndConfirm(api, payRes, order.id)
+      } catch (payErr) {
+        const ptsFail = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''
+        if (payErr && payErr.payCancel) {
+          my.alert({
+            title: '支付未完成',
+            content: '订单已创建，正在确认支付结果；也可稍后在「订单」页重新支付',
+            success: () => {
+              my.redirectTo({ url: `/pages/result/result?order_id=${order.id}${ptsFail}` })
+            }
+          })
+          return
+        }
+        my.showToast({ content: (payErr && payErr.message) || '支付未完成', type: 'fail' })
+        my.redirectTo({ url: `/pages/result/result?order_id=${order.id}${ptsFail}` })
+        return
+      }
       auth.saveCart([])
-      const pts = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''
+      prefUtil.clearPrefsCache(app)
+      const pts =
+        (payOutcome && payOutcome.sync && payOutcome.sync.points_earned) ||
+        (payRes && payRes.points_earned)
+          ? `&points_earned=${(payOutcome && payOutcome.sync && payOutcome.sync.points_earned) || payRes.points_earned}`
+          : ''
       my.redirectTo({ url: `/pages/result/result?order_id=${order.id}${pts}` })
     } catch (e) {
       const msg = (e && e.message) || '下单失败'

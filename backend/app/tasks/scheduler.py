@@ -33,7 +33,9 @@ def register_tasks(scheduler) -> None:
     async def close_expired_orders():
         async with AsyncSessionLocal() as db:
             from app.services.order_lifecycle import apply_order_status
+            from app.services.payment_service import PaymentService
             from app.services.system_settings_service import SystemSettingsService
+            from app.services.websocket_manager import ws_manager
 
             timeout_minutes = await SystemSettingsService.get_int(
                 db, "order_payment_timeout_minutes", settings.order_payment_timeout_minutes
@@ -51,8 +53,30 @@ def register_tasks(scheduler) -> None:
             )
             expired = list(result.scalars().all())
             closed = 0
+            rescued = 0
             for order in expired:
                 # 二次确认：锁内状态可能已被回调改写
+                if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
+                    continue
+                # 关单前先向渠道查单，避免回调丢失误关已付款订单
+                try:
+                    if await PaymentService.sync_before_close_order(db, order):
+                        rescued += 1
+                        try:
+                            await ws_manager.notify_order_event(
+                                "ORDER_PAID",
+                                {
+                                    "order_id": order.id,
+                                    "order_no": order.order_no,
+                                    "store_id": order.store_id,
+                                    "source": "CLOSE_PRE_SYNC",
+                                },
+                            )
+                        except Exception:
+                            logger.exception("关单前入账 WS 通知失败 order_id=%s", order.id)
+                        continue
+                except Exception:
+                    logger.exception("关单前查单异常 order_id=%s", order.id)
                 if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
                     continue
                 await apply_order_status(
@@ -68,6 +92,8 @@ def register_tasks(scheduler) -> None:
             await db.commit()
             if closed:
                 logger.info("Expired orders closed: %s", closed)
+            if rescued:
+                logger.info("Expired orders rescued via payment query: %s", rescued)
 
     @scheduler.scheduled_job("interval", minutes=1)
     async def auto_complete_kitchen_orders():
@@ -99,6 +125,15 @@ def register_tasks(scheduler) -> None:
                     logger.exception("KDS auto-complete ws notify failed order_id=%s", order.id)
             if completed:
                 logger.info("Kitchen auto-completed orders: %s", len(completed))
+
+    @scheduler.scheduled_job("interval", minutes=1)
+    async def poll_pending_payments():
+        """补偿支付回调丢失：扫描 PENDING 微信/支付宝单并主动查单。"""
+        from app.services.payment_service import PaymentService
+
+        n = await PaymentService.poll_pending_payments(limit=30, min_age_seconds=30)
+        if n:
+            logger.info("Pending payments settled via query: %s", n)
 
     @scheduler.scheduled_job("interval", minutes=1)
     async def poll_payment_refunds():

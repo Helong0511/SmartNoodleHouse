@@ -22,6 +22,12 @@
       </el-table-column>
       <el-table-column prop="name" label="分类名" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
+      <el-table-column label="须先点分类" min-width="160">
+        <template #default="{ row }">
+          <span v-if="!(row.require_category_ids || []).length" class="muted">无限制</span>
+          <span v-else>{{ formatRequireNames(row) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="sort_order" label="排序" width="80" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
@@ -40,8 +46,8 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑分类' : '新增分类'" width="440px">
-      <el-form :model="form" label-width="80px">
+    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑分类' : '新增分类'" width="520px">
+      <el-form :model="form" label-width="100px">
         <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店" required>
           <el-select v-model="form.store_id" placeholder="选择门店" style="width: 100%">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
@@ -58,6 +64,25 @@
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" />
+        </el-form-item>
+        <el-form-item label="须先点分类">
+          <el-select
+            v-model="form.require_category_ids"
+            multiple
+            clearable
+            filterable
+            style="width: 100%"
+            placeholder="不选=无限制；例：加料依赖「面」"
+          >
+            <el-option
+              v-for="c in requireOptions"
+              :key="c.id"
+              :label="c.name"
+              :value="c.id"
+              :disabled="form.id === c.id"
+            />
+          </el-select>
+          <div class="form-tip">新建商品时默认带入本配置，可在商品编辑里改成指定分类或指定商品</div>
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.sort_order" :min="0" />
@@ -95,6 +120,7 @@ const form = reactive({
   description: '',
   sort_order: 0,
   status: 1,
+  require_category_ids: [] as number[],
 })
 
 const boundStoreName = computed(() => {
@@ -102,6 +128,22 @@ const boundStoreName = computed(() => {
   if (!sid) return ''
   return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
 })
+
+const requireOptions = computed(() => {
+  const sid = form.store_id || (form.id ? categories.value.find((c) => c.id === form.id)?.store_id : undefined)
+  if (!sid) return categories.value.filter((c) => c.status === 1 || c.id === form.id)
+  return categories.value.filter((c) => c.store_id === sid)
+})
+
+function formatRequireNames(row: any) {
+  const ids = row.require_category_ids || []
+  if (!ids.length) return '无限制'
+  const names = ids.map((id: number) => {
+    const c = categories.value.find((x) => x.id === id)
+    return c?.name || `#${id}`
+  })
+  return names.join('、')
+}
 
 async function loadStores() {
   try {
@@ -137,6 +179,7 @@ function openForm(row?: any) {
       description: row.description || '',
       sort_order: row.sort_order,
       status: row.status,
+      require_category_ids: [...(row.require_category_ids || [])],
     })
   } else {
     Object.assign(form, {
@@ -149,6 +192,7 @@ function openForm(row?: any) {
       description: '',
       sort_order: 0,
       status: 1,
+      require_category_ids: [],
     })
   }
   dialogVisible.value = true
@@ -170,6 +214,7 @@ async function save() {
       description: form.description || null,
       sort_order: form.sort_order,
       status: form.status,
+      require_category_ids: form.require_category_ids || [],
     }
     if (!form.id) {
       payload.store_id = form.store_id
@@ -208,5 +253,14 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
+}
+.muted {
+  color: #c0c4cc;
 }
 </style>

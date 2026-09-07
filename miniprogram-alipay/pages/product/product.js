@@ -97,9 +97,30 @@ Page({
     my.previewImage({ current: url, urls })
   },
 
-  addCart() {
+  async addCart() {
     const p = this.data.product
     if (!p) return
+    let categories = []
+    let products = [p]
+    if ((p.require_category_ids || []).length || (p.require_product_ids || []).length) {
+      try {
+        const sid = p.store_id
+          || (app.globalData.table && app.globalData.table.store_id)
+          || (app.globalData.store && app.globalData.store.id)
+          || null
+        const [cats, prodRes] = await Promise.all([
+          api.get('/categories', sid ? { store_id: sid } : {}, false),
+          api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+        ])
+        categories = Array.isArray(cats) ? cats : []
+        products = (prodRes && prodRes.items) || [p]
+      } catch (_) {}
+    }
+    const check = cartUtil.checkCategoryRequire(p, auth.getCart(), products, categories)
+    if (!check.ok) {
+      my.showToast({ content: check.message, type: 'none', duration: 2500 })
+      return
+    }
     const qty = this.data.quantity || 1
     const optionIds = cartUtil.collectOptionIds(p, this.data.selected, this.data.multi)
     const unitPrice = cartUtil.calcUnitPrice(p, this.data.selected, this.data.multi)
@@ -116,7 +137,10 @@ Page({
       subtotal: (unitPrice * qty).toFixed(2),
       main_image: p.main_image || '',
       imageUrl,
-      no_member_discount: !!p.no_member_discount
+      no_member_discount: !!p.no_member_discount,
+      category_id: p.category_id,
+      require_category_ids: p.require_category_ids || [],
+      require_product_ids: p.require_product_ids || []
     })
     auth.saveCart(cart)
     my.showToast({ content: '已加入', type: 'success' })

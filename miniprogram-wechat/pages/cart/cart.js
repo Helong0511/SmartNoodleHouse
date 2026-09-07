@@ -58,13 +58,18 @@ Page({
     if (showLoading) this.setData({ loading: true })
     const rawCart = auth.getCart()
     let products = []
+    let categories = []
     try {
       const sid = this.storeId()
-      const res = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
-      products = (res && res.items) || []
+      const [prodRes, catRes] = await Promise.all([
+        api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false),
+        api.get('/categories', sid ? { store_id: sid } : {}, false)
+      ])
+      products = (prodRes && prodRes.items) || []
+      categories = Array.isArray(catRes) ? catRes : ((catRes && catRes.items) || [])
     } catch (_) {}
 
-    const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products)
+    const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories)
     const cart = list.map((raw) => {
       const item = cartUtil.normalizeItem({ ...raw })
       return {

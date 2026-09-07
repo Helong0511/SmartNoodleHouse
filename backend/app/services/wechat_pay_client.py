@@ -129,6 +129,28 @@ async def create_micropay_order(
     }
 
 
+def build_jsapi_pay_params(*, payment_no: str, prepay_id: str) -> dict[str, Any]:
+    """用已有 prepay_id 重新签名（复用未支付单时避免重复统一下单）。"""
+    settings = get_settings()
+    pid = (prepay_id or "").strip()
+    if not pid:
+        raise AppException(50012, "缺少 prepay_id，无法拉起微信支付")
+    ts = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    pkg = f"prepay_id={pid}"
+    pay_sign = _sign_message(f"{settings.wechat_app_id}\n{ts}\n{nonce}\n{pkg}\n")
+    return {
+        "provider": "WECHAT",
+        "payment_no": payment_no,
+        "prepay_id": pid,
+        "timeStamp": ts,
+        "nonceStr": nonce,
+        "package": pkg,
+        "signType": "RSA",
+        "paySign": pay_sign,
+    }
+
+
 async def create_jsapi_order(
     *,
     payment_no: str,
@@ -152,20 +174,34 @@ async def create_jsapi_order(
             "payer": {"openid": openid},
         },
     )
-    prepay_id = data.get("prepay_id")
-    ts = str(int(time.time()))
-    nonce = uuid.uuid4().hex
-    pkg = f"prepay_id={prepay_id}"
-    pay_sign = _sign_message(f"{settings.wechat_app_id}\n{ts}\n{nonce}\n{pkg}\n")
+    return build_jsapi_pay_params(payment_no=payment_no, prepay_id=str(data.get("prepay_id") or ""))
+
+
+async def query_by_out_trade_no(*, payment_no: str) -> dict[str, Any]:
+    """按商户订单号查单（APIv3）。trade_state: SUCCESS/NOTPAY/USERPAYING/CLOSED/..."""
+    settings = get_settings()
+    path = f"/v3/pay/transactions/out-trade-no/{payment_no}?mchid={settings.wechat_mch_id}"
+    try:
+        data = await _request("GET", path)
+    except AppException as exc:
+        msg = str(exc.message or "")
+        # 尚未在微信侧创建成功时查单会报不存在
+        if "RESOURCE_NOT_EXISTS" in msg or "ORDER_NOT_EXIST" in msg or "不存在" in msg:
+            return {
+                "trade_state": "NOTPAY",
+                "transaction_id": None,
+                "amount_total_fen": None,
+                "mchid": settings.wechat_mch_id,
+                "raw": {"code": "ORDER_NOT_EXIST", "message": msg},
+            }
+        raise
+    amount = data.get("amount") if isinstance(data.get("amount"), dict) else {}
     return {
-        "provider": "WECHAT",
-        "payment_no": payment_no,
-        "prepay_id": prepay_id,
-        "timeStamp": ts,
-        "nonceStr": nonce,
-        "package": pkg,
-        "signType": "RSA",
-        "paySign": pay_sign,
+        "trade_state": str(data.get("trade_state") or "").upper(),
+        "transaction_id": data.get("transaction_id"),
+        "amount_total_fen": amount.get("total"),
+        "mchid": data.get("mchid") or settings.wechat_mch_id,
+        "raw": data,
     }
 
 

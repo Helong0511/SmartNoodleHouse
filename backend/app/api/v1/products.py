@@ -7,6 +7,8 @@ from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_perm
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import (
+    CategorySortSchedule,
+    CategorySortScheduleItem,
     DeliveryProductMap,
     Option,
     OptionGroup,
@@ -20,6 +22,8 @@ from app.models import (
 )
 from app.schemas.product import (
     CategoryCreate,
+    CategoryScheduleCreate,
+    CategoryScheduleUpdate,
     CategoryUpdate,
     OptionCreate,
     OptionGroupCreate,
@@ -29,7 +33,171 @@ from app.schemas.product import (
     ProductUpdate,
 )
 from app.services.store_scope import assert_store_access, require_bound_store
+from app.services.category_require import (
+    normalize_id_list,
+    normalize_require_category_ids,
+    resolve_product_requires,
+)
+from app.services.category_schedule import (
+    apply_category_schedule_sort,
+    parse_hhmm,
+)
 from app.utils.upload import save_upload
+
+
+def _fmt_time(t) -> str:
+    if t is None:
+        return ""
+    return t.strftime("%H:%M:%S") if hasattr(t, "strftime") else str(t)
+
+
+def _schedule_payload(sched: CategorySortSchedule, items: list[CategorySortScheduleItem] | None = None) -> dict:
+    item_rows = items or []
+    return {
+        "id": sched.id,
+        "store_id": sched.store_id,
+        "name": sched.name,
+        "start_time": _fmt_time(sched.start_time)[:5],
+        "end_time": _fmt_time(sched.end_time)[:5],
+        "priority": sched.priority,
+        "status": sched.status,
+        "items": [
+            {"category_id": r.category_id, "sort_order": r.sort_order}
+            for r in sorted(item_rows, key=lambda x: (x.sort_order, x.category_id))
+        ],
+    }
+
+
+async def _load_schedule_items(db: DbSession, schedule_ids: list[int]) -> dict[int, list[CategorySortScheduleItem]]:
+    if not schedule_ids:
+        return {}
+    rows = list(
+        (
+            await db.execute(
+                select(CategorySortScheduleItem).where(
+                    CategorySortScheduleItem.schedule_id.in_(schedule_ids)
+                )
+            )
+        ).scalars()
+    )
+    out: dict[int, list[CategorySortScheduleItem]] = {i: [] for i in schedule_ids}
+    for r in rows:
+        out.setdefault(int(r.schedule_id), []).append(r)
+    return out
+
+
+async def _replace_schedule_items(
+    db: DbSession,
+    schedule: CategorySortSchedule,
+    items: list,
+) -> None:
+    await db.execute(
+        delete(CategorySortScheduleItem).where(
+            CategorySortScheduleItem.schedule_id == int(schedule.id)
+        )
+    )
+    seen: set[int] = set()
+    for raw in items or []:
+        cid = int(raw.category_id if hasattr(raw, "category_id") else raw["category_id"])
+        if cid in seen:
+            continue
+        seen.add(cid)
+        cat = await db.get(ProductCategory, cid)
+        if not cat or int(cat.store_id) != int(schedule.store_id):
+            raise AppException(40001, f"分类不存在或不属于本店: {cid}")
+        sort_order = int(raw.sort_order if hasattr(raw, "sort_order") else raw.get("sort_order", 0))
+        db.add(
+            CategorySortScheduleItem(
+                schedule_id=int(schedule.id),
+                category_id=cid,
+                sort_order=sort_order,
+            )
+        )
+
+
+def _category_payload(cat: ProductCategory, store_name: str | None = None, *, schedule_id: int | None = None, schedule_name: str | None = None) -> dict:
+    return {
+        "id": cat.id,
+        "store_id": cat.store_id,
+        "store_name": store_name,
+        "name": cat.name,
+        "description": cat.description,
+        "sort_order": cat.sort_order,
+        "status": cat.status,
+        "require_category_ids": normalize_require_category_ids(cat.require_category_ids),
+        "schedule_id": schedule_id,
+        "schedule_name": schedule_name,
+    }
+
+
+async def _validate_require_category_ids(
+    db: DbSession,
+    store_id: int,
+    require_ids: list[int] | None,
+    *,
+    self_id: int | None = None,
+) -> list[int]:
+    ids = normalize_require_category_ids(require_ids)
+    if not ids:
+        return []
+    if self_id is not None and self_id in ids:
+        raise AppException(40001, "分类不能依赖自身")
+    rows = list(
+        (
+            await db.execute(
+                select(ProductCategory).where(
+                    ProductCategory.id.in_(ids),
+                    ProductCategory.store_id == int(store_id),
+                )
+            )
+        ).scalars()
+    )
+    found = {c.id for c in rows}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise AppException(40001, f"依赖分类不存在或不属于本店: {missing}")
+    return ids
+
+
+async def _validate_require_product_ids(
+    db: DbSession,
+    store_id: int,
+    require_ids: list[int] | None,
+    *,
+    self_id: int | None = None,
+) -> list[int]:
+    ids = normalize_id_list(require_ids)
+    if not ids:
+        return []
+    if self_id is not None and self_id in ids:
+        raise AppException(40001, "商品不能依赖自身")
+    rows = list(
+        (
+            await db.execute(
+                select(Product).where(
+                    Product.id.in_(ids),
+                    Product.store_id == int(store_id),
+                )
+            )
+        ).scalars()
+    )
+    found = {p.id for p in rows}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise AppException(40001, f"依赖商品不存在或不属于本店: {missing}")
+    return ids
+
+
+def _store_require_lists(
+    require_category_ids: list[int] | None,
+    require_product_ids: list[int] | None,
+    *,
+    custom: bool,
+) -> tuple[list | None, list | None]:
+    """custom=False 时存 NULL（继承分类）；True 时存列表（可为空列表表示明确无限制）。"""
+    if not custom:
+        return None, None
+    return list(require_category_ids or []), list(require_product_ids or [])
 
 
 async def _clear_main_product_images(db: DbSession, product_id: int) -> None:
@@ -72,8 +240,13 @@ async def list_categories(
     status: int | None = 1,
     all: bool = False,
     store_id: int | None = None,
+    at: str | None = None,
+    apply_schedule: bool = True,
 ):
-    """分类列表。小程序/点餐传 store_id；后台按门店筛选。"""
+    """分类列表。小程序/点餐传 store_id；后台 all=true 用默认排序。
+
+    有 store_id 且非 all 时，按当前（或 at=HH:MM）时段方案重排 sort_order。
+    """
     from app.models import Store
 
     q = select(ProductCategory).order_by(ProductCategory.sort_order, ProductCategory.id)
@@ -83,6 +256,17 @@ async def list_categories(
         q = q.where(ProductCategory.store_id == int(store_id))
     result = await db.execute(q)
     cats = list(result.scalars().all())
+    active = None
+    at_t = None
+    if at:
+        try:
+            at_t = parse_hhmm(at)
+        except ValueError as exc:
+            raise AppException(40001, str(exc)) from exc
+    if apply_schedule and store_id is not None and not all:
+        cats, active = await apply_category_schedule_sort(
+            db, cats, store_id=int(store_id), at=at_t
+        )
     store_ids = list({c.store_id for c in cats if c.store_id})
     store_map: dict[int, str] = {}
     if store_ids:
@@ -90,21 +274,19 @@ async def list_categories(
             s.id: s.name
             for s in (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
         }
-    return success(
-        [
-            {
-                "id": c.id,
-                "store_id": c.store_id,
-                "store_name": store_map.get(c.store_id),
-                "name": c.name,
-                "description": c.description,
-                "sort_order": c.sort_order,
-                "status": c.status,
-            }
-            for c in cats
-        ],
-        request=request,
-    )
+    payloads = []
+    for i, c in enumerate(cats):
+        row = _category_payload(
+            c,
+            store_map.get(c.store_id),
+            schedule_id=int(active.id) if active else None,
+            schedule_name=active.name if active else None,
+        )
+        if active is not None:
+            row["sort_order"] = i
+            row["default_sort_order"] = int(c.sort_order or 0)
+        payloads.append(row)
+    return success(payloads, request=request)
 
 
 @router.post("/categories", dependencies=[require_permission("product:create")])
@@ -116,8 +298,13 @@ async def create_category(data: CategoryCreate, request: Request, db: DbSession,
         else:
             raise AppException(40020, "请指定门店后再创建分类")
     assert_store_access(user, sid)
-    payload = data.model_dump(exclude={"store_id"})
-    cat = ProductCategory(store_id=int(sid), **payload)
+    payload = data.model_dump(exclude={"store_id", "require_category_ids"})
+    require_ids = await _validate_require_category_ids(db, int(sid), data.require_category_ids)
+    cat = ProductCategory(
+        store_id=int(sid),
+        require_category_ids=require_ids or None,
+        **payload,
+    )
     db.add(cat)
     await db.flush()
     return success({"id": cat.id, "store_id": cat.store_id}, request=request)
@@ -136,10 +323,143 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
         assert_store_access(user, int(payload["store_id"]))
         cat.store_id = int(payload["store_id"])
         del payload["store_id"]
+    if "require_category_ids" in payload:
+        require_ids = await _validate_require_category_ids(
+            db,
+            int(cat.store_id),
+            payload.pop("require_category_ids"),
+            self_id=int(cat.id),
+        )
+        cat.require_category_ids = require_ids or None
     for k, v in payload.items():
         setattr(cat, k, v)
     await db.flush()
     return success({"id": cat.id, "store_id": cat.store_id}, request=request)
+
+
+@router.get("/category-schedules", dependencies=[require_permission("product:read")])
+async def list_category_schedules(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+):
+    sid = require_bound_store(user, store_id)
+    if sid is None and not user.store_id and user.role.code != "SUPER_ADMIN":
+        raise AppException(40020, "请指定门店")
+    q = select(CategorySortSchedule).order_by(
+        CategorySortSchedule.priority.desc(),
+        CategorySortSchedule.start_time,
+        CategorySortSchedule.id,
+    )
+    if sid is not None:
+        assert_store_access(user, sid)
+        q = q.where(CategorySortSchedule.store_id == int(sid))
+    elif user.store_id:
+        q = q.where(CategorySortSchedule.store_id == int(user.store_id))
+    rows = list((await db.execute(q)).scalars().all())
+    items_map = await _load_schedule_items(db, [int(r.id) for r in rows])
+    return success(
+        [_schedule_payload(r, items_map.get(int(r.id), [])) for r in rows],
+        request=request,
+    )
+
+
+@router.post("/category-schedules", dependencies=[require_permission("product:create")])
+async def create_category_schedule(
+    data: CategoryScheduleCreate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    sid = require_bound_store(user, data.store_id)
+    if sid is None:
+        if user.store_id:
+            sid = int(user.store_id)
+        else:
+            raise AppException(40020, "请指定门店后再创建时段方案")
+    assert_store_access(user, sid)
+    try:
+        start_t = parse_hhmm(data.start_time)
+        end_t = parse_hhmm(data.end_time)
+    except ValueError as exc:
+        raise AppException(40001, str(exc)) from exc
+    sched = CategorySortSchedule(
+        store_id=int(sid),
+        name=data.name.strip(),
+        start_time=start_t,
+        end_time=end_t,
+        priority=int(data.priority or 0),
+        status=int(data.status if data.status is not None else 1),
+    )
+    if not sched.name:
+        raise AppException(40001, "方案名称不能为空")
+    db.add(sched)
+    await db.flush()
+    await _replace_schedule_items(db, sched, data.items)
+    await db.flush()
+    items = (await _load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
+    return success(_schedule_payload(sched, items), request=request)
+
+
+@router.put("/category-schedules/{schedule_id}", dependencies=[require_permission("product:update")])
+async def update_category_schedule(
+    schedule_id: int,
+    data: CategoryScheduleUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    sched = await db.get(CategorySortSchedule, schedule_id)
+    if not sched:
+        raise AppException(40401, "时段方案不存在")
+    assert_store_access(user, sched.store_id)
+    payload = data.model_dump(exclude_unset=True)
+    if "name" in payload and payload["name"] is not None:
+        name = str(payload["name"]).strip()
+        if not name:
+            raise AppException(40001, "方案名称不能为空")
+        sched.name = name
+    if "start_time" in payload and payload["start_time"] is not None:
+        try:
+            sched.start_time = parse_hhmm(payload["start_time"])
+        except ValueError as exc:
+            raise AppException(40001, str(exc)) from exc
+    if "end_time" in payload and payload["end_time"] is not None:
+        try:
+            sched.end_time = parse_hhmm(payload["end_time"])
+        except ValueError as exc:
+            raise AppException(40001, str(exc)) from exc
+    if "priority" in payload and payload["priority"] is not None:
+        sched.priority = int(payload["priority"])
+    if "status" in payload and payload["status"] is not None:
+        sched.status = int(payload["status"])
+    if "items" in payload and payload["items"] is not None:
+        await _replace_schedule_items(db, sched, data.items or [])
+    await db.flush()
+    items = (await _load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
+    return success(_schedule_payload(sched, items), request=request)
+
+
+@router.delete("/category-schedules/{schedule_id}", dependencies=[require_permission("product:update")])
+async def delete_category_schedule(
+    schedule_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    sched = await db.get(CategorySortSchedule, schedule_id)
+    if not sched:
+        raise AppException(40401, "时段方案不存在")
+    assert_store_access(user, sched.store_id)
+    await db.execute(
+        delete(CategorySortScheduleItem).where(
+            CategorySortScheduleItem.schedule_id == int(sched.id)
+        )
+    )
+    await db.delete(sched)
+    await db.flush()
+    return success({"id": schedule_id}, request=request)
 
 
 @router.get("/products")
@@ -204,17 +524,32 @@ async def list_products(
             ).scalars().all()
         )
 
+    cat_ids = list({p.category_id for p in products if p.category_id})
+    cats_map: dict[int, ProductCategory] = {}
+    if cat_ids:
+        cats_map = {
+            c.id: c
+            for c in (
+                await db.execute(select(ProductCategory).where(ProductCategory.id.in_(cat_ids)))
+            ).scalars().all()
+        }
+
     items = []
     for p in products:
         ov = stock_map.get(p.id)
         if ov is not None and int(ov.status) != 1:
             continue
+        cat = cats_map.get(p.category_id)
+        eff_cats, eff_prods, inherited = resolve_product_requires(p, cat)
         items.append(
             {
                 "id": p.id,
                 "store_id": p.store_id,
                 "store_name": store_map.get(p.store_id),
                 "category_id": p.category_id,
+                "require_category_ids": eff_cats,
+                "require_product_ids": eff_prods,
+                "require_inherited": inherited,
                 "product_no": p.product_no,
                 "name": p.name,
                 "description": p.description or "",
@@ -401,12 +736,29 @@ async def get_product(product_id: int, request: Request, db: DbSession):
     )
     option_group_ids = [row[0] for row in pog_ids_result.all()]
     store = await db.get(Store, product.store_id) if product.store_id else None
+    cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
+    eff_cats, eff_prods, inherited = resolve_product_requires(product, cat)
+    stored_cats = (
+        normalize_id_list(product.require_category_ids)
+        if product.require_category_ids is not None
+        else None
+    )
+    stored_prods = (
+        normalize_id_list(product.require_product_ids)
+        if product.require_product_ids is not None
+        else None
+    )
     return success(
         {
             "id": product.id,
             "store_id": product.store_id,
             "store_name": store.name if store else None,
             "category_id": product.category_id,
+            "require_category_ids": eff_cats,
+            "require_product_ids": eff_prods,
+            "require_inherited": inherited,
+            "require_category_ids_stored": stored_cats,
+            "require_product_ids_stored": stored_prods,
             "product_no": product.product_no,
             "name": product.name,
             "description": product.description or "",
@@ -460,10 +812,31 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         missing = [gid for gid in data.option_group_ids if gid not in found_ids]
         if missing:
             raise AppException(40003, f"规格组不存在或已禁用: {missing}")
+
+    # 未传依赖字段：把分类默认带入商品（方案 A）
+    if data.require_category_ids is None and data.require_product_ids is None:
+        req_cats = await _validate_require_category_ids(
+            db, int(sid), normalize_require_category_ids(cat.require_category_ids)
+        )
+        req_prods: list[int] = []
+        custom = bool(req_cats)
+    else:
+        req_cats = await _validate_require_category_ids(db, int(sid), data.require_category_ids)
+        req_prods = await _validate_require_product_ids(db, int(sid), data.require_product_ids)
+        custom = True
+    stored_cats, stored_prods = _store_require_lists(req_cats, req_prods, custom=custom)
+
     try:
-        payload = data.model_dump(exclude={"option_group_ids", "store_id"})
+        payload = data.model_dump(
+            exclude={"option_group_ids", "store_id", "require_category_ids", "require_product_ids"}
+        )
         payload["product_no"] = product_no
-        product = Product(store_id=int(sid), **payload)
+        product = Product(
+            store_id=int(sid),
+            require_category_ids=stored_cats,
+            require_product_ids=stored_prods,
+            **payload,
+        )
         db.add(product)
         await db.flush()
         for idx, gid in enumerate(data.option_group_ids):
@@ -484,7 +857,10 @@ async def update_product(
         return success(None, message="商品不存在", request=request)
     assert_store_access(user, product.store_id)
 
-    payload = data.model_dump(exclude_unset=True, exclude={"option_group_ids"})
+    payload = data.model_dump(
+        exclude_unset=True,
+        exclude={"option_group_ids", "require_category_ids", "require_product_ids"},
+    )
     if "store_id" in payload and payload["store_id"] is not None:
         if user.role.code != "SUPER_ADMIN":
             raise AppException(40301, "仅超管可迁移商品所属门店")
@@ -499,6 +875,23 @@ async def update_product(
             raise AppException(40001, "分类不存在")
         if int(cat.store_id) != int(product.store_id):
             raise AppException(40001, "分类与商品不在同一门店")
+
+    raw = data.model_dump(exclude_unset=True)
+    if "require_category_ids" in raw or "require_product_ids" in raw:
+        req_cats = await _validate_require_category_ids(
+            db,
+            int(product.store_id),
+            raw.get("require_category_ids", product.require_category_ids),
+        )
+        req_prods = await _validate_require_product_ids(
+            db,
+            int(product.store_id),
+            raw.get("require_product_ids", product.require_product_ids),
+            self_id=int(product.id),
+        )
+        product.require_category_ids, product.require_product_ids = _store_require_lists(
+            req_cats, req_prods, custom=True
+        )
 
     old_main_image = product.main_image
     for k, v in payload.items():

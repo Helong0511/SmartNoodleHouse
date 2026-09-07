@@ -174,7 +174,7 @@ function mergeCartItem(cart, entry) {
   return list
 }
 
-function reconcileWithProducts(cart, products) {
+function reconcileWithProducts(cart, products, categories) {
   const map = {}
   ;(products || []).forEach((p) => {
     map[p.id] = p
@@ -199,10 +199,18 @@ function reconcileWithProducts(cart, products) {
       }
     }
 
+    if (!invalidReason && p) {
+      const req = checkCategoryRequire(p, cart, products, categories)
+      if (!req.ok) invalidReason = req.message
+    }
+
     if (invalidReason) invalidCount += 1
     const display = resolveOptionDisplay(item, p)
     return {
       ...item,
+      category_id: (p && p.category_id) || item.category_id,
+      require_category_ids: (p && p.require_category_ids) || item.require_category_ids || [],
+      require_product_ids: (p && p.require_product_ids) || item.require_product_ids || [],
       option_labels: display.option_labels,
       option_text: display.option_text,
       main_image: (p && p.main_image) || item.main_image || '',
@@ -262,6 +270,117 @@ function validateRequiredOptions(cart, products) {
   return issues
 }
 
+function normalizeRequireCategoryIds(raw) {
+  if (!raw) return []
+  if (!Array.isArray(raw)) return []
+  const out = []
+  const seen = {}
+  raw.forEach((x) => {
+    const id = Number(x)
+    if (!Number.isFinite(id) || id <= 0 || seen[id]) return
+    seen[id] = true
+    out.push(id)
+  })
+  return out
+}
+
+function productMap(products) {
+  const map = {}
+  ;(products || []).forEach((p) => {
+    if (!p) return
+    map[p.id] = p
+    map[String(p.id)] = p
+  })
+  return map
+}
+
+function categoryMap(categories) {
+  const map = {}
+  ;(categories || []).forEach((c) => {
+    if (!c) return
+    map[c.id] = c
+    map[String(c.id)] = c
+  })
+  return map
+}
+
+function resolveProductRequires(product, categories) {
+  if (!product) return { cats: [], prods: [] }
+  let cats = normalizeRequireCategoryIds(product.require_category_ids)
+  let prods = normalizeRequireCategoryIds(product.require_product_ids)
+  if (!cats.length && !prods.length) {
+    const cat = categoryMap(categories)[product.category_id]
+    cats = normalizeRequireCategoryIds(cat && cat.require_category_ids)
+  }
+  return { cats, prods }
+}
+
+function cartCategoryIds(cart, products) {
+  const map = productMap(products)
+  const ids = {}
+  ;(cart || []).forEach((raw) => {
+    const item = normalizeItem({ ...raw })
+    let cid = item.category_id != null ? Number(item.category_id) : NaN
+    if (!Number.isFinite(cid) || cid <= 0) {
+      const p = map[item.product_id]
+      cid = p && p.category_id != null ? Number(p.category_id) : NaN
+    }
+    if (Number.isFinite(cid) && cid > 0) ids[cid] = true
+  })
+  return ids
+}
+
+function cartProductIds(cart) {
+  const ids = {}
+  ;(cart || []).forEach((raw) => {
+    const pid = Number(raw && raw.product_id)
+    if (Number.isFinite(pid) && pid > 0) ids[pid] = true
+  })
+  return ids
+}
+
+function checkCategoryRequire(product, cart, products, categories) {
+  const { cats: requireCats, prods: requireProds } = resolveProductRequires(product, categories)
+  if (!requireCats.length && !requireProds.length) return { ok: true, message: '' }
+  const haveCats = cartCategoryIds(cart, products)
+  const haveProds = cartProductIds(cart)
+  const pmap = productMap(products)
+  if (requireCats.some((id) => haveCats[id])) return { ok: true, message: '' }
+  if (requireProds.some((id) => haveProds[id])) return { ok: true, message: '' }
+  const cmap = categoryMap(categories)
+  const labels = []
+  requireCats.forEach((id) => labels.push(`「${(cmap[id] && cmap[id].name) || ('分类#' + id)}」类`))
+  requireProds.forEach((id) => {
+    const p = pmap[id]
+    labels.push(`「${(p && p.name) || ('商品#' + id)}」`)
+  })
+  const name = (product && product.name) || '该商品'
+  return {
+    ok: false,
+    message: `请先点${labels.join('或')}，再点「${name}」`
+  }
+}
+
+function validateCategoryRequires(cart, products, categories) {
+  const map = productMap(products)
+  const issues = []
+  ;(cart || []).forEach((raw) => {
+    const item = normalizeItem({ ...raw })
+    const p = map[item.product_id] || {
+      id: item.product_id,
+      name: item.name,
+      category_id: item.category_id,
+      require_category_ids: item.require_category_ids,
+      require_product_ids: item.require_product_ids
+    }
+    const r = checkCategoryRequire(p, cart, products, categories)
+    if (!r.ok) {
+      issues.push({ name: p.name || item.name, message: r.message })
+    }
+  })
+  return issues
+}
+
 module.exports = {
   calcUnitPrice,
   buildOptionLabels,
@@ -277,5 +396,7 @@ module.exports = {
   calcCouponEligibleSubtotal,
   calcVoucherEligiblePayable,
   enrichCartFromProducts,
-  validateRequiredOptions
+  validateRequiredOptions,
+  checkCategoryRequire,
+  validateCategoryRequires
 }

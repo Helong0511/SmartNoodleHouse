@@ -19,6 +19,7 @@ const router = createRouter({
       children: [
         { path: 'dashboard', component: () => import('@/views/Dashboard.vue'), meta: { title: '数据概览', permission: 'order:read', denyCashier: true } },
         { path: 'categories', component: () => import('@/views/Categories.vue'), meta: { title: '分类管理', permission: 'product:read', denyCashier: true } },
+        { path: 'category-schedules', component: () => import('@/views/CategorySchedules.vue'), meta: { title: '分类时段排序', permission: 'product:read', denyCashier: true } },
         { path: 'options', component: () => import('@/views/Options.vue'), meta: { title: '规格管理', permission: 'product:read', denyCashier: true } },
         { path: 'products', component: () => import('@/views/Products.vue'), meta: { title: '商品管理', permission: 'product:read', denyCashier: true } },
         { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理', permission: 'order:read', denyCashier: true } },

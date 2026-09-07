@@ -85,6 +85,7 @@ import {
   sortPrefsForApply,
   buildOptionLabels,
   calcUnitPrice,
+  checkCategoryRequire,
   collectOptionIds,
   mergeCartItem,
 } from '@/utils/cart'
@@ -171,6 +172,11 @@ function addToCart() {
       return
     }
   }
+  const requireCheck = checkCategoryRequire(p, cart.value, products.value, categories.value)
+  if (!requireCheck.ok) {
+    ElMessage.warning(requireCheck.message)
+    return
+  }
   const stock = Number(p.stock ?? 999)
   if (stock < 999 && stock < 1) {
     ElMessage.error('库存不足')
@@ -191,6 +197,9 @@ function addToCart() {
     imageUrl: p._imageUrl || '',
     box_price: p.box_price || '0',
     no_member_discount: !!p.no_member_discount,
+    category_id: p.category_id,
+    require_category_ids: p.require_category_ids || [],
+    require_product_ids: p.require_product_ids || [],
   })
   localStorage.setItem('snh_cart', JSON.stringify(cart.value))
   localStorage.setItem('cart', JSON.stringify(cart.value))

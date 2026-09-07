@@ -209,6 +209,18 @@ npm run dev -- --host 0.0.0.0 --port 5173
 #
 # 已有库补顾客扫码注册门店：
 # mysql ... < sql/tools/015_customer_registered_store.sql
+#
+# 已有库补分类购买依赖（加料须先点面等）：
+# mysql ... < sql/tools/016_category_require_categories.sql
+# 或: python scripts/_run_sql_migrations.py sql/tools/016_category_require_categories.sql
+#
+# 已有库补商品级购买依赖（方案 A：商品可勾分类/指定商品）：
+# mysql ... < sql/tools/017_product_require_prerequisites.sql
+# 或: python scripts/_run_sql_migrations.py sql/tools/017_product_require_prerequisites.sql
+#
+# 已有库补分类分时段排序：
+# mysql ... < sql/tools/018_category_sort_schedules.sql
+# 或: python scripts/_run_sql_migrations.py sql/tools/018_category_sort_schedules.sql
 
 
 叫号屏地址（调试环境）

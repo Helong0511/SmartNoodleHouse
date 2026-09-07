@@ -9,6 +9,8 @@ class CategoryCreate(BaseModel):
     description: str | None = None
     sort_order: int = 0
     status: int = 1
+    # 须先点过的分类 id 列表（OR：购物车有其中任一分类即可）；空=无限制
+    require_category_ids: list[int] | None = None
 
 
 class CategoryUpdate(BaseModel):
@@ -18,6 +20,7 @@ class CategoryUpdate(BaseModel):
     status: int | None = None
     # 一般不改门店；超管可迁移
     store_id: int | None = None
+    require_category_ids: list[int] | None = None
 
 
 class CategoryOut(BaseModel):
@@ -27,8 +30,33 @@ class CategoryOut(BaseModel):
     description: str | None
     sort_order: int
     status: int
+    require_category_ids: list[int] | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CategoryScheduleItemIn(BaseModel):
+    category_id: int
+    sort_order: int = 0
+
+
+class CategoryScheduleCreate(BaseModel):
+    store_id: int | None = None
+    name: str
+    start_time: str  # HH:MM 或 HH:MM:SS
+    end_time: str
+    priority: int = 0
+    status: int = 1
+    items: list[CategoryScheduleItemIn] = []
+
+
+class CategoryScheduleUpdate(BaseModel):
+    name: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    priority: int | None = None
+    status: int | None = None
+    items: list[CategoryScheduleItemIn] | None = None
 
 
 class ProductCreate(BaseModel):
@@ -49,6 +77,9 @@ class ProductCreate(BaseModel):
     box_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="餐盒/打包费（单价）")
     main_image: str | None = None
     option_group_ids: list[int] = []
+    # None=创建时自动带入所属分类默认；[]=明确无限制；有值=商品自身配置
+    require_category_ids: list[int] | None = None
+    require_product_ids: list[int] | None = None
 
 
 class ProductUpdate(BaseModel):
@@ -68,6 +99,8 @@ class ProductUpdate(BaseModel):
     box_price: Decimal | None = None
     main_image: str | None = None
     option_group_ids: list[int] | None = None
+    require_category_ids: list[int] | None = None
+    require_product_ids: list[int] | None = None
 
 
 class ProductOut(BaseModel):
@@ -87,6 +120,8 @@ class ProductOut(BaseModel):
     no_cooking: bool
     sort_order: int
     sales_count: int
+    require_category_ids: list[int] | None = None
+    require_product_ids: list[int] | None = None
 
     model_config = {"from_attributes": True}
 

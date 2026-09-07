@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.core.response import money
-from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Product, ProductOptionGroup
+from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Product, ProductCategory, ProductOptionGroup
+from app.services.category_require import format_require_hint, resolve_product_requires
 from app.services.stock_service import deduct_for_order_items
 
 ORDER_STATUS_LABEL = {
@@ -214,6 +215,64 @@ class OrderPriceCalculator:
         if len(products) != len(set(product_ids)):
             missing = set(product_ids) - set(products)
             raise AppException(40002, f"商品不可用: {sorted(missing)}")
+
+        # 购买依赖（商品级优先，否则继承分类默认；分类 OR 指定商品）
+        cat_ids = list({p.category_id for p in products.values() if p.category_id})
+        cats_map: dict[int, ProductCategory] = {}
+        if cat_ids:
+            cats_map = {
+                c.id: c
+                for c in (
+                    await db.execute(select(ProductCategory).where(ProductCategory.id.in_(cat_ids)))
+                ).scalars()
+            }
+        cart_cat_ids = {int(p.category_id) for p in products.values() if p.category_id}
+        cart_product_ids = set(products.keys())
+
+        need_cat_names: set[int] = set()
+        need_prod_names: set[int] = set()
+        resolved: dict[int, tuple[list[int], list[int]]] = {}
+        for p in products.values():
+            req_cats, req_prods, _ = resolve_product_requires(p, cats_map.get(p.category_id))
+            resolved[p.id] = (req_cats, req_prods)
+            for rid in req_cats:
+                if rid not in cart_cat_ids:
+                    need_cat_names.add(rid)
+            for rid in req_prods:
+                if rid not in cart_product_ids:
+                    need_prod_names.add(rid)
+
+        cat_name_map: dict[int, str] = {c.id: c.name for c in cats_map.values()}
+        if need_cat_names - set(cat_name_map):
+            for c in (
+                await db.execute(
+                    select(ProductCategory).where(ProductCategory.id.in_(need_cat_names - set(cat_name_map)))
+                )
+            ).scalars().all():
+                cat_name_map[c.id] = c.name
+        prod_name_map: dict[int, str] = {pid: products[pid].name for pid in cart_product_ids}
+        if need_prod_names:
+            for rp in (
+                await db.execute(select(Product).where(Product.id.in_(need_prod_names)))
+            ).scalars().all():
+                prod_name_map[rp.id] = rp.name
+
+        for p in products.values():
+            req_cats, req_prods = resolved[p.id]
+            if not req_cats and not req_prods:
+                continue
+            ok = any(rid in cart_cat_ids for rid in req_cats) or any(
+                rid in cart_product_ids for rid in req_prods
+            )
+            if ok:
+                continue
+            hint = format_require_hint(
+                require_category_ids=req_cats,
+                require_product_ids=req_prods,
+                category_names=cat_name_map,
+                product_names=prod_name_map,
+            )
+            raise AppException(40008, f"「{p.name}」须先点：{hint}")
 
         # 批量规格组
         pog_rows = (

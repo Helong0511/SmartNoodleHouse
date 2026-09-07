@@ -6,6 +6,7 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
+const prefUtil = require('../../utils/preferences')
 const app = getApp()
 
 function memberDiscountText(rate) {
@@ -659,6 +660,15 @@ Page({
       })
       return
     }
+    const catIssues = cartUtil.validateCategoryRequires(cart, productItems)
+    if (catIssues.length) {
+      wx.showModal({
+        title: '无法下单',
+        content: catIssues[0].message || '加料类商品须先点主餐',
+        showCancel: false
+      })
+      return
+    }
     let tableToken = await this._ensureTableTokenForSubmit()
     if (!tableToken) {
       wx.showToast({ title: '请先扫描或选择桌号', icon: 'none' })
@@ -688,10 +698,35 @@ Page({
         provider: 'WECHAT',
         channel_type: 'miniprogram'
       })
-      await payUtil.requestWechatPay(payRes)
+      let payOutcome
+      try {
+        payOutcome = await payUtil.payAndConfirm(api, payRes, order.id)
+      } catch (payErr) {
+        // 订单已创建：保留待确认支付，引导结果页/订单页继续对账或重付
+        const ptsFail = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''
+        if (payErr && payErr.payCancel) {
+          wx.showModal({
+            title: '支付未完成',
+            content: '订单已创建，正在确认支付结果；也可稍后在「订单」页重新支付',
+            showCancel: false,
+            success: () => {
+              wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${ptsFail}` })
+            }
+          })
+          return
+        }
+        wx.showToast({ title: (payErr && payErr.message) || '支付未完成', icon: 'none', duration: 2500 })
+        wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${ptsFail}` })
+        return
+      }
       auth.saveCart([])
+      prefUtil.clearPrefsCache(app)
       await subscribe.requestOrderReadySubscribe()
-      const pts = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''
+      const pts =
+        (payOutcome && payOutcome.sync && payOutcome.sync.points_earned) ||
+        (payRes && payRes.points_earned)
+          ? `&points_earned=${(payOutcome && payOutcome.sync && payOutcome.sync.points_earned) || payRes.points_earned}`
+          : ''
       wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${pts}` })
     } catch (e) {
       const msg = (e && e.message) || '下单失败'

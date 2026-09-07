@@ -19,6 +19,7 @@
         <el-sub-menu v-if="showCatalog" index="g-catalog">
           <template #title>菜品</template>
           <el-menu-item index="/categories">分类管理</el-menu-item>
+          <el-menu-item index="/category-schedules">分类时段排序</el-menu-item>
           <el-menu-item index="/options">规格管理</el-menu-item>
           <el-menu-item index="/products">商品管理</el-menu-item>
           <el-menu-item index="/store-stocks">分店库存</el-menu-item>
@@ -119,7 +120,7 @@ const openGroup = computed(() => {
   if (['/pos', '/kitchen', '/delivery', '/orders', '/payments', '/pos-settlement', '/pos-refunds'].includes(p)) {
     return 'g-ops'
   }
-  if (['/products', '/categories', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
+  if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
   if (['/customers', '/member-levels', '/coupons'].includes(p)) return 'g-member'
   if (['/tables', '/users'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'

@@ -261,11 +261,37 @@ CREATE TABLE IF NOT EXISTS product_categories (
   description VARCHAR(255) DEFAULT NULL COMMENT '分类描述',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '排序权重，越小越靠前',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '1=展示 0=隐藏',
+  require_category_ids JSON DEFAULT NULL COMMENT '须先点过的分类 id 列表（OR：满足任一即可）；NULL/空=无限制。例：加料依赖面',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   INDEX idx_cat_store (store_id, sort_order, status),
   CONSTRAINT fk_cat_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品分类表（按门店）';
+
+CREATE TABLE IF NOT EXISTS category_sort_schedules (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  name VARCHAR(100) NOT NULL COMMENT '方案名（如 早餐优先）',
+  start_time TIME NOT NULL COMMENT '开始时间（含）',
+  end_time TIME NOT NULL COMMENT '结束时间（不含）；若 start>end 表示跨午夜',
+  priority INT NOT NULL DEFAULT 0 COMMENT '重叠时取更大优先级',
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  INDEX idx_cat_sched_store (store_id, status, priority),
+  CONSTRAINT fk_cat_sched_store FOREIGN KEY (store_id) REFERENCES stores(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分类分时段排序方案';
+
+CREATE TABLE IF NOT EXISTS category_sort_schedule_items (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  schedule_id BIGINT UNSIGNED NOT NULL COMMENT '方案 → category_sort_schedules.id',
+  category_id BIGINT UNSIGNED NOT NULL COMMENT '分类 → product_categories.id',
+  sort_order INT NOT NULL DEFAULT 0 COMMENT '时段内排序，越小越靠前',
+  UNIQUE KEY uk_sched_cat (schedule_id, category_id),
+  INDEX idx_sched_item_order (schedule_id, sort_order),
+  CONSTRAINT fk_sched_item_sched FOREIGN KEY (schedule_id) REFERENCES category_sort_schedules(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sched_item_cat FOREIGN KEY (category_id) REFERENCES product_categories(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='时段方案内分类排序';
 
 CREATE TABLE IF NOT EXISTS products (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -280,6 +306,8 @@ CREATE TABLE IF NOT EXISTS products (
   stock INT NOT NULL DEFAULT 999 COMMENT '默认库存；999 表示不限量',
   box_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '单份餐盒/打包费',
   min_order_count INT NOT NULL DEFAULT 1 COMMENT '起售份数',
+  require_category_ids JSON DEFAULT NULL COMMENT '须先点过的分类 id（OR）；NULL=继承所属分类默认',
+  require_product_ids JSON DEFAULT NULL COMMENT '须先点过的指定商品 id（OR）；与分类依赖合并 OR',
   status VARCHAR(20) NOT NULL DEFAULT 'ON_SALE' COMMENT 'ON_SALE=在售 | OFF_SALE=停售 | SOLD_OUT=售罄',
   is_recommended TINYINT NOT NULL DEFAULT 0 COMMENT '是否推荐：1=是 0=否',
   is_hot TINYINT NOT NULL DEFAULT 0 COMMENT '是否热销标签：1=是 0=否',

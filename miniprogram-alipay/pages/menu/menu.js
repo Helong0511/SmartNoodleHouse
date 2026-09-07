@@ -62,7 +62,7 @@ Page({
     tabCartBadge.syncTabCartBadge()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
-    this.loadPrefs()
+    this.loadPrefs(!(appGlobal().prefsAt))
     this.loadMenu()
   },
 
@@ -236,11 +236,29 @@ Page({
     auth.saveCart(cart)
   },
 
+  assertCanAddProduct(productLike) {
+    const cats = (this._catsCache && this._catsCache.cats) || this.data.categories || []
+    const products = this._lastProductItems || []
+    const check = cartUtil.checkCategoryRequire(productLike, auth.getCart(), products, cats)
+    if (!check.ok) {
+      my.showToast({ content: check.message, type: 'none', duration: 2500 })
+      return false
+    }
+    return true
+  },
+
   async quickAdd(e) {
     const ds = e.currentTarget.dataset
     const id = Number(ds.id)
     const hasOptions = ds.hasOptions === true || ds.hasOptions === 'true' || ds.hasOptions === 1 || ds.hasOptions === '1'
     const noMemberDiscount = ds.noMemberDiscount === true || ds.noMemberDiscount === 'true' || ds.noMemberDiscount === 1 || ds.noMemberDiscount === '1'
+    const listItem = (this._lastProductItems || []).find((p) => String(p.id) === String(id)) || {
+      id,
+      name: ds.name,
+      category_id: ds.categoryId != null ? Number(ds.categoryId) : undefined,
+      require_category_ids: []
+    }
+    if (!this.assertCanAddProduct(listItem)) return
 
     if (!hasOptions) {
       const unit = parseFloat(ds.price) || 0
@@ -255,7 +273,10 @@ Page({
         subtotal: unit.toFixed(2),
         imageUrl: ds.image || '',
         main_image: '',
-        no_member_discount: noMemberDiscount
+        no_member_discount: noMemberDiscount,
+        category_id: listItem.category_id,
+        require_category_ids: listItem.require_category_ids || [],
+        require_product_ids: listItem.require_product_ids || []
       })
       my.showToast({ content: '已加入', type: 'success' })
       return
@@ -264,6 +285,10 @@ Page({
     try {
       my.showLoading({ content: '加入中' })
       const product = await this.fetchProductDetail(id)
+      if (!this.assertCanAddProduct(product)) {
+        my.hideLoading()
+        return
+      }
       const gd = appGlobal()
       const prefs = this.data.prefs || gd.prefs || []
       const prefPrompt = prefUtil.buildQuickAddPrefPrompt(product, prefs)
@@ -292,7 +317,10 @@ Page({
         subtotal: unitPrice.toFixed(2),
         main_image: product.main_image || '',
         imageUrl: media.resolveUrl(product.main_image, media.imageVersion(product)) || ds.image || '',
-        no_member_discount: noMemberDiscount || !!product.no_member_discount
+        no_member_discount: noMemberDiscount || !!product.no_member_discount,
+        category_id: product.category_id,
+        require_category_ids: product.require_category_ids || [],
+        require_product_ids: product.require_product_ids || []
       })
       my.hideLoading()
       my.showToast({ content: usePrefs ? '已按爱好加入' : '已加入', type: 'success' })

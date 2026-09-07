@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -165,6 +165,33 @@ class ProductCategory(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(255))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    # 须先点过的分类 id 列表（OR）；空=无限制。例：【加料】依赖【面】
+    require_category_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+
+
+class CategorySortSchedule(Base, TimestampMixin):
+    """门店分类分时段排序方案"""
+    __tablename__ = "category_sort_schedules"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    start_time: Mapped[object] = mapped_column(Time)
+    end_time: Mapped[object] = mapped_column(Time)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class CategorySortScheduleItem(Base):
+    __tablename__ = "category_sort_schedule_items"
+    __table_args__ = (UniqueConstraint("schedule_id", "category_id"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    schedule_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("category_sort_schedules.id", ondelete="CASCADE")
+    )
+    category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("product_categories.id", ondelete="CASCADE")
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Product(Base, TimestampMixin):
@@ -189,6 +216,9 @@ class Product(Base, TimestampMixin):
     stock: Mapped[int] = mapped_column(Integer, default=999)
     box_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     min_order_count: Mapped[int] = mapped_column(Integer, default=1)
+    # NULL=继承所属分类默认；[]/有值=商品自身配置（与 require_product_ids 合并 OR）
+    require_category_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    require_product_ids: Mapped[list | None] = mapped_column(JSON, default=None)
 
 
 class ProductImage(Base):

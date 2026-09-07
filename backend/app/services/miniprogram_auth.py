@@ -119,7 +119,16 @@ class AlipayMiniAuth:
                 raise AppException(50033, err.get("sub_msg") or err.get("msg") or "支付宝 OAuth 失败")
             if token_resp.get("code") and token_resp.get("code") != "10000":
                 raise AppException(50033, token_resp.get("sub_msg") or token_resp.get("msg") or "支付宝 OAuth 失败")
-            user_id = token_resp.get("user_id") or token_resp.get("open_id")
+            open_id = token_resp.get("open_id")
+            legacy_user_id = token_resp.get("user_id")
+            # 同时返回时优先 open_id，避免同一账号在 user_id/open_id 间切换重复建客
+            if open_id and legacy_user_id and open_id != legacy_user_id:
+                logger.info(
+                    "支付宝 OAuth 同时返回 open_id 与 user_id，采用 open_id 作为稳定身份 open_id=%s user_id=%s",
+                    open_id,
+                    legacy_user_id,
+                )
+            user_id = open_id or legacy_user_id
             if not user_id:
                 # 便于排查：常见是签名错误、app_id 不匹配
                 preview = {k: data.get(k) for k in ("error_response", "alipay_system_oauth_token_response") if k in data}

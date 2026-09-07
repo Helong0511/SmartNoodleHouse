@@ -87,7 +87,7 @@
       @current-change="load"
     />
 
-    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="560px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="640px" destroy-on-close>
       <el-form :model="form" label-width="100px">
         <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店" required>
           <el-select v-model="form.store_id" placeholder="选择门店" style="width:100%" @change="onFormStoreChange">
@@ -130,10 +130,63 @@
           </div>
         </el-form-item>
         <el-form-item label="分类" required>
-          <el-select v-model="form.category_id" style="width:100%" placeholder="请选择分类">
+          <el-select v-model="form.category_id" style="width:100%" placeholder="请选择分类" @change="onFormCategoryChange">
             <el-option v-for="c in formCategories" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
           <p v-if="!formCategories.length" class="hint warn">该门店暂无分类，请先到「分类管理」创建</p>
+        </el-form-item>
+        <el-form-item label="须先点">
+          <div class="require-box">
+            <div class="require-row">
+              <span class="require-label">分类</span>
+              <el-select
+                v-model="form.require_category_ids"
+                multiple
+                clearable
+                filterable
+                style="flex:1"
+                placeholder="如：面（满足任一即可）"
+                @change="onRequireCategoriesChange"
+              >
+                <el-option
+                  v-for="c in requireCategoryOptions"
+                  :key="c.id"
+                  :label="c.name"
+                  :value="c.id"
+                />
+              </el-select>
+            </div>
+            <div class="require-row">
+              <span class="require-label">商品</span>
+              <el-select
+                v-model="form.require_product_ids"
+                multiple
+                clearable
+                filterable
+                style="flex:1"
+                :placeholder="form.require_category_ids.length ? '仅显示已选分类下的商品' : '指定商品（可先选分类缩小范围）'"
+              >
+                <el-option-group
+                  v-for="g in requireProductGroups"
+                  :key="g.id"
+                  :label="g.name"
+                >
+                  <el-option
+                    v-for="p in g.products"
+                    :key="p.id"
+                    :label="p.name"
+                    :value="p.id"
+                    :disabled="p.id === form.id"
+                  />
+                </el-option-group>
+              </el-select>
+            </div>
+            <div class="require-actions">
+              <el-button link type="primary" @click="applyCategoryRequireDefault">应用分类默认</el-button>
+              <span v-if="form.require_inherited" class="hint">当前继承分类默认，保存后将固定到本商品</span>
+            </div>
+            <p class="hint">选了分类后，下方商品只显示这些分类里的品；勾选项之间为「或」</p>
+          </div>
         </el-form-item>
         <el-form-item label="价格" required>
           <el-input-number v-model="form.price" :min="0.01" :precision="2" :step="1" placeholder="必填" />
@@ -192,6 +245,7 @@ const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
 const products = ref<any[]>([])
+const allStoreProducts = ref<any[]>([])
 const categories = ref<any[]>([])
 const stores = ref<any[]>([])
 const optionGroups = ref<any[]>([])
@@ -224,6 +278,9 @@ const form = reactive({
   no_member_discount: false,
   no_cooking: false,
   option_group_ids: [] as number[],
+  require_category_ids: [] as number[],
+  require_product_ids: [] as number[],
+  require_inherited: false,
 })
 
 const boundStoreName = computed(() => {
@@ -249,6 +306,27 @@ const formCategories = computed(() => {
   return categories.value.filter((c) => c.store_id === sid)
 })
 
+const requireCategoryOptions = computed(() => formCategories.value.filter((c) => c.status === 1 || c.id))
+
+const requireProductGroups = computed(() => {
+  const selectedCatIds = form.require_category_ids || []
+  const sid = form.store_id
+  const catList = selectedCatIds.length
+    ? formCategories.value.filter((c) => selectedCatIds.includes(c.id))
+    : formCategories.value
+  const allowed = new Set(catList.map((c) => c.id))
+  const list = (allStoreProducts.value || []).filter(
+    (p) => (!sid || p.store_id === sid) && allowed.has(p.category_id),
+  )
+  return catList
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      products: list.filter((p) => p.category_id === c.id),
+    }))
+    .filter((g) => g.products.length > 0)
+})
+
 function mediaUrl(path: string) {
   if (!path) return ''
   if (/^https?:\/\//i.test(path)) return path
@@ -258,6 +336,52 @@ function mediaUrl(path: string) {
 function categoryName(id: number) {
   const c = categories.value.find((x) => x.id === id)
   return c?.name || id
+}
+
+function pruneRequireProducts() {
+  const selectedCatIds = form.require_category_ids || []
+  if (!selectedCatIds.length) return
+  const allowedCatIds = new Set(selectedCatIds)
+  const sid = form.store_id
+  const allowedProductIds = new Set(
+    (allStoreProducts.value || [])
+      .filter((p) => (!sid || p.store_id === sid) && allowedCatIds.has(p.category_id))
+      .map((p) => p.id),
+  )
+  form.require_product_ids = (form.require_product_ids || []).filter((id) => allowedProductIds.has(id))
+}
+
+function onRequireCategoriesChange() {
+  form.require_inherited = false
+  pruneRequireProducts()
+}
+
+function applyCategoryRequireDefault() {
+  const cat = categories.value.find((c) => c.id === form.category_id)
+  form.require_category_ids = [...(cat?.require_category_ids || [])]
+  form.require_product_ids = []
+  form.require_inherited = false
+  pruneRequireProducts()
+}
+
+function onFormCategoryChange() {
+  if (!form.id) applyCategoryRequireDefault()
+}
+
+async function loadAllStoreProducts(storeId?: number) {
+  const sid = storeId || form.store_id || effectiveListStoreId.value
+  if (!sid) {
+    allStoreProducts.value = []
+    return
+  }
+  try {
+    const res = await api.get('/products', {
+      params: { page: 1, page_size: 200, status: 'ALL', store_id: sid },
+    })
+    allStoreProducts.value = res.data.items || []
+  } catch {
+    allStoreProducts.value = []
+  }
 }
 
 async function loadStores() {
@@ -339,14 +463,19 @@ function resetForm() {
     no_member_discount: false,
     no_cooking: false,
     option_group_ids: [],
+    require_category_ids: [],
+    require_product_ids: [],
+    require_inherited: false,
   })
   form.category_id = formCategories.value[0]?.id
+  applyCategoryRequireDefault()
 }
 
 async function openForm(row?: any) {
   resetForm()
   if (row) {
     const detail = (await api.get(`/products/${row.id}`)).data
+    const inherited = !!detail.require_inherited
     Object.assign(form, {
       id: detail.id,
       store_id: detail.store_id,
@@ -367,8 +496,17 @@ async function openForm(row?: any) {
       no_member_discount: detail.no_member_discount ?? false,
       no_cooking: detail.no_cooking ?? false,
       option_group_ids: detail.option_group_ids || [],
+      require_category_ids: inherited
+        ? [...(detail.require_category_ids || [])]
+        : [...(detail.require_category_ids_stored ?? detail.require_category_ids ?? [])],
+      require_product_ids: inherited
+        ? [...(detail.require_product_ids || [])]
+        : [...(detail.require_product_ids_stored ?? detail.require_product_ids ?? [])],
+      require_inherited: inherited,
     })
   }
+  await loadAllStoreProducts(form.store_id)
+  pruneRequireProducts()
   dialogVisible.value = true
 }
 
@@ -439,6 +577,8 @@ async function save() {
       no_member_discount: form.no_member_discount,
       no_cooking: form.no_cooking,
       option_group_ids: form.option_group_ids,
+      require_category_ids: form.require_category_ids || [],
+      require_product_ids: form.require_product_ids || [],
     }
     if (form.original_price != null && form.original_price > 0) {
       payload.original_price = form.original_price
@@ -517,4 +657,23 @@ onMounted(async () => {
 .img-actions { flex: 1; }
 .hint { margin: 4px 0 0; font-size: 12px; color: #909399; }
 .hint.warn { color: #e6a23c; }
+.require-box { width: 100%; }
+.require-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.require-label {
+  width: 36px;
+  line-height: 32px;
+  color: #606266;
+  flex-shrink: 0;
+}
+.require-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
 </style>

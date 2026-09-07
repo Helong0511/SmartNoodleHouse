@@ -97,8 +97,12 @@ Page({
   onLoad(query) {
     this.orderId = query.order_id
     this.pointsEarned = Number(query.points_earned || 0)
-    this.loadOrder()
-    this._pollTimer = setInterval(() => this.loadOrder(true), 8000)
+    this._refreshWithSync()
+    this._pollTimer = setInterval(() => this._refreshWithSync(true), 8000)
+  },
+
+  onShow() {
+    if (this.orderId) this._refreshWithSync(true)
   },
 
   onUnload() {
@@ -106,7 +110,26 @@ Page({
   },
 
   onPullDownRefresh() {
-    this.loadOrder(false).finally(() => my.stopPullDownRefresh())
+    this._refreshWithSync(false).finally(() => my.stopPullDownRefresh())
+  },
+
+  async _refreshWithSync(silent) {
+    const pending = payUtil.readPending()
+    const needSync =
+      pending &&
+      this.orderId &&
+      String(pending.orderId) === String(this.orderId)
+    if (needSync) {
+      await payUtil.confirmPending(api, {
+        orderId: this.orderId,
+        paymentNo: pending.paymentNo
+      })
+    }
+    await this.loadOrder(silent)
+    const order = this.data.order || {}
+    if (order.payment_status === 'PAID' || order.status === 'PAID') {
+      payUtil.clearPending(this.orderId)
+    }
   },
 
   buildSteps(status) {
@@ -202,12 +225,23 @@ Page({
         provider: 'ALIPAY',
         channel_type: 'miniprogram'
       })
-      await payUtil.requestAlipayPay(payRes)
+      try {
+        await payUtil.payAndConfirm(api, payRes, this.orderId)
+      } catch (payErr) {
+        if (payErr && payErr.payCancel) {
+          my.hideLoading()
+          my.showToast({ content: '已取消支付', type: 'none' })
+          await this._refreshWithSync(true)
+          return
+        }
+        throw payErr
+      }
       my.hideLoading()
-      await this.loadOrder()
+      await this._refreshWithSync()
     } catch (e) {
       my.hideLoading()
       my.showToast({ content: (e && e.message) || '支付失败', type: 'fail' })
+      await this._refreshWithSync(true)
     }
   },
 

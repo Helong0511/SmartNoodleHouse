@@ -87,7 +87,9 @@ Page({
     })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
-    this.loadProfile()
+    // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
+    const forcePrefs = !app.globalData.prefsAt
+    this.loadProfile(forcePrefs)
   },
 
   applyDineContext(ctx) {
