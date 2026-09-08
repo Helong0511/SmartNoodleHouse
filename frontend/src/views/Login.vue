@@ -1,8 +1,8 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <img src="/logo.png?v=202609031501" alt="肠旺面" class="login-logo" />
-      <h2>面馆智能经营系统</h2>
+      <img src="/logo.png?v=202609080938" alt="肠旺面" class="login-logo" />
+      <h2>肠旺面经营管理系统</h2>
       <el-form @submit.prevent="handleLogin">
         <el-form-item><el-input v-model="username" placeholder="用户名" /></el-form-item>
         <el-form-item><el-input v-model="password" type="password" placeholder="密码" /></el-form-item>

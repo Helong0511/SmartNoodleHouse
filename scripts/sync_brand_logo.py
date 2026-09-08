@@ -30,6 +30,8 @@ def main() -> None:
 
     targets = [
         (ROOT / "frontend" / "public" / "logo.png", 800),
+        (ROOT / "frontend" / "public" / "favicon-32.png", 32),
+        (ROOT / "frontend" / "public" / "apple-touch-icon.png", 180),
         (ROOT / "miniprogram-wechat" / "assets" / "logo.png", 256),
         (ROOT / "miniprogram-alipay" / "assets" / "logo.png", 256),
     ]
@@ -38,6 +40,13 @@ def main() -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         out.save(path, format="PNG", optimize=True)
         print("wrote", path.relative_to(ROOT), out.size, path.stat().st_size)
+
+    # 浏览器标签栏：多尺寸 ICO（16/32/48）
+    ico_path = ROOT / "frontend" / "public" / "favicon.ico"
+    ico_sizes = [(16, 16), (32, 32), (48, 48)]
+    ico_base = resize_cover(im, 48).convert("RGBA")
+    ico_base.save(ico_path, format="ICO", sizes=ico_sizes)
+    print("wrote", ico_path.relative_to(ROOT), ico_sizes, ico_path.stat().st_size)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
   <div class="customer-display" :class="{ fullscreen }">
     <header class="header">
       <div class="brand">
-        <img src="/logo.png?v=202609031501" alt="肠旺面" class="brand-logo" />
+        <img src="/logo.png?v=202609080938" alt="肠旺面" class="brand-logo" />
         <div class="brand-text">
           <h1>{{ storeName || '取餐叫号' }}</h1>
           <p class="subtitle">堂食看桌号 · 打包看取餐号 · 制作完成请自取</p>

@@ -2,7 +2,7 @@
   <el-container class="layout">
     <el-aside width="220px" class="aside">
       <div class="logo">
-        <img src="/logo.png?v=202609031501" alt="肠旺面" class="logo-img" />
+        <img src="/logo.png?v=202609080938" alt="肠旺面" class="logo-img" />
       </div>
       <el-menu
         :key="openGroup"

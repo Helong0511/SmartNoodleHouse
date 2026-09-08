@@ -2,7 +2,7 @@
   <div class="pos" :class="{ fullscreen, standalone }">
     <header class="toolbar">
       <div class="left">
-        <img src="/logo.png?v=202609031501" alt="logo" class="head-logo" />
+        <img src="/logo.png?v=202609080938" alt="logo" class="head-logo" />
         <div class="head-text">
           <div class="title">收银点餐</div>
           <div class="sub">{{ storeLabel }}</div>
@@ -516,7 +516,7 @@
     <!-- 锁屏 -->
     <div v-if="locked" class="lock-overlay">
       <div class="lock-card">
-        <img src="/logo.png?v=202609031501" alt="" class="lock-logo" />
+        <img src="/logo.png?v=202609080938" alt="" class="lock-logo" />
         <div class="lock-user">{{ auth.user?.display_name || auth.user?.username }}</div>
         <el-input
           v-model="unlockPassword"

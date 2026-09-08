@@ -3,7 +3,7 @@
     <header class="toolbar">
       <div class="left">
         <div class="head-brand">
-          <img src="/logo.png?v=202609031501" alt="肠旺面" class="head-logo" />
+          <img src="/logo.png?v=202609080938" alt="肠旺面" class="head-logo" />
           <div class="head-text">
             <div class="store-name" :title="storeHint">{{ storeLabel }}</div>
             <div class="head-sub">

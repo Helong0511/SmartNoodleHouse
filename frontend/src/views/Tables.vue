@@ -66,7 +66,7 @@
 
     <el-dialog v-model="printVisible" :title="`桌码 · ${printRow?.table_name || printRow?.table_no || ''}`" width="480px">
       <div v-if="printRow" class="print-box" id="table-qr-print">
-        <img src="/logo.png?v=202609031443" alt="肠旺面" class="print-logo" />
+        <img src="/logo.png?v=202609080938" alt="肠旺面" class="print-logo" />
         <div class="print-title">{{ printRow.table_name || printRow.table_no }}</div>
         <div class="print-sub">
           扫码点餐 · 桌号 {{ printRow.table_no }}

@@ -1,7 +1,7 @@
 <template>
   <div class="mobile-order">
     <header>
-      <img src="/logo.png?v=202609031501" alt="肠旺面" class="header-logo" />
+      <img src="/logo.png?v=202609080938" alt="肠旺面" class="header-logo" />
       <h1>扫码点餐</h1>
       <p v-if="table">桌号: {{ table.table_name }}</p>
     </header>
