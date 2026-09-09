@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
+import { reportApiLog } from '@/utils/logger'
 
 function parseApiError(err: unknown): string {
   if (!err || typeof err !== 'object') return '网络错误'
@@ -48,7 +49,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => {
     const data = res.data
+    const url = String(res.config?.url || '')
     if (data && data.code !== 0 && data.code !== undefined) {
+      reportApiLog('WARN', res.config?.method || 'GET', url, { code: data.code, message: data.message })
       return Promise.reject(new Error(data.message || '请求失败'))
     }
     return data
@@ -56,6 +59,8 @@ api.interceptors.response.use(
   (err) => {
     const status = err.response?.status
     const msg = parseApiError(err)
+    const url = String(err.config?.url || '')
+    reportApiLog('ERROR', err.config?.method || 'GET', url, { status, message: msg })
     if (status === 401) {
       clearStaffToken()
       if (!location.pathname.includes('/login') && !location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member') && !location.pathname.startsWith('/display')) {

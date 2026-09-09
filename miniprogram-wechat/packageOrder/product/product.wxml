@@ -9,6 +9,8 @@ function hasId(list, id) {
 module.exports.hasId = hasId
 </wxs>
 
+<privacy-popup id="privacy-popup" />
+
 <view class="page" wx:if="{{loading}}">
   <skeleton type="product" />
 </view>

@@ -1,4 +1,4 @@
-"""业务单号生成：业务+门店编号+桌位+时间+4位随机。"""
+"""业务单号生成：业务+门店编号+桌位+时间+4位随机；顾客为紧凑格式。"""
 from __future__ import annotations
 
 import re
@@ -6,12 +6,14 @@ import re
 import pytest
 
 from app.core.biz_no import (
+    BIZ_CU,
     BIZ_OD,
     BIZ_OT,
     BIZ_PA,
     BIZ_PW,
     BIZ_RA,
     BIZ_RW,
+    BIZ_VI,
     TABLE_DELIVERY,
     TABLE_TAKEAWAY,
     generate_no,
@@ -27,19 +29,23 @@ from app.core.biz_no import (
 def test_store_code_from_store_no():
     assert store_code("SH01") == "SH01"
     assert store_code("sh01") == "SH01"
-    assert store_code(None) == "0000"
-    assert store_code("") == "0000"
-    assert store_code("SH") == "SH00"
+    assert store_code(None) == "XXXX"
+    assert store_code("") == "XXXX"
+    assert store_code("SH") == "SHXX"
     assert store_code("SNH001") == "SNH0"
+    # 易混字母 O/I → Q/J
+    assert store_code("SO01") == "SQ01"
+    assert store_code("SI02") == "SJ02"
 
 
 def test_table_code_fixed_width():
     assert table_code("A01") == "A01"
     assert table_code("12") == "12X"
     assert table_code("桌-01") == "01X"
-    assert table_code(None) == "000"
+    assert table_code(None) == "XXX"
     assert table_code("", placeholder=TABLE_DELIVERY) == "DLV"
     assert table_code("ABCD") == "ABC"
+    assert table_code("A0I") == "A0J"
 
 
 def test_generate_no_shape_and_parse():
@@ -53,6 +59,38 @@ def test_generate_no_shape_and_parse():
     assert parsed["table"] == "A01"
     assert re.fullmatch(r"\d{14}", parsed["datetime"])
     assert re.fullmatch(r"[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}", parsed["rand"])
+    assert "0" not in parsed["rand"] and "O" not in parsed["rand"]
+    assert "1" not in parsed["rand"] and "I" not in parsed["rand"]
+
+
+def test_customer_compact_no():
+    """顾客编号不含门店/桌位占位，避免 CU0000000…"""
+    cu = generate_no(BIZ_CU)
+    assert len(cu) == 20
+    assert cu.startswith("CU")
+    assert "0000000" not in cu
+    parsed = parse_biz_no(cu)
+    assert parsed is not None
+    assert parsed["biz"] == "CU"
+    assert parsed["compact"] is True
+    assert parsed["store"] is None
+    assert re.fullmatch(r"\d{14}", parsed["datetime"])
+    assert re.fullmatch(r"[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}", parsed["rand"])
+
+    vi = generate_no(BIZ_VI)
+    assert len(vi) == 20
+    assert vi.startswith("VI")
+
+
+def test_parse_legacy_customer_no():
+    """旧版顾客号（含 0000000）仍可解析。"""
+    legacy = "CU000000020260907121105EG4W"
+    assert len(legacy) == 27
+    parsed = parse_biz_no(legacy)
+    assert parsed is not None
+    assert parsed["biz"] == "CU"
+    assert parsed["store"] == "0000"
+    assert parsed["table"] == "000"
 
 
 def test_delivery_and_payment_codes():
@@ -79,3 +117,9 @@ def test_resolve_table_parts():
 def test_invalid_biz():
     with pytest.raises(ValueError):
         generate_no("ORD", "SH01", "A01")
+
+
+def test_empty_store_table_uses_x_pad():
+    no = generate_no(BIZ_OT)
+    assert no.startswith("OTXXXXXXX")
+    assert len(no) == 27

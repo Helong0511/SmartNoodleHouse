@@ -1,4 +1,5 @@
 <view class="page">
+  <privacy-popup id="privacy-popup" />
   <skeleton wx:if="{{loading}}" type="order" rows="{{2}}" />
 
   <block wx:else>

@@ -41,6 +41,11 @@ Thumbs.db
 # 上传与运行时
 backend/uploads/
 *.log
+*.log.*
+logs/**
+!logs/.gitkeep
+!logs/**/.gitkeep
+!logs/README.txt
 
 # 编译产物
 *.pyc

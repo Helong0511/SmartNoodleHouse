@@ -160,3 +160,12 @@ def register_tasks(scheduler) -> None:
             await db.execute(delete(OperationLog).where(OperationLog.created_at < cutoff))
             await db.commit()
             logger.info("Operation logs cleaned before %s", cutoff)
+
+    @scheduler.scheduled_job("cron", hour=3, minute=30)
+    async def maintain_file_logs():
+        """文件日志：7 天明文→gzip，满月打包，超过 90 天删除。"""
+        from app.services.file_log_service import maintain_logs
+
+        stats = maintain_logs()
+        if any(stats.values()):
+            logger.info("File logs maintained: %s", stats)

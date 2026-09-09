@@ -19,6 +19,7 @@ SENSITIVE_LIMITS = {
     "/api/v1/payments/": (60, 60),
     "/api/v1/welcome/": (30, 60),
     "/api/v1/miniprogram/": (60, 60),
+    "/api/v1/client-logs": (120, 60),
     "/api/v1/delivery/meituan/notify": (300, 60),
     "/api/v1/delivery/eleme/notify": (300, 60),
 }

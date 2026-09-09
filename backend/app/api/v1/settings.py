@@ -256,6 +256,7 @@ def _build_env_groups(settings) -> list[dict]:
                 _env_item("PROCESS_ROLE", settings.process_role, "leader 跑定时任务/TTS/识别；其他实例设 worker"),
                 _env_item("JSON_LOGS", str(settings.json_logs).lower(), "JSON 结构化日志"),
                 _env_item("LOG_LEVEL", settings.log_level, "日志级别 DEBUG/INFO/WARNING/ERROR"),
+                _env_item("LOG_DIR", settings.log_dir, "文件日志根目录（相对仓库根或绝对路径）"),
             ],
         },
         {

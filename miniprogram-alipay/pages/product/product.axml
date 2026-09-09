@@ -1,5 +1,7 @@
 <import-sjs name="util" from="../../utils/cart.sjs" />
 
+<privacy-popup id="privacy-popup" />
+
 <view class="page" a:if="{{loading}}">
   <skeleton type="product" />
 </view>

@@ -4,6 +4,8 @@ const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
 const tabCartBadge = require('./utils/tabCartBadge')
 const clientConfig = require('./utils/clientConfig')
+const remoteLogger = require('./utils/logger')
+remoteLogger.install()
 
 App({
   globalData: {
@@ -43,6 +45,11 @@ App({
     privacy.bindAppPrivacyHandler(this)
     clientConfig.loadClientConfig().catch(() => {})
     auth.purgeStaleSessionIfNeeded().catch(() => {})
+  },
+  onError(err) {
+    try {
+      remoteLogger.logger.error(String(err || 'App.onError'), err)
+    } catch (_) {}
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

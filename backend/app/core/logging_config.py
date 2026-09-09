@@ -1,4 +1,4 @@
-"""结构化日志配置"""
+"""结构化日志配置：控制台 + logs/backend 文件滚动。"""
 from __future__ import annotations
 
 import json
@@ -35,3 +35,11 @@ def setup_logging(*, json_logs: bool = False, level: str = "INFO") -> None:
     # 降低噪音
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+    try:
+        from app.services.file_log_service import attach_backend_file_handler
+
+        path = attach_backend_file_handler(root)
+        logging.getLogger(__name__).info("文件日志目录: %s", path)
+    except Exception:
+        logging.getLogger(__name__).exception("初始化文件日志失败")

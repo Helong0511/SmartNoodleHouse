@@ -139,6 +139,9 @@ function requestOnce(method, path, data = {}, needAuth = true) {
         const msg = pickErrorMessage(res, `请求失败(${status || '?'})`)
         const codeNum = body.code == null ? undefined : Number(body.code)
         if ((status && status >= 400) || (codeNum !== undefined && codeNum !== 0 && !Number.isNaN(codeNum))) {
+          try {
+            require('./logger').reportApi('ERROR', upper, path, { status, code: body.code, message: msg })
+          } catch (_) {}
           if (needAuth && (status === 401 || isStaleAuthMessage(msg))) {
             clearStaleCustomerAuthQuietly()
             reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))
@@ -151,6 +154,9 @@ function requestOnce(method, path, data = {}, needAuth = true) {
       },
       fail(err) {
         const msg = networkHint(base, pickErrorMessage(err, '网络请求失败'))
+        try {
+          require('./logger').reportApi('ERROR', upper, path, { message: msg })
+        } catch (_) {}
         if (needAuth && isStaleAuthMessage(msg)) {
           clearStaleCustomerAuthQuietly()
           reject(makeRequestError(msg, { code: 'AUTH_STALE' }))

@@ -4,6 +4,8 @@ const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
 const tabCartBadge = require('./utils/tabCartBadge')
 const clientConfig = require('./utils/clientConfig')
+const remoteLogger = require('./utils/logger')
+remoteLogger.install()
 
 App({
   globalData: {
@@ -44,6 +46,11 @@ App({
     clientConfig.loadClientConfig().catch(() => {})
     // 库重置后本地 customer_token 会失效；静默探测并清理，避免启动期 Uncaught
     auth.purgeStaleSessionIfNeeded().catch(() => {})
+  },
+  onError(err) {
+    try {
+      remoteLogger.logger.error(String(err || 'App.onError'), err)
+    } catch (_) {}
   },
   onShow(options) {
     if (options) this.parseLaunch(options)

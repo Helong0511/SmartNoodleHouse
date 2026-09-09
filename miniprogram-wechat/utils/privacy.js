@@ -47,7 +47,7 @@ function openPrivacyContract() {
 }
 
 /** 弹出隐私同意层（不调 requirePrivacyAuthorize，避免 SDK 内部 timer 超时） */
-function showPrivacyPopup() {
+function tryShowPrivacyPopup() {
   const app = getAppSafe()
   if (!app) return false
   if (app._privacyPopup && app._privacyPopup.show) {
@@ -60,11 +60,25 @@ function showPrivacyPopup() {
     if (page && page.selectComponent) {
       const popup = page.selectComponent('#privacy-popup')
       if (popup && popup.show) {
+        app._privacyPopup = popup
         popup.show()
         return true
       }
     }
   } catch (_) {}
+  return false
+}
+
+function showPrivacyPopup() {
+  if (tryShowPrivacyPopup()) return true
+  // 点餐等 Tab 页若刚挂载，组件可能尚未就绪，短延迟再试
+  let attempts = 0
+  const timer = setInterval(() => {
+    attempts += 1
+    if (tryShowPrivacyPopup() || attempts >= 8) {
+      clearInterval(timer)
+    }
+  }, 80)
   return false
 }
 
@@ -133,8 +147,9 @@ function bindAppPrivacyHandler(app) {
       finishPrivacyReject()
     }, PRIVACY_RESOLVE_TIMEOUT_MS)
     notifyPagePrivacyNeed()
-    if (!showPrivacyPopup()) {
-      wx.showToast({ title: '请先点「同意隐私指引」', icon: 'none' })
+    // 先弹层；组件未就绪时由 showPrivacyPopup 短延迟重试，attached 时也会再弹
+    if (!tryShowPrivacyPopup()) {
+      showPrivacyPopup()
     }
   })
 }

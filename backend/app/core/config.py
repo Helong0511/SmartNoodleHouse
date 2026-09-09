@@ -141,9 +141,10 @@ class Settings(BaseSettings):
     # 是否在 leader 进程启动人脸识别 worker（须走 settings 读 .env，勿用 os.getenv）
     enable_recognition_worker: bool = True
 
-    # 结构化 JSON 日志
+    # 结构化 JSON 日志；文件落盘在仓库根 logs/{backend,frontend,wechat,alipay}
     json_logs: bool = False
     log_level: str = "INFO"
+    log_dir: str = "logs"
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     # 顾客 H5/一码通扫对外域名（如 https://order.example.com）；留空则用 CORS 首项

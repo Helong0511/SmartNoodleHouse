@@ -45,7 +45,7 @@ function openPrivacyContract() {
   })
 }
 
-function showPrivacyPopup() {
+function tryShowPrivacyPopup() {
   const app = getAppSafe()
   if (!app) return false
   if (app._privacyPopup && app._privacyPopup.show) {
@@ -58,6 +58,7 @@ function showPrivacyPopup() {
     if (page && page.selectComponent) {
       const popup = page.selectComponent('#privacy-popup')
       if (popup && popup.show) {
+        app._privacyPopup = popup
         popup.show()
         return true
       }
@@ -65,11 +66,24 @@ function showPrivacyPopup() {
     if (page && page.$selectComponent) {
       const popup = page.$selectComponent('#privacy-popup')
       if (popup && popup.show) {
+        app._privacyPopup = popup
         popup.show()
         return true
       }
     }
   } catch (_) {}
+  return false
+}
+
+function showPrivacyPopup() {
+  if (tryShowPrivacyPopup()) return true
+  let attempts = 0
+  const timer = setInterval(() => {
+    attempts += 1
+    if (tryShowPrivacyPopup() || attempts >= 8) {
+      clearInterval(timer)
+    }
+  }, 80)
   return false
 }
 
@@ -137,8 +151,8 @@ function bindAppPrivacyHandler(app) {
       finishPrivacyReject()
     }, PRIVACY_RESOLVE_TIMEOUT_MS)
     notifyPagePrivacyNeed()
-    if (!showPrivacyPopup()) {
-      my.showToast({ content: '请先点「同意隐私指引」', type: 'none' })
+    if (!tryShowPrivacyPopup()) {
+      showPrivacyPopup()
     }
   })
 }
