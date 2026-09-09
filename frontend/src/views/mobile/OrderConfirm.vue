@@ -97,6 +97,12 @@ const payEstimate = computed(() => {
   return Math.max(0, Math.round((sub - disc + pack) * 100) / 100).toFixed(2)
 })
 
+const checkoutNonce = ref('')
+
+function newCheckoutNonce() {
+  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+}
+
 function idempotencyKey(): string {
   const table = localStorage.getItem('snh_table_token') || localStorage.getItem('table_token') || ''
   const raw = JSON.stringify({
@@ -107,7 +113,9 @@ function idempotencyKey(): string {
   })
   let h = 0
   for (let i = 0; i < raw.length; i++) h = (Math.imul(31, h) + raw.charCodeAt(i)) | 0
-  return `idem_${Math.abs(h).toString(16)}_${cart.value.length}`
+  const content = Math.abs(h).toString(16)
+  if (!checkoutNonce.value) checkoutNonce.value = newCheckoutNonce()
+  return `idem_${content}_${checkoutNonce.value}_${cart.value.length}`
 }
 
 async function submit() {
@@ -122,6 +130,7 @@ async function submit() {
   }
   loading.value = true
   try {
+    if (!checkoutNonce.value) checkoutNonce.value = newCheckoutNonce()
     const orderRes = await api.post('/orders', {
       table_token: tableToken,
       channel,
@@ -148,9 +157,13 @@ async function submit() {
     }
     localStorage.removeItem('snh_cart')
     localStorage.removeItem('cart')
+    checkoutNonce.value = ''
     const pts = payRes?.points_earned ? `&points_earned=${payRes.points_earned}` : ''
     router.push(`/order/result?order_id=${orderId}${pts}`)
   } catch (e: any) {
+    if (/幂等键.*已结束|重新下单/.test(e?.message || '')) {
+      checkoutNonce.value = ''
+    }
     ElMessage.error(e.message || '下单失败')
   } finally {
     loading.value = false

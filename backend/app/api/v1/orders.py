@@ -562,6 +562,7 @@ async def display_active_orders(
     db: DbSession,
     store_id: int = Query(..., ge=1, description="门店 ID"),
     token: str | None = Query(default=None, description="叫号屏令牌（与 DISPLAY_SCREEN_TOKEN 一致）"),
+    limit: int = Query(default=200, ge=1, le=500, description="最多返回订单数（防止积压撑爆）"),
 ):
     """顾客叫号屏：仅展示本店堂食/自取订单状态，不含明细与操作。"""
     from app.services.customer_display import (
@@ -577,6 +578,7 @@ async def display_active_orders(
     if not store or int(store.status) != 1:
         raise HTTPException(status_code=404, detail="门店不存在或已停业")
 
+    cap = min(max(1, int(limit or 200)), 500)
     q = (
         select(Order)
         .where(
@@ -584,6 +586,7 @@ async def display_active_orders(
             Order.status.in_(DISPLAY_ACTIVE_STATUSES),
         )
         .order_by(Order.paid_at.is_(None), Order.paid_at, Order.id)
+        .limit(cap)
     )
     order_list = [o for o in (await db.execute(q)).scalars().all() if is_in_store_order(o)]
     table_map = await _load_tables(db, [o.table_id for o in order_list if o.table_id])

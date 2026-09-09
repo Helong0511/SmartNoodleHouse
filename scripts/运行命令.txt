@@ -13,7 +13,8 @@
 #   模拟器     自动 → 127.0.0.1:8000
 #   真机       自动 → 192.168.1.110:8000（改 DEV_LAN_HOST 即可）
 #   正式版     PROD_API_BASE → https://your-domain.com/api/v1
-#               ENABLE_WX_PRIVACY_APIS / ENABLE_ALIPAY_PRIVACY_APIS → true
+#               隐私开关：项目根 .env 的 ENABLE_WX_PRIVACY_APIS / ENABLE_ALIPAY_PRIVACY_APIS=true
+#               （由后端 GET /api/v1/miniprogram/config 下发；勿再改 config/env.js 内已 @deprecated 字段）
 #
 # ── 开放平台入口（常用）──
 #   微信公众平台（小程序）：https://mp.weixin.qq.com
@@ -37,7 +38,7 @@
 # 【微信小程序 miniprogram-wechat】
 #   入口：https://mp.weixin.qq.com （开放平台 https://open.weixin.qq.com ）
 #   config/env.js：PROD_API_BASE=https://你的域名/api/v1
-#   config/env.js：ENABLE_WX_PRIVACY_APIS=true
+#   项目根 .env：ENABLE_WX_PRIVACY_APIS=true（经 /miniprogram/config 下发，勿改 env.js 弃用字段）
 #   https://mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
 #   https://mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
 #     勾选：收集昵称头像、收集手机号；提交并发布
@@ -50,7 +51,7 @@
 # 【支付宝小程序 miniprogram-alipay】
 #   入口：https://open.alipay.com （文档 https://opendocs.alipay.com ）
 #   config/env.js：PROD_API_BASE=https://你的域名/api/v1
-#   config/env.js：ENABLE_ALIPAY_PRIVACY_APIS=true
+#   项目根 .env：ENABLE_ALIPAY_PRIVACY_APIS=true（经 /miniprogram/config 下发）
 #   https://open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单（HTTPS）
 #   基础设置 → 小程序隐私政策（声明手机号等收集类型）
 #   能力申请 → 获取会员手机号；开发设置 → 接口内容加密方式 → ALIPAY_AES_KEY
@@ -60,7 +61,7 @@
 # 【调试版 vs 正式版 对照】
 #   项              调试 develop/trial          正式 release
 #   小程序 API      DEV_LAN / 127.0.0.1         PROD_API_BASE HTTPS
-#   隐私 API 开关   自动开启                    ENABLE_*_PRIVACY_APIS=true
+#   隐私 API 开关   开发可开 .env                       根 .env ENABLE_*_PRIVACY_APIS=true
 #   合法域名校验    可关闭 urlCheck             必须开启并配置域名
 #   桌台码跳转      MINI_PROGRAM_ENV_VERSION=develop  =release
 #   H5 扫码地址     http://局域网IP:5173        https://域名
@@ -109,7 +110,7 @@
 # 1. https://open.alipay.com → 小程序详情 → 基础设置 → 小程序隐私政策（2025 起含 SDK/插件声明）
 # 2. app.json 已启用 usePrivacyCheck: true；真机预览隐私弹窗（开发者工具不支持）
 # 3. 绑定「获取会员手机号」并完成用户信息申请；开发设置配置 AES 密钥 → .env ALIPAY_AES_KEY
-# 4. 发正式版前将 miniprogram-alipay/config/env.js 中 ENABLE_ALIPAY_PRIVACY_APIS 改为 true
+# 4. 发正式版前将项目根 .env 中 ENABLE_ALIPAY_PRIVACY_APIS 改为 true（经 /miniprogram/config 下发）
 # 5. 头像/昵称使用 chooseAvatar + input type=nickname（勿再用 my.getOpenUserInfo 一键取）
 # 文档：https://opendocs.alipay.com/mini/api/getphonenumber
 #

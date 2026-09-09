@@ -588,6 +588,7 @@ const multiOptions = reactive<Record<number, number[]>>({})
 const payDialogVisible = ref(false)
 const payStep = ref<'pick' | 'cash' | 'barcode'>('pick')
 const checkoutOrderId = ref<number | null>(null)
+const posCheckoutNonce = ref('')
 const checkoutOrderNo = ref('')
 const checkoutAmount = ref('0.00')
 const paidAmount = ref('0.00')
@@ -958,6 +959,7 @@ function onDiningTypeChange() {
 function invalidateCheckoutOrder() {
   checkoutOrderId.value = null
   checkoutOrderNo.value = ''
+  posCheckoutNonce.value = ''
 }
 
 function toggleWaivePacking(waive: boolean) {
@@ -979,6 +981,8 @@ function pickTable(t: any) {
 
 function clearCart() {
   cart.value = []
+  posCheckoutNonce.value = ''
+  invalidateCheckoutOrder()
 }
 
 function changeQty(idx: number, delta: number) {
@@ -1056,6 +1060,10 @@ function addToCart() {
   productVisible.value = false
 }
 
+function newPosCheckoutNonce() {
+  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+}
+
 function idempotencyKey() {
   const raw = JSON.stringify({
     store: effectiveStoreId(),
@@ -1066,7 +1074,8 @@ function idempotencyKey() {
   })
   let h = 0
   for (let i = 0; i < raw.length; i++) h = (Math.imul(31, h) + raw.charCodeAt(i)) | 0
-  return `pos_${Math.abs(h).toString(16)}`
+  if (!posCheckoutNonce.value) posCheckoutNonce.value = newPosCheckoutNonce()
+  return `pos_${Math.abs(h).toString(16)}_${posCheckoutNonce.value}`
 }
 
 function validateBeforeCheckout(): boolean {

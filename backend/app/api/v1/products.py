@@ -992,14 +992,20 @@ async def list_option_groups(request: Request, db: DbSession, include_disabled: 
     q = select(OptionGroup).order_by(OptionGroup.sort_order)
     if not include_disabled:
         q = q.where(OptionGroup.status == 1)
-    result = await db.execute(q)
-    groups = []
-    for g in result.scalars():
-        opts_q = select(Option).where(Option.group_id == g.id).order_by(Option.sort_order)
-        if not include_disabled:
-            opts_q = opts_q.where(Option.status == 1)
-        opts = await db.execute(opts_q)
-        groups.append({
+    groups_rows = list((await db.execute(q)).scalars().all())
+    if not groups_rows:
+        return success([], request=request)
+
+    gids = [g.id for g in groups_rows]
+    opts_q = select(Option).where(Option.group_id.in_(gids)).order_by(Option.sort_order, Option.id)
+    if not include_disabled:
+        opts_q = opts_q.where(Option.status == 1)
+    opts_by_group: dict[int, list] = {gid: [] for gid in gids}
+    for o in (await db.execute(opts_q)).scalars().all():
+        opts_by_group.setdefault(int(o.group_id), []).append(o)
+
+    groups = [
+        {
             "id": g.id,
             "name": g.name,
             "code": g.code,
@@ -1007,11 +1013,10 @@ async def list_option_groups(request: Request, db: DbSession, include_disabled: 
             "is_required": g.is_required,
             "sort_order": g.sort_order,
             "status": g.status,
-            "options": [
-                _option_dict(o)
-                for o in opts.scalars()
-            ],
-        })
+            "options": [_option_dict(o) for o in opts_by_group.get(g.id, [])],
+        }
+        for g in groups_rows
+    ]
     return success(groups, request=request)
 
 

@@ -615,8 +615,12 @@ Page({
     this.setData({ remark: e.detail.value })
   },
 
+  _newCheckoutNonce() {
+    return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  },
+
   makeIdempotencyKey(cart) {
-    // 与订单内容绑定，同购物车重试可命中服务端幂等；避免纯随机导致重复下单
+    // 内容哈希 + 本次结算 nonce：网络重试可幂等；同款再买不会命中已付订单
     const cid = app.globalData.customerId || '0'
     const items = (cart || auth.getCart() || []).map((c) => {
       const opts = (c.option_ids || []).slice().map(String).sort().join('.')
@@ -634,7 +638,18 @@ Page({
       h ^= raw.charCodeAt(i)
       h = Math.imul(h, 16777619)
     }
-    return `wx_${cid}_${(h >>> 0).toString(36)}`
+    const content = (h >>> 0).toString(36)
+    if (this._idemContentKey !== content) {
+      this._idemContentKey = content
+      this._checkoutNonce = this._newCheckoutNonce()
+    }
+    if (!this._checkoutNonce) this._checkoutNonce = this._newCheckoutNonce()
+    return `wx_${cid}_${content}_${this._checkoutNonce}`
+  },
+
+  clearCheckoutNonce() {
+    this._checkoutNonce = null
+    this._idemContentKey = null
   },
 
   async submit() {
@@ -737,6 +752,7 @@ Page({
         return
       }
       auth.saveCart([])
+      this.clearCheckoutNonce()
       prefUtil.clearPrefsCache(app)
       await subscribe.requestOrderReadySubscribe()
       const pts =
@@ -747,6 +763,9 @@ Page({
       wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${pts}` })
     } catch (e) {
       const msg = (e && e.message) || '下单失败'
+      if (/幂等键.*已结束|重新下单/.test(msg)) {
+        this.clearCheckoutNonce()
+      }
       if (/无效桌台|桌台二维码|选择桌号/.test(msg)) {
         const retry = await dineCtx.refreshTableBinding({ channel: 'wechat' })
         if (retry.ok && retry.token) {

@@ -931,6 +931,12 @@ class OrderCreateService:
                     channel=channel,
                     operator_id=operator_id,
                 )
+                # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
+                if (order.status or "") != "PENDING_PAYMENT" or (order.payment_status or "") not in (
+                    "UNPAID",
+                    "PENDING",
+                ):
+                    raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                 return order
 
         dtype = (dining_type or "").strip().upper()
@@ -976,6 +982,11 @@ class OrderCreateService:
                         channel=channel,
                         operator_id=operator_id,
                     )
+                    if (order.status or "") != "PENDING_PAYMENT" or (order.payment_status or "") not in (
+                        "UNPAID",
+                        "PENDING",
+                    ):
+                        raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                     return order
             raise AppException(40901, "订单创建冲突，请重试")
 
