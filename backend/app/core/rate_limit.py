@@ -52,11 +52,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     content={"code": 429, "message": "请求过于频繁，请稍后再试", "data": None},
                 )
         except Exception as e:
-            # 敏感接口：Redis 不可用时 fail-closed，禁止旁路限流
+            # 生产环境敏感接口：Redis 不可用时 fail-closed，禁止旁路限流
             is_sensitive = any(
                 path.startswith(p.rstrip("/")) or path == p.rstrip("/") for p in SENSITIVE_LIMITS
             )
-            if is_sensitive or settings.is_production:
+            if settings.is_production and is_sensitive:
                 logger.error("限流 Redis 不可用，拒绝敏感请求: %s", e)
                 return JSONResponse(
                     status_code=503,

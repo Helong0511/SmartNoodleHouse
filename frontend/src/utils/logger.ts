@@ -111,7 +111,8 @@ function hookConsole() {
   ;(Object.keys(map) as (keyof typeof map)[]).forEach((key) => {
     const orig = console[key as keyof Console]
     if (typeof orig !== 'function') return
-    originalConsole[key] = orig.bind(console) as (...args: unknown[]) => void
+    const origFn = orig as (...args: unknown[]) => void
+    originalConsole[key] = origFn.bind(console)
     ;(console as any)[key] = (...args: unknown[]) => {
       try {
         push(map[key], args.map(stringifyArg).join(' '))

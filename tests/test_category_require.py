@@ -103,6 +103,7 @@ async def test_addon_inherits_category_require(db_session):
         await OrderPriceCalculator.calculate_items_batch(
             db_session,
             [{"product_id": egg.id, "quantity": 1, "option_ids": []}],
+            store_id=store.id,
         )
     assert ei.value.code == 40008
 
@@ -113,6 +114,7 @@ async def test_addon_inherits_category_require(db_session):
                 {"product_id": rice.id, "quantity": 1, "option_ids": []},
                 {"product_id": egg.id, "quantity": 1, "option_ids": []},
             ],
+            store_id=store.id,
         )
 
     rows = await OrderPriceCalculator.calculate_items_batch(
@@ -121,6 +123,7 @@ async def test_addon_inherits_category_require(db_session):
             {"product_id": noodle.id, "quantity": 1, "option_ids": []},
             {"product_id": egg.id, "quantity": 2, "option_ids": []},
         ],
+        store_id=store.id,
     )
     assert len(rows) == 2
 
@@ -180,6 +183,7 @@ async def test_product_require_specific_product(db_session):
                 {"product_id": intestine.id, "quantity": 1, "option_ids": []},
                 {"product_id": egg.id, "quantity": 1, "option_ids": []},
             ],
+            store_id=store.id,
         )
     assert ei.value.code == 40008
     assert "牛肉面" in ei.value.message
@@ -190,5 +194,6 @@ async def test_product_require_specific_product(db_session):
             {"product_id": beef.id, "quantity": 1, "option_ids": []},
             {"product_id": egg.id, "quantity": 1, "option_ids": []},
         ],
+        store_id=store.id,
     )
     assert len(rows) == 2

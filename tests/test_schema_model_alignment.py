@@ -8,13 +8,20 @@ ROOT = Path(__file__).resolve().parents[1]
 def parse_sql_schema(path: Path) -> dict[str, dict[str, str]]:
     sql = path.read_text(encoding="utf-8")
     tables: dict[str, dict[str, str]] = {}
-    for m in re.finditer(r"CREATE TABLE IF NOT EXISTS (\w+)\s*\((.*?)\)\s*ENGINE", sql, re.S):
+    for m in re.finditer(
+        r"CREATE TABLE IF NOT EXISTS `?(\w+)`?\s*\((.*?)\)\s*ENGINE",
+        sql,
+        re.S,
+    ):
         name = m.group(1)
         body = m.group(2)
         cols: dict[str, str] = {}
         for line in body.split("\n"):
             line = line.strip().rstrip(",")
             if not line or line.startswith(("PRIMARY", "UNIQUE", "INDEX", "KEY", "CONSTRAINT")):
+                continue
+            # 跳过 GENERATED 列（如 cashier_shifts.open_operator_key）
+            if "GENERATED ALWAYS" in line.upper():
                 continue
             cm = re.match(r"`?(\w+)`?\s+(\w+(?:\([^)]+\))?)", line)
             if cm:
@@ -61,13 +68,15 @@ def test_schema_model_table_alignment():
     model_only_cols = []
     sql_only_cols = []
     timestamp_cols = frozenset({"created_at", "updated_at"})
+    # MySQL GENERATED 列可不映射到 ORM
+    skip_sql_cols = frozenset({("cashier_shifts", "open_operator_key")})
     for tname in sorted(model_tables):
         mcols = set(model_tables[tname])
         scols = set(sql_tables[tname])
         for c in sorted(mcols - scols):
             model_only_cols.append((tname, c))
         for c in sorted(scols - mcols):
-            if c in timestamp_cols:
+            if c in timestamp_cols or (tname, c) in skip_sql_cols:
                 continue
             sql_only_cols.append((tname, c))
 

@@ -262,7 +262,7 @@ async def scan_entry(
             "prompts": {
                 "ask_register_member": True,
                 "ask_face_welcome": False,
-                "face_consent_text": "",
+                "face_consent_text": "开启人脸迎宾后到店可自动欢迎。当前为 basic anti-spoof（清晰度/亮度粗检，非真活体），可随时关闭。",
                 "member_consent_text": "注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。",
             },
         },

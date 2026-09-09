@@ -1,0 +1,29 @@
+# 人脸识别说明
+
+到店迎宾仅匹配**已主动授权**会员的加密特征向量，不做陌生人人脸检索。
+
+## 授权与采集
+
+- 入口：小程序摄像头实拍 → `POST /api/v1/miniprogram/face/consent` 或 `face/consent-base64`。
+- **禁止**客户端上传 `embedding` / `feature_vector`；服务端用 InsightFace（512 维）提取。
+- 维度不匹配 **fail-closed**（禁止截断 / padding）。
+- 质量门控：清晰度、人脸占比；活体为 **basic anti-spoof**（清晰度 / 亮度 / 姿态粗检），**不是**真活体 SDK。API 字段 `anti_spoof_level=basic`。
+
+## 匹配与迎宾
+
+- 阈值：`FACE_MATCH_THRESHOLD` 与后台 `system_settings.face_match_threshold`（门店可覆盖）。
+- 多帧确认：`FACE_CONFIRM_FRAMES` / `face_confirm_frames`。
+- 冷却：`WELCOME_COOLDOWN_SECONDS`（Redis 原子抢占）。
+- 识别 worker：`PROCESS_ROLE=leader` 且 `ENABLE_RECOGNITION_WORKER=1`；向量走 `FaceEmbeddingCache` 按 `updated_at` 增量刷新。
+
+## 安全与隐私
+
+- 特征密文：`FACE_ENCRYPTION_KEY`（Fernet）；轮换后旧密文可能无法解密，需重采。
+- 访客事件 `visitor_events` 有保留期，不含身份 embedding。
+- 摄像头 RTSP 仅店内网；勿对公网开放预览。
+
+## 相关配置（名称级）
+
+- `FACE_ENCRYPTION_KEY` / `FACE_MATCH_THRESHOLD` / `FACE_CONFIRM_FRAMES`
+- `ALLOW_OPENCV_FACE_FALLBACK`（仅开发；生产禁止）
+- `PROCESS_ROLE` / `ENABLE_RECOGNITION_WORKER`

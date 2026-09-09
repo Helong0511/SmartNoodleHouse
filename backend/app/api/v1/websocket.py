@@ -1,5 +1,4 @@
 import asyncio
-import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
@@ -13,7 +12,6 @@ from app.models import Customer, User
 from app.services.websocket_manager import WS_IDLE_TIMEOUT_SECONDS, ws_manager
 
 router = APIRouter(tags=["WebSocket"])
-logger = logging.getLogger(__name__)
 
 PROTECTED_CHANNELS = {"kitchen", "orders", "dashboard", "cameras"}
 CHANNEL_PERMS = {

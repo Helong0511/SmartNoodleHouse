@@ -653,10 +653,6 @@ class PaymentService:
             raw_amt = pay_data.get("provider_amount")
             if raw_amt is not None:
                 try:
-                    from decimal import Decimal
-
-                    from app.core.response import money
-
                     pa = money(Decimal(str(raw_amt)))
                     if pa != money(payment.amount):
                         payment.status = "UNKNOWN"

@@ -466,7 +466,7 @@ class CouponService:
             raise AppException(40062, "无权使用该优惠券")
         if row.status != "AVAILABLE":
             raise AppException(40063, "优惠券不可用或已被占用")
-        expires = ensure_local_aware(row.expires_at)
+        expires = ensure_local_aware(getattr(row, "expires_at", None))
         if expires and expires <= now_local():
             row.status = "EXPIRED"
             await db.flush()

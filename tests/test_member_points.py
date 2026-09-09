@@ -48,14 +48,18 @@ async def test_recalculate_member_level_upgrades():
 
 @pytest.mark.asyncio
 async def test_deduct_points_for_refund_downgrades():
-    customer = SimpleNamespace(points=150, member_level_id=2)
+    customer = SimpleNamespace(id=1, points=150, member_level_id=2)
     order = SimpleNamespace(customer_id=1, id=9)
     levels = [
         _level(1, "普通会员", 0, "1.0000"),
         _level(2, "银卡会员", 100, "0.9800"),
     ]
     db = MagicMock()
-    db.get = AsyncMock(return_value=customer)
+    locked = MagicMock()
+    locked.scalar_one_or_none.return_value = customer
+    db.execute = AsyncMock(return_value=locked)
+    db.scalar = AsyncMock(return_value=None)
+    db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
     deducted = await CustomerService.deduct_points_for_refund(db, order, Decimal("60.00"))
@@ -66,17 +70,21 @@ async def test_deduct_points_for_refund_downgrades():
 
 @pytest.mark.asyncio
 async def test_deduct_points_for_refund_clamps_at_zero():
-    customer = SimpleNamespace(points=30, member_level_id=2)
+    customer = SimpleNamespace(id=1, points=30, member_level_id=2)
     order = SimpleNamespace(customer_id=1, id=9)
     levels = [
         _level(1, "普通会员", 0, "1.0000"),
         _level(2, "银卡会员", 100, "0.9800"),
     ]
     db = MagicMock()
-    db.get = AsyncMock(return_value=customer)
+    locked = MagicMock()
+    locked.scalar_one_or_none.return_value = customer
+    db.execute = AsyncMock(return_value=locked)
+    db.scalar = AsyncMock(return_value=None)
+    db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
     deducted = await CustomerService.deduct_points_for_refund(db, order, Decimal("50.00"))
-    assert deducted == 50
+    assert deducted == 30  # 仅扣现有积分，不虚报
     assert customer.points == 0
     assert customer.member_level_id == 1

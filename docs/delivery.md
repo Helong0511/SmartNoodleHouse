@@ -1,0 +1,28 @@
+# 外卖接入说明
+
+统一将美团 / 饿了么订单映射为店内 `orders` + `delivery_orders`，厨房 KDS 与堂食共用出餐流。
+
+## 主流程
+
+1. 平台 Webhook → 验签 / IP 白名单 → 写入 `webhook_inbox`（幂等 `event_id`）。
+2. Leader 调度异步消费 → 创建 / 更新本地订单 → WebSocket 通知厨房 / 订单页。
+3. 商家确认或自动确认（`DELIVERY_AUTO_CONFIRM`）后同步平台状态。
+4. 取消 / 退款事件同样经 inbox 回放，避免丢单。
+
+## 开发与生产
+
+- 开发可 `ALLOW_DELIVERY_MOCK=true` 联调；**生产必须 false**。
+- 生产配置 `WEBHOOK_IP_ALLOWLIST`（及 `WEBHOOK_REQUIRE_ALLOWLIST`）与平台出口 IP。
+- 密钥：`MEITUAN_APP_*` / `ELEME_APP_*` 仅放 `.env`，文档与示例用占位符。
+
+## 门店映射
+
+- `delivery_shop_bindings`：平台门店 ID ↔ 本系统 `store_id`。
+- SKU 映射：`delivery_product_maps`（平台商品 ↔ 本地 `products`）。
+
+## 相关配置（名称级）
+
+- `MEITUAN_APP_ID` / `MEITUAN_APP_SECRET` / `MEITUAN_SHOP_ID` / `MEITUAN_NOTIFY_URL`
+- `ELEME_APP_ID` / `ELEME_APP_SECRET` / `ELEME_SHOP_ID` / `ELEME_ACCESS_TOKEN` / `ELEME_NOTIFY_URL`
+- `DELIVERY_AUTO_CONFIRM` / `ALLOW_DELIVERY_MOCK`
+- `WEBHOOK_IP_ALLOWLIST` / `TRUSTED_PROXY_IPS`

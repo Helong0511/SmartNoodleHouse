@@ -11,6 +11,8 @@
 -- 已有库升级（本文件不重复执行；按需跑增量脚本）：
 --   sql/003_pos_settlement.sql      → payments.operator_id + cashier_shifts
 --   sql/004_pos_refund_requests.sql → pos_refund_requests
+--   sql/004_welcome_coupon_unique.sql → customer_coupons 唯一
+--   sql/005_cashier_shift_one_open.sql → 同一收银员仅一个 OPEN 班次
 --   sql/tools/006~012               → token_version / 特价 / is_default / 免烹饪 / KDS 认领等
 --     （上述字段均已并入本全量 DDL；tools 仅供旧库补丁）
 -- ============================================================================
