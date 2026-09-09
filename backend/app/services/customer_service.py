@@ -823,6 +823,14 @@ class CustomerService:
 
 class OrderCreateService:
     @staticmethod
+    def _is_reusable_idempotent_order(order: Order) -> bool:
+        """仅待支付未结清订单可被幂等键复用。"""
+        return (order.status or "") == "PENDING_PAYMENT" and (order.payment_status or "") in (
+            "UNPAID",
+            "PENDING",
+        )
+
+    @staticmethod
     def _scoped_idempotency_key(
         raw: str | None,
         *,
@@ -932,10 +940,7 @@ class OrderCreateService:
                     operator_id=operator_id,
                 )
                 # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
-                if (order.status or "") != "PENDING_PAYMENT" or (order.payment_status or "") not in (
-                    "UNPAID",
-                    "PENDING",
-                ):
+                if not OrderCreateService._is_reusable_idempotent_order(order):
                     raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                 return order
 
@@ -982,10 +987,7 @@ class OrderCreateService:
                         channel=channel,
                         operator_id=operator_id,
                     )
-                    if (order.status or "") != "PENDING_PAYMENT" or (order.payment_status or "") not in (
-                        "UNPAID",
-                        "PENDING",
-                    ):
+                    if not OrderCreateService._is_reusable_idempotent_order(order):
                         raise AppException(40903, "该幂等键对应订单已结束，请重新下单")
                     return order
             raise AppException(40901, "订单创建冲突，请重试")

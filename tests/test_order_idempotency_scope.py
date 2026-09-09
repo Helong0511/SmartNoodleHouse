@@ -70,12 +70,6 @@ def test_idempotent_reuse_only_pending_payment_policy():
     paid = SimpleNamespace(status="PAID", payment_status="PAID")
     cancelled = SimpleNamespace(status="CANCELLED", payment_status="UNPAID")
 
-    def reusable(o) -> bool:
-        return (o.status or "") == "PENDING_PAYMENT" and (o.payment_status or "") in (
-            "UNPAID",
-            "PENDING",
-        )
-
-    assert reusable(pending)
-    assert not reusable(paid)
-    assert not reusable(cancelled)
+    assert OrderCreateService._is_reusable_idempotent_order(pending)
+    assert not OrderCreateService._is_reusable_idempotent_order(paid)
+    assert not OrderCreateService._is_reusable_idempotent_order(cancelled)
