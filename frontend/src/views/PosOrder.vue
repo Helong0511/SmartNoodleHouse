@@ -1100,24 +1100,32 @@ function validateBeforeCheckout(): boolean {
 
 async function createPosOrder() {
   const sid = effectiveStoreId()
-  const orderRes = await api.post('/orders/pos', {
-    store_id: sid,
-    table_id: diningType.value === 'DINE_IN' ? selectedTableId.value : null,
-    dining_type: diningType.value,
-    need_pack: diningType.value === 'TAKEAWAY',
-    waive_packing_fee: diningType.value === 'TAKEAWAY' && waivePackingFee.value,
-    remark: remark.value.trim() || null,
-    items: cart.value.map((c) => ({
-      product_id: c.product_id,
-      quantity: c.quantity || 1,
-      option_ids: c.option_ids || [],
-    })),
-    idempotency_key: idempotencyKey(),
-  })
-  checkoutOrderId.value = orderRes.data?.id
-  checkoutOrderNo.value = orderRes.data?.order_no || ''
-  checkoutAmount.value = orderRes.data?.total_amount || cartTotal.value
-  return orderRes.data
+  try {
+    const orderRes = await api.post('/orders/pos', {
+      store_id: sid,
+      table_id: diningType.value === 'DINE_IN' ? selectedTableId.value : null,
+      dining_type: diningType.value,
+      need_pack: diningType.value === 'TAKEAWAY',
+      waive_packing_fee: diningType.value === 'TAKEAWAY' && waivePackingFee.value,
+      remark: remark.value.trim() || null,
+      items: cart.value.map((c) => ({
+        product_id: c.product_id,
+        quantity: c.quantity || 1,
+        option_ids: c.option_ids || [],
+      })),
+      idempotency_key: idempotencyKey(),
+    })
+    checkoutOrderId.value = orderRes.data?.id
+    checkoutOrderNo.value = orderRes.data?.order_no || ''
+    checkoutAmount.value = orderRes.data?.total_amount || cartTotal.value
+    return orderRes.data
+  } catch (e: any) {
+    // 已付单占用幂等键：清 nonce，下次可再下同款
+    if (e?.code === 40903 || /幂等键.*已结束|重新下单/.test(e?.message || '')) {
+      invalidateCheckoutOrder()
+    }
+    throw e
+  }
 }
 
 function resetCheckout() {

@@ -161,7 +161,7 @@ async function submit() {
     const pts = payRes?.points_earned ? `&points_earned=${payRes.points_earned}` : ''
     router.push(`/order/result?order_id=${orderId}${pts}`)
   } catch (e: any) {
-    if (/幂等键.*已结束|重新下单/.test(e?.message || '')) {
+    if (/幂等键.*已结束|重新下单/.test(e?.message || '') || e?.code === 40903) {
       checkoutNonce.value = ''
     }
     ElMessage.error(e.message || '下单失败')

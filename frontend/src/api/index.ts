@@ -4,6 +4,19 @@ import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
 import { getCustomerToken } from '@/utils/customerAuth'
 import { reportApiLog } from '@/utils/logger'
 
+/** 带业务码的 API 错误，便于按 code 分支（如 40903 幂等键已结束） */
+export class ApiError extends Error {
+  code?: number
+  status?: number
+
+  constructor(message: string, opts?: { code?: number; status?: number }) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = opts?.code
+    this.status = opts?.status
+  }
+}
+
 function parseApiError(err: unknown): string {
   if (!err || typeof err !== 'object') return '网络错误'
   const ax = err as { response?: { data?: any; status?: number }; message?: string }
@@ -53,15 +66,18 @@ api.interceptors.response.use(
     const url = String(res.config?.url || '')
     if (data && data.code !== 0 && data.code !== undefined) {
       reportApiLog('WARN', res.config?.method || 'GET', url, { code: data.code, message: data.message })
-      return Promise.reject(new Error(data.message || '请求失败'))
+      return Promise.reject(
+        new ApiError(data.message || '请求失败', { code: Number(data.code), status: res.status }),
+      )
     }
     return data
   },
   (err) => {
     const status = err.response?.status
     const msg = parseApiError(err)
+    const bizCode = err.response?.data?.code
     const url = String(err.config?.url || '')
-    reportApiLog('ERROR', err.config?.method || 'GET', url, { status, message: msg })
+    reportApiLog('ERROR', err.config?.method || 'GET', url, { status, message: msg, code: bizCode })
     if (status === 401) {
       clearStaffToken()
       if (!location.pathname.includes('/login') && !location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member') && !location.pathname.startsWith('/display')) {
@@ -73,9 +89,14 @@ api.interceptors.response.use(
     } else if (status === 429) {
       ElMessage.error('请求过于频繁')
     }
-    return Promise.reject(new Error(msg))
+    return Promise.reject(
+      new ApiError(msg, {
+        code: bizCode != null ? Number(bizCode) : undefined,
+        status,
+      }),
+    )
   },
 )
 
-export { api }
 export default api
+export { api }

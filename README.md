@@ -534,7 +534,7 @@ sudo ufw allow OpenSSH
 sudo ufw allow 443/tcp
 sudo ufw enable
 
-curl -s http://127.0.0.1:8000/api/v1/health
+curl -s http://127.0.0.1:8000/health
 curl -sI https://你的域名.com/
 ```
 

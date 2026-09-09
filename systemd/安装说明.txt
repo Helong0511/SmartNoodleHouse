@@ -32,7 +32,7 @@ sudo systemctl start smart-noodle
 
 # ── 4. 验证 ──
 sudo systemctl status smart-noodle
-curl -s http://127.0.0.1:8000/api/v1/health
+curl -s http://127.0.0.1:8000/health
 sudo journalctl -u smart-noodle -f
 
 # ── 5. 更新发布（拉代码后）──

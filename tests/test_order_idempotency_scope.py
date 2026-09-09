@@ -105,3 +105,54 @@ async def test_create_order_rejects_idempotent_hit_on_paid_order():
             )
     assert ei.value.code == 40903
     assert "重新下单" in ei.value.message
+
+
+@pytest.mark.asyncio
+async def test_http_create_order_returns_40903_envelope():
+    """网关应透传 AppException.code=40903，供客户端清 nonce。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.api.deps import get_current_customer, get_db
+    from app.core.exceptions import AppException
+    from app.core.security import create_customer_token
+    from app.main import app
+
+    fake_customer = SimpleNamespace(id=1, status=1, token_version=0)
+    fake_db = AsyncMock()
+
+    async def override_db():
+        yield fake_db
+
+    async def override_customer():
+        return fake_customer
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_customer] = override_customer
+    token = create_customer_token(1, "wechat")
+    try:
+        with patch(
+            "app.api.v1.orders.OrderCreateService.create_order",
+            AsyncMock(side_effect=AppException(40903, "该幂等键对应订单已结束，请重新下单")),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                res = await client.post(
+                    "/api/v1/orders",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "store_id": 1,
+                        "channel": "H5",
+                        "idempotency_key": "reuse-paid-key",
+                        "items": [{"product_id": 1, "quantity": 1}],
+                    },
+                )
+        assert res.status_code == 400
+        body = res.json()
+        assert body["code"] == 40903
+        assert "重新下单" in (body.get("message") or "")
+        assert body.get("data") is None
+    finally:
+        app.dependency_overrides.clear()

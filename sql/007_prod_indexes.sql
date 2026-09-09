@@ -27,15 +27,15 @@ SET @sql := (
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- payment_refunds: 状态 + 成功时间
+-- payment_refunds: 状态 + 成功时间（同列已有 idx_refunds_succeeded 则跳过）
 SET @sql := (
   SELECT IF(
-    COUNT(*) = 0,
+    (SELECT COUNT(*) FROM information_schema.statistics
+     WHERE table_schema = @db AND table_name = 'payment_refunds'
+       AND index_name IN ('idx_refunds_status_succ', 'idx_refunds_succeeded')) = 0,
     'ALTER TABLE payment_refunds ADD INDEX idx_refunds_status_succ (status, succeeded_at)',
     'SELECT 1'
   )
-  FROM information_schema.statistics
-  WHERE table_schema = @db AND table_name = 'payment_refunds' AND index_name = 'idx_refunds_status_succ'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
@@ -51,14 +51,14 @@ SET @sql := (
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- customer_coupons: 顾客 + 状态 + 过期（reserve / 列表）
+-- customer_coupons: 顾客 + 状态 + 过期（同列已有 idx_cc_customer_status 则跳过）
 SET @sql := (
   SELECT IF(
-    COUNT(*) = 0,
+    (SELECT COUNT(*) FROM information_schema.statistics
+     WHERE table_schema = @db AND table_name = 'customer_coupons'
+       AND index_name IN ('idx_cc_customer_status_exp', 'idx_cc_customer_status')) = 0,
     'ALTER TABLE customer_coupons ADD INDEX idx_cc_customer_status_exp (customer_id, status, expires_at)',
     'SELECT 1'
   )
-  FROM information_schema.statistics
-  WHERE table_schema = @db AND table_name = 'customer_coupons' AND index_name = 'idx_cc_customer_status_exp'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

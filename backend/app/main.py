@@ -175,14 +175,15 @@ def create_app() -> FastAPI:
     app.add_exception_handler(OperationalError, sqlalchemy_operational_handler)
     app.include_router(api_router)
 
+    # 无前缀探针：与 /api/v1/health、/api/v1/ready 同源（DB+Redis）
+    from app.api.v1 import health as health_routes
+
+    app.include_router(health_routes.router)
+
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     if settings.is_development:
         app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
-
-    @app.get("/health")
-    async def health():
-        return {"status": "ok"}
 
     return app
 

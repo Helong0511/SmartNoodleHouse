@@ -42,11 +42,32 @@
         <VoiceSwitch v-model="soundOn" />
         <el-button size="small" type="warning" plain @click="testVoice">试听语音</el-button>
         <el-button size="small" @click="load(true)">刷新</el-button>
+        <el-badge :value="failedPrintJobs.length" :hidden="!failedPrintJobs.length" :max="99">
+          <el-button size="small" type="danger" plain @click="showPrintJobs = !showPrintJobs">
+            打印失败
+          </el-button>
+        </el-badge>
         <el-button size="small" type="primary" @click="toggleFullscreen">
           {{ fullscreen ? '退出全屏' : '全屏' }}
         </el-button>
       </div>
     </header>
+
+    <div v-if="showPrintJobs && failedPrintJobs.length" class="print-fail-panel">
+      <div v-for="j in failedPrintJobs" :key="j.id" class="print-fail-row">
+        <span>#{{ j.id }} 订单{{ j.order_id }} · {{ j.status }} · 尝试{{ j.attempt_count }}</span>
+        <span class="err" :title="j.last_error || ''">{{ j.last_error || '无错误信息' }}</span>
+        <el-button
+          size="small"
+          type="primary"
+          :loading="retryBusyId === j.id"
+          @click="retryPrintJob(j)"
+        >重试</el-button>
+      </div>
+    </div>
+    <div v-else-if="showPrintJobs && !failedPrintJobs.length" class="print-fail-panel empty-fail">
+      暂无失败/待重试打印任务
+    </div>
 
     <div v-if="soundOn && !voiceUnlocked" class="voice-unlock" @click.stop="enableVoice">
       点击此处或点击屏幕任意位置，启用厨房语音提示
@@ -216,6 +237,9 @@ const connStatus = ref<Conn>('connecting')
 const clockText = ref('')
 const busyId = ref<number | null>(null)
 const printBusyId = ref<number | null>(null)
+const retryBusyId = ref<number | null>(null)
+const failedPrintJobs = ref<any[]>([])
+const showPrintJobs = ref(false)
 const nowTick = ref(Date.now())
 const storeOptions = ref<{ id: number; name: string; store_no?: string }[]>([])
 const selectedStoreId = ref<number | null>(null)
@@ -570,9 +594,43 @@ async function loadOnce(manual = false) {
     knownIds = nextIds
     loadSnapshotReady = true
     orders.value = data
+    void loadPrintJobs()
     if (manual) ElMessage.success('已刷新')
   } catch (e: any) {
     if (manual) ElMessage.error(e.message || '加载失败')
+  }
+}
+
+async function loadPrintJobs() {
+  try {
+    const params: Record<string, any> = {
+      status: 'FAILED,RETRYING',
+      page: 1,
+      page_size: 20,
+    }
+    if (isSuperAdmin.value && selectedStoreId.value) params.store_id = selectedStoreId.value
+    const res: any = await api.get('/print-jobs', { params })
+    failedPrintJobs.value = res?.data?.items || []
+  } catch {
+    /* 无权限或接口未就绪时静默 */
+  }
+}
+
+async function retryPrintJob(j: any) {
+  retryBusyId.value = j.id
+  try {
+    const res: any = await api.post(`/print-jobs/${j.id}/retry`)
+    const data = res?.data ?? res
+    if (data?.ok) {
+      ElMessage.success('重试成功')
+    } else {
+      ElMessage.warning(data?.last_error || '已触发重试，请稍后再看状态')
+    }
+    await loadPrintJobs()
+  } catch (e: any) {
+    ElMessage.error(e.message || '重试失败')
+  } finally {
+    retryBusyId.value = null
   }
 }
 
@@ -814,6 +872,36 @@ onUnmounted(() => {
   background: rgba(15, 18, 32, 0.95);
   padding: 8px 0 12px;
   backdrop-filter: blur(6px);
+}
+.print-fail-panel {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+.print-fail-panel.empty-fail {
+  color: #fecaca;
+  font-size: 13px;
+}
+.print-fail-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #fee2e2;
+}
+.print-fail-row .err {
+  flex: 1;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .left, .right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .head-brand {

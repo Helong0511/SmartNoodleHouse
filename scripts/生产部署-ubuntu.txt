@@ -74,5 +74,6 @@ sudo nginx -t && sudo systemctl reload nginx
 #   详见 miniprogram-*/config/环境说明.txt
 
 # ── 7. 健康检查 ──
-curl -s http://127.0.0.1:8000/api/v1/health
+curl -s http://127.0.0.1:8000/health
+# 或：curl -s http://127.0.0.1:8000/api/v1/ready
 curl -sI https://your-domain.com/

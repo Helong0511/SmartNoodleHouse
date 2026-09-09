@@ -29,37 +29,49 @@ def _index_exists(conn, table: str, index: str) -> bool:
     return int(row or 0) > 0
 
 
+def _any_index_exists(conn, table: str, names: tuple[str, ...]) -> bool:
+    return any(_index_exists(conn, table, n) for n in names)
+
+
 def upgrade() -> None:
     conn = op.get_bind()
+    # (table, preferred_name, columns, alias_names_that_already_cover)
     indexes = [
-        ("orders", "idx_orders_store_pay_paid", "(store_id, payment_status, paid_at)"),
-        ("payments", "idx_payments_status_paid", "(status, paid_at)"),
-        ("payment_refunds", "idx_refunds_status_succ", "(status, succeeded_at)"),
+        ("orders", "idx_orders_store_pay_paid", "(store_id, payment_status, paid_at)", ()),
+        ("payments", "idx_payments_status_paid", "(status, paid_at)", ()),
+        (
+            "payment_refunds",
+            "idx_refunds_status_succ",
+            "(status, succeeded_at)",
+            ("idx_refunds_succeeded",),
+        ),
         (
             "financial_ledger",
             "idx_fl_store_ch_type_created",
             "(store_id, channel, entry_type, created_at)",
+            (),
         ),
         (
             "customer_coupons",
             "idx_cc_customer_status_exp",
             "(customer_id, status, expires_at)",
+            ("idx_cc_customer_status",),
         ),
     ]
-    for table, name, cols in indexes:
-        if _index_exists(conn, table, name):
+    for table, name, cols, aliases in indexes:
+        if _any_index_exists(conn, table, (name,) + aliases):
             continue
         conn.execute(text(f"ALTER TABLE {table} ADD INDEX {name} {cols}"))
 
 
 def downgrade() -> None:
     conn = op.get_bind()
-    for table, name, _ in [
-        ("orders", "idx_orders_store_pay_paid", ""),
-        ("payments", "idx_payments_status_paid", ""),
-        ("payment_refunds", "idx_refunds_status_succ", ""),
-        ("financial_ledger", "idx_fl_store_ch_type_created", ""),
-        ("customer_coupons", "idx_cc_customer_status_exp", ""),
+    for table, name in [
+        ("orders", "idx_orders_store_pay_paid"),
+        ("payments", "idx_payments_status_paid"),
+        ("payment_refunds", "idx_refunds_status_succ"),
+        ("financial_ledger", "idx_fl_store_ch_type_created"),
+        ("customer_coupons", "idx_cc_customer_status_exp"),
     ]:
         if _index_exists(conn, table, name):
             conn.execute(text(f"ALTER TABLE {table} DROP INDEX {name}"))

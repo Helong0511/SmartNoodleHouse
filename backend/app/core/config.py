@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     eleme_notify_url: str = ""
     eleme_access_token: str = ""
     eleme_api_base: str = "https://open-api.shop.ele.me/api/v1"
+    # 仅当 platform_store_bindings 缺失时，允许 .env 全局 Token 用于该本系统门店 ID（0=禁用）
+    delivery_env_fallback_store_id: int = 0
 
     tts_provider: str = "local"
     tts_voice: str = "zh-CN"

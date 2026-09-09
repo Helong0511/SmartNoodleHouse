@@ -88,19 +88,14 @@ async def resolve_store_and_credentials(
         )
         return binding.store_id, creds
 
-    # 单店全局配置：仅当 .env 中 platform shop_id 与回调一致时使用
+    # 单店全局配置：仅当 .env 中 platform shop_id 与回调一致，且显式配置了兜底门店时使用
     global_shop = settings.eleme_shop_id if platform.upper() == "ELEME" else settings.meituan_shop_id
     global_token = settings.eleme_access_token if platform.upper() == "ELEME" else None
-    if global_shop and str(global_shop) == str(shop_id):
-        # 使用绑定表缺失时的全局门店：必须显式配置 LOCAL_STORE_ID，默认仍禁止猜 1
-        local_store = int(raw.get("local_store_id") or parsed.get("local_store_id") or 0)
-        if local_store <= 0:
-            raise AppException(
-                40061,
-                f"平台门店 {shop_id} 未在 platform_store_bindings 绑定，且未提供 local_store_id",
-            )
-        return local_store, PlatformCredentials(
-            store_id=local_store,
+    fallback_sid = int(getattr(settings, "delivery_env_fallback_store_id", 0) or 0)
+    if global_shop and str(global_shop) == str(shop_id) and fallback_sid > 0:
+        # 禁止信任回调体里的 local_store_id（可伪造跨店）
+        return fallback_sid, PlatformCredentials(
+            store_id=fallback_sid,
             platform_shop_id=global_shop,
             access_token=global_token,
         )
@@ -113,6 +108,11 @@ async def get_credentials_for_store(
     platform: str,
     store_id: int,
 ) -> PlatformCredentials | None:
+    """按本系统门店取平台凭证。
+
+    默认禁止用 .env 全局 Token 冒充任意门店（多门店串单风险）。
+    仅当显式配置 DELIVERY_ENV_FALLBACK_STORE_ID 且与请求门店一致时，才允许开发兜底。
+    """
     binding = (
         await db.execute(
             select(PlatformStoreBinding).where(
@@ -124,10 +124,20 @@ async def get_credentials_for_store(
     ).scalar_one_or_none()
     if not binding:
         settings = get_settings()
+        fallback_sid = int(getattr(settings, "delivery_env_fallback_store_id", 0) or 0)
+        if fallback_sid <= 0 or int(store_id) != fallback_sid:
+            return None
         if platform.upper() == "ELEME" and settings.eleme_access_token:
-            return PlatformCredentials(store_id=store_id, platform_shop_id=settings.eleme_shop_id, access_token=settings.eleme_access_token)
+            return PlatformCredentials(
+                store_id=store_id,
+                platform_shop_id=settings.eleme_shop_id or None,
+                access_token=settings.eleme_access_token,
+            )
         if platform.upper() == "MEITUAN" and settings.meituan_shop_id:
-            return PlatformCredentials(store_id=store_id, platform_shop_id=settings.meituan_shop_id)
+            return PlatformCredentials(
+                store_id=store_id,
+                platform_shop_id=settings.meituan_shop_id,
+            )
         return None
     extra = {}
     if binding.extra_config:
