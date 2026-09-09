@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import generate_no
@@ -52,8 +52,11 @@ class CouponService:
 
     @staticmethod
     def template_payload(tmpl: CouponTemplate) -> dict:
+        sid = getattr(tmpl, "store_id", None)
         return {
             "id": tmpl.id,
+            "store_id": int(sid) if sid else None,
+            "store_scope": "HQ" if not sid else "STORE",
             "name": tmpl.name,
             "coupon_type": tmpl.coupon_type,
             "discount_value": str(tmpl.discount_value),
@@ -66,17 +69,40 @@ class CouponService:
         }
 
     @staticmethod
-    async def list_templates(db: AsyncSession, include_disabled: bool = True) -> list[dict]:
+    def template_visible_to_store(tmpl: CouponTemplate, store_id: int | None) -> bool:
+        """store_id=None（超管全店）可见全部；否则可见总部模板 + 本店模板。"""
+        if store_id is None:
+            return True
+        sid = getattr(tmpl, "store_id", None)
+        return sid is None or int(sid) == int(store_id)
+
+    @staticmethod
+    async def list_templates(
+        db: AsyncSession,
+        include_disabled: bool = True,
+        *,
+        store_id: int | None = None,
+    ) -> list[dict]:
         q = select(CouponTemplate).order_by(CouponTemplate.id.desc())
         if not include_disabled:
             q = q.where(CouponTemplate.status == 1)
+        if store_id is not None:
+            q = q.where(
+                or_(
+                    CouponTemplate.store_id.is_(None),
+                    CouponTemplate.store_id == int(store_id),
+                )
+            )
         rows = list((await db.execute(q)).scalars().all())
         return [CouponService.template_payload(t) for t in rows]
 
     @staticmethod
     async def create_template(db: AsyncSession, data: dict) -> CouponTemplate:
         CouponService._validate_template_data(data)
-        tmpl = CouponTemplate(**data)
+        payload = dict(data)
+        if "store_id" in payload and payload["store_id"] is not None:
+            payload["store_id"] = int(payload["store_id"])
+        tmpl = CouponTemplate(**payload)
         db.add(tmpl)
         await db.flush()
         return tmpl
@@ -93,7 +119,9 @@ class CouponService:
         }
         CouponService._validate_template_data(merged)
         for key, val in data.items():
-            if val is not None:
+            if key == "store_id":
+                tmpl.store_id = int(val) if val is not None else None
+            elif val is not None:
                 setattr(tmpl, key, val)
         await db.flush()
         return tmpl
@@ -166,16 +194,29 @@ class CouponService:
         keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        store_id: int | None = None,
     ) -> tuple[list[dict], int]:
         from sqlalchemy import func, or_
 
-        from app.models import Customer
+        from app.models import Customer, Order
 
         q = (
             select(CustomerCoupon, CouponTemplate, Customer)
             .join(CouponTemplate, CouponTemplate.id == CustomerCoupon.template_id)
             .join(Customer, Customer.id == CustomerCoupon.customer_id)
         )
+        if store_id is not None:
+            q = q.where(
+                or_(
+                    Customer.registered_store_id == int(store_id),
+                    Customer.id.in_(
+                        select(Order.customer_id).where(
+                            Order.store_id == int(store_id),
+                            Order.customer_id.isnot(None),
+                        )
+                    ),
+                )
+            )
         if customer_id:
             q = q.where(CustomerCoupon.customer_id == int(customer_id))
         if template_id:
@@ -323,10 +364,22 @@ class CouponService:
         tmpl = (
             await db.execute(
                 select(CouponTemplate).where(
-                    CouponTemplate.name == welcome_name, CouponTemplate.status == 1
+                    CouponTemplate.name == welcome_name,
+                    CouponTemplate.status == 1,
+                    CouponTemplate.store_id.is_(None),
                 )
             )
         ).scalar_one_or_none()
+        if not tmpl:
+            # 兼容历史：尚无总部模板时允许任意同名启用模板
+            tmpl = (
+                await db.execute(
+                    select(CouponTemplate)
+                    .where(CouponTemplate.name == welcome_name, CouponTemplate.status == 1)
+                    .order_by(CouponTemplate.id.asc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
         if not tmpl:
             logger.warning(
                 "欢迎券未发放：模板不存在或未启用 name=%r（请检查 coupon_templates 与 .env WELCOME_COUPON_NAME）",

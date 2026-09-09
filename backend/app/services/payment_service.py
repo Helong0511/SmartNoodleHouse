@@ -1507,10 +1507,14 @@ class PaymentService:
         db.add(row)
         await db.flush()
 
+        # 短事务：落库 PENDING 退款单并释放行锁后再调第三方
+        refund_id = row.id
+        payment_id = payment.id
+        await db.commit()
+
         provider_inst = cls.get_provider(payment.provider) if (payment.provider or "").upper() != "CASH" else None
         try:
             if provider_inst is None:
-                # 现金：本地退款入账，无需第三方
                 result = {
                     "refund_no": refund_no,
                     "status": "SUCCESS",
@@ -1519,12 +1523,28 @@ class PaymentService:
                     "_mock": False,
                 }
             else:
+                payment = await db.get(Payment, payment_id)
+                if not payment:
+                    raise AppException(40401, "支付记录不存在")
                 result = await provider_inst.refund_payment(payment, amount, reason, refund_no)
         except Exception as e:
-            row.status = "FAILED"
-            row.fail_reason = str(e)[:255]
-            await db.flush()
+            row = (
+                await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
+            ).scalar_one_or_none()
+            if row and row.status in ("PENDING", "PROCESSING"):
+                row.status = "FAILED"
+                row.fail_reason = str(e)[:255]
+                await db.flush()
+                await db.commit()
             raise
+
+        row = (
+            await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
+        ).scalar_one_or_none()
+        if not row:
+            raise AppException(40405, "退款单不存在")
+        if row.status == "SUCCESS":
+            return row
 
         api_status = (result.get("status") or "PROCESSING").upper()
         row.provider_refund_no = result.get("provider_refund_no")
@@ -1550,7 +1570,7 @@ class PaymentService:
                 source="REFUND_APPLY",
             )
         else:
-            # 受理成功，等待回调/定时查询
+            # 受理成功，等待回调/定时查询——不得当作已退款
             row.status = "PROCESSING"
             await db.flush()
 

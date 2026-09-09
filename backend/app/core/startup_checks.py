@@ -110,10 +110,12 @@ def validate_settings(settings: Settings) -> None:
         errors.append("生产须配置 WEBHOOK_IP_ALLOWLIST（支付/外卖回调 IP 白名单）")
 
     process_role = (getattr(settings, "process_role", None) or "").strip().lower()
-    if is_prod and process_role not in ("leader", "worker"):
-        errors.append("生产须显式设置 PROCESS_ROLE=leader|worker（仅一个实例为 leader）")
+    if is_prod and process_role not in ("leader", "worker", "auto"):
+        errors.append("生产须显式设置 PROCESS_ROLE=leader|worker|auto（集群仅一个进程持有 Redis Leader 锁）")
     if is_prod and process_role == "leader":
-        warnings.append("当前实例为 PROCESS_ROLE=leader；请确保集群内仅一个 leader")
+        warnings.append("当前实例为 PROCESS_ROLE=leader；若 gunicorn -w>1，依赖 Redis 锁仅一个 worker 跑调度")
+    if is_prod and process_role == "auto":
+        warnings.append("PROCESS_ROLE=auto：各进程争抢 Redis Leader 锁，适合单机多 worker")
 
     # 生产至少配置一种支付通道（微信 V3 或支付宝）；否则小程序/扫码收款不可用
     if is_prod:

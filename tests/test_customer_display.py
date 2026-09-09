@@ -82,11 +82,18 @@ def test_pickup_fields():
 
 
 @pytest.mark.asyncio
-async def test_display_active_api():
+async def test_display_active_api(monkeypatch):
     from httpx import ASGITransport, AsyncClient
+    from unittest.mock import patch
 
     from app.core.database import Base
+    from app.core.config import get_settings
     from app.main import app
+
+    display_tok = "test-display-token"
+    # 强制叫号屏令牌，避免依赖本机 .env 是否已配置 DISPLAY_SCREEN_TOKEN
+    real = get_settings()
+    monkeypatch.setattr(real, "display_screen_token", display_tok)
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
@@ -131,7 +138,10 @@ async def test_display_active_api():
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            res = await client.get("/api/v1/orders/display/active", params={"store_id": 1})
+            res = await client.get(
+                "/api/v1/orders/display/active",
+                params={"store_id": 1, "token": display_tok},
+            )
             assert res.status_code == 200
             body = res.json()
             assert body["code"] == 0

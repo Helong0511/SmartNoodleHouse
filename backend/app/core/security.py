@@ -34,6 +34,7 @@ def create_access_token(
         "nbf": now,
         "jti": uuid4().hex,
         "iss": settings.app_name,
+        "aud": settings.jwt_audience,
         "typ": "staff",
         "ver": token_version,
     }
@@ -53,6 +54,7 @@ def create_stream_ticket(user_id: int, camera_id: int, *, token_version: int = 0
         "nbf": now,
         "jti": uuid4().hex,
         "iss": settings.app_name,
+        "aud": settings.jwt_audience,
         "typ": "stream",
         "cam": int(camera_id),
         "ver": token_version,
@@ -68,7 +70,8 @@ def create_customer_token(
 ) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=settings.jwt_expire_minutes * 7)
+    ttl = int(getattr(settings, "customer_jwt_expire_minutes", None) or settings.jwt_expire_minutes)
+    expire = now + timedelta(minutes=max(30, ttl))
     payload = {
         "sub": str(customer_id),
         "exp": expire,
@@ -76,6 +79,7 @@ def create_customer_token(
         "nbf": now,
         "jti": uuid4().hex,
         "iss": settings.app_name,
+        "aud": settings.jwt_audience,
         "typ": "customer",
         "channel": channel,
         "ver": int(token_version or 0),
@@ -97,10 +101,12 @@ def decode_token(token: str) -> dict[str, Any]:
         settings.jwt_secret,
         algorithms=[settings.jwt_algorithm],
         issuer=settings.app_name,
+        audience=settings.jwt_audience,
         options={
             "require_exp": True,
             "require_iat": True,
             "require_sub": True,
             "require_nbf": True,
+            "require_aud": True,
         },
     )

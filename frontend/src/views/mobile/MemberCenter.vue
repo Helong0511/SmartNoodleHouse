@@ -97,6 +97,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { setCustomerToken } from '@/utils/customerAuth'
 
 const faceEnabled = ref(false)
 const profile = ref<any>(null)
@@ -160,8 +161,7 @@ async function ensureCustomer() {
   localStorage.setItem('h5_login_code', code)
   const res = await api.post('/miniprogram/wechat/login', { code })
   customerId.value = res.data.customer_id
-  localStorage.setItem('customer_token', res.data.customer_token)
-  localStorage.setItem('customer_id', String(res.data.customer_id))
+  setCustomerToken(res.data.customer_token, res.data.customer_id)
   if (res.data.nickname) localStorage.setItem('nickname', res.data.nickname)
   return res.data
 }

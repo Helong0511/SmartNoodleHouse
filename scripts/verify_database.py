@@ -85,6 +85,7 @@ REQUIRED_COLUMNS = [
     ("print_jobs", "attempt_count"),
     ("print_jobs", "next_retry_at"),
     ("print_jobs", "content"),
+    ("coupon_templates", "store_id"),
 ]
 
 
@@ -191,8 +192,25 @@ async def main() -> None:
             print(f"[{'OK' if ver else 'FAIL'}] alembic_version={ver!r}")
             if not ver:
                 failures.append("alembic_version empty")
-            elif ver not in ("0001_baseline", "0002_p0_hardening"):
+            elif not str(ver).startswith("000"):
                 print(f"[WARN] unexpected alembic revision: {ver}")
+            else:
+                print(f"[OK] alembic head-compatible revision={ver}")
+
+        RECOMMENDED_INDEXES = [
+            ("orders", "idx_orders_store_pay_paid"),
+            ("payments", "idx_payments_status_paid"),
+            ("payment_refunds", "idx_refunds_status_succ"),
+            ("financial_ledger", "idx_fl_store_ch_type_created"),
+            ("customer_coupons", "idx_cc_customer_status_exp"),
+        ]
+        for table, index in RECOMMENDED_INDEXES:
+            if not await _table_exists(db, table):
+                continue
+            ok = await _index_exists(db, table, index)
+            print(f"[{'OK' if ok else 'WARN'}] index {table}.{index}")
+            if not ok:
+                print(f"  hint: alembic upgrade head 或 sql/007_prod_indexes.sql")
         else:
             failures.append("missing alembic_version")
 

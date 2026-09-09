@@ -30,10 +30,17 @@ class Settings(BaseSettings):
 
     database_url: str = "mysql+aiomysql://root:password@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4"
     redis_url: str = "redis://127.0.0.1:6379/0"
+    # 每进程连接池；gunicorn -w N 时总连接 ≈ N*(pool_size+max_overflow)
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
 
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
+    # 顾客 JWT 独立生命周期（默认 24h；原先 staff×7 过长）
+    customer_jwt_expire_minutes: int = 1440
+    # JWT aud 声明，decode 时强制校验
+    jwt_audience: str = "smart-noodle-house"
 
     upload_dir: str = "uploads"
     max_upload_size_mb: int = 5
@@ -140,8 +147,11 @@ class Settings(BaseSettings):
     # 仅这些直连 peer（反代）可让后端信任 X-Real-IP / X-Forwarded-For
     trusted_proxy_ips: str = "127.0.0.1,::1"
 
-    # 多进程角色：默认 worker，避免所有 Gunicorn worker 都跑调度；仅一个实例设 leader
-    process_role: str = "worker"
+    # 多进程角色：
+    # - worker：永不跑调度/TTS/识别
+    # - leader：尝试 Redis 锁，抢到才跑调度（多实例误配时仍安全）
+    # - auto：各进程争抢 Redis 锁，适合单机 gunicorn -w N
+    process_role: str = "auto"
     # 是否在 leader 进程启动人脸识别 worker（须走 settings 读 .env，勿用 os.getenv）
     enable_recognition_worker: bool = True
 

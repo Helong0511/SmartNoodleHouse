@@ -497,6 +497,10 @@ async def update_store(
     db: DbSession,
     user: CurrentUser,
 ):
+    assert_store_access(user, store_id)
+    # 非超管不得改他店；超管可改任意店（assert 已放行）
+    if user.role.code != "SUPER_ADMIN" and user.store_id and int(user.store_id) != int(store_id):
+        raise AppException(40301, "无权修改该门店")
     store = await db.get(Store, store_id)
     if not store:
         raise AppException(40011, "门店不存在")

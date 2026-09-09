@@ -242,9 +242,10 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             )
         ).scalars().all()
     )
-    order_count = await db.scalar(
-        select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
-    ) or 0
+    order_count_q = select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
+    if effective_store is not None:
+        order_count_q = order_count_q.where(Order.store_id == effective_store)
+    order_count = await db.scalar(order_count_q) or 0
     profile = await CustomerService.build_member_profile(db, customer)
     wechat_list = list(wechat.scalars().all())
     alipay_list = list(alipay.scalars().all())

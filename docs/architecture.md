@@ -10,7 +10,7 @@
 | 管理端 | `frontend/` | 门店运营、商品、订单、会员、支付退款、摄像头迎宾 |
 | API | `backend/app/`（FastAPI） | 鉴权、业务编排、支付回调、外卖 Webhook |
 | 数据 | MySQL + Redis | 业务持久化；缓存 / 限流 / 分布式锁 |
-| Worker | `PROCESS_ROLE=leader` 同进程内调度 | Webhook 消费、退款轮询、打印、识别等 |
+| Worker | Redis Leader 锁选举的进程内调度 | Webhook 消费、退款轮询、打印、识别等 |
 
 ## 部署拓扑（概要）
 
@@ -28,7 +28,7 @@
 要点：
 
 - 摄像头 RTSP 仅走店内网，勿对公网开放。
-- 集群内仅允许 **一个** `PROCESS_ROLE=leader`（调度 / TTS / 人脸识别）。
+- 集群内同一时刻仅允许 **一个** 进程持有 Redis Leader 锁跑调度 / TTS / 人脸识别（`PROCESS_ROLE=auto|leader`）。
 - 小程序与支付 / 外卖回调必须使用 HTTPS 域名。
 
 ## 核心业务流

@@ -1,11 +1,12 @@
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
 
 import numpy as np
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,16 +21,32 @@ from app.services.face_extractor import EMBEDDING_DIM
 logger = logging.getLogger(__name__)
 
 
+def _fernet_from_material(material: str, *, legacy: bool = False) -> Fernet:
+    raw = (material or "").encode("utf-8")
+    if legacy:
+        key = raw[:32].ljust(32, b"0")
+    else:
+        key = hashlib.sha256(raw).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
 class FaceEncryption:
+    """人脸向量加密。新数据用 SHA256 派生；解密兼容历史零填充密钥。"""
+
     def __init__(self):
-        key = get_settings().face_encryption_key.encode()[:32].ljust(32, b"0")
-        self.fernet = Fernet(base64.urlsafe_b64encode(key))
+        material = get_settings().face_encryption_key or ""
+        self._material = material
+        self.fernet = _fernet_from_material(material, legacy=False)
 
     def encrypt(self, data: bytes) -> bytes:
         return self.fernet.encrypt(data)
 
     def decrypt(self, data: bytes) -> bytes:
-        return self.fernet.decrypt(data)
+        try:
+            return self.fernet.decrypt(data)
+        except InvalidToken:
+            legacy = _fernet_from_material(self._material, legacy=True)
+            return legacy.decrypt(data)
 
 
 class FaceEmbeddingCache:
@@ -376,7 +393,9 @@ class WelcomeService:
                     "camera_id": camera_id,
                     "text": text,
                     "name": name,
+                    "store_id": store_id,
                 },
+                store_id=store_id,
             )
         except Exception:
             pass

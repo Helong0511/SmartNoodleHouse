@@ -66,14 +66,14 @@ class ProductCreate(BaseModel):
     name: str
     description: str | None = None
     price: Decimal = Field(gt=0, description="售价须大于 0")
-    original_price: Decimal | None = None
+    original_price: Decimal | None = Field(default=None, ge=0, description="划线价须 ≥ 0")
     status: str = "ON_SALE"
     is_recommended: bool = False
     is_hot: bool = False
     no_member_discount: bool = False
     no_cooking: bool = False
     sort_order: int = 0
-    stock: int = 999
+    stock: int = Field(default=999, ge=0, description="库存须 ≥ 0")
     box_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="餐盒/打包费（单价）")
     main_image: str | None = None
     option_group_ids: list[int] = []
@@ -87,16 +87,16 @@ class ProductUpdate(BaseModel):
     category_id: int | None = None
     name: str | None = None
     description: str | None = None
-    price: Decimal | None = None
-    original_price: Decimal | None = None
+    price: Decimal | None = Field(default=None, gt=0, description="售价须大于 0")
+    original_price: Decimal | None = Field(default=None, ge=0, description="划线价须 ≥ 0")
     status: str | None = None
     is_recommended: bool | None = None
     is_hot: bool | None = None
     no_member_discount: bool | None = None
     no_cooking: bool | None = None
     sort_order: int | None = None
-    stock: int | None = None
-    box_price: Decimal | None = None
+    stock: int | None = Field(default=None, ge=0, description="库存须 ≥ 0")
+    box_price: Decimal | None = Field(default=None, ge=0)
     main_image: str | None = None
     option_group_ids: list[int] | None = None
     require_category_ids: list[int] | None = None
@@ -172,7 +172,7 @@ class OptionCreate(BaseModel):
     group_id: int
     name: str
     code: str
-    extra_price: Decimal = Decimal("0.00")
+    extra_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="加价须 ≥ 0")
     sort_order: int = 0
     is_default: bool = False
 
@@ -180,7 +180,7 @@ class OptionCreate(BaseModel):
 class OptionUpdate(BaseModel):
     name: str | None = None
     code: str | None = None
-    extra_price: Decimal | None = None
+    extra_price: Decimal | None = Field(default=None, ge=0, description="加价须 ≥ 0")
     sort_order: int | None = None
     is_default: bool | None = None
     status: int | None = None

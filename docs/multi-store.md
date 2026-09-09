@@ -23,8 +23,9 @@
 - 顾客 `registered_store_id` / `registered_table_id` 仅记录首次扫码注册门店 / 桌台。
 - 统计与财务分录（`financial_ledger.store_id`）按店过滤；跨店报表仅超管。
 - 顾客合并：`POST /api/v1/customers/{target_id}/merge`（需 `customer:write`）。非超管要求源/目标顾客均在本店下过单；合并策略见 `CustomerMergeService` docstring。
+- 优惠券模板：`coupon_templates.store_id` 为 NULL 表示总部模板（各店可见可发）；非空仅该店可管/可发。发券与持券列表对门店账号按本店顾客隔离。
 - 小程序 / H5 通过桌台或门店上下文解析 `store_id`，服务端必须以落库关联为准，勿信任客户端随意传店。
 
 ## 配置
 
-门店级参数放 `store_settings`；全局参数放 `system_settings` 或环境变量。生产多实例时各实例共享同一库，用 `PROCESS_ROLE` 区分 leader / worker，而不是按店拆进程（除非刻意分库，当前版本按单库多店设计）。
+门店级参数放 `store_settings`；全局参数放 `system_settings` 或环境变量。生产多实例共享同一库时，用 `PROCESS_ROLE=auto|leader|worker` + Redis Leader 锁保证调度不重复（而不是按店拆进程；当前版本按单库多店设计）。

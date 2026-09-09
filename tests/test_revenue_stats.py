@@ -133,11 +133,17 @@ async def test_delivery_kpi_status_counts_use_period_when_until_set():
     scalar_results = iter([0, 0, 0, 0, 0, 0, 0])
     db.scalar = AsyncMock(side_effect=lambda *_: next(scalar_results, 0))
     with patch(
-        "app.services.revenue_stats.gross_revenue_since",
+        "app.services.revenue_stats._ledger_has_entries_since",
         new_callable=AsyncMock,
-        return_value=Decimal("0"),
+        return_value=True,
     ), patch(
-        "app.services.revenue_stats.refunded_since", new_callable=AsyncMock, return_value=Decimal("0")
+        "app.services.revenue_stats.ledger_gross_since",
+        new_callable=AsyncMock,
+        return_value=Decimal("100.00"),
+    ), patch(
+        "app.services.revenue_stats.ledger_refunded_since",
+        new_callable=AsyncMock,
+        return_value=Decimal("150.00"),
     ), patch(
         "app.services.revenue_stats.member_discount_since",
         new_callable=AsyncMock,
@@ -145,6 +151,7 @@ async def test_delivery_kpi_status_counts_use_period_when_until_set():
     ):
         result = await delivery_kpi(db, since=since, until=until, store_id=1)
         assert result["pending"] == 0
+        assert result["revenue"] == "-50.00"
         stmts = [call.args[0] for call in db.scalar.call_args_list if call.args]
         period_sql = " ".join(str(s) for s in stmts)
         assert "created_at" in period_sql
@@ -157,6 +164,10 @@ async def test_delivery_kpi_status_counts_live_snapshot_without_until():
     scalar_results = iter([0, 5, 1, 2, 0, 0, 0, 0, 0])
     db.scalar = AsyncMock(side_effect=lambda *_: next(scalar_results, 0))
     with patch(
+        "app.services.revenue_stats._ledger_has_entries_since",
+        new_callable=AsyncMock,
+        return_value=False,
+    ), patch(
         "app.services.revenue_stats.gross_revenue_since",
         new_callable=AsyncMock,
         return_value=Decimal("0"),

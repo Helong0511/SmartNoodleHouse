@@ -20,7 +20,9 @@ cp .env.production.example .env   # 或开发用 .env.development.example
 | 变量 | 说明 |
 |------|------|
 | `APP_ENV=production` | 启用启动强校验 |
-| `PROCESS_ROLE` | `leader` 跑定时任务 / TTS / 识别；其余实例必须 `worker`。全机仅一个 leader |
+| `PROCESS_ROLE` | `auto`（推荐）：各 gunicorn worker 争抢 Redis Leader 锁；`worker` 永不调度；`leader` 优先争抢。集群同一时刻仅一个进程持锁跑调度/TTS/识别 |
+| `JWT_AUDIENCE` | JWT `aud` 声明（默认 `smart-noodle-house`）；升级后旧无 aud 令牌需重新登录 |
+| `CUSTOMER_JWT_EXPIRE_MINUTES` | 顾客 JWT 有效期（默认 1440）；勿再沿用员工 JWT×7 |
 | `TRUSTED_PROXY_IPS` | 反代直连 IP（逗号分隔，支持 CIDR）。仅这些 peer 的 `X-Real-IP` / `X-Forwarded-For` 会被信任 |
 | `WEBHOOK_REQUIRE_ALLOWLIST` | 生产建议 `true`，并配置平台出口 IP |
 | `ALLOW_*_MOCK` | 生产全部 `false` |
@@ -28,7 +30,8 @@ cp .env.production.example .env   # 或开发用 .env.development.example
 生成随机密钥示例（勿把输出提交到仓库）：
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+python scripts/gen_secrets.py
+# 或单条：python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 ## 2. 数据库 Schema（推荐 Alembic）
@@ -47,6 +50,8 @@ alembic upgrade head
 - `0004_p1_shift_open`：收银班次每人仅一个 OPEN
 - `0005_p1_merge_print`：`customer_coupons.status_reason`（合并冲突标记）
 - `0006_print_jobs`：厨房打印任务表 `print_jobs`（失败指数退避重试）
+- `0007_prod_indexes`：营收/厨房/账本/券常用复合索引
+- `0008_coupon_template_store`：`coupon_templates.store_id`（NULL=总部模板）
 
 等价手工路径（不推荐与 Alembic 混用同一库反复执行）：
 
@@ -97,7 +102,7 @@ npm ci && npm run build
 ## 5. Nginx / 多实例注意
 
 - 反代到本机 API；上传目录与静态 `frontend/dist` 分离挂载。
-- 多 Gunicorn worker 时：**只有一个进程 / 一台机** 设 `PROCESS_ROLE=leader`。
+- 多 Gunicorn worker：推荐 `PROCESS_ROLE=auto`（systemd 单元已默认覆盖为 auto），依赖 Redis Leader 锁；跨机多实例同样只允许一个进程持锁。
 - `TRUSTED_PROXY_IPS` 填 Nginx 所在网卡地址（常见 `127.0.0.1`）；若 API 与反代跨机，填反代出口 IP，勿填 `0.0.0.0/0`。
 
 ## 6. 上线检查清单
@@ -106,4 +111,4 @@ npm ci && npm run build
 - [ ] `init_admin.py` 已设强密码
 - [ ] 支付 / 小程序 / 外卖密钥为占位符已替换，且曾泄露密钥已在平台控制台轮换（见 [security.md](security.md)）
 - [ ] 回调 URL 为 HTTPS，且白名单生效
-- [ ] 仅一个 `PROCESS_ROLE=leader`
+- [ ] `PROCESS_ROLE=auto|leader|worker`，且 Redis 可用（Leader 锁）

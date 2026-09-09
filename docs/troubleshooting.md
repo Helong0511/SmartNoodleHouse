@@ -8,7 +8,8 @@
 |------|------|
 | `JWT_SECRET` / `FACE_ENCRYPTION_KEY` 过弱 | 生产启动校验拒绝；换 ≥32 字符高熵串 |
 | 未配置 `DISPLAY_SCREEN_TOKEN` | 生产叫号屏强制；填 opaque 短令牌 |
-| `PROCESS_ROLE` 非法 | 仅 `leader` / `worker`；集群只留一个 leader |
+| `PROCESS_ROLE` 非法 | 允许 `leader` / `worker` / `auto`；同一时刻仅一个进程持有 Redis Leader 锁 |
+| 登录后立即 401 | JWT 已强制 `aud`；部署后旧令牌需重新登录 |
 | 支付通道未配齐 | 微信或支付宝至少配通一套 |
 | 打印开了但未配主机 / 云账号 | `PRINTER_MODE` + `PRINTER_HOST` 或芯烨云三项 |
 

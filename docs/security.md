@@ -26,7 +26,9 @@
 ## 运行时加固
 
 - 生产关闭所有 `ALLOW_*_MOCK`。
-- `PROCESS_ROLE`：仅一个 leader，避免重复调度。
+- `PROCESS_ROLE`：`auto`/`leader` 经 Redis 锁选举，避免多 worker 重复调度；`worker` 永不调度。
+- JWT：签发带 `aud`（`JWT_AUDIENCE`）；顾客令牌独立 TTL（`CUSTOMER_JWT_EXPIRE_MINUTES`）。
+- 人脸/业务密钥：Fernet 材料经 SHA256 派生；解密兼容历史「截断补零」密文。
 - `TRUSTED_PROXY_IPS`：仅信任反代 peer，防止伪造客户端 IP。
 - Webhook：验签 +（建议）出口 IP 白名单。
 - 上传与回调接口限流；管理端敏感操作写 `operation_logs`。

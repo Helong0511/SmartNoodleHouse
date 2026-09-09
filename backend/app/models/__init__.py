@@ -97,6 +97,8 @@ class MemberLevel(Base):
 class CouponTemplate(Base):
     __tablename__ = "coupon_templates"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # NULL=总部/全店可见；非空=仅该门店
+    store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     name: Mapped[str] = mapped_column(String(100))
     coupon_type: Mapped[str] = mapped_column(String(20), default="FIXED")
     discount_value: Mapped[Decimal] = mapped_column(Numeric(10, 4))

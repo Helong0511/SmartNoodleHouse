@@ -46,6 +46,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { getCustomerToken, setCustomerToken } from '@/utils/customerAuth'
 import { mediaUrl } from '@/utils/media'
 
 const router = useRouter()
@@ -157,7 +158,7 @@ async function submit() {
 }
 
 async function ensureLogin() {
-  if (localStorage.getItem('customer_token')) return
+  if (getCustomerToken()) return
   // 生产禁止伪造 login code
   if (import.meta.env.PROD) {
     throw new Error('生产环境请使用小程序登录')
@@ -165,8 +166,7 @@ async function ensureLogin() {
   const code = localStorage.getItem('h5_login_code') || `h5_member_${Date.now()}`
   localStorage.setItem('h5_login_code', code)
   const res = await api.post('/miniprogram/wechat/login', { code })
-  localStorage.setItem('customer_token', res.data.customer_token)
-  localStorage.setItem('customer_id', String(res.data.customer_id))
+  setCustomerToken(res.data.customer_token, res.data.customer_id)
 }
 
 async function loadMember() {

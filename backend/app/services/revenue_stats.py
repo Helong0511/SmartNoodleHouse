@@ -770,15 +770,24 @@ async def delivery_kpi(
 
     orders = await _period_count()
 
-    gross = await gross_revenue_since(
-        db, since=since, until=until, store_id=store_id, channels=["MEITUAN", "ELEME"]
-    )
-    refunded = await refunded_since(
-        db, since=since, until=until, store_id=store_id, channels=["MEITUAN", "ELEME"]
-    )
+    # 外卖入账走 financial_ledger（无 Payment 行），KPI 必须读账本而非 Payment 汇总
+    _channels = ["MEITUAN", "ELEME"]
+    if await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id):
+        gross = await ledger_gross_since(
+            db, since=since, until=until, store_id=store_id, channels=_channels
+        )
+        refunded = await ledger_refunded_since(
+            db, since=since, until=until, store_id=store_id, channels=_channels
+        )
+    else:
+        gross = await gross_revenue_since(
+            db, since=since, until=until, store_id=store_id, channels=_channels
+        )
+        refunded = await refunded_since(
+            db, since=since, until=until, store_id=store_id, channels=_channels
+        )
+    # 允许负净收入（退款大于收款），与 net_revenue_from_ledger_since 一致
     revenue = money(gross - refunded)
-    if revenue < 0:
-        revenue = money(Decimal("0"))
 
     member_discount = await member_discount_since(
         db, since=since, until=until, store_id=store_id, channels=["MEITUAN", "ELEME"]

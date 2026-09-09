@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import or_, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
-from app.models import CouponTemplate
+from app.models import CouponTemplate, Customer, Order
 from app.schemas.coupon import CouponIssueRequest, CouponTemplateCreate, CouponTemplateUpdate
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
+from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/coupons", tags=["优惠券"])
 
@@ -16,16 +18,38 @@ class TemplateStatusUpdate(BaseModel):
     status: int = Field(..., ge=0, le=1)
 
 
+def _assert_template_manage_access(user, tmpl: CouponTemplate) -> None:
+    """门店账号仅可改本店模板；总部模板仅超管可改。"""
+    if user.role.code == "SUPER_ADMIN":
+        return
+    bound = require_bound_store(user, None)
+    sid = getattr(tmpl, "store_id", None)
+    if sid is None:
+        raise AppException(40301, "无权修改总部优惠券模板")
+    if bound is None or int(sid) != int(bound):
+        raise AppException(40301, "无权修改其他门店优惠券模板")
+
+
 @router.get("/templates", dependencies=[require_permission("coupon:read")])
 async def list_templates(request: Request, db: DbSession, user: CurrentUser, all: bool = True):
-    """优惠券模板列表。"""
-    items = await CouponService.list_templates(db, include_disabled=all)
+    """优惠券模板列表：门店见「总部 ∪ 本店」；超管见全部。"""
+    store_id = require_bound_store(user, None)
+    items = await CouponService.list_templates(db, include_disabled=all, store_id=store_id)
     return success({"items": items}, request=request)
 
 
 @router.post("/templates", dependencies=[require_permission("coupon:manage")])
 async def create_template(data: CouponTemplateCreate, request: Request, db: DbSession, user: CurrentUser):
-    tmpl = await CouponService.create_template(db, data.model_dump())
+    payload = data.model_dump()
+    if user.role.code == "SUPER_ADMIN":
+        # 超管可建总部(NULL)或指定店
+        pass
+    else:
+        bound = require_bound_store(user, None)
+        if bound is None:
+            raise AppException(40301, "账号未绑定门店，无法创建模板")
+        payload["store_id"] = int(bound)
+    tmpl = await CouponService.create_template(db, payload)
     await db.commit()
     return success(CouponService.template_payload(tmpl), request=request)
 
@@ -41,8 +65,11 @@ async def update_template(
     tmpl = await db.get(CouponTemplate, template_id)
     if not tmpl:
         raise AppException(40407, "优惠券模板不存在")
-    payload = {k: v for k, v in data.model_dump().items() if v is not None}
-    tmpl = await CouponService.update_template(db, tmpl, payload)
+    _assert_template_manage_access(user, tmpl)
+    raw = data.model_dump(exclude_unset=True)
+    if user.role.code != "SUPER_ADMIN":
+        raw.pop("store_id", None)  # 门店不可改归属
+    tmpl = await CouponService.update_template(db, tmpl, raw)
     await db.commit()
     return success(CouponService.template_payload(tmpl), request=request)
 
@@ -58,6 +85,7 @@ async def set_template_status(
     tmpl = await db.get(CouponTemplate, template_id)
     if not tmpl:
         raise AppException(40407, "优惠券模板不存在")
+    _assert_template_manage_access(user, tmpl)
     tmpl.status = int(data.status)
     await db.commit()
     return success(CouponService.template_payload(tmpl), request=request)
@@ -75,7 +103,8 @@ async def list_issued_coupons(
     page: int = 1,
     page_size: int = 20,
 ):
-    """顾客持券记录（全状态）。"""
+    """顾客持券记录（全状态）。门店账号仅看本店相关顾客。"""
+    store_id = require_bound_store(user, None)
     items, total = await CouponService.list_customer_coupons_admin(
         db,
         customer_id=customer_id,
@@ -84,6 +113,7 @@ async def list_issued_coupons(
         keyword=keyword,
         page=page,
         page_size=page_size,
+        store_id=store_id,
     )
     return success(
         {
@@ -105,9 +135,10 @@ async def search_customers_for_issue(
     keyword: str = Query(..., min_length=1, max_length=100, description="昵称/手机/顾客编号"),
     page_size: int = 20,
 ):
-    """手动发券：搜索全库顾客（不受本店下过单限制）。"""
+    """手动发券：按门店隔离搜索顾客（本店下过单或本店注册）。超管可搜全库。"""
+    store_id = require_bound_store(user, None)
     rows, _total = await CustomerService.search_active_customers(
-        db, keyword, page=1, page_size=page_size
+        db, keyword, page=1, page_size=page_size, store_id=store_id
     )
     items = [
         {
@@ -124,13 +155,38 @@ async def search_customers_for_issue(
 
 @router.post("/issue", dependencies=[require_permission("coupon:manage")])
 async def issue_coupon(data: CouponIssueRequest, request: Request, db: DbSession, user: CurrentUser):
-    """向指定顾客发放优惠券/代金券，可指定张数。"""
+    """向指定顾客发放优惠券/代金券。门店仅可对本店顾客发「总部∪本店」模板。"""
+    store_id = require_bound_store(user, None)
+    if store_id is not None:
+        customer = await db.get(Customer, data.customer_id)
+        if not customer:
+            raise AppException(40401, "顾客不存在")
+        in_scope = await db.scalar(
+            select(Customer.id).where(
+                Customer.id == data.customer_id,
+                or_(
+                    Customer.registered_store_id == store_id,
+                    Customer.id.in_(
+                        select(Order.customer_id).where(
+                            Order.store_id == store_id,
+                            Order.customer_id.isnot(None),
+                        )
+                    ),
+                ),
+            )
+        )
+        if not in_scope:
+            raise AppException(40301, "无权向其他门店顾客发券")
+    tmpl = await db.get(CouponTemplate, data.template_id)
+    if not tmpl:
+        raise AppException(40407, "优惠券模板不存在")
+    if not CouponService.template_visible_to_store(tmpl, store_id):
+        raise AppException(40301, "无权使用其他门店的优惠券模板")
     issued = await CouponService.issue_by_template_id(
         db, data.customer_id, data.template_id, quantity=data.quantity
     )
     await db.commit()
-    tmpl = await db.get(CouponTemplate, data.template_id)
-    kind = "代金券" if tmpl and CouponService.is_voucher_type(tmpl.coupon_type) else "优惠券"
+    kind = "代金券" if CouponService.is_voucher_type(tmpl.coupon_type) else "优惠券"
     items = [
         {
             "id": cc.id,

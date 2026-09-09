@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
+import { getCustomerToken } from '@/utils/customerAuth'
 import { reportApiLog } from '@/utils/logger'
 
 function parseApiError(err: unknown): string {
@@ -33,7 +34,7 @@ api.interceptors.request.use((config) => {
     url.includes('/welcome/face') ||
     (config.headers?.['X-Client'] === 'customer')
   const staffToken = getStaffToken()
-  const customerToken = localStorage.getItem('snh_customer_token') || localStorage.getItem('customer_token')
+  const customerToken = getCustomerToken()
   // 顾客订单列表/复购强制用顾客 token，避免后台登录态抢占
   const forceCustomer =
     url.includes('/orders/mine') || /\/orders\/\d+\/reorder/.test(url) || url.includes('/miniprogram')

@@ -26,11 +26,18 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+# 连接池按 gunicorn worker 估算：每 worker 约 pool_size+max_overflow；
+# 总连接 ≈ workers × (pool_size + max_overflow)，须小于 MySQL max_connections。
+_pool_size = max(5, int(getattr(settings, "db_pool_size", 5) or 5))
+_max_overflow = max(0, int(getattr(settings, "db_max_overflow", 10) or 10))
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.app_debug,
     pool_pre_ping=True,
     pool_recycle=3600,
+    pool_size=_pool_size,
+    max_overflow=_max_overflow,
 )
 
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

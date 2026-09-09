@@ -6,6 +6,10 @@
 #
 # 部署前必改：
 #   REPLACE_DEPLOY_ROOT  → 项目根目录，默认 /var/www/smart-noodle
+#
+# 多进程说明：
+#   - 本单元 PROCESS_ROLE=auto（或 worker）：gunicorn 多 worker 争抢 Redis Leader 锁
+#   - 仅抢到锁的进程启动 scheduler / TTS / 人脸识别，避免重复 Worker
 # =============================================================================
 
 [Unit]
@@ -25,6 +29,8 @@ WorkingDirectory=REPLACE_DEPLOY_ROOT/backend
 EnvironmentFile=REPLACE_DEPLOY_ROOT/.env
 Environment=PYTHONPATH=REPLACE_DEPLOY_ROOT/backend:REPLACE_DEPLOY_ROOT
 Environment=PYTHONUNBUFFERED=1
+# 覆盖 .env 中可能误写的 PROCESS_ROLE=leader：多 worker 必须用 auto/worker + Redis 锁
+Environment=PROCESS_ROLE=auto
 
 # gunicorn + uvicorn worker；worker 数可按 CPU 调整（2～4）
 ExecStart=REPLACE_DEPLOY_ROOT/backend/.venv/bin/gunicorn app.main:app \

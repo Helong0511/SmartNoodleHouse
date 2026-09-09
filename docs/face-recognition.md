@@ -14,7 +14,7 @@
 - 阈值：`FACE_MATCH_THRESHOLD` 与后台 `system_settings.face_match_threshold`（门店可覆盖）。
 - 多帧确认：`FACE_CONFIRM_FRAMES` / `face_confirm_frames`。
 - 冷却：`WELCOME_COOLDOWN_SECONDS`（Redis 原子抢占）。
-- 识别 worker：`PROCESS_ROLE=leader` 且 `ENABLE_RECOGNITION_WORKER=1`；向量走 `FaceEmbeddingCache` 按 `updated_at` 增量刷新。
+- 识别 worker：抢到 Redis Leader 锁的进程（`PROCESS_ROLE=auto|leader`）且 `ENABLE_RECOGNITION_WORKER=1`；向量走 `FaceEmbeddingCache` 按 `updated_at` 增量刷新。
 
 ## 安全与隐私
 

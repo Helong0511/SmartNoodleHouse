@@ -49,13 +49,28 @@ class CustomerService:
         *,
         page: int = 1,
         page_size: int = 20,
+        store_id: int | None = None,
     ) -> tuple[list[Customer], int]:
-        """全库搜索启用顾客（不受门店下单范围限制，供发券等场景）。"""
+        """搜索启用顾客。store_id 非空时限定本店注册或本店下过单的顾客。"""
         kw = (keyword or "").strip()
         if not kw:
             return [], 0
         cond = CustomerService.keyword_condition(kw)
         q = select(Customer).where(Customer.status == 1).where(cond)
+        if store_id is not None:
+            from app.models import Order
+
+            q = q.where(
+                or_(
+                    Customer.registered_store_id == int(store_id),
+                    Customer.id.in_(
+                        select(Order.customer_id).where(
+                            Order.store_id == int(store_id),
+                            Order.customer_id.isnot(None),
+                        )
+                    ),
+                )
+            )
         total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
         page = max(1, page)
         page_size = min(max(1, page_size), 50)

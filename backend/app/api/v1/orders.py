@@ -361,17 +361,29 @@ async def kitchen_stores(request: Request, db: DbSession, user: CurrentUser):
 
 
 @router.get("/kitchen/active", dependencies=[require_kitchen()])
-async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None):
-    """厨房 KDS：批量加载明细/规格/外卖信息，消除 N+1；按门店隔离。"""
+async def kitchen_orders(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+    limit: int = 200,
+):
+    """厨房 KDS：批量加载明细/规格/外卖信息，消除 N+1；按门店隔离。
+
+    limit 上限 500，防止全量未完结订单撑爆内存。
+    """
     from app.core.response import now_local
     from app.models import Store
     from app.services.store_scope import require_bound_store
 
     effective_store = require_bound_store(user, store_id)
+    cap = min(max(1, int(limit or 200)), 500)
     q = select(Order).where(Order.status.in_(["PAID", "CONFIRMED", "PREPARING", "COOKING", "READY"]))
     if effective_store:
         q = q.where(Order.store_id == effective_store)
-    result = await db.execute(q.order_by(Order.paid_at.is_(None), Order.paid_at, Order.id))
+    result = await db.execute(
+        q.order_by(Order.paid_at.is_(None), Order.paid_at, Order.id).limit(cap)
+    )
     order_list = list(result.scalars().all())
     if not order_list:
         return success([], request=request)

@@ -79,6 +79,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { setCustomerToken } from '@/utils/customerAuth'
 import { mediaUrl, thumbSizePx } from '@/utils/media'
 import {
   applyPreferencesToProduct,
@@ -265,9 +266,7 @@ onMounted(async () => {
       const res = await api.post(loginPath, loginBody, { headers: { 'X-Client': 'customer' } })
       customerId.value = res.data.customer_id
       customerToken.value = res.data.customer_token
-      localStorage.setItem('customer_id', String(customerId.value))
-      localStorage.setItem('snh_customer_token', customerToken.value || '')
-      localStorage.setItem('customer_token', customerToken.value || '')
+      setCustomerToken(customerToken.value || '', customerId.value)
     } catch (e: any) {
       ElMessage.warning(e.message || '顾客登录失败（开发环境假 code；生产需真实小程序 code）')
     }

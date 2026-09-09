@@ -10,6 +10,8 @@ class CouponTemplateCreate(BaseModel):
     min_order_amount: Decimal = Field(default=Decimal("0.00"), ge=0)
     valid_days: int = Field(default=30, ge=1, le=365)
     status: int = Field(default=1, ge=0, le=1)
+    # NULL=总部全店；门店账号创建时由后端强制为本店
+    store_id: int | None = Field(default=None, description="NULL=总部模板；非空=门店模板")
 
 
 class CouponTemplateUpdate(BaseModel):
@@ -19,6 +21,7 @@ class CouponTemplateUpdate(BaseModel):
     min_order_amount: Decimal | None = Field(default=None, ge=0)
     valid_days: int | None = Field(default=None, ge=1, le=365)
     status: int | None = Field(default=None, ge=0, le=1)
+    store_id: int | None = Field(default=None, description="仅超管可改；显式 null=改回总部")
 
 
 class CouponIssueRequest(BaseModel):

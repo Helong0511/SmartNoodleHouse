@@ -94,7 +94,7 @@ class RecognitionWorker:
                             settings.face_match_threshold,
                             store_id=store_id,
                         )
-                        if best_id is None or best_sim < threshold * 0.9:
+                        if best_id is None or best_sim < threshold:
                             continue
                         confirmed, cid, avg = global_tracker.push(cam_id, emb, best_id, best_sim)
                         if confirmed and cid:

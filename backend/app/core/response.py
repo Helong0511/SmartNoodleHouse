@@ -60,7 +60,10 @@ def utc_now() -> datetime:
 
 
 def money(value: Decimal | str | int | float) -> Decimal:
-    return Decimal(str(value)).quantize(Decimal("0.01"))
+    """金额统一两位小数，四舍五入（ROUND_HALF_UP）。"""
+    from decimal import ROUND_HALF_UP
+
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def calc_pages(total: int, page_size: int) -> int:

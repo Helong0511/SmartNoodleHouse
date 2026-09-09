@@ -43,13 +43,15 @@ cd frontend && npm ci && npm run build
 sudo systemctl restart smart-noodle
 sudo systemctl reload nginx
 
-# ── 6. 多实例注意 ──
-# PROCESS_ROLE=leader 全机只能有一个实例跑调度/人脸识别。
-# 勿在同一台机器启动第二个 smart-noodle.service。
-# 水平扩展时：仅 leader 设 PROCESS_ROLE=leader，其余 worker 设 follower 并关闭 ENABLE_RECOGNITION_WORKER。
+# ── 6. 多实例 / 多 Worker ──
+# PROCESS_ROLE 推荐 auto：gunicorn -w N 时各 worker 争抢 Redis Leader 锁，
+# 仅持锁进程跑 scheduler / TTS / 人脸识别，避免重复调度。
+# 水平扩展多机时：仅一台可设 PROCESS_ROLE=leader（仍受 Redis 锁保护），其余 PROCESS_ROLE=worker。
+# systemd 单元已强制 Environment=PROCESS_ROLE=auto，覆盖 .env 中误写的 leader。
 
 # ── 常见问题 ──
 # failed (code=exited)  → journalctl -u smart-noodle -n 50 看 Python 报错
 # .env 权限拒绝          → chmod 640 .env && chgrp www-data .env
 # 数据库连不上           → 检查 DATABASE_URL、mysql 是否 listen 127.0.0.1
 # 生产 mock 被拒绝       → .env 中 ALLOW_*_MOCK 须全部为 false
+# 密钥生成               → python scripts/gen_secrets.py

@@ -36,11 +36,14 @@ scheduler = AsyncIOScheduler()
 tts_worker = TTSWorker()
 tts_task: asyncio.Task | None = None
 recognition_task: asyncio.Task | None = None
+_leader_stop: asyncio.Event | None = None
+_leader_renew_task: asyncio.Task | None = None
+_leader_worker_id: str | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tts_task, recognition_task
+    global tts_task, recognition_task, _leader_stop, _leader_renew_task, _leader_worker_id
     settings = get_settings()
     validate_settings(settings)
 
@@ -63,14 +66,31 @@ async def lifespan(app: FastAPI):
             raise SystemExit(1) from e
 
     # 必须走 settings（会读 .env）；勿用 os.getenv，否则仅写在 .env 的 PROCESS_ROLE 会被忽略
-    role = (settings.process_role or "worker").strip().lower()
-    is_leader = role == "leader"
+    from app.core.leader_lock import make_worker_id, release_leader, renew_leader_loop, try_acquire_leader
+
+    role = (settings.process_role or "auto").strip().lower()
+    _leader_worker_id = make_worker_id()
+    if role == "worker":
+        is_leader = False
+    elif role in ("leader", "auto"):
+        is_leader = await try_acquire_leader(_leader_worker_id)
+        if role == "leader" and not is_leader:
+            logger.warning(
+                "PROCESS_ROLE=leader 但未抢到 Redis Leader 锁（worker_id=%s），本进程不启动调度以防重复",
+                _leader_worker_id,
+            )
+    else:
+        logger.warning("未知 PROCESS_ROLE=%s，按 worker 处理", role)
+        is_leader = False
+
     await start_ws_subscriber(on_redis_ws_message)
 
     if is_leader:
+        _leader_stop = asyncio.Event()
+        _leader_renew_task = asyncio.create_task(renew_leader_loop(_leader_worker_id, _leader_stop))
         register_tasks(scheduler)
         scheduler.start()
-        logger.info("Scheduler started (leader)")
+        logger.info("Scheduler started (leader worker_id=%s role=%s)", _leader_worker_id, role)
         if settings.tts_provider == "local":
             tts_task = asyncio.create_task(tts_worker.run(WelcomeService.get_queue()))
             logger.info("TTS worker started (leader)")
@@ -106,6 +126,16 @@ async def lifespan(app: FastAPI):
 
     await stop_ws_subscriber()
     await close_http_client()
+    if _leader_stop is not None:
+        _leader_stop.set()
+    if _leader_renew_task is not None:
+        _leader_renew_task.cancel()
+        try:
+            await _leader_renew_task
+        except (asyncio.CancelledError, Exception):
+            pass
+    if is_leader and _leader_worker_id:
+        await release_leader(_leader_worker_id)
     if is_leader:
         tts_worker.stop()
         if tts_task:

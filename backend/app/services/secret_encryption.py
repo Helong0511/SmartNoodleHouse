@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -14,23 +15,34 @@ CURRENT_KEY_VERSION = "v1"
 _PREFIX = "snhenc:"
 
 
+def _fernet_from_material(material: bytes, *, legacy: bool = False) -> Fernet:
+    if legacy:
+        key = material[:32].ljust(32, b"0")
+    else:
+        key = hashlib.sha256(material).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
 class SecretEncryptionService:
     """
     加密格式：`snhenc:v1:<fernet_token>`。
     明文（历史数据）原样返回；解密失败时记录日志并返回 None。
+    密钥派生：SHA256(material)；解密兼容历史「截断+右侧补0」。
     """
 
     @classmethod
-    def _fernet(cls, version: str = CURRENT_KEY_VERSION) -> Fernet:
+    def _material(cls) -> bytes:
         settings = get_settings()
         raw = (settings.secret_encryption_key or settings.face_encryption_key or "").encode()
         if not raw:
             raise RuntimeError("未配置 SECRET_ENCRYPTION_KEY / FACE_ENCRYPTION_KEY，无法加解密")
-        # 预留多版本：当前仅 v1 使用同一材料派生
+        return raw
+
+    @classmethod
+    def _fernet(cls, version: str = CURRENT_KEY_VERSION) -> Fernet:
         if version != CURRENT_KEY_VERSION:
             raise ValueError(f"不支持的密钥版本: {version}")
-        key = raw[:32].ljust(32, b"0")
-        return Fernet(base64.urlsafe_b64encode(key))
+        return _fernet_from_material(cls._material(), legacy=False)
 
     @classmethod
     def is_encrypted(cls, value: str | None) -> bool:
@@ -54,7 +66,6 @@ class SecretEncryptionService:
         if text == "":
             return ""
         if not cls.is_encrypted(text):
-            # 兼容历史明文
             return text
         try:
             _, version, token = text.split(":", 2)
@@ -63,7 +74,13 @@ class SecretEncryptionService:
             return None
         try:
             return cls._fernet(version).decrypt(token.encode()).decode()
-        except (InvalidToken, ValueError, RuntimeError) as exc:
+        except InvalidToken:
+            try:
+                return _fernet_from_material(cls._material(), legacy=True).decrypt(token.encode()).decode()
+            except (InvalidToken, ValueError, RuntimeError) as exc:
+                logger.warning("密文解密失败(含旧派生) version=%s: %s", version, exc)
+                return None
+        except (ValueError, RuntimeError) as exc:
             logger.warning("密文解密失败 version=%s: %s", version, exc)
             return None
 

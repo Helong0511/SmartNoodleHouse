@@ -155,13 +155,16 @@ CREATE TABLE IF NOT EXISTS member_levels (
 -- 券模板（优惠券 + 代金券共用；coupon_type=VOUCHER 时代金券）
 CREATE TABLE IF NOT EXISTS coupon_templates (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED DEFAULT NULL COMMENT 'NULL=总部全店模板；非空=仅该门店 → stores.id',
   name VARCHAR(100) NOT NULL COMMENT '券名称（展示用）',
   coupon_type VARCHAR(20) NOT NULL DEFAULT 'FIXED' COMMENT 'FIXED=满减元 | PERCENT=折扣比例 | VOUCHER=代金券抵扣',
   discount_value DECIMAL(10,4) NOT NULL COMMENT 'FIXED/VOUCHER=减免金额；PERCENT=折扣比例如0.90表示九折',
   min_order_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '使用门槛（按会员折后商品小计计）',
   valid_days INT NOT NULL DEFAULT 30 COMMENT '领取/发放后有效天数',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '模板状态：1=启用 0=停用',
-  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间'
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  INDEX idx_coupon_tmpl_store (store_id),
+  CONSTRAINT fk_coupon_tmpl_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='优惠券/代金券模板表';
 
 -- 顾客主档（小程序/H5 登录主体）
