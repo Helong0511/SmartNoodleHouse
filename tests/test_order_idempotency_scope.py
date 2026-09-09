@@ -73,3 +73,35 @@ def test_idempotent_reuse_only_pending_payment_policy():
     assert OrderCreateService._is_reusable_idempotent_order(pending)
     assert not OrderCreateService._is_reusable_idempotent_order(paid)
     assert not OrderCreateService._is_reusable_idempotent_order(cancelled)
+
+
+@pytest.mark.asyncio
+async def test_create_order_rejects_idempotent_hit_on_paid_order():
+    """命中已付订单的幂等键应抛 40903，而非静默返回旧单。"""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    paid = SimpleNamespace(
+        id=9,
+        status="PAID",
+        payment_status="PAID",
+        customer_id=1,
+        store_id=1,
+        channel="H5",
+        operator_id=None,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=paid)))
+
+    with patch.object(OrderCreateService, "_scoped_idempotency_key", return_value="cust:1:k"):
+        with pytest.raises(AppException) as ei:
+            await OrderCreateService.create_order(
+                db,
+                store_id=1,
+                table_token=None,
+                customer_id=1,
+                items=[{"product_id": 1, "quantity": 1}],
+                channel="H5",
+                idempotency_key="k",
+            )
+    assert ei.value.code == 40903
+    assert "重新下单" in ei.value.message

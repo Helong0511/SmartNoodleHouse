@@ -440,6 +440,7 @@ CREATE TABLE IF NOT EXISTS orders (
   INDEX idx_orders_status_paid (status, paid_at),
   INDEX idx_orders_store_created (store_id, created_at),
   INDEX idx_orders_store_paid (store_id, paid_at),
+  INDEX idx_orders_store_pay_paid (store_id, payment_status, paid_at),
   INDEX idx_orders_kitchen_claim (kitchen_claimed_by, status),
   INDEX idx_orders_operator (operator_id),
   CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
@@ -511,6 +512,7 @@ CREATE TABLE IF NOT EXISTS payments (
   INDEX idx_payments_order_status (order_id, status),
   INDEX idx_payments_created (created_at),
   INDEX idx_payments_paid_at (paid_at),
+  INDEX idx_payments_status_paid (status, paid_at),
   INDEX idx_payments_operator (operator_id, paid_at),
   CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders(id),
   CONSTRAINT fk_payments_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
@@ -663,6 +665,7 @@ CREATE TABLE IF NOT EXISTS financial_ledger (
   remark VARCHAR(500) DEFAULT NULL COMMENT '备注',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '入账时间',
   INDEX idx_fl_store_created (store_id, created_at),
+  INDEX idx_fl_store_ch_type_created (store_id, channel, entry_type, created_at),
   INDEX idx_fl_entry_type (entry_type, created_at),
   INDEX idx_fl_order (order_id),
   INDEX idx_fl_payment (payment_id),

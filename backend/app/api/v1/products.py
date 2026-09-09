@@ -709,11 +709,19 @@ async def get_product(product_id: int, request: Request, db: DbSession):
         .where(ProductOptionGroup.product_id == product_id, OptionGroup.status == 1)
         .order_by(ProductOptionGroup.sort_order)
     )
-    option_groups = []
-    for _, group in pog_result.all():
+    pairs = list(pog_result.all())
+    gids = [group.id for _, group in pairs]
+    opts_by_group: dict[int, list] = {gid: [] for gid in gids}
+    if gids:
         opts_result = await db.execute(
-            select(Option).where(Option.group_id == group.id, Option.status == 1).order_by(Option.sort_order)
+            select(Option)
+            .where(Option.group_id.in_(gids), Option.status == 1)
+            .order_by(Option.sort_order, Option.id)
         )
+        for o in opts_result.scalars().all():
+            opts_by_group.setdefault(int(o.group_id), []).append(o)
+    option_groups = []
+    for _, group in pairs:
         option_groups.append({
             "id": group.id,
             "name": group.name,
@@ -721,20 +729,21 @@ async def get_product(product_id: int, request: Request, db: DbSession):
             "selection_type": group.selection_type,
             "is_required": group.is_required,
             "options": [
-                {"id": o.id, "name": o.name, "code": o.code, "extra_price": str(o.extra_price), "is_default": bool(o.is_default)}
-                for o in opts_result.scalars()
+                {
+                    "id": o.id,
+                    "name": o.name,
+                    "code": o.code,
+                    "extra_price": str(o.extra_price),
+                    "is_default": bool(o.is_default),
+                }
+                for o in opts_by_group.get(group.id, [])
             ],
         })
 
     imgs_result = await db.execute(
         select(ProductImage).where(ProductImage.product_id == product_id).order_by(ProductImage.sort_order)
     )
-    pog_ids_result = await db.execute(
-        select(ProductOptionGroup.group_id)
-        .where(ProductOptionGroup.product_id == product_id)
-        .order_by(ProductOptionGroup.sort_order)
-    )
-    option_group_ids = [row[0] for row in pog_ids_result.all()]
+    option_group_ids = gids
     store = await db.get(Store, product.store_id) if product.store_id else None
     cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
     eff_cats, eff_prods, inherited = resolve_product_requires(product, cat)
