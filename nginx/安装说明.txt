@@ -59,3 +59,4 @@ sudo certbot renew --dry-run
 # 413 Request Entity  → 调大 client_max_body_size 与 .env MAX_UPLOAD_SIZE_MB
 # WebSocket 断连      → 确认 location /api/v1/ws/ 存在且 proxy Upgrade 头正确
 # 上传图 404          → 检查 REPLACE_UPLOADS_DIR 与 .env UPLOAD_DIR 一致
+# 摄像头 403          → /api/v1/cameras/ 默认仅内网；公网管理请走 VPN 或改 allow 网段

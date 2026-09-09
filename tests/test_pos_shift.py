@@ -19,14 +19,33 @@ def test_day_bounds_default():
 
 
 @pytest.mark.asyncio
-async def test_open_shift_rejects_duplicate():
+async def test_require_open_shift_missing():
     db = AsyncMock()
-    existing = MagicMock()
-    PosShiftService.get_open_shift = AsyncMock(return_value=existing)
-    with pytest.raises(Exception):
-        await PosShiftService.open_shift(
-            db, store_id=1, operator_id=2, opening_float=Decimal("100")
-        )
+    PosShiftService.get_open_shift = AsyncMock(return_value=None)
+    with pytest.raises(Exception) as ei:
+        await PosShiftService.require_open_shift(db, operator_id=9, store_id=1)
+    assert "开班" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_require_open_shift_store_mismatch():
+    db = AsyncMock()
+    shift = MagicMock()
+    shift.store_id = 2
+    PosShiftService.get_open_shift = AsyncMock(return_value=shift)
+    with pytest.raises(Exception) as ei:
+        await PosShiftService.require_open_shift(db, operator_id=9, store_id=1)
+    assert "门店" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_require_open_shift_ok():
+    db = AsyncMock()
+    shift = MagicMock()
+    shift.store_id = 1
+    PosShiftService.get_open_shift = AsyncMock(return_value=shift)
+    got = await PosShiftService.require_open_shift(db, operator_id=9, store_id=1)
+    assert got is shift
 
 
 @pytest.mark.asyncio

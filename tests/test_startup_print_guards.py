@@ -27,10 +27,14 @@ def _base_prod(**kwargs):
         webhook_ip_allowlist="203.0.113.0/24",
         display_screen_token="display-token-for-tests-only",
         process_role="leader",
+        cors_origins="https://order.example.com",
+        h5_public_base_url="https://order.example.com",
         wechat_mch_id="1900000000",
         wechat_api_v3_key="k" * 32,
         wechat_cert_serial_no="ABC123",
         wechat_app_id="wxapp",
+        wechat_platform_public_key="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds3xfn/ygWy\n-----END PUBLIC KEY-----",
+        wechat_platform_cert_path="",
         alipay_app_id="",
         alipay_private_key="",
         alipay_public_key="",
@@ -43,6 +47,21 @@ def _base_prod(**kwargs):
     )
     data.update(kwargs)
     return SimpleNamespace(**data)
+
+
+def test_prod_rejects_localhost_cors():
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(cors_origins="http://localhost:5173"))
+
+
+def test_prod_rejects_empty_h5_base():
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(h5_public_base_url=""))
+
+
+def test_prod_rejects_wechat_without_platform_cert():
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(wechat_platform_public_key="", wechat_platform_cert_path="missing.pem"))
 
 
 def test_prod_rejects_print_mock():

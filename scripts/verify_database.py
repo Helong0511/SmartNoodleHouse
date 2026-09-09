@@ -54,8 +54,15 @@ REQUIRED_UNIQUES = [
     ("cashier_shifts", "uk_cashier_shift_one_open"),
 ]
 
-# (table, constraint_name)
-REQUIRED_FKS = [
+# (table, constraint_name) — CHECK
+REQUIRED_CHECKS = [
+    ("products", "chk_products_stock_nonneg"),
+    ("products", "chk_products_price_pos"),
+    ("products", "chk_products_orig_price"),
+    ("store_product_stocks", "chk_sps_stock_nonneg"),
+    ("options", "chk_options_extra_price"),
+]
+
     ("orders", "fk_orders_store"),
     ("orders", "fk_orders_operator"),
     ("payments", "fk_payments_order"),
@@ -175,6 +182,24 @@ async def _fk_exists(db, table: str, constraint: str) -> bool:
     return int(n or 0) > 0
 
 
+async def _check_exists(db, table: str, constraint: str) -> bool:
+    n = (
+        await db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = :t
+                  AND CONSTRAINT_NAME = :n
+                  AND CONSTRAINT_TYPE = 'CHECK'
+                """
+            ),
+            {"t": table, "n": constraint},
+        )
+    ).scalar()
+    return int(n or 0) > 0
+
+
 async def main() -> None:
     failures: list[str] = []
     async with AsyncSessionLocal() as db:
@@ -237,6 +262,14 @@ async def main() -> None:
             print(f"[{'OK' if ok else 'FAIL'}] fk {table}.{fk}")
             if not ok:
                 failures.append(f"missing fk: {table}.{fk}")
+
+        for table, chk in REQUIRED_CHECKS:
+            if not await _table_exists(db, table):
+                continue
+            ok = await _check_exists(db, table, chk)
+            print(f"[{'OK' if ok else 'FAIL'}] check {table}.{chk}")
+            if not ok:
+                failures.append(f"missing check: {table}.{chk}（执行 alembic upgrade head 或 sql/009_product_stock_price_checks.sql）")
 
     if failures:
         print("\n校验失败:")

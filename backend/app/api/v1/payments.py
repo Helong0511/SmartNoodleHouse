@@ -178,11 +178,14 @@ async def pay_order_cash(
     data: PosCashPay | None = None,
 ):
     """收银台现金收款（支持分笔）：amount=本笔入账，received_amount=实收用于找零。"""
+    from app.services.pos_shift_service import PosShiftService
+
     body = data or PosCashPay()
     order = await db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
     assert_order_store_access(user, order)
+    await PosShiftService.require_open_shift(db, user.id, store_id=order.store_id)
     payment, pay_data = await PaymentService.settle_cash_payment(
         db,
         order,
@@ -232,6 +235,7 @@ async def create_pos_scan_payment(
 ):
     """收银台扫顾客付款码（支持分笔；自动识别微信/支付宝）。"""
     from app.services.payment_barcode import resolve_barcode_provider
+    from app.services.pos_shift_service import PosShiftService
 
     auth_code = (data.auth_code or "").strip()
     provider = resolve_barcode_provider(auth_code, data.provider)
@@ -239,6 +243,7 @@ async def create_pos_scan_payment(
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
     assert_order_store_access(user, order)
+    await PosShiftService.require_open_shift(db, user.id, store_id=order.store_id)
     channel_type = "micropay" if provider == "WECHAT" else "barcode"
     payment, pay_data = await PaymentService.create_payment(
         db,

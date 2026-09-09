@@ -367,6 +367,38 @@ class PaymentService:
         return p()
 
     @classmethod
+    async def order_net_collected(cls, db: AsyncSession, order_id: int) -> Decimal:
+        """订单净已收：各支付单金额 − 成功退款（含 PAID/PARTIAL_REFUND/REFUNDED）。"""
+        payments = list(
+            (
+                await db.execute(
+                    select(Payment).where(
+                        Payment.order_id == int(order_id),
+                        Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
+                    )
+                )
+            ).scalars().all()
+        )
+        if not payments:
+            return money(0)
+        pids = [p.id for p in payments]
+        refund_rows = (
+            await db.execute(
+                select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                    PaymentRefund.payment_id.in_(pids),
+                    PaymentRefund.status == "SUCCESS",
+                ).group_by(PaymentRefund.payment_id)
+            )
+        ).all()
+        refund_map = {int(pid): money(amt or 0) for pid, amt in refund_rows}
+        net = money(0)
+        for p in payments:
+            left = money(p.amount) - refund_map.get(int(p.id), money(0))
+            if left > 0:
+                net += left
+        return money(net)
+
+    @classmethod
     async def paid_amount(cls, db: AsyncSession, order_id: int) -> Decimal:
         """订单已成功入账金额（PAID 支付单合计）。"""
         total = await db.scalar(
@@ -461,10 +493,14 @@ class PaymentService:
                 payment_id=payment.id,
                 remark=f"payment_no={payment.payment_no}",
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "财务分录 SALE 写入失败 payment_id=%s order_id=%s", payment.id, order.id
             )
+            from app.core.config import get_settings
+
+            if get_settings().is_production:
+                raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
 
         paid = await cls.paid_amount(db, order.id)
         remaining = money(order.total_amount) - paid
@@ -1390,22 +1426,34 @@ class PaymentService:
                         refund_id=row.id,
                         remark=f"refund_no={row.refund_no}",
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "财务分录 REFUND 写入失败 refund_id=%s order_id=%s", row.id, order.id
                     )
-                if payment.status == "REFUNDED" and order.status not in ("CANCELLED", "REFUNDED"):
-                    await apply_order_status(
-                        db,
-                        order,
-                        "REFUNDED",
-                        source="PAYMENT",
-                        payment_status=payment.status,
-                        assert_kind="SYSTEM",
-                        remark=f"refund_no={row.refund_no}",
-                    )
+                    from app.core.config import get_settings
+
+                    if get_settings().is_production:
+                        raise AppException(50010, "财务分录写入失败，退款未确认，请重试") from exc
+                # 按订单净已收判断：分笔退满一笔不得误标整单 REFUNDED
+                net = await cls.order_net_collected(db, order.id)
+                total = money(order.total_amount)
+                if net <= 0:
+                    if order.status not in ("CANCELLED", "REFUNDED"):
+                        await apply_order_status(
+                            db,
+                            order,
+                            "REFUNDED",
+                            source="PAYMENT",
+                            payment_status="REFUNDED",
+                            assert_kind="SYSTEM",
+                            remark=f"refund_no={row.refund_no}",
+                        )
+                    else:
+                        order.payment_status = "REFUNDED"
+                elif net < total:
+                    order.payment_status = "PARTIAL_REFUND"
                 else:
-                    order.payment_status = payment.status
+                    order.payment_status = "PAID"
                 if order.customer_id:
                     try:
                         from app.services.customer_service import CustomerService, PreferenceService

@@ -381,36 +381,43 @@ async def camera_stream(
 ):
     from camera.camera_manager import CameraManager
     from app.core.security import decode_token
+    from fastapi import HTTPException
     from jose import JWTError
     from sqlalchemy.orm import selectinload
     from app.models import User
 
     token = None
     auth = request.headers.get("authorization") or ""
+    stream_hdr = (request.headers.get("x-stream-ticket") or "").strip()
     if auth.startswith("Bearer "):
         token = auth.split(" ", 1)[1]
+    elif stream_hdr:
+        token = stream_hdr
     elif ticket:
+        # <img> 预览只能走 query；须为短时 stream ticket，勿传长期员工 JWT
         token = ticket
     elif access_token:
-        token = access_token
+        raise HTTPException(status_code=401, detail="禁止在 query 传递长期令牌，请使用 Authorization 或短时 stream ticket")
     if not token:
-        return {"code": 401, "message": "未登录", "data": None}
+        raise HTTPException(status_code=401, detail="未登录")
     try:
         payload = decode_token(token)
         typ = payload.get("typ")
         if typ not in ("staff", "stream"):
-            return {"code": 401, "message": "请使用员工账号或流票据", "data": None}
+            raise HTTPException(status_code=401, detail="请使用员工账号或流票据")
         if typ == "stream" and int(payload.get("cam") or 0) != int(camera_id):
-            return {"code": 403, "message": "票据与摄像头不匹配", "data": None}
+            raise HTTPException(status_code=403, detail="票据与摄像头不匹配")
+        if typ == "staff" and ticket and not auth.startswith("Bearer ") and not stream_hdr:
+            raise HTTPException(status_code=401, detail="query 仅允许短时 stream ticket")
         user = (
             await db.execute(
                 select(User).options(selectinload(User.role)).where(User.id == int(payload["sub"]), User.status == 1)
             )
         ).scalar_one_or_none()
         if not user:
-            return {"code": 401, "message": "用户不存在", "data": None}
+            raise HTTPException(status_code=401, detail="用户不存在")
         if int(payload.get("ver") or 0) != int(getattr(user, "token_version", 0) or 0):
-            return {"code": 401, "message": "令牌已失效", "data": None}
+            raise HTTPException(status_code=401, detail="令牌已失效")
         perms_ok = user.role.code == "SUPER_ADMIN"
         if not perms_ok:
             from app.api.deps import get_user_permissions
@@ -418,19 +425,20 @@ async def camera_stream(
             perms = await get_user_permissions(db, user.role_id)
             perms_ok = "camera:read" in perms
         if not perms_ok:
-            return {"code": 403, "message": "缺少权限: camera:read", "data": None}
+            raise HTTPException(status_code=403, detail="缺少权限: camera:read")
+    except HTTPException:
+        raise
     except (JWTError, KeyError, ValueError):
-        return {"code": 401, "message": "无效令牌", "data": None}
+        raise HTTPException(status_code=401, detail="无效令牌")
 
     camera = await db.get(Camera, camera_id)
     if not camera:
-        return {"code": 404, "message": "摄像头不存在", "data": None}
-    from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="摄像头不存在")
 
     try:
         _assert_cam_access(user, camera)
     except HTTPException:
-        return {"code": 403, "message": "无权查看该门店摄像头", "data": None}
+        raise HTTPException(status_code=403, detail="无权查看该门店摄像头")
 
     mgr = CameraManager()
     worker = mgr.get_worker(camera_id)

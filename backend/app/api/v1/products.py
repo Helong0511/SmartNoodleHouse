@@ -263,17 +263,27 @@ class StoreStockUpsert(BaseModel):
 async def list_categories(
     request: Request,
     db: DbSession,
+    staff: OptionalStaffUser,
     status: int | None = 1,
     all: bool = False,
     store_id: int | None = None,
     at: str | None = None,
     apply_schedule: bool = True,
 ):
-    """分类列表。小程序/点餐传 store_id；后台 all=true 用默认排序。
+    """分类列表。小程序/点餐须传 store_id；后台 all=true 需员工登录。
 
     有 store_id 且非 all 时，按当前（或 at=HH:MM）时段方案重排 sort_order。
     """
     from app.models import Store
+
+    if store_id is None and not (staff is not None and all):
+        raise AppException(40001, "请指定门店 store_id")
+    if all and staff is None:
+        raise AppException(40101, "查看全部分类须登录员工账号")
+    if staff is not None and store_id is not None:
+        store_id = require_bound_store(staff, store_id)
+    elif staff is not None and all and store_id is None and staff.role.code != "SUPER_ADMIN":
+        store_id = require_bound_store(staff, None)
 
     q = select(ProductCategory).order_by(ProductCategory.sort_order, ProductCategory.id)
     if not all and status is not None:
@@ -1042,7 +1052,20 @@ async def _apply_option_default_flag(db: DbSession, opt: Option, want_default: b
 
 
 @router.get("/options/groups")
-async def list_option_groups(request: Request, db: DbSession, include_disabled: bool = False):
+async def list_option_groups(
+    request: Request,
+    db: DbSession,
+    staff: OptionalStaffUser,
+    include_disabled: bool = False,
+):
+    if include_disabled:
+        if staff is None:
+            raise AppException(40101, "查看停用规格须登录员工账号")
+        from app.api.deps import get_user_permissions
+
+        perms = await get_user_permissions(db, staff.role_id)
+        if staff.role.code != "SUPER_ADMIN" and "product:read" not in perms:
+            raise AppException(40301, "缺少权限: product:read")
     q = select(OptionGroup).order_by(OptionGroup.sort_order)
     if not include_disabled:
         q = q.where(OptionGroup.status == 1)

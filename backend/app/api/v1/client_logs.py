@@ -15,7 +15,7 @@ router = APIRouter(prefix="/client-logs", tags=["client-logs"])
 
 ClientSource = Literal["frontend", "wechat", "alipay"]
 
-_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MAX_MESSAGE = 2000
 _MAX_EXTRA_JSON = 2000
 _MAX_ENTRIES = 30
@@ -23,7 +23,8 @@ _MAX_BODY_CHARS = 64_000
 
 
 def _strip_ctrl(value: str) -> str:
-    return _CTRL_RE.sub("", value or "")
+    """去掉控制字符（含 \\r\\n），防止日志注入伪造行。"""
+    return _CTRL_RE.sub(" ", value or "")
 
 
 class ClientLogEntry(BaseModel):

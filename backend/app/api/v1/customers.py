@@ -210,7 +210,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
 
     customer = await db.get(Customer, customer_id)
     if not customer:
-        return success(None, message="顾客不存在", request=request)
+        raise AppException(40401, "顾客不存在")
 
     # 门店账号仅可查看在本店下过单的顾客；超管可看全量
     effective_store = require_bound_store(user, None)
@@ -221,7 +221,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             .where(Order.customer_id == customer_id, Order.store_id == effective_store)
         )
         if not ordered_here:
-            raise HTTPException(status_code=403, detail="无权查看其他门店顾客")
+            raise AppException(40301, "无权查看其他门店顾客")
 
     wechat = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == customer_id))
     alipay = await db.execute(select(CustomerAlipayAccount).where(CustomerAlipayAccount.customer_id == customer_id))

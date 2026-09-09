@@ -169,6 +169,10 @@ async def create_pos_order(
     elif store_id is None:
         raise AppException(40008, "外带下单请选择门店")
 
+    from app.services.pos_shift_service import PosShiftService
+
+    await PosShiftService.require_open_shift(db, user.id, store_id=int(store_id))
+
     order = await OrderCreateService.create_order(
         db,
         store_id=store_id,

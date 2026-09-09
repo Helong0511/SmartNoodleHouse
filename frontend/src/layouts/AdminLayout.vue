@@ -32,6 +32,7 @@
           <el-menu-item v-if="showDelivery" index="/delivery">外卖管理</el-menu-item>
           <el-menu-item v-if="showOrders" index="/orders">订单管理</el-menu-item>
           <el-menu-item v-if="showPayments" index="/payments">支付记录</el-menu-item>
+          <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-settlement">收银日结</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-refunds">退款审批</el-menu-item>
         </el-sub-menu>
@@ -117,7 +118,7 @@ const activeMenu = computed(() => {
 
 const openGroup = computed(() => {
   const p = activeMenu.value
-  if (['/pos', '/kitchen', '/delivery', '/orders', '/payments', '/pos-settlement', '/pos-refunds'].includes(p)) {
+  if (['/pos', '/kitchen', '/delivery', '/orders', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds'].includes(p)) {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'

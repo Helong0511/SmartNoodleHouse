@@ -88,6 +88,22 @@ class PosShiftService:
         ).scalar_one_or_none()
 
     @classmethod
+    async def require_open_shift(
+        cls,
+        db: AsyncSession,
+        operator_id: int,
+        *,
+        store_id: int | None = None,
+    ) -> CashierShift:
+        """收银下单/收款前强制开班；可选校验班次门店与订单门店一致。"""
+        shift = await cls.get_open_shift(db, operator_id)
+        if not shift:
+            raise AppException(40070, "请先开班后再收银")
+        if store_id is not None and int(shift.store_id) != int(store_id):
+            raise AppException(40071, "当前班次门店与订单门店不一致，请先交班后重新开班")
+        return shift
+
+    @classmethod
     async def get_open_shift_for_update(
         cls, db: AsyncSession, operator_id: int
     ) -> CashierShift | None:

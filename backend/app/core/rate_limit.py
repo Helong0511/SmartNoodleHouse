@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 # path 前缀 → (limit, window_seconds)
 SENSITIVE_LIMITS = {
-    "/api/v1/auth/login": (20, 60),
+    "/api/v1/auth/login": (10, 60),
+    "/api/v1/auth/verify-password": (20, 60),
     "/api/v1/payments/": (60, 60),
     "/api/v1/welcome/": (30, 60),
     "/api/v1/miniprogram/": (60, 60),

@@ -225,12 +225,12 @@ def write_client_entries(
             continue
         if len(msg) > 2000:
             msg = msg[:2000] + "…"
-        # 过滤控制字符，避免污染日志文件 / 终端
-        msg = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", msg)
+        # 过滤全部控制字符（含换行），避免污染日志文件 / 伪造多行
+        msg = re.sub(r"[\x00-\x1f\x7f]", " ", msg)
         level = level_map.get(str(item.get("level") or "INFO").upper(), logging.INFO)
         page = item.get("page")
         if page is not None:
-            page = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", str(page))[:200]
+            page = re.sub(r"[\x00-\x1f\x7f]", " ", str(page))[:200]
         ts = item.get("ts")
         extra = item.get("extra")
         parts = [msg]
@@ -242,6 +242,7 @@ def write_client_entries(
             extra_s = str(extra)
             if len(extra_s) > 2000:
                 extra_s = extra_s[:2000] + "…"
+            extra_s = re.sub(r"[\x00-\x1f\x7f]", " ", extra_s)
             parts.append(f"extra={extra_s}")
         lg.log(level, "%s%s", " | ".join(parts), meta)
         n += 1

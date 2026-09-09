@@ -124,6 +124,12 @@ async def daily_settlement(
 @router.post("/refund-requests", dependencies=[require_pos()])
 async def apply_pos_refund(data: PosRefundApply, request: Request, db: DbSession, user: CurrentUser):
     """收银员申请退款（待店长/管理员审批）。"""
+    from app.models import Order
+
+    order = await db.get(Order, int(data.order_id))
+    if not order:
+        raise AppException(40402, "订单不存在")
+    await PosShiftService.require_open_shift(db, user.id, store_id=order.store_id)
     row = await PosRefundService.create_request(
         db,
         user=user,

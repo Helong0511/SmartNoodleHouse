@@ -89,6 +89,16 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and not (getattr(settings, "display_screen_token", None) or "").strip():
         errors.append("生产环境须配置 DISPLAY_SCREEN_TOKEN（叫号屏访问令牌）")
 
+    cors = (getattr(settings, "cors_origins", None) or "").lower()
+    if is_prod and ("localhost" in cors or "127.0.0.1" in cors):
+        errors.append("生产环境 CORS_ORIGINS 不得包含 localhost/127.0.0.1，请改为正式前端域名")
+
+    h5_base = (getattr(settings, "h5_public_base_url", None) or "").strip()
+    if is_prod and not h5_base:
+        errors.append("生产环境须配置 H5_PUBLIC_BASE_URL（顾客扫码/H5 公网基址）")
+    elif is_prod and h5_base and ("localhost" in h5_base.lower() or "127.0.0.1" in h5_base):
+        errors.append("生产环境 H5_PUBLIC_BASE_URL 不得为 localhost")
+
     storage = (getattr(settings, "storage_backend", None) or "local").lower()
     if is_prod and storage == "s3":
         if not (
@@ -134,6 +144,25 @@ def validate_settings(settings: Settings) -> None:
             errors.append(
                 "生产须至少配置微信（MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID）或支付宝（APP_ID/私钥/公钥）之一"
             )
+        if wechat_ok:
+            plat_key = (getattr(settings, "wechat_platform_public_key", None) or "").strip()
+            plat_cert = (getattr(settings, "wechat_platform_cert_path", None) or "").strip()
+            cert_ok = False
+            if plat_key:
+                cert_ok = True
+            elif plat_cert:
+                from pathlib import Path
+
+                p = Path(plat_cert)
+                if not p.is_absolute():
+                    # 相对路径相对项目根 / backend 上级
+                    root = Path(__file__).resolve().parents[2]
+                    p = (root / plat_cert).resolve()
+                cert_ok = p.is_file()
+            if not cert_ok:
+                errors.append(
+                    "已配置微信支付时须提供 WECHAT_PLATFORM_PUBLIC_KEY 或可读的 WECHAT_PLATFORM_CERT_PATH（平台证书/公钥）"
+                )
 
     # 打印：开启则须按模式配齐，禁止「开了开关却静默跳过」
     if is_prod:

@@ -31,6 +31,7 @@ const router = createRouter({
         { path: 'users', component: () => import('@/views/Users.vue'), meta: { title: '员工管理', permission: 'user:read', denyCashier: true } },
         { path: 'store-stocks', component: () => import('@/views/StoreStocks.vue'), meta: { title: '分店库存', permission: 'product:read', denyCashier: true } },
         { path: 'payments', component: () => import('@/views/Payments.vue'), meta: { title: '支付记录', permission: 'payment:read', denyCashier: true } },
+        { path: 'financial-ledger', component: () => import('@/views/FinancialLedger.vue'), meta: { title: '财务账本', permission: 'payment:read', denyCashier: true } },
         { path: 'cameras', component: () => import('@/views/Cameras.vue'), meta: { title: '摄像头', permission: 'camera:read', denyCashier: true } },
         { path: 'kitchen', component: () => import('@/views/Kitchen.vue'), meta: { title: '厨房 KDS', kitchen: true, denyCashier: true } },
         { path: 'pos', component: () => import('@/views/PosOrder.vue'), meta: { title: '收银点餐', pos: true } },
