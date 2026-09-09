@@ -76,12 +76,13 @@ class MultiFrameTracker:
 
 def check_liveness_simple(image_bytes: bytes) -> dict:
     """
-    轻量活体门控（非对抗级）：
+    轻量活体门控（basic anti-spoof，非对抗级）：
     - 解码成功
     - 拉普拉斯清晰度
     - 亮度合理
     - 人脸区域占比（若 InsightFace 可用则用 det bbox）
-    真生产建议接入厂商活体 SDK / 挑战应答。
+    当前**不是**真活体/挑战应答；生产建议接入厂商活体 SDK。
+    UI / API 应标注 anti_spoof_level=basic。
     """
     import cv2
 
@@ -139,6 +140,8 @@ def check_liveness_simple(image_bytes: bytes) -> dict:
         "brightness": brightness,
         "face_ratio": face_ratio,
         "liveness": "basic_pass",
+        "anti_spoof_level": "basic",
+        "anti_spoof_note": "basic anti-spoof（清晰度/亮度/姿态粗检，非真活体）",
     }
 
 

@@ -109,7 +109,7 @@ const registering = ref(false)
 const customerId = ref<number | null>(null)
 const customerToken = ref<string | null>(null)
 const memberText = ref('注册会员后可查看历史订单、口味偏好，并支持一键复购。')
-const faceText = ref('开启人脸迎宾后，到店可自动欢迎并推荐您常点口味。仅在您主动授权后生效，可随时关闭。')
+const faceText = ref('开启人脸迎宾后，到店可自动欢迎并推荐您常点口味。仅在您主动授权后生效，可随时关闭。当前为 basic anti-spoof（非真活体）。')
 
 const cartCount = computed(() => cart.value.reduce((s, i) => s + i.quantity, 0))
 const cartTotal = computed(() => cart.value.reduce((s, i) => s + parseFloat(i.subtotal), 0).toFixed(2))

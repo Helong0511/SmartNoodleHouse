@@ -97,8 +97,12 @@ def deferred_print_task(order_id: int, ticket_type: str = TICKET_KITCHEN) -> dic
 
 
 def _escape_print_text(text: str) -> str:
-    """转义用户输入里的 < >，避免被当成打印标签解析。"""
-    return (text or "").replace("<", "&lt;").replace(">", "&gt;")
+    """清除 ESC/GS/控制字符并转义 < >，避免用户输入注入打印机指令或标签。"""
+    # TODO(PrintJob): 尚无 print_jobs 持久化表；出票失败目前仅日志。
+    # 后续最小实现：落库 status=PENDING/SUCCESS/FAILED + 重试计数，调度器消费。
+    s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text or "")
+    # 显式去掉 ESC(0x1b) / GS(0x1d)（已含于上式）；再挡常见标签注入
+    return s.replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _barcode_payload(order_no: str) -> str:

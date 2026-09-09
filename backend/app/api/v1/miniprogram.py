@@ -26,7 +26,7 @@ from app.services.coupon_service import CouponService
 from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
-from app.utils.upload import fetch_and_save_remote_image, save_upload
+from app.utils.upload import fetch_and_save_remote_image, read_upload_limited, save_upload
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
@@ -616,12 +616,10 @@ async def consent_face(
     customer: CurrentCustomer,
     image: UploadFile = File(...),
 ):
-    """顾客主动授权：摄像头实拍后上传，服务端质量+活体校验并提取特征，禁止客户端伪造向量"""
-    settings = get_settings()
-    raw = await image.read()
-    max_size = settings.max_upload_size_mb * 1024 * 1024
-    if len(raw) > max_size:
-        raise AppException(40030, f"图片超过 {settings.max_upload_size_mb}MB")
+    """顾客主动授权：摄像头实拍后上传，服务端质量+basic anti-spoof 校验并提取特征，禁止客户端伪造向量"""
+    raw = await read_upload_limited(image)
+    if not raw:
+        raise AppException(40030, "空图片")
 
     try:
         feature, quality = extract_face_embedding_with_quality(raw)
@@ -636,17 +634,19 @@ async def consent_face(
         customer_id=customer.id,
         profile_id=profile.id,
         request=request,
-        extra={"via": "upload"},
+        extra={"via": "upload", "anti_spoof_level": "basic"},
     )
     return success(
         {
             "profile_id": profile.id,
             "consent_status": profile.consent_status,
+            "anti_spoof_level": "basic",
             "quality": {
                 "sharpness": quality.get("sharpness"),
                 "brightness": quality.get("brightness"),
                 "face_ratio": quality.get("face_ratio"),
                 "liveness": quality.get("liveness"),
+                "anti_spoof_level": quality.get("anti_spoof_level", "basic"),
             },
         },
         request=request,
@@ -659,8 +659,10 @@ async def consent_face_base64(
     db: DbSession,
     customer: CurrentCustomer,
 ):
-    """小程序摄像头 takePhoto 后的 base64 授权（禁止相册选图）"""
+    """小程序摄像头 takePhoto 后的 base64 授权（禁止相册选图 / 禁止客户端上传 embedding）"""
     body = await request.json()
+    if body.get("feature") is not None or body.get("embedding") is not None or body.get("feature_vector") is not None:
+        raise AppException(40036, "禁止客户端上传人脸特征向量，仅接受摄像头实拍图片")
     b64 = body.get("image_base64", "")
     if "," in b64:
         b64 = b64.split(",", 1)[1]
@@ -669,8 +671,15 @@ async def consent_face_base64(
     # 占位/过短串直接拒绝（如 H5 假数据）
     if len(b64) < 800:
         raise AppException(40033, "人脸图像无效，请使用小程序摄像头实时采集")
+    settings = get_settings()
+    max_b64 = settings.max_upload_size_mb * 1024 * 1024 * 2  # base64 膨胀约 4/3，再留余量
+    if len(b64) > max_b64:
+        raise AppException(40030, f"图片超过 {settings.max_upload_size_mb}MB")
     try:
-        raw = base64.b64decode(b64)
+        raw = base64.b64decode(b64, validate=False)
+        max_size = settings.max_upload_size_mb * 1024 * 1024
+        if len(raw) > max_size:
+            raise AppException(40030, f"图片超过 {settings.max_upload_size_mb}MB")
         if len(raw) < 1024:
             raise AppException(40034, "人脸图像过小，请重新正对摄像头采集")
         feature, quality = extract_face_embedding_with_quality(raw)
@@ -689,17 +698,19 @@ async def consent_face_base64(
         customer_id=customer.id,
         profile_id=profile.id,
         request=request,
-        extra={"via": "base64"},
+        extra={"via": "base64", "anti_spoof_level": "basic"},
     )
     return success(
         {
             "profile_id": profile.id,
             "consent_status": profile.consent_status,
+            "anti_spoof_level": "basic",
             "quality": {
                 "sharpness": quality.get("sharpness"),
                 "brightness": quality.get("brightness"),
                 "face_ratio": quality.get("face_ratio"),
                 "liveness": quality.get("liveness"),
+                "anti_spoof_level": quality.get("anti_spoof_level", "basic"),
             },
         },
         request=request,

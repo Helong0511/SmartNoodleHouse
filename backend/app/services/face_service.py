@@ -1,7 +1,8 @@
 import asyncio
 import base64
 import json
-from datetime import timedelta
+import logging
+from datetime import datetime, timedelta
 
 import numpy as np
 from cryptography.fernet import Fernet
@@ -10,9 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.biz_no import BIZ_VI, generate_no
+from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
 from app.core.response import now_local
 from app.models import Camera, Customer, FaceProfile, Store, VisitorEvent, WelcomeLog
+from app.services.face_extractor import EMBEDDING_DIM
+
+logger = logging.getLogger(__name__)
 
 
 class FaceEncryption:
@@ -27,11 +32,105 @@ class FaceEncryption:
         return self.fernet.decrypt(data)
 
 
+class FaceEmbeddingCache:
+    """授权人脸向量内存缓存：按 updated_at 增量刷新，避免识别循环全表扫解密。"""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._by_customer: dict[int, tuple[int, np.ndarray]] = {}  # customer_id -> (profile_id, vec)
+        self._last_sync: datetime | None = None
+        self._full_resync_every = 300.0  # 定期全量校正
+        self._last_full_at = 0.0
+
+    def invalidate(self) -> None:
+        self._last_sync = None
+
+    async def get_profiles(self, db: AsyncSession) -> list[tuple[int, np.ndarray]]:
+        async with self._lock:
+            await self._refresh(db)
+            return [(cid, vec.copy()) for cid, (_pid, vec) in self._by_customer.items()]
+
+    async def _refresh(self, db: AsyncSession) -> None:
+        import time
+
+        now_mono = time.monotonic()
+        force_full = self._last_sync is None or (now_mono - self._last_full_at) >= self._full_resync_every
+        enc = FaceEncryption()
+
+        if force_full:
+            result = await db.execute(select(FaceProfile).where(FaceProfile.consent_status == "AUTHORIZED"))
+            rows = list(result.scalars().all())
+            fresh: dict[int, tuple[int, np.ndarray]] = {}
+            newest: datetime | None = None
+            for p in rows:
+                vec = self._decrypt_vec(enc, p)
+                if vec is None:
+                    continue
+                fresh[int(p.customer_id)] = (int(p.id), vec)
+                ts = p.updated_at or p.consent_at
+                if ts and (newest is None or ts > newest):
+                    newest = ts
+            self._by_customer = fresh
+            self._last_sync = newest or now_local()
+            self._last_full_at = now_mono
+            return
+
+        # 增量：updated_at 晚于上次同步的行（含撤销）
+        result = await db.execute(
+            select(FaceProfile).where(FaceProfile.updated_at > self._last_sync)  # type: ignore[operator]
+        )
+        newest = self._last_sync
+        for p in result.scalars().all():
+            ts = p.updated_at or p.consent_at
+            if ts and (newest is None or ts > newest):
+                newest = ts
+            cid = int(p.customer_id)
+            if p.consent_status != "AUTHORIZED" or not p.feature_data:
+                self._by_customer.pop(cid, None)
+                continue
+            vec = self._decrypt_vec(enc, p)
+            if vec is None:
+                self._by_customer.pop(cid, None)
+                continue
+            self._by_customer[cid] = (int(p.id), vec)
+        self._last_sync = newest
+
+    @staticmethod
+    def _decrypt_vec(enc: FaceEncryption, p: FaceProfile) -> np.ndarray | None:
+        if not p.feature_data:
+            return None
+        try:
+            vec = json.loads(enc.decrypt(p.feature_data).decode())
+            arr = np.array(vec, dtype=np.float32)
+            if arr.size != EMBEDDING_DIM:
+                logger.warning(
+                    "跳过维度不匹配的人脸档案 profile_id=%s dim=%s",
+                    getattr(p, "id", None),
+                    arr.size,
+                )
+                return None
+            return arr
+        except Exception:
+            return None
+
+
+face_embedding_cache = FaceEmbeddingCache()
+
+
 class FaceService:
-    """仅授权会员人脸匹配 - 禁止陌生顾客身份识别"""
+    """仅授权会员人脸匹配 - 禁止陌生顾客身份识别；禁止客户端直传 embedding。"""
+
+    @staticmethod
+    def _assert_embedding_dim(feature_vector: list[float]) -> None:
+        if not isinstance(feature_vector, (list, tuple)) or len(feature_vector) != EMBEDDING_DIM:
+            raise AppException(
+                40031,
+                f"人脸特征维度不匹配：期望 {EMBEDDING_DIM}（禁止 padding / 客户端伪造向量）",
+            )
 
     @staticmethod
     async def register_face(db: AsyncSession, customer_id: int, feature_vector: list[float]) -> FaceProfile:
+        FaceService._assert_embedding_dim(feature_vector)
         # 撤销旧授权
         result = await db.execute(
             select(FaceProfile).where(
@@ -53,6 +152,7 @@ class FaceService:
         )
         db.add(profile)
         await db.flush()
+        face_embedding_cache.invalidate()
         return profile
 
     @staticmethod
@@ -66,26 +166,16 @@ class FaceService:
             profile.consent_status = "REVOKED"
             profile.revoked_at = now_local()
             profile.feature_data = b""
+        face_embedding_cache.invalidate()
 
     @staticmethod
     async def get_authorized_profiles(db: AsyncSession) -> list[tuple[int, np.ndarray]]:
-        enc = FaceEncryption()
-        result = await db.execute(
-            select(FaceProfile).where(FaceProfile.consent_status == "AUTHORIZED")
-        )
-        profiles = []
-        for p in result.scalars().all():
-            if not p.feature_data:
-                continue
-            try:
-                vec = json.loads(enc.decrypt(p.feature_data).decode())
-                profiles.append((p.customer_id, np.array(vec, dtype=np.float32)))
-            except Exception:
-                continue
-        return profiles
+        return await face_embedding_cache.get_profiles(db)
 
     @staticmethod
     def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+        if a.shape != b.shape or a.size != EMBEDDING_DIM:
+            return 0.0
         na = np.linalg.norm(a)
         nb = np.linalg.norm(b)
         if na == 0 or nb == 0:

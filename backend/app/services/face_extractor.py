@@ -133,11 +133,11 @@ def _extract_insightface_bgr(img: np.ndarray) -> list[float]:
         raise ValueError("人脸检测置信度过低")
 
     emb = face.embedding.astype(np.float32)
+    # fail-closed：禁止截断/padding，避免不同模型维度被 silently 对齐后误匹配
     if emb.size != EMBEDDING_DIM:
-        if emb.size > EMBEDDING_DIM:
-            emb = emb[:EMBEDDING_DIM]
-        else:
-            emb = np.pad(emb, (0, EMBEDDING_DIM - emb.size))
+        raise ValueError(
+            f"人脸特征维度不匹配：期望 {EMBEDDING_DIM}，实际 {emb.size}（禁止 padding）"
+        )
     emb = emb / (np.linalg.norm(emb) + 1e-8)
     return emb.tolist()
 

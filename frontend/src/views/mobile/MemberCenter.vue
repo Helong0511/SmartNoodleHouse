@@ -47,7 +47,7 @@
     </div>
 
     <el-switch v-model="faceEnabled" active-text="人脸迎宾（需小程序摄像头）" @change="toggleFace" />
-    <p class="tip">H5 无法安全采集人脸。请在微信/支付宝小程序内打开摄像头实时授权；关闭可撤销特征。</p>
+    <p class="tip">H5 无法安全采集人脸。请在微信/支付宝小程序内打开摄像头实时授权；关闭可撤销特征。当前为 basic anti-spoof（清晰度/亮度粗检，非真活体）。</p>
 
     <div v-if="recommendations.length" class="block">
       <h3>智能记录的口味爱好</h3>

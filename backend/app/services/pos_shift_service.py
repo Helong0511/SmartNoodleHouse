@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -87,6 +88,21 @@ class PosShiftService:
         ).scalar_one_or_none()
 
     @classmethod
+    async def get_open_shift_for_update(
+        cls, db: AsyncSession, operator_id: int
+    ) -> CashierShift | None:
+        """开班/交班竞态：行锁当前 OPEN 班次。"""
+        return (
+            await db.execute(
+                select(CashierShift)
+                .where(CashierShift.operator_id == int(operator_id), CashierShift.status == "OPEN")
+                .order_by(CashierShift.id.desc())
+                .limit(1)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+
+    @classmethod
     async def open_shift(
         cls,
         db: AsyncSession,
@@ -95,7 +111,7 @@ class PosShiftService:
         operator_id: int,
         opening_float: Decimal,
     ) -> CashierShift:
-        existing = await cls.get_open_shift(db, operator_id)
+        existing = await cls.get_open_shift_for_update(db, operator_id)
         if existing:
             raise AppException(40013, "您已有进行中的班次，请先交班")
         shift = CashierShift(
@@ -106,7 +122,11 @@ class PosShiftService:
             opened_at=now_local(),
         )
         db.add(shift)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            # uk_cashier_shift_one_open：同一收银员仅允许一个 OPEN
+            raise AppException(40013, "您已有进行中的班次，请先交班") from exc
         return shift
 
     @classmethod
@@ -134,19 +154,26 @@ class PosShiftService:
         remark: str | None,
         closed_by: int | None = None,
     ) -> CashierShift:
-        if shift.status != "OPEN":
+        locked = (
+            await db.execute(
+                select(CashierShift).where(CashierShift.id == int(shift.id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not locked:
+            raise AppException(40414, "班次不存在")
+        if locked.status != "OPEN":
             raise AppException(40014, "班次已交班")
-        stats = await cls._fill_shift_totals(db, shift)
-        shift.status = "CLOSED"
-        shift.closed_at = now_local()
-        shift.remark = (remark or "").strip() or None
-        shift.closed_by = closed_by
+        stats = await cls._fill_shift_totals(db, locked)
+        locked.status = "CLOSED"
+        locked.closed_at = now_local()
+        locked.remark = (remark or "").strip() or None
+        locked.closed_by = closed_by
         if closing_cash is not None:
-            shift.closing_cash = _money(closing_cash)
-            expected_cash = _money(shift.opening_float) + stats["total_cash"]
-            shift.cash_difference = _money(closing_cash) - expected_cash
+            locked.closing_cash = _money(closing_cash)
+            expected_cash = _money(locked.opening_float) + stats["total_cash"]
+            locked.cash_difference = _money(closing_cash) - expected_cash
         await db.flush()
-        return shift
+        return locked
 
     @classmethod
     async def shift_payload(cls, db: AsyncSession, shift: CashierShift, *, live: bool = False) -> dict:

@@ -1,1 +1,1 @@
-<view class="tip">人脸授权功能已下线</view>
+<view class="tip">人脸授权请在会员中心使用摄像头实时采集。当前为 basic anti-spoof（清晰度/亮度粗检，非真活体 SDK）。</view>

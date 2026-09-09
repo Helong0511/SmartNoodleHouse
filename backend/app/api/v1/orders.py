@@ -536,7 +536,10 @@ async def kitchen_orders(request: Request, db: DbSession, user: CurrentUser, sto
 def _verify_display_token(token: str | None) -> None:
     from app.core.config import get_settings
 
-    expected = (get_settings().display_screen_token or "").strip()
+    settings = get_settings()
+    expected = (settings.display_screen_token or "").strip()
+    if settings.is_production and not expected:
+        raise HTTPException(status_code=503, detail="未配置 DISPLAY_SCREEN_TOKEN")
     if expected and (token or "").strip() != expected:
         raise HTTPException(status_code=403, detail="叫号屏访问令牌无效")
 

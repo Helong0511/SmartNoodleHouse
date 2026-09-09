@@ -556,10 +556,14 @@ CREATE TABLE IF NOT EXISTS cashier_shifts (
   cash_difference DECIMAL(10,2) DEFAULT NULL COMMENT '现金长短款',
   closed_by BIGINT UNSIGNED DEFAULT NULL COMMENT '确认日结的管理员 → users.id',
   remark VARCHAR(500) DEFAULT NULL COMMENT '交班备注',
+  open_operator_key BIGINT UNSIGNED
+    GENERATED ALWAYS AS (IF(status = 'OPEN', operator_id, NULL)) STORED
+    COMMENT 'OPEN 时为 operator_id，CLOSED 为 NULL；用于唯一约束',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   INDEX idx_shift_store_open (store_id, opened_at),
   INDEX idx_shift_operator_status (operator_id, status),
+  UNIQUE INDEX uk_cashier_shift_one_open (open_operator_key),
   CONSTRAINT fk_shift_store FOREIGN KEY (store_id) REFERENCES stores(id),
   CONSTRAINT fk_shift_operator FOREIGN KEY (operator_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='收银班次表';
