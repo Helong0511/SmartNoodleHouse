@@ -26,6 +26,7 @@ REQUIRED_TABLES = [
     "customers",
     "member_levels",
     "coupon_templates",
+    "customer_coupons",
     "orders",
     "order_items",
     "payments",
@@ -33,7 +34,9 @@ REQUIRED_TABLES = [
     "webhook_inbox",
     "financial_ledger",
     "point_ledger",
+    "print_jobs",
     "delivery_orders",
+    "cashier_shifts",
     "alembic_version",
 ]
 
@@ -47,6 +50,8 @@ REQUIRED_UNIQUES = [
     ("users", "username"),
     ("roles", "code"),
     ("permissions", "code"),
+    ("customer_coupons", "uk_cc_customer_template"),
+    ("cashier_shifts", "uk_cashier_shift_one_open"),
 ]
 
 # (table, constraint_name)
@@ -58,6 +63,8 @@ REQUIRED_FKS = [
     ("payment_refunds", "fk_refund_order"),
     ("financial_ledger", "fk_fl_store"),
     ("point_ledger", "fk_pl_customer"),
+    ("print_jobs", "fk_pj_store"),
+    ("print_jobs", "fk_pj_order"),
 ]
 
 # (table, column)
@@ -73,6 +80,11 @@ REQUIRED_COLUMNS = [
     ("payment_refunds", "next_retry_at"),
     ("payment_refunds", "last_error"),
     ("payment_refunds", "idempotency_key"),
+    ("customer_coupons", "status_reason"),
+    ("print_jobs", "status"),
+    ("print_jobs", "attempt_count"),
+    ("print_jobs", "next_retry_at"),
+    ("print_jobs", "content"),
 ]
 
 

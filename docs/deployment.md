@@ -43,6 +43,10 @@ alembic upgrade head
 
 - `0001_baseline`：执行仓库根目录 `sql/001_schema.sql`（跳过 `CREATE DATABASE` / `USE`）
 - `0002_p0_hardening`：补齐 `orders.operator_id`、webhook / 退款重试字段、`financial_ledger` / `point_ledger`（已存在则跳过）
+- `0003_p1_hardening`：欢迎券 `UNIQUE(customer_id, template_id)`
+- `0004_p1_shift_open`：收银班次每人仅一个 OPEN
+- `0005_p1_merge_print`：`customer_coupons.status_reason`（合并冲突标记）
+- `0006_print_jobs`：厨房打印任务表 `print_jobs`（失败指数退避重试）
 
 等价手工路径（不推荐与 Alembic 混用同一库反复执行）：
 

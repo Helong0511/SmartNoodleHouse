@@ -394,11 +394,28 @@ class DeliveryService:
         db.add(d_order)
         await db.flush()
 
+        from app.services.financial_ledger_service import FinancialLedgerService
         from app.services.status_history import record_order_status
 
         await record_order_status(
             db, order_id=order.id, from_status=None, to_status="PAID", source="DELIVERY", remark="外卖落单"
         )
+        try:
+            await FinancialLedgerService.record_sale(
+                db,
+                store_id=int(store_id),
+                amount=total,
+                channel=platform,
+                provider=platform,
+                order_id=order.id,
+                payment_id=None,
+                delivery_order_id=d_order.id,
+                remark=f"delivery:{platform}:{parsed['platform_order_id']}",
+            )
+        except Exception:
+            logger.exception(
+                "外卖 SALE 入账失败 order_id=%s platform=%s", order.id, platform
+            )
 
         settings = get_settings()
         deferred: list[dict] = []
@@ -738,6 +755,27 @@ class DeliveryService:
                         remark="外卖全额退款同意",
                     )
                     d_order.delivery_status = "CANCELLED"
+            if order:
+                try:
+                    from app.services.financial_ledger_service import FinancialLedgerService
+
+                    await FinancialLedgerService.record_refund(
+                        db,
+                        store_id=int(order.store_id),
+                        amount=refund.amount,
+                        channel=refund.platform or order.channel,
+                        provider=refund.platform,
+                        order_id=order.id,
+                        delivery_order_id=refund.delivery_order_id,
+                        delivery_refund_id=refund.id,
+                        remark=f"delivery_refund:{refund.platform}:{refund.platform_refund_id or refund.id}",
+                    )
+                except Exception:
+                    logger.exception(
+                        "外卖 REFUND 入账失败 delivery_refund_id=%s order_id=%s",
+                        refund.id,
+                        order.id,
+                    )
         else:
             ok = await provider.disagree_refund(
                 refund.platform_refund_id or "",

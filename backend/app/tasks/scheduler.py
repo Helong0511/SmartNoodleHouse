@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 from app.services.platform_token_service import PlatformTokenService
 from app.services.webhook_inbox import process_pending_inbox
+from app.services.print_service import PrintService
 
 
 def register_tasks(scheduler) -> None:
@@ -22,6 +23,12 @@ def register_tasks(scheduler) -> None:
         n = await process_pending_inbox(limit=30)
         if n:
             logger.info("Processed %s webhook inbox items", n)
+
+    @scheduler.scheduled_job("interval", seconds=10)
+    async def retry_failed_print_jobs():
+        n = await PrintService.process_pending_print_jobs(limit=20)
+        if n:
+            logger.info("Retried %s print jobs", n)
 
     @scheduler.scheduled_job("interval", hours=6)
     async def refresh_platform_tokens():

@@ -26,6 +26,8 @@
 
 `financial_ledger` 记录 SALE / REFUND / ADJUSTMENT 分录，便于按门店对账；与 `payments` 流水互补，不替代渠道对账单。
 
+支付成功（含分笔）与退款成功、外卖落单/退款会写入账本；Dashboard 净收入在有分录时优先从账本汇总（允许为负）。
+
 ## 回调与安全
 
 - 通知 URL 必须公网 HTTPS，与商户平台配置一致。

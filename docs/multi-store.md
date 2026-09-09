@@ -22,6 +22,7 @@
 - 新增门店：插入 `stores`，再配桌台、库存、外卖 `platform_store_bindings`、员工绑定。
 - 顾客 `registered_store_id` / `registered_table_id` 仅记录首次扫码注册门店 / 桌台。
 - 统计与财务分录（`financial_ledger.store_id`）按店过滤；跨店报表仅超管。
+- 顾客合并：`POST /api/v1/customers/{target_id}/merge`（需 `customer:write`）。非超管要求源/目标顾客均在本店下过单；合并策略见 `CustomerMergeService` docstring。
 - 小程序 / H5 通过桌台或门店上下文解析 `store_id`，服务端必须以落库关联为准，勿信任客户端随意传店。
 
 ## 配置

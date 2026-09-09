@@ -115,6 +115,7 @@ class CustomerCoupon(Base):
     template_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("coupon_templates.id"))
     coupon_no: Mapped[str] = mapped_column(String(40), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="AVAILABLE")
+    status_reason: Mapped[str | None] = mapped_column(String(40), default=None)
     obtained_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_order_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -675,3 +676,28 @@ class PaymentCallbackReceipt(Base):
     receipt_key: Mapped[str] = mapped_column(String(128))
     payment_no: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PrintJob(Base, TimestampMixin):
+    """厨房小票打印任务：落库 + 失败指数退避重试。"""
+
+    __tablename__ = "print_jobs"
+
+    # SQLite 仅 INTEGER PRIMARY KEY 可自增；MySQL 仍用 BIGINT
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
+    ticket_type: Mapped[str] = mapped_column(String(20), default="KITCHEN")
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    content: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(64))
+    succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

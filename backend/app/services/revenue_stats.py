@@ -52,13 +52,22 @@ async def net_revenue_since(
     since: datetime,
     store_id: int | None = None,
     channels: list[str] | None = None,
+    prefer_ledger: bool = True,
 ) -> Decimal:
     """
     净营收 = 期间内支付成功金额 − 期间内退款成功金额。
     - 支付侧：Payment.status 曾为已支付（PAID/PARTIAL_REFUND/REFUNDED）且 paid_at >= since
     - 退款侧：PaymentRefund.status=SUCCESS 且 succeeded_at（或 created_at）>= since
     这样「昨日支付、今日退款」会正确冲减今日营收。
+
+    若 prefer_ledger 且 financial_ledger 在窗口内有分录，则改从账本汇总
+    （SALE − REFUND），与统一入账路径一致；允许负净收入。
     """
+    if prefer_ledger and await _ledger_has_entries_since(db, since=since, store_id=store_id):
+        return await net_revenue_from_ledger_since(
+            db, since=since, until=None, store_id=store_id, channels=channels
+        )
+
     pay_q = select(func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.status.in_(_PAID_PAYMENT),
         Payment.paid_at >= since,
@@ -85,6 +94,92 @@ async def net_revenue_since(
     refunded = Decimal(str(await db.scalar(refund_q) or 0))
     net = money(gross - refunded)
     return net
+
+
+async def _ledger_has_entries_since(
+    db: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    store_id: int | None = None,
+) -> bool:
+    from app.models import FinancialLedger
+
+    q = select(func.count()).select_from(FinancialLedger).where(
+        FinancialLedger.entry_type.in_(("SALE", "REFUND")),
+        FinancialLedger.created_at >= since,
+    )
+    if until is not None:
+        q = q.where(FinancialLedger.created_at < until)
+    if store_id is not None:
+        q = q.where(FinancialLedger.store_id == store_id)
+    return int(await db.scalar(q) or 0) > 0
+
+
+async def ledger_gross_since(
+    db: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    store_id: int | None = None,
+    channels: list[str] | None = None,
+) -> Decimal:
+    """从 financial_ledger 汇总 SALE 金额。"""
+    from app.models import FinancialLedger
+
+    q = select(func.coalesce(func.sum(FinancialLedger.amount), 0)).where(
+        FinancialLedger.entry_type == "SALE",
+        FinancialLedger.created_at >= since,
+    )
+    if until is not None:
+        q = q.where(FinancialLedger.created_at < until)
+    if store_id is not None:
+        q = q.where(FinancialLedger.store_id == store_id)
+    if channels:
+        q = q.where(FinancialLedger.channel.in_(channels))
+    return money(Decimal(str(await db.scalar(q) or 0)))
+
+
+async def ledger_refunded_since(
+    db: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    store_id: int | None = None,
+    channels: list[str] | None = None,
+) -> Decimal:
+    """从 financial_ledger 汇总 REFUND 金额。"""
+    from app.models import FinancialLedger
+
+    q = select(func.coalesce(func.sum(FinancialLedger.amount), 0)).where(
+        FinancialLedger.entry_type == "REFUND",
+        FinancialLedger.created_at >= since,
+    )
+    if until is not None:
+        q = q.where(FinancialLedger.created_at < until)
+    if store_id is not None:
+        q = q.where(FinancialLedger.store_id == store_id)
+    if channels:
+        q = q.where(FinancialLedger.channel.in_(channels))
+    return money(Decimal(str(await db.scalar(q) or 0)))
+
+
+async def net_revenue_from_ledger_since(
+    db: AsyncSession,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    store_id: int | None = None,
+    channels: list[str] | None = None,
+) -> Decimal:
+    """账本净收入 = SALE − REFUND（允许为负）。"""
+    gross = await ledger_gross_since(
+        db, since=since, until=until, store_id=store_id, channels=channels
+    )
+    refunded = await ledger_refunded_since(
+        db, since=since, until=until, store_id=store_id, channels=channels
+    )
+    return money(gross - refunded)
 
 
 async def paid_order_count_since(
@@ -349,13 +444,23 @@ async def build_period_stats(
     period_label: str,
     store_id: int | None,
 ) -> dict:
-    """单周期汇总（今日/本月/昨日）。"""
+    """单周期汇总（今日/本月/昨日）。
+
+    净收入优先 financial_ledger（有分录时）；否则回退 Payment/PaymentRefund。
+    负净收入允许，不做 max(0, …) 钳制。
+    """
     placed = await placed_order_count_since(db, since=since, until=until, store_id=store_id)
     paid_count = await paid_order_count_since(db, since=since, until=until, store_id=store_id)
 
-    gross = await gross_revenue_since(db, since=since, until=until, store_id=store_id)
-    refunded = await refunded_since(db, since=since, until=until, store_id=store_id)
-    net = money(gross - refunded)
+    use_ledger = await _ledger_has_entries_since(db, since=since, until=until, store_id=store_id)
+    if use_ledger:
+        gross = await ledger_gross_since(db, since=since, until=until, store_id=store_id)
+        refunded = await ledger_refunded_since(db, since=since, until=until, store_id=store_id)
+        net = money(gross - refunded)
+    else:
+        gross = await gross_revenue_since(db, since=since, until=until, store_id=store_id)
+        refunded = await refunded_since(db, since=since, until=until, store_id=store_id)
+        net = money(gross - refunded)
     amounts = await order_amount_stats_since(db, since=since, until=until, store_id=store_id)
     avg_order = round(float(net) / paid_count, 2) if paid_count else 0.0
 
@@ -377,6 +482,7 @@ async def build_period_stats(
         "gross_revenue": str(gross),
         "net_revenue": str(net),
         "refunded_amount": str(refunded),
+        "revenue_source": "financial_ledger" if use_ledger else "payments",
         "avg_order_amount": avg_order,
         "amounts": _money_dict(amounts),
         "new_registered_members": new_members,

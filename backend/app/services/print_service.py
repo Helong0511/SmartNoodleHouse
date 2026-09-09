@@ -28,20 +28,35 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import re
+import socket
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import parse_biz_no
 from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
 from app.core.exceptions import AppException
 from app.core.error_codes import PRINTER_UNREACHABLE
 from app.core.response import now_local
-from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store, StoreSetting
+from app.models import (
+    DeliveryOrder,
+    DiningTable,
+    Order,
+    OrderItem,
+    OrderItemOption,
+    PrintJob,
+    Product,
+    Store,
+    StoreSetting,
+)
 from app.services.customer_display import pickup_code_from_order_no
 from app.services.escpos_client import EscposClient
 from app.services.xpyun_client import XpyunClient
@@ -54,6 +69,16 @@ logger = logging.getLogger(__name__)
 TICKET_KITCHEN = "KITCHEN"  # 正常厨房制作单
 TICKET_URGE = "URGE"  # 催单（票头加【催单】）
 TICKET_CANCEL = "CANCEL"  # 作废/取消（票头加【作废】）
+
+# PrintJob 重试：最多 N 次；指数退避 2^attempt 秒，封顶 1 小时
+MAX_PRINT_ATTEMPTS = 8
+PRINT_BACKOFF_BASE_SEC = 2
+PRINT_BACKOFF_CAP_SEC = 3600
+# TEXT 可截断上限（留余量）
+PRINT_CONTENT_MAX_LEN = 60000
+
+# 控制字符（含 ESC 0x1b / GS 0x1d），写入 content 前必须清除
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 # 渠道英文码 → 小票上显示的中文名（外卖行、兜底渠道文案会用到）
 _CHANNEL_LABEL = {
@@ -96,11 +121,36 @@ def deferred_print_task(order_id: int, ticket_type: str = TICKET_KITCHEN) -> dic
     return {"action": "print_ticket", "order_id": int(order_id), "ticket_type": ticket_type}
 
 
+def _print_worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _print_backoff_seconds(attempt_count: int) -> int:
+    """指数退避：2^attempt 秒，封顶 1 小时。"""
+    exp = max(0, int(attempt_count))
+    return min(PRINT_BACKOFF_CAP_SEC, PRINT_BACKOFF_BASE_SEC**exp)
+
+
+def _strip_print_controls(text: str) -> str:
+    """清除 ESC/GS/控制字符（不含标签转义，供整票 content 落库/发送前使用）。"""
+    return _CTRL_CHARS_RE.sub("", text or "")
+
+
+def _prepare_job_content(content: str) -> str:
+    """写入 PrintJob.content 前：清控制字符并截断。"""
+    s = _strip_print_controls(content)
+    if len(s) > PRINT_CONTENT_MAX_LEN:
+        return s[:PRINT_CONTENT_MAX_LEN]
+    return s
+
+
+def _content_hash(content: str) -> str:
+    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+
+
 def _escape_print_text(text: str) -> str:
     """清除 ESC/GS/控制字符并转义 < >，避免用户输入注入打印机指令或标签。"""
-    # TODO(PrintJob): 尚无 print_jobs 持久化表；出票失败目前仅日志。
-    # 后续最小实现：落库 status=PENDING/SUCCESS/FAILED + 重试计数，调度器消费。
-    s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text or "")
+    s = _strip_print_controls(text)
     # 显式去掉 ESC(0x1b) / GS(0x1d)（已含于上式）；再挡常见标签注入
     return s.replace("<", "&lt;").replace(">", "&gt;")
 
@@ -440,17 +490,165 @@ class PrintService:
         )
 
     @classmethod
+    def _mark_job_success(cls, job: PrintJob) -> None:
+        job.status = "SUCCESS"
+        job.succeeded_at = now_local()
+        job.last_error = None
+        job.next_retry_at = None
+        job.locked_at = None
+        job.locked_by = None
+
+    @classmethod
+    def _mark_job_failed(cls, job: PrintJob, exc: BaseException) -> None:
+        err = str(exc)[:500] or exc.__class__.__name__
+        attempts = int(job.attempt_count or 1)
+        job.last_error = err
+        job.locked_at = None
+        job.locked_by = None
+        if attempts < MAX_PRINT_ATTEMPTS:
+            job.status = "RETRYING"
+            job.next_retry_at = now_local() + timedelta(seconds=_print_backoff_seconds(attempts))
+        else:
+            job.status = "FAILED"
+            job.next_retry_at = None
+
+    @classmethod
+    async def _upsert_pending_job(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int,
+        order_id: int,
+        ticket_type: str,
+        content: str,
+        print_job_id: int | None = None,
+    ) -> PrintJob:
+        """创建或更新 PrintJob 为 PENDING，写入已 sanitize 的 content。"""
+        safe = _prepare_job_content(content)
+        digest = _content_hash(safe)
+        job: PrintJob | None = None
+        if print_job_id:
+            job = await db.get(PrintJob, int(print_job_id))
+        if job is None:
+            job = PrintJob(
+                store_id=int(store_id),
+                order_id=int(order_id),
+                ticket_type=ticket_type,
+                content=safe,
+                content_hash=digest,
+                status="PENDING",
+                attempt_count=0,
+            )
+            db.add(job)
+            await db.flush()
+        else:
+            job.store_id = int(store_id)
+            job.order_id = int(order_id)
+            job.ticket_type = ticket_type
+            job.content = safe
+            job.content_hash = digest
+            job.status = "PENDING"
+            job.next_retry_at = None
+            job.last_error = None
+            job.locked_at = None
+            job.locked_by = None
+            await db.flush()
+        return job
+
+    @classmethod
+    async def _begin_printing(cls, db: AsyncSession, job: PrintJob) -> None:
+        job.status = "PRINTING"
+        job.attempt_count = int(job.attempt_count or 0) + 1
+        job.locked_at = now_local()
+        job.locked_by = _print_worker_id()[:64]
+        job.next_retry_at = None
+        await db.flush()
+
+    @classmethod
+    async def _send_content(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int | None,
+        order_no: str,
+        content: str,
+        ticket_type: str,
+    ) -> dict[str, Any]:
+        """按配置把已清洗的 content 发到打印机；失败抛 AppException。"""
+        settings = get_settings()
+        sn = await cls.resolve_printer_sn(db, store_id)
+        host = await cls.resolve_printer_host(db, store_id)
+        mode = (settings.printer_mode or "local").strip().lower()
+        safe = _strip_print_controls(content)
+
+        # ---------- 芯烨云模式 ----------
+        if mode == "xpyun":
+            if not sn or not (settings.xpyun_user or "").strip() or not (settings.xpyun_user_key or "").strip():
+                if settings.allow_print_mock:
+                    logger.warning(
+                        "MOCK 打印 ticket=%s order=%s sn=%s\n%s",
+                        ticket_type,
+                        order_no,
+                        sn or "(未配置)",
+                        safe.replace("<BR>", "\n"),
+                    )
+                    return {"mock": True, "order_no": order_no}
+                raise AppException(
+                    50040,
+                    f"芯烨云未配置完整（USER/USER_KEY/打印机SN），无法出票 order={order_no}",
+                )
+            client = XpyunClient()
+            data = await client.print_ticket(
+                sn,
+                safe,
+                copies=settings.xpyun_print_copies,
+                cutter=1,
+                voice=0 if ticket_type != TICKET_KITCHEN else settings.xpyun_voice,
+                mode=1,
+            )
+            logger.info("厨房小票已发送(云) order=%s sn=%s type=%s", order_no, sn, ticket_type)
+            return data
+
+        # ---------- 局域网 ESC/POS（XP-80T 等）----------
+        if not host:
+            if settings.allow_print_mock:
+                logger.warning(
+                    "MOCK 打印 ticket=%s order=%s host=%s\n%s",
+                    ticket_type,
+                    order_no,
+                    host or "(未配置)",
+                    safe.replace("<BR>", "\n"),
+                )
+                return {"mock": True, "order_no": order_no}
+            raise AppException(
+                50040,
+                f"未配置打印机 IP（PRINTER_HOST），无法出票 order={order_no}",
+            )
+
+        client = EscposClient(host=host, port=settings.printer_port)
+        try:
+            data = await client.print_ticket(safe, copies=settings.xpyun_print_copies)
+        except RuntimeError as exc:
+            raise AppException(
+                PRINTER_UNREACHABLE,
+                str(exc) or f"无法连接打印机 {host}:{settings.printer_port}",
+            ) from exc
+        logger.info("厨房小票已发送(局域网) order=%s host=%s type=%s", order_no, host, ticket_type)
+        return data
+
+    @classmethod
     async def print_order(
         cls,
         db: AsyncSession,
         order_id: int,
         *,
         ticket_type: str = TICKET_KITCHEN,
+        print_job_id: int | None = None,
     ) -> dict[str, Any] | None:
-        """执行一次出票。
+        """执行一次出票（落库 PrintJob：PENDING → PRINTING → SUCCESS / RETRYING|FAILED）。
 
         返回：
-          - dict：云打印/局域网成功结果，或 mock 结果
+          - dict：云打印/局域网成功结果，或 mock 结果（含 print_job_id）
           - None：总开关关闭、订单不存在、已取消/退款制作单等「业务跳过」
 
         异常：
@@ -472,60 +670,125 @@ class PrintService:
             logger.info("打印跳过：订单已取消 order_id=%s", order_id)
             return None
 
-        sn = await cls.resolve_printer_sn(db, ctx.order.store_id)
-        host = await cls.resolve_printer_host(db, ctx.order.store_id)
         content = build_ticket_content(ctx, ticket_type=ticket_type)
-        mode = (settings.printer_mode or "local").strip().lower()
+        job = await cls._upsert_pending_job(
+            db,
+            store_id=int(ctx.order.store_id),
+            order_id=int(order_id),
+            ticket_type=ticket_type,
+            content=content,
+            print_job_id=print_job_id,
+        )
+        await cls._begin_printing(db, job)
 
-        # ---------- 芯烨云模式 ----------
-        if mode == "xpyun":
-            if not sn or not (settings.xpyun_user or "").strip() or not (settings.xpyun_user_key or "").strip():
-                if settings.allow_print_mock:
-                    logger.warning(
-                        "MOCK 打印 ticket=%s order=%s sn=%s\n%s",
-                        ticket_type,
-                        ctx.order.order_no,
-                        sn or "(未配置)",
-                        content.replace("<BR>", "\n"),
-                    )
-                    return {"mock": True, "order_no": ctx.order.order_no}
-                raise AppException(
-                    50040,
-                    f"芯烨云未配置完整（USER/USER_KEY/打印机SN），无法出票 order={ctx.order.order_no}",
-                )
-            client = XpyunClient()
-            data = await client.print_ticket(
-                sn,
-                content,
-                copies=settings.xpyun_print_copies,
-                cutter=1,
-                voice=0 if ticket_type != TICKET_KITCHEN else settings.xpyun_voice,
-                mode=1,
-            )
-            logger.info("厨房小票已发送(云) order=%s sn=%s type=%s", ctx.order.order_no, sn, ticket_type)
-            return data
-
-        # ---------- 局域网 ESC/POS（XP-80T 等）----------
-        if not host:
-            if settings.allow_print_mock:
-                logger.warning(
-                    "MOCK 打印 ticket=%s order=%s host=%s\n%s",
-                    ticket_type,
-                    ctx.order.order_no,
-                    host or "(未配置)",
-                    content.replace("<BR>", "\n"),
-                )
-                return {"mock": True, "order_no": ctx.order.order_no}
-            raise AppException(
-                50040,
-                f"未配置打印机 IP（PRINTER_HOST），无法出票 order={ctx.order.order_no}",
-            )
-
-        client = EscposClient(host=host, port=settings.printer_port)
         try:
-            data = await client.print_ticket(content, copies=settings.xpyun_print_copies)
-        except RuntimeError as exc:
-            # 连不上 IP:9100（超时/关机/IP 变更）→ 业务错误，避免接口裸奔 500 堆栈
-            raise AppException(PRINTER_UNREACHABLE, str(exc) or f"无法连接打印机 {host}:{settings.printer_port}") from exc
-        logger.info("厨房小票已发送(局域网) order=%s host=%s type=%s", ctx.order.order_no, host, ticket_type)
-        return data
+            data = await cls._send_content(
+                db,
+                store_id=ctx.order.store_id,
+                order_no=ctx.order.order_no or "",
+                content=job.content or content,
+                ticket_type=ticket_type,
+            )
+            cls._mark_job_success(job)
+            await db.flush()
+            if isinstance(data, dict):
+                data = {**data, "print_job_id": job.id}
+            return data
+        except Exception as exc:
+            cls._mark_job_failed(job, exc)
+            await db.flush()
+            raise
+
+    @classmethod
+    async def claim_print_job(cls, db: AsyncSession, job_id: int, *, worker: str | None = None) -> PrintJob | None:
+        """原子 claim：RETRYING/FAILED 且到点可重试 → PRINTING。"""
+        wid = (worker or _print_worker_id())[:64]
+        now = now_local()
+        stmt = (
+            update(PrintJob)
+            .where(
+                PrintJob.id == int(job_id),
+                PrintJob.attempt_count < MAX_PRINT_ATTEMPTS,
+                PrintJob.status.in_(("RETRYING", "FAILED")),
+                or_(
+                    PrintJob.next_retry_at.is_(None),
+                    PrintJob.next_retry_at <= now,
+                ),
+            )
+            .values(
+                status="PRINTING",
+                locked_at=now,
+                locked_by=wid,
+                attempt_count=PrintJob.attempt_count + 1,
+                next_retry_at=None,
+            )
+        )
+        result = await db.execute(stmt)
+        await db.commit()
+        if not result.rowcount:
+            return None
+        db.expire_all()
+        return await db.get(PrintJob, int(job_id))
+
+    @classmethod
+    async def process_print_job(cls, job_id: int) -> bool:
+        """消费一条可重试 PrintJob：claim 后用已存 content 重打。"""
+        async with AsyncSessionLocal() as db:
+            job = await cls.claim_print_job(db, job_id)
+            if not job:
+                return False
+            order = await db.get(Order, job.order_id)
+            order_no = (order.order_no if order else "") or ""
+            try:
+                data = await cls._send_content(
+                    db,
+                    store_id=job.store_id,
+                    order_no=order_no,
+                    content=job.content or "",
+                    ticket_type=job.ticket_type or TICKET_KITCHEN,
+                )
+                cls._mark_job_success(job)
+                await db.commit()
+                logger.info(
+                    "PrintJob 重试成功 id=%s order_id=%s mock=%s",
+                    job.id,
+                    job.order_id,
+                    bool(isinstance(data, dict) and data.get("mock")),
+                )
+                return True
+            except Exception as exc:
+                logger.exception("PrintJob 重试失败 id=%s: %s", job_id, exc)
+                async with AsyncSessionLocal() as db2:
+                    row = await db2.get(PrintJob, int(job_id))
+                    if not row or row.status == "SUCCESS":
+                        return False
+                    cls._mark_job_failed(row, exc)
+                    await db2.commit()
+                return False
+
+    @classmethod
+    async def process_pending_print_jobs(cls, limit: int = 20) -> int:
+        """扫描 RETRYING/FAILED 且 next_retry_at<=now 的任务并逐条 claim 重打。"""
+        now = now_local()
+        async with AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(PrintJob.id)
+                    .where(
+                        PrintJob.status.in_(("RETRYING", "FAILED")),
+                        PrintJob.attempt_count < MAX_PRINT_ATTEMPTS,
+                        or_(
+                            PrintJob.next_retry_at.is_(None),
+                            PrintJob.next_retry_at <= now,
+                        ),
+                    )
+                    .order_by(PrintJob.id)
+                    .limit(limit)
+                )
+            ).scalars().all()
+            ids = list(rows)
+        done = 0
+        for jid in ids:
+            if await cls.process_print_job(int(jid)):
+                done += 1
+        return done

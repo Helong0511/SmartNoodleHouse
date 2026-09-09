@@ -447,7 +447,25 @@ class PaymentService:
         provider: str,
         source: str,
     ) -> dict:
-        """本笔支付单已标 PAID 后：未结清→PARTIAL_PAID；结清→订单 PAID。"""
+        """本笔支付单已标 PAID 后：未结清→PARTIAL_PAID；结清→订单 PAID。每笔 SUCCESS 记 SALE。"""
+        from app.services.financial_ledger_service import FinancialLedgerService
+
+        try:
+            await FinancialLedgerService.record_sale(
+                db,
+                store_id=int(order.store_id),
+                amount=payment.amount,
+                channel=order.channel or payment.channel,
+                provider=provider or payment.provider,
+                order_id=order.id,
+                payment_id=payment.id,
+                remark=f"payment_no={payment.payment_no}",
+            )
+        except Exception:
+            logger.exception(
+                "财务分录 SALE 写入失败 payment_id=%s order_id=%s", payment.id, order.id
+            )
+
         paid = await cls.paid_amount(db, order.id)
         remaining = money(order.total_amount) - paid
         method = await cls._resolve_payment_method(db, order.id)
@@ -1358,6 +1376,24 @@ class PaymentService:
                 await db.execute(select(Order).where(Order.id == row.order_id).with_for_update())
             ).scalar_one_or_none()
             if order:
+                try:
+                    from app.services.financial_ledger_service import FinancialLedgerService
+
+                    await FinancialLedgerService.record_refund(
+                        db,
+                        store_id=int(order.store_id),
+                        amount=row.amount,
+                        channel=order.channel or payment.channel,
+                        provider=payment.provider,
+                        order_id=order.id,
+                        payment_id=payment.id,
+                        refund_id=row.id,
+                        remark=f"refund_no={row.refund_no}",
+                    )
+                except Exception:
+                    logger.exception(
+                        "财务分录 REFUND 写入失败 refund_id=%s order_id=%s", row.id, order.id
+                    )
                 if payment.status == "REFUNDED" and order.status not in ("CANCELLED", "REFUNDED"):
                     await apply_order_status(
                         db,

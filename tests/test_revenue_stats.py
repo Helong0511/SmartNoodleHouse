@@ -92,6 +92,10 @@ async def test_build_period_stats_passes_until_to_new_store_customers():
     ), patch(
         "app.services.revenue_stats.paid_order_count_since", new_callable=AsyncMock, return_value=0
     ), patch(
+        "app.services.revenue_stats._ledger_has_entries_since",
+        new_callable=AsyncMock,
+        return_value=False,
+    ), patch(
         "app.services.revenue_stats.gross_revenue_since",
         new_callable=AsyncMock,
         return_value=Decimal("0"),

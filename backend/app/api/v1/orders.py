@@ -968,7 +968,12 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
 
     if not get_settings().xpyun_enabled:
         return success({"printed": False, "message": "打印未启用（XPYUN_ENABLED=false）"}, request=request)
-    result = await PrintService.print_order(db, order_id)
+    try:
+        result = await PrintService.print_order(db, order_id)
+    except Exception:
+        # 先提交 PrintJob RETRYING/FAILED，避免 get_db 回滚冲掉
+        await db.commit()
+        raise
     if result is None:
         # 订单已取消等业务跳过（非配置缺失；配置缺失会抛 AppException）
         return success({"printed": False, "message": "当前订单状态不可打印"}, request=request)

@@ -125,10 +125,11 @@
       <el-table-column prop="created_at" label="注册时间" width="160">
         <template #default="{ row }">{{ row.created_at || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="showDetail(row.id)">详情</el-button>
           <el-button v-if="canIssueCoupon" link type="success" @click="openIssueDialog(row)">发券</el-button>
+          <el-button v-if="canMergeCustomer" link type="warning" @click="openMergeDialog(row)">合并入</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -324,13 +325,39 @@
         <el-button type="primary" :loading="issuing" @click="submitIssue">发放</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="mergeDialog" title="合并顾客到当前档案" width="480px" destroy-on-close>
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="不可逆操作"
+        description="将源顾客的账号、订单、券、积分等迁入目标顾客，源顾客停用。请核对 ID。"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="100px">
+        <el-form-item label="目标顾客">
+          <span>{{ mergeTargetLabel }}</span>
+        </el-form-item>
+        <el-form-item label="源顾客 ID" required>
+          <el-input-number v-model="mergeSourceId" :min="1" :controls="false" style="width: 100%" placeholder="被合并的顾客主键" />
+        </el-form-item>
+        <el-form-item label="原因">
+          <el-input v-model="mergeReason" maxlength="255" show-word-limit placeholder="如：同人双号合并" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mergeDialog = false">取消</el-button>
+        <el-button type="warning" :loading="merging" @click="submitMerge">确认合并</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { mediaUrl } from '@/utils/media'
 import { useAuthStore } from '@/stores/auth'
@@ -352,6 +379,9 @@ const customerCoupons = ref<any[]>([])
 const customerVouchers = ref<any[]>([])
 const couponsLoading = ref(false)
 const canIssueCoupon = computed(() => auth.hasPermission('coupon:manage'))
+const canMergeCustomer = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('customer:write'),
+)
 
 const couponTemplates = ref<any[]>([])
 const issueDialog = ref(false)
@@ -360,6 +390,19 @@ const issuing = ref(false)
 const issueForm = reactive({
   template_id: undefined as number | undefined,
   quantity: 1,
+})
+
+const mergeDialog = ref(false)
+const mergeTarget = ref<any>(null)
+const mergeSourceId = ref<number | undefined>()
+const mergeReason = ref('')
+const merging = ref(false)
+
+const mergeTargetLabel = computed(() => {
+  const c = mergeTarget.value
+  if (!c) return '—'
+  const name = c.display_name || c.nickname || '顾客'
+  return `${name}（ID ${c.id} / ${c.customer_no}）`
 })
 
 const enabledTemplates = computed(() => couponTemplates.value.filter((t) => t.status === 1))
@@ -522,6 +565,53 @@ async function submitIssue() {
     ElMessage.error(e.message || '发券失败')
   } finally {
     issuing.value = false
+  }
+}
+
+function openMergeDialog(customer: any) {
+  if (!customer?.id) return
+  mergeTarget.value = customer
+  mergeSourceId.value = undefined
+  mergeReason.value = ''
+  mergeDialog.value = true
+}
+
+async function submitMerge() {
+  const targetId = mergeTarget.value?.id
+  const sourceId = Number(mergeSourceId.value)
+  if (!targetId || !sourceId) {
+    ElMessage.warning('请填写源顾客 ID')
+    return
+  }
+  if (sourceId === Number(targetId)) {
+    ElMessage.warning('源与目标不能相同')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认将顾客 #${sourceId} 合并入 #${targetId}？此操作不可逆。`,
+      '确认合并',
+      { type: 'warning', confirmButtonText: '合并', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  merging.value = true
+  try {
+    await api.post(`/customers/${targetId}/merge`, {
+      source_customer_id: sourceId,
+      reason: mergeReason.value || undefined,
+    })
+    ElMessage.success('合并成功')
+    mergeDialog.value = false
+    await load()
+    if (drawer.value && detail.value?.id === targetId) {
+      await showDetail(targetId)
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '合并失败')
+  } finally {
+    merging.value = false
   }
 }
 

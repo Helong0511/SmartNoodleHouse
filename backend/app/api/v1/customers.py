@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, require_permission
+from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import (
     Customer,
@@ -11,9 +13,15 @@ from app.models import (
     FaceProfile,
     Order,
 )
+from app.services.customer_merge_service import CustomerMergeService
 from app.services.customer_service import CustomerService, PreferenceService
 
 router = APIRouter(prefix="/customers", tags=["顾客"])
+
+
+class CustomerMergeBody(BaseModel):
+    source_customer_id: int = Field(..., gt=0)
+    reason: str | None = Field(None, max_length=255)
 
 
 @router.get("", dependencies=[require_permission("customer:read")])
@@ -334,6 +342,43 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
         },
         request=request,
     )
+
+
+@router.post("/{target_id}/merge", dependencies=[require_permission("customer:write")])
+async def merge_customers(
+    target_id: int,
+    body: CustomerMergeBody,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """合并源顾客到目标：SUPER_ADMIN 或 customer:write；非超管要求两顾客均在本店下过单。"""
+    from app.services.store_scope import require_bound_store
+
+    if int(body.source_customer_id) == int(target_id):
+        raise AppException(40061, "不能合并同一顾客")
+
+    effective_store = require_bound_store(user, None)
+    if effective_store is not None:
+        for cid in (target_id, body.source_customer_id):
+            ordered_here = await db.scalar(
+                select(func.count())
+                .select_from(Order)
+                .where(Order.customer_id == cid, Order.store_id == effective_store)
+            )
+            if not ordered_here:
+                raise HTTPException(status_code=403, detail="无权合并其他门店顾客")
+
+    result = await CustomerMergeService.merge(
+        db,
+        target_customer_id=target_id,
+        source_customer_id=body.source_customer_id,
+        reason=body.reason,
+        operator_id=user.id,
+        request=request,
+    )
+    await db.commit()
+    return success(result, message="合并成功", request=request)
 
 
 @router.get("/{customer_id}/preferences")

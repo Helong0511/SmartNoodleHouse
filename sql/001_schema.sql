@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS customer_coupons (
   template_id BIGINT UNSIGNED NOT NULL COMMENT '券模板 → coupon_templates.id',
   coupon_no VARCHAR(40) NOT NULL UNIQUE COMMENT '券实例编号（全局唯一）',
   status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE' COMMENT 'AVAILABLE=可用 | RESERVED=下单预占 | USED=已使用 | EXPIRED=已过期',
+  status_reason VARCHAR(40) DEFAULT NULL COMMENT '状态原因：merge_dup=合并冲突作废 等',
   obtained_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '领取/发放时间',
   expires_at DATETIME(3) NOT NULL COMMENT '过期时间',
   used_order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '核销订单 → orders.id',
@@ -858,6 +859,31 @@ CREATE TABLE IF NOT EXISTS system_settings (
   description VARCHAR(255) DEFAULT NULL COMMENT '配置说明',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '最后修改时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统全局配置表';
+
+-- 厨房小票打印任务（落库 + 失败退避重试）
+CREATE TABLE IF NOT EXISTS print_jobs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  order_id BIGINT UNSIGNED NOT NULL COMMENT '订单 → orders.id',
+  ticket_type VARCHAR(20) NOT NULL DEFAULT 'KITCHEN' COMMENT 'KITCHEN/URGE/CANCEL',
+  content_hash VARCHAR(64) DEFAULT NULL COMMENT '内容 SHA-256',
+  content TEXT DEFAULT NULL COMMENT '小票内容（已清控制字符，可截断）',
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PRINTING/SUCCESS/FAILED/RETRYING',
+  attempt_count INT NOT NULL DEFAULT 0 COMMENT '已尝试次数（含当前）',
+  next_retry_at DATETIME(3) DEFAULT NULL COMMENT '下次允许重试时间（指数退避）',
+  last_error VARCHAR(500) DEFAULT NULL COMMENT '最近一次失败摘要',
+  locked_at DATETIME(3) DEFAULT NULL COMMENT '消费者加锁时间',
+  locked_by VARCHAR(64) DEFAULT NULL COMMENT '锁持有者标识（实例/worker）',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  succeeded_at DATETIME(3) DEFAULT NULL COMMENT '打印成功时间',
+  INDEX idx_pj_order (order_id, ticket_type),
+  INDEX idx_pj_store_status (store_id, status, created_at),
+  INDEX idx_pj_retry (status, next_retry_at),
+  INDEX idx_pj_locked (locked_at, locked_by),
+  CONSTRAINT fk_pj_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_pj_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='厨房小票打印任务表';
 
 SET FOREIGN_KEY_CHECKS = 1;
 

@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 async def run_print_ticket(order_id: int, ticket_type: str = TICKET_KITCHEN) -> None:
     try:
         async with AsyncSessionLocal() as db:
-            await PrintService.print_order(db, order_id, ticket_type=ticket_type)
+            try:
+                await PrintService.print_order(db, order_id, ticket_type=ticket_type)
+            except Exception:
+                # 无论成败都提交，保留 PrintJob SUCCESS / RETRYING / FAILED
+                await db.commit()
+                raise
             await db.commit()
     except Exception as e:
         logger.exception("打印任务失败 order_id=%s type=%s: %s", order_id, ticket_type, e)

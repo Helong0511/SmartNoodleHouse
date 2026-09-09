@@ -12,6 +12,7 @@ Alembic：
 
 1. **0001_baseline** — 读取并执行 `sql/001_schema.sql`（去掉 `CREATE DATABASE` / `USE`；按语句执行，忽略「已存在」类错误）。
 2. **0002_p0_hardening** — 对旧库补丁：`orders.operator_id`、幂等键注释、webhook / 退款重试列、`financial_ledger`、`point_ledger`。
+3. **0003 ~ 0006** — 欢迎券 UNIQUE、班次唯一 OPEN、券 `status_reason`、`print_jobs`。
 
 校验脚本：`python scripts/verify_database.py`（关键表、`alembic_version`、UNIQUE / FK、P0 列）。
 

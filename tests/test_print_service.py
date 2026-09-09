@@ -265,7 +265,10 @@ async def test_print_order_calls_local_escpos(db_session, monkeypatch):
     with patch("app.services.print_service.EscposClient.print_ticket", new_callable=AsyncMock) as mock_print:
         mock_print.return_value = {"code": 0, "msg": "ok", "mode": "local"}
         result = await PrintService.print_order(db_session, order.id)
-        assert result == {"code": 0, "msg": "ok", "mode": "local"}
+        assert result["code"] == 0
+        assert result["msg"] == "ok"
+        assert result["mode"] == "local"
+        assert result.get("print_job_id")
         mock_print.assert_awaited_once()
         assert order.order_no in mock_print.call_args.args[0]
 
@@ -315,7 +318,9 @@ async def test_print_order_calls_xpyun_api(db_session, monkeypatch):
     with patch("app.services.print_service.XpyunClient.print_ticket", new_callable=AsyncMock) as mock_print:
         mock_print.return_value = {"code": 0, "msg": "ok"}
         result = await PrintService.print_order(db_session, order.id)
-        assert result == {"code": 0, "msg": "ok"}
+        assert result["code"] == 0
+        assert result["msg"] == "ok"
+        assert result.get("print_job_id")
         mock_print.assert_awaited_once()
         args, kwargs = mock_print.call_args
         assert args[0] == "XPY123456789A"
