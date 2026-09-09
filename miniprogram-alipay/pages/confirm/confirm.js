@@ -6,6 +6,7 @@ const payUtil = require('../../utils/pay')
 const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
 function memberDiscountText(rate) {
@@ -103,7 +104,7 @@ Page({
       return this._productCatalog
     }
     const sid = this.storeId()
-    const products = await api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+    const products = await fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false)
     const items = (products && products.items) || []
     this._productCatalog = items
     const boxMap = {}
@@ -705,7 +706,7 @@ Page({
       my.redirectTo({ url: `/pages/result/result?order_id=${order.id}${pts}` })
     } catch (e) {
       const msg = (e && e.message) || '下单失败'
-      if (/幂等键.*已结束|重新下单/.test(msg)) {
+      if (Number(e && e.code) === 40903 || /幂等键.*已结束|重新下单/.test(msg)) {
         this.clearCheckoutNonce()
       }
       if (/无效桌台|桌台二维码|选择桌号/.test(msg)) {

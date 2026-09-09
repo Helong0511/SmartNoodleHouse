@@ -8,6 +8,7 @@ from app.api.v1 import (
     customers,
     dashboard,
     delivery,
+    financial_ledger,
     health,
     member_levels,
     miniprogram,
@@ -30,6 +31,7 @@ api_router.include_router(users.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(payments.router)
+api_router.include_router(financial_ledger.router)
 api_router.include_router(print_jobs.router)
 api_router.include_router(pos.router)
 api_router.include_router(customers.router)

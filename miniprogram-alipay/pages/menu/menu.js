@@ -5,6 +5,7 @@ const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
 const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
+const { fetchAllProducts } = require('../../utils/products')
 
 function appGlobal() {
   try {
@@ -158,7 +159,7 @@ Page({
       }
       const [cats, products] = await Promise.all([
         catList ? Promise.resolve(catList) : api.get('/categories', sid ? { store_id: sid } : {}, false),
-        api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+        fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false)
       ])
       if (!catList) {
         catList = normalizeList(cats)

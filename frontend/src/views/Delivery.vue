@@ -731,7 +731,7 @@ async function loadBindings() {
 }
 
 async function loadMaps() {
-  const res = await api.get('/delivery/product-maps')
+  const res = await api.get('/delivery/product-maps', { params: { page: 1, page_size: 200 } })
   const data = res.data
   maps.value = Array.isArray(data) ? data : data?.items || []
 }

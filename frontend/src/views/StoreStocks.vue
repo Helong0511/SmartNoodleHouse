@@ -71,8 +71,19 @@ async function load() {
   }
   loading.value = true
   try {
-    const res = await api.get('/store-stocks', { params: { store_id: storeId.value } })
-    items.value = (res.data.items || []).map((it: any) => ({ ...it }))
+    const res = await api.get('/store-stocks', {
+      params: { store_id: storeId.value, page: 1, page_size: 200 },
+    })
+    const data = res.data || {}
+    const all = [...(data.items || [])]
+    const pages = Math.max(1, Number(data.total_pages || 1))
+    for (let p = 2; p <= pages && p <= 20; p++) {
+      const more: any = await api.get('/store-stocks', {
+        params: { store_id: storeId.value, page: p, page_size: 200 },
+      })
+      all.push(...(more.data?.items || []))
+    }
+    items.value = all.map((it: any) => ({ ...it }))
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {

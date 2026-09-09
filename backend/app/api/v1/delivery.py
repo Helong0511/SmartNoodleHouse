@@ -659,6 +659,8 @@ async def list_product_maps(
     user: CurrentUser,
     platform: str | None = None,
     store_id: int | None = None,
+    page: int = 1,
+    page_size: int = 100,
 ):
     from app.services.store_scope import assert_store_access, require_bound_store
 
@@ -666,13 +668,25 @@ async def list_product_maps(
     if sid is None:
         sid = int(user.store_id) if user.store_id else None
     if not sid:
-        return success([], request=request)
+        return success(
+            {"items": [], "total": 0, "page": 1, "page_size": page_size, "total_pages": 0},
+            request=request,
+        )
     assert_store_access(user, sid)
     store_id = int(sid)
+    page = max(1, int(page or 1))
+    page_size = min(max(1, int(page_size or 100)), 200)
+    from sqlalchemy import func
+
+    from app.core.response import calc_pages
+
     q = select(DeliveryProductMap).where(DeliveryProductMap.store_id == store_id)
     if platform:
         q = q.where(DeliveryProductMap.platform == platform.upper())
-    result = await db.execute(q)
+    total = int(await db.scalar(select(func.count()).select_from(q.subquery())) or 0)
+    result = await db.execute(
+        q.order_by(DeliveryProductMap.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    )
     maps = list(result.scalars().all())
     product_ids = list({m.product_id for m in maps})
     products = {}
@@ -696,7 +710,16 @@ async def list_product_maps(
         }
         for m in maps
     ]
-    return success(items, request=request)
+    return success(
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total, page_size),
+        },
+        request=request,
+    )
 
 
 @router.post("/product-maps", dependencies=[require_permission("product:update")])

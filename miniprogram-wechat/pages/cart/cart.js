@@ -4,6 +4,7 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
+const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
 Page({
@@ -62,7 +63,7 @@ Page({
     try {
       const sid = this.storeId()
       const [prodRes, catRes] = await Promise.all([
-        api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false),
+        fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false),
         api.get('/categories', sid ? { store_id: sid } : {}, false)
       ])
       products = (prodRes && prodRes.items) || []

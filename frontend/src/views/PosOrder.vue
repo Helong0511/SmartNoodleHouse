@@ -926,12 +926,26 @@ async function loadMenu() {
   }
   loading.value = true
   try {
-    const [cats, prods] = await Promise.all([
+    const [cats, ...prodPages] = await Promise.all([
       api.get('/categories', { params: { store_id: sid } }),
-      api.get('/products', { params: { store_id: sid, page_size: 200 } }),
+      (async () => {
+        const all: any[] = []
+        let page = 1
+        let totalPages = 1
+        do {
+          const res: any = await api.get('/products', {
+            params: { store_id: sid, page, page_size: 200 },
+          })
+          const data = res?.data || {}
+          all.push(...(data.items || []))
+          totalPages = Math.max(1, Number(data.total_pages || 1))
+          page += 1
+        } while (page <= totalPages && page <= 20)
+        return all
+      })(),
     ])
     categories.value = cats.data || []
-    products.value = ((prods.data?.items) || []).map(decorate)
+    products.value = prodPages[0].map(decorate)
     activeCat.value = categories.value[0]?.id ?? null
     await loadTables()
   } catch (e: any) {

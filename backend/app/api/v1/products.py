@@ -43,6 +43,7 @@ from app.services.category_schedule import (
     parse_hhmm,
 )
 from app.utils.upload import save_upload
+from urllib.parse import urlparse
 
 
 def _fmt_time(t) -> str:
@@ -210,19 +211,44 @@ async def _clear_main_product_images(db: DbSession, product_id: int) -> None:
     )
 
 
+def _assert_safe_product_image_url(url: str | None) -> str | None:
+    """商品主图仅允许本站 uploads 相对路径或同源 /uploads/；禁止任意外链/内网。"""
+    if url is None:
+        return None
+    s = str(url).strip()
+    if not s:
+        return None
+    if s.startswith("/uploads/") or s.startswith("uploads/"):
+        if ".." in s or "\\" in s:
+            raise AppException(40015, "商品图片路径非法")
+        return s if s.startswith("/") else f"/{s}"
+    parsed = urlparse(s)
+    if parsed.scheme in ("http", "https") and parsed.hostname:
+        host = (parsed.hostname or "").lower()
+        if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local"):
+            raise AppException(40015, "不允许使用内网图片地址")
+        path = parsed.path or ""
+        if not path.startswith("/uploads/"):
+            raise AppException(40015, "商品图片须为站内 uploads 地址，请先上传")
+        return path
+    raise AppException(40015, "商品图片地址非法，请使用上传接口")
+
+
 async def _set_main_product_image(db: DbSession, product: Product, url: str | None) -> None:
     """更新主图并同步 product_images（仅保留一条 MAIN）。"""
+    safe = _assert_safe_product_image_url(url)
     await _clear_main_product_images(db, product.id)
-    product.main_image = url or None
-    if url:
+    product.main_image = safe
+    if safe:
         db.add(
             ProductImage(
                 product_id=product.id,
-                image_url=url,
+                image_url=safe,
                 image_type="MAIN",
                 sort_order=0,
             )
         )
+
 
 router = APIRouter(tags=["商品"])
 
@@ -480,6 +506,8 @@ async def list_products(
     """
     if staff is not None:
         store_id = require_bound_store(staff, store_id)
+    page = max(1, int(page or 1))
+    page_size = min(max(1, int(page_size or 20)), 200)
     q = select(Product)
     if store_id is not None:
         q = q.where(Product.store_id == int(store_id))
@@ -588,11 +616,15 @@ async def list_store_stocks(
     db: DbSession,
     user: CurrentUser,
     store_id: int | None = None,
+    page: int = 1,
+    page_size: int = 100,
 ):
     """分店库存覆盖列表（含品牌商品名）。"""
     sid = require_bound_store(user, store_id)
     if sid is None:
         raise AppException(40060, "请指定门店")
+    page = max(1, int(page or 1))
+    page_size = min(max(1, int(page_size or 100)), 200)
     products = list(
         (
             await db.execute(
@@ -622,7 +654,20 @@ async def list_store_stocks(
                 "has_override": ov is not None,
             }
         )
-    return success({"store_id": sid, "items": items}, request=request)
+    total = len(items)
+    start = (page - 1) * page_size
+    slice_items = items[start : start + page_size]
+    return success(
+        {
+            "store_id": sid,
+            "items": slice_items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total, page_size),
+        },
+        request=request,
+    )
 
 
 @router.put("/store-stocks/{product_id}", dependencies=[require_permission("product:update")])

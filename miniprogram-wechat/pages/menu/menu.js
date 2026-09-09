@@ -5,6 +5,7 @@ const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const tabCartBadge = require('../../utils/tabCartBadge')
+const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
 const MENU_CACHE_MS = 5 * 60 * 1000
@@ -149,7 +150,7 @@ Page({
       }
       const [cats, products] = await Promise.all([
         catList ? Promise.resolve(catList) : api.get('/categories', sid ? { store_id: sid } : {}, false),
-        api.get('/products', { page_size: 100, ...(sid ? { store_id: sid } : {}) }, false)
+        fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false)
       ])
       if (!catList) {
         catList = normalizeList(cats)
