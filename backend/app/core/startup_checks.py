@@ -86,6 +86,18 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and getattr(settings, "allow_print_mock", False):
         errors.append("生产环境禁止 ALLOW_PRINT_MOCK=true（会导致厨房以为已出票实际未打印）")
 
+    if is_prod and getattr(settings, "allow_opencv_face_fallback", False):
+        errors.append("生产环境禁止 ALLOW_OPENCV_FACE_FALLBACK=true")
+
+    if is_prod and not getattr(settings, "enable_rate_limit", True):
+        errors.append("生产环境禁止 ENABLE_RATE_LIMIT=false")
+
+    secret_enc = (getattr(settings, "secret_encryption_key", None) or "").strip()
+    if is_prod and not secret_enc:
+        errors.append("生产环境须独立配置 SECRET_ENCRYPTION_KEY（勿仅依赖 FACE_ENCRYPTION_KEY）")
+    elif is_prod and secret_enc and len(secret_enc) < 32:
+        errors.append("SECRET_ENCRYPTION_KEY 须至少 32 字符")
+
     if is_prod and not (getattr(settings, "display_screen_token", None) or "").strip():
         errors.append("生产环境须配置 DISPLAY_SCREEN_TOKEN（叫号屏访问令牌）")
 

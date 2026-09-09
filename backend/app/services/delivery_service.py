@@ -727,7 +727,11 @@ class DeliveryService:
         approve: bool,
         reason: str | None = None,
     ) -> dict:
-        refund = await db.get(DeliveryRefund, refund_id)
+        refund = (
+            await db.execute(
+                select(DeliveryRefund).where(DeliveryRefund.id == int(refund_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not refund:
             raise AppException(40453, "退款记录不存在")
         if refund.status != "PENDING":
@@ -735,7 +739,12 @@ class DeliveryService:
 
         d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
         order = await db.get(Order, refund.order_id) if refund.order_id else None
-        credentials = await get_credentials_for_store(db, refund.platform, order.store_id if order else 1)
+        if not order:
+            raise AppException(40454, "关联订单不存在，无法处理外卖退款")
+        store_id = int(order.store_id)
+        credentials = await get_credentials_for_store(db, refund.platform, store_id)
+        if not credentials:
+            raise AppException(40061, f"门店 {store_id} 未配置 {refund.platform} 外卖凭证")
         provider = get_delivery_provider(refund.platform, credentials)
 
         if approve:
@@ -800,10 +809,15 @@ class DeliveryService:
         if not d_order:
             raise AppException(40454, "外卖订单不存在")
         order = await db.get(Order, d_order.order_id)
-        if order and order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
+        if not order:
+            raise AppException(40454, "关联订单不存在，无法取消外卖单")
+        if order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
             raise AppException(40054, "订单已结束，无法取消")
 
-        credentials = await get_credentials_for_store(db, d_order.platform, order.store_id if order else 1)
+        store_id = int(order.store_id)
+        credentials = await get_credentials_for_store(db, d_order.platform, store_id)
+        if not credentials:
+            raise AppException(40061, f"门店 {store_id} 未配置 {d_order.platform} 外卖凭证")
         provider = get_delivery_provider(d_order.platform, credentials)
         ok = await provider.cancel_order(d_order.platform_order_id, reason)
         if ok and order:

@@ -29,6 +29,9 @@ def _base_prod(**kwargs):
         process_role="leader",
         cors_origins="https://order.example.com",
         h5_public_base_url="https://order.example.com",
+        secret_encryption_key="S7nB3qW9sE2mY6tR1uI5oP8aL4xC0vN2zM",
+        enable_rate_limit=True,
+        allow_opencv_face_fallback=False,
         wechat_mch_id="1900000000",
         wechat_api_v3_key="k" * 32,
         wechat_cert_serial_no="ABC123",
@@ -67,6 +70,21 @@ def test_prod_rejects_wechat_without_platform_cert():
 def test_prod_rejects_print_mock():
     with pytest.raises(SystemExit):
         validate_settings(_base_prod(allow_print_mock=True))
+
+
+def test_prod_rejects_missing_secret_encryption_key():
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(secret_encryption_key=""))
+
+
+def test_prod_rejects_rate_limit_disabled():
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(enable_rate_limit=False))
+
+
+def test_prod_rejects_opencv_face_fallback():
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(allow_opencv_face_fallback=True))
 
 
 def test_prod_rejects_xpyun_enabled_without_creds():

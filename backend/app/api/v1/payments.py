@@ -520,7 +520,7 @@ async def list_payments(
             select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
             .where(
                 PaymentRefund.payment_id.in_(ids),
-                PaymentRefund.status.in_(("PENDING", "PROCESSING")),
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
             )
             .group_by(PaymentRefund.payment_id)
         )
