@@ -375,10 +375,19 @@ async function loadAllStoreProducts(storeId?: number) {
     return
   }
   try {
-    const res = await api.get('/products', {
-      params: { page: 1, page_size: 200, status: 'ALL', store_id: sid },
-    })
-    allStoreProducts.value = res.data.items || []
+    const all: any[] = []
+    let page = 1
+    let totalPages = 1
+    do {
+      const res: any = await api.get('/products', {
+        params: { page, page_size: 200, status: 'ALL', store_id: sid },
+      })
+      const data = res?.data || {}
+      all.push(...(data.items || []))
+      totalPages = Math.max(1, Number(data.total_pages || 1))
+      page += 1
+    } while (page <= totalPages && page <= 20)
+    allStoreProducts.value = all
   } catch {
     allStoreProducts.value = []
   }

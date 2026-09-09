@@ -1,11 +1,11 @@
 """对象存储抽象：local / s3（含 MinIO 兼容）"""
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from urllib.parse import urljoin
 
 from app.core.config import get_settings
 
@@ -31,26 +31,37 @@ class LocalObjectStorage(ObjectStorage):
         root = Path(settings.upload_dir).resolve()
         if not str(resolved).startswith(str(root)):
             raise ValueError("非法存储路径")
-        path.write_bytes(data)
+        await asyncio.to_thread(path.write_bytes, data)
         return f"/uploads/{key.replace(chr(92), '/')}"
 
     async def delete(self, key: str) -> None:
         settings = get_settings()
         path = Path(settings.upload_dir) / key
         if path.is_file():
-            path.unlink()
+            await asyncio.to_thread(path.unlink)
 
 
 class S3ObjectStorage(ObjectStorage):
-    """需要 boto3；未安装时启动会降级提示。"""
+    """boto3 同步客户端；put/delete 经 asyncio.to_thread，避免阻塞事件循环。"""
 
     def __init__(self):
-        import boto3
-        from botocore.client import Config
-
         settings = get_settings()
+        if not (
+            (settings.s3_endpoint or "").strip()
+            and (settings.s3_access_key or "").strip()
+            and (settings.s3_secret_key or "").strip()
+            and (settings.s3_bucket or "").strip()
+        ):
+            raise RuntimeError("STORAGE_BACKEND=s3 但 S3 配置不完整")
+        try:
+            import boto3
+            from botocore.client import Config
+        except ImportError as e:
+            raise RuntimeError("STORAGE_BACKEND=s3 需要安装 boto3") from e
+
         self.bucket = settings.s3_bucket
         self.public_base = (settings.s3_public_base_url or "").rstrip("/")
+        self.endpoint = (settings.s3_endpoint or "").rstrip("/")
         self.client = boto3.client(
             "s3",
             endpoint_url=settings.s3_endpoint or None,
@@ -60,39 +71,50 @@ class S3ObjectStorage(ObjectStorage):
             config=Config(signature_version="s3v4"),
         )
 
-    async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-        # boto3 同步 API，放到线程池亦可；体量小直接调
+    def _put_sync(self, key: str, data: bytes, content_type: str) -> None:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+
+    def _delete_sync(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        await asyncio.to_thread(self._put_sync, key, data, content_type)
         if self.public_base:
             return f"{self.public_base}/{key}"
-        settings = get_settings()
-        if settings.s3_endpoint:
-            return f"{settings.s3_endpoint.rstrip('/')}/{self.bucket}/{key}"
+        if self.endpoint:
+            return f"{self.endpoint}/{self.bucket}/{key}"
         return f"s3://{self.bucket}/{key}"
 
     async def delete(self, key: str) -> None:
-        self.client.delete_object(Bucket=self.bucket, Key=key)
+        await asyncio.to_thread(self._delete_sync, key)
 
 
 _storage: ObjectStorage | None = None
 
 
 def get_storage() -> ObjectStorage:
+    """初始化对象存储。
+
+    STORAGE_BACKEND=s3 时初始化失败**不再**静默降级本地（生产易误以为已上云）。
+    """
     global _storage
     if _storage is not None:
         return _storage
     settings = get_settings()
     backend = (settings.storage_backend or "local").lower()
     if backend == "s3":
-        try:
-            _storage = S3ObjectStorage()
-            logger.info("Object storage: S3/MinIO bucket=%s", settings.s3_bucket)
-        except Exception as e:
-            logger.error("S3 初始化失败，降级本地存储: %s", e)
-            _storage = LocalObjectStorage()
+        _storage = S3ObjectStorage()
+        logger.info("Object storage: S3/MinIO bucket=%s", settings.s3_bucket)
     else:
         _storage = LocalObjectStorage()
+        logger.info("Object storage: local dir=%s", settings.upload_dir)
     return _storage
+
+
+def reset_storage_for_tests() -> None:
+    """测试用：清空单例。"""
+    global _storage
+    _storage = None
 
 
 def make_object_key(subdir: str, ext: str) -> str:

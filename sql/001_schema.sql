@@ -328,7 +328,10 @@ CREATE TABLE IF NOT EXISTS products (
   INDEX idx_products_store (store_id, status, sort_order),
   INDEX idx_products_category (category_id, status, sort_order),
   CONSTRAINT fk_products_store FOREIGN KEY (store_id) REFERENCES stores(id),
-  CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES product_categories(id)
+  CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES product_categories(id),
+  CONSTRAINT chk_products_stock_nonneg CHECK (stock >= 0),
+  CONSTRAINT chk_products_price_pos CHECK (price > 0),
+  CONSTRAINT chk_products_orig_price CHECK (original_price IS NULL OR original_price >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品表（按门店）';
 
 CREATE TABLE IF NOT EXISTS product_images (
@@ -354,7 +357,8 @@ CREATE TABLE IF NOT EXISTS store_product_stocks (
   UNIQUE KEY uk_store_product (store_id, product_id),
   INDEX idx_sps_product (product_id),
   CONSTRAINT fk_sps_store FOREIGN KEY (store_id) REFERENCES stores(id),
-  CONSTRAINT fk_sps_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  CONSTRAINT fk_sps_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  CONSTRAINT chk_sps_stock_nonneg CHECK (stock >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分店商品库存覆盖表';
 
 -- 规格组（全局字典，如 份量、辣度、加料）
@@ -383,7 +387,8 @@ CREATE TABLE IF NOT EXISTS options (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   UNIQUE KEY uk_group_code (group_id, code),
-  CONSTRAINT fk_options_group FOREIGN KEY (group_id) REFERENCES option_groups(id)
+  CONSTRAINT fk_options_group FOREIGN KEY (group_id) REFERENCES option_groups(id),
+  CONSTRAINT chk_options_extra_price CHECK (extra_price >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='规格选项表';
 
 -- 商品与规格组多对多绑定
