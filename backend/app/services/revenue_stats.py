@@ -84,7 +84,7 @@ async def net_revenue_since(
     gross = Decimal(str(await db.scalar(pay_q) or 0))
     refunded = Decimal(str(await db.scalar(refund_q) or 0))
     net = money(gross - refunded)
-    return net if net > 0 else money(Decimal("0"))
+    return net
 
 
 async def paid_order_count_since(
@@ -356,8 +356,6 @@ async def build_period_stats(
     gross = await gross_revenue_since(db, since=since, until=until, store_id=store_id)
     refunded = await refunded_since(db, since=since, until=until, store_id=store_id)
     net = money(gross - refunded)
-    if net < 0:
-        net = money(Decimal("0"))
     amounts = await order_amount_stats_since(db, since=since, until=until, store_id=store_id)
     avg_order = round(float(net) / paid_count, 2) if paid_count else 0.0
 
@@ -494,8 +492,6 @@ async def store_period_breakdown(
         gross = money(Decimal(str(gross_rows.get(sid, 0))))
         refunded = money(Decimal(str(refund_rows.get(sid, 0))))
         net = money(gross - refunded)
-        if net < 0:
-            net = money(Decimal("0"))
         paid = int(paid_rows.get(sid, 0))
         sub, mem, coup, vou, pay = amount_rows.get(sid, (0, 0, 0, 0, 0))
         mem, coup, vou = money(Decimal(str(mem))), money(Decimal(str(coup))), money(Decimal(str(vou)))
@@ -542,8 +538,6 @@ async def daily_series(
         gross = await gross_revenue_since(db, since=day_start, until=day_end, store_id=store_id)
         refunded = await refunded_since(db, since=day_start, until=day_end, store_id=store_id)
         net = money(gross - refunded)
-        if net < 0:
-            net = money(Decimal("0"))
         amounts = await order_amount_stats_since(db, since=day_start, until=day_end, store_id=store_id)
         series.append(
             {
@@ -617,8 +611,6 @@ async def payment_channel_stats(
         cnt, gross = pay_rows.get(code, (0, Decimal("0")))
         refunded = refund_rows.get(code, Decimal("0"))
         net = money(gross - refunded)
-        if net < 0:
-            net = money(Decimal("0"))
         items.append(
             {
                 "provider": code,

@@ -7,9 +7,11 @@ from datetime import timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.response import naive_local_now
 from app.models import Order
 from app.services.order_lifecycle import apply_order_status
+from app.services.system_settings_service import SystemSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +29,32 @@ def order_kitchen_anchor_at(order: Order):
 async def auto_complete_stale_kitchen_orders(
     db: AsyncSession,
     *,
-    timeout_minutes: int,
+    timeout_minutes: int | None = None,
     limit: int = 50,
 ) -> list[Order]:
-    """将超时未在 KDS 完成的堂食/小程序订单自动置为 COMPLETED。返回本次完成的订单。"""
-    if timeout_minutes <= 0:
-        return []
+    """将超时未在 KDS 完成的堂食/小程序订单自动置为 COMPLETED。按门店 effective_setting 判定超时。"""
+    settings = get_settings()
+    global_timeout = (
+        int(timeout_minutes)
+        if timeout_minutes is not None
+        else await SystemSettingsService.effective_int(
+            db, "kitchen_auto_complete_minutes", settings.kitchen_auto_complete_minutes
+        )
+    )
+    overrides_raw = await SystemSettingsService.store_override_map(db, "kitchen_auto_complete_minutes")
+    store_timeouts: dict[int, int] = {}
+    for sid, val in overrides_raw.items():
+        try:
+            store_timeouts[int(sid)] = int(val)
+        except (TypeError, ValueError):
+            continue
 
-    cutoff = naive_local_now() - timedelta(minutes=timeout_minutes)
+    # 取正超时中的最小值做粗筛；全 0 则关闭
+    positive = [t for t in [global_timeout, *store_timeouts.values()] if t > 0]
+    if not positive:
+        return []
+    min_timeout = min(positive)
+    cutoff = naive_local_now() - timedelta(minutes=min_timeout)
     anchor = func.coalesce(Order.paid_at, Order.ordered_at, Order.created_at)
     result = await db.execute(
         select(Order)
@@ -50,14 +70,18 @@ async def auto_complete_stale_kitchen_orders(
     )
     candidates = list(result.scalars().all())
     completed: list[Order] = []
+    now = naive_local_now()
     for order in candidates:
         if order.status not in KITCHEN_PIPELINE_STATUSES or order.payment_status != "PAID":
             continue
         ch = (order.channel or "").strip().upper()
         if ch in EXCLUDED_CHANNELS:
             continue
+        minutes = store_timeouts.get(int(order.store_id), global_timeout)
+        if minutes <= 0:
+            continue
         anchor_at = order_kitchen_anchor_at(order)
-        if anchor_at is None or anchor_at > cutoff:
+        if anchor_at is None or anchor_at > now - timedelta(minutes=minutes):
             continue
         await apply_order_status(
             db,
@@ -65,7 +89,7 @@ async def auto_complete_stale_kitchen_orders(
             "COMPLETED",
             source="KDS_TIMEOUT",
             assert_kind="SYSTEM",
-            remark=f"厨房 {timeout_minutes} 分钟未处理，系统自动出餐",
+            remark=f"厨房 {minutes} 分钟未处理，系统自动出餐",
         )
         completed.append(order)
     if completed:

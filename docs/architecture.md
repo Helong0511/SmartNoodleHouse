@@ -1,0 +1,47 @@
+# 系统架构
+
+智能面馆（SmartNoodleHouse）是一套多端堂食 / 外卖一体化门店系统：后台管理、顾客小程序（微信 / 支付宝）、收银台、厨房 KDS、叫号屏，以及美团 / 饿了么接入。
+
+## 逻辑分层
+
+| 层 | 路径 / 组件 | 职责 |
+|---|-------------|------|
+| 顾客端 | `miniprogram-wechat/`、`miniprogram-alipay/`、H5 扫码页 | 扫码绑桌、点餐、支付、订单状态 |
+| 管理端 | `frontend/` | 门店运营、商品、订单、会员、支付退款、摄像头迎宾 |
+| API | `backend/app/`（FastAPI） | 鉴权、业务编排、支付回调、外卖 Webhook |
+| 数据 | MySQL + Redis | 业务持久化；缓存 / 限流 / 分布式锁 |
+| Worker | `PROCESS_ROLE=leader` 同进程内调度 | Webhook 消费、退款轮询、打印、识别等 |
+
+## 部署拓扑（概要）
+
+```
+[店内局域网]                         [公网]
+  摄像头 RTSP ──┐
+  KDS / 收银 ───┼── 应用主机          HTTPS :443 ── Nginx
+  叫号屏 ───────┘  MySQL + Redis         │
+                    API :8000（本机）     ├─ /        → frontend/dist
+                                         ├─ /api     → Gunicorn / Uvicorn
+                                         └─ /uploads → 本地或对象存储
+  小程序 / 平台回调 ──→ https://域名/api/v1/...
+```
+
+要点：
+
+- 摄像头 RTSP 仅走店内网，勿对公网开放。
+- 集群内仅允许 **一个** `PROCESS_ROLE=leader`（调度 / TTS / 人脸识别）。
+- 小程序与支付 / 外卖回调必须使用 HTTPS 域名。
+
+## 核心业务流
+
+1. **堂食**：扫桌台码 → 绑定 `tables.qr_token` → 下单（幂等键）→ 支付 → 厨房认领 / 出餐 → 完成。
+2. **POS**：员工 JWT → 下单写入 `orders.operator_id` → 现金 / 扫码支付 → 班次日结。
+3. **外卖**：平台 Webhook → `webhook_inbox` 落库 → 异步映射为统一 `orders` + `delivery_orders`。
+4. **会员**：支付成功按实付积分；退款扣回；等级按 `member_levels.min_points` 重算。
+
+## 相关文档
+
+- [部署](deployment.md)
+- [数据库](database.md)
+- [支付](payment.md)
+- [多门店](multi-store.md)
+- [安全](security.md)

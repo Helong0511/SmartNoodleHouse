@@ -87,8 +87,12 @@ class RecognitionWorker:
                                 best_sim, best_id = sim, cid
                         from app.services.system_settings_service import SystemSettingsService
 
-                        threshold = await SystemSettingsService.get_float(
-                            db, "face_match_threshold", settings.face_match_threshold
+                        store_id = int(cam.store_id) if cam and cam.store_id else None
+                        threshold = await SystemSettingsService.effective_float(
+                            db,
+                            "face_match_threshold",
+                            settings.face_match_threshold,
+                            store_id=store_id,
                         )
                         if best_id is None or best_sim < threshold * 0.9:
                             continue

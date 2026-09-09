@@ -107,6 +107,9 @@ class CouponTemplate(Base):
 
 class CustomerCoupon(Base):
     __tablename__ = "customer_coupons"
+    __table_args__ = (
+        UniqueConstraint("customer_id", "template_id", name="uk_cc_customer_template"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
     template_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("coupon_templates.id"))
@@ -116,6 +119,19 @@ class CustomerCoupon(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_order_id: Mapped[int | None] = mapped_column(BigInteger)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PointLedger(Base):
+    """会员积分流水（与 customers.points 对账）"""
+    __tablename__ = "point_ledger"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    order_id: Mapped[int | None] = mapped_column(BigInteger)
+    refund_id: Mapped[int | None] = mapped_column(BigInteger)
+    delta: Mapped[int] = mapped_column(Integer)
+    balance_after: Mapped[int] = mapped_column(Integer)
+    entry_type: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Customer(Base, TimestampMixin):
@@ -308,6 +324,7 @@ class Order(Base, TimestampMixin):
     dining_type: Mapped[str] = mapped_column(String(20), default="DINE_IN")
     remark: Mapped[str | None] = mapped_column(String(500))
     idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), default=None)
     ordered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -616,6 +633,12 @@ class WebhookInbox(Base):
     headers_json: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     error_message: Mapped[str | None] = mapped_column(String(500))
+    # 原子 claim / 重试：attempt_count、退避、锁持有者
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(64))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

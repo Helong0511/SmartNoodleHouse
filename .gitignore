@@ -2,7 +2,12 @@
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
 *.pem
+*.key
+*.crt
+!docs/**/*.crt
 certs/
 
 # Python
@@ -28,6 +33,7 @@ coverage.xml
 node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/tsconfig.tsbuildinfo
 *.local
 
 # IDE
@@ -39,6 +45,7 @@ frontend/.vite/
 Thumbs.db
 
 # 上传与运行时
+uploads/
 backend/uploads/
 *.log
 *.log.*

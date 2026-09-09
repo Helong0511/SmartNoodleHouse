@@ -202,11 +202,13 @@ async def update_user(
 
     if data.display_name is not None:
         target.display_name = data.display_name.strip()
+    perm_changes: dict = {}
     if data.status is not None:
         if target.id == user.id and int(data.status) != 1:
             raise AppException(40083, "不能禁用自己的账号")
         new_status = int(data.status)
         if new_status != int(target.status):
+            perm_changes["status"] = {"from": int(target.status), "to": new_status}
             target.status = new_status
             if new_status != 1:
                 target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
@@ -214,11 +216,14 @@ async def update_user(
         role = await _get_role(db, data.role_id)
         _assert_can_assign_role(user, role)
         if role.id != target.role_id:
+            perm_changes["role_id"] = {"from": target.role_id, "to": role.id, "role_code": role.code}
             target.role_id = role.id
             target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
     if data.clear_store:
         if user.role.code != "SUPER_ADMIN":
             raise AppException(40312, "仅超管可清空门店绑定")
+        if target.store_id is not None:
+            perm_changes["store_id"] = {"from": target.store_id, "to": None}
         target.store_id = None
     elif data.store_id is not None:
         assert_store_access(user, data.store_id)
@@ -227,7 +232,20 @@ async def update_user(
             sid = require_bound_store(user)
             if sid != int(data.store_id):
                 raise AppException(40313, "不能将员工改绑到其他门店")
+        if target.store_id != int(data.store_id):
+            perm_changes["store_id"] = {"from": target.store_id, "to": int(data.store_id)}
         target.store_id = int(data.store_id)
+
+    if perm_changes:
+        from app.services.audit_service import AuditService
+
+        await AuditService.log_permission_change(
+            db,
+            operator_id=user.id,
+            target_user_id=target.id,
+            changes=perm_changes,
+            request=request,
+        )
 
     await db.flush()
     target = await _load_user_with_role(db, target.id)

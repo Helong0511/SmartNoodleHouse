@@ -30,6 +30,8 @@ TRUNCATE TABLE delivery_refunds;
 TRUNCATE TABLE platform_store_bindings;
 TRUNCATE TABLE delivery_orders;
 TRUNCATE TABLE delivery_product_maps;
+TRUNCATE TABLE point_ledger;
+TRUNCATE TABLE financial_ledger;
 TRUNCATE TABLE webhook_inbox;
 TRUNCATE TABLE payment_callback_receipts;
 TRUNCATE TABLE payment_status_history;

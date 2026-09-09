@@ -306,7 +306,7 @@ async function bindParsedScanRaw(raw, resolve) {
 
 function promptPasteTableToken(resolve) {
   const { DEV_LAN_HOST } = require('../config/env')
-  const sample = `http://${DEV_LAN_HOST || '192.168.1.110'}:5173/scan?token=6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs`
+  const sample = `http://${DEV_LAN_HOST || '192.168.1.110'}:5173/scan?token=…`
   my.prompt({
     title: '粘贴桌台码（模拟器）',
     message: '支付宝模拟器扫码只会返回 fake_code。请粘贴后台「一码通扫」完整链接，或直接粘贴 token。',

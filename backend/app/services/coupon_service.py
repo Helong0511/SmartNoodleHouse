@@ -112,6 +112,8 @@ class CouponService:
     async def issue_by_template_id(
         db: AsyncSession, customer_id: int, template_id: int, quantity: int = 1
     ) -> list[CustomerCoupon]:
+        from sqlalchemy.exc import IntegrityError
+
         from app.models import Customer
 
         customer = await db.get(Customer, int(customer_id))
@@ -120,19 +122,38 @@ class CouponService:
         tmpl = await db.get(CouponTemplate, int(template_id))
         if not tmpl or int(tmpl.status) != 1:
             raise AppException(40407, "优惠券模板不存在或已停用")
-        qty = max(1, min(int(quantity or 1), 50))
-        issued: list[CustomerCoupon] = []
-        for _ in range(qty):
-            cc = CustomerCoupon(
-                customer_id=customer.id,
-                template_id=tmpl.id,
-                coupon_no=generate_no("VP" if CouponService.is_voucher_type(tmpl.coupon_type) else "CP"),
-                status="AVAILABLE",
-                expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
+        # uk_cc_customer_template：每人每模板至多一张
+        exists = await db.scalar(
+            select(CustomerCoupon.id)
+            .where(
+                CustomerCoupon.customer_id == customer.id,
+                CustomerCoupon.template_id == tmpl.id,
             )
-            db.add(cc)
-            issued.append(cc)
-        await db.flush()
+            .limit(1)
+        )
+        if exists:
+            raise AppException(40076, "该顾客已持有此模板优惠券（每人每模板限一张）")
+        qty = max(1, min(int(quantity or 1), 50))
+        if qty > 1:
+            raise AppException(40077, "每人每模板限一张，不可批量重复发放同一模板")
+        issued: list[CustomerCoupon] = []
+        try:
+            async with db.begin_nested():
+                cc = CustomerCoupon(
+                    customer_id=customer.id,
+                    template_id=tmpl.id,
+                    coupon_no=generate_no("VP" if CouponService.is_voucher_type(tmpl.coupon_type) else "CP"),
+                    status="AVAILABLE",
+                    expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
+                )
+                db.add(cc)
+                await db.flush()
+                issued.append(cc)
+        except IntegrityError as exc:
+            msg = str(getattr(exc, "orig", exc)).upper()
+            if "UNIQUE" in msg or "DUPLICATE" in msg:
+                raise AppException(40076, "该顾客已持有此模板优惠券（每人每模板限一张）") from exc
+            raise
         return issued
 
     @staticmethod
@@ -262,6 +283,8 @@ class CouponService:
     async def issue_from_template(
         db: AsyncSession, customer_id: int, template_name: str
     ) -> CustomerCoupon | None:
+        from sqlalchemy.exc import IntegrityError
+
         tmpl = (
             await db.execute(
                 select(CouponTemplate).where(
@@ -271,16 +294,27 @@ class CouponService:
         ).scalar_one_or_none()
         if not tmpl:
             return None
-        cc = CustomerCoupon(
-            customer_id=customer_id,
-            template_id=tmpl.id,
-            coupon_no=generate_no("CP"),
-            status="AVAILABLE",
-            expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
+        exists = await db.scalar(
+            select(CustomerCoupon.id)
+            .where(CustomerCoupon.customer_id == customer_id, CustomerCoupon.template_id == tmpl.id)
+            .limit(1)
         )
-        db.add(cc)
-        await db.flush()
-        return cc
+        if exists:
+            return None
+        try:
+            async with db.begin_nested():
+                cc = CustomerCoupon(
+                    customer_id=customer_id,
+                    template_id=tmpl.id,
+                    coupon_no=generate_no("CP"),
+                    status="AVAILABLE",
+                    expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
+                )
+                db.add(cc)
+                await db.flush()
+                return cc
+        except IntegrityError:
+            return None
 
     @staticmethod
     async def issue_welcome_coupon(db: AsyncSession, customer_id: int) -> CustomerCoupon | None:
@@ -416,22 +450,27 @@ class CouponService:
         order_id: int,
         customer_id: int | None,
     ) -> None:
-        """下单后预占券，防并发双花。"""
+        """下单后预占券，防并发双花。先锁行再二次校验 status/expires_at/customer_id。"""
         if not coupon_id or not customer_id:
             return
         row = (
             await db.execute(
                 select(CustomerCoupon)
-                .where(
-                    CustomerCoupon.id == int(coupon_id),
-                    CustomerCoupon.customer_id == int(customer_id),
-                    CustomerCoupon.status == "AVAILABLE",
-                )
+                .where(CustomerCoupon.id == int(coupon_id))
                 .with_for_update()
             )
         ).scalar_one_or_none()
         if not row:
             raise AppException(40063, "优惠券不可用或已被占用")
+        if int(row.customer_id) != int(customer_id):
+            raise AppException(40062, "无权使用该优惠券")
+        if row.status != "AVAILABLE":
+            raise AppException(40063, "优惠券不可用或已被占用")
+        expires = ensure_local_aware(row.expires_at)
+        if expires and expires <= now_local():
+            row.status = "EXPIRED"
+            await db.flush()
+            raise AppException(40064, "优惠券已过期")
         row.status = "RESERVED"
         row.used_order_id = order_id
         await db.flush()

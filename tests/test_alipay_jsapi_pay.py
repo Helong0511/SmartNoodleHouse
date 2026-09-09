@@ -23,12 +23,12 @@ async def test_trade_create_builds_jsapi_payload(monkeypatch):
         amount_yuan=Decimal("12.50"),
         subject="订单ORD1",
         buyer_id="2088123456789012",
-        op_app_id="2021006196676140",
+        op_app_id="2021000000000000",
     )
     assert captured["method"] == "alipay.trade.create"
     assert captured["biz"]["product_code"] == "JSAPI_PAY"
     assert captured["biz"]["buyer_id"] == "2088123456789012"
-    assert captured["biz"]["op_app_id"] == "2021006196676140"
+    assert captured["biz"]["op_app_id"] == "2021000000000000"
     assert data["trade_no"] == "2024090322001000000001"
 
 

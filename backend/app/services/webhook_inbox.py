@@ -4,9 +4,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import socket
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +22,22 @@ from app.services.delivery_tasks import run_deferred_tasks
 from app.services.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
+
+# 最大重试次数；超过后保持 FAILED，不再自动 claim
+MAX_ATTEMPTS = 8
+# 指数退避基数（秒）：2^attempt，上限 3600
+BACKOFF_BASE_SEC = 2
+BACKOFF_CAP_SEC = 3600
+
+
+def _worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _backoff_seconds(attempt_count: int) -> int:
+    """指数退避：2^attempt 秒，封顶 1 小时。"""
+    exp = max(0, int(attempt_count))
+    return min(BACKOFF_CAP_SEC, BACKOFF_BASE_SEC**exp)
 
 
 def make_event_id(platform: str, raw: dict[str, Any], body: bytes) -> str:
@@ -84,13 +103,50 @@ async def enqueue_delivery_webhook(
         raise
 
 
+async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | None = None) -> WebhookInbox | None:
+    """
+    原子 claim：仅当 status=PENDING（或到点可重试的 FAILED）时 UPDATE 为 PROCESSING。
+    双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
+    """
+    wid = worker or _worker_id()
+    now = now_local()
+    # UPDATE ... WHERE status 条件：跨 MySQL/SQLite 均可，无需 FOR UPDATE SKIP LOCKED
+    stmt = (
+        update(WebhookInbox)
+        .where(
+            WebhookInbox.id == inbox_id,
+            or_(
+                WebhookInbox.status == "PENDING",
+                and_(
+                    WebhookInbox.status == "FAILED",
+                    WebhookInbox.attempt_count < MAX_ATTEMPTS,
+                    or_(
+                        WebhookInbox.next_retry_at.is_(None),
+                        WebhookInbox.next_retry_at <= now,
+                    ),
+                ),
+            ),
+        )
+        .values(
+            status="PROCESSING",
+            locked_at=now,
+            locked_by=wid[:64],
+            attempt_count=WebhookInbox.attempt_count + 1,
+        )
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+    if not result.rowcount:
+        return None
+    return await db.get(WebhookInbox, inbox_id)
+
+
 async def process_inbox_item(inbox_id: int) -> None:
     async with AsyncSessionLocal() as db:
-        row = await db.get(WebhookInbox, inbox_id)
-        if not row or row.status == "DONE":
+        row = await claim_inbox_item(db, inbox_id)
+        if not row:
+            # 已被其他 worker claim，或 DONE / 未到重试时间
             return
-        row.status = "PROCESSING"
-        await db.commit()
 
         try:
             envelope = json.loads(row.payload)
@@ -99,6 +155,10 @@ async def process_inbox_item(inbox_id: int) -> None:
             row.status = "DONE"
             row.processed_at = now_local()
             row.error_message = None
+            row.last_error = None
+            row.next_retry_at = None
+            row.locked_at = None
+            row.locked_by = None
             await db.commit()
 
             ws_event = EVENT_WS_MAP.get(result.event, "DELIVERY_UNKNOWN")
@@ -119,23 +179,51 @@ async def process_inbox_item(inbox_id: int) -> None:
             logger.exception("inbox 处理失败 id=%s: %s", inbox_id, e)
             async with AsyncSessionLocal() as db2:
                 row2 = await db2.get(WebhookInbox, inbox_id)
-                if row2:
-                    row2.status = "FAILED"
-                    row2.error_message = str(e)[:500]
-                    await db2.commit()
+                if not row2 or row2.status == "DONE":
+                    return
+                err = str(e)[:500]
+                row2.status = "FAILED"
+                row2.error_message = err
+                row2.last_error = err
+                row2.locked_at = None
+                row2.locked_by = None
+                attempts = int(row2.attempt_count or 1)
+                if attempts < MAX_ATTEMPTS:
+                    row2.next_retry_at = now_local() + timedelta(seconds=_backoff_seconds(attempts))
+                else:
+                    row2.next_retry_at = None
+                await db2.commit()
 
 
 async def process_pending_inbox(limit: int = 20) -> int:
+    """扫描可消费条目并逐条 claim；已被占用的 id 在 claim 时跳过。"""
+    now = now_local()
     async with AsyncSessionLocal() as db:
         rows = (
             await db.execute(
-                select(WebhookInbox)
-                .where(WebhookInbox.status == "PENDING")
+                select(WebhookInbox.id)
+                .where(
+                    or_(
+                        WebhookInbox.status == "PENDING",
+                        and_(
+                            WebhookInbox.status == "FAILED",
+                            WebhookInbox.attempt_count < MAX_ATTEMPTS,
+                            or_(
+                                WebhookInbox.next_retry_at.is_(None),
+                                WebhookInbox.next_retry_at <= now,
+                            ),
+                        ),
+                    )
+                )
                 .order_by(WebhookInbox.received_at)
                 .limit(limit)
             )
         ).scalars().all()
-        ids = [r.id for r in rows]
+        ids = list(rows)
+    claimed = 0
     for iid in ids:
+        before = claimed
         await process_inbox_item(iid)
-    return len(ids)
+        # process_inbox_item 内部 claim；无法廉价得知是否成功，按调用次数统计即可
+        claimed = before + 1
+    return claimed

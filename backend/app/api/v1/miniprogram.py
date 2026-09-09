@@ -629,6 +629,15 @@ async def consent_face(
         raise AppException(40031, str(e)) from e
 
     profile = await FaceService.register_face(db, customer.id, feature)
+    from app.services.audit_service import AuditService
+
+    await AuditService.log_face_consent(
+        db,
+        customer_id=customer.id,
+        profile_id=profile.id,
+        request=request,
+        extra={"via": "upload"},
+    )
     return success(
         {
             "profile_id": profile.id,
@@ -673,6 +682,15 @@ async def consent_face_base64(
         raise AppException(40035, f"人脸采集失败: {e}") from e
 
     profile = await FaceService.register_face(db, customer.id, feature)
+    from app.services.audit_service import AuditService
+
+    await AuditService.log_face_consent(
+        db,
+        customer_id=customer.id,
+        profile_id=profile.id,
+        request=request,
+        extra={"via": "base64"},
+    )
     return success(
         {
             "profile_id": profile.id,

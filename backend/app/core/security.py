@@ -96,5 +96,11 @@ def decode_token(token: str) -> dict[str, Any]:
         token,
         settings.jwt_secret,
         algorithms=[settings.jwt_algorithm],
-        options={"require_exp": True, "require_iat": True, "require_sub": True},
+        issuer=settings.app_name,
+        options={
+            "require_exp": True,
+            "require_iat": True,
+            "require_sub": True,
+            "require_nbf": True,
+        },
     )

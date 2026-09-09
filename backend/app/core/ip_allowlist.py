@@ -22,12 +22,19 @@ WEBHOOK_PATHS = (
 
 
 def client_ip(request: Request) -> str:
-    """解析真实客户端 IP（须配合 Nginx 设置 X-Real-IP=$remote_addr）。
+    """解析真实客户端 IP。
 
-    优先 X-Real-IP（反代写入的直连 peer，不可被客户端伪造）；
-    其次取 X-Forwarded-For **最后一段**（Nginx 用 proxy_add_x_forwarded_for 时追加的 $remote_addr）；
-    勿取 XFF 首段——客户端可伪造。
+    仅当 request.client.host 属于 TRUSTED_PROXY_IPS 时，才信任
+    X-Real-IP / X-Forwarded-For；否则直接使用直连 peer，防止客户端伪造绕过白名单与限流。
     """
+    peer = request.client.host if request.client else ""
+    settings = get_settings()
+    trusted_raw = getattr(settings, "trusted_proxy_ips", "") or ""
+    trusted = _parse_allowlist(trusted_raw)
+    # 未配置可信代理时：绝不信任客户端伪造头，只用 peer
+    if not trusted or not peer or not ip_allowed(peer, trusted):
+        return peer
+
     real = (request.headers.get("x-real-ip") or "").strip()
     if real:
         return real
@@ -35,8 +42,9 @@ def client_ip(request: Request) -> str:
     if xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if parts:
-            return parts[-1]
-    return request.client.host if request.client else ""
+            # 最左侧通常为原始客户端；在可信代理链下取首段
+            return parts[0]
+    return peer
 
 
 def _client_ip(request: Request) -> str:

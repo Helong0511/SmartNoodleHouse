@@ -1,0 +1,39 @@
+# 支付说明
+
+## 渠道
+
+| Provider | 场景 | 备注 |
+|----------|------|------|
+| WECHAT | 小程序 / 相关扫码 | 商户号、APIv3、平台证书验签 |
+| ALIPAY | 小程序 JSAPI 等 | 应用私钥 / 支付宝公钥；手机号解密需 AES Key |
+| CASH | POS 现金 | 无第三方回调 |
+| MOCK | 仅开发 | `ALLOW_PAYMENT_MOCK=true`；生产禁止 |
+
+## 主流程
+
+1. 创建支付单 `payments`（关联 `orders`，POS 写入 `operator_id`）。
+2. 调起渠道下单，拿到客户端调起参数。
+3. 异步通知进入回调接口 → 验签 → 幂等（Redis + `payment_callback_receipts`）→ 更新支付 / 订单状态 → 积分与券核销等。
+4. 退款写入 `payment_refunds`；可配置退款回调或主动查询轮询（含 `retry_count` / `next_retry_at` / `last_error` / `idempotency_key`）。
+
+## 收银与权限
+
+- 收银员通常无 `payment:refund`：对本班订单提交 `pos_refund_requests`，由店长 / 超管审批执行。
+- 店长 / 超管持有 `payment:refund`，可管理端直连退款。
+- 班次表 `cashier_shifts` 用于开班备用金与交班汇总。
+
+## 财务账本
+
+`financial_ledger` 记录 SALE / REFUND / ADJUSTMENT 分录，便于按门店对账；与 `payments` 流水互补，不替代渠道对账单。
+
+## 回调与安全
+
+- 通知 URL 必须公网 HTTPS，与商户平台配置一致。
+- 生产关闭一切 Mock；配置 `WEBHOOK_IP_ALLOWLIST`（如适用）与 `TRUSTED_PROXY_IPS`。
+- 密钥轮换见 [security.md](security.md)；文档与示例仅使用虚假占位符。
+
+## 相关配置（名称级，无真实值）
+
+- `WECHAT_MCH_ID` / `WECHAT_API_V3_KEY` / `WECHAT_NOTIFY_URL` / `WECHAT_REFUND_NOTIFY_URL`
+- `ALIPAY_APP_ID` / `ALIPAY_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` / `ALIPAY_NOTIFY_URL` / `ALIPAY_AES_KEY`
+- `ALLOW_PAYMENT_MOCK`

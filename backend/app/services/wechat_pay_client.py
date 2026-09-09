@@ -246,17 +246,18 @@ async def refund(
 
 
 async def query_refund(*, refund_no: str) -> dict[str, Any]:
-    """查询单笔退款（商户退款单号）。"""
+    """查询单笔退款（商户退款单号）。PROCESSING 不得当 SUCCESS；未知保留 UNKNOWN。"""
     data = await _request("GET", f"/v3/refund/domestic/refunds/out-refund-no/{refund_no}")
     raw_status = (data.get("status") or "").upper()
     if raw_status == "SUCCESS":
         status = "SUCCESS"
     elif raw_status in ("CLOSED", "ABNORMAL"):
         status = raw_status
-    elif raw_status:
+    elif raw_status in ("PROCESSING", "PENDING"):
         status = "PROCESSING"
     else:
-        status = "PROCESSING"
+        # 空或未识别状态：保留 UNKNOWN，由上层 _finalize_refund 不升格
+        status = "UNKNOWN"
     return {
         "refund_no": data.get("out_refund_no") or refund_no,
         "status": status,

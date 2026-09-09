@@ -52,6 +52,10 @@ function formatTime(iso?: string) {
 
 async function ensureLogin() {
   if (localStorage.getItem('customer_token')) return
+  // 生产禁止伪造 login code
+  if (import.meta.env.PROD) {
+    throw new Error('生产环境请使用小程序登录')
+  }
   const code = localStorage.getItem('h5_login_code') || `h5_member_${Date.now()}`
   localStorage.setItem('h5_login_code', code)
   const res = await api.post('/miniprogram/wechat/login', { code })

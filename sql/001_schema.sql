@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 智能面馆 SmartNoodleHouse — 数据库结构（全量 DDL）
 -- ============================================================================
--- MySQL 8.0+ · utf8mb4_unicode_ci · 43 张业务表
+-- MySQL 8.0+ · utf8mb4_unicode_ci · 45 张业务表（含 financial_ledger / point_ledger）
 --
 -- 全新部署（生产）：
 --   000_create_db_grant.sql  →  001_schema.sql  →  002_seed_prod.sql  →  init_admin.py
@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS customer_coupons (
   used_order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '核销订单 → orders.id',
   used_at DATETIME(3) DEFAULT NULL COMMENT '核销时间',
   INDEX idx_cc_customer_status (customer_id, status, expires_at),
+  UNIQUE KEY uk_cc_customer_template (customer_id, template_id),
   CONSTRAINT fk_cc_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
   CONSTRAINT fk_cc_template FOREIGN KEY (template_id) REFERENCES coupon_templates(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户优惠券/代金券实例表';
@@ -415,7 +416,8 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_method VARCHAR(20) DEFAULT NULL COMMENT '支付方式摘要：WECHAT/ALIPAY/CASH/MIXED',
   channel VARCHAR(20) DEFAULT NULL COMMENT '下单渠道：WECHAT/ALIPAY/MEITUAN/ELEME/H5',
   remark VARCHAR(500) DEFAULT NULL COMMENT '顾客备注',
-  idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '下单幂等键，防重复提交',
+  idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '下单幂等键（按渠道/门店/操作员等作用域拼接，防重复提交；允许多 NULL）',
+  operator_id BIGINT UNSIGNED DEFAULT NULL COMMENT '下单/收银操作员 → users.id（POS 渠道必填）',
   ordered_at DATETIME(3) DEFAULT NULL COMMENT '下单时间（业务时间）',
   paid_at DATETIME(3) DEFAULT NULL COMMENT '支付成功时间',
   completed_at DATETIME(3) DEFAULT NULL COMMENT '订单完成时间',
@@ -433,9 +435,11 @@ CREATE TABLE IF NOT EXISTS orders (
   INDEX idx_orders_store_created (store_id, created_at),
   INDEX idx_orders_store_paid (store_id, paid_at),
   INDEX idx_orders_kitchen_claim (kitchen_claimed_by, status),
+  INDEX idx_orders_operator (operator_id),
   CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
   CONSTRAINT fk_orders_table FOREIGN KEY (table_id) REFERENCES tables(id),
   CONSTRAINT fk_orders_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_orders_operator FOREIGN KEY (operator_id) REFERENCES users(id),
   CONSTRAINT fk_orders_kitchen_claim FOREIGN KEY (kitchen_claimed_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单主表';
 
@@ -519,12 +523,18 @@ CREATE TABLE IF NOT EXISTS payment_refunds (
   fail_reason VARCHAR(255) DEFAULT NULL COMMENT '失败或关闭原因',
   succeeded_at DATETIME(3) DEFAULT NULL COMMENT '退款成功确认时间',
   operator_id BIGINT UNSIGNED DEFAULT NULL COMMENT '发起退款员工 → users.id',
+  retry_count INT NOT NULL DEFAULT 0 COMMENT '主动查询/重试次数',
+  next_retry_at DATETIME(3) DEFAULT NULL COMMENT '下次允许重试时间',
+  last_error VARCHAR(500) DEFAULT NULL COMMENT '最近一次失败摘要',
+  idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '退款幂等键（防重复发起）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  UNIQUE KEY uk_refund_idempotency (idempotency_key),
   INDEX idx_refunds_status (status),
   INDEX idx_refunds_payment (payment_id),
   INDEX idx_refunds_operator (operator_id),
   INDEX idx_refunds_succeeded (status, succeeded_at),
+  INDEX idx_refunds_retry (status, next_retry_at),
   CONSTRAINT fk_refund_payment FOREIGN KEY (payment_id) REFERENCES payments(id),
   CONSTRAINT fk_refund_order FOREIGN KEY (order_id) REFERENCES orders(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付退款单表';
@@ -613,11 +623,58 @@ CREATE TABLE IF NOT EXISTS webhook_inbox (
   headers_json TEXT DEFAULT NULL COMMENT 'HTTP 头 JSON',
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/DONE/FAILED',
   error_message VARCHAR(500) DEFAULT NULL COMMENT '处理失败原因',
+  attempt_count INT NOT NULL DEFAULT 0 COMMENT '消费尝试次数',
+  last_error VARCHAR(500) DEFAULT NULL COMMENT '最近一次错误摘要',
+  next_retry_at DATETIME(3) DEFAULT NULL COMMENT '下次允许重试时间',
+  locked_at DATETIME(3) DEFAULT NULL COMMENT '消费者加锁时间',
+  locked_by VARCHAR(64) DEFAULT NULL COMMENT '锁持有者标识（实例/worker）',
   received_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '接收时间',
   processed_at DATETIME(3) DEFAULT NULL COMMENT '处理完成时间',
   UNIQUE KEY uk_webhook_event (channel, event_id),
-  INDEX idx_wi_status (status, received_at)
+  INDEX idx_wi_status (status, received_at),
+  INDEX idx_wi_retry (status, next_retry_at),
+  INDEX idx_wi_locked (locked_at, locked_by)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Webhook 异步收件箱';
+
+-- 财务分录账本（收款/退款/调账审计；与支付流水互补）
+CREATE TABLE IF NOT EXISTS financial_ledger (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  entry_type VARCHAR(20) NOT NULL COMMENT 'SALE=收款 | REFUND=退款 | ADJUSTMENT=调账',
+  channel VARCHAR(30) DEFAULT NULL COMMENT '业务渠道：WECHAT/ALIPAY/POS/MEITUAN/ELEME 等',
+  provider VARCHAR(20) DEFAULT NULL COMMENT '支付提供方：WECHAT/ALIPAY/CASH/MOCK',
+  amount DECIMAL(10,2) NOT NULL COMMENT '金额（元；退款可为负或按 entry_type 区分）',
+  currency VARCHAR(8) NOT NULL DEFAULT 'CNY' COMMENT '币种',
+  order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联订单 → orders.id',
+  payment_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联支付单 → payments.id',
+  refund_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联退款单 → payment_refunds.id',
+  delivery_order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联外卖扩展单 → delivery_orders.id',
+  delivery_refund_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联外卖退款 → delivery_refunds.id',
+  remark VARCHAR(500) DEFAULT NULL COMMENT '备注',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '入账时间',
+  INDEX idx_fl_store_created (store_id, created_at),
+  INDEX idx_fl_entry_type (entry_type, created_at),
+  INDEX idx_fl_order (order_id),
+  INDEX idx_fl_payment (payment_id),
+  INDEX idx_fl_refund (refund_id),
+  CONSTRAINT fk_fl_store FOREIGN KEY (store_id) REFERENCES stores(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='财务分录账本';
+
+-- 积分变动流水（与 customers.points 对账）
+CREATE TABLE IF NOT EXISTS point_ledger (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联订单 → orders.id',
+  refund_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联退款单 → payment_refunds.id',
+  delta INT NOT NULL COMMENT '积分变动（可正可负）',
+  balance_after INT NOT NULL COMMENT '变动后余额',
+  entry_type VARCHAR(30) NOT NULL COMMENT '变动类型：EARN/REFUND_DEDUCT/ADJUST 等',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
+  INDEX idx_pl_customer_created (customer_id, created_at),
+  INDEX idx_pl_order (order_id),
+  INDEX idx_pl_refund (refund_id),
+  CONSTRAINT fk_pl_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员积分流水';
 
 -- ============================================================================
 -- 六、外卖（美团 / 饿了么）

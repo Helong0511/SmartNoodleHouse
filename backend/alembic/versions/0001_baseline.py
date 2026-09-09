@@ -1,11 +1,17 @@
-"""empty
+"""baseline: 从 sql/001_schema.sql 构建完整 schema
 
 Revision ID: 0001_baseline
 Revises:
 Create Date: 2026-08-27
 """
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
 from alembic import op
-import sqlalchemy as sa
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 # revision identifiers
 revision = "0001_baseline"
@@ -13,12 +19,71 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+# MySQL：对象已存在时可忽略（重复执行 / 部分表已手工建过）
+_IGNORE_MYSQL_ERRNOS = {
+    1007,  # database exists
+    1050,  # table already exists
+    1060,  # duplicate column
+    1061,  # duplicate key name
+    1062,  # duplicate entry（种子类语句偶发）
+    1022,  # can't write; duplicate key
+    1826,  # duplicate FK name
+}
+
+
+def _repo_root() -> Path:
+    # .../backend/alembic/versions/本文件 → 仓库根
+    return Path(__file__).resolve().parents[3]
+
+
+def _schema_sql_path() -> Path:
+    return _repo_root() / "sql" / "001_schema.sql"
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """去掉整行注释后按分号切分（DDL 场景，不处理存储过程体）。"""
+    lines: list[str] = []
+    for line in sql.splitlines():
+        if line.strip().startswith("--"):
+            continue
+        lines.append(line)
+    body = "\n".join(lines)
+    return [p.strip() for p in body.split(";") if p.strip()]
+
+
+def _should_skip_statement(stmt: str) -> bool:
+    return bool(re.match(r"(?is)^(CREATE\s+DATABASE|USE)\b", stmt))
+
+
+def _mysql_errno(exc: BaseException) -> int | None:
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return None
+    args = getattr(orig, "args", None)
+    if args and isinstance(args[0], int):
+        return int(args[0])
+    return None
+
 
 def upgrade() -> None:
-    # 基线：现有库以 sql/*.sql 为准；此 revision 仅作 Alembic 起点标记。
-    # 新变更请用 `alembic revision --autogenerate` 生成。
-    pass
+    path = _schema_sql_path()
+    if not path.is_file():
+        raise FileNotFoundError(f"未找到 schema 文件: {path}")
+
+    raw = path.read_text(encoding="utf-8")
+    conn = op.get_bind()
+    for stmt in _split_sql_statements(raw):
+        if _should_skip_statement(stmt):
+            continue
+        try:
+            conn.execute(text(stmt))
+        except (ProgrammingError, DBAPIError) as exc:
+            errno = _mysql_errno(exc)
+            if errno in _IGNORE_MYSQL_ERRNOS:
+                continue
+            raise
 
 
 def downgrade() -> None:
+    # 基线不回滚整库 DROP；需要重建时请空库后重新 upgrade。
     pass

@@ -1,4 +1,4 @@
-"""Webhook / 支付回调防重放（Redis + 可选 DB）"""
+"""Webhook / 支付回调防重放（Redis 软锁 + DB UNIQUE 事实源）"""
 from __future__ import annotations
 
 import hashlib
@@ -14,7 +14,12 @@ DEFAULT_TTL = 86400 * 2  # 48h
 
 async def claim_once(channel: str, receipt_key: str, ttl: int = DEFAULT_TTL) -> bool:
     """
-    原子认领一次回调。返回 True 表示首次处理；False 表示重复（应幂等返回成功）。
+    Redis 原子认领一次回调。返回 True 表示本进程可继续处理；False 表示近期已有人认领。
+
+    降级策略：Redis 失败时返回 True（放行）。
+    唯一事实源是 DB 表 PaymentCallbackReceipt 的 UNIQUE(provider, receipt_key)；
+    Redis 仅作加速去重，不可替代 DB 约束。处理失败时务必调用 release_claim，
+    避免永久占 key 导致渠道重试无法入账。
     """
     key = f"{REDIS_NS}{channel}:{receipt_key}"
     try:
@@ -22,9 +27,18 @@ async def claim_once(channel: str, receipt_key: str, ttl: int = DEFAULT_TTL) -> 
         ok = await r.set(key, "1", nx=True, ex=ttl)
         return bool(ok)
     except Exception as e:
-        logger.error("Redis replay claim 失败，降级放行但记录: %s", e)
-        # Redis 不可用时不能静默丢单；由上层 DB unique 兜底
+        logger.error("Redis replay claim 失败，降级放行（DB UNIQUE 兜底）: %s", e)
         return True
+
+
+async def release_claim(channel: str, receipt_key: str) -> None:
+    """处理失败时删除 Redis key，允许渠道/定时任务重试。"""
+    key = f"{REDIS_NS}{channel}:{receipt_key}"
+    try:
+        r = await get_redis()
+        await r.delete(key)
+    except Exception as e:
+        logger.warning("Redis replay release 失败 channel=%s: %s", channel, e)
 
 
 def make_receipt_key(*parts: str) -> str:

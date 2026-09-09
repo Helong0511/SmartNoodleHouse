@@ -38,6 +38,48 @@ def test_webhook_receipt_key_stable():
     assert a == b and a != c
 
 
+def test_webhook_backoff_exponential():
+    from app.services.webhook_inbox import _backoff_seconds
+
+    assert _backoff_seconds(0) == 1
+    assert _backoff_seconds(2) == 4
+    assert _backoff_seconds(12) == 3600  # 2^12 封顶
+
+
+@pytest.mark.asyncio
+async def test_finalize_refund_keeps_unknown_not_success():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.payment_service import PaymentService
+
+    row = MagicMock()
+    row.status = "PROCESSING"
+    row.fail_reason = None
+    row.callback_raw = None
+    row.provider_refund_no = None
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    await PaymentService._finalize_refund(db, row, "UNKNOWN", source="TEST")
+    assert row.status == "UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_finalize_refund_processing_not_success():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.payment_service import PaymentService
+
+    row = MagicMock()
+    row.status = "PENDING"
+    row.fail_reason = None
+    row.callback_raw = None
+    row.provider_refund_no = None
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    await PaymentService._finalize_refund(db, row, "PROCESSING", source="TEST")
+    assert row.status == "PROCESSING"
+
+
 def test_eleme_shop_id_extract_no_store_fallback():
     from app.services.delivery_context import extract_platform_shop_id
 

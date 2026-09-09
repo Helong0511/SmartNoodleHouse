@@ -17,6 +17,7 @@ from app.models import (
     Order,
     OrderItem,
     OrderItemOption,
+    PointLedger,
     Store,
 )
 from app.services.order_service import OrderPriceCalculator
@@ -227,35 +228,90 @@ class CustomerService:
 
     @staticmethod
     async def award_points_for_paid_order(db: AsyncSession, order: Order) -> int:
-        """支付成功：实付 1 元 = 1 积分，并尝试升级等级。"""
+        """支付成功：实付 1 元 = 1 积分，并尝试升级等级。行锁 + point_ledger。"""
         if not order.customer_id:
             return 0
-        customer = await db.get(Customer, int(order.customer_id))
+        customer = (
+            await db.execute(
+                select(Customer).where(Customer.id == int(order.customer_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not customer:
+            return 0
+        # 同订单幂等：已有 EARN 流水则跳过
+        existed = await db.scalar(
+            select(PointLedger.id).where(
+                PointLedger.order_id == order.id,
+                PointLedger.entry_type == "EARN",
+            ).limit(1)
+        )
+        if existed:
             return 0
         earned = int(money(order.total_amount or 0))
         if earned <= 0:
             return 0
         customer.points = int(customer.points or 0) + earned
+        db.add(
+            PointLedger(
+                customer_id=customer.id,
+                order_id=order.id,
+                refund_id=None,
+                delta=earned,
+                balance_after=int(customer.points),
+                entry_type="EARN",
+            )
+        )
         await CustomerService.recalculate_member_level(db, customer)
         await db.flush()
         return earned
 
     @staticmethod
-    async def deduct_points_for_refund(db: AsyncSession, order: Order, refund_amount: Decimal) -> int:
-        """退款成功：按退款金额 1 元扣 1 积分，并尝试降级等级。"""
+    async def deduct_points_for_refund(
+        db: AsyncSession,
+        order: Order,
+        refund_amount: Decimal,
+        *,
+        refund_id: int | None = None,
+    ) -> int:
+        """退款成功：按退款金额 1 元扣 1 积分，并尝试降级等级。行锁 + point_ledger。"""
         if not order.customer_id:
             return 0
-        customer = await db.get(Customer, int(order.customer_id))
+        customer = (
+            await db.execute(
+                select(Customer).where(Customer.id == int(order.customer_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not customer:
             return 0
+        if refund_id is not None:
+            existed = await db.scalar(
+                select(PointLedger.id).where(
+                    PointLedger.refund_id == int(refund_id),
+                    PointLedger.entry_type == "REFUND_DEDUCT",
+                ).limit(1)
+            )
+            if existed:
+                return 0
         deducted = int(money(refund_amount or 0))
         if deducted <= 0:
             return 0
-        customer.points = max(0, int(customer.points or 0) - deducted)
+        before = int(customer.points or 0)
+        actual = min(before, deducted)
+        customer.points = before - actual
+        if actual > 0:
+            db.add(
+                PointLedger(
+                    customer_id=customer.id,
+                    order_id=order.id,
+                    refund_id=refund_id,
+                    delta=-actual,
+                    balance_after=int(customer.points),
+                    entry_type="REFUND_DEDUCT",
+                )
+            )
         await CustomerService.recalculate_member_level(db, customer)
         await db.flush()
-        return deducted
+        return actual
 
     @staticmethod
     def member_progress_payload(
@@ -752,6 +808,53 @@ class CustomerService:
 
 class OrderCreateService:
     @staticmethod
+    def _scoped_idempotency_key(
+        raw: str | None,
+        *,
+        channel: str | None,
+        customer_id: int | None,
+        store_id: int | None,
+        operator_id: int | None,
+    ) -> str | None:
+        """幂等键绑定业务主体，避免全局撞 key。"""
+        key = (raw or "").strip()
+        if not key:
+            return None
+        ch = (channel or "").strip().upper()
+        if ch == "POS":
+            if not store_id or not operator_id:
+                raise AppException(40008, "POS 下单幂等键须绑定门店与操作员")
+            return f"pos:{int(store_id)}:{int(operator_id)}:{key}"[:64]
+        if customer_id:
+            return f"cust:{int(customer_id)}:{key}"[:64]
+        if store_id:
+            return f"store:{int(store_id)}:{key}"[:64]
+        return key[:64]
+
+    @staticmethod
+    def _assert_idempotent_order_match(
+        order: Order,
+        *,
+        customer_id: int | None,
+        store_id: int | None,
+        channel: str | None,
+        operator_id: int | None,
+    ) -> None:
+        """命中幂等订单后必须再次校验归属，禁止直接 return 他人订单。"""
+        ch = (channel or "").strip().upper()
+        if ch and (order.channel or "").strip().upper() != ch:
+            raise AppException(40902, "幂等键冲突：渠道不一致")
+        if store_id is not None and int(order.store_id) != int(store_id):
+            raise AppException(40902, "幂等键冲突：门店不一致")
+        if customer_id is not None:
+            if order.customer_id is None or int(order.customer_id) != int(customer_id):
+                raise AppException(40902, "幂等键冲突：顾客不一致")
+        if ch == "POS" and operator_id is not None:
+            oid = getattr(order, "operator_id", None)
+            if oid is not None and int(oid) != int(operator_id):
+                raise AppException(40902, "幂等键冲突：操作员不一致")
+
+    @staticmethod
     async def create_order(
         db: AsyncSession,
         *,
@@ -767,16 +870,11 @@ class OrderCreateService:
         customer_coupon_id: int | None = None,
         customer_voucher_id: int | None = None,
         waive_packing_fee: bool = False,
+        operator_id: int | None = None,
     ) -> Order:
         from sqlalchemy.exc import IntegrityError
 
         from app.services.status_history import record_order_status
-
-        if idempotency_key:
-            existing = await db.execute(select(Order).where(Order.idempotency_key == idempotency_key))
-            order = existing.scalar_one_or_none()
-            if order:
-                return order
 
         table_id = None
         table_no_raw: str | None = None
@@ -800,6 +898,26 @@ class OrderCreateService:
             if not store_id or int(store_id) <= 0:
                 raise AppException(40008, "缺少桌台令牌或有效门店")
 
+        scoped_key = OrderCreateService._scoped_idempotency_key(
+            idempotency_key,
+            channel=channel,
+            customer_id=customer_id,
+            store_id=store_id,
+            operator_id=operator_id,
+        )
+        if scoped_key:
+            existing = await db.execute(select(Order).where(Order.idempotency_key == scoped_key))
+            order = existing.scalar_one_or_none()
+            if order:
+                OrderCreateService._assert_idempotent_order_match(
+                    order,
+                    customer_id=customer_id,
+                    store_id=store_id,
+                    channel=channel,
+                    operator_id=operator_id,
+                )
+                return order
+
         dtype = (dining_type or "").strip().upper()
         if dtype not in ("DINE_IN", "TAKEAWAY"):
             dtype = "TAKEAWAY" if need_pack else "DINE_IN"
@@ -809,7 +927,7 @@ class OrderCreateService:
         store = await db.get(Store, int(store_id)) if store_id else None
         sno = store.store_no if store else None
 
-        order = Order(
+        order_kwargs = dict(
             order_no=generate_no(BIZ_OT, sno, t_no, table_placeholder=t_ph),
             customer_id=customer_id,
             table_id=table_id,
@@ -819,19 +937,30 @@ class OrderCreateService:
             channel=channel,
             dining_type=dtype,
             remark=remark,
-            idempotency_key=idempotency_key,
+            idempotency_key=scoped_key,
             ordered_at=now_local(),
         )
+        # operator_id 列在迁移后存在；旧库无该字段时忽略
+        if hasattr(Order, "operator_id") and operator_id is not None:
+            order_kwargs["operator_id"] = operator_id
+        order = Order(**order_kwargs)
         db.add(order)
         try:
             await db.flush()
         except IntegrityError:
             # 并发幂等：唯一约束冲突后返回已有订单
             await db.rollback()
-            if idempotency_key:
-                existing = await db.execute(select(Order).where(Order.idempotency_key == idempotency_key))
+            if scoped_key:
+                existing = await db.execute(select(Order).where(Order.idempotency_key == scoped_key))
                 order = existing.scalar_one_or_none()
                 if order:
+                    OrderCreateService._assert_idempotent_order_match(
+                        order,
+                        customer_id=customer_id,
+                        store_id=store_id,
+                        channel=channel,
+                        operator_id=operator_id,
+                    )
                     return order
             raise AppException(40901, "订单创建冲突，请重试")
 

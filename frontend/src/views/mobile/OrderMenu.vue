@@ -252,20 +252,25 @@ onMounted(async () => {
     }
   }
 
-  const channelCode = channel === 'alipay' ? `h5_ali_${Date.now()}` : `h5_wx_${Date.now()}`
-  const loginPath = channel === 'alipay' ? '/miniprogram/alipay/login' : '/miniprogram/wechat/login'
-  const loginBody = channel === 'alipay'
-    ? { auth_code: channelCode, table_token: token || localStorage.getItem('snh_table_token') }
-    : { code: channelCode, table_token: token || localStorage.getItem('snh_table_token') }
-  try {
-    const res = await api.post(loginPath, loginBody, { headers: { 'X-Client': 'customer' } })
-    customerId.value = res.data.customer_id
-    customerToken.value = res.data.customer_token
-    localStorage.setItem('customer_id', String(customerId.value))
-    localStorage.setItem('snh_customer_token', customerToken.value || '')
-    localStorage.setItem('customer_token', customerToken.value || '')
-  } catch (e: any) {
-    ElMessage.warning(e.message || '顾客登录失败（生产需真实小程序 code）')
+  // 生产 build 禁止伪造 login code（仅开发/预览可用本地假 code）
+  if (import.meta.env.PROD) {
+    ElMessage.warning('生产环境请使用微信/支付宝小程序登录，H5 不支持伪造 code')
+  } else {
+    const channelCode = channel === 'alipay' ? `h5_ali_${Date.now()}` : `h5_wx_${Date.now()}`
+    const loginPath = channel === 'alipay' ? '/miniprogram/alipay/login' : '/miniprogram/wechat/login'
+    const loginBody = channel === 'alipay'
+      ? { auth_code: channelCode, table_token: token || localStorage.getItem('snh_table_token') }
+      : { code: channelCode, table_token: token || localStorage.getItem('snh_table_token') }
+    try {
+      const res = await api.post(loginPath, loginBody, { headers: { 'X-Client': 'customer' } })
+      customerId.value = res.data.customer_id
+      customerToken.value = res.data.customer_token
+      localStorage.setItem('customer_id', String(customerId.value))
+      localStorage.setItem('snh_customer_token', customerToken.value || '')
+      localStorage.setItem('customer_token', customerToken.value || '')
+    } catch (e: any) {
+      ElMessage.warning(e.message || '顾客登录失败（开发环境假 code；生产需真实小程序 code）')
+    }
   }
 
   if (!localStorage.getItem('member_prompt_done')) {

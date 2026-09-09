@@ -21,6 +21,7 @@ ORDER_STATUS_LABEL = {
     "READY": "待取餐",
     "COMPLETED": "已完成",
     "CANCELLED": "已取消",
+    "REFUND_PENDING": "退款中",
     "REFUNDED": "已退款",
 }
 
@@ -199,20 +200,41 @@ class OrderPriceCalculator:
     async def calculate_items_batch(
         db: AsyncSession,
         items_data: list[dict],
+        *,
+        store_id: int | None = None,
     ) -> list[tuple[Product, Decimal, list[tuple[OptionGroup, Option, int]], int]]:
         if not items_data:
             raise AppException(40000, "订单商品不能为空")
         if len(items_data) > OrderPriceCalculator.MAX_ITEMS:
             raise AppException(40000, f"单次下单最多 {OrderPriceCalculator.MAX_ITEMS} 个品项")
+        if store_id is None or int(store_id) <= 0:
+            raise AppException(40008, "计价须指定门店，禁止跨店商品")
 
+        store_id = int(store_id)
         product_ids = [int(i["product_id"]) for i in items_data]
         products = {
             p.id: p
             for p in (
-                await db.execute(select(Product).where(Product.id.in_(product_ids), Product.status == "ON_SALE"))
+                await db.execute(
+                    select(Product).where(
+                        Product.id.in_(product_ids),
+                        Product.status == "ON_SALE",
+                        Product.store_id == store_id,
+                    )
+                )
             ).scalars()
         }
         if len(products) != len(set(product_ids)):
+            # 区分「不存在/下架」与「跨店」
+            any_products = {
+                p.id: p
+                for p in (
+                    await db.execute(select(Product).where(Product.id.in_(product_ids)))
+                ).scalars()
+            }
+            cross = [pid for pid in set(product_ids) if pid in any_products and int(any_products[pid].store_id) != store_id]
+            if cross:
+                raise AppException(40002, f"商品不属于本门店，禁止跨店下单: {sorted(cross)}")
             missing = set(product_ids) - set(products)
             raise AppException(40002, f"商品不可用: {sorted(missing)}")
 
@@ -223,9 +245,16 @@ class OrderPriceCalculator:
             cats_map = {
                 c.id: c
                 for c in (
-                    await db.execute(select(ProductCategory).where(ProductCategory.id.in_(cat_ids)))
+                    await db.execute(
+                        select(ProductCategory).where(
+                            ProductCategory.id.in_(cat_ids),
+                            ProductCategory.store_id == store_id,
+                        )
+                    )
                 ).scalars()
             }
+            if len(cats_map) != len(set(cat_ids)):
+                raise AppException(40002, "商品分类不属于本门店")
         cart_cat_ids = {int(p.category_id) for p in products.values() if p.category_id}
         cart_product_ids = set(products.keys())
 
@@ -246,14 +275,22 @@ class OrderPriceCalculator:
         if need_cat_names - set(cat_name_map):
             for c in (
                 await db.execute(
-                    select(ProductCategory).where(ProductCategory.id.in_(need_cat_names - set(cat_name_map)))
+                    select(ProductCategory).where(
+                        ProductCategory.id.in_(need_cat_names - set(cat_name_map)),
+                        ProductCategory.store_id == store_id,
+                    )
                 )
             ).scalars().all():
                 cat_name_map[c.id] = c.name
         prod_name_map: dict[int, str] = {pid: products[pid].name for pid in cart_product_ids}
         if need_prod_names:
             for rp in (
-                await db.execute(select(Product).where(Product.id.in_(need_prod_names)))
+                await db.execute(
+                    select(Product).where(
+                        Product.id.in_(need_prod_names),
+                        Product.store_id == store_id,
+                    )
+                )
             ).scalars().all():
                 prod_name_map[rp.id] = rp.name
 
@@ -352,10 +389,14 @@ class OrderPriceCalculator:
         product_id: int,
         quantity: int,
         option_ids: list[int] | None = None,
+        *,
+        store_id: int | None = None,
     ) -> tuple[Product, Decimal, list[tuple[OptionGroup, Option, int]]]:
         option_ids = list(option_ids or [])
         rows = await OrderPriceCalculator.calculate_items_batch(
-            db, [{"product_id": product_id, "quantity": quantity, "option_ids": option_ids}]
+            db,
+            [{"product_id": product_id, "quantity": quantity, "option_ids": option_ids}],
+            store_id=store_id,
         )
         product, subtotal, options_detail, _ = rows[0]
         return product, subtotal, options_detail
@@ -370,7 +411,9 @@ class OrderPriceCalculator:
         need_pack: bool = False,
     ) -> tuple[Decimal, Decimal, Decimal]:
         """返回 (商品小计, 打包费, 可参与会员折扣的小计)。打包费 = Σ(商品 box_price × 数量)，仅 need_pack 时计。"""
-        rows = await OrderPriceCalculator.calculate_items_batch(db, items_data)
+        rows = await OrderPriceCalculator.calculate_items_batch(
+            db, items_data, store_id=order.store_id
+        )
         if deduct_stock:
             await deduct_for_order_items(
                 db,

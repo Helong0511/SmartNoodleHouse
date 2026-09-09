@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import PlatformStoreBinding
+from app.services.secret_encryption import SecretEncryptionService
+
+
+def _plain_token(stored: str | None) -> str | None:
+    return SecretEncryptionService.decrypt(stored)
 
 
 @dataclass
@@ -77,8 +82,8 @@ async def resolve_store_and_credentials(
         creds = PlatformCredentials(
             store_id=binding.store_id,
             platform_shop_id=binding.platform_shop_id,
-            access_token=binding.access_token,
-            refresh_token=binding.refresh_token,
+            access_token=_plain_token(binding.access_token),
+            refresh_token=_plain_token(binding.refresh_token),
             extra=extra,
         )
         return binding.store_id, creds
@@ -135,7 +140,7 @@ async def get_credentials_for_store(
     return PlatformCredentials(
         store_id=binding.store_id,
         platform_shop_id=binding.platform_shop_id,
-        access_token=binding.access_token,
-        refresh_token=binding.refresh_token,
+        access_token=_plain_token(binding.access_token),
+        refresh_token=_plain_token(binding.refresh_token),
         extra=extra,
     )

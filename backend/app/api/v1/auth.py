@@ -19,14 +19,32 @@ class VerifyPasswordRequest(BaseModel):
 @router.post("/login")
 async def login(data: LoginRequest, request: Request, db: DbSession):
     from app.api.deps import get_user_permissions
+    from app.services.audit_service import AuditService
 
     result = await db.execute(
         select(User).options(selectinload(User.role)).where(User.username == data.username, User.status == 1)
     )
     user = result.scalar_one_or_none()
     if not user or not verify_password(data.password, user.password_hash):
+        if user:
+            await AuditService.log_login(
+                db, user_id=user.id, username=data.username, success=False, request=request
+            )
+            await db.flush()
+        else:
+            await AuditService.log(
+                db,
+                action="auth.login_failed",
+                module="auth",
+                detail={"username": data.username, "success": False},
+                request=request,
+            )
+            await db.flush()
         return {"code": 401, "message": "用户名或密码错误", "data": None}
     user.last_login_at = now_local()
+    await AuditService.log_login(
+        db, user_id=user.id, username=user.username, success=True, request=request
+    )
     await db.flush()
     token = create_access_token(
         user.id,

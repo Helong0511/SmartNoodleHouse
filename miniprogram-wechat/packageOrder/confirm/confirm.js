@@ -615,68 +615,85 @@ Page({
     this.setData({ remark: e.detail.value })
   },
 
-  makeIdempotencyKey() {
+  makeIdempotencyKey(cart) {
+    // 与订单内容绑定，同购物车重试可命中服务端幂等；避免纯随机导致重复下单
     const cid = app.globalData.customerId || '0'
-    const rand = Math.random().toString(36).slice(2, 10)
-    return `wx_${cid}_${Date.now()}_${rand}`
+    const items = (cart || auth.getCart() || []).map((c) => {
+      const opts = (c.option_ids || []).slice().map(String).sort().join('.')
+      return `${c.product_id}x${c.quantity || 1}:${opts}`
+    }).sort()
+    const raw = [
+      this.submitStoreId() || 0,
+      this.data.needPack ? '1' : '0',
+      this.data.selectedCouponId || 0,
+      this.data.selectedVoucherId || 0,
+      items.join(',')
+    ].join('|')
+    let h = 2166136261
+    for (let i = 0; i < raw.length; i++) {
+      h ^= raw.charCodeAt(i)
+      h = Math.imul(h, 16777619)
+    }
+    return `wx_${cid}_${(h >>> 0).toString(36)}`
   },
 
   async submit() {
     if (this.data.loading) return
-    const cart = auth.getCart()
-    if (!cart.length) {
-      wx.showToast({ title: '购物车为空', icon: 'none' })
-      return
-    }
-    let productItems
-    try {
-      productItems = await this.loadProductCatalog()
-    } catch (e) {
-      wx.showModal({
-        title: '无法校验规格',
-        content: (e && e.message) || '商品信息加载失败，请检查网络后重试',
-        showCancel: false
-      })
-      return
-    }
-    if (!Array.isArray(productItems) || !productItems.length) {
-      wx.showModal({
-        title: '无法校验规格',
-        content: '未能加载商品规格，请返回菜单刷新后重试',
-        showCancel: false
-      })
-      return
-    }
-    const optionIssues = cartUtil.validateRequiredOptions(cart, productItems)
-    if (optionIssues.length) {
-      const first = optionIssues[0]
-      const hint = optionIssues.length === 1
-        ? `「${first.name}」缺少必选规格：${first.group}`
-        : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
-      wx.showModal({
-        title: '无法下单',
-        content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。`,
-        showCancel: false
-      })
-      return
-    }
-    const catIssues = cartUtil.validateCategoryRequires(cart, productItems)
-    if (catIssues.length) {
-      wx.showModal({
-        title: '无法下单',
-        content: catIssues[0].message || '加料类商品须先点主餐',
-        showCancel: false
-      })
-      return
-    }
-    let tableToken = await this._ensureTableTokenForSubmit()
-    if (!tableToken) {
-      wx.showToast({ title: '请先扫描或选择桌号', icon: 'none' })
-      await this.resolveTable()
-      return
-    }
+    // 校验前即加锁，防止连点双提交
     this.setData({ loading: true })
     try {
+      const cart = auth.getCart()
+      if (!cart.length) {
+        wx.showToast({ title: '购物车为空', icon: 'none' })
+        return
+      }
+      let productItems
+      try {
+        productItems = await this.loadProductCatalog()
+      } catch (e) {
+        wx.showModal({
+          title: '无法校验规格',
+          content: (e && e.message) || '商品信息加载失败，请检查网络后重试',
+          showCancel: false
+        })
+        return
+      }
+      if (!Array.isArray(productItems) || !productItems.length) {
+        wx.showModal({
+          title: '无法校验规格',
+          content: '未能加载商品规格，请返回菜单刷新后重试',
+          showCancel: false
+        })
+        return
+      }
+      const optionIssues = cartUtil.validateRequiredOptions(cart, productItems)
+      if (optionIssues.length) {
+        const first = optionIssues[0]
+        const hint = optionIssues.length === 1
+          ? `「${first.name}」缺少必选规格：${first.group}`
+          : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
+        wx.showModal({
+          title: '无法下单',
+          content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。`,
+          showCancel: false
+        })
+        return
+      }
+      const catIssues = cartUtil.validateCategoryRequires(cart, productItems)
+      if (catIssues.length) {
+        wx.showModal({
+          title: '无法下单',
+          content: catIssues[0].message || '加料类商品须先点主餐',
+          showCancel: false
+        })
+        return
+      }
+      let tableToken = await this._ensureTableTokenForSubmit()
+      if (!tableToken) {
+        wx.showToast({ title: '请先扫描或选择桌号', icon: 'none' })
+        await this.resolveTable()
+        return
+      }
       await auth.ensureLogin()
       const order = await api.post('/orders', {
         store_id: this.submitStoreId(),
@@ -685,7 +702,7 @@ Page({
         need_pack: !!this.data.needPack,
         dining_type: this.data.needPack ? 'TAKEAWAY' : 'DINE_IN',
         remark: this.data.remark,
-        idempotency_key: this.makeIdempotencyKey(),
+        idempotency_key: this.makeIdempotencyKey(cart),
         customer_coupon_id: this.data.selectedCouponId || undefined,
         customer_voucher_id: this.data.selectedVoucherId || undefined,
         items: cart.map((c) => ({

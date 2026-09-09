@@ -578,20 +578,26 @@ async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: D
     if existing:
         existing.platform_shop_name = data.platform_shop_name
         if data.access_token:
-            existing.access_token = data.access_token
+            from app.services.secret_encryption import SecretEncryptionService
+
+            existing.access_token = SecretEncryptionService.encrypt(data.access_token)
         if data.refresh_token:
-            existing.refresh_token = data.refresh_token
+            from app.services.secret_encryption import SecretEncryptionService
+
+            existing.refresh_token = SecretEncryptionService.encrypt(data.refresh_token)
         existing.status = 1
         await db.flush()
         return success({"id": existing.id, "updated": True}, request=request)
+
+    from app.services.secret_encryption import SecretEncryptionService
 
     row = PlatformStoreBinding(
         store_id=sid,
         platform=data.platform.upper(),
         platform_shop_id=data.platform_shop_id,
         platform_shop_name=data.platform_shop_name,
-        access_token=data.access_token,
-        refresh_token=data.refresh_token,
+        access_token=SecretEncryptionService.encrypt(data.access_token) if data.access_token else None,
+        refresh_token=SecretEncryptionService.encrypt(data.refresh_token) if data.refresh_token else None,
     )
     db.add(row)
     await db.flush()

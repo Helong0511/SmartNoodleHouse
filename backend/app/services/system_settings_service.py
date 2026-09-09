@@ -212,6 +212,70 @@ class SystemSettingsService:
             return fallback
 
     @classmethod
+    async def store_override_map(cls, db: AsyncSession, key: str) -> dict[int, str]:
+        """门店覆盖：store_id → raw value。"""
+        from app.models import StoreSetting
+
+        rows = (
+            await db.execute(select(StoreSetting).where(StoreSetting.setting_key == key))
+        ).scalars().all()
+        return {int(r.store_id): r.setting_value for r in rows}
+
+    @classmethod
+    async def effective_setting(
+        cls,
+        db: AsyncSession,
+        key: str,
+        *,
+        store_id: int | None = None,
+        fallback: str | int | float | None = None,
+    ) -> str:
+        """
+        业务读参入口：门店 store_settings 覆盖优先，否则全局 system_settings，再否则 fallback/.env。
+        """
+        if store_id is not None:
+            from app.models import StoreSetting
+
+            ov = await db.scalar(
+                select(StoreSetting.setting_value).where(
+                    StoreSetting.store_id == int(store_id),
+                    StoreSetting.setting_key == key,
+                )
+            )
+            if ov is not None and str(ov).strip() != "":
+                return str(ov)
+        fb = fallback if fallback is not None else cls._env_default(key)
+        return await cls.get_value(db, key, fb)
+
+    @classmethod
+    async def effective_int(
+        cls,
+        db: AsyncSession,
+        key: str,
+        fallback: int,
+        *,
+        store_id: int | None = None,
+    ) -> int:
+        try:
+            return int(await cls.effective_setting(db, key, store_id=store_id, fallback=fallback))
+        except (TypeError, ValueError):
+            return fallback
+
+    @classmethod
+    async def effective_float(
+        cls,
+        db: AsyncSession,
+        key: str,
+        fallback: float,
+        *,
+        store_id: int | None = None,
+    ) -> float:
+        try:
+            return float(await cls.effective_setting(db, key, store_id=store_id, fallback=fallback))
+        except (TypeError, ValueError):
+            return fallback
+
+    @classmethod
     def _validate_value(cls, key: str, value: str) -> str:
         if key not in BUSINESS_SETTING_META:
             raise ValueError(f"未知配置项: {key}")

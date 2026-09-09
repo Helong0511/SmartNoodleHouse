@@ -17,6 +17,7 @@ from app.services.camera_credentials import (
     build_connect_source,
     encrypt_password,
     mask_rtsp_url,
+    prepare_camera_source,
 )
 from app.services.store_scope import assert_store_access, require_bound_store
 
@@ -224,14 +225,16 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
         else:
             raise AppException(40020, "请指定门店后再创建摄像头")
     assert_store_access(user, sid)
-    pwd_enc = encrypt_password(data.password) if data.password else None
-    safe_url = mask_rtsp_url(data.source_url) if data.password and "://" in data.source_url else data.source_url
+    safe_url, user_name, plain_pwd = prepare_camera_source(
+        data.source_url, username=data.username, password=data.password
+    )
+    pwd_enc = encrypt_password(plain_pwd) if plain_pwd else None
     camera = Camera(
         store_id=int(sid),
         name=data.name.strip(),
         camera_type=data.camera_type,
-        source_url=safe_url if data.password else data.source_url,
-        username=data.username,
+        source_url=safe_url,
+        username=user_name,
         password_encrypted=pwd_enc,
         fps=data.fps,
         detect_fps=data.detect_fps,
@@ -268,19 +271,29 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     if "camera_type" in payload and payload["camera_type"]:
         camera.camera_type = payload["camera_type"]
         restart = True
-    if "source_url" in payload and payload["source_url"]:
-        camera.source_url = payload["source_url"]
-        restart = True
-    if "username" in payload:
-        camera.username = payload["username"]
-        restart = True
-    if payload.get("clear_password"):
-        camera.password_encrypted = None
-        restart = True
-    elif payload.get("password"):
-        camera.password_encrypted = encrypt_password(payload["password"])
-        if "://" in (camera.source_url or ""):
-            camera.source_url = mask_rtsp_url(camera.source_url)
+    # source_url / username / password 统一走分离存储，禁止明文口令入库
+    touch_source = "source_url" in payload or "username" in payload or "password" in payload or payload.get("clear_password")
+    if touch_source:
+        next_url = payload["source_url"] if "source_url" in payload and payload["source_url"] else camera.source_url
+        next_user = payload["username"] if "username" in payload else camera.username
+        next_pwd = None
+        if payload.get("clear_password"):
+            camera.password_encrypted = None
+        elif payload.get("password"):
+            next_pwd = payload["password"]
+        safe_url, user_name, plain_pwd = prepare_camera_source(
+            next_url or "",
+            username=next_user,
+            password=next_pwd,
+        )
+        camera.source_url = safe_url
+        if "username" in payload or plain_pwd or user_name:
+            camera.username = user_name
+        if plain_pwd:
+            camera.password_encrypted = encrypt_password(plain_pwd)
+        elif "source_url" in payload and plain_pwd is None and not payload.get("password") and not payload.get("clear_password"):
+            # 仅改 URL 时若 URL 内嵌了密码，prepare 已拆出 plain_pwd；否则保留原加密口令
+            pass
         restart = True
     if "fps" in payload and payload["fps"] is not None:
         camera.fps = payload["fps"]

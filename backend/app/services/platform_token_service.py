@@ -14,6 +14,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.response import ensure_local_aware, now_local
 from app.models import PlatformStoreBinding
 from app.services.delivery_sign import eleme_shop_sign
+from app.services.secret_encryption import SecretEncryptionService
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +50,23 @@ class PlatformTokenService:
     @classmethod
     async def _refresh_eleme_binding(cls, binding: PlatformStoreBinding) -> bool:
         settings = get_settings()
-        if not settings.eleme_app_id or not settings.eleme_app_secret or not binding.refresh_token:
+        refresh_plain = SecretEncryptionService.decrypt(binding.refresh_token)
+        access_plain = SecretEncryptionService.decrypt(binding.access_token)
+        if not settings.eleme_app_id or not settings.eleme_app_secret or not refresh_plain:
             return False
         action = "eleme.oauth.refreshToken"
         metas = {"app_key": settings.eleme_app_id, "timestamp": int(time.time())}
-        params = {"refreshToken": binding.refresh_token}
+        params = {"refreshToken": refresh_plain}
         payload = {
             "nop": "1.0.0",
             "id": str(uuid.uuid4()),
             "action": action,
-            "token": binding.access_token or settings.eleme_access_token or "",
+            "token": access_plain or settings.eleme_access_token or "",
             "metas": metas,
             "params": params,
-            "signature": eleme_shop_sign(action, binding.access_token or "", metas, params, settings.eleme_app_secret),
+            "signature": eleme_shop_sign(
+                action, access_plain or "", metas, params, settings.eleme_app_secret
+            ),
         }
         url = settings.eleme_api_base.rstrip("/") + "/"
         try:
@@ -75,9 +80,10 @@ class PlatformTokenService:
             if not new_token:
                 logger.warning("饿了么 Token 刷新失败 binding=%s: %s", binding.id, data)
                 return False
-            binding.access_token = new_token
-            if result.get("refresh_token") or result.get("refreshToken"):
-                binding.refresh_token = result.get("refresh_token") or result.get("refreshToken")
+            binding.access_token = SecretEncryptionService.encrypt(new_token)
+            new_refresh = result.get("refresh_token") or result.get("refreshToken")
+            if new_refresh:
+                binding.refresh_token = SecretEncryptionService.encrypt(new_refresh)
             expires_in = result.get("expires_in") or result.get("expiresIn") or 86400 * 30
             from datetime import timedelta
 

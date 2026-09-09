@@ -1,0 +1,51 @@
+# 数据库说明
+
+## 权威来源
+
+| 产物 | 说明 |
+|------|------|
+| `sql/001_schema.sql` | 全量 DDL（新建库结构） |
+| `sql/002_seed_prod.sql` / `002_seed_test.sql` | 生产 / 开发种子 |
+| `backend/alembic/versions/` | 版本化迁移；`upgrade head` 从空库可达当前 schema |
+
+Alembic：
+
+1. **0001_baseline** — 读取并执行 `sql/001_schema.sql`（去掉 `CREATE DATABASE` / `USE`；按语句执行，忽略「已存在」类错误）。
+2. **0002_p0_hardening** — 对旧库补丁：`orders.operator_id`、幂等键注释、webhook / 退款重试列、`financial_ledger`、`point_ledger`。
+
+校验脚本：`python scripts/verify_database.py`（关键表、`alembic_version`、UNIQUE / FK、P0 列）。
+
+## 模块概览
+
+- **RBAC**：`roles` / `permissions` / `role_permissions` / `users` / `operation_logs`
+- **门店**：`stores` / `tables` / `store_settings`
+- **会员营销**：`customers`、`member_levels`、`coupon_templates`、`customer_coupons`、渠道账号表、`point_ledger`
+- **订单支付**：`orders`（含 `operator_id`、`idempotency_key`）、明细与规格快照、`payments` / `payment_refunds`、班次与 POS 退款申请、状态历史、回调回执
+- **异步接入**：`webhook_inbox`（含 `attempt_count` / `next_retry_at` / 锁字段）
+- **财务**：`financial_ledger`（SALE / REFUND / ADJUSTMENT）
+- **外卖**：映射、扩展单、平台绑定、退款与回调日志
+- **迎宾**：摄像头、客流、人脸档案、欢迎日志
+- **配置**：`system_settings`
+
+## 关键约束（生产勿删）
+
+- `orders.uk_idempotency`：下单幂等（允许多个 `NULL`）
+- `orders.fk_orders_operator` → `users.id`
+- `webhook_inbox.uk_webhook_event`：`(channel, event_id)`
+- `payments` / `payment_refunds` 业务单号唯一；退款可选 `uk_refund_idempotency`
+- 门店、订单、支付相关 FK 保证跨表一致性
+
+## 种子脚本（Python）
+
+```bash
+python scripts/seed_roles.py
+python scripts/seed_permissions.py
+python scripts/seed_member_levels.py
+python scripts/seed_coupon_templates.py
+```
+
+均使用 `AsyncSessionLocal`，可重复执行。
+
+## 旧库增量
+
+历史手工补丁在 `sql/tools/`；新环境以 `001_schema.sql` + Alembic 为准，不必再跑已并入全量的 tools 脚本。

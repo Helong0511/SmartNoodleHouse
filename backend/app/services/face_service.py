@@ -140,19 +140,52 @@ class WelcomeService:
         return await redis.exists(key) > 0
 
     @staticmethod
-    async def set_cooldown(customer_id: int, db: AsyncSession | None = None) -> None:
-        redis = await get_redis()
+    async def _cooldown_seconds(
+        db: AsyncSession | None = None, store_id: int | None = None
+    ) -> int:
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
 
         seconds = settings.welcome_cooldown_seconds
         if db is not None:
-            seconds = await SystemSettingsService.get_int(db, "welcome_cooldown_seconds", seconds)
-        await redis.setex(f"snh:welcome:cooldown:{customer_id}", seconds, "1")
+            seconds = await SystemSettingsService.effective_int(
+                db, "welcome_cooldown_seconds", seconds, store_id=store_id
+            )
+        return max(0, int(seconds))
+
+    @staticmethod
+    async def try_acquire_cooldown(
+        customer_id: int,
+        db: AsyncSession | None = None,
+        store_id: int | None = None,
+    ) -> bool:
+        """原子冷却：SET key NX EX。抢到返回 True，已在冷却中返回 False。"""
+        seconds = await WelcomeService._cooldown_seconds(db, store_id=store_id)
+        if seconds <= 0:
+            return True
+        redis = await get_redis()
+        key = f"snh:welcome:cooldown:{customer_id}"
+        ok = await redis.set(key, "1", nx=True, ex=seconds)
+        return bool(ok)
+
+    @staticmethod
+    async def set_cooldown(
+        customer_id: int, db: AsyncSession | None = None, store_id: int | None = None
+    ) -> None:
+        """强制写入/刷新冷却（非原子抢占场景）。新迎宾路径请用 try_acquire_cooldown。"""
+        seconds = await WelcomeService._cooldown_seconds(db, store_id=store_id)
+        if seconds <= 0:
+            return
+        redis = await get_redis()
+        await redis.set(f"snh:welcome:cooldown:{customer_id}", "1", ex=seconds)
 
     @staticmethod
     async def push_frame_score(
-        customer_id: int, camera_id: int | None, similarity: float, db: AsyncSession | None = None
+        customer_id: int,
+        camera_id: int | None,
+        similarity: float,
+        db: AsyncSession | None = None,
+        store_id: int | None = None,
     ) -> tuple[bool, float]:
         """Redis 多帧确认，跨进程共享。返回 (ready, avg_score)。"""
         settings = get_settings()
@@ -160,7 +193,9 @@ class WelcomeService:
 
         confirm_frames = settings.face_confirm_frames
         if db is not None:
-            confirm_frames = await SystemSettingsService.get_int(db, "face_confirm_frames", confirm_frames)
+            confirm_frames = await SystemSettingsService.effective_int(
+                db, "face_confirm_frames", confirm_frames, store_id=store_id
+            )
         redis = await get_redis()
         key = f"snh:welcome:frames:{camera_id or 0}:{customer_id}"
         pipe = redis.pipeline()
@@ -185,13 +220,24 @@ class WelcomeService:
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
 
-        threshold = await SystemSettingsService.get_float(db, "face_match_threshold", settings.face_match_threshold)
-        ready, avg_sim = await cls.push_frame_score(customer_id, camera_id, similarity, db)
+        store_id: int | None = None
+        if camera_id:
+            cam = await db.get(Camera, camera_id)
+            if cam:
+                store_id = int(cam.store_id) if cam.store_id else None
+
+        threshold = await SystemSettingsService.effective_float(
+            db, "face_match_threshold", settings.face_match_threshold, store_id=store_id
+        )
+        ready, avg_sim = await cls.push_frame_score(
+            customer_id, camera_id, similarity, db, store_id=store_id
+        )
         if not ready:
             return False
         if avg_sim < threshold:
             return False
-        if await cls.is_cooled_down(customer_id):
+        # 先原子抢冷却，禁止 exists()+setex() 双步竞态导致重复迎宾
+        if not await cls.try_acquire_cooldown(customer_id, db, store_id=store_id):
             return False
 
         customer = await db.get(Customer, customer_id)
@@ -223,7 +269,6 @@ class WelcomeService:
         await cls.get_queue().put({"customer_id": customer_id, "text": text, "camera_id": camera_id})
 
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
-        await cls.set_cooldown(customer_id, db)
         try:
             redis = await get_redis()
             await redis.delete(f"snh:welcome:frames:{camera_id or 0}:{customer_id}")

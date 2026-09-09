@@ -270,12 +270,21 @@ class PosRefundService:
                     row.reason,
                     operator_id=user.id,
                 )
-                if last_refund.status in ("SUCCESS", "PENDING", "PROCESSING"):
+                if last_refund.status == "SUCCESS":
                     executed = money(executed + amt)
                     row.executed_amount = executed
                     row.payment_id = payment.id
                     row.refund_id = last_refund.id
                     await db.flush()
+                elif last_refund.status in ("PENDING", "PROCESSING", "UNKNOWN"):
+                    # 渠道仅受理/处理中：申请单保持 PROCESSING，不得记入 executed 或标 SUCCESS
+                    row.status = "PROCESSING"
+                    row.payment_id = payment.id
+                    row.refund_id = last_refund.id
+                    row.fail_reason = None
+                    await db.flush()
+                    await db.refresh(row)
+                    return row
                 else:
                     row.status = "FAILED"
                     row.fail_reason = (

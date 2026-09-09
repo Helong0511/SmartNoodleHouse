@@ -22,7 +22,10 @@ async def main():
 
         if user:
             if not password:
-                password = "admin123"
+                print("已存在管理员账号。更新密码必须显式设置环境变量：")
+                print("  set ADMIN_INITIAL_PASSWORD=YourStrongPass123!")
+                print("  python scripts/init_admin.py")
+                sys.exit(1)
             user.password_hash = hash_password(password)
             user.status = 1
             await db.commit()

@@ -37,10 +37,23 @@ def register_tasks(scheduler) -> None:
             from app.services.system_settings_service import SystemSettingsService
             from app.services.websocket_manager import ws_manager
 
-            timeout_minutes = await SystemSettingsService.get_int(
+            global_timeout = await SystemSettingsService.effective_int(
                 db, "order_payment_timeout_minutes", settings.order_payment_timeout_minutes
             )
-            timeout = naive_local_now() - timedelta(minutes=timeout_minutes)
+            overrides_raw = await SystemSettingsService.store_override_map(
+                db, "order_payment_timeout_minutes"
+            )
+            store_timeouts: dict[int, int] = {}
+            for sid, val in overrides_raw.items():
+                try:
+                    store_timeouts[int(sid)] = int(val)
+                except (TypeError, ValueError):
+                    continue
+            positive = [t for t in [global_timeout, *store_timeouts.values()] if t > 0]
+            if not positive:
+                return
+            min_timeout = min(positive)
+            timeout = naive_local_now() - timedelta(minutes=min_timeout)
             # FOR UPDATE 与支付回调行锁互斥，避免关单/入账竞态
             result = await db.execute(
                 select(Order)
@@ -54,9 +67,15 @@ def register_tasks(scheduler) -> None:
             expired = list(result.scalars().all())
             closed = 0
             rescued = 0
+            now = naive_local_now()
             for order in expired:
                 # 二次确认：锁内状态可能已被回调改写
                 if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
+                    continue
+                minutes = store_timeouts.get(int(order.store_id), global_timeout)
+                if minutes <= 0:
+                    continue
+                if order.created_at and order.created_at > now - timedelta(minutes=minutes):
                     continue
                 # 关单前先向渠道查单，避免回调丢失误关已付款订单
                 try:
@@ -99,13 +118,9 @@ def register_tasks(scheduler) -> None:
     async def auto_complete_kitchen_orders():
         async with AsyncSessionLocal() as db:
             from app.services.kitchen_auto_service import auto_complete_stale_kitchen_orders
-            from app.services.system_settings_service import SystemSettingsService
             from app.services.websocket_manager import ws_manager
 
-            timeout_minutes = await SystemSettingsService.get_int(
-                db, "kitchen_auto_complete_minutes", settings.kitchen_auto_complete_minutes
-            )
-            completed = await auto_complete_stale_kitchen_orders(db, timeout_minutes=timeout_minutes)
+            completed = await auto_complete_stale_kitchen_orders(db)
             await db.commit()
             for order in completed:
                 try:

@@ -59,6 +59,31 @@ async def _load_stores(db, store_ids: list[int]) -> dict[int, Store]:
     return {s.id: s for s in rows.scalars().all()}
 
 
+def _resolve_customer_order_channel(request: Request, client_channel: str | None) -> str:
+    """顾客下单渠道由服务端根据 JWT channel 强制确定，客户端不可伪造 POS/外卖等。"""
+    from app.core.exceptions import AppException
+    from app.core.security import decode_customer_token
+
+    allowed = {"WECHAT", "ALIPAY", "H5"}
+    jwt_ch = ""
+    auth = request.headers.get("authorization") or ""
+    if auth.startswith("Bearer "):
+        try:
+            jwt_ch = str(decode_customer_token(auth.split(" ", 1)[1]).get("channel") or "").strip().upper()
+        except Exception:
+            jwt_ch = ""
+    if jwt_ch in ("WECHAT", "ALIPAY"):
+        return jwt_ch
+    hint = (client_channel or "").strip().upper()
+    if hint in allowed:
+        # H5 入口无平台 JWT channel 时允许 WECHAT/ALIPAY/H5，仍拒绝 POS/外卖
+        return hint if hint != "H5" else "H5"
+    if hint:
+        raise AppException(40009, f"非法下单渠道: {hint}")
+    # 无 JWT channel 且未传：默认 H5（扫码页）
+    return "H5"
+
+
 @router.post("")
 async def create_order(
     data: OrderCreate,
@@ -66,6 +91,7 @@ async def create_order(
     db: DbSession,
     customer: CurrentCustomer,
 ):
+    channel = _resolve_customer_order_channel(request, data.channel)
     order = await OrderCreateService.create_order(
         db,
         store_id=data.store_id,
@@ -73,12 +99,13 @@ async def create_order(
         customer_id=customer.id,
         items=[i.model_dump() for i in data.items],
         remark=data.remark,
-        channel=data.channel,
+        channel=channel,
         idempotency_key=data.idempotency_key,
         need_pack=data.need_pack,
         dining_type=data.dining_type,
         customer_coupon_id=data.customer_coupon_id,
         customer_voucher_id=data.customer_voucher_id,
+        operator_id=None,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await ws_manager.notify_order_event(
@@ -154,6 +181,7 @@ async def create_pos_order(
         need_pack=need_pack,
         dining_type=dtype,
         waive_packing_fee=bool(data.waive_packing_fee),
+        operator_id=user.id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await ws_manager.notify_order_event(
@@ -686,9 +714,10 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             raise HTTPException(status_code=403, detail="缺少权限: order:read")
         assert_order_store_access(user, order)
 
-    if customer and order.customer_id != customer.id:
+    if customer is not None:
+        from app.services.order_access import assert_customer_owns_order
 
-        raise HTTPException(status_code=403, detail="无权查看此订单")
+        assert_customer_owns_order(order, customer.id, action="查看")
 
     from app.services.order_service import ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL
 

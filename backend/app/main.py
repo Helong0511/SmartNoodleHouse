@@ -59,9 +59,11 @@ async def lifespan(app: FastAPI):
             "错误：%s",
             e,
         )
+        if settings.is_production:
+            raise SystemExit(1) from e
 
     # 必须走 settings（会读 .env）；勿用 os.getenv，否则仅写在 .env 的 PROCESS_ROLE 会被忽略
-    role = (settings.process_role or "leader").strip().lower()
+    role = (settings.process_role or "worker").strip().lower()
     is_leader = role == "leader"
     await start_ws_subscriber(on_redis_ws_message)
 

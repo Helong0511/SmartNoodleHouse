@@ -61,12 +61,10 @@ async def create_payment(
     order = await db.get(Order, order_id)
     if not order:
         return success(None, message="订单不存在", request=request)
-    if order.customer_id:
-        if order.customer_id != customer.id:
-            raise HTTPException(status_code=403, detail="无权支付此订单")
-    else:
-        order.customer_id = customer.id
-        await db.flush()
+    from app.services.order_access import assert_customer_can_pay_order
+
+    # 禁止顾客 claim 未绑定的 POS 订单；仅本人订单可支付
+    assert_customer_can_pay_order(order, customer.id)
     extra: dict | None = None
     provider_u = data.provider.upper()
     channel_l = data.channel_type.lower()
@@ -111,11 +109,9 @@ async def sync_order_payment(
     order = await db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.customer_id and order.customer_id != customer.id:
-        raise HTTPException(status_code=403, detail="无权同步此订单支付")
-    if not order.customer_id:
-        order.customer_id = customer.id
-        await db.flush()
+    from app.services.order_access import assert_customer_owns_order
+
+    assert_customer_owns_order(order, customer.id, action="同步支付")
     payment, meta = await PaymentService.sync_order_pending_payment(
         db, order, provider=provider
     )
@@ -324,6 +320,18 @@ async def refund_payment(
         raise AppException(40301, "收银渠道订单请走退款审批（店长/管理员执行）")
     assert_order_store_access(user, order)
     row = await PaymentService.refund(db, payment, data.amount, data.reason, operator_id=user.id)
+    from app.services.audit_service import AuditService
+
+    await AuditService.log_refund(
+        db,
+        user_id=user.id,
+        refund_no=row.refund_no,
+        payment_no=payment.payment_no,
+        amount=row.amount,
+        reason=data.reason,
+        request=request,
+        extra={"order_id": order.id, "status": row.status},
+    )
     if row.status == "SUCCESS":
         await ws_manager.notify_order_event(
             "ORDER_REFUNDED",

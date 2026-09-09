@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     camera_password: str = ""
 
     face_encryption_key: str = ""
+    # 平台 Token 等业务密钥加密；未单独配置时回退到 FACE_ENCRYPTION_KEY
+    secret_encryption_key: str = ""
 
     # 微信平台公钥/证书 PEM（回调 Wechatpay-Signature 验签必填；生产强制）
     wechat_platform_public_key: str = ""
@@ -135,9 +137,11 @@ class Settings(BaseSettings):
     # Webhook IP 白名单，逗号分隔，支持 CIDR；空=不限制
     webhook_ip_allowlist: str = ""
     webhook_require_allowlist: bool = False
+    # 仅这些直连 peer（反代）可让后端信任 X-Real-IP / X-Forwarded-For
+    trusted_proxy_ips: str = "127.0.0.1,::1"
 
-    # 多进程角色：仅一个实例应为 leader（调度/TTS/摄像头/识别）
-    process_role: str = "leader"
+    # 多进程角色：默认 worker，避免所有 Gunicorn worker 都跑调度；仅一个实例设 leader
+    process_role: str = "worker"
     # 是否在 leader 进程启动人脸识别 worker（须走 settings 读 .env，勿用 os.getenv）
     enable_recognition_worker: bool = True
 
