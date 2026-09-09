@@ -94,7 +94,23 @@ class CouponService:
                 )
             )
         rows = list((await db.execute(q)).scalars().all())
-        return [CouponService.template_payload(t) for t in rows]
+        store_ids = {int(t.store_id) for t in rows if getattr(t, "store_id", None)}
+        name_map: dict[int, str] = {}
+        if store_ids:
+            from app.models import Store
+
+            stores = list(
+                (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars().all()
+            )
+            name_map = {int(s.id): s.name for s in stores}
+        out = []
+        for t in rows:
+            payload = CouponService.template_payload(t)
+            sid = payload.get("store_id")
+            if sid:
+                payload["store_name"] = name_map.get(int(sid))
+            out.append(payload)
+        return out
 
     @staticmethod
     async def create_template(db: AsyncSession, data: dict) -> CouponTemplate:

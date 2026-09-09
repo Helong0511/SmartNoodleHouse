@@ -8,6 +8,13 @@
         </div>
         <el-table :data="templates" border style="margin-top:12px">
           <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column label="归属" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.store_scope === 'HQ' || !row.store_id ? 'info' : 'success'">
+                {{ scopeLabel(row) }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
               {{ row.coupon_type === 'PERCENT' ? '折扣券' : row.coupon_type === 'VOUCHER' ? '代金券' : '满减券' }}
@@ -24,10 +31,13 @@
           </el-table-column>
           <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openTemplateForm(row)">编辑</el-button>
-              <el-button link type="warning" @click="toggleTemplate(row)">
-                {{ row.status === 1 ? '停用' : '启用' }}
-              </el-button>
+              <template v-if="canEditTemplate(row)">
+                <el-button link type="primary" @click="openTemplateForm(row)">编辑</el-button>
+                <el-button link type="warning" @click="toggleTemplate(row)">
+                  {{ row.status === 1 ? '停用' : '启用' }}
+                </el-button>
+              </template>
+              <span v-else class="muted">总部只读</span>
             </template>
           </el-table-column>
         </el-table>
@@ -97,6 +107,21 @@
 
     <el-dialog v-model="templateDialog" :title="templateForm.id ? '编辑模板' : '新增模板'" width="480px" destroy-on-close>
       <el-form :model="templateForm" label-width="100px">
+        <el-form-item v-if="!templateForm.id && auth.isSuperAdmin" label="归属" required>
+          <el-radio-group v-model="templateForm.scope">
+            <el-radio value="HQ">总部（全店可用）</el-radio>
+            <el-radio value="STORE">指定门店</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item
+          v-if="!templateForm.id && auth.isSuperAdmin && templateForm.scope === 'STORE'"
+          label="门店"
+          required
+        >
+          <el-select v-model="templateForm.store_id" placeholder="选择门店" style="width: 100%">
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="templateForm.name" maxlength="100" />
         </el-form-item>
@@ -202,6 +227,7 @@ const loading = ref(false)
 const saving = ref(false)
 const issuing = ref(false)
 const activeTab = ref('templates')
+const stores = ref<{ id: number; name: string }[]>([])
 
 const templates = ref<any[]>([])
 const templateDialog = ref(false)
@@ -213,7 +239,32 @@ const templateForm = reactive({
   min_order_amount: 30,
   valid_days: 30,
   status: 1,
+  scope: 'HQ' as 'HQ' | 'STORE',
+  store_id: undefined as number | undefined,
 })
+
+function scopeLabel(row: any) {
+  if (!row?.store_id || row.store_scope === 'HQ') return '总部'
+  const s = stores.value.find((x) => x.id === row.store_id)
+  return row.store_name || s?.name || `门店#${row.store_id}`
+}
+
+/** 门店账号不可改总部模板；超管可改全部 */
+function canEditTemplate(row: any) {
+  if (!canManage.value) return false
+  if (auth.isSuperAdmin) return true
+  return !!(row?.store_id)
+}
+
+async function loadStores() {
+  if (!auth.isSuperAdmin) return
+  try {
+    const res = await api.get('/settings/stores/options')
+    stores.value = res.data?.items || []
+  } catch {
+    stores.value = []
+  }
+}
 
 const issued = ref<any[]>([])
 const issuedKeyword = ref('')
@@ -291,6 +342,10 @@ function reloadIssued() {
 
 function openTemplateForm(row?: any) {
   if (row) {
+    if (!canEditTemplate(row)) {
+      ElMessage.warning('无权修改总部优惠券模板')
+      return
+    }
     Object.assign(templateForm, {
       id: row.id,
       name: row.name,
@@ -299,6 +354,8 @@ function openTemplateForm(row?: any) {
       min_order_amount: Number(row.min_order_amount),
       valid_days: row.valid_days,
       status: row.status,
+      scope: row.store_id ? 'STORE' : 'HQ',
+      store_id: row.store_id || undefined,
     })
   } else {
     Object.assign(templateForm, {
@@ -309,6 +366,8 @@ function openTemplateForm(row?: any) {
       min_order_amount: 30,
       valid_days: 30,
       status: 1,
+      scope: auth.isSuperAdmin ? 'HQ' : 'STORE',
+      store_id: auth.isSuperAdmin ? stores.value[0]?.id : auth.user?.store_id || undefined,
     })
   }
   templateDialog.value = true
@@ -319,15 +378,27 @@ async function saveTemplate() {
     ElMessage.warning('请输入模板名称')
     return
   }
+  if (
+    !templateForm.id &&
+    auth.isSuperAdmin &&
+    templateForm.scope === 'STORE' &&
+    !templateForm.store_id
+  ) {
+    ElMessage.warning('请选择门店')
+    return
+  }
   saving.value = true
   try {
-    const payload = {
+    const payload: Record<string, unknown> = {
       name: templateForm.name.trim(),
       coupon_type: templateForm.coupon_type,
       discount_value: templateForm.discount_value,
       min_order_amount: templateForm.min_order_amount,
       valid_days: templateForm.valid_days,
       status: templateForm.status,
+    }
+    if (!templateForm.id && auth.isSuperAdmin) {
+      payload.store_id = templateForm.scope === 'STORE' ? templateForm.store_id : null
     }
     if (templateForm.id) {
       await api.put(`/coupons/templates/${templateForm.id}`, payload)
@@ -398,6 +469,7 @@ async function submitIssue() {
 }
 
 onMounted(async () => {
+  await loadStores()
   await loadTemplates()
 })
 </script>

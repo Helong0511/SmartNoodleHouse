@@ -25,11 +25,14 @@
 # ── 正式版上线检查清单（微信 / 支付宝分开）──
 #
 # 【后端 .env 生产】cp .env.production.example .env
+#   生成密钥：python scripts/gen_secrets.py  （输出粘贴进 .env，勿提交）
 #   APP_ENV=production、APP_DEBUG=false
+#   PROCESS_ROLE=auto（推荐；systemd 单元也会覆盖为 auto + Redis Leader 锁）
 #   H5_PUBLIC_BASE_URL=https://你的域名
 #   MINI_PROGRAM_ENV_VERSION=release
 #   WECHAT_* / ALIPAY_* 支付与小程序密钥齐全
 #   ALIPAY_AES_KEY=开放平台接口内容加密 AES（支付宝手机号解密）
+#   DISPLAY_SCREEN_TOKEN / JWT_AUDIENCE / CUSTOMER_JWT_EXPIRE_MINUTES 见 .env.production.example
 #
 # 【微信小程序 miniprogram-wechat】
 #   入口：https://mp.weixin.qq.com （开放平台 https://open.weixin.qq.com ）
