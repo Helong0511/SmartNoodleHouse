@@ -2,7 +2,7 @@
 -- 智能面馆 — 生产环境种子数据
 -- ============================================================================
 -- 前置：sql/001_schema.sql
--- 后续：python scripts/init_admin.py（如需重置超管密码；本文件已含 admin/hsf/syxm）
+-- 后续：python scripts/init_admin.py（如需重置超管密码；本文件已含 admin/hsf/syxm/cwm）
 -- 多门店：第六节按实际增删 store_no
 --
 -- ⚠ 会先清空 001_schema.sql 中全部业务表数据，再写入种子（不可对线上有业务数据的库随意执行）
