@@ -260,7 +260,8 @@ SELECT
 INSERT INTO `smart_noodle_house`.`users` (`id`, `username`, `password_hash`, `display_name`, `role_id`, `store_id`, `token_version`, `status`, `last_login_at`, `created_at`, `updated_at`) VALUES 
 (1, 'admin', '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm', '系统管理员', 1, NULL, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (2, 'hsf', '$2b$12$5YuLHbzaVpVkUufQVLzI7.kgcmx8llwd8orUyt9APM8C.r1VLGSj.', '贺师傅', 4, 1, 1, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(3, 'syxm', '$2b$12$0wcpcyCEiMt022onlYQ7AuwB9NHNIpzWjB0.Cx5bkOyCRDbZXcSiO', '收银小妹', 3, 1, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(3, 'syxm', '$2b$12$0wcpcyCEiMt022onlYQ7AuwB9NHNIpzWjB0.Cx5bkOyCRDbZXcSiO', '收银小妹', 3, 1, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, 'cwm', '$2b$12$WDsX8M9O372aLwPVDvml7eTRqjcx5CvYDRzpb8AvdeHiavfkMikH2', '肠旺面店长', 2, 1, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 
 -- 添加分类
@@ -396,4 +397,3 @@ INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_
 (1, 1, 'WM', '外带自取', 'M7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (2, 1, 'A01', '1号桌', '6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (3, 1, 'A02', '2号桌', 'wJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
-

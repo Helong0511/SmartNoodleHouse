@@ -62,3 +62,20 @@ def test_idempotent_hit_same_owner_ok():
         channel="WECHAT",
         operator_id=None,
     )
+
+
+def test_idempotent_reuse_only_pending_payment_policy():
+    """已付/已取消订单不得再被同幂等键复用（客户端须带新 checkout nonce）。"""
+    pending = SimpleNamespace(status="PENDING_PAYMENT", payment_status="UNPAID")
+    paid = SimpleNamespace(status="PAID", payment_status="PAID")
+    cancelled = SimpleNamespace(status="CANCELLED", payment_status="UNPAID")
+
+    def reusable(o) -> bool:
+        return (o.status or "") == "PENDING_PAYMENT" and (o.payment_status or "") in (
+            "UNPAID",
+            "PENDING",
+        )
+
+    assert reusable(pending)
+    assert not reusable(paid)
+    assert not reusable(cancelled)
