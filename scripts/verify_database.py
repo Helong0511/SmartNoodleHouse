@@ -63,6 +63,8 @@ REQUIRED_CHECKS = [
     ("options", "chk_options_extra_price"),
 ]
 
+# (table, constraint_name) — FK
+REQUIRED_FKS = [
     ("orders", "fk_orders_store"),
     ("orders", "fk_orders_operator"),
     ("payments", "fk_payments_order"),

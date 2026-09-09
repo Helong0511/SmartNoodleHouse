@@ -412,10 +412,12 @@ class DeliveryService:
                 delivery_order_id=d_order.id,
                 remark=f"delivery:{platform}:{parsed['platform_order_id']}",
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "外卖 SALE 入账失败 order_id=%s platform=%s", order.id, platform
             )
+            if get_settings().is_production:
+                raise AppException(50010, "外卖财务分录写入失败，请重试回调") from exc
 
         settings = get_settings()
         deferred: list[dict] = []
@@ -770,12 +772,14 @@ class DeliveryService:
                         delivery_refund_id=refund.id,
                         remark=f"delivery_refund:{refund.platform}:{refund.platform_refund_id or refund.id}",
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "外卖 REFUND 入账失败 delivery_refund_id=%s order_id=%s",
                         refund.id,
                         order.id,
                     )
+                    if get_settings().is_production:
+                        raise AppException(50010, "外卖退款分录写入失败，请重试") from exc
         else:
             ok = await provider.disagree_refund(
                 refund.platform_refund_id or "",

@@ -276,12 +276,16 @@ onMounted(async () => {
     showMemberPrompt.value = true
   }
 
+  const sid = table.value?.store_id
+  if (!sid) {
+    ElMessage.warning('请先扫桌码进入点餐')
+    return
+  }
   categories.value = (
     await api.get('/categories', {
-      params: table.value?.store_id ? { store_id: table.value.store_id } : {},
+      params: { store_id: sid },
     })
   ).data
-  const sid = table.value?.store_id
   const allItems: any[] = []
   let page = 1
   let totalPages = 1
@@ -290,7 +294,7 @@ onMounted(async () => {
       params: {
         page,
         page_size: 100,
-        ...(sid ? { store_id: sid } : {}),
+        store_id: sid,
       },
     })
     const data = res?.data || {}

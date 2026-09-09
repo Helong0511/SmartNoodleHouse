@@ -155,7 +155,16 @@ async def me(request: Request, db: DbSession, user: CurrentUser):
 @router.post("/verify-password")
 async def verify_password_api(data: VerifyPasswordRequest, request: Request, db: DbSession, user: CurrentUser):
     """锁屏解锁：校验当前登录用户密码。"""
+    lock_name = f"uid:{user.id}"
+    if await _login_is_locked(lock_name):
+        return {
+            "code": 429,
+            "message": "密码错误次数过多，请 15 分钟后再试",
+            "data": None,
+        }
     row = await db.get(User, user.id)
     if not row or not verify_password(data.password, row.password_hash):
+        await _record_login_failure(lock_name)
         return {"code": 401, "message": "密码错误", "data": None}
+    await _clear_login_failures(lock_name)
     return success({"ok": True}, request=request)

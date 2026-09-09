@@ -65,9 +65,12 @@ Page({
     let categories = []
     try {
       const sid = this.storeId()
+      if (!sid) {
+        throw new Error('请先扫桌码选择门店')
+      }
       const [prodRes, catRes] = await Promise.all([
-        fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false),
-        api.get('/categories', sid ? { store_id: sid } : {}, false)
+        fetchAllProducts(api, { store_id: sid }, false),
+        api.get('/categories', { store_id: sid }, false)
       ])
       products = (prodRes && prodRes.items) || []
       categories = Array.isArray(catRes) ? catRes : ((catRes && catRes.items) || [])

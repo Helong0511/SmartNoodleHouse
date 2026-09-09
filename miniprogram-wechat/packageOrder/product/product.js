@@ -110,8 +110,12 @@ Page({
           || (app.globalData.store && app.globalData.store.id)
           || null
         const [cats, prodRes] = await Promise.all([
-          api.get('/categories', sid ? { store_id: sid } : {}, false),
-          fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false)
+          sid
+            ? api.get('/categories', { store_id: sid }, false)
+            : Promise.resolve([]),
+          sid
+            ? fetchAllProducts(api, { store_id: sid }, false)
+            : Promise.resolve({ items: [p] })
         ])
         categories = Array.isArray(cats) ? cats : []
         products = (prodRes && prodRes.items) || [p]

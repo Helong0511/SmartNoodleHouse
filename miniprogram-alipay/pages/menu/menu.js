@@ -158,8 +158,14 @@ Page({
         catList = this._catsCache.cats
       }
       const [cats, products] = await Promise.all([
-        catList ? Promise.resolve(catList) : api.get('/categories', sid ? { store_id: sid } : {}, false),
-        fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false)
+        catList
+          ? Promise.resolve(catList)
+          : sid
+            ? api.get('/categories', { store_id: sid }, false)
+            : Promise.reject(new Error('请先扫桌码选择门店')),
+        sid
+          ? fetchAllProducts(api, { store_id: sid }, false)
+          : Promise.reject(new Error('请先扫桌码选择门店')),
       ])
       if (!catList) {
         catList = normalizeList(cats)
