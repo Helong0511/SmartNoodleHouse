@@ -358,7 +358,7 @@ async def refund_payment(
                 "退款成功"
                 if row.status == "SUCCESS"
                 else "退款已受理，等待平台确认"
-                if row.status in ("PENDING", "PROCESSING")
+                if row.status in ("PENDING", "PROCESSING", "UNKNOWN")
                 else f"退款状态: {row.status}"
             ),
         },
