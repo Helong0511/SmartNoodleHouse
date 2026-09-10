@@ -460,26 +460,26 @@ INSERT INTO products (
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'SH01-MianYangMiFen-NiuRou', '绵阳米粉(牛肉)', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
+SELECT s.id, c.id, 'SH01-MianYangMiFen-NiuRouMiFen', '牛肉米粉', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '绵阳米粉'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-MianYangMiFen-NiuRou');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-MianYangMiFen-NiuRouMiFen');
 
 INSERT INTO products (
   store_id, category_id, product_no, name, description, main_image,
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'SH01-MianYangMiFen-FeiChang', '绵阳米粉(肥肠)', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
+SELECT s.id, c.id, 'SH01-MianYangMiFen-FeiChangMiFen', '肥肠米粉', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '绵阳米粉'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-MianYangMiFen-FeiChang');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-MianYangMiFen-FeiChangMiFen');
 
 -- 关联商品规格
 INSERT INTO `smart_noodle_house`.`product_option_groups` (`id`, `product_id`, `group_id`, `sort_order`) VALUES 

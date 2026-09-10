@@ -41,12 +41,15 @@
 
     <el-table :data="products" border row-key="id" @selection-change="onSelectionChange">
       <el-table-column v-if="auth.isSuperAdmin" type="selection" width="48" />
-      <el-table-column prop="product_no" label="编号" min-width="150" show-overflow-tooltip />
-      <el-table-column prop="name" label="名称" width="160" show-overflow-tooltip />
-      <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="110" show-overflow-tooltip>
+      <el-table-column prop="store_name" label="门店" min-width="80" show-overflow-tooltip>
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
       </el-table-column>
-      <el-table-column label="图片" width="72">
+      <el-table-column label="分类" min-width="90" show-overflow-tooltip>
+        <template #default="{ row }">{{ categoryName(row.category_id) }}</template>
+      </el-table-column>
+      <el-table-column prop="product_no" label="编号" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+      <el-table-column label="图片" width="72" align="center">
         <template #default="{ row }">
           <el-image
             v-if="row.main_image"
@@ -58,13 +61,14 @@
           <span v-else class="no-img">无</span>
         </template>
       </el-table-column>
-      <el-table-column label="分类" width="120">
-        <template #default="{ row }">{{ categoryName(row.category_id) }}</template>
+      <el-table-column prop="price" label="价格" width="88" />
+      <el-table-column label="原价" width="88">
+        <template #default="{ row }">{{ row.original_price != null && row.original_price !== '' ? row.original_price : '—' }}</template>
       </el-table-column>
-      <el-table-column prop="price" label="价格" width="100" />
-      <el-table-column prop="box_price" label="餐盒费" width="90" />
-      <el-table-column prop="stock" label="库存" width="100" />
-      <el-table-column label="状态" width="100">
+      <el-table-column prop="box_price" label="餐盒费" width="88" />
+      <el-table-column prop="stock" label="库存" width="80" />
+      <el-table-column prop="sales_count" label="销量" width="80" />
+      <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <el-select
             :model-value="row.status"
@@ -77,7 +81,20 @@
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column prop="sales_count" label="销量" width="100" />
+      <el-table-column label="标签" min-width="150">
+        <template #default="{ row }">
+          <el-tag v-if="row.is_recommended" size="small" type="success" class="tag-gap">推荐</el-tag>
+          <el-tag v-if="row.is_hot" size="small" type="danger" class="tag-gap">热销</el-tag>
+          <el-tag v-if="row.no_member_discount" size="small" type="warning" class="tag-gap">特价</el-tag>
+          <el-tag v-if="row.no_cooking" size="small" type="info" class="tag-gap">免烹饪</el-tag>
+          <el-tag v-if="row.has_options" size="small" class="tag-gap">规格</el-tag>
+          <span
+            v-if="!row.is_recommended && !row.is_hot && !row.no_member_discount && !row.no_cooking && !row.has_options"
+            class="no-img"
+          >—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="sort_order" label="排序" width="70" />
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openForm(row)">编辑</el-button>
@@ -830,6 +847,7 @@ onMounted(async () => {
 .thumb { width: 48px; height: 48px; border-radius: 6px; }
 .no-img { color: #c0c4cc; font-size: 12px; }
 .status-select { width: 88px; }
+.tag-gap { margin: 0 4px 4px 0; }
 .img-row { display: flex; gap: 12px; align-items: flex-start; }
 .preview { width: 96px; height: 96px; border-radius: 8px; }
 .preview.empty {
