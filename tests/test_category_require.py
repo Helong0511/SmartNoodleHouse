@@ -54,10 +54,11 @@ def test_store_require_lists_inherit_vs_custom():
 @pytest.mark.asyncio
 async def test_addon_inherits_category_require(db_session):
     store = Store(id=801, store_no="T-REQ-01", name="依赖测试店", status=1)
-    noodle_cat = ProductCategory(id=802, store_id=store.id, name="面", sort_order=0, status=1)
-    rice_cat = ProductCategory(id=803, store_id=store.id, name="绵阳米粉", sort_order=1, status=1)
+    noodle_cat = ProductCategory(id=802, category_no="C802", store_id=store.id, name="面", sort_order=0, status=1)
+    rice_cat = ProductCategory(id=803, category_no="C803", store_id=store.id, name="绵阳米粉", sort_order=1, status=1)
     addon_cat = ProductCategory(
         id=804,
+        category_no="C804",
         store_id=store.id,
         name="加料",
         sort_order=2,
@@ -131,9 +132,9 @@ async def test_addon_inherits_category_require(db_session):
 @pytest.mark.asyncio
 async def test_product_require_specific_product(db_session):
     store = Store(id=821, store_no="T-REQ-02", name="指定商品店", status=1)
-    noodle_cat = ProductCategory(id=822, store_id=store.id, name="面", sort_order=0, status=1)
+    noodle_cat = ProductCategory(id=822, category_no="C822", store_id=store.id, name="面", sort_order=0, status=1)
     addon_cat = ProductCategory(
-        id=823,
+        id=823, category_no="C823",
         store_id=store.id,
         name="加料",
         sort_order=1,

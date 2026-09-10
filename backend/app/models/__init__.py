@@ -197,8 +197,11 @@ class CustomerAlipayAccount(Base, TimestampMixin):
 
 class ProductCategory(Base, TimestampMixin):
     __tablename__ = "product_categories"
+    __table_args__ = (UniqueConstraint("store_id", "category_no", name="uk_cat_store_no"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    # 门店前缀编号，如 SH01-Mian；与商品/规格编码规则一致
+    category_no: Mapped[str] = mapped_column(String(64), default="")
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(String(255))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -238,7 +241,7 @@ class Product(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product_categories.id"))
-    product_no: Mapped[str] = mapped_column(String(32))
+    product_no: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     main_image: Mapped[str | None] = mapped_column(String(500))
@@ -276,7 +279,7 @@ class OptionGroup(Base, TimestampMixin):
     # NULL=总部共享（全店可用）；非空=仅该门店可改/可绑本店商品
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     name: Mapped[str] = mapped_column(String(50))
-    code: Mapped[str] = mapped_column(String(50))
+    code: Mapped[str] = mapped_column(String(64))
     selection_type: Mapped[str] = mapped_column(String(20), default="SINGLE")
     is_required: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -289,7 +292,7 @@ class Option(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     group_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("option_groups.id"))
     name: Mapped[str] = mapped_column(String(50))
-    code: Mapped[str] = mapped_column(String(50))
+    code: Mapped[str] = mapped_column(String(80))
     extra_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)

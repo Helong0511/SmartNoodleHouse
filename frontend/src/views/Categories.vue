@@ -13,13 +13,28 @@
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
       <el-button type="primary" @click="openForm()">新增分类</el-button>
+      <el-button
+        v-if="auth.isSuperAdmin"
+        type="success"
+        plain
+        :disabled="!selectedIds.length"
+        @click="openCopy"
+      >复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
 
-    <el-table :data="categories" style="margin-top:12px" border>
+    <el-table
+      :data="categories"
+      style="margin-top:12px"
+      border
+      row-key="id"
+      @selection-change="onSelectionChange"
+    >
+      <el-table-column v-if="auth.isSuperAdmin" type="selection" width="48" />
       <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="120">
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
       </el-table-column>
+      <el-table-column prop="category_no" label="编号" min-width="140" show-overflow-tooltip />
       <el-table-column prop="name" label="分类名" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
       <el-table-column label="须先点分类" min-width="160">
@@ -49,7 +64,7 @@
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑分类' : '新增分类'" width="520px">
       <el-form :model="form" label-width="100px">
         <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店" required>
-          <el-select v-model="form.store_id" placeholder="选择门店" style="width: 100%">
+          <el-select v-model="form.store_id" placeholder="选择门店" style="width: 100%" @change="onStoreChange">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
@@ -60,7 +75,16 @@
           <span>{{ form.store_name || boundStoreName || `门店#${form.store_id}` }}</span>
         </el-form-item>
         <el-form-item label="名称" required>
-          <el-input v-model="form.name" />
+          <el-input v-model="form.name" @input="onNameInput" />
+        </el-form-item>
+        <el-form-item label="编号" required>
+          <el-input
+            v-model="form.category_no"
+            :disabled="!!form.id"
+            :placeholder="categoryNoPlaceholder"
+            @input="codeTouched = true"
+          />
+          <div class="form-tip">{{ categoryNoTip }}</div>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" />
@@ -96,6 +120,15 @@
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <CopyToStoreDialog
+      v-model="copyVisible"
+      :stores="stores"
+      :exclude-store-id="copySourceStoreId"
+      :selected-count="selectedIds.length"
+      :category-ids="selectedIds"
+      @done="load"
+    />
   </div>
 </template>
 
@@ -104,6 +137,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
+import { codeHint, storePrefixFromNo, suggestCodeFromName } from '@/utils/bizCode'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -112,15 +147,52 @@ const categories = ref<any[]>([])
 const stores = ref<any[]>([])
 const filterStoreId = ref<number | undefined>()
 const dialogVisible = ref(false)
+const copyVisible = ref(false)
+const selectedRows = ref<any[]>([])
+const codeTouched = ref(false)
 const form = reactive({
   id: 0,
   store_id: undefined as number | undefined,
   store_name: '',
+  category_no: '',
   name: '',
   description: '',
   sort_order: 0,
   status: 1,
   require_category_ids: [] as number[],
+})
+
+function formStorePrefix() {
+  const sid = form.store_id || auth.user?.store_id
+  const s = stores.value.find((x) => Number(x.id) === Number(sid))
+  return storePrefixFromNo(s?.store_no)
+}
+
+const categoryNoPlaceholder = computed(() => `逻辑码如 Mian（保存为 ${formStorePrefix()}-Mian）`)
+const categoryNoTip = computed(() =>
+  form.id
+    ? '编号创建后不可改'
+    : `${codeHint('category', formStorePrefix())}；输入名称后自动建议拼音编码，可改。`,
+)
+
+function onNameInput() {
+  if (form.id || codeTouched.value) return
+  suggestCodeFromName(
+    { name: form.name, kind: 'category', store_id: form.store_id || auth.user?.store_id },
+    (code) => {
+      if (!codeTouched.value) form.category_no = code
+    },
+  )
+}
+
+function onStoreChange() {
+  if (!form.id && form.name && !codeTouched.value) onNameInput()
+}
+
+const selectedIds = computed(() => selectedRows.value.map((r) => r.id))
+const copySourceStoreId = computed(() => {
+  const storesSet = new Set(selectedRows.value.map((r) => Number(r.store_id)))
+  return storesSet.size === 1 ? [...storesSet][0] : null
 })
 
 const boundStoreName = computed(() => {
@@ -145,6 +217,23 @@ function formatRequireNames(row: any) {
   return names.join('、')
 }
 
+function onSelectionChange(rows: any[]) {
+  selectedRows.value = rows
+}
+
+function openCopy() {
+  if (!selectedIds.value.length) {
+    ElMessage.warning('请先勾选分类')
+    return
+  }
+  const storesSet = new Set(selectedRows.value.map((r) => Number(r.store_id)))
+  if (storesSet.size > 1) {
+    ElMessage.warning('请选择同一门店的分类再复制')
+    return
+  }
+  copyVisible.value = true
+}
+
 async function loadStores() {
   try {
     const res = await api.get('/settings/stores/options')
@@ -164,17 +253,20 @@ async function load() {
       params: { all: true, ...(sid ? { store_id: sid } : {}) },
     })
     categories.value = res.data || []
+    selectedRows.value = []
   } finally {
     loading.value = false
   }
 }
 
 function openForm(row?: any) {
+  codeTouched.value = !!row
   if (row) {
     Object.assign(form, {
       id: row.id,
       store_id: row.store_id,
       store_name: row.store_name || '',
+      category_no: row.category_no || '',
       name: row.name,
       description: row.description || '',
       sort_order: row.sort_order,
@@ -188,6 +280,7 @@ function openForm(row?: any) {
         ? filterStoreId.value || stores.value[0]?.id
         : auth.user?.store_id || stores.value[0]?.id,
       store_name: '',
+      category_no: '',
       name: '',
       description: '',
       sort_order: 0,
@@ -217,7 +310,13 @@ async function save() {
       require_category_ids: form.require_category_ids || [],
     }
     if (!form.id) {
+      if (!form.category_no.trim()) {
+        ElMessage.warning('请填写分类编号（或先输入名称自动生成）')
+        saving.value = false
+        return
+      }
       payload.store_id = form.store_id
+      payload.category_no = form.category_no.trim()
       await api.post('/categories', payload)
     } else {
       await api.put(`/categories/${form.id}`, payload)

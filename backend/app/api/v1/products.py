@@ -25,6 +25,7 @@ from app.schemas.product import (
     CategoryScheduleCreate,
     CategoryScheduleUpdate,
     CategoryUpdate,
+    MenuCopyRequest,
     OptionCreate,
     OptionGroupCreate,
     OptionGroupUpdate,
@@ -32,6 +33,7 @@ from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
 )
+from app.services.menu_copy_service import MenuCopyService
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.services.category_require import (
     normalize_id_list,
@@ -121,6 +123,7 @@ def _category_payload(cat: ProductCategory, store_name: str | None = None, *, sc
         "id": cat.id,
         "store_id": cat.store_id,
         "store_name": store_name,
+        "category_no": getattr(cat, "category_no", None) or "",
         "name": cat.name,
         "description": cat.description,
         "sort_order": cat.sort_order,
@@ -259,6 +262,166 @@ class StoreStockUpsert(BaseModel):
     status: int = Field(default=1, ge=0, le=1)
 
 
+@router.get("/menu/code-suggest", dependencies=[require_permission("product:read")])
+async def suggest_menu_code(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    name: str,
+    kind: str = "product",
+    store_id: int | None = None,
+    group_id: int | None = None,
+    category_id: int | None = None,
+    hq: bool = False,
+):
+    """根据中文名生成默认编码（拼音音节首字母大写 + 门店前缀）。
+
+    kind: product | category | group | option
+    product 时可传 category_id，生成 {前缀}-{分类逻辑}-{商品逻辑}
+    hq=true 或不传 store_id（超管）时商品/分类前缀用 0000
+    """
+    from app.services.option_code import (
+        HQ_STORE_PREFIX,
+        group_logical_key,
+        name_to_logical_code,
+        normalize_store_prefix,
+        suggest_code,
+    )
+
+    kind = (kind or "product").strip().lower()
+    if kind not in ("product", "category", "group", "option"):
+        raise AppException(40001, "kind 须为 product/category/group/option")
+
+    prefix = HQ_STORE_PREFIX
+    group_code = None
+    category_logical = None
+
+    if kind == "product":
+        # 超管可不选门店 → 0000；店员强制本店
+        if hq or (store_id is None and not user.store_id and getattr(user.role, "code", None) == "SUPER_ADMIN"):
+            prefix = HQ_STORE_PREFIX
+        else:
+            sid = require_bound_store(user, store_id)
+            if sid is None:
+                raise AppException(40001, "请指定门店 store_id，或不选门店以使用总部前缀 0000")
+            assert_store_access(user, sid)
+            store = await db.get(Store, int(sid))
+            prefix = normalize_store_prefix(getattr(store, "store_no", None) if store else None)
+        if category_id:
+            cat = await db.get(ProductCategory, int(category_id))
+            if not cat:
+                raise AppException(40001, "分类不存在")
+            assert_store_access(user, cat.store_id)
+            category_logical = group_logical_key(getattr(cat, "category_no", None) or "") or name_to_logical_code(
+                cat.name
+            )
+    elif kind == "group" and store_id is None and not user.store_id:
+        prefix = HQ_STORE_PREFIX
+    elif kind == "category" or (kind == "group" and store_id is not None):
+        sid = require_bound_store(user, store_id)
+        if sid is None:
+            raise AppException(40001, "请指定门店 store_id")
+        assert_store_access(user, sid)
+        store = await db.get(Store, int(sid))
+        prefix = normalize_store_prefix(getattr(store, "store_no", None) if store else None)
+    elif kind == "group":
+        if user.store_id:
+            store = await db.get(Store, int(user.store_id))
+            prefix = normalize_store_prefix(getattr(store, "store_no", None) if store else None)
+    if kind == "option":
+        if not group_id:
+            raise AppException(40001, "选项建议编码须传 group_id")
+        group = await db.get(OptionGroup, int(group_id))
+        if not group:
+            raise AppException(40003, "规格组不存在")
+        if group.store_id is not None:
+            assert_store_access(user, group.store_id)
+            store = await db.get(Store, int(group.store_id))
+            prefix = normalize_store_prefix(getattr(store, "store_no", None) if store else None)
+        else:
+            prefix = HQ_STORE_PREFIX
+        group_code = group.code
+
+    data = suggest_code(
+        name=name or "",
+        store_prefix=prefix,
+        kind=kind,
+        group_code=group_code,
+        category_logical=category_logical,
+    )
+    return success(data, request=request)
+
+
+@router.post("/menu/copy-to-store", dependencies=[require_permission("product:create")])
+async def copy_menu_to_store(data: MenuCopyRequest, request: Request, db: DbSession, user: CurrentUser):
+    """批量将分类/规格组/商品复制到另一门店（超管跨店；店员仅本店→本店无意义时拒绝）。
+
+    - 总部共享规格组无需复制，商品会直接沿用原组 id
+    - 目标店已有同名分类 / 同 code 门店规格组：复用
+    - 商品编号冲突：on_product_conflict=skip|rename
+    - 复制商品时自动带上所属分类与绑定的私有规格组
+    """
+    assert_store_access(user, data.target_store_id)
+    # 校验源数据门店权限
+    if data.category_ids:
+        cats = list(
+            (
+                await db.execute(
+                    select(ProductCategory).where(ProductCategory.id.in_(data.category_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for c in cats:
+            assert_store_access(user, c.store_id)
+    if data.option_group_ids:
+        groups = list(
+            (await db.execute(select(OptionGroup).where(OptionGroup.id.in_(data.option_group_ids))))
+            .scalars()
+            .all()
+        )
+        for g in groups:
+            if g.store_id is not None:
+                assert_store_access(user, g.store_id)
+    if data.product_ids:
+        prods = list(
+            (await db.execute(select(Product).where(Product.id.in_(data.product_ids)))).scalars().all()
+        )
+        for p in prods:
+            assert_store_access(user, p.store_id)
+            if int(p.store_id) == int(data.target_store_id):
+                raise AppException(40001, "源门店与目标门店不能相同")
+
+    # 仅分类/规格时也禁止同店复制
+    source_store: int | None = None
+    if data.product_ids:
+        p0 = await db.get(Product, int(data.product_ids[0]))
+        if p0:
+            source_store = int(p0.store_id)
+    elif data.category_ids:
+        c0 = await db.get(ProductCategory, int(data.category_ids[0]))
+        if c0:
+            source_store = int(c0.store_id)
+    elif data.option_group_ids:
+        g0 = await db.get(OptionGroup, int(data.option_group_ids[0]))
+        if g0 and g0.store_id is not None:
+            source_store = int(g0.store_id)
+    if source_store is not None and int(source_store) == int(data.target_store_id):
+        raise AppException(40001, "源门店与目标门店不能相同")
+
+    result = await MenuCopyService.copy_to_store(
+        db,
+        target_store_id=int(data.target_store_id),
+        category_ids=data.category_ids,
+        option_group_ids=data.option_group_ids,
+        product_ids=data.product_ids,
+        on_product_conflict=data.on_product_conflict,  # type: ignore[arg-type]
+        clone_shared_option_groups=bool(data.clone_shared_option_groups),
+    )
+    return success(result, request=request)
+
+
 @router.get("/categories")
 async def list_categories(
     request: Request,
@@ -327,6 +490,13 @@ async def list_categories(
 
 @router.post("/categories", dependencies=[require_permission("product:create")])
 async def create_category(data: CategoryCreate, request: Request, db: DbSession, user: CurrentUser):
+    from app.services.option_code import (
+        MAX_CATEGORY_NO,
+        format_category_no,
+        name_to_logical_code,
+        validate_prefixed_code,
+    )
+
     sid = require_bound_store(user, data.store_id)
     if sid is None:
         if user.store_id:
@@ -334,20 +504,37 @@ async def create_category(data: CategoryCreate, request: Request, db: DbSession,
         else:
             raise AppException(40020, "请指定门店后再创建分类")
     assert_store_access(user, sid)
-    payload = data.model_dump(exclude={"store_id", "require_category_ids"})
+    prefix = await _store_code_prefix(db, int(sid))
+    raw_no = (data.category_no or "").strip() or name_to_logical_code(data.name)
+    try:
+        category_no = format_category_no(prefix, raw_no)
+        validate_prefixed_code(category_no, max_len=MAX_CATEGORY_NO, expect_prefix=prefix)
+    except ValueError as e:
+        raise AppException(40001, str(e)) from e
+    exists = await db.scalar(
+        select(ProductCategory.id).where(
+            ProductCategory.store_id == int(sid), ProductCategory.category_no == category_no
+        ).limit(1)
+    )
+    if exists:
+        raise AppException(40002, f"本店分类编号「{category_no}」已存在")
+    payload = data.model_dump(exclude={"store_id", "require_category_ids", "category_no"})
     require_ids = await _validate_require_category_ids(db, int(sid), data.require_category_ids)
     cat = ProductCategory(
         store_id=int(sid),
+        category_no=category_no,
         require_category_ids=require_ids or None,
         **payload,
     )
     db.add(cat)
     await db.flush()
-    return success({"id": cat.id, "store_id": cat.store_id}, request=request)
+    return success({"id": cat.id, "store_id": cat.store_id, "category_no": cat.category_no}, request=request)
 
 
 @router.put("/categories/{cat_id}", dependencies=[require_permission("product:update")])
 async def update_category(cat_id: int, data: CategoryUpdate, request: Request, db: DbSession, user: CurrentUser):
+    from app.services.option_code import MAX_CATEGORY_NO, format_category_no, validate_prefixed_code
+
     cat = await db.get(ProductCategory, cat_id)
     if not cat:
         return success(None, message="分类不存在", request=request)
@@ -359,6 +546,28 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
         assert_store_access(user, int(payload["store_id"]))
         cat.store_id = int(payload["store_id"])
         del payload["store_id"]
+        # 迁店时同步编号前缀
+        prefix = await _store_code_prefix(db, int(cat.store_id))
+        cat.category_no = format_category_no(prefix, cat.category_no or cat.name)
+    if "category_no" in payload and payload["category_no"] is not None:
+        prefix = await _store_code_prefix(db, int(cat.store_id))
+        try:
+            new_no = format_category_no(prefix, str(payload.pop("category_no")))
+            validate_prefixed_code(new_no, max_len=MAX_CATEGORY_NO, expect_prefix=prefix)
+        except ValueError as e:
+            raise AppException(40001, str(e)) from e
+        exists = await db.scalar(
+            select(ProductCategory.id)
+            .where(
+                ProductCategory.store_id == int(cat.store_id),
+                ProductCategory.category_no == new_no,
+                ProductCategory.id != int(cat.id),
+            )
+            .limit(1)
+        )
+        if exists:
+            raise AppException(40002, f"本店分类编号「{new_no}」已存在")
+        cat.category_no = new_no
     if "require_category_ids" in payload:
         require_ids = await _validate_require_category_ids(
             db,
@@ -370,7 +579,7 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
     for k, v in payload.items():
         setattr(cat, k, v)
     await db.flush()
-    return success({"id": cat.id, "store_id": cat.store_id}, request=request)
+    return success({"id": cat.id, "store_id": cat.store_id, "category_no": cat.category_no}, request=request)
 
 
 @router.get("/category-schedules", dependencies=[require_permission("product:read")])
@@ -848,21 +1057,42 @@ async def get_product(product_id: int, request: Request, db: DbSession):
 
 @router.post("/products", dependencies=[require_permission("product:create")])
 async def create_product(data: ProductCreate, request: Request, db: DbSession, user: CurrentUser):
-    sid = require_bound_store(user, data.store_id)
-    if sid is None:
-        if user.store_id:
-            sid = int(user.store_id)
-        else:
-            raise AppException(40020, "请指定门店后再创建商品")
-    assert_store_access(user, sid)
+    from app.services.option_code import (
+        HQ_STORE_PREFIX,
+        MAX_PRODUCT_NO,
+        format_product_no,
+        group_logical_key,
+        name_to_logical_code,
+        validate_prefixed_code,
+    )
 
     cat = await db.get(ProductCategory, data.category_id)
     if not cat:
         raise AppException(40001, "分类不存在，请先创建分类")
-    if int(cat.store_id) != int(sid):
-        raise AppException(40001, "分类不属于所选门店，请重新选择分类")
 
-    product_no = data.product_no.strip()
+    # 超管可不选门店：编号前缀 0000；商品归属所选分类的门店
+    use_hq_prefix = False
+    sid = require_bound_store(user, data.store_id)
+    if sid is None and user.store_id:
+        sid = int(user.store_id)
+    if sid is None:
+        if getattr(user.role, "code", None) != "SUPER_ADMIN":
+            raise AppException(40020, "请指定门店后再创建商品")
+        use_hq_prefix = True
+        sid = int(cat.store_id)
+    else:
+        if int(cat.store_id) != int(sid):
+            raise AppException(40001, "分类不属于所选门店，请重新选择分类")
+    assert_store_access(user, sid)
+
+    prefix = HQ_STORE_PREFIX if use_hq_prefix else await _store_code_prefix(db, int(sid))
+    cat_logical = group_logical_key(getattr(cat, "category_no", None) or "") or name_to_logical_code(cat.name)
+    raw_no = (data.product_no or "").strip() or name_to_logical_code(data.name)
+    try:
+        product_no = format_product_no(prefix, raw_no, category_logical=cat_logical)
+        validate_prefixed_code(product_no, max_len=MAX_PRODUCT_NO, expect_prefix=prefix)
+    except ValueError as e:
+        raise AppException(40001, str(e)) from e
     dup = await db.execute(
         select(Product.id).where(Product.store_id == sid, Product.product_no == product_no)
     )
@@ -898,7 +1128,7 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
     except IntegrityError:
         await db.rollback()
         raise AppException(40002, f"本店商品编号「{product_no}」已存在，请换一个")
-    return success({"id": product.id, "store_id": product.store_id}, request=request)
+    return success({"id": product.id, "store_id": product.store_id, "product_no": product.product_no}, request=request)
 
 
 @router.put("/products/{product_id}", dependencies=[require_permission("product:update")])
@@ -914,6 +1144,21 @@ async def update_product(
         exclude_unset=True,
         exclude={"option_group_ids", "require_category_ids", "require_product_ids"},
     )
+    from app.services.option_code import (
+        MAX_PRODUCT_NO,
+        format_product_no,
+        group_logical_key,
+        name_to_logical_code,
+        validate_prefixed_code,
+    )
+
+    async def _product_cat_logical(store_id: int, category_id: int | None = None) -> str:
+        cid = category_id or product.category_id
+        c = await db.get(ProductCategory, int(cid))
+        if not c:
+            return "Item"
+        return group_logical_key(getattr(c, "category_no", None) or "") or name_to_logical_code(c.name)
+
     if "store_id" in payload and payload["store_id"] is not None:
         if user.role.code != "SUPER_ADMIN":
             raise AppException(40301, "仅超管可迁移商品所属门店")
@@ -921,6 +1166,37 @@ async def update_product(
         assert_store_access(user, new_sid)
         product.store_id = new_sid
         del payload["store_id"]
+        # 迁店时同步改编号前缀（保留分类+商品逻辑）
+        if "product_no" not in payload:
+            prefix = await _store_code_prefix(db, int(product.store_id))
+            cat_logical = await _product_cat_logical(int(product.store_id))
+            try:
+                product.product_no = format_product_no(prefix, product.product_no, category_logical=cat_logical)
+                validate_prefixed_code(product.product_no, max_len=MAX_PRODUCT_NO, expect_prefix=prefix)
+            except ValueError as e:
+                raise AppException(40001, str(e)) from e
+
+    if "product_no" in payload and payload["product_no"] is not None:
+        prefix = await _store_code_prefix(db, int(product.store_id))
+        cat_logical = await _product_cat_logical(
+            int(product.store_id),
+            payload.get("category_id", product.category_id),
+        )
+        try:
+            new_no = format_product_no(prefix, str(payload.pop("product_no")), category_logical=cat_logical)
+            validate_prefixed_code(new_no, max_len=MAX_PRODUCT_NO, expect_prefix=prefix)
+        except ValueError as e:
+            raise AppException(40001, str(e)) from e
+        dup = await db.scalar(
+            select(Product.id).where(
+                Product.store_id == product.store_id,
+                Product.product_no == new_no,
+                Product.id != product.id,
+            ).limit(1)
+        )
+        if dup:
+            raise AppException(40002, f"本店商品编号「{new_no}」已存在，请换一个")
+        product.product_no = new_no
 
     if "category_id" in payload and payload["category_id"] is not None:
         cat = await db.get(ProductCategory, int(payload["category_id"]))
@@ -1114,6 +1390,37 @@ async def _ensure_unique_group_code(db: DbSession, code: str, store_id: int | No
         raise AppException(40003, f"{scope}已存在编码「{code}」的规格组")
 
 
+async def _store_code_prefix(db: DbSession, store_id: int | None) -> str:
+    from app.services.option_code import HQ_STORE_PREFIX, normalize_store_prefix
+
+    if store_id is None:
+        return HQ_STORE_PREFIX
+    store = await db.get(Store, int(store_id))
+    return normalize_store_prefix(getattr(store, "store_no", None) if store else None)
+
+
+async def _normalize_group_code(db: DbSession, raw: str, store_id: int | None) -> str:
+    from app.services.option_code import MAX_GROUP_CODE, format_group_code, validate_prefixed_code
+
+    prefix = await _store_code_prefix(db, store_id)
+    try:
+        code = format_group_code(prefix, raw)
+        return validate_prefixed_code(code, max_len=MAX_GROUP_CODE, expect_prefix=prefix)
+    except ValueError as e:
+        raise AppException(40001, str(e)) from e
+
+
+async def _normalize_option_code(db: DbSession, raw: str, group: OptionGroup) -> str:
+    from app.services.option_code import MAX_OPTION_CODE, format_option_code, validate_prefixed_code
+
+    prefix = await _store_code_prefix(db, group.store_id)
+    try:
+        code = format_option_code(prefix, group.code, raw)
+        return validate_prefixed_code(code, max_len=MAX_OPTION_CODE, expect_prefix=prefix)
+    except ValueError as e:
+        raise AppException(40001, str(e)) from e
+
+
 @router.get("/options/groups")
 async def list_option_groups(
     request: Request,
@@ -1179,7 +1486,7 @@ async def list_option_groups(
 @router.post("/options/groups", dependencies=[require_permission("product:create")])
 async def create_option_group(data: OptionGroupCreate, request: Request, db: DbSession, user: CurrentUser):
     store_id = await _resolve_create_group_store_id(user, data.store_id)
-    code = (data.code or "").strip()
+    code = await _normalize_group_code(db, data.code or "", store_id)
     await _ensure_unique_group_code(db, code, store_id)
     payload = data.model_dump()
     payload["code"] = code
@@ -1187,7 +1494,7 @@ async def create_option_group(data: OptionGroupCreate, request: Request, db: DbS
     group = OptionGroup(**payload)
     db.add(group)
     await db.flush()
-    return success({"id": group.id, "store_id": group.store_id}, request=request)
+    return success({"id": group.id, "store_id": group.store_id, "code": group.code}, request=request)
 
 
 @router.post("/options", dependencies=[require_permission("product:create")])
@@ -1198,6 +1505,13 @@ async def create_option(data: OptionCreate, request: Request, db: DbSession, use
     _assert_option_group_manage(user, group)
     payload = data.model_dump()
     want_default = payload.pop("is_default", False)
+    payload["code"] = await _normalize_option_code(db, str(payload.get("code") or ""), group)
+    # 组内 code 唯一
+    exists = await db.scalar(
+        select(Option.id).where(Option.group_id == group.id, Option.code == payload["code"]).limit(1)
+    )
+    if exists:
+        raise AppException(40003, f"该规格组已存在编码「{payload['code']}」")
     opt = Option(**payload, is_default=bool(want_default))
     db.add(opt)
     await db.flush()
@@ -1219,17 +1533,20 @@ async def update_option_group(
     role = getattr(getattr(user, "role", None), "code", None) or ""
     if role != "SUPER_ADMIN":
         raw.pop("store_id", None)
+    target_sid = raw.get("store_id", group.store_id) if "store_id" in raw else group.store_id
     if "code" in raw and raw["code"] is not None:
-        new_code = str(raw["code"]).strip()
-        target_sid = raw.get("store_id", group.store_id)
+        new_code = await _normalize_group_code(db, str(raw["code"]), target_sid)
         await _ensure_unique_group_code(db, new_code, target_sid, exclude_id=group.id)
         raw["code"] = new_code
     elif "store_id" in raw:
-        await _ensure_unique_group_code(db, group.code, raw.get("store_id"), exclude_id=group.id)
+        # 迁店时同步改前缀
+        new_code = await _normalize_group_code(db, group.code, raw.get("store_id"))
+        await _ensure_unique_group_code(db, new_code, raw.get("store_id"), exclude_id=group.id)
+        raw["code"] = new_code
     for k, v in raw.items():
         setattr(group, k, v)
     await db.flush()
-    return success({"id": group.id, "store_id": group.store_id}, request=request)
+    return success({"id": group.id, "store_id": group.store_id, "code": group.code}, request=request)
 
 
 @router.delete("/options/groups/{group_id}", dependencies=[require_permission("product:delete")])
@@ -1255,6 +1572,15 @@ async def update_option(option_id: int, data: OptionUpdate, request: Request, db
     _assert_option_group_manage(user, group)
     fields = data.model_dump(exclude_unset=True)
     want_default = fields.pop("is_default", None)
+    if "code" in fields and fields["code"] is not None:
+        fields["code"] = await _normalize_option_code(db, str(fields["code"]), group)
+        exists = await db.scalar(
+            select(Option.id)
+            .where(Option.group_id == group.id, Option.code == fields["code"], Option.id != opt.id)
+            .limit(1)
+        )
+        if exists:
+            raise AppException(40003, f"该规格组已存在编码「{fields['code']}」")
     for k, v in fields.items():
         setattr(opt, k, v)
     await db.flush()

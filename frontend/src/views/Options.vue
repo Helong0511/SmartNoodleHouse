@@ -2,6 +2,13 @@
   <div v-loading="loading">
     <div class="toolbar">
       <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
+      <el-button
+        v-if="isSuper"
+        type="success"
+        plain
+        :disabled="!selectedIds.length"
+        @click="openCopy"
+      >复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
       <el-select
         v-if="isSuper"
@@ -16,9 +23,17 @@
       </el-select>
       <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="load">显示已禁用</el-checkbox>
     </div>
-    <p class="hint">总部共享规格组全店可用；门店私有规格组仅本店商品可绑。门店账号不可改总部共享组。</p>
+    <p class="hint">编码规则：总部 <code>0000-Liang</code>；分店 <code>SH01-Liang</code>；选项 <code>SH01-Liang-XiaoWan</code>。可填逻辑码（如 Liang），保存时自动加前缀。复制到门店会按目标店 store_no 重写编码。</p>
 
-    <el-table :key="tableKey" :data="groups" style="margin-top:12px" border row-key="id">
+    <el-table
+      :key="tableKey"
+      :data="groups"
+      style="margin-top:12px"
+      border
+      row-key="id"
+      @selection-change="onSelectionChange"
+    >
+      <el-table-column v-if="isSuper" type="selection" width="48" />
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="opts-panel">
@@ -93,8 +108,18 @@
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="名称" required><el-input v-model="groupForm.name" /></el-form-item>
-        <el-form-item label="编码" required><el-input v-model="groupForm.code" :disabled="!!groupForm.id" placeholder="如 SIZE" /></el-form-item>
+        <el-form-item label="名称" required>
+          <el-input v-model="groupForm.name" @input="onGroupNameInput" />
+        </el-form-item>
+        <el-form-item label="编码" required>
+          <el-input
+            v-model="groupForm.code"
+            :disabled="!!groupForm.id"
+            :placeholder="groupCodePlaceholder"
+            @input="groupCodeTouched = true"
+          />
+          <div class="form-tip">{{ groupCodeTip }}</div>
+        </el-form-item>
         <el-form-item label="选择类型">
           <el-radio-group v-model="groupForm.selection_type">
             <el-radio label="SINGLE">单选</el-radio>
@@ -115,8 +140,18 @@
 
     <el-dialog v-model="optionDialog" :title="optionForm.id ? '编辑选项' : '新增选项'" width="440px">
       <el-form :model="optionForm" label-width="90px">
-        <el-form-item label="名称" required><el-input v-model="optionForm.name" /></el-form-item>
-        <el-form-item label="编码" required><el-input v-model="optionForm.code" :disabled="!!optionForm.id" /></el-form-item>
+        <el-form-item label="名称" required>
+          <el-input v-model="optionForm.name" @input="onOptionNameInput" />
+        </el-form-item>
+        <el-form-item label="编码" required>
+          <el-input
+            v-model="optionForm.code"
+            :disabled="!!optionForm.id"
+            :placeholder="optionCodePlaceholder"
+            @input="optionCodeTouched = true"
+          />
+          <div class="form-tip">可只填 XiaoWan，保存为 前缀-组逻辑-XiaoWan；输入名称后自动建议拼音</div>
+        </el-form-item>
         <el-form-item label="加价"><el-input-number v-model="optionForm.extra_price" :min="0" :precision="2" :step="0.5" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="optionForm.sort_order" :min="0" /></el-form-item>
         <el-form-item v-if="optionGroupType === 'SINGLE'" label="默认项">
@@ -132,6 +167,17 @@
         <el-button type="primary" :loading="saving" @click="saveOption">保存</el-button>
       </template>
     </el-dialog>
+
+    <CopyToStoreDialog
+      v-model="copyVisible"
+      :stores="stores"
+      :exclude-store-id="copySourceStoreId"
+      :selected-count="selectedIds.length"
+      :option-group-ids="selectedIds"
+      clone-shared-option-groups
+      hint="复制后编码按目标店编号重写：0000-Liang → SH01-Liang，选项同步为 SH01-Liang-XiaoWan。"
+      @done="load"
+    />
   </div>
 </template>
 
@@ -140,6 +186,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
+import { suggestCodeFromName } from '@/utils/bizCode'
 
 const auth = useAuthStore()
 const isSuper = computed(() => !!auth.isSuperAdmin)
@@ -155,6 +203,82 @@ const showDisabled = ref(false)
 const groupDialog = ref(false)
 const optionDialog = ref(false)
 const optionGroupType = ref('SINGLE')
+const copyVisible = ref(false)
+const selectedRows = ref<any[]>([])
+const editingGroupCode = ref('')
+const groupCodeTouched = ref(false)
+const optionCodeTouched = ref(false)
+const editingOptionGroupId = ref(0)
+
+const selectedIds = computed(() => selectedRows.value.map((r) => r.id))
+const copySourceStoreId = computed(() => {
+  const privateRows = selectedRows.value.filter((r) => r.store_id != null)
+  if (!privateRows.length) return null
+  const storesSet = new Set(privateRows.map((r) => Number(r.store_id)))
+  return storesSet.size === 1 ? [...storesSet][0] : null
+})
+
+function storePrefix(storeId: number | null | undefined) {
+  if (storeId == null) return '0000'
+  const s = stores.value.find((x) => Number(x.id) === Number(storeId))
+  return (s?.store_no || `S${storeId}`).toString()
+}
+
+const groupCodePlaceholder = computed(() => {
+  const p = storePrefix(groupForm.store_id)
+  return `逻辑码如 Liang（保存为 ${p}-Liang）`
+})
+
+const groupCodeTip = computed(() => {
+  const p = storePrefix(groupForm.store_id)
+  return groupForm.id
+    ? '编码创建后不可改'
+    : `归属为空=总部前缀 0000；选门店则用该店编号。例：${p}-Liang；输入名称后自动建议拼音`
+})
+
+const optionCodePlaceholder = computed(() => {
+  const g = editingGroupCode.value || 'Liang'
+  const stem = g.includes('-') ? g.split('-').slice(1).join('-') : g
+  const p = g.includes('-') ? g.split('-')[0] : '0000'
+  return `如 XiaoWan → ${p}-${stem}-XiaoWan`
+})
+
+function onGroupNameInput() {
+  if (groupForm.id || groupCodeTouched.value) return
+  suggestCodeFromName(
+    { name: groupForm.name, kind: 'group', store_id: groupForm.store_id },
+    (code) => {
+      if (!groupCodeTouched.value) groupForm.code = code
+    },
+  )
+}
+
+function onOptionNameInput() {
+  if (optionForm.id || optionCodeTouched.value || !editingOptionGroupId.value) return
+  suggestCodeFromName(
+    { name: optionForm.name, kind: 'option', group_id: editingOptionGroupId.value },
+    (code) => {
+      if (!optionCodeTouched.value) optionForm.code = code
+    },
+  )
+}
+function onSelectionChange(rows: any[]) {
+  selectedRows.value = rows
+}
+
+function openCopy() {
+  if (!selectedIds.value.length) {
+    ElMessage.warning('请先勾选规格组')
+    return
+  }
+  const privateRows = selectedRows.value.filter((r) => r.store_id != null)
+  const storesSet = new Set(privateRows.map((r) => Number(r.store_id)))
+  if (storesSet.size > 1) {
+    ElMessage.warning('请不要同时勾选多个门店的私有规格组')
+    return
+  }
+  copyVisible.value = true
+}
 
 const groupForm = reactive({
   id: 0,
@@ -216,6 +340,7 @@ async function load() {
       rows = rows.filter((g: any) => g.store_id == null)
     }
     groups.value = rows
+    selectedRows.value = []
     tableKey.value += 1
   } finally {
     loading.value = false
@@ -223,6 +348,7 @@ async function load() {
 }
 
 function openGroupForm(row?: any) {
+  groupCodeTouched.value = !!row
   if (row) {
     Object.assign(groupForm, {
       id: row.id,
@@ -300,6 +426,9 @@ async function removeGroup(row: any) {
 
 function openOptionForm(group: any, opt?: any) {
   optionGroupType.value = group.selection_type || 'SINGLE'
+  editingGroupCode.value = group.code || ''
+  editingOptionGroupId.value = group.id
+  optionCodeTouched.value = !!opt
   if (opt) {
     Object.assign(optionForm, {
       id: opt.id,

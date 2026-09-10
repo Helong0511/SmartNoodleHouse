@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class CategoryCreate(BaseModel):
     store_id: int | None = None
+    category_no: str | None = None
     name: str
     description: str | None = None
     sort_order: int = 0
@@ -14,6 +15,7 @@ class CategoryCreate(BaseModel):
 
 
 class CategoryUpdate(BaseModel):
+    category_no: str | None = None
     name: str | None = None
     description: str | None = None
     sort_order: int | None = None
@@ -26,6 +28,7 @@ class CategoryUpdate(BaseModel):
 class CategoryOut(BaseModel):
     id: int
     store_id: int
+    category_no: str | None = None
     name: str
     description: str | None
     sort_order: int
@@ -150,6 +153,18 @@ class OptionOut(BaseModel):
     status: int
 
     model_config = {"from_attributes": True}
+
+
+class MenuCopyRequest(BaseModel):
+    """跨门店复制分类/规格组/商品到目标店（新建副本）。"""
+    target_store_id: int = Field(..., gt=0)
+    category_ids: list[int] = []
+    option_group_ids: list[int] = []
+    product_ids: list[int] = []
+    # 目标店已有同 product_no：skip=跳过；rename=自动改编号后创建
+    on_product_conflict: str = Field(default="skip", pattern="^(skip|rename)$")
+    # 规格管理页：将总部共享也克隆为目标店私有副本；商品复制时默认 false（共享组直接沿用）
+    clone_shared_option_groups: bool = False
 
 
 class OptionGroupCreate(BaseModel):

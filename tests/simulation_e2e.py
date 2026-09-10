@@ -175,7 +175,7 @@ async def seed_database():
             id=1, store_id=1, table_no="A08", table_name="A08",
             qr_token="TEST_QR_TOKEN_SIM_001", status=1,
         ))
-        db.add(ProductCategory(id=1, store_id=1, name="招牌面", sort_order=1, status=1))
+        db.add(ProductCategory(id=1, category_no="C1", store_id=1, name="招牌面", sort_order=1, status=1))
         db.add(Product(
             id=1, store_id=1, category_id=1, product_no="P001", name="牛肉面",
             price=Decimal("18.00"), status="ON_SALE", sort_order=1,

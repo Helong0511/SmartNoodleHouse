@@ -46,16 +46,16 @@ def test_pick_active_schedule_priority():
 
 
 def test_sort_categories_by_schedule_partial():
-    a = ProductCategory(id=1, store_id=1, name="早点", sort_order=2, status=1)
-    b = ProductCategory(id=2, store_id=1, name="面", sort_order=0, status=1)
-    c = ProductCategory(id=3, store_id=1, name="卤味", sort_order=1, status=1)
+    a = ProductCategory(id=1, category_no="C1", store_id=1, name="早点", sort_order=2, status=1)
+    b = ProductCategory(id=2, category_no="C2", store_id=1, name="面", sort_order=0, status=1)
+    c = ProductCategory(id=3, category_no="C3", store_id=1, name="卤味", sort_order=1, status=1)
     # 仅配置早点、卤味；面未列入应跟在后面且保持默认序
     ordered = sort_categories_by_schedule([a, b, c], {1: 0, 3: 1})
     assert [x.id for x in ordered] == [1, 3, 2]
 
 
 def test_sort_fallback_when_empty_items():
-    a = ProductCategory(id=1, store_id=1, name="早点", sort_order=2, status=1)
-    b = ProductCategory(id=2, store_id=1, name="面", sort_order=0, status=1)
+    a = ProductCategory(id=1, category_no="C1", store_id=1, name="早点", sort_order=2, status=1)
+    b = ProductCategory(id=2, category_no="C2", store_id=1, name="面", sort_order=0, status=1)
     ordered = sort_categories_by_schedule([a, b], {})
     assert [x.id for x in ordered] == [2, 1]

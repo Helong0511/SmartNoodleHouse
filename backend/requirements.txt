@@ -19,7 +19,7 @@ opencv-python-headless>=4.9.0,<5.0
 numpy>=1.26.0,<3.0
 cryptography>=42.0.0,<46
 Pillow>=10.2.0,<12
-python-dotenv>=1.0.0,<2.0
+pypinyin>=0.51.0,<1.0
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
 onnxruntime>=1.16.0,<2.0

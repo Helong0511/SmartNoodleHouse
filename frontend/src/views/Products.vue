@@ -29,11 +29,19 @@
         </el-select>
       </el-form-item>
       <el-button type="primary" @click="openForm()">新增商品</el-button>
+      <el-button
+        v-if="auth.isSuperAdmin"
+        type="success"
+        plain
+        :disabled="!selectedIds.length"
+        @click="openCopy"
+      >复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
     </el-form>
 
-    <el-table :data="products" border>
-      <el-table-column prop="product_no" label="编号" width="100" />
+    <el-table :data="products" border row-key="id" @selection-change="onSelectionChange">
+      <el-table-column v-if="auth.isSuperAdmin" type="selection" width="48" />
+      <el-table-column prop="product_no" label="编号" min-width="150" show-overflow-tooltip />
       <el-table-column prop="name" label="名称" width="160" show-overflow-tooltip />
       <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="110" show-overflow-tooltip>
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
@@ -89,19 +97,49 @@
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="640px" destroy-on-close>
       <el-form :model="form" label-width="100px">
-        <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店" required>
-          <el-select v-model="form.store_id" placeholder="选择门店" style="width:100%" @change="onFormStoreChange">
+        <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店">
+          <el-select
+            v-model="form.store_id"
+            clearable
+            placeholder="不选=总部前缀 0000（编号全店统一风格）"
+            style="width:100%"
+            @change="onFormStoreChange"
+          >
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
+          <div class="hint">不选门店：编号为 0000-分类-商品；商品归属所选分类所在门店，可用「复制到门店」铺开</div>
         </el-form-item>
-        <el-form-item v-else label="门店">
+        <el-form-item v-else-if="form.id || !auth.isSuperAdmin" label="门店">
           <span>{{ form.store_name || boundStoreName || (form.store_id ? `门店#${form.store_id}` : '—') }}</span>
         </el-form-item>
-        <el-form-item label="商品编号" required>
-          <el-input v-model="form.product_no" :disabled="!!form.id" placeholder="如 NOODLE001" />
+        <el-form-item label="分类" required>
+          <el-select
+            v-model="form.category_id"
+            style="width:100%"
+            placeholder="请先选择分类"
+            filterable
+            @change="onFormCategoryChange"
+          >
+            <el-option
+              v-for="c in formCategories"
+              :key="c.id"
+              :label="categoryOptionLabel(c)"
+              :value="c.id"
+            />
+          </el-select>
+          <p v-if="!formCategories.length" class="hint warn">暂无分类，请先到「分类管理」创建</p>
         </el-form-item>
         <el-form-item label="名称" required>
-          <el-input v-model="form.name" />
+          <el-input v-model="form.name" placeholder="如 牛肉面" @input="onProductNameInput" />
+        </el-form-item>
+        <el-form-item label="商品编号" required>
+          <el-input
+            v-model="form.product_no"
+            :disabled="!!form.id"
+            :placeholder="productNoPlaceholder"
+            @input="codeTouched = true"
+          />
+          <div class="hint">{{ productNoTip }}</div>
         </el-form-item>
         <el-form-item label="预览图">
           <div class="img-row">
@@ -128,12 +166,6 @@
               <p class="hint">建议 1:1、1200×1200（最低 800×800），小程序按屏幕自适应</p>
             </div>
           </div>
-        </el-form-item>
-        <el-form-item label="分类" required>
-          <el-select v-model="form.category_id" style="width:100%" placeholder="请选择分类" @change="onFormCategoryChange">
-            <el-option v-for="c in formCategories" :key="c.id" :label="c.name" :value="c.id" />
-          </el-select>
-          <p v-if="!formCategories.length" class="hint warn">该门店暂无分类，请先到「分类管理」创建</p>
         </el-form-item>
         <el-form-item label="须先点">
           <div class="require-box">
@@ -237,6 +269,16 @@
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
+
+    <CopyToStoreDialog
+      v-model="copyVisible"
+      :stores="stores"
+      :exclude-store-id="copySourceStoreId"
+      :selected-count="selectedIds.length"
+      :product-ids="selectedIds"
+      show-product-conflict
+      @done="load"
+    />
   </div>
 </template>
 
@@ -245,6 +287,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
+import { storePrefixFromNo, suggestCodeFromName } from '@/utils/bizCode'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -263,6 +307,77 @@ const statusFilter = ref('ALL')
 const categoryFilter = ref<number | undefined>()
 const storeFilter = ref<number | undefined>()
 const dialogVisible = ref(false)
+const copyVisible = ref(false)
+const selectedRows = ref<any[]>([])
+const codeTouched = ref(false)
+
+const selectedIds = computed(() => selectedRows.value.map((r) => r.id))
+const copySourceStoreId = computed(() => {
+  const storesSet = new Set(selectedRows.value.map((r) => Number(r.store_id)))
+  return storesSet.size === 1 ? [...storesSet][0] : null
+})
+
+function onSelectionChange(rows: any[]) {
+  selectedRows.value = rows
+}
+
+function openCopy() {
+  if (!selectedIds.value.length) {
+    ElMessage.warning('请先勾选商品')
+    return
+  }
+  const storesSet = new Set(selectedRows.value.map((r) => Number(r.store_id)))
+  if (storesSet.size > 1) {
+    ElMessage.warning('请选择同一门店的商品再复制')
+    return
+  }
+  copyVisible.value = true
+}
+
+function formStorePrefix() {
+  if (!form.store_id && auth.isSuperAdmin) return '0000'
+  const sid = form.store_id || auth.user?.store_id
+  const s = stores.value.find((x) => Number(x.id) === Number(sid))
+  return storePrefixFromNo(s?.store_no)
+}
+
+const productNoPlaceholder = computed(() => {
+  const p = formStorePrefix()
+  return `如 ${p}-Mian-NiuRouMian`
+})
+const productNoTip = computed(() =>
+  form.id
+    ? '编号创建后不可改'
+    : `规则：${formStorePrefix()}-分类拼音-商品拼音；先选分类再填名称会自动建议。`,
+)
+
+function categoryOptionLabel(c: any) {
+  if (form.store_id || !auth.isSuperAdmin) return c.name
+  const sn = c.store_name || stores.value.find((s) => Number(s.id) === Number(c.store_id))?.name
+  return sn ? `${c.name}（${sn}）` : c.name
+}
+
+function refreshProductCodeSuggest() {
+  if (form.id || codeTouched.value) return
+  if (!form.name?.trim() || !form.category_id) return
+  const hq = auth.isSuperAdmin && !form.store_id
+  suggestCodeFromName(
+    {
+      name: form.name,
+      kind: 'product',
+      store_id: form.store_id || auth.user?.store_id || undefined,
+      category_id: form.category_id,
+      hq,
+    },
+    (code) => {
+      if (!codeTouched.value) form.product_no = code
+    },
+  )
+}
+
+function onProductNameInput() {
+  refreshProductCodeSuggest()
+}
 
 const form = reactive({
   id: 0,
@@ -307,14 +422,19 @@ const filterCategories = computed(() => {
 })
 
 const formCategories = computed(() => {
-  const sid = form.store_id
-  if (!sid) return []
-  return categories.value.filter((c) => c.store_id === sid)
+  const sid = form.store_id || (!auth.isSuperAdmin ? auth.user?.store_id : undefined)
+  if (!sid) {
+    // 超管未选门店：可选全部分类（选项带门店名）
+    return categories.value
+  }
+  return categories.value.filter((c) => Number(c.store_id) === Number(sid))
 })
 
-/** 绑规格：总部共享 ∪ 表单门店私有（避免超管全店列表误选他店组） */
+/** 绑规格：总部共享 ∪ 表单门店私有（未选门店时用分类所属门店） */
 const bindableOptionGroups = computed(() => {
-  const sid = form.store_id
+  const sid =
+    form.store_id ||
+    categories.value.find((c) => Number(c.id) === Number(form.category_id))?.store_id
   if (!sid) {
     return (optionGroups.value || []).filter((g) => g.store_id == null)
   }
@@ -383,6 +503,10 @@ function applyCategoryRequireDefault() {
 
 function onFormCategoryChange() {
   if (!form.id) applyCategoryRequireDefault()
+  if (!form.id) {
+    codeTouched.value = false
+    refreshProductCodeSuggest()
+  }
 }
 
 async function loadAllStoreProducts(storeId?: number) {
@@ -444,7 +568,10 @@ async function onStoreFilterChange() {
 }
 
 async function onFormStoreChange() {
-  form.category_id = formCategories.value[0]?.id
+  // 换店后若当前分类不属于可选范围则重置
+  if (!formCategories.value.some((c) => c.id === form.category_id)) {
+    form.category_id = formCategories.value[0]?.id
+  }
   // 换店后去掉不可绑的他店规格组
   const ok = new Set(bindableOptionGroups.value.map((g) => g.id))
   form.option_group_ids = (form.option_group_ids || []).filter((id: number) => ok.has(id))
@@ -461,6 +588,8 @@ async function onFormStoreChange() {
       /* ignore */
     }
   }
+  codeTouched.value = false
+  refreshProductCodeSuggest()
 }
 
 async function load() {
@@ -478,6 +607,7 @@ async function load() {
     })
     products.value = res.data.items
     total.value = res.data.total
+    selectedRows.value = []
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {
@@ -486,13 +616,17 @@ async function load() {
 }
 
 function resetForm() {
+  codeTouched.value = false
+  // 超管新建：默认不选门店 → 0000 前缀；若列表筛了门店则带上
   const defaultStore = auth.isSuperAdmin
-    ? storeFilter.value || stores.value[0]?.id
+    ? storeFilter.value || undefined
     : auth.user?.store_id || stores.value[0]?.id
   Object.assign(form, {
     id: 0,
     store_id: defaultStore,
-    store_name: stores.value.find((s) => s.id === defaultStore)?.name || '',
+    store_name: defaultStore
+      ? stores.value.find((s) => s.id === defaultStore)?.name || ''
+      : '',
     product_no: '',
     name: '',
     category_id: undefined,
@@ -519,6 +653,7 @@ function resetForm() {
 
 async function openForm(row?: any) {
   resetForm()
+  codeTouched.value = !!row
   if (row) {
     const detail = (await api.get(`/products/${row.id}`)).data
     const inherited = !!detail.require_inherited
@@ -594,7 +729,7 @@ async function save() {
     ElMessage.warning('请填写商品编号和名称')
     return
   }
-  if (!form.id && !form.store_id) {
+  if (!form.id && !auth.isSuperAdmin && !form.store_id) {
     ElMessage.warning('请选择门店')
     return
   }
@@ -635,10 +770,11 @@ async function save() {
       dialogVisible.value = false
       load()
     } else {
-      payload.store_id = form.store_id
+      payload.store_id = form.store_id || null
       const res = await api.post('/products', payload)
       form.id = res.data.id
       form.store_id = res.data.store_id || form.store_id
+      if (res.data.product_no) form.product_no = res.data.product_no
       ElMessage.success('已创建，可继续上传预览图')
       statusFilter.value = form.status
       page.value = 1

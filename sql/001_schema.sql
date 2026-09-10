@@ -16,9 +16,11 @@
 --   sql/tools/022_ledger_idempotency_unique.sql → 财务/积分流水 DB 幂等唯一
 --   sql/tools/023_store_geo_option_scope.sql → 门店经纬度 + option_groups 门店隔离
 --   sql/tools/024_preference_scene_settings.sql → 口味场景/天气加权开关（种子）
+--   sql/tools/025_option_code_store_prefix.sql → 规格编码 0000-/门店号- 前缀
+--   sql/tools/026_category_no_and_code_lengths.sql → 分类编号 + 商品/规格字段加长
 --   sql/005_cashier_shift_one_open.sql → 同一收银员仅一个 OPEN 班次
 --   sql/tools/006~012               → token_version / 特价 / is_default / 免烹饪 / KDS 认领等
---     （023 字段已并入本全量 DDL；024 为配置种子；tools 仅供旧库补丁）
+--     （023/category_no 等已并入本全量 DDL；024/025/026 为配置/编码补丁；tools 仅供旧库）
 -- ============================================================================
 
 SET NAMES utf8mb4;
@@ -270,6 +272,7 @@ CREATE TABLE IF NOT EXISTS customer_preferences (
 CREATE TABLE IF NOT EXISTS product_categories (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
+  category_no VARCHAR(64) NOT NULL COMMENT '分类编号：{store_no}-拼音逻辑，如 SH01-Mian',
   name VARCHAR(100) NOT NULL COMMENT '分类名称（如 招牌面、小吃）',
   description VARCHAR(255) DEFAULT NULL COMMENT '分类描述',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '排序权重，越小越靠前',
@@ -277,6 +280,7 @@ CREATE TABLE IF NOT EXISTS product_categories (
   require_category_ids JSON DEFAULT NULL COMMENT '须先点过的分类 id 列表（OR：满足任一即可）；NULL/空=无限制。例：加料依赖面',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  UNIQUE KEY uk_cat_store_no (store_id, category_no),
   INDEX idx_cat_store (store_id, sort_order, status),
   CONSTRAINT fk_cat_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品分类表（按门店）';
@@ -310,7 +314,7 @@ CREATE TABLE IF NOT EXISTS products (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   category_id BIGINT UNSIGNED NOT NULL COMMENT '分类 → product_categories.id',
-  product_no VARCHAR(32) NOT NULL COMMENT '店内商品编号（同店唯一）',
+  product_no VARCHAR(64) NOT NULL COMMENT '店内商品编号：{store_no|0000}-分类逻辑-商品逻辑，如 SH01-Mian-NiuRouMian',
   name VARCHAR(100) NOT NULL COMMENT '商品名称',
   description TEXT DEFAULT NULL COMMENT '商品描述/卖点',
   main_image VARCHAR(500) DEFAULT NULL COMMENT '主图相对或绝对路径',
@@ -372,7 +376,7 @@ CREATE TABLE IF NOT EXISTS option_groups (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED DEFAULT NULL COMMENT 'NULL=总部共享；非空=仅该门店',
   name VARCHAR(50) NOT NULL COMMENT '规格组显示名',
-  code VARCHAR(50) NOT NULL COMMENT '规格组编码，如 NOODLE_AMOUNT、SPICY_LEVEL',
+  code VARCHAR(64) NOT NULL COMMENT '规格组编码：0000-Liang 或 SH01-Liang',
   selection_type VARCHAR(20) NOT NULL DEFAULT 'SINGLE' COMMENT 'SINGLE=单选 | MULTIPLE=多选',
   is_required TINYINT NOT NULL DEFAULT 1 COMMENT '是否必选：1=必选 0=可选',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '展示排序',
@@ -389,7 +393,7 @@ CREATE TABLE IF NOT EXISTS options (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   group_id BIGINT UNSIGNED NOT NULL COMMENT '规格组 → option_groups.id',
   name VARCHAR(50) NOT NULL COMMENT '选项显示名，如 大份、微辣',
-  code VARCHAR(50) NOT NULL COMMENT '选项编码（组内唯一）',
+  code VARCHAR(80) NOT NULL COMMENT '选项编码：0000-Liang-XiaoWan 或 SH01-Liang-XiaoWan',
   extra_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '相对基础价的加价',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '组内排序',
   is_default TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认选项（同组单选仅一个；菜单+一键加购）',

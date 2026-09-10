@@ -249,6 +249,10 @@ npm run dev -- --host 0.0.0.0 --port 5173
 #
 # 已有库：口味场景/天气加权开关（默认 true）：
 # mysql ... < sql/tools/024_preference_scene_settings.sql
+# 规格编码门店前缀（0000-/SH01-）：
+# mysql ... < sql/tools/025_option_code_store_prefix.sql
+# 分类编号 + 商品/规格编码字段加长：
+# mysql ... < sql/tools/026_category_no_and_code_lengths.sql
 
 
 叫号屏地址（调试环境）

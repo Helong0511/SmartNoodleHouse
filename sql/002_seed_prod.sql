@@ -332,6 +332,13 @@ INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'delivery_env_fallback_store_id', '0', '外卖 .env 兜底门店'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'delivery_env_fallback_store_id');
 
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'preference_scene_enabled');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'weather_pref_enabled');
+
 -- 八、校正（幂等）：非店长角色不得持有 payment:refund
 DELETE rp FROM role_permissions rp
 JOIN roles r ON r.id = rp.role_id
@@ -354,72 +361,72 @@ INSERT INTO `smart_noodle_house`.`users` (`id`, `username`, `password_hash`, `di
 
 
 -- 添加分类
-INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES 
-(1, '特价品', '超级优惠', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '绵阳米粉', '经典绵阳米粉', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '面', '面', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '小吃', '小吃', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '卤味', '卤味', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '饮料', '饮料', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `category_no`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES 
+(1, 'SH01-TeJiaPin', '特价品', '超级优惠', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, 'SH01-MianYangMiFen', '绵阳米粉', '经典绵阳米粉', 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, 'SH01-Mian', '面', '面', 2, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, 'SH01-XiaoChi', '小吃', '小吃', 3, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, 'SH01-LuWei', '卤味', '卤味', 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, 'SH01-YinLiao', '饮料', '饮料', 5, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 添加规格租
 -- store_id NULL = 总部共享（全店可绑）；与 001 option_groups.store_id 语义一致
 INSERT INTO `smart_noodle_house`.`option_groups` (`store_id`, `name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES
-(NULL, '量', 'Liang', 'SINGLE', 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(NULL, '加料', 'JiaLiao', 'MULTIPLE', 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(NULL, '辣', 'La', 'SINGLE', 0, 2, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(NULL, '麻', 'Ma', 'SINGLE', 0, 3, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(NULL, '葱', 'Cong', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(NULL, '香菜', 'XiangCai', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(NULL, '蒜末', 'SuanMo', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(NULL, '量', '0000-Liang', 'SINGLE', 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '加料', '0000-JiaLiao', 'MULTIPLE', 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '辣', '0000-La', 'SINGLE', 0, 2, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '麻', '0000-Ma', 'SINGLE', 0, 3, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '葱', '0000-Cong', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '香菜', '0000-XiangCai', 'SINGLE', 0, 5, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '蒜末', '0000-SuanMo', 'SINGLE', 0, 6, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 添加规格组明细
   -- 量
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(1, '小碗', 'Liang-XiaoWan', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '中碗', 'Liang-ZhongWan', 1.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(1, '大碗', 'Liang-DaWAN', 2.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(1, '小碗', '0000-Liang-XiaoWan', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, '中碗', '0000-Liang-ZhongWan', 1.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, '大碗', '0000-Liang-DaWAN', 2.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
   -- 加料
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(2, '加卤蛋', 'JiaLiao-LuDan', 2.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(2, '加牛肉', 'JiaLiao-NiuRou', 5.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(2, '加肥肠', 'JiaLiao-FeiChang', 5.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(2, '加卤蛋', '0000-JiaLiao-LuDan', 2.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, '加牛肉', '0000-JiaLiao-NiuRou', 5.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, '加肥肠', '0000-JiaLiao-FeiChang', 5.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
   -- 辣
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(3, '不辣', 'La-BuLa', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(3, '微辣', 'La-WeiLa', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(3, '正常辣', 'La-ZhengChangLa', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(3, '加辣', 'La-JiaLa', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(3, '不辣', '0000-La-BuLa', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, '微辣', '0000-La-WeiLa', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, '正常辣', '0000-La-ZhengChangLa', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, '加辣', '0000-La-JiaLa', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
   -- 麻
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(4, '不麻', 'Ma-BuMa', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(4, '微麻', 'Ma-WeiMa', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(4, '正常麻', 'Ma-ZhengChangMa', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(4, '加麻', 'Ma-JiaMa', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(4, '不麻', '0000-Ma-BuMa', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, '微麻', '0000-Ma-WeiMa', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, '正常麻', '0000-Ma-ZhengChangMa', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, '加麻', '0000-Ma-JiaMa', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
   -- 葱
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(5, '不加葱', 'Cong-BuJiaCong', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
-(5, '微量葱', 'Cong-WeiLiangCong', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
-(5, '正常葱', 'Cong-ZhengChangCong', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(5, '加量葱', 'Cong-JiaLiangCong', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(5, '不加葱', '0000-Cong-BuJiaCong', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
+(5, '微量葱', '0000-Cong-WeiLiangCong', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
+(5, '正常葱', '0000-Cong-ZhengChangCong', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(5, '加量葱', '0000-Cong-JiaLiangCong', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
   -- 香菜
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(6, '不加香菜', 'XiangCai-BuJiaXiangCai', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
-(6, '微量香菜', 'XiangCai-WeiLiangXiangCai', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(6, '正常香菜', 'XiangCai-ZhengChangXiangCai', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(6, '加量香菜', 'XiangCai-JiaLiangXiangCai', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(6, '不加香菜', '0000-XiangCai-BuJiaXiangCai', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
+(6, '微量香菜', '0000-XiangCai-WeiLiangXiangCai', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6, '正常香菜', '0000-XiangCai-ZhengChangXiangCai', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6, '加量香菜', '0000-XiangCai-JiaLiangXiangCai', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
   -- 蒜
 INSERT INTO `smart_noodle_house`.`options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) VALUES 
-(7, '不加蒜末', 'SuanMo-BuJiaSuanMo', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(7, '微量蒜末', 'SuanMo-WeiLiangSuanMo', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(7, '正常蒜末', 'SuanMo-ZhengChangSuanMo', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(7, '加量蒜末', 'SuanMo-JiaLiangSuanMo', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(7, '不加蒜末', '0000-SuanMo-BuJiaSuanMo', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, '微量蒜末', '0000-SuanMo-WeiLiangSuanMo', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, '正常蒜末', '0000-SuanMo-ZhengChangSuanMo', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, '加量蒜末', '0000-SuanMo-JiaLiangSuanMo', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 添加餐品
 INSERT INTO products (
@@ -427,52 +434,52 @@ INSERT INTO products (
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'M001', '牛肉面', '好吃的牛肉面', '/uploads/products/25985ea8d2fe4d08b074f5b4e443d57d.png',
+SELECT s.id, c.id, 'SH01-Mian-NiuRouMian', '牛肉面', '好吃的牛肉面', '/uploads/products/25985ea8d2fe4d08b074f5b4e443d57d.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '面'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'M001');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-Mian-NiuRouMian');
 
 INSERT INTO products (
   store_id, category_id, product_no, name, description, main_image,
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'M002', '肥肠面', '好吃的肥肠面', '/uploads/products/8681823f4fd646789b1915d1a82b4eab.png',
+SELECT s.id, c.id, 'SH01-Mian-FeiChangMian', '肥肠面', '好吃的肥肠面', '/uploads/products/8681823f4fd646789b1915d1a82b4eab.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '面'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'M002');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-Mian-FeiChangMian');
 
 INSERT INTO products (
   store_id, category_id, product_no, name, description, main_image,
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'F001', '绵阳米粉(牛肉)', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
+SELECT s.id, c.id, 'SH01-MianYangMiFen-NiuRou', '绵阳米粉(牛肉)', '好吃的牛肉米粉', '/uploads/products/77ab8543ca8a445885909f048a946e46.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '绵阳米粉'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'F001');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-MianYangMiFen-NiuRou');
 
 INSERT INTO products (
   store_id, category_id, product_no, name, description, main_image,
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, no_member_discount, no_cooking, sort_order, sales_count
 )
-SELECT s.id, c.id, 'F002', '绵阳米粉(肥肠)', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
+SELECT s.id, c.id, 'SH01-MianYangMiFen-FeiChang', '绵阳米粉(肥肠)', '好吃的肥肠米粉', '/uploads/products/12537c63a3b84e0da4eae8ef570b6ae4.png',
   7.00, 6.00, 9999, 1.00, 1,
   'ON_SALE', 1, 1, 0, 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '绵阳米粉'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'F002');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-MianYangMiFen-FeiChang');
 
 -- 关联商品规格
 INSERT INTO `smart_noodle_house`.`product_option_groups` (`id`, `product_id`, `group_id`, `sort_order`) VALUES 
@@ -488,9 +495,3 @@ INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_
 (2, 1, 'A01', '1号桌', '6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (3, 1, 'A02', '2号桌', 'wJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
-INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）'
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'preference_scene_enabled');
-INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）'
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'weather_pref_enabled');

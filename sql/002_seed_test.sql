@@ -286,104 +286,104 @@ INSERT INTO `tables` VALUES (3, 1, 'W01', '外1号桌', 'k72g8pO1Df3vJOxQbTH2-O0
 -- ============================================================================
 -- 八、商品分类（挂总店）
 -- ============================================================================
-INSERT INTO product_categories (store_id, name, description, sort_order, status)
-SELECT s.id, '招牌面', '本店招牌', 1, 1
+INSERT INTO product_categories (store_id, category_no, name, description, sort_order, status)
+SELECT s.id, 'SH01-ZhaoPaiMian', '招牌面', '本店招牌', 1, 1
 FROM stores s WHERE s.store_no = 'SH01'
   AND NOT EXISTS (
     SELECT 1 FROM product_categories c WHERE c.store_id = s.id AND c.name = '招牌面'
   );
 
-INSERT INTO product_categories (store_id, name, description, sort_order, status)
-SELECT s.id, '小吃', '特色小吃', 2, 1
+INSERT INTO product_categories (store_id, category_no, name, description, sort_order, status)
+SELECT s.id, 'SH01-XiaoChi', '小吃', '特色小吃', 2, 1
 FROM stores s WHERE s.store_no = 'SH01'
   AND NOT EXISTS (
     SELECT 1 FROM product_categories c WHERE c.store_id = s.id AND c.name = '小吃'
   );
 
-INSERT INTO product_categories (store_id, name, description, sort_order, status)
-SELECT s.id, '饮品', '冷热饮品', 3, 1
+INSERT INTO product_categories (store_id, category_no, name, description, sort_order, status)
+SELECT s.id, 'SH01-YinPin', '饮品', '冷热饮品', 3, 1
 FROM stores s WHERE s.store_no = 'SH01'
   AND NOT EXISTS (
     SELECT 1 FROM product_categories c WHERE c.store_id = s.id AND c.name = '饮品'
   );
 
 -- ============================================================================
--- 九、规格组与选项（全局）
+-- 九、规格组与选项（全局 / 总部前缀 0000）
 -- ============================================================================
 INSERT INTO option_groups (name, code, selection_type, is_required, sort_order, status)
-SELECT '面量', 'NOODLE_AMOUNT', 'SINGLE', 1, 1, 1 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = 'NOODLE_AMOUNT');
+SELECT '面量', '0000-NoodleAmount', 'SINGLE', 1, 1, 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = '0000-NoodleAmount');
 
 INSERT INTO option_groups (name, code, selection_type, is_required, sort_order, status)
-SELECT '辣度', 'SPICY', 'SINGLE', 1, 2, 1 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = 'SPICY');
+SELECT '辣度', '0000-Spicy', 'SINGLE', 1, 2, 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = '0000-Spicy');
 
 INSERT INTO option_groups (name, code, selection_type, is_required, sort_order, status)
-SELECT '麻度', 'NUMB', 'SINGLE', 1, 3, 1 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = 'NUMB');
+SELECT '麻度', '0000-Numb', 'SINGLE', 1, 3, 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = '0000-Numb');
 
 INSERT INTO option_groups (name, code, selection_type, is_required, sort_order, status)
-SELECT '加料', 'EXTRA', 'MULTIPLE', 0, 4, 1 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = 'EXTRA');
+SELECT '加料', '0000-Extra', 'MULTIPLE', 0, 4, 1 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM option_groups WHERE code = '0000-Extra');
 
 -- 面量
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '少面', 'LESS', 0.00, 1, 1 FROM option_groups g WHERE g.code = 'NOODLE_AMOUNT'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'LESS');
+SELECT g.id, '少面', '0000-NoodleAmount-Less', 0.00, 1, 1 FROM option_groups g WHERE g.code = '0000-NoodleAmount'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-NoodleAmount-Less');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '正常', 'NORMAL', 0.00, 2, 1 FROM option_groups g WHERE g.code = 'NOODLE_AMOUNT'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'NORMAL');
+SELECT g.id, '正常', '0000-NoodleAmount-Normal', 0.00, 2, 1 FROM option_groups g WHERE g.code = '0000-NoodleAmount'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-NoodleAmount-Normal');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '多面', 'EXTRA', 1.00, 3, 1 FROM option_groups g WHERE g.code = 'NOODLE_AMOUNT'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'EXTRA');
+SELECT g.id, '多面', '0000-NoodleAmount-More', 1.00, 3, 1 FROM option_groups g WHERE g.code = '0000-NoodleAmount'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-NoodleAmount-More');
 
 -- 辣度
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '不要辣', 'NONE', 0.00, 1, 1 FROM option_groups g WHERE g.code = 'SPICY'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'NONE');
+SELECT g.id, '不要辣', '0000-Spicy-None', 0.00, 1, 1 FROM option_groups g WHERE g.code = '0000-Spicy'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Spicy-None');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '少辣', 'LESS', 0.00, 2, 1 FROM option_groups g WHERE g.code = 'SPICY'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'LESS');
+SELECT g.id, '少辣', '0000-Spicy-Less', 0.00, 2, 1 FROM option_groups g WHERE g.code = '0000-Spicy'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Spicy-Less');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '正常辣', 'NORMAL', 0.00, 3, 1 FROM option_groups g WHERE g.code = 'SPICY'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'NORMAL');
+SELECT g.id, '正常辣', '0000-Spicy-Normal', 0.00, 3, 1 FROM option_groups g WHERE g.code = '0000-Spicy'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Spicy-Normal');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '多辣', 'EXTRA', 0.00, 4, 1 FROM option_groups g WHERE g.code = 'SPICY'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'EXTRA');
+SELECT g.id, '多辣', '0000-Spicy-More', 0.00, 4, 1 FROM option_groups g WHERE g.code = '0000-Spicy'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Spicy-More');
 
 -- 麻度
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '不要麻', 'NONE', 0.00, 1, 1 FROM option_groups g WHERE g.code = 'NUMB'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'NONE');
+SELECT g.id, '不要麻', '0000-Numb-None', 0.00, 1, 1 FROM option_groups g WHERE g.code = '0000-Numb'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Numb-None');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '少麻', 'LESS', 0.00, 2, 1 FROM option_groups g WHERE g.code = 'NUMB'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'LESS');
+SELECT g.id, '少麻', '0000-Numb-Less', 0.00, 2, 1 FROM option_groups g WHERE g.code = '0000-Numb'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Numb-Less');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '正常麻', 'NORMAL', 0.00, 3, 1 FROM option_groups g WHERE g.code = 'NUMB'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'NORMAL');
+SELECT g.id, '正常麻', '0000-Numb-Normal', 0.00, 3, 1 FROM option_groups g WHERE g.code = '0000-Numb'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Numb-Normal');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '多麻', 'EXTRA', 0.00, 4, 1 FROM option_groups g WHERE g.code = 'NUMB'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'EXTRA');
+SELECT g.id, '多麻', '0000-Numb-More', 0.00, 4, 1 FROM option_groups g WHERE g.code = '0000-Numb'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Numb-More');
 
 -- 加料
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '加蛋', 'EGG', 2.00, 1, 1 FROM option_groups g WHERE g.code = 'EXTRA'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'EGG');
+SELECT g.id, '加蛋', '0000-Extra-Egg', 2.00, 1, 1 FROM option_groups g WHERE g.code = '0000-Extra'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Extra-Egg');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '加牛肉', 'BEEF', 5.00, 2, 1 FROM option_groups g WHERE g.code = 'EXTRA'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'BEEF');
+SELECT g.id, '加牛肉', '0000-Extra-Beef', 5.00, 2, 1 FROM option_groups g WHERE g.code = '0000-Extra'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Extra-Beef');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '加肥肠', 'FEICHANG', 5.00, 3, 1 FROM option_groups g WHERE g.code = 'EXTRA'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'FEICHANG');
+SELECT g.id, '加肥肠', '0000-Extra-FeiChang', 5.00, 3, 1 FROM option_groups g WHERE g.code = '0000-Extra'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Extra-FeiChang');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '加豆皮', 'BEAN_CURD', 2.00, 4, 1 FROM option_groups g WHERE g.code = 'EXTRA'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'BEAN_CURD');
+SELECT g.id, '加豆皮', '0000-Extra-BeanCurd', 2.00, 4, 1 FROM option_groups g WHERE g.code = '0000-Extra'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Extra-BeanCurd');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '加香菜', 'CORIANDER', 0.00, 5, 1 FROM option_groups g WHERE g.code = 'EXTRA'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'CORIANDER');
+SELECT g.id, '加香菜', '0000-Extra-Coriander', 0.00, 5, 1 FROM option_groups g WHERE g.code = '0000-Extra'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Extra-Coriander');
 INSERT INTO options (group_id, name, code, extra_price, sort_order, status)
-SELECT g.id, '加葱', 'SCALLION', 0.00, 6, 1 FROM option_groups g WHERE g.code = 'EXTRA'
-  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = 'SCALLION');
+SELECT g.id, '加葱', '0000-Extra-Scallion', 0.00, 6, 1 FROM option_groups g WHERE g.code = '0000-Extra'
+  AND NOT EXISTS (SELECT 1 FROM options o WHERE o.group_id = g.id AND o.code = '0000-Extra-Scallion');
 
 -- ============================================================================
 -- 十、示例商品 + 规格绑定
@@ -393,47 +393,47 @@ INSERT INTO products (
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, sort_order
 )
-SELECT s.id, c.id, 'P001', '牛肉面', '经典牛肉面',
+SELECT s.id, c.id, 'SH01-ZhaoPaiMian-NiuRouMian', '牛肉面', '经典牛肉面',
   18.00, 20.00, 999, 1.00, 1,
   'ON_SALE', 1, 1, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '招牌面'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'P001');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian');
 
 INSERT INTO products (
   store_id, category_id, product_no, name, description,
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, sort_order
 )
-SELECT s.id, c.id, 'P002', '酸辣粉', '地道酸辣粉',
+SELECT s.id, c.id, 'SH01-ZhaoPaiMian-SuanLaFen', '酸辣粉', '地道酸辣粉',
   15.00, 16.00, 999, 1.00, 1,
   'ON_SALE', 1, 0, 2
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '招牌面'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'P002');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-ZhaoPaiMian-SuanLaFen');
 
 INSERT INTO products (
   store_id, category_id, product_no, name, description,
   price, original_price, stock, box_price, min_order_count,
   status, is_recommended, is_hot, sort_order
 )
-SELECT s.id, c.id, 'P003', '卤蛋', '入味卤蛋',
+SELECT s.id, c.id, 'SH01-XiaoChi-LuDan', '卤蛋', '入味卤蛋',
   3.00, 3.00, 999, 0.50, 1,
   'ON_SALE', 0, 0, 1
 FROM stores s
 JOIN product_categories c ON c.store_id = s.id AND c.name = '小吃'
 WHERE s.store_no = 'SH01'
-  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'P003');
+  AND NOT EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id AND p.product_no = 'SH01-XiaoChi-LuDan');
 
 -- 牛肉面：面量+辣度+麻度+加料
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 1
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'NOODLE_AMOUNT'
-WHERE p.product_no = 'P001'
+JOIN option_groups g ON g.code = '0000-NoodleAmount'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -442,8 +442,8 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 2
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'SPICY'
-WHERE p.product_no = 'P001'
+JOIN option_groups g ON g.code = '0000-Spicy'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -452,8 +452,8 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 3
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'NUMB'
-WHERE p.product_no = 'P001'
+JOIN option_groups g ON g.code = '0000-Numb'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -462,8 +462,8 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 4
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'EXTRA'
-WHERE p.product_no = 'P001'
+JOIN option_groups g ON g.code = '0000-Extra'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -473,8 +473,8 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 1
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'SPICY'
-WHERE p.product_no = 'P002'
+JOIN option_groups g ON g.code = '0000-Spicy'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-SuanLaFen'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -483,8 +483,8 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 2
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'NUMB'
-WHERE p.product_no = 'P002'
+JOIN option_groups g ON g.code = '0000-Numb'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-SuanLaFen'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -493,8 +493,8 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, 3
 FROM products p
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01'
-JOIN option_groups g ON g.code = 'EXTRA'
-WHERE p.product_no = 'P002'
+JOIN option_groups g ON g.code = '0000-Extra'
+WHERE p.product_no = 'SH01-ZhaoPaiMian-SuanLaFen'
   AND NOT EXISTS (
     SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id
   );
@@ -680,7 +680,7 @@ WHERE s.store_no = 'SH01'
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 1, 18.00
 FROM orders o
-JOIN products p ON p.product_no = 'P001'
+JOIN products p ON p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
 WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120101', 'A2B3')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
@@ -723,7 +723,7 @@ WHERE s.store_no = 'SH01'
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 2, 36.00
 FROM orders o
-JOIN products p ON p.product_no = 'P001'
+JOIN products p ON p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
 WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120201', 'E6F7')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
@@ -784,7 +784,7 @@ WHERE s.store_no = 'SH01'
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '酸辣粉', 15.00, 1, 15.00
 FROM orders o
-JOIN products p ON p.product_no = 'P002'
+JOIN products p ON p.product_no = 'SH01-ZhaoPaiMian-SuanLaFen'
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
 WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120401', 'L4M5')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);
@@ -845,7 +845,7 @@ WHERE s.store_no = 'SH01'
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 1, 18.00
 FROM orders o
-JOIN products p ON p.product_no = 'P001'
+JOIN products p ON p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
 WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120601', 'S2T3')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.product_name_snapshot = '牛肉面');
@@ -853,7 +853,7 @@ WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '卤蛋', 3.00, 1, 3.00
 FROM orders o
-JOIN products p ON p.product_no = 'P003'
+JOIN products p ON p.product_no = 'SH01-XiaoChi-LuDan'
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
 WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120601', 'S2T3')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id AND oi.product_name_snapshot = '卤蛋');
@@ -914,7 +914,7 @@ WHERE s.store_no = 'SH01'
 INSERT INTO order_items (order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity, subtotal)
 SELECT o.id, p.id, '牛肉面', 18.00, 1, 18.00
 FROM orders o
-JOIN products p ON p.product_no = 'P001'
+JOIN products p ON p.product_no = 'SH01-ZhaoPaiMian-NiuRouMian'
 JOIN stores s ON s.id = p.store_id AND s.store_no = 'SH01' AND s.id = o.store_id
 WHERE o.order_no = CONCAT('OT', (SELECT store_no FROM stores WHERE id = o.store_id), '100', '20260801120801', 'Y8Z2')
   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id);

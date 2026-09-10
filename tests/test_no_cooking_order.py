@@ -21,7 +21,7 @@ def _skip_order_side_effects(monkeypatch):
 @pytest.mark.asyncio
 async def test_order_all_no_cooking(db_session):
     store = Store(id=901, store_no="T-NC-01", name="测试店", status=1)
-    cat = ProductCategory(id=902, store_id=store.id, name="卤味", sort_order=0, status=1)
+    cat = ProductCategory(id=902, category_no="C902", store_id=store.id, name="卤味", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
@@ -66,7 +66,7 @@ async def test_order_all_no_cooking(db_session):
 @pytest.mark.asyncio
 async def test_staff_direct_complete_rejected_for_mixed_order(db_session):
     store = Store(id=911, store_no="T-NC-02", name="测试店2", status=1)
-    cat = ProductCategory(id=912, store_id=store.id, name="卤味", sort_order=0, status=1)
+    cat = ProductCategory(id=912, category_no="C912", store_id=store.id, name="卤味", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
@@ -109,7 +109,7 @@ async def test_staff_direct_complete_rejected_for_mixed_order(db_session):
 @pytest.mark.asyncio
 async def test_staff_direct_complete_rejected_for_pure_no_cooking(db_session):
     store = Store(id=941, store_no="T-NC-05", name="测试店5", status=1)
-    cat = ProductCategory(id=942, store_id=store.id, name="卤味", sort_order=0, status=1)
+    cat = ProductCategory(id=942, category_no="C942", store_id=store.id, name="卤味", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
@@ -156,7 +156,7 @@ async def test_staff_direct_complete_rejected_for_pure_no_cooking(db_session):
 @pytest.mark.asyncio
 async def test_no_cooking_ready_then_completed(db_session):
     store = Store(id=951, store_no="T-NC-06", name="测试店6", status=1)
-    cat = ProductCategory(id=952, store_id=store.id, name="卤味", sort_order=0, status=1)
+    cat = ProductCategory(id=952, category_no="C952", store_id=store.id, name="卤味", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
@@ -204,7 +204,7 @@ async def test_no_cooking_ready_then_completed(db_session):
 @pytest.mark.asyncio
 async def test_staff_direct_ready_for_pure_no_cooking_order(db_session):
     store = Store(id=921, store_no="T-NC-03", name="测试店3", status=1)
-    cat = ProductCategory(id=922, store_id=store.id, name="卤味", sort_order=0, status=1)
+    cat = ProductCategory(id=922, category_no="C922", store_id=store.id, name="卤味", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
@@ -250,7 +250,7 @@ async def test_staff_direct_ready_for_pure_no_cooking_order(db_session):
 @pytest.mark.asyncio
 async def test_staff_direct_ready_rejected_for_mixed_order(db_session):
     store = Store(id=931, store_no="T-NC-04", name="测试店4", status=1)
-    cat = ProductCategory(id=932, store_id=store.id, name="卤味", sort_order=0, status=1)
+    cat = ProductCategory(id=932, category_no="C932", store_id=store.id, name="卤味", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 

@@ -11,7 +11,7 @@ from app.models import Product, ProductCategory, ProductImage, Store
 @pytest.mark.asyncio
 async def test_clear_main_product_images_removes_all_main_rows(db_session):
     store = Store(id=801, store_no="T-IMG-01", name="测试店", status=1)
-    cat = ProductCategory(id=802, store_id=store.id, name="面类", sort_order=0, status=1)
+    cat = ProductCategory(id=802, category_no="C802", store_id=store.id, name="面类", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
@@ -48,7 +48,7 @@ async def test_clear_main_product_images_removes_all_main_rows(db_session):
 @pytest.mark.asyncio
 async def test_set_main_product_image_clear(db_session):
     store = Store(id=811, store_no="T-IMG-02", name="测试店2", status=1)
-    cat = ProductCategory(id=812, store_id=store.id, name="面类", sort_order=0, status=1)
+    cat = ProductCategory(id=812, category_no="C812", store_id=store.id, name="面类", sort_order=0, status=1)
     db_session.add_all([store, cat])
     await db_session.flush()
 
