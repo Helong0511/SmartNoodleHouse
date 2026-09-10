@@ -40,7 +40,7 @@
             <el-button size="small" type="primary" :disabled="!canEditGroup(row)" @click="openOptionForm(row)">新增选项</el-button>
             <el-table :data="row.options" size="small" border style="margin-top:8px">
               <el-table-column prop="name" label="选项名" width="180"/>
-              <el-table-column prop="code" label="编码" width="200"/>
+              <el-table-column prop="code" label="编码" width="250"/>
               <el-table-column prop="extra_price" label="加价" width="90">
                 <template #default="{ row: o }">¥{{ o.extra_price }}</template>
               </el-table-column>
