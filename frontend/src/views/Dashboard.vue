@@ -35,46 +35,43 @@
     </el-row>
 
     <el-row :gutter="16" style="margin-top:16px">
-      <el-col :span="24">
-        <el-card shadow="hover">
+      <el-col :xs="24" :md="10">
+        <el-card shadow="hover" class="side-card">
           <div class="section-head">
             <h3>{{ periodLabel }}优惠构成</h3>
             <span class="scope-hint">有效已付订单统计</span>
           </div>
           <el-table :data="discountRows" size="small" border>
-            <el-table-column prop="name" label="类型" width="120" />
-            <el-table-column label="金额" width="120" align="right">
+            <el-table-column prop="name" label="类型" width="100" />
+            <el-table-column label="金额" width="100" align="right">
               <template #default="{ row }">¥{{ row.amount }}</template>
             </el-table-column>
-            <el-table-column prop="desc" label="说明" min-width="200" />
+            <el-table-column prop="desc" label="说明" min-width="120" show-overflow-tooltip />
           </el-table>
         </el-card>
       </el-col>
-    </el-row>
-
-    <el-row :gutter="16" style="margin-top:16px">
-      <el-col :span="24">
-        <el-card shadow="hover">
+      <el-col :xs="24" :md="14">
+        <el-card shadow="hover" class="side-card">
           <div class="section-head">
             <h3>近 7 日趋势</h3>
             <span class="scope-hint">按自然日 · 净营收 = 入账 − 退款</span>
           </div>
           <el-table :data="data?.daily_series || []" size="small" stripe border>
-            <el-table-column prop="date" label="日期" width="110" />
-            <el-table-column prop="order_count" label="下单数" width="80" align="right" />
-            <el-table-column prop="paid_order_count" label="已付" width="72" align="right" />
-            <el-table-column label="净营收" width="100" align="right">
+            <el-table-column prop="date" label="日期" width="100" />
+            <el-table-column prop="order_count" label="下单数" width="72" align="right" />
+            <el-table-column prop="paid_order_count" label="已付" width="64" align="right" />
+            <el-table-column label="净营收" width="92" align="right">
               <template #default="{ row }">¥{{ row.net_revenue }}</template>
             </el-table-column>
-            <el-table-column label="毛收入" width="100" align="right">
+            <el-table-column label="毛收入" width="92" align="right">
               <template #default="{ row }">¥{{ row.gross_revenue }}</template>
             </el-table-column>
-            <el-table-column label="退款" width="90" align="right">
+            <el-table-column label="退款" width="80" align="right">
               <template #default="{ row }">
                 <span :class="{ 'text-warn': Number(row.refunded_amount) > 0 }">¥{{ row.refunded_amount }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="合计优惠" width="100" align="right">
+            <el-table-column label="合计优惠" min-width="88" align="right">
               <template #default="{ row }">
                 {{ Number(row.total_discount) > 0 ? `¥${row.total_discount}` : '—' }}
               </template>
@@ -396,6 +393,7 @@ onMounted(async () => {
   margin-bottom: 8px;
 }
 .section-head h3 { margin: 0; font-size: 16px; }
+.side-card { height: 100%; margin-bottom: 8px; }
 .pay-note { font-size: 12px; color: #909399; margin: 0 0 10px; }
 .mini-stat {
   background: #f7f8fa;
