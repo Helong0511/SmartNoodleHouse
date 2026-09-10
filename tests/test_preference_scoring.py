@@ -23,6 +23,30 @@ def test_preference_score_denominator_uses_payment_status():
     assert PreferenceService.PREFERENCE_SCORE_PAYMENT_STATUSES == ("PAID", "PARTIAL_REFUND")
 
 
+def test_order_weight_weekend_and_partial_refund():
+    from types import SimpleNamespace
+    from datetime import datetime
+
+    decay = PreferenceService.RECENCY_DECAY
+    weekday = SimpleNamespace(
+        paid_at=datetime(2026, 9, 1, 12, 0, 0),  # 周二午市
+        payment_status="PAID",
+    )
+    weekend = SimpleNamespace(
+        paid_at=datetime(2026, 9, 5, 12, 0, 0),  # 周六午市
+        payment_status="PAID",
+    )
+    partial = SimpleNamespace(
+        paid_at=datetime(2026, 9, 1, 12, 0, 0),
+        payment_status="PARTIAL_REFUND",
+    )
+    w0 = PreferenceService._order_weight(weekday, idx=0, decay=decay)
+    w_end = PreferenceService._order_weight(weekend, idx=0, decay=decay)
+    w_part = PreferenceService._order_weight(partial, idx=0, decay=decay)
+    assert w_end == w0 * PreferenceService.WEEKEND_BOOST
+    assert w_part == w0 * PreferenceService.PARTIAL_REFUND_WEIGHT
+
+
 def test_kitchen_statuses_not_used_for_preference_denominator():
     """厨房态不应作为偏好分母（订单离开 PAID 后 status 会变，但 payment_status 不变）。"""
     kitchen = ("CONFIRMED", "PREPARING", "COOKING", "READY", "COMPLETED")
@@ -92,8 +116,18 @@ async def test_update_from_order_scores_by_payment_status(db_session):
     db_session.add_all([kitchen_order, paid_order])
     await db_session.flush()
 
-    item = OrderItem(
+    # 厨房态旧单也挂规格（不同口味），验证 payment_status=PAID 仍计入分母
+    item_old = OrderItem(
         id=907,
+        order_id=kitchen_order.id,
+        product_id=product.id,
+        product_name_snapshot="测试面",
+        unit_price_snapshot=Decimal("18.00"),
+        quantity=1,
+        subtotal=Decimal("18.00"),
+    )
+    item = OrderItem(
+        id=909,
         order_id=paid_order.id,
         product_id=product.id,
         product_name_snapshot="测试面",
@@ -101,16 +135,25 @@ async def test_update_from_order_scores_by_payment_status(db_session):
         quantity=1,
         subtotal=Decimal("18.00"),
     )
-    db_session.add(item)
+    db_session.add_all([item_old, item])
     await db_session.flush()
-    db_session.add(
-        OrderItemOption(
-            id=908,
-            order_item_id=item.id,
-            group_name_snapshot="辣度",
-            option_name_snapshot="微辣",
-            option_code="MILD",
-        )
+    db_session.add_all(
+        [
+            OrderItemOption(
+                id=908,
+                order_item_id=item_old.id,
+                group_name_snapshot="辣度",
+                option_name_snapshot="特辣",
+                option_code="HOT",
+            ),
+            OrderItemOption(
+                id=910,
+                order_item_id=item.id,
+                group_name_snapshot="辣度",
+                option_name_snapshot="微辣",
+                option_code="MILD",
+            ),
+        ]
     )
     await db_session.commit()
 
@@ -119,18 +162,19 @@ async def test_update_from_order_scores_by_payment_status(db_session):
     await PreferenceService.update_from_order(db_session, paid_order.id)
     await db_session.commit()
 
-    prefs = list(
-        (
+    prefs = {
+        p.option_code: p
+        for p in (
             await db_session.execute(
                 select(CustomerPreference).where(CustomerPreference.customer_id == customer.id)
             )
         ).scalars()
-    )
-    assert len(prefs) == 1
-    assert prefs[0].order_count == 1
-    # 最新单 weight=1，旧单 weight=0.85 → 1/1.85
+    }
+    assert set(prefs) == {"MILD", "HOT"}
+    assert prefs["MILD"].order_count == 1
+    # 两单均在午市，时段加权相消：最新 weight=1，旧单 weight=0.85 → 1/1.85
     expected = PreferenceService._score_quantize(Decimal("1") / (Decimal("1") + PreferenceService.RECENCY_DECAY))
-    assert prefs[0].preference_score == expected
+    assert prefs["MILD"].preference_score == expected
 
 
 @pytest.mark.asyncio
@@ -168,8 +212,8 @@ async def test_update_from_order_skips_non_paid_status(db_session):
 
 
 @pytest.mark.asyncio
-async def test_same_option_in_one_order_counts_once(db_session):
-    """同一订单内同一规格出现多次，只计 1 次。"""
+async def test_same_option_in_one_order_counts_by_line_qty(db_session):
+    """同一订单内同一规格按行数量加权（两行各 1 份计 2 次）。"""
     store = Store(id=941, store_no="T-PREF-DEDUP", name="去重店", status=1)
     customer = Customer(id=942, customer_no="C-PREF-DEDUP", nickname="去重客", status=1)
     cat = ProductCategory(id=943, store_id=store.id, name="面类", sort_order=1, status=1)
@@ -247,7 +291,7 @@ async def test_same_option_in_one_order_counts_once(db_session):
         ).scalars()
     )
     assert len(prefs) == 1
-    assert prefs[0].order_count == 1
+    assert prefs[0].order_count == 2
     assert prefs[0].preference_score == Decimal("1.0000")
 
 

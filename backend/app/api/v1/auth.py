@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
-# 登录防爆破：按用户名累计失败，达阈值后锁定一段时间
+# 登录防爆破：按「用户名+客户端 IP」累计，避免跨 IP 锁死合法账号
 _LOGIN_FAIL_LIMIT = 8
 _LOGIN_LOCK_SECONDS = 15 * 60
 _LOGIN_FAIL_WINDOW = 15 * 60
@@ -21,46 +21,64 @@ class VerifyPasswordRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
-def _login_fail_key(username: str) -> str:
-    return f"snh:login:fail:{(username or '').strip().lower()}"
+def _client_ip(request: Request | None) -> str:
+    if request is None:
+        return "unknown"
+    try:
+        from app.core.ip_allowlist import client_ip
+
+        return (client_ip(request) or "").strip() or "unknown"
+    except Exception:
+        peer = request.client.host if request.client else ""
+        return (peer or "unknown").strip() or "unknown"
 
 
-def _login_lock_key(username: str) -> str:
-    return f"snh:login:lock:{(username or '').strip().lower()}"
+def _login_scope(username: str, ip: str) -> str:
+    u = (username or "").strip().lower()
+    return f"{u}|{(ip or 'unknown').strip()}"
 
 
-async def _login_is_locked(username: str) -> bool:
+def _login_fail_key(username: str, ip: str) -> str:
+    return f"snh:login:fail:{_login_scope(username, ip)}"
+
+
+def _login_lock_key(username: str, ip: str) -> str:
+    return f"snh:login:lock:{_login_scope(username, ip)}"
+
+
+async def _login_is_locked(username: str, ip: str) -> bool:
     try:
         from app.core.redis_client import get_redis
 
         r = await get_redis()
-        return bool(await r.get(_login_lock_key(username)))
+        return bool(await r.get(_login_lock_key(username, ip)))
     except Exception:
+        # Redis 不可用：不误锁全员；依赖 RateLimitMiddleware 兜底
         return False
 
 
-async def _record_login_failure(username: str) -> None:
+async def _record_login_failure(username: str, ip: str) -> None:
     try:
         from app.core.redis_client import get_redis
 
         r = await get_redis()
-        fail_key = _login_fail_key(username)
+        fail_key = _login_fail_key(username, ip)
         count = await r.incr(fail_key)
         if count == 1:
             await r.expire(fail_key, _LOGIN_FAIL_WINDOW)
         if int(count) >= _LOGIN_FAIL_LIMIT:
-            await r.set(_login_lock_key(username), "1", ex=_LOGIN_LOCK_SECONDS)
+            await r.set(_login_lock_key(username, ip), "1", ex=_LOGIN_LOCK_SECONDS)
             await r.delete(fail_key)
     except Exception:
         pass
 
 
-async def _clear_login_failures(username: str) -> None:
+async def _clear_login_failures(username: str, ip: str) -> None:
     try:
         from app.core.redis_client import get_redis
 
         r = await get_redis()
-        await r.delete(_login_fail_key(username), _login_lock_key(username))
+        await r.delete(_login_fail_key(username, ip), _login_lock_key(username, ip))
     except Exception:
         pass
 
@@ -71,7 +89,8 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
     from app.services.audit_service import AuditService
 
     username = (data.username or "").strip()
-    if await _login_is_locked(username):
+    ip = _client_ip(request)
+    if await _login_is_locked(username, ip):
         return {
             "code": 429,
             "message": "登录失败次数过多，请 15 分钟后再试",
@@ -83,7 +102,7 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
     )
     user = result.scalar_one_or_none()
     if not user or not verify_password(data.password, user.password_hash):
-        await _record_login_failure(username)
+        await _record_login_failure(username, ip)
         if user:
             await AuditService.log_login(
                 db, user_id=user.id, username=username, success=False, request=request
@@ -100,7 +119,7 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
             await db.flush()
         return {"code": 401, "message": "用户名或密码错误", "data": None}
 
-    await _clear_login_failures(username)
+    await _clear_login_failures(username, ip)
     user.last_login_at = now_local()
     await AuditService.log_login(
         db, user_id=user.id, username=user.username, success=True, request=request

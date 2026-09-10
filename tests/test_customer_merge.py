@@ -1,6 +1,7 @@
 """顾客合并服务：账号迁移、券冲突、积分合并。"""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from itertools import count
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -13,10 +14,23 @@ from app.models import (
     CustomerCoupon,
     CustomerWechatAccount,
     MemberLevel,
+    PointLedger,
 )
 from app.services.customer_merge_service import CustomerMergeService
 
 _TZ = timezone(timedelta(hours=8))
+
+
+def _sqlite_auto_id(db_session, model, start: int = 7000):
+    ids = count(start)
+    real_add = db_session.add
+
+    def _add(obj):
+        if isinstance(obj, model) and getattr(obj, "id", None) is None:
+            obj.id = next(ids)
+        return real_add(obj)
+
+    db_session.add = _add  # type: ignore[method-assign]
 
 
 async def _seed_levels(db):
@@ -64,6 +78,7 @@ async def test_merge_moves_accounts_and_points(db_session):
         )
     )
     await db_session.flush()
+    _sqlite_auto_id(db_session, PointLedger, 7100)
 
     with patch(
         "app.services.customer_merge_service.AuditService.log",
@@ -85,6 +100,16 @@ async def test_merge_moves_accounts_and_points(db_session):
     assert result["stats"]["wechat_moved"] == 1
     assert result["stats"]["alipay_moved"] == 1
     assert result["stats"]["points_added"] == 80
+
+    merge_rows = (
+        await db_session.execute(
+            select(PointLedger).where(
+                PointLedger.customer_id == target.id, PointLedger.entry_type == "MERGE"
+            )
+        )
+    ).scalars().all()
+    assert len(merge_rows) == 1
+    assert int(merge_rows[0].delta) == 80
 
     await db_session.refresh(target)
     await db_session.refresh(source)

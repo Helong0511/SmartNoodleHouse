@@ -1,4 +1,5 @@
 """小程序登录与扫码点餐入口"""
+import asyncio
 import base64
 import re
 
@@ -639,7 +640,7 @@ async def consent_face(
         raise AppException(40030, "空图片")
 
     try:
-        feature, quality = extract_face_embedding_with_quality(raw)
+        feature, quality = await asyncio.to_thread(extract_face_embedding_with_quality, raw)
     except ValueError as e:
         raise AppException(40031, str(e)) from e
 
@@ -702,7 +703,7 @@ async def consent_face_base64(
             raise AppException(40030, f"图片超过 {mb}MB")
         if len(raw) < 1024:
             raise AppException(40034, "人脸图像过小，请重新正对摄像头采集")
-        feature, quality = extract_face_embedding_with_quality(raw)
+        feature, quality = await asyncio.to_thread(extract_face_embedding_with_quality, raw)
     except AppException:
         raise
     except ValueError as e:
@@ -739,8 +740,8 @@ async def consent_face_base64(
 
 @router.post("/face/revoke")
 async def revoke_face(request: Request, db: DbSession, customer: CurrentCustomer):
-    await FaceService.revoke_face(db, customer.id)
-    return success({"revoked": True}, request=request)
+    n = await FaceService.revoke_face(db, customer.id, request=request)
+    return success({"revoked": True, "count": n}, request=request)
 
 
 @router.get("/coupons/mine")

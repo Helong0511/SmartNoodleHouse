@@ -18,25 +18,42 @@ from app.services.print_service import PrintService
 def register_tasks(scheduler) -> None:
     settings = get_settings()
 
+    def _leader_job(fn):
+        """调度任务 fence：锁丢失后跳过，避免双 Leader 窗口继续跑任务。"""
+
+        async def _wrapped(*args, **kwargs):
+            from app.core.leader_lock import is_leader_held
+
+            if not is_leader_held():
+                return None
+            return await fn(*args, **kwargs)
+
+        _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
+        return _wrapped
+
     @scheduler.scheduled_job("interval", seconds=5)
+    @_leader_job
     async def drain_webhook_inbox():
         n = await process_pending_inbox(limit=30)
         if n:
             logger.info("Processed %s webhook inbox items", n)
 
     @scheduler.scheduled_job("interval", seconds=10)
+    @_leader_job
     async def retry_failed_print_jobs():
         n = await PrintService.process_pending_print_jobs(limit=20)
         if n:
             logger.info("Retried %s print jobs", n)
 
     @scheduler.scheduled_job("interval", hours=6)
+    @_leader_job
     async def refresh_platform_tokens():
         count = await PlatformTokenService.refresh_expiring_tokens(within_hours=24)
         if count:
             logger.info("Refreshed %s platform tokens", count)
 
     @scheduler.scheduled_job("interval", minutes=1)
+    @_leader_job
     async def close_expired_orders():
         async with AsyncSessionLocal() as db:
             from app.services.order_lifecycle import apply_order_status
@@ -122,6 +139,7 @@ def register_tasks(scheduler) -> None:
                 logger.info("Expired orders rescued via payment query: %s", rescued)
 
     @scheduler.scheduled_job("interval", minutes=1)
+    @_leader_job
     async def auto_complete_kitchen_orders():
         async with AsyncSessionLocal() as db:
             from app.services.kitchen_auto_service import auto_complete_stale_kitchen_orders
@@ -149,6 +167,7 @@ def register_tasks(scheduler) -> None:
                 logger.info("Kitchen auto-completed orders: %s", len(completed))
 
     @scheduler.scheduled_job("interval", minutes=1)
+    @_leader_job
     async def poll_pending_payments():
         """补偿支付回调丢失：扫描 PENDING 微信/支付宝单并主动查单。"""
         from app.services.payment_service import PaymentService
@@ -158,6 +177,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Pending payments settled via query: %s", n)
 
     @scheduler.scheduled_job("interval", minutes=1)
+    @_leader_job
     async def poll_payment_refunds():
         from app.services.payment_service import PaymentService
 
@@ -166,6 +186,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Payment refunds confirmed via query: %s", n)
 
     @scheduler.scheduled_job("interval", hours=6)
+    @_leader_job
     async def cleanup_visitor_data():
         async with AsyncSessionLocal() as db:
             await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= naive_local_now()))
@@ -173,6 +194,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Expired visitor data cleaned")
 
     @scheduler.scheduled_job("cron", hour=3, minute=0)
+    @_leader_job
     async def cleanup_operation_logs():
         async with AsyncSessionLocal() as db:
             from app.services.system_settings_service import SystemSettingsService
@@ -184,6 +206,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Operation logs cleaned before %s", cutoff)
 
     @scheduler.scheduled_job("cron", hour=3, minute=30)
+    @_leader_job
     async def maintain_file_logs():
         """文件日志：7 天明文→gzip，满月打包，超过 90 天删除。"""
         from app.services.file_log_service import maintain_logs
@@ -191,3 +214,25 @@ def register_tasks(scheduler) -> None:
         stats = maintain_logs()
         if any(stats.values()):
             logger.info("File logs maintained: %s", stats)
+
+    @scheduler.scheduled_job("interval", minutes=2)
+    @_leader_job
+    async def retry_paid_side_effects():
+        """支付成功后积分/券/偏好失败补偿。"""
+        from app.services.paid_side_effects import process_pending_side_effects
+
+        n = await process_pending_side_effects(limit=30)
+        if n:
+            logger.info("Paid side-effects retried: %s", n)
+
+    @scheduler.scheduled_job("interval", minutes=30)
+    @_leader_job
+    async def reencrypt_face_profiles():
+        """密钥轮换后：把旧 version 人脸向量重加密到当前密钥。"""
+        from app.services.face_service import FaceService
+
+        async with AsyncSessionLocal() as db:
+            n = await FaceService.reencrypt_stale_profiles(db, limit=50)
+            if n:
+                await db.commit()
+                logger.info("Face profiles re-encrypted: %s", n)

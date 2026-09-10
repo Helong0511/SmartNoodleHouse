@@ -259,7 +259,7 @@ async function bindParsedScanRaw(raw, resolve) {
   }
 
   const token = parseTableTokenFromScan(text)
-  console.warn('[scan] raw=', text.slice(0, 180), 'token=', token)
+  console.warn('[scan] raw=', text.slice(0, 180), 'token=', token ? `${String(token).slice(0, 4)}***` : '')
   if (!token) {
     const tip = text
       ? `未识别到桌台码\n原文: ${text.slice(0, 120)}`

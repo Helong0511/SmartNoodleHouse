@@ -16,6 +16,10 @@ router = APIRouter(prefix="/client-logs", tags=["client-logs"])
 ClientSource = Literal["frontend", "wechat", "alipay"]
 
 _CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_SECRET_RE = re.compile(
+    r"(?i)(authorization|bearer|access_token|customer_token|token|refresh_token|password|secret)"
+    r"([\"'\s:=]+)([^\s\"'&,;]{8,})"
+)
 _MAX_MESSAGE = 2000
 _MAX_EXTRA_JSON = 2000
 _MAX_ENTRIES = 30
@@ -25,6 +29,10 @@ _MAX_BODY_CHARS = 64_000
 def _strip_ctrl(value: str) -> str:
     """去掉控制字符（含 \\r\\n），防止日志注入伪造行。"""
     return _CTRL_RE.sub(" ", value or "")
+
+
+def _redact_secrets(value: str) -> str:
+    return _SECRET_RE.sub(r"\1\2***", value or "")
 
 
 class ClientLogEntry(BaseModel):
@@ -44,7 +52,7 @@ class ClientLogEntry(BaseModel):
     def clean_text(cls, v: Any) -> Any:
         if v is None:
             return v
-        return _strip_ctrl(str(v))
+        return _redact_secrets(_strip_ctrl(str(v)))
 
     @field_validator("extra")
     @classmethod
@@ -55,7 +63,7 @@ class ClientLogEntry(BaseModel):
             raw = json.dumps(v, ensure_ascii=False, default=str)
         except Exception:
             raw = str(v)
-        raw = _strip_ctrl(raw)
+        raw = _redact_secrets(_strip_ctrl(raw))
         if len(raw) > _MAX_EXTRA_JSON:
             return {"_truncated": raw[:_MAX_EXTRA_JSON]}
         try:

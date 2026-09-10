@@ -142,12 +142,16 @@ async def websocket_endpoint(
         if deny:
             await websocket.close(code=4429, reason=deny)
             return
-        await ws_manager.connect(
-            "display",
-            websocket,
-            store_id=int(store_id),
-            user_key=f"display:{store_id}",
-        )
+        try:
+            await ws_manager.connect(
+                "display",
+                websocket,
+                store_id=int(store_id),
+                user_key=f"display:{store_id}",
+            )
+        except PermissionError as e:
+            await websocket.close(code=4429, reason=str(e)[:120])
+            return
         try:
             await _ws_loop("display", websocket)
         except WebSocketDisconnect:
@@ -202,13 +206,17 @@ async def websocket_endpoint(
         return
 
     effective_store = store_id if is_super else user_store_id
-    await ws_manager.connect(
-        channel,
-        websocket,
-        store_id=effective_store,
-        is_super_admin=is_super and effective_store is None,
-        user_key=user_key,
-    )
+    try:
+        await ws_manager.connect(
+            channel,
+            websocket,
+            store_id=effective_store,
+            is_super_admin=is_super and effective_store is None,
+            user_key=user_key,
+        )
+    except PermissionError as e:
+        await websocket.close(code=4429, reason=str(e)[:120])
+        return
     try:
         await _ws_loop(channel, websocket)
     except WebSocketDisconnect:

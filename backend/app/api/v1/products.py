@@ -962,6 +962,16 @@ async def update_product(
         if new_main_image != old_main_image:
             await _set_main_product_image(db, product, new_main_image)
     if data.option_group_ids is not None:
+        if data.option_group_ids:
+            found = await db.execute(
+                select(OptionGroup.id).where(
+                    OptionGroup.id.in_(data.option_group_ids), OptionGroup.status == 1
+                )
+            )
+            found_ids = set(found.scalars().all())
+            missing = [gid for gid in data.option_group_ids if gid not in found_ids]
+            if missing:
+                raise AppException(40003, f"规格组不存在或已禁用: {missing}")
         await db.execute(delete(ProductOptionGroup).where(ProductOptionGroup.product_id == product_id))
         for idx, gid in enumerate(data.option_group_ids):
             db.add(ProductOptionGroup(product_id=product.id, group_id=gid, sort_order=idx))
@@ -1097,8 +1107,17 @@ async def list_option_groups(
     return success(groups, request=request)
 
 
+async def _require_hq_option_admin(user: CurrentUser) -> None:
+    """规格组为全局字典：仅总部超管可改，避免门店员工改坏全店。"""
+    role = getattr(getattr(user, "role", None), "code", None) or ""
+    if role == "SUPER_ADMIN" or not user.store_id:
+        return
+    raise AppException(40301, "规格组为全局配置，仅总部账号可修改")
+
+
 @router.post("/options/groups", dependencies=[require_permission("product:create")])
-async def create_option_group(data: OptionGroupCreate, request: Request, db: DbSession):
+async def create_option_group(data: OptionGroupCreate, request: Request, db: DbSession, user: CurrentUser):
+    await _require_hq_option_admin(user)
     group = OptionGroup(**data.model_dump())
     db.add(group)
     await db.flush()
@@ -1106,7 +1125,8 @@ async def create_option_group(data: OptionGroupCreate, request: Request, db: DbS
 
 
 @router.post("/options", dependencies=[require_permission("product:create")])
-async def create_option(data: OptionCreate, request: Request, db: DbSession):
+async def create_option(data: OptionCreate, request: Request, db: DbSession, user: CurrentUser):
+    await _require_hq_option_admin(user)
     payload = data.model_dump()
     want_default = payload.pop("is_default", False)
     opt = Option(**payload, is_default=bool(want_default))
@@ -1119,7 +1139,10 @@ async def create_option(data: OptionCreate, request: Request, db: DbSession):
 
 
 @router.put("/options/groups/{group_id}", dependencies=[require_permission("product:update")])
-async def update_option_group(group_id: int, data: OptionGroupUpdate, request: Request, db: DbSession):
+async def update_option_group(
+    group_id: int, data: OptionGroupUpdate, request: Request, db: DbSession, user: CurrentUser
+):
+    await _require_hq_option_admin(user)
     group = await db.get(OptionGroup, group_id)
     if not group:
         return success(None, message="规格组不存在", request=request)
@@ -1130,7 +1153,8 @@ async def update_option_group(group_id: int, data: OptionGroupUpdate, request: R
 
 
 @router.delete("/options/groups/{group_id}", dependencies=[require_permission("product:delete")])
-async def delete_option_group(group_id: int, request: Request, db: DbSession):
+async def delete_option_group(group_id: int, request: Request, db: DbSession, user: CurrentUser):
+    await _require_hq_option_admin(user)
     group = await db.get(OptionGroup, group_id)
     if not group:
         return success(None, message="规格组不存在", request=request)
@@ -1143,7 +1167,8 @@ async def delete_option_group(group_id: int, request: Request, db: DbSession):
 
 
 @router.put("/options/{option_id}", dependencies=[require_permission("product:update")])
-async def update_option(option_id: int, data: OptionUpdate, request: Request, db: DbSession):
+async def update_option(option_id: int, data: OptionUpdate, request: Request, db: DbSession, user: CurrentUser):
+    await _require_hq_option_admin(user)
     opt = await db.get(Option, option_id)
     if not opt:
         return success(None, message="规格选项不存在", request=request)
@@ -1159,8 +1184,9 @@ async def update_option(option_id: int, data: OptionUpdate, request: Request, db
 
 
 @router.put("/options/{option_id}/default", dependencies=[require_permission("product:update")])
-async def set_default_option(option_id: int, request: Request, db: DbSession):
+async def set_default_option(option_id: int, request: Request, db: DbSession, user: CurrentUser):
     """将单选规格组内某选项设为唯一默认（菜单 + 一键加购）。"""
+    await _require_hq_option_admin(user)
     opt = await db.get(Option, option_id)
     if not opt:
         return success(None, message="规格选项不存在", request=request)

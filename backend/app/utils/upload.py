@@ -150,6 +150,20 @@ def _assert_host_public(host: str) -> None:
         raise AppException(40021, "无法解析头像地址")
 
 
+def _peer_ip_from_response(resp) -> str | None:
+    """读取已建立连接的对端 IP，缓解 DNS TOCTOU / rebinding。"""
+    try:
+        stream = resp.extensions.get("network_stream")
+        if stream is None:
+            return None
+        peer = stream.get_extra_info("peername")
+        if isinstance(peer, tuple) and peer:
+            return str(peer[0])
+    except Exception:
+        return None
+    return None
+
+
 def assert_public_http_url(url: str) -> None:
     """拒绝非 http(s)、内网/回环/metadata，降低 SSRF 风险。"""
     parsed = urlparse(str(url or "").strip())
@@ -228,6 +242,12 @@ async def fetch_and_save_remote_image(url: str, subdir: str = "avatars") -> str:
             async with client.stream(
                 "GET", current, headers={"User-Agent": "SmartNoodleHouse/1.0"}
             ) as resp:
+                peer = _peer_ip_from_response(resp)
+                if peer:
+                    try:
+                        _assert_ip_public(ipaddress.ip_address(peer))
+                    except ValueError:
+                        raise AppException(40021, _UNSAFE_URL_MSG) from None
                 if resp.status_code in (301, 302, 303, 307, 308):
                     loc = resp.headers.get("location")
                     if not loc:

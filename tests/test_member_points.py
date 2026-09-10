@@ -58,7 +58,8 @@ async def test_deduct_points_for_refund_downgrades():
     locked = MagicMock()
     locked.scalar_one_or_none.return_value = customer
     db.execute = AsyncMock(return_value=locked)
-    db.scalar = AsyncMock(return_value=None)
+    # EARN 合计 / 已 REFUND_DEDUCT 合计（本单净可扣上限）
+    db.scalar = AsyncMock(side_effect=[60, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
@@ -80,7 +81,7 @@ async def test_deduct_points_for_refund_clamps_at_zero():
     locked = MagicMock()
     locked.scalar_one_or_none.return_value = customer
     db.execute = AsyncMock(return_value=locked)
-    db.scalar = AsyncMock(return_value=None)
+    db.scalar = AsyncMock(side_effect=[50, 0])
     db.add = MagicMock()
     db.flush = AsyncMock()
     CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
@@ -88,3 +89,31 @@ async def test_deduct_points_for_refund_clamps_at_zero():
     assert deducted == 30  # 仅扣现有积分，不虚报
     assert customer.points == 0
     assert customer.member_level_id == 1
+
+
+@pytest.mark.asyncio
+async def test_deduct_points_capped_by_order_net_earn():
+    """退款扣分不超过本单净已发积分，避免跨单扣光。"""
+    customer = SimpleNamespace(id=1, points=200, member_level_id=2)
+    order = SimpleNamespace(customer_id=1, id=9)
+    levels = [
+        _level(1, "普通会员", 0, "1.0000"),
+        _level(2, "银卡会员", 100, "0.9800"),
+    ]
+    db = MagicMock()
+    locked = MagicMock()
+    locked.scalar_one_or_none.return_value = customer
+    db.execute = AsyncMock(return_value=locked)
+    db.scalar = AsyncMock(side_effect=[40, 0])  # 本单仅发过 40
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    CustomerService.list_levels_ordered = AsyncMock(return_value=levels)  # type: ignore[method-assign]
+    deducted = await CustomerService.deduct_points_for_refund(db, order, Decimal("80.00"))
+    assert deducted == 40
+    assert customer.points == 160
+
+
+def test_points_from_amount_rounds_half_up():
+    assert CustomerService.points_from_amount(Decimal("10.4")) == 10
+    assert CustomerService.points_from_amount(Decimal("10.5")) == 11
+    assert CustomerService.points_from_amount(Decimal("10.49")) == 10

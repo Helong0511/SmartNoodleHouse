@@ -31,6 +31,7 @@ jobs:
           pip install pytest pytest-asyncio httpx
       - name: Run unit tests
         env:
+          PYTHONPATH: backend
           APP_ENV: development
           APP_DEBUG: "true"
           JWT_SECRET: "ci-test-jwt-secret-at-least-32-chars!!"

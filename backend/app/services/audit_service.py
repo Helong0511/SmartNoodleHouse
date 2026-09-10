@@ -176,3 +176,29 @@ class AuditService:
             detail={"customer_id": customer_id, "profile_id": profile_id, **(extra or {})},
             request=request,
         )
+
+    @classmethod
+    async def log_face_revoke(
+        cls,
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        profile_ids: list[int],
+        request: Request | None = None,
+        operator_id: int | None = None,
+        extra: dict | None = None,
+    ) -> OperationLog:
+        return await cls.log(
+            db,
+            user_id=operator_id,
+            action="face.revoke",
+            module="face",
+            target_type="customer",
+            target_id=customer_id,
+            detail={
+                "customer_id": customer_id,
+                "profile_ids": profile_ids,
+                **(extra or {}),
+            },
+            request=request,
+        )

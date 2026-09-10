@@ -13,8 +13,8 @@ router = APIRouter(prefix="/welcome", tags=["欢迎"])
 
 @router.post("/face/revoke")
 async def revoke_face(request: Request, db: DbSession, customer: CurrentCustomer):
-    await FaceService.revoke_face(db, customer.id)
-    return success({"revoked": True}, request=request)
+    n = await FaceService.revoke_face(db, customer.id, request=request)
+    return success({"revoked": True, "count": n}, request=request)
 
 
 @router.get("/stats", dependencies=[require_permission("welcome:manage")])

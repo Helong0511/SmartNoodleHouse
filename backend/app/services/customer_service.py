@@ -242,6 +242,13 @@ class CustomerService:
         return chosen
 
     @staticmethod
+    def points_from_amount(amount) -> int:
+        """实付金额 → 积分：按元四舍五入（与 money 同 ROUND_HALF_UP）。"""
+        from decimal import ROUND_HALF_UP
+
+        return int(money(amount or 0).to_integral_value(rounding=ROUND_HALF_UP))
+
+    @staticmethod
     async def award_points_for_paid_order(db: AsyncSession, order: Order) -> int:
         """支付成功：实付 1 元 = 1 积分，并尝试升级等级。行锁 + point_ledger。"""
         if not order.customer_id:
@@ -262,7 +269,7 @@ class CustomerService:
         )
         if existed:
             return 0
-        earned = int(money(order.total_amount or 0))
+        earned = CustomerService.points_from_amount(order.total_amount)
         if earned <= 0:
             return 0
         customer.points = int(customer.points or 0) + earned
@@ -288,7 +295,9 @@ class CustomerService:
         *,
         refund_id: int | None = None,
     ) -> int:
-        """退款成功：按退款金额 1 元扣 1 积分，并尝试降级等级。行锁 + point_ledger。"""
+        """退款成功：按退款金额扣积分，不超过本单净已发积分。行锁 + point_ledger。"""
+        from sqlalchemy import func
+
         if not order.customer_id:
             return 0
         customer = (
@@ -307,11 +316,32 @@ class CustomerService:
             )
             if existed:
                 return 0
-        deducted = int(money(refund_amount or 0))
+        deducted = CustomerService.points_from_amount(refund_amount)
         if deducted <= 0:
             return 0
+        # 本单净已发积分上限，避免跨单扣光余额
+        earned = int(
+            await db.scalar(
+                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
+                    PointLedger.order_id == order.id,
+                    PointLedger.entry_type == "EARN",
+                )
+            )
+            or 0
+        )
+        already = int(
+            await db.scalar(
+                select(func.coalesce(func.sum(PointLedger.delta), 0)).where(
+                    PointLedger.order_id == order.id,
+                    PointLedger.entry_type == "REFUND_DEDUCT",
+                )
+            )
+            or 0
+        )
+        # already 为负，净可扣 = earned + already
+        remaining = max(0, earned + already)
         before = int(customer.points or 0)
-        actual = min(before, deducted)
+        actual = min(before, deducted, remaining)
         customer.points = before - actual
         if actual > 0:
             db.add(
@@ -1078,8 +1108,9 @@ class PreferenceService:
     """智能口味：根据已付订单持续分析并修正偏好。
 
     每次支付成功（或退款后）按顾客近期已付订单全量重算：
-    - 同一订单内同一规格只计 1 次
+    - 按行数量加权（买 2 份加料计 2 次）
     - 近期订单加权更高（口味改变时自动修正）
+    - 午餐/晚餐时段、周末轻微加权；部分退款弱负反馈降权
     - 全额退款订单不再参与分析
     """
 
@@ -1092,10 +1123,36 @@ class PreferenceService:
     # 近期加权：越新权重越高；分析最近 N 单
     RECENCY_DECAY = Decimal("0.85")
     RECENCY_WINDOW = 40
+    # 时段场景：午餐/晚餐略加权
+    MEAL_HOUR_BOOST = Decimal("1.15")
+    # 周末订单轻微加权（休闲场景口味）
+    WEEKEND_BOOST = Decimal("1.08")
+    # 部分退款：弱负反馈，降低该单规格权重
+    PARTIAL_REFUND_WEIGHT = Decimal("0.5")
 
     @staticmethod
     def _score_quantize(value: Decimal) -> Decimal:
         return min(Decimal("1"), max(Decimal("0"), value.quantize(Decimal("0.0001"))))
+
+    @staticmethod
+    def _order_weight(order, *, idx: int, decay: Decimal) -> Decimal:
+        weight = (decay ** idx) if decay > 0 else Decimal("1")
+        when = order.paid_at or order.created_at
+        try:
+            hour = int(when.hour) if when is not None else -1
+        except Exception:
+            hour = -1
+        if hour in range(11, 15) or hour in range(17, 22):
+            weight *= PreferenceService.MEAL_HOUR_BOOST
+        try:
+            wd = int(when.weekday()) if when is not None else -1
+        except Exception:
+            wd = -1
+        if wd >= 5:
+            weight *= PreferenceService.WEEKEND_BOOST
+        if getattr(order, "payment_status", None) == "PARTIAL_REFUND":
+            weight *= PreferenceService.PARTIAL_REFUND_WEIGHT
+        return weight
 
     @staticmethod
     async def update_from_order(db: AsyncSession, order_id: int) -> None:
@@ -1162,20 +1219,19 @@ class PreferenceService:
         decay = PreferenceService.RECENCY_DECAY
 
         for idx, order in enumerate(orders):
-            weight = (decay ** idx) if decay > 0 else Decimal("1")
-            total_weight += weight
-            seen: set[tuple[str, str]] = set()
-            order_last = order.paid_at or order.created_at or now_local()
+            weight = PreferenceService._order_weight(order, idx=idx, decay=decay)
+            when = order.paid_at or order.created_at
+            order_last = when or now_local()
             for it in items_by_order.get(order.id, []):
+                qty = max(1, int(getattr(it, "quantity", None) or 1))
+                line_w = weight * Decimal(qty)
                 for opt in opts_by_item.get(it.id, []):
                     category = str(opt.group_name_snapshot or "").strip() or "规格"
                     code = str(opt.option_code or "").strip()
                     if not code:
                         continue
+                    total_weight += line_w
                     key = (category, code)
-                    if key in seen:
-                        continue
-                    seen.add(key)
                     name = opt.option_name_snapshot or code
                     row = agg.get(key)
                     if not row:
@@ -1183,13 +1239,13 @@ class PreferenceService:
                             "category": category,
                             "option_code": code,
                             "option_name": name,
-                            "order_count": 1,
-                            "weighted": weight,
+                            "order_count": qty,
+                            "weighted": line_w,
                             "last_used_at": order_last,
                         }
                     else:
-                        row["order_count"] += 1
-                        row["weighted"] += weight
+                        row["order_count"] += qty
+                        row["weighted"] += line_w
                         if name:
                             row["option_name"] = name
                         if row["last_used_at"] is None or (

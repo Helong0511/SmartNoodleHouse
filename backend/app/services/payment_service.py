@@ -1048,11 +1048,19 @@ class PaymentService:
         if pay_amount > remaining:
             raise AppException(40052, f"本笔金额超过待收余额 ¥{remaining}")
 
-        # 实收校验：至少覆盖本笔入账
+        # 实收校验：至少覆盖本笔入账；找零由服务端计算且不得为负
         if received_amount is not None and money(received_amount) < pay_amount:
             raise AppException(40009, f"实收金额不足，本笔应收 ¥{pay_amount}")
         if change_amount is None and received_amount is not None:
             change_amount = money(received_amount) - pay_amount
+        if change_amount is not None and money(change_amount) < 0:
+            raise AppException(40009, "找零金额非法")
+        if received_amount is not None and change_amount is not None:
+            if money(received_amount) - money(change_amount) != pay_amount:
+                # 以实收为准重算找零，避免客户端篡改
+                change_amount = money(received_amount) - pay_amount
+                if change_amount < 0:
+                    raise AppException(40009, f"实收金额不足，本笔应收 ¥{pay_amount}")
 
         sno = await _order_store_no(db, order)
         t_no, t_ph = await _order_table_parts(db, order)

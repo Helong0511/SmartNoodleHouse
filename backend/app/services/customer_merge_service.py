@@ -4,7 +4,7 @@ Merge policy
 ============
 1. 目标顾客保留（status 不变）；源顾客 status=0，token_version+1，写 AuditService 审计
    （before/after 含脱敏手机号）。
-2. 积分：target.points = target.points + source.points（双方 FOR UPDATE），再
+2. 积分：target.points = target.points + source.points（双方 FOR UPDATE），写 MERGE 流水，再
    CustomerService.recalculate_member_level。
 3. 券：全部迁入目标（同模板可多张）；不再按模板去重作废。
 4. 平台账号（openid / alipay_user_id 唯一）：目标已存在同 openid/userid 则删除源账号
@@ -328,9 +328,21 @@ class CustomerMergeService:
         cls, db: AsyncSession, source: Customer, target: Customer, stats: dict
     ) -> None:
         add = int(source.points or 0)
-        target.points = int(target.points or 0) + add
+        before = int(target.points or 0)
+        target.points = before + add
         source.points = 0
         stats["points_added"] = add
+        if add != 0:
+            db.add(
+                PointLedger(
+                    customer_id=target.id,
+                    order_id=None,
+                    refund_id=None,
+                    delta=add,
+                    balance_after=int(target.points),
+                    entry_type="MERGE",
+                )
+            )
 
         if source.last_order_at and (
             not target.last_order_at or source.last_order_at > target.last_order_at

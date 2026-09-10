@@ -91,7 +91,7 @@ async def create_payment(
             cust = await db.get(Customer, order.customer_id)
             if cust:
                 profile = await CustomerService.build_member_profile(db, cust)
-                pay_data["points_earned"] = int(order.total_amount or 0)
+                pay_data["points_earned"] = CustomerService.points_from_amount(order.total_amount)
                 pay_data["member_points"] = profile.get("member_points", 0)
                 pay_data["member_level_name"] = profile.get("member_level_name")
     return success({"payment_no": payment.payment_no, "amount": str(payment.amount), **pay_data}, request=request)

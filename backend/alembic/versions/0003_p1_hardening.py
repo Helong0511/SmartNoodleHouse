@@ -3,6 +3,10 @@
 Revision ID: 0003_p1_hardening
 Revises: 0002_p0_hardening
 Create Date: 2026-09-09
+
+警告：本迁移含 DELETE 去重 + 加 uk_cc_customer_template，与现行「同模板可多张」冲突。
+新环境请勿依赖本逻辑；已执行过的库请跑 0010 / sql/tools/021+022 去掉唯一约束。
+勿在已有多张同模板券的库上「重放」本 upgrade。
 """
 from __future__ import annotations
 

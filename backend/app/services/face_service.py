@@ -31,12 +31,17 @@ def _fernet_from_material(material: str, *, legacy: bool = False) -> Fernet:
 
 
 class FaceEncryption:
-    """人脸向量加密。新数据用 SHA256 派生；解密兼容历史零填充密钥。"""
+    """人脸向量加密。新数据用 SHA256 派生；解密兼容历史零填充密钥与 previous 密钥。"""
+
+    CURRENT_VERSION_PREFIX = "enc1"
 
     def __init__(self):
-        material = get_settings().face_encryption_key or ""
+        settings = get_settings()
+        material = settings.face_encryption_key or ""
         self._material = material
         self.fernet = _fernet_from_material(material, legacy=False)
+        prev = (getattr(settings, "face_encryption_key_previous", None) or "").strip()
+        self._previous = _fernet_from_material(prev, legacy=False) if prev else None
 
     def encrypt(self, data: bytes) -> bytes:
         return self.fernet.encrypt(data)
@@ -45,8 +50,20 @@ class FaceEncryption:
         try:
             return self.fernet.decrypt(data)
         except InvalidToken:
+            if self._previous is not None:
+                try:
+                    return self._previous.decrypt(data)
+                except InvalidToken:
+                    pass
             legacy = _fernet_from_material(self._material, legacy=True)
             return legacy.decrypt(data)
+
+    @classmethod
+    def key_version_label(cls) -> str:
+        """含当前密钥指纹，轮换后旧档案 version 不匹配即可批量重加密。"""
+        material = get_settings().face_encryption_key or ""
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:8]
+        return f"{cls.CURRENT_VERSION_PREFIX}:{digest}"
 
 
 class FaceEmbeddingCache:
@@ -164,6 +181,7 @@ class FaceService:
         profile = FaceProfile(
             customer_id=customer_id,
             feature_data=feature_bytes,
+            feature_version=FaceEncryption.key_version_label(),
             consent_status="AUTHORIZED",
             consent_at=now_local(),
         )
@@ -173,17 +191,72 @@ class FaceService:
         return profile
 
     @staticmethod
-    async def revoke_face(db: AsyncSession, customer_id: int) -> None:
+    async def revoke_face(
+        db: AsyncSession,
+        customer_id: int,
+        *,
+        request=None,
+        operator_id: int | None = None,
+    ) -> int:
         result = await db.execute(
             select(FaceProfile).where(
                 FaceProfile.customer_id == customer_id, FaceProfile.consent_status == "AUTHORIZED"
             )
         )
-        for profile in result.scalars().all():
+        profiles = list(result.scalars().all())
+        ids: list[int] = []
+        for profile in profiles:
+            ids.append(int(profile.id))
             profile.consent_status = "REVOKED"
             profile.revoked_at = now_local()
             profile.feature_data = b""
         face_embedding_cache.invalidate()
+        if ids:
+            from app.services.audit_service import AuditService
+
+            await AuditService.log_face_revoke(
+                db,
+                customer_id=customer_id,
+                profile_ids=ids,
+                request=request,
+                operator_id=operator_id,
+            )
+        return len(ids)
+
+    @staticmethod
+    async def reencrypt_stale_profiles(db: AsyncSession, *, limit: int = 50) -> int:
+        """将旧密钥/旧 version 的授权人脸重加密到当前密钥（密钥轮换后批量迁移）。"""
+        target = FaceEncryption.key_version_label()
+        result = await db.execute(
+            select(FaceProfile)
+            .where(
+                FaceProfile.consent_status == "AUTHORIZED",
+                FaceProfile.feature_data.isnot(None),
+                FaceProfile.feature_version != target,
+            )
+            .order_by(FaceProfile.id.asc())
+            .limit(max(1, min(int(limit), 200)))
+        )
+        rows = list(result.scalars().all())
+        if not rows:
+            return 0
+        enc = FaceEncryption()
+        done = 0
+        for profile in rows:
+            raw = profile.feature_data or b""
+            if not raw:
+                continue
+            try:
+                plain = enc.decrypt(raw)
+                profile.feature_data = enc.encrypt(plain)
+                profile.feature_version = target
+                done += 1
+            except Exception:
+                logger.exception("人脸重加密失败 profile_id=%s", getattr(profile, "id", None))
+        if done:
+            face_embedding_cache.invalidate()
+            await db.flush()
+        return done
 
     @staticmethod
     async def get_authorized_profiles(db: AsyncSession) -> list[tuple[int, np.ndarray]]:

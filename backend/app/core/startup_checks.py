@@ -80,6 +80,12 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and getattr(settings, "allow_auth_mock", False):
         errors.append("生产环境禁止 ALLOW_AUTH_MOCK=true")
 
+    mini_ver = (getattr(settings, "mini_program_env_version", None) or "").strip().lower()
+    if is_prod and mini_ver in ("develop", "trial"):
+        errors.append(
+            "生产环境禁止 MINI_PROGRAM_ENV_VERSION=develop/trial（桌台码会拉起开发/体验版）"
+        )
+
     if is_prod and getattr(settings, "allow_delivery_mock", False):
         errors.append("生产环境禁止 ALLOW_DELIVERY_MOCK=true")
 

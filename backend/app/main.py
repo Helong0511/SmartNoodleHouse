@@ -98,7 +98,30 @@ async def lifespan(app: FastAPI):
 
     await start_ws_subscriber(on_redis_ws_message)
 
+    async def _stop_leader_work() -> None:
+        """锁丢失：立即停调度与后台 worker，避免双 Leader。"""
+        nonlocal is_leader
+        logger.warning("执行 Leader 降级：shutdown scheduler / TTS / RecognitionWorker")
+        try:
+            if scheduler.running:
+                scheduler.shutdown(wait=False)
+        except Exception:
+            logger.exception("关闭 scheduler 失败")
+        try:
+            tts_worker.stop()
+        except Exception:
+            pass
+        if tts_task and not tts_task.done():
+            tts_task.cancel()
+        if recognition_task and not recognition_task.done():
+            recognition_task.cancel()
+        is_leader = False
+
     if is_leader:
+        from app.core.leader_lock import set_leader_held, set_on_leader_lost
+
+        set_leader_held(True)
+        set_on_leader_lost(_stop_leader_work)
         _leader_stop = asyncio.Event()
         _leader_renew_task = asyncio.create_task(renew_leader_loop(_leader_worker_id, _leader_stop))
         register_tasks(scheduler)

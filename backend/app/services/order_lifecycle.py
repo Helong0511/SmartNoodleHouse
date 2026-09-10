@@ -106,15 +106,13 @@ async def apply_order_status(
             logger.exception("出餐订阅消息推送失败 order_id=%s", order.id)
     elif target == "PAID" and old != "PAID" and order.customer_id:
         try:
-            from app.services.customer_service import CustomerService, PreferenceService
-            from app.services.coupon_service import CouponService
+            from app.services.paid_side_effects import run_paid_side_effects
 
-            await CustomerService.award_points_for_paid_order(db, order)
-            await CouponService.mark_used(db, order)
-            if do_pref:
-                await PreferenceService.update_from_order(db, order.id)
+            await run_paid_side_effects(db, order, do_pref=do_pref)
         except Exception:
-            logger.exception("积分发放、券核销或口味记录失败 order_id=%s", order.id)
+            logger.exception(
+                "积分发放、券核销或口味记录失败（已入队补偿）order_id=%s", order.id
+            )
 
     await record_order_status(
         db,

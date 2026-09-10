@@ -658,6 +658,11 @@ class SystemSettingsService:
                 return "auto"
             if raw not in choices:
                 raise ValueError(f"{meta['label']}须为: {', '.join(choices)}")
+            if key == "mini_program_env_version" and raw in ("develop", "trial"):
+                from app.core.config import get_settings
+
+                if get_settings().is_production:
+                    raise ValueError("生产环境不可将小程序环境设为 develop/trial")
             return raw
         if raw == "" or raw.lower() in ("nan", "none", "null"):
             raise ValueError(f"{meta['label']}不能为空")

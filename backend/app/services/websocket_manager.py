@@ -31,7 +31,7 @@ class ConnectionManager:
         return (client.host if client else "") or "unknown"
 
     def can_accept(self, websocket: WebSocket, *, user_key: str | None = None) -> str | None:
-        """返回拒绝原因；None 表示可接受。"""
+        """进程内预检；全局限额在 connect 时再占 Redis。"""
         ip = self._client_ip(websocket)
         if len(self._by_ip.get(ip, ())) >= MAX_CONNECTIONS_PER_IP:
             return "同一 IP 连接数超限"
@@ -48,6 +48,17 @@ class ConnectionManager:
         is_super_admin: bool = False,
         user_key: str | None = None,
     ):
+        from app.services import ws_conn_quota
+
+        ip = self._client_ip(websocket)
+        reason = await ws_conn_quota.try_reserve(
+            ip=ip,
+            user_key=user_key,
+            max_ip=MAX_CONNECTIONS_PER_IP,
+            max_user=MAX_CONNECTIONS_PER_USER,
+        )
+        if reason:
+            raise PermissionError(reason)
         await websocket.accept()
         keys: list[str] = []
         if is_super_admin and store_id is None:
@@ -59,7 +70,6 @@ class ConnectionManager:
             keys = []
         for key in keys:
             self.active.setdefault(key, set()).add(websocket)
-        ip = self._client_ip(websocket)
         self._by_ip.setdefault(ip, set()).add(websocket)
         if user_key:
             self._by_user.setdefault(user_key, set()).add(websocket)
@@ -71,12 +81,14 @@ class ConnectionManager:
             "ip": ip,
             "user_key": user_key,
             "last_seen": time.monotonic(),
+            "quota_reserved": True,
         }
 
     def touch(self, websocket: WebSocket) -> None:
         meta = self.meta.get(websocket)
         if meta is not None:
             meta["last_seen"] = time.monotonic()
+            # 异步续期放上层；此处仅本地时间戳
 
     def disconnect(self, channel: str, websocket: WebSocket):
         meta = self.meta.pop(websocket, {}) or {}
@@ -93,6 +105,16 @@ class ConnectionManager:
             self._by_user[user_key].discard(websocket)
             if not self._by_user[user_key]:
                 self._by_user.pop(user_key, None)
+        if meta.get("quota_reserved"):
+            try:
+                import asyncio
+
+                from app.services import ws_conn_quota
+
+                loop = asyncio.get_running_loop()
+                loop.create_task(ws_conn_quota.release(ip=ip or "unknown", user_key=user_key))
+            except Exception:
+                pass
 
     def cleanup_idle(self, idle_seconds: float = WS_IDLE_TIMEOUT_SECONDS) -> list[WebSocket]:
         """返回超时连接（调用方负责 close）。"""

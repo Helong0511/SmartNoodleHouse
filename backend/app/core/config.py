@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     camera_password: str = ""
 
     face_encryption_key: str = ""
+    # 轮换时保留旧密钥以便解密历史向量；新注册只用 face_encryption_key
+    face_encryption_key_previous: str = ""
     # 平台 Token 等业务密钥加密；未单独配置时回退到 FACE_ENCRYPTION_KEY
     secret_encryption_key: str = ""
 

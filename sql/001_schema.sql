@@ -13,6 +13,7 @@
 --   sql/004_pos_refund_requests.sql → pos_refund_requests
 --   sql/004_welcome_coupon_unique.sql → 历史：曾加每人每模板唯一（已被 021 取消）
 --   sql/tools/021_voucher_multi_issue.sql → 去掉 uk_cc_customer_template，同模板可多张
+--   sql/tools/022_ledger_idempotency_unique.sql → 财务/积分流水 DB 幂等唯一
 --   sql/005_cashier_shift_one_open.sql → 同一收银员仅一个 OPEN 班次
 --   sql/tools/006~012               → token_version / 特价 / is_default / 免烹饪 / KDS 认领等
 --     （上述字段均已并入本全量 DDL；tools 仅供旧库补丁）
@@ -676,6 +677,9 @@ CREATE TABLE IF NOT EXISTS financial_ledger (
   INDEX idx_fl_order (order_id),
   INDEX idx_fl_payment (payment_id),
   INDEX idx_fl_refund (refund_id),
+  UNIQUE KEY uk_fl_payment (payment_id),
+  UNIQUE KEY uk_fl_refund (refund_id),
+  UNIQUE KEY uk_fl_delivery_refund (delivery_refund_id),
   CONSTRAINT fk_fl_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='财务分录账本';
 
@@ -689,9 +693,14 @@ CREATE TABLE IF NOT EXISTS point_ledger (
   balance_after INT NOT NULL COMMENT '变动后余额',
   entry_type VARCHAR(30) NOT NULL COMMENT '变动类型：EARN/REFUND_DEDUCT/ADJUST 等',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
+  earn_order_id BIGINT UNSIGNED
+    GENERATED ALWAYS AS (IF(entry_type = 'EARN', order_id, NULL)) STORED
+    COMMENT 'EARN 幂等键：每单至多一条发放',
   INDEX idx_pl_customer_created (customer_id, created_at),
   INDEX idx_pl_order (order_id),
   INDEX idx_pl_refund (refund_id),
+  UNIQUE KEY uk_pl_refund (refund_id),
+  UNIQUE KEY uk_pl_earn_order (earn_order_id),
   CONSTRAINT fk_pl_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员积分流水';
 
