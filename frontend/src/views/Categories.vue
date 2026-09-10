@@ -31,10 +31,10 @@
       @selection-change="onSelectionChange"
     >
       <el-table-column v-if="auth.isSuperAdmin" type="selection" width="48" />
-      <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="120">
+      <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="80">
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
       </el-table-column>
-      <el-table-column prop="category_no" label="编号" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="category_no" label="编号" min-width="90" show-overflow-tooltip />
       <el-table-column prop="name" label="分类名" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
       <el-table-column label="须先点分类" min-width="160">
