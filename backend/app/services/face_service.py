@@ -429,7 +429,7 @@ class WelcomeService:
         try:
             from app.services.customer_service import PreferenceService
 
-            rec = await PreferenceService.get_recommendations(db, customer_id)
+            rec = await PreferenceService.get_recommendations(db, customer_id, store_id=store_id)
             prefs = (rec or {}).get("preferences") or []
             if prefs:
                 bits = []

@@ -803,9 +803,14 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
 
 
 @router.get("/customers/me/preferences")
-async def get_my_preferences(request: Request, db: DbSession, customer: CurrentCustomer):
+async def get_my_preferences(
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+    store_id: int | None = None,
+):
     """当前会员口味偏好（小程序专用，以令牌身份为准，避免本地 customer_id 过期）。"""
-    prefs = await PreferenceService.get_recommendations(db, customer.id)
+    prefs = await PreferenceService.get_recommendations(db, customer.id, store_id=store_id)
     result = await db.execute(
         select(CustomerPreference)
         .where(CustomerPreference.customer_id == customer.id)

@@ -315,6 +315,20 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "max": 999999,
         "description": "无绑定时允许用 .env Token 的本系统门店 ID；多店生产必须 0",
     },
+    "preference_scene_enabled": {
+        "group": "system",
+        "label": "口味场景加权",
+        "unit": "",
+        "type": "bool",
+        "description": "推荐时按季节/同星期同餐段微调口味排序（不改历史学习分）",
+    },
+    "weather_pref_enabled": {
+        "group": "system",
+        "label": "天气口味加权",
+        "unit": "",
+        "type": "bool",
+        "description": "门店配置经纬度后，按实时气温/雨天微调口味推荐",
+    },
 }
 
 REDIS_CACHE_VER_KEY = "snh:system_settings:ver"

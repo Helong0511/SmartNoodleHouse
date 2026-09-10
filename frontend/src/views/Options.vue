@@ -1,14 +1,28 @@
 <template>
   <div v-loading="loading">
-    <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
-    <el-button @click="load">刷新</el-button>
-    <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="load">显示已禁用</el-checkbox>
+    <div class="toolbar">
+      <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
+      <el-button @click="load">刷新</el-button>
+      <el-select
+        v-if="isSuper"
+        v-model="filterStoreId"
+        clearable
+        placeholder="门店筛选（空=全部可见）"
+        style="width:220px;margin-left:12px"
+        @change="load"
+      >
+        <el-option label="仅总部共享" :value="0" />
+        <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="load">显示已禁用</el-checkbox>
+    </div>
+    <p class="hint">总部共享规格组全店可用；门店私有规格组仅本店商品可绑。门店账号不可改总部共享组。</p>
 
     <el-table :key="tableKey" :data="groups" style="margin-top:12px" border row-key="id">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="opts-panel">
-            <el-button size="small" type="primary" @click="openOptionForm(row)">新增选项</el-button>
+            <el-button size="small" type="primary" :disabled="!canEditGroup(row)" @click="openOptionForm(row)">新增选项</el-button>
             <el-table :data="row.options" size="small" border style="margin-top:8px">
               <el-table-column prop="name" label="选项名" width="180"/>
               <el-table-column prop="code" label="编码" width="200"/>
@@ -29,23 +43,30 @@
               </el-table-column>
               <el-table-column label="操作" width="320">
                 <template #default="{ row: o }">
-                  <el-button link type="primary" @click="openOptionForm(row, o)">编辑</el-button>
+                  <el-button link type="primary" :disabled="!canEditGroup(row)" @click="openOptionForm(row, o)">编辑</el-button>
                   <el-button
                     v-if="row.selection_type === 'SINGLE' && !isDefaultOption(o) && o.status === 1"
                     link
                     type="warning"
+                    :disabled="!canEditGroup(row)"
                     @click="setDefaultOption(o)"
                   >设为默认</el-button>
-                  <el-button link type="danger" @click="removeOption(o)">删除</el-button>
+                  <el-button link type="danger" :disabled="!canEditGroup(row)" @click="removeOption(o)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="name" label="规格组" width="180" />
-      <el-table-column prop="code" label="编码" width="200" />
-      <el-table-column label="类型" width="100">
+      <el-table-column prop="name" label="规格组" width="160" />
+      <el-table-column prop="code" label="编码" width="160" />
+      <el-table-column label="归属" width="140">
+        <template #default="{ row }">
+          <el-tag v-if="row.store_id == null" type="success" size="small">总部共享</el-tag>
+          <span v-else>{{ storeName(row.store_id) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="类型" width="90">
         <template #default="{ row }">{{ row.selection_type === 'MULTIPLE' ? '多选' : '单选' }}</template>
       </el-table-column>
       <el-table-column label="必选" width="70">
@@ -57,16 +78,21 @@
           <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="340">
+      <el-table-column label="操作" width="200">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openGroupForm(row)">编辑</el-button>
-          <el-button link type="danger" @click="removeGroup(row)">删除</el-button>
+          <el-button link type="primary" :disabled="!canEditGroup(row)" @click="openGroupForm(row)">编辑</el-button>
+          <el-button link type="danger" :disabled="!canEditGroup(row)" @click="removeGroup(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <el-dialog v-model="groupDialog" :title="groupForm.id ? '编辑规格组' : '新增规格组'" width="480px">
       <el-form :model="groupForm" label-width="90px">
+        <el-form-item v-if="isSuper && !groupForm.id" label="归属">
+          <el-select v-model="groupForm.store_id" clearable placeholder="空=总部共享" style="width:100%">
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="名称" required><el-input v-model="groupForm.name" /></el-form-item>
         <el-form-item label="编码" required><el-input v-model="groupForm.code" :disabled="!!groupForm.id" placeholder="如 SIZE" /></el-form-item>
         <el-form-item label="选择类型">
@@ -110,13 +136,20 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const isSuper = computed(() => !!auth.isSuperAdmin)
+const boundStoreId = computed(() => auth.user?.store_id || null)
 
 const loading = ref(false)
 const saving = ref(false)
 const groups = ref<any[]>([])
+const stores = ref<any[]>([])
+const filterStoreId = ref<number | null>(null)
 const tableKey = ref(0)
 const showDisabled = ref(false)
 const groupDialog = ref(false)
@@ -125,6 +158,7 @@ const optionGroupType = ref('SINGLE')
 
 const groupForm = reactive({
   id: 0,
+  store_id: null as number | null,
   name: '',
   code: '',
   selection_type: 'SINGLE',
@@ -148,12 +182,40 @@ function isDefaultOption(o: any) {
   return o?.is_default === true || o?.is_default === 1 || o?.is_default === '1'
 }
 
+function storeName(sid: number) {
+  const s = stores.value.find((x) => x.id === sid)
+  return s ? s.name : `门店#${sid}`
+}
+
+function canEditGroup(row: any) {
+  if (isSuper.value) return true
+  if (row.store_id == null) return false
+  return boundStoreId.value != null && Number(row.store_id) === Number(boundStoreId.value)
+}
+
+async function loadStores() {
+  try {
+    stores.value = (await api.get('/settings/stores/options')).data.items || []
+  } catch {
+    stores.value = []
+  }
+}
+
 async function load() {
   loading.value = true
   try {
-    groups.value = (await api.get('/options/groups', {
-      params: showDisabled.value ? { include_disabled: true } : {},
-    })).data || []
+    const params: Record<string, any> = {}
+    if (showDisabled.value) params.include_disabled = true
+    if (isSuper.value && filterStoreId.value === 0) {
+      // 后端无「仅总部」过滤：前端筛选
+    } else if (isSuper.value && filterStoreId.value) {
+      params.store_id = filterStoreId.value
+    }
+    let rows = (await api.get('/options/groups', { params })).data || []
+    if (isSuper.value && filterStoreId.value === 0) {
+      rows = rows.filter((g: any) => g.store_id == null)
+    }
+    groups.value = rows
     tableKey.value += 1
   } finally {
     loading.value = false
@@ -164,6 +226,7 @@ function openGroupForm(row?: any) {
   if (row) {
     Object.assign(groupForm, {
       id: row.id,
+      store_id: row.store_id ?? null,
       name: row.name,
       code: row.code,
       selection_type: row.selection_type,
@@ -172,7 +235,16 @@ function openGroupForm(row?: any) {
       status: row.status ?? 1,
     })
   } else {
-    Object.assign(groupForm, { id: 0, name: '', code: '', selection_type: 'SINGLE', is_required: true, sort_order: 0, status: 1 })
+    Object.assign(groupForm, {
+      id: 0,
+      store_id: isSuper.value ? null : boundStoreId.value,
+      name: '',
+      code: '',
+      selection_type: 'SINGLE',
+      is_required: true,
+      sort_order: 0,
+      status: 1,
+    })
   }
   groupDialog.value = true
 }
@@ -184,12 +256,15 @@ async function saveGroup() {
   }
   saving.value = true
   try {
-    const payload = {
+    const payload: Record<string, any> = {
       name: groupForm.name,
       code: groupForm.code,
       selection_type: groupForm.selection_type,
       is_required: groupForm.is_required,
       sort_order: groupForm.sort_order,
+    }
+    if (!groupForm.id && isSuper.value) {
+      payload.store_id = groupForm.store_id
     }
     if (groupForm.id) {
       await api.put(`/options/groups/${groupForm.id}`, { ...payload, status: groupForm.status })
@@ -316,10 +391,15 @@ async function removeOption(opt: any) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await loadStores()
+  await load()
+})
 </script>
 
 <style scoped>
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.hint { margin: 8px 0 0; font-size: 12px; color: #909399; }
 .opts-panel { padding: 8px 16px 16px 48px; }
 .muted { color: #999; font-size: 12px; }
 .form-tip { font-size: 12px; color: #909399; margin-top: 4px; }

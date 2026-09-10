@@ -122,6 +122,28 @@
                 <span v-else>{{ row.phone || '—' }}</span>
               </template>
             </el-table-column>
+            <el-table-column label="纬度" width="110">
+              <template #default="{ row }">
+                <el-input
+                  v-if="storeEdits[row.id]"
+                  v-model="storeEdits[row.id].latitude"
+                  size="small"
+                  placeholder="如 31.23"
+                />
+                <span v-else>{{ row.latitude ?? '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="经度" width="110">
+              <template #default="{ row }">
+                <el-input
+                  v-if="storeEdits[row.id]"
+                  v-model="storeEdits[row.id].longitude"
+                  size="small"
+                  placeholder="如 121.47"
+                />
+                <span v-else>{{ row.longitude ?? '—' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-switch
@@ -160,6 +182,12 @@
             </el-form-item>
             <el-form-item label="电话">
               <el-input v-model="createStoreForm.phone" maxlength="20" />
+            </el-form-item>
+            <el-form-item label="纬度">
+              <el-input v-model="createStoreForm.latitude" placeholder="可选，天气口味用" />
+            </el-form-item>
+            <el-form-item label="经度">
+              <el-input v-model="createStoreForm.longitude" placeholder="可选，天气口味用" />
             </el-form-item>
           </el-form>
           <template #footer>
@@ -336,11 +364,20 @@ const overview = ref<any>(null)
 const businessForm = ref<any[]>([])
 const businessGroups = ref<any[]>([])
 const businessSaving = ref(false)
-const storeEdits = reactive<Record<number, { name: string; address: string; phone: string; status: number }>>({})
+const storeEdits = reactive<
+  Record<number, { name: string; address: string; phone: string; latitude: string; longitude: string; status: number }>
+>({})
 const storeSaving = ref<number | null>(null)
 const createStoreVisible = ref(false)
 const creatingStore = ref(false)
-const createStoreForm = reactive({ store_no: '', name: '', address: '', phone: '' })
+const createStoreForm = reactive({
+  store_no: '',
+  name: '',
+  address: '',
+  phone: '',
+  latitude: '',
+  longitude: '',
+})
 const envKeyword = ref('')
 const envGroupFilter = ref('')
 
@@ -548,6 +585,8 @@ function startStoreEdit(row: any) {
     name: row.name,
     address: row.address || '',
     phone: row.phone || '',
+    latitude: row.latitude != null ? String(row.latitude) : '',
+    longitude: row.longitude != null ? String(row.longitude) : '',
     status: row.status,
   }
 }
@@ -564,10 +603,14 @@ async function saveStore(id: number) {
   }
   storeSaving.value = id
   try {
+    const latRaw = String(edit.latitude || '').trim()
+    const lngRaw = String(edit.longitude || '').trim()
     await api.put(`/settings/stores/${id}`, {
       name: edit.name.trim(),
       address: edit.address?.trim() || null,
       phone: edit.phone?.trim() || null,
+      latitude: latRaw === '' ? null : Number(latRaw),
+      longitude: lngRaw === '' ? null : Number(lngRaw),
       status: edit.status,
     })
     ElMessage.success('门店已更新')
@@ -581,7 +624,14 @@ async function saveStore(id: number) {
 }
 
 function openCreateStore() {
-  Object.assign(createStoreForm, { store_no: '', name: '', address: '', phone: '' })
+  Object.assign(createStoreForm, {
+    store_no: '',
+    name: '',
+    address: '',
+    phone: '',
+    latitude: '',
+    longitude: '',
+  })
   createStoreVisible.value = true
 }
 
@@ -592,11 +642,15 @@ async function createStore() {
   }
   creatingStore.value = true
   try {
+    const latRaw = String(createStoreForm.latitude || '').trim()
+    const lngRaw = String(createStoreForm.longitude || '').trim()
     await api.post('/settings/stores', {
       store_no: createStoreForm.store_no.trim(),
       name: createStoreForm.name.trim(),
       address: createStoreForm.address.trim() || null,
       phone: createStoreForm.phone.trim() || null,
+      latitude: latRaw === '' ? null : Number(latRaw),
+      longitude: lngRaw === '' ? null : Number(lngRaw),
     })
     ElMessage.success('门店已创建')
     createStoreVisible.value = false

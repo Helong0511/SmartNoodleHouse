@@ -142,7 +142,10 @@ async function openProduct(p: any) {
   }
   if (customerId.value) {
     try {
-      const prefRes = await api.get(`/customers/${customerId.value}/preferences`)
+      const sid = table.value?.store_id
+      const prefRes = await api.get(`/customers/${customerId.value}/preferences`, {
+        params: sid ? { store_id: sid } : {},
+      })
       const raw = prefRes.data?.all?.length ? prefRes.data.all : (prefRes.data?.preferences || [])
       const prefs = sortPrefsForApply(raw)
       const applied = applyPreferencesToProduct(
@@ -244,12 +247,18 @@ onMounted(async () => {
     try {
       const entry = await api.get('/miniprogram/entry', { params: { token, channel } })
       table.value = entry.data?.table
+      if (table.value) {
+        localStorage.setItem('snh_table', JSON.stringify(table.value))
+      }
       if (entry.data?.prompts) {
         memberText.value = entry.data.prompts.member_consent_text
         faceText.value = entry.data.prompts.face_consent_text
       }
     } catch {
       table.value = (await api.get(`/tables/resolve/${token}`)).data
+      if (table.value) {
+        localStorage.setItem('snh_table', JSON.stringify(table.value))
+      }
     }
   }
 
@@ -266,7 +275,7 @@ onMounted(async () => {
       const res = await api.post(loginPath, loginBody, { headers: { 'X-Client': 'customer' } })
       customerId.value = res.data.customer_id
       customerToken.value = res.data.customer_token
-      setCustomerToken(customerToken.value || '', customerId.value)
+      setCustomerToken(customerToken.value || '', customerId.value ?? undefined)
     } catch (e: any) {
       ElMessage.warning(e.message || '顾客登录失败（开发环境假 code；生产需真实小程序 code）')
     }

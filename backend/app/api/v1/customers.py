@@ -231,7 +231,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             FaceProfile.consent_status == "AUTHORIZED",
         )
     )
-    prefs = await PreferenceService.get_recommendations(db, customer_id)
+    prefs = await PreferenceService.get_recommendations(db, customer_id, store_id=effective_store)
     pref_list = prefs.get("preferences") or []
     all_prefs = list(
         (
@@ -340,6 +340,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
                 if pref_list
                 else None
             ),
+            "preference_scene": prefs.get("scene") or {"enabled": False},
         },
         request=request,
     )
@@ -388,10 +389,11 @@ async def get_preferences(
     request: Request,
     db: DbSession,
     customer: CurrentCustomer,
+    store_id: int | None = None,
 ):
     if customer.id != customer_id:
         raise HTTPException(status_code=403, detail="无权查看他人偏好")
-    prefs = await PreferenceService.get_recommendations(db, customer_id)
+    prefs = await PreferenceService.get_recommendations(db, customer_id, store_id=store_id)
     result = await db.execute(
         select(CustomerPreference)
         .where(CustomerPreference.customer_id == customer_id)

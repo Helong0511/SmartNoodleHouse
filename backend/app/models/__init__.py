@@ -71,6 +71,8 @@ class Store(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100))
     address: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(20))
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), default=None)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), default=None)
     status: Mapped[int] = mapped_column(Integer, default=1)
 
 
@@ -269,9 +271,12 @@ class ProductImage(Base):
 
 class OptionGroup(Base, TimestampMixin):
     __tablename__ = "option_groups"
+    __table_args__ = (UniqueConstraint("store_id", "code", name="uk_og_store_code"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # NULL=总部共享（全店可用）；非空=仅该门店可改/可绑本店商品
+    store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     name: Mapped[str] = mapped_column(String(50))
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    code: Mapped[str] = mapped_column(String(50))
     selection_type: Mapped[str] = mapped_column(String(20), default="SINGLE")
     is_required: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)

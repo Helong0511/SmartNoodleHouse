@@ -237,7 +237,17 @@ function goOrder() {
 onMounted(async () => {
   await ensureCustomer()
   await loadWallet()
-  const prefs = await api.get(`/customers/${customerId.value}/preferences`)
+  let storeId: number | undefined
+  try {
+    const raw = localStorage.getItem('snh_table')
+    if (raw) {
+      const t = JSON.parse(raw)
+      if (t?.store_id) storeId = Number(t.store_id)
+    }
+  } catch (_) {}
+  const prefs = await api.get(`/customers/${customerId.value}/preferences`, {
+    params: storeId ? { store_id: storeId } : {},
+  })
   recommendations.value = prefs.data.preferences || []
   try {
     const face = await api.get('/miniprogram/customers/me/face-status')

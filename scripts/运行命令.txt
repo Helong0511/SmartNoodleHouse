@@ -234,6 +234,18 @@ npm run dev -- --host 0.0.0.0 --port 5173
 # 已有库补分类分时段排序：
 # mysql ... < sql/tools/018_category_sort_schedules.sql
 # 或: python scripts/_run_sql_migrations.py sql/tools/018_category_sort_schedules.sql
+#
+# 已有库：券同模板可多张（去 uk_cc_customer_template）：
+# mysql ... < sql/tools/021_voucher_multi_issue.sql
+#
+# 已有库：账本/积分幂等唯一索引：
+# mysql ... < sql/tools/022_ledger_idempotency_unique.sql
+# （若有历史重复流水须先清洗，否则加索引会失败）
+#
+# 已有库：门店经纬度 + 规格组门店隔离：
+# mysql ... < sql/tools/023_store_geo_option_scope.sql
+# 或 alembic upgrade 到 0011_store_geo_option_scope
+# 门店设置补 lat/lng 后启用天气口味加权
 
 
 叫号屏地址（调试环境）

@@ -408,7 +408,11 @@ async function loadMeta() {
       params: { all: true, ...(sid ? { store_id: sid } : {}) },
     })
   ).data
-  optionGroups.value = (await api.get('/options/groups')).data
+  optionGroups.value = (
+    await api.get('/options/groups', {
+      params: sid ? { store_id: sid } : {},
+    })
+  ).data
 }
 
 function reload() {

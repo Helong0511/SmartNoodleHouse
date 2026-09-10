@@ -1293,7 +1293,13 @@ class PreferenceService:
                 await db.delete(pref)
 
     @staticmethod
-    async def get_recommendations(db: AsyncSession, customer_id: int) -> dict:
+    async def get_recommendations(
+        db: AsyncSession,
+        customer_id: int,
+        *,
+        store_id: int | None = None,
+        apply_scene: bool = True,
+    ) -> dict:
         prefs_result = await db.execute(
             select(CustomerPreference)
             .where(
@@ -1316,18 +1322,63 @@ class PreferenceService:
             )
         high = [p for p in prefs if p.preference_score >= PreferenceService.HIGH_PREFERENCE_THRESHOLD]
         use = high or prefs
-        return {
-            "preferences": [
+
+        scene: dict = {}
+        scene_on = False
+        if apply_scene:
+            try:
+                from app.services.system_settings_service import SystemSettingsService
+
+                scene_on = await SystemSettingsService.effective_bool(
+                    db, "preference_scene_enabled", True, store_id=store_id
+                )
+            except Exception:
+                scene_on = True
+        if scene_on:
+            try:
+                from app.services.preference_scene import apply_scene_multiplier, build_scene_context
+
+                scene = await build_scene_context(db, store_id)
+            except Exception:
+                scene = {}
+                scene_on = False
+
+        items: list[dict] = []
+        for p in use:
+            base = float(p.preference_score)
+            score = base
+            if scene_on and scene:
+                from app.services.preference_scene import apply_scene_multiplier
+
+                score = apply_scene_multiplier(
+                    base,
+                    option_code=str(p.option_code or ""),
+                    last_used_at=getattr(p, "last_used_at", None),
+                    season=str(scene.get("season") or "spring"),
+                    weather_condition=scene.get("condition"),
+                )
+            items.append(
                 {
                     "category": p.category,
                     "option_code": p.option_code,
                     "option_name": p.option_name or p.option_code,
-                    "score": float(p.preference_score),
+                    "score": score,
+                    "base_score": base,
                     "order_count": p.order_count,
                     "label": f"{p.category}·{(p.option_name or p.option_code)}"
                     if p.category
                     else str(p.option_name or p.option_code),
                 }
-                for p in use
-            ]
+            )
+        items.sort(key=lambda x: (-float(x["score"]), -int(x.get("order_count") or 0)))
+        return {
+            "preferences": items,
+            "scene": {
+                "season": scene.get("season"),
+                "condition": scene.get("condition"),
+                "temp_c": scene.get("temp_c"),
+                "enabled": scene_on,
+            }
+            if scene_on
+            else {"enabled": False},
         }

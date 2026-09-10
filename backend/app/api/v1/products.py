@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_permission
@@ -869,13 +869,7 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
     if dup.scalar_one_or_none():
         raise AppException(40002, f"本店商品编号「{product_no}」已存在，请换一个")
     if data.option_group_ids:
-        found = await db.execute(
-            select(OptionGroup.id).where(OptionGroup.id.in_(data.option_group_ids), OptionGroup.status == 1)
-        )
-        found_ids = set(found.scalars().all())
-        missing = [gid for gid in data.option_group_ids if gid not in found_ids]
-        if missing:
-            raise AppException(40003, f"规格组不存在或已禁用: {missing}")
+        await _assert_groups_usable_for_store(db, data.option_group_ids, int(sid))
 
     # 未传依赖字段：存 NULL，运行时继承分类默认（方案 A）；勿把分类列表写入商品
     if data.require_category_ids is None and data.require_product_ids is None:
@@ -963,15 +957,7 @@ async def update_product(
             await _set_main_product_image(db, product, new_main_image)
     if data.option_group_ids is not None:
         if data.option_group_ids:
-            found = await db.execute(
-                select(OptionGroup.id).where(
-                    OptionGroup.id.in_(data.option_group_ids), OptionGroup.status == 1
-                )
-            )
-            found_ids = set(found.scalars().all())
-            missing = [gid for gid in data.option_group_ids if gid not in found_ids]
-            if missing:
-                raise AppException(40003, f"规格组不存在或已禁用: {missing}")
+            await _assert_groups_usable_for_store(db, data.option_group_ids, int(product.store_id))
         await db.execute(delete(ProductOptionGroup).where(ProductOptionGroup.product_id == product_id))
         for idx, gid in enumerate(data.option_group_ids):
             db.add(ProductOptionGroup(product_id=product.id, group_id=gid, sort_order=idx))
@@ -1061,13 +1047,82 @@ async def _apply_option_default_flag(db: DbSession, opt: Option, want_default: b
         await db.flush()
 
 
+async def _assert_groups_usable_for_store(db: DbSession, group_ids: list[int], store_id: int | None) -> None:
+    """商品只能绑总部共享或本店规格组。"""
+    if not group_ids:
+        return
+    rows = list(
+        (
+            await db.execute(
+                select(OptionGroup).where(OptionGroup.id.in_(group_ids), OptionGroup.status == 1)
+            )
+        ).scalars().all()
+    )
+    found = {int(g.id): g for g in rows}
+    missing = [gid for gid in group_ids if int(gid) not in found]
+    if missing:
+        raise AppException(40003, f"规格组不存在或已禁用: {missing}")
+    if store_id is None:
+        return
+    sid = int(store_id)
+    bad = [
+        g.id
+        for g in rows
+        if g.store_id is not None and int(g.store_id) != sid
+    ]
+    if bad:
+        raise AppException(40003, f"规格组不属于本店或总部共享: {bad}")
+
+
+def _assert_option_group_manage(user: CurrentUser, group: OptionGroup | None = None) -> None:
+    """门店仅可改本店规格组；总部共享仅超管/总部账号可改。"""
+    role = getattr(getattr(user, "role", None), "code", None) or ""
+    if role == "SUPER_ADMIN" or not user.store_id:
+        if group is not None and user.store_id and group.store_id is not None:
+            if int(group.store_id) != int(user.store_id) and role != "SUPER_ADMIN":
+                raise AppException(40301, "无权修改其他门店规格组")
+        return
+    if group is None:
+        return
+    if group.store_id is None:
+        raise AppException(40301, "无权修改总部共享规格组")
+    if int(group.store_id) != int(user.store_id):
+        raise AppException(40301, "无权修改其他门店规格组")
+
+
+async def _resolve_create_group_store_id(user: CurrentUser, requested: int | None) -> int | None:
+    role = getattr(getattr(user, "role", None), "code", None) or ""
+    if role == "SUPER_ADMIN":
+        return int(requested) if requested else None
+    bound = require_bound_store(user, None)
+    if bound is None:
+        raise AppException(40301, "账号未绑定门店，无法创建规格组")
+    return int(bound)
+
+
+async def _ensure_unique_group_code(db: DbSession, code: str, store_id: int | None, *, exclude_id: int | None = None) -> None:
+    q = select(OptionGroup.id).where(OptionGroup.code == code)
+    if store_id is None:
+        q = q.where(OptionGroup.store_id.is_(None))
+    else:
+        q = q.where(OptionGroup.store_id == int(store_id))
+    if exclude_id is not None:
+        q = q.where(OptionGroup.id != int(exclude_id))
+    exists = await db.scalar(q.limit(1))
+    if exists:
+        scope = "总部" if store_id is None else f"门店#{store_id}"
+        raise AppException(40003, f"{scope}已存在编码「{code}」的规格组")
+
+
 @router.get("/options/groups")
 async def list_option_groups(
     request: Request,
     db: DbSession,
     staff: OptionalStaffUser,
     include_disabled: bool = False,
+    store_id: int | None = None,
 ):
+    """规格组列表：门店见「总部共享 ∪ 本店」；超管可按 store_id 过滤。"""
     if include_disabled:
         if staff is None:
             raise AppException(40101, "查看停用规格须登录员工账号")
@@ -1076,9 +1131,22 @@ async def list_option_groups(
         perms = await get_user_permissions(db, staff.role_id)
         if staff.role.code != "SUPER_ADMIN" and "product:read" not in perms:
             raise AppException(40301, "缺少权限: product:read")
-    q = select(OptionGroup).order_by(OptionGroup.sort_order)
+    q = select(OptionGroup).order_by(OptionGroup.sort_order, OptionGroup.id)
     if not include_disabled:
         q = q.where(OptionGroup.status == 1)
+
+    scope_store: int | None = None
+    if staff is not None:
+        if staff.role.code == "SUPER_ADMIN":
+            scope_store = int(store_id) if store_id else None
+        else:
+            scope_store = int(staff.store_id) if staff.store_id else None
+    elif store_id:
+        scope_store = int(store_id)
+
+    if scope_store is not None:
+        q = q.where(or_(OptionGroup.store_id.is_(None), OptionGroup.store_id == scope_store))
+
     groups_rows = list((await db.execute(q)).scalars().all())
     if not groups_rows:
         return success([], request=request)
@@ -1094,6 +1162,7 @@ async def list_option_groups(
     groups = [
         {
             "id": g.id,
+            "store_id": g.store_id,
             "name": g.name,
             "code": g.code,
             "selection_type": g.selection_type,
@@ -1107,26 +1176,26 @@ async def list_option_groups(
     return success(groups, request=request)
 
 
-async def _require_hq_option_admin(user: CurrentUser) -> None:
-    """规格组为全局字典：仅总部超管可改，避免门店员工改坏全店。"""
-    role = getattr(getattr(user, "role", None), "code", None) or ""
-    if role == "SUPER_ADMIN" or not user.store_id:
-        return
-    raise AppException(40301, "规格组为全局配置，仅总部账号可修改")
-
-
 @router.post("/options/groups", dependencies=[require_permission("product:create")])
 async def create_option_group(data: OptionGroupCreate, request: Request, db: DbSession, user: CurrentUser):
-    await _require_hq_option_admin(user)
-    group = OptionGroup(**data.model_dump())
+    store_id = await _resolve_create_group_store_id(user, data.store_id)
+    code = (data.code or "").strip()
+    await _ensure_unique_group_code(db, code, store_id)
+    payload = data.model_dump()
+    payload["code"] = code
+    payload["store_id"] = store_id
+    group = OptionGroup(**payload)
     db.add(group)
     await db.flush()
-    return success({"id": group.id}, request=request)
+    return success({"id": group.id, "store_id": group.store_id}, request=request)
 
 
 @router.post("/options", dependencies=[require_permission("product:create")])
 async def create_option(data: OptionCreate, request: Request, db: DbSession, user: CurrentUser):
-    await _require_hq_option_admin(user)
+    group = await db.get(OptionGroup, data.group_id)
+    if not group:
+        raise AppException(40003, "规格组不存在")
+    _assert_option_group_manage(user, group)
     payload = data.model_dump()
     want_default = payload.pop("is_default", False)
     opt = Option(**payload, is_default=bool(want_default))
@@ -1142,22 +1211,33 @@ async def create_option(data: OptionCreate, request: Request, db: DbSession, use
 async def update_option_group(
     group_id: int, data: OptionGroupUpdate, request: Request, db: DbSession, user: CurrentUser
 ):
-    await _require_hq_option_admin(user)
     group = await db.get(OptionGroup, group_id)
     if not group:
         return success(None, message="规格组不存在", request=request)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    _assert_option_group_manage(user, group)
+    raw = data.model_dump(exclude_unset=True)
+    role = getattr(getattr(user, "role", None), "code", None) or ""
+    if role != "SUPER_ADMIN":
+        raw.pop("store_id", None)
+    if "code" in raw and raw["code"] is not None:
+        new_code = str(raw["code"]).strip()
+        target_sid = raw.get("store_id", group.store_id)
+        await _ensure_unique_group_code(db, new_code, target_sid, exclude_id=group.id)
+        raw["code"] = new_code
+    elif "store_id" in raw:
+        await _ensure_unique_group_code(db, group.code, raw.get("store_id"), exclude_id=group.id)
+    for k, v in raw.items():
         setattr(group, k, v)
     await db.flush()
-    return success({"id": group.id}, request=request)
+    return success({"id": group.id, "store_id": group.store_id}, request=request)
 
 
 @router.delete("/options/groups/{group_id}", dependencies=[require_permission("product:delete")])
 async def delete_option_group(group_id: int, request: Request, db: DbSession, user: CurrentUser):
-    await _require_hq_option_admin(user)
     group = await db.get(OptionGroup, group_id)
     if not group:
         return success(None, message="规格组不存在", request=request)
+    _assert_option_group_manage(user, group)
     group.status = 0
     opts = await db.execute(select(Option).where(Option.group_id == group_id))
     for o in opts.scalars():
@@ -1168,10 +1248,11 @@ async def delete_option_group(group_id: int, request: Request, db: DbSession, us
 
 @router.put("/options/{option_id}", dependencies=[require_permission("product:update")])
 async def update_option(option_id: int, data: OptionUpdate, request: Request, db: DbSession, user: CurrentUser):
-    await _require_hq_option_admin(user)
     opt = await db.get(Option, option_id)
     if not opt:
         return success(None, message="规格选项不存在", request=request)
+    group = await db.get(OptionGroup, opt.group_id)
+    _assert_option_group_manage(user, group)
     fields = data.model_dump(exclude_unset=True)
     want_default = fields.pop("is_default", None)
     for k, v in fields.items():
@@ -1186,13 +1267,13 @@ async def update_option(option_id: int, data: OptionUpdate, request: Request, db
 @router.put("/options/{option_id}/default", dependencies=[require_permission("product:update")])
 async def set_default_option(option_id: int, request: Request, db: DbSession, user: CurrentUser):
     """将单选规格组内某选项设为唯一默认（菜单 + 一键加购）。"""
-    await _require_hq_option_admin(user)
     opt = await db.get(Option, option_id)
     if not opt:
         return success(None, message="规格选项不存在", request=request)
     group = await db.get(OptionGroup, opt.group_id)
     if not group:
         return success(None, message="规格组不存在", request=request)
+    _assert_option_group_manage(user, group)
     if group.selection_type != "SINGLE":
         raise AppException(40036, "仅单选规格组可设置默认项")
     if opt.status != 1:
@@ -1203,10 +1284,12 @@ async def set_default_option(option_id: int, request: Request, db: DbSession, us
 
 
 @router.delete("/options/{option_id}", dependencies=[require_permission("product:delete")])
-async def delete_option(option_id: int, request: Request, db: DbSession):
+async def delete_option(option_id: int, request: Request, db: DbSession, user: CurrentUser):
     opt = await db.get(Option, option_id)
     if not opt:
         return success(None, message="规格选项不存在", request=request)
+    group = await db.get(OptionGroup, opt.group_id)
+    _assert_option_group_manage(user, group)
     opt.status = 0
     await db.flush()
     return success({"id": opt.id}, request=request)

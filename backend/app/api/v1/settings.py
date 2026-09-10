@@ -27,6 +27,8 @@ class StoreCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     address: str | None = None
     phone: str | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
 class StoreBusinessUpdate(BaseModel):
@@ -61,11 +63,15 @@ async def create_store(data: StoreCreate, request: Request, db: DbSession, user:
     exists = await db.scalar(select(Store.id).where(Store.store_no == no).limit(1))
     if exists:
         raise AppException(40070, f"门店编号「{no}」已存在")
+    from decimal import Decimal
+
     store = Store(
         store_no=no,
         name=data.name.strip(),
         address=(data.address or "").strip() or None,
         phone=(data.phone or "").strip() or None,
+        latitude=Decimal(str(data.latitude)) if data.latitude is not None else None,
+        longitude=Decimal(str(data.longitude)) if data.longitude is not None else None,
         status=1,
     )
     db.add(store)
@@ -383,6 +389,8 @@ async def get_settings_overview(request: Request, db: DbSession):
                     "name": s.name,
                     "address": s.address,
                     "phone": s.phone,
+                    "latitude": float(s.latitude) if s.latitude is not None else None,
+                    "longitude": float(s.longitude) if s.longitude is not None else None,
                     "status": s.status,
                 }
                 for s in stores
@@ -554,9 +562,21 @@ async def update_store(
         raise AppException(40012, "未提交任何修改")
     if "name" in payload and (not payload["name"] or not str(payload["name"]).strip()):
         raise AppException(40013, "门店名称不能为空")
-    before = {"name": store.name, "address": store.address, "phone": store.phone, "status": store.status}
+    before = {
+        "name": store.name,
+        "address": store.address,
+        "phone": store.phone,
+        "latitude": float(store.latitude) if store.latitude is not None else None,
+        "longitude": float(store.longitude) if store.longitude is not None else None,
+        "status": store.status,
+    }
     for k, v in payload.items():
-        setattr(store, k, v)
+        if k in ("latitude", "longitude") and v is not None:
+            from decimal import Decimal
+
+            setattr(store, k, Decimal(str(v)))
+        else:
+            setattr(store, k, v)
     await _write_audit(
         db,
         user=user,

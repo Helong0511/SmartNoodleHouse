@@ -150,7 +150,10 @@ async function loadCustomerPrefs(app, api, options = {}) {
     return app.globalData.prefsView
   }
   try {
-    const prefRes = await api.get('/miniprogram/customers/me/preferences')
+    const store = app.globalData.store || {}
+    const table = app.globalData.table || {}
+    const sid = store.id || table.store_id || null
+    const prefRes = await api.get('/miniprogram/customers/me/preferences', sid ? { store_id: sid } : {})
     const view = buildPrefDisplay(prefRes)
     app.globalData.prefs = view.prefs
     app.globalData.prefsView = view

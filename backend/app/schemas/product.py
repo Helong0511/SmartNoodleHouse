@@ -128,6 +128,7 @@ class ProductOut(BaseModel):
 
 class OptionGroupOut(BaseModel):
     id: int
+    store_id: int | None = None
     name: str
     code: str
     selection_type: str
@@ -157,6 +158,8 @@ class OptionGroupCreate(BaseModel):
     selection_type: str = "SINGLE"
     is_required: bool = True
     sort_order: int = 0
+    # 超管可指定；门店账号服务端强制为本店
+    store_id: int | None = None
 
 
 class OptionGroupUpdate(BaseModel):
@@ -166,6 +169,7 @@ class OptionGroupUpdate(BaseModel):
     is_required: bool | None = None
     sort_order: int | None = None
     status: int | None = None
+    store_id: int | None = None
 
 
 class OptionCreate(BaseModel):
