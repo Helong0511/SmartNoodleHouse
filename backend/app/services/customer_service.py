@@ -84,22 +84,60 @@ class CustomerService:
         return rows, int(total)
 
     @staticmethod
+    def is_member(customer: Customer) -> bool:
+        return str(getattr(customer, "member_status", "") or "").upper() == "MEMBER"
+
+    @staticmethod
     def member_payload(customer: Customer, level: MemberLevel | None = None) -> dict:
-        """顾客会员关联摘要（列表/详情复用）。"""
-        registered = bool(
-            customer.member_level_id
-            or (customer.display_name and str(customer.display_name).strip())
-            or (customer.nickname and str(customer.nickname).strip())
-            or (customer.phone and str(customer.phone).strip())
-        )
+        """顾客会员关联摘要（列表/详情复用）。以 member_status 为准，不再用昵称/手机启发式。"""
+        registered = CustomerService.is_member(customer)
         return {
             "is_member": registered,
+            "member_status": str(getattr(customer, "member_status", None) or "GUEST").upper(),
+            "account_status": str(getattr(customer, "account_status", None) or "ACTIVE").upper(),
+            "profile_status": str(getattr(customer, "profile_status", None) or "EMPTY").upper(),
+            "phone_verified": bool(int(getattr(customer, "phone_verified", 0) or 0)),
+            "member_activated_at": (
+                customer.member_activated_at.isoformat()
+                if getattr(customer, "member_activated_at", None)
+                else None
+            ),
             "member_level_id": customer.member_level_id,
             "member_level_name": level.name if level else None,
             "member_discount_rate": str(level.discount_rate) if level else None,
             "member_min_points": int(level.min_points) if level else None,
             "member_points": int(customer.points or 0),
         }
+
+    @staticmethod
+    def compute_profile_status(customer: Customer) -> str:
+        has_nick = CustomerService.is_meaningful_nickname(customer.nickname or customer.display_name)
+        has_phone = bool(customer.phone and str(customer.phone).strip())
+        has_avatar = bool(customer.avatar_url and str(customer.avatar_url).strip())
+        if has_nick and has_phone:
+            return "COMPLETED"
+        if has_nick or has_phone or has_avatar:
+            return "PARTIAL"
+        return "EMPTY"
+
+    @staticmethod
+    def refresh_profile_status(customer: Customer) -> str:
+        status = CustomerService.compute_profile_status(customer)
+        customer.profile_status = status
+        return status
+
+    @staticmethod
+    def _new_guest_customer() -> Customer:
+        now = now_local()
+        return Customer(
+            customer_no=generate_no(BIZ_CU),
+            status=1,
+            member_status="GUEST",
+            account_status="ACTIVE",
+            profile_status="EMPTY",
+            phone_verified=0,
+            first_seen_at=now,
+        )
 
     @staticmethod
     def discount_display_text(rate: Decimal | None) -> str | None:
@@ -438,11 +476,11 @@ class CustomerService:
 
     @staticmethod
     async def resolve_member_discount_rate(db: AsyncSession, customer_id: int | None) -> Decimal:
-        """会员等级折扣率（0~1）；无等级或无效时返回 1（不打折）。"""
+        """会员等级折扣率（0~1）；游客或无等级时返回 1（不打折）。"""
         if not customer_id:
             return Decimal("1")
         customer = await db.get(Customer, int(customer_id))
-        if not customer or not customer.member_level_id:
+        if not customer or not CustomerService.is_member(customer) or not customer.member_level_id:
             return Decimal("1")
         level = await db.get(MemberLevel, customer.member_level_id)
         if not level or level.discount_rate is None:
@@ -590,7 +628,7 @@ class CustomerService:
 
         try:
             async with db.begin_nested():
-                customer = Customer(customer_no=generate_no(BIZ_CU), status=1)
+                customer = CustomerService._new_guest_customer()
                 db.add(customer)
                 await db.flush()
                 db.add(CustomerWechatAccount(customer_id=customer.id, openid=openid, unionid=unionid))
@@ -615,7 +653,7 @@ class CustomerService:
             return await db.get(Customer, account.customer_id)
         try:
             async with db.begin_nested():
-                customer = Customer(customer_no=generate_no(BIZ_CU), status=1)
+                customer = CustomerService._new_guest_customer()
                 db.add(customer)
                 await db.flush()
                 db.add(CustomerAlipayAccount(customer_id=customer.id, alipay_user_id=alipay_user_id))
@@ -799,6 +837,79 @@ class CustomerService:
         customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
         await db.flush()
         return target
+
+    @staticmethod
+    async def remember_first_seen(
+        db: AsyncSession,
+        customer: Customer,
+        table_token: str | None = None,
+        table: DiningTable | None = None,
+    ) -> None:
+        """记录首次扫码门店/桌台；与会员激活、registered_* 分离。"""
+        now = now_local()
+        if not getattr(customer, "first_seen_at", None):
+            customer.first_seen_at = now
+        if getattr(customer, "first_seen_store_id", None):
+            await db.flush()
+            return
+        resolved = table
+        if resolved is None:
+            token = (table_token or "").strip()
+            if token:
+                from app.services.table_resolve import resolve_dining_table
+
+                resolved = await resolve_dining_table(db, token)
+        if not resolved:
+            await db.flush()
+            return
+        customer.first_seen_store_id = resolved.store_id
+        customer.first_seen_table_id = resolved.id
+        await db.flush()
+
+    @staticmethod
+    async def activate_member(
+        db: AsyncSession,
+        customer: Customer,
+        *,
+        channel: str | None = None,
+        nickname: str | None = None,
+        avatar_url: str | None = None,
+        table_token: str | None = None,
+        mark_channel_completed: bool = True,
+    ) -> tuple[Customer, bool]:
+        """
+        幂等开通会员：仅首次 GUEST→MEMBER 返回 newly_activated=True（可发欢迎券等副作用）。
+        已是 MEMBER 时只更新可选资料，不重复副作用。
+        """
+        newly = not CustomerService.is_member(customer)
+        if newly:
+            customer.member_status = "MEMBER"
+            customer.member_activated_at = now_local()
+            await CustomerService.ensure_default_member_level(db, customer)
+            await CustomerService.remember_registered_scan(db, customer, table_token)
+
+        if nickname is not None or avatar_url is not None:
+            ch = (channel or "").strip().lower()
+            if ch in ("wechat", "alipay"):
+                await CustomerService.save_channel_profile(
+                    db,
+                    customer.id,
+                    ch,
+                    nickname=nickname,
+                    avatar_url=avatar_url,
+                    completed=True if mark_channel_completed else None,
+                )
+            CustomerService.fill_customer_display_if_empty(
+                customer, nickname=nickname, avatar_url=avatar_url
+            )
+        elif mark_channel_completed and channel:
+            ch = (channel or "").strip().lower()
+            if ch in ("wechat", "alipay"):
+                await CustomerService.mark_channel_profile_completed(db, customer.id, ch)
+
+        CustomerService.refresh_profile_status(customer)
+        await db.flush()
+        return customer, newly
 
     @staticmethod
     async def remember_registered_scan(
@@ -996,6 +1107,26 @@ class OrderCreateService:
             idempotency_key=scoped_key,
             ordered_at=now_local(),
         )
+        # 关联当前 ACTIVE 就餐会话（过期则不挂旧桌）
+        if customer_id and table_id and hasattr(Order, "dining_session_id"):
+            from app.services.dining_session_service import DiningSessionService
+
+            active = await DiningSessionService.get_active(db, int(customer_id))
+            if active and int(active.table_id) == int(table_id):
+                order_kwargs["dining_session_id"] = active.id
+                await DiningSessionService.touch(db, active.id)
+            elif table_token:
+                from app.services.table_resolve import resolve_dining_table
+
+                tbl = await resolve_dining_table(db, table_token, store_id=store_id)
+                if tbl:
+                    sess = await DiningSessionService.start_or_refresh(
+                        db,
+                        customer_id=int(customer_id),
+                        table=tbl,
+                        table_token=table_token,
+                    )
+                    order_kwargs["dining_session_id"] = sess.id
         # operator_id 列在迁移后存在；旧库无该字段时忽略
         if hasattr(Order, "operator_id") and operator_id is not None:
             order_kwargs["operator_id"] = operator_id

@@ -39,7 +39,7 @@ Page({
     showDevTips: false,
     debugInfo: '',
     nicknameReviewFail: false,
-    memberText: '注册会员后系统会智能记录您的口味爱好，支持一键复购；完成注册可领取欢迎券并享受会员等级权益。'
+    memberText: '开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。不影响先点餐。'
   },
 
   buildDebugInfo(extra) {
@@ -144,50 +144,46 @@ Page({
           duration: 3500
         })
       }
-      // 未登录不得沿用本地缓存资料，必须展示注册引导
+      // 首次扫码：游客可直接点餐，不强制注册墙
       const loginOk = !!(login && login.customer_token)
       const nicknameFromServer = loginOk ? String(login.nickname || '') : ''
-      const showMemberPrompt = loginOk
-        ? (login.need_member_prompt !== false || auth.isPlaceholderNickname(nicknameFromServer))
+      const memberStatus = String((login && login.member_status) || '').toUpperCase()
+      const isGuest = loginOk
+        ? (login.is_guest === true || memberStatus === 'GUEST' || login.need_member_prompt === true)
         : true
+      // 首页不再拦截；会员引导改到支付成功页 /「我的」
+      const showMemberPrompt = false
       const ctx = dineCtx.currentDisplay()
-      const draft = showMemberPrompt ? auth.readRegDraft() : { nickname: '', avatarUrl: '' }
-      const nickname = showMemberPrompt
-        ? String(draft.nickname || '')
-        : nicknameFromServer
-      const avatarUrl = showMemberPrompt
-        ? String(draft.avatarUrl || '')
-        : (loginOk ? String(login.avatar_url || '') : '')
+      const nickname = auth.isPlaceholderNickname(nicknameFromServer) ? '' : nicknameFromServer
+      const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
       this.setData({
         loading: false,
-        nickname: auth.isPlaceholderNickname(nickname) ? '' : nickname,
+        nickname,
         avatarUrl: avatarUtil.resolveDisplayUrl(avatarUrl) || avatarUrl,
-        phone: '',
+        phone: loginOk ? String(login.phone || '') : '',
         phoneInput: '',
         showMemberPrompt,
+        isGuest,
         ready: true,
         table: ctx.table || app.globalData.table,
         store: ctx.store || app.globalData.store,
         ...dineCtx.pageDineFields(ctx)
       })
       auth.fetchCustomerMeSilent().then((me) => {
-        if (this.data.showMemberPrompt) return
         if (me && me.phone) this.setData({ phone: me.phone })
         if (me && me.avatar_url) {
           app.globalData.avatarUrl = me.avatar_url
           this.setData({ avatarUrl: avatarUtil.resolveDisplayUrl(me.avatar_url) })
         }
       })
-      if (!showMemberPrompt && loginOk && login.nickname && !auth.isPlaceholderNickname(login.nickname)) {
-        wx.setStorageSync('nickname', login.nickname)
-      } else if (loginOk && !showMemberPrompt) {
+      if (loginOk && nickname) {
+        wx.setStorageSync('nickname', nickname)
+      } else if (loginOk) {
         try { wx.removeStorageSync('nickname') } catch (_) {}
       }
-      if (!showMemberPrompt && loginOk && login.avatar_url) {
-        app.globalData.avatarUrl = login.avatar_url
-        wx.setStorageSync('avatar_url', login.avatar_url)
-      } else if (loginOk && showMemberPrompt) {
-        app.globalData.avatarUrl = draft.avatarUrl || ''
+      if (loginOk && avatarUrl) {
+        app.globalData.avatarUrl = avatarUrl
+        wx.setStorageSync('avatar_url', avatarUrl)
       } else if (loginOk) {
         app.globalData.avatarUrl = ''
         try { wx.removeStorageSync('avatar_url') } catch (_) {}
@@ -197,12 +193,12 @@ Page({
         wx.setStorageSync('customer_id', login.customer_id)
       }
       if (loginOk && login.customer_no) wx.setStorageSync('customer_no', login.customer_no)
+      if (loginOk && login.member_status) {
+        try { wx.setStorageSync('member_status', login.member_status) } catch (_) {}
+      }
       await this.refreshPrivacyState()
-      // 以服务端 need_member_prompt / 昵称为准，禁止仅凭本地缓存跳过注册
-      const shouldSkipPrompt = loginOk
-        && login.need_member_prompt === false
-        && !auth.isPlaceholderNickname(login.nickname)
-      if (shouldSkipPrompt) {
+      // 登录成功即进菜单（有无桌台均可；无桌台由菜单页提示扫码）
+      if (loginOk) {
         this.goMenu()
         return
       }

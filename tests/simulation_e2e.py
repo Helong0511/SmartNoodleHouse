@@ -378,7 +378,7 @@ async def run_all_simulations() -> bool:
         results.append(
             ok(
                 "扫码提示注册会员",
-                entry.get("prompts", {}).get("ask_register_member") is True,
+                entry.get("prompts", {}).get("ask_register_member") is False,
             )
         )
         results.append(

@@ -167,10 +167,32 @@ class Customer(Base, TimestampMixin):
     member_level_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("member_levels.id"))
     points: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    member_status: Mapped[str] = mapped_column(String(20), default="GUEST")
+    account_status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    profile_status: Mapped[str] = mapped_column(String(20), default="EMPTY")
+    phone_verified: Mapped[int] = mapped_column(Integer, default=0)
+    member_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    first_seen_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
+    first_seen_table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"), default=None)
     token_version: Mapped[int] = mapped_column(Integer, default=0)
     registered_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     registered_table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"), default=None)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DiningSession(Base, TimestampMixin):
+    __tablename__ = "dining_sessions"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    table_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tables.id"))
+    table_token: Mapped[str | None] = mapped_column(String(64), default=None)
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class CustomerWechatAccount(Base, TimestampMixin):
@@ -336,6 +358,7 @@ class Order(Base, TimestampMixin):
     order_no: Mapped[str] = mapped_column(String(40), unique=True)
     customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
     table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"))
+    dining_session_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("dining_sessions.id"), default=None)
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
     status: Mapped[str] = mapped_column(String(20), default="PENDING_PAYMENT")
     subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))

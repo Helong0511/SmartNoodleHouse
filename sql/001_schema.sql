@@ -185,20 +185,29 @@ CREATE TABLE IF NOT EXISTS customers (
   phone VARCHAR(11) DEFAULT NULL COMMENT '手机号；绑定后可合并历史账号',
   member_level_id BIGINT UNSIGNED DEFAULT NULL COMMENT '当前会员等级 → member_levels.id',
   points INT NOT NULL DEFAULT 0 COMMENT '累计积分；实付1元=1分，达门槛自动升级',
-  status TINYINT NOT NULL DEFAULT 1 COMMENT '顾客状态：1=正常 0=禁用',
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '顾客状态：1=正常 0=禁用（兼容字段；以 account_status 为准）',
+  member_status VARCHAR(20) NOT NULL DEFAULT 'GUEST' COMMENT 'GUEST=游客（可点餐） MEMBER=已主动开通会员',
+  account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED/DELETED',
+  profile_status VARCHAR(20) NOT NULL DEFAULT 'EMPTY' COMMENT 'EMPTY/PARTIAL/COMPLETED 资料完善度（≠会员）',
+  phone_verified TINYINT NOT NULL DEFAULT 0 COMMENT '手机号是否已验证',
+  member_activated_at DATETIME(3) DEFAULT NULL COMMENT '首次主动开通会员时间（≠首次扫码）',
+  first_seen_at DATETIME(3) DEFAULT NULL COMMENT '首次扫码/识别时间（≠会员激活）',
+  first_seen_store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '首次扫码门店 → stores.id',
+  first_seen_table_id BIGINT UNSIGNED DEFAULT NULL COMMENT '首次扫码桌台 → tables.id',
   token_version INT NOT NULL DEFAULT 0 COMMENT 'JWT 版本号；禁用/合并账号时递增，使旧令牌失效',
-  registered_store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '扫码注册时的门店 → stores.id；只记第一次',
-  registered_table_id BIGINT UNSIGNED DEFAULT NULL COMMENT '扫码注册时的桌台 → tables.id；只记第一次',
+  registered_store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '会员激活时门店 → stores.id；只记第一次',
+  registered_table_id BIGINT UNSIGNED DEFAULT NULL COMMENT '会员激活时桌台 → tables.id；只记第一次',
   last_order_at DATETIME(3) DEFAULT NULL COMMENT '最近下单时间',
-  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '注册时间',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次建档时间（游客即可）',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   INDEX idx_customers_phone (phone),
   INDEX idx_customers_last_order (last_order_at),
   INDEX idx_customers_reg_store (registered_store_id),
+  INDEX idx_customers_member_status (member_status),
   CONSTRAINT fk_customers_level FOREIGN KEY (member_level_id) REFERENCES member_levels(id),
   CONSTRAINT fk_customers_reg_store FOREIGN KEY (registered_store_id) REFERENCES stores(id),
   CONSTRAINT fk_customers_reg_table FOREIGN KEY (registered_table_id) REFERENCES tables(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客/会员主表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客主表（游客/会员统一身份）';
 
 -- 用户持有的券实例（同模板可多张；按张核销）
 CREATE TABLE IF NOT EXISTS customer_coupons (
@@ -224,7 +233,7 @@ CREATE TABLE IF NOT EXISTS customer_wechat_accounts (
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   openid VARCHAR(64) NOT NULL UNIQUE COMMENT '微信 openid，小程序内唯一',
   unionid VARCHAR(64) DEFAULT NULL COMMENT '微信 unionid（同主体多应用打通）',
-  profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否已完成会员注册引导',
+  profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否完善过昵称/头像资料（≠member_status）',
   nickname VARCHAR(100) DEFAULT NULL COMMENT '本渠道展示昵称（与支付宝互不覆盖）',
   avatar_url VARCHAR(500) DEFAULT NULL COMMENT '本渠道展示头像（与支付宝互不覆盖）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次绑定时间',
@@ -239,13 +248,34 @@ CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   alipay_user_id VARCHAR(64) NOT NULL UNIQUE COMMENT '支付宝 user_id',
   alipay_union_id VARCHAR(64) DEFAULT NULL COMMENT '支付宝 union_id（如有）',
-  profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否已完成会员注册引导',
+  profile_completed TINYINT NOT NULL DEFAULT 0 COMMENT '本渠道是否完善过昵称/头像资料（≠member_status）',
   nickname VARCHAR(100) DEFAULT NULL COMMENT '本渠道展示昵称（与微信互不覆盖）',
   avatar_url VARCHAR(500) DEFAULT NULL COMMENT '本渠道展示头像（与微信互不覆盖）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次绑定时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   CONSTRAINT fk_caa_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付宝账号绑定表';
+
+-- 就餐会话：扫码绑桌建立，过期后不再沿用旧桌台
+CREATE TABLE IF NOT EXISTS dining_sessions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  table_id BIGINT UNSIGNED NOT NULL COMMENT '桌台 → tables.id',
+  table_token VARCHAR(64) DEFAULT NULL COMMENT '绑定时桌台二维码 token 快照',
+  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/EXPIRED/COMPLETED/CANCELLED',
+  started_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '会话开始',
+  last_active_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '最近活跃',
+  expires_at DATETIME(3) NOT NULL COMMENT '过期时间',
+  ended_at DATETIME(3) DEFAULT NULL COMMENT '结束时间',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  INDEX idx_ds_customer_status (customer_id, status, expires_at),
+  INDEX idx_ds_store_table (store_id, table_id, status),
+  CONSTRAINT fk_ds_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
+  CONSTRAINT fk_ds_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_ds_table FOREIGN KEY (table_id) REFERENCES tables(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='就餐会话（扫码绑桌，非永久桌台归属）';
 
 -- 智能口味：按历史订单累计规格偏好，点餐时预选
 CREATE TABLE IF NOT EXISTS customer_preferences (
@@ -426,6 +456,7 @@ CREATE TABLE IF NOT EXISTS orders (
   order_no VARCHAR(40) NOT NULL UNIQUE COMMENT '业务订单号（含门店/桌位/时间等可读信息）',
   customer_id BIGINT UNSIGNED DEFAULT NULL COMMENT '下单顾客 → customers.id；匿名单可为空',
   table_id BIGINT UNSIGNED DEFAULT NULL COMMENT '堂食桌台 → tables.id；外卖/打包可空',
+  dining_session_id BIGINT UNSIGNED DEFAULT NULL COMMENT '就餐会话 → dining_sessions.id',
   store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING_PAYMENT' COMMENT '订单履约状态，见文件头枚举',
   dining_type VARCHAR(20) NOT NULL DEFAULT 'DINE_IN' COMMENT 'DINE_IN=堂食 | TAKEAWAY=打包外带',
@@ -454,6 +485,7 @@ CREATE TABLE IF NOT EXISTS orders (
   UNIQUE KEY uk_idempotency (idempotency_key),
   INDEX idx_orders_customer (customer_id, created_at),
   INDEX idx_orders_table (table_id, created_at),
+  INDEX idx_orders_dining_session (dining_session_id),
   INDEX idx_orders_status (status, created_at),
   INDEX idx_orders_payment (payment_status, created_at),
   INDEX idx_orders_status_paid (status, paid_at),

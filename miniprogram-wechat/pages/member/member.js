@@ -46,6 +46,8 @@ Page({
     prefsLearning: [],
     prefsEmpty: true,
     isMember: false,
+    needActivate: false,
+    activatingMember: false,
     memberLevelName: '',
     memberDiscountText: '',
     memberPoints: 0,
@@ -122,39 +124,40 @@ Page({
       this.setData({ loading: false, walletLoading: false })
       return
     }
-    const pending = !!profile.need_member_prompt
-    const draft = pending ? auth.readRegDraft() : { nickname: '', avatarUrl: '' }
-    const nickname = pending
-      ? String(draft.nickname || '')
-      : (profile.nickname || app.globalData.nickname || '')
-    const displayName = nickname || '面馆会员'
-    if (!pending && profile.nickname) app.globalData.nickname = profile.nickname
-    if (!pending && profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
+    const memberStatus = String(profile.member_status || '').toUpperCase()
+    const isMember = profile.is_member === true || memberStatus === 'MEMBER'
+    const needActivate = !isMember
+    const nickname = profile.nickname || app.globalData.nickname || ''
+    const displayName = nickname || (isMember ? '面馆会员' : '面馆访客')
+    if (profile.nickname) app.globalData.nickname = profile.nickname
+    if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
     if (profile.customer_no) app.globalData.customerNo = profile.customer_no
+    try {
+      wx.setStorageSync('member_status', isMember ? 'MEMBER' : 'GUEST')
+    } catch (_) {}
     const view = prefView || prefUtil.buildPrefDisplay({})
-    const rawAvatar = pending
-      ? String(draft.avatarUrl || '')
-      : (profile.avatar_url || app.globalData.avatarUrl || '')
+    const rawAvatar = profile.avatar_url || app.globalData.avatarUrl || ''
     this.setData({
       nickname,
       displayName,
-      avatarLetter: displayName.charAt(0) || '会',
+      avatarLetter: displayName.charAt(0) || (isMember ? '会' : '访'),
       avatarUrl: avatarUtil.resolveDisplayUrl(rawAvatar),
       customerNo: profile.customer_no || app.globalData.customerNo || '',
       prefs: view.prefs || [],
       prefsConfirmed: view.confirmed || [],
       prefsLearning: view.learning || [],
       prefsEmpty: !!view.isEmpty,
-      isMember: pending ? false : !!profile.is_member,
-      memberLevelName: pending ? '' : (profile.member_level_name || ''),
-      memberDiscountText: pending ? '' : discountText(profile.member_discount_rate),
-      memberPoints: pending ? 0 : (profile.member_points || 0),
-      nextLevelName: pending ? '' : (profile.next_level_name || ''),
-      pointsToNext: pending ? 0 : (profile.points_to_next_level || 0),
-      levelProgress: pending ? 0 : (profile.level_progress_percent || 0),
+      isMember,
+      needActivate,
+      memberLevelName: isMember ? (profile.member_level_name || '') : '',
+      memberDiscountText: isMember ? discountText(profile.member_discount_rate) : '',
+      memberPoints: isMember ? (profile.member_points || 0) : 0,
+      nextLevelName: isMember ? (profile.next_level_name || '') : '',
+      pointsToNext: isMember ? (profile.points_to_next_level || 0) : 0,
+      levelProgress: isMember ? (profile.level_progress_percent || 0) : 0,
       pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
       memberLevels: profile.member_levels || [],
-      phone: pending ? '' : (profile.phone || ''),
+      phone: profile.phone || '',
       loading: false
     })
   },
@@ -263,7 +266,7 @@ Page({
     }
     try {
       this.setData({ savingName: true })
-      const res = await auth.registerMember({
+      const res = await auth.patchMemberProfile({
         nickname,
         avatar_url: (() => {
           const raw = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || ''
@@ -294,14 +297,41 @@ Page({
         nicknameDraft: '',
         savingName: false
       })
-      const tip = (res && res.welcome_coupon_issued)
-        ? `已赠送「${(res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'}」`
-        : '已更新昵称'
-      wx.showToast({ title: tip, icon: 'success' })
-      if (res && res.welcome_coupon_issued) this.loadWallet()
+      wx.showToast({ title: '已更新昵称', icon: 'success' })
     } catch (e) {
       this.setData({ savingName: false })
       wx.showToast({ title: e.message || '保存失败', icon: 'none' })
+    }
+  },
+
+  async activateSmartMember() {
+    if (this.data.activatingMember || this.data.isMember) return
+    try {
+      this.setData({ activatingMember: true })
+      const res = await auth.activateMember({
+        nickname: this.data.nickname || undefined,
+        avatar_url: (() => {
+          const raw = app.globalData.avatarUrl || wx.getStorageSync('avatar_url') || ''
+          return avatarUtil.isPersistableAvatarUrl(raw) ? raw : null
+        })()
+      })
+      if (res && res.customer_token) {
+        auth.refreshCustomerToken(app, res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
+      }
+      this._profileLoadedAt = 0
+      await this.loadProfile(true)
+      const tip = (res && res.welcome_coupon_issued)
+        ? `已开启会员，赠送「${(res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'}」`
+        : '已开启智能会员'
+      wx.showToast({ title: tip, icon: 'success' })
+      if (res && res.welcome_coupon_issued) this.loadWallet()
+    } catch (e) {
+      wx.showToast({ title: e.message || '开通失败', icon: 'none' })
+    } finally {
+      this.setData({ activatingMember: false })
     }
   },
 

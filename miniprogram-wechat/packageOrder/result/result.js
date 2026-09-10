@@ -93,7 +93,10 @@ Page({
     customerStatusLabel: '',
     pickupHint: '',
     isTakeaway: false,
-    isReady: false
+    isReady: false,
+    showMemberBanner: false,
+    activatingMember: false,
+    tasteHint: ''
   },
 
   onLoad(query) {
@@ -214,10 +217,65 @@ Page({
       })
       if (order && (order.status === 'PAID' || order.status === 'COMPLETED' || order.payment_status === 'PAID')) {
         prefUtil.clearPrefsCache(app)
+        this._maybeShowMemberBanner(order)
       }
     } catch (e) {
       this.setData({ loading: false })
       if (!silent) wx.showToast({ title: e.message || '加载失败', icon: 'none' })
+    }
+  },
+
+  async _maybeShowMemberBanner(order) {
+    if (this.data.showMemberBanner === false && this._memberBannerChecked) return
+    try {
+      const auth = require('../../utils/auth')
+      const me = await auth.fetchCustomerMeSilent()
+      const isMember = me && (me.is_member === true || String(me.member_status || '').toUpperCase() === 'MEMBER')
+      if (isMember) {
+        this.setData({ showMemberBanner: false })
+        this._memberBannerChecked = true
+        return
+      }
+      const items = (order && order.items) || []
+      const tasteParts = []
+      items.slice(0, 2).forEach((it) => {
+        const name = it.product_name || it.name || ''
+        const opts = (it.options || []).map((o) => o.name || o.code).filter(Boolean)
+        if (name) tasteParts.push(opts.length ? `${name}·${opts.slice(0, 2).join('·')}` : name)
+      })
+      this.setData({
+        showMemberBanner: true,
+        tasteHint: tasteParts.join('、') || '您刚点的口味'
+      })
+      this._memberBannerChecked = true
+    } catch (_) {}
+  },
+
+  dismissMemberBanner() {
+    this.setData({ showMemberBanner: false })
+  },
+
+  async activateMemberFromResult() {
+    if (this.data.activatingMember) return
+    try {
+      this.setData({ activatingMember: true })
+      const auth = require('../../utils/auth')
+      const res = await auth.activateMember({})
+      if (res && res.customer_token) {
+        auth.refreshCustomerToken(app, res.customer_token, {
+          customer_id: res.customer_id,
+          customer_no: res.customer_no
+        })
+      }
+      this.setData({ showMemberBanner: false })
+      const tip = (res && res.welcome_coupon_issued)
+        ? `已开启会员，赠送「${(res.welcome_coupon && res.welcome_coupon.name) || '新客券'}」`
+        : '已开启智能会员'
+      wx.showToast({ title: tip, icon: 'success' })
+    } catch (e) {
+      wx.showToast({ title: (e && e.message) || '开通失败', icon: 'none' })
+    } finally {
+      this.setData({ activatingMember: false })
     }
   },
 

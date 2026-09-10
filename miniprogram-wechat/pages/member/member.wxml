@@ -87,9 +87,8 @@
         </view>
 
         <view class="level-row" wx:elif="{{!isMember}}">
-
-          <text class="hint">注册会员享积分升级与专属折扣</text>
-
+          <text class="hint">开启智能会员享积分升级与专属折扣（不影响点餐）</text>
+          <button class="btn-primary activate-btn" size="mini" loading="{{activatingMember}}" bindtap="activateSmartMember">开启智能会员</button>
         </view>
 
         <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
@@ -146,7 +145,7 @@
 
     </view>
 
-    <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；新注册会员自动获赠新客券。</view>
+    <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；主动开通会员后自动获赠新客券。</view>
 
   </view>
 

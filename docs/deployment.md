@@ -1,114 +1,542 @@
 # 部署指南
 
-本文说明从空库到可服务的推荐步骤。真实密钥只放在本地 `.env`（已 gitignore），勿写入仓库。
+面向**全新 Ubuntu 服务器**从零上线：先弄清还缺什么、拿到后改哪里，再按步骤部署。
 
-## 前置
+- 真实密钥只放项目根 `.env`（已 gitignore），勿写入仓库或本文档。
+- 命令速查：`scripts/生产部署-ubuntu.txt`
+- 支付细节：[payment.md](payment.md)；安全与轮换：[security.md](security.md)
 
-- MySQL 8.0+、Redis、Python 3.11+、Node.js 18+
-- 生产建议 Nginx + HTTPS；API 仅本机监听（如 `APP_HOST=127.0.0.1`）
+目标环境：**Ubuntu 22.04 LTS**，不使用 Docker。对外只暴露 **HTTPS 443**；后端 gunicorn 监听 `127.0.0.1:8000`，由 Nginx 反代。
 
-## 1. 配置环境
+---
 
-```bash
-cp .env.production.example .env   # 或开发用 .env.development.example
-# 编辑 .env：DATABASE_URL、REDIS_URL、JWT_SECRET、FACE_ENCRYPTION_KEY、
-# WECHAT_* / ALIPAY_*、CORS_ORIGINS、H5_PUBLIC_BASE_URL 等
+## 0. 部署架构（一眼看懂）
+
+```
+[店内局域网]                         [公网]
+  海康摄像头 ──RTSP──┐
+  厨房 KDS / 收银 ───┼── 服务器      HTTPS :443 ── Nginx
+  大厅叫号屏 ────────┘    Ubuntu         │
+                    MySQL + Redis        ├─ /          → frontend/dist
+                    API :8000（本机）    ├─ /api       → gunicorn
+                                         └─ /uploads   → 本地上传目录
+
+  微信 / 支付宝小程序 ──request──→ https://你的域名/api/v1
+  支付 / 外卖平台 ──回调 POST──→ https://你的域名/api/v1/.../notify
 ```
 
-关键生产项：
+推荐部署根目录：`/var/www/smart-noodle`。
 
-| 变量 | 说明 |
-|------|------|
-| `APP_ENV=production` | 启用启动强校验 |
-| `PROCESS_ROLE` | `auto`（推荐）：各 gunicorn worker 争抢 Redis Leader 锁；`worker` 永不调度；`leader` 优先争抢。集群同一时刻仅一个进程持锁跑调度/TTS/识别 |
-| `JWT_AUDIENCE` | JWT `aud` 声明（默认 `smart-noodle-house`）；升级后旧无 aud 令牌需重新登录 |
-| `CUSTOMER_JWT_EXPIRE_MINUTES` | 顾客 JWT 有效期（默认 1440）；勿再沿用员工 JWT×7 |
-| `TRUSTED_PROXY_IPS` | 反代直连 IP（逗号分隔，支持 CIDR）。仅这些 peer 的 `X-Real-IP` / `X-Forwarded-For` 会被信任 |
-| `WEBHOOK_REQUIRE_ALLOWLIST` | 生产建议 `true`，并配置平台出口 IP |
-| `ALLOW_*_MOCK` | 生产全部 `false` |
+---
 
-生成随机密钥示例（勿把输出提交到仓库）：
+
+
+## 1. 上线前还缺什么（物料清单）
+
+按「没有就无法正式营业」排序。本地局域网联调（`DEV_LAN_HOST`）**不需要**备案域名。
+
+### 1.1 基础设施（必有）
+
+
+| 物料                     | 为何需要                              | 去哪办                       |
+| ---------------------- | --------------------------------- | ------------------------- |
+| **中国大陆云主机**            | 小程序合法域名、备案、支付回调都要求境内可访问 HTTPS     | 阿里云 / 腾讯云 / 华为云等大陆地域      |
+| **已 ICP 备案的域名**        | 微信/支付宝只接受已备案 HTTPS；未备案常无法开 80/443 | 域名注册商 + 工信部备案（约 1～20 工作日） |
+| **域名 A 记录解析到服务器公网 IP** | Nginx / Let’s Encrypt / 小程序域名校验   | DNS 控制台                   |
+| **企业或个体工商户主体**         | 微信 `getPhoneNumber`、支付商户等能力个人主体受限 | 营业执照                      |
+| **公安备案（公网安备）**         | ICP 通过后按规定办理；对外页面展示备案号            | 各地网警平台                    |
+
+
+建议规格（单店 + 数路摄像头）：**8 核 16G、200G SSD、≥10M 带宽**。安全组 / 防火墙仅放行 **22（或改 SSH 端口）+ 443**；MySQL / Redis **禁止**对公网开放。
+
+### 1.2 微信侧（堂食小程序 + 支付）
+
+
+| 物料                        | 说明                                                                      | 控制台                                                        |
+| ------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **小程序 AppID + AppSecret** | 登录 `code2session`                                                       | [mp.weixin.qq.com](https://mp.weixin.qq.com) → 开发管理 → 开发设置 |
+| **服务器域名**                 | request / uploadFile / downloadFile 填你的 HTTPS 域名（无 `https://` 前缀时按后台提示） | 同上 → 服务器域名                                                 |
+| **用户隐私保护指引**              | 勾选昵称、头像、手机号等并**发布**                                                     | 设置 → 用户隐私保护指引                                              |
+| **微信支付商户号** `mch_id`      | 与小程序同主体或已绑定                                                             | [pay.weixin.qq.com](https://pay.weixin.qq.com)             |
+| **APIv3 密钥**              | 32 位，商户平台设置                                                             | 账户中心 → API 安全                                              |
+| **商户 API 证书**             | `apiclient_key.pem` + 证书序列号                                             | 同左，下载到服务器                                                  |
+| **平台证书 / 公钥**             | 验签支付/退款回调                                                               | API 安全 → 平台证书                                              |
+| **支付结果通知 URL**            | 须公网 HTTPS，与 `.env` 一致                                                   | 产品中心 / JSAPI 配置；亦写入 `.env` 的 `WECHAT_NOTIFY_URL`           |
+| （可选）订阅消息模板 ID             | 出餐提醒等                                                                   | 小程序后台 → 订阅消息                                               |
+
+
+
+
+### 1.3 支付宝侧（小程序 + 支付）
+
+
+| 物料                 | 说明                              | 控制台                                        |
+| ------------------ | ------------------------------- | ------------------------------------------ |
+| **小程序 / 应用 AppID** | 与支付宝小程序工程一致                     | [open.alipay.com](https://open.alipay.com) |
+| **应用私钥 + 支付宝公钥**   | 签名与验签                           | 开发设置 → 接口加签方式                              |
+| **接口内容加密 AES Key** | 授权手机号解密；生产强烈建议配置                | 接口内容加密                                     |
+| **服务器域名白名单**       | HTTPS 域名                        | 小程序 → 开发设置                                 |
+| **获取会员手机号能力**      | 企业主体申请开通                        | 能力列表                                       |
+| **支付异步通知 URL**     | 与 `.env` `ALIPAY_NOTIFY_URL` 一致 | 应用网关 / 支付产品配置                              |
+
+
+
+
+### 1.4 业务可选（按需）
+
+
+| 物料                    | 说明                         |
+| --------------------- | -------------------------- |
+| 美团 / 饿了么开放平台凭证 + 门店绑定 | 外卖接单；回调 URL 见下文            |
+| 芯烨 XP-80T（WiFi）或云打印机  | 厨房热敏票；局域网版填 `PRINTER_HOST` |
+| 海康等 RTSP 摄像头          | 人脸迎宾；**仅内网**，勿暴露公网         |
+| 对象存储 S3 兼容桶           | 生产建议，避免 uploads 仅落本机盘      |
+
+
+
+
+### 1.5 自检：当前还缺什么？
+
+在准备阶段对照下面勾选。**未勾选的项 = 现在还缺的**：
+
+- [ ] 大陆服务器 + 公网 IP
+- [ ] 域名已 ICP 备案并解析到该 IP
+- [ ] HTTPS 证书可申请（或已有）
+- [ ] 微信小程序 AppID / AppSecret
+- [ ] 微信公众平台已配服务器域名与隐私指引
+- [ ] 微信支付商户号 + APIv3 + 商户私钥 + 平台证书
+- [ ] 支付宝 AppID + 私钥/公钥 +（建议）AES Key
+- [ ] 支付宝域名白名单与手机号能力
+- [ ] （可选）外卖、打印机、摄像头
+
+本地开发可先全 `ALLOW_*_MOCK=true` 联调；**生产启动校验会拒绝 mock**，且至少要配齐微信**或**支付宝支付之一。
+
+---
+
+
+
+## 2. 已经有了：改哪里？
+
+一句话：**业务密钥与域名进项目根** `.env`**；小程序正式 API 进两端** `config/env.js`**；反代进 Nginx；进程进 systemd。**
+
+### 2.1 配置文件总表
+
+
+| 用途           | 路径                                                   | 改什么                                                           |
+| ------------ | ---------------------------------------------------- | ------------------------------------------------------------- |
+| 后端全部密钥与开关    | 项目根 `.env`（从 `.env.production.example` 复制）           | 域名、DB、JWT、微信/支付宝、回调 URL、Mock 关闭                               |
+| 微信小程序生产 API  | `miniprogram-wechat/config/env.js`                   | `PROD_API_BASE = 'https://你的域名/api/v1'`                       |
+| 支付宝小程序生产 API | `miniprogram-alipay/config/env.js`                   | 同上 `PROD_API_BASE`                                            |
+| 微信工程 AppID   | `miniprogram-wechat/project.config.json`             | `appid`；生产 `setting.urlCheck: true`                           |
+| 支付宝工程 AppID  | 支付宝开发者工具项目设置 / `mini.project.json`（若有）               | 填正式 AppID                                                     |
+| 头像/昵称/手机号开关  | 根 `.env` 的 `ENABLE_WX_*` / `ENABLE_ALIPAY_*`         | 经 `GET /api/v1/miniprogram/config` 下发，**改后重启后端**              |
+| Nginx        | `nginx/smart-noodle.conf`                            | `REPLACE_DOMAIN` / `REPLACE_WEB_ROOT` / `REPLACE_UPLOADS_DIR` |
+| systemd      | `systemd/smart-noodle.service`                       | `REPLACE_DEPLOY_ROOT` → 如 `/var/www/smart-noodle`             |
+| 微信支付 PEM     | `/etc/smart-noodle/certs/`                           | 路径与 `.env` 的 `WECHAT_*_PATH` 一致                               |
+| 前端构建         | `frontend/` + 根 `.env` 的 `VITE_API_BASE_URL=/api/v1` | 生产用相对路径，由 Nginx 反代                                            |
+
+
+开发模板对照：
+
+
+| 场景         | 模板                                  |
+| ---------- | ----------------------------------- |
+| 本地 Windows | `.env.development.example` → `.env` |
+| 生产 Ubuntu  | `.env.production.example` → `.env`  |
+| 全量字段参考     | `.env.example`                      |
+
+
+
+
+### 2.2 `.env` 必改项（拿到域名/密钥后）
 
 ```bash
-python scripts/gen_secrets.py
-# 或单条：python -c "import secrets; print(secrets.token_urlsafe(48))"
+cp .env.production.example .env
+# 编辑 .env
 ```
 
-## 2. 数据库 Schema（推荐 Alembic）
 
-在已创建空库（或已授权的库）上：
+| 变量                                                             | 填什么                                            |
+| -------------------------------------------------------------- | ---------------------------------------------- |
+| `APP_ENV=production`                                           | 启用启动强校验                                        |
+| `APP_HOST=127.0.0.1`                                           | 仅本机，交给 Nginx                                   |
+| `DATABASE_URL` / `REDIS_URL`                                   | 本机或内网地址                                        |
+| `JWT_SECRET` / `FACE_ENCRYPTION_KEY` / `SECRET_ENCRYPTION_KEY` | 各 ≥32 字符高熵随机串（`python scripts/gen_secrets.py`） |
+| `DISPLAY_SCREEN_TOKEN`                                         | 叫号屏 URL 查询参数；生产必填                              |
+| `CORS_ORIGINS` / `H5_PUBLIC_BASE_URL`                          | `https://你的域名`（勿含 localhost）                   |
+| `MINI_PROGRAM_ENV_VERSION=release`                             | 桌台码跳正式版小程序                                     |
+| `ALLOW_*_MOCK` / `ALLOW_PRINT_MOCK`                            | 全部 `false`                                     |
+| `UPLOAD_DIR`                                                   | 如 `/var/www/smart-noodle/uploads`              |
+| `TRUSTED_PROXY_IPS`                                            | 常见 `127.0.0.1,::1`；跨机反代填反代出口 IP                |
+| `WEBHOOK_IP_ALLOWLIST`                                         | 微信/支付宝/外卖回调出口 IP（逗号分隔）；生产必填                    |
+| `WEBHOOK_REQUIRE_ALLOWLIST=true`                               | 与上项配合                                          |
+| `PROCESS_ROLE`                                                 | 单机 gunicorn 推荐 `auto`（systemd 单元也会覆盖为 auto）    |
+
+
+**微信（有商户号后）：**
+
+
+| 变量                                                         | 说明                                                   |
+| ---------------------------------------------------------- | ---------------------------------------------------- |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET`                      | 小程序                                                  |
+| `WECHAT_MCH_ID`                                            | 商户号                                                  |
+| `WECHAT_API_V3_KEY`                                        | APIv3 密钥                                             |
+| `WECHAT_CERT_SERIAL_NO`                                    | 商户证书序列号                                              |
+| `WECHAT_PRIVATE_KEY_PATH`                                  | 如 `/etc/smart-noodle/certs/wechat_apiclient_key.pem` |
+| `WECHAT_PLATFORM_CERT_PATH` 或 `WECHAT_PLATFORM_PUBLIC_KEY` | 平台证书文件或公钥内容                                          |
+| `WECHAT_NOTIFY_URL`                                        | `https://你的域名/api/v1/payments/wechat/notify`         |
+| `WECHAT_REFUND_NOTIFY_URL`                                 | 可空（空则复用 notify URL）                                  |
+
+
+**支付宝：**
+
+
+| 变量                                         | 说明                                           |
+| ------------------------------------------ | -------------------------------------------- |
+| `ALIPAY_APP_ID`                            | 与小程序一致                                       |
+| `ALIPAY_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` | PKCS8 私钥 + 支付宝公钥                             |
+| `ALIPAY_AES_KEY`                           | 授权手机号；生产建议必填                                 |
+| `ALIPAY_NOTIFY_URL`                        | `https://你的域名/api/v1/payments/alipay/notify` |
+| `ALIPAY_RETURN_URL`                        | 如 `https://你的域名/order/result`                |
+
+
+生产启动至少要求：**微信支付四件套（AppID+商户号+APIv3+证书序列号）或支付宝（AppID+私钥+公钥）之一完整**。
+
+### 2.3 小程序工程（发布正式版前）
+
+```javascript
+// miniprogram-wechat/config/env.js 与 miniprogram-alipay/config/env.js
+const PROD_API_BASE = 'https://你的域名/api/v1'
+```
+
+
+| 平台后台操作                                      | 说明                      |
+| ------------------------------------------- | ----------------------- |
+| 微信：服务器域名                                    | 与 `PROD_API_BASE` 主机名一致 |
+| 微信：`project.config.json` → `urlCheck: true` | 正式校验合法域名                |
+| 支付宝：服务器域名白名单                                | 同上                      |
+| 两端隐私政策                                      | 与实际采集字段一致并发布            |
+
+
+头像 / 昵称 / 一键手机号：**不要**再改 `env.js` 里已废弃的开关；改根 `.env`：
+
+- `ENABLE_WX_AVATAR` / `ENABLE_WX_NICKNAME` / `ENABLE_WX_PHONE_BIND`
+- `ENABLE_ALIPAY_AVATAR` / `ENABLE_ALIPAY_NICKNAME` / `ENABLE_ALIPAY_PHONE_BIND`
+
+
+
+### 2.4 平台回调 URL 一览（配到商户后台 + `.env`）
+
+
+| 渠道    | URL                                           |
+| ----- | --------------------------------------------- |
+| 微信支付  | `https://你的域名/api/v1/payments/wechat/notify`  |
+| 支付宝支付 | `https://你的域名/api/v1/payments/alipay/notify`  |
+| 美团外卖  | `https://你的域名/api/v1/delivery/meituan/notify` |
+| 饿了么外卖 | `https://你的域名/api/v1/delivery/eleme/notify`   |
+
+
+
+
+### 2.5 改域名后还要做什么
+
+1. 更新 `.env`：`CORS_ORIGINS`、`H5_PUBLIC_BASE_URL`、所有 `*_NOTIFY_URL`
+2. 更新两端 `PROD_API_BASE` 并重新上传审核小程序
+3. 更新 Nginx `server_name` + 重新申请证书
+4. 微信/支付宝后台改合法域名
+5. **后台「桌台管理」重新打印二维码**（码内嵌旧 `H5_PUBLIC_BASE_URL`）
+
+---
+
+
+
+## 3. 全新服务器怎么部署（逐步）
+
+以下默认部署路径 `/var/www/smart-noodle`，域名写成 `你的域名.com`。先完成 §1 中至少：服务器 + 已备案域名已解析。
+
+### 3.1 系统软件
 
 ```bash
-cd backend
-# 使用与运行时相同的 DATABASE_URL（.env）
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git curl wget vim nginx certbot python3-certbot-nginx \
+  mysql-server redis-server build-essential python3.11 python3.11-venv python3-pip
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+
+
+### 3.2 MySQL / Redis
+
+```bash
+sudo mysql_secure_installation
+
+sudo mysql -e "
+CREATE DATABASE smart_noodle_house CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'snh'@'127.0.0.1' IDENTIFIED BY '你的强密码';
+GRANT ALL ON smart_noodle_house.* TO 'snh'@'127.0.0.1';
+FLUSH PRIVILEGES;
+"
+
+sudo systemctl enable --now redis-server
+```
+
+也可用仓库脚本参考：`sql/000_create_db_grant.sql`（按实际用户名密码改）。
+
+### 3.3 拉取代码与 `.env`
+
+```bash
+sudo mkdir -p /var/www/smart-noodle /etc/smart-noodle/certs
+sudo chown $USER:$USER /var/www/smart-noodle
+cd /var/www/smart-noodle
+git clone <仓库地址> .
+
+cp .env.production.example .env
+nano .env   # 按 §2.2 填完；DATABASE_URL 用上面的 snh 用户
+
+python3 scripts/gen_secrets.py   # 或逐条 token_urlsafe(48)
+```
+
+将微信 `apiclient_key.pem`、平台证书放到 `/etc/smart-noodle/certs/`，权限仅运行用户可读：
+
+```bash
+sudo chmod 640 /etc/smart-noodle/certs/*
+sudo chown root:www-data /etc/smart-noodle/certs/*
+```
+
+
+
+### 3.4 后端虚拟环境 + 数据库迁移
+
+**推荐 Alembic（与运行时同一** `DATABASE_URL`**）：**
+
+```bash
+cd /var/www/smart-noodle/backend
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -U pip && pip install -r requirements.txt
+
 alembic upgrade head
 ```
 
-- `0001_baseline`：执行仓库根目录 `sql/001_schema.sql`（跳过 `CREATE DATABASE` / `USE`）
-- `0002_p0_hardening`：补齐 `orders.operator_id`、webhook / 退款重试字段、`financial_ledger` / `point_ledger`（已存在则跳过）
-- `0003_p1_hardening`：欢迎券 `UNIQUE(customer_id, template_id)`
-- `0004_p1_shift_open`：收银班次每人仅一个 OPEN
-- `0005_p1_merge_print`：`customer_coupons.status_reason`（合并冲突标记）
-- `0006_print_jobs`：厨房打印任务表 `print_jobs`（失败指数退避重试）
-- `0007_prod_indexes`：营收/厨房/账本/券常用复合索引
-- `0008_coupon_template_store`：`coupon_templates.store_id`（NULL=总部模板）
+说明：
 
-等价手工路径（不推荐与 Alembic 混用同一库反复执行）：
+- `0001_baseline` 会执行仓库 `sql/001_schema.sql`（跳过 `CREATE DATABASE` / `USE`）
+- 后续版本补索引、班次、打印任务、券约束、就餐会话等
+
+**空库种子（仅新库；会 TRUNCATE 业务表，有真实数据勿执行）：**
 
 ```bash
-mysql ... < sql/001_schema.sql
-# 再 stamp / upgrade 使 alembic_version 与真实结构一致
+cd /var/www/smart-noodle
+mysql -u snh -p -h 127.0.0.1 smart_noodle_house < sql/002_seed_prod.sql
+# 或按需：
+# python scripts/seed_roles.py
+# python scripts/seed_permissions.py
+# python scripts/seed_member_levels.py
+# python scripts/seed_coupon_templates.py
 ```
 
-## 3. 种子数据与超管
+**超管：**
 
 ```bash
-# 生产整库种子（会 TRUNCATE 业务表，勿对有真实数据的库执行）
-mysql ... < sql/002_seed_prod.sql
-
-# 或按模块幂等种子（可叠加）
-python scripts/seed_roles.py
-python scripts/seed_permissions.py
-python scripts/seed_member_levels.py
-python scripts/seed_coupon_templates.py
-
-# 创建 / 重置超管密码（须显式设置强密码）
-set ADMIN_INITIAL_PASSWORD=YourStrongPass123!   # Windows
-# export ADMIN_INITIAL_PASSWORD='...'           # Linux
-python scripts/init_admin.py
+export ADMIN_INITIAL_PASSWORD='超管强密码'
+# 可选：ADMIN_USERNAME=admin
+python3 scripts/init_admin.py
+python3 scripts/verify_database.py
 ```
 
-校验：
+勿对生产库执行测试种子 `002_seed_test.sql`（若存在）。
+
+### 3.5 前端构建
 
 ```bash
-python scripts/verify_database.py
+cd /var/www/smart-noodle/frontend
+npm ci
+npm run build
+# 产物：frontend/dist
 ```
 
-## 4. 后端与前端
+
+
+### 3.6 Nginx + HTTPS
 
 ```bash
-cd backend
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate
-pip install -r requirements.txt
-# 开发: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-# 生产: gunicorn 等（见 README）
+cd /var/www/smart-noodle
+sed -i 's|REPLACE_DOMAIN|你的域名.com|g' nginx/smart-noodle.conf
+sed -i 's|REPLACE_WEB_ROOT|/var/www/smart-noodle/frontend/dist|g' nginx/smart-noodle.conf
+sed -i 's|REPLACE_UPLOADS_DIR|/var/www/smart-noodle/uploads|g' nginx/smart-noodle.conf
 
-cd ../frontend
-npm ci && npm run build
+sudo cp nginx/snippets/*.conf /etc/nginx/snippets/
+sudo cp nginx/smart-noodle.conf /etc/nginx/sites-available/smart-noodle.conf
+sudo ln -sf /etc/nginx/sites-available/smart-noodle.conf /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+sudo mkdir -p /var/www/smart-noodle/uploads /var/www/smart-noodle/logs
+sudo nginx -t && sudo systemctl reload nginx
+
+# 域名已解析后申请证书（若 80 强制跳转导致失败，见 nginx/安装说明.txt）
+sudo certbot --nginx -d 你的域名.com
+sudo systemctl enable nginx && sudo systemctl reload nginx
 ```
 
-## 5. Nginx / 多实例注意
 
-- 反代到本机 API；上传目录与静态 `frontend/dist` 分离挂载。
-- 多 Gunicorn worker：推荐 `PROCESS_ROLE=auto`（systemd 单元已默认覆盖为 auto），依赖 Redis Leader 锁；跨机多实例同样只允许一个进程持锁。
-- `TRUSTED_PROXY_IPS` 填 Nginx 所在网卡地址（常见 `127.0.0.1`）；若 API 与反代跨机，填反代出口 IP，勿填 `0.0.0.0/0`。
 
-## 6. 上线检查清单
+### 3.7 systemd 开机自启
 
-- [ ] `alembic upgrade head` 成功，`verify_database.py` 通过
+```bash
+cd /var/www/smart-noodle
+sed -i 's|REPLACE_DEPLOY_ROOT|/var/www/smart-noodle|g' systemd/smart-noodle.service
+sudo cp systemd/smart-noodle.service /etc/systemd/system/
+
+sudo chown -R www-data:www-data /var/www/smart-noodle/uploads /var/www/smart-noodle/logs
+# 代码与 .venv 需 www-data 能读；按实际权限调整
+sudo chmod 640 /var/www/smart-noodle/.env
+sudo chown root:www-data /var/www/smart-noodle/.env
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now smart-noodle
+sudo systemctl status smart-noodle
+```
+
+单元默认：`gunicorn -w 2`，`PROCESS_ROLE=auto`（多 worker 争抢 Redis Leader 锁，仅一个跑调度/TTS/识别）。
+
+### 3.8 防火墙与探活
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 443/tcp
+sudo ufw enable
+
+curl -s http://127.0.0.1:8000/health
+curl -sI https://你的域名.com/
+curl -sI https://你的域名.com/health
+```
+
+若启动失败，看启动校验报错（缺支付、缺 `WEBHOOK_IP_ALLOWLIST`、mock 未关等）：
+
+```bash
+sudo journalctl -u smart-noodle -n 80 --no-pager
+```
+
+
+
+### 3.9 小程序发布与桌台码
+
+1. 两端 `config/env.js` 写入正式 `PROD_API_BASE`
+2. 微信 / 支付宝后台配置合法域名与隐私
+3. 上传代码 → 提审 → 发布 **正式版 release**
+4. 管理后台登录 → 配置门店 / 桌台 → **打印桌台码**
+  扫码落地：`https://你的域名.com/scan?token=…`
+
+
+
+### 3.10 店内屏与可选硬件
+
+
+| 终端     | 地址                                                                 |
+| ------ | ------------------------------------------------------------------ |
+| 后台     | `https://你的域名.com/`                                                |
+| 厨房 KDS | `https://你的域名.com/kitchen`                                         |
+| 叫号屏    | `https://你的域名.com/display?store_id=1&token=DISPLAY_SCREEN_TOKEN的值` |
+
+
+打印机（有设备时）：`.env` 中 `XPYUN_ENABLED=true`，`PRINTER_MODE=local`，`PRINTER_HOST=打印机局域网IP`，`ALLOW_PRINT_MOCK=false`。  
+摄像头：后台填内网 RTSP；Nginx 默认仅允许内网访问 `/api/v1/cameras/`。
+
+---
+
+
+
+## 4. 上线检查清单
+
+
+
+### 备案与网络
+
+- [ ] 域名 ICP 备案可查，解析正确，443 可访问
+- [ ] 网站对外页展示备案号（含 H5 `/scan` 等）
+- [ ] MySQL / Redis 未对公网监听
+
+
+
+### 后端
+
+- [ ] `.env` 来自 production 模板；全部 mock 为 `false`
+- [ ] `alembic upgrade head` + `verify_database.py` 通过
 - [ ] `init_admin.py` 已设强密码
-- [ ] 支付 / 小程序 / 外卖密钥为占位符已替换，且曾泄露密钥已在平台控制台轮换（见 [security.md](security.md)）
-- [ ] 回调 URL 为 HTTPS，且白名单生效
-- [ ] `PROCESS_ROLE=auto|leader|worker`，且 Redis 可用（Leader 锁）
+- [ ] `JWT_SECRET` / `FACE_ENCRYPTION_KEY` / `SECRET_ENCRYPTION_KEY` / `DISPLAY_SCREEN_TOKEN` 已换随机值
+- [ ] 微信或支付宝支付配置完整；回调为 HTTPS
+- [ ] `WEBHOOK_IP_ALLOWLIST` 已填且与平台出口一致
+- [ ] `systemctl status smart-noodle` 为 active
+
+
+
+### 小程序与业务
+
+- [ ] 两端 `PROD_API_BASE` 正确；正式版已发布
+- [ ] 公众平台域名 / 隐私 /（支付宝）AES 与手机号能力已就绪
+- [ ] 桌台码按当前域名重新生成
+- [ ] 试下一单支付 + 回调落库；退款路径按 [payment.md](payment.md) / [refund.md](refund.md) 抽测
+
+---
+
+
+
+## 5. 日常运维
+
+```bash
+sudo systemctl status smart-noodle nginx mysql redis-server
+sudo journalctl -u smart-noodle -f
+
+# 发版
+cd /var/www/smart-noodle && git pull
+source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
+cd backend && alembic upgrade head
+cd ../frontend && npm ci && npm run build
+sudo systemctl restart smart-noodle
+
+# 备份
+mysqldump -u snh -p -h 127.0.0.1 smart_noodle_house | gzip > /backup/snh_$(date +%F).sql.gz
+```
+
+密钥轮换见 [security.md](security.md)。
+
+---
+
+
+
+## 6. 常见问题
+
+
+| 现象                    | 处理                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| 服务起不来                 | `journalctl -u smart-noodle`：查 mock、支付缺项、`WEBHOOK_IP_ALLOWLIST`、`DISPLAY_SCREEN_TOKEN` |
+| 小程序连不上 API            | HTTPS、合法域名、`PROD_API_BASE` 三者主机名一致                                                     |
+| 支付宝手机号失败              | `ALIPAY_AES_KEY`；须两步授权（隐私同意 → getPhoneNumber）                                          |
+| 微信头像/手机号报错            | 隐私指引未发布；主体能力不足                                                                         |
+| 扫桌台码仍是旧域名 / 127.0.0.1 | 重打码；查 `H5_PUBLIC_BASE_URL`                                                             |
+| 支付成功订单未更新             | 回调 URL、验签证书、Nginx 是否把 `/api` 反代到本机；查白名单是否误拦                                            |
+| 502                   | gunicorn 未起或未听 `127.0.0.1:8000`                                                        |
+| 上传 413                | Nginx `client_max_body_size` 与 `.env` `MAX_UPLOAD_SIZE_MB`                             |
+| 摄像头 OFFLINE / 403     | RTSP 账号与同网段；公网被 Nginx deny 属预期                                                         |
+
+
+---
+
+
+
+## 7. 相关文档与脚本
+
+
+| 文档 / 路径                                  | 内容            |
+| ---------------------------------------- | ------------- |
+| `.env.production.example`                | 生产变量全集 + 中文注释 |
+| `scripts/生产部署-ubuntu.txt`                | 命令速查          |
+| `nginx/安装说明.txt` / `systemd/安装说明.txt`    | 反代与进程细节       |
+| `miniprogram-*/config/环境说明.txt`          | 开发 vs 正式版对照   |
+| [payment.md](payment.md)                 | 支付主流程         |
+| [security.md](security.md)               | 密钥与加固         |
+| [troubleshooting.md](troubleshooting.md) | 排障补充          |
+
+

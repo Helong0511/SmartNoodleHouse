@@ -97,6 +97,15 @@
       </view>
     </view>
 
+    <view class="member-banner" wx:if="{{showMemberBanner}}">
+      <view class="member-banner-title">开启智能会员</view>
+      <view class="member-banner-desc">我们已经记住您的口味：{{tasteHint}}。开通后下次可自动推荐常点规格。</view>
+      <view class="member-banner-actions">
+        <button class="btn-ghost mini" bindtap="dismissMemberBanner">暂时不用</button>
+        <button class="btn-primary mini" loading="{{activatingMember}}" bindtap="activateMemberFromResult">开启智能会员</button>
+      </view>
+    </view>
+
     <button class="btn-primary" wx:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" bindtap="repay">继续支付</button>
     <button class="btn-ghost" open-type="share">分享给好友</button>
     <button class="btn-primary" bindtap="goMenu">继续点餐</button>

@@ -405,6 +405,46 @@ async function ensureLogin(tableToken, opts) {
   return data
 }
 
+/** 主动开通智能会员（幂等）；兼容旧 register 路径 */
+async function activateMember(payload) {
+  await ensureLogin()
+  const app = requireApp()
+  const channel = (app.globalData && app.globalData.channel) || ''
+  const body = Object.assign({}, payload || {})
+  if (channel === 'wechat' || channel === 'alipay') body.channel = channel
+  if (!body.table_token) {
+    body.table_token = (app.globalData && app.globalData.tableToken) || readStorage('table_token') || null
+  }
+  try {
+    return await api.post('/miniprogram/member/activate', body)
+  } catch (e) {
+    if (e && (e.code === 40400 || e.status === 404 || /not found|404/i.test(String(e.message || '')))) {
+      return registerMember(body)
+    }
+    if (!isStaleCustomerAuthError(e)) throw e
+    clearCustomerSession(requireApp())
+    await ensureLogin()
+    return api.post('/miniprogram/member/activate', body)
+  }
+}
+
+/** 仅更新资料，不激活会员、不发券 */
+async function patchMemberProfile(payload) {
+  await ensureLogin()
+  const app = requireApp()
+  const channel = (app.globalData && app.globalData.channel) || ''
+  const body = Object.assign({}, payload || {})
+  if (channel === 'wechat' || channel === 'alipay') body.channel = channel
+  try {
+    return await api.patch('/miniprogram/member/profile', body)
+  } catch (e) {
+    if (!isStaleCustomerAuthError(e)) throw e
+    clearCustomerSession(requireApp())
+    await ensureLogin()
+    return api.patch('/miniprogram/member/profile', body)
+  }
+}
+
 /** 会员注册（完善资料）；遇旧 token 自动清会话重登后重试一次 */
 async function registerMember(payload) {
   await ensureLogin()
@@ -440,6 +480,8 @@ function getCart() {
 module.exports = {
   ensureLogin,
   registerMember,
+  activateMember,
+  patchMemberProfile,
   saveCart,
   getCart,
   formatError,

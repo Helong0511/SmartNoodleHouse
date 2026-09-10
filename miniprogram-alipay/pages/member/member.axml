@@ -60,7 +60,8 @@
             <text class="discount muted-disc" a:else>当前等级无额外折扣</text>
           </view>
           <view class="level-row" a:elif="{{!isMember}}">
-            <text class="hint">注册会员享积分升级与专属折扣</text>
+            <text class="hint">开启智能会员享积分升级与专属折扣（不影响点餐）</text>
+            <button class="btn-primary activate-btn" size="mini" loading="{{activatingMember}}" onTap="activateSmartMember">开启智能会员</button>
           </view>
           <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
           <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
@@ -89,7 +90,7 @@
         </view>
         <view class="lv-meta">{{item.min_points}} 积分起 · {{item.discount_text || '无额外折扣'}}</view>
       </view>
-      <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；新注册会员自动获赠新客券。</view>
+      <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；主动开通会员后自动获赠新客券。</view>
     </view>
 
     <view class="card">

@@ -61,28 +61,19 @@ def main(files: list[str]) -> None:
     cur.execute(
         "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
         "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customers' "
-        "AND COLUMN_NAME IN ('registered_store_id','registered_table_id','token_version')"
+        "AND COLUMN_NAME IN ('member_status','account_status','profile_status','first_seen_at')"
     )
-    print("customers cols:", [r[0] for r in cur.fetchall()])
+    print("customers identity cols:", [r[0] for r in cur.fetchall()])
     cur.execute(
-        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_wechat_accounts' "
-        "AND COLUMN_NAME IN ('profile_completed','nickname','avatar_url')"
+        "SELECT COUNT(*) FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='dining_sessions'"
     )
-    print("wechat cols:", [r[0] for r in cur.fetchall()])
-    cur.execute(
-        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_alipay_accounts' "
-        "AND COLUMN_NAME IN ('profile_completed','nickname','avatar_url')"
-    )
-    print("alipay cols:", [r[0] for r in cur.fetchall()])
+    print("dining_sessions:", cur.fetchone()[0])
     conn.close()
 
 
 if __name__ == "__main__":
     args = sys.argv[1:] or [
-        "sql/tools/013_channel_profile_completed.sql",
-        "sql/tools/014_channel_profile_display.sql",
-        "sql/tools/015_customer_registered_store.sql",
+        "sql/016_guest_member_dining_session.sql",
     ]
     main(args)

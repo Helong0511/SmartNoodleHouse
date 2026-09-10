@@ -15,8 +15,8 @@
   </view>
 
   <view class="card" wx:elif="{{ready}}">
-    <view class="title">{{showMemberPrompt ? '注册会员，智能记住您的口味' : '欢迎回来'}}</view>
-    <view class="desc">{{showMemberPrompt ? memberText : '完善头像、昵称、手机号后开始点餐。'}}</view>
+    <view class="title">{{showMemberPrompt ? '开启智能会员，记住您的口味' : '欢迎光临'}}</view>
+    <view class="desc">{{showMemberPrompt ? memberText : '登录成功后可直接点餐；会员可随时在「我的」页开通。'}}</view>
 
     <view class="mp-config-hint" wx:if="{{showDevTips && debugInfo}}">
       <text class="mp-config-title">真机微信头像/昵称报错？</text>
@@ -122,9 +122,9 @@
     <view class="dev-tip" wx:if="{{showDevTips && privacyTip}}">{{privacyTip}}</view>
     <view class="dev-tip debug" wx:if="{{showDevTips && debugInfo}}">{{debugInfo}}</view>
 
-    <button class="btn-primary" catchtap="onSubmitRegister" loading="{{saving}}">{{showMemberPrompt ? '注册并开始点餐' : '保存并开始点餐'}}</button>
+    <button class="btn-primary" catchtap="onSubmitRegister" loading="{{saving}}">{{showMemberPrompt ? '开启会员并点餐' : '保存并开始点餐'}}</button>
     </form>
-    <button class="btn-ghost skip" bindtap="goMenu">先点餐，稍后再改</button>
+    <button class="btn-ghost skip" bindtap="goMenu">先点餐，稍后再说</button>
     <button class="btn-ghost skip" bindtap="scanTable">{{hasTable ? '重新扫码换桌' : '扫一扫绑桌'}}</button>
     <button class="btn-ghost skip" bindtap="goMember">会员中心 · 口味爱好</button>
   </view>
