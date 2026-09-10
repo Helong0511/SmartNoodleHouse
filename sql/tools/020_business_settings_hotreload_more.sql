@@ -64,3 +64,10 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'a
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'delivery_env_fallback_store_id', '0', '外卖 .env 兜底门店 ID（多店生产须 0）'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'delivery_env_fallback_store_id');
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'preference_scene_enabled');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'weather_pref_enabled');

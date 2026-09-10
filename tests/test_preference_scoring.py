@@ -47,6 +47,13 @@ def test_order_weight_weekend_and_partial_refund():
     assert w_part == w0 * PreferenceService.PARTIAL_REFUND_WEIGHT
 
 
+def test_scene_settings_env_default_true():
+    from app.services.system_settings_service import SystemSettingsService
+
+    assert SystemSettingsService._env_default("preference_scene_enabled") == "true"
+    assert SystemSettingsService._env_default("weather_pref_enabled") == "true"
+
+
 def test_kitchen_statuses_not_used_for_preference_denominator():
     """厨房态不应作为偏好分母（订单离开 PAID 后 status 会变，但 payment_status 不变）。"""
     kitchen = ("CONFIRMED", "PREPARING", "COOKING", "READY", "COMPLETED")

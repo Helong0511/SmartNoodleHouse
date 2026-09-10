@@ -246,6 +246,9 @@ npm run dev -- --host 0.0.0.0 --port 5173
 # mysql ... < sql/tools/023_store_geo_option_scope.sql
 # 或 alembic upgrade 到 0011_store_geo_option_scope
 # 门店设置补 lat/lng 后启用天气口味加权
+#
+# 已有库：口味场景/天气加权开关（默认 true）：
+# mysql ... < sql/tools/024_preference_scene_settings.sql
 
 
 叫号屏地址（调试环境）

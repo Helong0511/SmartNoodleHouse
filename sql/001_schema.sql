@@ -14,9 +14,11 @@
 --   sql/004_welcome_coupon_unique.sql → 历史：曾加每人每模板唯一（已被 021 取消）
 --   sql/tools/021_voucher_multi_issue.sql → 去掉 uk_cc_customer_template，同模板可多张
 --   sql/tools/022_ledger_idempotency_unique.sql → 财务/积分流水 DB 幂等唯一
+--   sql/tools/023_store_geo_option_scope.sql → 门店经纬度 + option_groups 门店隔离
+--   sql/tools/024_preference_scene_settings.sql → 口味场景/天气加权开关（种子）
 --   sql/005_cashier_shift_one_open.sql → 同一收银员仅一个 OPEN 班次
 --   sql/tools/006~012               → token_version / 特价 / is_default / 免烹饪 / KDS 认领等
---     （上述字段均已并入本全量 DDL；tools 仅供旧库补丁）
+--     （023 字段已并入本全量 DDL；024 为配置种子；tools 仅供旧库补丁）
 -- ============================================================================
 
 SET NAMES utf8mb4;

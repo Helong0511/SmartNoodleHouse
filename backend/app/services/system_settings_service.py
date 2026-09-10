@@ -320,6 +320,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "口味场景加权",
         "unit": "",
         "type": "bool",
+        "default": True,
         "description": "推荐时按季节/同星期同餐段微调口味排序（不改历史学习分）",
     },
     "weather_pref_enabled": {
@@ -327,6 +328,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "天气口味加权",
         "unit": "",
         "type": "bool",
+        "default": True,
         "description": "门店配置经纬度后，按实时气温/雨天微调口味推荐",
     },
 }
@@ -347,7 +349,11 @@ class SystemSettingsService:
         val = getattr(s, key, None)
         meta = BUSINESS_SETTING_META.get(key) or {}
         if meta.get("type") == "bool":
-            return "true" if cls._parse_bool(val, False) else "false"
+            # 无 Settings 字段时优先用 META.default，避免把本应开启的项种成 false
+            fallback = bool(meta.get("default", False))
+            if val is None and "default" in meta:
+                return "true" if fallback else "false"
+            return "true" if cls._parse_bool(val, fallback) else "false"
         if key == "mini_program_env_version":
             raw = (str(val).strip().lower() if val is not None else "")
             return raw if raw in ("develop", "trial", "release") else "auto"

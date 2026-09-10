@@ -49,7 +49,10 @@ TRUNCATE TABLE option_groups;
 TRUNCATE TABLE store_product_stocks;
 TRUNCATE TABLE product_images;
 TRUNCATE TABLE products;
+TRUNCATE TABLE category_sort_schedule_items;
+TRUNCATE TABLE category_sort_schedules;
 TRUNCATE TABLE product_categories;
+TRUNCATE TABLE print_jobs;
 TRUNCATE TABLE customer_preferences;
 TRUNCATE TABLE customer_alipay_accounts;
 TRUNCATE TABLE customer_wechat_accounts;
@@ -360,14 +363,15 @@ INSERT INTO `smart_noodle_house`.`product_categories` (`store_id`, `name`, `desc
 (1, '饮料', '饮料', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 添加规格租
-INSERT INTO `smart_noodle_house`.`option_groups` (`name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES 
-('量', 'Liang', 'SINGLE', 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-('加料', 'JiaLiao', 'MULTIPLE', 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-('辣', 'La', 'SINGLE', 0, 2, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-('麻', 'Ma', 'SINGLE', 0, 3, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-('葱', 'Cong', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-('香菜', 'XiangCai', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-('蒜末', 'SuanMo', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+-- store_id NULL = 总部共享（全店可绑）；与 001 option_groups.store_id 语义一致
+INSERT INTO `smart_noodle_house`.`option_groups` (`store_id`, `name`, `code`, `selection_type`, `is_required`, `sort_order`, `status`, `created_at`, `updated_at`) VALUES
+(NULL, '量', 'Liang', 'SINGLE', 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '加料', 'JiaLiao', 'MULTIPLE', 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '辣', 'La', 'SINGLE', 0, 2, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '麻', 'Ma', 'SINGLE', 0, 3, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '葱', 'Cong', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '香菜', 'XiangCai', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(NULL, '蒜末', 'SuanMo', 'SINGLE', 0, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 添加规格组明细
   -- 量
@@ -483,3 +487,10 @@ INSERT INTO `smart_noodle_house`.`tables` (`id`, `store_id`, `table_no`, `table_
 (1, 1, 'WM', '外带自取', 'M7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DM7v-8H_ZLOdUXsR9UYPH7Umj-ZU0Z4JuEijy5X_w3kg%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (2, 1, 'A01', '1号桌', '6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3D6jO4K28UbqPozFWvtT0uqPpR5WWwD3030ir2ORwQYWs%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (3, 1, 'A02', '2号桌', 'wJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA', 'weixin://dl/business/?appid=wxd0964c5d02b1549d&path=pages/index/index&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dwechat&env_version=develop', 'alipays://platformapi/startapp?appId=YOUR_ALIPAY_APPID&page=pages%2Findex%2Findex&query=token%3DwJYZpvc1g-FqvZ7KE-XtFaS_M115B6KCcm93Cav6VbA%26channel%3Dalipay', 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'preference_scene_enabled');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'weather_pref_enabled');

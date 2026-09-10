@@ -176,16 +176,12 @@ Page({
       const cid = app.globalData.customerId || auth.readStorage('customer_id')
       if (cid) app.globalData.customerId = cid
       this.setData({ walletLoading: true })
-      const [profile, prefRes, couponRes, voucherRes] = await Promise.all([
+      const [profile, prefView, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
-        api.get('/miniprogram/customers/me/preferences').catch(() => ({ preferences: [], all: [] })),
+        prefUtil.loadCustomerPrefs(app, api).catch(() => prefUtil.buildPrefDisplay({})),
         api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
         api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
       ])
-      const prefView = prefUtil.buildPrefDisplay(prefRes)
-      app.globalData.prefs = prefView.prefs
-      app.globalData.prefsView = prefView
-      app.globalData.prefsAt = now
       if (!profile || typeof profile !== 'object') {
         throw new Error('会员资料加载失败，请稍后重试')
       }

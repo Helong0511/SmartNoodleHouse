@@ -210,8 +210,14 @@
         </el-form-item>
         <el-form-item label="规格组">
           <el-select v-model="form.option_group_ids" multiple style="width:100%" placeholder="选择关联规格组">
-            <el-option v-for="g in optionGroups" :key="g.id" :label="g.name" :value="g.id" />
+            <el-option
+              v-for="g in bindableOptionGroups"
+              :key="g.id"
+              :label="g.store_id == null ? `${g.name}（总部）` : g.name"
+              :value="g.id"
+            />
           </el-select>
+          <p class="hint">仅可选总部共享或本店规格组</p>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" />
@@ -304,6 +310,17 @@ const formCategories = computed(() => {
   const sid = form.store_id
   if (!sid) return []
   return categories.value.filter((c) => c.store_id === sid)
+})
+
+/** 绑规格：总部共享 ∪ 表单门店私有（避免超管全店列表误选他店组） */
+const bindableOptionGroups = computed(() => {
+  const sid = form.store_id
+  if (!sid) {
+    return (optionGroups.value || []).filter((g) => g.store_id == null)
+  }
+  return (optionGroups.value || []).filter(
+    (g) => g.store_id == null || Number(g.store_id) === Number(sid),
+  )
 })
 
 const requireCategoryOptions = computed(() => formCategories.value.filter((c) => c.status === 1 || c.id))
@@ -426,8 +443,24 @@ async function onStoreFilterChange() {
   reload()
 }
 
-function onFormStoreChange() {
+async function onFormStoreChange() {
   form.category_id = formCategories.value[0]?.id
+  // 换店后去掉不可绑的他店规格组
+  const ok = new Set(bindableOptionGroups.value.map((g) => g.id))
+  form.option_group_ids = (form.option_group_ids || []).filter((id: number) => ok.has(id))
+  // 超管全店筛选时列表可能不含本店组：按表单门店补拉
+  if (auth.isSuperAdmin && !effectiveListStoreId.value && form.store_id) {
+    try {
+      const rows = (
+        await api.get('/options/groups', { params: { store_id: form.store_id } })
+      ).data || []
+      const byId = new Map((optionGroups.value || []).map((g: any) => [g.id, g]))
+      for (const g of rows) byId.set(g.id, g)
+      optionGroups.value = Array.from(byId.values())
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 async function load() {

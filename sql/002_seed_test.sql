@@ -949,3 +949,10 @@ SELECT 'seed_ok' AS result,
   (SELECT COUNT(*) FROM payment_refunds r
      JOIN orders o ON o.id = r.order_id
     WHERE o.remark LIKE '种子：%') AS seed_refunds;
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'preference_scene_enabled');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'weather_pref_enabled');

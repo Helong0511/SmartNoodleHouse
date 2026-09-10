@@ -142,24 +142,26 @@ async function loadCustomerPrefs(app, api, options = {}) {
   if (!token) {
     return buildPrefDisplay({})
   }
+  const store = app.globalData.store || {}
+  const table = app.globalData.table || {}
+  const sid = store.id || table.store_id || null
   const now = Date.now()
   if (
     !force
     && app.globalData.prefsView
     && app.globalData.prefsAt
+    && app.globalData.prefsStoreId === sid
     && now - app.globalData.prefsAt < PREFS_CACHE_MS
   ) {
     return app.globalData.prefsView
   }
   try {
-    const store = app.globalData.store || {}
-    const table = app.globalData.table || {}
-    const sid = store.id || table.store_id || null
     const prefRes = await api.get('/miniprogram/customers/me/preferences', sid ? { store_id: sid } : {})
     const view = buildPrefDisplay(prefRes)
     app.globalData.prefs = view.prefs
     app.globalData.prefsView = view
     app.globalData.prefsAt = now
+    app.globalData.prefsStoreId = sid
     return view
   } catch (_) {
     return buildPrefDisplay({})
@@ -170,6 +172,7 @@ function clearPrefsCache(app) {
   app.globalData.prefs = []
   app.globalData.prefsView = null
   app.globalData.prefsAt = 0
+  app.globalData.prefsStoreId = undefined
 }
 
 function pickSelected(map, gid) {
