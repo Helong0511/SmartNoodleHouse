@@ -145,7 +145,14 @@ async function payAndConfirm(api, payRes, orderId) {
   }
   const synced = await confirmPending(api, { orderId, paymentNo })
   if (synced.paid) clearPending(orderId)
-  return { paid: true, confirmed: !!synced.paid, payRes, sync: synced.data }
+  return {
+    paid: !!synced.paid,
+    confirmed: !!synced.paid,
+    clientOk: true,
+    pendingConfirm: !synced.paid,
+    payRes,
+    sync: synced.data
+  }
 }
 
 module.exports = {

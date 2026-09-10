@@ -9,6 +9,51 @@ function getAppSafe() {
   }
 }
 
+/** 与后端 DiningSession 默认 4 小时对齐；过期后不得静默复用昨日桌台 */
+const DINE_BOUND_TTL_MS = 4 * 60 * 60 * 1000
+const DINE_BOUND_AT_KEY = 'dine_bound_at'
+
+function nowMs() {
+  return Date.now()
+}
+
+function readBoundAt() {
+  try {
+    const v = auth.readStorage(DINE_BOUND_AT_KEY)
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? n : 0
+  } catch (_) {
+    return 0
+  }
+}
+
+function writeBoundAt(ts) {
+  try {
+    my.setStorageSync({ key: DINE_BOUND_AT_KEY, data: Number(ts) || nowMs() })
+  } catch (_) {}
+}
+
+function isDineCacheFresh(boundAt) {
+  const at = Number(boundAt) || 0
+  if (!at) return false
+  return nowMs() - at < DINE_BOUND_TTL_MS
+}
+
+function clearDineContext() {
+  const g = getAppSafe()
+  if (g && g.globalData) {
+    g.globalData.table = null
+    g.globalData.store = null
+    g.globalData.tableToken = ''
+  }
+  try {
+    my.removeStorageSync({ key: 'dine_table' })
+    my.removeStorageSync({ key: 'dine_store' })
+    my.removeStorageSync({ key: 'table_token' })
+    my.removeStorageSync({ key: DINE_BOUND_AT_KEY })
+  } catch (_) {}
+}
+
 /** 外带/外卖虚拟桌（种子 table_no=WM），不是堂食实体桌 */
 function isTakeawayChannelTable(table) {
   if (!table) return false
@@ -34,9 +79,10 @@ function storeLabel(store) {
   return store.name || ''
 }
 
-function applyContext(table, store) {
+function applyContext(table, store, options) {
   const g = getAppSafe()
   if (!g) return
+  const opts = options || {}
   if (table) {
     const storedToken = g.globalData.tableToken || auth.readStorage('table_token') || ''
     if (!table.qr_token && storedToken) {
@@ -48,6 +94,18 @@ function applyContext(table, store) {
       g.globalData.tableToken = table.qr_token
       my.setStorageSync({ key: 'table_token', data: table.qr_token })
     }
+    if (opts.boundAt != null) {
+      writeBoundAt(opts.boundAt)
+    } else if (opts.expiresAt) {
+      const exp = Date.parse(opts.expiresAt)
+      if (Number.isFinite(exp)) {
+        writeBoundAt(Math.max(nowMs() - (DINE_BOUND_TTL_MS - Math.max(0, exp - nowMs())), nowMs() - DINE_BOUND_TTL_MS + 1000))
+      } else {
+        writeBoundAt(nowMs())
+      }
+    } else {
+      writeBoundAt(nowMs())
+    }
   }
   if (store) {
     g.globalData.store = store
@@ -57,13 +115,21 @@ function applyContext(table, store) {
 
 function readCachedContext() {
   const g = getAppSafe()
-  if (!g) return { table: null, store: null, token: '' }
+  if (!g) return { table: null, store: null, token: '', fresh: false }
+  const boundAt = readBoundAt()
+  const fresh = isDineCacheFresh(boundAt)
+  if (!fresh) {
+    const hadToken = !!(g.globalData.tableToken || auth.readStorage('table_token'))
+    const hadTable = !!(g.globalData.table || auth.readStorage('dine_table'))
+    if (hadToken || hadTable) clearDineContext()
+    return { table: null, store: null, token: '', fresh: false }
+  }
   let table = g.globalData.table || auth.readStorage('dine_table') || null
   const store = g.globalData.store || auth.readStorage('dine_store') || null
   const token = g.globalData.tableToken || auth.readStorage('table_token') || ''
   if (table && !g.globalData.table) g.globalData.table = table
   if (store && !g.globalData.store) g.globalData.store = store
-  return { table, store, token }
+  return { table, store, token, fresh: true }
 }
 
 function contextReady(table, store, token) {

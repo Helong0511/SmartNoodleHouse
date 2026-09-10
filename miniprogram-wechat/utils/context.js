@@ -1,5 +1,4 @@
 const api = require('./api')
-const app = getApp()
 
 function getAppSafe() {
   try {
@@ -7,6 +6,52 @@ function getAppSafe() {
   } catch (_) {
     return null
   }
+}
+
+/** 与后端 DiningSession 默认 4 小时对齐；过期后不得静默复用昨日桌台 */
+const DINE_BOUND_TTL_MS = 4 * 60 * 60 * 1000
+const DINE_BOUND_AT_KEY = 'dine_bound_at'
+
+function nowMs() {
+  return Date.now()
+}
+
+function readBoundAt() {
+  try {
+    const v = wx.getStorageSync(DINE_BOUND_AT_KEY)
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? n : 0
+  } catch (_) {
+    return 0
+  }
+}
+
+function writeBoundAt(ts) {
+  try {
+    wx.setStorageSync(DINE_BOUND_AT_KEY, Number(ts) || nowMs())
+  } catch (_) {}
+}
+
+function isDineCacheFresh(boundAt) {
+  const at = Number(boundAt) || 0
+  if (!at) return false
+  return nowMs() - at < DINE_BOUND_TTL_MS
+}
+
+/** 清空本地桌台/门店缓存（过期或换桌失败时） */
+function clearDineContext() {
+  const g = getAppSafe()
+  if (g && g.globalData) {
+    g.globalData.table = null
+    g.globalData.store = null
+    g.globalData.tableToken = ''
+  }
+  try {
+    wx.removeStorageSync('dine_table')
+    wx.removeStorageSync('dine_store')
+    wx.removeStorageSync('table_token')
+    wx.removeStorageSync(DINE_BOUND_AT_KEY)
+  } catch (_) {}
 }
 
 /** 外带/外卖虚拟桌（种子 table_no=WM），不是堂食实体桌 */
@@ -35,9 +80,10 @@ function storeLabel(store) {
 }
 
 /** 将门店/桌台写入 globalData */
-function applyContext(table, store) {
+function applyContext(table, store, options) {
   const g = getAppSafe()
   if (!g) return
+  const opts = options || {}
   if (table) {
     const storedToken = g.globalData.tableToken || wx.getStorageSync('table_token') || ''
     if (!table.qr_token && storedToken) {
@@ -49,6 +95,19 @@ function applyContext(table, store) {
       g.globalData.tableToken = table.qr_token
       wx.setStorageSync('table_token', table.qr_token)
     }
+    if (opts.boundAt != null) {
+      writeBoundAt(opts.boundAt)
+    } else if (opts.expiresAt) {
+      const exp = Date.parse(opts.expiresAt)
+      if (Number.isFinite(exp)) {
+        // 以「还剩多久」反推绑定时间，保证与服务端 expires_at 对齐
+        writeBoundAt(Math.max(nowMs() - (DINE_BOUND_TTL_MS - Math.max(0, exp - nowMs())), nowMs() - DINE_BOUND_TTL_MS + 1000))
+      } else {
+        writeBoundAt(nowMs())
+      }
+    } else {
+      writeBoundAt(nowMs())
+    }
   }
   if (store) {
     g.globalData.store = store
@@ -58,13 +117,24 @@ function applyContext(table, store) {
 
 function readCachedContext() {
   const g = getAppSafe()
-  if (!g) return { table: null, store: null, token: '' }
+  if (!g) return { table: null, store: null, token: '', fresh: false }
+  const boundAt = readBoundAt()
+  const fresh = isDineCacheFresh(boundAt)
+  if (!fresh) {
+    // 过期：清桌台 token，避免次日静默复绑；门店名可留作展示但无 token 不算堂食会话
+    const hadToken = !!(g.globalData.tableToken || wx.getStorageSync('table_token'))
+    const hadTable = !!(g.globalData.table || wx.getStorageSync('dine_table'))
+    if (hadToken || hadTable) {
+      clearDineContext()
+    }
+    return { table: null, store: null, token: '', fresh: false }
+  }
   let table = g.globalData.table || wx.getStorageSync('dine_table') || null
   const store = g.globalData.store || wx.getStorageSync('dine_store') || null
   const token = g.globalData.tableToken || wx.getStorageSync('table_token') || ''
   if (table && !g.globalData.table) g.globalData.table = table
   if (store && !g.globalData.store) g.globalData.store = store
-  return { table, store, token }
+  return { table, store, token, fresh: true }
 }
 
 function contextReady(table, store, token) {
@@ -171,16 +241,18 @@ async function bindTableFromToken(token) {
 }
 
 /**
- * 校验并刷新桌台 token（entry 失败时按 table_id 向服务端换 qr_token）
+ * 校验并刷新桌台 token。
+ * 缓存过期后禁止仅凭 table_id 复活旧桌，须重新扫码。
  * @returns {{ ok: boolean, token?: string, ctx?: object }}
  */
 async function refreshTableBinding(options = {}) {
   const channel = (options && options.channel) || 'wechat'
+  const allowReviveByTableId = !!(options && options.allowReviveByTableId)
   const cached = readCachedContext()
-  const { table, store } = cached
+  const { table, store, fresh } = cached
   let token = String(cached.token || (table && table.qr_token) || '').trim()
 
-  if (token) {
+  if (token && fresh) {
     try {
       const entry = await api.get('/miniprogram/entry', { token, channel }, false)
       if (entry && entry.table) {
@@ -191,21 +263,24 @@ async function refreshTableBinding(options = {}) {
     } catch (_) {}
   }
 
+  // 仅当会话仍新鲜时，才允许用 table_id 换 token（防昨日桌台污染）
   const tableId = table && table.id
   const sid = (table && table.store_id) || (store && store.id)
-  if (tableId && sid) {
+  if (allowReviveByTableId && fresh && tableId && sid) {
     try {
       const bound = await api.post('/miniprogram/tables/bind', {
         table_id: tableId,
         store_id: sid
       })
       if (bound && bound.qr_token) {
-        applyContext(bound, store)
+        const sess = bound.dining_session || null
+        applyContext(bound, store, sess && sess.expires_at ? { expiresAt: sess.expires_at } : {})
         return { ok: true, token: bound.qr_token, ctx: displayPayload(store, bound) }
       }
     } catch (_) {}
   }
-  return { ok: false, token }
+  if (!fresh) clearDineContext()
+  return { ok: false, token: '' }
 }
 
 /** 调起扫码并绑定桌台 */
@@ -398,9 +473,12 @@ function scanAndBindTable() {
 }
 
 module.exports = {
+  DINE_BOUND_TTL_MS,
   ensureDineContext,
   currentDisplay,
   applyContext,
+  clearDineContext,
+  readCachedContext,
   displayPayload,
   pageDineFields,
   isTakeawayChannelTable,

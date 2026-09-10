@@ -125,9 +125,19 @@ async function payAndConfirm(api, payRes, orderId) {
     throw e
   }
   const synced = await confirmPending(api, { orderId, paymentNo })
-  // 收银台成功即视为用户侧已付；若查单未到账则保留 pending 供结果页继续对账
-  if (synced.paid) clearPending(orderId)
-  return { paid: true, confirmed: !!synced.paid, payRes, sync: synced.data }
+  // 必须以服务端查单为准；收银台 success 仅表示客户端调起成功，不算订单 PAID
+  if (synced.paid) {
+    clearPending(orderId)
+    return { paid: true, confirmed: true, payRes, sync: synced.data }
+  }
+  return {
+    paid: false,
+    confirmed: false,
+    clientOk: true,
+    pendingConfirm: true,
+    payRes,
+    sync: synced.data
+  }
 }
 
 module.exports = {

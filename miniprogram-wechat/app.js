@@ -38,8 +38,24 @@ App({
     this.globalData.customerToken = wx.getStorageSync('customer_token') || ''
     this.globalData.customerId = wx.getStorageSync('customer_id') || null
     this.globalData.customerNo = wx.getStorageSync('customer_no') || ''
-    this.globalData.store = wx.getStorageSync('dine_store') || null
-    this.globalData.table = wx.getStorageSync('dine_table') || null
+    // 桌台缓存有 TTL：过期则清空，避免次日沿用昨日桌号
+    try {
+      const dineCtx = require('./utils/context')
+      const cached = dineCtx.readCachedContext()
+      if (cached.fresh) {
+        this.globalData.store = cached.store
+        this.globalData.table = cached.table
+        this.globalData.tableToken = cached.token || ''
+      } else {
+        this.globalData.store = null
+        this.globalData.table = null
+        this.globalData.tableToken = ''
+      }
+    } catch (_) {
+      this.globalData.store = null
+      this.globalData.table = null
+      this.globalData.tableToken = ''
+    }
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
