@@ -29,6 +29,13 @@ DEFAULT_LIMIT = (120, 60)
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        try:
+            from app.services.system_settings_service import SystemSettingsService
+
+            await SystemSettingsService.touch_cache()
+        except Exception:
+            pass
+
         settings = get_settings()
         if settings.is_development and not getattr(settings, "enable_rate_limit", True):
             return await call_next(request)

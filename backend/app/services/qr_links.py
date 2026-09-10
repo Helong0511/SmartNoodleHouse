@@ -19,7 +19,11 @@ def _rewrite_localhost_for_lan(base: str, lan_host: str) -> str:
 
 def resolve_h5_public_base() -> str:
     settings = get_settings()
-    custom = (settings.h5_public_base_url or "").strip().rstrip("/")
+    from app.services.system_settings_service import SystemSettingsService
+
+    custom = SystemSettingsService.resolved_str_sync(
+        "h5_public_base_url", settings.h5_public_base_url or ""
+    ).strip().rstrip("/")
     if custom:
         base = custom
     elif settings.cors_origin_list:
@@ -28,16 +32,19 @@ def resolve_h5_public_base() -> str:
         base = "http://127.0.0.1:5173"
 
     if settings.is_development:
-        base = _rewrite_localhost_for_lan(base, settings.dev_lan_host)
+        lan = SystemSettingsService.resolved_str_sync("dev_lan_host", settings.dev_lan_host or "")
+        base = _rewrite_localhost_for_lan(base, lan)
     return base
 
 
 def build_table_qr_links(token: str, *, h5_base: str | None = None) -> dict[str, str]:
     """生成桌台相关扫码/跳转 URL（token 须为 dining_tables.qr_token）。"""
     settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
     wx_appid = settings.wechat_app_id or "YOUR_WECHAT_APPID"
     ali_appid = settings.alipay_app_id or "YOUR_ALIPAY_APPID"
-    env_version = settings.resolved_mini_program_env_version
+    env_version = SystemSettingsService.resolved_mini_program_env_version_sync()
     base = (h5_base or resolve_h5_public_base()).rstrip("/")
     query_wechat = quote(f"token={token}&channel=wechat", safe="")
     query_alipay = quote(f"token={token}&channel=alipay", safe="")

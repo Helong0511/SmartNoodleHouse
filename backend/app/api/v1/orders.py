@@ -984,9 +984,12 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
         raise HTTPException(status_code=404, detail="订单不存在")
     assert_order_store_access(user, order)
     from app.core.config import get_settings
+    from app.services.system_settings_service import SystemSettingsService
 
-    if not get_settings().xpyun_enabled:
-        return success({"printed": False, "message": "打印未启用（XPYUN_ENABLED=false）"}, request=request)
+    if not SystemSettingsService.resolved_bool_sync(
+        "xpyun_enabled", get_settings().xpyun_enabled
+    ):
+        return success({"printed": False, "message": "打印未启用（厨房打印总开关关闭）"}, request=request)
     try:
         result = await PrintService.print_order(db, order_id)
     except Exception:

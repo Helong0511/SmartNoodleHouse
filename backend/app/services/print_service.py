@@ -296,8 +296,8 @@ def _meta_line(ctx: OrderPrintContext, *, cols: int = 48) -> str:
     return f"{left}{' ' * gap}<B>{right}</B>"
 
 
-def _order_no_footer_lines(order_no: str) -> list[str]:
-    """制作单底部「订单号」区域，受 .env 的 KITCHEN_TICKET_ORDER_NO 控制。
+def _order_no_footer_lines(order_no: str, *, mode: str | None = None) -> list[str]:
+    """制作单底部「订单号」区域，受 kitchen_ticket_order_no（库表/ .env）控制。
 
     - barcode（默认）：先打 CODE-128，再打可读单号
     - text / plain / number：只打可读单号
@@ -309,14 +309,15 @@ def _order_no_footer_lines(order_no: str) -> list[str]:
       p=\"0\"  HRI 人眼可读字符位置（0=不打印在条码上，我们另起一行打单号）
     """
     settings = get_settings()
-    mode = (settings.kitchen_ticket_order_no or "barcode").strip().lower()
-    if mode in ("off", "none", "0", "false", "no"):
+    resolved = (mode if mode is not None else settings.kitchen_ticket_order_no or "barcode")
+    resolved = str(resolved).strip().lower()
+    if resolved in ("off", "none", "0", "false", "no"):
         return []
     no = (order_no or "").strip().upper()
     if not no:
         return []
     safe = _escape_print_text(no)
-    if mode in ("text", "plain", "number"):
+    if resolved in ("text", "plain", "number"):
         return [f"<C>{safe}</C>"]
     # 默认 barcode：条码 + 下方文字单号（具体 ESC/POS 编码见 escpos_client）
     payload = _barcode_payload(no)
@@ -326,7 +327,12 @@ def _order_no_footer_lines(order_no: str) -> list[str]:
     ]
 
 
-def build_ticket_content(ctx: OrderPrintContext, ticket_type: str = TICKET_KITCHEN) -> str:
+def build_ticket_content(
+    ctx: OrderPrintContext,
+    ticket_type: str = TICKET_KITCHEN,
+    *,
+    kitchen_ticket_order_no: str | None = None,
+) -> str:
     """生成厨房小票全文，各行用 <BR> 拼接，末尾 <CUT>。
 
     结构顺序：
@@ -399,7 +405,7 @@ def build_ticket_content(ctx: OrderPrintContext, ticket_type: str = TICKET_KITCH
 
     # 票底订单号 / 条码
     order_no = (order.order_no or "").strip().upper()
-    lines.extend(_order_no_footer_lines(order_no))
+    lines.extend(_order_no_footer_lines(order_no, mode=kitchen_ticket_order_no))
     lines.append("<CUT>")
     return "<BR>".join(lines)
 
@@ -411,28 +417,25 @@ class PrintService:
     async def resolve_printer_host(cls, db: AsyncSession, store_id: int | None) -> str:
         """解析局域网打印机 IP。
 
-        优先级：门店 store_settings.printer_host > 全局 .env PRINTER_HOST。
-        多门店不同打印机时，在库里按店覆盖即可，不必改全局环境变量。
+        优先级：门店 store_settings.printer_host > 全局 system_settings / .env PRINTER_HOST。
         """
         settings = get_settings()
-        if store_id:
-            row = (
-                await db.execute(
-                    select(StoreSetting.setting_value).where(
-                        StoreSetting.store_id == int(store_id),
-                        StoreSetting.setting_key == "printer_host",
-                    )
-                )
-            ).scalar_one_or_none()
-            if row and str(row).strip():
-                return str(row).strip()
-        return (settings.printer_host or "").strip()
+        from app.services.system_settings_service import SystemSettingsService
+
+        return (
+            await SystemSettingsService.effective_setting(
+                db,
+                "printer_host",
+                store_id=int(store_id) if store_id else None,
+                fallback=settings.printer_host or "",
+            )
+        ).strip()
 
     @classmethod
     async def resolve_printer_sn(cls, db: AsyncSession, store_id: int | None) -> str:
         """解析芯烨云打印机 SN（仅 PRINTER_MODE=xpyun 时需要）。
 
-        优先级：门店 store_settings.xpyun_printer_sn > 全局 XPYUN_PRINTER_SN。
+        优先级：门店 store_settings.xpyun_printer_sn > 全局 XPYUN_PRINTER_SN（密钥仍在 .env）。
         """
         settings = get_settings()
         if store_id:
@@ -576,10 +579,25 @@ class PrintService:
     ) -> dict[str, Any]:
         """按配置把已清洗的 content 发到打印机；失败抛 AppException。"""
         settings = get_settings()
+        from app.services.system_settings_service import SystemSettingsService
+
         sn = await cls.resolve_printer_sn(db, store_id)
         host = await cls.resolve_printer_host(db, store_id)
-        mode = (settings.printer_mode or "local").strip().lower()
+        mode = (
+            await SystemSettingsService.effective_setting(
+                db, "printer_mode", store_id=store_id, fallback=settings.printer_mode or "local"
+            )
+        ).strip().lower()
         safe = _strip_print_controls(content)
+        copies = await SystemSettingsService.effective_int(
+            db, "xpyun_print_copies", settings.xpyun_print_copies, store_id=store_id
+        )
+        voice = await SystemSettingsService.effective_int(
+            db, "xpyun_voice", settings.xpyun_voice, store_id=store_id
+        )
+        printer_port = await SystemSettingsService.effective_int(
+            db, "printer_port", settings.printer_port, store_id=store_id
+        )
 
         # ---------- 芯烨云模式 ----------
         if mode == "xpyun":
@@ -601,9 +619,9 @@ class PrintService:
             data = await client.print_ticket(
                 sn,
                 safe,
-                copies=settings.xpyun_print_copies,
+                copies=copies,
                 cutter=1,
-                voice=0 if ticket_type != TICKET_KITCHEN else settings.xpyun_voice,
+                voice=0 if ticket_type != TICKET_KITCHEN else voice,
                 mode=1,
             )
             logger.info("厨房小票已发送(云) order=%s sn=%s type=%s", order_no, sn, ticket_type)
@@ -625,13 +643,13 @@ class PrintService:
                 f"未配置打印机 IP（PRINTER_HOST），无法出票 order={order_no}",
             )
 
-        client = EscposClient(host=host, port=settings.printer_port)
+        client = EscposClient(host=host, port=printer_port)
         try:
-            data = await client.print_ticket(safe, copies=settings.xpyun_print_copies)
+            data = await client.print_ticket(safe, copies=copies)
         except RuntimeError as exc:
             raise AppException(
                 PRINTER_UNREACHABLE,
-                str(exc) or f"无法连接打印机 {host}:{settings.printer_port}",
+                str(exc) or f"无法连接打印机 {host}:{printer_port}",
             ) from exc
         logger.info("厨房小票已发送(局域网) order=%s host=%s type=%s", order_no, host, ticket_type)
         return data
@@ -655,8 +673,13 @@ class PrintService:
           - AppException：配置缺失、打印机连不上等（接口应转成业务错误码，而非裸 500）
         """
         settings = get_settings()
+        from app.services.system_settings_service import SystemSettingsService
+
         # 总开关（历史字段名 XPYUN_ENABLED，对 local / xpyun 两种模式都生效）
-        if not settings.xpyun_enabled:
+        enabled = await SystemSettingsService.effective_bool(
+            db, "xpyun_enabled", settings.xpyun_enabled, store_id=None
+        )
+        if not enabled:
             logger.debug("打印已关闭 xpyun_enabled=false order_id=%s", order_id)
             return None
 
@@ -670,7 +693,16 @@ class PrintService:
             logger.info("打印跳过：订单已取消 order_id=%s", order_id)
             return None
 
-        content = build_ticket_content(ctx, ticket_type=ticket_type)
+        content = build_ticket_content(
+            ctx,
+            ticket_type=ticket_type,
+            kitchen_ticket_order_no=await SystemSettingsService.effective_setting(
+                db,
+                "kitchen_ticket_order_no",
+                store_id=int(ctx.order.store_id),
+                fallback=settings.kitchen_ticket_order_no,
+            ),
+        )
         job = await cls._upsert_pending_job(
             db,
             store_id=int(ctx.order.store_id),

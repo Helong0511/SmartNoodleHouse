@@ -132,22 +132,37 @@ class PhoneBindRequest(BaseModel):
 
 
 @router.get("/config")
-async def miniprogram_config(request: Request):
+async def miniprogram_config(request: Request, db: DbSession):
     """小程序前端配置（订阅模板、隐私能力开关等，不含密钥）。"""
+    from app.services.system_settings_service import SystemSettingsService
+
     settings = get_settings()
-    tmpl = (settings.wechat_subscribe_template_order_ready or "").strip()
+    await SystemSettingsService.ensure_seeded(db)
+    tmpl = (
+        await SystemSettingsService.get_value(
+            db,
+            "wechat_subscribe_template_order_ready",
+            settings.wechat_subscribe_template_order_ready or "",
+        )
+    ).strip()
+
+    async def _flag(key: str, fallback: bool) -> bool:
+        return await SystemSettingsService.get_bool(db, key, fallback)
+
     return success(
         {
             "subscribe_templates": {
                 "order_ready": tmpl or None,
             },
-            # 与项目根 .env 的 ENABLE_{WX|ALIPAY}_{AVATAR|NICKNAME|PHONE_BIND} 对应
-            "enable_alipay_avatar": bool(settings.enable_alipay_avatar),
-            "enable_alipay_nickname": bool(settings.enable_alipay_nickname),
-            "enable_alipay_phone_bind": bool(settings.enable_alipay_phone_bind),
-            "enable_wx_avatar": bool(settings.enable_wx_avatar),
-            "enable_wx_nickname": bool(settings.enable_wx_nickname),
-            "enable_wx_phone_bind": bool(settings.enable_wx_phone_bind),
+            # 优先 system_settings，种子默认值来自 .env ENABLE_* 
+            "enable_alipay_avatar": await _flag("enable_alipay_avatar", settings.enable_alipay_avatar),
+            "enable_alipay_nickname": await _flag("enable_alipay_nickname", settings.enable_alipay_nickname),
+            "enable_alipay_phone_bind": await _flag(
+                "enable_alipay_phone_bind", settings.enable_alipay_phone_bind
+            ),
+            "enable_wx_avatar": await _flag("enable_wx_avatar", settings.enable_wx_avatar),
+            "enable_wx_nickname": await _flag("enable_wx_nickname", settings.enable_wx_nickname),
+            "enable_wx_phone_bind": await _flag("enable_wx_phone_bind", settings.enable_wx_phone_bind),
         },
         request=request,
     )
@@ -333,10 +348,12 @@ async def wechat_debug_qrcode(
     if not table:
         raise AppException(40403, "无效桌台二维码")
     settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
     png, err = await generate_wxacode(
         path="pages/index/index",
         query=f"token={table.qr_token}&channel=wechat",
-        env_version=settings.resolved_mini_program_env_version,
+        env_version=SystemSettingsService.resolved_mini_program_env_version_sync(),
         width=280,
     )
     if not png:
@@ -480,13 +497,13 @@ async def register_member(
         "customer_token": _issue_customer_token(customer, channel),
         "welcome_coupon_issued": welcome is not None,
         "welcome_coupon": welcome,
-        "welcome_coupon_name": CouponService.welcome_template_name(),
+        "welcome_coupon_name": await CouponService.welcome_template_name(db),
     }
     if data.enable_face:
         return success(payload, message="会员信息已保存，请完成摄像头人脸采集授权", request=request)
     msg = "注册成功"
     if welcome:
-        msg = f"注册成功，已赠送「{welcome.get('name') or CouponService.welcome_template_name()}」"
+        msg = f"注册成功，已赠送「{welcome.get('name') or await CouponService.welcome_template_name(db)}」"
     return success(payload, message=msg, request=request)
 
 
@@ -593,7 +610,7 @@ async def bind_member_phone(
             "need_member_prompt": not channel_ready,
             "welcome_coupon_issued": welcome is not None,
             "welcome_coupon": welcome,
-            "welcome_coupon_name": CouponService.welcome_template_name(),
+            "welcome_coupon_name": await CouponService.welcome_template_name(db),
             **profile,
         },
         request=request,
@@ -672,14 +689,17 @@ async def consent_face_base64(
     if len(b64) < 800:
         raise AppException(40033, "人脸图像无效，请使用小程序摄像头实时采集")
     settings = get_settings()
-    max_b64 = settings.max_upload_size_mb * 1024 * 1024 * 2  # base64 膨胀约 4/3，再留余量
+    from app.services.system_settings_service import SystemSettingsService
+
+    mb = await SystemSettingsService.get_int(db, "max_upload_size_mb", settings.max_upload_size_mb)
+    max_b64 = mb * 1024 * 1024 * 2  # base64 膨胀约 4/3，再留余量
     if len(b64) > max_b64:
-        raise AppException(40030, f"图片超过 {settings.max_upload_size_mb}MB")
+        raise AppException(40030, f"图片超过 {mb}MB")
     try:
         raw = base64.b64decode(b64, validate=False)
-        max_size = settings.max_upload_size_mb * 1024 * 1024
+        max_size = mb * 1024 * 1024
         if len(raw) > max_size:
-            raise AppException(40030, f"图片超过 {settings.max_upload_size_mb}MB")
+            raise AppException(40030, f"图片超过 {mb}MB")
         if len(raw) < 1024:
             raise AppException(40034, "人脸图像过小，请重新正对摄像头采集")
         feature, quality = extract_face_embedding_with_quality(raw)

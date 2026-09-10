@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>系统设置</h2>
-        <p class="hint">业务参数可在线调整；.env 敏感项仅展示脱敏值，修改后需重启后端</p>
+        <p class="hint">分类业务参数可在线热更；.env 敏感项只读展示，修改后需重启后端</p>
       </div>
       <div class="header-actions">
         <el-tag v-if="overview" size="small" :type="overview.health?.redis ? 'success' : 'warning'">
@@ -24,7 +24,7 @@
       :description="`环境 ${overview.app.env} · 进程角色 ${overview.app.process_role} · ${overview.cache?.multi_worker_note || ''} · 配置文件：${overview.env_file_hint}`"
     />
 
-    <el-tabs v-if="overview" v-model="activeTab" class="settings-tabs">
+    <el-tabs v-if="overview" v-model="activeTab" class="settings-tabs" @tab-change="onTabChange">
       <el-tab-pane label="运行概览" name="overview">
         <el-row :gutter="16">
           <el-col :xs="24" :md="8">
@@ -169,18 +169,62 @@
         </el-dialog>
       </el-tab-pane>
 
-      <el-tab-pane label="业务参数" name="business">
+      <!-- 业务参数：按分类分页 -->
+      <el-tab-pane
+        v-for="g in businessGroups"
+        :key="g.id"
+        :name="`biz-${g.id}`"
+      >
+        <template #label>
+          <span class="tab-label">
+            {{ g.label }}
+            <el-badge v-if="dirtyCountByGroup[g.id]" :value="dirtyCountByGroup[g.id]" class="tab-badge" />
+          </span>
+        </template>
+
         <el-alert
           type="success"
           show-icon
           :closable="false"
-          title="在线可调"
-          description="保存在 system_settings；本进程立即生效。多 worker 依赖 Redis 版本号同步失效。缩短「访客数据保留」会压缩已有访客过期时间。"
+          :title="g.label"
+          :description="`${g.description || ''} 保存在 system_settings，保存后约 15 秒内多 worker 同步。`"
+          class="group-alert"
         />
-        <el-form label-width="160px" class="business-form" @submit.prevent>
-          <el-form-item v-for="item in businessForm" :key="item.key" :label="item.label">
+
+        <el-form label-width="180px" class="business-form" @submit.prevent>
+          <el-form-item v-for="item in itemsOfGroup(g.id)" :key="item.key" :label="item.label">
+            <el-switch v-if="item.type === 'bool'" v-model="item.boolValue" />
+            <el-select
+              v-else-if="item.type === 'enum'"
+              v-model="item.strValue"
+              style="width: 280px"
+            >
+              <el-option
+                v-for="c in item.choices || []"
+                :key="c"
+                :label="enumLabel(item.key, c)"
+                :value="c"
+              />
+            </el-select>
+            <el-input
+              v-else-if="item.type === 'string' && isLongText(item)"
+              v-model="item.strValue"
+              type="textarea"
+              :rows="3"
+              :maxlength="item.max_length || 2000"
+              show-word-limit
+              style="max-width: 520px"
+            />
+            <el-input
+              v-else-if="item.type === 'string'"
+              v-model="item.strValue"
+              :maxlength="item.max_length || 256"
+              show-word-limit
+              style="max-width: 420px"
+              clearable
+            />
             <el-input-number
-              v-if="item.type === 'int'"
+              v-else-if="item.type === 'int'"
               v-model="item.numValue"
               :min="item.min"
               :max="item.max"
@@ -197,18 +241,43 @@
             />
             <span v-if="item.unit" class="unit">{{ item.unit }}</span>
             <el-tag v-if="isDirty(item)" size="small" type="warning" style="margin-left:8px">已改</el-tag>
-            <p class="field-desc">{{ item.description }} · 范围 {{ item.min }} ~ {{ item.max }}</p>
+            <p class="field-desc">
+              {{ item.description }}
+              <template v-if="item.type === 'int' || item.type === 'float'">
+                · 范围 {{ item.min }} ~ {{ item.max }}
+              </template>
+              <template v-else-if="item.type === 'enum'">
+                · 可选 {{ (item.choices || []).join(' / ') }}
+              </template>
+            </p>
           </el-form-item>
+
           <el-form-item>
-            <el-button type="primary" :loading="businessSaving" :disabled="!canSaveBusiness" @click="saveBusiness">
-              保存业务参数
+            <el-button
+              type="primary"
+              :loading="businessSaving"
+              :disabled="!canSaveGroup(g.id)"
+              @click="saveBusinessGroup(g.id)"
+            >
+              保存「{{ g.label }}」
             </el-button>
-            <el-button :disabled="!hasDirtyBusiness" @click="resetBusiness">还原未保存修改</el-button>
+            <el-button :disabled="!dirtyCountByGroup[g.id]" @click="resetBusinessGroup(g.id)">
+              还原本页未保存修改
+            </el-button>
+            <span v-if="dirtyCountByGroup[g.id]" class="dirty-hint">本页 {{ dirtyCountByGroup[g.id] }} 项已改</span>
           </el-form-item>
         </el-form>
       </el-tab-pane>
 
       <el-tab-pane label="环境变量" name="env">
+        <el-alert
+          type="warning"
+          show-icon
+          :closable="false"
+          title="只读"
+          description="以下为进程内 .env / 启动配置脱敏展示。标注「需要重启」的项改文件后须重启后端；标注「—」的多为业务参数种子，正式以左侧分类页为准。"
+          class="group-alert"
+        />
         <div class="env-toolbar">
           <el-input
             v-model="envKeyword"
@@ -265,6 +334,7 @@ const loading = ref(false)
 const activeTab = ref('overview')
 const overview = ref<any>(null)
 const businessForm = ref<any[]>([])
+const businessGroups = ref<any[]>([])
 const businessSaving = ref(false)
 const storeEdits = reactive<Record<number, { name: string; address: string; phone: string; status: number }>>({})
 const storeSaving = ref<number | null>(null)
@@ -274,11 +344,61 @@ const createStoreForm = reactive({ store_no: '', name: '', address: '', phone: '
 const envKeyword = ref('')
 const envGroupFilter = ref('')
 
-const hasDirtyBusiness = computed(() => businessForm.value.some((i) => isDirty(i)))
-const canSaveBusiness = computed(() => {
-  if (!businessForm.value.length) return false
-  return businessForm.value.every((i) => Number.isFinite(i.numValue))
+const ENUM_LABELS: Record<string, Record<string, string>> = {
+  kitchen_ticket_order_no: {
+    barcode: '条码+单号',
+    text: '仅单号',
+    off: '不打印',
+  },
+  printer_mode: {
+    local: '局域网 ESC/POS',
+    xpyun: '芯烨云',
+  },
+  mini_program_env_version: {
+    auto: '自动（开发→develop / 生产→release）',
+    develop: 'develop 开发版',
+    trial: 'trial 体验版',
+    release: 'release 正式版',
+  },
+}
+
+function enumLabel(key: string, value: string) {
+  return ENUM_LABELS[key]?.[value] || value
+}
+
+function isLongText(item: any) {
+  const max = Number(item.max_length || 0)
+  return max >= 500 || ['webhook_ip_allowlist', 'trusted_proxy_ips'].includes(item.key)
+}
+
+function itemsOfGroup(groupId: string) {
+  return businessForm.value.filter((i) => i.group === groupId)
+}
+
+function isDirty(item: any) {
+  if (item.type === 'bool') return item.boolValue !== item._savedBool
+  if (item.type === 'string' || item.type === 'enum') return item.strValue !== item._savedStr
+  return item.numValue !== item._saved
+}
+
+const dirtyCountByGroup = computed(() => {
+  const map: Record<string, number> = {}
+  for (const item of businessForm.value) {
+    if (!isDirty(item)) continue
+    map[item.group] = (map[item.group] || 0) + 1
+  }
+  return map
 })
+
+function canSaveGroup(groupId: string) {
+  const items = itemsOfGroup(groupId)
+  if (!items.length) return false
+  if (!items.some((i) => isDirty(i))) return false
+  return items.every((i) => {
+    if (i.type === 'bool' || i.type === 'string' || i.type === 'enum') return true
+    return Number.isFinite(i.numValue)
+  })
+}
 
 const filteredEnvGroups = computed(() => {
   const groups = overview.value?.env_groups || []
@@ -313,8 +433,22 @@ function parseNum(item: any) {
   return n
 }
 
+function parseBool(item: any) {
+  if (typeof item.bool_value === 'boolean') return item.bool_value
+  const s = String(item.value ?? '').trim().toLowerCase()
+  return ['1', 'true', 'yes', 'on', 'y'].includes(s)
+}
+
 function buildBusinessForm(items: any[]) {
   businessForm.value = items.map((item) => {
+    if (item.type === 'bool') {
+      const boolValue = parseBool(item)
+      return { ...item, boolValue, _savedBool: boolValue }
+    }
+    if (item.type === 'string' || item.type === 'enum') {
+      const strValue = item.value == null ? '' : String(item.value)
+      return { ...item, strValue, _savedStr: strValue }
+    }
     const numValue = parseNum(item)
     return {
       ...item,
@@ -324,40 +458,39 @@ function buildBusinessForm(items: any[]) {
   })
 }
 
-function isDirty(item: any) {
-  return item.numValue !== item._saved
-}
-
-function resetBusiness() {
-  for (const item of businessForm.value) {
-    item.numValue = item._saved
+function applyBusinessPayload(data: any) {
+  buildBusinessForm(data.business || [])
+  businessGroups.value = data.business_groups || []
+  if (!businessGroups.value.length && data.business_group_defs) {
+    businessGroups.value = (data.business_group_defs || []).map((g: any) => ({
+      ...g,
+      items: [],
+    }))
   }
 }
 
-async function load() {
-  loading.value = true
-  try {
-    overview.value = (await api.get('/settings')).data
-    buildBusinessForm(overview.value.business || [])
-  } catch (e: any) {
-    ElMessage.error(e.message || '加载设置失败')
-  } finally {
-    loading.value = false
+function resetBusinessGroup(groupId: string) {
+  for (const item of itemsOfGroup(groupId)) {
+    if (item.type === 'bool') item.boolValue = item._savedBool
+    else if (item.type === 'string' || item.type === 'enum') item.strValue = item._savedStr
+    else item.numValue = item._saved
   }
 }
 
-async function refreshHealth() {
-  try {
-    const res = await api.get('/settings/health')
-    if (overview.value) overview.value.health = res.data
-    ElMessage.success('健康检查已更新')
-  } catch (e: any) {
-    ElMessage.error(e.message || '检测失败')
-  }
+function payloadOfItem(item: any): string | number | boolean {
+  if (item.type === 'bool') return item.boolValue
+  if (item.type === 'string' || item.type === 'enum') return item.strValue
+  return item.numValue
 }
 
-async function saveBusiness() {
-  for (const item of businessForm.value) {
+async function saveBusinessGroup(groupId: string) {
+  const dirty = itemsOfGroup(groupId).filter((i) => isDirty(i))
+  if (!dirty.length) {
+    ElMessage.info('没有需要保存的修改')
+    return
+  }
+  for (const item of dirty) {
+    if (item.type === 'bool' || item.type === 'string' || item.type === 'enum') continue
     if (!Number.isFinite(item.numValue)) {
       ElMessage.warning(`${item.label} 数值无效`)
       return
@@ -369,18 +502,44 @@ async function saveBusiness() {
   }
   businessSaving.value = true
   try {
-    const settings: Record<string, number> = {}
-    for (const item of businessForm.value) {
-      settings[item.key] = item.numValue
+    const settings: Record<string, string | number | boolean> = {}
+    for (const item of dirty) {
+      settings[item.key] = payloadOfItem(item)
     }
     const res = await api.put('/settings/business', { settings })
-    buildBusinessForm(res.data.business)
-    ElMessage.success('业务参数已保存')
-    refreshHealth()
+    applyBusinessPayload(res.data)
+    ElMessage.success(`已保存 ${dirty.length} 项`)
+    refreshHealth(false)
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
   } finally {
     businessSaving.value = false
+  }
+}
+
+function onTabChange() {
+  // 预留：切换分类时无需额外请求
+}
+
+async function load() {
+  loading.value = true
+  try {
+    overview.value = (await api.get('/settings')).data
+    applyBusinessPayload(overview.value)
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载设置失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function refreshHealth(showToast = true) {
+  try {
+    const res = await api.get('/settings/health')
+    if (overview.value) overview.value.health = res.data
+    if (showToast) ElMessage.success('健康检查已更新')
+  } catch (e: any) {
+    if (showToast) ElMessage.error(e.message || '检测失败')
   }
 }
 
@@ -468,14 +627,18 @@ onMounted(load)
 .hint { margin: 4px 0 0; color: #909399; font-size: 12px; }
 .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .env-tip { margin-bottom: 16px; }
+.group-alert { margin-bottom: 16px; }
 .settings-tabs { margin-top: 8px; }
+.tab-label { display: inline-flex; align-items: center; gap: 4px; }
+.tab-badge { margin-left: 2px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .health-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
 .health-row:last-child { border-bottom: none; }
 .sub { font-size: 12px; color: #999; font-weight: normal; margin-left: 8px; }
-.business-form { max-width: 720px; margin-top: 20px; }
+.business-form { max-width: 780px; margin-top: 8px; }
 .field-desc { margin: 4px 0 0; font-size: 12px; color: #999; }
 .unit { margin-left: 8px; color: #666; font-size: 13px; }
+.dirty-hint { margin-left: 12px; color: #e6a23c; font-size: 12px; }
 .group-desc { color: #666; margin: 0 0 12px; font-size: 13px; }
 .env-toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 .env-group { margin-bottom: 24px; }

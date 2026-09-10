@@ -12,7 +12,11 @@ from app.core.response import success
 from app.models import OperationLog, Store, StoreSetting
 from app.schemas.settings import BusinessSettingsUpdate, StoreUpdate
 from app.services.store_scope import assert_store_access, require_bound_store
-from app.services.system_settings_service import BUSINESS_SETTING_META, SystemSettingsService
+from app.services.system_settings_service import (
+    BUSINESS_SETTING_GROUPS,
+    BUSINESS_SETTING_META,
+    SystemSettingsService,
+)
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/settings", tags=["系统设置"])
@@ -26,7 +30,7 @@ class StoreCreate(BaseModel):
 
 
 class StoreBusinessUpdate(BaseModel):
-    updates: dict[str, str | int | float] = Field(default_factory=dict)
+    updates: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
 
 @router.get("/stores/options", dependencies=[require_permission("order:read")])
@@ -151,11 +155,13 @@ def _build_env_groups(settings) -> list[dict]:
             "items": [
                 _env_item("JWT_SECRET", settings.jwt_secret, "员工 JWT 密钥，至少 32 字符", sensitive=True),
                 _env_item("JWT_ALGORITHM", settings.jwt_algorithm, "JWT 算法"),
-                _env_item("JWT_EXPIRE_MINUTES", str(settings.jwt_expire_minutes), "Token 有效期（分钟）"),
+                _env_item("JWT_EXPIRE_MINUTES", str(settings.jwt_expire_minutes), "员工 Token 有效期种子（运行时看业务参数）", restart=False),
+                _env_item("CUSTOMER_JWT_EXPIRE_MINUTES", str(settings.customer_jwt_expire_minutes), "顾客 Token 有效期种子（运行时看业务参数）", restart=False),
                 _env_item("FACE_ENCRYPTION_KEY", settings.face_encryption_key, "人脸向量加密密钥，至少 32 字符", sensitive=True),
-                _env_item("WEBHOOK_IP_ALLOWLIST", settings.webhook_ip_allowlist, "支付/外卖回调 IP 白名单，CIDR，逗号分隔"),
-                _env_item("WEBHOOK_REQUIRE_ALLOWLIST", str(settings.webhook_require_allowlist).lower(), "是否强制校验 Webhook IP"),
-                _env_item("ENABLE_RATE_LIMIT", str(settings.enable_rate_limit).lower(), "API 限流开关"),
+                _env_item("WEBHOOK_IP_ALLOWLIST", settings.webhook_ip_allowlist, "Webhook 白名单种子（运行时看业务参数）", restart=False),
+                _env_item("WEBHOOK_REQUIRE_ALLOWLIST", str(settings.webhook_require_allowlist).lower(), "强制白名单种子（运行时看业务参数）", restart=False),
+                _env_item("TRUSTED_PROXY_IPS", settings.trusted_proxy_ips, "可信反代种子（运行时看业务参数）", restart=False),
+                _env_item("ENABLE_RATE_LIMIT", str(settings.enable_rate_limit).lower(), "API 限流开关（须重启）"),
             ],
         },
         {
@@ -221,16 +227,38 @@ def _build_env_groups(settings) -> list[dict]:
         },
         {
             "title": "外卖业务",
+            "description": "门店 Token 在「外卖管理→门店绑定」；下列默认值仅作 system_settings 种子，正式以「业务参数」页为准",
             "items": [
-                _env_item("DELIVERY_AUTO_CONFIRM", str(settings.delivery_auto_confirm).lower(), "新外卖单是否自动向平台 confirm"),
+                _env_item(
+                    "DELIVERY_AUTO_CONFIRM",
+                    str(settings.delivery_auto_confirm).lower(),
+                    "新外卖单自动接单（种子默认；运行时看业务参数）",
+                    restart=False,
+                ),
+                _env_item(
+                    "DELIVERY_ENV_FALLBACK_STORE_ID",
+                    str(settings.delivery_env_fallback_store_id),
+                    "无绑定时允许 .env Token 的门店 ID；多店生产须为 0（运行时看业务参数）",
+                    restart=False,
+                ),
             ],
         },
         {
             "title": "文件与对象存储",
             "items": [
                 _env_item("UPLOAD_DIR", settings.upload_dir, "本地上传目录"),
-                _env_item("MAX_UPLOAD_SIZE_MB", str(settings.max_upload_size_mb), "单文件大小上限"),
-                _env_item("ALLOWED_IMAGE_EXTENSIONS", settings.allowed_image_extensions, "允许的图片扩展名"),
+                _env_item(
+                    "MAX_UPLOAD_SIZE_MB",
+                    str(settings.max_upload_size_mb),
+                    "上传上限种子默认（运行时看业务参数）",
+                    restart=False,
+                ),
+                _env_item(
+                    "ALLOWED_IMAGE_EXTENSIONS",
+                    settings.allowed_image_extensions,
+                    "允许的图片扩展名种子（运行时看业务参数）",
+                    restart=False,
+                ),
                 _env_item("STORAGE_BACKEND", settings.storage_backend, "local 或 s3"),
                 _env_item("S3_ENDPOINT", settings.s3_endpoint, "S3/MinIO 端点"),
                 _env_item("S3_ACCESS_KEY", settings.s3_access_key, "S3 Access Key", sensitive=True),
@@ -243,7 +271,7 @@ def _build_env_groups(settings) -> list[dict]:
             "title": "迎宾 / TTS / 摄像头",
             "items": [
                 _env_item("TTS_PROVIDER", settings.tts_provider, "TTS 提供商（local 等）"),
-                _env_item("TTS_VOICE", settings.tts_voice, "语音音色"),
+                _env_item("TTS_VOICE", settings.tts_voice, "语音音色（当前本地 TTS 未读取，保留配置位）"),
                 _env_item("CAMERA_URL", settings.camera_url, "默认 RTSP（可在摄像头管理覆盖）", sensitive=True),
                 _env_item("CAMERA_USERNAME", settings.camera_username, "摄像头默认用户名"),
                 _env_item("CAMERA_PASSWORD", settings.camera_password, "摄像头默认密码", sensitive=True),
@@ -270,6 +298,16 @@ def _build_env_groups(settings) -> list[dict]:
                 _env_item("WELCOME_COOLDOWN_SECONDS", str(settings.welcome_cooldown_seconds), "迎宾冷却（秒）", restart=False),
                 _env_item("FACE_MATCH_THRESHOLD", str(settings.face_match_threshold), "人脸匹配阈值", restart=False),
                 _env_item("FACE_CONFIRM_FRAMES", str(settings.face_confirm_frames), "人脸确认帧数", restart=False),
+                _env_item("WELCOME_COUPON_NAME", settings.welcome_coupon_name, "新客赠券模板名", restart=False),
+                _env_item("ENABLE_ALIPAY_AVATAR", str(settings.enable_alipay_avatar).lower(), "支付宝头像能力", restart=False),
+                _env_item("ENABLE_ALIPAY_NICKNAME", str(settings.enable_alipay_nickname).lower(), "支付宝昵称能力", restart=False),
+                _env_item("ENABLE_ALIPAY_PHONE_BIND", str(settings.enable_alipay_phone_bind).lower(), "支付宝手机号绑定", restart=False),
+                _env_item("ENABLE_WX_AVATAR", str(settings.enable_wx_avatar).lower(), "微信头像能力", restart=False),
+                _env_item("ENABLE_WX_NICKNAME", str(settings.enable_wx_nickname).lower(), "微信昵称能力", restart=False),
+                _env_item("ENABLE_WX_PHONE_BIND", str(settings.enable_wx_phone_bind).lower(), "微信手机号绑定", restart=False),
+                _env_item("KITCHEN_TICKET_ORDER_NO", settings.kitchen_ticket_order_no, "厨房票订单号样式 barcode/text/off", restart=False),
+                _env_item("XPYUN_PRINT_COPIES", str(settings.xpyun_print_copies), "小票打印份数", restart=False),
+                _env_item("XPYUN_VOICE", str(settings.xpyun_voice), "云打印语音 0~3", restart=False),
             ],
         },
     ]
@@ -325,6 +363,7 @@ async def get_settings_overview(request: Request, db: DbSession):
     settings = get_settings()
     stores = (await db.execute(select(Store).order_by(Store.id))).scalars().all()
     business = await SystemSettingsService.list_business(db)
+    business_groups = await SystemSettingsService.list_business_grouped(db)
     health = await _check_health(db)
     env_path = Path(__file__).resolve().parents[4] / ".env"
     return success(
@@ -349,6 +388,8 @@ async def get_settings_overview(request: Request, db: DbSession):
                 for s in stores
             ],
             "business": business,
+            "business_groups": business_groups,
+            "business_group_defs": BUSINESS_SETTING_GROUPS,
             "env_groups": _build_env_groups(settings),
             "env_file_hint": str(env_path),
             "cache": {
@@ -393,8 +434,9 @@ async def update_business_settings(
         detail={"keys": list(data.settings.keys()), "values": {k: str(v) for k, v in data.settings.items()}},
     )
     await db.flush()
+    groups = await SystemSettingsService.list_business_grouped(db)
     return success(
-        {"business": items},
+        {"business": items, "business_groups": groups},
         message="业务参数已保存；本进程立即生效，多实例通过 Redis 版本同步",
         request=request,
     )
@@ -459,7 +501,10 @@ async def update_store_business(
         ).scalars()
     }
     for key, val in data.updates.items():
-        sval = str(val)
+        try:
+            sval = SystemSettingsService._validate_value(key, str(val))
+        except ValueError as e:
+            raise AppException(40014, str(e)) from e
         if key in existing:
             existing[key].setting_value = sval
         else:

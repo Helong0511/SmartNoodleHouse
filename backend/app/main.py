@@ -65,6 +65,19 @@ async def lifespan(app: FastAPI):
         if settings.is_production:
             raise SystemExit(1) from e
 
+    # 业务参数：把 META 中缺失键按 .env 种子写入 system_settings，并预热本进程缓存
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.services.system_settings_service import SystemSettingsService
+
+        async with AsyncSessionLocal() as db:
+            await SystemSettingsService.ensure_seeded(db)
+            await db.commit()
+            await SystemSettingsService._load_raw(db, force=True)
+        logger.info("system_settings 已种子并预热缓存")
+    except Exception as e:
+        logger.warning("system_settings 种子失败（可稍后由后台页触发）: %s", e)
+
     # 必须走 settings（会读 .env）；勿用 os.getenv，否则仅写在 .env 的 PROCESS_ROLE 会被忽略
     from app.core.leader_lock import make_worker_id, release_leader, renew_leader_loop, try_acquire_leader
 

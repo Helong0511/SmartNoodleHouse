@@ -14,8 +14,23 @@ from app.models import SystemSetting, VisitorEvent
 logger = logging.getLogger(__name__)
 
 # 可在后台在线修改的业务参数（持久化到 system_settings 表，运行时优先于 .env 默认值）
+# 类型：int / float / bool / string / enum（enum 须带 choices）
+# group：前端「系统设置」分页分类
+
+BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
+    {"id": "order", "label": "订单与厨房", "description": "支付超时、厨房自动出餐等堂食履约参数"},
+    {"id": "welcome", "label": "迎宾与人脸", "description": "迎宾冷却、人脸匹配与访客保留"},
+    {"id": "member", "label": "会员与优惠", "description": "新客赠券等会员相关"},
+    {"id": "miniprogram", "label": "小程序与 H5", "description": "隐私能力开关、订阅模板、扫码域名与小程序版本"},
+    {"id": "delivery", "label": "外卖", "description": "自动接单与开发兜底门店（生产多店须关闭兜底）"},
+    {"id": "print", "label": "厨房打印", "description": "打印总开关、模式、IP/端口、份数与票面样式"},
+    {"id": "security", "label": "安全与网络", "description": "Token 有效期、Webhook 白名单、可信反代"},
+    {"id": "system", "label": "系统通用", "description": "时区、上传限制与扩展名"},
+]
+
 BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
     "order_payment_timeout_minutes": {
+        "group": "order",
         "label": "订单支付超时",
         "unit": "分钟",
         "type": "int",
@@ -24,6 +39,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "description": "未支付订单自动关闭时间",
     },
     "kitchen_auto_complete_minutes": {
+        "group": "order",
         "label": "厨房自动出餐",
         "unit": "分钟",
         "type": "int",
@@ -32,6 +48,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "description": "支付后厨房 KDS 未处理超过该时间则自动完成出餐；0 表示关闭",
     },
     "visitor_data_retention_days": {
+        "group": "welcome",
         "label": "访客数据保留",
         "unit": "天",
         "type": "int",
@@ -40,6 +57,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "description": "匿名访客事件保留天数；缩短时会同步压缩已有记录的过期时间",
     },
     "operation_log_retention_days": {
+        "group": "system",
         "label": "操作日志保留",
         "unit": "天",
         "type": "int",
@@ -48,6 +66,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "description": "后台操作日志自动清理周期",
     },
     "welcome_cooldown_seconds": {
+        "group": "welcome",
         "label": "迎宾冷却时间",
         "unit": "秒",
         "type": "int",
@@ -56,6 +75,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "description": "同一顾客两次迎宾的最小间隔",
     },
     "face_match_threshold": {
+        "group": "welcome",
         "label": "人脸匹配阈值",
         "unit": "",
         "type": "float",
@@ -65,12 +85,235 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "description": "相似度达到该值才视为同一人（0.75 推荐）",
     },
     "face_confirm_frames": {
+        "group": "welcome",
         "label": "人脸确认帧数",
         "unit": "帧",
         "type": "int",
         "min": 1,
         "max": 30,
         "description": "连续 N 帧匹配成功才触发迎宾",
+    },
+    "delivery_auto_confirm": {
+        "group": "delivery",
+        "label": "外卖自动接单",
+        "unit": "",
+        "type": "bool",
+        "description": "新外卖单是否自动向平台 confirm；关闭则本地 PENDING，需商家确认",
+    },
+    "welcome_coupon_name": {
+        "group": "member",
+        "label": "新客赠券模板名",
+        "unit": "",
+        "type": "string",
+        "max_length": 64,
+        "description": "须与 coupon_templates.name 完全一致且启用；空则不发券",
+    },
+    "enable_alipay_avatar": {
+        "group": "miniprogram",
+        "label": "支付宝头像能力",
+        "unit": "",
+        "type": "bool",
+        "description": "经小程序 /miniprogram/config 下发；个人主体请关闭",
+    },
+    "enable_alipay_nickname": {
+        "group": "miniprogram",
+        "label": "支付宝昵称能力",
+        "unit": "",
+        "type": "bool",
+        "description": "经小程序 /miniprogram/config 下发",
+    },
+    "enable_alipay_phone_bind": {
+        "group": "miniprogram",
+        "label": "支付宝手机号绑定",
+        "unit": "",
+        "type": "bool",
+        "description": "个人主体小程序通常须关闭",
+    },
+    "enable_wx_avatar": {
+        "group": "miniprogram",
+        "label": "微信头像能力",
+        "unit": "",
+        "type": "bool",
+        "description": "经小程序 /miniprogram/config 下发",
+    },
+    "enable_wx_nickname": {
+        "group": "miniprogram",
+        "label": "微信昵称能力",
+        "unit": "",
+        "type": "bool",
+        "description": "经小程序 /miniprogram/config 下发",
+    },
+    "enable_wx_phone_bind": {
+        "group": "miniprogram",
+        "label": "微信手机号绑定",
+        "unit": "",
+        "type": "bool",
+        "description": "个人主体小程序通常须关闭",
+    },
+    "kitchen_ticket_order_no": {
+        "group": "print",
+        "label": "厨房票订单号样式",
+        "unit": "",
+        "type": "enum",
+        "choices": ["barcode", "text", "off"],
+        "description": "barcode=条码+单号；text=仅单号；off=不打印",
+    },
+    "xpyun_print_copies": {
+        "group": "print",
+        "label": "小票打印份数",
+        "unit": "份",
+        "type": "int",
+        "min": 1,
+        "max": 5,
+        "description": "局域网/云打印出票份数",
+    },
+    "xpyun_voice": {
+        "group": "print",
+        "label": "云打印语音",
+        "unit": "",
+        "type": "int",
+        "min": 0,
+        "max": 3,
+        "description": "仅芯烨云：0取消单 1静音 2来单 3退单",
+    },
+    "max_upload_size_mb": {
+        "group": "system",
+        "label": "上传大小上限",
+        "unit": "MB",
+        "type": "int",
+        "min": 1,
+        "max": 50,
+        "description": "单文件上传上限（商品图/头像等）；改后对新上传生效",
+    },
+    "jwt_expire_minutes": {
+        "group": "security",
+        "label": "员工 Token 有效期",
+        "unit": "分钟",
+        "type": "int",
+        "min": 30,
+        "max": 10080,
+        "description": "仅影响新签发的员工 JWT",
+    },
+    "customer_jwt_expire_minutes": {
+        "group": "security",
+        "label": "顾客 Token 有效期",
+        "unit": "分钟",
+        "type": "int",
+        "min": 30,
+        "max": 10080,
+        "description": "仅影响新签发的顾客 JWT",
+    },
+    "webhook_ip_allowlist": {
+        "group": "security",
+        "label": "Webhook IP 白名单",
+        "unit": "",
+        "type": "string",
+        "max_length": 2000,
+        "description": "支付/外卖回调允许的 IP/CIDR，逗号分隔；空=不限制",
+    },
+    "webhook_require_allowlist": {
+        "group": "security",
+        "label": "强制 Webhook 白名单",
+        "unit": "",
+        "type": "bool",
+        "description": "生产环境白名单为空时是否直接拒绝回调",
+    },
+    "trusted_proxy_ips": {
+        "group": "security",
+        "label": "可信反代 IP",
+        "unit": "",
+        "type": "string",
+        "max_length": 2000,
+        "description": "仅这些直连 peer 可信任 X-Real-IP / X-Forwarded-For",
+    },
+    "h5_public_base_url": {
+        "group": "miniprogram",
+        "label": "H5 对外域名",
+        "unit": "",
+        "type": "string",
+        "max_length": 255,
+        "description": "桌台一码通扫 / 顾客 H5 基址，如 https://order.example.com",
+    },
+    "dev_lan_host": {
+        "group": "miniprogram",
+        "label": "开发机局域网 IP",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "description": "开发环境把 localhost 改写成真机可访问地址；生产可留空",
+    },
+    "mini_program_env_version": {
+        "group": "miniprogram",
+        "label": "小程序码版本",
+        "unit": "",
+        "type": "enum",
+        "choices": ["auto", "develop", "trial", "release"],
+        "description": "auto=按环境推断；桌台码/URL Link 的 env_version",
+    },
+    "xpyun_enabled": {
+        "group": "print",
+        "label": "厨房打印总开关",
+        "unit": "",
+        "type": "bool",
+        "description": "关闭后不再出制作单（历史字段名 XPYUN_ENABLED）",
+    },
+    "printer_mode": {
+        "group": "print",
+        "label": "打印机模式",
+        "unit": "",
+        "type": "enum",
+        "choices": ["local", "xpyun"],
+        "description": "local=局域网 ESC/POS；xpyun=芯烨云",
+    },
+    "printer_host": {
+        "group": "print",
+        "label": "打印机 IP",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "description": "局域网模式全局默认；可按门店 store_settings 覆盖",
+    },
+    "printer_port": {
+        "group": "print",
+        "label": "打印机端口",
+        "unit": "",
+        "type": "int",
+        "min": 1,
+        "max": 65535,
+        "description": "局域网 ESC/POS 端口，默认 9100",
+    },
+    "wechat_subscribe_template_order_ready": {
+        "group": "miniprogram",
+        "label": "微信出餐订阅模板",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "description": "公众平台订阅消息模板 ID；空则不下发",
+    },
+    "allowed_image_extensions": {
+        "group": "system",
+        "label": "允许的图片扩展名",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "description": "逗号分隔，如 jpg,jpeg,png,webp,gif",
+    },
+    "app_timezone": {
+        "group": "system",
+        "label": "业务时区",
+        "unit": "",
+        "type": "string",
+        "max_length": 64,
+        "description": "如 Asia/Shanghai；影响订单时间展示与超时计算",
+    },
+    "delivery_env_fallback_store_id": {
+        "group": "delivery",
+        "label": "外卖 .env 兜底门店",
+        "unit": "",
+        "type": "int",
+        "min": 0,
+        "max": 999999,
+        "description": "无绑定时允许用 .env Token 的本系统门店 ID；多店生产必须 0",
     },
 }
 
@@ -88,6 +331,12 @@ class SystemSettingsService:
     def _env_default(cls, key: str, settings: Settings | None = None) -> str:
         s = settings or get_settings()
         val = getattr(s, key, None)
+        meta = BUSINESS_SETTING_META.get(key) or {}
+        if meta.get("type") == "bool":
+            return "true" if cls._parse_bool(val, False) else "false"
+        if key == "mini_program_env_version":
+            raw = (str(val).strip().lower() if val is not None else "")
+            return raw if raw in ("develop", "trial", "release") else "auto"
         return str(val) if val is not None else ""
 
     @classmethod
@@ -205,11 +454,87 @@ class SystemSettingsService:
             return fallback
 
     @classmethod
+    def peek_cached(cls, key: str) -> str | None:
+        """同步窥视本进程缓存（未预热则返回 None，调用方回退 .env）。"""
+        if cls._cache is not None and key in cls._cache:
+            return cls._cache[key]
+        return None
+
+    @classmethod
+    def resolved_int_sync(cls, key: str, fallback: int) -> int:
+        raw = cls.peek_cached(key)
+        if raw is None:
+            return fallback
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    @classmethod
+    def resolved_bool_sync(cls, key: str, fallback: bool) -> bool:
+        raw = cls.peek_cached(key)
+        if raw is None:
+            return fallback
+        return cls._parse_bool(raw, fallback)
+
+    @classmethod
+    def resolved_str_sync(cls, key: str, fallback: str) -> str:
+        raw = cls.peek_cached(key)
+        return fallback if raw is None else str(raw)
+
+    @classmethod
+    def resolved_mini_program_env_version_sync(cls) -> str:
+        settings = get_settings()
+        raw = cls.resolved_str_sync(
+            "mini_program_env_version",
+            (settings.mini_program_env_version or "").strip() or "auto",
+        ).strip().lower()
+        if raw in ("develop", "trial", "release"):
+            return raw
+        return "release" if settings.is_production else "develop"
+
+    @classmethod
+    async def touch_cache(cls, db: AsyncSession | None = None) -> None:
+        """请求路径轻量刷新：Redis 版本未变且在 TTL 内则无 DB 查询。"""
+        if db is not None:
+            await cls._load_raw(db)
+            return
+        now = time.monotonic()
+        remote_ver = await cls._remote_version()
+        if (
+            cls._cache is not None
+            and cls._cache_ver == remote_ver
+            and now - cls._cache_at < cls.CACHE_TTL
+        ):
+            return
+        from app.core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await cls._load_raw(session)
+
+    @classmethod
     async def get_float(cls, db: AsyncSession, key: str, fallback: float) -> float:
         try:
             return float(await cls.get_value(db, key, fallback))
         except (TypeError, ValueError):
             return fallback
+
+    @classmethod
+    def _parse_bool(cls, raw: str | bool | int | None, fallback: bool = False) -> bool:
+        if isinstance(raw, bool):
+            return raw
+        if raw is None:
+            return fallback
+        s = str(raw).strip().lower()
+        if s in ("1", "true", "yes", "on", "y"):
+            return True
+        if s in ("0", "false", "no", "off", "n", ""):
+            return False
+        return fallback
+
+    @classmethod
+    async def get_bool(cls, db: AsyncSession, key: str, fallback: bool) -> bool:
+        return cls._parse_bool(await cls.get_value(db, key, fallback), fallback)
 
     @classmethod
     async def store_override_map(cls, db: AsyncSession, key: str) -> dict[int, str]:
@@ -276,12 +601,64 @@ class SystemSettingsService:
             return fallback
 
     @classmethod
+    async def effective_bool(
+        cls,
+        db: AsyncSession,
+        key: str,
+        fallback: bool,
+        *,
+        store_id: int | None = None,
+    ) -> bool:
+        return cls._parse_bool(
+            await cls.effective_setting(db, key, store_id=store_id, fallback=fallback),
+            fallback,
+        )
+
+    @classmethod
     def _validate_value(cls, key: str, value: str) -> str:
         if key not in BUSINESS_SETTING_META:
             raise ValueError(f"未知配置项: {key}")
         meta = BUSINESS_SETTING_META[key]
         typ = meta["type"]
         raw = str(value).strip()
+        if typ == "bool":
+            low = raw.lower()
+            if low in ("1", "true", "yes", "on", "y"):
+                return "true"
+            if low in ("0", "false", "no", "off", "n"):
+                return "false"
+            raise ValueError(f"{meta['label']}须为 true/false")
+        if typ == "string":
+            # 允许空串（如关闭新客券 / 白名单）
+            max_len = int(meta.get("max_length") or 256)
+            if len(raw) > max_len:
+                raise ValueError(f"{meta['label']}最多 {max_len} 字符")
+            if key == "app_timezone" and raw:
+                try:
+                    from zoneinfo import ZoneInfo
+
+                    ZoneInfo(raw)
+                except Exception as e:
+                    raise ValueError(f"{meta['label']}无效: {raw}") from e
+            if key == "allowed_image_extensions" and raw:
+                parts = [p.strip().lower().lstrip(".") for p in raw.split(",") if p.strip()]
+                if not parts:
+                    raise ValueError(f"{meta['label']}不能为空列表")
+                return ",".join(parts)
+            if key == "h5_public_base_url" and raw:
+                if not (raw.startswith("http://") or raw.startswith("https://")):
+                    raise ValueError(f"{meta['label']}须以 http:// 或 https:// 开头")
+            return raw
+        if typ == "enum":
+            choices = [str(c) for c in (meta.get("choices") or [])]
+            if raw.lower() in ("nan", "none", "null"):
+                raise ValueError(f"{meta['label']}不能为空")
+            # mini_program：空串视为 auto
+            if key == "mini_program_env_version" and raw == "":
+                return "auto"
+            if raw not in choices:
+                raise ValueError(f"{meta['label']}须为: {', '.join(choices)}")
+            return raw
         if raw == "" or raw.lower() in ("nan", "none", "null"):
             raise ValueError(f"{meta['label']}不能为空")
         try:
@@ -316,31 +693,68 @@ class SystemSettingsService:
         )
 
     @classmethod
+    def group_meta_map(cls) -> dict[str, dict[str, str]]:
+        return {g["id"]: g for g in BUSINESS_SETTING_GROUPS}
+
+    @classmethod
     async def list_business(cls, db: AsyncSession) -> list[dict]:
         await cls.ensure_seeded(db)
         settings = get_settings()
         raw = await cls._load_raw(db)
+        groups = cls.group_meta_map()
         items = []
         for key, meta in BUSINESS_SETTING_META.items():
             val = raw.get(key, cls._env_default(key, settings))
-            items.append(
-                {
-                    "key": key,
-                    "value": val,
-                    "label": meta["label"],
-                    "unit": meta.get("unit", ""),
-                    "type": meta["type"],
-                    "min": meta.get("min"),
-                    "max": meta.get("max"),
-                    "step": meta.get("step"),
-                    "description": meta.get("description"),
-                    "editable": True,
-                }
-            )
+            gid = meta.get("group") or "system"
+            gmeta = groups.get(gid) or {"id": gid, "label": gid, "description": ""}
+            item: dict[str, Any] = {
+                "key": key,
+                "value": val,
+                "label": meta["label"],
+                "unit": meta.get("unit", ""),
+                "type": meta["type"],
+                "min": meta.get("min"),
+                "max": meta.get("max"),
+                "step": meta.get("step"),
+                "max_length": meta.get("max_length"),
+                "choices": meta.get("choices"),
+                "description": meta.get("description"),
+                "group": gid,
+                "group_label": gmeta.get("label", gid),
+                "group_description": gmeta.get("description", ""),
+                "editable": True,
+            }
+            if meta["type"] == "bool":
+                item["bool_value"] = cls._parse_bool(val, False)
+            items.append(item)
         return items
 
     @classmethod
-    async def update_business(cls, db: AsyncSession, updates: dict[str, str | int | float]) -> list[dict]:
+    async def list_business_grouped(cls, db: AsyncSession) -> list[dict]:
+        """按 BUSINESS_SETTING_GROUPS 顺序返回分组 + items。"""
+        items = await cls.list_business(db)
+        by_group: dict[str, list[dict]] = {}
+        for it in items:
+            by_group.setdefault(it["group"], []).append(it)
+        result = []
+        for g in BUSINESS_SETTING_GROUPS:
+            result.append(
+                {
+                    "id": g["id"],
+                    "label": g["label"],
+                    "description": g.get("description", ""),
+                    "items": by_group.get(g["id"], []),
+                }
+            )
+        # 兜底：META 中出现未登记的 group
+        known = {g["id"] for g in BUSINESS_SETTING_GROUPS}
+        for gid, gitems in by_group.items():
+            if gid not in known:
+                result.append({"id": gid, "label": gid, "description": "", "items": gitems})
+        return result
+
+    @classmethod
+    async def update_business(cls, db: AsyncSession, updates: dict[str, str | int | float | bool]) -> list[dict]:
         if not updates:
             raise ValueError("未提交任何配置项")
         unknown = [k for k in updates if k not in BUSINESS_SETTING_META]

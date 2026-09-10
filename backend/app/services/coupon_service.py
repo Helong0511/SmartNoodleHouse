@@ -19,9 +19,17 @@ logger = logging.getLogger(__name__)
 
 class CouponService:
     @staticmethod
-    def welcome_template_name() -> str:
-        """注册赠券对应的模板名（.env WELCOME_COUPON_NAME，默认「新客满30减5」）。"""
+    async def welcome_template_name(db: AsyncSession | None = None) -> str:
+        """注册赠券模板名：优先 system_settings，否则 .env WELCOME_COUPON_NAME。"""
         name = (get_settings().welcome_coupon_name or "").strip()
+        if db is not None:
+            from app.services.system_settings_service import SystemSettingsService
+
+            name = (
+                await SystemSettingsService.effective_setting(
+                    db, "welcome_coupon_name", fallback=name
+                )
+            ).strip()
         return name or "新客满30减5"
     @staticmethod
     def discount_label(tmpl: CouponTemplate) -> str:
@@ -376,7 +384,7 @@ class CouponService:
     @staticmethod
     async def issue_welcome_coupon(db: AsyncSession, customer_id: int) -> CustomerCoupon | None:
         """注册会员赠送新客券（每人限领该欢迎模板一张；模板缺失时打日志并跳过）。"""
-        welcome_name = CouponService.welcome_template_name()
+        welcome_name = await CouponService.welcome_template_name(db)
         tmpl = (
             await db.execute(
                 select(CouponTemplate).where(

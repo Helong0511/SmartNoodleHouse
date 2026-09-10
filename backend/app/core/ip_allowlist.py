@@ -29,7 +29,11 @@ def client_ip(request: Request) -> str:
     """
     peer = request.client.host if request.client else ""
     settings = get_settings()
-    trusted_raw = getattr(settings, "trusted_proxy_ips", "") or ""
+    from app.services.system_settings_service import SystemSettingsService
+
+    trusted_raw = SystemSettingsService.resolved_str_sync(
+        "trusted_proxy_ips", getattr(settings, "trusted_proxy_ips", "") or ""
+    )
     trusted = _parse_allowlist(trusted_raw)
     # 未配置可信代理时：绝不信任客户端伪造头，只用 peer
     if not trusted or not peer or not ip_allowed(peer, trusted):
@@ -86,16 +90,29 @@ def ip_allowed(ip: str, allowlist: list) -> bool:
 
 class WebhookAllowlistMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        from app.services.system_settings_service import SystemSettingsService
+
+        try:
+            await SystemSettingsService.touch_cache()
+        except Exception:
+            pass
+
         path = request.url.path
         if not any(path.startswith(p) or path == p for p in WEBHOOK_PATHS):
             return await call_next(request)
 
         settings = get_settings()
-        raw = getattr(settings, "webhook_ip_allowlist", "") or ""
+        raw = SystemSettingsService.resolved_str_sync(
+            "webhook_ip_allowlist", getattr(settings, "webhook_ip_allowlist", "") or ""
+        )
         allowlist = _parse_allowlist(raw)
         if not allowlist:
             # 生产未配置白名单时告警但放行（避免误杀）；可用 WEBHOOK_REQUIRE_ALLOWLIST=true 强制
-            if settings.is_production and getattr(settings, "webhook_require_allowlist", False):
+            require = SystemSettingsService.resolved_bool_sync(
+                "webhook_require_allowlist",
+                bool(getattr(settings, "webhook_require_allowlist", False)),
+            )
+            if settings.is_production and require:
                 return JSONResponse(
                     status_code=403,
                     content={"code": 403, "message": "Webhook IP 白名单未配置", "data": None},

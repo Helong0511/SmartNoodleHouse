@@ -25,8 +25,13 @@ def create_access_token(
     token_version: int = 0,
 ) -> str:
     settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
     now = datetime.now(timezone.utc)
-    expire = now + timedelta(minutes=settings.jwt_expire_minutes)
+    ttl = SystemSettingsService.resolved_int_sync(
+        "jwt_expire_minutes", settings.jwt_expire_minutes
+    )
+    expire = now + timedelta(minutes=max(30, int(ttl)))
     payload = {
         "sub": str(subject),
         "exp": expire,
@@ -69,9 +74,14 @@ def create_customer_token(
     token_version: int = 0,
 ) -> str:
     settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
     now = datetime.now(timezone.utc)
-    ttl = int(getattr(settings, "customer_jwt_expire_minutes", None) or settings.jwt_expire_minutes)
-    expire = now + timedelta(minutes=max(30, ttl))
+    ttl = SystemSettingsService.resolved_int_sync(
+        "customer_jwt_expire_minutes",
+        int(getattr(settings, "customer_jwt_expire_minutes", None) or settings.jwt_expire_minutes),
+    )
+    expire = now + timedelta(minutes=max(30, int(ttl)))
     payload = {
         "sub": str(customer_id),
         "exp": expire,

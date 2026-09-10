@@ -239,9 +239,95 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'f
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'operation_log_retention_days', '60', '操作日志保留天数'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'operation_log_retention_days');
+
 INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'kitchen_auto_complete_minutes', '20', '厨房 KDS 未处理自动出餐（分钟，0=关闭）'
+SELECT 'kitchen_auto_complete_minutes', '30', '厨房 KDS 未处理自动出餐（分钟，0=关闭）'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'kitchen_auto_complete_minutes');
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'delivery_auto_confirm', 'false', '新外卖单是否自动向平台 confirm'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'delivery_auto_confirm');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'welcome_coupon_name', '新客满30减5', '注册赠券模板名'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'welcome_coupon_name');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'enable_alipay_avatar', 'true', '支付宝头像能力'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_alipay_avatar');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'enable_alipay_nickname', 'true', '支付宝昵称能力'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_alipay_nickname');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'enable_alipay_phone_bind', 'false', '支付宝手机号绑定'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_alipay_phone_bind');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'enable_wx_avatar', 'true', '微信头像能力'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_wx_avatar');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'enable_wx_nickname', 'true', '微信昵称能力'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_wx_nickname');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'enable_wx_phone_bind', 'false', '微信手机号绑定'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_wx_phone_bind');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'kitchen_ticket_order_no', 'barcode', '厨房票订单号样式 barcode/text/off'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'kitchen_ticket_order_no');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'xpyun_print_copies', '1', '小票打印份数'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_print_copies');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'xpyun_voice', '2', '云打印语音 0~3'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_voice');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'max_upload_size_mb', '5', '单文件上传上限 MB'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'max_upload_size_mb');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'jwt_expire_minutes', '1440', '员工 Token 有效期（分钟）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'jwt_expire_minutes');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'customer_jwt_expire_minutes', '1440', '顾客 Token 有效期（分钟）'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'customer_jwt_expire_minutes');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'webhook_ip_allowlist', '', 'Webhook IP 白名单'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'webhook_ip_allowlist');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'webhook_require_allowlist', 'false', '强制 Webhook 白名单'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'webhook_require_allowlist');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'trusted_proxy_ips', '127.0.0.1,::1', '可信反代 IP'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'trusted_proxy_ips');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'h5_public_base_url', '', 'H5 对外域名'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'h5_public_base_url');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'dev_lan_host', '', '开发机局域网 IP'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'dev_lan_host');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'mini_program_env_version', 'auto', '小程序码版本'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'mini_program_env_version');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'xpyun_enabled', 'false', '厨房打印总开关'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_enabled');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'printer_mode', 'local', '打印机模式'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'printer_mode');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'printer_host', '', '打印机 IP'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'printer_host');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'printer_port', '9100', '打印机端口'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'printer_port');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'wechat_subscribe_template_order_ready', '', '微信出餐订阅模板'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'wechat_subscribe_template_order_ready');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'allowed_image_extensions', 'jpg,jpeg,png,webp,gif', '允许的图片扩展名'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'allowed_image_extensions');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'app_timezone', 'Asia/Shanghai', '业务时区'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'app_timezone');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'delivery_env_fallback_store_id', '0', '外卖 .env 兜底门店'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'delivery_env_fallback_store_id');
 
 -- 八、校正（幂等）：非店长角色不得持有 payment:refund
 DELETE rp FROM role_permissions rp

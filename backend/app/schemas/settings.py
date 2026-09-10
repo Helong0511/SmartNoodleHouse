@@ -2,15 +2,15 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class BusinessSettingsUpdate(BaseModel):
-    settings: dict[str, str | int | float] = Field(description="业务参数键值，见 GET /settings 的 business 列表")
+    settings: dict[str, str | int | float | bool] = Field(description="业务参数键值，见 GET /settings 的 business 列表")
 
     @field_validator("settings")
     @classmethod
     def validate_settings(cls, v: dict) -> dict:
         if not v:
             raise ValueError("未提交任何配置项")
-        if len(v) > 32:
-            raise ValueError("单次最多提交 32 个配置项")
+        if len(v) > 80:
+            raise ValueError("单次最多提交 80 个配置项")
         return v
 
 

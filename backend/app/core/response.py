@@ -36,15 +36,26 @@ def error(code: int, message: str, request: Request | None = None) -> dict:
     return {"code": code, "message": message, "data": None, "request_id": rid}
 
 
+def _biz_timezone() -> ZoneInfo:
+    settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
+    name = SystemSettingsService.resolved_str_sync("app_timezone", settings.app_timezone or "Asia/Shanghai")
+    try:
+        return ZoneInfo(name.strip() or "Asia/Shanghai")
+    except Exception:
+        return ZoneInfo("Asia/Shanghai")
+
+
 def now_local() -> datetime:
-    return datetime.now(ZoneInfo(get_settings().app_timezone))
+    return datetime.now(_biz_timezone())
 
 
 def ensure_local_aware(dt: datetime | None) -> datetime | None:
     """MySQL 读出的本地时间常为 naive，与 now_local() 比较前补齐时区。"""
     if dt is None:
         return None
-    tz = ZoneInfo(get_settings().app_timezone)
+    tz = _biz_timezone()
     if dt.tzinfo is None:
         return dt.replace(tzinfo=tz)
     return dt.astimezone(tz)

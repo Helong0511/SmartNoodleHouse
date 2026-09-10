@@ -65,14 +65,14 @@ class Settings(BaseSettings):
     alipay_gateway: str = "https://openapi.alipay.com/gateway.do"
     alipay_notify_url: str = ""
     alipay_return_url: str = ""
-    # 小程序隐私能力开关（经 GET /miniprogram/config 下发；个人主体手机号须 false）
+    # 小程序隐私能力开关（种子默认；运行时优先 system_settings，经 GET /miniprogram/config 下发）
     enable_alipay_avatar: bool = True
     enable_alipay_nickname: bool = True
     enable_alipay_phone_bind: bool = False
     enable_wx_avatar: bool = True
     enable_wx_nickname: bool = True
     enable_wx_phone_bind: bool = False
-    # 注册会员自动赠送的券模板名称（须与 coupon_templates.name 完全一致且 status=1）
+    # 注册会员自动赠送的券模板名称（种子默认；运行时看 system_settings.welcome_coupon_name）
     welcome_coupon_name: str = "新客满30减5"
 
     # 美团外卖开放平台（waimaiopen）
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     allow_auth_mock: bool = False
     # 开发机未装 InsightFace 时可用 OpenCV 弱特征兜底；生产禁止
     allow_opencv_face_fallback: bool = False
-    # 外卖新单是否自动向平台 confirm（默认 false：本地 PENDING，需商家确认）
+    # 外卖新单是否自动向平台 confirm（种子默认；运行时看 system_settings / 可按门店覆盖）
     delivery_auto_confirm: bool = False
 
     # 厨房热敏小票打印（总开关 XPYUN_ENABLED 历史命名保留）
@@ -126,8 +126,8 @@ class Settings(BaseSettings):
     xpyun_printer_sn: str = ""
     xpyun_api_base: str = "https://open.xpyun.net/api/openapi/xprinter"
     xpyun_print_copies: int = 1
-    xpyun_voice: int = 2  # 0取消单 1静音 2来单 3退单（仅 xpyun 模式）
-    # 制作单底部订单号：barcode=CODE-128+单号 | text=仅单号 | off=不打印
+    xpyun_voice: int = 2  # 0取消单 1静音 2来单 3退单（仅 xpyun；可热更）
+    # 制作单底部订单号：barcode | text | off（种子默认；运行时看 system_settings）
     kitchen_ticket_order_no: str = "barcode"
     allow_print_mock: bool = False
     enable_rate_limit: bool = True

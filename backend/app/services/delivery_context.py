@@ -91,7 +91,13 @@ async def resolve_store_and_credentials(
     # 单店全局配置：仅当 .env 中 platform shop_id 与回调一致，且显式配置了兜底门店时使用
     global_shop = settings.eleme_shop_id if platform.upper() == "ELEME" else settings.meituan_shop_id
     global_token = settings.eleme_access_token if platform.upper() == "ELEME" else None
-    fallback_sid = int(getattr(settings, "delivery_env_fallback_store_id", 0) or 0)
+    from app.services.system_settings_service import SystemSettingsService
+
+    fallback_sid = await SystemSettingsService.effective_int(
+        db,
+        "delivery_env_fallback_store_id",
+        int(getattr(settings, "delivery_env_fallback_store_id", 0) or 0),
+    )
     if global_shop and str(global_shop) == str(shop_id) and fallback_sid > 0:
         # 禁止信任回调体里的 local_store_id（可伪造跨店）
         return fallback_sid, PlatformCredentials(
@@ -124,7 +130,13 @@ async def get_credentials_for_store(
     ).scalar_one_or_none()
     if not binding:
         settings = get_settings()
-        fallback_sid = int(getattr(settings, "delivery_env_fallback_store_id", 0) or 0)
+        from app.services.system_settings_service import SystemSettingsService
+
+        fallback_sid = await SystemSettingsService.effective_int(
+            db,
+            "delivery_env_fallback_store_id",
+            int(getattr(settings, "delivery_env_fallback_store_id", 0) or 0),
+        )
         if fallback_sid <= 0 or int(store_id) != fallback_sid:
             return None
         if platform.upper() == "ELEME" and settings.eleme_access_token:

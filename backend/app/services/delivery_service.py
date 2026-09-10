@@ -419,9 +419,16 @@ class DeliveryService:
             if get_settings().is_production:
                 raise AppException(50010, "外卖财务分录写入失败，请重试回调") from exc
 
-        settings = get_settings()
+        from app.services.system_settings_service import SystemSettingsService
+
         deferred: list[dict] = []
-        if settings.delivery_auto_confirm:
+        auto_confirm = await SystemSettingsService.effective_bool(
+            db,
+            "delivery_auto_confirm",
+            get_settings().delivery_auto_confirm,
+            store_id=int(store_id),
+        )
+        if auto_confirm:
             # 本地先标记 ACCEPTED，平台 confirm 失败由 deferred 回滚任务处理
             from app.services.order_lifecycle import apply_order_status
 

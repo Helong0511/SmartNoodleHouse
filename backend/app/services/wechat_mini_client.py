@@ -114,9 +114,15 @@ async def generate_url_link(
 ) -> tuple[str | None, str | None]:
     """生成可在微信内打开的 URL Link。返回 (link, error_hint)。"""
     settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
     if not settings.wechat_app_id or not settings.wechat_app_secret:
         return None, "未配置 WECHAT_APP_ID / WECHAT_APP_SECRET"
-    ver = (env_version or settings.resolved_mini_program_env_version or "release").strip().lower()
+    ver = (
+        env_version
+        or SystemSettingsService.resolved_mini_program_env_version_sync()
+        or "release"
+    ).strip().lower()
     if ver not in ("develop", "trial", "release"):
         ver = "release"
     page = (path or "pages/index/index").strip().lstrip("/")
@@ -168,9 +174,15 @@ async def generate_wxacode(
 ) -> tuple[bytes | None, str | None]:
     """生成微信小程序码图片（扫码直接进小程序，比 weixin:// 明文 Scheme 可靠）。"""
     settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
     if not settings.wechat_app_id or not settings.wechat_app_secret:
         return None, "未配置 WECHAT_APP_ID / WECHAT_APP_SECRET"
-    ver = (env_version or settings.resolved_mini_program_env_version or "release").strip().lower()
+    ver = (
+        env_version
+        or SystemSettingsService.resolved_mini_program_env_version_sync()
+        or "release"
+    ).strip().lower()
     if ver not in ("develop", "trial", "release"):
         ver = "release"
     page = (path or "pages/index/index").strip().lstrip("/")
@@ -242,7 +254,12 @@ async def send_order_ready_subscribe(
 ) -> bool:
     """订单 READY 时发送订阅消息（未配置模板则跳过）。"""
     settings = get_settings()
-    tmpl = (settings.wechat_subscribe_template_order_ready or "").strip()
+    from app.services.system_settings_service import SystemSettingsService
+
+    tmpl = SystemSettingsService.resolved_str_sync(
+        "wechat_subscribe_template_order_ready",
+        settings.wechat_subscribe_template_order_ready or "",
+    ).strip()
     if not tmpl or not openid:
         return False
     if not settings.wechat_app_id or not settings.wechat_app_secret:

@@ -33,6 +33,26 @@ _REMOTE_MAX_REDIRECTS = 3
 _REMOTE_TIMEOUT = 10.0
 
 
+def _max_upload_mb() -> int:
+    """优先 system_settings 进程缓存，否则 .env。"""
+    from app.services.system_settings_service import SystemSettingsService
+
+    return SystemSettingsService.resolved_int_sync(
+        "max_upload_size_mb", get_settings().max_upload_size_mb
+    )
+
+
+def _allowed_extensions() -> set[str]:
+    settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
+    raw = SystemSettingsService.resolved_str_sync(
+        "allowed_image_extensions", settings.allowed_image_extensions
+    )
+    exts = {e.strip().lower().lstrip(".") for e in raw.split(",") if e.strip()}
+    return exts or settings.allowed_extensions
+
+
 # 魔数校验，防扩展名伪造
 _MAGIC = {
     "jpg": (b"\xff\xd8\xff",),
@@ -147,8 +167,8 @@ def assert_public_http_url(url: str) -> None:
 
 async def read_upload_limited(file: UploadFile, max_bytes: int | None = None) -> bytes:
     """流式读取上传文件，超限立即中止（避免无条件 file.read()）。"""
-    settings = get_settings()
-    limit = int(max_bytes if max_bytes is not None else settings.max_upload_size_mb * 1024 * 1024)
+    mb = _max_upload_mb()
+    limit = int(max_bytes if max_bytes is not None else mb * 1024 * 1024)
     chunks: list[bytes] = []
     total = 0
     while True:
@@ -157,7 +177,7 @@ async def read_upload_limited(file: UploadFile, max_bytes: int | None = None) ->
             break
         total += len(chunk)
         if total > limit:
-            raise AppException(40022, f"文件大小超过限制 {settings.max_upload_size_mb}MB")
+            raise AppException(40022, f"文件大小超过限制 {mb}MB")
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -170,13 +190,14 @@ async def save_image_bytes(
     subdir: str,
 ) -> str:
     settings = get_settings()
-    if ext not in settings.allowed_extensions:
+    if ext not in _allowed_extensions():
         raise AppException(40020, f"不允许的文件扩展名: {ext}")
     if content_type not in ALLOWED_MIME:
         raise AppException(40021, f"不允许的MIME类型: {content_type}")
-    max_size = settings.max_upload_size_mb * 1024 * 1024
+    mb = _max_upload_mb()
+    max_size = mb * 1024 * 1024
     if len(data) > max_size:
-        raise AppException(40022, f"文件大小超过限制 {settings.max_upload_size_mb}MB")
+        raise AppException(40022, f"文件大小超过限制 {mb}MB")
     if not data:
         raise AppException(40025, "空文件")
     _validate_magic(ext, data)
@@ -197,8 +218,8 @@ async def fetch_and_save_remote_image(url: str, subdir: str = "avatars") -> str:
     import httpx
 
     current = str(url or "").strip()
-    settings = get_settings()
-    max_size = settings.max_upload_size_mb * 1024 * 1024
+    mb = _max_upload_mb()
+    max_size = mb * 1024 * 1024
     data = b""
 
     async with httpx.AsyncClient(timeout=_REMOTE_TIMEOUT, follow_redirects=False) as client:
@@ -217,14 +238,14 @@ async def fetch_and_save_remote_image(url: str, subdir: str = "avatars") -> str:
                     raise AppException(40021, f"无法下载头像({resp.status_code})")
                 cl = resp.headers.get("content-length")
                 if cl and cl.isdigit() and int(cl) > max_size:
-                    raise AppException(40022, f"文件大小超过限制 {settings.max_upload_size_mb}MB")
+                    raise AppException(40022, f"文件大小超过限制 {mb}MB")
                 chunks: list[bytes] = []
                 total = 0
                 async for chunk in resp.aiter_bytes(_READ_CHUNK):
                     total += len(chunk)
                     if total > max_size:
                         raise AppException(
-                            40022, f"文件大小超过限制 {settings.max_upload_size_mb}MB"
+                            40022, f"文件大小超过限制 {mb}MB"
                         )
                     chunks.append(chunk)
                 data = b"".join(chunks)
