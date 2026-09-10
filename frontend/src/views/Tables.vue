@@ -17,7 +17,7 @@
     </div>
 
     <el-table :data="tables" style="margin-top:12px" border>
-      <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="120" />
+      <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="40" />
       <el-table-column prop="table_no" label="桌号" width="100" />
       <el-table-column prop="table_name" label="名称" />
       <el-table-column label="状态" width="90">

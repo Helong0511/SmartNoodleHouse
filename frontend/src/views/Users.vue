@@ -17,14 +17,14 @@
       <el-button @click="load">刷新</el-button>
     </div>
 
-    <el-table :data="users" border style="margin-top:12px">
-      <el-table-column prop="username" label="用户名" width="120" />
-      <el-table-column prop="display_name" label="姓名" width="120" />
-      <el-table-column prop="role_name" label="角色" width="120" />
-      <el-table-column prop="store_name" label="门店" min-width="140">
+    <el-table :data="users" border style="margin-top:12px" table-layout="auto">
+      <el-table-column prop="store_name" label="门店" width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.store_name || (row.role_code === 'SUPER_ADMIN' ? '全店' : '—') }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="90">
+      <el-table-column prop="role_name" label="角色" width="120" />
+      <el-table-column prop="username" label="用户名" width="120" show-overflow-tooltip />
+      <el-table-column prop="display_name" label="姓名" width="120" show-overflow-tooltip />
+      <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
             {{ row.status === 1 ? '启用' : '禁用' }}
@@ -33,6 +33,9 @@
       </el-table-column>
       <el-table-column prop="last_login_at" label="最近登录" width="170">
         <template #default="{ row }">{{ formatDateTime(row.last_login_at) }}</template>
+      </el-table-column>
+      <el-table-column prop="created_at" label="创建时间" width="170">
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
