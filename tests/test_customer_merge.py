@@ -111,7 +111,7 @@ async def test_merge_moves_accounts_and_points(db_session):
 
 
 @pytest.mark.asyncio
-async def test_merge_coupon_conflict_expires_source(db_session):
+async def test_merge_moves_all_coupons_including_same_template(db_session):
     await _seed_levels(db_session)
     target = Customer(id=911, customer_no="CU_MG_CT", status=1, points=0)
     source = Customer(id=912, customer_no="CU_MG_CS", status=1, points=0)
@@ -178,34 +178,16 @@ async def test_merge_coupon_conflict_expires_source(db_session):
             db_session,
             target_customer_id=target.id,
             source_customer_id=source.id,
-            reason="券冲突",
+            reason="券合并",
         )
         await db_session.flush()
 
-    assert result["stats"]["coupons_expired_dup"] == 1
-    assert result["stats"]["coupons_moved"] == 1
+    assert result["stats"]["coupons_expired_dup"] == 0
+    assert result["stats"]["coupons_moved"] == 2
 
-    dup = (
-        await db_session.execute(
-            select(CustomerCoupon).where(CustomerCoupon.coupon_no == "CP_MG_S1")
-        )
-    ).scalar_one()
-    assert dup.status == "EXPIRED"
-    assert getattr(dup, "status_reason", None) == "merge_dup"
-    assert dup.customer_id == source.id
-
-    moved = (
-        await db_session.execute(
-            select(CustomerCoupon).where(CustomerCoupon.coupon_no == "CP_MG_S2")
-        )
-    ).scalar_one()
-    assert moved.customer_id == target.id
-    assert moved.status == "AVAILABLE"
-
-    keep = (
-        await db_session.execute(
-            select(CustomerCoupon).where(CustomerCoupon.coupon_no == "CP_MG_T1")
-        )
-    ).scalar_one()
-    assert keep.status == "AVAILABLE"
-    assert keep.customer_id == target.id
+    for no in ("CP_MG_S1", "CP_MG_S2", "CP_MG_T1"):
+        row = (
+            await db_session.execute(select(CustomerCoupon).where(CustomerCoupon.coupon_no == no))
+        ).scalar_one()
+        assert row.customer_id == target.id
+        assert row.status == "AVAILABLE"

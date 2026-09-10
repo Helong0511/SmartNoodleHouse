@@ -138,9 +138,13 @@ Page({
   onShareAppMessage() {
     const o = this.data.order || {}
     const title = `${o.store_name || '智能面馆'} · ${this.data.pageTitle}`
+    const oid = this.orderId || o.id || ''
     return {
       title,
-      path: `/packageOrder/result/result?order_id=${this.orderId || o.id || ''}`
+      // 分享 path 勿以 / 开头，且必须带有效 order_id，避免打开空页
+      path: oid
+        ? `packageOrder/result/result?order_id=${oid}`
+        : 'pages/index/index'
     }
   },
 

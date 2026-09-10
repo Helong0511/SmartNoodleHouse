@@ -203,8 +203,15 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="issueQuantityLabel" required>
-          <el-input-number v-model="issueForm.quantity" :min="1" :max="50" :step="1" style="width: 100%" />
-          <div class="hint">单次最多发放 50 张，适用于优惠券与代金券</div>
+          <el-input-number
+            v-model="issueForm.quantity"
+            :min="1"
+            :max="50"
+            :step="1"
+            :disabled="!issueForm.template_id"
+            style="width: 100%"
+          />
+          <div class="hint">同模板可多张，单次最多 50 张</div>
         </el-form-item>
       </el-form>
       <template #footer>

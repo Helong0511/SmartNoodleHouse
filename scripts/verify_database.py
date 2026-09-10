@@ -50,7 +50,6 @@ REQUIRED_UNIQUES = [
     ("users", "username"),
     ("roles", "code"),
     ("permissions", "code"),
-    ("customer_coupons", "uk_cc_customer_template"),
     ("cashier_shifts", "uk_cashier_shift_one_open"),
 ]
 

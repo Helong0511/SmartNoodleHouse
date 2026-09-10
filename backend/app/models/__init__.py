@@ -109,9 +109,7 @@ class CouponTemplate(Base):
 
 class CustomerCoupon(Base):
     __tablename__ = "customer_coupons"
-    __table_args__ = (
-        UniqueConstraint("customer_id", "template_id", name="uk_cc_customer_template"),
-    )
+    # 同模板可持有多张（满减/折扣/代金券均由业务按张核销）
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
     template_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("coupon_templates.id"))

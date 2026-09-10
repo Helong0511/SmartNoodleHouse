@@ -51,6 +51,20 @@ App({
       remoteLogger.logger.error(String(err || 'App.onError'), err)
     } catch (_) {}
   },
+  onPageNotFound(res) {
+    try {
+      remoteLogger.logger.warn('onPageNotFound', res)
+    } catch (_) {}
+    const path = (res && res.path) || ''
+    if (!path) {
+      wx.switchTab({
+        url: '/pages/menu/menu',
+        fail: () => wx.reLaunch({ url: '/pages/index/index' })
+      })
+      return
+    }
+    wx.reLaunch({ url: '/pages/index/index' })
+  },
   onShow(options) {
     if (options) this.parseLaunch(options)
     tabCartBadge.updateTabCartBadge(this.globalData.cart || wx.getStorageSync('cart') || [])

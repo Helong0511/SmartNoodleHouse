@@ -27,4 +27,4 @@ class CouponTemplateUpdate(BaseModel):
 class CouponIssueRequest(BaseModel):
     customer_id: int = Field(..., gt=0)
     template_id: int = Field(..., gt=0)
-    quantity: int = Field(default=1, ge=1, le=50, description="发放张数（优惠券/代金券通用）")
+    quantity: int = Field(default=1, ge=1, le=50, description="发放张数，单次最多 50")

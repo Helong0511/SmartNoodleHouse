@@ -11,7 +11,8 @@
 -- 已有库升级（本文件不重复执行；按需跑增量脚本）：
 --   sql/003_pos_settlement.sql      → payments.operator_id + cashier_shifts
 --   sql/004_pos_refund_requests.sql → pos_refund_requests
---   sql/004_welcome_coupon_unique.sql → customer_coupons 唯一
+--   sql/004_welcome_coupon_unique.sql → 历史：曾加每人每模板唯一（已被 021 取消）
+--   sql/tools/021_voucher_multi_issue.sql → 去掉 uk_cc_customer_template，同模板可多张
 --   sql/005_cashier_shift_one_open.sql → 同一收银员仅一个 OPEN 班次
 --   sql/tools/006~012               → token_version / 特价 / is_default / 免烹饪 / KDS 认领等
 --     （上述字段均已并入本全量 DDL；tools 仅供旧库补丁）
@@ -192,7 +193,7 @@ CREATE TABLE IF NOT EXISTS customers (
   CONSTRAINT fk_customers_reg_table FOREIGN KEY (registered_table_id) REFERENCES tables(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顾客/会员主表';
 
--- 用户持有的券实例（一张模板可发放多张）
+-- 用户持有的券实例（同模板可多张；按张核销）
 CREATE TABLE IF NOT EXISTS customer_coupons (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   customer_id BIGINT UNSIGNED NOT NULL COMMENT '持有人 → customers.id',
@@ -205,7 +206,7 @@ CREATE TABLE IF NOT EXISTS customer_coupons (
   used_order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '核销订单 → orders.id',
   used_at DATETIME(3) DEFAULT NULL COMMENT '核销时间',
   INDEX idx_cc_customer_status (customer_id, status, expires_at),
-  UNIQUE KEY uk_cc_customer_template (customer_id, template_id),
+  INDEX idx_cc_customer_template (customer_id, template_id),
   CONSTRAINT fk_cc_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
   CONSTRAINT fk_cc_template FOREIGN KEY (template_id) REFERENCES coupon_templates(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户优惠券/代金券实例表';

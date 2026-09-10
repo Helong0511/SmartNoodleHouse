@@ -52,6 +52,15 @@ App({
       remoteLogger.logger.error(String(err || 'App.onError'), err)
     } catch (_) {}
   },
+  onPageNotFound(res) {
+    try {
+      remoteLogger.logger.warn('onPageNotFound', res)
+    } catch (_) {}
+    my.switchTab({
+      url: '/pages/menu/menu',
+      fail: () => my.reLaunch({ url: '/pages/index/index' })
+    })
+  },
   onShow(options) {
     if (options) this.parseLaunch(options)
     tabCartBadge.updateTabCartBadge(this.globalData.cart || auth.readStorage('cart') || [])

@@ -174,37 +174,30 @@ class CouponService:
         tmpl = await db.get(CouponTemplate, int(template_id))
         if not tmpl or int(tmpl.status) != 1:
             raise AppException(40407, "优惠券模板不存在或已停用")
-        # uk_cc_customer_template：每人每模板至多一张
-        exists = await db.scalar(
-            select(CustomerCoupon.id)
-            .where(
-                CustomerCoupon.customer_id == customer.id,
-                CustomerCoupon.template_id == tmpl.id,
-            )
-            .limit(1)
-        )
-        if exists:
-            raise AppException(40076, "该顾客已持有此模板优惠券（每人每模板限一张）")
+
+        is_voucher = CouponService.is_voucher_type(tmpl.coupon_type)
         qty = max(1, min(int(quantity or 1), 50))
-        if qty > 1:
-            raise AppException(40077, "每人每模板限一张，不可批量重复发放同一模板")
+        prefix = "VP" if is_voucher else "CP"
+        expires = now_local() + timedelta(days=int(tmpl.valid_days or 30))
         issued: list[CustomerCoupon] = []
         try:
             async with db.begin_nested():
-                cc = CustomerCoupon(
-                    customer_id=customer.id,
-                    template_id=tmpl.id,
-                    coupon_no=generate_no("VP" if CouponService.is_voucher_type(tmpl.coupon_type) else "CP"),
-                    status="AVAILABLE",
-                    expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
-                )
-                db.add(cc)
+                for _ in range(qty):
+                    cc = CustomerCoupon(
+                        customer_id=customer.id,
+                        template_id=tmpl.id,
+                        coupon_no=generate_no(prefix),
+                        status="AVAILABLE",
+                        expires_at=expires,
+                    )
+                    db.add(cc)
+                    issued.append(cc)
                 await db.flush()
-                issued.append(cc)
         except IntegrityError as exc:
             msg = str(getattr(exc, "orig", exc)).upper()
             if "UNIQUE" in msg or "DUPLICATE" in msg:
-                raise AppException(40076, "该顾客已持有此模板优惠券（每人每模板限一张）") from exc
+                # 多为 coupon_no 冲突，重试由调用方处理；不再按「每人每模板」拦截
+                raise AppException(50020, "发券冲突，请重试") from exc
             raise
         return issued
 

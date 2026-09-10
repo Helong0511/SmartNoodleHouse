@@ -6,8 +6,7 @@ Merge policy
    （before/after 含脱敏手机号）。
 2. 积分：target.points = target.points + source.points（双方 FOR UPDATE），再
    CustomerService.recalculate_member_level。
-3. 券冲突（UNIQUE customer_id+template_id）：目标保留 AVAILABLE；源侧同 template 的
-   AVAILABLE → EXPIRED，status_reason=merge_dup；无冲突的券改挂到目标。
+3. 券：全部迁入目标（同模板可多张）；不再按模板去重作废。
 4. 平台账号（openid / alipay_user_id 唯一）：目标已存在同 openid/userid 则删除源账号
    行；否则改 customer_id 到目标。
 5. 偏好 UNIQUE(customer, category, option_code)：冲突保留更高 preference_score
@@ -224,27 +223,12 @@ class CustomerMergeService:
     async def _merge_coupons(
         cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
     ) -> None:
-        target_templates = set(
-            (
-                await db.execute(
-                    select(CustomerCoupon.template_id).where(CustomerCoupon.customer_id == target_id)
-                )
-            ).scalars().all()
-        )
+        # 同模板可多张：源侧券一律迁入目标
         for cc in (
             await db.execute(select(CustomerCoupon).where(CustomerCoupon.customer_id == source_id))
         ).scalars().all():
-            if cc.template_id in target_templates:
-                if (cc.status or "").upper() == "AVAILABLE":
-                    cc.status = "EXPIRED"
-                    if hasattr(cc, "status_reason"):
-                        cc.status_reason = "merge_dup"
-                    stats["coupons_expired_dup"] += 1
-                # 冲突券留在源顾客（已禁用），避免 UNIQUE 冲突
-            else:
-                cc.customer_id = target_id
-                target_templates.add(cc.template_id)
-                stats["coupons_moved"] += 1
+            cc.customer_id = target_id
+            stats["coupons_moved"] += 1
         await db.flush()
 
     @classmethod

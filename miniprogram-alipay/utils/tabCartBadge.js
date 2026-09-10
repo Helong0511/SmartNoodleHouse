@@ -2,6 +2,13 @@
 
 const CART_TAB_INDEX = 1
 
+const TAB_ROUTES = {
+  'pages/menu/menu': true,
+  'pages/cart/cart': true,
+  'pages/orders/orders': true,
+  'pages/member/member': true
+}
+
 function cartBadgeCount(cart) {
   return (cart || []).filter((i) => !i.invalid).length
 }
@@ -21,14 +28,30 @@ function readCart() {
   }
 }
 
+function isOnTabPage() {
+  try {
+    const pages = getCurrentPages()
+    if (!pages || !pages.length) return false
+    const cur = pages[pages.length - 1]
+    const route = (cur && (cur.route || cur.__route__)) || ''
+    return !!TAB_ROUTES[route]
+  } catch (_) {
+    return false
+  }
+}
+
 function applyBadge(count) {
+  // 非 Tab 页调用会失败，静默忽略
+  if (!isOnTabPage()) return
+  const noop = () => {}
   if (count > 0) {
     my.setTabBarBadge({
       index: CART_TAB_INDEX,
       text: count > 99 ? '99+' : String(count),
+      fail: noop
     })
   } else {
-    my.removeTabBarBadge({ index: CART_TAB_INDEX })
+    my.removeTabBarBadge({ index: CART_TAB_INDEX, fail: noop })
   }
 }
 
@@ -59,5 +82,5 @@ module.exports = {
   CART_TAB_INDEX,
   cartBadgeCount,
   updateTabCartBadge,
-  syncTabCartBadge,
+  syncTabCartBadge
 }
