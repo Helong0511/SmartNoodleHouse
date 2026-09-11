@@ -6,8 +6,9 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppException
 from app.core.response import now_local
-from app.models import DiningSession, DiningTable
+from app.models import Customer, DiningSession, DiningTable
 
 # 堂食会话默认有效期（小时）；过期后须重新扫码
 DEFAULT_SESSION_HOURS = 4
@@ -70,6 +71,14 @@ class DiningSessionService:
         hours: int = DEFAULT_SESSION_HOURS,
     ) -> DiningSession:
         """扫码进入：同桌续期；换桌则结束旧会话并开新会话。"""
+        # 以顾客行为锁串行化换桌，避免并发扫码留下多个 ACTIVE 会话。
+        locked_customer = (
+            await db.execute(
+                select(Customer).where(Customer.id == int(customer_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not locked_customer or int(locked_customer.status or 0) != 1:
+            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
         await DiningSessionService.expire_stale(db, customer_id)
         now = now_local()
         expires = now + timedelta(hours=max(1, int(hours or DEFAULT_SESSION_HOURS)))

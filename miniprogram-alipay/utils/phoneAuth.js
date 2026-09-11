@@ -83,9 +83,23 @@ function handleGetPhoneAuthorize(page, err, onEncrypted) {
   handleGetAuthorizeSuccess(page, { authScope: 'phoneNumber' }, onEncrypted)
 }
 
+function confirmAccountMerge(message) {
+  return new Promise((resolve) => {
+    my.confirm({
+      title: '确认合并账号',
+      content: message || '该手机号已关联另一账号。合并后将统一历史订单、积分和优惠券，是否继续？',
+      confirmButtonText: '确认合并',
+      cancelButtonText: '暂不合并',
+      success: (res) => resolve(!!(res && res.confirm)),
+      fail: () => resolve(false)
+    })
+  })
+}
+
 module.exports = {
   handleGetAuthorizeSuccess,
   handleAuthError,
   handleGetPhoneAuthorize,
-  normalizePhoneEncrypted
+  normalizePhoneEncrypted,
+  confirmAccountMerge
 }

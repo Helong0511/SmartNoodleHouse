@@ -371,7 +371,20 @@ Page({
       try {
         my.showLoading({ content: '绑定中' })
         await auth.ensureLogin()
-        const res = await api.post('/miniprogram/member/phone', { alipay_phone_encrypted: encrypted })
+        let res
+        try {
+          res = await api.post('/miniprogram/member/phone', { alipay_phone_encrypted: encrypted })
+        } catch (bindErr) {
+          if (Number(bindErr && bindErr.code) !== 40906) throw bindErr
+          my.hideLoading()
+          const confirmed = await phoneAuth.confirmAccountMerge(bindErr.message)
+          if (!confirmed) return
+          my.showLoading({ content: '合并中' })
+          res = await api.post('/miniprogram/member/phone', {
+            alipay_phone_encrypted: encrypted,
+            confirm_merge: true
+          })
+        }
         const app = appRef()
         if (res && res.customer_token && app) {
           auth.refreshCustomerToken(app, res.customer_token, {

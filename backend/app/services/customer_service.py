@@ -1,3 +1,4 @@
+import hashlib
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select, update
@@ -10,6 +11,7 @@ from app.core.response import money, now_local
 from app.models import (
     Customer,
     CustomerAlipayAccount,
+    CustomerIdentity,
     CustomerPreference,
     CustomerWechatAccount,
     DiningTable,
@@ -587,44 +589,179 @@ class CustomerService:
         ).scalar_one_or_none()
 
     @staticmethod
-    async def get_or_create_by_wechat(db: AsyncSession, openid: str, unionid: str | None = None) -> Customer:
-        result = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
-        account = result.scalar_one_or_none()
+    async def _identity_customer_id(
+        db: AsyncSession, provider: str, provider_subject: str | None
+    ) -> int | None:
+        subject = (provider_subject or "").strip()
+        if not subject:
+            return None
+        return (
+            await db.execute(
+                select(CustomerIdentity.customer_id).where(
+                    CustomerIdentity.provider == provider,
+                    CustomerIdentity.provider_subject == subject,
+                    CustomerIdentity.verified == 1,
+                )
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
+    async def _claim_identity(
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        provider: str,
+        provider_subject: str | None,
+    ) -> None:
+        """原子认领稳定身份；同一身份绝不能静默改挂到另一顾客。"""
+        subject = (provider_subject or "").strip()
+        if not subject:
+            return
+        existing = (
+            await db.execute(
+                select(CustomerIdentity).where(
+                    CustomerIdentity.provider == provider,
+                    CustomerIdentity.provider_subject == subject,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            if int(existing.customer_id) != int(customer_id):
+                raise AppException(40905, "该渠道身份已绑定其他顾客，请联系客服处理")
+            if int(existing.verified or 0) != 1:
+                existing.verified = 1
+            return
+        try:
+            async with db.begin_nested():
+                db.add(
+                    CustomerIdentity(
+                        customer_id=int(customer_id),
+                        provider=provider,
+                        provider_subject=subject,
+                        verified=1,
+                    )
+                )
+                await db.flush()
+        except IntegrityError:
+            winner = (
+                await db.execute(
+                    select(CustomerIdentity).where(
+                        CustomerIdentity.provider == provider,
+                        CustomerIdentity.provider_subject == subject,
+                    )
+                )
+            ).scalar_one_or_none()
+            if not winner or int(winner.customer_id) != int(customer_id):
+                raise AppException(40905, "该渠道身份已绑定其他顾客，请联系客服处理")
+
+    @staticmethod
+    async def _ensure_wechat_account(
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        openid: str,
+        unionid: str | None,
+        copy_profile_from: CustomerWechatAccount | None = None,
+    ) -> None:
+        account = (
+            await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
+        ).scalar_one_or_none()
         if account:
+            if int(account.customer_id) != int(customer_id):
+                raise AppException(40905, "微信身份绑定冲突，请联系客服处理")
             if unionid and not account.unionid:
                 account.unionid = unionid
-                await db.flush()
+        else:
+            src = copy_profile_from
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        CustomerWechatAccount(
+                            customer_id=int(customer_id),
+                            openid=openid,
+                            unionid=unionid,
+                            profile_completed=int(getattr(src, "profile_completed", 0) or 0),
+                            nickname=getattr(src, "nickname", None),
+                            avatar_url=getattr(src, "avatar_url", None),
+                        )
+                    )
+                    await db.flush()
+            except IntegrityError:
+                account = (
+                    await db.execute(
+                        select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid)
+                    )
+                ).scalar_one_or_none()
+                if not account or int(account.customer_id) != int(customer_id):
+                    raise AppException(40905, "微信身份绑定冲突，请联系客服处理")
+        await CustomerService._claim_identity(
+            db,
+            customer_id=customer_id,
+            provider="WECHAT_OPENID",
+            provider_subject=openid,
+        )
+        if unionid:
+            await CustomerService._claim_identity(
+                db,
+                customer_id=customer_id,
+                provider="WECHAT_UNIONID",
+                provider_subject=unionid,
+            )
+        await db.flush()
+
+    @staticmethod
+    async def get_or_create_by_wechat(db: AsyncSession, openid: str, unionid: str | None = None) -> Customer:
+        openid = (openid or "").strip()
+        unionid = (unionid or "").strip() or None
+        if not openid:
+            raise AppException(40002, "微信未返回稳定用户身份")
+
+        openid_customer_id = await CustomerService._identity_customer_id(db, "WECHAT_OPENID", openid)
+        union_customer_id = await CustomerService._identity_customer_id(db, "WECHAT_UNIONID", unionid)
+        if openid_customer_id and union_customer_id and openid_customer_id != union_customer_id:
+            raise AppException(40905, "微信身份数据冲突，请联系客服处理")
+        identity_customer_id = openid_customer_id or union_customer_id
+        if identity_customer_id:
+            await CustomerService._ensure_wechat_account(
+                db,
+                customer_id=identity_customer_id,
+                openid=openid,
+                unionid=unionid,
+            )
+            return await db.get(Customer, identity_customer_id)
+
+        account = (
+            await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
+        ).scalar_one_or_none()
+        if account:
+            await CustomerService._ensure_wechat_account(
+                db,
+                customer_id=account.customer_id,
+                openid=openid,
+                unionid=unionid,
+            )
             return await db.get(Customer, account.customer_id)
 
-        # 同一开放平台主体下，unionid 可跨小程序识别同一人
+        # 兼容迁移前数据：仅 UnionID 这一微信官方强身份可复用既有 Customer。
+        union_acc = None
         if unionid:
-            by_union = await db.execute(
-                select(CustomerWechatAccount).where(CustomerWechatAccount.unionid == unionid).limit(1)
+            union_acc = (
+                await db.execute(
+                    select(CustomerWechatAccount)
+                    .where(CustomerWechatAccount.unionid == unionid)
+                    .order_by(CustomerWechatAccount.id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if union_acc:
+            await CustomerService._ensure_wechat_account(
+                db,
+                customer_id=union_acc.customer_id,
+                openid=openid,
+                unionid=unionid,
+                copy_profile_from=union_acc,
             )
-            union_acc = by_union.scalar_one_or_none()
-            if union_acc:
-                try:
-                    async with db.begin_nested():
-                        db.add(
-                            CustomerWechatAccount(
-                                customer_id=union_acc.customer_id,
-                                openid=openid,
-                                unionid=unionid,
-                                profile_completed=int(getattr(union_acc, "profile_completed", 0) or 0),
-                                nickname=getattr(union_acc, "nickname", None),
-                                avatar_url=getattr(union_acc, "avatar_url", None),
-                            )
-                        )
-                        await db.flush()
-                except IntegrityError:
-                    pass
-                else:
-                    return await db.get(Customer, union_acc.customer_id)
-                again = (
-                    await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
-                ).scalar_one_or_none()
-                if again:
-                    return await db.get(Customer, again.customer_id)
+            return await db.get(Customer, union_acc.customer_id)
 
         try:
             async with db.begin_nested():
@@ -632,24 +769,75 @@ class CustomerService:
                 db.add(customer)
                 await db.flush()
                 db.add(CustomerWechatAccount(customer_id=customer.id, openid=openid, unionid=unionid))
+                db.add(
+                    CustomerIdentity(
+                        customer_id=customer.id,
+                        provider="WECHAT_OPENID",
+                        provider_subject=openid,
+                        verified=1,
+                    )
+                )
+                if unionid:
+                    db.add(
+                        CustomerIdentity(
+                            customer_id=customer.id,
+                            provider="WECHAT_UNIONID",
+                            provider_subject=unionid,
+                            verified=1,
+                        )
+                    )
                 await db.flush()
                 return customer
         except IntegrityError:
-            # 并发登录：另一请求已写入同一 openid
-            again = (
-                await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == openid))
-            ).scalar_one_or_none()
-            if again:
-                return await db.get(Customer, again.customer_id)
+            winner_id = await CustomerService._identity_customer_id(db, "WECHAT_OPENID", openid)
+            union_winner_id = await CustomerService._identity_customer_id(db, "WECHAT_UNIONID", unionid)
+            if winner_id and union_winner_id and winner_id != union_winner_id:
+                raise AppException(40905, "微信身份数据冲突，请联系客服处理")
+            winner_id = winner_id or union_winner_id
+            if winner_id:
+                await CustomerService._ensure_wechat_account(
+                    db,
+                    customer_id=winner_id,
+                    openid=openid,
+                    unionid=unionid,
+                )
+                return await db.get(Customer, winner_id)
             raise AppException(40002, "微信登录冲突，请重试")
 
     @staticmethod
     async def get_or_create_by_alipay(db: AsyncSession, alipay_user_id: str) -> Customer:
-        result = await db.execute(
-            select(CustomerAlipayAccount).where(CustomerAlipayAccount.alipay_user_id == alipay_user_id)
+        alipay_user_id = (alipay_user_id or "").strip()
+        if not alipay_user_id:
+            raise AppException(40002, "支付宝未返回稳定用户身份")
+        identity_customer_id = await CustomerService._identity_customer_id(
+            db, "ALIPAY_USER_ID", alipay_user_id
         )
-        account = result.scalar_one_or_none()
+        account = (
+            await db.execute(
+                select(CustomerAlipayAccount).where(
+                    CustomerAlipayAccount.alipay_user_id == alipay_user_id
+                )
+            )
+        ).scalar_one_or_none()
+        if identity_customer_id:
+            if account and int(account.customer_id) != int(identity_customer_id):
+                raise AppException(40905, "支付宝身份绑定冲突，请联系客服处理")
+            if not account:
+                db.add(
+                    CustomerAlipayAccount(
+                        customer_id=identity_customer_id,
+                        alipay_user_id=alipay_user_id,
+                    )
+                )
+                await db.flush()
+            return await db.get(Customer, identity_customer_id)
         if account:
+            await CustomerService._claim_identity(
+                db,
+                customer_id=account.customer_id,
+                provider="ALIPAY_USER_ID",
+                provider_subject=alipay_user_id,
+            )
             return await db.get(Customer, account.customer_id)
         try:
             async with db.begin_nested():
@@ -657,15 +845,36 @@ class CustomerService:
                 db.add(customer)
                 await db.flush()
                 db.add(CustomerAlipayAccount(customer_id=customer.id, alipay_user_id=alipay_user_id))
+                db.add(
+                    CustomerIdentity(
+                        customer_id=customer.id,
+                        provider="ALIPAY_USER_ID",
+                        provider_subject=alipay_user_id,
+                        verified=1,
+                    )
+                )
                 await db.flush()
                 return customer
         except IntegrityError:
+            winner_id = await CustomerService._identity_customer_id(
+                db, "ALIPAY_USER_ID", alipay_user_id
+            )
+            if winner_id:
+                return await db.get(Customer, winner_id)
             again = (
                 await db.execute(
-                    select(CustomerAlipayAccount).where(CustomerAlipayAccount.alipay_user_id == alipay_user_id)
+                    select(CustomerAlipayAccount).where(
+                        CustomerAlipayAccount.alipay_user_id == alipay_user_id
+                    )
                 )
             ).scalar_one_or_none()
             if again:
+                await CustomerService._claim_identity(
+                    db,
+                    customer_id=again.customer_id,
+                    provider="ALIPAY_USER_ID",
+                    provider_subject=alipay_user_id,
+                )
                 return await db.get(Customer, again.customer_id)
             raise AppException(40002, "支付宝登录冲突，请重试")
 
@@ -801,42 +1010,111 @@ class CustomerService:
         }
 
     @staticmethod
-    async def try_link_by_phone(db: AsyncSession, customer: Customer, phone: str) -> Customer:
-        """注册填手机号时：若已有同号顾客，合并渠道账号到老顾客，避免微信/支付宝各建一套。"""
+    async def save_unverified_phone(
+        db: AsyncSession, customer: Customer, phone: str
+    ) -> Customer:
+        """保存手工填写手机号；永不认证、永不查找或合并其他账号。"""
         phone = (phone or "").strip()
-        if not phone or len(phone) < 7:
+        if not phone:
             return customer
-        other = await db.execute(
-            select(Customer).where(Customer.phone == phone, Customer.id != customer.id).limit(1)
-        )
-        target = other.scalar_one_or_none()
-        if not target:
-            customer.phone = phone
-            return customer
-
-        # 把当前顾客的微信/支付宝账号迁到已有顾客（渠道昵称/头像跟着账号走，互不覆盖）
-        for Acc, fk in (
-            (CustomerWechatAccount, "customer_id"),
-            (CustomerAlipayAccount, "customer_id"),
-        ):
-            rows = (await db.execute(select(Acc).where(getattr(Acc, fk) == customer.id))).scalars().all()
-            for row in rows:
-                row.customer_id = target.id
-        CustomerService.fill_customer_display_if_empty(
-            target,
-            nickname=customer.nickname,
-            avatar_url=customer.avatar_url,
-        )
-        if not getattr(target, "registered_store_id", None) and getattr(customer, "registered_store_id", None):
-            target.registered_store_id = customer.registered_store_id
-            target.registered_table_id = getattr(customer, "registered_table_id", None)
-        target.phone = phone
-        # 软禁用被合并的空壳顾客
-        customer.status = 0
-        customer.phone = None
-        customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
+        if int(getattr(customer, "phone_verified", 0) or 0) == 1:
+            if (customer.phone or "").strip() == phone:
+                return customer
+            raise AppException(40055, "已验证手机号只能通过官方手机号授权更换")
+        customer.phone = phone
+        customer.phone_verified = 0
+        CustomerService.refresh_profile_status(customer)
         await db.flush()
-        return target
+        return customer
+
+    @staticmethod
+    async def bind_verified_phone(
+        db: AsyncSession,
+        customer: Customer,
+        phone: str,
+        *,
+        verification_source: str,
+        confirm_merge: bool = False,
+        request=None,
+    ) -> tuple[Customer, bool]:
+        """绑定官方验证手机号；号码已属其他账号时必须二次确认后完整合并。"""
+        phone = (phone or "").strip()
+        source = (verification_source or "").strip().upper()
+        if source not in ("WECHAT", "ALIPAY"):
+            raise AppException(40054, "手机号缺少可信验证来源")
+
+        identity = (
+            await db.execute(
+                select(CustomerIdentity)
+                .where(
+                    CustomerIdentity.provider == "PHONE",
+                    CustomerIdentity.provider_subject == phone,
+                    CustomerIdentity.verified == 1,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+
+        if not identity:
+            try:
+                async with db.begin_nested():
+                    identity = CustomerIdentity(
+                        customer_id=customer.id,
+                        provider="PHONE",
+                        provider_subject=phone,
+                        verified=1,
+                    )
+                    db.add(identity)
+                    await db.flush()
+            except IntegrityError:
+                identity = (
+                    await db.execute(
+                        select(CustomerIdentity).where(
+                            CustomerIdentity.provider == "PHONE",
+                            CustomerIdentity.provider_subject == phone,
+                            CustomerIdentity.verified == 1,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if not identity:
+                    raise AppException(40905, "手机号绑定冲突，请重试", status_code=409)
+
+        merged = False
+        if int(identity.customer_id) != int(customer.id):
+            if not confirm_merge:
+                raise AppException(
+                    40906,
+                    "该已验证手机号已关联其他账号，确认后可合并历史订单、积分和优惠券",
+                    status_code=409,
+                )
+            from app.services.customer_merge_service import CustomerMergeService
+
+            result = await CustomerMergeService.merge(
+                db,
+                target_customer_id=int(identity.customer_id),
+                source_customer_id=int(customer.id),
+                reason=f"用户确认通过{source}官方手机号合并",
+                request=request,
+            )
+            customer = await db.get(Customer, int(result["target_customer_id"]))
+            if not customer:
+                raise AppException(40905, "账号合并失败，请重试", status_code=409)
+            merged = True
+        else:
+            locked = (
+                await db.execute(
+                    select(Customer).where(Customer.id == customer.id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not locked or int(locked.status or 0) != 1:
+                raise AppException(40102, "顾客不存在或已禁用", status_code=401)
+            customer = locked
+
+        customer.phone = phone
+        customer.phone_verified = 1
+        CustomerService.refresh_profile_status(customer)
+        await db.flush()
+        return customer, merged
 
     @staticmethod
     async def remember_first_seen(
@@ -881,6 +1159,13 @@ class CustomerService:
         幂等开通会员：仅首次 GUEST→MEMBER 返回 newly_activated=True（可发欢迎券等副作用）。
         已是 MEMBER 时只更新可选资料，不重复副作用。
         """
+        # 会员行锁覆盖状态迁移与调用方后续发券所在事务，避免双击并发均认为首次开通。
+        locked = (
+            await db.execute(select(Customer).where(Customer.id == customer.id).with_for_update())
+        ).scalar_one_or_none()
+        if not locked or int(locked.status or 0) != 1:
+            raise AppException(40102, "顾客不存在或已禁用", status_code=401)
+        customer = locked
         newly = not CustomerService.is_member(customer)
         if newly:
             customer.member_status = "MEMBER"
@@ -988,12 +1273,19 @@ class OrderCreateService:
         if ch == "POS":
             if not store_id or not operator_id:
                 raise AppException(40008, "POS 下单幂等键须绑定门店与操作员")
-            return f"pos:{int(store_id)}:{int(operator_id)}:{key}"[:64]
-        if customer_id:
-            return f"cust:{int(customer_id)}:{key}"[:64]
-        if store_id:
-            return f"store:{int(store_id)}:{key}"[:64]
-        return key[:64]
+            scope = f"pos:{int(store_id)}:{int(operator_id)}:"
+        elif customer_id:
+            scope = f"cust:{int(customer_id)}:"
+        elif store_id:
+            scope = f"store:{int(store_id)}:"
+        else:
+            scope = "request:"
+        combined = f"{scope}{key}"
+        if len(combined) <= 64:
+            return combined
+        # 不可直接截断：相同长前缀会碰撞并错误复用他人/另一购物车的订单。
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return f"{scope}sha256:{digest}"[:64]
 
     @staticmethod
     def _assert_idempotent_order_match(

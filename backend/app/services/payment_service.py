@@ -580,22 +580,36 @@ class PaymentService:
             f"{provider_u}_{channel_type.upper()}",
         )
 
-        # 全额待付且金额一致时可复用未支付单；分笔始终新建
-        existing = None
-        if pay_amount == remaining == money(order.total_amount):
-            existing = (
+        # 同一订单任一时刻仅允许一个有效支付流程。订单行锁使检查与创建串行化；
+        # 全额同渠道重试复用原支付单，跨渠道或分笔并发必须先确认原流程结果。
+        pending_rows = list(
+            (
                 await db.execute(
                     select(Payment)
-                    .where(
-                        Payment.order_id == order.id,
-                        Payment.status == "PENDING",
-                        Payment.provider == provider_u,
-                        Payment.channel == channel,
-                    )
+                    .where(Payment.order_id == order.id, Payment.status == "PENDING")
                     .order_by(Payment.id.desc())
-                    .limit(1)
                 )
-            ).scalar_one_or_none()
+            ).scalars().all()
+        )
+        existing = None
+        if pay_amount == remaining == money(order.total_amount):
+            existing = next(
+                (
+                    row
+                    for row in pending_rows
+                    if row.provider == provider_u
+                    and row.channel == channel
+                    and money(row.amount) == pay_amount
+                ),
+                None,
+            )
+        conflicts = [row for row in pending_rows if existing is None or row.id != existing.id]
+        if conflicts:
+            raise AppException(
+                40908,
+                "该订单已有支付流程进行中，请先查单确认结果，避免微信/支付宝重复扣款",
+                status_code=409,
+            )
 
         reused = False
         if existing and money(existing.amount) == pay_amount:
@@ -1299,6 +1313,7 @@ class PaymentService:
             await cls._finalize_tender(
                 db, payment=payment, order=order, provider=provider_u, source="CALLBACK"
             )
+            payment._callback_transitioned_to_paid = True
 
         await db.flush()
         return payment
@@ -1391,6 +1406,7 @@ class PaymentService:
 
         if new_status == "SUCCESS":
             row.status = "SUCCESS"
+            row._callback_transitioned_to_success = True
             row.succeeded_at = now_local()
             payment = (
                 await db.execute(select(Payment).where(Payment.id == row.payment_id).with_for_update())

@@ -29,8 +29,10 @@ from app.models import (
     Customer,
     CustomerAlipayAccount,
     CustomerCoupon,
+    CustomerIdentity,
     CustomerPreference,
     CustomerWechatAccount,
+    DiningSession,
     FaceProfile,
     Order,
     Payment,
@@ -103,6 +105,8 @@ class CustomerMergeService:
             "wechat_dropped": 0,
             "alipay_moved": 0,
             "alipay_dropped": 0,
+            "identities_moved": 0,
+            "dining_sessions": 0,
             "orders": 0,
             "payments": 0,
             "coupons_moved": 0,
@@ -116,6 +120,8 @@ class CustomerMergeService:
         }
 
         await cls._merge_platform_accounts(db, source.id, target.id, stats)
+        await cls._merge_identities(db, source.id, target.id, stats)
+        await cls._merge_dining_sessions(db, source.id, target.id, stats)
         await cls._reassign_orders_payments(db, source.id, target.id, stats)
         await cls._merge_coupons(db, source.id, target.id, stats)
         await cls._merge_preferences(db, source.id, target.id, stats)
@@ -129,7 +135,9 @@ class CustomerMergeService:
         await cls._merge_points_and_meta(db, source, target, stats)
 
         source.status = 0
+        source.account_status = "DISABLED"
         source.phone = None
+        source.phone_verified = 0
         source.token_version = int(getattr(source, "token_version", 0) or 0) + 1
         await db.flush()
 
@@ -217,6 +225,56 @@ class CustomerMergeService:
             update(Payment).where(Payment.customer_id == source_id).values(customer_id=target_id)
         )
         stats["payments"] = int(r2.rowcount or 0)
+        await db.flush()
+
+    @classmethod
+    async def _merge_identities(
+        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+    ) -> None:
+        rows = list(
+            (
+                await db.execute(
+                    select(CustomerIdentity)
+                    .where(CustomerIdentity.customer_id == source_id)
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        for row in rows:
+            row.customer_id = target_id
+            stats["identities_moved"] += 1
+        await db.flush()
+
+    @classmethod
+    async def _merge_dining_sessions(
+        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+    ) -> None:
+        from app.core.response import now_local
+
+        sessions = list(
+            (
+                await db.execute(
+                    select(DiningSession)
+                    .where(DiningSession.customer_id.in_((source_id, target_id)))
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        for row in sessions:
+            if int(row.customer_id) == int(source_id):
+                row.customer_id = target_id
+                stats["dining_sessions"] += 1
+
+        active = [s for s in sessions if (s.status or "").upper() == "ACTIVE"]
+        if len(active) > 1:
+            active.sort(
+                key=lambda s: (s.last_active_at or s.started_at, int(s.id or 0)),
+                reverse=True,
+            )
+            ended_at = now_local()
+            for stale in active[1:]:
+                stale.status = "CANCELLED"
+                stale.ended_at = stale.ended_at or ended_at
         await db.flush()
 
     @classmethod
@@ -356,6 +414,30 @@ class CustomerMergeService:
         )
         if not target.phone and source.phone:
             target.phone = source.phone
+            target.phone_verified = int(getattr(source, "phone_verified", 0) or 0)
+        elif target.phone and source.phone and target.phone == source.phone:
+            target.phone_verified = max(
+                int(getattr(target, "phone_verified", 0) or 0),
+                int(getattr(source, "phone_verified", 0) or 0),
+            )
+        if CustomerService.is_member(source) and not CustomerService.is_member(target):
+            target.member_status = "MEMBER"
+        activation_times = [
+            value
+            for value in (
+                getattr(target, "member_activated_at", None),
+                getattr(source, "member_activated_at", None),
+            )
+            if value is not None
+        ]
+        if activation_times:
+            target.member_activated_at = min(activation_times)
+        source_first_seen = getattr(source, "first_seen_at", None)
+        target_first_seen = getattr(target, "first_seen_at", None)
+        if source_first_seen and (not target_first_seen or source_first_seen < target_first_seen):
+            target.first_seen_at = source_first_seen
+            target.first_seen_store_id = getattr(source, "first_seen_store_id", None)
+            target.first_seen_table_id = getattr(source, "first_seen_table_id", None)
         if not getattr(target, "registered_store_id", None) and getattr(
             source, "registered_store_id", None
         ):
@@ -364,4 +446,5 @@ class CustomerMergeService:
 
         await db.flush()
         await CustomerService.recalculate_member_level(db, target)
+        CustomerService.refresh_profile_status(target)
         await db.flush()

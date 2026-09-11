@@ -91,6 +91,8 @@ async def create_order(
     db: DbSession,
     customer: CurrentCustomer,
 ):
+    if not (data.idempotency_key or "").strip():
+        raise AppException(40010, "创建订单必须提供 idempotency_key，以便网络重试安全复用")
     channel = _resolve_customer_order_channel(request, data.channel)
     order = await OrderCreateService.create_order(
         db,

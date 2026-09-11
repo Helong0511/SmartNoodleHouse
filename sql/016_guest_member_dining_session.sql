@@ -122,9 +122,7 @@ SET first_seen_at = COALESCE(first_seen_at, created_at),
     first_seen_table_id = COALESCE(first_seen_table_id, registered_table_id)
 WHERE first_seen_at IS NULL;
 
-UPDATE customers
-SET phone_verified = 1
-WHERE phone IS NOT NULL AND phone <> '' AND phone_verified = 0;
+-- 历史 phone 的来源不可证明，保持 phone_verified=0；须重新走微信/支付宝官方授权。
 
 -- ---------- dining_sessions ----------
 CREATE TABLE IF NOT EXISTS dining_sessions (

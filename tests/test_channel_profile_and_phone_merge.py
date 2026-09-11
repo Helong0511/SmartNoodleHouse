@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models import Customer, CustomerAlipayAccount, CustomerWechatAccount
+from app.models import Customer, CustomerAlipayAccount, CustomerIdentity, CustomerWechatAccount
 from app.services.customer_service import CustomerService
 
 
@@ -45,7 +45,7 @@ async def test_alipay_channel_not_completed_when_only_wechat_registered(db_sessi
 
 
 @pytest.mark.asyncio
-async def test_try_link_by_phone_keeps_each_channel_profile(db_session):
+async def test_confirm_verified_phone_merge_keeps_each_channel_profile(db_session):
     wechat = Customer(
         id=802,
         customer_no="CU_CH_WX",
@@ -76,6 +76,14 @@ async def test_try_link_by_phone_keeps_each_channel_profile(db_session):
         )
     )
     db_session.add(
+        CustomerIdentity(
+            customer_id=wechat.id,
+            provider="PHONE",
+            provider_subject="13800002222",
+            verified=1,
+        )
+    )
+    db_session.add(
         CustomerAlipayAccount(
             id=22,
             customer_id=alipay.id,
@@ -87,9 +95,16 @@ async def test_try_link_by_phone_keeps_each_channel_profile(db_session):
     )
     await db_session.flush()
 
-    merged = await CustomerService.try_link_by_phone(db_session, alipay, "13800002222")
+    merged, did_merge = await CustomerService.bind_verified_phone(
+        db_session,
+        alipay,
+        "13800002222",
+        verification_source="ALIPAY",
+        confirm_merge=True,
+    )
     await db_session.flush()
 
+    assert did_merge is True
     assert merged.id == wechat.id
     assert merged.nickname == "微信张三"
     assert merged.avatar_url == "/uploads/avatars/wx.jpg"

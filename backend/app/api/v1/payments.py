@@ -116,7 +116,7 @@ async def sync_order_payment(
         db, order, provider=provider
     )
     if meta.get("synced") and payment and payment.status == "PAID":
-        await _notify_paid_or_refunded(db, payment)
+        await _notify_paid_or_refunded(db, payment, transitioned=True)
     return success(
         {
             "order_id": order.id,
@@ -145,16 +145,24 @@ async def sync_payment(
         raise HTTPException(status_code=404, detail="支付记录不存在")
     order = await db.get(Order, payment.order_id)
     if customer:
-        if payment.customer_id and payment.customer_id != customer.id:
-            raise HTTPException(status_code=403, detail="无权同步此支付")
-        if order and order.customer_id and order.customer_id != customer.id:
+        from app.services.order_access import assert_customer_owns_order
+
+        if not order:
+            raise HTTPException(status_code=404, detail="订单不存在")
+        assert_customer_owns_order(order, customer.id, action="同步支付")
+        if payment.customer_id is None or int(payment.customer_id) != int(customer.id):
             raise HTTPException(status_code=403, detail="无权同步此支付")
     if user is not None and order:
+        from app.api.deps import get_user_permissions
+
+        perms = await get_user_permissions(db, user.role_id)
+        if user.role.code != "SUPER_ADMIN" and "payment:read" not in perms:
+            raise HTTPException(status_code=403, detail="缺少权限: payment:read")
         assert_order_store_access(user, order)
     before = payment.status
     payment, meta = await PaymentService.sync_payment_status(db, payment)
     if before != "PAID" and payment.status == "PAID":
-        await _notify_paid_or_refunded(db, payment)
+        await _notify_paid_or_refunded(db, payment, transitioned=True)
     progress = await PaymentService.payment_progress(db, order) if order else {}
     return success(
         {
@@ -375,8 +383,9 @@ async def sync_refund(refund_no: str, request: Request, db: DbSession, user: Cur
     order = await db.get(Order, row.order_id)
     if order:
         assert_order_store_access(user, order)
+    before_status = row.status
     row = await PaymentService.sync_refund_status(db, row)
-    if row.status == "SUCCESS" and order:
+    if before_status != "SUCCESS" and row.status == "SUCCESS" and order:
         await ws_manager.notify_order_event(
             "ORDER_REFUNDED",
             {
@@ -393,10 +402,14 @@ async def sync_refund(refund_no: str, request: Request, db: DbSession, user: Cur
     )
 
 
-async def _notify_paid_or_refunded(db: DbSession, result) -> None:
+async def _notify_paid_or_refunded(db: DbSession, result, *, transitioned: bool = False) -> None:
     from app.models import PaymentRefund as PR
 
-    if isinstance(result, PR) and result.status == "SUCCESS":
+    if (
+        isinstance(result, PR)
+        and result.status == "SUCCESS"
+        and (transitioned or bool(getattr(result, "_callback_transitioned_to_success", False)))
+    ):
         order = await db.get(Order, result.order_id)
         if order:
             await ws_manager.notify_order_event(
@@ -409,7 +422,11 @@ async def _notify_paid_or_refunded(db: DbSession, result) -> None:
                     "store_id": order.store_id,
                 },
             )
-    elif isinstance(result, Payment) and result.status == "PAID":
+    elif (
+        isinstance(result, Payment)
+        and result.status == "PAID"
+        and (transitioned or bool(getattr(result, "_callback_transitioned_to_paid", False)))
+    ):
         order = await db.get(Order, result.order_id)
         if order:
             await ws_manager.notify_order_event(
@@ -704,6 +721,11 @@ async def get_payment(payment_no: str, request: Request, db: DbSession, auth: St
     if customer and payment.customer_id != customer.id:
         raise HTTPException(status_code=403, detail="无权查看此支付")
     if user is not None:
+        from app.api.deps import get_user_permissions
+
+        perms = await get_user_permissions(db, user.role_id)
+        if user.role.code != "SUPER_ADMIN" and "payment:read" not in perms:
+            raise HTTPException(status_code=403, detail="缺少权限: payment:read")
         order = await db.get(Order, payment.order_id)
         if order:
             assert_order_store_access(user, order)

@@ -69,11 +69,17 @@ def main(files: list[str]) -> None:
         "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='dining_sessions'"
     )
     print("dining_sessions:", cur.fetchone()[0])
+    cur.execute(
+        "SELECT COUNT(*) FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_identities'"
+    )
+    print("customer_identities:", cur.fetchone()[0])
     conn.close()
 
 
 if __name__ == "__main__":
     args = sys.argv[1:] or [
         "sql/016_guest_member_dining_session.sql",
+        "sql/017_customer_identity_phone_security.sql",
     ]
     main(args)

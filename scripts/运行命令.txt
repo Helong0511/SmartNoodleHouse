@@ -275,3 +275,13 @@ npm run dev -- --host 0.0.0.0 --port 5173
 # 粘贴 PKCS8 私钥内容到 .env 的 ALIPAY_PRIVATE_KEY，勿提交真实密钥。
 # ALIPAY_PUBLIC_KEY = 支付宝公钥，非应用私钥。
 # 示例手机号请用 13800138000 等明显虚假号码。
+
+hel290390@gmail.com
+gpt-5.6-sol
+
+sk-1wDVfl9SKDxnHIcwybTZnKdaOues2xmg1iMA03s1aWyIW2Cq
+AfLNAW97a4kEJJHCqNw9f6NPPS79Vt45kLCuIhbGZtjBOrZx
+setx APISPACE_API_KEY "eivjqkfLBIHDlYd0Z9pZQZpQcrTiHrbWnbNXKJaO0GVuQjii"
+
+
+setx APISPACE_API_KEY "lvFLoISXYg5FgwrY7YDNB355Lb3AqSPes1MzOudei7EhZK1N"

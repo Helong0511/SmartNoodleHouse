@@ -89,7 +89,11 @@ async def get_current_customer(
     except (JWTError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="无效顾客令牌")
     customer = await db.get(Customer, customer_id)
-    if not customer or customer.status != 1:
+    if (
+        not customer
+        or customer.status != 1
+        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+    ):
         raise HTTPException(status_code=401, detail="顾客不存在或已禁用")
     if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
         raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
@@ -111,7 +115,11 @@ async def get_staff_or_customer(
         payload = decode_token(token)
         if payload.get("typ") == "customer":
             customer = await db.get(Customer, int(payload["sub"]))
-            if not customer or customer.status != 1:
+            if (
+                not customer
+                or customer.status != 1
+                or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+            ):
                 raise HTTPException(status_code=401, detail="顾客不存在或已禁用")
             if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
                 raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")

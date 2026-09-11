@@ -1,7 +1,14 @@
 """扫码注册门店：只记第一次，换店点餐不覆盖。"""
 import pytest
 
-from app.models import Customer, CustomerAlipayAccount, CustomerWechatAccount, DiningTable, Store
+from app.models import (
+    Customer,
+    CustomerAlipayAccount,
+    CustomerIdentity,
+    CustomerWechatAccount,
+    DiningTable,
+    Store,
+)
 from app.services.customer_service import CustomerService
 
 
@@ -59,9 +66,13 @@ async def test_phone_merge_keeps_target_registered_store(db_session):
     await db_session.flush()
     db_session.add(CustomerWechatAccount(id=41, customer_id=wechat.id, openid="wx_reg_1", profile_completed=1))
     db_session.add(CustomerAlipayAccount(id=42, customer_id=alipay.id, alipay_user_id="ali_reg_1", profile_completed=1))
+    db_session.add(CustomerIdentity(customer_id=wechat.id, provider="PHONE", provider_subject="13900001111", verified=1))
     await db_session.flush()
 
-    merged = await CustomerService.try_link_by_phone(db_session, alipay, "13900001111")
+    merged, did_merge = await CustomerService.bind_verified_phone(
+        db_session, alipay, "13900001111", verification_source="ALIPAY", confirm_merge=True
+    )
+    assert did_merge is True
     assert merged.id == wechat.id
     assert merged.registered_store_id == store_a.id
     assert merged.registered_table_id == table_a.id
@@ -82,9 +93,13 @@ async def test_phone_merge_copies_store_when_target_empty(db_session):
     await db_session.flush()
     db_session.add(CustomerWechatAccount(id=43, customer_id=wechat.id, openid="wx_reg_2", profile_completed=1))
     db_session.add(CustomerAlipayAccount(id=44, customer_id=alipay.id, alipay_user_id="ali_reg_2", profile_completed=1))
+    db_session.add(CustomerIdentity(customer_id=wechat.id, provider="PHONE", provider_subject="13900002222", verified=1))
     await db_session.flush()
 
-    merged = await CustomerService.try_link_by_phone(db_session, alipay, "13900002222")
+    merged, did_merge = await CustomerService.bind_verified_phone(
+        db_session, alipay, "13900002222", verification_source="ALIPAY", confirm_merge=True
+    )
+    assert did_merge is True
     assert merged.id == wechat.id
     assert merged.registered_store_id == store_b.id
     assert merged.registered_table_id == table_b.id

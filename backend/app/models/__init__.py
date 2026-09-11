@@ -51,7 +51,11 @@ class User(Base, TimestampMixin):
 
 class OperationLog(Base):
     __tablename__ = "operation_logs"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     user_id: Mapped[int | None] = mapped_column(BigInteger)
     action: Mapped[str] = mapped_column(String(100))
     module: Mapped[str] = mapped_column(String(50))
@@ -158,7 +162,11 @@ class FinancialLedger(Base):
 
 class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     customer_no: Mapped[str] = mapped_column(String(40), unique=True)
     display_name: Mapped[str | None] = mapped_column(String(100))
     nickname: Mapped[str | None] = mapped_column(String(100))
@@ -181,6 +189,28 @@ class Customer(Base, TimestampMixin):
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CustomerIdentity(Base, TimestampMixin):
+    """服务端验证过的稳定身份；昵称、头像和手输手机号不得写入此表。"""
+
+    __tablename__ = "customer_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_subject",
+            name="uk_customer_identity_provider_subject",
+        ),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_subject: Mapped[str] = mapped_column(String(128))
+    verified: Mapped[int] = mapped_column(Integer, default=1)
+
+
 class DiningSession(Base, TimestampMixin):
     __tablename__ = "dining_sessions"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -197,7 +227,11 @@ class DiningSession(Base, TimestampMixin):
 
 class CustomerWechatAccount(Base, TimestampMixin):
     __tablename__ = "customer_wechat_accounts"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
     openid: Mapped[str] = mapped_column(String(64), unique=True)
     unionid: Mapped[str | None] = mapped_column(String(64))
@@ -208,7 +242,11 @@ class CustomerWechatAccount(Base, TimestampMixin):
 
 class CustomerAlipayAccount(Base, TimestampMixin):
     __tablename__ = "customer_alipay_accounts"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"))
     alipay_user_id: Mapped[str] = mapped_column(String(64), unique=True)
     alipay_union_id: Mapped[str | None] = mapped_column(String(64))

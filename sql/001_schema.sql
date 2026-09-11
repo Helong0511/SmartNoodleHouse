@@ -256,6 +256,20 @@ CREATE TABLE IF NOT EXISTS customer_alipay_accounts (
   CONSTRAINT fk_caa_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付宝账号绑定表';
 
+-- 服务端验证过的稳定身份；昵称/头像/手输手机号不得写入
+CREATE TABLE IF NOT EXISTS customer_identities (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  customer_id BIGINT UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  provider VARCHAR(32) NOT NULL COMMENT 'WECHAT_OPENID/WECHAT_UNIONID/ALIPAY_USER_ID/PHONE',
+  provider_subject VARCHAR(128) NOT NULL COMMENT '渠道稳定身份；日志中必须脱敏',
+  verified TINYINT NOT NULL DEFAULT 1 COMMENT '是否经渠道服务端验证',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_customer_identity_provider_subject (provider, provider_subject),
+  INDEX idx_customer_identity_customer (customer_id, provider),
+  CONSTRAINT fk_customer_identity_customer FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='统一顾客稳定身份绑定';
+
 -- 就餐会话：扫码绑桌建立，过期后不再沿用旧桌台
 CREATE TABLE IF NOT EXISTS dining_sessions (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',

@@ -20,7 +20,7 @@ class OrderCreate(BaseModel):
     # 堂食默认；打包外带时计商品餐盒费 box_price
     need_pack: bool = False
     dining_type: str | None = Field(default=None, description="DINE_IN / TAKEAWAY，可与 need_pack 二选一")
-    idempotency_key: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
     customer_coupon_id: int | None = Field(default=None, description="用户优惠券 ID（满减/折扣）")
     customer_voucher_id: int | None = Field(default=None, description="用户代金券 ID")
 
@@ -47,7 +47,7 @@ class PosOrderCreate(BaseModel):
     remark: str | None = None
     need_pack: bool = False
     dining_type: str | None = Field(default=None, description="DINE_IN / TAKEAWAY")
-    idempotency_key: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
     waive_packing_fee: bool = Field(default=False, description="收银员免收打包费（仅 POS）")
 
 

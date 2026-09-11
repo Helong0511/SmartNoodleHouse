@@ -64,9 +64,23 @@ function handleGetPhoneNumber(page, detail, onCode) {
   if (typeof onCode === 'function') onCode(code)
 }
 
+function confirmAccountMerge(message) {
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: '确认合并账号',
+      content: message || '该手机号已关联另一账号。合并后将统一历史订单、积分和优惠券，是否继续？',
+      confirmText: '确认合并',
+      cancelText: '暂不合并',
+      success: (res) => resolve(!!(res && res.confirm)),
+      fail: () => resolve(false)
+    })
+  })
+}
+
 module.exports = {
   parseDetail,
   isPrivacyError,
   isQuotaError,
-  handleGetPhoneNumber
+  handleGetPhoneNumber,
+  confirmAccountMerge
 }

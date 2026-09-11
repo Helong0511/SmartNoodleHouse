@@ -376,7 +376,7 @@ Page({
         const cname = (res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'
         wx.showToast({ title: `绑定成功，已赠送「${cname}」`, icon: 'success' })
       } else {
-        wx.showToast({ title: '绑定成功', icon: 'success' })
+        wx.showToast({ title: res.phone_verified ? '验证成功' : '已保存，尚未验证', icon: 'success' })
       }
       this.setData({ phone: res.phone || this.data.phoneInput, phoneInput: '' })
       if (res && res.welcome_coupon_issued) {
@@ -385,6 +385,12 @@ Page({
       }
     } catch (e) {
       const msg = String((e && e.message) || '')
+      if (Number(e && e.code) === 40906 && !payload.confirm_merge && (payload.phone_code || payload.alipay_phone_encrypted)) {
+        wx.hideLoading()
+        const confirmed = await phoneAuth.confirmAccountMerge(msg)
+        if (confirmed) return this._savePhone({ ...payload, confirm_merge: true }, retried)
+        return
+      }
       if (!retried && /顾客不存在|已禁用|令牌已失效|请先登录|无效顾客|401/.test(msg)) {
         try {
           wx.hideLoading()

@@ -134,15 +134,7 @@ def upgrade() -> None:
             """
         )
     )
-    conn.execute(
-        text(
-            """
-            UPDATE customers
-            SET phone_verified = 1
-            WHERE phone IS NOT NULL AND phone <> '' AND phone_verified = 0
-            """
-        )
-    )
+    # 历史 phone 可能来自手工输入，缺少官方验证凭据；安全默认必须保持未验证。
 
     if not _table_exists(conn, "dining_sessions"):
         conn.execute(

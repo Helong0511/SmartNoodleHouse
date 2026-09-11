@@ -379,7 +379,17 @@ Page({
       try {
         wx.showLoading({ title: '绑定中' })
         await auth.ensureLogin()
-        const res = await api.post('/miniprogram/member/phone', { phone_code: code })
+        let res
+        try {
+          res = await api.post('/miniprogram/member/phone', { phone_code: code })
+        } catch (bindErr) {
+          if (Number(bindErr && bindErr.code) !== 40906) throw bindErr
+          wx.hideLoading()
+          const confirmed = await phoneAuth.confirmAccountMerge(bindErr.message)
+          if (!confirmed) return
+          wx.showLoading({ title: '合并中' })
+          res = await api.post('/miniprogram/member/phone', { phone_code: code, confirm_merge: true })
+        }
         if (res && res.customer_token) {
           auth.refreshCustomerToken(app, res.customer_token, {
             customer_id: res.customer_id,
