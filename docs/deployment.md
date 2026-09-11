@@ -281,7 +281,7 @@ FLUSH PRIVILEGES;
 sudo systemctl enable --now redis-server
 ```
 
-也可用仓库脚本参考：`sql/000_create_db_grant.sql`（按实际用户名密码改）。
+也可用唯一数据库脚本 `sql/smart_noodle_house.sql` 全新初始化；执行前必须替换账号密码占位符，且已有业务数据勿执行（脚本会删库重建）。
 
 ### 3.3 拉取代码与 `.env`
 
@@ -321,19 +321,14 @@ alembic upgrade head
 
 说明：
 
-- `0001_baseline` 会执行仓库 `sql/001_schema.sql`（跳过 `CREATE DATABASE` / `USE`）
+- `0001_baseline` 只执行仓库 `sql/smart_noodle_house.sql` 的结构分段
 - 后续版本补索引、班次、打印任务、券约束、就餐会话等
 
-**空库种子（仅新库；会 TRUNCATE 业务表，有真实数据勿执行）：**
+**全新数据库初始化（会删除并重建同名库，有真实数据勿执行）：**
 
 ```bash
 cd /var/www/smart-noodle
-mysql -u snh -p -h 127.0.0.1 smart_noodle_house < sql/002_seed_prod.sql
-# 或按需：
-# python scripts/seed_roles.py
-# python scripts/seed_permissions.py
-# python scripts/seed_member_levels.py
-# python scripts/seed_coupon_templates.py
+mysql -u root -p < sql/smart_noodle_house.sql
 ```
 
 **超管：**

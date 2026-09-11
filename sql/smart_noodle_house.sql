@@ -8,7 +8,7 @@
 -- ============================================================================
 -- 建库（可选，需 MySQL root）
 -- ============================================================================
--- 下一步：001_schema.sql → 002_seed_prod.sql → python scripts/init_admin.py
+-- 本文件已包含建库、结构与生产基础数据；执行后运行 python scripts/init_admin.py 设置强密码。
 --
 -- 应用账号请与 .env 中 DATABASE_URL 一致，示例：
 --   mysql+aiomysql://remote:强密码@127.0.0.1:3306/smart_noodle_house
@@ -21,7 +21,8 @@ CREATE DATABASE IF NOT EXISTS smart_noodle_house
   DEFAULT CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'kb7$rL3d8!tQ';
+-- 部署前替换下方占位符；禁止把真实数据库密码提交到版本库。
+CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'CHANGE_ME_BEFORE_PRODUCTION';
 GRANT ALL PRIVILEGES ON smart_noodle_house.* TO 'remote'@'localhost';
 FLUSH PRIVILEGES;
 -- ============================================================================
@@ -969,18 +970,18 @@ CREATE TABLE IF NOT EXISTS print_jobs (
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 完成：生产 → 002_seed_prod.sql + init_admin.py；开发 → 002_seed_test.sql + init_admin.py
+-- 完成：本文件已包含生产基础数据；随后运行 init_admin.py。
 -- END CANONICAL SCHEMA
 
 -- BEGIN PRODUCTION SEED
 -- ============================================================================
 -- 智能面馆 — 生产环境种子数据
 -- ============================================================================
--- 前置：sql/001_schema.sql
+-- 前置：本文件上方 CANONICAL SCHEMA 分段
 -- 后续：python scripts/init_admin.py（如需重置超管密码；本文件已含 admin/hsf/syxm/cwm）
 -- 多门店：第六节按实际增删 store_no
 --
--- ⚠ 会先清空 001_schema.sql 中全部业务表数据，再写入种子（不可对线上有业务数据的库随意执行）
+-- ⚠ 会先清空全部业务表数据，再写入种子（不可对线上有业务数据的库随意执行）
 --
 -- 退款权限策略：
 --   1) 收银员 CASHIER：无 payment:refund；收银渠道须「本班订单申请 → 店长审批」
@@ -992,7 +993,7 @@ SET NAMES utf8mb4;
 USE smart_noodle_house;
 
 -- ---------------------------------------------------------------------------
--- 〇、清空全部业务表（对齐 sql/001_schema.sql；TRUNCATE 同时重置自增）
+-- 〇、清空全部业务表（与本文件结构段对齐；TRUNCATE 同时重置自增）
 -- ---------------------------------------------------------------------------
 SET FOREIGN_KEY_CHECKS = 0;
 

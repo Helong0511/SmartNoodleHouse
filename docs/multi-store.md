@@ -15,7 +15,7 @@
 | STORE_ADMIN | 本店 ID | 本店运营与退款 |
 | CASHIER / KITCHEN / OPERATOR | 本店 ID | 按权限矩阵收敛 |
 
-种子见 `scripts/seed_roles.py`、`scripts/seed_permissions.py` 与 `sql/002_seed_prod.sql`。
+生产基础数据见唯一真源 `sql/smart_noodle_house.sql`；Python 种子脚本用于幂等维护。
 
 ## 运营注意
 

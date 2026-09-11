@@ -4,13 +4,13 @@
 
 | 产物 | 说明 |
 |------|------|
-| `sql/001_schema.sql` | 全量 DDL（新建库结构） |
-| `sql/002_seed_prod.sql` / `002_seed_test.sql` | 生产 / 开发种子 |
+| `sql/smart_noodle_house.sql` | 唯一真源：建库授权、全量 DDL 与生产基础数据 |
+| `sql/002_seed_test.sql` | 仅开发测试追加数据，不是结构真源 |
 | `backend/alembic/versions/` | 版本化迁移；`upgrade head` 从空库可达当前 schema |
 
 Alembic：
 
-1. **0001_baseline** — 读取并执行 `sql/001_schema.sql`（去掉 `CREATE DATABASE` / `USE`；按语句执行，忽略「已存在」类错误）。
+1. **0001_baseline** — 只读取 `sql/smart_noodle_house.sql` 的 `CANONICAL SCHEMA` 分段，不执行删库、授权和种子段。
 2. **0002_p0_hardening** — 对旧库补丁：`orders.operator_id`、幂等键注释、webhook / 退款重试列、`financial_ledger`、`point_ledger`。
 3. **0003 ~ 0006** — 欢迎券 UNIQUE、班次唯一 OPEN、券 `status_reason`、`print_jobs`。
 4. **0007_prod_indexes** — 订单/支付/退款/账本/券复合索引（亦可手工执行 `sql/007_prod_indexes.sql`）。
@@ -51,4 +51,4 @@ python scripts/seed_coupon_templates.py
 
 ## 旧库增量
 
-历史手工补丁在 `sql/tools/`；新环境以 `001_schema.sql` + Alembic 为准，不必再跑已并入全量的 tools 脚本。
+历史手工补丁在 `sql/tools/`；新环境以 `sql/smart_noodle_house.sql` 为准，不必再跑已并入全量的 tools 脚本。

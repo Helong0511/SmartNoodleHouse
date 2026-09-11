@@ -38,28 +38,24 @@
 
 ### 2. 数据库
 
-**开发环境**按顺序执行：
+**全新环境**执行唯一数据库脚本（会删除并重建同名库，已有业务数据勿执行）：
 
 ```bash
-mysql -u root -p < sql/001_schema.sql
-mysql -u root -p < sql/002_seed_test.sql
+mysql -u root -p < sql/smart_noodle_house.sql
 python scripts/init_admin.py
 ```
 
-**生产环境**请勿执行 `002_seed_test.sql`（含弱口令与测试数据），改用：
+生产部署前必须修改脚本内数据库账号密码占位符，并设置管理员强密码：
 
 ```bash
-mysql -u root -p < sql/001_schema.sql
-mysql -u root -p < sql/002_seed_prod.sql
+mysql -u root -p < sql/smart_noodle_house.sql
 set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
 python scripts/init_admin.py
 ```
 
 | 脚本 | 说明 |
 |------|------|
-| `000_create_db_grant.sql` | 可选：建库 + 应用账号授权 |
-| `001_schema.sql` | 全量表结构（40 表） |
-| `002_seed_prod.sql` | **生产**：角色/权限/会员/券/门店/系统参数 |
+| `smart_noodle_house.sql` | **唯一真源**：建库授权、完整结构与生产基础数据 |
 | `002_seed_test.sql` | **仅开发**：样例商品、订单、admin/cashier/manager |
 | `sql/tools/003_capacity_audit.sql` | 容量审计（运维工具，非迁移） |
 | `sql/tools/004_fix_delivery_dining_type.sql` | 历史外卖订单 dining_type 修复（幂等） |
@@ -413,10 +409,7 @@ sudo systemctl enable redis-server && sudo systemctl start redis-server
 
 ```bash
 cd /var/www/smart-noodle
-mysql -u snh -p smart_noodle_house < sql/001_schema.sql
-mysql -u snh -p smart_noodle_house < sql/002_seed_prod.sql
-mysql -u snh -p smart_noodle_house < sql/tools/008_member_level_manage.sql
-mysql -u snh -p smart_noodle_house < sql/tools/010_product_no_cooking.sql
+mysql -u root -p < sql/smart_noodle_house.sql
 
 export ADMIN_INITIAL_PASSWORD='超管强密码'
 python3 scripts/init_admin.py

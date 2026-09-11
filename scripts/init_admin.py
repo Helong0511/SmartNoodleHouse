@@ -33,7 +33,7 @@ async def main():
             return
 
         if not password:
-            print("未找到管理员账号。生产部署请先执行 sql/002_seed_prod.sql，并设置强密码：")
+            print("未找到管理员账号。请先执行 sql/smart_noodle_house.sql，并设置强密码：")
             print("  set ADMIN_INITIAL_PASSWORD=YourStrongPass123!")
             print("  python scripts/init_admin.py")
             sys.exit(1)
@@ -42,7 +42,7 @@ async def main():
             await db.execute(select(Role).where(Role.code == "SUPER_ADMIN"))
         ).scalar_one_or_none()
         if not role:
-            print("未找到 SUPER_ADMIN 角色，请先执行 sql/002_seed_prod.sql 或 sql/002_seed_test.sql")
+            print("未找到 SUPER_ADMIN 角色，请先执行 sql/smart_noodle_house.sql")
             sys.exit(1)
 
         db.add(
