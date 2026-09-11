@@ -16,7 +16,7 @@
     </div>
 
     <el-table :data="items" border style="margin-top:12px">
-      <el-table-column prop="product_no" label="编号" width="120" />
+      <el-table-column prop="product_no" label="编号" width="280" />
       <el-table-column prop="name" label="商品" min-width="160" />
       <el-table-column prop="brand_stock" label="品牌库存" width="100" />
       <el-table-column label="本店库存" width="140">
