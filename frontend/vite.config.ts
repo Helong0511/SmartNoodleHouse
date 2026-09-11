@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { resolve } from 'path'
+import { resolve } from 'node:path'
 
 /**
  * Vite 开发服务器配置
@@ -17,7 +17,7 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [vue()],
   resolve: {
-    alias: { '@': resolve(__dirname, 'src') },
+    alias: { '@': resolve(import.meta.dirname, 'src') },
   },
   server: {
     // 允许手机通过 http://192.168.x.x:5173 访问（配合 .env H5_PUBLIC_BASE_URL）
