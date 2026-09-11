@@ -1,4 +1,4 @@
-"""baseline: 从 sql/001_schema.sql 构建完整 schema
+"""baseline: 从 sql/smart_noodle_house.sql 的结构段构建完整 schema
 
 Revision ID: 0001_baseline
 Revises:
@@ -37,7 +37,18 @@ def _repo_root() -> Path:
 
 
 def _schema_sql_path() -> Path:
-    return _repo_root() / "sql" / "001_schema.sql"
+    return _repo_root() / "sql" / "smart_noodle_house.sql"
+
+
+def _extract_schema_section(raw: str) -> str:
+    """只读取唯一真源的 DDL，绝不执行删库、授权或生产种子段。"""
+    start_marker = "-- BEGIN CANONICAL SCHEMA"
+    end_marker = "-- END CANONICAL SCHEMA"
+    start = raw.find(start_marker)
+    end = raw.find(end_marker)
+    if start < 0 or end < 0 or end <= start:
+        raise RuntimeError("数据库唯一真源缺少 CANONICAL SCHEMA 分段标记")
+    return raw[start + len(start_marker) : end]
 
 
 def _split_sql_statements(sql: str) -> list[str]:
@@ -70,7 +81,7 @@ def upgrade() -> None:
     if not path.is_file():
         raise FileNotFoundError(f"未找到 schema 文件: {path}")
 
-    raw = path.read_text(encoding="utf-8")
+    raw = _extract_schema_section(path.read_text(encoding="utf-8"))
     conn = op.get_bind()
     for stmt in _split_sql_statements(raw):
         if _should_skip_statement(stmt):

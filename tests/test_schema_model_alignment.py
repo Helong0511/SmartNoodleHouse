@@ -1,4 +1,4 @@
-"""比对 sql/001_schema.sql 与 SQLAlchemy models 的表/列一致性。"""
+"""比对数据库唯一真源与 SQLAlchemy models 的表/列一致性。"""
 import re
 from pathlib import Path
 
@@ -55,7 +55,7 @@ def parse_models(path: Path) -> dict[str, dict[str, str]]:
 
 
 def test_schema_model_table_alignment():
-    sql_tables = parse_sql_schema(ROOT / "sql" / "001_schema.sql")
+    sql_tables = parse_sql_schema(ROOT / "sql" / "smart_noodle_house.sql")
     model_tables = parse_models(ROOT / "backend" / "app" / "models" / "__init__.py")
 
     assert not (set(model_tables) - set(sql_tables)), (
@@ -69,7 +69,13 @@ def test_schema_model_table_alignment():
     sql_only_cols = []
     timestamp_cols = frozenset({"created_at", "updated_at"})
     # MySQL GENERATED 列可不映射到 ORM
-    skip_sql_cols = frozenset({("cashier_shifts", "open_operator_key")})
+    skip_sql_cols = frozenset(
+        {
+            ("cashier_shifts", "open_operator_key"),
+            ("option_groups", "store_scope"),
+            ("point_ledger", "earn_order_id"),
+        }
+    )
     for tname in sorted(model_tables):
         mcols = set(model_tables[tname])
         scols = set(sql_tables[tname])
@@ -85,7 +91,7 @@ def test_schema_model_table_alignment():
 
 
 if __name__ == "__main__":
-    sql_tables = parse_sql_schema(ROOT / "sql" / "001_schema.sql")
+    sql_tables = parse_sql_schema(ROOT / "sql" / "smart_noodle_house.sql")
     model_tables = parse_models(ROOT / "backend" / "app" / "models" / "__init__.py")
     print("tables model-only:", sorted(set(model_tables) - set(sql_tables)))
     print("tables sql-only:", sorted(set(sql_tables) - set(model_tables)))

@@ -78,8 +78,10 @@ def main(files: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:] or [
-        "sql/016_guest_member_dining_session.sql",
-        "sql/017_customer_identity_phone_security.sql",
-    ]
+    args = sys.argv[1:]
+    if not args:
+        raise SystemExit(
+            "请显式传入旧库增量脚本；全新建库请直接运行 "
+            "sql/smart_noodle_house.sql"
+        )
     main(args)

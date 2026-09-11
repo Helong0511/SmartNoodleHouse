@@ -1,28 +1,15 @@
-# 数据库表结构变更同步
+---
+description: Enforce the single authoritative MySQL schema file for every database change
+alwaysApply: true
+---
 
-修改数据库表结构时，**必须**同步更新主 schema，不能只写 `sql/tools/` 迁移脚本就结束。
+# 数据库唯一真源
 
-## 必须同步的文件
+`sql/smart_noodle_house.sql` 是本项目唯一权威的数据库定义与初始化文件。
 
-| 变更类型 | 更新位置 |
-|---------|---------|
-| 新建/改表、改列、索引、约束 | `sql/001_schema.sql`（全量建表脚本，供新环境初始化） |
-| 已有库升级 | `sql/tools/NNN_*.sql`（幂等迁移脚本） |
+- 新建或修改表、字段、字段类型、默认值、索引、唯一约束、外键、字符集及初始化数据时，必须在同一变更中更新 `sql/smart_noodle_house.sql`。
+- SQLAlchemy 模型、Alembic 或升级脚本必须与该文件一致；它们只能作为运行时映射或从唯一真源派生的升级手段，不能成为另一套结构真源。
+- 新环境应能仅使用 `sql/smart_noodle_house.sql` 得到当前完整数据库。
+- 测试、部署脚本和文档中的全量建库路径必须指向 `sql/smart_noodle_house.sql`。
 
-## 工作流程
-
-1. 先改 `sql/001_schema.sql`，保证全新 `mysql < 001_schema.sql` 即包含最新结构
-2. 再写 `sql/tools/` 迁移，供已部署库幂等升级
-3. 同步改 `backend/app/models/`、API、前端/小程序（如有依赖）
-
-## 禁止
-
-- 只加 `sql/tools/` 而不改 `001_schema.sql`
-- 只改 SQLAlchemy 模型而不改 `001_schema.sql`
-
-## 示例
-
-新增 `options.is_default`：
-- `sql/001_schema.sql` → `options` 表加列
-- `sql/tools/009_option_is_default.sql` → 老库 ALTER
-- `backend/app/models/__init__.py` → ORM 字段
+禁止只修改模型、Alembic、`sql/001_schema.sql` 或其他补丁 SQL，而不修改 `sql/smart_noodle_house.sql`。
