@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -15,6 +16,11 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.models import Customer, Payment
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_INTEGRATION") != "1",
+    reason="会连接并修改真实 MySQL/API 数据；设置 RUN_INTEGRATION=1 后单独运行",
+)
 
 API = "http://127.0.0.1:8000/api/v1"
 

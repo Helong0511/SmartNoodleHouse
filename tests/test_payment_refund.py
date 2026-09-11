@@ -85,6 +85,9 @@ async def test_finalize_refund_marks_partial():
 
     order = MagicMock()
     order.id = 9
+    order.store_id = 1
+    order.total_amount = Decimal("100.00")
+    order.channel = "WECHAT_MINIPROGRAM"
     order.status = "PAID"
     order.payment_status = "PAID"
     order.customer_id = None
@@ -113,6 +116,13 @@ async def test_finalize_refund_marks_partial():
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
+        "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.payment_service.PaymentService.order_net_collected",
+        new_callable=AsyncMock,
+        return_value=Decimal("60.00"),
+    ), patch(
         "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
     ) as deduct:
         await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
@@ -134,6 +144,9 @@ async def test_finalize_refund_deducts_points_for_customer():
 
     order = MagicMock()
     order.id = 9
+    order.store_id = 1
+    order.total_amount = Decimal("100.00")
+    order.channel = "WECHAT_MINIPROGRAM"
     order.status = "PAID"
     order.payment_status = "PAID"
     order.customer_id = 42
@@ -161,6 +174,13 @@ async def test_finalize_refund_deducts_points_for_customer():
 
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
+    ), patch(
+        "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.payment_service.PaymentService.order_net_collected",
+        new_callable=AsyncMock,
+        return_value=Decimal("60.00"),
     ), patch(
         "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
     ) as deduct:

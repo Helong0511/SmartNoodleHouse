@@ -46,7 +46,7 @@ def _login_lock_key(username: str, ip: str) -> str:
     return f"snh:login:lock:{_login_scope(username, ip)}"
 
 
-async def _login_is_locked(username: str, ip: str) -> bool:
+async def _login_is_locked(username: str, ip: str = "unknown") -> bool:
     try:
         from app.core.redis_client import get_redis
 
@@ -57,7 +57,7 @@ async def _login_is_locked(username: str, ip: str) -> bool:
         return False
 
 
-async def _record_login_failure(username: str, ip: str) -> None:
+async def _record_login_failure(username: str, ip: str = "unknown") -> None:
     try:
         from app.core.redis_client import get_redis
 
@@ -73,7 +73,7 @@ async def _record_login_failure(username: str, ip: str) -> None:
         pass
 
 
-async def _clear_login_failures(username: str, ip: str) -> None:
+async def _clear_login_failures(username: str, ip: str = "unknown") -> None:
     try:
         from app.core.redis_client import get_redis
 

@@ -12,6 +12,12 @@ from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa
 logger = logging.getLogger(__name__)
 
 
+def _identity_fingerprint(value: str | None) -> str:
+    """日志只记录不可逆短指纹，禁止输出渠道稳定身份原文。"""
+    raw = (value or "").encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:12] if raw else "missing"
+
+
 def _mock_allowed(*, provider_configured: bool = False) -> bool:
     """生产禁止 mock；开发未配密钥或显式 ALLOW_AUTH_MOCK=true 时允许。"""
     s = get_settings()
@@ -37,7 +43,10 @@ def _mock_wechat_openid(code: str) -> dict:
         openid = "wx_dev_" + hashlib.md5(device.encode()).hexdigest()[:16]
     else:
         openid = "wx_dev_simulator"
-    logger.warning("WECHAT 开发 Mock openid=%s（稳定身份，不会因 code 变化新建顾客）", openid)
+    logger.warning(
+        "WECHAT 开发 Mock identity_fp=%s（稳定身份，不会因 code 变化新建顾客）",
+        _identity_fingerprint(openid),
+    )
     return {"openid": openid, "unionid": None, "session_key": "dev_session", "is_mock": True}
 
 
@@ -47,7 +56,7 @@ def _mock_alipay_user_id(auth_code: str) -> dict:
         user_id = "ali_dev_" + hashlib.md5(device.encode()).hexdigest()[:16]
     else:
         user_id = "ali_dev_simulator"
-    logger.warning("ALIPAY 开发 Mock user_id=%s（稳定身份）", user_id)
+    logger.warning("ALIPAY 开发 Mock identity_fp=%s（稳定身份）", _identity_fingerprint(user_id))
     return {"alipay_user_id": user_id, "is_mock": True}
 
 
@@ -124,15 +133,20 @@ class AlipayMiniAuth:
             # 同时返回时优先 open_id，避免同一账号在 user_id/open_id 间切换重复建客
             if open_id and legacy_user_id and open_id != legacy_user_id:
                 logger.info(
-                    "支付宝 OAuth 同时返回 open_id 与 user_id，采用 open_id 作为稳定身份 open_id=%s user_id=%s",
-                    open_id,
-                    legacy_user_id,
+                    "支付宝 OAuth 同时返回两类身份，采用 open_id；open_fp=%s legacy_fp=%s",
+                    _identity_fingerprint(open_id),
+                    _identity_fingerprint(legacy_user_id),
                 )
             user_id = open_id or legacy_user_id
             if not user_id:
                 # 便于排查：常见是签名错误、app_id 不匹配
-                preview = {k: data.get(k) for k in ("error_response", "alipay_system_oauth_token_response") if k in data}
-                logger.error("支付宝 OAuth 无 user_id，响应摘要=%s", preview or list(data.keys())[:8])
+                error_response = data.get("error_response") or {}
+                logger.error(
+                    "支付宝 OAuth 无用户标识 code=%s sub_code=%s response_keys=%s",
+                    error_response.get("code"),
+                    error_response.get("sub_code"),
+                    sorted(str(k) for k in data.keys())[:8],
+                )
                 raise AppException(50033, "支付宝未返回用户标识（请核对 ALIPAY_APP_ID / 应用私钥是否与开放平台一致）")
             return {"alipay_user_id": user_id, "is_mock": False}
         except AppException:

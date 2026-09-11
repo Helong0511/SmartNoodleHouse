@@ -264,7 +264,10 @@ async def send_order_ready_subscribe(
         return False
     if not settings.wechat_app_id or not settings.wechat_app_secret:
         if _mock_allowed():
-            logger.info("Mock 订阅消息 order_ready openid=%s order=%s", openid, order_no)
+            import hashlib
+
+            identity_fp = hashlib.sha256(openid.encode("utf-8")).hexdigest()[:12]
+            logger.info("Mock 订阅消息 order_ready identity_fp=%s order=%s", identity_fp, order_no)
             return True
         return False
 

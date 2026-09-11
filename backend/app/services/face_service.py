@@ -40,7 +40,8 @@ class FaceEncryption:
         material = settings.face_encryption_key or ""
         self._material = material
         self.fernet = _fernet_from_material(material, legacy=False)
-        prev = (getattr(settings, "face_encryption_key_previous", None) or "").strip()
+        previous_value = getattr(settings, "face_encryption_key_previous", None)
+        prev = previous_value.strip() if isinstance(previous_value, str) else ""
         self._previous = _fernet_from_material(prev, legacy=False) if prev else None
 
     def encrypt(self, data: bytes) -> bytes:

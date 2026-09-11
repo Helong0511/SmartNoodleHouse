@@ -21,7 +21,7 @@ async def test_login_updates_last_login_at():
     user.token_version = 0
     user.last_login_at = None
 
-    db = AsyncMock()
+    db = MagicMock()
     row = MagicMock()
     row.scalar_one_or_none.return_value = user
     db.execute = AsyncMock(return_value=row)
