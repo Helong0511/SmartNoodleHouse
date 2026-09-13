@@ -443,15 +443,16 @@ async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: 
         CustomerService.refresh_profile_status(customer)
         await db.flush()
 
-    table = await _resolve_table(db, data.table_token) if data.table_token else None
-    await CustomerService.remember_first_seen(db, customer, data.table_token, table=table)
+    table_record = await _resolve_table_record(db, data.table_token) if data.table_token else None
+    table = await _table_payload(db, table_record)
+    await CustomerService.remember_first_seen(db, customer, data.table_token, table=table_record)
     dining_session = None
-    if table:
+    if table_record:
         dining_session = await DiningSessionService.start_or_refresh(
             db,
             customer_id=customer.id,
-            table=table,
-            table_token=data.table_token or table.qr_token,
+            table=table_record,
+            table_token=data.table_token or table_record.qr_token,
         )
     payload = await _channel_login_payload(
         db,
@@ -492,15 +493,16 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
         CustomerService.refresh_profile_status(customer)
         await db.flush()
 
-    table = await _resolve_table(db, data.table_token) if data.table_token else None
-    await CustomerService.remember_first_seen(db, customer, data.table_token, table=table)
+    table_record = await _resolve_table_record(db, data.table_token) if data.table_token else None
+    table = await _table_payload(db, table_record)
+    await CustomerService.remember_first_seen(db, customer, data.table_token, table=table_record)
     dining_session = None
-    if table:
+    if table_record:
         dining_session = await DiningSessionService.start_or_refresh(
             db,
             customer_id=customer.id,
-            table=table,
-            table_token=data.table_token or table.qr_token,
+            table=table_record,
+            table_token=data.table_token or table_record.qr_token,
         )
     payload = await _channel_login_payload(
         db,
@@ -1049,13 +1051,16 @@ async def _store_brief(db, store_id: int | None) -> dict | None:
     }
 
 
-async def _resolve_table(db, token: str) -> dict | None:
+async def _resolve_table_record(db, token: str) -> DiningTable | None:
     from app.services.table_resolve import resolve_dining_table
 
-    table = await resolve_dining_table(db, token)
+    return await resolve_dining_table(db, token)
+
+
+async def _table_payload(db, table: DiningTable | None) -> dict | None:
     if not table:
         return None
-    payload = {
+    payload: dict = {
         "id": table.id,
         "table_no": table.table_no,
         "table_name": table.table_name,
@@ -1066,3 +1071,8 @@ async def _resolve_table(db, token: str) -> dict | None:
     if store:
         payload["store"] = store
     return payload
+
+
+async def _resolve_table(db, token: str) -> dict | None:
+    """Resolve a table for public entry responses without leaking ORM objects."""
+    return await _table_payload(db, await _resolve_table_record(db, token))

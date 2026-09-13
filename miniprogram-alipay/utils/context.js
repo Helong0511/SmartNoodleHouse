@@ -439,7 +439,7 @@ function pageDineFields(ctx) {
     storePhone: c.storePhone,
     tableName: c.tableName,
     tableNo: c.tableNo,
-    seatLabel: c.seatLabel,
+    seatLabel: c.seatLabel || '桌号',
     isTakeawayChannel: c.isTakeawayChannel,
     hasTable: c.hasTable
   }

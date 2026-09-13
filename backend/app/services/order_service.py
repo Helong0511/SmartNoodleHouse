@@ -156,6 +156,7 @@ class OrderReorderService:
                 priced = await OrderPriceCalculator.calculate_items_batch(
                     db,
                     [{"product_id": product.id, "quantity": item.quantity, "option_ids": option_ids}],
+                    store_id=order.store_id,
                 )
                 _p, line_subtotal, _detail, qty = priced[0]
                 unit_price = money(line_subtotal / Decimal(qty)) if qty else line_subtotal

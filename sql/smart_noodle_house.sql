@@ -1195,9 +1195,9 @@ SELECT '10元代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM coupon_templates WHERE name = '10元代金券');
 
 -- 六、门店
-INSERT INTO stores (store_no, name, address, phone, status)
-SELECT 'SH01', '肠旺面', '城南红砖路88号', '151-9691-4600', 1
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM stores WHERE store_no = 'SH01');
+INSERT INTO `smart_noodle_house`.`stores` (`id`, `store_no`, `name`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) VALUES 
+(1, 'SH01', '肠旺面', '城南红砖路88号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, 'SH02', '肠旺面', '城南红砖路188号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 七、系统参数
 INSERT INTO system_settings (setting_key, setting_value, description)
@@ -1247,15 +1247,7 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'e
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'enable_wx_phone_bind', 'false', '微信手机号绑定'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'enable_wx_phone_bind');
-INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'kitchen_ticket_order_no', 'barcode', '厨房票订单号样式 barcode/text/off'
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'kitchen_ticket_order_no');
-INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'xpyun_print_copies', '1', '小票打印份数'
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_print_copies');
-INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'xpyun_voice', '2', '云打印语音 0~3'
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_voice');
+
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'max_upload_size_mb', '5', '单文件上传上限 MB'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'max_upload_size_mb');
@@ -1283,14 +1275,28 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'd
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'mini_program_env_version', 'auto', '小程序码版本'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'mini_program_env_version');
+
+-- true/false
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'xpyun_enabled', 'false', '厨房打印总开关'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_enabled');
+
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'printer_mode', 'local', '打印机模式'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'printer_mode');
+
 INSERT INTO system_settings (setting_key, setting_value, description)
-SELECT 'printer_host', '', '打印机 IP'
+SELECT 'kitchen_ticket_order_no', 'barcode', '厨房票订单号样式 barcode/text/off'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'kitchen_ticket_order_no');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'xpyun_print_copies', '1', '小票打印份数'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_print_copies');
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'xpyun_voice', '0', '云打印语音 0~3'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'xpyun_voice');
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+SELECT 'printer_host', '192.168.1.150', '打印机 IP'
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE setting_key = 'printer_host');
 INSERT INTO system_settings (setting_key, setting_value, description)
 SELECT 'printer_port', '9100', '打印机端口'

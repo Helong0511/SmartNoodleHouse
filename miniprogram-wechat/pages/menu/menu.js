@@ -48,6 +48,7 @@ Page({
     storePhone: '',
     tableName: '',
     tableNo: '',
+    seatLabel: '桌号',
     hasTable: false
   },
 

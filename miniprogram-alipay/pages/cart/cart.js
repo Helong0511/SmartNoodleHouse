@@ -20,7 +20,8 @@ Page({
     storeAddress: '',
     storePhone: '',
     tableName: '',
-    tableNo: ''
+    tableNo: '',
+    seatLabel: '桌号'
   },
 
   onShow() {

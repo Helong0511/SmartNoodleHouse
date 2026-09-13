@@ -24,7 +24,8 @@ Page({
     storeAddress: '',
     storePhone: '',
     tableName: '',
-    tableNo: ''
+    tableNo: '',
+    seatLabel: '桌号'
   },
 
   onShow() {
@@ -151,6 +152,8 @@ Page({
   async reorderOrder(e) {
     const id = e.currentTarget.dataset.id
     if (!id || this.data.reorderingId) return
+    const item = this.data.orders.find((order) => String(order.id) === String(id))
+    if (item && !item.can_reorder) return
     this.setData({ reorderingId: id })
     try {
       my.showLoading({ content: '生成订单中' })

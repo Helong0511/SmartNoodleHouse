@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import now_local
+from app.core.response import ensure_local_aware, now_local
 from app.models import Customer, DiningSession, DiningTable
 
 # 堂食会话默认有效期（小时）；过期后须重新扫码
@@ -120,7 +120,12 @@ class DiningSessionService:
         if not session or session.status != "ACTIVE":
             return
         now = now_local()
-        if session.expires_at and session.expires_at <= now:
+        # MySQL commonly returns DATETIME(timezone=True) as a naive local
+        # datetime.  Normalize it before comparing with now_local(), which is
+        # timezone-aware, otherwise every order created while a table session
+        # is active fails with a 500 TypeError.
+        expires_at = ensure_local_aware(session.expires_at)
+        if expires_at and expires_at <= now:
             session.status = "EXPIRED"
             session.ended_at = now
             await db.flush()

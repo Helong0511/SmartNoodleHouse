@@ -66,19 +66,13 @@
 
         <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}<text wx:if="{{item.discount_amount > 0}}" class="discount">（已优惠¥{{item.discount_amount}}）</text> · {{item.payLabel}}</text>
 
-        <button
-
-          class="btn-mini"
-
-          size="mini"
-
+        <view
+          class="btn-mini {{!item.can_reorder || reorderingId == item.id ? 'is-disabled' : ''}}"
           catchtap="reorderOrder"
-
           data-id="{{item.id}}"
-
-          disabled="{{!item.can_reorder || reorderingId == item.id}}"
-
-        >再来一单</button>
+        >
+          <text class="btn-mini-label">再来一单</text>
+        </view>
 
       </view>
 

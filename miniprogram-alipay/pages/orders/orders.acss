@@ -41,6 +41,13 @@
   font-size: 22rpx;
   height: 48rpx;
   padding: 0 20rpx;
-  line-height: 48rpx;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
 }
+.btn-mini-label { line-height: 1; }
+.btn-mini.is-disabled { opacity: 0.45; }
 .list-foot { text-align: center; color: #bbb; font-size: 24rpx; padding: 24rpx 0 40rpx; }

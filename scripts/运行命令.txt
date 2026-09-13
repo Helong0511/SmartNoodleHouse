@@ -285,3 +285,5 @@ setx APISPACE_API_KEY "eivjqkfLBIHDlYd0Z9pZQZpQcrTiHrbWnbNXKJaO0GVuQjii"
 
 
 setx APISPACE_API_KEY "lvFLoISXYg5FgwrY7YDNB355Lb3AqSPes1MzOudei7EhZK1N"
+
+2026-09-12 17:42:01,304 ERROR [snh.filelog.wechat] api POST /orders/1/reorder | page=pages/orders/orders | client_ts=2026-09-12T09:42:00.279Z | extra={'status': 400, 'code': 40041, 'message': '没有可复购的在售商品，请重新点餐'}
