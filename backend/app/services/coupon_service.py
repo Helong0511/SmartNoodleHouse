@@ -86,9 +86,11 @@ class CouponService:
             return True
         sid = getattr(tmpl, "store_id", None)
         if sid is None:
-            # P2-4 总部模板：白名单为 NULL 表示全部门店可见；非空则仅列出门店可见
+            # P2-4 总部模板：白名单为 NULL 或空数组表示全部门店可见；非空则仅列出门店可见
+            # 空数组与 _normalize_whitelist 的归一化口径保持一致（[]→None），
+            # 兼容历史数据/直接写入的 JSON []
             whitelist = getattr(tmpl, "store_whitelist", None)
-            if whitelist is None:
+            if not whitelist:
                 return True
             try:
                 return int(store_id) in {int(s) for s in whitelist}

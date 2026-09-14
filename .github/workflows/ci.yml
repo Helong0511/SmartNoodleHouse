@@ -32,6 +32,9 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall backend/app -q
+      - name: Store isolation guard check
+        run: |
+          python scripts/check_store_isolation.py
       - name: Run unit tests with coverage
         env:
           PYTHONPATH: backend

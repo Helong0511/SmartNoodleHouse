@@ -1,0 +1,26 @@
+﻿........................................................................ [ 13%]
+........................s............................................... [ 27%]
+........................................................................ [ 41%]
+........................................................................ [ 55%]
+........................................................................ [ 69%]
+...........................................................ss........... [ 82%]
+...ss......F............................................................ [ 96%]
+ss.....s.........                                                        [100%]
+================================== FAILURES ===================================
+______________________ test_schema_model_table_alignment ______________________
+tests\test_schema_model_alignment.py:89: in test_schema_model_table_alignment
+    assert not model_only_cols, f"model 独有列: {model_only_cols}"
+E   AssertionError: model 独有列: [('coupon_templates', 'store_whitelist')]
+E   assert not [('coupon_templates', 'store_whitelist')]
+============================== warnings summary ===============================
+tests/test_payment_refund.py::test_finalize_refund_deducts_points_for_customer
+  E:\SmartNoodleHouse\tests\..\backend\app\services\outbox_worker.py:84: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    async with db.begin_nested():
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_schema_model_alignment.py::test_schema_model_table_alignment - AssertionError: model 独有列: [('coupon_templates', 'store_whitelist')]
+assert not [('coupon_templates', 'store_whitelist')]
+1 failed, 512 passed, 8 skipped, 1 warning in 34.29s
