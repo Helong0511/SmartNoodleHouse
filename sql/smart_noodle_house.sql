@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS coupon_templates (
   status TINYINT NOT NULL DEFAULT 1 COMMENT '模板状态：1=启用 0=停用',
   total_quota INT DEFAULT NULL COMMENT 'P0-6: 发放总量上限；NULL=不限',
   remaining INT DEFAULT NULL COMMENT 'P0-6: 剩余可发量；NULL=不限',
+  store_whitelist JSON DEFAULT NULL COMMENT 'P2-4: 总部模板可见门店白名单；NULL/空数组=全部门店',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   INDEX idx_coupon_tmpl_store (store_id),
   CONSTRAINT fk_coupon_tmpl_store FOREIGN KEY (store_id) REFERENCES stores(id)

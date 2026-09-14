@@ -1,0 +1,17 @@
+﻿........................................................................ [ 13%]
+........................s............................................... [ 27%]
+........................................................................ [ 41%]
+........................................................................ [ 55%]
+........................................................................ [ 69%]
+...........................................................ss........... [ 82%]
+...ss................................................................... [ 96%]
+ss.....s.........                                                        [100%]
+============================== warnings summary ===============================
+tests/test_payment_refund.py::test_finalize_refund_deducts_points_for_customer
+  E:\SmartNoodleHouse\tests\..\backend\app\services\outbox_worker.py:84: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    async with db.begin_nested():
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+513 passed, 8 skipped, 1 warning in 25.47s
