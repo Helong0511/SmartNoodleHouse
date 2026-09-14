@@ -162,12 +162,19 @@ async def claim_outbox_item(
 
 
 async def process_outbox_item(outbox_id: int) -> None:
-    """claim 单条 outbox 事件并分发给已注册 handler。"""
+    """claim 单条 outbox 事件并分发给已注册 handler。
+
+    claim 释放使用原子 UPDATE WHERE locked_by = wid：处理期间若行被
+    reclaim_stale_outbox 复位并被另一 worker 重新 claim，原 worker 的
+    UPDATE 命中 0 行，不会覆盖新 owner 的锁。
+    """
     async with AsyncSessionLocal() as db:
         row = await claim_outbox_item(db, outbox_id)
         if not row:
             # 已被其他 worker claim，或 DONE / 未到重试时间
             return
+        # claim 后 row.locked_by 即本 worker 的 owner token
+        wid = (row.locked_by or "")[:64]
         handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
         if handler is None:
             logger.error(
@@ -176,7 +183,7 @@ async def process_outbox_item(outbox_id: int) -> None:
                 row.event_kind,
                 outbox_id,
             )
-            await _mark_failed(db, row, "handler_not_registered")
+            await _mark_failed(db, row, "handler_not_registered", wid=wid)
             return
         try:
             payload = json.loads(row.payload) if row.payload else {}
@@ -184,34 +191,70 @@ async def process_outbox_item(outbox_id: int) -> None:
             payload = {}
         try:
             await handler(db, row)
-            row.status = "DONE"
-            row.processed_at = now_local()
-            row.last_error = None
-            row.next_retry_at = None
-            row.locked_at = None
-            row.locked_by = None
+            # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
+            done_stmt = (
+                update(OutboxEvent)
+                .where(
+                    OutboxEvent.id == outbox_id,
+                    OutboxEvent.locked_by == wid,
+                )
+                .values(
+                    status="DONE",
+                    processed_at=now_local(),
+                    last_error=None,
+                    next_retry_at=None,
+                    locked_at=None,
+                    locked_by=None,
+                )
+            )
+            done_result = await db.execute(done_stmt)
             await db.commit()
+            if not done_result.rowcount:
+                logger.warning(
+                    "Outbox 行在处理期间被 reclaim 释放 id=%s", outbox_id
+                )
         except Exception as e:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, e)
-            await _mark_failed(db, row, str(e))
+            await _mark_failed(db, row, str(e), wid=wid)
 
 
-async def _mark_failed(db: AsyncSession, row: OutboxEvent, err: str) -> None:
-    """handler 异常时标记 FAILED 并安排退避；超过 max_attempts 不再自动重试。"""
-    # 重新加载以避免在已回滚的 session 上操作
+async def _mark_failed(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str = "") -> None:
+    """handler 异常时标记 FAILED 并安排退避；超过 max_attempts 不再自动重试。
+
+    原子 UPDATE WHERE locked_by = wid：仅当锁仍归原 worker 时才标记失败，
+    避免 reclaim 后新 owner 的锁被误覆盖。
+    """
+    # 重新加载以获取 attempt_count / max_attempts
     fresh = await db.get(OutboxEvent, row.id)
     if not fresh or fresh.status == "DONE":
         return
-    fresh.status = "FAILED"
-    fresh.last_error = err[:500]
-    fresh.locked_at = None
-    fresh.locked_by = None
     attempts = int(fresh.attempt_count or 1)
-    if attempts < int(fresh.max_attempts or MAX_ATTEMPTS):
-        fresh.next_retry_at = now_local() + timedelta(seconds=_backoff_seconds(attempts))
-    else:
-        fresh.next_retry_at = None
+    max_att = int(fresh.max_attempts or MAX_ATTEMPTS)
+    retry_at = (
+        now_local() + timedelta(seconds=_backoff_seconds(attempts))
+        if attempts < max_att
+        else None
+    )
+    fail_stmt = (
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == row.id,
+            OutboxEvent.locked_by == wid,
+        )
+        .values(
+            status="FAILED",
+            last_error=err[:500],
+            locked_at=None,
+            locked_by=None,
+            next_retry_at=retry_at,
+        )
+    )
+    fail_result = await db.execute(fail_stmt)
     await db.commit()
+    if not fail_result.rowcount:
+        logger.warning(
+            "Outbox 行在失败标记期间被 reclaim 释放 id=%s", row.id
+        )
 
 
 async def process_pending_outbox(limit: int = 30) -> int:

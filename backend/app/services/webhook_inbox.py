@@ -181,9 +181,14 @@ async def process_inbox_item(inbox_id: int) -> bool:
 
     返回 True 表示成功 claim（无论最终 DONE 还是 FAILED）；
     返回 False 表示未被 claim（已被其他 worker 占用 / DONE / 未到重试时间）。
+
+    claim 释放使用原子 UPDATE WHERE locked_by = wid：如果处理期间行被
+    reclaim_stale_inbox 复位并被另一 worker 重新 claim，原 worker 的
+    UPDATE 会命中 0 行，不会覆盖新 owner 的锁（避免误释放他人锁）。
     """
+    wid = _worker_id()
     async with AsyncSessionLocal() as db:
-        row = await claim_inbox_item(db, inbox_id)
+        row = await claim_inbox_item(db, inbox_id, worker=wid)
         if not row:
             # 已被其他 worker claim，或 DONE / 未到重试时间
             return False
@@ -192,14 +197,32 @@ async def process_inbox_item(inbox_id: int) -> bool:
             envelope = json.loads(row.payload)
             raw = envelope.get("raw") if isinstance(envelope, dict) and envelope.get("_verified") else envelope
             result = await DeliveryService.process_raw(db, row.channel, raw if isinstance(raw, dict) else {})
-            row.status = "DONE"
-            row.processed_at = now_local()
-            row.error_message = None
-            row.last_error = None
-            row.next_retry_at = None
-            row.locked_at = None
-            row.locked_by = None
+            # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
+            # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
+            done_stmt = (
+                update(WebhookInbox)
+                .where(
+                    WebhookInbox.id == inbox_id,
+                    WebhookInbox.locked_by == wid[:64],
+                )
+                .values(
+                    status="DONE",
+                    processed_at=now_local(),
+                    error_message=None,
+                    last_error=None,
+                    next_retry_at=None,
+                    locked_at=None,
+                    locked_by=None,
+                )
+            )
+            done_result = await db.execute(done_stmt)
             await db.commit()
+            if not done_result.rowcount:
+                # 行已被 reclaim 并被其他 worker 重新 claim：不通知 WS（新 owner 负责）
+                logger.warning(
+                    "inbox 行在处理期间被 reclaim 释放 id=%s，跳过 WS 通知", inbox_id
+                )
+                return True
 
             ws_event = EVENT_WS_MAP.get(result.event, "DELIVERY_UNKNOWN")
             payload = {"channel": row.channel, "event": result.event, **result.extra}
@@ -219,21 +242,39 @@ async def process_inbox_item(inbox_id: int) -> bool:
         except Exception as e:
             logger.exception("inbox 处理失败 id=%s: %s", inbox_id, e)
             async with AsyncSessionLocal() as db2:
+                # 先读 attempt_count（用于计算退避），再用原子 UPDATE 释放
                 row2 = await db2.get(WebhookInbox, inbox_id)
                 if not row2 or row2.status == "DONE":
                     return True
                 err = str(e)[:500]
-                row2.status = "FAILED"
-                row2.error_message = err
-                row2.last_error = err
-                row2.locked_at = None
-                row2.locked_by = None
                 attempts = int(row2.attempt_count or 1)
-                if attempts < MAX_ATTEMPTS:
-                    row2.next_retry_at = now_local() + timedelta(seconds=_backoff_seconds(attempts))
-                else:
-                    row2.next_retry_at = None
+                retry_at = (
+                    now_local() + timedelta(seconds=_backoff_seconds(attempts))
+                    if attempts < MAX_ATTEMPTS
+                    else None
+                )
+                # 原子释放：仅当 locked_by 仍为原 worker 时才标记 FAILED
+                fail_stmt = (
+                    update(WebhookInbox)
+                    .where(
+                        WebhookInbox.id == inbox_id,
+                        WebhookInbox.locked_by == wid[:64],
+                    )
+                    .values(
+                        status="FAILED",
+                        error_message=err,
+                        last_error=err,
+                        locked_at=None,
+                        locked_by=None,
+                        next_retry_at=retry_at,
+                    )
+                )
+                fail_result = await db2.execute(fail_stmt)
                 await db2.commit()
+                if not fail_result.rowcount:
+                    logger.warning(
+                        "inbox 行在失败处理期间被 reclaim 释放 id=%s", inbox_id
+                    )
             return True
 
 

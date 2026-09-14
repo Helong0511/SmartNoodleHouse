@@ -766,9 +766,15 @@ class PrintService:
 
     @classmethod
     async def process_print_job(cls, job_id: int) -> bool:
-        """消费一条可重试 PrintJob：claim 后用已存 content 重打。"""
+        """消费一条可重试 PrintJob：claim 后用已存 content 重打。
+
+        claim 释放使用原子 UPDATE WHERE locked_by = wid：处理期间若行被
+        reclaim_stale_printing 复位并被另一 worker 重新 claim，原 worker 的
+        UPDATE 命中 0 行，不会覆盖新 owner 的锁。
+        """
+        wid = _print_worker_id()
         async with AsyncSessionLocal() as db:
-            job = await cls.claim_print_job(db, job_id)
+            job = await cls.claim_print_job(db, job_id, worker=wid)
             if not job:
                 return False
             order = await db.get(Order, job.order_id)
@@ -781,8 +787,29 @@ class PrintService:
                     content=job.content or "",
                     ticket_type=job.ticket_type or TICKET_KITCHEN,
                 )
-                cls._mark_job_success(job)
+                # 原子释放：仅当 locked_by 仍为本 worker 时才标记 SUCCESS
+                success_stmt = (
+                    update(PrintJob)
+                    .where(
+                        PrintJob.id == int(job_id),
+                        PrintJob.locked_by == wid,
+                    )
+                    .values(
+                        status="SUCCESS",
+                        succeeded_at=now_local(),
+                        last_error=None,
+                        next_retry_at=None,
+                        locked_at=None,
+                        locked_by=None,
+                    )
+                )
+                ok_result = await db.execute(success_stmt)
                 await db.commit()
+                if not ok_result.rowcount:
+                    logger.warning(
+                        "PrintJob 行在处理期间被 reclaim 释放 id=%s", job_id
+                    )
+                    return False
                 logger.info(
                     "PrintJob 重试成功 id=%s order_id=%s mock=%s",
                     job.id,
@@ -796,8 +823,35 @@ class PrintService:
                     row = await db2.get(PrintJob, int(job_id))
                     if not row or row.status == "SUCCESS":
                         return False
-                    cls._mark_job_failed(row, exc)
+                    err = str(exc)[:500] or exc.__class__.__name__
+                    attempts = int(row.attempt_count or 1)
+                    retry_at = (
+                        now_local() + timedelta(seconds=_print_backoff_seconds(attempts))
+                        if attempts < MAX_PRINT_ATTEMPTS
+                        else None
+                    )
+                    new_status = "RETRYING" if attempts < MAX_PRINT_ATTEMPTS else "FAILED"
+                    # 原子释放：仅当 locked_by 仍为原 worker 时才标记失败
+                    fail_stmt = (
+                        update(PrintJob)
+                        .where(
+                            PrintJob.id == int(job_id),
+                            PrintJob.locked_by == wid,
+                        )
+                        .values(
+                            status=new_status,
+                            last_error=err,
+                            next_retry_at=retry_at,
+                            locked_at=None,
+                            locked_by=None,
+                        )
+                    )
+                    fail_result = await db2.execute(fail_stmt)
                     await db2.commit()
+                    if not fail_result.rowcount:
+                        logger.warning(
+                            "PrintJob 行在失败处理期间被 reclaim 释放 id=%s", job_id
+                        )
                 return False
 
     @classmethod

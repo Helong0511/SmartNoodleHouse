@@ -993,6 +993,26 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
         "xpyun_enabled", get_settings().xpyun_enabled
     ):
         return success({"printed": False, "message": "打印未启用（厨房打印总开关关闭）"}, request=request)
+
+    # 手动补打幂等：短时 Redis NX 锁防止快速重复点击导致重复出票
+    # TTL=15s 足够覆盖一次打印往返；锁自然过期，无需手动释放
+    import time
+
+    from app.core.redis_client import get_redis
+
+    dedup_key = f"snh:print:dedup:{order_id}:KITCHEN"
+    try:
+        r = await get_redis()
+        acquired = await r.set(dedup_key, str(int(time.time())), nx=True, ex=15)
+        if not acquired:
+            return success(
+                {"printed": False, "message": "正在打印中，请勿重复点击"},
+                request=request,
+            )
+    except Exception:
+        # Redis 不可用时降级放行（不阻断打印主流程）
+        pass
+
     try:
         result = await PrintService.print_order(db, order_id)
     except Exception:

@@ -704,23 +704,14 @@ class DeliveryService:
         reason = str(raw.get("reason") or raw.get("refund_reason") or parsed.get("reason") or "")
         refund_type = "PARTIAL" if amount and order and amount < order.total_amount else "FULL"
 
-        existing = None
-        if refund_id:
-            result = await db.execute(
-                select(DeliveryRefund).where(
-                    DeliveryRefund.platform == platform.upper(),
-                    DeliveryRefund.platform_refund_id == refund_id,
-                )
-            )
-            existing = result.scalar_one_or_none()
-
-        if not existing:
+        if not refund_id:
+            # 平台未给 refund_id：不受唯一约束保护，直接插入
             db.add(
                 DeliveryRefund(
                     delivery_order_id=d_order.id,
                     order_id=d_order.order_id,
                     platform=platform.upper(),
-                    platform_refund_id=refund_id or None,
+                    platform_refund_id=None,
                     refund_type=refund_type,
                     amount=amount,
                     reason=reason,
@@ -728,6 +719,28 @@ class DeliveryService:
                     raw_payload=json.dumps(raw, ensure_ascii=False, default=str),
                 )
             )
+        else:
+            # 有 refund_id：利用唯一约束原子去重，IntegrityError 时回滚 savepoint 再查已有行
+            from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        DeliveryRefund(
+                            delivery_order_id=d_order.id,
+                            order_id=d_order.order_id,
+                            platform=platform.upper(),
+                            platform_refund_id=refund_id,
+                            refund_type=refund_type,
+                            amount=amount,
+                            reason=reason,
+                            status="PENDING",
+                            raw_payload=json.dumps(raw, ensure_ascii=False, default=str),
+                        )
+                    )
+            except _IntegrityError:
+                # 并发回调：(platform, platform_refund_id) 冲突 → 已有台账，跳过
+                pass
 
         d_order.refund_status = "PENDING"
         d_order.last_sync_at = now_local()
@@ -764,6 +777,9 @@ class DeliveryService:
 
         if approve:
             ok = await provider.agree_refund(refund.platform_refund_id or "", d_order.platform_order_id if d_order else "")
+            # 平台拒绝同意（ok=False）：不得标记 APPROVED，保持 PENDING 让商家重试
+            if not ok:
+                raise AppException(40062, "平台拒绝同意退款，请稍后重试或联系平台")
             refund.status = "APPROVED"
             if d_order:
                 d_order.refund_status = "APPROVED"
@@ -810,6 +826,9 @@ class DeliveryService:
                 d_order.platform_order_id if d_order else "",
                 reason or "商家拒绝退款",
             )
+            # 平台拒绝拒绝（ok=False）：不得标记 REJECTED，保持 PENDING
+            if not ok:
+                raise AppException(40062, "平台拒绝退款拒绝操作，请稍后重试或联系平台")
             refund.status = "REJECTED"
             if d_order:
                 d_order.refund_status = "REJECTED"

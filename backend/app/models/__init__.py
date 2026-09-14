@@ -668,6 +668,9 @@ class PlatformStoreBinding(Base, TimestampMixin):
 
 class DeliveryRefund(Base):
     __tablename__ = "delivery_refunds"
+    # (platform, platform_refund_id) 唯一：防止重复回调/并发请求创建多条退款台账
+    # platform_refund_id 为 NULL 时不受约束（平台未给 refund_id 的退款仍可入账）
+    __table_args__ = (UniqueConstraint("platform", "platform_refund_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     delivery_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("delivery_orders.id", ondelete="CASCADE"))
