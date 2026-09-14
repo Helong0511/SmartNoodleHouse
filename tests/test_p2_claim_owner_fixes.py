@@ -177,25 +177,28 @@ async def test_reprint_dedup_blocks_rapid_double_click():
 
     fake_redis = SimpleNamespace(set=fake_set)
 
-    async def fake_get_redis():
-        return fake_redis
-
     print_called = AsyncMock(return_value={"mock": True})
 
     from app.services.system_settings_service import SystemSettingsService
     # 清除缓存避免之前测试预热影响 resolved_bool_sync 的 fallback 路径
     SystemSettingsService._cache = None
 
+    # 直接注入 _redis 全局变量，避免 patch classmethod 的不稳定性
+    import app.core.redis_client as redis_module
+    original_redis = redis_module._redis
+    redis_module._redis = fake_redis
+
     fake_settings = SimpleNamespace(xpyun_enabled=True)
 
     with patch(
         "app.core.config.get_settings", return_value=fake_settings,
     ), patch(
-        "app.core.redis_client.get_redis", fake_get_redis,
-    ), patch(
         "app.services.print_service.PrintService.print_order", print_called,
     ):
         result = await reprint_kitchen_ticket(10, fake_request, db, user)
+
+    # 恢复 _redis
+    redis_module._redis = original_redis
 
     # print_order 不应被调用
     assert result["data"]["printed"] is False, f"printed should be False, got {result['data']}"
