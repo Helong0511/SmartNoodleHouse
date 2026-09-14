@@ -70,10 +70,11 @@ async def create_payment(
     order = await db.get(Order, order_id)
     if not order:
         return success(None, message="订单不存在", request=request)
-    from app.services.order_access import assert_customer_can_pay_order
+    from app.services.order_access import assert_customer_can_pay_order, assert_dining_session_owner
 
     # 禁止顾客 claim 未绑定的 POS 订单；仅本人订单可支付
     assert_customer_can_pay_order(order, customer.id)
+    await assert_dining_session_owner(db, order, customer.id, action="支付")
     extra: dict | None = None
     provider_u = data.provider.upper()
     channel_l = data.channel_type.lower()
@@ -118,9 +119,10 @@ async def sync_order_payment(
     order = await db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    from app.services.order_access import assert_customer_owns_order
+    from app.services.order_access import assert_customer_owns_order, assert_dining_session_owner
 
     assert_customer_owns_order(order, customer.id, action="同步支付")
+    await assert_dining_session_owner(db, order, customer.id, action="同步支付")
     # P1-13: per-payment Redis cooldown before querying provider
     pending = (
         await db.execute(
