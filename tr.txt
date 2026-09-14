@@ -1,0 +1,38 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\18307\AppData\Local\Programs\Python\Python311\python.exe
+cachedir: .pytest_cache
+rootdir: E:\SmartNoodleHouse
+configfile: pytest.ini
+plugins: anyio-3.7.1, asyncio-1.3.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 27 items
+
+..\tests\test_concurrency_guards.py::test_apply_order_status_revalidates_under_row_lock PASSED [  3%]
+..\tests\test_concurrency_guards.py::test_apply_order_status_idempotent_when_db_already_target PASSED [  7%]
+..\tests\test_concurrency_guards.py::test_ws_quota_release_uses_atomic_lua PASSED [ 11%]
+..\tests\test_concurrency_guards.py::test_handle_urge_uses_atomic_increment PASSED [ 14%]
+..\tests\test_pos_refund.py::test_allocate_cash_first_then_alipay PASSED [ 18%]
+..\tests\test_pos_refund.py::test_allocate_full_mixed_order PASSED       [ 22%]
+..\tests\test_pos_refund.py::test_allocate_rejects_over_refundable PASSED [ 25%]
+..\tests\test_pos_refund.py::test_cashier_cannot_apply_others_payment PASSED [ 29%]
+..\tests\test_pos_refund.py::test_create_request_uses_order_level_refundable PASSED [ 33%]
+..\tests\test_pos_refund.py::test_reject_requires_manager PASSED         [ 37%]
+..\tests\test_pos_refund.py::test_approve_requires_manager PASSED        [ 40%]
+..\tests\test_pos_refund.py::test_cancel_request_uses_row_lock PASSED    [ 44%]
+..\tests\test_pos_refund.py::test_cancel_request_blocked_after_concurrent_approve PASSED [ 48%]
+..\tests\test_pos_refund.py::test_reject_request_uses_row_lock_and_blocks_when_approved PASSED [ 51%]
+..\tests\test_camera_ssrf_liveness.py::test_camera_url_blocks_metadata_endpoint PASSED [ 55%]
+..\tests\test_camera_ssrf_liveness.py::test_camera_url_blocks_localhost PASSED [ 59%]
+..\tests\test_camera_ssrf_liveness.py::test_camera_url_blocks_link_local PASSED [ 62%]
+..\tests\test_camera_ssrf_liveness.py::test_camera_url_allows_private_lan PASSED [ 66%]
+..\tests\test_camera_ssrf_liveness.py::test_camera_url_allows_public_ip PASSED [ 70%]
+..\tests\test_camera_ssrf_liveness.py::test_camera_url_ignores_non_url PASSED [ 74%]
+..\tests\test_camera_ssrf_liveness.py::test_prepare_camera_source_blocks_metadata PASSED [ 77%]
+..\tests\test_camera_ssrf_liveness.py::test_prepare_camera_source_allows_safe_lan PASSED [ 81%]
+..\tests\test_camera_ssrf_liveness.py::test_generate_liveness_challenge_returns_token_and_action PASSED [ 85%]
+..\tests\test_camera_ssrf_liveness.py::test_verify_liveness_challenge_success PASSED [ 88%]
+..\tests\test_camera_ssrf_liveness.py::test_verify_liveness_challenge_replay_blocked PASSED [ 92%]
+..\tests\test_camera_ssrf_liveness.py::test_verify_liveness_challenge_action_not_completed PASSED [ 96%]
+..\tests\test_camera_ssrf_liveness.py::test_verify_liveness_challenge_expired_token PASSED [100%]
+
+============================= 27 passed in 0.44s ==============================

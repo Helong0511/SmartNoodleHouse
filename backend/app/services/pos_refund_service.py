@@ -169,7 +169,13 @@ class PosRefundService:
 
     @classmethod
     async def cancel_request(cls, db: AsyncSession, *, user, request_id: int) -> PosRefundRequest:
-        row = await db.get(PosRefundRequest, int(request_id))
+        # FOR UPDATE：与 approve_and_execute（可能正调用外部退款渠道）互斥，
+        # 避免审批提交后被无锁的撤销覆写成 CANCELLED（钱已退、单据丢失）。
+        row = (
+            await db.execute(
+                select(PosRefundRequest).where(PosRefundRequest.id == int(request_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not row:
             raise AppException(40404, "退款申请不存在")
         if row.requested_by != user.id and not _can_approve(user):
@@ -192,7 +198,12 @@ class PosRefundService:
     ) -> PosRefundRequest:
         if not _can_approve(user):
             raise AppException(40301, "仅店长或管理员可审批退款")
-        row = await db.get(PosRefundRequest, int(request_id))
+        # FOR UPDATE：同 cancel_request，拒绝与审批互斥，防止覆写退款结果
+        row = (
+            await db.execute(
+                select(PosRefundRequest).where(PosRefundRequest.id == int(request_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not row:
             raise AppException(40404, "退款申请不存在")
         assert_store_access(user, row.store_id)

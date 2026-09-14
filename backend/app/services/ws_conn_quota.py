@@ -10,6 +10,16 @@ WS_USER_KEY = "snh:ws:conn:user:"
 # 略长于常见空闲超时，断开时再 DECR；崩溃时靠 TTL 回收
 WS_COUNT_TTL = 300
 
+# 原子 DECR + 归零删除：避免 DECR 与 DELETE 两次往返之间被新连接 INCR，
+# 导致旧连接的 DELETE 误删新连接的有效计数（配额被低估）。
+_LUA_DECR_DELETE = """
+local n = redis.call('decr', KEYS[1])
+if n <= 0 then
+    redis.call('del', KEYS[1])
+end
+return n
+"""
+
 
 async def try_reserve(*, ip: str, user_key: str | None, max_ip: int, max_user: int) -> str | None:
     """尝试占用一个全局名额；返回拒绝原因或 None。"""
@@ -48,16 +58,12 @@ async def release(*, ip: str, user_key: str | None) -> None:
 
         r = await get_redis()
         ip_k = f"{WS_IP_KEY}{ip or 'unknown'}"
-        n = await r.decr(ip_k)
-        if int(n or 0) <= 0:
-            await r.delete(ip_k)
+        await r.eval(_LUA_DECR_DELETE, 1, ip_k)
         if user_key:
             uk = f"{WS_USER_KEY}{user_key}"
-            un = await r.decr(uk)
-            if int(un or 0) <= 0:
-                await r.delete(uk)
-    except Exception:
-        pass
+            await r.eval(_LUA_DECR_DELETE, 1, uk)
+    except Exception as e:
+        logger.warning("WS 连接计数释放失败（将由 TTL 回收）: %s", e)
 
 
 async def touch(*, ip: str, user_key: str | None) -> None:

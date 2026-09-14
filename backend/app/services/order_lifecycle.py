@@ -54,7 +54,19 @@ async def apply_order_status(
     target = (target or "").strip().upper()
     if not target:
         raise AppException(40021, "目标状态为空")
-    old = (order.status or "").strip().upper()
+
+    # 以当前读（FOR UPDATE）取权威状态并串行化并发迁移：支付退款、平台取消、
+    # 商家取消等可能在不同事务里基于同一 RR 快照双双通过 Python 校验，若不加行锁，
+    # 后提交方会覆写终态（REFUNDED→CANCELLED）并因旧快照非终态而二次回补库存（虚增）。
+    # 此处只取标量，不刷新调用方传入的 ORM 对象；已持锁的调用方在同一事务内重复加锁无副作用。
+    current = (
+        await db.execute(select(Order.status).where(Order.id == order.id).with_for_update())
+    ).scalar_one_or_none()
+    if current is not None:
+        old = (current or "").strip().upper()
+    else:
+        # 尚未落库的新单（极端路径）退回使用对象值
+        old = (order.status or "").strip().upper()
     if old == target:
         if payment_status is not None and order.payment_status != payment_status:
             order.payment_status = payment_status

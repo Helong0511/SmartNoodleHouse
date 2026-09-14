@@ -26,6 +26,16 @@ LIVENESS_ACTIONS = ("blink", "turn_left", "turn_right", "nod", "smile")
 CHALLENGE_KEY = "snh:face:liveness:{token}"
 CHALLENGE_TTL = 30  # 秒
 
+# 原子 GETDEL：一次性挑战 token 必须在单条命令内取出并删除，
+# 否则 GET 与 DEL 两次往返之间可被同一 token 并发重放。
+_LUA_GET_DEL = """
+local v = redis.call('get', KEYS[1])
+if v then
+    redis.call('del', KEYS[1])
+end
+return v
+"""
+
 
 async def generate_liveness_challenge(
     *, customer_id: int | None = None, camera_id: int | None = None
@@ -78,12 +88,11 @@ async def verify_liveness_challenge(token: str, *, action_completed: bool = True
 
     redis = await get_redis()
     key = CHALLENGE_KEY.format(token=token)
-    # 原子 GET + DEL 防止重放攻击
-    raw = await redis.get(key)
+    # Lua 原子 GETDEL：取出即删，杜绝同一 token 并发重放
+    raw = await redis.eval(_LUA_GET_DEL, 1, key)
     if not raw:
         logger.warning("Liveness challenge token not found or expired: %s", token[:8])
         return False
-    await redis.delete(key)
 
     try:
         payload = json.loads(raw)

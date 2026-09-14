@@ -96,22 +96,21 @@ async def test_verify_liveness_challenge_success():
 
     fake_redis = MagicMock()
     payload = '{"action": "blink", "customer_id": 1, "camera_id": 2}'
-    fake_redis.get = AsyncMock(return_value=payload)
-    fake_redis.delete = AsyncMock()
+    # 原子 GETDEL 由单条 Lua eval 完成
+    fake_redis.eval = AsyncMock(return_value=payload)
     with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
         ok = await verify_liveness_challenge("valid_token", action_completed=True)
     assert ok is True
-    fake_redis.delete.assert_awaited_once()
+    fake_redis.eval.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_verify_liveness_challenge_replay_blocked():
-    """同一 token 第二次校验应失败（已被删除）。"""
+    """同一 token 第二次校验应失败（Lua GETDEL 已在第一次删除）。"""
     from app.services.face_liveness_service import verify_liveness_challenge
 
     fake_redis = MagicMock()
-    fake_redis.get = AsyncMock(return_value=None)  # 已被第一次删除
-    fake_redis.delete = AsyncMock()
+    fake_redis.eval = AsyncMock(return_value=None)  # 已被第一次 GETDEL 删除
     with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
         ok = await verify_liveness_challenge("replayed_token", action_completed=True)
     assert ok is False
@@ -119,13 +118,12 @@ async def test_verify_liveness_challenge_replay_blocked():
 
 @pytest.mark.asyncio
 async def test_verify_liveness_challenge_action_not_completed():
-    """token 有效但动作未完成 → False。"""
+    """token 有效但动作未完成 → False（token 仍被原子消费）。"""
     from app.services.face_liveness_service import verify_liveness_challenge
 
     fake_redis = MagicMock()
     payload = '{"action": "blink", "customer_id": 1}'
-    fake_redis.get = AsyncMock(return_value=payload)
-    fake_redis.delete = AsyncMock()
+    fake_redis.eval = AsyncMock(return_value=payload)
     with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
         ok = await verify_liveness_challenge("valid_token", action_completed=False)
     assert ok is False
@@ -137,8 +135,7 @@ async def test_verify_liveness_challenge_expired_token():
     from app.services.face_liveness_service import verify_liveness_challenge
 
     fake_redis = MagicMock()
-    fake_redis.get = AsyncMock(return_value=None)
-    fake_redis.delete = AsyncMock()
+    fake_redis.eval = AsyncMock(return_value=None)
     with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
         ok = await verify_liveness_challenge("expired_or_invalid_token")
     assert ok is False

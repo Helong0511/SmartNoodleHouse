@@ -618,9 +618,17 @@ class DeliveryService:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None, []
-        d_order.urge_count = (d_order.urge_count or 0) + 1
-        d_order.last_sync_at = now_local()
-        await db.flush()
+        # 原子自增，避免并发催单事件基于旧快照互相覆盖计数（丢失更新）
+        from sqlalchemy import update as sa_update
+
+        await db.execute(
+            sa_update(DeliveryOrder)
+            .where(DeliveryOrder.id == d_order.id)
+            .values(
+                urge_count=DeliveryOrder.urge_count + 1,
+                last_sync_at=now_local(),
+            )
+        )
         tasks = [
             {
                 "action": "reply_urge",
