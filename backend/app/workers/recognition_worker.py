@@ -67,12 +67,16 @@ class RecognitionWorker:
 
                         # 匿名访客流量：同一摄像头 30s 内最多记 1 次 ENTER
                         if now - self._last_visitor_at.get(cam_id, 0) >= 30:
-                            try:
-                                await VisitorService.record_event(db, cam_id, "ENTER")
-                                await db.commit()
+                            # P0-24: 未知顾客捕获默认关闭 — 仅记录 ENTER 事件，不保存人脸 snapshot
+                            if settings.unknown_visitor_capture_enabled:
+                                try:
+                                    await VisitorService.record_event(db, cam_id, "ENTER")
+                                    await db.commit()
+                                    self._last_visitor_at[cam_id] = now
+                                except Exception:
+                                    await db.rollback()
+                            else:
                                 self._last_visitor_at[cam_id] = now
-                            except Exception:
-                                await db.rollback()
 
                         try:
                             emb = np.array(extract_face_embedding_bgr(frame), dtype=np.float32)

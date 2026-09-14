@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission, require_pos
 from app.core.exceptions import AppException
+from app.core.redis_client import get_redis
 from app.core.response import calc_pages, success
 from app.models import Order, Payment, PaymentRefund
 from app.schemas.order import PaymentCreate, PosCashPay, PosScanPay
@@ -40,6 +41,14 @@ def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
 class RefundCreate(BaseModel):
     amount: Decimal = Field(..., gt=0)
     reason: str = Field(default="商家退款", max_length=200)
+
+
+async def _acquire_sync_cooldown(payment_id: int) -> None:
+    """P1-13: per-payment 2s Redis cooldown (SET NX EX 2) to avoid flooding provider query API."""
+    redis_client = await get_redis()
+    acquired = await redis_client.set(f"payment_sync:{payment_id}", "1", nx=True, ex=2)
+    if not acquired:
+        raise HTTPException(status_code=429, detail="查询过于频繁，请稍后重试")
 
 
 async def _wechat_openid_for_customer(db: AsyncSession, customer_id: int) -> str | None:
@@ -112,6 +121,17 @@ async def sync_order_payment(
     from app.services.order_access import assert_customer_owns_order
 
     assert_customer_owns_order(order, customer.id, action="同步支付")
+    # P1-13: per-payment Redis cooldown before querying provider
+    pending = (
+        await db.execute(
+            select(Payment)
+            .where(Payment.order_id == order.id, Payment.status == "PENDING")
+            .order_by(Payment.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if pending:
+        await _acquire_sync_cooldown(pending.id)
     payment, meta = await PaymentService.sync_order_pending_payment(
         db, order, provider=provider
     )
@@ -159,6 +179,8 @@ async def sync_payment(
         if user.role.code != "SUPER_ADMIN" and "payment:read" not in perms:
             raise HTTPException(status_code=403, detail="缺少权限: payment:read")
         assert_order_store_access(user, order)
+    # P1-13: per-payment Redis cooldown before querying provider
+    await _acquire_sync_cooldown(payment.id)
     before = payment.status
     payment, meta = await PaymentService.sync_payment_status(db, payment)
     if before != "PAID" and payment.status == "PAID":

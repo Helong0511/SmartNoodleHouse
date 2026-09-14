@@ -409,5 +409,70 @@ Page({
 
   goOrders() {
     my.switchTab({ url: '/pages/orders/orders' })
+  },
+
+  async onGetUserInfoAuthorize() {
+    try {
+      my.showLoading({ content: '获取资料' })
+      await auth.ensureLogin()
+      // 支付宝 getAuthorize scope=userInfo 后用 my.getOpenUserInfo 获取用户信息
+      const res = await new Promise((resolve, reject) => {
+        my.getOpenUserInfo({
+          success: (r) => resolve(r),
+          fail: (e) => reject(e)
+        })
+      })
+      let nickName = ''
+      let avatarUrl = ''
+      if (res) {
+        // 支付宝返回 JSON 字符串或对象
+        const info = typeof res === 'string' ? JSON.parse(res) : res
+        nickName = info.nickName || info.nick || ''
+        avatarUrl = info.avatar || info.avatarUrl || ''
+      }
+      // 头像转存到服务端
+      let persistedAvatar = ''
+      if (avatarUrl) {
+        try {
+          persistedAvatar = await avatarUtil.ensureRemoteAvatar(avatarUrl)
+        } catch (e) {
+          // 转存失败不阻断流程，继续保存昵称
+        }
+      }
+      // 保存到 profile
+      const patchData = {}
+      if (nickName) patchData.nickname = nickName
+      if (persistedAvatar) patchData.avatar_url = persistedAvatar
+      if (Object.keys(patchData).length > 0) {
+        const saveRes = await auth.patchMemberProfile(patchData)
+        if (nickName) {
+          app.globalData.nickname = nickName
+          my.setStorageSync({ key: 'nickname', data: nickName })
+        }
+        if (persistedAvatar) {
+          app.globalData.avatarUrl = persistedAvatar
+          my.setStorageSync({ key: 'avatar_url', data: persistedAvatar })
+        }
+      }
+      my.hideLoading()
+      // 更新 UI
+      this._profileLoadedAt = 0
+      await this.loadProfile(true)
+      // 如果非会员且有昵称，自动注册为会员
+      if (!this.data.isMember && nickName && nickName.length >= 2) {
+        my.showToast({ content: '资料已更新，正在开通会员...', type: 'none' })
+        await this.activateSmartMember()
+      } else {
+        my.showToast({ content: '资料已更新', type: 'success' })
+      }
+    } catch (err) {
+      my.hideLoading()
+      my.showToast({ content: (err && err.message) || '授权失败', type: 'fail' })
+    }
+  },
+
+  onGetUserInfoFail(e) {
+    const msg = (e && (e.errorMessage || e.message)) || '用户拒绝授权'
+    my.showToast({ content: msg, type: 'fail' })
   }
 })

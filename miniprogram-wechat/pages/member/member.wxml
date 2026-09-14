@@ -32,9 +32,15 @@
 
     <view class="profile">
 
-      <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
-
-      <view class="avatar placeholder" wx:else>{{avatarLetter}}</view>
+      <button
+        class="avatar-btn"
+        open-type="chooseAvatar"
+        bindchooseavatar="onChooseAvatar"
+      >
+        <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
+        <view class="avatar placeholder" wx:else>{{avatarLetter}}</view>
+        <view class="avatar-edit-hint">点击授权头像</view>
+      </button>
 
       <view class="meta">
 

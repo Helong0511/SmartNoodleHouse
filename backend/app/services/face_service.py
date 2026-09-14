@@ -93,7 +93,17 @@ class FaceEmbeddingCache:
         enc = FaceEncryption()
 
         if force_full:
-            result = await db.execute(select(FaceProfile).where(FaceProfile.consent_status == "AUTHORIZED"))
+            # P0-18: join Customer 校验会员状态，仅缓存活跃会员的授权人脸
+            result = await db.execute(
+                select(FaceProfile)
+                .join(Customer, Customer.id == FaceProfile.customer_id)
+                .where(
+                    FaceProfile.consent_status == "AUTHORIZED",
+                    Customer.status == 1,
+                    Customer.account_status == "ACTIVE",
+                    Customer.member_status == "MEMBER",
+                )
+            )
             rows = list(result.scalars().all())
             fresh: dict[int, tuple[int, np.ndarray]] = {}
             newest: datetime | None = None
@@ -115,12 +125,28 @@ class FaceEmbeddingCache:
             select(FaceProfile).where(FaceProfile.updated_at > self._last_sync)  # type: ignore[operator]
         )
         newest = self._last_sync
-        for p in result.scalars().all():
+        # P0-18: 批量查这批 customer_id 对应的 Customer 状态
+        changed_rows = list(result.scalars().all())
+        cust_ids = {int(p.customer_id) for p in changed_rows}
+        active_cust_ids: set[int] = set()
+        if cust_ids:
+            cust_rows = await db.execute(
+                select(Customer.id).where(
+                    Customer.id.in_(cust_ids),
+                    Customer.status == 1,
+                    Customer.account_status == "ACTIVE",
+                    Customer.member_status == "MEMBER",
+                )
+            )
+            active_cust_ids = {int(r[0]) for r in cust_rows.all()}
+
+        for p in changed_rows:
             ts = p.updated_at or p.consent_at
             if ts and (newest is None or ts > newest):
                 newest = ts
             cid = int(p.customer_id)
-            if p.consent_status != "AUTHORIZED" or not p.feature_data:
+            # P0-18: 非活跃会员或已撤销授权 → 从缓存移除
+            if p.consent_status != "AUTHORIZED" or not p.feature_data or cid not in active_cust_ids:
                 self._by_customer.pop(cid, None)
                 continue
             vec = self._decrypt_vec(enc, p)
@@ -164,8 +190,33 @@ class FaceService:
             )
 
     @staticmethod
+    async def _assert_customer_member(db: AsyncSession, customer_id: int) -> Customer:
+        """P0-17: 人脸注册前校验顾客为活跃会员。
+
+        要求：status==1 AND account_status=='ACTIVE' AND member_status=='MEMBER'
+        非会员/禁用顾客禁止注册人脸。
+        """
+        cust = (
+            await db.execute(
+                select(Customer).where(Customer.id == customer_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not cust:
+            raise AppException(40031, "顾客不存在，禁止注册人脸")
+        if cust.status != 1:
+            raise AppException(40031, "顾客已禁用，禁止注册人脸")
+        if (cust.account_status or "ACTIVE") != "ACTIVE":
+            raise AppException(40031, "顾客账号非活跃状态，禁止注册人脸")
+        if (cust.member_status or "GUEST") != "MEMBER":
+            raise AppException(40031, "仅会员可注册人脸，非会员禁止")
+        return cust
+
+    @staticmethod
     async def register_face(db: AsyncSession, customer_id: int, feature_vector: list[float]) -> FaceProfile:
         FaceService._assert_embedding_dim(feature_vector)
+        # P0-17: 校验顾客为活跃会员
+        await FaceService._assert_customer_member(db, customer_id)
+        # P0-19: SELECT FOR UPDATE 防并发注册（_assert_customer_member 已锁 Customer 行）
         # 撤销旧授权
         result = await db.execute(
             select(FaceProfile).where(
@@ -310,8 +361,9 @@ class WelcomeService:
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
+        # P1-59: 有界队列防止 OOM — 最多积压 100 条迎宾任务
         if cls._queue is None:
-            cls._queue = asyncio.Queue()
+            cls._queue = asyncio.Queue(maxsize=100)
         return cls._queue
 
     @staticmethod

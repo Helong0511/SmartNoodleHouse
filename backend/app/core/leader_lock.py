@@ -16,6 +16,24 @@ LEADER_KEY = "snh:process:leader"
 DEFAULT_TTL = 45
 RENEW_INTERVAL = 15
 
+# Lua 原子脚本：避免 GET→DELETE / GET→EXPIRE 的 TOCTOU（A 的 release 误删 B 的锁等）
+# compare-and-delete：仅当值=worker_id 时才 DEL
+_LUA_COMPARE_DELETE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+else
+    return 0
+end
+"""
+# compare-and-expire：仅当值=worker_id 时才 EXPIRE（续期）
+_LUA_COMPARE_EXPIRE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
 # 本进程是否仍持有 Leader（续期失败时清 False，供调度任务 fence）
 _held = False
 _on_lost: Callable[[], Awaitable[None] | None] | None = None
@@ -55,9 +73,14 @@ async def try_acquire_leader(worker_id: str, *, ttl: int = DEFAULT_TTL) -> bool:
             return ok2
         cur_s = cur.decode() if isinstance(cur, (bytes, bytearray)) else str(cur)
         if cur_s == worker_id:
-            await r.expire(LEADER_KEY, ttl)
-            set_leader_held(True)
-            return True
+            # 原子 compare-and-expire：避免 GET→EXPIRE 之间锁过期被 B 抢占后误续期 B 的锁
+            renewed = await r.eval(_LUA_COMPARE_EXPIRE, 1, LEADER_KEY, worker_id, int(ttl))
+            if renewed:
+                set_leader_held(True)
+                return True
+            # 续期失败说明锁已被他人抢占
+            set_leader_held(False)
+            return False
         set_leader_held(False)
         return False
     except Exception as e:
@@ -69,13 +92,9 @@ async def try_acquire_leader(worker_id: str, *, ttl: int = DEFAULT_TTL) -> bool:
 async def release_leader(worker_id: str) -> None:
     try:
         r = await get_redis()
-        cur = await r.get(LEADER_KEY)
-        if cur is None:
-            set_leader_held(False)
-            return
-        cur_s = cur.decode() if isinstance(cur, (bytes, bytearray)) else str(cur)
-        if cur_s == worker_id:
-            await r.delete(LEADER_KEY)
+        # 原子 compare-and-delete：仅当锁仍归本 worker 时才 DEL，
+        # 避免 GET→DELETE 之间锁过期被 B 抢占后误删 B 的锁
+        await r.eval(_LUA_COMPARE_DELETE, 1, LEADER_KEY, worker_id)
         set_leader_held(False)
     except Exception as e:
         logger.warning("释放 Leader 锁失败: %s", e)

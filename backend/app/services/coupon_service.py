@@ -71,6 +71,8 @@ class CouponService:
             "min_order_amount": str(tmpl.min_order_amount),
             "valid_days": int(tmpl.valid_days or 30),
             "status": int(tmpl.status or 0),
+            "total_quota": getattr(tmpl, "total_quota", None),
+            "remaining": getattr(tmpl, "remaining", None),
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
             "created_at": tmpl.created_at.isoformat() if getattr(tmpl, "created_at", None) else None,
@@ -126,6 +128,20 @@ class CouponService:
         payload = dict(data)
         if "store_id" in payload and payload["store_id"] is not None:
             payload["store_id"] = int(payload["store_id"])
+        # P0-6: 创建模板时初始化 remaining = total_quota（NULL=不限；0=禁止发放）
+        quota = payload.get("total_quota")
+        if quota is not None:
+            quota = int(quota)
+            if quota >= 1:
+                payload["total_quota"] = quota
+                payload["remaining"] = quota
+            else:
+                # quota=0：显式保持上限 0 并设 remaining=0 禁止发放
+                payload["total_quota"] = 0
+                payload["remaining"] = 0
+        else:
+            payload.pop("total_quota", None)
+            payload.pop("remaining", None)
         tmpl = CouponTemplate(**payload)
         db.add(tmpl)
         await db.flush()
@@ -145,6 +161,15 @@ class CouponService:
         for key, val in data.items():
             if key == "store_id":
                 tmpl.store_id = int(val) if val is not None else None
+            elif key == "total_quota":
+                # P0-6: 仅修改 total_quota 上限，不影响 remaining
+                if val is not None:
+                    tmpl.total_quota = int(val)
+                else:
+                    tmpl.total_quota = None
+            elif key == "remaining":
+                # remaining 不允许直接通过 API 修改
+                continue
             elif val is not None:
                 setattr(tmpl, key, val)
         await db.flush()
@@ -162,8 +187,16 @@ class CouponService:
 
     @staticmethod
     async def issue_by_template_id(
-        db: AsyncSession, customer_id: int, template_id: int, quantity: int = 1
+        db: AsyncSession,
+        customer_id: int,
+        template_id: int,
+        quantity: int = 1,
+        *,
+        client_request_id: str | None = None,
+        issued_by_user_id: int | None = None,
+        issued_at_store_id: int | None = None,
     ) -> list[CustomerCoupon]:
+        from sqlalchemy import update as sa_update
         from sqlalchemy.exc import IntegrityError
 
         from app.models import Customer
@@ -179,6 +212,38 @@ class CouponService:
         qty = max(1, min(int(quantity or 1), 50))
         prefix = "VP" if is_voucher else "CP"
         expires = now_local() + timedelta(days=int(tmpl.valid_days or 30))
+
+        # P0-6: 客户端幂等键 — 同 key 重复请求返回已有行
+        req_key = (client_request_id or "").strip()[:128] if client_request_id else None
+        if req_key:
+            existing = (
+                await db.execute(
+                    select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+                )
+            ).scalars().all()
+            if existing:
+                return list(existing)
+
+        # P0-6: 原子扣减库存（remaining IS NULL = 不限量，跳过扣减）
+        remaining = getattr(tmpl, "remaining", None)
+        if remaining is not None:
+            result = await db.execute(
+                sa_update(CouponTemplate)
+                .where(
+                    CouponTemplate.id == tmpl.id,
+                    CouponTemplate.remaining.isnot(None),
+                    CouponTemplate.remaining >= qty,
+                )
+                .values(remaining=CouponTemplate.remaining - qty)
+            )
+            if not result.rowcount:
+                raise AppException(40070, "优惠券库存不足")
+
+        # 发券门店：优先使用参数传入；若模板本身绑定门店，继承模板门店
+        effective_store_id = issued_at_store_id
+        if effective_store_id is None and getattr(tmpl, "store_id", None) is not None:
+            effective_store_id = int(tmpl.store_id)
+
         issued: list[CustomerCoupon] = []
         try:
             async with db.begin_nested():
@@ -189,14 +254,34 @@ class CouponService:
                         coupon_no=generate_no(prefix),
                         status="AVAILABLE",
                         expires_at=expires,
+                        client_request_id=req_key if req_key else None,
+                        issued_by_user_id=int(issued_by_user_id) if issued_by_user_id else None,
+                        issued_at_store_id=int(effective_store_id) if effective_store_id else None,
                     )
                     db.add(cc)
                     issued.append(cc)
                 await db.flush()
         except IntegrityError as exc:
             msg = str(getattr(exc, "orig", exc)).upper()
+            if "CLIENT_REQUEST_ID" in msg or ("UNIQUE" in msg and req_key):
+                # 幂等键冲突：回查已发行记录
+                await db.rollback()
+                existing = (
+                    await db.execute(
+                        select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+                    )
+                ).scalars().all()
+                if existing:
+                    return list(existing)
+                raise AppException(50020, "发券冲突，请重试") from exc
             if "UNIQUE" in msg or "DUPLICATE" in msg:
-                # 多为 coupon_no 冲突，重试由调用方处理；不再按「每人每模板」拦截
+                # coupon_no 冲突：若已扣库存则需回补
+                if remaining is not None:
+                    await db.execute(
+                        sa_update(CouponTemplate)
+                        .where(CouponTemplate.id == tmpl.id)
+                        .values(remaining=CouponTemplate.remaining + qty)
+                    )
                 raise AppException(50020, "发券冲突，请重试") from exc
             raise
         return issued
@@ -282,12 +367,16 @@ class CouponService:
                     "expires_at": cc.expires_at.isoformat() if cc.expires_at else None,
                     "used_order_id": cc.used_order_id,
                     "used_at": cc.used_at.isoformat() if cc.used_at else None,
+                    "issued_by_user_id": int(cc.issued_by_user_id) if getattr(cc, "issued_by_user_id", None) else None,
+                    "issued_at_store_id": int(cc.issued_at_store_id) if getattr(cc, "issued_at_store_id", None) else None,
+                    "store_restricted": bool(getattr(cc, "issued_at_store_id", None)),
                 }
             )
         return items, int(total)
 
     @staticmethod
     def _hold_payload(cc: CustomerCoupon, tmpl: CouponTemplate) -> dict:
+        issued_store_id = getattr(cc, "issued_at_store_id", None)
         return {
             "id": cc.id,
             "coupon_no": cc.coupon_no,
@@ -300,6 +389,8 @@ class CouponService:
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
             "expires_at": cc.expires_at.isoformat() if cc.expires_at else None,
+            "issued_at_store_id": int(issued_store_id) if issued_store_id else None,
+            "store_restricted": bool(issued_store_id),
         }
 
     @staticmethod
@@ -352,13 +443,34 @@ class CouponService:
         ).scalar_one_or_none()
         if not tmpl:
             return None
-        exists = await db.scalar(
-            select(CustomerCoupon.id)
-            .where(CustomerCoupon.customer_id == customer_id, CustomerCoupon.template_id == tmpl.id)
-            .limit(1)
-        )
-        if exists:
+
+        # P0-6: 用 client_request_id 做 DB UNIQUE 幂等，取代 TOCTOU SELECT-then-INSERT
+        req_key = f"WELCOME:{int(customer_id)}:{int(tmpl.id)}"
+        existing = (
+            await db.execute(
+                select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+            )
+        ).scalar_one_or_none()
+        if existing:
             return None
+
+        # P0-6: 原子扣减库存（remaining IS NULL = 不限量）
+        remaining = getattr(tmpl, "remaining", None)
+        if remaining is not None:
+            from sqlalchemy import update as sa_update
+
+            result = await db.execute(
+                sa_update(CouponTemplate)
+                .where(
+                    CouponTemplate.id == tmpl.id,
+                    CouponTemplate.remaining.isnot(None),
+                    CouponTemplate.remaining >= 1,
+                )
+                .values(remaining=CouponTemplate.remaining - 1)
+            )
+            if not result.rowcount:
+                return None
+
         try:
             async with db.begin_nested():
                 cc = CustomerCoupon(
@@ -367,11 +479,21 @@ class CouponService:
                     coupon_no=generate_no("CP"),
                     status="AVAILABLE",
                     expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
+                    client_request_id=req_key,
                 )
                 db.add(cc)
                 await db.flush()
                 return cc
         except IntegrityError:
+            # 幂等键冲突：另一并发请求已成功发券
+            if remaining is not None:
+                from sqlalchemy import update as sa_update
+
+                await db.execute(
+                    sa_update(CouponTemplate)
+                    .where(CouponTemplate.id == tmpl.id)
+                    .values(remaining=CouponTemplate.remaining + 1)
+                )
             return None
 
     @staticmethod
@@ -427,6 +549,8 @@ class CouponService:
         customer_coupon_id: int | None,
         customer_id: int | None,
         eligible_subtotal: Decimal,
+        *,
+        order_store_id: int | None = None,
     ) -> tuple[Decimal, int | None]:
         """校验并计算优惠券减免。eligible_subtotal=会员折后可用商品小计（不含特价商品）。"""
         if not customer_coupon_id or not customer_id:
@@ -447,6 +571,11 @@ class CouponService:
             raise AppException(40062, "无权使用该优惠券")
         if cc.status != "AVAILABLE":
             raise AppException(40063, "优惠券不可用")
+        # 发券门店限制：如果券记录了发券门店，订单必须在该门店使用
+        issued_store = getattr(cc, "issued_at_store_id", None)
+        if issued_store is not None and order_store_id is not None:
+            if int(issued_store) != int(order_store_id):
+                raise AppException(40060, "该优惠券仅在发券门店可用，不可跨门店使用")
         now = now_local()
         expires = ensure_local_aware(cc.expires_at)
         if expires and expires <= now:
@@ -474,6 +603,7 @@ class CouponService:
         payable_amount: Decimal,
         *,
         eligible_payable: Decimal | None = None,
+        order_store_id: int | None = None,
     ) -> tuple[Decimal, int | None]:
         """校验并计算代金券抵扣。payable_amount=订单应付；eligible_payable=可参与代金券的基数（不含特价商品）。"""
         if not customer_voucher_id or not customer_id:
@@ -494,6 +624,11 @@ class CouponService:
             raise AppException(40062, "无权使用该代金券")
         if cc.status != "AVAILABLE":
             raise AppException(40073, "代金券不可用")
+        # 发券门店限制
+        issued_store = getattr(cc, "issued_at_store_id", None)
+        if issued_store is not None and order_store_id is not None:
+            if int(issued_store) != int(order_store_id):
+                raise AppException(40060, "该代金券仅在发券门店可用，不可跨门店使用")
         now = now_local()
         expires = ensure_local_aware(cc.expires_at)
         if expires and expires <= now:

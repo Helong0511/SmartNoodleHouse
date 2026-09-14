@@ -1,98 +1,148 @@
-"""支付成功后副作用（积分/券核销/口味）失败入队，由调度任务重试。"""
+"""支付成功后副作用（积分/券核销/口味）：DB 事务型 outbox，不依赖 Redis。
+
+支付 PAID 同事务写入 3 条 outbox 事件：
+  - points_award       → CustomerService.award_points_for_paid_order
+  - coupon_mark_used   → CouponService.mark_used
+  - pref_update        → PreferenceService.update_from_order
+
+各副作用函数自身按 order_id 幂等（point_ledger 去重、cc.status 守卫、pref 重算），
+故 outbox 重试不会重复入账。
+"""
 from __future__ import annotations
 
 import logging
 
-from app.core.redis_client import get_redis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.outbox_worker import enqueue_outbox, register_outbox_handler
 
 logger = logging.getLogger(__name__)
 
-QUEUE_KEY = "snh:paid_side_effects"
-MAX_QUEUE = 5000
+
+async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
+    """与支付 PAID 同事务写入 outbox 事件。commit 由调用方负责。
+
+    幂等：(aggregate_type, aggregate_id, event_kind) UNIQUE 保证不重复入队。
+    """
+    if not order or not getattr(order, "id", None):
+        return
+    order_id = int(order.id)
+    # 3 条独立事件：失败粒度更细，单条 retry 不影响其它
+    for kind in ("points_award", "coupon_mark_used", "pref_update"):
+        try:
+            await enqueue_outbox(
+                db,
+                aggregate_type="paid_side_effect",
+                aggregate_id=order_id,
+                event_kind=kind,
+                payload={"order_id": order_id},
+            )
+        except Exception:
+            # enqueue_outbox 在 UNIQUE 冲突时返回 is_new=False 不抛；此处异常多为 DB 故障
+            logger.exception("写入 paid_side_effect outbox 失败 order_id=%s kind=%s", order_id, kind)
+            raise
 
 
-async def enqueue_paid_side_effect(order_id: int) -> None:
-    try:
-        oid = int(order_id)
-        if oid <= 0:
-            return
-        r = await get_redis()
-        await r.lpush(QUEUE_KEY, str(oid))
-        await r.ltrim(QUEUE_KEY, 0, MAX_QUEUE - 1)
-    except Exception:
-        logger.exception("入队支付副作用失败 order_id=%s", order_id)
+# ---------- outbox handlers：由 outbox_worker.process_pending_outbox 调用 ----------
 
 
-async def run_paid_side_effects(db, order, *, do_pref: bool = True) -> None:
-    """幂等：积分/核销内部已有防重。"""
+@register_outbox_handler("paid_side_effect", "points_award")
+async def _handle_points_award(db: AsyncSession, row) -> None:
+    """发放积分。幂等：point_ledger 已有 EARN 则跳过。"""
+    from app.models import Order
+    from app.services.customer_service import CustomerService
+
+    order = (await db.execute(select(Order).where(Order.id == int(row.aggregate_id)).with_for_update())).scalar_one_or_none()
+    if not order or not order.customer_id:
+        return
+    await CustomerService.award_points_for_paid_order(db, order)
+
+
+@register_outbox_handler("paid_side_effect", "coupon_mark_used")
+async def _handle_coupon_mark_used(db: AsyncSession, row) -> None:
+    """核销券/代金券。幂等：status 守卫，已 USED 则 no-op。"""
+    from app.models import Order
+    from app.services.coupon_service import CouponService
+
+    order = await db.get(Order, int(row.aggregate_id))
+    if not order:
+        return
+    await CouponService.mark_used(db, order)
+
+
+@register_outbox_handler("paid_side_effect", "pref_update")
+async def _handle_pref_update(db: AsyncSession, row) -> None:
+    """重算口味偏好。幂等：基于订单历史重算，重复执行收敛到同一结果。"""
+    from app.models import Order
+    from app.services.customer_service import PreferenceService
+
+    order = await db.get(Order, int(row.aggregate_id))
+    if not order or not order.customer_id:
+        return
+    await PreferenceService.update_from_order(db, order.id)
+
+
+async def run_paid_side_effects(db: AsyncSession, order, *, do_pref: bool = True) -> None:
+    """[已废弃] 同步执行所有副作用；保留仅供过渡期兼容，主路径已改 outbox。
+
+    新代码应调用 enqueue_paid_side_effects 与支付 PAID 同事务写入 outbox。
+    """
     from app.services.coupon_service import CouponService
     from app.services.customer_service import CustomerService, PreferenceService
 
-    errors: list[str] = []
     try:
         await CustomerService.award_points_for_paid_order(db, order)
     except Exception:
         logger.exception("积分发放失败 order_id=%s", order.id)
-        errors.append("points")
     try:
         await CouponService.mark_used(db, order)
     except Exception:
         logger.exception("券核销失败 order_id=%s", order.id)
-        errors.append("coupon")
     if do_pref:
         try:
             await PreferenceService.update_from_order(db, order.id)
         except Exception:
             logger.exception("口味记录失败 order_id=%s", order.id)
-            errors.append("pref")
-    if errors:
-        await enqueue_paid_side_effect(int(order.id))
-        raise RuntimeError(f"paid_side_effects_partial:{','.join(errors)}")
 
 
-async def process_pending_side_effects(*, limit: int = 30) -> int:
-    from sqlalchemy import select
+# ---------- 退款补偿 outbox handlers（#3 分布式事务补偿）----------
 
-    from app.core.database import AsyncSessionLocal
-    from app.models import Order
 
-    try:
-        r = await get_redis()
-    except Exception:
-        return 0
+@register_outbox_handler("refund", "points_deduct_refund")
+async def _handle_points_deduct_refund(db: AsyncSession, row) -> None:
+    """退款成功后扣减积分。幂等：point_ledger 按 refund_id 去重。
 
-    done = 0
-    for _ in range(max(1, int(limit))):
-        raw = await r.rpop(QUEUE_KEY)
-        if not raw:
-            break
-        try:
-            oid = int(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
-        except (TypeError, ValueError):
-            continue
-        try:
-            async with AsyncSessionLocal() as db:
-                order = (
-                    await db.execute(select(Order).where(Order.id == oid).with_for_update())
-                ).scalar_one_or_none()
-                if not order or not order.customer_id:
-                    continue
-                if (order.payment_status or "").upper() != "PAID" and (order.status or "") != "PAID":
-                    # 仍可能已进入后继状态但曾付过款
-                    if (order.payment_status or "").upper() not in ("PAID", "PARTIAL_REFUND", "REFUNDED"):
-                        continue
-                try:
-                    await run_paid_side_effects(db, order, do_pref=True)
-                    await db.commit()
-                    done += 1
-                except RuntimeError:
-                    await db.commit()  # 部分成功也提交
-                    # 已重新入队
-                except Exception:
-                    logger.exception("补偿支付副作用异常 order_id=%s", oid)
-                    await db.rollback()
-                    await enqueue_paid_side_effect(oid)
-        except Exception:
-            logger.exception("补偿支付副作用处理失败 order_id=%s", oid)
-            await enqueue_paid_side_effect(oid)
-    return done
+    aggregate_id = refund_id；provider 已退款但本地积分扣减失败时由 _finalize_refund 入队。
+    """
+    from app.models import Order, PaymentRefund
+    from app.services.customer_service import CustomerService
+
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if not refund:
+        # refund 行尚未落库或已被清理；no-op，等下次重试
+        return
+    order = await db.get(Order, refund.order_id)
+    if not order or not order.customer_id:
+        return
+    await CustomerService.deduct_points_for_refund(
+        db, order, refund.amount, refund_id=refund.id
+    )
+
+
+@register_outbox_handler("refund", "pref_recompute")
+async def _handle_pref_recompute(db: AsyncSession, row) -> None:
+    """退款成功后重算口味。幂等：基于全量订单历史重算，重复执行收敛到同一结果。
+
+    aggregate_id = refund_id；通过 refund → order → customer_id 定位顾客。
+    """
+    from app.models import Order, PaymentRefund
+    from app.services.customer_service import PreferenceService
+
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if not refund:
+        return
+    order = await db.get(Order, refund.order_id)
+    if not order or not order.customer_id:
+        return
+    await PreferenceService.recompute_for_customer(db, order.customer_id)

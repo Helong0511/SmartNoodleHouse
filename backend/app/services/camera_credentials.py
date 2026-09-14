@@ -1,10 +1,55 @@
 """摄像头凭据加密存储"""
 from __future__ import annotations
 
+import ipaddress
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from app.core.exceptions import AppException
 from app.services.face_service import FaceEncryption
+
+# P1: 摄像头 URL 禁止指向的元数据/危险端点
+_BLOCKED_HOSTS = {
+    "169.254.169.254",  # AWS/云元数据端点
+    "metadata.google.internal",
+    "metadata",
+    "fd00:ec2::254",  # IPv6 元数据
+}
+# 禁止的网段（即使解析到这些 IP 也不允许）
+def _is_blocked_ip(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        # 禁止回环、链路本地、未指定地址
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+            return True
+        # 禁止元数据端点
+        if str(ip) in _BLOCKED_HOSTS:
+            return True
+    except ValueError:
+        pass
+    return False
+
+
+def assert_camera_url_safe(source_url: str) -> None:
+    """P1: 校验摄像头 RTSP/HTTP URL 不指向元数据端点/回环。
+    注意：RTSP 摄像头本身就在内网，因此允许 10.x/172.16-31/192.168.x，
+    但禁止 169.254.169.254 等云元数据端点和 loopback。
+    """
+    if not source_url or source_url.isdigit():
+        return
+    try:
+        parsed = urlparse(source_url)
+    except Exception:
+        return
+    if parsed.scheme not in ("rtsp", "rtsps", "http", "https"):
+        return
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return
+    if host in _BLOCKED_HOSTS:
+        raise AppException(40026, f"摄像头地址禁止指向元数据/危险端点: {host}")
+    # 尝试解析为 IP
+    if _is_blocked_ip(host):
+        raise AppException(40026, f"摄像头地址禁止指向回环/链路本地地址")
 
 
 def encrypt_password(password: str) -> str:
@@ -92,6 +137,7 @@ def prepare_camera_source(
     user = (username or url_user or None)
     pwd = password if password is not None and password != "" else url_pwd
     ensure_no_plaintext_password_in_url(safe)
+    assert_camera_url_safe(safe)  # P1: SSRF/元数据防护
     # 二次保险：若仍含 :xxx@ 形态则强制剥离
     try:
         parsed = urlparse(safe)
@@ -125,7 +171,7 @@ def build_connect_source(
     if not source_url or source_url.isdigit():
         return source_url
     if not password_encrypted:
-        # 历史脏数据：连接时临时解析 URL 内嵌口令，不再向外抛错阻断
+        # 无加密密码字段：若 URL 内嵌明文密码则用之（历史脏数据兼容）
         try:
             safe, user, pwd = extract_url_credentials(source_url)
             if pwd:
@@ -142,7 +188,8 @@ def build_connect_source(
     try:
         password = decrypt_password(password_encrypted)
     except Exception:
-        return source_url
+        # P1: 解密失败时 fail-closed — 不回退到可能含明文密码的 source_url
+        raise AppException(40026, "摄像头密码解密失败，请重新设置密码")
 
     parsed = urlparse(source_url)
     if parsed.scheme not in ("rtsp", "rtsps", "http", "https"):

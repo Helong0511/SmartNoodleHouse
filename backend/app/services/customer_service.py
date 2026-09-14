@@ -1295,6 +1295,8 @@ class OrderCreateService:
         store_id: int | None,
         channel: str | None,
         operator_id: int | None,
+        dining_type: str | None = None,
+        table_id: int | None = None,
     ) -> None:
         """命中幂等订单后必须再次校验归属，禁止直接 return 他人订单。"""
         ch = (channel or "").strip().upper()
@@ -1309,6 +1311,16 @@ class OrderCreateService:
             oid = getattr(order, "operator_id", None)
             if oid is not None and int(oid) != int(operator_id):
                 raise AppException(40902, "幂等键冲突：操作员不一致")
+        # P0-15: 校验订单核心要素，防止同 key 不同参数
+        dtype = (dining_type or "").strip().upper()
+        if dtype:
+            order_dtype = (getattr(order, "dining_type", "") or "").strip().upper()
+            if order_dtype and order_dtype != dtype:
+                raise AppException(40902, "幂等键冲突：就餐方式不一致")
+        if table_id is not None:
+            order_tid = getattr(order, "table_id", None)
+            if order_tid is not None and int(order_tid) != int(table_id):
+                raise AppException(40902, "幂等键冲突：桌台不一致")
 
     @staticmethod
     async def create_order(
@@ -1371,6 +1383,8 @@ class OrderCreateService:
                     store_id=store_id,
                     channel=channel,
                     operator_id=operator_id,
+                    dining_type=dining_type,
+                    table_id=table_id,
                 )
                 # 仅复用待支付单；已支付/取消等同内容再下须换新幂等键（客户端带 checkout nonce）
                 if not OrderCreateService._is_reusable_idempotent_order(order):
@@ -1458,7 +1472,8 @@ class OrderCreateService:
         from app.services.coupon_service import CouponService
 
         coupon_discount, coupon_id = await CouponService.resolve_discount(
-            db, customer_coupon_id, customer_id, coupon_eligible
+            db, customer_coupon_id, customer_id, coupon_eligible,
+            order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
         )
         payable_before_voucher = money(base_total - coupon_discount)
         voucher_eligible = CustomerService.calc_voucher_eligible_payable(
@@ -1470,6 +1485,7 @@ class OrderCreateService:
             customer_id,
             payable_before_voucher,
             eligible_payable=voucher_eligible,
+            order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
         )
         total_amount = money(payable_before_voucher - voucher_discount)
         order.subtotal = subtotal

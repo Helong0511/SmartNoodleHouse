@@ -28,6 +28,8 @@ MAX_ATTEMPTS = 8
 # 指数退避基数（秒）：2^attempt，上限 3600
 BACKOFF_BASE_SEC = 2
 BACKOFF_CAP_SEC = 3600
+# PROCESSING 行超时阈值（秒）：超过即视为崩溃残留，由 reclaim 复位 PENDING
+STALE_PROCESSING_SEC = 300
 
 
 def _worker_id() -> str:
@@ -74,6 +76,15 @@ async def enqueue_delivery_webhook(
     """
     channel = platform.upper()
     event_id = make_event_id(channel, raw, body)
+    # P1-44: 脱敏敏感 header，防止 Authorization/Cookie/token 泄露到 inbox 存储
+    _SENSITIVE_HEADERS = frozenset({
+        "authorization", "cookie", "set-cookie", "x-api-key",
+        "x-auth-token", "x-access-token", "proxy-authorization",
+    })
+    safe_headers = {
+        k: ("[REDACTED]" if k.lower() in _SENSITIVE_HEADERS else str(v))
+        for k, v in headers.items()
+    }
     # 存已验签后的结构化 raw，消费时不再二次验签
     envelope = {"_verified": True, "raw": raw}
     row = WebhookInbox(
@@ -81,7 +92,7 @@ async def enqueue_delivery_webhook(
         event_id=event_id,
         event_type=event_type,
         payload=json.dumps(envelope, ensure_ascii=False, default=str),
-        headers_json=json.dumps({k: str(v) for k, v in headers.items()}, ensure_ascii=False),
+        headers_json=json.dumps(safe_headers, ensure_ascii=False),
         status="PENDING",
     )
     db.add(row)
@@ -101,6 +112,30 @@ async def enqueue_delivery_webhook(
         if existing:
             return existing, False
         raise
+
+
+async def reclaim_stale_inbox(
+    db: AsyncSession, *, stale_after: int = STALE_PROCESSING_SEC
+) -> int:
+    """回收崩溃残留的 PROCESSING inbox 行：locked_at < now - stale_after → 复位 PENDING。
+
+    复位时不清零 attempt_count（避免无限重试），仅释放锁、保留退避。
+    """
+    cutoff = now_local() - timedelta(seconds=stale_after)
+    stmt = (
+        update(WebhookInbox)
+        .where(
+            WebhookInbox.status == "PROCESSING",
+            or_(WebhookInbox.locked_at.is_(None), WebhookInbox.locked_at < cutoff),
+        )
+        .values(status="PENDING", locked_at=None, locked_by=None)
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+    count = int(result.rowcount or 0)
+    if count:
+        logger.warning("Reclaimed %s stale PROCESSING inbox events", count)
+    return count
 
 
 async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | None = None) -> WebhookInbox | None:
@@ -141,12 +176,17 @@ async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | Non
     return await db.get(WebhookInbox, inbox_id)
 
 
-async def process_inbox_item(inbox_id: int) -> None:
+async def process_inbox_item(inbox_id: int) -> bool:
+    """Claim + 处理单条 inbox。
+
+    返回 True 表示成功 claim（无论最终 DONE 还是 FAILED）；
+    返回 False 表示未被 claim（已被其他 worker 占用 / DONE / 未到重试时间）。
+    """
     async with AsyncSessionLocal() as db:
         row = await claim_inbox_item(db, inbox_id)
         if not row:
             # 已被其他 worker claim，或 DONE / 未到重试时间
-            return
+            return False
 
         try:
             envelope = json.loads(row.payload)
@@ -175,12 +215,13 @@ async def process_inbox_item(inbox_id: int) -> None:
             await ws_manager.notify_order_event(ws_event, payload)
             if result.deferred_tasks:
                 await run_deferred_tasks(result.deferred_tasks)
+            return True
         except Exception as e:
             logger.exception("inbox 处理失败 id=%s: %s", inbox_id, e)
             async with AsyncSessionLocal() as db2:
                 row2 = await db2.get(WebhookInbox, inbox_id)
                 if not row2 or row2.status == "DONE":
-                    return
+                    return True
                 err = str(e)[:500]
                 row2.status = "FAILED"
                 row2.error_message = err
@@ -193,6 +234,7 @@ async def process_inbox_item(inbox_id: int) -> None:
                 else:
                     row2.next_retry_at = None
                 await db2.commit()
+            return True
 
 
 async def process_pending_inbox(limit: int = 20) -> int:
@@ -222,8 +264,7 @@ async def process_pending_inbox(limit: int = 20) -> int:
         ids = list(rows)
     claimed = 0
     for iid in ids:
-        before = claimed
-        await process_inbox_item(iid)
-        # process_inbox_item 内部 claim；无法廉价得知是否成功，按调用次数统计即可
-        claimed = before + 1
+        # process_inbox_item 内部原子 claim；仅当成功 claim（DONE 或 FAILED）时计 +1
+        if await process_inbox_item(iid):
+            claimed += 1
     return claimed

@@ -1,10 +1,34 @@
 .page { padding: 24rpx; padding-bottom: 48rpx; }
 .card { background: #fff; border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
 .profile { display: flex; align-items: center; gap: 20rpx; }
-.avatar { width: 96rpx; height: 96rpx; border-radius: 50%; }
+.avatar-btn {
+  position: relative;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  line-height: normal;
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  overflow: visible;
+}
+.avatar-btn::after { border: none; }
+.avatar { width: 96rpx; height: 96rpx; border-radius: 50%; display: block; }
 .avatar.placeholder {
   display: flex; align-items: center; justify-content: center;
   background: #fff3ee; color: #ff6b35; font-weight: 700; font-size: 36rpx;
+  width: 96rpx; height: 96rpx; border-radius: 50%;
+}
+.avatar-edit-hint {
+  position: absolute;
+  bottom: -28rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 20rpx;
+  color: #ff6b35;
+  white-space: nowrap;
+  opacity: 0.7;
 }
 .meta { flex: 1; min-width: 0; }
 .name-row { display: flex; align-items: center; gap: 16rpx; }

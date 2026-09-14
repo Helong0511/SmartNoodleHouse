@@ -183,7 +183,13 @@ async def issue_coupon(data: CouponIssueRequest, request: Request, db: DbSession
     if not CouponService.template_visible_to_store(tmpl, store_id):
         raise AppException(40301, "无权使用其他门店的优惠券模板")
     issued = await CouponService.issue_by_template_id(
-        db, data.customer_id, data.template_id, quantity=data.quantity
+        db,
+        data.customer_id,
+        data.template_id,
+        quantity=data.quantity,
+        client_request_id=data.client_request_id,
+        issued_by_user_id=int(user.id) if getattr(user, "id", None) else None,
+        issued_at_store_id=store_id,
     )
     await db.commit()
     kind = "代金券" if CouponService.is_voucher_type(tmpl.coupon_type) else "优惠券"

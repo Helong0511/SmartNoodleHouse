@@ -1,0 +1,250 @@
+# 多门店数据隔离 — 修复建议与加固方案
+
+> 基于 [数据隔离审计报告](#) 的结论生成。审计未发现 P0 级数据泄漏漏洞，本文档聚焦**纵深防御加固**、**边界场景防护**与**流程保障**，按优先级排列。
+
+---
+
+## 目录
+
+1. [优先级总览](#1-优先级总览)
+2. [P1 — 纵深防御加固](#2-p1--纵深防御加固)
+3. [P2 — 边界场景防护](#3-p2--边界场景防护)
+4. [P3 — 流程与测试保障](#4-p3--流程与测试保障)
+5. [实施路线图](#5-实施路线图)
+
+---
+
+## 1. 优先级总览
+
+| 优先级 | 数量 | 说明 |
+|---|---|---|
+| P0 | 0 | 无关键泄漏漏洞 |
+| P1 | 4 | 纵深防御，降低未来回归风险 |
+| P2 | 5 | 边界场景防护，防患于未然 |
+| P3 | 3 | 流程与测试保障 |
+
+---
+
+## 2. P1 — 纵深防御加固
+
+### P1-1 在 `OrderCreateService.create_order` 中增加最终 store_id 一致性断言
+
+**现状**：`calculate_items_batch` 已校验商品/分类/规格组的 store_id，但 `create_order` 入口依赖 `table_token` 解析 store_id，若 `resolve_dining_table` 异常可能导致 store_id 与商品不一致。
+
+**建议**：在 `create_order` 拿到 `store_id` 后、写入订单前，增加断言确保所有商品的 `store_id` 与订单 `store_id` 完全一致（双重校验）。
+
+**位置**：`backend/app/services/customer_service.py` `OrderCreateService.create_order`
+
+```python
+# 建议在 calculate_items_batch 返回后、flush 前增加：
+product_store_ids = {int(p.store_id) for p, _, _, _ in items_result}
+if product_store_ids - {int(store_id)}:
+    raise AppException(40002, "订单门店与商品门店不一致")
+```
+
+**收益**：即使 `calculate_items_batch` 逻辑被未来改动绕过，订单写入层仍有最后一道防线。
+
+---
+
+### P1-2 为 `GET /products` 公开接口增加 per-store_id 限流
+
+**现状**：`GET /products` 在无员工 token 时可按任意 `store_id` 查询菜单，这是点餐场景的合理设计，但缺乏频率限制，可能被用于批量爬取全部门店菜单。
+
+**建议**：在该接口增加基于 `store_id` 的滑动窗口限流（如每 IP + store_id 每分钟 60 次），复用现有 Redis 限流基础设施。
+
+**位置**：`backend/app/api/v1/products.py` `list_products`
+
+```python
+# 建议在 staff is None 分支增加限流：
+if staff is None and store_id:
+    await rate_limit_service.check(f"products:public:{store_id}", limit=60, window=60)
+```
+
+**收益**：防止菜单数据被批量爬取，同时不影响正常点餐流量。
+
+---
+
+### P1-3 顾客账号合并时校验跨门店数据归属
+
+**现状**：`POST /member/phone` 支持手机号合并历史账号，合并后原账号的订单/优惠券/积分全部归属新账号。若原账号在其他门店有数据，合并后新账号可查看跨店订单。
+
+**建议**：
+1. 合并前在响应中提示"将合并 N 个门店的历史数据"
+2. 合并操作记录审计日志，包含涉及的门店列表
+3. 合并后订单列表仍按 `store_id` 自然过滤，顾客看到的是合并后全部门店的订单（符合顾客视角）
+
+**位置**：`backend/app/services/customer_merge_service.py`
+
+**收益**：合并行为可追溯，避免顾客对"突然出现其他门店订单"产生困惑。
+
+---
+
+### P1-4 新增 API 的门店隔离强制检查清单（代码评审门禁）
+
+**现状**：隔离依赖开发者手动调用 `require_bound_store` / `assert_store_access`，存在遗忘风险。
+
+**建议**：
+1. 在 `docs/` 下新增 `STORE_ISOLATION_CHECKLIST.md`，要求每个新增 API 必须勾选：
+   - [ ] 列表查询是否调用 `require_bound_store`
+   - [ ] 单条操作是否调用 `assert_store_access` / `assert_order_store_access`
+   - [ ] 顾客端是否基于 `customer.id` 过滤
+2. 在 CI 中增加静态检查：扫描新增 API 文件，若包含 `select(` 但未 import `store_scope`，则警告
+
+**收益**：将隔离要求从"约定"变为"可检查的门禁"，降低未来回归风险。
+
+---
+
+## 3. P2 — 边界场景防护
+
+### P2-1 POS 退款申请列表增加门店过滤校验
+
+**现状**：`GET /pos/refund-requests` 调用 `PosRefundService.list`，需确认该方法内部按 `store_id` 过滤。
+
+**建议**：核实 `PosShiftService` / `PosRefundService` 的列表方法是否强制按 `user.store_id`（非超管）过滤，若未过滤则补充。
+
+**位置**：`backend/app/services/pos_shift_service.py` `list_refund_requests`
+
+**检查项**：
+```python
+# 非超管必须按 store_id 过滤
+if user.role.code != "SUPER_ADMIN":
+    q = q.where(PosRefundRequest.store_id == user.store_id)
+```
+
+---
+
+### P2-2 WebSocket `display` 频道令牌与 store_id 绑定
+
+**现状**：`display` 频道使用全局 `DISPLAY_SCREEN_TOKEN`，任何门店的叫号屏使用同一令牌即可连接。
+
+**建议**：将令牌改为 `store_id` 维度（如 `display_token_{store_id}`），或在连接时校验令牌对应的 store_id 与请求 store_id 一致。
+
+**位置**：`backend/app/api/v1/websocket.py` L123-159
+
+**收益**：防止 A 店叫号屏令牌被用于连接 B 店频道（虽然事件已按 store_id 过滤，但令牌绑定可进一步缩小攻击面）。
+
+---
+
+### P2-3 顾客订单详情接口增加 dining_session 归属校验
+
+**现状**：`GET /orders/{id}` 对顾客使用 `assert_customer_owns_order`，已校验订单归属。但如果订单关联了 `dining_session_id`，未校验 session 的 customer_id 是否一致。
+
+**建议**：在 `assert_customer_owns_order` 中增加可选校验：若订单有 `dining_session_id`，则 session 的 `customer_id` 必须等于当前顾客。
+
+**位置**：`backend/app/services/order_access.py` `assert_customer_owns_order`
+
+```python
+# 可选增强：
+if order.dining_session_id:
+    session = await db.get(DiningSession, order.dining_session_id)
+    if session and int(session.customer_id) != int(customer_id):
+        raise HTTPException(status_code=403, detail="无权访问此订单")
+```
+
+**注意**：需传入 `db` 参数，当前函数签名无 db，需调整或在调用处校验。
+
+---
+
+### P2-4 优惠券总部模板的门店可见性增加白名单
+
+**现状**：`store_id=NULL` 的总部优惠券模板对所有门店可见，门店账号可对本店顾客发放。若某模板不应在特定门店发放，目前无法限制。
+
+**建议**：在 `CouponTemplate` 增加 `store_whitelist` 字段（JSON 数组，NULL=全部门店），发放时校验 `template_visible_to_store`。
+
+**位置**：`backend/app/services/coupon_service.py` `template_visible_to_store`
+
+**收益**：支持"总部模板仅指定门店可用"的精细化运营场景。
+
+---
+
+### P2-5 摄像头流票据增加 store_id 绑定
+
+**现状**：`create_camera_stream_ticket` 生成的票据包含 `cam`（camera_id），已校验票据与摄像头匹配。但未校验 camera 的 store_id 与用户 store_id 一致（该校验在 `_assert_cam_access` 中已做）。
+
+**建议**：将 `store_id` 也编码进票据 payload，连接时双重校验，避免 `_assert_cam_access` 被绕过后票据仍可用。
+
+**位置**：`backend/app/core/security.py` `create_stream_ticket`
+
+```python
+payload = {
+    ...
+    "cam": int(camera_id),
+    "store": int(camera.store_id),  # 新增
+}
+```
+
+---
+
+## 4. P3 — 流程与测试保障
+
+### P3-1 增加门店隔离自动化测试用例
+
+**建议**：在 `tests/` 下新增 `test_store_isolation.py`，覆盖以下场景：
+
+| 用例 | 预期 |
+|---|---|
+| 门店A员工请求门店B订单列表 | 返回空或 403 |
+| 门店A员工查看门店B订单详情 | 403 |
+| 门店A员工修改门店B商品 | 403 |
+| 门店A员工发放优惠券给门店B顾客 | 403 |
+| 顾客A查看顾客B的订单 | 403 |
+| 顾客A用门店B商品下单 | 400 "商品不属于本门店" |
+| 门店A收银员申请门店B订单退款 | 403 |
+
+**收益**：将隔离规则固化为可执行测试，防止未来重构引入回归。
+
+---
+
+### P3-2 增加 store_scope 调用覆盖率统计
+
+**建议**：在 CI 中增加脚本，统计 `require_bound_store` / `assert_store_access` / `assert_order_store_access` 的调用次数与 API 端点总数的比值，低于阈值（如 90%）则告警。
+
+**实现**：
+```bash
+# 统计 API 文件中 select( 的数量与 store_scope 调用数量
+grep -rn "select(" app/api/v1/*.py | wc -l
+grep -rn "require_bound_store\|assert_store_access\|assert_order_store_access" app/api/v1/*.py | wc -l
+```
+
+---
+
+### P3-3 数据隔离审计纳入发布流程
+
+**建议**：每次涉及 API 变更的 PR 必须在描述中勾选"门店隔离自查清单"（见 P1-4），并由 reviewer 重点检查 `store_scope` 调用。
+
+---
+
+## 5. 实施路线图
+
+| 阶段 | 内容 | 优先级 | 预计工作量 |
+|---|---|---|---|
+| 第一阶段 | P1-1 订单 store_id 最终断言、P1-4 隔离检查清单 | P1 | 1 天 |
+| 第二阶段 | P1-2 公开接口限流、P1-3 合并审计 | P1 | 2 天 |
+| 第三阶段 | P2 全部边界场景加固 | P2 | 3 天 |
+| 第四阶段 | P3 自动化测试 + CI 门禁 | P3 | 2 天 |
+
+**总工作量**：约 8 个工作日。
+
+---
+
+## 附录：当前隔离防线矩阵
+
+```
+请求入口
+  │
+  ├─ 员工 JWT (typ=staff)
+  │   ├─ require_permission()  →  功能权限校验
+  │   ├─ require_bound_store() →  列表查询强制本店  ──┐
+  │   ├─ assert_store_access() →  单条记录归属校验    │  门店隔离
+  │   └─ assert_order_store_access() → 订单归属校验  ─┘
+  │
+  ├─ 顾客 JWT (typ=customer)
+  │   ├─ CurrentCustomer       →  解析顾客身份
+  │   ├─ customer.id 过滤      →  仅本人数据
+  │   └─ assert_customer_owns_order() → 订单归属
+  │
+  └─ 无 Token（公开）
+      └─ GET /products         →  按 store_id 查询菜单（点餐必需）
+```
+
+当前三道防线（认证 → 门店 → 个人）已完整覆盖，本加固方案在此基础上增加第四道"断言/限流/审计"纵深防御。

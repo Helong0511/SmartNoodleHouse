@@ -410,5 +410,35 @@ Page({
 
   goOrders() {
     wx.switchTab({ url: '/pages/orders/orders' })
+  },
+
+  async onChooseAvatar(e) {
+    const tempUrl = e && e.detail && e.detail.avatarUrl
+    if (!tempUrl) return
+    try {
+      wx.showLoading({ title: '更新头像' })
+      await auth.ensureLogin()
+      // 上传临时头像到服务端
+      const persistedUrl = await avatarUtil.ensureRemoteAvatar(tempUrl)
+      if (!persistedUrl) throw new Error('头像上传未返回地址')
+      // 保存到 profile
+      const res = await auth.patchMemberProfile({ avatar_url: persistedUrl })
+      app.globalData.avatarUrl = persistedUrl
+      wx.setStorageSync('avatar_url', persistedUrl)
+      this.setData({
+        avatarUrl: avatarUtil.resolveDisplayUrl(persistedUrl)
+      })
+      wx.hideLoading()
+      // 如果非会员且已有昵称，自动注册为会员
+      if (!this.data.isMember && this.data.nickname && this.data.nickname.length >= 2) {
+        wx.showToast({ title: '头像已更新，正在开通会员...', icon: 'none' })
+        await this.activateSmartMember()
+      } else {
+        wx.showToast({ title: '头像已更新', icon: 'success' })
+      }
+    } catch (err) {
+      wx.hideLoading()
+      wx.showToast({ title: (err && err.message) || '头像更新失败', icon: 'none' })
+    }
   }
 })

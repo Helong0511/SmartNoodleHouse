@@ -6,7 +6,7 @@ from pathlib import Path
 import app.bootstrap_path  # noqa: F401 — 项目根目录加入 sys.path（camera 模块）
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -118,10 +118,14 @@ async def lifespan(app: FastAPI):
         is_leader = False
 
     if is_leader:
-        from app.core.leader_lock import set_leader_held, set_on_leader_lost
+        from app.core.leader_lock import is_leader_held, set_leader_held, set_on_leader_lost
 
         set_leader_held(True)
         set_on_leader_lost(_stop_leader_work)
+        # P0-6: 注入 Leader 检查回调到 CameraManager
+        from camera.camera_manager import CameraManager
+
+        CameraManager.set_leader_check(is_leader_held)
         _leader_stop = asyncio.Event()
         _leader_renew_task = asyncio.create_task(renew_leader_loop(_leader_worker_id, _leader_stop))
         register_tasks(scheduler)
@@ -144,7 +148,6 @@ async def lifespan(app: FastAPI):
             from app.core.database import AsyncSessionLocal
             from app.models import Camera
             from app.services.camera_credentials import build_connect_source
-            from camera.camera_manager import CameraManager
 
             async with AsyncSessionLocal() as db:
                 cams = (await db.execute(select(Camera).where(Camera.status != "DISABLED"))).scalars().all()
@@ -192,7 +195,17 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(json_logs=settings.json_logs or settings.is_production, level=settings.log_level)
-    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    # P1-40: 生产环境关闭 /docs /redoc /openapi.json
+    docs_url = "/docs" if settings.is_development else None
+    redoc_url = "/redoc" if settings.is_development else None
+    openapi_url = "/openapi.json" if settings.is_development else None
+    app = FastAPI(
+        title=settings.app_name,
+        lifespan=lifespan,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -200,6 +213,29 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # P1-40: Security headers 中间件
+    @app.middleware("http")
+    async def security_headers_middleware(request: Request, call_next):
+        # P1-43: Webhook body size limit — 超限返回 413
+        path = request.url.path
+        if "/webhook" in path or "/notify" in path or "/callback" in path:
+            cl = request.headers.get("content-length")
+            if cl and int(cl) > settings.webhook_max_body_bytes:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=413,
+                    content={"code": 413, "message": "Webhook body too large"},
+                )
+        response = await call_next(request)
+        if settings.is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(WebhookAllowlistMiddleware)

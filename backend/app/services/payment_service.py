@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -1134,6 +1135,12 @@ class PaymentService:
         if provider_u == "WECHAT":
             data = WechatPayVerifier().verify_and_parse(headers, body)
             parsed_probe = await provider_inst.handle_callback(data)
+            # P0-10: 微信回调身份 fail-closed — mchid 必须匹配
+            callback_mchid = str(parsed_probe.get("mchid") or "").strip()
+            expected_mchid = str(get_settings().wechat_mch_id or "").strip()
+            if expected_mchid and callback_mchid and callback_mchid != expected_mchid:
+                logger.warning("微信回调 mchid 不匹配: got=%s expected=%s", callback_mchid, expected_mchid)
+                raise AppException(40054, "微信回调商户号不匹配，拒绝处理")
             if parsed_probe.get("is_refund"):
                 receipt = make_receipt_key(
                     f"{provider_u}:REFUND",
@@ -1151,6 +1158,12 @@ class PaymentService:
         else:
             data = AlipayVerifier().verify_and_parse(headers, body)
             parsed_probe = await provider_inst.handle_callback(data)
+            # P0-10: 支付宝回调身份 fail-closed — app_id 必须匹配
+            callback_appid = str(parsed_probe.get("app_id") or "").strip()
+            expected_appid = str(get_settings().alipay_app_id or "").strip()
+            if expected_appid and callback_appid and callback_appid != expected_appid:
+                logger.warning("支付宝回调 app_id 不匹配: got=%s expected=%s", callback_appid, expected_appid)
+                raise AppException(40054, "支付宝回调应用ID不匹配，拒绝处理")
             if parsed_probe.get("is_refund"):
                 receipt = make_receipt_key(
                     f"{provider_u}:REFUND",
@@ -1169,15 +1182,34 @@ class PaymentService:
         redis_channel = f"pay:{provider_u}"
         first = await claim_once(redis_channel, receipt)
         if not first:
-            if parsed_probe.get("is_refund"):
-                refund_no = parsed_probe.get("refund_no")
-                if refund_no:
-                    return (
-                        await db.execute(select(PaymentRefund).where(PaymentRefund.refund_no == refund_no))
-                    ).scalar_one_or_none()
-                return None
-            result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
-            return result.scalar_one_or_none()
+            # Redis 显示已认领：可能是真重复，也可能是崩溃残留
+            # （claim 后、receipt 提交前 crash）。必须查 DB receipt 判断真相，
+            # 否则支付状态可能永久卡住（#2）。
+            receipt_provider_check = (
+                f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
+            )
+            existing_receipt = (
+                await db.execute(
+                    select(PaymentCallbackReceipt).where(
+                        PaymentCallbackReceipt.provider == receipt_provider_check,
+                        PaymentCallbackReceipt.receipt_key == receipt,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_receipt:
+                # 真重复：receipt 已落库，业务已处理过，短路返回现有对象
+                if parsed_probe.get("is_refund"):
+                    refund_no = parsed_probe.get("refund_no")
+                    if refund_no:
+                        return (
+                            await db.execute(select(PaymentRefund).where(PaymentRefund.refund_no == refund_no))
+                        ).scalar_one_or_none()
+                    return None
+                result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
+                return result.scalar_one_or_none()
+            # Redis claim 是崩溃残留（receipt 未落库）：释放 Redis，继续处理，
+            # 让本次回调真正入账，而不是被误判为重复。
+            await release_claim(redis_channel, receipt)
 
         receipt_provider = f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
         try:
@@ -1189,7 +1221,7 @@ class PaymentService:
                 )
             )
             await db.flush()
-        except Exception:
+        except IntegrityError:
             await db.rollback()
             # DB UNIQUE 已认领：与 Redis 一致视为重复，不再处理
             if parsed_probe.get("is_refund"):
@@ -1206,8 +1238,27 @@ class PaymentService:
             if parsed_probe.get("is_refund"):
                 return await cls._apply_refund_callback(db, provider_u, data, parsed_probe, receipt)
             return await cls._apply_payment_callback(db, provider_u, provider_inst, data, receipt)
+        except IntegrityError:
+            # 业务级 UNIQUE 冲突（如已 PAID 订单再次标记、point_ledger/status_history 重复）：
+            # 视为重复处理，回滚本次未提交变更，短路返回现有对象。
+            # 不释放 Redis / 不删 receipt（receipt 未提交已随 rollback 消失；
+            # 若 prior 已提交 receipt 仍在 DB 守护，重试会被上面的 receipt 检查短路）。
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            if parsed_probe.get("is_refund"):
+                refund_no = parsed_probe.get("refund_no")
+                if refund_no:
+                    return (
+                        await db.execute(select(PaymentRefund).where(PaymentRefund.refund_no == refund_no))
+                    ).scalar_one_or_none()
+                return None
+            result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
+            return result.scalar_one_or_none()
         except Exception:
-            # 处理失败：释放 Redis，并删除刚写入的 DB 回执，便于渠道重试
+            # 瞬时/未知错误（OperationalError/Timeout 等）：回滚（receipt 未提交随之回滚），
+            # 释放 Redis 让 provider 重试，re-raise 让 provider 知道重试。
             try:
                 await db.rollback()
             except Exception:
@@ -1359,6 +1410,16 @@ class PaymentService:
         if not row:
             raise AppException(40403, "退款记录不存在")
 
+        # P0-11: 退款金额严格校验 — provider refund_fee 必须匹配本地退款金额
+        refund_fee_raw = parsed.get("refund_fee")
+        if refund_fee_raw is not None:
+            try:
+                provider_refund_amount = money(Decimal(str(refund_fee_raw)))
+                if provider_refund_amount != money(row.amount):
+                    raise AppException(40302, "退款金额不匹配")
+            except (InvalidOperation, ValueError):
+                logger.warning("退款回调 refund_fee 解析失败: %s", refund_fee_raw)
+
         status_raw = str(parsed.get("refund_status") or "").upper()
         if provider_u == "WECHAT":
             if status_raw == "SUCCESS" or str(data.get("event_type") or "").upper() == "REFUND.SUCCESS":
@@ -1394,6 +1455,10 @@ class PaymentService:
         fail_reason: str | None = None,
         source: str = "SYSTEM",
     ) -> PaymentRefund:
+        # P1-14 Refund state machine: PENDING -> PROCESSING -> {SUCCESS, FAILED, CLOSED, UNKNOWN}.
+        # Idempotent: SUCCESS is terminal; re-finalizing a SUCCESS row is a no-op.
+        # UNKNOWN = provider returned an ambiguous result; must NOT be promoted to SUCCESS;
+        #   recovery happens via sync_refund_status query / scheduled compensation.
         if row.status == "SUCCESS":
             return row
 
@@ -1479,6 +1544,11 @@ class PaymentService:
                 else:
                     order.payment_status = "PAID"
                 if order.customer_id:
+                    # 退款已确认 SUCCESS（provider 资金已退）；积分扣减/口味重算失败不再静默吞，
+                    # 入队 DB outbox 由 worker 重驱，避免「钱退了积分没扣」（#3 分布式事务补偿）。
+                    # 各 handler 按 refund_id 幂等。
+                    from app.services.outbox_worker import enqueue_outbox
+
                     try:
                         from app.services.customer_service import CustomerService, PreferenceService
 
@@ -1489,8 +1559,27 @@ class PaymentService:
                         await PreferenceService.recompute_for_customer(db, order.customer_id)
                     except Exception:
                         logger.exception(
-                            "退款扣减积分或口味重算失败 order_id=%s refund_no=%s", order.id, row.refund_no
+                            "退款扣减积分或口味重算失败，已入队 outbox 补偿 order_id=%s refund_no=%s",
+                            order.id,
+                            row.refund_no,
                         )
+                        # 补偿事件：aggregate_id=refund_id 保证每笔退款各一条，幂等
+                        for kind, payload in (
+                            ("points_deduct_refund", {"order_id": int(order.id), "refund_id": int(row.id)}),
+                            ("pref_recompute", {"order_id": int(order.id), "refund_id": int(row.id)}),
+                        ):
+                            try:
+                                await enqueue_outbox(
+                                    db,
+                                    aggregate_type="refund",
+                                    aggregate_id=int(row.id),
+                                    event_kind=kind,
+                                    payload=payload,
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "入队退款补偿 outbox 失败 refund_id=%s kind=%s", row.id, kind
+                                )
         elif new_status in ("CLOSED", "ABNORMAL", "FAILED"):
             row.status = new_status if new_status != "ABNORMAL" else "FAILED"
             row.fail_reason = row.fail_reason or fail_reason or new_status

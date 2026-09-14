@@ -1,0 +1,316 @@
+# 微信 / 支付宝小程序 后台配置与提审清单
+
+> 本文档对应项目：智能面馆（SmartNoodleHouse）
+> 微信小程序 AppID：`wxd0964c5d02b1549d`
+> 支付宝小程序 AppID：见后端 `.env` 的 `ALIPAY_APP_ID`
+> 生产 API 基础地址：`https://your-domain.com/api/v1`（替换为真实域名）
+
+---
+
+## 目录
+
+1. [通用前提](#1-通用前提)
+2. [微信小程序后台配置](#2-微信小程序后台配置)
+3. [支付宝小程序后台配置](#3-支付宝小程序后台配置)
+4. [支付能力开通](#4-支付能力开通)
+5. [提审前最终自查](#5-提审前最终自查)
+6. [常见驳回原因与排查](#6-常见驳回原因与排查)
+
+---
+
+## 1. 通用前提
+
+### 1.1 准备材料
+
+| 材料 | 说明 |
+|---|---|
+| 营业执照 | 主体需与小程序注册主体一致 |
+| 食品经营许可证 | 餐饮类目必需 |
+| 对公账户 | 用于微信支付 / 支付宝商户结算 |
+| 法人身份证 | 实名认证 |
+| HTTPS 域名 | 已备案、已部署 SSL 证书（如 `https://your-domain.com`） |
+| 小程序图标 | 微信 144×144 PNG ≤ 200KB；支付宝 180×180 PNG/JPG |
+| 小程序名称 | 3–20 字符，含品牌或业务指向，不得用"测试""官方"等宽泛词 |
+
+### 1.2 后端代码侧已完成项
+
+- [x] `app.json` 已开启 `__usePrivacyCheck__: true`（微信）/ `usePrivacyCheck: true`（支付宝）
+- [x] `privacy-popup` 组件已接入首页和会员页
+- [x] 已使用 `open-type="agreePrivacyAuthorization"` 官方同意按钮
+- [x] 已调用 `getPrivacySetting` / `openPrivacyContract`
+- [x] 包体积：微信 0.35MB / 支付宝 0.34MB（远低于上限）
+- [x] logo.png 已压缩至 61KB
+- [x] 已删除空的 `face` 页面（微信）
+
+### 1.3 本项目使用的隐私 API 清单
+
+| 能力 | 微信 API | 支付宝 API | 需在隐私协议声明 |
+|---|---|---|---|
+| 头像 | `chooseAvatar` | `chooseAvatar` | 收集你的头像 |
+| 昵称 | `type="nickname"` 输入框 | 昵称输入 | 收集你的昵称 |
+| 手机号 | `getPhoneNumber` | `getPhoneNumber` | 收集你的手机号 |
+| 相册/相机 | `chooseMedia` / `chooseImage` | `chooseImage` | 收集你的相册信息、摄像头信息 |
+| 扫码 | `scanCode` | `scan` | 收集你的摄像头信息 |
+| 剪贴板 | `getClipboardData` | — | 收集你的剪贴板信息 |
+
+---
+
+## 2. 微信小程序后台配置
+
+登录地址：https://mp.weixin.qq.com
+
+### 2.1 基本信息
+
+路径：**设置 → 基本设置**
+
+| 配置项 | 填写内容 |
+|---|---|
+| 小程序名称 | 智能面馆（或品牌名+"面馆"） |
+| 小程序简称 | 面馆 |
+| 小程序头像 | 上传 144×144 PNG，≤ 200KB |
+| 小程序简介 | 一句话描述功能，如"扫码点餐、会员口味记忆、智能推荐"（10–32 字） |
+| 服务类目 | 餐饮 → 餐饮服务（需上传食品经营许可证） |
+
+> ⚠️ 个人主体无法开通微信支付和手机号快速验证，请使用企业/个体工商户主体。
+
+### 2.2 开发设置
+
+路径：**开发 → 开发管理 → 开发设置**
+
+#### 2.2.1 服务器域名（关键）
+
+| 域名类型 | 填写值 |
+|---|---|
+| request 合法域名 | `https://your-domain.com` |
+| uploadFile 合法域名 | `https://your-domain.com` |
+| downloadFile 合法域名 | `https://your-domain.com`（如使用 CDN 则填 CDN 域名） |
+| socket 合法域名 | `wss://your-domain.com`（如使用 WebSocket） |
+
+> 必须 HTTPS，域名需已 ICP 备案。每月可修改 5 次。
+
+#### 2.2.2 业务域名
+
+如未使用 `web-view` 组件则无需配置。本项目未使用 `web-view`，跳过。
+
+### 2.3 用户隐私保护指引（关键）
+
+路径：**设置 → 服务内容声明 → 用户隐私保护指引**
+
+点击"更新"，逐项勾选并填写用途说明：
+
+| 收集的信息 | 用途说明（参考） |
+|---|---|
+| 用户信息（头像） | 用于会员头像展示 |
+| 用户信息（昵称） | 用于会员昵称展示 |
+| 手机号 | 用于会员账号绑定与订单通知 |
+| 相册信息 | 用于会员头像上传（从相册选择） |
+| 摄像头信息 | 用于扫码点餐桌台码绑定、头像拍摄 |
+| 剪贴板信息 | 用于识别剪贴板中的桌台码链接 |
+
+提交后等待审核，通常 10 分钟–2 小时生效。生效前 `chooseAvatar` / `getPhoneNumber` 会报隐私未声明错误。
+
+### 2.4 微信支付
+
+路径：**微信支付 → 接入微信支付**
+
+1. 开通微信支付商户号，完成商户认证
+2. 在商户平台 API 安全中：
+   - 设置 APIv3 密钥（32 位）
+   - 申请 API 证书，获取商户证书序列号
+3. 配置支付回调地址：`https://your-domain.com/api/v1/payments/wechat/notify`
+4. 退款回调地址（如启用退款）：`https://your-domain.com/api/v1/payments/wechat/refund-notify`
+
+后端 `.env` 对应配置：
+```
+WECHAT_APP_ID=wxd0964c5d02b1549d
+WECHAT_APP_SECRET=你的小程序密钥
+WECHAT_MCH_ID=商户号
+WECHAT_API_V3_KEY=APIv3密钥
+WECHAT_CERT_SERIAL_NO=商户证书序列号
+WECHAT_PRIVATE_KEY_PATH=certs/wechat_apiclient_key.pem
+WECHAT_PLATFORM_CERT_PATH=certs/wechat_platform_cert.pem
+WECHAT_NOTIFY_URL=https://your-domain.com/api/v1/payments/wechat/notify
+```
+
+### 2.5 订阅消息（可选）
+
+路径：**功能 → 订阅消息 → 我的模板**
+
+如需"订单就绪通知"等推送：
+1. 在公共模板库中搜索"订单"相关模板
+2. 添加并记录模板 ID
+3. 后端 `.env` 配置：`WECHAT_SUBSCRIBE_TEMPLATE_ORDER_READY=模板ID`
+
+### 2.6 体验版与发布
+
+1. 微信开发者工具 → 上传 → 填写版本号和备注
+2. mp 后台 → 版本管理 → 提交审核
+3. 审核通过后 → 发布上线
+
+---
+
+## 3. 支付宝小程序后台配置
+
+登录地址：https://open.alipay.com
+
+### 3.1 基本信息
+
+路径：**控制台 → 小程序 → 基本信息**
+
+| 配置项 | 填写内容 |
+|---|---|
+| 小程序名称 | 3–20 字符，与微信端保持一致 |
+| 小程序图标 | 180×180，PNG/JPG，≤ 120KB，圆角 12px |
+| 小程序简介 | 10–32 字，描述核心功能 |
+| 服务类目 | 餐饮 → 餐饮服务（上传食品经营许可证） |
+
+### 3.2 服务器域名白名单（关键）
+
+路径：**控制台 → 小程序 → 开发设置 → 服务器域名白名单**
+
+| 配置项 | 填写值 |
+|---|---|
+| 域名 | `https://your-domain.com` |
+
+> 支付宝只需要配置一个域名白名单，覆盖 request / uploadFile / downloadFile。
+
+### 3.3 接口加签方式（关键）
+
+路径：**控制台 → 小程序 → 开发设置 → 接口加签方式**
+
+1. 选择"公钥"模式
+2. 生成应用私钥（PKCS8 格式）和应用公钥
+3. 将应用公钥上传到平台，获取**支付宝公钥**
+4. 配置"接口内容加密"（AES 密钥），用于手机号等敏感信息解密
+
+后端 `.env` 对应配置：
+```
+ALIPAY_APP_ID=你的支付宝AppID
+ALIPAY_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
+ALIPAY_PUBLIC_KEY=支付宝公钥
+ALIPAY_AES_KEY=接口内容加密AES密钥
+ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do
+ALIPAY_NOTIFY_URL=https://your-domain.com/api/v1/payments/alipay/notify
+```
+
+### 3.4 隐私协议（关键）
+
+路径：**控制台 → 小程序 → 设置 → 隐私协议**
+
+填写隐私政策文本，需包含：
+- 收集的信息类型：头像、昵称、手机号、相册、摄像头
+- 收集目的：会员服务、扫码点餐、订单通知
+- 信息存储与保护方式
+- 用户权利（查询、删除、撤回同意）
+
+### 3.5 功能列表签约
+
+路径：**控制台 → 小程序 → 功能列表**
+
+必须签约/开通的能力：
+
+| 功能 | 说明 |
+|---|---|
+| 获取会员手机号 | 企业主体可开通；用于 `getPhoneNumber` |
+| 支付宝会员授权 | 用于 `getAuthCode` 登录 |
+| JSAPI 支付 | 小程序内支付（见第 4 节） |
+
+### 3.6 体验版与发布
+
+1. 支付宝开发者工具 → 上传
+2. 开放平台控制台 → 版本管理 → 提交审核
+3. 审核通过后 → 发布
+
+---
+
+## 4. 支付能力开通
+
+### 4.1 微信支付
+
+详见 [2.4 微信支付](#24-微信支付)。核心步骤：
+1. 小程序后台申请开通微信支付
+2. 完成商户号注册与认证
+3. 配置 APIv3 密钥和证书
+4. 后端 `.env` 填入商户信息
+5. 确保 `ALLOW_PAYMENT_MOCK=false`（生产必须）
+
+### 4.2 支付宝 JSAPI 支付
+
+1. 开放平台 → 产品中心 → 搜索"JSAPI 支付"
+2. 签约并关联本小程序 AppID
+3. 配置异步通知地址：`https://your-domain.com/api/v1/payments/alipay/notify`
+4. 后端 `.env` 确保 `ALIPAY_APP_ID`、密钥已配置
+5. 生产环境 `ALLOW_PAYMENT_MOCK=false`
+
+> ⚠️ 支付对象为餐饮实物（面条），非虚拟商品，不受 iOS 虚拟支付限制。
+
+---
+
+## 5. 提审前最终自查
+
+### 5.1 代码侧
+
+- [ ] `miniprogram-wechat/config/env.js` 的 `PROD_API_BASE` 已改为真实 HTTPS 域名
+- [ ] `miniprogram-alipay/config/env.js` 的 `PROD_API_BASE` 已改为真实 HTTPS 域名
+- [ ] 后端 `.env` 中 `ALLOW_PAYMENT_MOCK=false`
+- [ ] 后端 `.env` 中 `ALLOW_AUTH_MOCK=false`
+- [ ] 后端 `.env` 中 `ALLOW_PRINT_MOCK=false`（有打印机时）
+- [ ] 后端 `.env` 中 `ENABLE_WX_PHONE_BIND=true`（如已开通手机号能力）
+- [ ] 后端 `.env` 中 `ENABLE_ALIPAY_PHONE_BIND=true`（如已开通手机号能力）
+- [ ] 微信开发者工具 → 详情 → 本地设置 → 取消勾选"不校验合法域名"（提审前确认域名已配置）
+
+### 5.2 微信后台
+
+- [ ] 服务器域名已配置（request/uploadFile/downloadFile）
+- [ ] 用户隐私保护指引已提交并审核通过
+- [ ] 服务类目为"餐饮"且食品经营许可证已上传
+- [ ] 微信支付已开通并配置回调
+- [ ] 无 `web-view` 引用（本项目未使用，确认即可）
+
+### 5.3 支付宝后台
+
+- [ ] 服务器域名白名单已配置
+- [ ] 接口加签公钥已上传，支付宝公钥已记录
+- [ ] 接口内容加密 AES 密钥已配置
+- [ ] 隐私协议已填写
+- [ ] JSAPI 支付已签约并关联 AppID
+- [ ] "获取会员手机号"能力已开通（如需）
+
+### 5.4 功能自测
+
+- [ ] 首页可正常加载，不强制登录
+- [ ] 菜单页可浏览商品
+- [ ] 购物车加减、结算正常
+- [ ] 支付流程可正常拉起收银台
+- [ ] 会员页头像/昵称/手机号授权正常
+- [ ] 订单页可查看历史订单
+- [ ] 弱网环境下有加载提示和错误提示
+- [ ] 无白屏、崩溃、控制台报错
+
+---
+
+## 6. 常见驳回原因与排查
+
+| 驳回反馈 | 排查方向 |
+|---|---|
+| 未配置用户隐私保护指引 | 微信后台 → 设置 → 服务内容声明，提交隐私指引并等待生效 |
+| 小程序在未登录状态下应能正常浏览 | 确认首页不强制跳转登录，游客可浏览菜单 |
+| 请在用户主动触发后再申请授权 | 检查 `onLoad`/`onShow` 中是否直接调用授权 API |
+| 涉及虚拟内容支付，未使用虚拟支付能力 | 本项目为实物餐饮支付，确认支付场景为点餐 |
+| 类目与实际运营内容不符 | 确认选择"餐饮"类目，上传食品经营许可证 |
+| 服务器域名未配置 | mp 后台配置 request 合法域名，确保 HTTPS + 备案 |
+| 页面功能不完整 | 确认所有页面可正常打开，无"开发中"占位 |
+| 用户信息授权描述不明确 | 隐私指引中每个权限项都要写明具体用途 |
+| 内容不符合运营规范 | 检查是否有诱导分享、诱导关注等营销文案 |
+
+---
+
+## 附录：关键 URL 速查
+
+| 平台 | 地址 |
+|---|---|
+| 微信公众平台 | https://mp.weixin.qq.com |
+| 微信支付商户平台 | https://pay.weixin.qq.com |
+| 支付宝开放平台 | https://open.alipay.com |
+| 微信小程序运营规范 | https://developers.weixin.qq.com/miniprogram/product/ |
+| 支付宝小程序运营规范 | https://opendocs.alipay.com/mini/product |

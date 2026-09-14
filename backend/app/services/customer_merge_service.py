@@ -100,6 +100,14 @@ class CustomerMergeService:
             "reason": (reason or "").strip() or None,
         }
 
+        # P1-3 收集源顾客涉及的门店列表，写入审计日志，便于追溯跨门店数据合并
+        source_store_ids = (
+            await db.execute(
+                select(Order.store_id).where(Order.customer_id == source.id).distinct()
+            )
+        ).scalars().all()
+        source_store_ids = sorted({int(s) for s in source_store_ids if s is not None})
+
         stats: dict[str, Any] = {
             "wechat_moved": 0,
             "wechat_dropped": 0,
@@ -145,6 +153,8 @@ class CustomerMergeService:
             "target": _customer_snapshot(target),
             "source": _customer_snapshot(source),
             "stats": stats,
+            "source_store_ids": source_store_ids,
+            "cross_store": len(source_store_ids) > 1,
         }
         await AuditService.log(
             db,
@@ -162,6 +172,8 @@ class CustomerMergeService:
             "source_customer_id": source.id,
             "stats": stats,
             "target": after["target"],
+            "source_store_ids": source_store_ids,
+            "cross_store": len(source_store_ids) > 1,
         }
 
     @classmethod

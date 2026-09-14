@@ -28,8 +28,11 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx
-      - name: Run unit tests
+          pip install pytest pytest-asyncio httpx pytest-cov
+      - name: Compile check
+        run: |
+          python -m compileall backend/app -q
+      - name: Run unit tests with coverage
         env:
           PYTHONPATH: backend
           APP_ENV: development
@@ -39,4 +42,24 @@ jobs:
           ALLOW_PAYMENT_MOCK: "true"
           ALLOW_AUTH_MOCK: "true"
           ALLOW_DELIVERY_MOCK: "true"
-        run: python -m pytest -q --ignore=tests/test_concurrency_stock.py
+        run: |
+          python -m pytest -q --tb=short \
+            --cov=app --cov-report=term-missing --cov-report=xml \
+            --cov-fail-under=35
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check and build
+        run: npm run build

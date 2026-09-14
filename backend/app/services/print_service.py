@@ -74,6 +74,8 @@ TICKET_CANCEL = "CANCEL"  # 作废/取消（票头加【作废】）
 MAX_PRINT_ATTEMPTS = 8
 PRINT_BACKOFF_BASE_SEC = 2
 PRINT_BACKOFF_CAP_SEC = 3600
+# PRINTING 超时回收：locked_at 早于 now - STALE_PRINTING_SEC 视为崩溃残留，复位 PENDING
+STALE_PRINTING_SEC = 300
 # TEXT 可截断上限（留余量）
 PRINT_CONTENT_MAX_LEN = 60000
 
@@ -824,3 +826,25 @@ class PrintService:
             if await cls.process_print_job(int(jid)):
                 done += 1
         return done
+
+    @classmethod
+    async def reclaim_stale_printing(cls, db: AsyncSession, *, stale_after: int = STALE_PRINTING_SEC) -> int:
+        """回收崩溃残留的 PRINTING 任务：locked_at < now - stale_after → 复位 PENDING。
+
+        复位时不清零 attempt_count（避免无限重试），仅释放锁。
+        """
+        cutoff = now_local() - timedelta(seconds=stale_after)
+        stmt = (
+            update(PrintJob)
+            .where(
+                PrintJob.status == "PRINTING",
+                or_(PrintJob.locked_at.is_(None), PrintJob.locked_at < cutoff),
+            )
+            .values(status="PENDING", locked_at=None, locked_by=None)
+        )
+        result = await db.execute(stmt)
+        await db.commit()
+        count = int(result.rowcount or 0)
+        if count:
+            logger.warning("Reclaimed %s stale PRINTING print jobs", count)
+        return count

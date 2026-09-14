@@ -18,9 +18,13 @@ WECHAT_API = "https://api.mch.weixin.qq.com"
 
 
 def _api_key() -> str:
-    key = (get_settings().wechat_api_v3_key or "").strip()
+    # P1-12: 优先使用独立的 V2 API 密钥，未配置时回退 V3 密钥（兼容）
+    s = get_settings()
+    key = (s.wechat_api_v2_key or "").strip()
     if not key:
-        raise AppException(50011, "微信 API 密钥未配置（商户平台 API 安全）")
+        key = (s.wechat_api_v3_key or "").strip()
+    if not key:
+        raise AppException(50011, "微信 API 密钥未配置（WECHAT_API_V2_KEY 或 WECHAT_API_V3_KEY）")
     return key
 
 
@@ -60,6 +64,12 @@ async def _post_xml(path: str, params: dict[str, str]) -> dict[str, str]:
     data = _xml_dict(resp.text)
     if data.get("return_code") != "SUCCESS":
         raise AppException(50012, f"微信支付通信失败: {data.get('return_msg') or data}")
+    # P1-12: 响应签名校验 — 防止中间人篡改响应
+    resp_sign = data.pop("sign", None)
+    if resp_sign and data.get("result_code"):
+        expected_sign = _sign_md5(data)
+        if resp_sign.upper() != expected_sign:
+            raise AppException(50012, "微信支付响应签名校验失败")
     # result_code 可能为 FAIL（如 USERPAYING），由上层处理
     return data
 

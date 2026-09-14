@@ -89,6 +89,13 @@ def assess_face_quality(image_bytes: bytes) -> dict:
     """简单质量门控：尺寸、清晰度、人脸占比。"""
     import cv2
 
+    # P0-20: decompression bomb 防护 — 限制输入字节数
+    _MAX_FACE_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
+    if len(image_bytes) > _MAX_FACE_IMAGE_BYTES:
+        raise ValueError("人脸图片过大，请压缩后重新上传")
+    if len(image_bytes) < 100:
+        raise ValueError("人脸图片数据为空")
+
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:

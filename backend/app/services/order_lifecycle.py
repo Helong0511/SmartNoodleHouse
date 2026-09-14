@@ -105,14 +105,12 @@ async def apply_order_status(
         except Exception:
             logger.exception("出餐订阅消息推送失败 order_id=%s", order.id)
     elif target == "PAID" and old != "PAID" and order.customer_id:
-        try:
-            from app.services.paid_side_effects import run_paid_side_effects
+        # 支付成功副作用：与 PAID 同事务写入 DB outbox（积分/券/口味）。
+        # outbox 写入失败 → 整事务回滚（含 PAID），provider 回调重试，fail-closed。
+        # 副作用实际执行由 outbox worker 异步驱动，各 handler 按 order_id 幂等。
+        from app.services.paid_side_effects import enqueue_paid_side_effects
 
-            await run_paid_side_effects(db, order, do_pref=do_pref)
-        except Exception:
-            logger.exception(
-                "积分发放、券核销或口味记录失败（已入队补偿）order_id=%s", order.id
-            )
+        await enqueue_paid_side_effects(db, order)
 
     await record_order_status(
         db,

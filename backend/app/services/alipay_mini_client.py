@@ -171,6 +171,9 @@ def decrypt_phone_response(encrypted_b64: str) -> str:
 
     cipher_text, plain_mobile = _extract_cipher_from_envelope(raw)
     if plain_mobile:
+        # P0-3: 生产环境拒绝明文手机号（防客户端伪造），仅开发环境允许
+        if not settings.is_development:
+            raise AppException(40054, "支付宝手机号必须为 AES 加密报文，拒绝明文响应")
         return plain_mobile
     if not cipher_text:
         raise AppException(40054, "未能从支付宝响应中解析手机号")

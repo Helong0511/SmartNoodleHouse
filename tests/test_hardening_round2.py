@@ -106,6 +106,7 @@ async def test_leader_lock_acquire_and_hold():
     fake.get = AsyncMock(return_value=b"w1")
     fake.expire = AsyncMock(return_value=True)
     fake.delete = AsyncMock(return_value=1)
+    fake.eval = AsyncMock(return_value=True)  # Lua compare-and-expire 续期成功
 
     with patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)):
         assert await leader_lock.try_acquire_leader("w1") is True

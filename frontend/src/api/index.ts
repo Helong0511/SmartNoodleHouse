@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
-import { getCustomerToken } from '@/utils/customerAuth'
+import { clearCustomerToken, getCustomerToken } from '@/utils/customerAuth'
 import { reportApiLog } from '@/utils/logger'
 
 /** 带业务码的 API 错误，便于按 code 分支（如 40903 幂等键已结束） */
@@ -79,10 +79,27 @@ api.interceptors.response.use(
     const url = String(err.config?.url || '')
     reportApiLog('ERROR', err.config?.method || 'GET', url, { status, message: msg, code: bizCode })
     if (status === 401) {
-      clearStaffToken()
-      if (!location.pathname.includes('/login') && !location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member') && !location.pathname.startsWith('/display')) {
-        ElMessage.error('登录已过期，请重新登录')
-        location.href = '/login'
+      // P1: 401 时区分顾客/员工 API，清理对应 token，避免残留失效态
+      const reqUrl = String(err.config?.url || '')
+      const isCustApi =
+        reqUrl.includes('/miniprogram') ||
+        reqUrl.startsWith('/customers/') ||
+        reqUrl.includes('/orders/mine') ||
+        /\/orders\/\d+\/reorder/.test(reqUrl) ||
+        reqUrl.includes('/welcome/face') ||
+        (err.config?.headers?.['X-Client'] === 'customer')
+      if (isCustApi) {
+        clearCustomerToken()
+        if (!location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member') && !location.pathname.startsWith('/display')) {
+          ElMessage.error('登录已过期，请重新扫码')
+          location.href = '/scan'
+        }
+      } else {
+        clearStaffToken()
+        if (!location.pathname.includes('/login')) {
+          ElMessage.error('登录已过期，请重新登录')
+          location.href = '/login'
+        }
       }
     } else if (status === 403) {
       ElMessage.error(msg || '无权限')

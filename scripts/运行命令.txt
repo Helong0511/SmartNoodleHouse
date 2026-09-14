@@ -286,4 +286,28 @@ setx APISPACE_API_KEY "eivjqkfLBIHDlYd0Z9pZQZpQcrTiHrbWnbNXKJaO0GVuQjii"
 
 setx APISPACE_API_KEY "lvFLoISXYg5FgwrY7YDNB355Lb3AqSPes1MzOudei7EhZK1N"
 
-2026-09-12 17:42:01,304 ERROR [snh.filelog.wechat] api POST /orders/1/reorder | page=pages/orders/orders | client_ts=2026-09-12T09:42:00.279Z | extra={'status': 400, 'code': 40041, 'message': '没有可复购的在售商品，请重新点餐'}
+🔴 P0 级
+多门店下单存在跨门店商品问题
+支付回调 Redis 防重机制存在“先标记成功、后业务失败”导致支付状态可能永久卡住的问题
+退款存在外部支付成功 + 本地事务回滚的分布式事务风险
+Webhook Inbox 多实例/并发消费存在重复消费问题
+已支付订单允许直接人工取消，但订单/退款/优惠券/库存状态可能不一致
+优惠券发放存在高并发重复发券风险
+支付成功后的积分/优惠券/口味等副作用异常被吞掉，可能出现“钱收了，但会员数据没处理”的情况
+🟠 P1 级
+后台顾客详情存在明显的 IDOR/门店隔离缺口
+商品、规格相关 API 的门店隔离不完整
+小程序/后台的“人脸授权”功能目前实际上没有形成完整闭环
+当前人脸活体方案安全强度不足
+摄像头 URL 存在 SSRF/DNS Rebinding 风险
+外卖平台 Token 明文存数据库
+摄像头密码解密失败时可能回退到明文 URL
+Redis 故障时限流直接 Fail-Open
+定时任务没有真正的分布式 Leader Lock
+数据库 migration 目前只是空 baseline，生产容易发生 schema drift
+没有真正的自动化测试体系
+生产 SQL 中存在固定管理员账号/密码哈希，部署安全性不足
+外卖订单/回调中的手机号、地址等 PII 缺少完整生命周期清理
+支付成功状态缺少完善的主动对账机制
+订单幂等键设计还不够严谨
+智能口味算法目前还没有真正使用“星期 + 时间段 + 场景”等你之前要求的数据

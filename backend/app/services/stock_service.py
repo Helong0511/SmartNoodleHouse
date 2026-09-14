@@ -29,6 +29,9 @@ async def deduct_stock(
     *,
     store_id: int | None = None,
 ) -> None:
+    # P1-48: Atomic deduction — single conditional UPDATE (stock = stock - qty WHERE stock >= qty),
+    # NOT SELECT-then-UPDATE. The _has_store_row SELECT above only checks store-listing status,
+    # not stock level; the decrement itself is race-safe in one statement.
     if qty <= 0:
         raise AppException(40030, "扣减数量非法")
 
@@ -88,6 +91,11 @@ async def restore_stock(
     *,
     store_id: int | None = None,
 ) -> None:
+    # P1-48: Per-order idempotency is enforced by the caller (apply_order_status in
+    # order_lifecycle.py), which only invokes _restore_order_stock on the FIRST transition into
+    # CANCELLED/REFUNDED (guarded by `old not in ("CANCELLED", "REFUNDED")` and an early-return
+    # when old == target). This function does an unconditional increment, so callers MUST guard
+    # against double-restore; do not call it directly without that protection.
     if qty <= 0:
         return
 

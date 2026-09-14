@@ -111,6 +111,9 @@ class CouponTemplate(Base):
     min_order_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     valid_days: Mapped[int] = mapped_column(Integer, default=30)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    # P0-6: 库存控制（NULL=不限量）
+    total_quota: Mapped[int | None] = mapped_column(Integer, default=None, comment="发放总量上限；NULL=不限")
+    remaining: Mapped[int | None] = mapped_column(Integer, default=None, comment="剩余可发量；NULL=不限")
 
 
 class CustomerCoupon(Base):
@@ -126,6 +129,11 @@ class CustomerCoupon(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_order_id: Mapped[int | None] = mapped_column(BigInteger)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # P0-6: 客户端幂等键（NULL 多行不冲突；非空时 UNIQUE 保证重复请求只成功一次）
+    client_request_id: Mapped[str | None] = mapped_column(String(128), default=None, comment="客户端幂等键")
+    # 发券人信息：记录谁发的券、在哪个门店发的（券只能在该门店使用）
+    issued_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), default=None, comment="发券人 user_id")
+    issued_at_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, comment="发券门店；NULL=不限门店使用")
 
 
 class PointLedger(Base):
@@ -745,6 +753,41 @@ class PaymentCallbackReceipt(Base):
     receipt_key: Mapped[str] = mapped_column(String(128))
     payment_no: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OutboxEvent(Base):
+    """DB 事务型 outbox：与业务状态同事务写入，由 worker 原子 claim 异步消费。
+
+    用于支付成功副作用（积分/券核销/口味）与退款补偿，避免 Redis list 丢消息。
+    幂等键：(aggregate_type, aggregate_id, event_kind)。
+    """
+
+    __tablename__ = "outbox_events"
+    __table_args__ = (
+        UniqueConstraint("aggregate_type", "aggregate_id", "event_kind", name="uq_outbox_agg"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    aggregate_type: Mapped[str] = mapped_column(String(32))
+    aggregate_id: Mapped[int] = mapped_column(BigInteger)
+    event_kind: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=8)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(64))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PrintJob(Base, TimestampMixin):

@@ -1,0 +1,113 @@
+# 门店数据隔离检查清单
+
+> 本清单是每个新增/修改 API 的**强制门禁**。PR 描述中必须逐项勾选，reviewer 重点检查未勾选项。
+
+---
+
+## 一、员工端接口（依赖 `CurrentUser`）
+
+### 列表查询类（GET /xxx?page=...）
+- [ ] 调用了 `require_bound_store(user, store_id)` 获取 `effective_store`
+- [ ] 查询条件中包含 `Model.store_id == effective_store`
+- [ ] 非 SUPER_ADMIN 时，请求参数中的 `store_id` 被忽略（由 `require_bound_store` 强制覆盖）
+
+```python
+# 正确示例
+effective = require_bound_store(user, store_id)
+q = select(Order).where(Order.store_id == effective)
+```
+
+### 单条查询/操作类（GET/PUT/DELETE /xxx/{id}）
+- [ ] 先通过 `db.get(Model, id)` 拿到记录
+- [ ] 调用 `assert_store_access(user, record.store_id)` 校验归属
+- [ ] 操作（修改/删除）在校验通过后执行
+
+```python
+# 正确示例
+obj = await db.get(Product, product_id)
+assert obj is not None
+assert_store_access(user, obj.store_id)
+```
+
+### 订单相关操作
+- [ ] 使用 `assert_order_store_access(user, order)` 而非手动比较 `store_id`
+- [ ] 退款/取消操作额外校验班次归属（`PosShiftService.require_open_shift`）
+
+### 创建类（POST /xxx）
+- [ ] 非 SUPER_ADMIN 时，`store_id` 被强制设为 `user.store_id`（忽略请求体中的 store_id）
+- [ ] 关联资源（分类、规格组等）通过 `assert_store_access` 校验属于同门店
+
+---
+
+## 二、顾客端接口（依赖 `CurrentCustomer`）
+
+### 通用规则
+- [ ] 所有数据查询以 `customer.id` 为唯一过滤条件
+- [ ] 不接受请求参数中的 `customer_id`（或忽略，使用 token 中的）
+- [ ] 订单详情使用 `assert_customer_owns_order(order, customer_id)`
+
+```python
+# 正确示例
+q = select(Order).where(Order.customer_id == customer.id)
+```
+
+### 桌台绑定
+- [ ] 生产环境必须传 `store_id`
+- [ ] 校验 `req_store_id == table.store_id`，拒绝跨店绑桌
+
+---
+
+## 三、公开接口（无 Token）
+
+### 规则
+- [ ] 仅暴露点餐必需的公开数据（商品菜单、门店信息等）
+- [ ] 按 `store_id` 过滤，不返回全量数据
+- [ ] 增加限流（参考 `products.py` 的 IP+store_id 限流模式）
+
+---
+
+## 四、禁止模式（反例）
+
+| 反例 | 问题 | 正确做法 |
+|---|---|---|
+| `q = select(Order)` 无 store_id 过滤 | 返回全部门店订单 | 加 `Order.store_id == effective` |
+| `store_id = req.store_id`（直接信任前端） | 可越权访问他店 | 用 `require_bound_store` |
+| 顾客端 `where(Order.id == req.order_id)` 不校验 customer | IDOR 越权 | 加 `Order.customer_id == customer.id` |
+| `assert user.store_id == obj.store_id` 手写判断 | 遗漏 SUPER_ADMIN 豁免 | 用 `assert_store_access` |
+
+---
+
+## 五、CI 静态检查（可选增强）
+
+在 CI 中运行以下检查，对未通过的 API 文件发出警告：
+
+```bash
+# 1. 统计 API 文件中 select( 调用数量
+grep -rn "select(" app/api/v1/*.py | wc -l
+
+# 2. 统计 store_scope 隔离函数调用数量
+grep -rn "require_bound_store\|assert_store_access\|assert_order_store_access\|assert_customer_owns_order" app/api/v1/*.py | wc -l
+
+# 3. 比率应 > 80%（部分 select 用于统计/关联表，不需要隔离）
+```
+
+---
+
+## 六、Reviewer 检查要点
+
+1. **列表接口**：是否每个 `select(Model)` 都有 `store_id` 过滤？
+2. **单条接口**：是否每个 `db.get` 后都有归属校验？
+3. **顾客接口**：是否所有查询都绑定了 `customer.id`？
+4. **创建接口**：非超管是否忽略了请求体中的 `store_id`？
+5. **公开接口**：是否有 store_id 过滤 + 限流？
+6. **跨表查询**：JOIN 的表是否也有 store_id 过滤？
+
+---
+
+## 七、参考实现
+
+- 列表隔离：`orders.py` `list_orders` L246
+- 单条归属：`orders.py` `get_order` L739
+- 顾客订单：`orders.py` `list_my_orders` L641
+- 公开限流：`products.py` `list_products` L729
+- 门店隔离服务：`services/store_scope.py`

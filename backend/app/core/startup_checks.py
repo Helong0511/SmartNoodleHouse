@@ -137,6 +137,15 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and not webhook_allow:
         errors.append("生产须配置 WEBHOOK_IP_ALLOWLIST（支付/外卖回调 IP 白名单）")
 
+    # P1-41: 生产环境必需配置项不得使用开发默认值
+    db_url = (getattr(settings, "database_url", None) or "").strip().lower()
+    if is_prod and ("sqlite" in db_url or "localhost" in db_url or "127.0.0.1" in db_url):
+        errors.append("生产环境 DATABASE_URL 不得使用 sqlite/localhost，须为生产 MySQL 地址")
+
+    redis_url = (getattr(settings, "redis_url", None) or "").strip().lower()
+    if is_prod and ("localhost" in redis_url or "127.0.0.1" in redis_url) and "redis://" in redis_url:
+        warnings.append("生产环境 REDIS_URL 指向 localhost，请确认是否为生产 Redis")
+
     process_role = (getattr(settings, "process_role", None) or "").strip().lower()
     if is_prod and process_role not in ("leader", "worker", "auto"):
         errors.append("生产须显式设置 PROCESS_ROLE=leader|worker|auto（集群仅一个进程持有 Redis Leader 锁）")

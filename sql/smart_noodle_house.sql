@@ -174,6 +174,8 @@ CREATE TABLE IF NOT EXISTS coupon_templates (
   min_order_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '使用门槛（按会员折后商品小计计）',
   valid_days INT NOT NULL DEFAULT 30 COMMENT '领取/发放后有效天数',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '模板状态：1=启用 0=停用',
+  total_quota INT DEFAULT NULL COMMENT 'P0-6: 发放总量上限；NULL=不限',
+  remaining INT DEFAULT NULL COMMENT 'P0-6: 剩余可发量；NULL=不限',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   INDEX idx_coupon_tmpl_store (store_id),
   CONSTRAINT fk_coupon_tmpl_store FOREIGN KEY (store_id) REFERENCES stores(id)
@@ -225,10 +227,18 @@ CREATE TABLE IF NOT EXISTS customer_coupons (
   expires_at DATETIME(3) NOT NULL COMMENT '过期时间',
   used_order_id BIGINT UNSIGNED DEFAULT NULL COMMENT '核销订单 → orders.id',
   used_at DATETIME(3) DEFAULT NULL COMMENT '核销时间',
+  client_request_id VARCHAR(128) DEFAULT NULL COMMENT 'P0-6: 客户端幂等键；同键重复发券只成功一次',
+  issued_by_user_id BIGINT UNSIGNED DEFAULT NULL COMMENT '发券人 user_id',
+  issued_at_store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '发券门店；NULL=不限门店使用',
+  UNIQUE INDEX uq_cc_client_request (client_request_id),
   INDEX idx_cc_customer_status (customer_id, status, expires_at),
   INDEX idx_cc_customer_template (customer_id, template_id),
+  INDEX idx_cc_issued_store (issued_at_store_id),
+  INDEX idx_cc_issued_by (issued_by_user_id),
   CONSTRAINT fk_cc_customer FOREIGN KEY (customer_id) REFERENCES customers(id),
-  CONSTRAINT fk_cc_template FOREIGN KEY (template_id) REFERENCES coupon_templates(id)
+  CONSTRAINT fk_cc_template FOREIGN KEY (template_id) REFERENCES coupon_templates(id),
+  CONSTRAINT fk_cc_issued_user FOREIGN KEY (issued_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_cc_issued_store FOREIGN KEY (issued_at_store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户优惠券/代金券实例表';
 
 -- 微信小程序 openid 与顾客绑定（支付、订阅消息依赖 openid）
@@ -967,6 +977,27 @@ CREATE TABLE IF NOT EXISTS print_jobs (
   CONSTRAINT fk_pj_store FOREIGN KEY (store_id) REFERENCES stores(id),
   CONSTRAINT fk_pj_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='厨房小票打印任务表';
+
+CREATE TABLE IF NOT EXISTS outbox_events (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  aggregate_type VARCHAR(32) NOT NULL COMMENT '聚合类型：refund / paid_side_effect / ...',
+  aggregate_id BIGINT UNSIGNED NOT NULL COMMENT '聚合 ID（refund_id / order_id / ...）',
+  event_kind VARCHAR(64) NOT NULL COMMENT '事件类型：refund_finalize / points_award / coupon_mark_used / pref_update / points_deduct_refund / pref_recompute',
+  payload MEDIUMTEXT DEFAULT NULL COMMENT 'JSON 负载（参数快照）',
+  status VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / PROCESSING / DONE / FAILED',
+  attempt_count INT NOT NULL DEFAULT 0 COMMENT '消费尝试次数',
+  max_attempts INT NOT NULL DEFAULT 8 COMMENT '最大重试次数',
+  next_retry_at DATETIME(3) DEFAULT NULL COMMENT '下次允许重试时间',
+  locked_at DATETIME(3) DEFAULT NULL COMMENT '消费者加锁时间',
+  locked_by VARCHAR(64) DEFAULT NULL COMMENT '锁持有者标识（hostname:pid）',
+  last_error VARCHAR(500) DEFAULT NULL COMMENT '最近一次错误摘要',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  processed_at DATETIME(3) DEFAULT NULL COMMENT '处理完成时间',
+  UNIQUE KEY uq_outbox_agg (aggregate_type, aggregate_id, event_kind),
+  INDEX idx_oe_status_retry (status, next_retry_at),
+  INDEX idx_oe_status_locked (status, locked_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='DB 事务型 outbox 事件';
 
 SET FOREIGN_KEY_CHECKS = 1;
 

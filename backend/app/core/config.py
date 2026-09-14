@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     wechat_app_secret: str = ""
     wechat_mch_id: str = ""
     wechat_api_v3_key: str = ""
+    # P1-12: V2 付款码独立 API 密钥（不与 V3 共用，降低密钥泄露面）
+    wechat_api_v2_key: str = ""
     wechat_cert_serial_no: str = ""
     wechat_private_key_path: str = "certs/wechat_apiclient_key.pem"
     wechat_notify_url: str = ""
@@ -148,6 +150,8 @@ class Settings(BaseSettings):
     # Webhook IP 白名单，逗号分隔，支持 CIDR；空=不限制
     webhook_ip_allowlist: str = ""
     webhook_require_allowlist: bool = False
+    # P1-43: Webhook 请求体最大字节数（超出返回 413）
+    webhook_max_body_bytes: int = 512 * 1024  # 512KB
     # 仅这些直连 peer（反代）可让后端信任 X-Real-IP / X-Forwarded-For
     trusted_proxy_ips: str = "127.0.0.1,::1"
 
@@ -196,6 +200,11 @@ class Settings(BaseSettings):
     welcome_cooldown_seconds: int = 60
     face_match_threshold: float = 0.75
     face_confirm_frames: int = 3
+    # P1: 活体检测模式 — none=多帧确认（被动）；challenge=随机动作挑战（主动）
+    face_liveness_mode: str = "challenge"
+    face_liveness_challenge_timeout: int = 30  # 挑战有效期（秒）
+    # P0-24: 未知顾客人脸捕获 — 默认关闭，不保存 snapshot/不自动创建 identity
+    unknown_visitor_capture_enabled: bool = False
 
     @property
     def cors_origin_list(self) -> List[str]:

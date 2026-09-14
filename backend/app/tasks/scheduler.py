@@ -11,8 +11,10 @@ from app.models import OperationLog, Order, VisitorEvent
 logger = logging.getLogger(__name__)
 
 from app.services.platform_token_service import PlatformTokenService
-from app.services.webhook_inbox import process_pending_inbox
+from app.services.webhook_inbox import process_pending_inbox, reclaim_stale_inbox
 from app.services.print_service import PrintService
+from app.services.outbox_worker import process_pending_outbox, reclaim_stale_processing
+from app.services.pii_cleanup_service import anonymize_expired_delivery_pii
 
 
 def register_tasks(scheduler) -> None:
@@ -205,6 +207,15 @@ def register_tasks(scheduler) -> None:
             await db.commit()
             logger.info("Operation logs cleaned before %s", cutoff)
 
+    @scheduler.scheduled_job("cron", hour=4, minute=0)
+    @_leader_job
+    async def cleanup_delivery_pii():
+        """P1: 外卖订单 PII 脱敏 — 已完结超 30 天的 recipient/rider 字段置 NULL。"""
+        async with AsyncSessionLocal() as db:
+            n = await anonymize_expired_delivery_pii(db)
+        if n:
+            logger.info("Delivery PII anonymized: %s orders", n)
+
     @scheduler.scheduled_job("cron", hour=3, minute=30)
     @_leader_job
     async def maintain_file_logs():
@@ -215,15 +226,40 @@ def register_tasks(scheduler) -> None:
         if any(stats.values()):
             logger.info("File logs maintained: %s", stats)
 
-    @scheduler.scheduled_job("interval", minutes=2)
+    @scheduler.scheduled_job("interval", seconds=30)
     @_leader_job
-    async def retry_paid_side_effects():
-        """支付成功后积分/券/偏好失败补偿。"""
-        from app.services.paid_side_effects import process_pending_side_effects
-
-        n = await process_pending_side_effects(limit=30)
+    async def drain_outbox_events():
+        """DB outbox worker：消费支付副作用/退款补偿等事务型事件。"""
+        n = await process_pending_outbox(limit=30)
         if n:
-            logger.info("Paid side-effects retried: %s", n)
+            logger.info("Outbox events processed: %s", n)
+
+    @scheduler.scheduled_job("interval", minutes=5)
+    @_leader_job
+    async def reclaim_stale_outbox():
+        """回收崩溃残留的 PROCESSING outbox 行。"""
+        async with AsyncSessionLocal() as db:
+            n = await reclaim_stale_processing(db)
+        if n:
+            logger.info("Stale outbox PROCESSING reclaimed: %s", n)
+
+    @scheduler.scheduled_job("interval", minutes=5)
+    @_leader_job
+    async def reclaim_stale_webhook_inbox():
+        """回收崩溃残留的 PROCESSING webhook inbox 行。"""
+        async with AsyncSessionLocal() as db:
+            n = await reclaim_stale_inbox(db)
+        if n:
+            logger.info("Stale webhook inbox PROCESSING reclaimed: %s", n)
+
+    @scheduler.scheduled_job("cron", minute="*/2")
+    @_leader_job
+    async def reclaim_stale_printing_jobs():
+        """回收崩溃残留的 PRINTING 打印任务（locked_at > 5min 视为残留）。"""
+        async with AsyncSessionLocal() as db:
+            n = await PrintService.reclaim_stale_printing(db)
+        if n:
+            logger.info("Stale PRINTING print jobs reclaimed: %s", n)
 
     @scheduler.scheduled_job("interval", minutes=30)
     @_leader_job

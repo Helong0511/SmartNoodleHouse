@@ -10,6 +10,10 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+class CameraNotLeaderError(RuntimeError):
+    """非 Leader worker 尝试操作摄像头时抛出。"""
+
+
 class FrameBuffer:
     """线程安全的最新帧缓存"""
 
@@ -98,10 +102,12 @@ class CameraWorker:
 
 
 class CameraManager:
-    """摄像头管理器 - 保证每摄像头仅一个 Worker"""
+    """摄像头管理器 - 保证每摄像头仅一个 Worker；P0-6: Leader-only 守卫。"""
 
     _instance: "CameraManager | None" = None
     _workers: dict[int, CameraWorker]
+    # P0-6: Leader 检查回调，由后端启动时注入；None 时不检查（兼容独立运行）
+    _leader_check: Callable[[], bool] | None = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -109,7 +115,28 @@ class CameraManager:
             cls._instance._workers = {}
         return cls._instance
 
+    @classmethod
+    def set_leader_check(cls, check: Callable[[], bool] | None) -> None:
+        """注入 Leader 检查回调（后端启动时调用）。"""
+        cls._leader_check = check
+
+    def _assert_leader(self) -> None:
+        if self._leader_check is not None and not self._leader_check():
+            raise CameraNotLeaderError("摄像头操作需要 Leader 锁；非 Leader worker 拒绝执行")
+
+    def _cleanup_stale_workers(self) -> None:
+        """P0-6: 清理线程已死的 stale worker，防止僵尸残留。"""
+        stale_ids = [
+            cid for cid, w in self._workers.items()
+            if w._thread and not w._thread.is_alive()
+        ]
+        for cid in stale_ids:
+            logger.warning("Cleaning stale camera worker: %s", cid)
+            self.stop_camera(cid)
+
     def start_camera(self, camera_id: int, source: str, fps: int = 25, *, force: bool = False) -> CameraWorker:
+        self._assert_leader()
+        self._cleanup_stale_workers()
         existing = self._workers.get(camera_id)
         if existing and not force:
             # 已在跑则复用；卡死（线程死了）则重建
@@ -124,6 +151,7 @@ class CameraManager:
         return worker
 
     def restart_camera(self, camera_id: int, source: str, fps: int = 25) -> CameraWorker:
+        self._assert_leader()
         return self.start_camera(camera_id, source, fps, force=True)
 
     def list_camera_ids(self) -> list[int]:
@@ -133,6 +161,7 @@ class CameraManager:
         return self._workers.get(camera_id)
 
     def stop_camera(self, camera_id: int) -> None:
+        # stop 允许非 Leader 调用（安全退出场景）
         worker = self._workers.pop(camera_id, None)
         if worker:
             worker.stop()

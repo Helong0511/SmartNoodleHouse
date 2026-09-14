@@ -342,6 +342,14 @@ class OrderPriceCalculator:
             groups_map = {
                 g.id: g for g in (await db.execute(select(OptionGroup).where(OptionGroup.id.in_(group_ids)))).scalars()
             }
+            # P0-1: 跨门店规格校验 — group.store_id 非 NULL 时必须等于订单门店
+            cross_store_groups = [
+                g.name
+                for g in groups_map.values()
+                if g.store_id is not None and int(g.store_id) != store_id
+            ]
+            if cross_store_groups:
+                raise AppException(40002, f"规格组不属于本门店，禁止跨店下单: {cross_store_groups}")
 
         results = []
         for item in items_data:
@@ -415,6 +423,12 @@ class OrderPriceCalculator:
         rows = await OrderPriceCalculator.calculate_items_batch(
             db, items_data, store_id=order.store_id
         )
+        # P1-1 纵深防御：最终断言所有商品门店与订单门店一致（calculate_items_batch 已校验，此处为第二道防线）
+        if rows and order.store_id is not None:
+            order_store = int(order.store_id)
+            mismatched = [int(p.id) for p, _, _, _ in rows if p.store_id is not None and int(p.store_id) != order_store]
+            if mismatched:
+                raise AppException(40002, f"订单门店与商品门店不一致: product_ids={mismatched}")
         if deduct_stock:
             await deduct_for_order_items(
                 db,

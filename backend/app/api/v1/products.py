@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_permission
 from app.core.exceptions import AppException
+from app.core.redis_client import get_redis
 from app.core.response import calc_pages, success
 from app.models import (
     CategorySortSchedule,
@@ -725,6 +726,22 @@ async def list_products(
     """
     if staff is not None:
         store_id = require_bound_store(staff, store_id)
+    else:
+        # P1-2 公开菜单按 IP+store_id 限流，防止批量爬取全部门店菜单
+        if store_id is not None:
+            ip = request.client.host if request.client else "unknown"
+            rl_key = f"snh:rl:products:public:{ip}:{int(store_id)}"
+            try:
+                r = await get_redis()
+                cnt = await r.incr(rl_key)
+                if cnt == 1:
+                    await r.expire(rl_key, 60)
+                if cnt > 60:
+                    raise AppException(42901, "请求过于频繁，请稍后再试")
+            except AppException:
+                raise
+            except Exception:
+                pass
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 20)), 200)
     q = select(Product)
