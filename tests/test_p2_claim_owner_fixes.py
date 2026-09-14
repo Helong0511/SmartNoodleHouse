@@ -226,17 +226,24 @@ async def test_reprint_dedup_redis_down_degrades_gracefully():
     from app.services.system_settings_service import SystemSettingsService
     SystemSettingsService._cache = None
 
+    # 直接设置 _redis 为 None，让 get_redis() 尝试创建新连接时失败
+    import app.core.redis_client as redis_module
+    original_redis = redis_module._redis
+    redis_module._redis = None
+
     fake_settings = SimpleNamespace(xpyun_enabled=True)
 
     with patch(
         "app.core.config.get_settings", return_value=fake_settings,
     ), patch(
-        "app.core.redis_client.get_redis",
-        AsyncMock(side_effect=Exception("Redis down")),
+        "redis.from_url", side_effect=Exception("Redis down"),
     ), patch(
         "app.services.print_service.PrintService.print_order", print_called,
     ):
         result = await reprint_kitchen_ticket(10, fake_request, db, user)
+
+    # 恢复 _redis
+    redis_module._redis = original_redis
 
     # Redis 宕机 → 降级放行 → print_order 被调用
     print_called.assert_awaited_once()
