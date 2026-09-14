@@ -1,14 +1,11 @@
-﻿........................................................................ [ 14%]
-...................s.................................................... [ 29%]
-........................................................................ [ 44%]
-........................................................................ [ 59%]
-........................................................................ [ 73%]
-.................................ss..............ss......F.............. [ 88%]
-.......................................ss.....s.........                 [100%]
-================================== FAILURES ===================================
-E   AssertionError: model 独有列: [('customer_coupons', 'issued_at_store_id'), ('customer_coupons', 'issued_by_user_id')]
-    assert not [('customer_coupons', 'issued_at_store_id'), ('customer_coupons', 'issued_by_user_id')]
-E:\SmartNoodleHouse\tests\test_schema_model_alignment.py:89: AssertionError: model 独有列: [('customer_coupons', 'issued_at_store_id'), ('customer_coupons', 'issued_by_user_id')]
+﻿........................................................................ [ 13%]
+........................s............................................... [ 27%]
+........................................................................ [ 41%]
+........................................................................ [ 55%]
+........................................................................ [ 69%]
+......................................................ss..............ss [ 83%]
+...................................................................ss... [ 97%]
+..s.........                                                             [100%]
 ============================== warnings summary ===============================
 tests/test_payment_refund.py::test_finalize_refund_deducts_points_for_customer
   E:\SmartNoodleHouse\tests\..\backend\app\services\outbox_worker.py:84: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
@@ -17,7 +14,4 @@ tests/test_payment_refund.py::test_finalize_refund_deducts_points_for_customer
   See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-=========================== short test summary info ===========================
-FAILED ..\tests\test_schema_model_alignment.py::test_schema_model_table_alignment - AssertionError: model 独有列: [('customer_coupons', 'issued_at_store_id'), ('customer_coupons', 'issued_by_user_id')]
-assert not [('customer_coupons', 'issued_at_store_id'), ('customer_coupons', 'issued_by_user_id')]
-1 failed, 479 passed, 8 skipped, 1 warning in 27.05s
+508 passed, 8 skipped, 1 warning in 19.43s
