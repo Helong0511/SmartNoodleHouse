@@ -1,6 +1,5 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -116,7 +115,7 @@ class CouponTemplate(Base):
     total_quota: Mapped[int | None] = mapped_column(Integer, default=None, comment="发放总量上限；NULL=不限")
     remaining: Mapped[int | None] = mapped_column(Integer, default=None, comment="剩余可发量；NULL=不限")
     # P2-4: 总部模板（store_id=NULL）的门店白名单；NULL=全部门店可见，非空数组=仅列出门店可见
-    store_whitelist: Mapped[list[int] | None] = mapped_column(
+    store_whitelist: Mapped[list | None] = mapped_column(
         JSON, default=None, nullable=True, comment="总部模板可见门店白名单；NULL=全部门店"
     )
 
@@ -280,7 +279,7 @@ class ProductCategory(Base, TimestampMixin):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[int] = mapped_column(Integer, default=1)
     # 须先点过的分类 id 列表（OR）；空=无限制。例：【加料】依赖【面】
-    require_category_ids: Mapped[list[int] | None] = mapped_column(JSON, default=None)
+    require_category_ids: Mapped[list | None] = mapped_column(JSON, default=None)
 
 
 class CategorySortSchedule(Base, TimestampMixin):
@@ -331,8 +330,8 @@ class Product(Base, TimestampMixin):
     box_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     min_order_count: Mapped[int] = mapped_column(Integer, default=1)
     # NULL=继承所属分类默认；[]/有值=商品自身配置（与 require_product_ids 合并 OR）
-    require_category_ids: Mapped[list[int] | None] = mapped_column(JSON, default=None)
-    require_product_ids: Mapped[list[int] | None] = mapped_column(JSON, default=None)
+    require_category_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    require_product_ids: Mapped[list | None] = mapped_column(JSON, default=None)
 
 
 class ProductImage(Base):
@@ -473,7 +472,7 @@ class Payment(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     provider_trade_no: Mapped[str | None] = mapped_column(String(64))
     provider_order_no: Mapped[str | None] = mapped_column(String(64))
-    callback_raw: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    callback_raw: Mapped[dict | None] = mapped_column(JSON)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -487,7 +486,7 @@ class PaymentRefund(Base, TimestampMixin):
     reason: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     provider_refund_no: Mapped[str | None] = mapped_column(String(64))
-    callback_raw: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    callback_raw: Mapped[dict | None] = mapped_column(JSON)
     fail_reason: Mapped[str | None] = mapped_column(String(255))
     succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     operator_id: Mapped[int | None] = mapped_column(BigInteger)
