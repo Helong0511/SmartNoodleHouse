@@ -13,6 +13,8 @@ class CouponTemplateCreate(BaseModel):
     # NULL=总部全店；门店账号创建时由后端强制为本店
     store_id: int | None = Field(default=None, description="NULL=总部模板；非空=门店模板")
     total_quota: int | None = Field(default=None, ge=0, description="发放总量上限；NULL=不限；0=禁止发放")
+    # P2-4 仅对总部模板生效：NULL=全部门店可见；非空=仅列出门店可见
+    store_whitelist: list[int] | None = Field(default=None, description="总部模板可见门店白名单；NULL=全部门店")
 
 
 class CouponTemplateUpdate(BaseModel):
@@ -24,6 +26,7 @@ class CouponTemplateUpdate(BaseModel):
     status: int | None = Field(default=None, ge=0, le=1)
     store_id: int | None = Field(default=None, description="仅超管可改；显式 null=改回总部")
     total_quota: int | None = Field(default=None, ge=0, description="发放总量上限；0=禁止发放；NULL=不限；修改不影响 remaining")
+    store_whitelist: list[int] | None = Field(default=None, description="总部模板门店白名单；显式 null=恢复全部门店可见")
 
 
 class CouponIssueRequest(BaseModel):

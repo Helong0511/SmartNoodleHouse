@@ -114,6 +114,10 @@ class CouponTemplate(Base):
     # P0-6: 库存控制（NULL=不限量）
     total_quota: Mapped[int | None] = mapped_column(Integer, default=None, comment="发放总量上限；NULL=不限")
     remaining: Mapped[int | None] = mapped_column(Integer, default=None, comment="剩余可发量；NULL=不限")
+    # P2-4: 总部模板（store_id=NULL）的门店白名单；NULL=全部门店可见，非空数组=仅列出门店可见
+    store_whitelist: Mapped[list | None] = mapped_column(
+        JSON, default=None, nullable=True, comment="总部模板可见门店白名单；NULL=全部门店"
+    )
 
 
 class CustomerCoupon(Base):

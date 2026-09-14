@@ -73,6 +73,7 @@ class CouponService:
             "status": int(tmpl.status or 0),
             "total_quota": getattr(tmpl, "total_quota", None),
             "remaining": getattr(tmpl, "remaining", None),
+            "store_whitelist": getattr(tmpl, "store_whitelist", None),
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
             "created_at": tmpl.created_at.isoformat() if getattr(tmpl, "created_at", None) else None,
@@ -80,11 +81,20 @@ class CouponService:
 
     @staticmethod
     def template_visible_to_store(tmpl: CouponTemplate, store_id: int | None) -> bool:
-        """store_id=None（超管全店）可见全部；否则可见总部模板 + 本店模板。"""
+        """store_id=None（超管全店）可见全部；否则可见本店模板 + 白名单内的总部模板。"""
         if store_id is None:
             return True
         sid = getattr(tmpl, "store_id", None)
-        return sid is None or int(sid) == int(store_id)
+        if sid is None:
+            # P2-4 总部模板：白名单为 NULL 表示全部门店可见；非空则仅列出门店可见
+            whitelist = getattr(tmpl, "store_whitelist", None)
+            if whitelist is None:
+                return True
+            try:
+                return int(store_id) in {int(s) for s in whitelist}
+            except (TypeError, ValueError):
+                return False
+        return int(sid) == int(store_id)
 
     @staticmethod
     async def list_templates(
@@ -104,6 +114,9 @@ class CouponService:
                 )
             )
         rows = list((await db.execute(q)).scalars().all())
+        # P2-4 总部模板白名单过滤（Python 层，兼容 MySQL/SQLite）
+        if store_id is not None:
+            rows = [t for t in rows if CouponService.template_visible_to_store(t, store_id)]
         store_ids = {int(t.store_id) for t in rows if getattr(t, "store_id", None)}
         name_map: dict[int, str] = {}
         if store_ids:
@@ -142,6 +155,11 @@ class CouponService:
         else:
             payload.pop("total_quota", None)
             payload.pop("remaining", None)
+        # P2-4 白名单仅对总部模板生效；门店模板强制为 None
+        if payload.get("store_id") is not None:
+            payload["store_whitelist"] = None
+        elif "store_whitelist" in payload:
+            payload["store_whitelist"] = CouponService._normalize_whitelist(payload.get("store_whitelist"))
         tmpl = CouponTemplate(**payload)
         db.add(tmpl)
         await db.flush()
@@ -161,6 +179,13 @@ class CouponService:
         for key, val in data.items():
             if key == "store_id":
                 tmpl.store_id = int(val) if val is not None else None
+                # P2-4 模板改为门店归属后白名单失效，改回总部后需重新配置
+                if tmpl.store_id is not None:
+                    tmpl.store_whitelist = None
+            elif key == "store_whitelist":
+                # 仅总部模板可设白名单；显式 None=恢复全部门店可见
+                if tmpl.store_id is None:
+                    tmpl.store_whitelist = CouponService._normalize_whitelist(val)
             elif key == "total_quota":
                 # P0-6: 仅修改 total_quota 上限，不影响 remaining
                 if val is not None:
@@ -174,6 +199,17 @@ class CouponService:
                 setattr(tmpl, key, val)
         await db.flush()
         return tmpl
+
+    @staticmethod
+    def _normalize_whitelist(value) -> list[int] | None:
+        """P2-4 规范化门店白名单：None/空列表=全部门店（None）；否则返回去重后的正整数列表。"""
+        if value is None:
+            return None
+        try:
+            ids = {int(s) for s in value if int(s) > 0}
+        except (TypeError, ValueError):
+            raise AppException(40069, "门店白名单必须是门店 ID 数组")
+        return sorted(ids) if ids else None
 
     @staticmethod
     def _validate_template_data(data: dict) -> None:

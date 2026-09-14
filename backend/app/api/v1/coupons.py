@@ -49,6 +49,8 @@ async def create_template(data: CouponTemplateCreate, request: Request, db: DbSe
         if bound is None:
             raise AppException(40301, "账号未绑定门店，无法创建模板")
         payload["store_id"] = int(bound)
+        # P2-4 门店白名单仅总部可配置
+        payload.pop("store_whitelist", None)
     tmpl = await CouponService.create_template(db, payload)
     await db.commit()
     return success(CouponService.template_payload(tmpl), request=request)
@@ -69,6 +71,7 @@ async def update_template(
     raw = data.model_dump(exclude_unset=True)
     if user.role.code != "SUPER_ADMIN":
         raw.pop("store_id", None)  # 门店不可改归属
+        raw.pop("store_whitelist", None)  # P2-4 门店白名单仅总部可配置
     tmpl = await CouponService.update_template(db, tmpl, raw)
     await db.commit()
     return success(CouponService.template_payload(tmpl), request=request)
