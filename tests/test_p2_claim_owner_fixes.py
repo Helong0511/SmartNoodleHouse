@@ -24,7 +24,8 @@ async def test_handle_refund_dedup_uses_savepoint_on_conflict():
     order = SimpleNamespace(id=9, total_amount=100)
 
     db = MagicMock()
-    db.get = AsyncMock(side_effect=[d_order, order])
+    # _get_delivery_order 被 patch，db.get 仅用于 db.get(Order, 9)
+    db.get = AsyncMock(return_value=order)
 
     # begin_nested 返回一个真正的 async context manager
     class _NestedCtx:
@@ -62,7 +63,7 @@ async def test_handle_refund_without_refund_id_inserts_directly():
     order = SimpleNamespace(id=9, total_amount=100)
 
     db = MagicMock()
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.get = AsyncMock(return_value=order)
     db.add = MagicMock()
     db.flush = AsyncMock()
     db.begin_nested = MagicMock()
@@ -157,97 +158,86 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
 
 @pytest.mark.asyncio
 async def test_reprint_dedup_blocks_rapid_double_click():
-    """Redis NX 锁存在时应返回 "正在打印中"。"""
+    """Redis NX 锁存在时应返回 "正在打印中"，不调用 print_order。"""
     from app.api.v1.orders import reprint_kitchen_ticket
-    from app.api.deps import get_current_user, get_db
-    from app.main import app
-    from app.models import Order
 
-    user = SimpleNamespace(
-        id=9, role_id=3, store_id=1,
-        role=SimpleNamespace(code="KITCHEN"), status=1, token_version=0,
-    )
     order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001")
+    user = SimpleNamespace(
+        id=9, store_id=1, role=SimpleNamespace(code="KITCHEN"),
+    )
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
 
-    fake_db = MagicMock()
-    fake_db.get = AsyncMock(return_value=order)
-    fake_db.commit = AsyncMock()
+    fake_request = MagicMock()
+    fake_request.headers = {}
 
-    fake_redis = MagicMock()
-    # 模拟锁已存在（第二次点击）
-    fake_redis.set = AsyncMock(return_value=None)
+    # 使用 SimpleNamespace + 真正的 async 函数，避免 MagicMock await 问题
+    async def fake_set(*args, **kwargs):
+        return None  # NX 失败 = 锁已存在
 
-    async def override_db():
-        yield fake_db
+    fake_redis = SimpleNamespace(set=fake_set)
 
-    async def override_user():
-        return user
+    async def fake_get_redis():
+        return fake_redis
 
-    app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_current_user] = override_user
+    print_called = AsyncMock(return_value={"mock": True})
 
-    try:
-        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:update"})), \
-             patch("app.services.system_settings_service.SystemSettingsService.resolved_bool_sync", return_value=True), \
-             patch("app.core.redis_client.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("app.services.print_service.PrintService.print_order", AsyncMock(return_value={"mock": True})):
-            from httpx import ASGITransport, AsyncClient
+    from app.services.system_settings_service import SystemSettingsService
+    # 清除缓存避免之前测试预热影响 resolved_bool_sync 的 fallback 路径
+    SystemSettingsService._cache = None
 
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                res = await client.post("/api/v1/orders/10/print")
+    fake_settings = SimpleNamespace(xpyun_enabled=True)
 
-        assert res.status_code == 200
-        body = res.json()
-        assert body["code"] == 0
-        assert body["data"]["printed"] is False
-        assert "勿重复" in body["data"]["message"]
-    finally:
-        app.dependency_overrides.clear()
+    with patch(
+        "app.core.config.get_settings", return_value=fake_settings,
+    ), patch(
+        "app.core.redis_client.get_redis", fake_get_redis,
+    ), patch(
+        "app.services.print_service.PrintService.print_order", print_called,
+    ):
+        result = await reprint_kitchen_ticket(10, fake_request, db, user)
+
+    # print_order 不应被调用
+    assert result["data"]["printed"] is False, f"printed should be False, got {result['data']}"
+    assert "勿重复" in result["data"]["message"], f"message was: {result['data']['message']}"
+    print_called.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_reprint_dedup_redis_down_degrades_gracefully():
-    """Redis 不可用时应降级放行，不阻断打印。"""
-    from app.api.deps import get_current_user, get_db
-    from app.main import app
+    """Redis 不可用时应降级放行，不阻断打印主流程。"""
+    from app.api.v1.orders import reprint_kitchen_ticket
 
+    order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001", status="PAID")
     user = SimpleNamespace(
-        id=9, role_id=3, store_id=1,
-        role=SimpleNamespace(code="KITCHEN"), status=1, token_version=0,
+        id=9, store_id=1, role=SimpleNamespace(code="KITCHEN"),
     )
-    order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001")
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
 
-    fake_db = MagicMock()
-    fake_db.get = AsyncMock(return_value=order)
-    fake_db.commit = AsyncMock()
+    fake_request = MagicMock()
+    fake_request.headers = {}
 
-    async def override_db():
-        yield fake_db
+    print_called = AsyncMock(return_value=None)
 
-    async def override_user():
-        return user
+    from app.services.system_settings_service import SystemSettingsService
+    SystemSettingsService._cache = None
 
-    app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_current_user] = override_user
+    fake_settings = SimpleNamespace(xpyun_enabled=True)
 
-    try:
-        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:update"})), \
-             patch("app.services.system_settings_service.SystemSettingsService.resolved_bool_sync", return_value=True), \
-             patch("app.core.redis_client.get_redis", AsyncMock(side_effect=Exception("Redis down"))), \
-             patch("app.services.print_service.PrintService.print_order", AsyncMock(return_value=None)):
-            from httpx import ASGITransport, AsyncClient
+    with patch(
+        "app.core.config.get_settings", return_value=fake_settings,
+    ), patch(
+        "app.core.redis_client.get_redis",
+        AsyncMock(side_effect=Exception("Redis down")),
+    ), patch(
+        "app.services.print_service.PrintService.print_order", print_called,
+    ):
+        result = await reprint_kitchen_ticket(10, fake_request, db, user)
 
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                res = await client.post("/api/v1/orders/10/print")
-
-        # Redis 宕机 → 降级放行 → print_order 返回 None（业务跳过）
-        assert res.status_code == 200
-        body = res.json()
-        assert body["code"] == 0
-    finally:
-        app.dependency_overrides.clear()
+    # Redis 宕机 → 降级放行 → print_order 被调用
+    print_called.assert_awaited_once()
+    assert result["data"]["printed"] is False
 
 
 # ─── 4. Webhook claim 释放 owner 校验 ───
