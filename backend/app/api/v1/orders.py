@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -5,6 +6,7 @@ from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission, require_pos
 from app.core.exceptions import AppException
+from app.core.redis_client import get_redis
 from app.core.response import calc_pages, ensure_local_aware, now_local, success
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
 from app.schemas.order import OrderCreate, OrderStatusUpdate, PosOrderCreate
@@ -996,10 +998,6 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
 
     # 手动补打幂等：短时 Redis NX 锁防止快速重复点击导致重复出票
     # TTL=15s 足够覆盖一次打印往返；锁自然过期，无需手动释放
-    import time
-
-    from app.core.redis_client import get_redis
-
     dedup_key = f"snh:print:dedup:{order_id}:KITCHEN"
     try:
         r = await get_redis()
