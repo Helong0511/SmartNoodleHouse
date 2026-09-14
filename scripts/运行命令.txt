@@ -256,7 +256,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 
 叫号屏地址（调试环境）
-http://127.0.0.1:5173/display?store_id=1
+http://127.0.0.1:5173/display?store_id=1&token=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb
 
 
 选择 餐品后   点击 【加入购物车】按钮成功后 直接跳转到  购物车页面

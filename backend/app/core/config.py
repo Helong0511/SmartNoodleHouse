@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # 每进程连接池；gunicorn -w N 时总连接 ≈ N*(pool_size+max_overflow)
     db_pool_size: int = 5
     db_max_overflow: int = 10
+    # 是否打印 SQL 语句（独立于 APP_DEBUG，避免调试模式下日志被 SQL 淹没）
+    db_echo: bool = False
 
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
