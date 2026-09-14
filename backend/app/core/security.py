@@ -48,7 +48,7 @@ def create_access_token(
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_stream_ticket(user_id: int, camera_id: int, *, token_version: int = 0, ttl_seconds: int = 120) -> str:
+def create_stream_ticket(user_id: int, camera_id: int, *, store_id: int | None = None, token_version: int = 0, ttl_seconds: int = 120) -> str:
     """摄像头预览短期票据，避免把长生命周期 JWT 放进 URL query。"""
     settings = get_settings()
     now = datetime.now(timezone.utc)
@@ -64,6 +64,9 @@ def create_stream_ticket(user_id: int, camera_id: int, *, token_version: int = 0
         "cam": int(camera_id),
         "ver": token_version,
     }
+    # P2-4 编码 store_id，消费端二次校验票据门店与摄像头门店一致
+    if store_id is not None:
+        payload["store"] = int(store_id)
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

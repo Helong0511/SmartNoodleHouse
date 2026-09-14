@@ -367,7 +367,9 @@ async def create_camera_stream_ticket(camera_id: int, request: Request, db: DbSe
     if not camera:
         raise AppException(40420, "摄像头不存在")
     _assert_cam_access(user, camera)
-    ticket = create_stream_ticket(user.id, camera_id, token_version=int(getattr(user, "token_version", 0) or 0))
+    ticket = create_stream_ticket(
+        user.id, camera_id, store_id=camera.store_id, token_version=int(getattr(user, "token_version", 0) or 0)
+    )
     return success({"ticket": ticket, "expires_in": 120}, request=request)
 
 
@@ -434,6 +436,12 @@ async def camera_stream(
     camera = await db.get(Camera, camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="摄像头不存在")
+
+    # P2-4 票据门店与摄像头门店二次校验（即使 _assert_cam_access 被绕过也无法跨店）
+    if typ == "stream":
+        tk_store = payload.get("store")
+        if tk_store is not None and int(tk_store) != int(camera.store_id or 0):
+            raise HTTPException(status_code=403, detail="票据门店与摄像头不匹配")
 
     try:
         _assert_cam_access(user, camera)
