@@ -125,7 +125,19 @@ async def websocket_endpoint(
             await websocket.close(code=4400, reason="缺少 store_id")
             return
         settings = get_settings()
-        expected = (settings.display_screen_token or "").strip()
+        global_token = (settings.display_screen_token or "").strip()
+        # P2-2 优先使用门店级 display token（store_settings），降级到全局 token
+        expected = global_token
+        try:
+            from app.services.system_settings_service import SystemSettingsService
+
+            async with AsyncSessionLocal() as db:
+                store_tok = await SystemSettingsService.effective_setting(
+                    db, "display_screen_token", store_id=int(store_id), fallback=global_token
+                )
+                expected = (store_tok or "").strip() or global_token
+        except Exception:
+            pass
         # 生产强制（与 startup_checks 一致）；开发可空
         if settings.is_production and not expected:
             await websocket.close(code=4401, reason="未配置 DISPLAY_SCREEN_TOKEN")

@@ -37,6 +37,7 @@
           {{ fullscreen ? '退出全屏' : '全屏' }}
         </el-button>
         <el-button v-if="auth.isCashier" size="large" @click="goMyStats">我的今日</el-button>
+        <el-button v-if="!currentShift" size="large" type="success" @click="shiftOpenVisible = true">开班</el-button>
         <el-button v-if="currentShift" size="large" plain @click="openShiftOrders">本班订单</el-button>
         <el-button v-if="currentShift" size="large" type="warning" plain @click="shiftCloseVisible = true">交班</el-button>
         <el-button size="large" @click="lockScreen">锁屏</el-button>
@@ -1348,7 +1349,8 @@ async function loadShift() {
   try {
     const res = await api.get('/pos/shifts/current')
     currentShift.value = res.data?.shift || null
-    if (!currentShift.value && auth.isCashier) {
+    // 无班次时自动弹开班对话框（所有有 POS 权限的角色）
+    if (!currentShift.value) {
       shiftOpenVisible.value = true
     }
   } catch {

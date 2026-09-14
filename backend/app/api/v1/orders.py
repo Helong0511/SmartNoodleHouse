@@ -739,9 +739,10 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
         assert_order_store_access(user, order)
 
     if customer is not None:
-        from app.services.order_access import assert_customer_owns_order
+        from app.services.order_access import assert_customer_owns_order, assert_dining_session_owner
 
         assert_customer_owns_order(order, customer.id, action="查看")
+        await assert_dining_session_owner(db, order, customer.id, action="查看")
 
     from app.services.order_service import ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL
 
