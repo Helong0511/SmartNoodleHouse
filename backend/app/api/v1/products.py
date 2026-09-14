@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select
@@ -47,6 +49,8 @@ from app.services.category_schedule import (
 )
 from app.utils.upload import save_upload
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt_time(t) -> str:
@@ -740,8 +744,9 @@ async def list_products(
                     raise AppException(42901, "请求过于频繁，请稍后再试")
             except AppException:
                 raise
-            except Exception:
-                pass
+            except Exception as e:
+                # Redis 不可用时不阻塞主流程，但必须留痕；否则限流静默失效，无法排查/防爬
+                logger.warning("Public product list rate limit check failed: %s", e)
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 20)), 200)
     q = select(Product)
