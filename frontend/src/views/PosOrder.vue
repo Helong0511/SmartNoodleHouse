@@ -56,32 +56,34 @@
 
     <div v-if="loading" class="loading-tip">加载菜单中…</div>
 
-    <!-- 未结算桌号提醒 -->
+    <!-- 未结算桌号卡片（大按钮触摸友好） -->
     <div v-if="!loading && pendingOrders.length" class="pending-bar">
-      <span class="pending-title">未结算 {{ pendingOrders.length }} 桌</span>
-      <div class="pending-chips">
+      <div class="pending-summary">
+        <span class="bell-icon">🔔</span>
+        <span><b>{{ pendingOrders.length }}</b> 桌待结算</span>
+        <el-button size="small" text @click="loadPendingOrders" :loading="pendingLoading">刷新</el-button>
+      </div>
+      <div class="pending-cards">
         <div
           v-for="o in pendingOrders"
           :key="o.id"
-          class="pending-chip-wrap"
+          class="pending-card"
+          :class="{ active: checkoutOrderId === o.id }"
         >
-          <button
-            type="button"
-            class="pending-chip"
-            :class="{ active: checkoutOrderId === o.id }"
-            @click="togglePendingActions(o)"
-          >
+          <div class="pc-head">
             <span class="pc-table">{{ o.table_no ? o.table_no + '号桌' : '散客' }}</span>
+            <span class="pc-time">{{ formatPendingTime(o.ordered_at) }}</span>
+          </div>
+          <div class="pc-body">
             <span class="pc-amount">¥{{ o.total_amount }}</span>
             <span class="pc-items">{{ o.item_count }}件</span>
-          </button>
-          <div v-if="activePendingId === o.id" class="pending-actions">
-            <el-button size="small" type="warning" plain @click="resumePendingOrder(o, 'add')">继续加餐</el-button>
-            <el-button size="small" type="primary" @click="resumePendingOrder(o, 'pay')">去结算</el-button>
+          </div>
+          <div class="pc-actions">
+            <button class="pc-btn add" @click="resumePendingOrder(o, 'add')">加餐</button>
+            <button class="pc-btn pay" @click="resumePendingOrder(o, 'pay')">结算</button>
           </div>
         </div>
       </div>
-      <el-button size="small" plain @click="loadPendingOrders" :loading="pendingLoading">刷新</el-button>
     </div>
 
     <div v-if="!loading" class="main">
@@ -101,7 +103,7 @@
       <section class="products">
         <div class="product-grid">
           <button
-            v-for="p in visibleProducts"
+            v-for="p in pagedProducts"
             :key="p.id"
             type="button"
             class="product-card"
@@ -118,6 +120,16 @@
           </button>
         </div>
         <div v-if="!visibleProducts.length" class="empty-menu">该分类暂无商品</div>
+        <div v-if="totalPages > 1" class="pos-pagination">
+          <el-pagination
+            v-model:current-page="productPage"
+            :page-size="pageSize"
+            :total="visibleProducts.length"
+            layout="prev, pager, next"
+            size="small"
+            background
+          />
+        </div>
       </section>
 
       <aside class="cart-panel">
@@ -812,6 +824,14 @@ const tableLabel = computed(() => {
 const visibleProducts = computed(() =>
   products.value.filter((p) => !activeCat.value || p.category_id === activeCat.value),
 )
+const pageSize = 24
+const productPage = ref(1)
+const totalPages = computed(() => Math.ceil(visibleProducts.value.length / pageSize))
+const pagedProducts = computed(() => {
+  const start = (productPage.value - 1) * pageSize
+  return visibleProducts.value.slice(start, start + pageSize)
+})
+watch([activeCat], () => { productPage.value = 1 })
 
 const cartSubtotal = computed(() => {
   const n = cart.value.reduce((s, i) => s + parseFloat(i.subtotal || 0), 0)
@@ -1419,13 +1439,16 @@ async function loadPendingOrders() {
   }
 }
 
-/** 点击未结算桌号：展开/收起操作按钮 */
-function togglePendingActions(o: any) {
-  if (activePendingId.value === o.id) {
-    activePendingId.value = null
-  } else {
-    activePendingId.value = o.id
-  }
+/** 格式化等待时间：刚刚 / N分钟前 */
+function formatPendingTime(iso: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000)
+  if (mins < 1) return '刚刚'
+  if (mins < 60) return `${mins}分钟前`
+  const hrs = Math.floor(mins / 60)
+  return `${hrs}小时前`
 }
 
 /** 恢复挂单订单：mode=add 继续加餐，mode=pay 去结算 */
@@ -1961,17 +1984,26 @@ watch(() => auth.user?.store_id, () => {
 .dine-toggle :deep(.el-radio-button__inner) { padding: 12px 24px; font-size: 17px; }
 .table-btn { min-width: 130px; font-size: 17px; font-weight: 600; }
 .loading-tip { padding: 48px; text-align: center; color: #888; font-size: 20px; }
-.pending-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #fff8f5; border-bottom: 2px solid #ff6b35; overflow: visible; }
-.pending-title { font-size: 14px; font-weight: 700; color: #ff6b35; white-space: nowrap; }
-.pending-chips { display: flex; gap: 6px; overflow-x: auto; flex: 1; overflow-y: visible; }
-.pending-chip-wrap { position: relative; flex-shrink: 0; }
-.pending-actions { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px; display: flex; gap: 6px; z-index: 20; background: #fff; padding: 6px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.12); white-space: nowrap; }
-.pending-chip { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 12px; border: 1.5px solid #ffd4c2; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; white-space: nowrap; transition: all .15s; }
-.pending-chip:hover { border-color: #ff6b35; box-shadow: 0 2px 6px rgba(255,107,53,.15); }
-.pending-chip.active { border-color: #ff6b35; background: #fff8f5; box-shadow: 0 0 0 2px rgba(255,107,53,.2); }
-.pending-chip .pc-table { font-weight: 700; color: #333; }
-.pending-chip .pc-amount { color: #ff6b35; font-weight: 700; }
-.pending-chip .pc-items { color: #999; font-size: 11px; }
+.pending-bar { background: #fff8f5; border-bottom: 2px solid #ff6b35; padding: 10px 16px; }
+.pending-summary { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ff6b35; margin-bottom: 8px; }
+.pending-summary b { font-size: 18px; }
+.bell-icon { font-size: 18px; }
+.pending-cards { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.pending-card { flex: 0 0 auto; width: 160px; background: #fff; border: 1.5px solid #ffd4c2; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; transition: all .15s; }
+.pending-card.active { border-color: #ff6b35; box-shadow: 0 0 0 2px rgba(255,107,53,.2); background: #fff8f5; }
+.pc-head { display: flex; justify-content: space-between; align-items: center; }
+.pc-head .pc-table { font-weight: 700; font-size: 15px; color: #333; }
+.pc-head .pc-time { font-size: 11px; color: #aaa; }
+.pc-body { display: flex; justify-content: space-between; align-items: baseline; }
+.pc-body .pc-amount { color: #ff6b35; font-weight: 700; font-size: 20px; }
+.pc-body .pc-items { color: #999; font-size: 12px; }
+.pc-actions { display: flex; gap: 6px; margin-top: 2px; }
+.pc-btn { flex: 1; height: 34px; border-radius: 8px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: transform .1s; }
+.pc-btn:active { transform: scale(.96); }
+.pc-btn.add { background: #e6f4ff; color: #1677ff; }
+.pc-btn.add:hover { background: #bae0ff; }
+.pc-btn.pay { background: #ff6b35; color: #fff; }
+.pc-btn.pay:hover { background: #ff551f; }
 .main {
   flex: 1;
   display: grid;
@@ -2068,6 +2100,7 @@ watch(() => auth.user?.store_id, () => {
 .pname { font-size: 17px; font-weight: 600; color: #333; line-height: 1.35; min-height: 2.5em; }
 .pprice { margin-top: 8px; color: #ff6b35; font-size: 20px; font-weight: 700; }
 .empty-menu { padding: 40px; text-align: center; color: #aaa; font-size: 17px; }
+.pos-pagination { display: flex; justify-content: center; padding: 8px 0 4px; }
 .cart-panel {
   background: #fff;
   border-left: 1px solid #eee;
