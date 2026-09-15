@@ -122,8 +122,8 @@
         </el-form-item>
         <el-form-item label="选择类型">
           <el-radio-group v-model="groupForm.selection_type">
-            <el-radio label="SINGLE">单选</el-radio>
-            <el-radio label="MULTIPLE">多选</el-radio>
+            <el-radio value="SINGLE">单选</el-radio>
+            <el-radio value="MULTIPLE">多选</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="必选"><el-switch v-model="groupForm.is_required" /></el-form-item>

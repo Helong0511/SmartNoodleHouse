@@ -20,8 +20,8 @@
       </el-form-item>
       <el-form-item v-if="showProductConflict" label="编号冲突">
         <el-radio-group v-model="onConflict">
-          <el-radio label="skip">跳过</el-radio>
-          <el-radio label="rename">自动改编号</el-radio>
+          <el-radio value="skip">跳过</el-radio>
+          <el-radio value="rename">自动改编号</el-radio>
         </el-radio-group>
       </el-form-item>
     </el-form>

@@ -31,13 +31,13 @@
       </div>
       <div class="right">
         <el-radio-group v-model="filter" size="small" class="filters">
-          <el-radio-button label="ALL">全部 {{ orders.length }}</el-radio-button>
-          <el-radio-button label="NEW">待制作 {{ counts.NEW }}</el-radio-button>
-          <el-radio-button label="COOKING">制作中 {{ counts.COOKING }}</el-radio-button>
-          <el-radio-button label="READY">待出餐 {{ counts.READY }}</el-radio-button>
-          <el-radio-button label="DELIVERY">外卖 {{ counts.DELIVERY }}</el-radio-button>
-          <el-radio-button label="DINE">堂食 {{ counts.DINE }}</el-radio-button>
-          <el-radio-button label="PACK">打包 {{ counts.PACK }}</el-radio-button>
+          <el-radio-button value="ALL">全部 {{ orders.length }}</el-radio-button>
+          <el-radio-button value="NEW">待制作 {{ counts.NEW }}</el-radio-button>
+          <el-radio-button value="COOKING">制作中 {{ counts.COOKING }}</el-radio-button>
+          <el-radio-button value="READY">待出餐 {{ counts.READY }}</el-radio-button>
+          <el-radio-button value="DELIVERY">外卖 {{ counts.DELIVERY }}</el-radio-button>
+          <el-radio-button value="DINE">堂食 {{ counts.DINE }}</el-radio-button>
+          <el-radio-button value="PACK">打包 {{ counts.PACK }}</el-radio-button>
         </el-radio-group>
         <VoiceSwitch v-model="soundOn" />
         <el-button size="small" type="warning" plain @click="testVoice">试听语音</el-button>

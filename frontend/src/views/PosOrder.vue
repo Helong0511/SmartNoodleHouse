@@ -20,8 +20,8 @@
       </div>
       <div class="right">
         <el-radio-group v-model="diningType" size="large" class="dine-toggle" @change="onDiningTypeChange">
-          <el-radio-button label="DINE_IN">堂食</el-radio-button>
-          <el-radio-button label="TAKEAWAY">外带</el-radio-button>
+          <el-radio-button value="DINE_IN">堂食</el-radio-button>
+          <el-radio-button value="TAKEAWAY">外带</el-radio-button>
         </el-radio-group>
         <el-button
           v-if="diningType === 'DINE_IN'"
