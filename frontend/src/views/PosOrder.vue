@@ -33,6 +33,15 @@
         >
           {{ tableLabel }}
         </el-button>
+        <el-button
+          v-if="checkoutOrderId && addingItems"
+          size="large"
+          type="warning"
+          plain
+          @click="transferTableDialogVisible = true"
+        >
+          转台
+        </el-button>
         <el-button size="large" @click="toggleFullscreen">
           {{ fullscreen ? '退出全屏' : '全屏' }}
         </el-button>
@@ -47,7 +56,35 @@
 
     <div v-if="loading" class="loading-tip">加载菜单中…</div>
 
-    <div v-else class="main">
+    <!-- 未结算桌号提醒 -->
+    <div v-if="!loading && pendingOrders.length" class="pending-bar">
+      <span class="pending-title">未结算 {{ pendingOrders.length }} 桌</span>
+      <div class="pending-chips">
+        <div
+          v-for="o in pendingOrders"
+          :key="o.id"
+          class="pending-chip-wrap"
+        >
+          <button
+            type="button"
+            class="pending-chip"
+            :class="{ active: checkoutOrderId === o.id }"
+            @click="togglePendingActions(o)"
+          >
+            <span class="pc-table">{{ o.table_no ? o.table_no + '号桌' : '散客' }}</span>
+            <span class="pc-amount">¥{{ o.total_amount }}</span>
+            <span class="pc-items">{{ o.item_count }}件</span>
+          </button>
+          <div v-if="activePendingId === o.id" class="pending-actions">
+            <el-button size="small" type="warning" plain @click="resumePendingOrder(o, 'add')">继续加餐</el-button>
+            <el-button size="small" type="primary" @click="resumePendingOrder(o, 'pay')">去结算</el-button>
+          </div>
+        </div>
+      </div>
+      <el-button size="small" plain @click="loadPendingOrders" :loading="pendingLoading">刷新</el-button>
+    </div>
+
+    <div v-if="!loading" class="main">
       <aside class="cat-nav">
         <button
           v-for="c in categories"
@@ -114,7 +151,46 @@
           </div>
           <div class="sum-row"><span>合计</span><span class="sum">¥{{ cartTotal }}</span></div>
           <el-input v-model="remark" placeholder="备注（可选）" size="large" class="remark" />
+          <div v-if="addingItems && cart.length" class="add-items-actions">
+            <el-button
+              size="large"
+              plain
+              class="add-items-btn"
+              :loading="paying"
+              @click="addItemsToOrder"
+            >
+              加菜入单 ¥{{ cartTotal }}
+            </el-button>
+            <el-button
+              size="large"
+              type="primary"
+              @click="goCheckoutFromAddItems"
+            >
+              去收款 ¥{{ payableAmount }}
+            </el-button>
+          </div>
+          <div v-else-if="cart.length" class="checkout-actions">
+            <el-button
+              size="large"
+              plain
+              class="park-btn"
+              :loading="parking"
+              @click="parkOrder"
+            >
+              挂单
+            </el-button>
+            <el-button
+              size="large"
+              type="primary"
+              class="pay-btn"
+              :loading="paying"
+              @click="openCheckout"
+            >
+              去收款 ¥{{ cartTotal }}
+            </el-button>
+          </div>
           <el-button
+            v-else
             type="primary"
             size="large"
             class="pay-btn"
@@ -131,12 +207,38 @@
     <el-dialog v-model="tableDialogVisible" title="选择桌号" width="560px" class="table-dialog">
       <div class="table-grid">
         <button
+          type="button"
+          class="table-chip walk-in"
+          :class="{ on: !selectedTableId }"
+          @click="pickWalkIn"
+        >
+          散客
+        </button>
+        <button
           v-for="t in tables"
           :key="t.id"
           type="button"
           class="table-chip"
           :class="{ on: selectedTableId === t.id }"
           @click="pickTable(t)"
+        >
+          {{ t.table_name || t.table_no }}
+        </button>
+      </div>
+      <div v-if="!tables.length" class="empty-tables">暂无可用桌台</div>
+    </el-dialog>
+
+    <!-- 转台 -->
+    <el-dialog v-model="transferTableDialogVisible" title="转台" width="560px" class="table-dialog">
+      <div class="table-grid">
+        <button
+          v-for="t in tables"
+          :key="t.id"
+          type="button"
+          class="table-chip"
+          :class="{ on: selectedTableId === t.id }"
+          :disabled="t.id === selectedTableId"
+          @click="doTransferTable(t.id)"
         >
           {{ t.table_name || t.table_no }}
         </button>
@@ -301,6 +403,10 @@
 
       <!-- 本笔金额 + 选方式 -->
       <div v-if="payStep === 'pick'" class="pay-pick">
+        <div v-if="checkoutOrderId" class="add-items-hint">
+          <span>订单 {{ checkoutOrderNo }} · 待收 ¥{{ remainingAmountDisplay }}</span>
+          <el-button size="small" plain @click="enterAddItemsMode">加菜</el-button>
+        </div>
         <div class="tender-amt-wrap">
           <label>本笔收款</label>
           <div class="tender-quick">
@@ -363,6 +469,9 @@
         <div class="cash-row change-row">
           <span>找零</span>
           <span class="change-amt" :class="{ warn: cashChangeWarn }">¥{{ cashChangeDisplay }}</span>
+        </div>
+        <div v-if="canRoundDown" class="cash-row round-down-row">
+          <el-checkbox v-model="cashRoundDown">抹零（免除 ¥{{ roundDownAmount }} 零头）</el-checkbox>
         </div>
         <div class="cash-actions">
           <el-button size="large" @click="cancelCashPay">返回</el-button>
@@ -601,6 +710,19 @@ const lockedTenderAmount = ref('')
 const cashReceived = ref('')
 const barcodeInput = ref('')
 const barcodeInputRef = ref<any>(null)
+/** 现金抹零 */
+const cashRoundDown = ref(false)
+/** 加菜模式：已建订单后返回菜单继续点餐 */
+const addingItems = ref(false)
+/** 转台对话框 */
+const transferTableDialogVisible = ref(false)
+/** 未结算订单列表 */
+const pendingOrders = ref<any[]>([])
+const pendingLoading = ref(false)
+/** 挂单中 */
+const parking = ref(false)
+/** 当前展开操作按钮的未结算订单 ID */
+const activePendingId = ref<number | null>(null)
 
 function detectBarcodeProvider(code: string): 'WECHAT' | 'ALIPAY' | null {
   const s = code.trim()
@@ -682,6 +804,7 @@ const drawerUnitPrice = computed(() => {
 
 const tableLabel = computed(() => {
   if (diningType.value !== 'DINE_IN') return ''
+  if (!selectedTableId.value) return '散客 / 开台'
   const t = tables.value.find((x) => x.id === selectedTableId.value)
   return t ? (t.table_name || t.table_no) : '选择桌号'
 })
@@ -749,6 +872,21 @@ const cashChangeDisplay = computed(() => {
 })
 
 const cashChangeWarn = computed(() => cashChangeNum.value !== null && cashChangeNum.value < 0)
+
+/** 抹零金额：待收金额小数部分（仅全额收款时有意义） */
+const roundDownAmount = computed(() => {
+  const due = parseFloat(activeTenderAmount.value)
+  if (!Number.isFinite(due)) return '0.00'
+  const cents = due * 100
+  const remainder = cents % 100
+  return (remainder / 100).toFixed(2)
+})
+const canRoundDown = computed(() => {
+  const due = parseFloat(activeTenderAmount.value)
+  const rem = parseFloat(remainingAmountDisplay.value)
+  if (!Number.isFinite(due) || !Number.isFinite(rem)) return false
+  return Math.abs(due - rem) < 0.001 && due > 0
+})
 
 const cashConfirmDisabled = computed(() => {
   if (!cashReceived.value.trim()) return false
@@ -994,6 +1132,11 @@ function pickTable(t: any) {
   tableDialogVisible.value = false
 }
 
+function pickWalkIn() {
+  selectedTableId.value = null
+  tableDialogVisible.value = false
+}
+
 function clearCart() {
   cart.value = []
   posCheckoutNonce.value = ''
@@ -1095,11 +1238,6 @@ function idempotencyKey() {
 
 function validateBeforeCheckout(): boolean {
   if (!cart.value.length) return false
-  if (diningType.value === 'DINE_IN' && !selectedTableId.value) {
-    ElMessage.warning('没有选桌号')
-    tableDialogVisible.value = true
-    return false
-  }
   const sid = effectiveStoreId()
   if (!sid) {
     ElMessage.warning('请先选择门店')
@@ -1153,6 +1291,8 @@ function resetCheckout() {
   tenders.value = []
   tenderAmount.value = ''
   lockedTenderAmount.value = ''
+  cashRoundDown.value = false
+  addingItems.value = false
 }
 
 function setCashQuick(amt: number) {
@@ -1184,6 +1324,7 @@ function finishCheckout(msg: string) {
   payDialogVisible.value = false
   resetCheckout()
   loadShift()
+  loadPendingOrders()
   if (shiftOrdersVisible.value) loadShiftOrders()
 }
 
@@ -1261,6 +1402,53 @@ async function loadShiftOrders() {
 function openShiftOrders() {
   shiftOrdersVisible.value = true
   loadShiftOrders()
+}
+
+/** 加载未结算订单列表 */
+async function loadPendingOrders() {
+  const sid = effectiveStoreId()
+  if (!sid) return
+  pendingLoading.value = true
+  try {
+    const res = await api.get('/orders/pos/pending', { params: { store_id: sid } })
+    pendingOrders.value = res.data || []
+  } catch {
+    pendingOrders.value = []
+  } finally {
+    pendingLoading.value = false
+  }
+}
+
+/** 点击未结算桌号：展开/收起操作按钮 */
+function togglePendingActions(o: any) {
+  if (activePendingId.value === o.id) {
+    activePendingId.value = null
+  } else {
+    activePendingId.value = o.id
+  }
+}
+
+/** 恢复挂单订单：mode=add 继续加餐，mode=pay 去结算 */
+function resumePendingOrder(o: any, mode: 'add' | 'pay') {
+  checkoutOrderId.value = o.id
+  checkoutOrderNo.value = o.order_no
+  checkoutAmount.value = o.total_amount
+  remainingAmount.value = o.total_amount
+  paidAmount.value = '0.00'
+  cart.value = []
+  remark.value = o.remark || ''
+  selectedTableId.value = o.table_id || null
+  activePendingId.value = null
+
+  if (mode === 'add') {
+    addingItems.value = true
+    ElMessage.success(`已切换到 ${o.table_no ? o.table_no + '号桌' : '散客'}，继续加餐`)
+  } else {
+    addingItems.value = false
+    payStep.value = 'pick'
+    tenderAmount.value = o.total_amount
+    payDialogVisible.value = true
+  }
 }
 
 function refundStatusLabel(status: string) {
@@ -1411,6 +1599,113 @@ function openCheckout() {
   payDialogVisible.value = true
 }
 
+/** 挂单：创建订单后不进入支付，回到菜单继续操作 */
+async function parkOrder() {
+  if (!validateBeforeCheckout()) return
+  parking.value = true
+  try {
+    await createPosOrder()
+    const tableName = selectedTableId.value
+      ? (tables.value.find((t) => t.id === selectedTableId.value)?.table_name || tables.value.find((t) => t.id === selectedTableId.value)?.table_no || '')
+      : '散客'
+    ElMessage.success(`挂单成功：${tableName} ¥${checkoutAmount.value}`)
+    // 清空购物车，回到菜单
+    cart.value = []
+    remark.value = ''
+    waivePackingFee.value = false
+    invalidateCheckoutOrder()
+    addingItems.value = false
+    // 刷新未结算列表
+    await loadPendingOrders()
+  } catch (e: any) {
+    ElMessage.error(e.message || '挂单失败')
+  } finally {
+    parking.value = false
+  }
+}
+
+/** 进入加菜模式：关闭收款弹窗，清空购物车，回到菜单继续点餐 */
+function enterAddItemsMode() {
+  payDialogVisible.value = false
+  cart.value = []
+  remark.value = ''
+  addingItems.value = true
+}
+
+/** 加菜入单：将购物车中的商品追加到已有订单 */
+async function addItemsToOrder() {
+  if (!cart.value.length) {
+    ElMessage.warning('请先选择要加的菜品')
+    return
+  }
+  if (!checkoutOrderId.value) {
+    ElMessage.error('订单不存在，请重新下单')
+    return
+  }
+  const catIssues = validateCategoryRequires(cart.value, products.value, categories.value)
+  if (catIssues.length) {
+    ElMessage.warning(catIssues[0].message)
+    return
+  }
+  paying.value = true
+  try {
+    const res = await api.post(`/orders/${checkoutOrderId.value}/add-items`, {
+      items: cart.value.map((c) => ({
+        product_id: c.product_id,
+        quantity: c.quantity || 1,
+        option_ids: c.option_ids || [],
+      })),
+      idempotency_key: `add_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    })
+    checkoutAmount.value = res.data?.total_amount || checkoutAmount.value
+    remainingAmount.value = res.data?.total_amount || remainingAmount.value
+    paidAmount.value = '0.00'
+    cart.value = []
+    remark.value = ''
+    addingItems.value = false
+    ElMessage.success('加菜成功')
+    loadPendingOrders()
+  } catch (e: any) {
+    ElMessage.error(e.message || '加菜失败')
+  } finally {
+    paying.value = false
+  }
+}
+
+/** 加菜后直接去收款 */
+function goCheckoutFromAddItems() {
+  if (!checkoutOrderId.value) {
+    ElMessage.error('订单不存在，请重新下单')
+    return
+  }
+  payStep.value = 'pick'
+  tenderAmount.value = remainingAmount.value
+  payDialogVisible.value = true
+}
+
+/** 转台 */
+async function doTransferTable(newTableId: number) {
+  if (!checkoutOrderId.value) {
+    ElMessage.error('订单不存在')
+    return
+  }
+  if (!newTableId) {
+    ElMessage.warning('请选择目标桌号')
+    return
+  }
+  paying.value = true
+  try {
+    await api.post(`/orders/${checkoutOrderId.value}/transfer-table?new_table_id=${newTableId}`)
+    selectedTableId.value = newTableId
+    transferTableDialogVisible.value = false
+    ElMessage.success('转台成功')
+  } catch (e: any) {
+    ElMessage.error(e.message || '转台失败')
+  } finally {
+    paying.value = false
+  }
+}
+
 async function ensureOrder() {
   if (checkoutOrderId.value) return checkoutOrderId.value
   // 建单前先记住本笔金额，避免被重置成全额待收
@@ -1456,9 +1751,12 @@ async function confirmCashPay() {
   paying.value = true
   try {
     const orderId = await ensureOrder()
-    const body: { amount: string; received_amount?: string } = { amount }
+    const body: { amount: string; received_amount?: string; round_down?: boolean } = { amount }
     if (cashReceived.value.trim()) {
       body.received_amount = cashReceived.value.trim()
+    }
+    if (cashRoundDown.value) {
+      body.round_down = true
     }
     const payRes = await api.post(`/payments/orders/${orderId}/cash`, body)
     applyPayProgress(payRes.data)
@@ -1611,6 +1909,7 @@ onMounted(async () => {
   await loadStores()
   await loadMenu()
   await loadShift()
+  await loadPendingOrders()
   if (standalone.value) document.title = '收银点餐'
   document.addEventListener('fullscreenchange', onFsChange)
 })
@@ -1662,6 +1961,17 @@ watch(() => auth.user?.store_id, () => {
 .dine-toggle :deep(.el-radio-button__inner) { padding: 12px 24px; font-size: 17px; }
 .table-btn { min-width: 130px; font-size: 17px; font-weight: 600; }
 .loading-tip { padding: 48px; text-align: center; color: #888; font-size: 20px; }
+.pending-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #fff8f5; border-bottom: 2px solid #ff6b35; overflow: visible; }
+.pending-title { font-size: 14px; font-weight: 700; color: #ff6b35; white-space: nowrap; }
+.pending-chips { display: flex; gap: 6px; overflow-x: auto; flex: 1; overflow-y: visible; }
+.pending-chip-wrap { position: relative; flex-shrink: 0; }
+.pending-actions { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px; display: flex; gap: 6px; z-index: 20; background: #fff; padding: 6px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.12); white-space: nowrap; }
+.pending-chip { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 12px; border: 1.5px solid #ffd4c2; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; white-space: nowrap; transition: all .15s; }
+.pending-chip:hover { border-color: #ff6b35; box-shadow: 0 2px 6px rgba(255,107,53,.15); }
+.pending-chip.active { border-color: #ff6b35; background: #fff8f5; box-shadow: 0 0 0 2px rgba(255,107,53,.2); }
+.pending-chip .pc-table { font-weight: 700; color: #333; }
+.pending-chip .pc-amount { color: #ff6b35; font-weight: 700; }
+.pending-chip .pc-items { color: #999; font-size: 11px; }
 .main {
   flex: 1;
   display: grid;
@@ -1816,6 +2126,8 @@ watch(() => auth.user?.store_id, () => {
   cursor: pointer;
 }
 .table-chip.on { border-color: #ff6b35; background: #fff8f5; color: #ff6b35; }
+.table-chip.walk-in { color: #1677ff; border-color: #91caff; background: #f0f9ff; }
+.table-chip.walk-in.on { border-color: #1677ff; background: #e6f4ff; color: #1677ff; }
 .empty-tables { text-align: center; color: #999; padding: 24px; font-size: 16px; }
 
 /* 规格抽屉：分栏触控，少纵向滑动 */
@@ -2217,6 +2529,14 @@ watch(() => auth.user?.store_id, () => {
 }
 .cash-actions .el-button { flex: 1; height: 52px; font-size: 17px; }
 .cash-confirm { flex: 2 !important; }
+.round-down-row { margin-top: 12px; }
+.add-items-hint { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 8px 12px; background: #f0f9ff; border-radius: 8px; font-size: 14px; color: #1677ff; }
+.add-items-actions { display: flex; gap: 8px; }
+.add-items-actions .el-button { flex: 1; height: 60px; font-size: 18px; font-weight: 700; border-radius: 12px; }
+.checkout-actions { display: flex; gap: 8px; }
+.checkout-actions .el-button { height: 60px; font-size: 18px; font-weight: 700; border-radius: 12px; }
+.checkout-actions .pay-btn { flex: 2; }
+.checkout-actions .park-btn { flex: 1; color: #1677ff; border-color: #91caff; background: #f0f9ff; }
 
 .barcode-panel { text-align: center; }
 .barcode-panel .scan-provider { font-size: 20px; font-weight: 700; margin-bottom: 8px; }

@@ -323,7 +323,7 @@ const connLabel = computed(() => {
 const counts = computed(() => {
   const list = orders.value
   return {
-    NEW: list.filter((o) => o.status === 'PAID' || o.status === 'CONFIRMED').length,
+    NEW: list.filter((o) => o.status === 'PENDING_PAYMENT' || o.status === 'PAID' || o.status === 'CONFIRMED').length,
     COOKING: list.filter((o) => o.status === 'PREPARING' || o.status === 'COOKING').length,
     READY: list.filter((o) => o.status === 'READY').length,
     DELIVERY: list.filter((o) => o.is_delivery).length,
@@ -342,7 +342,7 @@ const filtered = computed(() => {
   })
   switch (filter.value) {
     case 'NEW':
-      return list.filter((o) => o.status === 'PAID' || o.status === 'CONFIRMED')
+      return list.filter((o) => o.status === 'PENDING_PAYMENT' || o.status === 'PAID' || o.status === 'CONFIRMED')
     case 'COOKING':
       return list.filter((o) => o.status === 'PREPARING' || o.status === 'COOKING')
     case 'READY':

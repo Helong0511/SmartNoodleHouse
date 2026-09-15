@@ -7,9 +7,9 @@ from sqlalchemy import func, or_, select
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission, require_pos
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
-from app.core.response import calc_pages, ensure_local_aware, now_local, success
+from app.core.response import calc_pages, ensure_local_aware, money, now_local, success
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
-from app.schemas.order import OrderCreate, OrderStatusUpdate, PosOrderCreate
+from app.schemas.order import OrderCreate, OrderStatusUpdate, PosAddItems, PosOrderCreate
 from app.services.customer_service import OrderCreateService
 from app.services.delivery_service import DeliveryService
 from app.services.store_scope import assert_order_store_access, assert_store_access, require_bound_store
@@ -159,9 +159,8 @@ async def create_pos_order(
 
     store_id = require_bound_store(user, data.store_id)
     table_token: str | None = None
-    if dtype == "DINE_IN":
-        if not data.table_id:
-            raise AppException(40008, "堂食请先选择桌号")
+    if dtype == "DINE_IN" and data.table_id:
+        # 开台模式：选了桌号才校验
         table = await db.get(DiningTable, int(data.table_id))
         if not table or table.status != 1:
             raise AppException(40403, "桌台不存在或已停用")
@@ -170,8 +169,19 @@ async def create_pos_order(
         table_token = (table.qr_token or "").strip() or None
         if not table_token:
             raise AppException(40008, "桌台未配置二维码，请在后台重新生成桌码")
+        # 同桌号挂单查重：一个桌号只能有一个未结算订单
+        dup = await db.execute(
+            select(Order.id, Order.order_no).where(
+                Order.table_id == int(data.table_id),
+                Order.status == "PENDING_PAYMENT",
+                Order.channel == "POS",
+            )
+        )
+        dup_row = dup.first()
+        if dup_row:
+            raise AppException(40060, f"桌台 {table.table_no} 已有挂单（单号 {dup_row[1]}），请先结算或加菜")
     elif store_id is None:
-        raise AppException(40008, "外带下单请选择门店")
+        raise AppException(40008, "请选择门店")
 
     from app.services.pos_shift_service import PosShiftService
 
@@ -221,6 +231,224 @@ async def create_pos_order(
         },
         request=request,
     )
+
+
+@router.post("/{order_id}/add-items", dependencies=[require_pos()])
+async def add_items_to_order(
+    order_id: int,
+    data: PosAddItems,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """收银台加菜：往已有待支付订单追加商品，重算金额。"""
+    order = await db.get(Order, order_id)
+    if not order:
+        raise AppException(40404, "订单不存在")
+    assert_order_store_access(user, order)
+    if order.channel != "POS":
+        raise AppException(40009, "仅收银台订单可加菜")
+    if order.status != "PENDING_PAYMENT":
+        raise AppException(40009, f"订单当前状态不可加菜: {order.status}")
+
+    # 加菜幂等防重（Redis SET NX + 5min TTL）
+    raw_key = (data.idempotency_key or "").strip()
+    redis = await get_redis()
+    idem_cache_key = f"pos:add:{int(order.id)}:{int(user.id)}:{raw_key}"[:200]
+    if raw_key and redis:
+        if redis.set(idem_cache_key, "1", nx=True, ex=300):
+            pass  # 抢到锁，继续加菜
+        else:
+            # 幂等命中：返回当前订单快照
+            await db.refresh(order)
+            table = await db.get(DiningTable, order.table_id) if order.table_id else None
+            return success(
+                {
+                    "id": order.id,
+                    "order_no": order.order_no,
+                    "total_amount": str(order.total_amount),
+                    "subtotal": str(order.subtotal),
+                    "discount_amount": str(order.discount_amount),
+                    "packing_fee": str(order.packing_fee),
+                    "status": order.status,
+                    "payment_status": order.payment_status,
+                    "table": _table_payload(table),
+                },
+                request=request,
+            )
+
+    items_data = [i.model_dump() for i in data.items]
+    from app.services.order_service import OrderPriceCalculator
+    add_subtotal, add_packing, add_discountable = await OrderPriceCalculator.build_order_items(
+        db, order, items_data, deduct_stock=True, need_pack=(order.dining_type == "TAKEAWAY"),
+    )
+    # 重算金额：原 subtotal + 加菜 subtotal
+    new_subtotal = money(order.subtotal) + add_subtotal
+    new_packing = money(order.packing_fee) + add_packing
+    # 会员折扣：POS 订单无顾客则无折扣；有顾客则按原折扣率重算
+    from app.services.customer_service import CustomerService
+    rate = await CustomerService.resolve_member_discount_rate(db, order.customer_id)
+    old_discountable = order.subtotal - order.discount_amount  # 已下单的可折扣小计
+    new_discountable = old_discountable + add_discountable
+    discount_amount, base_total = CustomerService.calc_member_discount(
+        new_subtotal, new_packing, rate, discountable_subtotal=new_discountable
+    )
+    order.subtotal = new_subtotal
+    order.discount_amount = discount_amount
+    order.packing_fee = new_packing
+    order.total_amount = money(base_total)
+    await db.flush()
+
+    table = await db.get(DiningTable, order.table_id) if order.table_id else None
+    await ws_manager.notify_order_event(
+        "ORDER_UPDATED",
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "status": order.status,
+            "store_id": order.store_id,
+            "table_id": order.table_id,
+            "table_no": table.table_no if table else None,
+            "action": "ADD_ITEMS",
+        },
+    )
+    return success(
+        {
+            "id": order.id,
+            "order_no": order.order_no,
+            "total_amount": str(order.total_amount),
+            "subtotal": str(order.subtotal),
+            "discount_amount": str(order.discount_amount),
+            "packing_fee": str(order.packing_fee),
+            "status": order.status,
+            "payment_status": order.payment_status,
+            "table": _table_payload(table),
+        },
+        request=request,
+    )
+
+
+@router.post("/{order_id}/transfer-table", dependencies=[require_pos()])
+async def transfer_table(
+    order_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    new_table_id: int = Query(..., description="新桌台 ID"),
+):
+    """转台：将订单从当前桌号转到新桌号，记录转台历史。"""
+    order = await db.get(Order, order_id)
+    if not order:
+        raise AppException(40404, "订单不存在")
+    assert_order_store_access(user, order)
+    if order.channel != "POS":
+        raise AppException(40009, "仅收银台订单可转台")
+    if order.status not in ("PENDING_PAYMENT", "PAID", "CONFIRMED", "PREPARING", "COOKING"):
+        raise AppException(40009, f"订单当前状态不可转台: {order.status}")
+
+    new_table = await db.get(DiningTable, int(new_table_id))
+    if not new_table or new_table.status != 1:
+        raise AppException(40403, "目标桌台不存在或已停用")
+    assert_store_access(user, new_table.store_id)
+    if int(new_table.store_id) != int(order.store_id):
+        raise AppException(40002, "不可跨门店转台")
+
+    old_table_id = order.table_id
+    old_table = await db.get(DiningTable, old_table_id) if old_table_id else None
+    old_table_no = old_table.table_no if old_table else None
+
+    order.table_id = int(new_table_id)
+    await db.flush()
+
+    # 记录转台历史到订单状态历史
+    from app.services.status_history import record_order_status
+    await record_order_status(
+        db,
+        order_id=order.id,
+        from_status=order.status,
+        to_status=order.status,
+        source="TABLE_TRANSFER",
+        operator_id=user.id,
+        remark=f"转台: {old_table_no or '散客'} → {new_table.table_no}",
+    )
+
+    await ws_manager.notify_order_event(
+        "TABLE_TRANSFER",
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "store_id": order.store_id,
+            "old_table_id": old_table_id,
+            "old_table_no": old_table_no,
+            "new_table_id": new_table.id,
+            "new_table_no": new_table.table_no,
+        },
+    )
+    return success(
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "old_table_id": old_table_id,
+            "old_table_no": old_table_no,
+            "new_table_id": new_table.id,
+            "new_table_no": new_table.table_no,
+        },
+        request=request,
+    )
+
+
+@router.get("/pos/pending", dependencies=[require_pos()])
+async def list_pos_pending_orders(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+):
+    """收银台：列出本门店所有未结算（PENDING_PAYMENT）的 POS 订单，按桌号分组。"""
+    sid = require_bound_store(user, store_id)
+    q = (
+        select(Order)
+        .where(
+            Order.status == "PENDING_PAYMENT",
+            Order.channel == "POS",
+            Order.store_id == int(sid),
+        )
+        .order_by(Order.id)
+    )
+    result = await db.execute(q)
+    orders_list = list(result.scalars().all())
+    if not orders_list:
+        return success([], request=request)
+
+    order_ids = [o.id for o in orders_list]
+    items = list(
+        (await db.execute(select(OrderItem).where(OrderItem.order_id.in_(order_ids)))).scalars().all()
+    )
+    items_by_order: dict[int, list] = {}
+    for it in items:
+        items_by_order.setdefault(it.order_id, []).append(it)
+
+    table_ids = [o.table_id for o in orders_list if o.table_id]
+    table_map = await _load_tables(db, table_ids) if table_ids else {}
+
+    result_list = []
+    for o in orders_list:
+        o_items = items_by_order.get(o.id, [])
+        tbl = table_map.get(o.table_id) if o.table_id else None
+        result_list.append({
+            "id": o.id,
+            "order_no": o.order_no,
+            "table_id": o.table_id,
+            "table_no": tbl.table_no if tbl else None,
+            "table_name": tbl.table_name if tbl else None,
+            "dining_type": o.dining_type,
+            "total_amount": str(o.total_amount),
+            "subtotal": str(o.subtotal),
+            "item_count": len(o_items),
+            "ordered_at": ensure_local_aware(o.ordered_at).isoformat() if o.ordered_at else None,
+            "remark": o.remark,
+        })
+    return success(result_list, request=request)
 
 
 @router.get("", dependencies=[require_permission("order:read")])
@@ -386,7 +614,7 @@ async def kitchen_orders(
 
     effective_store = require_bound_store(user, store_id)
     cap = min(max(1, int(limit or 200)), 500)
-    q = select(Order).where(Order.status.in_(["PAID", "CONFIRMED", "PREPARING", "COOKING", "READY"]))
+    q = select(Order).where(Order.status.in_(["PENDING_PAYMENT", "PAID", "CONFIRMED", "PREPARING", "COOKING", "READY"]))
     if effective_store:
         q = q.where(Order.store_id == effective_store)
     result = await db.execute(

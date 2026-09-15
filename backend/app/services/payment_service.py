@@ -1020,6 +1020,7 @@ class PaymentService:
         amount: Decimal | None = None,
         received_amount: Decimal | None = None,
         change_amount: Decimal | None = None,
+        round_down: bool = False,
     ) -> tuple[Payment, dict]:
         """收银台现金入账（支持分笔；生产可用，不依赖第三方支付配置）。"""
         locked = (
@@ -1063,6 +1064,16 @@ class PaymentService:
         if pay_amount > remaining:
             raise AppException(40052, f"本笔金额超过待收余额 ¥{remaining}")
 
+        # 抹零：向下取整到元（仅全额收款时生效）
+        round_down_amount = Decimal("0.00")
+        if round_down and pay_amount == remaining:
+            from decimal import ROUND_FLOOR
+            rounded = pay_amount.quantize(Decimal("1"), rounding=ROUND_FLOOR)
+            round_down_amount = pay_amount - rounded
+            pay_amount = rounded
+            if pay_amount <= 0:
+                raise AppException(40051, "抹零后金额非法")
+
         # 实收校验：至少覆盖本笔入账；找零由服务端计算且不得为负
         if received_amount is not None and money(received_amount) < pay_amount:
             raise AppException(40009, f"实收金额不足，本笔应收 ¥{pay_amount}")
@@ -1100,6 +1111,7 @@ class PaymentService:
             "operator_id": operator_id,
             **({"received_amount": str(received_amount)} if received_amount is not None else {}),
             **({"change_amount": str(change_amount)} if change_amount is not None else {}),
+            **({"round_down_amount": str(round_down_amount)} if round_down_amount > 0 else {}),
         }
         await record_payment_status(db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="POS_CASH")
         tender = await cls._finalize_tender(

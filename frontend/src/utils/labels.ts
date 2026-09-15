@@ -174,6 +174,7 @@ export const ORDER_NEXT_ACTIONS: Record<string, { status: string; label: string;
 
 /** KDS 主操作按钮（每状态一个主按钮 + 可选次要） */
 export const KDS_ACTIONS: Record<string, { status: string; label: string; type: string; plain?: boolean }[]> = {
+  PENDING_PAYMENT: [{ status: 'CONFIRMED', label: '接单制作', type: 'warning' }],
   PAID: [{ status: 'PREPARING', label: '开始制作', type: 'warning' }],
   CONFIRMED: [{ status: 'PREPARING', label: '开始制作', type: 'warning' }],
   PREPARING: [

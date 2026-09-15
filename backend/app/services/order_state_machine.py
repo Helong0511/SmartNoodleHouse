@@ -6,7 +6,7 @@ from app.core.exceptions import AppException
 # 后台/厨房可手动推进的状态迁移（不含 PAID / REFUNDED）
 # 已付款订单禁止直接 CANCELLED：须走退款流程 → REFUNDED
 STAFF_TRANSITIONS: dict[str, set[str]] = {
-    "PENDING_PAYMENT": {"CANCELLED"},
+    "PENDING_PAYMENT": {"CANCELLED", "CONFIRMED"},
     # 免烹饪单：PAID/CONFIRMED → READY（制作完成）；出餐必须 READY → COMPLETED
     "PAID": {"CONFIRMED", "PREPARING", "READY", "REFUND_PENDING"},
     "CONFIRMED": {"PREPARING", "COOKING", "READY", "REFUND_PENDING"},

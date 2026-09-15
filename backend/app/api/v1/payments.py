@@ -226,6 +226,7 @@ async def pay_order_cash(
         amount=body.amount,
         received_amount=body.received_amount,
         change_amount=None,
+        round_down=body.round_down,
     )
     if pay_data.get("fully_paid"):
         await ws_manager.notify_order_event(
