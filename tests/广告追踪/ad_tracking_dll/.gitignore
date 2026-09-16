@@ -1,0 +1,10 @@
+/target/
+/bin/*.dll
+/lib/*.so
+*.pdb
+*.dSYM
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+*.log

@@ -1,0 +1,51 @@
+#include <windows.h>
+
+#define VER_FILEVERSION             1,1,0,0
+#define VER_FILEVERSION_STR         "1.1.0.0\0"
+#define VER_PRODUCTVERSION          1,1,0,0
+#define VER_PRODUCTVERSION_STR      "1.1.0\0"
+
+#define VER_COMPANYNAME_STR         "深圳市指动空间科技有限公司"
+#define VER_FILEDESCRIPTION_STR     "广告追踪安全引擎"
+#define VER_INTERNALNAME_STR        "ad_tracking_engine"
+#define VER_LEGALCOPYRIGHT_STR     "版权所有 © 2026 深圳市指动空间科技有限公司"
+#define VER_ORIGINALFILENAME_STR    "ad_tracking_engine.dll"
+#define VER_PRODUCTNAME_STR         "Ad Tracking Engine"
+#define VER_COMMENTS_STR            "Rust 高性能广告追踪安全引擎"
+#define VER_CONTACT_STR             "18011189359"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION VER_FILEVERSION
+ PRODUCTVERSION VER_PRODUCTVERSION
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_DLL
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName", VER_COMPANYNAME_STR
+            VALUE "FileDescription", VER_FILEDESCRIPTION_STR
+            VALUE "FileVersion", VER_FILEVERSION_STR
+            VALUE "InternalName", VER_INTERNALNAME_STR
+            VALUE "LegalCopyright", VER_LEGALCOPYRIGHT_STR
+            VALUE "OriginalFilename", VER_ORIGINALFILENAME_STR
+            VALUE "ProductName", VER_PRODUCTNAME_STR
+            VALUE "ProductVersion", VER_PRODUCTVERSION_STR
+            VALUE "Comments", VER_COMMENTS_STR
+            VALUE "Contact", VER_CONTACT_STR
+        END
+    END
+
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END
