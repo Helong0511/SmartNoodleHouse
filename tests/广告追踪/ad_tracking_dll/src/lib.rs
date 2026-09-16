@@ -69,7 +69,7 @@ struct State {
 impl Drop for State {
     fn drop(&mut self) {
         for key in self.keys.values_mut() {
-            secure_zeroize(&mut key);
+            secure_zeroize(key);
         }
         self.keys.clear();
         self.current_kid = None;
