@@ -79,9 +79,12 @@ class DeliveryProvider(ABC):
         logger.info("[%s] 拒绝退款 refund=%s order=%s reason=%s", self.platform, refund_id, platform_order_id, reason)
         return True
 
-    async def sync_product(self, payload: dict[str, Any]) -> bool:
+    async def sync_product(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """同步单个商品到平台。返回 {"ok": bool, "platform_id": str|None, "error": str|None}。
+        platform_id 用于落库到 DeliveryProductMap.platform_sku_id，便于后续 updateItem/price/stock。
+        """
         logger.info("[%s mock] sync_product %s", self.platform, payload.get("name"))
-        return True
+        return {"ok": True, "platform_id": None}
 
     async def sync_prices(self, items: list[dict]) -> int:
         logger.info("[%s mock] sync_prices count=%s", self.platform, len(items))
@@ -282,7 +285,7 @@ class MeituanProvider(DeliveryProvider):
         )
         return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
 
-    async def sync_product(self, payload: dict[str, Any]) -> bool:
+    async def sync_product(self, payload: dict[str, Any]) -> dict[str, Any]:
         food_data = json.dumps(
             {
                 "app_food_code": payload["app_food_code"],
@@ -300,7 +303,8 @@ class MeituanProvider(DeliveryProvider):
             {"app_food_code": payload["app_food_code"], "food_data": food_data},
             method="POST",
         )
-        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
+        ok = _ok_or_mock(data, ok_expr=data.get("data") == "ok")
+        return {"ok": ok, "platform_id": payload["app_food_code"] if ok else None, "error": None if ok else str(data.get("error"))}
 
     async def cancel_order(self, platform_order_id: str, reason: str = "商家取消") -> bool:
         data = await self._request(
@@ -490,12 +494,12 @@ class ElemeProvider(DeliveryProvider):
         )
         return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
-    async def sync_product(self, payload: dict[str, Any]) -> bool:
+    async def sync_product(self, payload: dict[str, Any]) -> dict[str, Any]:
         settings = get_settings()
         if not settings.eleme_app_id:
             if settings.is_production or not settings.allow_delivery_mock:
                 raise ValueError("饿了么未配置，禁止 Mock 同步商品")
-            return True
+            return {"ok": True, "platform_id": None}
         data = await self._rpc(
             "eleme.product.item.createItem",
             {
@@ -506,7 +510,16 @@ class ElemeProvider(DeliveryProvider):
                 "specs": [{"specId": payload["app_food_code"], "name": "默认", "price": payload["price"]}],
             },
         )
-        return _ok_or_mock(data, ok_expr=data.get("error") is None)
+        ok = _ok_or_mock(data, ok_expr=data.get("error") is None)
+        # 饿了么 createItem 返回 result.itemId（数字字符串），保存后才能后续 updateItem
+        result = data.get("result") or {}
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except Exception:
+                result = {}
+        platform_id = str(result.get("itemId") or result.get("id") or "") if ok else None
+        return {"ok": ok, "platform_id": platform_id or None, "error": None if ok else str(data.get("error"))}
 
     async def sync_prices(self, items: list[dict]) -> int:
         ok = 0

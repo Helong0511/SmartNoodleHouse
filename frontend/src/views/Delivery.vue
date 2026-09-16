@@ -286,8 +286,41 @@
               <el-tag size="small" :type="row.has_token ? 'success' : 'info'">{{ row.has_token ? '是' : '否' }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="Token 过期" width="170">
+            <template #default="{ row }">
+              <span v-if="!row.token_expires_at" class="muted">—</span>
+              <el-tag v-else size="small" :type="tokenExpiryTagType(row.token_expires_at)">
+                {{ fmtExpires(row.token_expires_at) }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="80">
             <template #default="{ row }">{{ row.status === 1 ? '启用' : '停用' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="240" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                link
+                :disabled="!row.has_refresh_token"
+                :loading="refreshingId === row.id"
+                @click="refreshBindingToken(row)"
+              >刷新Token</el-button>
+              <el-button
+                size="small"
+                :type="row.status === 1 ? 'warning' : 'success'"
+                link
+                @click="toggleBindingStatus(row)"
+              >{{ row.status === 1 ? '停用' : '启用' }}</el-button>
+              <el-button
+                size="small"
+                type="danger"
+                link
+                :loading="deletingId === row.id"
+                @click="deleteBinding(row)"
+              >解绑</el-button>
+            </template>
           </el-table-column>
         </el-table>
       </el-tab-pane>
@@ -471,7 +504,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
@@ -600,6 +633,8 @@ const bindingForm = reactive({
   access_token: '',
   refresh_token: '',
 })
+const refreshingId = ref<number | null>(null)
+const deletingId = ref<number | null>(null)
 const mapForm = reactive({
   platform: 'MEITUAN',
   platform_sku_id: '',
@@ -856,6 +891,73 @@ async function saveBinding() {
     loadBindings()
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
+  }
+}
+
+function fmtExpires(v?: string | null) {
+  if (!v) return '—'
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return v
+  const now = Date.now()
+  const diff = d.getTime() - now
+  const days = Math.floor(diff / 86400000)
+  const hours = Math.floor((diff % 86400000) / 3600000)
+  if (diff < 0) return '已过期'
+  if (days > 0) return `${days}天${hours}时`
+  return `${hours}时`
+}
+
+function tokenExpiryTagType(v?: string | null) {
+  if (!v) return 'info' as const
+  const diff = new Date(v).getTime() - Date.now()
+  if (diff < 0) return 'danger' as const
+  if (diff < 24 * 3600 * 1000) return 'warning' as const
+  return 'success' as const
+}
+
+async function refreshBindingToken(row: any) {
+  refreshingId.value = row.id
+  try {
+    const res = await api.post(`/delivery/store-bindings/${row.id}/refresh-token`)
+    ElMessage.success(`Token 刷新成功，新过期：${fmtExpires(res.data.token_expires_at)}`)
+    loadBindings()
+  } catch (e: any) {
+    ElMessage.error(e.message || '刷新失败')
+  } finally {
+    refreshingId.value = null
+  }
+}
+
+async function toggleBindingStatus(row: any) {
+  const next = row.status === 1 ? 0 : 1
+  try {
+    await api.patch(`/delivery/store-bindings/${row.id}/status`, { status: next })
+    ElMessage.success(next === 1 ? '已启用' : '已停用')
+    loadBindings()
+  } catch (e: any) {
+    ElMessage.error(e.message || '切换失败')
+  }
+}
+
+async function deleteBinding(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认解绑 ${platformName(row.platform)} ${row.platform_shop_name || row.platform_shop_id}？\n解绑后该门店回调将被拒绝落单，且 Token 立即失效。`,
+      '解绑确认',
+      { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  deletingId.value = row.id
+  try {
+    await api.delete(`/delivery/store-bindings/${row.id}`)
+    ElMessage.success('已解绑')
+    loadBindings()
+  } catch (e: any) {
+    ElMessage.error(e.message || '解绑失败')
+  } finally {
+    deletingId.value = null
   }
 }
 

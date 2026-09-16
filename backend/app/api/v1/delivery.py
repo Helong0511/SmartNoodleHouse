@@ -550,6 +550,8 @@ async def list_store_bindings(request: Request, db: DbSession, user: CurrentUser
             "platform_shop_name": b.platform_shop_name,
             "status": b.status,
             "has_token": bool(b.access_token),
+            "has_refresh_token": bool(b.refresh_token),
+            "token_expires_at": b.token_expires_at.isoformat() if b.token_expires_at else None,
         }
         for b in result.scalars()
     ]
@@ -602,6 +604,96 @@ async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: D
     db.add(row)
     await db.flush()
     return success({"id": row.id, "updated": False}, request=request)
+
+
+@router.get("/store-bindings/{binding_id}", dependencies=[require_permission("product:read")])
+async def get_store_binding(binding_id: int, request: Request, db: DbSession, user: CurrentUser):
+    """获取绑定详情（含 token 过期时间，便于管理后台展示）。"""
+    from app.services.store_scope import assert_store_access
+
+    row = await db.get(PlatformStoreBinding, binding_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="绑定不存在")
+    assert_store_access(user, row.store_id)
+    return success(
+        {
+            "id": row.id,
+            "store_id": row.store_id,
+            "platform": row.platform,
+            "platform_shop_id": row.platform_shop_id,
+            "platform_shop_name": row.platform_shop_name,
+            "has_token": bool(row.access_token),
+            "has_refresh_token": bool(row.refresh_token),
+            "token_expires_at": row.token_expires_at.isoformat() if row.token_expires_at else None,
+            "status": row.status,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        },
+        request=request,
+    )
+
+
+@router.delete("/store-bindings/{binding_id}", dependencies=[require_permission("product:update")])
+async def delete_store_binding(binding_id: int, request: Request, db: DbSession, user: CurrentUser):
+    """解绑平台门店：清除 token 并停用，不真正删除行（保留审计/对账链路）。"""
+    from app.services.store_scope import assert_store_access
+
+    row = await db.get(PlatformStoreBinding, binding_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="绑定不存在")
+    assert_store_access(user, row.store_id)
+    row.access_token = None
+    row.refresh_token = None
+    row.token_expires_at = None
+    row.status = 0
+    await db.flush()
+    return success({"id": row.id, "status": 0}, request=request)
+
+
+class BindingStatusUpdate(BaseModel):
+    status: int = Field(ge=0, le=1, description="1=启用, 0=停用")
+
+
+@router.patch("/store-bindings/{binding_id}/status", dependencies=[require_permission("product:update")])
+async def update_store_binding_status(
+    binding_id: int, data: BindingStatusUpdate, request: Request, db: DbSession, user: CurrentUser
+):
+    """切换绑定启用/停用（停用后回调会被拒绝落单）。"""
+    from app.services.store_scope import assert_store_access
+
+    row = await db.get(PlatformStoreBinding, binding_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="绑定不存在")
+    assert_store_access(user, row.store_id)
+    row.status = int(data.status)
+    await db.flush()
+    return success({"id": row.id, "status": row.status}, request=request)
+
+
+@router.post("/store-bindings/{binding_id}/refresh-token", dependencies=[require_permission("product:update")])
+async def refresh_store_binding_token(
+    binding_id: int, request: Request, db: DbSession, user: CurrentUser
+):
+    """手动触发 Token 刷新（美团/饿了么均支持）。失败返回原因。"""
+    from app.services.platform_token_service import PlatformTokenService
+    from app.services.store_scope import assert_store_access
+
+    row = await db.get(PlatformStoreBinding, binding_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="绑定不存在")
+    assert_store_access(user, row.store_id)
+    if not row.refresh_token:
+        raise HTTPException(status_code=400, detail="未保存 refresh_token，无法刷新")
+    ok = await PlatformTokenService.refresh_single_binding(row)
+    await db.commit()
+    if not ok:
+        raise HTTPException(status_code=500, detail="刷新失败，请检查日志或重试")
+    return success(
+        {
+            "id": row.id,
+            "token_expires_at": row.token_expires_at.isoformat() if row.token_expires_at else None,
+        },
+        request=request,
+    )
 
 
 @router.post("/sync/menu", dependencies=[require_permission("product:update")])

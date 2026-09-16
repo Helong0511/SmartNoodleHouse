@@ -53,12 +53,14 @@ class ProductSyncService:
         for p in products:
             try:
                 payload = cls._build_product_payload_cached(p, cats.get(p.category_id), binding.platform_shop_id)
-                ok = await provider.sync_product(payload)
-                if ok is True:
+                result = await provider.sync_product(payload)
+                if result.get("ok"):
                     synced += 1
-                    await cls._ensure_default_map(db, store_id, platform, p)
+                    # 保存平台返回的真实 ID（饿了么 itemId），美团用 app_food_code
+                    platform_id = result.get("platform_id") or payload["app_food_code"]
+                    await cls._ensure_default_map(db, store_id, platform, p, platform_id)
                 else:
-                    errors.append(f"{p.name}:平台返回失败")
+                    errors.append(f"{p.name}:{result.get('error') or '平台返回失败'}")
             except Exception as e:
                 logger.exception("同步商品失败 %s: %s", p.name, e)
                 errors.append(f"{p.name}:{e}")
@@ -144,8 +146,19 @@ class ProductSyncService:
         return cls._build_product_payload_cached(product, cat, shop_id)
 
     @classmethod
-    async def _ensure_default_map(cls, db: AsyncSession, store_id: int, platform: str, product: Product) -> None:
-        sku = product.product_no
+    async def _ensure_default_map(
+        cls,
+        db: AsyncSession,
+        store_id: int,
+        platform: str,
+        product: Product,
+        platform_sku_id: str | None = None,
+    ) -> None:
+        """同步后落库平台 SKU 映射。
+        - 美团：platform_sku_id = app_food_code = 本地 product_no（商家自编码）
+        - 饿了么：platform_sku_id = 平台返回的 itemId（必须保存，否则后续 updateItem 失败）
+        """
+        sku = platform_sku_id or product.product_no
         existing = (
             await db.execute(
                 select(DeliveryProductMap).where(
@@ -156,6 +169,13 @@ class ProductSyncService:
             )
         ).scalar_one_or_none()
         if existing:
+            # 饿了么重新同步可能拿到新 itemId，更新映射
+            existing.platform_sku_name = product.name
+            existing.platform_spu_code = product.product_no
+            existing.app_food_code = product.product_no
+            existing.product_id = product.id
+            existing.status = 1
+            await db.flush()
             return
         db.add(
             DeliveryProductMap(
