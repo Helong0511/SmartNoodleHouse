@@ -1,0 +1,11 @@
+# Windows MSVC 商业发布版链接加固
+# 仅影响 MSVC 目标；Linux/macOS 不使用这些 linker flags。
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+  "-C", "debuginfo=0",
+  "-C", "link-arg=/DEBUG:NONE",
+  "-C", "link-arg=/OPT:REF",
+  "-C", "link-arg=/OPT:ICF",
+  "-C", "link-arg=/DYNAMICBASE",
+  "-C", "link-arg=/NXCOMPAT"
+]

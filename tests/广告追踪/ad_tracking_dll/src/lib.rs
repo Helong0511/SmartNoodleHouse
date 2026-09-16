@@ -34,6 +34,17 @@ const MAX_KEYS: usize = 32;
 const MAX_FIELDS: usize = 64;
 const AAD_PREFIX: &[u8] = b"ad-tracking-engine:v1";
 
+/// Best-effort compiler-resistant clearing for fixed-size secret buffers.
+/// This reduces accidental key retention; it is not a guarantee against a
+/// privileged debugger or memory forensics on the host.
+#[inline(never)]
+fn secure_zeroize(bytes: &mut [u8]) {
+    for byte in bytes {
+        unsafe { std::ptr::write_volatile(byte, 0); }
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
 pub const OK: i32 = 0;
 pub const ERR_NULL_INPUT: i32 = 1;
 pub const ERR_INVALID_ARGUMENT: i32 = 2;
@@ -51,6 +62,18 @@ pub const ERR_INTERNAL: i32 = 100;
 struct State {
     keys: HashMap<u8, [u8; 32]>,
     current_kid: Option<u8>,
+}
+
+// 商业发布加固：DLL 卸载时主动清零密钥内存。
+// 注意：客户端 DLL 内的密钥仍然不能视为绝对保密，核心长期密钥应放服务端/KMS。
+impl Drop for State {
+    fn drop(&mut self) {
+        for key in self.keys.values_mut() {
+            secure_zeroize(&mut key);
+        }
+        self.keys.clear();
+        self.current_kid = None;
+    }
 }
 
 static STATE: Lazy<RwLock<State>> = Lazy::new(|| RwLock::new(State::default()));
@@ -297,7 +320,7 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
     }
 
     let now = now_unix()?;
-    let (kid, key) = current_key()?;
+    let (kid, mut key) = current_key()?;
     let exp = now.checked_add(i64::try_from(ttl).map_err(|_| ERR_INVALID_ARGUMENT)?).ok_or_else(|| {
         set_error("ttl calculation overflow");
         ERR_INVALID_ARGUMENT
@@ -342,6 +365,7 @@ fn encode_payload(mut payload: Value, ttl: u64) -> Result<String, i32> {
         set_error("AES-GCM encryption failed");
         ERR_INTERNAL
     })?;
+    secure_zeroize(&mut key);
 
     let mut raw = Vec::with_capacity(HEADER_LEN + ciphertext.len());
     raw.push(VERSION);
@@ -377,7 +401,7 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         return Err(ERR_TOKEN_INVALID);
     }
 
-    let key = match key_for(kid) {
+    let mut key = match key_for(kid) {
         Ok(k) => k,
         Err(ERR_KEY_NOT_FOUND) => {
             // Do not expose key-version existence to untrusted callers.
@@ -398,6 +422,7 @@ fn decode_token(token: &str, check_expiration: bool) -> Result<Value, i32> {
         set_error("token authentication failed");
         ERR_TOKEN_INVALID
     })?;
+    secure_zeroize(&mut key);
 
     if plaintext.len() > MAX_PAYLOAD_CHARS {
         set_error("decrypted payload too large");
@@ -468,7 +493,9 @@ pub extern "C" fn tracking_set_key(kid: c_uchar, key_hex: *const c_char) -> i32 
             set_error("maximum number of keys reached");
             return ERR_INVALID_ARGUMENT;
         }
-        state.keys.insert(kid, key);
+        if let Some(mut old_key) = state.keys.insert(kid, key) {
+            secure_zeroize(&mut old_key);
+        }
         OK
     })
 }
@@ -484,11 +511,13 @@ pub extern "C" fn tracking_remove_key(kid: c_uchar) -> i32 {
             set_error("cannot remove current KID");
             return ERR_INVALID_ARGUMENT;
         }
-        if state.keys.remove(&kid).is_none() {
+        if let Some(mut old_key) = state.keys.remove(&kid) {
+            secure_zeroize(&mut old_key);
+            OK
+        } else {
             set_error("KID not found");
-            return ERR_KEY_NOT_FOUND;
+            ERR_KEY_NOT_FOUND
         }
-        OK
     })
 }
 

@@ -28,3 +28,14 @@ harness = false
 
 [build-dependencies]
 winres = "0.1"
+
+# 商业发布版加固：优化、LTO、去符号、无增量、无调试信息
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+incremental = false
+overflow-checks = false

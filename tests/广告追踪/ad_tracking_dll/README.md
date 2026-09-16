@@ -1839,3 +1839,108 @@ cargo build --release
 
 然后再执行完整测试。
 
+
+
+# 28. 商业发布版 DLL 加固
+
+本项目的 Release 配置已经加入：
+
+- `opt-level = 3`
+- `lto = "fat"`
+- `codegen-units = 1`
+- `panic = "abort"`
+- `strip = "symbols"`
+- `debug = false`
+- `incremental = false`
+- Windows MSVC `DEBUG:NONE`
+- Windows `/OPT:REF`
+- Windows `/OPT:ICF`
+- Windows `/DYNAMICBASE`
+- Windows `/NXCOMPAT`
+
+并在密钥替换、删除以及 Engine 状态销毁时主动清零密钥数组。
+
+## 28.1 Windows 正式构建
+
+在 Visual Studio Developer Command Prompt / x64 Native Tools Command Prompt 中：
+
+```bat
+build_windows.bat
+```
+
+成功后：
+
+```text
+bin/ad_tracking_engine.dll
+bin/ad_tracking_engine.dll.sha256
+```
+
+## 28.2 正式交付禁止包含
+
+```text
+*.pdb
+target/debug/
+*.rlib
+*.rmeta
+.env
+私钥
+生产 API Secret
+测试密钥
+```
+
+## 28.3 发布检查
+
+PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\release_check.ps1
+```
+
+## 28.4 重要安全边界
+
+Rust Release 加固、去符号、LTO、字符串控制和完整性检查只能提高逆向成本，不能保证 DLL “无法反编译”。
+
+任何运行在客户机器上的秘密理论上都可能被提取。
+
+因此：
+
+1. 长期生产密钥不要硬编码进 DLL。
+2. License 使用服务器私钥签名，DLL 只内置公钥。
+3. 核心归因、扣量、结算、防刷、Replay 等业务规则放服务端。
+4. DLL 负责客户端必须完成的本地计算与协议封装。
+5. 生产 DLL 不输出敏感 Token、密钥或完整请求的 Debug 日志。
+
+## 28.5 密钥生命周期
+
+DLL 内的 Key 仍然只是运行时秘密，不应当被当作永久安全边界。
+
+当前版本会在：
+
+- 替换旧 KID Key 时
+- 删除 KID Key 时
+- DLL 全局状态销毁时
+
+主动清零保存的 `[u8; 32]` 密钥数组。
+
+但是 `current_key()` / `key_for()` 为加密操作复制出的短生命周期栈变量也只存在于当前操作期间，并在使用后显式清零。
+
+## 28.6 逆向现实
+
+Release 加固可以降低：
+
+- 符号可读性
+- 调试信息暴露
+- 简单字符串搜索价值
+- 未优化代码结构可读性
+
+但不能阻止：
+
+- 反汇编
+- 动态调试
+- API Hook
+- 内存分析
+- Patch
+- 行为分析
+
+商业核心算法和服务器私钥必须保持在服务端。
+

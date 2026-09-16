@@ -8,3 +8,6 @@ __pycache__/
 .venv/
 .env
 *.log
+
+# 商业发布临时目录
+release/
