@@ -435,7 +435,7 @@ CREATE TABLE IF NOT EXISTS option_groups (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   store_id BIGINT UNSIGNED DEFAULT NULL COMMENT 'NULL=总部共享；非空=仅该门店',
   name VARCHAR(50) NOT NULL COMMENT '规格组显示名',
-  code VARCHAR(64) NOT NULL COMMENT '规格组编码：0000-Liang 或 SH01-Liang',
+  code VARCHAR(64) NOT NULL COMMENT '规格组编码：SH01-Liang 或 SH01-Liang',
   selection_type VARCHAR(20) NOT NULL DEFAULT 'SINGLE' COMMENT 'SINGLE=单选 | MULTIPLE=多选',
   is_required TINYINT NOT NULL DEFAULT 1 COMMENT '是否必选：1=必选 0=可选',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '展示排序',
@@ -452,7 +452,7 @@ CREATE TABLE IF NOT EXISTS options (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
   group_id BIGINT UNSIGNED NOT NULL COMMENT '规格组 → option_groups.id',
   name VARCHAR(50) NOT NULL COMMENT '选项显示名，如 大份、微辣',
-  code VARCHAR(80) NOT NULL COMMENT '选项编码：0000-Liang-XiaoWan 或 SH01-Liang-XiaoWan',
+  code VARCHAR(80) NOT NULL COMMENT '选项编码：SH01-Liang-XiaoWan 或 SH01-Liang-XiaoWan',
   extra_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '相对基础价的加价',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '组内排序',
   is_default TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认选项（同组单选仅一个；菜单+一键加购）',
@@ -1431,112 +1431,111 @@ INSERT INTO product_categories (store_id, category_no, name, description, sort_o
 (1, 'SH01-BaoZiDianXin', '包子·点心', '香葱包、酱肉包，支持单个起售', 10, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- ============================================================================
--- 二、新增规格组（原有 1-7：量/加料/辣/麻/葱/香菜/蒜末）
---     本次新增 8-20：姜末、面型、口感、汤汁、加臊子、加蛋加菜、汤底、皮薄厚、甜度、
---     荷包蛋熟度、汤圆数量、包子个数、是否加热
+-- 二、新增规格组（1-13：量/加料/辣/麻/葱/香菜/蒜末/姜末/面型/口感/汤汁/加臊子/
+--     加蛋加菜/汤底/皮薄厚/甜度/荷包蛋熟度/汤圆数量/包子个数/是否加热）
 --     store_id=NULL 表示总部共享，全店可绑（与原有 0000- 编码一致）
 -- ============================================================================
 INSERT INTO option_groups (id, store_id, name, code, selection_type, is_required, sort_order, status, created_at, updated_at) VALUES
-(8,  NULL, '姜末', '0000-JiangMo', 'SINGLE', 0, 7, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(9,  NULL, '面型', '0000-MianXing', 'SINGLE', 0, 8, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(10, NULL, '口感', '0000-KouGan', 'SINGLE', 0, 9, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(11, NULL, '汤汁', '0000-TangZhi', 'SINGLE', 0, 10, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(12, NULL, '加臊子', '0000-JiaSaoZi', 'MULTIPLE', 0, 11, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(13, NULL, '加蛋加菜', '0000-JiaDanJiaCai', 'MULTIPLE', 0, 12, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(14, NULL, '汤底', '0000-TangDi', 'SINGLE', 0, 13, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(15, NULL, '皮薄厚', '0000-PiBaoHou', 'SINGLE', 0, 14, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(16, NULL, '甜度', '0000-TianDu', 'SINGLE', 0, 15, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(17, NULL, '荷包蛋熟度', '0000-ShuDu', 'SINGLE', 0, 16, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(18, NULL, '汤圆数量', '0000-TangYuanShuLiang', 'SINGLE', 1, 17, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(19, NULL, '包子个数', '0000-BaoZiGeShu', 'SINGLE', 1, 18, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(20, NULL, '是否加热', '0000-ShiFouJiaRe', 'SINGLE', 1, 19, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(1,  1, '姜末', 'SH01-JiangMo', 'SINGLE', 0, 7, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2,  1, '面型', 'SH01-MianXing', 'SINGLE', 0, 8, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3,  1, '口感', 'SH01-KouGan', 'SINGLE', 0, 9, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4,  1, '汤汁', 'SH01-TangZhi', 'SINGLE', 0, 10, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(5,  1, '加臊子', 'SH01-JiaSaoZi', 'MULTIPLE', 0, 11, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6,  1, '加蛋加菜', 'SH01-JiaDanJiaCai', 'MULTIPLE', 0, 12, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7,  1, '汤底', 'SH01-TangDi', 'SINGLE', 0, 13, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(8,  1, '皮薄厚', 'SH01-PiBaoHou', 'SINGLE', 0, 14, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(9,  1, '甜度', 'SH01-TianDu', 'SINGLE', 0, 15, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(10, 1, '荷包蛋熟度', 'SH01-ShuDu', 'SINGLE', 0, 16, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(11, 1, '汤圆数量', 'SH01-TangYuanShuLiang', 'SINGLE', 1, 17, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(12, 1, '包子个数', 'SH01-BaoZiGeShu', 'SINGLE', 1, 18, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(13, 1, '是否加热', 'SH01-ShiFouJiaRe', 'SINGLE', 1, 19, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- ============================================================================
 -- 三、新增规格选项
 -- ============================================================================
 
--- 3.1 姜末（group 8）★ 用户要求的葱/姜/蒜之“姜”
+-- 3.1 姜末（group 1）★ 用户要求的葱/姜/蒜之“姜”
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(8, '不加姜末', '0000-JiangMo-BuJiaJiangMo', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(8, '微量姜末', '0000-JiangMo-WeiLiangJiangMo', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(8, '正常姜末', '0000-JiangMo-ZhengChangJiangMo', 0.00, 2, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(8, '加量姜末', '0000-JiangMo-JiaLiangJiangMo', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(1, '不加姜末', 'SH01-JiangMo-BuJiaJiangMo', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, '微量姜末', 'SH01-JiangMo-WeiLiangJiangMo', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, '正常姜末', 'SH01-JiangMo-ZhengChangJiangMo', 0.00, 2, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(1, '加量姜末', 'SH01-JiangMo-JiaLiangJiangMo', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.2 面型（group 9）
+-- 3.2 面型（group 2）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(9, '细面', '0000-MianXing-XiMian', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(9, '宽面', '0000-MianXing-KuanMian', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(9, '韭菜叶', '0000-MianXing-JiuCaiYe', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(9, '碱水面', '0000-MianXing-JianShuiMian', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(2, '细面', 'SH01-MianXing-XiMian', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, '宽面', 'SH01-MianXing-KuanMian', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, '韭菜叶', 'SH01-MianXing-JiuCaiYe', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, '碱水面', 'SH01-MianXing-JianShuiMian', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.3 口感（group 10）
+-- 3.3 口感（group 3）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(10, '软一点', '0000-KouGan-RuanYiDian', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(10, '标准', '0000-KouGan-BiaoZhun', 0.00, 1, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(10, '硬一点(提黄)', '0000-KouGan-YingYiDian', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(3, '软一点', 'SH01-KouGan-RuanYiDian', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, '标准', 'SH01-KouGan-BiaoZhun', 0.00, 1, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, '硬一点(提黄)', 'SH01-KouGan-YingYiDian', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.4 汤汁（group 11）
+-- 3.4 汤汁（group 4）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(11, '正常汤', '0000-TangZhi-ZhengChangTang', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(11, '多汤', '0000-TangZhi-DuoTang', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(11, '少汤', '0000-TangZhi-ShaoTang', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(11, '干拌(免汤)', '0000-TangZhi-GanBan', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(4, '正常汤', 'SH01-TangZhi-ZhengChangTang', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, '多汤', 'SH01-TangZhi-DuoTang', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, '少汤', 'SH01-TangZhi-ShaoTang', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, '干拌(免汤)', 'SH01-TangZhi-GanBan', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.5 加臊子（group 12，多选加价；牛肉/肥肠沿用原 group 2 加料）
+-- 3.5 加臊子（group 5，多选加价；牛肉/肥肠沿用原 group 2 加料）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(12, '加杂酱', '0000-JiaSaoZi-ZaJiang', 3.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(12, '加鸡杂', '0000-JiaSaoZi-JiZa', 4.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(12, '加蹄花', '0000-JiaSaoZi-TiHua', 6.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(12, '加血旺', '0000-JiaSaoZi-XueWang', 3.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(5, '加杂酱', 'SH01-JiaSaoZi-ZaJiang', 3.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(5, '加鸡杂', 'SH01-JiaSaoZi-JiZa', 4.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(5, '加蹄花', 'SH01-JiaSaoZi-TiHua', 6.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(5, '加血旺', 'SH01-JiaSaoZi-XueWang', 3.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.6 加蛋加菜（group 13）
+-- 3.6 加蛋加菜（group 6）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(13, '加煎蛋', '0000-JiaDanJiaCai-JianDan', 2.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(13, '加荷包蛋', '0000-JiaDanJiaCai-HeBaoDan', 2.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(13, '加豌豆', '0000-JiaDanJiaCai-WanDou', 1.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(13, '加青菜', '0000-JiaDanJiaCai-QingCai', 1.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(13, '加豆芽', '0000-JiaDanJiaCai-DouYa', 1.00, 4, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(6, '加煎蛋', 'SH01-JiaDanJiaCai-JianDan', 2.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6, '加荷包蛋', 'SH01-JiaDanJiaCai-HeBaoDan', 2.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6, '加豌豆', 'SH01-JiaDanJiaCai-WanDou', 1.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6, '加青菜', 'SH01-JiaDanJiaCai-QingCai', 1.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(6, '加豆芽', 'SH01-JiaDanJiaCai-DouYa', 1.00, 4, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.7 汤底（group 14，抄手/水饺）
+-- 3.7 汤底（group 7，抄手/水饺）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(14, '清汤', '0000-TangDi-QingTang', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(14, '红油', '0000-TangDi-HongYou', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(14, '酸辣', '0000-TangDi-SuanLa', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(14, '干拌', '0000-TangDi-GanBan', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(7, '清汤', 'SH01-TangDi-QingTang', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, '红油', 'SH01-TangDi-HongYou', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, '酸辣', 'SH01-TangDi-SuanLa', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, '干拌', 'SH01-TangDi-GanBan', 0.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.8 皮薄厚（group 15）
+-- 3.8 皮薄厚（group 8）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(15, '标准', '0000-PiBaoHou-BiaoZhun', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(15, '皮薄', '0000-PiBaoHou-PiBao', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(8, '标准', 'SH01-PiBaoHou-BiaoZhun', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(8, '皮薄', 'SH01-PiBaoHou-PiBao', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.9 甜度（group 16，汤圆）
+-- 3.9 甜度（group 9，汤圆）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(16, '正常糖', '0000-TianDu-ZhengChangTang', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(16, '少糖', '0000-TianDu-ShaoTang', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(16, '无糖', '0000-TianDu-WuTang', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(9, '正常糖', 'SH01-TianDu-ZhengChangTang', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(9, '少糖', 'SH01-TianDu-ShaoTang', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(9, '无糖', 'SH01-TianDu-WuTang', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.10 荷包蛋熟度（group 17）
+-- 3.10 荷包蛋熟度（group 10）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(17, '溏心', '0000-ShuDu-TangXin', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(17, '全熟', '0000-ShuDu-QuanShu', 0.00, 1, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(10, '溏心', 'SH01-ShuDu-TangXin', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(10, '全熟', 'SH01-ShuDu-QuanShu', 0.00, 1, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.11 汤圆数量（group 18，必选，默认 6 个）
+-- 3.11 汤圆数量（group 11，必选，默认 6 个）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(18, '4个', '0000-TangYuanShuLiang-4Ge', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(18, '6个', '0000-TangYuanShuLiang-6Ge', 0.00, 1, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(18, '8个', '0000-TangYuanShuLiang-8Ge', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(11, '4个', 'SH01-TangYuanShuLiang-4Ge', 0.00, 0, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(11, '6个', 'SH01-TangYuanShuLiang-6Ge', 0.00, 1, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(11, '8个', 'SH01-TangYuanShuLiang-8Ge', 0.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.12 包子个数（group 19；基础价=1个价，其余为相对加价）
+-- 3.12 包子个数（group 12；基础价=1个价，其余为相对加价）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(19, '1个', '0000-BaoZiGeShu-1Ge', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(19, '2个', '0000-BaoZiGeShu-2Ge', 2.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(19, '半笼(3个)', '0000-BaoZiGeShu-BanLong', 4.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(19, '一笼(6个)', '0000-BaoZiGeShu-YiLong', 10.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(12, '1个', 'SH01-BaoZiGeShu-1Ge', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(12, '2个', 'SH01-BaoZiGeShu-2Ge', 2.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(12, '半笼(3个)', 'SH01-BaoZiGeShu-BanLong', 4.00, 2, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(12, '一笼(6个)', 'SH01-BaoZiGeShu-YiLong', 10.00, 3, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
--- 3.13 是否加热（group 20）
+-- 3.13 是否加热（group 13）
 INSERT INTO options (group_id, name, code, extra_price, sort_order, is_default, status, created_at, updated_at) VALUES
-(20, '现蒸', '0000-ShiFouJiaRe-XianZheng', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
-(20, '复蒸加热', '0000-ShiFouJiaRe-FuZheng', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+(13, '现蒸', 'SH01-ShiFouJiaRe-XianZheng', 0.00, 0, 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(13, '复蒸加热', 'SH01-ShiFouJiaRe-FuZheng', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- ============================================================================
 -- 四、新增 14 道餐品
@@ -1642,7 +1641,7 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, g.sort_order
 FROM products p
 JOIN product_categories c ON c.id = p.category_id
-JOIN option_groups g ON g.code IN ('0000-Liang','0000-JiaLiao','0000-La','0000-Ma','0000-Cong','0000-XiangCai','0000-SuanMo','0000-JiangMo','0000-MianXing','0000-KouGan','0000-TangZhi','0000-JiaSaoZi','0000-JiaDanJiaCai')
+JOIN option_groups g ON g.code IN ('SH01-Liang','SH01-JiaLiao','SH01-La','SH01-Ma','SH01-Cong','SH01-XiangCai','SH01-SuanMo','SH01-JiangMo','SH01-MianXing','SH01-KouGan','SH01-TangZhi','SH01-JiaSaoZi','SH01-JiaDanJiaCai')
 WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
   AND c.category_no IN ('SH01-ZhaoPaiMian','SH01-GanBanMian')
   AND NOT EXISTS (SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id);
@@ -1652,7 +1651,7 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, g.sort_order
 FROM products p
 JOIN product_categories c ON c.id = p.category_id
-JOIN option_groups g ON g.code IN ('0000-Liang','0000-JiaLiao','0000-La','0000-Ma','0000-Cong','0000-XiangCai','0000-SuanMo','0000-JiangMo','0000-JiaDanJiaCai','0000-TangDi','0000-PiBaoHou')
+JOIN option_groups g ON g.code IN ('SH01-Liang','SH01-JiaLiao','SH01-La','SH01-Ma','SH01-Cong','SH01-XiangCai','SH01-SuanMo','SH01-JiangMo','SH01-JiaDanJiaCai','SH01-TangDi','SH01-PiBaoHou')
 WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
   AND c.category_no = 'SH01-ChaoShouShuiJiao'
   AND NOT EXISTS (SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id);
@@ -1661,7 +1660,7 @@ WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, g.sort_order
 FROM products p
-JOIN option_groups g ON g.code IN ('0000-TianDu','0000-ShuDu','0000-TangYuanShuLiang')
+JOIN option_groups g ON g.code IN ('SH01-TianDu','SH01-ShuDu','SH01-TangYuanShuLiang')
 WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
   AND p.product_no = 'SH01-TangYuan-TangYuanHeBaoDan'
   AND NOT EXISTS (SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id);
@@ -1670,7 +1669,7 @@ WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
 INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, g.sort_order
 FROM products p
-JOIN option_groups g ON g.code IN ('0000-TianDu','0000-TangYuanShuLiang')
+JOIN option_groups g ON g.code IN ('SH01-TianDu','SH01-TangYuanShuLiang')
 WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
   AND p.product_no = 'SH01-TangYuan-HongTangXiaoTangYuan'
   AND NOT EXISTS (SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id);
@@ -1680,7 +1679,7 @@ INSERT INTO product_option_groups (product_id, group_id, sort_order)
 SELECT p.id, g.id, g.sort_order
 FROM products p
 JOIN product_categories c ON c.id = p.category_id
-JOIN option_groups g ON g.code IN ('0000-BaoZiGeShu','0000-ShiFouJiaRe')
+JOIN option_groups g ON g.code IN ('SH01-BaoZiGeShu','SH01-ShiFouJiaRe')
 WHERE p.store_id = (SELECT id FROM stores WHERE store_no = 'SH01')
   AND c.category_no = 'SH01-BaoZiDianXin'
   AND NOT EXISTS (SELECT 1 FROM product_option_groups pog WHERE pog.product_id = p.id AND pog.group_id = g.id);
