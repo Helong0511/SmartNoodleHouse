@@ -338,7 +338,6 @@ onUnmounted(() => {
 .kpi-val { font-size: 22px; font-weight: 700; }
 .kpi-label { font-size: 12px; color: #909399; margin-top: 4px; }
 .kpi-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-.toolbar { margin-bottom: 12px; }
 .new-hint {
   margin-bottom: 10px;
   padding: 8px 14px;

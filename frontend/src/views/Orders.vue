@@ -308,7 +308,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { margin-bottom: 12px; }
 .fee-tip { font-size: 11px; color: #e6a23c; line-height: 1.2; }
 .fee-tip.discount { color: #f56c6c; }
 </style>

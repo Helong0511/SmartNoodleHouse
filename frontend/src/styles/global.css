@@ -1,0 +1,55 @@
+/* 统一筛选工具栏（Product/Payments/Coupons/Orders/Customers/FinancialLedger 等共用） */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* el-form inline 内部的 el-form-item 默认 margin-bottom 会撑开一行，归零 */
+.toolbar.el-form--inline .el-form-item {
+  margin-right: 0;
+  margin-bottom: 0;
+}
+
+/* 直接 div.toolbar 里放 el-form-item 的情况（同上） */
+.toolbar .el-form-item {
+  margin-right: 0;
+  margin-bottom: 0;
+}
+
+/* 同行内的 el-tag 默认高度 32px 与 default 输入框一致，
+   但它会有 vertical-align: top 之类的干扰，强制对齐 */
+.toolbar .el-tag {
+  height: 32px;
+  line-height: 30px;
+  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* el-checkbox 与 输入框 居中基线 */
+.toolbar .el-checkbox {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* PosRefundApprove 等用了 size="large" 的页面：去掉后默认 32px，
+   但为了保险在全局层做一个向下收敛——除非用 size="small" */
+.toolbar .el-input,
+.toolbar .el-input__wrapper,
+.toolbar .el-select .el-input,
+.toolbar .el-button,
+.toolbar .el-date-editor.el-input,
+.toolbar .el-date-editor.el-input__wrapper,
+.toolbar .el-input-number {
+  height: 32px;
+}
+
+/* 日期范围控件统一宽度，不要太宽占满整行 */
+.toolbar .el-date-editor--daterange.el-input,
+.toolbar .el-date-editor--daterange {
+  width: 220px !important;
+}

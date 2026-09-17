@@ -44,7 +44,7 @@ const router = createRouter({
         { path: 'delivery/menu', component: () => import('@/views/delivery/DeliveryMaps.vue'), meta: { title: '外卖餐品', permission: 'order:read', denyCashier: true } },
         { path: 'delivery/sync', component: () => import('@/views/delivery/DeliverySync.vue'), meta: { title: '外卖同步监控', permission: 'order:read', denyCashier: true } },
         { path: 'delivery/logs', component: () => import('@/views/delivery/DeliveryLogs.vue'), meta: { title: '外卖回调日志', permission: 'order:read', denyCashier: true } },
-        { path: 'store-info', component: () => import('@/views/StoreInfo.vue'), meta: { title: '门店信息', permission: 'system:manage', denyCashier: true } },
+        { path: 'store-info', component: () => import('@/views/StoreInfo.vue'), meta: { title: '门店信息', permission: 'table:manage', denyCashier: true } },
         { path: 'welcome-logs', component: () => import('@/views/WelcomeLogs.vue'), meta: { title: '迎宾日志', permission: 'welcome:manage', denyCashier: true } },
         { path: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置', permission: 'system:manage', denyCashier: true } },
       ]

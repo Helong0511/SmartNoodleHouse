@@ -171,6 +171,5 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { margin-bottom: 12px; }
 .pager { margin-top: 16px; display: flex; justify-content: flex-end; }
 </style>

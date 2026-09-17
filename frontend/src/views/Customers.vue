@@ -694,7 +694,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { margin-bottom: 12px; }
 .muted { color: #999; }
 .tip { font-size: 13px; margin: 4px 0 10px; }
 .avatar-thumb {

@@ -1,7 +1,7 @@
 <template>
   <div class="refund-page">
     <div class="toolbar">
-      <el-select v-model="status" placeholder="状态" clearable size="large" style="width:140px" @change="reload">
+      <el-select v-model="status" placeholder="状态" clearable style="width:140px" @change="reload">
         <el-option label="待审批" value="PENDING" />
         <el-option label="已退款" value="SUCCESS" />
         <el-option label="已拒绝" value="REJECTED" />
@@ -12,7 +12,6 @@
         v-model="keyword"
         placeholder="订单号 / 支付流水号"
         clearable
-        size="large"
         style="width:220px"
         @keyup.enter="reload"
         @clear="reload"
@@ -23,20 +22,18 @@
         value-format="YYYY-MM-DD"
         start-placeholder="申请开始"
         end-placeholder="申请结束"
-        style="width:260px"
         @change="reload"
       />
       <el-select
         v-if="auth.isSuperAdmin"
         v-model="storeId"
         placeholder="门店"
-        size="large"
         style="width:200px"
         @change="reload"
       >
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
-      <el-button type="primary" size="large" :loading="loading" @click="reload">查询</el-button>
+      <el-button type="primary" :loading="loading" @click="reload">查询</el-button>
     </div>
 
     <el-table :data="items" v-loading="loading" stripe style="width:100%;margin-top:12px">

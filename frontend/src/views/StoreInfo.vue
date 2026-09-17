@@ -4,7 +4,7 @@
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <span style="font-weight: 600">门店信息</span>
-          <el-button type="primary" size="small" @click="openCreateStore">新建门店</el-button>
+          <el-button v-if="auth.isSuperAdmin" type="primary" size="small" @click="openCreateStore">新建门店</el-button>
         </div>
       </template>
       <el-table :data="stores" border size="small">
@@ -90,6 +90,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
 
 const stores = ref<any[]>([])
 const storeEdits = reactive<Record<number, any>>({})

@@ -18,7 +18,7 @@
 
         <el-sub-menu v-if="showStore" index="g-store">
           <template #title>门店</template>
-          <el-menu-item index="/store-info">门店信息</el-menu-item>
+          <el-menu-item v-if="auth.hasPermission('table:manage')" index="/store-info">门店信息</el-menu-item>
           <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
           <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
         </el-sub-menu>

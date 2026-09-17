@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, text
 
 from app.api.deps import CurrentUser, DbSession, require_permission
@@ -20,6 +20,13 @@ from app.services.system_settings_service import (
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/settings", tags=["系统设置"])
+
+
+async def _require_store_update(user: CurrentUser):
+    """编辑门店信息：超管可改任意门店；店长可改自己绑定的门店（后续由 store_id 再次校验）。"""
+    if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
+        return user
+    raise HTTPException(status_code=403, detail="无权编辑门店信息")
 
 
 class StoreCreate(BaseModel):
@@ -562,7 +569,7 @@ async def clear_store_business_key(
     return success({"cleared": True, "store_id": store_id, "key": key}, request=request)
 
 
-@router.put("/stores/{store_id}", dependencies=[require_permission("system:manage")])
+@router.put("/stores/{store_id}", dependencies=[Depends(_require_store_update)])
 async def update_store(
     store_id: int,
     data: StoreUpdate,

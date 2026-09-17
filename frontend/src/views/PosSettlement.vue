@@ -1,11 +1,11 @@
 <template>
   <div class="settlement-page">
     <div class="toolbar">
-      <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" size="large" @change="load" />
-      <el-select v-if="auth.isSuperAdmin" v-model="storeId" placeholder="门店" size="large" style="width:200px" @change="load">
+      <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" @change="load" />
+      <el-select v-if="auth.isSuperAdmin" v-model="storeId" placeholder="门店" style="width:200px" @change="load">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
-      <el-button type="primary" size="large" :loading="loading" @click="load">刷新</el-button>
+      <el-button type="primary" :loading="loading" @click="load">刷新</el-button>
     </div>
 
     <div v-if="loading" class="tip">加载中…</div>
