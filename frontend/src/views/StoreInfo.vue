@@ -184,7 +184,9 @@ async function createStore() {
 
 async function loadStores() {
   try {
-    const res = await api.get('/settings/stores/options')
+    const res = await api.get('/settings/stores/options', {
+      params: { include_inactive: true },
+    })
     stores.value = res.data.items || []
   } catch {
     stores.value = []

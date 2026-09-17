@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from sqlalchemy import select, text
 
 from app.api.deps import CurrentUser, DbSession, require_permission
@@ -36,17 +36,37 @@ class StoreBusinessUpdate(BaseModel):
 
 
 @router.get("/stores/options", dependencies=[require_permission("order:read")])
-async def list_store_options(request: Request, db: DbSession, user: CurrentUser):
-    """员工可选门店列表：超管看全部营业中门店；门店账号仅本店。"""
+async def list_store_options(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    include_inactive: bool = Query(default=False),
+):
+    """员工可选门店列表：超管看全部营业中门店；门店账号仅本店。
+
+    include_inactive=true 时返回含停用门店（门店信息管理页使用），
+    并附带经纬度、状态字段。
+    """
     effective = require_bound_store(user, None)
-    q = select(Store).where(Store.status == 1).order_by(Store.id)
+    q = select(Store).order_by(Store.id)
+    if not include_inactive:
+        q = q.where(Store.status == 1)
     if effective is not None:
         q = q.where(Store.id == effective)
     rows = list((await db.execute(q)).scalars().all())
     return success(
         {
             "items": [
-                {"id": s.id, "store_no": s.store_no, "name": s.name, "address": s.address, "phone": s.phone}
+                {
+                    "id": s.id,
+                    "store_no": s.store_no,
+                    "name": s.name,
+                    "address": s.address,
+                    "phone": s.phone,
+                    "status": s.status,
+                    "latitude": float(s.latitude) if s.latitude is not None else None,
+                    "longitude": float(s.longitude) if s.longitude is not None else None,
+                }
                 for s in rows
             ],
             "bound_store_id": user.store_id,

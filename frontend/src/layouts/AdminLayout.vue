@@ -16,6 +16,13 @@
       >
         <el-menu-item v-if="showDashboard" index="/dashboard">数据概览</el-menu-item>
 
+        <el-sub-menu v-if="showStore" index="g-store">
+          <template #title>门店</template>
+          <el-menu-item index="/store-info">门店信息</el-menu-item>
+          <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
+          <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="showCatalog" index="g-catalog">
           <template #title>菜品</template>
           <el-menu-item index="/categories">分类管理</el-menu-item>
@@ -23,6 +30,13 @@
           <el-menu-item index="/options">规格管理</el-menu-item>
           <el-menu-item index="/products">商品管理</el-menu-item>
           <el-menu-item index="/store-stocks">分店库存</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu v-if="showMember" index="g-member">
+          <template #title>会员</template>
+          <el-menu-item v-if="showCustomers" index="/customers">顾客管理</el-menu-item>
+          <el-menu-item v-if="showCustomers" index="/member-levels">会员等级</el-menu-item>
+          <el-menu-item v-if="showCoupons" index="/coupons">优惠券</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showOps" index="g-ops">
@@ -44,20 +58,6 @@
           <el-menu-item index="/delivery/menu">外卖餐品</el-menu-item>
           <el-menu-item index="/delivery/sync">同步监控</el-menu-item>
           <el-menu-item index="/delivery/logs">回调日志</el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu v-if="showStore" index="g-store">
-          <template #title>门店</template>
-          <el-menu-item index="/store-info">门店信息</el-menu-item>
-          <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
-          <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu v-if="showMember" index="g-member">
-          <template #title>会员</template>
-          <el-menu-item v-if="showCustomers" index="/customers">顾客管理</el-menu-item>
-          <el-menu-item v-if="showCustomers" index="/member-levels">会员等级</el-menu-item>
-          <el-menu-item v-if="showCoupons" index="/coupons">优惠券</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showSmart" index="g-smart">
