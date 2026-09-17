@@ -498,7 +498,12 @@ async def list_orders(
     q = _apply_date_range(q, Order.created_at, date_from, date_to)
 
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
-    result = await db.execute(q.order_by(Order.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+    # created_at 同秒多单（高峰期常见），必须以 id 兜底，否则 OFFSET 翻页会重复/丢行
+    result = await db.execute(
+        q.order_by(Order.created_at.desc(), Order.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     order_rows = list(result.scalars().all())
     table_map = await _load_tables(db, [o.table_id for o in order_rows if o.table_id])
     store_map = await _load_stores(db, [o.store_id for o in order_rows if o.store_id])
@@ -875,7 +880,9 @@ async def list_my_orders(
     rows = list(
         (
             await db.execute(
-                base.order_by(Order.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+                base.order_by(Order.created_at.desc(), Order.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
         ).scalars()
     )

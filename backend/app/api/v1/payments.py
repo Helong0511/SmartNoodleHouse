@@ -522,7 +522,12 @@ async def list_payments(
     time_col = func.coalesce(Payment.paid_at, Payment.created_at)
     q = _apply_date_range(q, time_col, date_from, date_to)
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
-    result = await db.execute(q.order_by(Payment.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+    # 排序口径须与日期筛选一致（coalesce(paid_at, created_at)），并以 id 兜底保证翻页稳定
+    result = await db.execute(
+        q.order_by(time_col.desc(), Payment.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     rows = list(result.scalars())
     ids = [p.id for p in rows]
     order_ids = list({p.order_id for p in rows if p.order_id})

@@ -195,7 +195,11 @@ async def visitor_events(
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = list(
         (
-            await db.execute(q.order_by(VisitorEvent.event_time.desc()).offset((page - 1) * page_size).limit(page_size))
+            await db.execute(
+                q.order_by(VisitorEvent.event_time.desc(), VisitorEvent.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
         ).scalars()
     )
     items = [

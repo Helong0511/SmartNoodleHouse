@@ -70,7 +70,9 @@ async def list_customers(
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
-        q.order_by(Customer.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        q.order_by(Customer.created_at.desc(), Customer.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     customers = list(result.scalars().all())
     ids = [c.id for c in customers]

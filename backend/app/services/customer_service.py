@@ -79,7 +79,9 @@ class CustomerService:
         rows = list(
             (
                 await db.execute(
-                    q.order_by(Customer.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+                    q.order_by(Customer.created_at.desc(), Customer.id.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
                 )
             ).scalars().all()
         )

@@ -238,7 +238,9 @@ async def list_delivery_orders(
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
-        q.order_by(DeliveryOrder.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        q.order_by(DeliveryOrder.created_at.desc(), DeliveryOrder.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     rows = list(result.scalars().all())
     order_ids = [d.order_id for d in rows]
@@ -410,7 +412,9 @@ async def list_refunds(
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
-        q.order_by(DeliveryRefund.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        q.order_by(DeliveryRefund.created_at.desc(), DeliveryRefund.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     rows = list(result.scalars().all())
     d_ids = list({r.delivery_order_id for r in rows})
@@ -523,7 +527,9 @@ async def list_callback_logs(
     if event_type:
         q = q.where(DeliveryCallbackLog.event_type == event_type)
     result = await db.execute(
-        q.order_by(DeliveryCallbackLog.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        q.order_by(DeliveryCallbackLog.created_at.desc(), DeliveryCallbackLog.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     items = [
         {
@@ -555,6 +561,7 @@ async def list_store_bindings(request: Request, db: DbSession, user: CurrentUser
     items = [
         {
             "id": b.id,
+            "store_id": b.store_id,
             "platform": b.platform,
             "platform_shop_id": b.platform_shop_id,
             "platform_shop_name": b.platform_shop_name,
@@ -562,6 +569,8 @@ async def list_store_bindings(request: Request, db: DbSession, user: CurrentUser
             "has_token": bool(b.access_token),
             "has_refresh_token": bool(b.refresh_token),
             "token_expires_at": b.token_expires_at.isoformat() if b.token_expires_at else None,
+            "auto_sync_open": bool(b.auto_sync_open),
+            "platform_open_status": b.platform_open_status,
         }
         for b in result.scalars()
     ]

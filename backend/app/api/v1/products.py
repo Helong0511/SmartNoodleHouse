@@ -752,6 +752,18 @@ async def list_products(
     q = select(Product)
     if store_id is not None:
         q = q.where(Product.store_id == int(store_id))
+        # 本店停售覆盖必须在 SQL 层剔除（NOT EXISTS），count 与分页共用同一条件，
+        # 否则先分页再在 Python 层 continue 会导致页不满、total 虚高、末页空白
+        stopped_exists = (
+            select(1)
+            .where(
+                StoreProductStock.product_id == Product.id,
+                StoreProductStock.store_id == int(store_id),
+                StoreProductStock.status != 1,
+            )
+            .exists()
+        )
+        q = q.where(~stopped_exists)
     if category_id:
         q = q.where(Product.category_id == category_id)
     if status and status != "ALL":
@@ -760,7 +772,12 @@ async def list_products(
         kw = keyword.strip()
         q = q.where((Product.name.contains(kw)) | (Product.product_no.contains(kw)))
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
-    result = await db.execute(q.order_by(Product.sort_order).offset((page - 1) * page_size).limit(page_size))
+    # sort_order 大量商品默认值相同，必须补 id 兜底保证翻页稳定
+    result = await db.execute(
+        q.order_by(Product.sort_order, Product.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     products = list(result.scalars())
     stock_map: dict[int, StoreProductStock] = {}
     if store_id and products:
@@ -805,9 +822,8 @@ async def list_products(
 
     items = []
     for p in products:
+        # 本店停售品已在 SQL 层（NOT EXISTS）剔除，此处不再二次过滤，避免 total 与实际条数不一致
         ov = stock_map.get(p.id)
-        if ov is not None and int(ov.status) != 1:
-            continue
         cat = cats_map.get(p.category_id)
         eff_cats, eff_prods, inherited = resolve_product_requires(p, cat)
         items.append(

@@ -98,7 +98,8 @@ async def welcome_logs(
             pass
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
-    q = q.order_by(WelcomeLog.created_at.desc())
+    # 迎宾日志高频写入且可能同秒多条，id 兜底保证翻页不重复/不丢行
+    q = q.order_by(WelcomeLog.created_at.desc(), WelcomeLog.id.desc())
     if limit is not None:
         rows = list((await db.execute(q.limit(min(limit, 200)))).scalars().all())
     else:

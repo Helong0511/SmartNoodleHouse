@@ -378,7 +378,8 @@ class CouponService:
         rows = list(
             (
                 await db.execute(
-                    q.order_by(CustomerCoupon.obtained_at.desc())
+                    # 批量发券会产生大量 obtained_at 完全相同的行，必须用 id 兜底防翻页重复/丢行
+                    q.order_by(CustomerCoupon.obtained_at.desc(), CustomerCoupon.id.desc())
                     .offset((page - 1) * page_size)
                     .limit(page_size)
                 )
