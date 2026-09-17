@@ -1,14 +1,59 @@
 """库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌商品库存"""
 from __future__ import annotations
 
-from sqlalchemy import select, text
+import json
+
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.models import StoreProductStock
+from app.models import OutboxEvent, StoreProductStock
+from app.services.outbox_worker import enqueue_outbox
 
 # stock=999 视为不限库存
 UNLIMITED_STOCK = 999
+
+
+async def _emit_stock_mirror(
+    db: AsyncSession,
+    *,
+    store_id: int,
+    product_id: int,
+    mirror_id: int,
+    zero: bool,
+) -> None:
+    """库存跨 0 翻转时发出外卖镜像信号（同事务）。
+
+    复用 outbox：aggregate 用门店库存行 id（每店每品唯一）。因同一商品会反复
+    售罄/补货，而 outbox 键永久唯一，信号行为 DONE 时将其复活为 PENDING；
+    handler 执行时重读最新库存再推送，乱序/重复均收敛到最新值，天然幂等。
+    """
+    payload = {"store_id": store_id, "product_id": product_id, "zero": zero}
+    _, is_new = await enqueue_outbox(
+        db,
+        aggregate_type="delivery_stock",
+        aggregate_id=int(mirror_id),
+        event_kind="mirror",
+        payload=payload,
+    )
+    if not is_new:
+        await db.execute(
+            update(OutboxEvent)
+            .where(
+                OutboxEvent.aggregate_type == "delivery_stock",
+                OutboxEvent.aggregate_id == int(mirror_id),
+                OutboxEvent.event_kind == "mirror",
+            )
+            .values(
+                status="PENDING",
+                attempt_count=0,
+                next_retry_at=None,
+                locked_at=None,
+                locked_by=None,
+                last_error=None,
+                payload=json.dumps(payload, ensure_ascii=False),
+            )
+        )
 
 
 async def _has_store_row(db: AsyncSession, store_id: int, product_id: int) -> StoreProductStock | None:
@@ -57,6 +102,20 @@ async def deduct_stock(
             )
             if result.rowcount != 1:
                 raise AppException(40031, f"本店库存不足或商品不可售: {product_id}")
+            # 扣减成功时扣前必 >0（条件 UPDATE 保证）；若扣后归 0 即 >0→0 售罄翻转
+            after = (
+                await db.execute(
+                    text(
+                        "SELECT stock FROM store_product_stocks "
+                        "WHERE store_id = :sid AND product_id = :pid"
+                    ),
+                    {"sid": store_id, "pid": product_id},
+                )
+            ).scalar()
+            if int(after or 0) == 0:
+                await _emit_stock_mirror(
+                    db, store_id=store_id, product_id=product_id, mirror_id=row.id, zero=True
+                )
             # 销量仍记在品牌商品上
             await db.execute(
                 text("UPDATE products SET sales_count = sales_count + :qty WHERE id = :pid"),
@@ -102,6 +161,7 @@ async def restore_stock(
     if store_id:
         row = await _has_store_row(db, store_id, product_id)
         if row is not None:
+            was_zero = int(row.stock or 0) == 0
             await db.execute(
                 text(
                     """
@@ -115,6 +175,11 @@ async def restore_stock(
                 ),
                 {"sid": store_id, "pid": product_id, "qty": qty, "unlimited": UNLIMITED_STOCK},
             )
+            # 回库前为 0、回库后必 >0（qty>0）：0→>0 恢复营业，镜像解除售罄
+            if was_zero:
+                await _emit_stock_mirror(
+                    db, store_id=store_id, product_id=product_id, mirror_id=row.id, zero=False
+                )
             await db.execute(
                 text(
                     "UPDATE products SET sales_count = GREATEST(0, sales_count - :qty) WHERE id = :pid"

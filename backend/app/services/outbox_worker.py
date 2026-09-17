@@ -268,6 +268,10 @@ async def process_pending_outbox(limit: int = 30) -> int:
         import app.services.paid_side_effects  # noqa: F401
     except Exception:
         logger.exception("Failed to import paid_side_effects handlers")
+    try:
+        import app.services.delivery_sync_handlers  # noqa: F401
+    except Exception:
+        logger.exception("Failed to import delivery_sync_handlers handlers")
     now = now_local()
     async with AsyncSessionLocal() as db:
         rows = (

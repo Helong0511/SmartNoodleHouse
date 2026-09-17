@@ -932,16 +932,16 @@ async def revoke_face(request: Request, db: DbSession, customer: CurrentCustomer
 
 
 @router.get("/coupons/mine")
-async def list_my_coupons(request: Request, db: DbSession, customer: CurrentCustomer):
-    """我的可用优惠券（满减/折扣，不含代金券）。"""
-    items = await CouponService.list_available(db, customer.id)
+async def list_my_coupons(request: Request, db: DbSession, customer: CurrentCustomer, store_id: int | None = None):
+    """我的可用优惠券（满减/折扣，不含代金券）。传 store_id 时仅返回该门店可用券。"""
+    items = await CouponService.list_available(db, customer.id, store_id=store_id)
     return success({"items": items}, request=request)
 
 
 @router.get("/vouchers/mine")
-async def list_my_vouchers(request: Request, db: DbSession, customer: CurrentCustomer):
-    """我的可用代金券。"""
-    items = await CouponService.list_available_vouchers(db, customer.id)
+async def list_my_vouchers(request: Request, db: DbSession, customer: CurrentCustomer, store_id: int | None = None):
+    """我的可用代金券。传 store_id 时仅返回该门店可用代金券。"""
+    items = await CouponService.list_available_vouchers(db, customer.id, store_id=store_id)
     return success({"items": items}, request=request)
 
 

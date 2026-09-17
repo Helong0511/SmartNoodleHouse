@@ -56,6 +56,28 @@ def register_tasks(scheduler) -> None:
 
     @scheduler.scheduled_job("interval", minutes=1)
     @_leader_job
+    async def auto_open_close_delivery_stores():
+        # 外卖门店按本地营业时间自动开/关店（仅 auto_sync_open=true 的绑定）
+        async with AsyncSessionLocal() as db:
+            from app.services.store_hours_service import StoreHoursService
+
+            stats = await StoreHoursService.apply_auto_open_tick(db)
+            if stats["opened"] or stats["closed"]:
+                logger.info("外卖自动开关店: %s", stats)
+
+    @scheduler.scheduled_job("interval", minutes=5)
+    @_leader_job
+    async def delivery_stock_reconcile():
+        # 外卖库存定时对账：以本地门店库存覆盖推送各平台，纠正任何漂移（最终一致）
+        async with AsyncSessionLocal() as db:
+            from app.services.product_sync_service import ProductSyncService
+
+            res = await ProductSyncService.reconcile_stock(db)
+            if res.get("failures"):
+                logger.warning("外卖库存对账存在失败: %s", res)
+
+    @scheduler.scheduled_job("interval", minutes=1)
+    @_leader_job
     async def close_expired_orders():
         async with AsyncSessionLocal() as db:
             from app.services.order_lifecycle import apply_order_status

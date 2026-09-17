@@ -843,6 +843,9 @@ CREATE TABLE IF NOT EXISTS platform_store_bindings (
   token_expires_at DATETIME(3) DEFAULT NULL COMMENT 'token 过期时间',
   extra_config JSON DEFAULT NULL COMMENT '扩展配置（app_key、回调地址等）',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '1=已绑定 0=已解绑',
+  auto_sync_open TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否按营业时间自动开/关店（默认关闭，逐店开启）',
+  platform_open_status VARCHAR(20) DEFAULT NULL COMMENT '最近同步到平台的营业状态 OPEN/REST/OFFLINE',
+  last_sync_at DATETIME(3) DEFAULT NULL COMMENT '最近一次与平台同步时间',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   UNIQUE KEY uk_store_platform_shop (store_id, platform, platform_shop_id),
@@ -880,6 +883,53 @@ CREATE TABLE IF NOT EXISTS delivery_callback_logs (
   INDEX idx_dcl_platform_order (platform, platform_order_id, created_at),
   INDEX idx_dcl_event (event_type, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外卖回调审计日志表';
+
+CREATE TABLE IF NOT EXISTS store_business_hours (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  weekday TINYINT NOT NULL COMMENT '星期几：1=周一 ... 7=周日',
+  slot_index INT NOT NULL DEFAULT 0 COMMENT '当日第几时段，从 0 开始',
+  open_time TIME NOT NULL COMMENT '营业开始时间',
+  close_time TIME NOT NULL COMMENT '营业结束时间（<=开始时间视为跨午夜）',
+  cross_day TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否跨午夜',
+  is_open TINYINT(1) NOT NULL DEFAULT 1 COMMENT '该时段是否营业',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  UNIQUE KEY uk_sbh_store_day_slot (store_id, weekday, slot_index),
+  INDEX idx_sbh_store (store_id),
+  CONSTRAINT fk_sbh_store FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='门店营业时间（多时段/跨午夜）';
+
+CREATE TABLE IF NOT EXISTS platform_category_maps (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '门店 → stores.id；NULL=总部默认映射',
+  platform VARCHAR(20) NOT NULL COMMENT 'MEITUAN | ELEME',
+  local_category_id BIGINT UNSIGNED NOT NULL COMMENT '本地分类 → product_categories.id',
+  platform_category_code VARCHAR(64) DEFAULT NULL COMMENT '平台侧分类编码',
+  platform_category_name VARCHAR(100) DEFAULT NULL COMMENT '平台侧分类名称',
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  UNIQUE KEY uk_pcm_store_platform_cat (store_id, platform, local_category_id),
+  INDEX idx_pcm_platform (platform, status),
+  CONSTRAINT fk_pcm_store FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pcm_cat FOREIGN KEY (local_category_id) REFERENCES product_categories(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='本地分类 ↔ 外卖平台分类映射';
+
+CREATE TABLE IF NOT EXISTS delivery_sync_alerts (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
+  store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '关联门店 stores.id（可空）',
+  platform VARCHAR(20) DEFAULT NULL COMMENT 'MEITUAN | ELEME',
+  alert_type VARCHAR(30) NOT NULL DEFAULT 'SYNC_FAIL' COMMENT 'REJECT_ORDER=库存拒单 | SYNC_FAIL=同步失败',
+  title VARCHAR(200) NOT NULL COMMENT '告警标题',
+  detail TEXT DEFAULT NULL COMMENT '告警详情/原因',
+  platform_order_id VARCHAR(64) DEFAULT NULL COMMENT '关联平台订单号',
+  resolved TINYINT NOT NULL DEFAULT 0 COMMENT '0=未处理 1=已处理',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '产生时间',
+  resolved_at DATETIME(3) DEFAULT NULL COMMENT '处理时间',
+  INDEX idx_dsa_store_resolved (store_id, resolved, created_at),
+  INDEX idx_dsa_platform_order (platform_order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外卖同步/拒单告警';
 
 -- ============================================================================
 -- 七、摄像头 / 客流 / 人脸迎宾

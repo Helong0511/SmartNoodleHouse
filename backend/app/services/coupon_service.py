@@ -431,7 +431,7 @@ class CouponService:
 
     @staticmethod
     async def _list_available_filtered(
-        db: AsyncSession, customer_id: int, *, voucher_only: bool
+        db: AsyncSession, customer_id: int, *, voucher_only: bool, store_id: int | None = None
     ) -> list[dict]:
         now = naive_local_now()
         q = (
@@ -453,16 +453,21 @@ class CouponService:
                 continue
             if not voucher_only and is_voucher:
                 continue
+            # 门店隔离：有 issued_at_store_id 的券仅在本店可见
+            if store_id is not None:
+                issued_store = getattr(cc, "issued_at_store_id", None)
+                if issued_store is not None and int(issued_store) != int(store_id):
+                    continue
             items.append(CouponService._hold_payload(cc, tmpl))
         return items
 
     @staticmethod
-    async def list_available(db: AsyncSession, customer_id: int) -> list[dict]:
-        return await CouponService._list_available_filtered(db, customer_id, voucher_only=False)
+    async def list_available(db: AsyncSession, customer_id: int, *, store_id: int | None = None) -> list[dict]:
+        return await CouponService._list_available_filtered(db, customer_id, voucher_only=False, store_id=store_id)
 
     @staticmethod
-    async def list_available_vouchers(db: AsyncSession, customer_id: int) -> list[dict]:
-        return await CouponService._list_available_filtered(db, customer_id, voucher_only=True)
+    async def list_available_vouchers(db: AsyncSession, customer_id: int, *, store_id: int | None = None) -> list[dict]:
+        return await CouponService._list_available_filtered(db, customer_id, voucher_only=True, store_id=store_id)
 
     @staticmethod
     async def issue_from_template(

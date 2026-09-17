@@ -98,6 +98,40 @@ class DeliveryProvider(ABC):
         logger.info("[%s] 取消订单 order=%s reason=%s", self.platform, platform_order_id, reason)
         return True
 
+    # ── 菜单 / 库存 / 营业状态（步骤1：基类默认 mock；步骤2：平台子类真实实现）──
+
+    async def batch_sync_products(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+        """批量创建/更新菜品。返回 {"ok": n, "fail": n, "errors": [...]}。"""
+        logger.info("[%s mock] batch_sync_products count=%s", self.platform, len(payloads))
+        return {"ok": len(payloads), "fail": 0, "errors": []}
+
+    async def set_sell_status(self, items: list[dict[str, Any]], on_shelf: bool) -> int:
+        """批量上架/下架。items: [{"app_food_code", "platform_sku_id"?}]。返回成功条数。"""
+        logger.info("[%s mock] set_sell_status on_shelf=%s count=%s", self.platform, on_shelf, len(items))
+        return len(items)
+
+    async def set_sku_stock(self, items: list[dict[str, Any]]) -> int:
+        """绝对覆盖 SKU 库存（售罄置0 / 对账主用）。items: [{"app_food_code","stock"}]。"""
+        logger.info("[%s mock] set_sku_stock count=%s", self.platform, len(items))
+        return len(items)
+
+    async def inc_stock(self, items: list[dict[str, Any]]) -> int:
+        """原子增加库存 items: [{"app_food_code","qty"}]。"""
+        logger.info("[%s mock] inc_stock count=%s", self.platform, len(items))
+        return len(items)
+
+    async def dec_stock(self, items: list[dict[str, Any]]) -> int:
+        """原子扣减库存 items: [{"app_food_code","qty"}]。"""
+        logger.info("[%s mock] dec_stock count=%s", self.platform, len(items))
+        return len(items)
+
+    async def set_store_open_status(self, open_status: str, shipping_time: str | None = None) -> bool:
+        """同步门店营业状态。open_status: OPEN(营业)/REST(休息)/OFFLINE(下线)；shipping_time 营业时间串。"""
+        logger.info(
+            "[%s mock] set_store_open_status status=%s hours=%s", self.platform, open_status, shipping_time
+        )
+        return True
+
 
 class MeituanProvider(DeliveryProvider):
     """美团外卖开放平台 waimaiopen"""
@@ -335,6 +369,106 @@ class MeituanProvider(DeliveryProvider):
                 ok += 1
         return ok
 
+    # ── 步骤2：批量 / 上下架 / 原子库存 / 门店营业状态（官方 food/batchinitdata 等）──
+
+    async def batch_sync_products(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+        if not payloads:
+            return {"ok": 0, "fail": 0, "errors": []}
+        food_data = [
+            {
+                "app_food_code": p["app_food_code"],
+                "category_name": p.get("category_name") or "默认分类",
+                "name": p["name"],
+                "description": p.get("description", ""),
+                "price": p["price"],
+                "is_sold_out": 0,
+                "min_order_count": p.get("min_order_count", 1) or 1,
+                "unit": "份",
+                "box_price": str(p.get("box_price", 0) or 0),
+                "picture": p.get("picture", ""),
+                "skus": p.get("skus")
+                or [
+                    {
+                        "sku_id": p["app_food_code"],
+                        "spec": "默认",
+                        "price": p["price"],
+                        "stock": p.get("stock", 9999),
+                    }
+                ],
+            }
+            for p in payloads
+        ]
+        data = await self._request(
+            "/api/v1/food/batchinitdata",
+            {"food_data": json.dumps(food_data, ensure_ascii=False)},
+            method="POST",
+        )
+        if _ok_or_mock(data, ok_expr=data.get("data") == "ok"):
+            return {"ok": len(food_data), "fail": 0, "errors": []}
+        return {"ok": 0, "fail": len(food_data), "errors": [str(data.get("error"))]}
+
+    async def set_sell_status(self, items: list[dict[str, Any]], on_shelf: bool) -> int:
+        # 官方 food/sku/sellStatus：sell_status 1=下架，0=上架
+        food_data = [
+            {
+                "app_food_code": it["app_food_code"],
+                "skus": [{"sku_id": it.get("platform_sku_id") or it["app_food_code"]}],
+            }
+            for it in items
+        ]
+        data = await self._request(
+            "/api/v1/food/sku/sellStatus",
+            {
+                "sell_status": 0 if on_shelf else 1,
+                "food_data": json.dumps(food_data, ensure_ascii=False),
+            },
+            method="POST",
+        )
+        return len(items) if _ok_or_mock(data, ok_expr=data.get("data") == "ok") else 0
+
+    async def set_sku_stock(self, items: list[dict[str, Any]]) -> int:
+        # 售罄置0 / 定时对账主路径：绝对覆盖，复用已验证的 updateStock
+        return await self.sync_stock(items)
+
+    async def _adjust_stock(self, items: list[dict[str, Any]], path: str) -> int:
+        # 原子增减（预留）。注意：官方 inc_stock/desc_stock 数量字段名以真机文档为准，此处用 count。
+        ok = 0
+        for it in items:
+            qty = int(it.get("qty") or it.get("stock") or 0)
+            if qty <= 0:
+                continue
+            data = await self._request(
+                path,
+                {
+                    "app_food_code": it["app_food_code"],
+                    "sku_id": it.get("platform_sku_id") or it["app_food_code"],
+                    "count": qty,
+                },
+            )
+            if _ok_or_mock(data, ok_expr=data.get("data") == "ok"):
+                ok += 1
+        return ok
+
+    async def inc_stock(self, items: list[dict[str, Any]]) -> int:
+        return await self._adjust_stock(items, "/api/v1/food/sku/inc_stock")
+
+    async def dec_stock(self, items: list[dict[str, Any]]) -> int:
+        return await self._adjust_stock(items, "/api/v1/food/sku/desc_stock")
+
+    async def set_store_open_status(self, open_status: str, shipping_time: str | None = None) -> bool:
+        # OPEN→poi/online；OFFLINE→poi/offline（只需 app_poi_code，_request 自动注入）。
+        # REST→poi/save open_level=3；真实环境 poi/save 为全量字段，必要时先 poi/mget 回写（联调点）。
+        if open_status == "OPEN":
+            data = await self._request("/api/v1/poi/online", {}, method="POST")
+        elif open_status == "OFFLINE":
+            data = await self._request("/api/v1/poi/offline", {}, method="POST")
+        else:
+            biz: dict[str, Any] = {"open_level": 3}
+            if shipping_time:
+                biz["shipping_time"] = shipping_time
+            data = await self._request("/api/v1/poi/save", biz, method="POST")
+        return _ok_or_mock(data, ok_expr=data.get("data") == "ok")
+
 
 class ElemeProvider(DeliveryProvider):
     """饿了么商家开放平台 open-api.shop.ele.me（JSON-RPC）"""
@@ -548,6 +682,53 @@ class ElemeProvider(DeliveryProvider):
             "eleme.order.cancelOrderLite",
             {"orderId": platform_order_id, "reason": reason, "type": "restaurantClose"},
         )
+        return _ok_or_mock(data, ok_expr=data.get("error") is None)
+
+    # ── 步骤2：批量 / 上下架 / 库存 / 门店开关 ──
+
+    async def batch_sync_products(self, payloads: list[dict[str, Any]]) -> dict[str, Any]:
+        # 饿了么餐饮无批量建档接口，逐个 createItem，聚合结果
+        ok = 0
+        errors: list[str] = []
+        for p in payloads:
+            res = await self.sync_product(p)
+            if res.get("ok"):
+                ok += 1
+            else:
+                errors.append(str(res.get("error")))
+        return {"ok": ok, "fail": len(payloads) - ok, "errors": errors}
+
+    async def set_sell_status(self, items: list[dict[str, Any]], on_shelf: bool) -> int:
+        action = "eleme.product.item.onShelf" if on_shelf else "eleme.product.item.offShelf"
+        ok = 0
+        for it in items:
+            data = await self._rpc(action, {"itemId": it.get("platform_sku_id") or it.get("app_food_code")})
+            if _ok_or_mock(data, ok_expr=data.get("error") is None):
+                ok += 1
+        return ok
+
+    async def set_sku_stock(self, items: list[dict[str, Any]]) -> int:
+        # 饿了么仅支持绝对库存覆盖
+        return await self.sync_stock(items)
+
+    async def inc_stock(self, items: list[dict[str, Any]]) -> int:
+        logger.warning("饿了么不支持原子增减库存，统一走 set_sku_stock 绝对覆盖")
+        return 0
+
+    async def dec_stock(self, items: list[dict[str, Any]]) -> int:
+        logger.warning("饿了么不支持原子增减库存，统一走 set_sku_stock 绝对覆盖")
+        return 0
+
+    async def set_store_open_status(self, open_status: str, shipping_time: str | None = None) -> bool:
+        # 饿了么餐饮：openShop / closeShop（休息与下线均为闭店）。
+        # 营业时间需通过 eleme.shop.updateShop 维护，字段随门店类型不同（联调点），此处仅在开店时附带日志。
+        shop_id = self.credentials.platform_shop_id
+        if open_status == "OPEN":
+            data = await self._rpc("eleme.shop.openShop", {"shopId": shop_id})
+        else:
+            if shipping_time:
+                logger.info("[ELEME] 营业时间更新需 updateShop 联调，shipping_time=%s", shipping_time)
+            data = await self._rpc("eleme.shop.closeShop", {"shopId": shop_id})
         return _ok_or_mock(data, ok_expr=data.get("error") is None)
 
 

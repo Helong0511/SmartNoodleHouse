@@ -95,9 +95,10 @@
         </template>
       </el-table-column>
       <el-table-column prop="sort_order" label="排序" width="70" />
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openForm(row)">编辑</el-button>
+          <el-button link type="success" @click="openPushDialog(row)">推送外卖</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -296,6 +297,41 @@
       show-product-conflict
       @done="load"
     />
+
+    <!-- 推送外卖弹窗 -->
+    <el-dialog v-model="pushDialog" title="推送商品到外卖平台" width="480px" destroy-on-close>
+      <div v-if="!pushPlatforms.length" class="hint" style="text-align:center;padding:20px 0">
+        当前门店尚未绑定任何外卖平台，请先到「外卖 → 门店与营业」绑定。
+      </div>
+      <div v-else>
+        <div style="margin-bottom:12px">
+          <span class="hint">商品：</span>
+          <span style="font-weight:600">{{ pushProduct?.name }}</span>
+          <span class="hint" style="margin-left:12px">门店：</span>
+          <span>{{ pushStoreName }}</span>
+        </div>
+        <el-checkbox-group v-model="pushSelected">
+          <div v-for="b in pushPlatforms" :key="b.id" style="margin:8px 0">
+            <el-checkbox :label="b.platform">
+              <span>{{ platformLabel(b.platform) }}</span>
+              <span class="hint" style="margin-left:8px">{{ b.platform_shop_name || b.platform_shop_id }}</span>
+            </el-checkbox>
+          </div>
+        </el-checkbox-group>
+        <div style="margin-top:8px">
+          <el-checkbox v-model="pushSelectAll" @change="onSelectAll">全选</el-checkbox>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="pushDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="pushing"
+          :disabled="!pushSelected.length"
+          @click="doPush"
+        >推送</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -830,6 +866,66 @@ async function remove(row: any) {
       ElMessage.error(e.message || '删除失败')
     }
   }
+}
+
+// ── 推送外卖 ──
+const pushDialog = ref(false)
+const pushProduct = ref<any>(null)
+const pushPlatforms = ref<any[]>([])
+const pushSelected = ref<string[]>([])
+const pushSelectAll = ref(false)
+const pushing = ref(false)
+
+const pushStoreId = computed(() => pushProduct.value?.store_id || effectiveListStoreId.value)
+const pushStoreName = computed(() => {
+  const s = stores.value.find((x) => x.id === pushStoreId.value)
+  return s?.name || (pushStoreId.value ? `门店#${pushStoreId.value}` : '—')
+})
+
+function platformLabel(p: string) {
+  return p === 'MEITUAN' ? '美团' : p === 'ELEME' ? '饿了么' : p
+}
+
+function onSelectAll(val: any) {
+  pushSelected.value = val ? pushPlatforms.value.map((b) => b.platform) : []
+}
+
+async function openPushDialog(row: any) {
+  pushProduct.value = row
+  pushSelected.value = []
+  pushSelectAll.value = false
+  pushDialog.value = true
+  try {
+    const res = await api.get('/delivery/store-bindings', { params: { store_id: pushStoreId.value } })
+    pushPlatforms.value = (res.data?.items || res.data || []).filter((b: any) => b.status === 1)
+  } catch {
+    pushPlatforms.value = []
+  }
+}
+
+async function doPush() {
+  pushing.value = true
+  const results: string[] = []
+  for (const p of pushSelected.value) {
+    try {
+      const res = await api.post('/delivery/sync/product', {
+        store_id: pushStoreId.value,
+        platform: p,
+        product_id: pushProduct.value.id,
+      })
+      if (res.data?.ok) {
+        results.push(`${platformLabel(p)}：成功`)
+      } else {
+        results.push(`${platformLabel(p)}：${res.data?.error || res.data?.message || '失败'}`)
+      }
+    } catch (e: any) {
+      results.push(`${platformLabel(p)}：${e.message || '请求失败'}`)
+    }
+  }
+  pushing.value = false
+  pushDialog.value = false
+  const allOk = results.every((r) => r.includes('成功'))
+  ElMessage[allOk ? 'success' : 'warning'](results.join('；'))
 }
 
 onMounted(async () => {

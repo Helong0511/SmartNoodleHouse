@@ -39,7 +39,7 @@ Page({
     showDevTips: false,
     debugInfo: '',
     nicknameReviewFail: false,
-    memberText: '开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。不影响先点餐。'
+    memberText: '开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。随时可在「我的」页开通，不影响点餐。'
   },
 
   buildDebugInfo(extra) {
@@ -132,6 +132,16 @@ Page({
         } catch (_) {
           this.setData({ hasTable: false, table: null })
         }
+      }
+      // 会员引导文案以后端 /miniprogram/entry 下发为准，与支付宝端保持一致
+      const promptCtx = dineCtx.currentDisplay()
+      if (promptCtx.table) {
+        try {
+          const entry = await api.get('/miniprogram/entry', { token: promptCtx.table.qr_token || token, channel: 'wechat' }, false)
+          if (entry && entry.prompts) {
+            this.setData({ memberText: entry.prompts.member_consent_text })
+          }
+        } catch (_) {}
       }
       let login = null
       try {

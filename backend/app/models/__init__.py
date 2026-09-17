@@ -668,6 +668,73 @@ class PlatformStoreBinding(Base, TimestampMixin):
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     extra_config: Mapped[str | None] = mapped_column(Text)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    # 自动开/关店开关：默认关闭，需逐门店显式开启，避免上线即影响真实营业
+    auto_sync_open: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 最后一次同步到平台的营业状态：OPEN(营业)/REST(休息)/OFFLINE(下线)
+    platform_open_status: Mapped[str | None] = mapped_column(String(20), default=None)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class StoreBusinessHours(Base, TimestampMixin):
+    """门店营业时间：每个 (门店, 星期几, 时段序号) 一行。
+
+    close_time <= open_time 视为跨午夜（cross_day=True）。
+    某天没有任何 is_open=1 的行，即当日整体休息。
+    """
+
+    __tablename__ = "store_business_hours"
+    __table_args__ = (UniqueConstraint("store_id", "weekday", "slot_index", name="uk_sbh_store_day_slot"),)
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"))
+    weekday: Mapped[int] = mapped_column(Integer, comment="1=周一 ... 7=周日")
+    slot_index: Mapped[int] = mapped_column(Integer, default=0, comment="当日第几时段，从0开始")
+    open_time: Mapped[datetime] = mapped_column(Time)
+    close_time: Mapped[datetime] = mapped_column(Time)
+    cross_day: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否跨午夜")
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PlatformCategoryMap(Base, TimestampMixin):
+    """本地商品分类 ↔ 外卖平台分类映射。store_id=NULL 表示总部默认映射。"""
+
+    __tablename__ = "platform_category_maps"
+    __table_args__ = (
+        UniqueConstraint("store_id", "platform", "local_category_id", name="uk_pcm_store_platform_cat"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    store_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("stores.id", ondelete="CASCADE"), default=None, comment="NULL=总部默认"
+    )
+    platform: Mapped[str] = mapped_column(String(20))
+    local_category_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product_categories.id", ondelete="CASCADE"))
+    platform_category_code: Mapped[str | None] = mapped_column(String(64), default=None)
+    platform_category_name: Mapped[str | None] = mapped_column(String(100), default=None)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class DeliverySyncAlert(Base):
+    """外卖同步告警：拒单（库存不足）、平台同步失败等，供监控页展示。"""
+
+    __tablename__ = "delivery_sync_alerts"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    store_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    platform: Mapped[str | None] = mapped_column(String(20), default=None)
+    alert_type: Mapped[str] = mapped_column(String(30), default="SYNC_FAIL")
+    title: Mapped[str] = mapped_column(String(200))
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    platform_order_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    resolved: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class DeliveryRefund(Base):

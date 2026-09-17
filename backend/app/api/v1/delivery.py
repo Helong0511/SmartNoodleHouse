@@ -9,7 +9,17 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.response import success
-from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryProductMap, DeliveryRefund, PlatformStoreBinding, Product
+from app.models import (
+    DeliveryCallbackLog,
+    DeliveryOrder,
+    DeliveryProductMap,
+    DeliveryRefund,
+    DeliverySyncAlert,
+    PlatformCategoryMap,
+    PlatformStoreBinding,
+    Product,
+    ProductCategory,
+)
 from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
 from app.services.delivery_tasks import run_deferred_tasks
@@ -696,6 +706,12 @@ async def refresh_store_binding_token(
     )
 
 
+class SingleProductSyncPayload(BaseModel):
+    store_id: int | None = None
+    platform: str
+    product_id: int
+
+
 @router.post("/sync/menu", dependencies=[require_permission("product:update")])
 async def sync_menu(
     request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None, platform: str = "MEITUAN"
@@ -709,6 +725,23 @@ async def sync_menu(
         raise HTTPException(status_code=400, detail="缺少门店")
     assert_store_access(user, sid)
     result = await ProductSyncService.sync_store_menu(db, int(sid), platform)
+    return success(result, request=request)
+
+
+@router.post("/sync/product", dependencies=[require_permission("product:update")])
+async def sync_single_product(
+    data: SingleProductSyncPayload, request: Request, db: DbSession, user: CurrentUser
+):
+    """推送单个商品到指定外卖平台。"""
+    from app.services.store_scope import assert_store_access, require_bound_store
+
+    sid = require_bound_store(user, data.store_id)
+    if sid is None:
+        sid = int(user.store_id) if user.store_id else None
+    if not sid:
+        raise HTTPException(status_code=400, detail="缺少门店")
+    assert_store_access(user, sid)
+    result = await ProductSyncService.sync_single_product(db, int(sid), data.platform, data.product_id)
     return success(result, request=request)
 
 
@@ -860,3 +893,365 @@ async def create_product_map(data: ProductMapCreate, request: Request, db: DbSes
     db.add(row)
     await db.flush()
     return success({"id": row.id, "updated": False}, request=request)
+
+
+# ═════════════════════ 外卖管理重构：营业 / 菜单 / 监控 ═════════════════════
+
+class HoursSlot(BaseModel):
+    open_time: str = Field(description="HH:MM")
+    close_time: str = Field(description="HH:MM")
+    cross_day: bool = False
+
+
+class HoursDay(BaseModel):
+    weekday: int = Field(ge=1, le=7, description="1=周一 ... 7=周日")
+    is_open: bool = True
+    slots: list[HoursSlot] = []
+
+
+class HoursPayload(BaseModel):
+    days: list[HoursDay]
+
+
+class AutoSyncOpenPayload(BaseModel):
+    auto_sync_open: bool
+
+
+class StoreOpenPayload(BaseModel):
+    platform: str | None = None
+
+
+class ShelfPayload(BaseModel):
+    store_id: int
+    platform: str
+    on_shelf: bool
+    product_ids: list[int] | None = None
+
+
+class ReconcilePayload(BaseModel):
+    store_id: int | None = None
+    platform: str | None = None
+
+
+class CategoryMapPayload(BaseModel):
+    platform: str
+    local_category_id: int
+    platform_category_code: str | None = None
+    platform_category_name: str | None = None
+    store_id: int | None = None
+
+
+@router.get("/stores/{store_id}/business-hours", dependencies=[require_permission("product:read")])
+async def get_business_hours(store_id: int, request: Request, db: DbSession, user: CurrentUser):
+    """读取门店一周营业时间。"""
+    from app.services.store_hours_service import StoreHoursService
+    from app.services.store_scope import assert_store_access
+
+    assert_store_access(user, store_id)
+    days = await StoreHoursService.get_hours_payload(db, store_id)
+    return success({"store_id": store_id, "days": days}, request=request)
+
+
+@router.put("/stores/{store_id}/business-hours", dependencies=[require_permission("product:update")])
+async def set_business_hours(store_id: int, data: HoursPayload, request: Request, db: DbSession, user: CurrentUser):
+    """全量覆盖门店一周营业时间（is_open=false 或无 slots = 当天休息）。"""
+    from app.services.store_hours_service import StoreHoursService
+    from app.services.store_scope import assert_store_access
+
+    assert_store_access(user, store_id)
+    try:
+        days = await StoreHoursService.set_hours(db, store_id, [d.model_dump() for d in data.days])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return success({"store_id": store_id, "days": days}, request=request)
+
+
+async def _change_store_open_status(db, user, store_id: int, open_status: str, platform: str | None):
+    from app.core.response import naive_local_now
+    from app.services.delivery_context import get_credentials_for_store
+    from app.services.delivery_providers import get_delivery_provider
+    from app.services.store_hours_service import StoreHoursService, _python_weekday, shipping_time_for_day
+    from app.services.store_scope import assert_store_access
+
+    assert_store_access(user, store_id)
+    stmt = select(PlatformStoreBinding).where(
+        PlatformStoreBinding.store_id == store_id,
+        PlatformStoreBinding.status == 1,
+    )
+    if platform:
+        stmt = stmt.where(PlatformStoreBinding.platform == platform.upper())
+    bindings = list((await db.execute(stmt)).scalars().all())
+    if not bindings:
+        raise HTTPException(status_code=400, detail="该门店没有已启用的平台绑定")
+
+    now = naive_local_now()
+    rows = await StoreHoursService.list_hours(db, store_id)
+    shipping = shipping_time_for_day(rows, _python_weekday(now)) if open_status == "REST" else None
+
+    results = []
+    for b in bindings:
+        try:
+            creds = await get_credentials_for_store(db, b.platform, store_id)
+            provider = get_delivery_provider(b.platform, creds)
+            ok = await provider.set_store_open_status(open_status, shipping)
+        except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            b.platform_open_status = open_status
+            b.last_sync_at = now
+        results.append({"platform": b.platform, "ok": ok})
+    await db.commit()
+    return results
+
+
+@router.post("/stores/{store_id}/open", dependencies=[require_permission("product:update")])
+async def open_delivery_store(store_id: int, data: StoreOpenPayload, request: Request, db: DbSession, user: CurrentUser):
+    """手动开店（平台上线营业）。"""
+    results = await _change_store_open_status(db, user, store_id, "OPEN", data.platform)
+    return success({"store_id": store_id, "results": results}, request=request)
+
+
+@router.post("/stores/{store_id}/close", dependencies=[require_permission("product:update")])
+async def close_delivery_store(store_id: int, data: StoreOpenPayload, request: Request, db: DbSession, user: CurrentUser):
+    """手动关店（商家休息/暂停接单）。"""
+    results = await _change_store_open_status(db, user, store_id, "REST", data.platform)
+    return success({"store_id": store_id, "results": results}, request=request)
+
+
+@router.patch(
+    "/store-bindings/{binding_id}/auto-sync-open",
+    dependencies=[require_permission("product:update")],
+)
+async def set_binding_auto_sync(
+    binding_id: int, data: AutoSyncOpenPayload, request: Request, db: DbSession, user: CurrentUser
+):
+    """开启/关闭该绑定的按营业时间自动开/关店（默认关闭）。"""
+    from app.services.store_scope import assert_store_access
+
+    row = await db.get(PlatformStoreBinding, binding_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="绑定不存在")
+    assert_store_access(user, row.store_id)
+    row.auto_sync_open = bool(data.auto_sync_open)
+    await db.flush()
+    return success({"id": row.id, "auto_sync_open": row.auto_sync_open}, request=request)
+
+
+@router.post("/sync/menu-batch", dependencies=[require_permission("product:update")])
+async def sync_menu_batch(
+    request: Request, db: DbSession, user: CurrentUser, store_id: int, platform: str = "MEITUAN"
+):
+    """批量推送门店菜单到平台（建档/更新），语义同 /sync/menu。"""
+    from app.services.store_scope import assert_store_access
+
+    assert_store_access(user, store_id)
+    result = await ProductSyncService.sync_store_menu(db, store_id, platform)
+    return success(result, request=request)
+
+
+@router.post("/sync/shelf", dependencies=[require_permission("product:update")])
+async def sync_shelf(data: ShelfPayload, request: Request, db: DbSession, user: CurrentUser):
+    """外卖平台侧批量上架/下架（不影响本地堂食）。"""
+    from app.services.store_scope import assert_store_access
+
+    assert_store_access(user, data.store_id)
+    result = await ProductSyncService.set_shelf(
+        db, data.store_id, data.platform, data.on_shelf, data.product_ids
+    )
+    return success(result, request=request)
+
+
+@router.post("/sync/reconcile", dependencies=[require_permission("product:update")])
+async def sync_reconcile(data: ReconcilePayload, request: Request, db: DbSession, user: CurrentUser):
+    """手动触发库存对账：本地库存覆盖推送平台。"""
+    from app.services.store_scope import assert_store_access
+
+    sid = data.store_id
+    if sid:
+        assert_store_access(user, sid)
+    elif getattr(user, "store_id", None):
+        sid = int(user.store_id)
+    result = await ProductSyncService.reconcile_stock(db, sid, data.platform)
+    return success(result, request=request)
+
+
+@router.get("/category-maps", dependencies=[require_permission("product:read")])
+async def list_category_maps(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+    platform: str | None = None,
+):
+    """平台分类映射列表（含本地分类名）。"""
+    sid = store_id
+    if sid is None and getattr(user, "store_id", None):
+        sid = int(user.store_id)
+    rows = await ProductSyncService.list_category_maps(db, sid, platform)
+    cat_ids = list({r.local_category_id for r in rows})
+    cat_names = {
+        cid: name
+        for cid, name in (
+            await db.execute(
+                select(ProductCategory.id, ProductCategory.name).where(ProductCategory.id.in_(cat_ids or [-1]))
+            )
+        ).all()
+    }
+    items = [
+        {
+            "id": r.id,
+            "store_id": r.store_id,
+            "platform": r.platform,
+            "local_category_id": r.local_category_id,
+            "local_category_name": cat_names.get(r.local_category_id),
+            "platform_category_code": r.platform_category_code,
+            "platform_category_name": r.platform_category_name,
+            "status": r.status,
+        }
+        for r in rows
+    ]
+    return success({"items": items, "total": len(items)}, request=request)
+
+
+@router.post("/category-maps", dependencies=[require_permission("product:update")])
+async def create_category_map(data: CategoryMapPayload, request: Request, db: DbSession, user: CurrentUser):
+    """新增/更新平台分类映射（store_id 留空=总部默认）。"""
+    from app.services.store_scope import assert_store_access
+
+    if data.store_id:
+        assert_store_access(user, data.store_id)
+    if not await db.get(ProductCategory, data.local_category_id):
+        raise HTTPException(status_code=400, detail="本地分类不存在")
+    row = await ProductSyncService.upsert_category_map(
+        db,
+        platform=data.platform,
+        local_category_id=data.local_category_id,
+        platform_category_code=data.platform_category_code,
+        platform_category_name=data.platform_category_name,
+        store_id=data.store_id,
+    )
+    await db.commit()
+    return success({"id": row.id}, request=request)
+
+
+@router.delete("/category-maps/{map_id}", dependencies=[require_permission("product:update")])
+async def delete_category_map(map_id: int, request: Request, db: DbSession, user: CurrentUser):
+    from app.services.store_scope import assert_store_access
+
+    row = await db.get(PlatformCategoryMap, map_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="映射不存在")
+    if row.store_id:
+        assert_store_access(user, row.store_id)
+    ok = await ProductSyncService.delete_category_map(db, map_id)
+    await db.commit()
+    return success({"id": map_id, "deleted": ok}, request=request)
+
+
+@router.get("/sync-alerts", dependencies=[require_permission("product:read")])
+async def list_sync_alerts(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    platform: str | None = None,
+    resolved: int | None = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """外卖同步/拒单告警列表。"""
+    from sqlalchemy import func
+
+    from app.core.response import calc_pages
+
+    page = max(1, int(page or 1))
+    page_size = min(max(1, int(page_size or 50)), 200)
+    q = select(DeliverySyncAlert)
+    if getattr(user, "store_id", None):
+        q = q.where(DeliverySyncAlert.store_id == int(user.store_id))
+    if platform:
+        q = q.where(DeliverySyncAlert.platform == platform.upper())
+    if resolved is not None:
+        q = q.where(DeliverySyncAlert.resolved == int(resolved))
+    total = int(await db.scalar(select(func.count()).select_from(q.subquery())) or 0)
+    rows = list(
+        (
+            await db.execute(
+                q.order_by(DeliverySyncAlert.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    items = [
+        {
+            "id": r.id,
+            "store_id": r.store_id,
+            "platform": r.platform,
+            "alert_type": r.alert_type,
+            "title": r.title,
+            "detail": r.detail,
+            "platform_order_id": r.platform_order_id,
+            "resolved": r.resolved,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+        }
+        for r in rows
+    ]
+    return success(
+        {"items": items, "total": total, "page": page, "page_size": page_size,
+         "total_pages": calc_pages(total, page_size)},
+        request=request,
+    )
+
+
+@router.post("/sync-alerts/{alert_id}/resolve", dependencies=[require_permission("product:update")])
+async def resolve_sync_alert(alert_id: int, request: Request, db: DbSession, user: CurrentUser):
+    from app.core.response import naive_local_now
+
+    row = await db.get(DeliverySyncAlert, alert_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="告警不存在")
+    if row.store_id:
+        from app.services.store_scope import assert_store_access
+
+        assert_store_access(user, row.store_id)
+    row.resolved = 1
+    row.resolved_at = naive_local_now()
+    await db.flush()
+    return success({"id": row.id, "resolved": 1}, request=request)
+
+
+@router.get("/sync/overview", dependencies=[require_permission("product:read")])
+async def sync_overview(request: Request, db: DbSession, user: CurrentUser):
+    """同步监控总览：各平台绑定状态 + 未解决告警数。"""
+    from sqlalchemy import func
+
+    q = select(PlatformStoreBinding)
+    if getattr(user, "store_id", None):
+        q = q.where(PlatformStoreBinding.store_id == int(user.store_id))
+    bindings = list((await db.execute(q.order_by(PlatformStoreBinding.id.desc()))).scalars().all())
+
+    unresolved_q = select(func.count()).select_from(DeliverySyncAlert).where(DeliverySyncAlert.resolved == 0)
+    if getattr(user, "store_id", None):
+        unresolved_q = unresolved_q.where(DeliverySyncAlert.store_id == int(user.store_id))
+    unresolved = int(await db.scalar(unresolved_q) or 0)
+
+    items = [
+        {
+            "binding_id": b.id,
+            "store_id": b.store_id,
+            "platform": b.platform,
+            "platform_shop_id": b.platform_shop_id,
+            "platform_shop_name": b.platform_shop_name,
+            "status": b.status,
+            "has_token": bool(b.access_token),
+            "token_expires_at": b.token_expires_at.isoformat() if b.token_expires_at else None,
+            "auto_sync_open": bool(b.auto_sync_open),
+            "platform_open_status": b.platform_open_status,
+            "last_sync_at": b.last_sync_at.isoformat() if b.last_sync_at else None,
+        }
+        for b in bindings
+    ]
+    return success({"bindings": items, "unresolved_alerts": unresolved}, request=request)

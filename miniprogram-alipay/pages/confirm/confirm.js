@@ -410,7 +410,7 @@ Page({
   async loadCoupons() {
     try {
       await auth.ensureLogin()
-      const res = await api.get('/miniprogram/coupons/mine')
+      const res = await api.get('/miniprogram/coupons/mine', { store_id: this.submitStoreId() })
       const items = (res && res.items) || []
       this.setData({
         coupons: items,
@@ -423,7 +423,7 @@ Page({
   async loadVouchers() {
     try {
       await auth.ensureLogin()
-      const res = await api.get('/miniprogram/vouchers/mine')
+      const res = await api.get('/miniprogram/vouchers/mine', { store_id: this.submitStoreId() })
       const items = (res && res.items) || []
       this.setData({
         vouchers: items,

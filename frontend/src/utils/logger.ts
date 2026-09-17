@@ -73,13 +73,15 @@ function scheduleFlush() {
   }
 }
 
+let flushFailures = 0
+
 async function flush() {
   if (flushing || !queue.length) return
   flushing = true
   const batch = queue.splice(0, MAX_BATCH)
   reporting = true
   try {
-    await fetch(`${apiBase()}/client-logs`, {
+    const res = await fetch(`${apiBase()}/client-logs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -90,9 +92,19 @@ async function flush() {
       }),
       keepalive: true,
     })
+    flushFailures = 0
+    if (res.status === 401 || res.status === 403) {
+      // 未登录/无权限，清空队列不再重试
+      queue.length = 0
+    }
   } catch {
-    queue.unshift(...batch)
-    while (queue.length > MAX_QUEUE) queue.pop()
+    // 请求被中止（页面跳转/卸载）或网络错误，丢弃当前 batch 不重试
+    flushFailures++
+    if (flushFailures >= 3) {
+      // 连续失败3次，清空队列避免堆积
+      queue.length = 0
+      flushFailures = 0
+    }
   } finally {
     reporting = false
     flushing = false
@@ -160,11 +172,14 @@ export function installFrontendLogger() {
     const reason = (ev as PromiseRejectionEvent).reason
     push('ERROR', 'unhandledrejection', reason)
   })
-  window.addEventListener('pagehide', () => {
-    void flush()
-  })
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') void flush()
+}
+
+// Vite HMR 热重载时清理旧模块的定时器和队列，避免请求被中止
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (flushTimer) clearTimeout(flushTimer)
+    flushTimer = null
+    queue.length = 0
   })
 }
 

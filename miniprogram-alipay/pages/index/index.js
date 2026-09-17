@@ -40,7 +40,7 @@ Page({
     showDevTips: false,
     debugInfo: '',
     nicknameReviewFail: false,
-    memberText: '开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。不影响先点餐。'
+    memberText: '开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。随时可在「我的」页开通，不影响点餐。'
   },
 
   buildDebugInfo(extra) {

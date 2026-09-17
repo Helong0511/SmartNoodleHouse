@@ -19,6 +19,7 @@ from app.models import (
     DeliveryOrder,
     DeliveryProductMap,
     DeliveryRefund,
+    DeliverySyncAlert,
     Option,
     OptionGroup,
     Order,
@@ -192,6 +193,11 @@ class DeliveryService:
             parsed["items"] = parse_meituan_foods(raw)
 
         order, tasks = await cls._create_from_platform(db, provider, parsed, raw, credentials)
+        if order is None:
+            # 库存不足已拒单（无本地单），正常结束以 ack 平台消息，避免 Inbox 无限重试
+            return DeliveryNotifyResult(
+                event=DeliveryEvent.ORDER_NEW, order=None, extra={"rejected": True}
+            )
         return DeliveryNotifyResult(event=DeliveryEvent.ORDER_NEW, order=order, deferred_tasks=tasks)
 
     @classmethod
@@ -333,14 +339,21 @@ class DeliveryService:
             )
         total = local_total
 
-        # 原子扣库存（与堂食一致）
+        # 原子扣库存（与堂食一致）。库存不足=跨平台超卖：主动取消平台订单 + 告警，不落本地单。
         from app.services.stock_service import deduct_for_order_items
 
-        await deduct_for_order_items(
-            db,
-            [{"product_id": row["product"].id, "quantity": row["quantity"]} for row in order_items_payload],
-            store_id=store_id,
-        )
+        try:
+            await deduct_for_order_items(
+                db,
+                [{"product_id": row["product"].id, "quantity": row["quantity"]} for row in order_items_payload],
+                store_id=store_id,
+            )
+        except AppException as e:
+            if getattr(e, "code", None) != 40031:
+                raise
+            await cls._reject_order_soldout(db, provider, parsed, str(e))
+            # 返回 (None, []) 告知上层该单已拒；Inbox/回调据此正常 ack，不再重试
+            return None, []
 
         store = await db.get(Store, int(store_id)) if store_id else None
         order = Order(
@@ -483,6 +496,25 @@ class DeliveryService:
             }
         ]
         return order, deferred
+
+    @classmethod
+    async def _reject_order_soldout(cls, db, provider, parsed: dict, reason: str) -> None:
+        """跨平台超卖兜底：本地库存不足无法接单时，主动取消平台订单并记录告警（不落本地单）。"""
+        platform_order_id = str(parsed.get("platform_order_id") or "")
+        try:
+            await provider.cancel_order(platform_order_id, reason="商品售罄，商家无法接单")
+        except Exception:  # noqa: BLE001 取消失败也要留告警，不影响 ack
+            logger.exception("拒单时取消平台订单失败 platform_order_id=%s", platform_order_id)
+        db.add(
+            DeliverySyncAlert(
+                store_id=parsed.get("store_id"),
+                platform=parsed.get("platform"),
+                alert_type="REJECT_ORDER",
+                title=f"库存不足已拒单 {platform_order_id}".strip(),
+                detail=reason,
+                platform_order_id=platform_order_id or None,
+            )
+        )
 
     @classmethod
     async def _resolve_product(

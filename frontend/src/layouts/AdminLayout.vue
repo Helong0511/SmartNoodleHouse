@@ -29,7 +29,6 @@
           <template #title>营业</template>
           <el-menu-item v-if="showPos" index="/pos">收银点餐</el-menu-item>
           <el-menu-item v-if="showKitchen" index="/kitchen">厨房 KDS</el-menu-item>
-          <el-menu-item v-if="showDelivery" index="/delivery">外卖管理</el-menu-item>
           <el-menu-item v-if="showOrders" index="/orders">订单管理</el-menu-item>
           <el-menu-item v-if="showPayments" index="/payments">支付记录</el-menu-item>
           <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
@@ -37,8 +36,19 @@
           <el-menu-item v-if="showSettlement" index="/pos-refunds">退款审批</el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu v-if="showDelivery" index="g-delivery">
+          <template #title>外卖</template>
+          <el-menu-item index="/delivery/orders">外卖订单</el-menu-item>
+          <el-menu-item index="/delivery/refunds">退款处理</el-menu-item>
+          <el-menu-item index="/delivery/stores">门店与营业</el-menu-item>
+          <el-menu-item index="/delivery/menu">外卖餐品</el-menu-item>
+          <el-menu-item index="/delivery/sync">同步监控</el-menu-item>
+          <el-menu-item index="/delivery/logs">回调日志</el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="showStore" index="g-store">
           <template #title>门店</template>
+          <el-menu-item index="/store-info">门店信息</el-menu-item>
           <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
           <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
         </el-sub-menu>
@@ -96,7 +106,7 @@ const showCoupons = computed(() => auth.hasPermission('coupon:read') && notCashi
 const showMember = computed(() => showCustomers.value || showCoupons.value)
 const showTables = computed(() => auth.hasPermission('table:manage'))
 const showUsers = computed(() => auth.hasPermission('user:read'))
-const showStore = computed(() => showTables.value || showUsers.value)
+const showStore = computed(() => showTables.value || showUsers.value || auth.hasPermission('system:manage'))
 const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
 const showSmart = computed(() => showCameras.value || showWelcome.value)
@@ -118,12 +128,14 @@ const activeMenu = computed(() => {
 
 const openGroup = computed(() => {
   const p = activeMenu.value
-  if (['/pos', '/kitchen', '/delivery', '/orders', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds'].includes(p)) {
+  if (p === '/store-info') return 'g-store'
+  if (p.startsWith('/delivery')) return 'g-delivery'
+  if (['/pos', '/kitchen', '/orders', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds'].includes(p)) {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
   if (['/customers', '/member-levels', '/coupons'].includes(p)) return 'g-member'
-  if (['/tables', '/users'].includes(p)) return 'g-store'
+  if (['/tables', '/users', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
   return ''
 })

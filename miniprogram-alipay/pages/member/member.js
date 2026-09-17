@@ -180,11 +180,12 @@ Page({
       const cid = app.globalData.customerId || auth.readStorage('customer_id')
       if (cid) app.globalData.customerId = cid
       this.setData({ walletLoading: true })
+      const storeId = dineCtx.currentDisplay().storeId
       const [profile, prefView, couponRes, voucherRes] = await Promise.all([
         api.get('/miniprogram/customers/me'),
         prefUtil.loadCustomerPrefs(app, api).catch(() => prefUtil.buildPrefDisplay({})),
-        api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
-        api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
+        api.get('/miniprogram/coupons/mine', { store_id: storeId }).catch(() => ({ items: [] })),
+        api.get('/miniprogram/vouchers/mine', { store_id: storeId }).catch(() => ({ items: [] }))
       ])
       if (!profile || typeof profile !== 'object') {
         throw new Error('会员资料加载失败，请稍后重试')
@@ -206,8 +207,8 @@ Page({
     this.setData({ walletLoading: true })
     try {
       const [couponRes, voucherRes] = await Promise.all([
-        api.get('/miniprogram/coupons/mine').catch(() => ({ items: [] })),
-        api.get('/miniprogram/vouchers/mine').catch(() => ({ items: [] }))
+        api.get('/miniprogram/coupons/mine', { store_id: dineCtx.currentDisplay().storeId }).catch(() => ({ items: [] })),
+        api.get('/miniprogram/vouchers/mine', { store_id: dineCtx.currentDisplay().storeId }).catch(() => ({ items: [] }))
       ])
       this.applyWallet(couponRes, voucherRes)
     } catch (e) {

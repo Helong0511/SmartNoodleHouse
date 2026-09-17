@@ -3,12 +3,18 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import AppException
-from app.models import DeliveryProductMap, PlatformStoreBinding, Product, ProductCategory
+from app.models import (
+    DeliveryProductMap,
+    PlatformCategoryMap,
+    PlatformStoreBinding,
+    Product,
+    ProductCategory,
+)
 from app.services.delivery_context import get_credentials_for_store
 from app.services.delivery_providers import get_delivery_provider
 
@@ -32,7 +38,7 @@ class ProductSyncService:
 
         products = list(
             (
-                await db.execute(select(Product).where(Product.status == "ON_SALE").order_by(Product.sort_order))
+                await db.execute(select(Product).where(Product.store_id == store_id, Product.status == "ON_SALE").order_by(Product.sort_order))
             ).scalars().all()
         )
         cat_ids = list({p.category_id for p in products})
@@ -66,6 +72,39 @@ class ProductSyncService:
                 errors.append(f"{p.name}:{e}")
 
         return {"ok": len(errors) == 0, "synced": synced, "total": len(products), "errors": errors}
+
+    @classmethod
+    async def sync_single_product(cls, db: AsyncSession, store_id: int, platform: str, product_id: int) -> dict:
+        """推送单个商品到指定外卖平台。"""
+        binding = (
+            await db.execute(
+                select(PlatformStoreBinding).where(
+                    PlatformStoreBinding.store_id == store_id,
+                    PlatformStoreBinding.platform == platform.upper(),
+                    PlatformStoreBinding.status == 1,
+                )
+            )
+        ).scalar_one_or_none()
+        if not binding:
+            return {"ok": False, "message": "未绑定平台门店"}
+
+        product = await db.get(Product, product_id)
+        if not product:
+            return {"ok": False, "message": "商品不存在"}
+
+        cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
+        creds = await get_credentials_for_store(db, platform, store_id)
+        if not creds:
+            raise AppException(40063, "缺少平台凭证")
+        provider = get_delivery_provider(platform, creds)
+
+        payload = cls._build_product_payload_cached(product, cat, binding.platform_shop_id)
+        result = await provider.sync_product(payload)
+        if result.get("ok"):
+            platform_id = result.get("platform_id") or payload["app_food_code"]
+            await cls._ensure_default_map(db, store_id, platform, product, platform_id)
+            return {"ok": True, "product": product.name, "platform": platform}
+        return {"ok": False, "product": product.name, "error": result.get("error") or "平台返回失败"}
 
     @classmethod
     async def sync_prices(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
@@ -193,3 +232,124 @@ class ProductSyncService:
     @staticmethod
     def build_option_signature(option_codes: list[str]) -> str:
         return "_".join(sorted(option_codes)) if option_codes else "DEFAULT"
+
+    # ── 步骤5：批量上下架 / 库存对账 / 平台分类映射 ──
+
+    @classmethod
+    async def set_shelf(
+        cls,
+        db: AsyncSession,
+        store_id: int,
+        platform: str,
+        on_shelf: bool,
+        product_ids: list[int] | None = None,
+    ) -> dict:
+        """外卖平台侧批量上架/下架（不改变本地堂食上下架状态）。"""
+        stmt = select(DeliveryProductMap).where(
+            DeliveryProductMap.store_id == store_id,
+            DeliveryProductMap.platform == platform.upper(),
+            DeliveryProductMap.status == 1,
+        )
+        if product_ids:
+            stmt = stmt.where(DeliveryProductMap.product_id.in_(list(product_ids)))
+        maps = list((await db.execute(stmt)).scalars().all())
+        if not maps:
+            return {"ok": True, "updated": 0, "total": 0, "on_shelf": on_shelf}
+
+        items = [
+            {"app_food_code": m.app_food_code or m.platform_sku_id, "platform_sku_id": m.platform_sku_id}
+            for m in maps
+        ]
+        provider = get_delivery_provider(platform, await get_credentials_for_store(db, platform, store_id))
+        done = await provider.set_sell_status(items, on_shelf)
+        return {"ok": done == len(items), "updated": done, "total": len(items), "on_shelf": on_shelf}
+
+    @classmethod
+    async def reconcile_stock(
+        cls,
+        db: AsyncSession,
+        store_id: int | None = None,
+        platform: str | None = None,
+    ) -> dict:
+        """定时/手动对账：以本地门店库存为准，覆盖推送平台（最终一致，幂等）。"""
+        from app.services.delivery_sync_handlers import _push_store_product_stock
+
+        stmt = (
+            select(DeliveryProductMap.store_id, DeliveryProductMap.product_id)
+            .where(DeliveryProductMap.status == 1)
+            .distinct()
+        )
+        if store_id:
+            stmt = stmt.where(DeliveryProductMap.store_id == store_id)
+        if platform:
+            stmt = stmt.where(DeliveryProductMap.platform == platform.upper())
+        pairs = list((await db.execute(stmt)).all())
+
+        failures = 0
+        for sid, pid in pairs:
+            failures += await _push_store_product_stock(db, int(sid), int(pid))
+        return {"products": len(pairs), "failures": failures, "ok": failures == 0}
+
+    @staticmethod
+    async def list_category_maps(
+        db: AsyncSession,
+        store_id: int | None = None,
+        platform: str | None = None,
+    ) -> list[PlatformCategoryMap]:
+        stmt = select(PlatformCategoryMap)
+        if store_id is not None:
+            stmt = stmt.where(
+                (PlatformCategoryMap.store_id == store_id) | (PlatformCategoryMap.store_id.is_(None))
+            )
+        if platform:
+            stmt = stmt.where(PlatformCategoryMap.platform == platform.upper())
+        stmt = stmt.order_by(PlatformCategoryMap.store_id.is_(None), PlatformCategoryMap.platform)
+        return list((await db.execute(stmt)).scalars().all())
+
+    @staticmethod
+    async def upsert_category_map(
+        db: AsyncSession,
+        *,
+        platform: str,
+        local_category_id: int,
+        platform_category_code: str | None = None,
+        platform_category_name: str | None = None,
+        store_id: int | None = None,
+    ) -> PlatformCategoryMap:
+        existing = (
+            await db.execute(
+                select(PlatformCategoryMap).where(
+                    PlatformCategoryMap.platform == platform.upper(),
+                    PlatformCategoryMap.local_category_id == local_category_id,
+                    (
+                        (PlatformCategoryMap.store_id == store_id)
+                        if store_id is not None
+                        else PlatformCategoryMap.store_id.is_(None)
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            existing.platform_category_code = platform_category_code
+            existing.platform_category_name = platform_category_name
+            existing.status = 1
+            await db.flush()
+            return existing
+        row = PlatformCategoryMap(
+            store_id=store_id,
+            platform=platform.upper(),
+            local_category_id=local_category_id,
+            platform_category_code=platform_category_code,
+            platform_category_name=platform_category_name,
+            status=1,
+        )
+        db.add(row)
+        await db.flush()
+        return row
+
+    @staticmethod
+    async def delete_category_map(db: AsyncSession, map_id: int) -> bool:
+        result = await db.execute(
+            delete(PlatformCategoryMap).where(PlatformCategoryMap.id == map_id)
+        )
+        return (result.rowcount or 0) > 0
