@@ -1,24 +1,42 @@
 <template>
   <div class="refund-page">
     <div class="toolbar">
-      <el-select v-model="status" placeholder="状态" clearable size="large" style="width:140px" @change="load">
+      <el-select v-model="status" placeholder="状态" clearable size="large" style="width:140px" @change="reload">
         <el-option label="待审批" value="PENDING" />
         <el-option label="已退款" value="SUCCESS" />
         <el-option label="已拒绝" value="REJECTED" />
         <el-option label="失败" value="FAILED" />
         <el-option label="已撤销" value="CANCELLED" />
       </el-select>
+      <el-input
+        v-model="keyword"
+        placeholder="订单号 / 支付流水号"
+        clearable
+        size="large"
+        style="width:220px"
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        value-format="YYYY-MM-DD"
+        start-placeholder="申请开始"
+        end-placeholder="申请结束"
+        style="width:260px"
+        @change="reload"
+      />
       <el-select
         v-if="auth.isSuperAdmin"
         v-model="storeId"
         placeholder="门店"
         size="large"
         style="width:200px"
-        @change="load"
+        @change="reload"
       >
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
-      <el-button type="primary" size="large" :loading="loading" @click="load">刷新</el-button>
+      <el-button type="primary" size="large" :loading="loading" @click="reload">查询</el-button>
     </div>
 
     <el-table :data="items" v-loading="loading" stripe style="width:100%;margin-top:12px">
@@ -71,11 +89,23 @@
       </el-table-column>
     </el-table>
     <div v-if="!loading && !items.length" class="empty">暂无退款申请</div>
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.pageSize"
+        :total="pager.total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="load"
+        @size-change="reload"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -85,8 +115,11 @@ const loading = ref(false)
 const items = ref<any[]>([])
 const status = ref<string | null>('PENDING')
 const storeId = ref<number | null>(null)
+const keyword = ref('')
+const dateRange = ref<string[] | null>(null)
 const stores = ref<any[]>([])
 const actingId = ref<number | null>(null)
+const pager = reactive({ page: 1, pageSize: 20, total: 0 })
 
 function payLabel(m: string) {
   const u = (m || '').toUpperCase()
@@ -132,16 +165,38 @@ async function loadStores() {
 async function load() {
   loading.value = true
   try {
-    const params: Record<string, any> = { page: 1, page_size: 100 }
+    const params: Record<string, any> = {
+      page: pager.page,
+      page_size: pager.pageSize,
+    }
     if (status.value) params.status = status.value
     if (storeId.value) params.store_id = storeId.value
+    if (keyword.value.trim()) params.keyword = keyword.value.trim()
+    if (dateRange.value?.length === 2) {
+      params.date_from = dateRange.value[0]
+      params.date_to = dateRange.value[1]
+    }
     const res = await api.get('/pos/refund-requests', { params })
-    items.value = res.data?.items || []
+    const list = res.data?.items || []
+    // 审批后末页变空自动回退，避免处理完当前页最后一条后停在空白页
+    if (list.length === 0 && pager.page > 1) {
+      pager.page -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    items.value = list
+    pager.total = res.data?.total || 0
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+function reload() {
+  pager.page = 1
+  return load()
 }
 
 async function approve(row: any) {
@@ -208,5 +263,6 @@ onMounted(async () => {
 .amt { color: #ff6b35; }
 .tender-tip { font-size: 12px; color: #888; margin-top: 2px; line-height: 1.3; }
 .empty { text-align: center; color: #aaa; padding: 40px; }
+.pager { margin-top: 14px; display: flex; justify-content: flex-end; }
 .muted { color: #999; font-size: 13px; }
 </style>

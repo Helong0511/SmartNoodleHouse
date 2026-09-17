@@ -7,7 +7,7 @@
           placeholder="全部门店"
           clearable
           style="width:160px"
-          @change="reload"
+          @change="onStoreChange"
         >
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
@@ -22,6 +22,11 @@
           @keyup.enter="reload"
           @clear="reload"
         />
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="operatorFilter" placeholder="收银员" clearable filterable style="width:130px" @change="reload">
+          <el-option v-for="o in operators" :key="o.id" :label="o.name" :value="o.id" />
+        </el-select>
       </el-form-item>
       <el-form-item>
         <el-select v-model="statusFilter" placeholder="支付状态" clearable style="width:130px" @change="reload">
@@ -41,6 +46,27 @@
           start-placeholder="支付起"
           end-placeholder="支付止"
           style="width:240px"
+          @change="reload"
+        />
+      </el-form-item>
+      <el-form-item>
+        <el-input-number
+          v-model="amountMin"
+          :min="0"
+          :precision="2"
+          :controls="false"
+          placeholder="金额≥"
+          style="width:110px"
+          @change="reload"
+        />
+        <span style="margin:0 4px;color:#999">-</span>
+        <el-input-number
+          v-model="amountMax"
+          :min="0"
+          :precision="2"
+          :controls="false"
+          placeholder="金额≤"
+          style="width:110px"
           @change="reload"
         />
       </el-form-item>
@@ -109,6 +135,9 @@
         </template>
       </el-table-column>
       <el-table-column prop="paid_at" label="支付时间" width="170" />
+      <el-table-column label="收银员" width="90">
+        <template #default="{ row }">{{ row.operator_name || '—' }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openRefundDrawer(row)">明细</el-button>
@@ -129,9 +158,11 @@
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
-      layout="total, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next"
       style="margin-top:16px"
       @current-change="load"
+      @size-change="reload"
     />
 
     <el-dialog v-model="refundDialog" title="发起退款" width="400px">
@@ -220,11 +251,13 @@
         <el-pagination
           v-if="refundDrawerMode === 'inflight'"
           v-model:current-page="refundPage"
-          :page-size="refundPageSize"
+          v-model:page-size="refundPageSize"
           :total="refundTotal"
-          layout="total, prev, pager, next"
+          :page-sizes="[20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
           style="margin-top:12px"
           @current-change="loadInflightRefunds"
+          @size-change="reloadInflightRefunds"
         />
         <div v-if="!refundList.length && !refundListLoading" class="empty-hint">暂无退款记录</div>
       </div>
@@ -251,12 +284,16 @@ const auth = useAuthStore()
 const loading = ref(false)
 const payments = ref<any[]>([])
 const stores = ref<any[]>([])
+const operators = ref<any[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const storeFilter = ref<number | undefined>()
 const statusFilter = ref<string | undefined>()
 const providerFilter = ref<string | undefined>()
+const operatorFilter = ref<number | undefined>()
+const amountMin = ref<number | undefined>()
+const amountMax = ref<number | undefined>()
 const keyword = ref('')
 const dateRange = ref<string[] | null>(todayDateRange())
 const refundDialog = ref(false)
@@ -271,7 +308,7 @@ const refundDrawerPayment = ref<any>(null)
 const refundList = ref<any[]>([])
 const refundListLoading = ref(false)
 const refundPage = ref(1)
-const refundPageSize = 20
+const refundPageSize = ref(20)
 const refundTotal = ref(0)
 const syncingNo = ref('')
 
@@ -318,9 +355,30 @@ function resetFilters() {
   storeFilter.value = undefined
   statusFilter.value = undefined
   providerFilter.value = undefined
+  operatorFilter.value = undefined
+  amountMin.value = undefined
+  amountMax.value = undefined
   keyword.value = ''
   dateRange.value = todayDateRange()
-  reload()
+  onStoreChange()
+}
+
+// 门店切换后收银员下拉须按门店联动
+async function onStoreChange() {
+  operatorFilter.value = undefined
+  page.value = 1
+  await Promise.all([loadOperators(), load()])
+}
+
+async function loadOperators() {
+  try {
+    const res = await api.get('/orders/operators', {
+      params: { store_id: auth.isSuperAdmin ? storeFilter.value : undefined },
+    })
+    operators.value = res.data?.items || []
+  } catch {
+    operators.value = []
+  }
 }
 
 async function loadStores() {
@@ -341,6 +399,9 @@ async function load() {
       status: statusFilter.value,
       store_id: storeFilter.value,
       provider: providerFilter.value,
+      operator_id: operatorFilter.value,
+      amount_min: amountMin.value,
+      amount_max: amountMax.value,
       keyword: keyword.value.trim() || undefined,
     }
     if (dateRange.value?.length === 2) {
@@ -348,7 +409,15 @@ async function load() {
       params.date_to = dateRange.value[1]
     }
     const res = await api.get('/payments', { params })
-    payments.value = res.data.items
+    const list = res.data.items || []
+    // 退款后末页变空时自动回退
+    if (list.length === 0 && page.value > 1) {
+      page.value -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    payments.value = list
     total.value = res.data.total
   } finally {
     loading.value = false
@@ -422,7 +491,7 @@ async function loadInflightRefunds() {
   try {
     const params: Record<string, unknown> = {
       page: refundPage.value,
-      page_size: refundPageSize,
+      page_size: refundPageSize.value,
       status: 'PENDING,PROCESSING',
       store_id: storeFilter.value,
       keyword: keyword.value.trim() || undefined,
@@ -432,7 +501,15 @@ async function loadInflightRefunds() {
       params.date_to = dateRange.value[1]
     }
     const res = await api.get('/payments/refunds', { params })
-    refundList.value = res.data.items || []
+    const list = res.data.items || []
+    // 末页退款单处理完后状态离开"处理中"，自动回退避免空白页
+    if (list.length === 0 && refundPage.value > 1) {
+      refundPage.value -= 1
+      refundListLoading.value = false
+      await loadInflightRefunds()
+      return
+    }
+    refundList.value = list
     refundTotal.value = res.data.total || 0
   } catch (e: any) {
     ElMessage.error(e.message || '加载处理中退款失败')
@@ -441,6 +518,11 @@ async function loadInflightRefunds() {
   } finally {
     refundListLoading.value = false
   }
+}
+
+function reloadInflightRefunds() {
+  refundPage.value = 1
+  return loadInflightRefunds()
 }
 
 async function syncRefund(row: any) {
@@ -464,7 +546,7 @@ async function syncRefund(row: any) {
 
 onMounted(async () => {
   await loadStores()
-  await load()
+  await Promise.all([loadOperators(), load()])
 })
 </script>
 

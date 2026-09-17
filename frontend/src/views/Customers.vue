@@ -29,6 +29,35 @@
           <el-option label="支付宝" value="ALIPAY" />
         </el-select>
       </el-form-item>
+      <el-form-item>
+        <el-select v-model="memberStatusFilter" placeholder="会员身份" clearable style="width: 120px" @change="reload">
+          <el-option label="会员" value="MEMBER" />
+          <el-option label="游客" value="GUEST" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="levelFilter" placeholder="会员等级" clearable style="width: 130px" @change="reload">
+          <el-option v-for="lv in levels" :key="lv.id" :label="lv.name" :value="lv.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="statusFilter" placeholder="账号状态" style="width: 120px" @change="reload">
+          <el-option label="启用" :value="1" />
+          <el-option label="禁用" :value="0" />
+          <el-option label="全部" :value="-1" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-date-picker
+          v-model="registeredRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          start-placeholder="注册起"
+          end-placeholder="注册止"
+          style="width:240px"
+          @change="reload"
+        />
+      </el-form-item>
       <el-button type="primary" @click="reload">搜索</el-button>
       <el-button @click="resetFilters">重置</el-button>
       <el-button @click="goMemberLevels">会员等级设置</el-button>
@@ -138,9 +167,11 @@
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
-      layout="total, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next"
       style="margin-top:16px"
       @current-change="load"
+      @size-change="reload"
     />
 
     <el-drawer v-model="drawer" title="顾客详情 · 会员与口味档案" size="560px">
@@ -379,6 +410,11 @@ const pageSize = ref(20)
 const total = ref(0)
 const keyword = ref('')
 const channel = ref<string | undefined>()
+const memberStatusFilter = ref<string | undefined>()
+const levelFilter = ref<number | undefined>()
+const statusFilter = ref<number | undefined>(1)
+const registeredRange = ref<string[] | null>(null)
+const levels = ref<any[]>([])
 const storeFilter = ref<number | undefined>()
 const drawer = ref(false)
 const detail = ref<any>(null)
@@ -464,6 +500,10 @@ function resetFilters() {
   storeFilter.value = undefined
   keyword.value = ''
   channel.value = undefined
+  memberStatusFilter.value = undefined
+  levelFilter.value = undefined
+  statusFilter.value = 1
+  registeredRange.value = null
   reload()
 }
 
@@ -480,19 +520,44 @@ async function loadStores() {
   }
 }
 
+async function loadLevels() {
+  try {
+    const res = await api.get('/member-levels')
+    levels.value = res.data?.items || []
+  } catch {
+    levels.value = []
+  }
+}
+
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/customers', {
-      params: {
-        page: page.value,
-        page_size: pageSize.value,
-        keyword: keyword.value.trim() || undefined,
-        channel: channel.value || undefined,
-        store_id: storeFilter.value,
-      },
-    })
-    customers.value = res.data.items
+    const params: Record<string, any> = {
+      page: page.value,
+      page_size: pageSize.value,
+      keyword: keyword.value.trim() || undefined,
+      channel: channel.value || undefined,
+      member_status: memberStatusFilter.value || undefined,
+      member_level_id: levelFilter.value,
+      store_id: storeFilter.value,
+    }
+    if (statusFilter.value === 1 || statusFilter.value === 0) {
+      params.status = statusFilter.value
+    }
+    if (registeredRange.value?.length === 2) {
+      params.registered_from = registeredRange.value[0]
+      params.registered_to = registeredRange.value[1]
+    }
+    const res = await api.get('/customers', { params })
+    const list = res.data.items
+    // 禁用/合并后末页可能变空，自动回退避免空白页
+    if (list.length === 0 && page.value > 1) {
+      page.value -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    customers.value = list
     total.value = res.data.total
   } finally {
     loading.value = false
@@ -623,7 +688,7 @@ async function submitMerge() {
 }
 
 onMounted(async () => {
-  await loadStores()
+  await Promise.all([loadStores(), loadLevels()])
   await load()
 })
 </script>

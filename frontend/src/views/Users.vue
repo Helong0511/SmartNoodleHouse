@@ -12,6 +12,13 @@
       >
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
+      <el-select v-model="filterRoleId" clearable placeholder="全部角色" style="width:140px" @change="reload">
+        <el-option v-for="r in roles" :key="r.id" :label="r.name" :value="r.id" />
+      </el-select>
+      <el-select v-model="filterStatus" clearable placeholder="全部状态" style="width:120px" @change="reload">
+        <el-option label="启用" :value="1" />
+        <el-option label="禁用" :value="0" />
+      </el-select>
       <el-button type="primary" @click="reload">搜索</el-button>
       <el-button type="primary" @click="openForm()">新增员工</el-button>
       <el-button @click="load">刷新</el-button>
@@ -52,11 +59,13 @@
 
     <el-pagination
       v-model:current-page="page"
-      :page-size="pageSize"
+      v-model:page-size="pageSize"
       :total="total"
-      layout="total, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next"
       style="margin-top:12px"
       @current-change="load"
+      @size-change="reload"
     />
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑员工' : '新增员工'" width="460px">
@@ -121,8 +130,10 @@ const roles = ref<any[]>([])
 const stores = ref<any[]>([])
 const keyword = ref('')
 const filterStoreId = ref<number | undefined>()
+const filterRoleId = ref<number | undefined>()
+const filterStatus = ref<number | undefined>()
 const page = ref(1)
-const pageSize = 20
+const pageSize = ref(20)
 const total = ref(0)
 const dialogVisible = ref(false)
 const resetVisible = ref(false)
@@ -171,12 +182,22 @@ async function load() {
     const res = await api.get('/users', {
       params: {
         page: page.value,
-        page_size: pageSize,
+        page_size: pageSize.value,
         keyword: keyword.value || undefined,
         store_id: auth.isSuperAdmin ? filterStoreId.value || undefined : undefined,
+        role_id: filterRoleId.value,
+        status: filterStatus.value,
       },
     })
-    users.value = res.data.items || []
+    const list = res.data.items || []
+    // 禁用/删除（末页最后一条）后自动回退，避免停留在空白页
+    if (list.length === 0 && page.value > 1) {
+      page.value -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    users.value = list
     total.value = res.data.total || 0
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')

@@ -72,6 +72,10 @@
       <el-button type="primary" @click="reloadOrders">查询</el-button>
     </div>
 
+    <div v-if="hasNewHint" class="new-hint" @click="jumpToLatest">
+      有新订单或状态更新，点击回到第 1 页查看最新
+    </div>
+
     <el-table
       :data="orders"
       size="small"
@@ -324,6 +328,8 @@ const filters = reactive({
 })
 const quickFilter = ref('')
 const pager = reactive({ page: 1, pageSize: 20, total: 0 })
+// 非第1页/详情打开期间收到实时事件，不直接替换列表，仅提示（防止翻页时行跳动、新单无感）
+const hasNewHint = ref(false)
 
 const statusOptions = {
   PENDING: '待接单',
@@ -470,13 +476,36 @@ async function loadOrders() {
     params.date_to = filters.dateRange[1]
   }
   const res = await api.get('/delivery/orders', { params })
-  orders.value = res.data?.items || []
+  const items = res.data?.items || []
+  // 操作（接单/取消）或数据变化导致当前页为空时，自动回退到上一页，避免停在空白页
+  if (items.length === 0 && pager.page > 1) {
+    pager.page -= 1
+    return loadOrders()
+  }
+  orders.value = items
   pager.total = res.data?.total || 0
 }
 
 function reloadOrders() {
+  hasNewHint.value = false
   pager.page = 1
   return loadOrders()
+}
+
+/** 轮询/WebSocket 实时刷新：仅第 1 页且未开详情时自动替换列表，否则只亮提示条 */
+async function autoReloadOrders() {
+  if (pager.page !== 1 || detailVisible.value) {
+    hasNewHint.value = true
+    return
+  }
+  await loadOrders()
+}
+
+/** 点击"有新订单"提示条：回第 1 页看最新数据 */
+async function jumpToLatest() {
+  hasNewHint.value = false
+  pager.page = 1
+  await Promise.all([loadOrders(), loadStats()])
 }
 
 async function refreshAll() {
@@ -556,7 +585,7 @@ function startPoll() {
   if (pollTimer) return
   pollTimer = setInterval(() => {
     loadStats()
-    loadOrders()
+    autoReloadOrders()
   }, 8000)
   connStatus.value = 'polling'
 }
@@ -594,7 +623,7 @@ function connectWs() {
       /* */
     }
     loadStats()
-    loadOrders()
+    autoReloadOrders()
   }
   ws.onerror = () => {
     connStatus.value = 'offline'
@@ -715,6 +744,19 @@ onUnmounted(() => {
 .conn.connecting {
   background: #f4f4f5;
   color: #909399;
+}
+.new-hint {
+  margin-bottom: 10px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.new-hint:hover {
+  background: var(--el-color-primary-light-7);
 }
 .toolbar {
   display: flex;

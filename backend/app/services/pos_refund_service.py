@@ -340,9 +340,16 @@ class PosRefundService:
         user,
         status: str | None = None,
         store_id: int | None = None,
+        keyword: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict:
+        from datetime import datetime
+
+        from sqlalchemy import or_
+
         from app.services.store_scope import require_bound_store
 
         page = max(1, int(page))
@@ -356,6 +363,28 @@ class PosRefundService:
                 q = q.where(PosRefundRequest.store_id == int(effective))
         if status:
             q = q.where(PosRefundRequest.status == status.strip().upper())
+        if keyword and keyword.strip():
+            kw = f"%{keyword.strip()}%"
+            q = (
+                q.join(Order, Order.id == PosRefundRequest.order_id)
+                .join(Payment, Payment.id == PosRefundRequest.payment_id)
+                .where(or_(Order.order_no.like(kw), Payment.payment_no.like(kw)))
+            )
+        if date_from:
+            try:
+                q = q.where(PosRefundRequest.created_at >= datetime.fromisoformat(date_from))
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                end = datetime.fromisoformat(date_to)
+                if len(date_to) <= 10:
+                    from datetime import timedelta
+
+                    end = end + timedelta(days=1)
+                q = q.where(PosRefundRequest.created_at < end)
+            except ValueError:
+                pass
 
         total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
         rows = (

@@ -7,7 +7,7 @@
           placeholder="全部门店"
           clearable
           style="width:160px"
-          @change="reload"
+          @change="onStoreChange"
         >
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
@@ -17,11 +17,16 @@
         <el-input
           v-model="keyword"
           clearable
-          placeholder="订单号 / 桌号"
-          style="width:200px"
+          placeholder="订单号/桌号/手机号/姓名"
+          style="width:220px"
           @keyup.enter="reload"
           @clear="reload"
         />
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="operatorFilter" placeholder="收银员" clearable filterable style="width:130px" @change="reload">
+          <el-option v-for="o in operators" :key="o.id" :label="o.name" :value="o.id" />
+        </el-select>
       </el-form-item>
       <el-form-item>
         <el-select v-model="statusFilter" placeholder="订单状态" clearable style="width:130px" @change="reload">
@@ -51,6 +56,7 @@
           value-format="YYYY-MM-DD"
           start-placeholder="下单起"
           end-placeholder="下单止"
+          :shortcuts="dateShortcuts"
           style="width:240px"
           @change="reload"
         />
@@ -125,7 +131,10 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="下单时间" width="220" />
+      <el-table-column prop="created_at" label="下单时间" width="180" />
+      <el-table-column label="收银员" width="90">
+        <template #default="{ row }">{{ row.operator_name || '—' }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="90" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="$router.push(`/orders/${row.id}`)">详情</el-button>
@@ -137,9 +146,11 @@
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
-      layout="total, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next"
       style="margin-top:16px"
       @current-change="load"
+      @size-change="reload"
     />
   </div>
 </template>
@@ -172,7 +183,37 @@ const paymentFilter = ref<string | undefined>()
 const channelFilter = ref<string | undefined>()
 const diningFilter = ref<string | undefined>()
 const keyword = ref('')
+const operatorFilter = ref<number | undefined>()
+const operators = ref<any[]>([])
 const dateRange = ref<string[] | null>(todayDateRange())
+
+// 日期快捷：与后端 date_to 含全天口径一致（结束日按当地零点 +1 天）
+const dateShortcuts = [
+  {
+    text: '今日',
+    value: () => {
+      const d = new Date()
+      return [d, d]
+    },
+  },
+  {
+    text: '昨日',
+    value: () => {
+      const d = new Date()
+      d.setDate(d.getDate() - 1)
+      return [d, d]
+    },
+  },
+  {
+    text: '近7天',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setDate(start.getDate() - 6)
+      return [start, end]
+    },
+  },
+]
 
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
@@ -185,6 +226,12 @@ function reload() {
   load()
 }
 
+async function onStoreChange() {
+  // 收银员下拉随门店联动，避免用 A 店员工筛选 B 店订单
+  operatorFilter.value = undefined
+  await Promise.all([reload(), loadOperators()])
+}
+
 function resetFilters() {
   storeFilter.value = undefined
   statusFilter.value = undefined
@@ -192,8 +239,10 @@ function resetFilters() {
   channelFilter.value = undefined
   diningFilter.value = undefined
   keyword.value = ''
+  operatorFilter.value = undefined
   dateRange.value = todayDateRange()
   reload()
+  loadOperators()
 }
 
 async function loadStores() {
@@ -202,6 +251,17 @@ async function loadStores() {
     stores.value = res.data.items || []
   } catch {
     stores.value = []
+  }
+}
+
+async function loadOperators() {
+  try {
+    const res = await api.get('/orders/operators', {
+      params: { store_id: storeFilter.value },
+    })
+    operators.value = res.data || []
+  } catch {
+    operators.value = []
   }
 }
 
@@ -216,6 +276,7 @@ async function load() {
       payment_status: paymentFilter.value,
       channel: channelFilter.value,
       dining_type: diningFilter.value,
+      operator_id: operatorFilter.value,
       keyword: keyword.value.trim() || undefined,
     }
     if (dateRange.value?.length === 2) {
@@ -223,7 +284,15 @@ async function load() {
       params.date_to = dateRange.value[1]
     }
     const res = await api.get('/orders', { params })
-    orders.value = res.data.items
+    const list = res.data.items
+    // 撤单/改筛选后末页可能变空，自动回退避免空白页
+    if (list.length === 0 && page.value > 1) {
+      page.value -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    orders.value = list
     total.value = res.data.total
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
@@ -233,7 +302,7 @@ async function load() {
 }
 
 onMounted(async () => {
-  await loadStores()
+  await Promise.all([loadStores(), loadOperators()])
   await load()
 })
 </script>

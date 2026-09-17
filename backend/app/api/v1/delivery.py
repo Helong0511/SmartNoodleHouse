@@ -392,20 +392,58 @@ async def list_refunds(
     user: CurrentUser,
     status: str | None = None,
     store_id: int | None = None,
+    platform: str | None = None,
+    keyword: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
+    from datetime import datetime
+
+    from sqlalchemy import or_
+
     from app.models import Order
     from app.services.store_scope import require_bound_store
 
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
-    q = select(DeliveryRefund).join(Order, Order.id == DeliveryRefund.order_id)
+    q = (
+        select(DeliveryRefund)
+        .join(Order, Order.id == DeliveryRefund.order_id)
+        .join(DeliveryOrder, DeliveryOrder.id == DeliveryRefund.delivery_order_id)
+    )
     store = require_bound_store(user, store_id)
     if store:
         q = q.where(Order.store_id == store)
     if status:
         q = q.where(DeliveryRefund.status == status.upper())
+    if platform:
+        q = q.where(DeliveryRefund.platform == platform.strip().upper())
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.where(
+            or_(
+                DeliveryOrder.platform_order_id.like(kw),
+                DeliveryRefund.platform_refund_id.like(kw),
+                Order.order_no.like(kw),
+            )
+        )
+    if date_from:
+        try:
+            q = q.where(DeliveryRefund.created_at >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = datetime.fromisoformat(date_to)
+            if len(date_to) <= 10:
+                from datetime import timedelta
+
+                end = end + timedelta(days=1)
+            q = q.where(DeliveryRefund.created_at < end)
+        except ValueError:
+            pass
     from sqlalchemy import func
 
     from app.core.response import calc_pages
@@ -510,22 +548,60 @@ async def list_callback_logs(
     user: CurrentUser,
     platform: str | None = None,
     event_type: str | None = None,
+    store_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
+    from datetime import datetime
+
+    from sqlalchemy import func
+
+    from app.core.response import calc_pages
     from app.models import Order
     from app.services.store_scope import require_bound_store
 
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     q = select(DeliveryCallbackLog).outerjoin(Order, Order.id == DeliveryCallbackLog.order_id)
-    store = require_bound_store(user)
-    if store:
-        q = q.where((DeliveryCallbackLog.order_id.is_(None)) | (Order.store_id == store))
+    # 门店隔离：门店账号只能看关联到本店订单的回调（孤立的平台级回调归超管排查）；
+    # 超管传 store_id 看单店（不含孤立日志），不传看全部
+    effective_store = require_bound_store(user, store_id)
+    if effective_store is not None:
+        q = q.where(Order.store_id == effective_store)
     if platform:
         q = q.where(DeliveryCallbackLog.platform == platform.upper())
     if event_type:
         q = q.where(DeliveryCallbackLog.event_type == event_type)
+    if date_from:
+        try:
+            q = q.where(DeliveryCallbackLog.created_at >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = datetime.fromisoformat(date_to)
+            if len(date_to) <= 10:
+                from datetime import timedelta
+
+                end = end + timedelta(days=1)
+            q = q.where(DeliveryCallbackLog.created_at < end)
+        except ValueError:
+            pass
+    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    # 事件类型为平台原始事件码（开放集合），返回当前过滤口径下去重值供前端联动下拉
+    event_types = list(
+        (
+            await db.execute(
+                q.with_only_columns(DeliveryCallbackLog.event_type)
+                .where(DeliveryCallbackLog.event_type.isnot(None))
+                .distinct()
+                .order_by(DeliveryCallbackLog.event_type)
+                .limit(100)
+            )
+        ).scalars().all()
+    )
     result = await db.execute(
         q.order_by(DeliveryCallbackLog.created_at.desc(), DeliveryCallbackLog.id.desc())
         .offset((page - 1) * page_size)
@@ -542,7 +618,17 @@ async def list_callback_logs(
         }
         for log in result.scalars()
     ]
-    return success({"items": items, "page": page, "page_size": page_size}, request=request)
+    return success(
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total, page_size),
+            "event_types": event_types,
+        },
+        request=request,
+    )
 
 
 @router.get("/store-bindings", dependencies=[require_permission("product:read")])
@@ -793,6 +879,7 @@ async def list_product_maps(
     user: CurrentUser,
     platform: str | None = None,
     store_id: int | None = None,
+    keyword: str | None = None,
     page: int = 1,
     page_size: int = 100,
 ):
@@ -810,13 +897,22 @@ async def list_product_maps(
     store_id = int(sid)
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 100)), 200)
-    from sqlalchemy import func
+    from sqlalchemy import func, or_
 
     from app.core.response import calc_pages
 
     q = select(DeliveryProductMap).where(DeliveryProductMap.store_id == store_id)
     if platform:
         q = q.where(DeliveryProductMap.platform == platform.upper())
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.where(
+            or_(
+                DeliveryProductMap.platform_sku_id.like(kw),
+                DeliveryProductMap.platform_sku_name.like(kw),
+                DeliveryProductMap.app_food_code.like(kw),
+            )
+        )
     total = int(await db.scalar(select(func.count()).select_from(q.subquery())) or 0)
     result = await db.execute(
         q.order_by(DeliveryProductMap.id.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -1163,6 +1259,7 @@ async def list_sync_alerts(
     db: DbSession,
     user: CurrentUser,
     platform: str | None = None,
+    alert_type: str | None = None,
     resolved: int | None = None,
     page: int = 1,
     page_size: int = 50,
@@ -1179,6 +1276,8 @@ async def list_sync_alerts(
         q = q.where(DeliverySyncAlert.store_id == int(user.store_id))
     if platform:
         q = q.where(DeliverySyncAlert.platform == platform.upper())
+    if alert_type:
+        q = q.where(DeliverySyncAlert.alert_type == alert_type.strip().upper())
     if resolved is not None:
         q = q.where(DeliverySyncAlert.resolved == int(resolved))
     total = int(await db.scalar(select(func.count()).select_from(q.subquery())) or 0)

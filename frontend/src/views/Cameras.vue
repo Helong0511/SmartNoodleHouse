@@ -47,15 +47,68 @@
           <span>最近访客事件</span>
           <el-button link type="primary" @click="loadEvents">刷新</el-button>
         </div>
+        <div class="event-filters">
+          <el-select
+            v-model="eventFilter.cameraId"
+            clearable
+            filterable
+            placeholder="全部摄像头"
+            style="width: 200px"
+            @change="reloadEvents"
+          >
+            <el-option
+              v-for="c in cameras"
+              :key="c.id"
+              :label="cameraLabel(c)"
+              :value="c.id"
+            />
+          </el-select>
+          <el-select
+            v-model="eventFilter.eventType"
+            clearable
+            filterable
+            allow-create
+            default-first-option
+            placeholder="全部类型"
+            style="width: 130px"
+            @change="reloadEvents"
+          >
+            <el-option v-for="t in eventTypes" :key="t" :label="t" :value="t" />
+          </el-select>
+          <el-date-picker
+            v-model="eventFilter.dateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            style="width: 260px"
+            @change="reloadEvents"
+          />
+        </div>
       </template>
-      <el-table :data="events" size="small" border>
+      <el-table :data="events" size="small" border v-loading="eventsLoading">
         <el-table-column prop="event_time" label="时间" width="170">
           <template #default="{ row }">{{ fmt(row.event_time) }}</template>
         </el-table-column>
         <el-table-column prop="visitor_no" label="访客号" min-width="140" />
-        <el-table-column prop="camera_id" label="摄像头" width="90" />
+        <el-table-column label="摄像头" min-width="120">
+          <template #default="{ row }">{{ cameraName(row.camera_id) }}</template>
+        </el-table-column>
         <el-table-column prop="event_type" label="类型" width="90" />
       </el-table>
+      <div class="pager">
+        <el-pagination
+          v-model:current-page="eventPager.page"
+          v-model:page-size="eventPager.pageSize"
+          :total="eventPager.total"
+          :page-sizes="[20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          background
+          small
+          @current-change="loadEvents"
+          @size-change="reloadEvents"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑摄像头' : '新增摄像头'" width="560px" destroy-on-close>
@@ -115,6 +168,14 @@ const loading = ref(false)
 const saving = ref(false)
 const cameras = ref<any[]>([])
 const events = ref<any[]>([])
+const eventsLoading = ref(false)
+const eventTypes = ref<string[]>([])
+const eventFilter = reactive<{ cameraId?: number; eventType?: string; dateRange: string[] | null }>({
+  cameraId: undefined,
+  eventType: undefined,
+  dateRange: null,
+})
+const eventPager = reactive({ page: 1, pageSize: 20, total: 0 })
 const overview = ref<any>({})
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -176,13 +237,55 @@ async function load() {
   }
 }
 
+function cameraLabel(c: any) {
+  // 超管跨店查看时，摄像头名后附门店，避免同名设备混淆
+  if (auth.isSuperAdmin) {
+    const sname = stores.value.find((s) => s.id === c.store_id)?.name
+    return sname ? `${c.name}（${sname}）` : `${c.name}（门店#${c.store_id}）`
+  }
+  return c.name
+}
+
+function cameraName(id: number) {
+  const c = cameras.value.find((x) => x.id === id)
+  return c ? cameraLabel(c) : `#${id}`
+}
+
 async function loadEvents() {
+  eventsLoading.value = true
   try {
-    const res = await api.get('/cameras/visitors/events', { params: { page_size: 20 } })
-    events.value = res.data?.items || []
+    const params: Record<string, any> = {
+      page: eventPager.page,
+      page_size: eventPager.pageSize,
+    }
+    if (eventFilter.cameraId) params.camera_id = eventFilter.cameraId
+    if (eventFilter.eventType) params.event_type = eventFilter.eventType
+    if (eventFilter.dateRange?.length === 2) {
+      params.date_from = eventFilter.dateRange[0]
+      params.date_to = eventFilter.dateRange[1]
+    }
+    const res = await api.get('/cameras/visitors/events', { params })
+    const list = res.data?.items || []
+    // 数据留存过期清理后末页可能变空，自动回退到上一页
+    if (list.length === 0 && eventPager.page > 1) {
+      eventPager.page -= 1
+      eventsLoading.value = false
+      await loadEvents()
+      return
+    }
+    events.value = list
+    eventPager.total = res.data?.total || 0
+    if (Array.isArray(res.data?.event_types)) eventTypes.value = res.data.event_types
   } catch {
     events.value = []
+  } finally {
+    eventsLoading.value = false
   }
+}
+
+function reloadEvents() {
+  eventPager.page = 1
+  return loadEvents()
 }
 
 async function refreshAll() {
@@ -355,6 +458,8 @@ onUnmounted(() => {
 .kpi-label { font-size: 12px; color: #909399; margin-top: 4px; }
 .kpi-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
+.event-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pager { margin-top: 12px; display: flex; justify-content: flex-end; }
 .muted { color: #c0c4cc; font-size: 12px; }
 .preview-wrap { text-align: center; }
 .preview-img { max-width: 100%; max-height: 70vh; background: #111; border-radius: 4px; }

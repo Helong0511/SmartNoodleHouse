@@ -2,7 +2,7 @@ import secrets
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission, require_pos
 from app.core.exceptions import AppException
@@ -96,6 +96,7 @@ async def list_tables(
     page_size: int = 20,
     status: int | None = None,
     store_id: int | None = None,
+    keyword: str | None = None,
 ):
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -105,9 +106,14 @@ async def list_tables(
         q = q.where(DiningTable.store_id == effective)
     if status is not None:
         q = q.where(DiningTable.status == status)
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.where(or_(DiningTable.table_no.like(kw), DiningTable.table_name.like(kw)))
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
-        q.order_by(DiningTable.store_id, DiningTable.table_no).offset((page - 1) * page_size).limit(page_size)
+        q.order_by(DiningTable.store_id, DiningTable.table_no, DiningTable.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     items = list(result.scalars().all())
     store_ids = list({t.store_id for t in items})

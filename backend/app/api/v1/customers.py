@@ -34,8 +34,15 @@ async def list_customers(
     keyword: str | None = None,
     channel: str | None = None,
     include_disabled: bool = False,
+    status: int | None = None,
+    member_status: str | None = None,
+    member_level_id: int | None = None,
+    registered_from: str | None = None,
+    registered_to: str | None = None,
     store_id: int | None = None,
 ):
+    from datetime import datetime, timedelta
+
     from app.services.store_scope import require_bound_store
 
     page = max(1, page)
@@ -44,8 +51,25 @@ async def list_customers(
     effective_store = require_bound_store(user, store_id)
 
     q = select(Customer)
-    if not include_disabled:
+    if status is not None:
+        q = q.where(Customer.status == int(status))
+    elif not include_disabled:
         q = q.where(Customer.status == 1)
+    if member_status and member_status.strip().upper() in ("GUEST", "MEMBER"):
+        q = q.where(Customer.member_status == member_status.strip().upper())
+    if member_level_id:
+        q = q.where(Customer.member_level_id == int(member_level_id))
+    if registered_from:
+        try:
+            q = q.where(Customer.created_at >= datetime.fromisoformat(registered_from))
+        except ValueError:
+            pass
+    if registered_to:
+        try:
+            # 结束日含全天：+1 天取开区间
+            q = q.where(Customer.created_at < datetime.fromisoformat(registered_to) + timedelta(days=1))
+        except ValueError:
+            pass
     if effective_store is not None:
         q = q.where(
             Customer.id.in_(

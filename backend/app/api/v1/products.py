@@ -2,8 +2,9 @@ import logging
 
 from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_permission
 from app.core.exceptions import AppException
@@ -722,6 +723,9 @@ async def list_products(
     category_id: int | None = None,
     status: str | None = "ON_SALE",
     keyword: str | None = None,
+    tag: str | None = None,
+    low_stock: bool = False,
+    stock_threshold: int = 10,
     store_id: int | None = None,
 ):
     """商品列表。传 store_id 时只看该店商品，并合并分店库存覆盖（本店停售剔除）。
@@ -750,16 +754,20 @@ async def list_products(
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 20)), 200)
     q = select(Product)
+    # 停售判定子查询必须用独立别名：低库存筛选会 outerjoin 同一 StoreProductStock 表，
+    # 共用实体时相关子查询会被自动关联吞掉 FROM（no FROM clauses due to auto-correlation）
+    stopped_ov = aliased(StoreProductStock)
     if store_id is not None:
         q = q.where(Product.store_id == int(store_id))
         # 本店停售覆盖必须在 SQL 层剔除（NOT EXISTS），count 与分页共用同一条件，
         # 否则先分页再在 Python 层 continue 会导致页不满、total 虚高、末页空白
         stopped_exists = (
             select(1)
+            .select_from(stopped_ov)
             .where(
-                StoreProductStock.product_id == Product.id,
-                StoreProductStock.store_id == int(store_id),
-                StoreProductStock.status != 1,
+                stopped_ov.product_id == Product.id,
+                stopped_ov.store_id == int(store_id),
+                stopped_ov.status != 1,
             )
             .exists()
         )
@@ -768,6 +776,28 @@ async def list_products(
         q = q.where(Product.category_id == category_id)
     if status and status != "ALL":
         q = q.where(Product.status == status)
+    if tag:
+        tag_map = {
+            "RECOMMENDED": Product.is_recommended,
+            "HOT": Product.is_hot,
+            "NO_COOKING": Product.no_cooking,
+        }
+        col = tag_map.get(tag.strip().upper())
+        if col is not None:
+            q = q.where(col == 1)
+    if low_stock:
+        # 门店维度：分店覆盖库存优先，回退总部库存；超管全店视角按总部库存判定
+        threshold = max(0, int(stock_threshold or 0))
+        if store_id is not None:
+            q = q.outerjoin(
+                StoreProductStock,
+                and_(
+                    StoreProductStock.product_id == Product.id,
+                    StoreProductStock.store_id == int(store_id),
+                ),
+            ).where(func.coalesce(StoreProductStock.stock, Product.stock) <= threshold)
+        else:
+            q = q.where(Product.stock <= threshold)
     if keyword:
         kw = keyword.strip()
         q = q.where((Product.name.contains(kw)) | (Product.product_no.contains(kw)))
@@ -875,20 +905,20 @@ async def list_store_stocks(
     store_id: int | None = None,
     page: int = 1,
     page_size: int = 100,
+    keyword: str | None = None,
 ):
-    """分店库存覆盖列表（含品牌商品名）。"""
+    """分店库存覆盖列表（含品牌商品名）。keyword 匹配商品编号/名称。"""
     sid = require_bound_store(user, store_id)
     if sid is None:
         raise AppException(40060, "请指定门店")
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 100)), 200)
-    products = list(
-        (
-            await db.execute(
-                select(Product).where(Product.store_id == sid).order_by(Product.sort_order, Product.id)
-            )
-        ).scalars()
-    )
+    kw = (keyword or "").strip()
+    pq = select(Product).where(Product.store_id == sid)
+    if kw:
+        like = f"%{kw}%"
+        pq = pq.where(or_(Product.product_no.like(like), Product.name.like(like)))
+    products = list((await db.execute(pq.order_by(Product.sort_order, Product.id))).scalars())
     overrides = {
         r.product_id: r
         for r in (

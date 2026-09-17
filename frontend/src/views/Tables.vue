@@ -7,13 +7,30 @@
         clearable
         placeholder="全部门店"
         style="width: 180px"
-        @change="load"
+        @change="reload"
       >
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
+      <el-input
+        v-model="keyword"
+        placeholder="桌号 / 名称"
+        clearable
+        style="width: 180px"
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-select
+        v-model="filterStatus"
+        clearable
+        placeholder="全部状态"
+        style="width: 120px"
+        @change="reload"
+      >
+        <el-option label="启用" :value="1" />
+        <el-option label="禁用" :value="0" />
+      </el-select>
       <el-button type="primary" @click="openForm()">新增桌台</el-button>
-      <el-button @click="load">刷新</el-button>
     </div>
 
     <el-table :data="tables" style="margin-top:12px" border>
@@ -43,6 +60,19 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.pageSize"
+        :total="pager.total"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="load"
+        @size-change="reload"
+      />
+    </div>
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑桌台' : '新增桌台'" width="420px">
       <el-form :model="form" label-width="80px">
@@ -152,6 +182,9 @@ const saving = ref(false)
 const tables = ref<any[]>([])
 const stores = ref<any[]>([])
 const filterStoreId = ref<number | undefined>()
+const keyword = ref('')
+const filterStatus = ref<number | undefined>()
+const pager = reactive({ page: 1, pageSize: 20, total: 0 })
 const dialogVisible = ref(false)
 const printVisible = ref(false)
 const printRow = ref<any>(null)
@@ -199,18 +232,36 @@ async function loadStores() {
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/tables', {
-      params: {
-        page_size: 200,
-        store_id: auth.isSuperAdmin ? filterStoreId.value || undefined : undefined,
-      },
-    })
-    tables.value = res.data.items || []
+    const params: Record<string, any> = {
+      page: pager.page,
+      page_size: pager.pageSize,
+    }
+    if (auth.isSuperAdmin && filterStoreId.value) params.store_id = filterStoreId.value
+    if (keyword.value.trim()) params.keyword = keyword.value.trim()
+    if (filterStatus.value !== undefined && filterStatus.value !== null) {
+      params.status = filterStatus.value
+    }
+    const res = await api.get('/tables', { params })
+    const list = res.data.items || []
+    // 末页禁用最后一条桌台等操作后自动回退，避免停留在空白页
+    if (list.length === 0 && pager.page > 1) {
+      pager.page -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    tables.value = list
+    pager.total = res.data.total || 0
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+function reload() {
+  pager.page = 1
+  return load()
 }
 
 function openForm(row?: any) {
@@ -360,6 +411,7 @@ onMounted(async () => {
 
 <style scoped>
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pager { margin-top: 12px; display: flex; justify-content: flex-end; }
 .print-box { text-align: center; }
 .print-logo {
   display: block;

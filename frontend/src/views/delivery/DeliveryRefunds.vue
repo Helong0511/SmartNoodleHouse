@@ -17,7 +17,31 @@
         <el-option label="已同意" value="APPROVED" />
         <el-option label="已拒绝" value="REJECTED" />
       </el-select>
-      <el-button @click="reloadRefunds">刷新</el-button>
+      <el-select v-model="platformFilter" placeholder="平台" clearable style="width: 110px" @change="reloadRefunds">
+        <el-option label="美团" value="MEITUAN" />
+        <el-option label="饿了么" value="ELEME" />
+      </el-select>
+      <el-input
+        v-model="keyword"
+        clearable
+        placeholder="平台单号"
+        style="width: 180px"
+        @keyup.enter="reloadRefunds"
+        @clear="reloadRefunds"
+      />
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        value-format="YYYY-MM-DD"
+        start-placeholder="开始"
+        end-placeholder="结束"
+        style="width: 240px"
+        @change="reloadRefunds"
+      />
+      <el-button @click="reloadRefunds">查询</el-button>
+    </div>
+    <div v-if="hasNewHint" class="new-hint" @click="jumpToLatest">
+      有退款状态更新，点击回到第 1 页查看最新
     </div>
     <el-table :data="refunds" size="small" stripe>
       <el-table-column label="平台" width="72">
@@ -56,7 +80,8 @@
         v-model:current-page="refundPager.page"
         v-model:page-size="refundPager.pageSize"
         :total="refundPager.total"
-        layout="total, prev, pager, next"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
         background
         small
         @current-change="loadRefunds"
@@ -94,7 +119,12 @@ const boundStoreName = computed(() => {
 
 const refunds = ref<any[]>([])
 const refundFilter = ref('PENDING')
+const platformFilter = ref('')
+const keyword = ref('')
+const dateRange = ref<string[] | null>(null)
 const refundPager = reactive({ page: 1, pageSize: 20, total: 0 })
+// 非第 1 页轮询不替换列表，仅提示，避免审批时翻页跳动
+const hasNewHint = ref(false)
 
 const rejectVisible = ref(false)
 const rejectReason = ref('商品已制作，无法退款')
@@ -127,14 +157,42 @@ async function loadRefunds() {
     store_id: storeFilter.value,
   }
   if (refundFilter.value) params.status = refundFilter.value
+  if (platformFilter.value) params.platform = platformFilter.value
+  if (keyword.value.trim()) params.keyword = keyword.value.trim()
+  if (dateRange.value?.length === 2) {
+    params.date_from = dateRange.value[0]
+    params.date_to = dateRange.value[1]
+  }
   const res = await api.get('/delivery/refunds', { params })
-  refunds.value = res.data?.items || []
+  const items = res.data?.items || []
+  // 审批后当前筛选结果集缩小，末页变空时自动回退，避免停在空白页
+  if (items.length === 0 && refundPager.page > 1) {
+    refundPager.page -= 1
+    return loadRefunds()
+  }
+  refunds.value = items
   refundPager.total = res.data?.total || 0
 }
 
 function reloadRefunds() {
+  hasNewHint.value = false
   refundPager.page = 1
   return loadRefunds()
+}
+
+/** 轮询自动刷新：仅第 1 页替换列表，非第 1 页只亮提示条 */
+async function autoReloadRefunds() {
+  if (refundPager.page !== 1) {
+    hasNewHint.value = true
+    return
+  }
+  await loadRefunds()
+}
+
+async function jumpToLatest() {
+  hasNewHint.value = false
+  refundPager.page = 1
+  await loadRefunds()
 }
 
 async function handleRefund(id: number, approve: boolean, reason?: string) {
@@ -168,7 +226,7 @@ async function doRejectRefund() {
 
 function startPoll() {
   if (pollTimer) return
-  pollTimer = setInterval(() => loadRefunds(), 10000)
+  pollTimer = setInterval(() => autoReloadRefunds(), 10000)
 }
 
 function stopPoll() {
@@ -199,6 +257,19 @@ onUnmounted(() => {
   gap: 8px;
   align-items: center;
   margin-bottom: 12px;
+}
+.new-hint {
+  margin-bottom: 10px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.new-hint:hover {
+  background: var(--el-color-primary-light-7);
 }
 .pager {
   margin-top: 12px;

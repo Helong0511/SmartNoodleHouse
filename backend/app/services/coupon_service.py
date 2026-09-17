@@ -86,9 +86,9 @@ class CouponService:
             return True
         sid = getattr(tmpl, "store_id", None)
         if sid is None:
-            # P2-4 总部模板：白名单为 NULL 表示全部门店可见；非空则仅列出门店可见
+            # P2-4 总部模板：白名单为 NULL（或规范化后等价的空列表）表示全部门店可见；非空则仅列出门店可见
             whitelist = getattr(tmpl, "store_whitelist", None)
-            if whitelist is None:
+            if not whitelist:
                 return True
             try:
                 return int(store_id) in {int(s) for s in whitelist}
@@ -333,6 +333,8 @@ class CouponService:
         page: int = 1,
         page_size: int = 20,
         store_id: int | None = None,
+        issued_store_id: int | None = None,
+        coupon_type: str | None = None,
     ) -> tuple[list[dict], int]:
         from sqlalchemy import func, or_
 
@@ -359,6 +361,14 @@ class CouponService:
             q = q.where(CustomerCoupon.customer_id == int(customer_id))
         if template_id:
             q = q.where(CustomerCoupon.template_id == int(template_id))
+        # 发券门店是业务筛选（券实际从哪个店发出），与上方 store_id 的数据隔离口径不同
+        if issued_store_id is not None:
+            if int(issued_store_id) > 0:
+                q = q.where(CustomerCoupon.issued_at_store_id == int(issued_store_id))
+            else:
+                q = q.where(CustomerCoupon.issued_at_store_id.is_(None))
+        if coupon_type and coupon_type.strip():
+            q = q.where(CouponTemplate.coupon_type == coupon_type.strip().upper())
         if status:
             q = q.where(CustomerCoupon.status == status.strip().upper())
         if keyword and keyword.strip():

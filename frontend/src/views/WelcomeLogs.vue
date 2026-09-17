@@ -31,7 +31,16 @@
         <el-input v-model="filters.keyword" placeholder="欢迎语关键词" clearable style="width:160px" @keyup.enter="reload" @clear="reload" />
       </el-form-item>
       <el-form-item>
-        <el-input-number v-model="filters.cameraId" :min="1" placeholder="摄像头" controls-position="right" style="width:120px" @change="reload" />
+        <el-select
+          v-model="filters.cameraId"
+          placeholder="摄像头"
+          clearable
+          filterable
+          style="width:180px"
+          @change="reload"
+        >
+          <el-option v-for="c in cameras" :key="c.id" :label="cameraLabel(c)" :value="c.id" />
+        </el-select>
       </el-form-item>
       <el-form-item>
         <el-date-picker
@@ -47,6 +56,10 @@
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
     </el-form>
+
+    <div v-if="hasNewHint" class="new-hint" @click="jumpToLatest">
+      有新的迎宾记录，点击回到第 1 页查看最新
+    </div>
 
     <el-table :data="logs" border size="small" stripe>
       <el-table-column label="时间" width="170">
@@ -93,16 +106,25 @@ const auth = useAuthStore()
 const loading = ref(false)
 const logs = ref<any[]>([])
 const stores = ref<any[]>([])
+const cameras = ref<any[]>([])
 const storeFilter = ref<number | undefined>()
 const page = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
+// 非第 1 页时实时事件不替换列表，仅提示，避免高频日志写入导致翻页跳动
+const hasNewHint = ref(false)
 const stats = reactive({ total: 0, today: 0, unique_customers: 0 })
+
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const filters = reactive({
   customerId: '',
   keyword: '',
   cameraId: undefined as number | undefined,
-  dateRange: null as string[] | null,
+  dateRange: [todayStr(), todayStr()] as string[] | null,
 })
 
 const boundStoreName = computed(() => {
@@ -137,15 +159,26 @@ function resetFilters() {
   filters.customerId = ''
   filters.keyword = ''
   filters.cameraId = undefined
-  filters.dateRange = null
+  const t = todayStr()
+  filters.dateRange = [t, t]
+  loadCameras()
   reload()
 }
 
+function cameraLabel(c: any) {
+  // 超管看全部门店摄像头时，名称后附带门店 id 便于区分
+  return auth.isSuperAdmin && !storeFilter.value && c.store_id ? `${c.name}（门店#${c.store_id}）` : c.name
+}
+
 function onStoreChange() {
+  // 门店 → 摄像头联动：切店清空已选摄像头并重新拉取该店摄像头
+  filters.cameraId = undefined
+  loadCameras()
   refreshAll()
 }
 
 function reload() {
+  hasNewHint.value = false
   page.value = 1
   return load()
 }
@@ -156,6 +189,15 @@ async function loadStores() {
     stores.value = res.data.items || []
   } catch {
     stores.value = []
+  }
+}
+
+async function loadCameras() {
+  try {
+    const res = await api.get('/cameras', { params: { store_id: storeFilter.value } })
+    cameras.value = res.data?.items || []
+  } catch {
+    cameras.value = []
   }
 }
 
@@ -199,6 +241,22 @@ async function refreshAll() {
   await Promise.all([loadStats(), load()])
 }
 
+/** 轮询/WS 自动刷新：仅第 1 页替换列表，非第 1 页只亮提示条并更新 KPI */
+async function autoRefreshAll() {
+  if (page.value !== 1) {
+    hasNewHint.value = true
+    await loadStats()
+    return
+  }
+  await refreshAll()
+}
+
+async function jumpToLatest() {
+  hasNewHint.value = false
+  page.value = 1
+  await refreshAll()
+}
+
 function stopPoll() {
   if (pollTimer) {
     clearInterval(pollTimer)
@@ -208,7 +266,7 @@ function stopPoll() {
 
 function startPoll() {
   if (pollTimer) return
-  pollTimer = setInterval(() => refreshAll(), 10000)
+  pollTimer = setInterval(() => autoRefreshAll(), 10000)
   connStatus.value = 'polling'
 }
 
@@ -243,7 +301,7 @@ function connectWs() {
     } catch {
       /* */
     }
-    refreshAll()
+    autoRefreshAll()
   }
   ws.onerror = () => {
     connStatus.value = 'offline'
@@ -257,6 +315,7 @@ function connectWs() {
 
 onMounted(async () => {
   await loadStores()
+  await loadCameras()
   await refreshAll()
   connectWs()
 })
@@ -280,6 +339,17 @@ onUnmounted(() => {
 .kpi-label { font-size: 12px; color: #909399; margin-top: 4px; }
 .kpi-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .toolbar { margin-bottom: 12px; }
+.new-hint {
+  margin-bottom: 10px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.new-hint:hover { background: var(--el-color-primary-light-7); }
 .sub { font-size: 12px; color: #909399; }
 .pager { margin-top: 12px; display: flex; justify-content: flex-end; }
 </style>

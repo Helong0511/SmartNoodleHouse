@@ -23,7 +23,15 @@
 
   />
 
-
+  <scroll-view class="tabs" scroll-x enhanced show-scrollbar="{{false}}">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="key"
+      class="tab-item {{activeTab === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="onTabChange"
+    >{{item.label}}</view>
+  </scroll-view>
 
   <skeleton wx:if="{{loading && !orders.length}}" type="order" rows="{{4}}" />
 

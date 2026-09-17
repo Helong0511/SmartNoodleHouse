@@ -11,9 +11,26 @@
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else type="info">本店库存覆盖</el-tag>
-      <el-button type="primary" @click="load">刷新</el-button>
+      <el-input
+        v-model="keyword"
+        clearable
+        placeholder="商品编号 / 名称"
+        style="width:220px"
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-button type="primary" @click="reload">查询</el-button>
       <span class="tip">有覆盖则下单扣本店库存；删除覆盖后回退品牌库存</span>
     </div>
+
+    <el-alert
+      v-if="truncated"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-top:10px"
+      title="商品数量超过 4000 条，当前仅加载前 4000 条，请用编号/名称搜索缩小范围。"
+    />
 
     <el-table :data="items" border style="margin-top:12px">
       <el-table-column prop="product_no" label="编号" width="280" />
@@ -57,6 +74,16 @@ const loading = ref(false)
 const stores = ref<any[]>([])
 const storeId = ref<number | undefined>()
 const items = ref<any[]>([])
+const keyword = ref('')
+const truncated = ref(false)
+
+// 编辑型表格需行内直接修改，保留全量拉取；单店上限 20 页 × 200 = 4000 条
+const FETCH_MAX_PAGES = 20
+const PAGE_SIZE = 200
+
+function reload() {
+  return load()
+}
 
 async function loadStores() {
   const res = await api.get('/settings/stores/options')
@@ -70,19 +97,22 @@ async function load() {
     return
   }
   loading.value = true
+  truncated.value = false
   try {
+    const kw = keyword.value.trim() || undefined
     const res = await api.get('/store-stocks', {
-      params: { store_id: storeId.value, page: 1, page_size: 200 },
+      params: { store_id: storeId.value, page: 1, page_size: PAGE_SIZE, keyword: kw },
     })
     const data = res.data || {}
     const all = [...(data.items || [])]
     const pages = Math.max(1, Number(data.total_pages || 1))
-    for (let p = 2; p <= pages && p <= 20; p++) {
+    for (let p = 2; p <= pages && p <= FETCH_MAX_PAGES; p++) {
       const more: any = await api.get('/store-stocks', {
-        params: { store_id: storeId.value, page: p, page_size: 200 },
+        params: { store_id: storeId.value, page: p, page_size: PAGE_SIZE, keyword: kw },
       })
       all.push(...(more.data?.items || []))
     }
+    if (Number(data.total || 0) > all.length) truncated.value = true
     items.value = all.map((it: any) => ({ ...it }))
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')

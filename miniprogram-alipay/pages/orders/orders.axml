@@ -12,6 +12,16 @@
     onTableChange="onTableChange"
   />
 
+  <scroll-view class="tabs" scroll-x>
+    <view
+      a:for="{{tabs}}"
+      a:key="key"
+      class="tab-item {{activeTab === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      onTap="onTabChange"
+    >{{item.label}}</view>
+  </scroll-view>
+
   <skeleton a:if="{{loading && !orders.length}}" type="order" rows="{{4}}" />
 
   <view class="empty" a:elif="{{!loading && !orders.length}}">

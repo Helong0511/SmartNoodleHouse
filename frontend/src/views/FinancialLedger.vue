@@ -20,7 +20,23 @@
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-input v-model="channel" clearable placeholder="渠道" style="width:120px" @keyup.enter="reload" />
+        <el-select
+          v-model="channel"
+          clearable
+          filterable
+          allow-create
+          default-first-option
+          placeholder="渠道"
+          style="width:130px"
+          @change="reload"
+        >
+          <el-option label="微信" value="WECHAT" />
+          <el-option label="支付宝" value="ALIPAY" />
+          <el-option label="现金" value="CASH" />
+          <el-option label="组合支付" value="MIXED" />
+          <el-option label="美团" value="MEITUAN" />
+          <el-option label="饿了么" value="ELEME" />
+        </el-select>
       </el-form-item>
       <el-form-item>
         <el-date-picker
@@ -39,7 +55,9 @@
 
     <el-table :data="rows" border>
       <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="store_id" label="门店" width="90" />
+      <el-table-column label="门店" width="110">
+        <template #default="{ row }">{{ storeName(row.store_id) }}</template>
+      </el-table-column>
       <el-table-column prop="entry_type" label="类型" width="100" />
       <el-table-column prop="channel" label="渠道" width="110" />
       <el-table-column prop="provider" label="通道" width="100" />
@@ -58,7 +76,8 @@
         v-model:current-page="page"
         v-model:page-size="pageSize"
         :total="total"
-        layout="total, prev, pager, next"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
         @current-change="load"
         @size-change="reload"
       />
@@ -111,6 +130,11 @@ function reload() {
   return load()
 }
 
+function storeName(sid: number) {
+  if (!sid) return '—'
+  return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
+}
+
 async function load() {
   loading.value = true
   try {
@@ -123,7 +147,15 @@ async function load() {
       params.date_to = `${dateRange.value[1]}T23:59:59`
     }
     const res: any = await api.get('/financial-ledger', { params })
-    rows.value = res.data?.items || []
+    const list = res.data?.items || []
+    // 退款红冲等场景导致末页变空时自动回退
+    if (list.length === 0 && page.value > 1) {
+      page.value -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    rows.value = list
     total.value = Number(res.data?.total || 0)
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')

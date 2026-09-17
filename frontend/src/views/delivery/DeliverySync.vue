@@ -43,7 +43,21 @@
       </el-table-column>
     </el-table>
 
-    <h4 style="margin: 14px 0 8px">同步 / 拒单告警</h4>
+    <div class="alerts-head">
+      <h4>同步 / 拒单告警</h4>
+      <el-select v-model="alertFilter.platform" placeholder="平台" clearable size="small" style="width:100px" @change="reloadAlerts">
+        <el-option label="美团" value="MEITUAN" />
+        <el-option label="饿了么" value="ELEME" />
+      </el-select>
+      <el-select v-model="alertFilter.alertType" placeholder="类型" clearable size="small" style="width:110px" @change="reloadAlerts">
+        <el-option label="库存拒单" value="REJECT_ORDER" />
+        <el-option label="同步失败" value="SYNC_FAIL" />
+      </el-select>
+      <el-select v-model="alertFilter.resolved" placeholder="状态" clearable size="small" style="width:100px" @change="reloadAlerts">
+        <el-option label="待处理" :value="0" />
+        <el-option label="已处理" :value="1" />
+      </el-select>
+    </div>
     <el-table :data="alerts" size="small" stripe>
       <el-table-column label="类型" width="100">
         <template #default="{ row }">
@@ -76,11 +90,24 @@
         </template>
       </el-table-column>
     </el-table>
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="alertPager.page"
+        v-model:page-size="alertPager.pageSize"
+        :total="alertPager.total"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        small
+        @current-change="loadAlerts"
+        @size-change="reloadAlerts"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -88,6 +115,12 @@ const overview = ref<any[]>([])
 const unresolvedAlerts = ref(0)
 const alerts = ref<any[]>([])
 const reconciling = ref(false)
+const alertPager = reactive({ page: 1, pageSize: 20, total: 0 })
+const alertFilter = reactive<{ platform: string; alertType: string; resolved: number | null }>({
+  platform: '',
+  alertType: '',
+  resolved: null,
+})
 
 function platformName(p: string) {
   return p === 'MEITUAN' ? '美团' : p === 'ELEME' ? '饿了么' : p || '-'
@@ -138,11 +171,31 @@ async function loadOverview() {
 
 async function loadAlerts() {
   try {
-    const res = await api.get('/delivery/sync-alerts', { params: { page: 1, page_size: 50 } })
-    alerts.value = res.data?.items || []
+    const params: Record<string, any> = {
+      page: alertPager.page,
+      page_size: alertPager.pageSize,
+    }
+    if (alertFilter.platform) params.platform = alertFilter.platform
+    if (alertFilter.alertType) params.alert_type = alertFilter.alertType
+    if (alertFilter.resolved !== null) params.resolved = alertFilter.resolved
+    const res = await api.get('/delivery/sync-alerts', { params })
+    const items = res.data?.items || []
+    // 标记处理后末页变空时自动回退
+    if (items.length === 0 && alertPager.page > 1) {
+      alertPager.page -= 1
+      await loadAlerts()
+      return
+    }
+    alerts.value = items
+    alertPager.total = res.data?.total || 0
   } catch (e: any) {
     ElMessage.error(e.message || '告警加载失败')
   }
+}
+
+function reloadAlerts() {
+  alertPager.page = 1
+  return loadAlerts()
 }
 
 async function reconcileNow() {
@@ -187,5 +240,19 @@ onMounted(() => {
 }
 .muted {
   color: #c0c4cc;
+}
+.alerts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 8px;
+}
+.alerts-head h4 {
+  margin: 0 8px 0 0;
+}
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

@@ -1,13 +1,21 @@
 <template>
   <div class="maps-page">
     <div class="toolbar">
-      <el-select v-model="syncStoreId" placeholder="门店" style="width: 150px">
+      <el-select v-model="syncStoreId" placeholder="门店" style="width: 150px" @change="reloadMaps">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
-      <el-select v-model="syncPlatform" style="width: 100px">
+      <el-select v-model="syncPlatform" style="width: 100px" @change="reloadMaps">
         <el-option label="美团" value="MEITUAN" />
         <el-option label="饿了么" value="ELEME" />
       </el-select>
+      <el-input
+        v-model="mapKeyword"
+        placeholder="平台SKU / 品名 / 菜品码"
+        clearable
+        style="width: 210px"
+        @keyup.enter="reloadMaps"
+        @clear="reloadMaps"
+      />
       <el-button type="primary" @click="syncMenuBatch">批量推送菜单</el-button>
       <el-button type="success" @click="setPlatformShelf(true)">平台上架</el-button>
       <el-button type="warning" @click="setPlatformShelf(false)">平台下架</el-button>
@@ -16,8 +24,7 @@
       <el-button @click="syncMenu">同步菜单</el-button>
       <el-button @click="syncPrices">同步价格</el-button>
       <el-button @click="syncStock">同步库存</el-button>
-      <el-button @click="showMapDialog = true">新增映射</el-button>
-      <el-button @click="loadMaps">刷新</el-button>
+      <el-button @click="openMapDialog">新增映射</el-button>
     </div>
     <el-table :data="maps" size="small" stripe>
       <el-table-column prop="platform" label="平台" width="80">
@@ -32,10 +39,28 @@
         <template #default="{ row }">{{ row.status === 1 ? '启用' : '停用' }}</template>
       </el-table-column>
     </el-table>
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="mapPager.page"
+        v-model:page-size="mapPager.pageSize"
+        :total="mapPager.total"
+        :page-sizes="[20, 50, 100, 200]"
+        layout="total, sizes, prev, pager, next"
+        background
+        small
+        @current-change="loadMaps"
+        @size-change="reloadMaps"
+      />
+    </div>
 
     <!-- 映射弹窗 -->
     <el-dialog v-model="showMapDialog" title="新增/更新商品映射" width="480px">
       <el-form label-width="110px">
+        <el-form-item v-if="auth.isSuperAdmin" label="归属门店" required>
+          <el-select v-model="mapForm.store_id" placeholder="选择门店" style="width: 100%">
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="平台">
           <el-select v-model="mapForm.platform" style="width: 100%">
             <el-option label="美团" value="MEITUAN" />
@@ -108,9 +133,19 @@ const stores = ref<any[]>([])
 const maps = ref<any[]>([])
 const syncStoreId = ref<number | undefined>()
 const syncPlatform = ref('MEITUAN')
+const mapKeyword = ref('')
+const mapPager = reactive({ page: 1, pageSize: 20, total: 0 })
 const showMapDialog = ref(false)
-const mapForm = reactive({
+const mapForm = reactive<{
+  platform: string
+  store_id?: number
+  platform_sku_id: string
+  platform_sku_name: string
+  product_id: number
+  app_food_code: string
+}>({
   platform: 'MEITUAN',
+  store_id: undefined,
   platform_sku_id: '',
   platform_sku_name: '',
   product_id: 0,
@@ -144,9 +179,33 @@ async function loadStores() {
 }
 
 async function loadMaps() {
-  const res = await api.get('/delivery/product-maps', { params: { page: 1, page_size: 200 } })
+  const params: Record<string, any> = {
+    page: mapPager.page,
+    page_size: mapPager.pageSize,
+    platform: syncPlatform.value,
+  }
+  if (syncStoreId.value) params.store_id = syncStoreId.value
+  if (mapKeyword.value.trim()) params.keyword = mapKeyword.value.trim()
+  const res = await api.get('/delivery/product-maps', { params })
   const data = res.data
   maps.value = Array.isArray(data) ? data : data?.items || []
+  mapPager.total = Number(data?.total || 0)
+}
+
+function reloadMaps() {
+  mapPager.page = 1
+  return loadMaps()
+}
+
+function openMapDialog() {
+  mapForm.platform = syncPlatform.value
+  // 默认归属当前列表选中的门店（门店账号由后端强制本店）
+  mapForm.store_id = syncStoreId.value
+  mapForm.platform_sku_id = ''
+  mapForm.platform_sku_name = ''
+  mapForm.product_id = 0
+  mapForm.app_food_code = ''
+  showMapDialog.value = true
 }
 
 async function saveMap() {
@@ -156,6 +215,10 @@ async function saveMap() {
   }
   if (!mapForm.product_id || mapForm.product_id <= 0) {
     ElMessage.warning('请填写有效的本系统商品 ID')
+    return
+  }
+  if (auth.isSuperAdmin && !mapForm.store_id) {
+    ElMessage.warning('请选择归属门店')
     return
   }
   try {
@@ -283,5 +346,10 @@ onMounted(async () => {
 }
 .muted {
   color: #c0c4cc;
+}
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

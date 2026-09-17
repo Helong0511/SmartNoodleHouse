@@ -451,6 +451,40 @@ async def list_pos_pending_orders(
     return success(result_list, request=request)
 
 
+@router.get("/operators", dependencies=[require_permission("order:read")])
+async def list_order_operators(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+):
+    """订单筛选用收银员下拉：仅返回实际下过单的员工，随门店隔离收窄。"""
+    from app.models import User
+
+    effective_store = require_bound_store(user, store_id)
+    q = (
+        select(User.id, User.username, User.display_name, User.status)
+        .join(Order, Order.operator_id == User.id)
+        .distinct()
+    )
+    if effective_store:
+        q = q.where(Order.store_id == effective_store)
+    rows = (await db.execute(q.order_by(User.id))).all()
+    return success(
+        [
+            {
+                "id": r[0],
+                "username": r[1],
+                "display_name": r[2],
+                "name": r[2] or r[1],
+                "status": r[3],
+            }
+            for r in rows
+        ],
+        request=request,
+    )
+
+
 @router.get("", dependencies=[require_permission("order:read")])
 async def list_orders(
     request: Request,
@@ -464,10 +498,13 @@ async def list_orders(
     keyword: str | None = None,
     channel: str | None = None,
     dining_type: str | None = None,
+    operator_id: int | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
 ):
-    """订单列表。keyword 匹配订单号/桌号；date_* 按下单 created_at。"""
+    """订单列表。keyword 匹配订单号/桌号/顾客手机号·姓名·会员号；date_* 按下单 created_at。"""
+    from app.models import Customer, User
+
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     q = select(Order)
@@ -486,13 +523,23 @@ async def list_orders(
         dt = dining_type.strip().upper()
         if dt in ("DINE_IN", "TAKEAWAY"):
             q = q.where(Order.dining_type == dt)
+    if operator_id:
+        q = q.where(Order.operator_id == int(operator_id))
     if keyword and keyword.strip():
         kw = f"%{keyword.strip()}%"
-        q = q.outerjoin(DiningTable, DiningTable.id == Order.table_id).where(
-            or_(
-                Order.order_no.like(kw),
-                DiningTable.table_no.like(kw),
-                DiningTable.table_name.like(kw),
+        q = (
+            q.outerjoin(DiningTable, DiningTable.id == Order.table_id)
+            .outerjoin(Customer, Customer.id == Order.customer_id)
+            .where(
+                or_(
+                    Order.order_no.like(kw),
+                    DiningTable.table_no.like(kw),
+                    DiningTable.table_name.like(kw),
+                    Customer.phone.like(kw),
+                    Customer.nickname.like(kw),
+                    Customer.display_name.like(kw),
+                    Customer.customer_no.like(kw),
+                )
             )
         )
     q = _apply_date_range(q, Order.created_at, date_from, date_to)
@@ -507,7 +554,6 @@ async def list_orders(
     order_rows = list(result.scalars().all())
     table_map = await _load_tables(db, [o.table_id for o in order_rows if o.table_id])
     store_map = await _load_stores(db, [o.store_id for o in order_rows if o.store_id])
-    from app.models import Customer
     from app.services.customer_service import CustomerService
 
     cust_ids = list({o.customer_id for o in order_rows if o.customer_id})
@@ -521,11 +567,20 @@ async def list_orders(
         db, [c.member_level_id for c in cust_map.values()]
     )
 
+    op_ids = list({o.operator_id for o in order_rows if o.operator_id})
+    op_map: dict[int, User] = {}
+    if op_ids:
+        op_map = {
+            u.id: u
+            for u in (await db.execute(select(User).where(User.id.in_(op_ids)))).scalars().all()
+        }
+
     items = []
     for o in order_rows:
         t = table_map.get(o.table_id) if o.table_id else None
         store = store_map.get(o.store_id)
         cust = cust_map.get(o.customer_id) if o.customer_id else None
+        op = op_map.get(o.operator_id) if o.operator_id else None
         level = level_map.get(cust.member_level_id) if cust and cust.member_level_id else None
         member = CustomerService.member_payload(cust, level) if cust else {
             "is_member": False,
@@ -559,6 +614,8 @@ async def list_orders(
                 "channel": o.channel,
                 "total_amount": str(o.total_amount),
                 "payment_status": o.payment_status,
+                "operator_id": o.operator_id,
+                "operator_name": (op.display_name or op.username) if op else None,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
             }
         )
@@ -867,8 +924,9 @@ async def list_my_orders(
     page: int = 1,
     page_size: int = 20,
     store_id: int | None = None,
+    status: str | None = None,
 ):
-    """顾客历史订单列表（会员中心）。传 store_id 时仅返回该门店订单。"""
+    """顾客历史订单列表（会员中心）。传 store_id 时仅返回该门店订单；status 支持逗号分隔多状态。"""
     from app.services.order_service import ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL
 
     page = max(1, page)
@@ -876,6 +934,13 @@ async def list_my_orders(
     base = select(Order).where(Order.customer_id == customer.id)
     if store_id is not None and int(store_id) > 0:
         base = base.where(Order.store_id == int(store_id))
+    if status and status.strip():
+        # 白名单过滤非法状态；小程序 tab 按业务分组传多状态（如进行中=PAID,CONFIRMED,...）
+        statuses = [s.strip().upper() for s in status.split(",") if s.strip() in ORDER_STATUS_LABEL]
+        if statuses:
+            base = base.where(Order.status.in_(statuses))
+        else:
+            base = base.where(Order.id.is_(None))  # 全部非法时不得放宽为全量
     total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = list(
         (

@@ -103,11 +103,16 @@ async def list_issued_coupons(
     template_id: int | None = None,
     status: str | None = None,
     keyword: str | None = None,
+    issued_store_id: int | None = None,
+    coupon_type: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
-    """顾客持券记录（全状态）。门店账号仅看本店相关顾客。"""
+    """顾客持券记录（全状态）。门店账号仅看本店相关顾客；issued_store_id 按发券门店过滤。"""
     store_id = require_bound_store(user, None)
+    # 防御：发券门店筛选仅超管可用；门店账号丢弃该参数，沿用本店数据隔离口径
+    if user.role.code != "SUPER_ADMIN":
+        issued_store_id = None
     items, total = await CouponService.list_customer_coupons_admin(
         db,
         customer_id=customer_id,
@@ -117,6 +122,8 @@ async def list_issued_coupons(
         page=page,
         page_size=page_size,
         store_id=store_id,
+        issued_store_id=issued_store_id,
+        coupon_type=coupon_type,
     )
     return success(
         {

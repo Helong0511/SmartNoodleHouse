@@ -147,12 +147,23 @@ async def list_pos_refunds(
     user: CurrentUser,
     status: str | None = None,
     store_id: int | None = None,
+    keyword: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
     """退款申请列表：收银员看本人；店长/管理员看本店。"""
     data = await PosRefundService.list_requests(
-        db, user=user, status=status, store_id=store_id, page=page, page_size=page_size
+        db,
+        user=user,
+        status=status,
+        store_id=store_id,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        page_size=page_size,
     )
     return success(data, request=request)
 

@@ -101,6 +101,7 @@ async def list_users(
     keyword: str | None = None,
     store_id: int | None = None,
     status: int | None = None,
+    role_id: int | None = None,
 ):
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -110,6 +111,8 @@ async def list_users(
         q = q.where(User.store_id == effective)
     if status is not None:
         q = q.where(User.status == status)
+    if role_id:
+        q = q.where(User.role_id == int(role_id))
     if keyword:
         kw = f"%{keyword.strip()}%"
         q = q.where(or_(User.username.like(kw), User.display_name.like(kw)))

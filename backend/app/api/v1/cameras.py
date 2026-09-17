@@ -125,9 +125,10 @@ async def cameras_overview(request: Request, db: DbSession, user: CurrentUser):
 
 
 @router.get("", dependencies=[require_permission("camera:read")])
-async def list_cameras(request: Request, db: DbSession, user: CurrentUser):
+async def list_cameras(request: Request, db: DbSession, user: CurrentUser, store_id: int | None = None):
     q = select(Camera).order_by(Camera.id.desc())
-    sid = require_bound_store(user)
+    # 超管可按门店筛选摄像头（迎宾日志的门店→摄像头联动）；非超管强制本店
+    sid = require_bound_store(user, store_id)
     if sid is not None:
         q = q.where(Camera.store_id == sid)
     result = await db.execute(q)
@@ -173,9 +174,17 @@ async def visitor_events(
     db: DbSession,
     user: CurrentUser,
     camera_id: int | None = None,
+    store_id: int | None = None,
+    event_type: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import distinct
+
     from app.core.response import calc_pages
 
     page = max(1, page)
@@ -188,10 +197,33 @@ async def visitor_events(
         _assert_cam_access(user, camera)
         q = q.where(VisitorEvent.camera_id == camera_id)
     else:
-        sid = require_bound_store(user)
+        sid = require_bound_store(user, store_id)
         if sid is not None:
             cam_ids = (await db.execute(select(Camera.id).where(Camera.store_id == sid))).scalars().all()
             q = q.where(VisitorEvent.camera_id.in_(list(cam_ids) or [-1]))
+    if date_from:
+        try:
+            q = q.where(VisitorEvent.event_time >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            # 结束日期按自然日含全天：date_to + 1 天取开区间
+            q = q.where(VisitorEvent.event_time < datetime.fromisoformat(date_to) + timedelta(days=1))
+        except ValueError:
+            pass
+    if event_type and event_type.strip():
+        q = q.where(VisitorEvent.event_type == event_type.strip().upper())
+
+    # 事件类型开放集合（当前为 ENTER 等），返回去重列表供前端下拉
+    type_rows = (
+        await db.execute(
+            select(distinct(VisitorEvent.event_type))
+            .where(VisitorEvent.event_type.isnot(None))
+            .order_by(VisitorEvent.event_type)
+            .limit(100)
+        )
+    ).scalars().all()
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = list(
         (
@@ -214,7 +246,14 @@ async def visitor_events(
         for e in rows
     ]
     return success(
-        {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": calc_pages(total, page_size)},
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total, page_size),
+            "event_types": [t for t in type_rows if t],
+        },
         request=request,
     )
 

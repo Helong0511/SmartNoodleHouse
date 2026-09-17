@@ -62,8 +62,25 @@
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-select v-model="issuedTemplateId" placeholder="模板" clearable style="width: 160px" @change="reloadIssued">
-              <el-option v-for="t in enabledTemplates" :key="t.id" :label="t.name" :value="t.id" />
+            <el-select v-model="issuedCouponType" placeholder="券类型" clearable style="width: 120px" @change="reloadIssued">
+              <el-option label="满减券" value="FIXED" />
+              <el-option label="折扣券" value="PERCENT" />
+              <el-option label="代金券" value="VOUCHER" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="issuedTemplateId" placeholder="模板" clearable filterable style="width: 180px" @change="reloadIssued">
+              <el-option
+                v-for="t in templates"
+                :key="t.id"
+                :label="t.status === 1 ? t.name : `${t.name}（停用）`"
+                :value="t.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="auth.isSuperAdmin">
+            <el-select v-model="issuedStoreId" placeholder="发券门店" clearable style="width: 160px" @change="reloadIssued">
+              <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </el-form-item>
           <el-button type="primary" @click="reloadIssued">搜索</el-button>
@@ -83,6 +100,9 @@
           <el-table-column prop="customer_phone" label="手机" width="120">
             <template #default="{ row }">{{ row.customer_phone || '—' }}</template>
           </el-table-column>
+          <el-table-column v-if="auth.isSuperAdmin" label="发券门店" width="120">
+            <template #default="{ row }">{{ issuedStoreName(row.issued_at_store_id) }}</template>
+          </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tag size="small" :type="statusTag(row.status)">{{ statusLabel(row.status) }}</el-tag>
@@ -98,9 +118,11 @@
           v-model:current-page="issuedPage"
           v-model:page-size="issuedPageSize"
           :total="issuedTotal"
-          layout="total, prev, pager, next"
+          :page-sizes="[20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
           style="margin-top:16px"
           @current-change="loadIssued"
+          @size-change="reloadIssued"
         />
       </el-tab-pane>
     </el-tabs>
@@ -277,6 +299,8 @@ const issued = ref<any[]>([])
 const issuedKeyword = ref('')
 const issuedStatus = ref<string | undefined>()
 const issuedTemplateId = ref<number | undefined>()
+const issuedCouponType = ref<string | undefined>()
+const issuedStoreId = ref<number | undefined>()
 const issuedPage = ref(1)
 const issuedPageSize = ref(20)
 const issuedTotal = ref(0)
@@ -319,6 +343,11 @@ async function loadTemplates() {
   }
 }
 
+function issuedStoreName(storeId?: number | null) {
+  if (!storeId) return '不限'
+  return stores.value.find((s) => s.id === storeId)?.name || `门店#${storeId}`
+}
+
 async function loadIssued() {
   loading.value = true
   try {
@@ -329,9 +358,19 @@ async function loadIssued() {
         keyword: issuedKeyword.value || undefined,
         status: issuedStatus.value || undefined,
         template_id: issuedTemplateId.value || undefined,
+        coupon_type: issuedCouponType.value || undefined,
+        issued_store_id: auth.isSuperAdmin ? issuedStoreId.value || undefined : undefined,
       },
     })
-    issued.value = res.data?.items || []
+    const list = res.data?.items || []
+    // 券核销后离开"可用"集合，末页可能变空，自动回退避免空白页
+    if (list.length === 0 && issuedPage.value > 1) {
+      issuedPage.value -= 1
+      loading.value = false
+      await loadIssued()
+      return
+    }
+    issued.value = list
     issuedTotal.value = res.data?.total || 0
   } finally {
     loading.value = false

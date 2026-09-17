@@ -28,6 +28,16 @@
           <el-option v-for="c in filterCategories" :key="c.id" :label="c.name" :value="c.id" />
         </el-select>
       </el-form-item>
+      <el-form-item>
+        <el-select v-model="tagFilter" placeholder="标签" clearable style="width:120px" @change="reload">
+          <el-option label="推荐" value="RECOMMENDED" />
+          <el-option label="热销" value="HOT" />
+          <el-option label="免烹饪" value="NO_COOKING" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-checkbox v-model="lowStockFilter" @change="reload">仅看低库存（≤{{ lowStockThreshold }}）</el-checkbox>
+      </el-form-item>
       <el-button type="primary" @click="openForm()">新增商品</el-button>
       <el-button
         v-if="auth.isSuperAdmin"
@@ -108,9 +118,11 @@
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
-      layout="total, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next"
       style="margin-top:16px"
       @current-change="load"
+      @size-change="reload"
     />
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="640px" destroy-on-close>
@@ -358,6 +370,9 @@ const total = ref(0)
 const keyword = ref('')
 const statusFilter = ref('ALL')
 const categoryFilter = ref<number | undefined>()
+const tagFilter = ref<string | undefined>()
+const lowStockFilter = ref(false)
+const lowStockThreshold = 10
 const storeFilter = ref<number | undefined>()
 const dialogVisible = ref(false)
 const copyVisible = ref(false)
@@ -655,10 +670,21 @@ async function load() {
         keyword: keyword.value || undefined,
         status: statusFilter.value,
         category_id: categoryFilter.value,
+        tag: tagFilter.value || undefined,
+        low_stock: lowStockFilter.value || undefined,
+        stock_threshold: lowStockFilter.value ? lowStockThreshold : undefined,
         store_id: effectiveListStoreId.value,
       },
     })
-    products.value = res.data.items
+    const list = res.data.items
+    // 删除/下架后当前页变空时自动回退上一页，避免停留在空白页
+    if (list.length === 0 && page.value > 1) {
+      page.value -= 1
+      loading.value = false
+      await load()
+      return
+    }
+    products.value = list
     total.value = res.data.total
     selectedRows.value = []
   } catch (e: any) {

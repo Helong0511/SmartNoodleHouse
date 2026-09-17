@@ -8,8 +8,19 @@ const app = getApp()
 
 const ORDERS_CACHE_MS = 30 * 1000
 
+// tab key 即传给 /orders/mine 的 status（逗号分隔多状态）；空串=全部
+const ORDER_TABS = [
+  { key: '', label: '全部' },
+  { key: 'PENDING_PAYMENT', label: '待支付' },
+  { key: 'PAID,CONFIRMED,PREPARING,COOKING,READY', label: '进行中' },
+  { key: 'COMPLETED', label: '已完成' },
+  { key: 'CANCELLED,REFUND_PENDING,REFUNDED', label: '取消/退款' }
+]
+
 Page({
   data: {
+    tabs: ORDER_TABS,
+    activeTab: '',
     orders: [],
     page: 1,
     pageSize: 15,
@@ -67,11 +78,19 @@ Page({
     this.loadOrders(false)
   },
 
+  onTabChange(e) {
+    const key = e.currentTarget.dataset.key || ''
+    if (key === this.data.activeTab) return
+    this.setData({ activeTab: key })
+    this._ordersLoadedAt = 0
+    this.loadOrders(true, false)
+  },
+
   async loadOrders(reset = true, silent = false, storeId = null) {
     if (reset) {
       if (this.data.loading) return
       const sid = storeId != null ? storeId : this.data.storeId
-      const cacheKey = `${sid || 'all'}`
+      const cacheKey = `${sid || 'all'}::${this.data.activeTab || 'all'}`
       const now = Date.now()
       if (
         silent
@@ -96,6 +115,7 @@ Page({
       await auth.ensureLogin()
       const params = { page, page_size: this.data.pageSize }
       if (sid) params.store_id = sid
+      if (this.data.activeTab) params.status = this.data.activeTab
       const res = await api.get('/orders/mine', params)
       const batch = ((res && res.items) || []).map((o) => ({
         ...o,
@@ -115,7 +135,7 @@ Page({
       })
       if (reset) {
         this._ordersLoadedAt = Date.now()
-        this._ordersCacheKey = `${sid || 'all'}`
+        this._ordersCacheKey = `${sid || 'all'}::${this.data.activeTab || 'all'}`
       }
     } catch (e) {
       if (reset) this.setData({ orders: [] })

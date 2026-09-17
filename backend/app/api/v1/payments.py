@@ -498,10 +498,15 @@ async def list_payments(
     store_id: int | None = None,
     keyword: str | None = None,
     provider: str | None = None,
+    operator_id: int | None = None,
+    amount_min: float | None = None,
+    amount_max: float | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
 ):
     """支付列表。keyword 匹配支付号/订单号；date_* 按支付时间 paid_at（空则 created_at）。"""
+    from decimal import Decimal
+
     from app.models import Store
     from app.schemas.pagination import clamp_page
 
@@ -515,6 +520,12 @@ async def list_payments(
         q = q.where(Order.store_id == effective_store)
     if provider:
         q = q.where(Payment.provider == provider.strip().upper())
+    if operator_id:
+        q = q.where(Payment.operator_id == int(operator_id))
+    if amount_min is not None:
+        q = q.where(Payment.amount >= Decimal(str(amount_min)))
+    if amount_max is not None:
+        q = q.where(Payment.amount <= Decimal(str(amount_max)))
     if keyword and keyword.strip():
         kw = f"%{keyword.strip()}%"
         q = q.where(or_(Payment.payment_no.like(kw), Order.order_no.like(kw)))
@@ -554,6 +565,16 @@ async def list_payments(
             for t in (await db.execute(select(DiningTable).where(DiningTable.id.in_(table_ids)))).scalars().all()
         }
 
+    from app.models import User
+
+    op_ids = list({p.operator_id for p in rows if p.operator_id})
+    op_map: dict[int, User] = {}
+    if op_ids:
+        op_map = {
+            u.id: u
+            for u in (await db.execute(select(User).where(User.id.in_(op_ids)))).scalars().all()
+        }
+
     refunded_map: dict[int, Decimal] = {}
     inflight_map: dict[int, Decimal] = {}
     if ids:
@@ -585,6 +606,7 @@ async def list_payments(
         order = order_map.get(p.order_id)
         store = store_map.get(order.store_id) if order and order.store_id else None
         table = table_map.get(order.table_id) if order and order.table_id else None
+        op = op_map.get(p.operator_id) if p.operator_id else None
         items.append(
             {
                 "id": p.id,
@@ -610,6 +632,8 @@ async def list_payments(
                 "refundable_amount": str(remain),
                 "refund_inflight": str(inflight),
                 "status": p.status,
+                "operator_id": p.operator_id,
+                "operator_name": (op.display_name or op.username) if op else None,
                 "paid_at": p.paid_at.isoformat() if p.paid_at else None,
             }
         )
