@@ -22,9 +22,13 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/settings", tags=["系统设置"])
 
 
-async def _require_store_update(user: CurrentUser):
-    """编辑门店信息：超管可改任意门店；店长可改自己绑定的门店（后续由 store_id 再次校验）。"""
-    if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
+async def _require_store_update(store_id: int, user: CurrentUser):
+    """编辑门店信息：超管可改任意门店；店长仅可改自己绑定的门店。"""
+    if user.role.code == "SUPER_ADMIN":
+        return user
+    if user.role.code == "STORE_ADMIN":
+        if user.store_id is None or int(user.store_id) != int(store_id):
+            raise HTTPException(status_code=403, detail="无权修改该门店")
         return user
     raise HTTPException(status_code=403, detail="无权编辑门店信息")
 
