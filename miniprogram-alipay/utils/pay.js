@@ -100,12 +100,13 @@ function requestAlipayPay(payData) {
           resolve({ ok: true, res, payData })
           return
         }
-        // 8000 处理中 / 6004 结果不明：交给查单
-        const uncertain = code === '8000' || code === '6004' || code === '99'
+        // 8000 处理中 / 6004 结果不明：交给查单；'99' 为明确失败，不进查单
+        const uncertain = code === '8000' || code === '6004'
+        const failed = code === '99'
         const cancel = code === '6001'
-        const e = new Error((res && res.memo) || (cancel ? '您已取消支付' : '支付未完成'))
+        const e = new Error((res && res.memo) || (cancel ? '您已取消支付' : failed ? '支付失败，请重试' : '支付未完成'))
         e.payCancel = cancel
-        e.payUncertain = uncertain || !cancel
+        e.payUncertain = uncertain || (!cancel && !failed)
         e.payData = payData
         e.resultCode = code
         reject(e)

@@ -1,12 +1,10 @@
-import json
-
 from fastapi import APIRouter, Request
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import Customer, OperationLog
+from app.models import Customer
 from app.schemas.member_level import MemberLevelsBatchUpdate
 from app.services.customer_service import CustomerService
 
@@ -48,21 +46,16 @@ async def update_member_levels(
         )
     except AppException:
         raise
-    db.add(
-        OperationLog(
-            user_id=user.id,
-            action="member_level.update",
-            module="customer",
-            target_type="member_levels",
-            target_id=None,
-            ip=request.client.host if request.client else None,
-            user_agent=(request.headers.get("user-agent") or "")[:500],
-            request_id=getattr(request.state, "request_id", None),
-            detail=json.dumps(
-                {"changed": result["changed"], "recalculated": result["recalculated"]},
-                ensure_ascii=False,
-            )[:4000],
-        )
+    from app.services.audit_service import AuditService
+
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="member_level.update",
+        module="customer",
+        target_type="member_levels",
+        detail={"changed": result["changed"], "recalculated": result["recalculated"]},
+        request=request,
     )
     await db.flush()
     levels = await CustomerService.list_levels_ordered(db)

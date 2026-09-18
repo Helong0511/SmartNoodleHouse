@@ -98,10 +98,14 @@ CREATE TABLE IF NOT EXISTS operation_logs (
   user_agent VARCHAR(500) DEFAULT NULL COMMENT '浏览器/客户端 UA',
   request_id VARCHAR(64) DEFAULT NULL COMMENT '请求链路 ID，便于与日志系统关联',
   detail JSON DEFAULT NULL COMMENT '变更详情、请求参数摘要等 JSON',
+  category VARCHAR(20) DEFAULT 'STAFF' COMMENT '审计分类：STAFF/STORE_ADMIN/CASHIER/KITCHEN/SYSTEM/CUSTOMER/DANGER/INTRUSION',
+  store_id BIGINT UNSIGNED DEFAULT NULL COMMENT '操作关联门店；NULL=全局/未绑定（如登录失败、跨店系统操作）',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
   INDEX idx_op_logs_user (user_id, created_at),
   INDEX idx_op_logs_module (module, created_at),
-  INDEX idx_op_logs_created (created_at)
+  INDEX idx_op_logs_created (created_at),
+  INDEX idx_op_logs_category (category, created_at),
+  INDEX idx_op_logs_store (store_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='后台操作审计日志';
 
 -- ============================================================================
@@ -1209,6 +1213,9 @@ WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'coupon:read');
 INSERT INTO permissions (code, name, module)
 SELECT 'coupon:manage', '管理优惠券', 'coupon' FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'coupon:manage');
+INSERT INTO permissions (code, name, module)
+SELECT 'audit:read', '查看操作日志', 'audit' FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE code = 'audit:read');
 
 -- 三、角色权限矩阵
 INSERT INTO role_permissions (role_id, permission_id)
@@ -1223,7 +1230,7 @@ JOIN permissions p ON p.code IN (
   'order:read', 'order:update', 'customer:read', 'customer:manage',
   'camera:read', 'camera:manage', 'welcome:manage',
   'payment:read', 'payment:refund', 'table:manage',
-  'user:read', 'user:manage', 'coupon:read', 'coupon:manage'
+  'user:read', 'user:manage', 'coupon:read', 'coupon:manage', 'audit:read'
 )
 WHERE r.code = 'STORE_ADMIN'
   AND NOT EXISTS (SELECT 1 FROM role_permissions rp WHERE rp.role_id = r.id AND rp.permission_id = p.id);

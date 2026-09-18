@@ -26,6 +26,20 @@ SENSITIVE_LIMITS = {
 }
 DEFAULT_LIMIT = (120, 60)
 
+# INCR+EXPIRE 原子化：避免两步间失败留下无 TTL 计数键导致该 IP+路径永久 429
+_INCR_SLIDING = """
+local c = redis.call('INCR', KEYS[1])
+if c == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+else
+  local ttl = redis.call('TTL', KEYS[1])
+  if ttl == -1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+  end
+end
+return c
+"""
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -51,9 +65,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         try:
             r = await get_redis()
-            count = await r.incr(key)
-            if count == 1:
-                await r.expire(key, window)
+            count = int(await r.eval(_INCR_SLIDING, 1, key, window))
             if count > limit:
                 return JSONResponse(
                     status_code=429,

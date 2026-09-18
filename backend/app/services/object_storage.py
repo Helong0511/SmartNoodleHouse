@@ -23,20 +23,26 @@ class ObjectStorage(ABC):
 
 
 class LocalObjectStorage(ObjectStorage):
-    async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+    @staticmethod
+    def _safe_resolve(key: str) -> Path:
+        """解析并校验 key 不逃逸出上传根目录（commonpath 防兄弟目录前缀绕过）。"""
         settings = get_settings()
-        path = Path(settings.upload_dir) / key
-        path.parent.mkdir(parents=True, exist_ok=True)
-        resolved = path.resolve()
         root = Path(settings.upload_dir).resolve()
-        if not str(resolved).startswith(str(root)):
+        resolved = (root / key).resolve()
+        import os
+
+        if os.path.commonpath([str(root), str(resolved)]) != str(root):
             raise ValueError("非法存储路径")
+        return resolved
+
+    async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        path = self._safe_resolve(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(path.write_bytes, data)
         return f"/uploads/{key.replace(chr(92), '/')}"
 
     async def delete(self, key: str) -> None:
-        settings = get_settings()
-        path = Path(settings.upload_dir) / key
+        path = self._safe_resolve(key)
         if path.is_file():
             await asyncio.to_thread(path.unlink)
 

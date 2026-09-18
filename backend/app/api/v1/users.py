@@ -11,6 +11,7 @@ from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.core.security import hash_password
 from app.models import Role, Store, User
+from app.services.audit_service import AuditService
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/users", tags=["员工"])
@@ -182,6 +183,22 @@ async def create_user(data: UserCreate, request: Request, db: DbSession, user: C
         store = await db.get(Store, sid)
         if store:
             store_names[sid] = store.name
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="user.create",
+        module="user",
+        target_type="user",
+        target_id=u.id,
+        detail={
+            "username": u.username,
+            "display_name": u.display_name,
+            "role_id": role.id,
+            "role_code": role.code,
+            "store_id": sid,
+        },
+        request=request,
+    )
     return success(_ser(u, store_names), request=request)
 
 
@@ -239,14 +256,18 @@ async def update_user(
             perm_changes["store_id"] = {"from": target.store_id, "to": int(data.store_id)}
         target.store_id = int(data.store_id)
 
-    if perm_changes:
-        from app.services.audit_service import AuditService
+    if data.display_name is not None:
+        perm_changes["display_name"] = data.display_name.strip()
 
-        await AuditService.log_permission_change(
+    if perm_changes:
+        await AuditService.log(
             db,
-            operator_id=user.id,
-            target_user_id=target.id,
-            changes=perm_changes,
+            user_id=user.id,
+            action="user.update",
+            module="user",
+            target_type="user",
+            target_id=target.id,
+            detail=perm_changes,
             request=request,
         )
 
@@ -278,4 +299,14 @@ async def reset_password(
     target.password_hash = hash_password(data.password)
     target.token_version = int(target.token_version or 0) + 1
     await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="user.reset_password",
+        module="user",
+        target_type="user",
+        target_id=target.id,
+        detail={"username": target.username},
+        request=request,
+    )
     return success({"id": target.id, "token_version": target.token_version}, request=request)

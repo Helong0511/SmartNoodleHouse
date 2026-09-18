@@ -120,9 +120,14 @@ class FaceEmbeddingCache:
             self._last_full_at = now_mono
             return
 
-        # 增量：updated_at 晚于上次同步的行（含撤销）
+        # 增量：updated_at 晚于等于上次同步的行（含撤销）；用 coalesce 兜底 NULL，
+        # 避免 updated_at 为 NULL 的行在增量阶段永远刷不进缓存
+        from sqlalchemy import func as sa_func
+
         result = await db.execute(
-            select(FaceProfile).where(FaceProfile.updated_at > self._last_sync)  # type: ignore[operator]
+            select(FaceProfile).where(
+                sa_func.coalesce(FaceProfile.updated_at, FaceProfile.created_at) >= self._last_sync  # type: ignore[operator]
+            )
         )
         newest = self._last_sync
         # P0-18: 批量查这批 customer_id 对应的 Customer 状态

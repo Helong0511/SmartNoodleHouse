@@ -97,10 +97,11 @@ async def enqueue_delivery_webhook(
     )
     db.add(row)
     try:
-        await db.flush()
+        # SAVEPOINT 隔离唯一冲突，避免 rollback 连带回滚调用方事务中的其他写入
+        async with db.begin_nested():
+            await db.flush()
         return row, True
     except IntegrityError:
-        await db.rollback()
         existing = (
             await db.execute(
                 select(WebhookInbox).where(

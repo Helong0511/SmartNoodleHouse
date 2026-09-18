@@ -105,7 +105,8 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
         await _record_login_failure(username, ip)
         if user:
             await AuditService.log_login(
-                db, user_id=user.id, username=username, success=False, request=request
+                db, user_id=user.id, username=username, success=False, request=request,
+                store_id=user.store_id,
             )
             await db.flush()
         else:
@@ -122,7 +123,8 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
     await _clear_login_failures(username, ip)
     user.last_login_at = now_local()
     await AuditService.log_login(
-        db, user_id=user.id, username=user.username, success=True, request=request
+        db, user_id=user.id, username=user.username, success=True, request=request,
+        store_id=user.store_id,
     )
     await db.flush()
     token = create_access_token(

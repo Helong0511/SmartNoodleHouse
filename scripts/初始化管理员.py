@@ -1,6 +1,7 @@
 """初始化超级管理员（生产空库 / 开发重置密码）"""
 import asyncio
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -11,10 +12,24 @@ from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
 from app.models import Role, User
 
+# 弱口令黑名单 + 最低复杂度：长度>=10 且含字母与数字
+_WEAK_PASSWORDS = {"admin123", "123456", "12345678", "password", "admin", "admin888", "111111", "000000"}
+
+
+def _validate_password(password: str) -> None:
+    if password.lower() in _WEAK_PASSWORDS:
+        print("拒绝：密码在弱口令黑名单中，请更换强密码")
+        sys.exit(1)
+    if len(password) < 10 or not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+        print("拒绝：密码至少 10 位且须同时包含字母与数字")
+        sys.exit(1)
+
 
 async def main():
     username = os.environ.get("ADMIN_USERNAME", "admin")
     password = os.environ.get("ADMIN_INITIAL_PASSWORD") or os.environ.get("ADMIN_PASSWORD")
+    if password:
+        _validate_password(password)
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.username == username))

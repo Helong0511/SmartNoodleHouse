@@ -8,6 +8,7 @@ from app.api.deps import CurrentUser, DbSession, require_permission, require_pos
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import DiningTable, Store
+from app.services.audit_service import AuditService
 from app.services.qr_links import build_table_qr_links
 from app.services.store_scope import assert_store_access, require_bound_store
 
@@ -177,6 +178,16 @@ async def create_table(
     )
     db.add(table)
     await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="table.create",
+        module="table",
+        target_type="table",
+        target_id=table.id,
+        detail={"store_id": sid, "table_no": table.table_no, "table_name": table.table_name},
+        request=request,
+    )
     return success(_serialize(table), request=request)
 
 
@@ -205,6 +216,16 @@ async def update_table(
     for k, v in payload.items():
         setattr(table, k, v)
     await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="table.update",
+        module="table",
+        target_type="table",
+        target_id=table.id,
+        detail={"store_id": table.store_id, "changes": payload},
+        request=request,
+    )
     return success(_serialize(table), request=request)
 
 
@@ -236,4 +257,14 @@ async def regenerate_qr(table_id: int, request: Request, db: DbSession, user: Cu
     table.wechat_qr_url = links["wechat_scheme"]
     table.alipay_qr_url = links["alipay_scheme"]
     await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="table.regenerate_qr",
+        module="table",
+        target_type="table",
+        target_id=table.id,
+        detail={"store_id": table.store_id, "table_no": table.table_no},
+        request=request,
+    )
     return success(_serialize(table), request=request)

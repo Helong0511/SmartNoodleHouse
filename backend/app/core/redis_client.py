@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import redis.asyncio as redis
@@ -7,12 +8,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import get_settings
 
 _redis: redis.Redis | None = None
+_lock = asyncio.Lock()
 
 
 async def get_redis() -> redis.Redis:
     global _redis
     if _redis is None:
-        _redis = redis.from_url(get_settings().redis_url, decode_responses=True)
+        # 并发首调仅创建一个实例，避免被覆盖的实例连接泄漏
+        async with _lock:
+            if _redis is None:
+                _redis = redis.from_url(get_settings().redis_url, decode_responses=True)
     return _redis
 
 

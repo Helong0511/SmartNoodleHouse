@@ -80,6 +80,7 @@ async def test_retry_print_job_triggers_process():
     fake_db = MagicMock()
     fake_db.get = AsyncMock(side_effect=[job, job])
     fake_db.commit = AsyncMock()
+    fake_db.flush = AsyncMock()
 
     async def override_db():
         yield fake_db

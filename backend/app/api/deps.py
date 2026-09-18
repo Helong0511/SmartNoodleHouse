@@ -124,6 +124,9 @@ async def get_staff_or_customer(
             if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
                 raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
             return None, customer
+        # 仅接受员工令牌：拒绝 stream 摄像头短票据等其他类型混入
+        if payload.get("typ") != "staff":
+            raise HTTPException(status_code=401, detail="无效令牌类型")
         user = (
             await db.execute(
                 select(User).options(selectinload(User.role)).where(User.id == int(payload["sub"]), User.status == 1)

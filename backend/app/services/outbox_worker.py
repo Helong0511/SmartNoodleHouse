@@ -215,6 +215,8 @@ async def process_outbox_item(outbox_id: int) -> None:
                 )
         except Exception as e:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, e)
+            # handler 异常后会话可能处于失败态，先回滚再用同一会话标记失败
+            await db.rollback()
             await _mark_failed(db, row, str(e), wid=wid)
 
 

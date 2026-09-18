@@ -7,6 +7,7 @@ from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import CouponTemplate, Customer, Order
 from app.schemas.coupon import CouponIssueRequest, CouponTemplateCreate, CouponTemplateUpdate
+from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
 from app.services.store_scope import require_bound_store
@@ -53,6 +54,16 @@ async def create_template(data: CouponTemplateCreate, request: Request, db: DbSe
         payload.pop("store_whitelist", None)
     tmpl = await CouponService.create_template(db, payload)
     await db.commit()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="coupon.template.create",
+        module="coupon",
+        target_type="coupon_template",
+        target_id=tmpl.id,
+        detail={"name": tmpl.name, "coupon_type": tmpl.coupon_type, "store_id": tmpl.store_id},
+        request=request,
+    )
     return success(CouponService.template_payload(tmpl), request=request)
 
 
@@ -74,6 +85,16 @@ async def update_template(
         raw.pop("store_whitelist", None)  # P2-4 门店白名单仅总部可配置
     tmpl = await CouponService.update_template(db, tmpl, raw)
     await db.commit()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="coupon.template.update",
+        module="coupon",
+        target_type="coupon_template",
+        target_id=tmpl.id,
+        detail={"changes": raw},
+        request=request,
+    )
     return success(CouponService.template_payload(tmpl), request=request)
 
 
@@ -89,8 +110,19 @@ async def set_template_status(
     if not tmpl:
         raise AppException(40407, "优惠券模板不存在")
     _assert_template_manage_access(user, tmpl)
+    old_status = int(tmpl.status)
     tmpl.status = int(data.status)
     await db.commit()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="coupon.template.status",
+        module="coupon",
+        target_type="coupon_template",
+        target_id=tmpl.id,
+        detail={"from": old_status, "to": int(data.status)},
+        request=request,
+    )
     return success(CouponService.template_payload(tmpl), request=request)
 
 
@@ -217,6 +249,23 @@ async def issue_coupon(data: CouponIssueRequest, request: Request, db: DbSession
         for cc in issued
     ]
     qty = len(items)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="coupon.issue",
+        module="coupon",
+        target_type="customer",
+        target_id=int(data.customer_id),
+        detail={
+            "customer_id": int(data.customer_id),
+            "template_id": int(data.template_id),
+            "quantity": int(qty),
+            "issued_coupon_ids": [int(cc.id) for cc in issued],
+            "store_id": int(store_id) if store_id else None,
+        },
+        request=request,
+        store_id=int(store_id) if store_id else None,
+    )
     return success(
         {
             "quantity": qty,

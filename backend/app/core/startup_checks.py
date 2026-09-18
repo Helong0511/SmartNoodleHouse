@@ -156,17 +156,31 @@ def validate_settings(settings: Settings) -> None:
 
     # 生产至少配置一种支付通道（微信 V3 或支付宝）；否则小程序/扫码收款不可用
     if is_prod:
+        # 占位值检测：REPLACE/your-domain 等示例值一旦上线会静默失效
+        _placeholder_re = re.compile(r"replace[_-]|your[-_]domain|your[-_]password|example\.com|<.*>", re.IGNORECASE)
+
+        def _is_placeholder(value: object) -> bool:
+            v = str(value or "").strip()
+            return bool(v) and bool(_placeholder_re.search(v))
+
         wechat_ok = bool(
             getattr(settings, "wechat_mch_id", None)
             and getattr(settings, "wechat_api_v3_key", None)
             and getattr(settings, "wechat_cert_serial_no", None)
             and getattr(settings, "wechat_app_id", None)
         )
+        if wechat_ok:
+            for label in ("wechat_app_secret", "wechat_api_v3_key"):
+                if _is_placeholder(getattr(settings, label, None)):
+                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实密钥")
         alipay_ok = bool(
             getattr(settings, "alipay_app_id", None)
             and getattr(settings, "alipay_private_key", None)
             and getattr(settings, "alipay_public_key", None)
         )
+        for label in ("wechat_notify_url", "alipay_notify_url", "meituan_notify_url", "eleme_notify_url"):
+            if _is_placeholder(getattr(settings, label, None)):
+                errors.append(f"生产配置 {label.upper()} 仍为占位域名（your-domain），回调将无法送达")
         if not wechat_ok and not alipay_ok:
             errors.append(
                 "生产须至少配置微信（MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID）或支付宝（APP_ID/私钥/公钥）之一"

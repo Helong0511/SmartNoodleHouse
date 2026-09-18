@@ -8,6 +8,7 @@ from app.api.deps import CurrentUser, DbSession, require_kitchen
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.models import PrintJob
+from app.services.audit_service import AuditService
 from app.services.print_service import PrintService
 from app.services.store_scope import assert_store_access, require_bound_store
 
@@ -88,6 +89,21 @@ async def retry_print_job(job_id: int, request: Request, db: DbSession, user: Cu
     await db.commit()
     ok = await PrintService.process_print_job(int(job_id))
     refreshed = await db.get(PrintJob, int(job_id))
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="print_job.retry",
+        module="print_job",
+        target_type="print_job",
+        target_id=int(job_id),
+        detail={
+            "ok": bool(ok),
+            "status": refreshed.status if refreshed else None,
+            "store_id": int(job.store_id) if getattr(job, "store_id", None) else None,
+        },
+        request=request,
+        store_id=int(job.store_id) if getattr(job, "store_id", None) else None,
+    )
     return success(
         {
             "retried": True,

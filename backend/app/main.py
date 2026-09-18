@@ -20,6 +20,7 @@ from app.core.exceptions import (
     sqlalchemy_operational_handler,
 )
 from app.core.http_client import close_http_client
+from app.core.intrusion_detection import detect_intrusion
 from app.core.ip_allowlist import WebhookAllowlistMiddleware
 from app.core.logging_config import setup_logging
 from app.core.rate_limit import RateLimitMiddleware
@@ -235,6 +236,38 @@ def create_app() -> FastAPI:
             response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
             response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         return response
+
+    # P1-40: 危险请求检测中间件（SQL注入 / 路径遍历 / 命令注入 / 漏洞探针）
+    @app.middleware("http")
+    async def intrusion_detection_middleware(request: Request, call_next):
+        is_dangerous, reason = detect_intrusion(request)
+        if is_dangerous:
+            from fastapi.responses import JSONResponse
+
+            from app.core.database import AsyncSessionLocal
+            from app.services.audit_service import AuditService
+
+            try:
+                async with AsyncSessionLocal() as audit_db:
+                    await AuditService.log_intrusion(
+                        audit_db,
+                        reason=reason,
+                        path=request.url.path,
+                        request=request,
+                        extra={
+                            "method": request.method,
+                            "query": request.url.query,
+                            "ua": (request.headers.get("user-agent") or "")[:500],
+                        },
+                    )
+                    await audit_db.commit()
+            except Exception:
+                logger.exception("audit log_intrusion failed: %s", reason)
+            return JSONResponse(
+                status_code=403,
+                content={"code": 403, "message": "Request blocked by security policy"},
+            )
+        return await call_next(request)
 
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RateLimitMiddleware)

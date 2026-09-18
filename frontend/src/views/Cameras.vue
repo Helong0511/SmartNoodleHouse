@@ -232,6 +232,8 @@ async function load() {
     const res = await api.get('/cameras')
     const data = res.data
     cameras.value = Array.isArray(data) ? data : data?.items || []
+  } catch (e: any) {
+    // 10 秒轮询的网络抖动不应持续抛未处理 rejection
   } finally {
     loading.value = false
   }

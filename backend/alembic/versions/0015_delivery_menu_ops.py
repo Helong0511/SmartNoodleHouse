@@ -1,7 +1,7 @@
 """外卖管理重构：营业时间/分类映射/同步告警表 + 门店绑定自动开关店字段
 
 Revision ID: 0015_delivery_menu_ops
-Revises: 0014_coupon_template_store_whitelist
+Revises: 0014_coupon_template_whitelist
 Create Date: 2026-09-16
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0015_delivery_menu_ops"
-down_revision = "0014_coupon_template_store_whitelist"
+down_revision = "0014_coupon_template_whitelist"
 branch_labels = None
 depends_on = None
 

@@ -177,7 +177,7 @@
         v-model:current-page="pager.page"
         v-model:page-size="pager.pageSize"
         :total="pager.total"
-        :page-sizes="[10, 20, 50]"
+        :page-sizes="[20, 50, 100]"
         layout="total, sizes, prev, pager, next"
         background
         small
@@ -445,6 +445,8 @@ async function loadStores() {
 }
 
 function onStoreChange() {
+  // 门店变更：筛选条件变化回到第 1 页（项目约定），避免停留在越界页码
+  pager.page = 1
   refreshAll()
 }
 
@@ -475,7 +477,14 @@ async function loadOrders() {
     params.date_from = filters.dateRange[0]
     params.date_to = filters.dateRange[1]
   }
-  const res = await api.get('/delivery/orders', { params })
+  let res
+  try {
+    res = await api.get('/delivery/orders', { params })
+  } catch (e: any) {
+    // 轮询/WS 自动刷新的网络抖动不应每 8 秒抛一次未处理 rejection
+    if (!pageLoading.value) ElMessage.error(e?.message || '加载外卖订单失败')
+    return
+  }
   const items = res.data?.items || []
   // 操作（接单/取消）或数据变化导致当前页为空时，自动回退到上一页，避免停在空白页
   if (items.length === 0 && pager.page > 1) {

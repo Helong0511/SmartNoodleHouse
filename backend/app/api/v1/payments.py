@@ -13,6 +13,7 @@ from app.core.redis_client import get_redis
 from app.core.response import calc_pages, success
 from app.models import Order, Payment, PaymentRefund
 from app.schemas.order import PaymentCreate, PosCashPay, PosScanPay
+from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
 from app.services.payment_service import PaymentService
 from app.services.store_scope import assert_order_store_access, require_bound_store
@@ -26,7 +27,7 @@ def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
         try:
             q = q.where(col >= datetime.fromisoformat(date_from))
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail=f"date_from 格式非法: {date_from}")
     if date_to:
         try:
             end = datetime.fromisoformat(date_to)
@@ -34,7 +35,7 @@ def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
                 end = end + timedelta(days=1)
             q = q.where(col < end)
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail=f"date_to 格式非法: {date_to}")
     return q
 
 
@@ -104,6 +105,27 @@ async def create_payment(
                 pay_data["points_earned"] = CustomerService.points_from_amount(order.total_amount)
                 pay_data["member_points"] = profile.get("member_points", 0)
                 pay_data["member_level_name"] = profile.get("member_level_name")
+    await AuditService.log(
+        db,
+        action="payment.pay",
+        module="payment",
+        user_id=None,
+        target_type="order",
+        target_id=int(order.id),
+        detail={
+            "order_id": int(order.id),
+            "order_no": order.order_no,
+            "payment_no": payment.payment_no,
+            "amount": str(payment.amount),
+            "provider": data.provider,
+            "channel_type": data.channel_type,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "customer_id": int(customer.id),
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success({"payment_no": payment.payment_no, "amount": str(payment.amount), **pay_data}, request=request)
 
 
@@ -139,6 +161,25 @@ async def sync_order_payment(
     )
     if meta.get("synced") and payment and payment.status == "PAID":
         await _notify_paid_or_refunded(db, payment, transitioned=True)
+    await AuditService.log(
+        db,
+        action="payment.sync",
+        module="payment",
+        user_id=None,
+        target_type="order",
+        target_id=int(order.id),
+        detail={
+            "order_id": int(order.id),
+            "order_no": order.order_no,
+            "payment_no": payment.payment_no if payment else meta.get("payment_no"),
+            "store_id": int(order.store_id) if order.store_id else None,
+            "customer_id": int(customer.id),
+            "synced": bool(meta.get("synced")),
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "order_id": order.id,
@@ -189,6 +230,47 @@ async def sync_payment(
     if before != "PAID" and payment.status == "PAID":
         await _notify_paid_or_refunded(db, payment, transitioned=True)
     progress = await PaymentService.payment_progress(db, order) if order else {}
+    audit_store_id = int(order.store_id) if order and order.store_id else None
+    if user is not None:
+        await AuditService.log_staff(
+            db,
+            user=user,
+            action="payment.sync",
+            module="payment",
+            target_type="payment",
+            target_id=int(payment.id),
+            detail={
+                "payment_no": payment.payment_no,
+                "order_id": int(order.id) if order else None,
+                "amount": str(payment.amount),
+                "store_id": audit_store_id,
+                "before": before,
+                "after": payment.status,
+            },
+            request=request,
+            store_id=audit_store_id,
+        )
+    else:
+        await AuditService.log(
+            db,
+            action="payment.sync",
+            module="payment",
+            user_id=None,
+            target_type="payment",
+            target_id=int(payment.id),
+            detail={
+                "payment_no": payment.payment_no,
+                "order_id": int(order.id) if order else None,
+                "amount": str(payment.amount),
+                "store_id": audit_store_id,
+                "customer_id": int(customer.id) if customer else None,
+                "before": before,
+                "after": payment.status,
+            },
+            request=request,
+            category=AuditService.CATEGORY_CUSTOMER,
+            store_id=audit_store_id,
+        )
     return success(
         {
             "payment_no": payment.payment_no,
@@ -234,6 +316,24 @@ async def pay_order_cash(
             {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id, "channel": order.channel},
         )
     # amount / 进度字段放最后，避免被 pay_data 内同名键覆盖
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="payment.cash",
+        module="payment",
+        target_type="payment",
+        target_id=int(payment.id),
+        detail={
+            "order_id": int(order.id),
+            "order_no": order.order_no,
+            "payment_no": payment.payment_no,
+            "amount": str(payment.amount),
+            "received_amount": str(body.received_amount) if body.received_amount is not None else None,
+            "store_id": int(order.store_id) if order.store_id else None,
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "payment_no": payment.payment_no,
@@ -299,6 +399,24 @@ async def create_pos_scan_payment(
                 "channel": order.channel,
             },
         )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="payment.pos_scan",
+        module="payment",
+        target_type="payment",
+        target_id=int(payment.id),
+        detail={
+            "order_id": int(order.id),
+            "order_no": order.order_no,
+            "payment_no": payment.payment_no,
+            "amount": str(payment.amount),
+            "provider": provider,
+            "store_id": int(order.store_id) if order.store_id else None,
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "payment_no": payment.payment_no,
@@ -370,6 +488,7 @@ async def refund_payment(
         reason=data.reason,
         request=request,
         extra={"order_id": order.id, "status": row.status},
+        store_id=order.store_id,
     )
     if row.status == "SUCCESS":
         await ws_manager.notify_order_event(

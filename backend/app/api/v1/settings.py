@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
-from app.models import OperationLog, Store, StoreSetting
+from app.models import Store, StoreSetting
 from app.schemas.settings import BusinessSettingsUpdate, StoreUpdate
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.services.system_settings_service import (
@@ -107,6 +107,20 @@ async def create_store(data: StoreCreate, request: Request, db: DbSession, user:
     )
     db.add(store)
     await db.flush()
+    await _write_audit(
+        db,
+        user=user,
+        request=request,
+        action="store.create",
+        target_type="store",
+        target_id=store.id,
+        detail={
+            "store_no": store.store_no,
+            "name": store.name,
+            "address": store.address,
+            "phone": store.phone,
+        },
+    )
     return success(
         {"id": store.id, "store_no": store.store_no, "name": store.name, "status": store.status},
         request=request,
@@ -380,18 +394,17 @@ async def _write_audit(
     target_id: int | None,
     detail: dict,
 ) -> None:
-    db.add(
-        OperationLog(
-            user_id=user.id,
-            action=action,
-            module="settings",
-            target_type=target_type,
-            target_id=target_id,
-            ip=request.client.host if request.client else None,
-            user_agent=(request.headers.get("user-agent") or "")[:500],
-            request_id=getattr(request.state, "request_id", None),
-            detail=json.dumps(detail, ensure_ascii=False)[:4000],
-        )
+    from app.services.audit_service import AuditService
+
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action=action,
+        module="settings",
+        target_type=target_type,
+        target_id=target_id,
+        detail=detail,
+        request=request,
     )
 
 
@@ -548,6 +561,15 @@ async def update_store_business(
             existing[key].setting_value = sval
         else:
             db.add(StoreSetting(store_id=store_id, setting_key=key, setting_value=sval))
+    await _write_audit(
+        db,
+        user=user,
+        request=request,
+        action="store.business.update",
+        target_type="store",
+        target_id=store_id,
+        detail={"updates": {k: str(v) for k, v in data.updates.items()}},
+    )
     await db.flush()
     return await get_store_business(store_id, request, db, user)
 
@@ -568,6 +590,15 @@ async def clear_store_business_key(
 
     await db.execute(
         sa_delete(StoreSetting).where(StoreSetting.store_id == store_id, StoreSetting.setting_key == key)
+    )
+    await _write_audit(
+        db,
+        user=user,
+        request=request,
+        action="store.business.clear",
+        target_type="store",
+        target_id=store_id,
+        detail={"key": key},
     )
     await db.flush()
     return success({"cleared": True, "store_id": store_id, "key": key}, request=request)

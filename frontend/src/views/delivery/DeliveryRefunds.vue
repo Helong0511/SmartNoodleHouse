@@ -80,7 +80,7 @@
         v-model:current-page="refundPager.page"
         v-model:page-size="refundPager.pageSize"
         :total="refundPager.total"
-        :page-sizes="[10, 20, 50]"
+        :page-sizes="[20, 50, 100]"
         layout="total, sizes, prev, pager, next"
         background
         small
@@ -163,7 +163,13 @@ async function loadRefunds() {
     params.date_from = dateRange.value[0]
     params.date_to = dateRange.value[1]
   }
-  const res = await api.get('/delivery/refunds', { params })
+  let res
+  try {
+    res = await api.get('/delivery/refunds', { params })
+  } catch (e: any) {
+    // 10 秒轮询的网络抖动不应持续抛未处理 rejection
+    return
+  }
   const items = res.data?.items || []
   // 审批后当前筛选结果集缩小，末页变空时自动回退，避免停在空白页
   if (items.length === 0 && refundPager.page > 1) {

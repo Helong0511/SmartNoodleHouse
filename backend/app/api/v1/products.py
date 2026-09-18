@@ -37,6 +37,7 @@ from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
 )
+from app.services.audit_service import AuditService
 from app.services.menu_copy_service import MenuCopyService
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.services.category_require import (
@@ -425,6 +426,23 @@ async def copy_menu_to_store(data: MenuCopyRequest, request: Request, db: DbSess
         on_product_conflict=data.on_product_conflict,  # type: ignore[arg-type]
         clone_shared_option_groups=bool(data.clone_shared_option_groups),
     )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.menu.copy",
+        module="product",
+        target_type="store",
+        target_id=int(data.target_store_id),
+        detail={
+            "target_store_id": int(data.target_store_id),
+            "category_ids": list(data.category_ids or []),
+            "option_group_ids": list(data.option_group_ids or []),
+            "product_ids": list(data.product_ids or []),
+            "on_product_conflict": data.on_product_conflict,
+        },
+        request=request,
+        store_id=int(data.target_store_id),
+    )
     return success(result, request=request)
 
 
@@ -534,6 +552,17 @@ async def create_category(data: CategoryCreate, request: Request, db: DbSession,
     )
     db.add(cat)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.category.create",
+        module="product",
+        target_type="category",
+        target_id=int(cat.id),
+        detail={"store_id": int(sid), "category_no": cat.category_no, "name": data.name},
+        request=request,
+        store_id=int(sid),
+    )
     return success({"id": cat.id, "store_id": cat.store_id, "category_no": cat.category_no}, request=request)
 
 
@@ -585,6 +614,17 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
     for k, v in payload.items():
         setattr(cat, k, v)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.category.update",
+        module="product",
+        target_type="category",
+        target_id=int(cat.id),
+        detail={"store_id": int(cat.store_id) if cat.store_id else None, "category_no": cat.category_no, "fields": list(data.model_dump(exclude_unset=True).keys())},
+        request=request,
+        store_id=int(cat.store_id) if cat.store_id else None,
+    )
     return success({"id": cat.id, "store_id": cat.store_id, "category_no": cat.category_no}, request=request)
 
 
@@ -650,6 +690,17 @@ async def create_category_schedule(
     await _replace_schedule_items(db, sched, data.items)
     await db.flush()
     items = (await _load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.category_schedule.create",
+        module="product",
+        target_type="category_schedule",
+        target_id=int(sched.id),
+        detail={"store_id": int(sid), "name": sched.name},
+        request=request,
+        store_id=int(sid),
+    )
     return success(_schedule_payload(sched, items), request=request)
 
 
@@ -689,6 +740,17 @@ async def update_category_schedule(
         await _replace_schedule_items(db, sched, data.items or [])
     await db.flush()
     items = (await _load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.category_schedule.update",
+        module="product",
+        target_type="category_schedule",
+        target_id=int(sched.id),
+        detail={"store_id": int(sched.store_id) if sched.store_id else None, "fields": list(data.model_dump(exclude_unset=True).keys())},
+        request=request,
+        store_id=int(sched.store_id) if sched.store_id else None,
+    )
     return success(_schedule_payload(sched, items), request=request)
 
 
@@ -710,6 +772,17 @@ async def delete_category_schedule(
     )
     await db.delete(sched)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.category_schedule.delete",
+        module="product",
+        target_type="category_schedule",
+        target_id=int(schedule_id),
+        detail={"store_id": int(sched.store_id) if sched.store_id else None, "name": sched.name},
+        request=request,
+        store_id=int(sched.store_id) if sched.store_id else None,
+    )
     return success({"id": schedule_id}, request=request)
 
 
@@ -994,6 +1067,17 @@ async def upsert_store_stock(
         )
         db.add(row)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.stock.upsert",
+        module="product",
+        target_type="store_product_stock",
+        target_id=int(product_id),
+        detail={"store_id": int(sid), "product_id": int(product_id), "stock": int(row.stock), "status": int(row.status)},
+        request=request,
+        store_id=int(sid),
+    )
     return success(
         {
             "store_id": sid,
@@ -1026,6 +1110,17 @@ async def delete_store_stock(
         )
     )
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.stock.delete",
+        module="product",
+        target_type="store_product_stock",
+        target_id=int(product_id),
+        detail={"store_id": int(sid), "product_id": int(product_id)},
+        request=request,
+        store_id=int(sid),
+    )
     return success({"deleted": True, "store_id": sid, "product_id": product_id}, request=request)
 
 
@@ -1196,6 +1291,17 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
     except IntegrityError:
         await db.rollback()
         raise AppException(40002, f"本店商品编号「{product_no}」已存在，请换一个")
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.create",
+        module="product",
+        target_type="product",
+        target_id=int(product.id),
+        detail={"store_id": int(product.store_id), "product_no": product.product_no, "name": data.name},
+        request=request,
+        store_id=int(product.store_id),
+    )
     return success({"id": product.id, "store_id": product.store_id, "product_no": product.product_no}, request=request)
 
 
@@ -1306,6 +1412,17 @@ async def update_product(
         for idx, gid in enumerate(data.option_group_ids):
             db.add(ProductOptionGroup(product_id=product.id, group_id=gid, sort_order=idx))
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.update",
+        module="product",
+        target_type="product",
+        target_id=int(product.id),
+        detail={"store_id": int(product.store_id), "product_no": product.product_no, "fields": list(data.model_dump(exclude_unset=True).keys())},
+        request=request,
+        store_id=int(product.store_id),
+    )
     return success({"id": product.id, "store_id": product.store_id}, request=request)
 
 
@@ -1327,6 +1444,17 @@ async def upload_product_image(
     await db.flush()
     await db.refresh(product)
     updated_at = product.updated_at.isoformat() if product.updated_at else None
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.image.upload",
+        module="product",
+        target_type="product",
+        target_id=int(product.id),
+        detail={"store_id": int(product.store_id), "product_id": int(product.id), "main_image": url},
+        request=request,
+        store_id=int(product.store_id),
+    )
     return success(
         {
             "id": product.id,
@@ -1352,6 +1480,17 @@ async def delete_product(product_id: int, request: Request, db: DbSession, user:
     await db.execute(delete(DeliveryProductMap).where(DeliveryProductMap.product_id == product_id))
     await db.delete(product)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.delete",
+        module="product",
+        target_type="product",
+        target_id=int(product_id),
+        detail={"store_id": int(product.store_id), "product_no": product.product_no, "name": product.name},
+        request=request,
+        store_id=int(product.store_id),
+    )
     return success({"id": product_id}, request=request)
 
 
@@ -1562,6 +1701,17 @@ async def create_option_group(data: OptionGroupCreate, request: Request, db: DbS
     group = OptionGroup(**payload)
     db.add(group)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option_group.create",
+        module="product",
+        target_type="option_group",
+        target_id=int(group.id),
+        detail={"store_id": int(group.store_id) if group.store_id else None, "code": group.code, "name": data.name},
+        request=request,
+        store_id=int(group.store_id) if group.store_id else None,
+    )
     return success({"id": group.id, "store_id": group.store_id, "code": group.code}, request=request)
 
 
@@ -1586,6 +1736,16 @@ async def create_option(data: OptionCreate, request: Request, db: DbSession, use
     if opt.is_default:
         await _clear_sibling_defaults(db, opt.group_id, opt.id)
     await db.refresh(opt)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option.create",
+        module="product",
+        target_type="option",
+        target_id=int(opt.id),
+        detail={"group_id": int(opt.group_id), "code": opt.code, "name": opt.name, "is_default": bool(opt.is_default)},
+        request=request,
+    )
     return success(_option_dict(opt), request=request)
 
 
@@ -1614,6 +1774,17 @@ async def update_option_group(
     for k, v in raw.items():
         setattr(group, k, v)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option_group.update",
+        module="product",
+        target_type="option_group",
+        target_id=int(group.id),
+        detail={"store_id": int(group.store_id) if group.store_id else None, "code": group.code, "fields": list(data.model_dump(exclude_unset=True).keys())},
+        request=request,
+        store_id=int(group.store_id) if group.store_id else None,
+    )
     return success({"id": group.id, "store_id": group.store_id, "code": group.code}, request=request)
 
 
@@ -1628,6 +1799,17 @@ async def delete_option_group(group_id: int, request: Request, db: DbSession, us
     for o in opts.scalars():
         o.status = 0
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option_group.delete",
+        module="product",
+        target_type="option_group",
+        target_id=int(group.id),
+        detail={"store_id": int(group.store_id) if group.store_id else None, "code": group.code, "name": group.name},
+        request=request,
+        store_id=int(group.store_id) if group.store_id else None,
+    )
     return success({"id": group.id}, request=request)
 
 
@@ -1655,6 +1837,16 @@ async def update_option(option_id: int, data: OptionUpdate, request: Request, db
     if want_default is not None:
         await _apply_option_default_flag(db, opt, want_default)
     await db.refresh(opt)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option.update",
+        module="product",
+        target_type="option",
+        target_id=int(opt.id),
+        detail={"group_id": int(opt.group_id), "code": opt.code, "fields": list(data.model_dump(exclude_unset=True).keys())},
+        request=request,
+    )
     return success(_option_dict(opt), request=request)
 
 
@@ -1674,6 +1866,16 @@ async def set_default_option(option_id: int, request: Request, db: DbSession, us
         raise AppException(40037, "已停用的选项不能设为默认")
     await _apply_option_default_flag(db, opt, True)
     await db.refresh(opt)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option.set_default",
+        module="product",
+        target_type="option",
+        target_id=int(opt.id),
+        detail={"group_id": int(opt.group_id), "code": opt.code, "is_default": bool(opt.is_default)},
+        request=request,
+    )
     return success(_option_dict(opt), request=request)
 
 
@@ -1686,4 +1888,14 @@ async def delete_option(option_id: int, request: Request, db: DbSession, user: C
     _assert_option_group_manage(user, group)
     opt.status = 0
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.option.delete",
+        module="product",
+        target_type="option",
+        target_id=int(opt.id),
+        detail={"group_id": int(opt.group_id), "code": opt.code, "name": opt.name},
+        request=request,
+    )
     return success({"id": opt.id}, request=request)

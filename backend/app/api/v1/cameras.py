@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import now_local, success
 from app.models import Camera, VisitorEvent
+from app.services.audit_service import AuditService
 from app.services.camera_credentials import (
     build_connect_source,
     encrypt_password,
@@ -285,6 +286,21 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
     )
     db.add(camera)
     await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.create",
+        module="camera",
+        target_type="camera",
+        target_id=camera.id,
+        detail={
+            "store_id": sid,
+            "name": camera.name,
+            "camera_type": camera.camera_type,
+            "auto_start": bool(data.auto_start),
+        },
+        request=request,
+    )
     if data.auto_start:
         _start_worker(camera, force=True)
         time.sleep(0.3)
@@ -350,6 +366,20 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     if restart and mgr.get_worker(camera_id):
         _start_worker(camera, force=True)
         camera.status = mgr.get_status(camera_id) or "OFFLINE"
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.update",
+        module="camera",
+        target_type="camera",
+        target_id=camera.id,
+        detail={
+            "store_id": camera.store_id,
+            "changes": {k: v for k, v in payload.items() if k not in ("password",)},
+            "restart": restart,
+        },
+        request=request,
+    )
     return success(_serialize(camera, mgr), request=request)
 
 
@@ -361,9 +391,21 @@ async def delete_camera(camera_id: int, request: Request, db: DbSession, user: C
     if not camera:
         raise AppException(40420, "摄像头不存在")
     _assert_cam_access(user, camera)
+    store_id = camera.store_id
+    name = camera.name
     CameraManager().stop_camera(camera_id)
     await db.delete(camera)
     await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.delete",
+        module="camera",
+        target_type="camera",
+        target_id=camera_id,
+        detail={"store_id": store_id, "name": name},
+        request=request,
+    )
     return success({"deleted": True, "id": camera_id}, request=request)
 
 
@@ -381,6 +423,16 @@ async def start_camera(camera_id: int, request: Request, db: DbSession, user: Cu
     camera.status = st
     if st == "ONLINE":
         camera.last_online_at = now_local()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.start",
+        module="camera",
+        target_type="camera",
+        target_id=camera.id,
+        detail={"store_id": camera.store_id, "status": st},
+        request=request,
+    )
     return success(_serialize(camera, CameraManager()), request=request)
 
 
@@ -399,6 +451,16 @@ async def stop_camera(camera_id: int, request: Request, db: DbSession, user: Cur
     _assert_cam_access(user, camera)
     CameraManager().stop_camera(camera_id)
     camera.status = "OFFLINE"
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.stop",
+        module="camera",
+        target_type="camera",
+        target_id=camera.id,
+        detail={"store_id": camera.store_id},
+        request=request,
+    )
     return success(_serialize(camera, CameraManager()), request=request)
 
 

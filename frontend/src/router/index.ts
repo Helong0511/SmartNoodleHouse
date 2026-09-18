@@ -46,6 +46,7 @@ const router = createRouter({
         { path: 'delivery/logs', component: () => import('@/views/delivery/DeliveryLogs.vue'), meta: { title: '外卖回调日志', permission: 'order:read', denyCashier: true } },
         { path: 'store-info', component: () => import('@/views/StoreInfo.vue'), meta: { title: '门店信息', permission: 'table:manage', denyCashier: true } },
         { path: 'welcome-logs', component: () => import('@/views/WelcomeLogs.vue'), meta: { title: '迎宾日志', permission: 'welcome:manage', denyCashier: true } },
+        { path: 'audit-logs', component: () => import('@/views/AuditLogs.vue'), meta: { title: '操作日志', permission: 'audit:read', denyCashier: true } },
         { path: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置', permission: 'system:manage', denyCashier: true } },
       ]
     },
@@ -72,8 +73,9 @@ async function ensureUser() {
 }
 
 router.beforeEach(async (to, _from, next) => {
-  const publicPaths = ['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member', '/display']
-  const isPublic = publicPaths.some((p) => to.path.startsWith(p))
+  // 公开页精确匹配，避免前缀误伤后台路由（如 /order 前缀命中 /orders、/member 命中 /member-levels）
+  const publicPaths = new Set(['/login', '/scan', '/order', '/order/cart', '/order/confirm', '/order/result', '/order/history', '/member', '/display'])
+  const isPublic = publicPaths.has(to.path)
   if (to.path === '/login' && getStaffToken()) {
     const { useAuthStore } = await import('@/stores/auth')
     useAuthStore().logout()

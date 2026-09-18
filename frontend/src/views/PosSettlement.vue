@@ -66,11 +66,13 @@
 import { onMounted, ref } from 'vue'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { formatYmd } from '@/utils/date'
 
 const auth = useAuthStore()
 const loading = ref(false)
 const report = ref<any>(null)
-const date = ref(new Date().toISOString().slice(0, 10))
+// formatYmd 使用本地时区，避免 toISOString 的 UTC 日期在东八区 0-8 点显示为昨日
+const date = ref(formatYmd())
 const storeId = ref<number | null>(null)
 const stores = ref<any[]>([])
 
@@ -91,6 +93,8 @@ async function load() {
     if (storeId.value) params.store_id = storeId.value
     const res = await api.get('/pos/settlement/daily', { params })
     report.value = res.data
+  } catch (e: any) {
+    report.value = null
   } finally {
     loading.value = false
   }

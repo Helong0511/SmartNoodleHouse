@@ -22,6 +22,7 @@ from app.models import (
     FaceProfile,
     Store,
 )
+from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService, PreferenceService
 from app.services.coupon_service import CouponService
 from app.services.dining_session_service import DiningSessionService
@@ -279,6 +280,22 @@ async def bind_dine_table(
     )
     await CustomerService.remember_first_seen(db, customer, table.qr_token, table=table)
 
+    await AuditService.log(
+        db,
+        action="customer.table.bind",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "store_id": int(table.store_id) if table.store_id else None,
+            "table_id": int(table.id),
+            "customer_id": int(customer.id),
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(table.store_id) if table.store_id else None,
+    )
     return success(
         {
             "id": table.id,
@@ -536,6 +553,23 @@ async def register_member(
         table_token=data.table_token,
         mark_channel_completed=True,
     )
+    await AuditService.log(
+        db,
+        action="customer.member.register",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "customer_id": int(customer.id),
+            "channel": channel,
+            "newly_activated": bool(newly),
+            "store_id": int(getattr(customer, "registered_store_id", 0) or 0) or None,
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(getattr(customer, "registered_store_id", 0) or 0) or None,
+    )
     return await _member_activation_response(
         db,
         customer,
@@ -615,6 +649,23 @@ async def activate_member(
         table_token=data.table_token,
         mark_channel_completed=True,
     )
+    await AuditService.log(
+        db,
+        action="customer.member.activate",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "customer_id": int(customer.id),
+            "channel": channel,
+            "newly_activated": bool(newly),
+            "store_id": int(getattr(customer, "registered_store_id", 0) or 0) or None,
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(getattr(customer, "registered_store_id", 0) or 0) or None,
+    )
     return await _member_activation_response(
         db,
         customer,
@@ -650,6 +701,21 @@ async def patch_member_profile(
     await db.flush()
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)
     profile = await CustomerService.build_member_profile(db, customer)
+    await AuditService.log(
+        db,
+        action="customer.member.profile_update",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "customer_id": int(customer.id),
+            "channel": channel,
+            "fields": list(data.model_dump(exclude_unset=True).keys()),
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+    )
     return success(
         {
             "customer_id": customer.id,
@@ -691,6 +757,17 @@ async def upload_member_avatar(
     CustomerService.fill_customer_display_if_empty(customer, avatar_url=url)
     CustomerService.refresh_profile_status(customer)
     await db.flush()
+    await AuditService.log(
+        db,
+        action="customer.member.avatar_upload",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={"customer_id": int(customer.id), "channel": channel, "avatar_url": url},
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+    )
     return success(
         {
             "avatar_url": url,
@@ -718,6 +795,17 @@ async def import_member_avatar_from_url(
     CustomerService.fill_customer_display_if_empty(customer, avatar_url=url)
     CustomerService.refresh_profile_status(customer)
     await db.flush()
+    await AuditService.log(
+        db,
+        action="customer.member.avatar_import",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={"customer_id": int(customer.id), "channel": channel, "avatar_url": url},
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+    )
     return success(
         {
             "avatar_url": url,
@@ -781,6 +869,23 @@ async def bind_member_phone(
     await db.flush()
     # 绑手机不发欢迎券；欢迎券仅在主动开通会员时发放
     profile = await CustomerService.build_member_profile(db, customer)
+    await AuditService.log(
+        db,
+        action="customer.member.phone_bind",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "customer_id": int(customer.id),
+            "channel": channel,
+            "phone_verified": bool(int(getattr(customer, "phone_verified", 0) or 0)),
+            "account_merged": bool(merged),
+            "verification_source": verified_source,
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+    )
     return success(
         {
             "phone": customer.phone,

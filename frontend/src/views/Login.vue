@@ -20,8 +20,9 @@ import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
-const username = ref(import.meta.env.DEV ? 'admin' : '')
-const password = ref(import.meta.env.DEV ? 'admin123' : '')
+// 不预填真实凭据，避免默认弱口令泄露
+const username = ref('')
+const password = ref('')
 const loading = ref(false)
 
 async function handleLogin() {

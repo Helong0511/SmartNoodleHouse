@@ -419,6 +419,8 @@ async function load() {
     }
     payments.value = list
     total.value = res.data.total
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载支付记录失败')
   } finally {
     loading.value = false
   }

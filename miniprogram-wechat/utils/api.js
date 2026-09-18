@@ -172,7 +172,8 @@ function requestOnce(method, path, data = {}, needAuth = true) {
 
 function request(method, path, data = {}, needAuth = true, retries = 1) {
   return requestOnce(method, path, data, needAuth).catch((err) => {
-    if (retries > 0 && isTransientNetworkError(err && err.message)) {
+    // 仅对幂等的 GET 自动重试；POST/PUT/PATCH（下单/支付等）重试可能重复提交
+    if (retries > 0 && method === 'GET' && isTransientNetworkError(err && err.message)) {
       return new Promise((resolve, reject) => {
         setTimeout(() => {
           request(method, path, data, needAuth, retries - 1).then(resolve).catch(reject)

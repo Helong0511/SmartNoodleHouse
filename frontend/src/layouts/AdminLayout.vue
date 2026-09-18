@@ -66,7 +66,11 @@
           <el-menu-item v-if="showWelcome" index="/welcome-logs">迎宾日志</el-menu-item>
         </el-sub-menu>
 
-        <el-menu-item v-if="showSettings" index="/settings">系统设置</el-menu-item>
+        <el-sub-menu v-if="showSystemGroup" index="g-system">
+          <template #title>系统管理</template>
+          <el-menu-item v-if="showSettings" index="/settings">系统设置</el-menu-item>
+          <el-menu-item v-if="showAudit" index="/audit-logs">操作日志</el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
     <el-container>
@@ -111,6 +115,8 @@ const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
 const showSmart = computed(() => showCameras.value || showWelcome.value)
 const showSettings = computed(() => auth.hasPermission('system:manage'))
+const showAudit = computed(() => auth.hasPermission('audit:read'))
+const showSystemGroup = computed(() => showSettings.value || showAudit.value)
 const showOps = computed(
   () =>
     showPos.value
@@ -137,6 +143,7 @@ const openGroup = computed(() => {
   if (['/customers', '/member-levels', '/coupons'].includes(p)) return 'g-member'
   if (['/tables', '/users', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
+  if (['/settings', '/audit-logs'].includes(p)) return 'g-system'
   return ''
 })
 

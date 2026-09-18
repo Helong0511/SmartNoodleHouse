@@ -64,9 +64,11 @@ async def _post_xml(path: str, params: dict[str, str]) -> dict[str, str]:
     data = _xml_dict(resp.text)
     if data.get("return_code") != "SUCCESS":
         raise AppException(50012, f"微信支付通信失败: {data.get('return_msg') or data}")
-    # P1-12: 响应签名校验 — 防止中间人篡改响应
+    # P1-12: 响应签名校验 — 防止中间人篡改响应（fail-closed：result_code 存在但 sign 缺失也判失败）
     resp_sign = data.pop("sign", None)
-    if resp_sign and data.get("result_code"):
+    if data.get("result_code"):
+        if not resp_sign:
+            raise AppException(50012, "微信支付响应缺少签名，拒绝处理")
         expected_sign = _sign_md5(data)
         if resp_sign.upper() != expected_sign:
             raise AppException(50012, "微信支付响应签名校验失败")

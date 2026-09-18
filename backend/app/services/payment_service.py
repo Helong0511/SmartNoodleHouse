@@ -739,17 +739,19 @@ class PaymentService:
             await cls._settle_immediate_payment(db, payment, order, provider_u, str(trade_no or ""))
             pay_data["status"] = "PAID"
         else:
-            # 渠道已受理、待回调：标记 REQUESTING（若列/状态支持）
-            if payment.status == "PENDING":
+            # 渠道已受理、待回调：保持 PENDING，等待回调/查单推进
+            if payment.status not in ("PENDING", "REQUESTING"):
                 payment.status = "PENDING"
+                await db.flush()
         progress = await cls.payment_progress(db, order)
         pay_data.update(progress)
         return payment, pay_data
 
     @classmethod
     def _is_duplicate_out_trade_error(cls, exc: AppException) -> bool:
+        """仅匹配明确的商户订单号冲突错误码，避免把限频等临时错误误判为单号冲突。"""
         msg = str(getattr(exc, "message", "") or exc or "")
-        needles = ("商户订单号", "out_trade_no", "ORDERPAID", "FREQUENCY_LIMITED", "已存在", "重复")
+        needles = ("商户订单号重复", "out_trade_no", "OUT_TRADE_NO_USED", "ORDERPAID", "ACQ.TRADE_HAS_SUCCESS")
         return any(n.lower() in msg.lower() for n in needles)
 
     @classmethod
@@ -1423,7 +1425,15 @@ class PaymentService:
             raise AppException(40403, "退款记录不存在")
 
         # P0-11: 退款金额严格校验 — provider refund_fee 必须匹配本地退款金额
+        # 支付宝：refund_fee（元）；微信：verifier 回传 amount.refund（分，字段名 refund_amount）
         refund_fee_raw = parsed.get("refund_fee")
+        if refund_fee_raw is None:
+            refund_amount_raw = parsed.get("refund_amount")
+            if refund_amount_raw is not None and provider_u == "WECHAT":
+                try:
+                    refund_fee_raw = money(Decimal(str(refund_amount_raw)) / 100)
+                except (InvalidOperation, ValueError):
+                    refund_fee_raw = None
         if refund_fee_raw is not None:
             try:
                 provider_refund_amount = money(Decimal(str(refund_fee_raw)))
@@ -1700,16 +1710,30 @@ class PaymentService:
                 if not payment:
                     raise AppException(40401, "支付记录不存在")
                 result = await provider_inst.refund_payment(payment, amount, reason, refund_no)
-        except Exception as e:
+        except AppException as e:
+            # 渠道明确拒绝（HTTP 业务错误）：结果确定，置 FAILED 允许重新发起
             row = (
                 await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
             ).scalar_one_or_none()
-            if row and row.status in ("PENDING", "PROCESSING"):
+            if row and row.status in ("PENDING", "PROCESSING", "UNKNOWN"):
                 row.status = "FAILED"
                 row.fail_reason = str(e)[:255]
                 await db.flush()
                 await db.commit()
             raise
+        except Exception as e:
+            # 网络超时/结果未知：渠道侧可能已实际退款，置 UNKNOWN 并交由
+            # poll_pending_refunds 定时查单补偿，防止双重退款
+            row = (
+                await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
+            ).scalar_one_or_none()
+            if row and row.status in ("PENDING", "PROCESSING"):
+                row.status = "UNKNOWN"
+                row.fail_reason = f"退款结果未知，待查单补偿: {e}"[:255]
+                await db.flush()
+                await db.commit()
+            logger.error("退款申请结果未知 refund_no=%s: %s", refund_no, e)
+            raise AppException(40055, "退款结果未知，系统将自动查询退款结果，请稍后查看退款状态")
 
         row = (
             await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
@@ -1843,8 +1867,11 @@ class PaymentService:
                             meta.get("trade_state"),
                         )
                 except Exception as e:
+                    # 回滚本单半程变更，避免脏提交到下一单并防止会话失败态
+                    await db.rollback()
                     logger.warning("支付查单失败 payment_no=%s: %s", row.payment_no, e)
-            await db.commit()
+                else:
+                    await db.commit()
             return done
 
     @classmethod
@@ -1918,6 +1945,9 @@ class PaymentService:
                         except Exception as ws_err:
                             logger.warning("退款成功 WS 通知失败: %s", ws_err)
                 except Exception as e:
+                    # 回滚本单半程变更，避免脏提交到下一单并防止会话失败态
+                    await db.rollback()
                     logger.warning("退款查询失败 refund_no=%s: %s", row.refund_no, e)
-            await db.commit()
+                else:
+                    await db.commit()
             return done

@@ -65,6 +65,10 @@ class OperationLog(Base):
     user_agent: Mapped[str | None] = mapped_column(String(500))
     request_id: Mapped[str | None] = mapped_column(String(64))
     detail: Mapped[str | None] = mapped_column(Text)
+    # 审计分类：STAFF/STORE_ADMIN/CASHIER/KITCHEN/SYSTEM/CUSTOMER/DANGER/INTRUSION
+    category: Mapped[str | None] = mapped_column(String(20), default="STAFF", comment="审计分类")
+    # 门店归属：方便按门店过滤；NULL=全局/未绑定（如登录失败、跨店系统操作）
+    store_id: Mapped[int | None] = mapped_column(BigInteger, default=None, comment="操作关联门店")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -170,6 +174,13 @@ class FinancialLedger(Base):
     delivery_refund_id: Mapped[int | None] = mapped_column(BigInteger)
     remark: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 幂等唯一约束：并发回调下防重复入账（MySQL 唯一索引对 NULL 不生效，业务键缺失的行不受限）
+    __table_args__ = (
+        UniqueConstraint("entry_type", "payment_id", name="uq_fin_ledger_entry_payment"),
+        UniqueConstraint("entry_type", "refund_id", name="uq_fin_ledger_entry_refund"),
+        UniqueConstraint("entry_type", "delivery_order_id", name="uq_fin_ledger_entry_delivery_order"),
+        UniqueConstraint("entry_type", "delivery_refund_id", name="uq_fin_ledger_entry_delivery_refund"),
+    )
 
 
 class Customer(Base, TimestampMixin):

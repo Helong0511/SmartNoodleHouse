@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    audit_logs,
     auth,
     cameras,
     client_logs,
@@ -46,3 +47,4 @@ api_router.include_router(delivery.router)
 api_router.include_router(settings.router)
 api_router.include_router(client_logs.router)
 api_router.include_router(websocket.router)
+api_router.include_router(audit_logs.router)

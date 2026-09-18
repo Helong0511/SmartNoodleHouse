@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import CurrentUser, DbSession, require_pos
 from app.core.exceptions import AppException
 from app.core.response import success
+from app.services.audit_service import AuditService
 from app.services.pos_refund_service import PosRefundService
 from app.services.pos_shift_service import PosShiftService
 from app.services.store_scope import require_bound_store
@@ -62,6 +63,17 @@ async def open_shift(data: ShiftOpen, request: Request, db: DbSession, user: Cur
         opening_float=data.opening_float,
     )
     payload = await PosShiftService.shift_payload(db, shift, live=True)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.shift.open",
+        module="pos",
+        target_type="shift",
+        target_id=shift.id,
+        detail={"store_id": int(store_id), "opening_float": str(data.opening_float)},
+        request=request,
+        store_id=int(store_id),
+    )
     return success(payload, request=request)
 
 
@@ -79,6 +91,21 @@ async def close_my_shift(data: ShiftClose, request: Request, db: DbSession, user
         closed_by=user.id,
     )
     payload = await PosShiftService.shift_payload(db, shift)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.shift.close",
+        module="pos",
+        target_type="shift",
+        target_id=shift.id,
+        detail={
+            "store_id": int(shift.store_id) if getattr(shift, "store_id", None) else None,
+            "closing_cash": str(data.closing_cash) if data.closing_cash is not None else None,
+            "remark": data.remark,
+        },
+        request=request,
+        store_id=int(shift.store_id) if getattr(shift, "store_id", None) else None,
+    )
     return success(payload, request=request)
 
 
@@ -129,6 +156,9 @@ async def apply_pos_refund(data: PosRefundApply, request: Request, db: DbSession
     order = await db.get(Order, int(data.order_id))
     if not order:
         raise AppException(40402, "订单不存在")
+    from app.services.store_scope import assert_order_store_access
+
+    assert_order_store_access(user, order)
     await PosShiftService.require_open_shift(db, user.id, store_id=order.store_id)
     row = await PosRefundService.create_request(
         db,
@@ -136,6 +166,22 @@ async def apply_pos_refund(data: PosRefundApply, request: Request, db: DbSession
         order_id=data.order_id,
         amount=data.amount,
         reason=data.reason,
+    )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.refund.apply",
+        module="pos",
+        target_type="refund_request",
+        target_id=row.id,
+        detail={
+            "order_id": int(data.order_id),
+            "amount": str(data.amount) if data.amount is not None else None,
+            "reason": data.reason,
+            "store_id": int(order.store_id) if order is not None else None,
+        },
+        request=request,
+        store_id=int(order.store_id) if order is not None else None,
     )
     return success(await PosRefundService.payload(db, row), request=request)
 
@@ -172,6 +218,17 @@ async def list_pos_refunds(
 async def cancel_pos_refund(request_id: int, request: Request, db: DbSession, user: CurrentUser):
     """撤销待审批的退款申请。"""
     row = await PosRefundService.cancel_request(db, user=user, request_id=request_id)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.refund.cancel",
+        module="pos",
+        target_type="refund_request",
+        target_id=int(request_id),
+        detail={"status": row.status, "store_id": int(getattr(row, "store_id", 0) or 0) or None},
+        request=request,
+        store_id=int(getattr(row, "store_id", 0) or 0) or None,
+    )
     return success(await PosRefundService.payload(db, row), request=request)
 
 
@@ -188,6 +245,17 @@ async def reject_pos_refund(
         raise HTTPException(status_code=403, detail="仅店长或超管可审批退款")
     body = data or PosRefundReview()
     row = await PosRefundService.reject_request(db, user=user, request_id=request_id, remark=body.remark)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.refund.reject",
+        module="pos",
+        target_type="refund_request",
+        target_id=int(request_id),
+        detail={"remark": body.remark, "status": row.status, "store_id": int(getattr(row, "store_id", 0) or 0) or None},
+        request=request,
+        store_id=int(getattr(row, "store_id", 0) or 0) or None,
+    )
     return success(await PosRefundService.payload(db, row), request=request)
 
 
@@ -206,11 +274,13 @@ async def approve_pos_refund(
     row = await PosRefundService.approve_and_execute(
         db, user=user, request_id=request_id, remark=body.remark
     )
+    audit_store_id: int | None = None
     if row.status == "SUCCESS":
         from app.models import Order
 
         order = await db.get(Order, row.order_id)
         if order:
+            audit_store_id = int(order.store_id) if order.store_id else None
             await ws_manager.notify_order_event(
                 "ORDER_REFUNDED",
                 {
@@ -221,4 +291,21 @@ async def approve_pos_refund(
                     "pos_refund_request_id": row.id,
                 },
             )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.refund.approve",
+        module="pos",
+        target_type="refund_request",
+        target_id=int(request_id),
+        detail={
+            "remark": body.remark,
+            "status": row.status,
+            "amount": str(row.amount),
+            "order_id": int(getattr(row, "order_id", 0) or 0) or None,
+            "store_id": audit_store_id,
+        },
+        request=request,
+        store_id=audit_store_id,
+    )
     return success(await PosRefundService.payload(db, row), request=request)

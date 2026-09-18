@@ -45,8 +45,13 @@ def client_ip(request: Request) -> str:
     xff = (request.headers.get("x-forwarded-for") or "").strip()
     if xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
+        # 从右向左跳过可信代理，取第一个非可信 IP；
+        # 最左段由客户端可伪造，直接采用会被绕过白名单与限流
+        for part in reversed(parts):
+            if not ip_allowed(part, trusted):
+                return part
+        # 整条链均为可信代理（异常场景）：回退最左段
         if parts:
-            # 最左侧通常为原始客户端；在可信代理链下取首段
             return parts[0]
     return peer
 

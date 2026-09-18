@@ -10,6 +10,7 @@ from app.core.redis_client import get_redis
 from app.core.response import calc_pages, ensure_local_aware, money, now_local, success
 from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
 from app.schemas.order import OrderCreate, OrderStatusUpdate, PosAddItems, PosOrderCreate
+from app.services.audit_service import AuditService
 from app.services.customer_service import OrderCreateService
 from app.services.delivery_service import DeliveryService
 from app.services.store_scope import assert_order_store_access, assert_store_access, require_bound_store
@@ -23,7 +24,7 @@ def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
         try:
             q = q.where(col >= datetime.fromisoformat(date_from))
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail=f"date_from 格式非法: {date_from}")
     if date_to:
         try:
             end = datetime.fromisoformat(date_to)
@@ -31,7 +32,7 @@ def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
                 end = end + timedelta(days=1)
             q = q.where(col < end)
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail=f"date_to 格式非法: {date_to}")
     return q
 
 
@@ -112,17 +113,42 @@ async def create_order(
         operator_id=None,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
-    await ws_manager.notify_order_event(
-        "ORDER_CREATED",
-        {
-            "order_id": order.id,
+    try:
+        await ws_manager.notify_order_event(
+            "ORDER_CREATED",
+            {
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "status": order.status,
+                "store_id": order.store_id,
+                "table_id": order.table_id,
+                "table_no": table.table_no if table else None,
+                "dining_type": order.dining_type,
+            },
+        )
+    except Exception as ws_err:
+        # WS 推送失败不应导致下单事务回滚（顾客已视为下单成功）
+        import logging
+
+        logging.getLogger("app.order").warning("下单 WS 通知失败 order=%s: %s", order.order_no, ws_err)
+    await AuditService.log(
+        db,
+        action="order.create",
+        module="order",
+        user_id=None,
+        target_type="order",
+        target_id=order.id,
+        detail={
             "order_no": order.order_no,
-            "status": order.status,
-            "store_id": order.store_id,
-            "table_id": order.table_id,
-            "table_no": table.table_no if table else None,
-            "dining_type": order.dining_type,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "customer_id": int(order.customer_id) if order.customer_id else None,
+            "channel": channel,
+            "total_amount": str(order.total_amount),
+            "table_id": int(order.table_id) if order.table_id else None,
         },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(order.store_id) if order.store_id else None,
     )
     return success(
         {
@@ -214,6 +240,23 @@ async def create_pos_order(
             "dining_type": order.dining_type,
             "channel": "POS",
         },
+    )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.create_pos",
+        module="order",
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "dining_type": order.dining_type,
+            "total_amount": str(order.total_amount),
+            "table_id": int(order.table_id) if order.table_id else None,
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
     )
     return success(
         {
@@ -312,6 +355,23 @@ async def add_items_to_order(
             "action": "ADD_ITEMS",
         },
     )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.add_items",
+        module="order",
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "subtotal": str(order.subtotal),
+            "total_amount": str(order.total_amount),
+            "items_added": len(items_data),
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "id": order.id,
@@ -384,6 +444,22 @@ async def transfer_table(
             "new_table_no": new_table.table_no,
         },
     )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.transfer_table",
+        module="order",
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "old_table_id": old_table_id,
+            "new_table_id": int(new_table.id),
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "order_id": order.id,
@@ -406,6 +482,9 @@ async def list_pos_pending_orders(
 ):
     """收银台：列出本门店所有未结算（PENDING_PAYMENT）的 POS 订单，按桌号分组。"""
     sid = require_bound_store(user, store_id)
+    if sid is None:
+        # 超管未指定门店时无法按单店列出挂单
+        raise AppException(40008, "请选择门店")
     q = (
         select(Order)
         .where(
@@ -1188,6 +1267,22 @@ async def reorder_order(order_id: int, request: Request, db: DbSession, customer
         raise AppException(40042, "待支付订单请先完成支付或取消后再复购")
 
     data = await OrderReorderService.build_cart_from_order(db, order)
+    await AuditService.log(
+        db,
+        action="order.reorder",
+        module="order",
+        user_id=None,
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "customer_id": int(customer.id),
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(data, request=request)
 
 
@@ -1230,6 +1325,22 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
         },
     )
 
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.update_status",
+        module="order",
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "from_status": old_status,
+            "to_status": (data.status or "").strip().upper(),
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "id": order.id,
@@ -1266,6 +1377,22 @@ async def kitchen_takeover(order_id: int, request: Request, db: DbSession, user:
         },
     )
     my_name = await claimer_display_name(db, user.id)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.kitchen_takeover",
+        module="order",
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "previous_claimed_by": prev,
+            "new_claimed_by": int(user.id),
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(
         {
             "id": order.id,
@@ -1320,4 +1447,19 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
     if result is None:
         # 订单已取消等业务跳过（非配置缺失；配置缺失会抛 AppException）
         return success({"printed": False, "message": "当前订单状态不可打印"}, request=request)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.print",
+        module="order",
+        target_type="order",
+        target_id=int(order_id),
+        detail={
+            "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
+            "printed": True,
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success({"printed": True, "order_no": order.order_no, "result": result}, request=request)

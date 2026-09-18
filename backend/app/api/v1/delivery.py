@@ -20,6 +20,7 @@ from app.models import (
     Product,
     ProductCategory,
 )
+from app.services.audit_service import AuditService
 from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
 from app.services.delivery_tasks import run_deferred_tasks
@@ -98,7 +99,10 @@ async def meituan_notify(request: Request, db: DbSession, background_tasks: Back
         if is_new:
             background_tasks.add_task(process_inbox_item, row.id)
     except Exception as e:
-        return JSONResponse({"data": "ng", "error": {"msg": str(e)}}, status_code=200)
+        import logging
+
+        logging.getLogger("app.delivery").warning("美团回调处理失败: %s", e, exc_info=True)
+        return JSONResponse({"data": "ng"}, status_code=200)
     return JSONResponse({"data": "ok"})
 
 
@@ -122,7 +126,10 @@ async def eleme_notify(request: Request, db: DbSession, background_tasks: Backgr
         if is_new:
             background_tasks.add_task(process_inbox_item, row.id)
     except Exception as e:
-        return JSONResponse({"message": "error", "error": str(e)}, status_code=200)
+        import logging
+
+        logging.getLogger("app.delivery").warning("饿了么回调处理失败: %s", e, exc_info=True)
+        return JSONResponse({"message": "error"}, status_code=200)
     return JSONResponse({"message": "ok"})
 
 
@@ -143,6 +150,17 @@ async def confirm_delivery_order(
     await ws_manager.notify_order_event(
         "ORDER_CONFIRMED",
         {"order_id": order.id, "order_no": order.order_no, "status": order.status, "store_id": order.store_id},
+    )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.order.confirm",
+        module="delivery",
+        target_type="order",
+        target_id=int(order.id),
+        detail={"order_id": int(order.id), "order_no": order.order_no, "status": order.status, "store_id": int(order.store_id) if order.store_id else None},
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
     )
     return success({"id": order.id, "status": order.status}, request=request)
 
@@ -511,6 +529,17 @@ async def refund_action(refund_id: int, data: RefundAction, request: Request, db
         "ORDER_REFUND_HANDLED",
         {"refund_id": refund_id, "approve": data.approve, "store_id": order.store_id, **result},
     )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.refund.action",
+        module="delivery",
+        target_type="refund",
+        target_id=int(refund_id),
+        detail={"approve": bool(data.approve), "reason": data.reason, "order_id": int(order.id), "store_id": int(order.store_id) if order.store_id else None, **result},
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(result, request=request)
 
 
@@ -538,6 +567,17 @@ async def merchant_cancel_order(
             "ORDER_CANCELLED",
             {"order_id": result["order_id"], "reason": data.reason, "by": "merchant"},
         )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.order.cancel",
+        module="delivery",
+        target_type="delivery_order",
+        target_id=int(delivery_order_id),
+        detail={"reason": data.reason, "order_id": int(order.id), "store_id": int(order.store_id) if order.store_id else None, **result},
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
     return success(result, request=request)
 
 
@@ -694,6 +734,17 @@ async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: D
             existing.refresh_token = SecretEncryptionService.encrypt(data.refresh_token)
         existing.status = 1
         await db.flush()
+        await AuditService.log_staff(
+            db,
+            user=user,
+            action="delivery.binding.create",
+            module="delivery",
+            target_type="platform_store_binding",
+            target_id=int(existing.id),
+            detail={"store_id": int(sid), "platform": data.platform.upper(), "platform_shop_id": data.platform_shop_id, "updated": True},
+            request=request,
+            store_id=int(sid) if sid else None,
+        )
         return success({"id": existing.id, "updated": True}, request=request)
 
     from app.services.secret_encryption import SecretEncryptionService
@@ -708,6 +759,17 @@ async def upsert_store_binding(data: StoreBindingCreate, request: Request, db: D
     )
     db.add(row)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.binding.create",
+        module="delivery",
+        target_type="platform_store_binding",
+        target_id=int(row.id),
+        detail={"store_id": int(sid), "platform": data.platform.upper(), "platform_shop_id": data.platform_shop_id, "updated": False},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success({"id": row.id, "updated": False}, request=request)
 
 
@@ -751,6 +813,17 @@ async def delete_store_binding(binding_id: int, request: Request, db: DbSession,
     row.token_expires_at = None
     row.status = 0
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.binding.delete",
+        module="delivery",
+        target_type="platform_store_binding",
+        target_id=int(row.id),
+        detail={"store_id": int(row.store_id) if row.store_id else None, "platform": row.platform, "platform_shop_id": row.platform_shop_id},
+        request=request,
+        store_id=int(row.store_id) if row.store_id else None,
+    )
     return success({"id": row.id, "status": 0}, request=request)
 
 
@@ -771,6 +844,17 @@ async def update_store_binding_status(
     assert_store_access(user, row.store_id)
     row.status = int(data.status)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.binding.status",
+        module="delivery",
+        target_type="platform_store_binding",
+        target_id=int(row.id),
+        detail={"store_id": int(row.store_id) if row.store_id else None, "status": int(row.status)},
+        request=request,
+        store_id=int(row.store_id) if row.store_id else None,
+    )
     return success({"id": row.id, "status": row.status}, request=request)
 
 
@@ -792,6 +876,17 @@ async def refresh_store_binding_token(
     await db.commit()
     if not ok:
         raise HTTPException(status_code=500, detail="刷新失败，请检查日志或重试")
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.binding.refresh_token",
+        module="delivery",
+        target_type="platform_store_binding",
+        target_id=int(row.id),
+        detail={"store_id": int(row.store_id) if row.store_id else None, "platform": row.platform, "token_expires_at": row.token_expires_at.isoformat() if row.token_expires_at else None},
+        request=request,
+        store_id=int(row.store_id) if row.store_id else None,
+    )
     return success(
         {
             "id": row.id,
@@ -820,6 +915,17 @@ async def sync_menu(
         raise HTTPException(status_code=400, detail="缺少门店")
     assert_store_access(user, sid)
     result = await ProductSyncService.sync_store_menu(db, int(sid), platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.menu",
+        module="delivery",
+        target_type="store",
+        target_id=int(sid),
+        detail={"store_id": int(sid), "platform": platform, **result},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success(result, request=request)
 
 
@@ -837,6 +943,17 @@ async def sync_single_product(
         raise HTTPException(status_code=400, detail="缺少门店")
     assert_store_access(user, sid)
     result = await ProductSyncService.sync_single_product(db, int(sid), data.platform, data.product_id)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.product",
+        module="delivery",
+        target_type="product",
+        target_id=int(data.product_id),
+        detail={"store_id": int(sid), "platform": data.platform, "product_id": int(data.product_id), **result},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success(result, request=request)
 
 
@@ -853,6 +970,17 @@ async def sync_prices(
         raise HTTPException(status_code=400, detail="缺少门店")
     assert_store_access(user, sid)
     result = await ProductSyncService.sync_prices(db, int(sid), platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.prices",
+        module="delivery",
+        target_type="store",
+        target_id=int(sid),
+        detail={"store_id": int(sid), "platform": platform, **result},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success(result, request=request)
 
 
@@ -869,6 +997,17 @@ async def sync_stock(
         raise HTTPException(status_code=400, detail="缺少门店")
     assert_store_access(user, sid)
     result = await ProductSyncService.sync_stock(db, int(sid), platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.stock",
+        module="delivery",
+        target_type="store",
+        target_id=int(sid),
+        detail={"store_id": int(sid), "platform": platform, **result},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success(result, request=request)
 
 
@@ -965,6 +1104,8 @@ async def create_product_map(data: ProductMapCreate, request: Request, db: DbSes
     product = await db.get(Product, data.product_id)
     if not product:
         return success(None, message="商品不存在", request=request)
+    if product.store_id is None or int(product.store_id) != int(sid):
+        raise HTTPException(status_code=403, detail="商品不属于该门店，禁止映射")
     existing = await db.execute(
         select(DeliveryProductMap).where(
             DeliveryProductMap.store_id == sid,
@@ -982,6 +1123,17 @@ async def create_product_map(data: ProductMapCreate, request: Request, db: DbSes
         row.option_map_json = data.option_map_json
         row.status = 1
         await db.flush()
+        await AuditService.log_staff(
+            db,
+            user=user,
+            action="delivery.product_map.create",
+            module="delivery",
+            target_type="delivery_product_map",
+            target_id=int(row.id),
+            detail={"store_id": int(sid), "platform": data.platform.upper(), "platform_sku_id": data.platform_sku_id, "product_id": int(data.product_id), "updated": True},
+            request=request,
+            store_id=int(sid) if sid else None,
+        )
         return success({"id": row.id, "updated": True}, request=request)
 
     row = DeliveryProductMap(
@@ -997,6 +1149,17 @@ async def create_product_map(data: ProductMapCreate, request: Request, db: DbSes
     )
     db.add(row)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.product_map.create",
+        module="delivery",
+        target_type="delivery_product_map",
+        target_id=int(row.id),
+        detail={"store_id": int(sid), "platform": data.platform.upper(), "platform_sku_id": data.platform_sku_id, "product_id": int(data.product_id), "updated": False},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success({"id": row.id, "updated": False}, request=request)
 
 
@@ -1068,6 +1231,17 @@ async def set_business_hours(store_id: int, data: HoursPayload, request: Request
         days = await StoreHoursService.set_hours(db, store_id, [d.model_dump() for d in data.days])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.business_hours.update",
+        module="delivery",
+        target_type="store",
+        target_id=int(store_id),
+        detail={"store_id": int(store_id), "days_count": len(data.days)},
+        request=request,
+        store_id=int(store_id),
+    )
     return success({"store_id": store_id, "days": days}, request=request)
 
 
@@ -1113,6 +1287,17 @@ async def _change_store_open_status(db, user, store_id: int, open_status: str, p
 async def open_delivery_store(store_id: int, data: StoreOpenPayload, request: Request, db: DbSession, user: CurrentUser):
     """手动开店（平台上线营业）。"""
     results = await _change_store_open_status(db, user, store_id, "OPEN", data.platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.store.open",
+        module="delivery",
+        target_type="store",
+        target_id=int(store_id),
+        detail={"store_id": int(store_id), "platform": data.platform, "results": results},
+        request=request,
+        store_id=int(store_id),
+    )
     return success({"store_id": store_id, "results": results}, request=request)
 
 
@@ -1120,6 +1305,17 @@ async def open_delivery_store(store_id: int, data: StoreOpenPayload, request: Re
 async def close_delivery_store(store_id: int, data: StoreOpenPayload, request: Request, db: DbSession, user: CurrentUser):
     """手动关店（商家休息/暂停接单）。"""
     results = await _change_store_open_status(db, user, store_id, "REST", data.platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.store.close",
+        module="delivery",
+        target_type="store",
+        target_id=int(store_id),
+        detail={"store_id": int(store_id), "platform": data.platform, "results": results},
+        request=request,
+        store_id=int(store_id),
+    )
     return success({"store_id": store_id, "results": results}, request=request)
 
 
@@ -1139,6 +1335,17 @@ async def set_binding_auto_sync(
     assert_store_access(user, row.store_id)
     row.auto_sync_open = bool(data.auto_sync_open)
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.binding.auto_sync_open",
+        module="delivery",
+        target_type="platform_store_binding",
+        target_id=int(row.id),
+        detail={"store_id": int(row.store_id) if row.store_id else None, "auto_sync_open": bool(row.auto_sync_open)},
+        request=request,
+        store_id=int(row.store_id) if row.store_id else None,
+    )
     return success({"id": row.id, "auto_sync_open": row.auto_sync_open}, request=request)
 
 
@@ -1151,6 +1358,17 @@ async def sync_menu_batch(
 
     assert_store_access(user, store_id)
     result = await ProductSyncService.sync_store_menu(db, store_id, platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.menu_batch",
+        module="delivery",
+        target_type="store",
+        target_id=int(store_id),
+        detail={"store_id": int(store_id), "platform": platform, **result},
+        request=request,
+        store_id=int(store_id),
+    )
     return success(result, request=request)
 
 
@@ -1162,6 +1380,17 @@ async def sync_shelf(data: ShelfPayload, request: Request, db: DbSession, user: 
     assert_store_access(user, data.store_id)
     result = await ProductSyncService.set_shelf(
         db, data.store_id, data.platform, data.on_shelf, data.product_ids
+    )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.shelf",
+        module="delivery",
+        target_type="store",
+        target_id=int(data.store_id),
+        detail={"store_id": int(data.store_id), "platform": data.platform, "on_shelf": bool(data.on_shelf), "product_ids": list(data.product_ids or []), **result},
+        request=request,
+        store_id=int(data.store_id),
     )
     return success(result, request=request)
 
@@ -1177,6 +1406,17 @@ async def sync_reconcile(data: ReconcilePayload, request: Request, db: DbSession
     elif getattr(user, "store_id", None):
         sid = int(user.store_id)
     result = await ProductSyncService.reconcile_stock(db, sid, data.platform)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync.reconcile",
+        module="delivery",
+        target_type="store",
+        target_id=int(sid) if sid else None,
+        detail={"store_id": int(sid) if sid else None, "platform": data.platform, **result},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
     return success(result, request=request)
 
 
@@ -1189,9 +1429,9 @@ async def list_category_maps(
     platform: str | None = None,
 ):
     """平台分类映射列表（含本地分类名）。"""
-    sid = store_id
-    if sid is None and getattr(user, "store_id", None):
-        sid = int(user.store_id)
+    from app.services.store_scope import require_bound_store
+
+    sid = require_bound_store(user, store_id)
     rows = await ProductSyncService.list_category_maps(db, sid, platform)
     cat_ids = list({r.local_category_id for r in rows})
     cat_names = {
@@ -1223,6 +1463,11 @@ async def create_category_map(data: CategoryMapPayload, request: Request, db: Db
     """新增/更新平台分类映射（store_id 留空=总部默认）。"""
     from app.services.store_scope import assert_store_access
 
+    # 非超管：必须绑定门店，store_id 留空强制写本店，禁止创建总部级映射
+    if user.role.code != "SUPER_ADMIN":
+        if not user.store_id:
+            raise HTTPException(status_code=403, detail="账号未绑定门店")
+        data.store_id = int(user.store_id)
     if data.store_id:
         assert_store_access(user, data.store_id)
     if not await db.get(ProductCategory, data.local_category_id):
@@ -1236,6 +1481,17 @@ async def create_category_map(data: CategoryMapPayload, request: Request, db: Db
         store_id=data.store_id,
     )
     await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.category_map.create",
+        module="delivery",
+        target_type="platform_category_map",
+        target_id=int(row.id),
+        detail={"store_id": int(data.store_id) if data.store_id else None, "platform": data.platform, "local_category_id": int(data.local_category_id)},
+        request=request,
+        store_id=int(data.store_id) if data.store_id else None,
+    )
     return success({"id": row.id}, request=request)
 
 
@@ -1246,10 +1502,21 @@ async def delete_category_map(map_id: int, request: Request, db: DbSession, user
     row = await db.get(PlatformCategoryMap, map_id)
     if not row:
         raise HTTPException(status_code=404, detail="映射不存在")
-    if row.store_id:
-        assert_store_access(user, row.store_id)
+    # store_id 为 NULL 的总部级映射仅超管可删除；assert_store_access 对非超管的 None 一律拒绝
+    assert_store_access(user, row.store_id)
     ok = await ProductSyncService.delete_category_map(db, map_id)
     await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.category_map.delete",
+        module="delivery",
+        target_type="platform_category_map",
+        target_id=int(map_id),
+        detail={"store_id": int(row.store_id) if row.store_id else None, "platform": row.platform, "deleted": bool(ok)},
+        request=request,
+        store_id=int(row.store_id) if row.store_id else None,
+    )
     return success({"id": map_id, "deleted": ok}, request=request)
 
 
@@ -1272,7 +1539,11 @@ async def list_sync_alerts(
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 50)), 200)
     q = select(DeliverySyncAlert)
-    if getattr(user, "store_id", None):
+    if user.role.code != "SUPER_ADMIN":
+        if not user.store_id:
+            raise HTTPException(status_code=403, detail="账号未绑定门店")
+        q = q.where(DeliverySyncAlert.store_id == int(user.store_id))
+    elif getattr(user, "store_id", None):
         q = q.where(DeliverySyncAlert.store_id == int(user.store_id))
     if platform:
         q = q.where(DeliverySyncAlert.platform == platform.upper())
@@ -1321,13 +1592,24 @@ async def resolve_sync_alert(alert_id: int, request: Request, db: DbSession, use
     row = await db.get(DeliverySyncAlert, alert_id)
     if not row:
         raise HTTPException(status_code=404, detail="告警不存在")
-    if row.store_id:
-        from app.services.store_scope import assert_store_access
+    # store_id 为 NULL 的平台级告警仅超管可处理；assert_store_access 对非超管的 None 一律拒绝
+    from app.services.store_scope import assert_store_access
 
-        assert_store_access(user, row.store_id)
+    assert_store_access(user, row.store_id)
     row.resolved = 1
     row.resolved_at = naive_local_now()
     await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.sync_alert.resolve",
+        module="delivery",
+        target_type="delivery_sync_alert",
+        target_id=int(row.id),
+        detail={"store_id": int(row.store_id) if row.store_id else None, "alert_type": row.alert_type, "title": row.title},
+        request=request,
+        store_id=int(row.store_id) if row.store_id else None,
+    )
     return success({"id": row.id, "resolved": 1}, request=request)
 
 
@@ -1336,6 +1618,8 @@ async def sync_overview(request: Request, db: DbSession, user: CurrentUser):
     """同步监控总览：各平台绑定状态 + 未解决告警数。"""
     from sqlalchemy import func
 
+    if user.role.code != "SUPER_ADMIN" and not user.store_id:
+        raise HTTPException(status_code=403, detail="账号未绑定门店")
     q = select(PlatformStoreBinding)
     if getattr(user, "store_id", None):
         q = q.where(PlatformStoreBinding.store_id == int(user.store_id))

@@ -13,6 +13,7 @@ from app.models import (
     FaceProfile,
     Order,
 )
+from app.services.audit_service import AuditService
 from app.services.customer_merge_service import CustomerMergeService
 from app.services.customer_service import CustomerService, PreferenceService
 
@@ -406,6 +407,23 @@ async def merge_customers(
         request=request,
     )
     await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="customer.merge",
+        module="customer",
+        target_type="customer",
+        target_id=int(target_id),
+        detail={
+            "source_id": int(body.source_customer_id),
+            "target_id": int(target_id),
+            "reason": body.reason,
+            "store_id": int(effective_store) if effective_store else None,
+            "matched_fields": list(result.keys()) if isinstance(result, dict) else None,
+        },
+        request=request,
+        store_id=int(effective_store) if effective_store else None,
+    )
     return success(result, message="合并成功", request=request)
 
 

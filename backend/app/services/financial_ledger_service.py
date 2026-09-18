@@ -4,10 +4,35 @@ from __future__ import annotations
 from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import money
 from app.models import FinancialLedger
+
+
+async def _flush_idempotent(db: AsyncSession, row: FinancialLedger) -> FinancialLedger:
+    """SAVEPOINT 内 flush；并发唯一约束冲突时回退 SAVEPOINT 并返回已有行（DB 级幂等兜底）。"""
+    try:
+        async with db.begin_nested():
+            db.add(row)
+            await db.flush()
+        return row
+    except IntegrityError:
+        existing = (
+            await db.execute(
+                select(FinancialLedger).where(
+                    FinancialLedger.entry_type == row.entry_type,
+                    FinancialLedger.payment_id == row.payment_id,
+                    FinancialLedger.refund_id == row.refund_id,
+                    FinancialLedger.delivery_order_id == row.delivery_order_id,
+                    FinancialLedger.delivery_refund_id == row.delivery_refund_id,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return existing
+        raise
 
 
 class FinancialLedgerService:
@@ -65,9 +90,7 @@ class FinancialLedgerService:
             delivery_order_id=delivery_order_id,
             remark=str(remark)[:500] if remark else None,
         )
-        db.add(row)
-        await db.flush()
-        return row
+        return await _flush_idempotent(db, row)
 
     @classmethod
     async def record_refund(
@@ -125,6 +148,4 @@ class FinancialLedgerService:
             delivery_refund_id=delivery_refund_id,
             remark=str(remark)[:500] if remark else None,
         )
-        db.add(row)
-        await db.flush()
-        return row
+        return await _flush_idempotent(db, row)
