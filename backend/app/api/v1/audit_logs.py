@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.response import calc_pages, success
@@ -53,27 +53,27 @@ async def list_audit_logs(
             q = q.where(OperationLog.store_id == sid)
             cq = cq.where(OperationLog.store_id == sid)
     else:
-        # 非超管：本店 + 自己操作
+        # 非超管不能看 DANGER/INTRUSION：防止恶意用户探查告警边界
+        not_danger = ~OperationLog.category.in_(["DANGER", "INTRUSION"])
+        uid = int(user.id)
         if sid is None:
-            # 非超管必须绑店（已在 require_bound_store 内保障）；兜底
-            q = q.where(OperationLog.user_id == int(user.id))
-            cq = cq.where(OperationLog.user_id == int(user.id))
+            # 非超管必须绑店（require_bound_store 已对未绑店账号抛 403）；兜底仅本人
+            scope = and_(OperationLog.user_id == uid, not_danger)
+        elif user.role.code == "STORE_ADMIN":
+            # 店长：本店全部操作记录 + 本人记录（含本人 store_id 为空的系统级操作）
+            scope = and_(
+                or_(OperationLog.store_id == sid, OperationLog.user_id == uid),
+                not_danger,
+            )
         else:
-            q = q.where(
-                or_(
-                    OperationLog.user_id == int(user.id),
-                    OperationLog.store_id == sid,
-                ),
-                # 非超管不能看 DANGER/INTRUSION：防止恶意用户探查告警边界
-                ~OperationLog.category.in_(["DANGER", "INTRUSION"]),
+            # 收银员/厨房/其他：严格限定本店 + 本人，禁止查看本店其他员工记录
+            scope = and_(
+                OperationLog.store_id == sid,
+                OperationLog.user_id == uid,
+                not_danger,
             )
-            cq = cq.where(
-                or_(
-                    OperationLog.user_id == int(user.id),
-                    OperationLog.store_id == sid,
-                ),
-                ~OperationLog.category.in_(["DANGER", "INTRUSION"]),
-            )
+        q = q.where(scope)
+        cq = cq.where(scope)
 
     if category:
         cat = category.strip().upper()

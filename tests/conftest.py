@@ -45,3 +45,18 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _isolate_system_settings_cache():
+    """系统设置为进程内类级缓存（TTL 15s），跨测试残留会造成顺序依赖。
+
+    例如 IP 解析测试通过环境变量配置 TRUSTED_PROXY_IPS，但 ensure_seeded
+    类测试可能已把空串 trusted_proxy_ips 留在缓存中，使 resolved_str_sync
+    命中空串而非 env 默认值。每个测试前后强制清缓存以隔离。
+    """
+    from app.services.system_settings_service import SystemSettingsService
+
+    SystemSettingsService.invalidate_cache_local()
+    yield
+    SystemSettingsService.invalidate_cache_local()
