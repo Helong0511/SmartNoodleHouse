@@ -59,9 +59,10 @@ Page({
     vouchers: [],
     walletLoading: false,
     phone: '',
-    phoneInput: '',
     canAlipayPhone: false,
     showDevTips: false,
+    phoneInput: '',
+    savingPhone: false,
     useAlipayNickname: false,
     needPrivacyAgree: false,
     nicknameReviewFail: false,
@@ -332,10 +333,6 @@ Page({
     }
   },
 
-  onPhoneInput(e) {
-    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
-  },
-
   onPrivacyAgreeForPhone() {
     privacy.finishPrivacyAgree('agree-phone-btn')
     this.setData({ needPrivacyAgree: false })
@@ -352,10 +349,19 @@ Page({
     phoneAuth.handleAuthError(this, e || { errorMessage: '用户拒绝授权' })
   },
 
-  async bindPhone() {
-    const phone = (this.data.phoneInput || '').trim()
+  // 调试用：个人主体/未开通取号能力时模拟官方一键授权，走与生产相同的绑定链路
+  mockPhoneAuthorize() {
+    this._savePhone({ alipay_phone_encrypted: 'mock:debug' })
+  },
+
+  onPhoneInput(e) {
+    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  },
+
+  async bindManualPhone() {
+    const phone = String(this.data.phoneInput || '').trim()
     if (!/^1\d{10}$/.test(phone)) {
-      my.showToast({ content: '请输入11位手机号', type: 'fail' })
+      my.showToast({ content: '请输入正确的11位手机号', type: 'fail' })
       return
     }
     await this._savePhone({ phone })
@@ -379,7 +385,7 @@ Page({
       } else {
         my.showToast({ content: res.phone_verified ? '验证成功' : '已保存，尚未验证', type: 'success' })
       }
-      this.setData({ phone: res.phone || this.data.phoneInput, phoneInput: '' })
+      this.setData({ phone: res.phone || '' })
       if (res && res.welcome_coupon_issued) {
         this._profileLoadedAt = 0
         this.loadWallet()

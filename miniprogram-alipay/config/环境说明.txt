@@ -44,7 +44,7 @@
 【个人主体测试】
   ENABLE_ALIPAY_AVATAR=true
   ENABLE_ALIPAY_NICKNAME=true
-  ENABLE_ALIPAY_PHONE_BIND=false   ← 个人无法一键取号，手输手机号
+  ENABLE_ALIPAY_PHONE_BIND=false   ← 个人无法一键取号；会员页开发/调试版提供「模拟一键授权」与手输手机号（均未验证），生产版仅官方授权
 
 【企业正式】
   三项均可 true（须开放平台隐私政策 + 已开通「获取会员手机号」）

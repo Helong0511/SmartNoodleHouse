@@ -30,6 +30,8 @@
 
   <view class="card member-card">
 
+    <view class="auth-tip">授权头像、昵称、手机号，用于累计积分、会员打折及出餐提醒</view>
+
     <view class="profile">
 
       <button
@@ -219,7 +221,7 @@
 
     <view class="title">绑定手机号</view>
 
-    <view class="tip">绑定后可接收出餐提醒，并合并历史会员账号</view>
+    <view class="tip">授权头像、昵称、手机号用于累计积分、会员打折及出餐提醒。手机号仅来自微信官方授权，防止被冒用。</view>
 
     <button
       wx:if="{{canWxPhone && needPrivacyAgree}}"
@@ -236,13 +238,23 @@
       bindgetphonenumber="onGetPhoneNumber"
     >微信一键绑定手机号</button>
 
-    <view class="or" wx:if="{{canWxPhone}}">或手动输入</view>
-    <view class="tip" wx:if="{{!canWxPhone}}">请输入 11 位手机号完成绑定。一键取号开关：.env → ENABLE_WX_PHONE_BIND。</view>
-    <view class="tip dev-tip" wx:if="{{showDevTips}}">隐私开关：ENABLE_WX_AVATAR / NICKNAME / PHONE_BIND（改后重启后端）</view>
+    <block wx:if="{{showDevTips}}">
+      <view class="manual-phone">
+        <view class="or-line">调试用（仅开发环境，生产走官方授权）</view>
+        <button class="btn-primary manual-phone-btn" size="mini" bindtap="mockPhoneAuthorize">模拟一键授权获取手机号</button>
+        <input
+          class="phone-input"
+          type="number"
+          maxlength="11"
+          placeholder="或手动输入11位手机号"
+          value="{{phoneInput}}"
+          bindinput="onPhoneInput"
+        />
+        <button class="btn-primary manual-phone-btn" size="mini" loading="{{savingPhone}}" bindtap="bindManualPhone">保存手输手机号</button>
+      </view>
+    </block>
 
-    <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phoneInput}}" bindinput="onPhoneInput" />
-
-    <button class="btn-ghost" bindtap="bindPhone">确认绑定</button>
+    <view class="tip" wx:else>当前小程序主体暂未开通微信一键取号能力，暂不能绑定手机号，不影响正常点餐。</view>
 
   </view>
 

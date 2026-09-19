@@ -36,7 +36,7 @@
 【个人主体 / 未开通手机号能力】
   ENABLE_WX_AVATAR=true
   ENABLE_WX_NICKNAME=true
-  ENABLE_WX_PHONE_BIND=false   ← 请手输手机号
+  ENABLE_WX_PHONE_BIND=false   ← 会员页开发/调试版提供「模拟一键授权」与手输手机号（均未验证），生产版仅官方授权
 
 【企业正式】
   三项均可 true（须公众平台隐私指引 + 已声明手机号）

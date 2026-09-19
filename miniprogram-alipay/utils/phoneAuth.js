@@ -44,7 +44,7 @@ function handleGetAuthorizeSuccess(page, e, onEncrypted) {
     success: (res) => {
       const encrypted = normalizePhoneEncrypted(res)
       if (!encrypted) {
-        my.showToast({ content: '未获取到手机号密文，请手输', type: 'none' })
+        my.showToast({ content: '未获取到手机号密文，请稍后重试', type: 'none' })
         return
       }
       if (typeof onEncrypted === 'function') onEncrypted(encrypted)
@@ -66,7 +66,7 @@ function handleAuthError(page, err) {
     privacy.showPrivacyPopup()
     my.showModal({
       title: '需先同意隐私政策',
-      content: '请先在小程序内同意隐私政策，并在开放平台开通「获取会员手机号」；也可手动输入手机号。',
+      content: '请先在小程序内同意隐私政策，并在开放平台开通「获取会员手机号」能力（手机号仅支持官方一键授权）。',
       confirmText: '知道了'
     })
     return

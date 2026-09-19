@@ -1,73 +1,24 @@
-const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
-const privacy = require('../../utils/privacy')
-const phoneAuth = require('../../utils/phoneAuth')
-const clientConfig = require('../../utils/clientConfig')
-const avatarUtil = require('../../utils/avatar')
 const { normalizeLaunchQuery } = require('../../utils/scan')
-const {
-  resolveApiBase,
-  getEnvDebugInfo,
-  shouldShowDevTips,
-  appendDevApiHint
-} = require('../../config/env')
 
-function appRef() {
-  return auth.getAppSafe()
-}
+/**
+ * 扫码落地页：只做「识别桌台 + 静默登录」，随后直接进入点餐页。
+ * 不收集头像/昵称/手机号，会员开通与手机号绑定统一在「会员」页完成。
+ * 弱网兜底 12 秒：即使登录未完成也以游客身份进入菜单（下单前各页会再次 ensureLogin）。
+ */
+const BOOT_FALLBACK_MS = 12000
 
 Page({
   data: {
-    loading: true,
-    ready: false,
-    hasTable: false,
-    showMemberPrompt: false,
-    saving: false,
-    needPrivacyAgree: false,
-    table: null,
     storeName: '',
     tableName: '',
     seatLabel: '桌号',
-    nickname: '',
-    avatarUrl: '',
-    phone: '',
-    phoneInput: '',
-    canChooseAvatar: false,
-    useAlipayNickname: false,
-    canAlipayPhone: false,
-    privacyTip: '',
-    showDevTips: false,
-    debugInfo: '',
-    nicknameReviewFail: false,
-    memberText: '开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。随时可在「我的」页开通，不影响点餐。'
-  },
-
-  buildDebugInfo(extra) {
-    const env = getEnvDebugInfo()
-    const p = clientConfig.alipayPrivacyPageData()
-    const parts = [
-      `环境:${env.envVersion}`,
-      `头像:${p.canChooseAvatar ? '开' : '关'}`,
-      `昵称:${p.useAlipayNickname ? '开' : '关'}`,
-      `手机:${p.canAlipayPhone ? '开' : '关'}`,
-      `隐私待同意:${this.data.needPrivacyAgree ? '是' : '否'}`
-    ]
-    if (extra) parts.push(extra)
-    return `${parts.join(' | ')} | ${env.apiBase}`
+    hasTable: false
   },
 
   onLoad(query) {
-    const env = getEnvDebugInfo()
-    this.setData({
-      ...clientConfig.alipayPrivacyPageData(),
-      showDevTips: shouldShowDevTips(),
-      debugInfo: env.isRelease ? '' : this.buildDebugInfo()
-    })
-    clientConfig.loadClientConfig().then(() => {
-      this.setData(clientConfig.alipayPrivacyPageData())
-    })
-    const app = appRef()
+    const app = auth.getAppSafe()
     const q = normalizeLaunchQuery(query)
     if (q.token && app) {
       app.globalData.tableToken = q.token
@@ -85,443 +36,48 @@ Page({
   },
 
   onShow() {
-    const app = appRef()
+    const app = auth.getAppSafe()
     if (app && app._privacyPopup && app.globalData.needPrivacyPopup) {
       app._privacyPopup.show()
     }
   },
 
-  async refreshPrivacyState() {
-    const setting = await privacy.setupPrivacy()
-    const need = !!setting.needAuthorization
-    const apiHint = (appRef() && appRef().globalData.apiBase) || resolveApiBase()
-    const baseTip = need
-      ? '请先点击上方「同意隐私政策」，再获取头像/昵称/手机号；也可手输昵称与手机号，或从相册选头像。'
-      : '点头像选支付宝头像，点昵称框后在键盘上方选支付宝昵称。'
-    this.setData({
-      needPrivacyAgree: need,
-      privacyTip: appendDevApiHint(baseTip, apiHint),
-      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo()
-    })
-    return !need
-  },
-
-  openPrivacyContract() {
-    privacy.openPrivacyContract()
-  },
-
-  onPrivacyAgree() {
-    privacy.finishPrivacyAgree('agree-btn')
-    this.setData({
-      needPrivacyAgree: false,
-      privacyTip: appendDevApiHint(
-        '已同意隐私政策。请点头像选头像，点昵称框获取支付宝昵称。',
-        (appRef() && appRef().globalData.apiBase) || resolveApiBase()
-      ),
-      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('隐私已同意')
-    })
-    my.showToast({ content: '已同意，请继续操作', type: 'success' })
-  },
-
-  onPrivacyAgreeForPhone() {
-    privacy.finishPrivacyAgree('agree-phone-btn')
-    this.setData({
-      needPrivacyAgree: false,
-      privacyTip: appendDevApiHint(
-        '已同意隐私政策，请再次点击「支付宝授权手机号」。',
-        (appRef() && appRef().globalData.apiBase) || resolveApiBase()
-      ),
-      debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('隐私已同意(手机号)')
-    })
-    my.showToast({ content: '已同意，请再点授权手机号', type: 'success' })
-  },
-
   async bootstrap() {
-    try {
-      this.setData({ loading: true })
-      await auth.purgeStaleSessionIfNeeded()
-      const app = appRef()
-      const gd = (app && app.globalData) || {}
-      const token = gd.tableToken || auth.readStorage('table_token') || ''
-      if (token) {
-        try {
-          await dineCtx.bindTableFromToken(token)
-        } catch (_) {}
-      }
-      const ctx = dineCtx.currentDisplay()
-      if (ctx.table) {
-        try {
-          const entry = await api.get('/miniprogram/entry', { token: ctx.table.qr_token || token, channel: 'alipay' }, false)
-          if (entry && entry.prompts) {
-            this.setData({ memberText: entry.prompts.member_consent_text })
-          }
-        } catch (_) {}
-      }
-      let login = null
-      try {
-        login = await auth.ensureLogin(token, { forceRelogin: true })
-      } catch (loginErr) {
-        console.error('[bootstrap login]', loginErr)
-        my.showToast({
-          content: auth.formatError(loginErr, '登录失败'),
-          type: 'none',
-          duration: 3500
-        })
-      }
-      // 首次扫码：游客可直接点餐，不强制注册墙
-      const loginOk = !!(login && login.customer_token)
-      const nicknameFromServer = loginOk ? String(login.nickname || '') : ''
-      const memberStatus = String((login && login.member_status) || '').toUpperCase()
-      const isGuest = loginOk
-        ? (login.is_guest === true || memberStatus === 'GUEST' || login.need_member_prompt === true)
-        : true
-      const showMemberPrompt = false
-      const nickname = auth.isPlaceholderNickname(nicknameFromServer) ? '' : nicknameFromServer
-      const avatarUrl = loginOk ? String(login.avatar_url || '') : ''
-      const dine = dineCtx.currentDisplay()
-      this.setData({
-        loading: false,
-        nickname,
-        avatarUrl: avatarUtil.resolveDisplayUrl(avatarUrl) || avatarUrl,
-        phone: loginOk ? String(login.phone || '') : '',
-        phoneInput: '',
-        showMemberPrompt,
-        isGuest,
-        ready: true,
-        table: dine.table,
-        ...dineCtx.pageDineFields(dine)
-      })
-      auth.fetchCustomerMeSilent().then((me) => {
-        if (me && me.phone) this.setData({ phone: me.phone })
-        if (me && me.avatar_url) {
-          app && (app.globalData.avatarUrl = me.avatar_url)
-          this.setData({ avatarUrl: avatarUtil.resolveDisplayUrl(me.avatar_url) })
-        }
-      })
-      if (loginOk && nickname) {
-        my.setStorageSync({ key: 'nickname', data: nickname })
-      } else if (loginOk) {
-        try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
-      }
-      if (loginOk && avatarUrl) {
-        if (app) app.globalData.avatarUrl = avatarUrl
-        my.setStorageSync({ key: 'avatar_url', data: avatarUrl })
-      } else if (loginOk) {
-        if (app) app.globalData.avatarUrl = ''
-        try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
-      }
-      if (loginOk && login.customer_id && app) {
-        app.globalData.customerId = login.customer_id
-        my.setStorageSync({ key: 'customer_id', data: login.customer_id })
-      }
-      if (loginOk && login.customer_no) {
-        my.setStorageSync({ key: 'customer_no', data: login.customer_no })
-      }
-      if (loginOk && login.member_status) {
-        try { my.setStorageSync({ key: 'member_status', data: login.member_status }) } catch (_) {}
-      }
-      await this.refreshPrivacyState()
-      if (loginOk) {
-        this.goMenu()
-        return
-      }
-    } catch (e) {
-      this.setData({
-        loading: false,
-        ready: true,
-        hasTable: false,
-        showMemberPrompt: true,
-        nickname: '',
-        avatarUrl: ''
-      })
-      my.alert({ title: '初始化失败', content: auth.formatError(e, '初始化失败') })
-    }
-  },
+    const app = auth.getAppSafe()
+    const token = (app && app.globalData.tableToken) || auth.readStorage('table_token') || ''
 
-  scanTable() {
-    dineCtx.scanAndBindTable()
-      .then((ctx) => {
-        if (ctx) {
-          this.setData({
-            table: ctx.table,
-            ...dineCtx.pageDineFields(ctx)
-          })
-        }
+    // 绑桌（公开接口）与静默登录并行；两者失败都不阻断进入点餐
+    const tablePromise = token
+      ? dineCtx.bindTableFromToken(token).catch((e) => {
+        console.warn('[bootstrap table]', auth.formatError(e, '绑桌失败'))
       })
-      .catch((e) => {
-        my.showToast({ content: auth.formatError(e, '扫码失败'), type: 'none' })
-      })
-  },
-
-  onChooseAvatar(e) {
-    const detail = (e && e.detail) || {}
-    const url = detail.avatarUrl || detail.avatar || ''
-    const errMsg = String(detail.errMsg || detail.errorMessage || '')
-    console.log('[chooseAvatar]', detail)
-    if (!url) {
-      if (/privacy|authorize|协议|声明|agree|scope/i.test(errMsg)) {
-        this.setData({
-          needPrivacyAgree: true,
-          debugInfo: getEnvDebugInfo().isRelease ? '' : this.buildDebugInfo('头像:隐私')
-        })
-        privacy.showPrivacyPopup()
-        my.alert({
-          title: '需配置隐私政策',
-          content: '请在开放平台配置小程序隐私政策并声明头像能力；临时可用相册选图+手输昵称。'
-        })
-        return
-      }
-      if (/cancel/i.test(errMsg)) return
-      my.showToast({ content: errMsg || '未选头像', type: 'none' })
-      return
-    }
-    this.persistChosenAvatar(url)
-  },
-
-  onPickLocalAvatar() {
-    my.chooseImage({
-      count: 1,
-      sourceType: ['album', 'camera'],
-      success: (res) => {
-        const url = (res.apFilePaths && res.apFilePaths[0]) || (res.tempFilePaths && res.tempFilePaths[0]) || ''
-        if (!url) {
-          my.showToast({ content: '未选择图片', type: 'none' })
-          return
-        }
-        this.persistChosenAvatar(url)
-      }
+      : Promise.resolve()
+    const loginPromise = auth.ensureLogin(token).catch((e) => {
+      console.warn('[bootstrap login]', auth.formatError(e, '登录未完成'))
     })
-  },
 
-  async persistChosenAvatar(localOrRemoteUrl) {
-    my.showLoading({ content: '上传头像' })
-    try {
-      const remote = await avatarUtil.ensureRemoteAvatar(localOrRemoteUrl)
-      this.applyProfile('', remote)
-      my.hideLoading()
-      my.showToast({ content: '头像已保存', type: 'success' })
-    } catch (e) {
-      my.hideLoading()
-      // 上传失败仍先本地预览，注册时再试上传
-      this.applyProfile('', localOrRemoteUrl)
-      my.showToast({
-        content: avatarUtil.formatUploadError(e, '头像上传失败，注册时将重试'),
-        type: 'none',
-        duration: 2500
-      })
-    }
-  },
-
-  applyProfile(nickname, avatarUrl) {
-    const app = appRef()
-    const patch = {}
-    if (nickname) {
-      patch.nickname = nickname
-      if (app) app.globalData.nickname = nickname
-      my.setStorageSync({ key: 'nickname', data: nickname })
-      auth.writeRegDraft({ nickname })
-    }
-    if (avatarUrl) {
-      const storePath = avatarUtil.isPersistableAvatarUrl(avatarUrl)
-        ? (avatarUrl.includes('/uploads/')
-          ? avatarUrl.slice(avatarUrl.indexOf('/uploads/')).split('?')[0]
-          : avatarUrl)
-        : avatarUrl
-      patch.avatarUrl = avatarUtil.resolveDisplayUrl(storePath) || storePath
-      if (app) app.globalData.avatarUrl = storePath
-      my.setStorageSync({ key: 'avatar_url', data: storePath })
-      auth.writeRegDraft({ avatarUrl: storePath })
-    }
-    if (Object.keys(patch).length) this.setData(patch)
-  },
-
-  onNicknameInput(e) {
-    const nickname = (e.detail && e.detail.value) || ''
-    this.setData({ nickname })
-    const app = appRef()
-    if (app) app.globalData.nickname = nickname
-    auth.writeRegDraft({ nickname })
-  },
-
-  onNicknameBlur(e) {
-    const nickname = (e.detail && e.detail.value) || ''
-    if (!nickname) return
-    this.setData({ nickname })
-    const app = appRef()
-    if (app) app.globalData.nickname = nickname
-    auth.writeRegDraft({ nickname })
-  },
-
-  onNicknameReview(e) {
-    const detail = (e.detail) || {}
-    if (detail.pass === false) {
-      this.setData({ nicknameReviewFail: true, nickname: '' })
-      my.showToast({ content: '昵称未通过审核，请修改', type: 'none' })
-    } else if (detail.pass === true) {
-      this.setData({ nicknameReviewFail: false })
-    }
-  },
-
-  onPhoneInput(e) {
-    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
-  },
-
-  onGetPhoneAuthorize(e) {
-    phoneAuth.handleGetAuthorizeSuccess(this, e || {}, async (encrypted) => {
-      try {
-        my.showLoading({ content: '绑定中' })
-        await auth.ensureLogin()
-        let res
-        try {
-          res = await api.post('/miniprogram/member/phone', { alipay_phone_encrypted: encrypted })
-        } catch (bindErr) {
-          if (Number(bindErr && bindErr.code) !== 40906) throw bindErr
-          my.hideLoading()
-          const confirmed = await phoneAuth.confirmAccountMerge(bindErr.message)
-          if (!confirmed) return
-          my.showLoading({ content: '合并中' })
-          res = await api.post('/miniprogram/member/phone', {
-            alipay_phone_encrypted: encrypted,
-            confirm_merge: true
-          })
-        }
-        const app = appRef()
-        if (res && res.customer_token && app) {
-          auth.refreshCustomerToken(app, res.customer_token, {
-            customer_id: res.customer_id,
-            customer_no: res.customer_no
-          })
-        }
-        my.hideLoading()
-        this.setData({ phone: res.phone || '', phoneInput: '' })
-        my.showToast({ content: '手机号已绑定', type: 'success' })
-      } catch (err) {
-        my.hideLoading()
-        my.showToast({ content: (err && err.message) || '绑定失败，请手输', type: 'none' })
-      }
+    let fromFallback = false
+    const fallback = new Promise((resolve) => {
+      setTimeout(() => {
+        fromFallback = true
+        resolve()
+      }, BOOT_FALLBACK_MS)
     })
-  },
+    await Promise.race([Promise.all([tablePromise, loginPromise]), fallback])
 
-  onGetPhoneAuthorizeFail(e) {
-    phoneAuth.handleAuthError(this, e || { errorMessage: '用户拒绝授权' })
-  },
+    const dine = dineCtx.currentDisplay()
+    this.setData(dineCtx.pageDineFields(dine))
 
-  onFormSubmit(e) {
-    if (this.data.saving) return
-    const formVal = (e.detail && e.detail.value) || {}
-    const formNick = String(formVal.nickname || '').trim()
-    const nickname = formNick || String(this.data.nickname || '').trim()
-    this.doSaveAndGo(nickname)
-  },
-
-  onSubmitRegister() {
-    if (this.data.saving) return
-    this.doSaveAndGo(String(this.data.nickname || '').trim())
-  },
-
-  async doSaveAndGo(nickname) {
-    const app = appRef()
-    if (!app) {
-      my.showToast({ content: '应用未就绪', type: 'fail' })
-      return
+    if (fromFallback || !app || !app.globalData.customerToken) {
+      my.showToast({ content: '网络较慢，可先浏览点餐', type: 'none', duration: 2000 })
     }
-    if (this.data.useAlipayNickname && this.data.nicknameReviewFail) {
-      my.showToast({ content: '昵称未通过审核，请修改', type: 'fail' })
-      return
-    }
-    if (nickname && (nickname.length < 2 || nickname.length > 20)) {
-      my.showToast({ content: '昵称需 2-20 个字', type: 'fail' })
-      return
-    }
-    const phoneInput = (this.data.phoneInput || '').trim()
-    if (phoneInput && !/^1\d{10}$/.test(phoneInput)) {
-      my.showToast({ content: '请输入11位手机号', type: 'fail' })
-      return
-    }
-    try {
-      await auth.ensureLogin()
-    } catch (e) {
-      my.showToast({ content: auth.formatError(e, '请先登录'), type: 'fail' })
-      return
-    }
-    try {
-      this.setData({ saving: true })
-      my.showLoading({ content: '保存中' })
-      let avatarPath = this.data.avatarUrl || (app && app.globalData.avatarUrl) || ''
-      // data 里可能已是完整可展示 URL，优先用 storage / global 的持久路径
-      const storedAvatar = auth.readStorage('avatar_url') || (app && app.globalData.avatarUrl) || ''
-      if (avatarUtil.isPersistableAvatarUrl(storedAvatar)) {
-        avatarPath = storedAvatar
-      }
-      try {
-        avatarPath = await avatarUtil.ensureRemoteAvatar(avatarPath)
-      } catch (upErr) {
-        if (avatarUtil.needsUpload(avatarPath)) {
-          throw upErr
-        }
-      }
-      const res = await auth.registerMember({
-        nickname: nickname || '面馆会员',
-        avatar_url: avatarUtil.isPersistableAvatarUrl(avatarPath) ? avatarPath : null,
-        phone: phoneInput || null
-      })
-      app.globalData.nickname = (res && res.nickname) || nickname || '面馆会员'
-      app.globalData.avatarUrl = (res && res.avatar_url) || (avatarUtil.isPersistableAvatarUrl(avatarPath) ? avatarPath : '') || ''
-      if (res && res.customer_token) {
-        auth.refreshCustomerToken(app, res.customer_token, {
-          customer_id: res.customer_id,
-          customer_no: res.customer_no
-        })
-      } else if (res && res.customer_id) {
-        auth.refreshCustomerToken(app, app.globalData.customerToken, {
-          customer_id: res.customer_id,
-          customer_no: res.customer_no
-        })
-      }
-      if (res && res.is_member != null) app.globalData.isMember = res.is_member
-      if (res && res.member_level_name) app.globalData.memberLevelName = res.member_level_name
-      if (res && res.member_discount_rate) app.globalData.memberDiscountRate = res.member_discount_rate
-      my.setStorageSync({ key: 'nickname', data: app.globalData.nickname })
-      if (app.globalData.avatarUrl) {
-        my.setStorageSync({ key: 'avatar_url', data: app.globalData.avatarUrl })
-      }
-      auth.clearRegDraft()
-      this.setData({
-        nickname: app.globalData.nickname,
-        avatarUrl: avatarUtil.resolveDisplayUrl(app.globalData.avatarUrl),
-        phone: (res && res.phone) || this.data.phone || phoneInput || '',
-        phoneInput: '',
-        showMemberPrompt: false,
-        saving: false
-      })
-      my.hideLoading()
-      if (res && res.welcome_coupon_issued) {
-        const cname = (res.welcome_coupon && res.welcome_coupon.name) || res.welcome_coupon_name || '新客券'
-        my.showToast({ content: `已赠送「${cname}」`, type: 'success' })
-      }
-      this.goMenu()
-    } catch (e) {
-      this.setData({ saving: false })
-      my.hideLoading()
-      my.showToast({ content: e.message || '保存失败', type: 'fail' })
-    }
+    this.goMenu()
   },
 
   goMenu() {
     my.switchTab({
       url: '/pages/menu/menu',
-      fail: (err) => {
-        my.showToast({ content: auth.formatError(err, '无法打开点餐页'), type: 'none' })
-      }
-    })
-  },
-
-  goMember() {
-    my.switchTab({
-      url: '/pages/member/member',
-      fail: (err) => {
-        my.showToast({ content: auth.formatError(err, '无法打开会员页'), type: 'none' })
-      }
+      fail: () => my.reLaunch({ url: '/pages/menu/menu' })
     })
   }
 })

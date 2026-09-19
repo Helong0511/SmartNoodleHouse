@@ -2,13 +2,7 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="全部门店"
-          clearable
-          style="width:160px"
-          @change="reload"
-        >
+        <el-select v-model="storeFilter" placeholder="全部门店" clearable style="width:160px" @change="reload">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
@@ -17,76 +11,34 @@
       </el-tag>
 
       <el-form-item>
-        <el-select
-          v-model="categoryFilter"
-          placeholder="分类"
-          clearable
-          style="width:140px"
-          @change="reload"
-        >
-          <el-option
-            v-for="c in categories"
-            :key="c.value"
-            :label="c.label"
-            :value="c.value"
-          />
+        <el-select v-model="categoryFilter" placeholder="分类" clearable style="width:140px" @change="reload">
+          <el-option v-for="c in categories" :key="c.value" :label="c.label" :value="c.value" />
         </el-select>
       </el-form-item>
 
       <el-form-item>
-        <el-input
-          v-model="moduleFilter"
-          clearable
-          placeholder="模块（如 order）"
-          style="width:140px"
-          @keyup.enter="reload"
-          @clear="reload"
-        />
+        <el-input v-model="moduleFilter" clearable placeholder="模块（如 order）" style="width:140px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
 
       <el-form-item>
-        <el-input
-          v-model="actionFilter"
-          clearable
-          placeholder="操作 action"
-          style="width:140px"
-          @keyup.enter="reload"
-          @clear="reload"
-        />
+        <el-input v-model="actionFilter" clearable placeholder="操作 action" style="width:140px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
 
       <el-form-item>
-        <el-input-number
-          v-model="userIdFilter"
-          :min="1"
-          :controls="false"
-          placeholder="用户 ID"
-          style="width:110px"
-          @change="reload"
-        />
+        <el-input-number v-model="userIdFilter" :min="1" :controls="false" placeholder="用户 ID" style="width:110px"
+          @change="reload" />
       </el-form-item>
 
       <el-form-item>
-        <el-input
-          v-model="keyword"
-          clearable
-          placeholder="关键字（action/detail）"
-          style="width:220px"
-          @keyup.enter="reload"
-          @clear="reload"
-        />
+        <el-input v-model="keyword" clearable placeholder="关键字（action/detail）" style="width:220px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
 
       <el-form-item>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="起"
-          end-placeholder="止"
-          style="width:240px"
-          @change="reload"
-        />
+        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="起"
+          end-placeholder="止" style="width:240px" @change="reload" />
       </el-form-item>
 
       <el-button type="primary" @click="reload">查询</el-button>
@@ -106,7 +58,7 @@
       <el-table-column label="时间" width="170">
         <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="用户" min-width="160" show-overflow-tooltip>
+      <el-table-column label="用户" min-width="80" show-overflow-tooltip>
         <template #default="{ row }">
           {{ row.display_name || row.username || `用户#${row.user_id}` }}
           <div v-if="row.username && row.display_name" class="muted">{{ row.username }}</div>
@@ -141,15 +93,8 @@
     </el-table>
 
     <div class="pager">
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        @current-change="load"
-        @size-change="reload"
-      />
+      <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next" @current-change="load" @size-change="reload" />
     </div>
 
     <el-dialog v-model="detailDialog" title="操作日志详情" width="720px">
@@ -348,15 +293,51 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.kpi-row { margin-bottom: 12px; }
-.kpi-card { text-align: center; }
-.kpi-label { font-size: 12px; color: #909399; }
-.kpi-value { font-size: 24px; font-weight: 600; color: #303133; margin-top: 4px; }
-.pager { margin-top: 16px; display: flex; justify-content: flex-end; }
-.muted { color: #909399; font-size: 12px; }
-.detail-box { padding: 4px 0; }
-.detail-section { margin-top: 12px; }
-.detail-section-title { font-weight: 600; margin-bottom: 6px; color: #303133; }
+.kpi-row {
+  margin-bottom: 12px;
+}
+
+.kpi-card {
+  text-align: center;
+}
+
+.kpi-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.kpi-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #303133;
+  margin-top: 4px;
+}
+
+.pager {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.muted {
+  color: #909399;
+  font-size: 12px;
+}
+
+.detail-box {
+  padding: 4px 0;
+}
+
+.detail-section {
+  margin-top: 12px;
+}
+
+.detail-section-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #303133;
+}
+
 .detail-pre {
   margin: 0;
   padding: 12px;
@@ -370,5 +351,10 @@ onMounted(async () => {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.ua { word-break: break-all; font-size: 12px; color: #606266; }
+
+.ua {
+  word-break: break-all;
+  font-size: 12px;
+  color: #606266;
+}
 </style>

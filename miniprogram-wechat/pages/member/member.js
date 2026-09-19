@@ -60,9 +60,10 @@ Page({
     vouchers: [],
     walletLoading: false,
     phone: '',
-    phoneInput: '',
     canWxPhone: false,
     showDevTips: false,
+    phoneInput: '',
+    savingPhone: false,
     needPrivacyAgree: false,
     nicknameReviewFail: false,
     storeName: '',
@@ -337,19 +338,6 @@ Page({
     }
   },
 
-  onPhoneInput(e) {
-    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
-  },
-
-  async bindPhone() {
-    const phone = (this.data.phoneInput || '').trim()
-    if (!/^1\d{10}$/.test(phone)) {
-      wx.showToast({ title: '请输入11位手机号', icon: 'none' })
-      return
-    }
-    await this._savePhone({ phone })
-  },
-
   async onGetPhoneNumber(e) {
     const detail = (e && e.detail) || {}
     phoneAuth.handleGetPhoneNumber(this, detail, (code) => {
@@ -360,6 +348,24 @@ Page({
   onPrivacyAgree() {
     privacy.finishPrivacyAgree('agree-btn-phone')
     this.setData({ needPrivacyAgree: false })
+  },
+
+  // 调试用：个人主体/未开通取号能力时模拟官方一键授权，走与生产相同的绑定链路
+  mockPhoneAuthorize() {
+    this._savePhone({ phone_code: 'mock:debug' })
+  },
+
+  onPhoneInput(e) {
+    this.setData({ phoneInput: (e.detail && e.detail.value) || '' })
+  },
+
+  async bindManualPhone() {
+    const phone = String(this.data.phoneInput || '').trim()
+    if (!/^1\d{10}$/.test(phone)) {
+      wx.showToast({ title: '请输入正确的11位手机号', icon: 'none' })
+      return
+    }
+    await this._savePhone({ phone })
   },
 
   async _savePhone(payload, retried = false) {
@@ -380,7 +386,7 @@ Page({
       } else {
         wx.showToast({ title: res.phone_verified ? '验证成功' : '已保存，尚未验证', icon: 'success' })
       }
-      this.setData({ phone: res.phone || this.data.phoneInput, phoneInput: '' })
+      this.setData({ phone: res.phone || '' })
       if (res && res.welcome_coupon_issued) {
         this._profileLoadedAt = 0
         this.loadWallet()

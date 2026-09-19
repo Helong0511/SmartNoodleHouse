@@ -5,6 +5,7 @@ import re
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, File, Request, UploadFile
 
@@ -128,9 +129,10 @@ class AlipayMiniLoginRequest(BaseModel):
 
 
 class MemberRegisterRequest(BaseModel):
+    # 安全约束：注册/激活不接受手机号。手机号只能走 /member/phone 官方一键授权，
+    # 防止用户手输他人号码污染资料或冒享会员权益。
     nickname: str | None = None
     avatar_url: str | None = None
-    phone: str | None = Field(default=None, pattern=r"^1\d{10}$")
     enable_face: bool = False
     channel: str | None = None
     table_token: str | None = None
@@ -140,7 +142,6 @@ class MemberActivateRequest(BaseModel):
     """主动开通智能会员（GUEST → MEMBER，幂等）。"""
     nickname: str | None = None
     avatar_url: str | None = None
-    phone: str | None = Field(default=None, pattern=r"^1\d{10}$")
     table_token: str | None = None
     channel: str | None = None
     enable_face: bool = False
@@ -159,7 +160,7 @@ class PhoneBindRequest(BaseModel):
         min_length=11,
         max_length=11,
         pattern=r"^1\d{10}$",
-        description="手动输入手机号（仅保存为未验证，不触发账号合并）",
+        description="已废弃：手输渠道已关闭，服务端将拒绝；仅保留字段以返回明确错误提示",
     )
     phone_code: str | None = Field(default=None, description="微信 getPhoneNumber 返回的 code")
     alipay_phone_encrypted: str | None = Field(default=None, description="支付宝 my.getPhoneNumber 返回的 response 密文")
@@ -542,8 +543,6 @@ async def register_member(
     """兼容旧接口：等价于主动开通会员（activate）+ 可选写资料。"""
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
-    if data.phone:
-        customer = await CustomerService.save_unverified_phone(db, customer, data.phone)
     customer, newly = await CustomerService.activate_member(
         db,
         customer,
@@ -638,8 +637,6 @@ async def activate_member(
     """用户明确点击「开启智能会员」：幂等 GUEST→MEMBER，仅首次发欢迎券。"""
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
-    if data.phone:
-        customer = await CustomerService.save_unverified_phone(db, customer, data.phone)
     customer, newly = await CustomerService.activate_member(
         db,
         customer,
@@ -815,6 +812,60 @@ async def import_member_avatar_from_url(
     )
 
 
+# 调试环境模拟绑定的固定测试手机号（明显占位、非真实分配号码段内常用示例）
+_MOCK_DEBUG_PHONE = "13800000000"
+
+
+async def _save_unverified_phone_response(
+    db: AsyncSession,
+    request: Request,
+    customer,  # Customer
+    channel: str,
+    phone: str,
+    *,
+    source: str,
+    message: str,
+):
+    """调试链路共用：保存未验证手机号（不合并账号），返回与官方授权同构的响应。"""
+    customer = await CustomerService.save_unverified_phone(db, customer, phone)
+    CustomerService.refresh_profile_status(customer)
+    await db.flush()
+    profile = await CustomerService.build_member_profile(db, customer)
+    await AuditService.log(
+        db,
+        action="customer.member.phone_bind",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "customer_id": int(customer.id),
+            "channel": channel,
+            "phone_verified": False,
+            "account_merged": False,
+            "verification_source": source,
+        },
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+    )
+    return success(
+        {
+            "phone": customer.phone,
+            "customer_id": customer.id,
+            "customer_token": _issue_customer_token(customer, channel),
+            "phone_verified": False,
+            "account_merged": False,
+            "need_member_prompt": not CustomerService.is_member(customer),
+            "welcome_coupon_issued": False,
+            "welcome_coupon": None,
+            "welcome_coupon_name": await CouponService.welcome_template_name(db),
+            **profile,
+        },
+        message=message,
+        request=request,
+    )
+
+
 @router.post("/member/phone")
 async def bind_member_phone(
     data: PhoneBindRequest,
@@ -829,42 +880,68 @@ async def bind_member_phone(
     from app.services.wechat_mini_client import get_phone_by_code
 
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
+    settings = get_settings()
+
+    # ── 调试环境：允许手输手机号（仅开发/测试）──
+    # 保存为未验证手机号（phone_verified=0），不合并账号、不享受与已验证手机号挂钩的权益，
+    # 仅方便个人主体/未开通官方取号能力时调试出餐提醒等流程。生产环境一律走官方授权。
+    if data.phone:
+        if not settings.is_development:
+            raise AppException(
+                40054,
+                "为防止手机号被冒用，仅支持微信/支付宝官方一键授权绑定手机号，不支持手动输入",
+            )
+        if not re.fullmatch(r"1\d{10}", data.phone):
+            raise AppException(40053, "手机号格式不正确")
+        return await _save_unverified_phone_response(
+            db, request, customer, channel, data.phone,
+            source="MANUAL_DEV",
+            message="调试环境：手机号已保存（未验证），生产环境须使用官方一键授权",
+        )
 
     supplied = sum(
         bool(value)
-        for value in (data.phone, data.phone_code, data.alipay_phone_encrypted)
+        for value in (data.phone_code, data.alipay_phone_encrypted)
     )
     if supplied != 1:
-        raise AppException(40054, "手机号、微信 phone_code、支付宝授权密文必须且只能提供一种")
+        raise AppException(40054, "微信 phone_code、支付宝授权密文必须且只能提供一种")
 
-    raw_phone = (data.phone or "").strip()
-    verified_source = None
+    # ── 调试环境：mock 一键授权凭据（与生产同一按钮流程，后端返回固定测试号）──
+    # 个人主体/未开通取号能力时，真机无法弹出官方授权窗，前端提交 mock:debug 凭据
+    # 走完整绑定链路（未验证、不合并账号），便于本地/真机调试。
+    if data.phone_code == "mock:debug" or data.alipay_phone_encrypted == "mock:debug":
+        if not settings.is_development:
+            raise AppException(40054, "mock 授权凭据仅限开发调试环境使用")
+        return await _save_unverified_phone_response(
+            db, request, customer, channel,
+            _MOCK_DEBUG_PHONE,
+            source="MOCK_DEV",
+            message="调试环境：已模拟绑定测试手机号（未验证），生产环境将走官方授权",
+        )
+
+    verified_source: str
     if data.phone_code:
         if channel == "alipay":
             raise AppException(40054, "支付宝端请使用 alipay_phone_encrypted 字段")
         raw_phone = await get_phone_by_code(data.phone_code)
         verified_source = "WECHAT"
-    elif data.alipay_phone_encrypted:
+    else:
         if channel != "alipay":
             raise AppException(40054, "微信端不能提交支付宝手机号授权数据")
         raw_phone = decrypt_phone_response(data.alipay_phone_encrypted)
         verified_source = "ALIPAY"
     if not raw_phone:
-        raise AppException(40054, "请提供手机号或授权获取手机号")
+        raise AppException(40054, "未获取到授权手机号，请重新授权")
     if not re.fullmatch(r"1\d{10}", raw_phone):
         raise AppException(40053, "手机号格式不正确")
-    merged = False
-    if verified_source:
-        customer, merged = await CustomerService.bind_verified_phone(
-            db,
-            customer,
-            raw_phone,
-            verification_source=verified_source,
-            confirm_merge=data.confirm_merge,
-            request=request,
-        )
-    else:
-        customer = await CustomerService.save_unverified_phone(db, customer, raw_phone)
+    customer, merged = await CustomerService.bind_verified_phone(
+        db,
+        customer,
+        raw_phone,
+        verification_source=verified_source,
+        confirm_merge=data.confirm_merge,
+        request=request,
+    )
     CustomerService.refresh_profile_status(customer)
     await db.flush()
     # 绑手机不发欢迎券；欢迎券仅在主动开通会员时发放
@@ -903,8 +980,6 @@ async def bind_member_phone(
             "账号已安全合并，手机号验证成功"
             if merged
             else "手机号验证成功"
-            if verified_source
-            else "手机号已保存，完成官方授权后才会验证或合并账号"
         ),
         request=request,
     )

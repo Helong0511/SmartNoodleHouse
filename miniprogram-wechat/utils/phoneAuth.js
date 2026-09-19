@@ -36,7 +36,7 @@ function handleGetPhoneNumber(page, detail, onCode) {
     privacy.showPrivacyPopup()
     wx.showModal({
       title: '需先同意隐私指引',
-      content: '请先在小程序内同意隐私指引，并在微信公众平台声明「手机号」能力；也可手动输入手机号。',
+      content: '请先在小程序内同意隐私指引，并在微信公众平台声明「手机号」能力（手机号仅支持官方一键授权）。',
       showCancel: false
     })
     return
@@ -47,7 +47,7 @@ function handleGetPhoneNumber(page, detail, onCode) {
     } else if (isQuotaError(errMsg, errno)) {
       wx.showModal({
         title: '手机号验证额度不足',
-        content: '微信手机号快速验证次数已用尽，请在公众平台「付费管理」购买资源包，或改用手动输入手机号。',
+        content: '微信手机号快速验证次数已用尽，请在公众平台「付费管理」购买资源包后再试。',
         showCancel: false
       })
     } else if (errMsg) {
@@ -55,7 +55,7 @@ function handleGetPhoneNumber(page, detail, onCode) {
     } else {
       wx.showModal({
         title: '手机号授权无响应',
-        content: '请确认：①已同意隐私指引 ②公众平台已声明手机号 ③小程序已认证。也可手动输入手机号。',
+        content: '请确认：①已同意隐私指引 ②公众平台已声明手机号 ③小程序已认证。',
         showCancel: false
       })
     }

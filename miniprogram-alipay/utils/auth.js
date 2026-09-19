@@ -176,6 +176,14 @@ function extractRequestFailMessage(err) {
 }
 
 /**
+ * 探测单飞：冷启动时 app.onLaunch 清会话、首页 ensureLogin（validate + sync）、菜单页偏好
+ * 几乎同时触发；同一 token 在 10 秒内只发一次 /customers/me 并复用结果（含失败），
+ * 避免启动请求风暴拖慢真机调试。
+ */
+let probeState = null
+const PROBE_DEDUP_MS = 10000
+
+/**
  * 静默探测顾客令牌是否有效（永不 reject，避免把 401 打成 Uncaught Error）
  */
 function probeCustomerMe(token) {
@@ -183,7 +191,11 @@ function probeCustomerMe(token) {
   if (!base || !token) {
     return Promise.resolve({ ok: false, stale: true, data: null })
   }
-  return new Promise((resolve) => {
+  const now = Date.now()
+  if (probeState && probeState.token === token && now - probeState.at < PROBE_DEDUP_MS) {
+    return probeState.promise
+  }
+  const promise = new Promise((resolve) => {
     my.request({
       url: `${base}/miniprogram/customers/me`,
       method: 'GET',
@@ -222,6 +234,8 @@ function probeCustomerMe(token) {
       }
     })
   })
+  probeState = { token, at: now, promise }
+  return promise
 }
 
 function applyMeProfile(app, token, me) {
@@ -354,7 +368,7 @@ function refreshCustomerToken(app, token, patch = {}) {
   }
 }
 
-async function ensureLogin(tableToken, opts) {
+async function doEnsureLogin(tableToken, opts) {
   const app = requireApp()
   const forceRelogin = !!(opts && opts.forceRelogin)
   const cachedToken = app.globalData.customerToken || readStorage('customer_token')
@@ -423,6 +437,28 @@ async function ensureLogin(tableToken, opts) {
     }
   }
   return data
+}
+
+/**
+ * 登录单飞：首页 12 秒兜底跳菜单后，菜单/会员页再调 ensureLogin 时复用同一在途登录，
+ * 弱网下避免重复弹授权、重复请求 /alipay/login。forceRelogin 不复用。
+ */
+let loginInflight = null
+function ensureLogin(tableToken, opts) {
+  const forceRelogin = !!(opts && opts.forceRelogin)
+  if (!forceRelogin && loginInflight) return loginInflight
+  const promise = doEnsureLogin(tableToken, opts).then(
+    (v) => {
+      if (loginInflight === promise) loginInflight = null
+      return v
+    },
+    (e) => {
+      if (loginInflight === promise) loginInflight = null
+      throw e
+    }
+  )
+  if (!forceRelogin) loginInflight = promise
+  return promise
 }
 
 /** 主动开通智能会员（幂等）；兼容旧 register 路径 */

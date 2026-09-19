@@ -65,7 +65,9 @@ function isDevelopOrTrial() {
 }
 
 function shouldShowDevTips() {
-  return !isRelease()
+  // 仅开发版显示调试入口；体验版（审核场景）与正式版一律隐藏，符合平台
+  // 「不得出现开发调试入口」的审核要求
+  return miniEnvVersion() === 'develop'
 }
 
 function appendDevApiHint(text, apiBase) {
