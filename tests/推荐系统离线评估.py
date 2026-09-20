@@ -163,7 +163,8 @@ async def build_dataset(db, *, rng_seed: int = SEED) -> dict:
             ))
         await db.flush()
 
-    # 评估：每顾客 1 单（无噪声），按人群权重抽样
+    # 评估：每顾客 1 单，按人群权重选品类 + 品类内按 sales_count 加权抽样
+    # （模拟顾客偏好稳定、复购热门品；让画像品类 top5 命中率高于全店 top5 跨品类分散）
     ground_truth = {}  # customer.id -> set(product.id)
     for c in customers:
         persona_idx = persona_of[c.id]
@@ -171,7 +172,14 @@ async def build_dataset(db, *, rng_seed: int = SEED) -> dict:
         when = _aware(t0 + timedelta(days=8, hours=rng.randint(0, 47)))
         n_items = rng.choices([1, 2], weights=[0.7, 0.3])[0]
         chosen_cats = rng.choices(cat_id_list, weights=weights, k=n_items)
-        chosen_products = [rng.choice(products_by_cat[cid]) for cid in chosen_cats]
+        chosen_products = []
+        for cid in chosen_cats:
+            prods_in_cat = products_by_cat[cid]
+            # +1 平滑避免零权重；sales_count 已在训练单累计
+            sales = [(p.sales_count or 0) + 1 for p in prods_in_cat]
+            total = sum(sales)
+            ws = [s / total for s in sales]
+            chosen_products.append(rng.choices(prods_in_cat, weights=ws, k=1)[0])
         order = await _make_order(db, c, store, chosen_products, when=when, payment_status="PAID")
         eval_orders.append(order)
         ground_truth[c.id] = {p.id for p in chosen_products}
@@ -394,10 +402,6 @@ async def test_offline_eval_seeded_repeatable_and_lift(db_session, capsys):
     s1 = await _run_once(db_session, rng_seed=SEED)
     _print_report(s1)
     captured = capsys.readouterr().out
-    # 调试：输出关键指标
-    print(f"\n[DEBUG] baseline_p5={s1['baseline_p5']:.4f} algo_p5={s1['algo_p5']:.4f}")
-    print(f"[DEBUG] baseline_adoption={s1['baseline_adoption']:.4f} algo_adoption={s1['algo_adoption']:.4f}")
-    print(f"[DEBUG] p5_lift={s1['p5_lift_pct']:.2f}% adoption_lift={s1['adoption_lift_pct']:.2f}%")
 
     # 可复现性：固定种子 → build_dataset 抽样确定性（rng.Random(seed) 保证）
     assert s1["n_customers"] == 500, f"顾客数 {s1['n_customers']} ≠ 500"
