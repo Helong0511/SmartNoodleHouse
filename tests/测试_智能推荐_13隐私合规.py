@@ -6,6 +6,7 @@
 ⑤ consent 版本/时间/opt_in 落库
 ⑥ A 令牌无法操作 B 的画像/清除（CurrentCustomer 鉴权天然隔离）
 """
+import itertools
 import uuid
 from datetime import timedelta
 
@@ -40,6 +41,11 @@ from reco_factories import (
     make_store,
     utcnow,
 )
+
+# CustomerPreference 在 SQLite 下 id 不自增（纯 BIGINT 主键），需显式分配
+_PREF_ID = itertools.count(80000)
+_TP_ID = itertools.count(80000)
+_FB_ID = itertools.count(80000)
 
 
 def _ev(eid, etype, **kw):
@@ -86,7 +92,7 @@ async def test_opt_out_drops_events_and_non_personalized(db_session):
     assert total == 0
 
     # 推荐：opt_out 走 COLD（非个性化）
-    ranked, state, _ = await RecommendationService.rank_candidates(
+    ranked, state, _ = await RecommendationService.recommend(
         db, store_id=store.id, customer_id=c.id, scene="recommend_menu", limit=10, use_cache=False
     )
     assert state == "COLD"
@@ -106,20 +112,24 @@ async def test_taste_profile_view_contains_dimensions_and_prefs(db_session):
     # 建画像（CATEGORY + PRODUCT + TASTE_TAG 三维）
     db.add_all([
         CustomerTasteProfile(
+            id=next(_TP_ID),
             customer_id=c.id, dim_type="CATEGORY", target_key=str(cat.id),
             target_name="招牌面", score=0.9, raw_weight=9.0, event_count=4,
         ),
         CustomerTasteProfile(
+            id=next(_TP_ID),
             customer_id=c.id, dim_type="PRODUCT", target_key=str(p.id),
             target_name="麻辣小面", score=0.8, raw_weight=8.0, event_count=3,
         ),
         CustomerTasteProfile(
+            id=next(_TP_ID),
             customer_id=c.id, dim_type="TASTE_TAG", target_key="SPICY",
             target_name="辣", score=0.7, raw_weight=7.0, event_count=2,
         ),
     ])
     # 建规格偏好
     db.add(CustomerPreference(
+        id=next(_PREF_ID),
         customer_id=c.id, category="SPICY", option_code="MILD",
         option_name="微辣", preference_score="0.6500", order_count=2,
     ))
@@ -158,16 +168,19 @@ async def test_clear_taste_profile_keeps_orders_and_logs_audit(db_session):
     ])
     # 建画像
     db.add(CustomerTasteProfile(
+        id=next(_TP_ID),
         customer_id=c.id, dim_type="CATEGORY", target_key=str(cat.id),
         target_name="招牌面", score=0.9, raw_weight=9.0, event_count=2,
     ))
     # 建评价
     db.add(ProductFeedback(
+        id=next(_FB_ID),
         order_id=order.id, product_id=p.id, customer_id=c.id, store_id=store.id,
         verdicts=["TASTY"], sentiment="POSITIVE",
     ))
     # 建规格偏好
     db.add(CustomerPreference(
+        id=next(_PREF_ID),
         customer_id=c.id, category="SPICY", option_code="MILD",
         option_name="微辣", preference_score="0.6500", order_count=2,
     ))
@@ -283,6 +296,7 @@ async def test_customer_a_cannot_operate_customer_b_via_token(db_session):
 
     # B 有画像与事件
     db.add(CustomerTasteProfile(
+        id=next(_TP_ID),
         customer_id=b.id, dim_type="CATEGORY", target_key=str(cat.id),
         target_name="招牌面", score=0.9, raw_weight=9.0, event_count=4,
     ))

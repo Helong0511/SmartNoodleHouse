@@ -72,7 +72,14 @@ Page({
     storePhone: '',
     tableName: '',
     tableNo: '',
-    seatLabel: '桌号'
+    seatLabel: '桌号',
+    recommendOptIn: 1,
+    consentVersion: '',
+    consentAt: '',
+    showTasteProfile: false,
+    tasteProfile: null,
+    clearingProfile: false,
+    updatingOptIn: false
   },
 
   onShow() {
@@ -89,6 +96,7 @@ Page({
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
     })
+    this.loadPrivacySettings()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
@@ -481,5 +489,104 @@ Page({
   onGetUserInfoFail(e) {
     const msg = (e && (e.errorMessage || e.message)) || '用户拒绝授权'
     my.showToast({ content: msg, type: 'fail' })
+  },
+
+  // ---------- TR-13 隐私合规 ----------
+
+  async loadPrivacySettings() {
+    try {
+      await auth.ensureLogin()
+      const s = await api.get('/miniprogram/customers/me/privacy-settings')
+      if (!s) return
+      const opt = Number(s.recommend_opt_in || 0)
+      this.setData({
+        recommendOptIn: opt,
+        consentVersion: s.consent_version || '',
+        consentAt: s.consented_at || ''
+      })
+      app.globalData.recommendOptIn = opt
+      app.globalData.recommend_opt_in = opt
+      my.setStorageSync({ key: 'recommend_opt_in', data: opt })
+    } catch (_) { /* 静默 */ }
+  },
+
+  async onToggleRecommend(e) {
+    if (this.data.updatingOptIn) return
+    const v = e && e.detail
+    const val = typeof v === 'boolean' ? (v ? 1 : 0) : (typeof v === 'number' ? v : (this.data.recommendOptIn ? 0 : 1))
+    this.setData({ updatingOptIn: true })
+    try {
+      await auth.ensureLogin()
+      const s = await api.put('/miniprogram/customers/me/privacy-settings', { recommend_opt_in: val })
+      const opt = Number((s && s.recommend_opt_in) || val)
+      this.setData({
+        recommendOptIn: opt,
+        consentVersion: (s && s.consent_version) || this.data.consentVersion,
+        consentAt: (s && s.consented_at) || this.data.consentAt
+      })
+      app.globalData.recommendOptIn = opt
+      app.globalData.recommend_opt_in = opt
+      my.setStorageSync({ key: 'recommend_opt_in', data: opt })
+      my.showToast({
+        content: opt ? '已开启个性化推荐' : '已关闭，后续不会记录你的行为',
+        type: 'none'
+      })
+    } catch (err) {
+      this.setData({ recommendOptIn: val ? 0 : 1 })
+      my.showToast({ content: (err && err.message) || '更新失败', type: 'fail' })
+    } finally {
+      this.setData({ updatingOptIn: false })
+    }
+  },
+
+  async onViewTasteProfile() {
+    if (this.data.tasteProfile) {
+      this.setData({ showTasteProfile: true })
+      return
+    }
+    try {
+      my.showLoading({ content: '加载画像' })
+      await auth.ensureLogin()
+      const data = await api.get('/miniprogram/customers/me/taste-profile')
+      my.hideLoading()
+      this.setData({ tasteProfile: data || null, showTasteProfile: true })
+    } catch (err) {
+      my.hideLoading()
+      my.showToast({ content: (err && err.message) || '加载失败', type: 'fail' })
+    }
+  },
+
+  closeTasteProfile() {
+    this.setData({ showTasteProfile: false })
+  },
+
+  async onClearTasteProfile() {
+    if (this.data.clearingProfile) return
+    const confirm = await new Promise((resolve) => {
+      my.confirm({
+        title: '清除口味画像',
+        content: '将清除你的行为记录、口味画像、轻量评价与规格偏好。订单本体保留，不影响积分与权益。此操作不可恢复。',
+        confirmButtonText: '确认清除',
+        cancelButtonText: '取消',
+        success: (r) => resolve(r.confirm)
+      })
+    })
+    if (!confirm) return
+    this.setData({ clearingProfile: true })
+    try {
+      await auth.ensureLogin()
+      const res = await api.post('/miniprogram/customers/me/taste-profile/clear', {})
+      my.showToast({
+        content: `已清除 ${res && res.events_deleted ? res.events_deleted : 0} 条记录`,
+        type: 'none'
+      })
+      this.setData({ tasteProfile: null, showTasteProfile: false })
+      this._profileLoadedAt = 0
+      await this.loadProfile(true)
+    } catch (err) {
+      my.showToast({ content: (err && err.message) || '清除失败', type: 'fail' })
+    } finally {
+      this.setData({ clearingProfile: false })
+    }
   }
 })

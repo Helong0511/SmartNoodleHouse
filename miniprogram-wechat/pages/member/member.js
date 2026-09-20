@@ -72,7 +72,14 @@ Page({
     storePhone: '',
     tableName: '',
     tableNo: '',
-    seatLabel: '桌号'
+    seatLabel: '桌号',
+    recommendOptIn: 1,
+    consentVersion: '',
+    consentAt: '',
+    showTasteProfile: false,
+    tasteProfile: null,
+    clearingProfile: false,
+    updatingOptIn: false
   },
 
   onShow() {
@@ -89,6 +96,7 @@ Page({
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
     })
+    this.loadPrivacySettings()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
@@ -446,6 +454,111 @@ Page({
     } catch (err) {
       wx.hideLoading()
       wx.showToast({ title: (err && err.message) || '头像更新失败', icon: 'none' })
+    }
+  },
+
+  // ---------- TR-13 隐私合规 ----------
+
+  async loadPrivacySettings() {
+    try {
+      await auth.ensureLogin()
+      const s = await api.get('/miniprogram/customers/me/privacy-settings')
+      if (!s) return
+      const opt = Number(s.recommend_opt_in || 0)
+      this.setData({
+        recommendOptIn: opt,
+        consentVersion: s.consent_version || '',
+        consentAt: s.consented_at || ''
+      })
+      app.globalData.recommendOptIn = opt
+      app.globalData.recommend_opt_in = opt
+      wx.setStorageSync('recommend_opt_in', opt)
+    } catch (_) { /* 静默，不打扰用户 */ }
+  },
+
+  async onToggleRecommend(e) {
+    if (this.data.updatingOptIn) return
+    const val = e && e.detail && typeof e.detail.value === 'boolean'
+      ? (e.detail.value ? 1 : 0)
+      : (this.data.recommendOptIn ? 0 : 1)
+    this.setData({ updatingOptIn: true })
+    try {
+      await auth.ensureLogin()
+      const s = await api.put('/miniprogram/customers/me/privacy-settings', { recommend_opt_in: val })
+      const opt = Number((s && s.recommend_opt_in) || val)
+      this.setData({
+        recommendOptIn: opt,
+        consentVersion: (s && s.consent_version) || this.data.consentVersion,
+        consentAt: (s && s.consented_at) || this.data.consentAt
+      })
+      app.globalData.recommendOptIn = opt
+      app.globalData.recommend_opt_in = opt
+      wx.setStorageSync('recommend_opt_in', opt)
+      wx.showToast({
+        title: opt ? '已开启个性化推荐' : '已关闭，后续不会记录你的行为',
+        icon: 'none'
+      })
+    } catch (err) {
+      // 回滚开关
+      this.setData({ recommendOptIn: val ? 0 : 1 })
+      wx.showToast({ title: (err && err.message) || '更新失败', icon: 'none' })
+    } finally {
+      this.setData({ updatingOptIn: false })
+    }
+  },
+
+  async onViewTasteProfile() {
+    if (this.data.tasteProfile) {
+      this.setData({ showTasteProfile: true })
+      return
+    }
+    try {
+      wx.showLoading({ title: '加载画像' })
+      await auth.ensureLogin()
+      const data = await api.get('/miniprogram/customers/me/taste-profile')
+      wx.hideLoading()
+      this.setData({
+        tasteProfile: data || null,
+        showTasteProfile: true
+      })
+    } catch (err) {
+      wx.hideLoading()
+      wx.showToast({ title: (err && err.message) || '加载失败', icon: 'none' })
+    }
+  },
+
+  closeTasteProfile() {
+    this.setData({ showTasteProfile: false })
+  },
+
+  async onClearTasteProfile() {
+    if (this.data.clearingProfile) return
+    const confirm = await new Promise((resolve) => {
+      wx.showModal({
+        title: '清除口味画像',
+        content: '将清除你的行为记录、口味画像、轻量评价与规格偏好。订单本体保留，不影响积分与权益。此操作不可恢复。',
+        confirmText: '确认清除',
+        confirmColor: '#e6433a',
+        success: (r) => resolve(r.confirm)
+      })
+    })
+    if (!confirm) return
+    this.setData({ clearingProfile: true })
+    try {
+      await auth.ensureLogin()
+      const res = await api.post('/miniprogram/customers/me/taste-profile/clear', {})
+      wx.showToast({
+        title: `已清除 ${res && res.events_deleted ? res.events_deleted : 0} 条记录`,
+        icon: 'none'
+      })
+      // 刷新画像/偏好展示
+      this.setData({ tasteProfile: null, showTasteProfile: false })
+      this._profileLoadedAt = 0
+      await this.loadProfile(true)
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '清除失败', icon: 'none' })
+    } finally {
+      this.setData({ clearingProfile: false })
     }
   }
 })

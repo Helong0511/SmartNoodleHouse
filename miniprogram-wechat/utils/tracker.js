@@ -3,7 +3,7 @@
  * 事件：EXPOSE / CLICK / CART_ADD / CART_REMOVE / ORDER_PAID / REORDER / FEEDBACK
  * - 本地队列持久化，批量上报（每 10 条或 15 秒），App onHide 时 flush
  * - event_id 客户端生成，服务端幂等去重；未登录时暂存不发，登录后自动补发
- * - 关闭个性化推荐（opt_in=0）由服务端丢弃，前端仍正常记录行为流
+ * - 关闭个性化推荐（opt_in=0）时前端不入队、不上报，从源头降低隐私暴露（TR-13）
  */
 const api = require('./api')
 
@@ -68,6 +68,18 @@ function hasToken() {
   }
 }
 
+function optInEnabled() {
+  // 默认开启；member 页拉取 /privacy-settings 后写入 storage 与 globalData
+  try {
+    const v = wx.getStorageSync('recommend_opt_in')
+    if (v === 0 || v === '0') return false
+  } catch (_) {}
+  const app = getAppSafe()
+  const gd = app && app.globalData
+  if (gd && (gd.recommendOptIn === 0 || gd.recommend_opt_in === 0)) return false
+  return true
+}
+
 function currentStoreId() {
   const app = getAppSafe()
   const store = app && app.globalData && app.globalData.store
@@ -91,6 +103,8 @@ function pruneQueue(queue) {
 function track(eventType, props) {
   const type = String(eventType || '').toUpperCase()
   if (VALID_TYPES.indexOf(type) < 0) return
+  // 隐私开关关闭：前端不入队，降低本地痕迹
+  if (!optInEnabled()) return
   const p = props || {}
   const event = {
     event_id: p.event_id || genEventId(),
@@ -118,6 +132,8 @@ function flush() {
   const queue = readQueue()
   if (!queue.length) return Promise.resolve({ skipped: true })
   if (!hasToken()) return Promise.resolve({ skipped: true, reason: 'no_token' })
+  // 隐私开关关闭期间：不上报、不消耗队列（用户重新开启后可继续补发）
+  if (!optInEnabled()) return Promise.resolve({ skipped: true, reason: 'opt_out' })
 
   flushing = true
   const batch = queue.slice(0, BATCH_SIZE)

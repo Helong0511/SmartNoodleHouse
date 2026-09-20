@@ -201,5 +201,68 @@
         <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
       </block>
     </view>
+
+    <view class="card">
+      <view class="title">个性化推荐与隐私</view>
+      <view class="tip">我们仅在你同意时收集点餐行为以优化推荐。可随时关闭、查看或清除你的口味画像。行为事件保留不超过 90 天。</view>
+      <view class="privacy-row">
+        <text class="privacy-label">个性化推荐</text>
+        <switch
+          checked="{{recommendOptIn === 1}}"
+          onChange="onToggleRecommend"
+          color="#ff6b35"
+          disabled="{{updatingOptIn}}"
+        />
+      </view>
+      <view class="privacy-row link-row" onTap="onViewTasteProfile">
+        <text>查看我的口味画像</text>
+        <text class="arrow">›</text>
+      </view>
+      <view class="privacy-row link-row danger" onTap="onClearTasteProfile">
+        <text>清除口味画像</text>
+        <text class="arrow">›</text>
+      </view>
+      <view class="tip consent-tip" a:if="{{consentVersion}}">同意版本 {{consentVersion}}<text a:if="{{consentAt}}"> · {{consentAt}}</text></view>
+    </view>
   </block>
+
+  <view class="profile-mask" a:if="{{showTasteProfile}}" onTap="closeTasteProfile">
+    <view class="profile-sheet" catchTap="">
+      <view class="sheet-title">我的口味画像</view>
+      <scroll-view scroll-y class="sheet-body">
+        <view a:if="{{!tasteProfile || (!tasteProfile.dimensions.CATEGORY.length && !tasteProfile.dimensions.PRODUCT.length && !tasteProfile.dimensions.TASTE_TAG.length && !tasteProfile.spec_preferences.length)}}" class="tip">暂无画像数据，完成订单后会自动学习。</view>
+        <block a:else>
+          <view class="dim-group" a:if="{{tasteProfile.dimensions.CATEGORY.length}}">
+            <view class="dim-title">品类偏好</view>
+            <view class="dim-item" a:for="{{tasteProfile.dimensions.CATEGORY}}" a:key="target_key">
+              <text class="dim-name">{{item.target_name || item.target_key}}</text>
+              <text class="dim-score">权重 {{item.score}}</text>
+            </view>
+          </view>
+          <view class="dim-group" a:if="{{tasteProfile.dimensions.PRODUCT.length}}">
+            <view class="dim-title">单品偏好</view>
+            <view class="dim-item" a:for="{{tasteProfile.dimensions.PRODUCT}}" a:key="target_key">
+              <text class="dim-name">{{item.target_name || item.target_key}}</text>
+              <text class="dim-score">权重 {{item.score}}</text>
+            </view>
+          </view>
+          <view class="dim-group" a:if="{{tasteProfile.dimensions.TASTE_TAG.length}}">
+            <view class="dim-title">口味标签</view>
+            <view class="dim-item" a:for="{{tasteProfile.dimensions.TASTE_TAG}}" a:key="target_key">
+              <text class="dim-name">{{item.target_name || item.target_key}}</text>
+              <text class="dim-score">权重 {{item.score}}</text>
+            </view>
+          </view>
+          <view class="dim-group" a:if="{{tasteProfile.spec_preferences.length}}">
+            <view class="dim-title">规格偏好</view>
+            <view class="dim-item" a:for="{{tasteProfile.spec_preferences}}" a:key="option_code">
+              <text class="dim-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+              <text class="dim-score">下单 {{item.order_count}} 次</text>
+            </view>
+          </view>
+        </block>
+      </scroll-view>
+      <button class="btn-primary" onTap="closeTasteProfile">关闭</button>
+    </view>
+  </view>
 </view>

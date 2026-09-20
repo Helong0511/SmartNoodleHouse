@@ -110,10 +110,12 @@ class PrivacyService:
         ).scalars().all()
         spec_prefs = [
             {
-                "target_key": p.target_key,
-                "target_name": getattr(p, "target_name", None),
-                "score": float(p.preference_score) if hasattr(p, "preference_score") else None,
-                "order_count": getattr(p, "order_count", None),
+                "category": p.category,
+                "option_code": p.option_code,
+                "option_name": p.option_name,
+                "score": float(p.preference_score) if p.preference_score is not None else None,
+                "order_count": p.order_count,
+                "last_used_at": p.last_used_at.isoformat() if p.last_used_at else None,
             }
             for p in prefs
         ]

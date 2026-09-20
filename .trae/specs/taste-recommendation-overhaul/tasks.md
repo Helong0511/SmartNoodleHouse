@@ -271,7 +271,7 @@
   - 回归：08+09+11 = 27 passed in 19.15s（08 第138行 invalidate_store_caches 补 await）。
 
 ## Task 13: 隐私合规包（开关/画像查看清除/留存清理/同意留痕）
-- **Status**: `pending`
+- **Status**: `completed`
 - **Priority**: high
 - **Depends On**: Task 5, Task 4
 - **Description**:
@@ -287,6 +287,12 @@
 - **Test Requirements**:
   - `rule` TR-13.1: 6 子项 pytest 全过：关开关后推荐非个性化且事件不落库；画像查看完整；清除后三表为空且订单仍在、审计有记录；超期事件被任务清理；consent 版本/时间落库；顾客 A 令牌访问顾客 B 画像/清除接口 403。
   - `rule` TR-13.2: 双端入口代码齐备 node --check 通过；tracker 在 opt_in=0 时不产生网络请求（静态走查）。
+- **Completion Evidence**:
+  - 后端：`backend/app/services/privacy_service.py`（PrivacyService：get_privacy_settings/update_opt_in/get_taste_profile_view/clear_taste_profile/record_consent/cleanup_expired_events，DEFAULT_RETENTION_DAYS=90, CONSENT_VERSION="1.0"）；`backend/app/api/v1/miniprogram.py` 追加 5 个顾客本人接口（L1232-1303）：`GET/PUT /customers/me/privacy-settings`、`GET /customers/me/taste-profile`、`POST /customers/me/taste-profile/clear`、`POST /privacy/consent`，全部用 CurrentCustomer 鉴权（不接收 customer_id 参数，天然令牌隔离）。
+  - 定时任务：`backend/app/tasks/scheduler.py` L336-349 新增 `cleanup_expired_behavior_events`（cron hour=3,minute=15 + @_leader_job fence，retention_days 从 system_settings "behavior_event_retention_days" 读取，默认 90）。
+  - 测试：`tests/测试_智能推荐_13隐私合规.py` 6 用例全过（1.70s）——①opt_out 后 ingest dropped=2 reason=opt_out、RecommendationService.recommend 走 COLD 状态；②画像查看含 CATEGORY/PRODUCT/TASTE_TAG 三维 + spec_preferences；③清除后 CustomerBehaviorEvent/CustomerTasteProfile/ProductFeedback/CustomerPreference 四表为空、Order 仍存在、OperationLog 有 privacy.clear_taste_profile（category=CUSTOMER）；④超期事件（91 天前）被 cleanup_expired_events(retention_days=90) 删除；⑤consent 写 consent_version/recommend_consent_at/recommend_opt_in=1 并落 OperationLog privacy.consent；⑥A 令牌访问 taste-profile/clear 不会影响 B 的画像与事件（CurrentCustomer 从令牌解析）。
+  - 双端前端：`miniprogram-wechat/utils/tracker.js` 与 `miniprogram-alipay/utils/tracker.js` 新增 optInEnabled() 函数，track() 不入队、flush() 跳过上报（reason=opt_out）；`miniprogram-wechat/pages/member/member.{js,wxml,wxss}` 与 `miniprogram-alipay/pages/member/member.{js,axml,acss}` 新增"个性化推荐与隐私"卡片（switch 开关 + 查看画像弹层 + 清除二次确认）。
+  - `node --check` 4 文件全部通过。
 
 ## Task 14: 离线评估合成数据与效果报告
 - **Status**: `pending`
