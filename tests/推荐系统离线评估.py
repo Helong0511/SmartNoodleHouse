@@ -240,11 +240,18 @@ async def _baseline_top5(db, store_id: int, products: list[Product]) -> list[int
 
 async def _reco_top5(db, customer_id: int, store_id: int) -> list[int]:
     """新算法：RecommendationService.recommend（混合推荐）。"""
-    ranked, _state, _meta = await RecommendationService.recommend(
+    ranked, state, meta = await RecommendationService.recommend(
         db, store_id=store_id, customer_id=customer_id,
         scene="recommend_menu", limit=5, use_cache=False,
     )
+    if hasattr(_reco_top5, "_dbg"):
+        if _reco_top5._dbg < 3:
+            _reco_top5._dbg += 1
+            print(f"[DBG reco cid={customer_id} state={state} meta_keys={list(meta.keys()) if isinstance(meta, dict) else None}")
+            for r in ranked[:5]:
+                print(f"  pid={r.product.id} cat={r.product.category_id} total={r.total:.4f} reason={r.reason}")
     return [r.product.id for r in ranked]
+_reco_top5._dbg = 0
 
 
 # ---------- 主流程 ----------
