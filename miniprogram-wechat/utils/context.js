@@ -54,6 +54,20 @@ function clearDineContext() {
   } catch (_) {}
 }
 
+/**
+ * P2-1：门店切换检测。传入将要生效的门店 id，若与 cart_store_id 不一致则清空购物车。
+ * 在 applyContext 写入新 store 后调用。
+ */
+function reconcileCartWithStore(storeId) {
+  try {
+    const auth = require('./auth')
+    if (auth && typeof auth.ensureCartForCurrentStore === 'function') {
+      return auth.ensureCartForCurrentStore()
+    }
+  } catch (_) {}
+  return false
+}
+
 /** 外带/外卖虚拟桌（种子 table_no=WM），不是堂食实体桌 */
 function isTakeawayChannelTable(table) {
   if (!table) return false
@@ -110,8 +124,14 @@ function applyContext(table, store, options) {
     }
   }
   if (store) {
+    const prevStoreId = (g.globalData.store && (g.globalData.store.id || g.globalData.store.store_id)) || null
+    const newStoreId = store.id || store.store_id || null
     g.globalData.store = store
     wx.setStorageSync('dine_store', store)
+    // P2-1：门店切换（或首次绑定）时，校验购物车归属，跨店一律清空
+    if (newStoreId && Number(newStoreId) !== Number(prevStoreId)) {
+      reconcileCartWithStore(newStoreId)
+    }
   }
 }
 
@@ -264,13 +284,15 @@ async function refreshTableBinding(options = {}) {
   }
 
   // 仅当会话仍新鲜时，才允许用 table_id 换 token（防昨日桌台污染）
+  // P1 修复：bind 须传当前扫码 qr_token 凭证，后端校验同门店才允许绑定
   const tableId = table && table.id
   const sid = (table && table.store_id) || (store && store.id)
   if (allowReviveByTableId && fresh && tableId && sid) {
     try {
       const bound = await api.post('/miniprogram/tables/bind', {
         table_id: tableId,
-        store_id: sid
+        store_id: sid,
+        qr_token: token
       })
       if (bound && bound.qr_token) {
         const sess = bound.dining_session || null
@@ -484,5 +506,6 @@ module.exports = {
   isTakeawayChannelTable,
   bindTableFromToken,
   refreshTableBinding,
-  scanAndBindTable
+  scanAndBindTable,
+  reconcileCartWithStore
 }

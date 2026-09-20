@@ -5,8 +5,10 @@ from app.core.exceptions import AppException
 
 # 后台/厨房可手动推进的状态迁移（不含 PAID / REFUNDED）
 # 已付款订单禁止直接 CANCELLED：须走退款流程 → REFUNDED
+# P0 修复：PENDING_PAYMENT 仅允许 CANCELLED；CONFIRMED 必须由 PAID 推进，
+#   防止未支付订单进入厨房制作后回调无法入账（40024 死锁）。
 STAFF_TRANSITIONS: dict[str, set[str]] = {
-    "PENDING_PAYMENT": {"CANCELLED", "CONFIRMED"},
+    "PENDING_PAYMENT": {"CANCELLED"},
     # 免烹饪单：PAID/CONFIRMED → READY（制作完成）；出餐必须 READY → COMPLETED
     "PAID": {"CONFIRMED", "PREPARING", "READY", "REFUND_PENDING"},
     "CONFIRMED": {"PREPARING", "COOKING", "READY", "REFUND_PENDING"},
@@ -20,8 +22,10 @@ STAFF_TRANSITIONS: dict[str, set[str]] = {
 }
 
 # 支付成功回调允许的迁移
+# P0 安全收敛：CONFIRMED → PAID 兜底，避免订单被异常推进到 CONFIRMED 后回调无法入账。
 PAYMENT_TRANSITIONS: dict[str, set[str]] = {
     "PENDING_PAYMENT": {"PAID"},
+    "CONFIRMED": {"PAID"},
 }
 
 # 系统/外卖/超时/退款写入（含厨房同步后的平台回写）

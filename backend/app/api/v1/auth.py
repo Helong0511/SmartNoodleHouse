@@ -189,3 +189,30 @@ async def verify_password_api(data: VerifyPasswordRequest, request: Request, db:
         return {"code": 401, "message": "密码错误", "data": None}
     await _clear_login_failures(lock_name)
     return success({"ok": True}, request=request)
+
+
+@router.post("/logout")
+async def staff_logout(request: Request, db: DbSession, user: CurrentUser):
+    """员工登出：递增 token_version 使旧 token 立即失效。
+
+    P2-3：JWT 吊销补齐。原实现仅依赖前端清除本地 token，旧 token 在 TTL 内仍可被
+    重放（如共享设备、Token 泄露）。现服务端递增 token_version，使任何持有旧
+    token 的请求都立即 401。
+    """
+    from app.services.audit_service import AuditService
+
+    target = await db.get(User, user.id)
+    if target:
+        target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
+        await db.flush()
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="user.logout",
+        module="user",
+        target_type="user",
+        target_id=int(user.id),
+        detail={"username": getattr(user, "username", "") or ""},
+        request=request,
+    )
+    return success({"revoked": True}, request=request)

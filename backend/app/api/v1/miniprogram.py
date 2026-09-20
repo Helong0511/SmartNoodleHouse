@@ -255,23 +255,41 @@ async def bind_dine_table(
     db: DbSession,
     customer: CurrentCustomer,
 ):
-    """按 table_id 换取该桌 qr_token；须校验门店，防止跨店绑桌。"""
+    """选桌绑定：须凭扫码 qr_token 凭证，验证同门店后才允许绑定目标 table_id。
+
+    P1 修复：原逻辑凭 body 中自报 table_id+store_id 即返回永久 qr_token，
+    任何登录顾客可枚举 table_id 获取任意桌台 token。现要求传 qr_token（扫码获得），
+    后端校验 qr_token 对应桌台与目标 table_id 同门店才允许绑定。
+    """
     from app.core.config import get_settings
     from app.core.exceptions import AppException
+    from app.services.table_resolve import resolve_dining_table
 
     body = await request.json()
     table_id = int(body.get("table_id") or 0)
+    qr_token = (body.get("qr_token") or body.get("token") or "").strip()
     req_store = body.get("store_id")
     table = await db.get(DiningTable, table_id)
     if not table or table.status != 1:
         return success(None, message="桌台不存在或已禁用", request=request)
 
     settings = get_settings()
-    # 生产必须带 store_id，且与桌台一致；开发可省略但传了仍校验
-    if req_store is None and not settings.is_development:
+    # 生产必须带 qr_token 凭证；开发可省略但传了仍校验
+    if not qr_token and not settings.is_development:
         raise AppException(40050, "请先扫码进入门店后再选桌")
-    if req_store is not None and int(req_store) != int(table.store_id):
-        raise AppException(40052, "桌台不属于当前门店")
+    if qr_token:
+        # 校验 qr_token 凭证：必须能解析到桌台，且与目标桌台同门店
+        cred_table = await resolve_dining_table(db, qr_token)
+        if not cred_table:
+            raise AppException(40050, "扫码凭证无效，请重新扫码")
+        if int(cred_table.store_id) != int(table.store_id):
+            raise AppException(40052, "桌台不属于当前门店")
+    else:
+        # 开发环境兜底：须带 store_id 且一致
+        if req_store is None:
+            raise AppException(40050, "请先扫码进入门店后再选桌")
+        if int(req_store) != int(table.store_id):
+            raise AppException(40052, "桌台不属于当前门店")
 
     session = await DiningSessionService.start_or_refresh(
         db,
@@ -292,6 +310,7 @@ async def bind_dine_table(
             "store_id": int(table.store_id) if table.store_id else None,
             "table_id": int(table.id),
             "customer_id": int(customer.id),
+            "verified_by_token": bool(qr_token),
         },
         request=request,
         category=AuditService.CATEGORY_CUSTOMER,
@@ -1200,6 +1219,34 @@ async def get_my_preferences(
 @router.get("/customers/me/face-status")
 async def get_my_face_status(request: Request, db: DbSession, customer: CurrentCustomer):
     return success(await _face_status(db, customer.id), request=request)
+
+
+@router.post("/logout")
+async def customer_logout(
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """顾客登出：递增 token_version 使旧 token 立即失效。
+
+    P2-3：JWT 吊销补齐。原实现仅依赖前端清除本地 token，旧 token 在 TTL 内仍可被
+    重放（如设备被他人使用、Token 泄露）。现服务端递增 token_version，使任何持有
+    旧 token 的请求都立即 401，配合前端清 storage 实现真正吊销。
+    """
+    customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
+    await db.flush()
+    await AuditService.log(
+        db,
+        action="customer.logout",
+        module="customer",
+        user_id=None,
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={"channel": _customer_channel_from_request(request, default="wechat")},
+        request=request,
+        category=AuditService.CATEGORY_CUSTOMER,
+    )
+    return success({"revoked": True}, request=request)
 
 
 async def _face_status(db, customer_id: int) -> dict:

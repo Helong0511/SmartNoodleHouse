@@ -146,6 +146,28 @@ def register_tasks(scheduler) -> None:
                     logger.exception("关单前查单异常 order_id=%s", order.id)
                 if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
                     continue
+                # P1 修复：关单前同步撤销渠道交易，避免渠道侧交易悬挂；
+                # 若发现迟到成功支付（已自动入账），保留订单不关单。
+                try:
+                    if await PaymentService.close_channel_payments(db, order):
+                        rescued += 1
+                        try:
+                            await ws_manager.notify_order_event(
+                                "ORDER_PAID",
+                                {
+                                    "order_id": order.id,
+                                    "order_no": order.order_no,
+                                    "store_id": order.store_id,
+                                    "source": "CLOSE_CHANNEL_LATE_PAID",
+                                },
+                            )
+                        except Exception:
+                            logger.exception("关单迟到入账 WS 通知失败 order_id=%s", order.id)
+                        continue
+                except Exception:
+                    logger.exception("关单撤销渠道交易异常 order_id=%s", order.id)
+                if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
+                    continue
                 await apply_order_status(
                     db,
                     order,

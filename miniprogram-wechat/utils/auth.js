@@ -139,6 +139,18 @@ function isStaleCustomerAuthError(err) {
   return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(msg)
 }
 
+/**
+ * P2-3：顾客登出。通知服务端递增 token_version 吊销旧 token，并清除本地会话。
+ * 即使服务端调用失败（无网络/旧 token 已失效），也强制清本地缓存。
+ */
+async function logoutCustomer() {
+  const app = getAppSafe()
+  try {
+    await api.post('/miniprogram/logout', {}, true)
+  } catch (_) {}
+  if (app) clearCustomerSession(app)
+}
+
 function isStaleAuthMessage(msg) {
   return /顾客不存在|已禁用|无效顾客|请先登录|令牌已失效|无效令牌|401/.test(String(msg || ''))
 }
@@ -501,16 +513,64 @@ async function registerMember(payload) {
   }
 }
 
-function saveCart(cart) {
+// P2-1 购物车按门店隔离：cart 始终绑定 cart_store_id，跨店必须清空，防止串单
+const CART_STORE_ID_KEY = 'cart_store_id'
+
+function currentStoreId() {
+  const app = getAppSafe()
+  const g = app && app.globalData
+  const store = g && g.store
+  const table = g && g.table
+  return (store && (store.id || store.store_id)) || (table && table.store_id) || null
+}
+
+function saveCart(cart, options) {
   const app = requireApp()
+  const opts = options || {}
   app.globalData.cart = cart
   wx.setStorageSync('cart', cart)
+  // 始终把当前门店写入 cart_store_id，确保后续切店可检测
+  const sid = opts.store_id != null ? opts.store_id : currentStoreId()
+  if (sid != null) {
+    wx.setStorageSync(CART_STORE_ID_KEY, Number(sid) || 0)
+  } else {
+    try { wx.removeStorageSync(CART_STORE_ID_KEY) } catch (_) {}
+  }
   require('./tabCartBadge').updateTabCartBadge(cart)
 }
 
 function getCart() {
   const app = getAppSafe()
   return (app && app.globalData && app.globalData.cart) || readStorage('cart') || []
+}
+
+/**
+ * P2-1：门店切换时检测并清空跨店购物车。
+ * 在 entry/扫码绑定/启动恢复后调用。返回 true 表示已清空。
+ */
+function ensureCartForCurrentStore() {
+  const app = getAppSafe()
+  if (!app || !app.globalData) return false
+  const sid = currentStoreId()
+  if (sid == null) return false
+  const boundSidRaw = readStorage(CART_STORE_ID_KEY)
+  const boundSid = Number(boundSidRaw)
+  if (!Number.isFinite(boundSid) || boundSid <= 0) {
+    // 旧版本未写入 cart_store_id 且购物车非空，且当前门店已确定 → 一律视为跨店，清空
+    const cart = app.globalData.cart || readStorage('cart') || []
+    if (cart.length) {
+      saveCart([], { store_id: sid })
+      return true
+    }
+    // 购物车本就空：补记当前门店
+    try { wx.setStorageSync(CART_STORE_ID_KEY, Number(sid) || 0) } catch (_) {}
+    return false
+  }
+  if (boundSid !== Number(sid)) {
+    saveCart([], { store_id: sid })
+    return true
+  }
+  return false
 }
 
 module.exports = {
@@ -520,6 +580,9 @@ module.exports = {
   patchMemberProfile,
   saveCart,
   getCart,
+  currentStoreId,
+  ensureCartForCurrentStore,
+  logoutCustomer,
   formatError,
   readStorage,
   getAppSafe,

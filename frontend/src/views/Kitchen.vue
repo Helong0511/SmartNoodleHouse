@@ -322,8 +322,9 @@ const connLabel = computed(() => {
 
 const counts = computed(() => {
   const list = orders.value
+  // P0-2：KDS 不再展示 PENDING_PAYMENT 订单，避免厨房误接单导致支付回调死锁
   return {
-    NEW: list.filter((o) => o.status === 'PENDING_PAYMENT' || o.status === 'PAID' || o.status === 'CONFIRMED').length,
+    NEW: list.filter((o) => o.status === 'PAID' || o.status === 'CONFIRMED').length,
     COOKING: list.filter((o) => o.status === 'PREPARING' || o.status === 'COOKING').length,
     READY: list.filter((o) => o.status === 'READY').length,
     DELIVERY: list.filter((o) => o.is_delivery).length,
@@ -342,7 +343,8 @@ const filtered = computed(() => {
   })
   switch (filter.value) {
     case 'NEW':
-      return list.filter((o) => o.status === 'PENDING_PAYMENT' || o.status === 'PAID' || o.status === 'CONFIRMED')
+      // P0-2：KDS 不再展示 PENDING_PAYMENT 订单
+      return list.filter((o) => o.status === 'PAID' || o.status === 'CONFIRMED')
     case 'COOKING':
       return list.filter((o) => o.status === 'PREPARING' || o.status === 'COOKING')
     case 'READY':

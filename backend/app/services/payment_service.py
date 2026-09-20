@@ -553,7 +553,9 @@ class PaymentService:
             raise AppException(40010, "订单已支付")
         if order.status == "CANCELLED":
             raise AppException(40011, "订单已取消")
-        if order.status != "PENDING_PAYMENT":
+        # P0 安全收敛：允许 PENDING_PAYMENT 与未支付的 CONFIRMED 发起支付。
+        # CONFIRMED 路径用于异常恢复（外卖同步/历史数据等导致 CONFIRMED 但未入账）。
+        if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
             raise AppException(40012, f"当前订单状态不可支付: {order.status}")
 
         remaining = await cls.remaining_amount(db, order)
@@ -1053,7 +1055,8 @@ class PaymentService:
                 return existing, {"status": "PAID", "already_paid": True, **progress}
         if order.status == "CANCELLED" or order.payment_status == "REFUNDED":
             raise AppException(40009, "订单已取消或已退款，无法收款")
-        if order.status != "PENDING_PAYMENT":
+        # P0 安全收敛：允许未支付 CONFIRMED 现金收款，作为异常恢复路径。
+        if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
             raise AppException(40012, f"当前订单状态不可收款: {order.status}")
 
         remaining = await cls.remaining_amount(db, order)
@@ -1150,9 +1153,17 @@ class PaymentService:
             data = WechatPayVerifier().verify_and_parse(headers, body)
             parsed_probe = await provider_inst.handle_callback(data)
             # P0-10: 微信回调身份 fail-closed — mchid 必须匹配
+            # P2 修复：生产环境 mchid 缺失也拒绝（符合硬约束"must reject if missing or mismatched"）
             callback_mchid = str(parsed_probe.get("mchid") or "").strip()
             expected_mchid = str(get_settings().wechat_mch_id or "").strip()
-            if expected_mchid and callback_mchid and callback_mchid != expected_mchid:
+            if get_settings().is_production:
+                if not callback_mchid:
+                    logger.warning("微信回调缺少 mchid，生产环境拒绝处理")
+                    raise AppException(40054, "微信回调缺少商户号，拒绝处理")
+                if expected_mchid and callback_mchid != expected_mchid:
+                    logger.warning("微信回调 mchid 不匹配: got=%s expected=%s", callback_mchid, expected_mchid)
+                    raise AppException(40054, "微信回调商户号不匹配，拒绝处理")
+            elif expected_mchid and callback_mchid and callback_mchid != expected_mchid:
                 logger.warning("微信回调 mchid 不匹配: got=%s expected=%s", callback_mchid, expected_mchid)
                 raise AppException(40054, "微信回调商户号不匹配，拒绝处理")
             if parsed_probe.get("is_refund"):
@@ -1173,9 +1184,17 @@ class PaymentService:
             data = AlipayVerifier().verify_and_parse(headers, body)
             parsed_probe = await provider_inst.handle_callback(data)
             # P0-10: 支付宝回调身份 fail-closed — app_id 必须匹配
+            # P2 修复：生产环境 app_id 缺失也拒绝
             callback_appid = str(parsed_probe.get("app_id") or "").strip()
             expected_appid = str(get_settings().alipay_app_id or "").strip()
-            if expected_appid and callback_appid and callback_appid != expected_appid:
+            if get_settings().is_production:
+                if not callback_appid:
+                    logger.warning("支付宝回调缺少 app_id，生产环境拒绝处理")
+                    raise AppException(40054, "支付宝回调缺少应用ID，拒绝处理")
+                if expected_appid and callback_appid != expected_appid:
+                    logger.warning("支付宝回调 app_id 不匹配: got=%s expected=%s", callback_appid, expected_appid)
+                    raise AppException(40054, "支付宝回调应用ID不匹配，拒绝处理")
+            elif expected_appid and callback_appid and callback_appid != expected_appid:
                 logger.warning("支付宝回调 app_id 不匹配: got=%s expected=%s", callback_appid, expected_appid)
                 raise AppException(40054, "支付宝回调应用ID不匹配，拒绝处理")
             if parsed_probe.get("is_refund"):
@@ -1341,11 +1360,22 @@ class PaymentService:
         settings = get_settings()
         if provider_u == "WECHAT":
             mch = parsed.get("mchid") or data.get("mchid")
-            if mch and str(mch) != str(settings.wechat_mch_id):
+            # P2 修复：生产环境 mchid 缺失或不匹配一律拒绝
+            if settings.is_production:
+                if not mch:
+                    raise AppException(40301, "支付回调缺少商户号")
+                if str(mch) != str(settings.wechat_mch_id):
+                    raise AppException(40301, "支付商户号不匹配")
+            elif mch and str(mch) != str(settings.wechat_mch_id):
                 raise AppException(40301, "支付商户号不匹配")
         else:
             app_id = parsed.get("app_id") or data.get("app_id")
-            if app_id and settings.alipay_app_id and str(app_id) != str(settings.alipay_app_id):
+            if settings.is_production:
+                if not app_id:
+                    raise AppException(40301, "支付回调缺少应用ID")
+                if settings.alipay_app_id and str(app_id) != str(settings.alipay_app_id):
+                    raise AppException(40301, "支付宝 app_id 不匹配")
+            elif app_id and settings.alipay_app_id and str(app_id) != str(settings.alipay_app_id):
                 raise AppException(40301, "支付宝 app_id 不匹配")
 
         # 币种：有则必须 CNY（微信 amount.currency / 支付宝 currency）
@@ -1905,6 +1935,70 @@ class PaymentService:
                 )
         await db.refresh(order)
         return order.payment_status == "PAID"
+
+    @classmethod
+    async def close_channel_payments(cls, db: AsyncSession, order: Order) -> bool:
+        """超时关单时同步撤销渠道交易，并把本地 PENDING 支付单置 CLOSED。
+
+        P1 修复：原逻辑只置订单 CANCELLED 但不调渠道关单，导致渠道交易悬挂、
+        顾客迟到成功支付后资金无法回收。现流程：
+        1. sync_before_close_order 已查单确认未付（sync_payment_status 会自动入账）
+        2. 调渠道关单/撤销接口，撤销渠道侧交易
+        3. 本地 PENDING 支付单置 CLOSED
+        4. 关单后再查一次单，若发现迟到成功支付（sync_payment_status 已入账 PAID）
+           返回 True，由上层保留订单不关单
+
+        返回 True 表示检测到迟到成功支付（订单已入账，不应关单）。
+        """
+        await db.refresh(order)
+        if order.payment_status == "PAID":
+            return True
+        pending = list(
+            (
+                await db.execute(
+                    select(Payment).where(
+                        Payment.order_id == order.id,
+                        Payment.status == "PENDING",
+                        Payment.provider.in_(("WECHAT", "ALIPAY")),
+                    )
+                )
+            ).scalars()
+        )
+        late_paid = False
+        for payment in pending:
+            provider_u = (payment.provider or "").upper()
+            try:
+                # 1. 调渠道关单/撤销
+                if provider_u == "WECHAT" and _wechat_pay_configured():
+                    await wechat_pay_client.close_order(payment_no=payment.payment_no)
+                elif provider_u == "ALIPAY" and _alipay_pay_configured():
+                    await alipay_client.trade_cancel(payment_no=payment.payment_no)
+                # 2. 关单后再查一次单，确认渠道状态（防止关单与支付竞态）
+                synced, _meta = await cls.sync_payment_status(db, payment)
+                if synced.status == "PAID":
+                    late_paid = True
+                    logger.warning(
+                        "渠道关单后发现迟到成功支付 order=%s payment=%s，已自动入账",
+                        order.order_no,
+                        payment.payment_no,
+                    )
+                    continue
+                # 3. 本地支付单置 CLOSED
+                await cls._close_pending_payment(
+                    db, payment, reason="超时关单同步撤销渠道交易"
+                )
+            except Exception as e:
+                logger.warning(
+                    "关单撤销渠道交易失败 order=%s payment=%s: %s",
+                    order.order_no,
+                    payment.payment_no,
+                    e,
+                )
+                # 失败仍置本地 CLOSED，由 poll_pending_payments 兜底查单
+                await cls._close_pending_payment(
+                    db, payment, reason=f"关单撤销失败: {e}"[:200]
+                )
+        return late_paid
 
     @classmethod
     async def poll_pending_refunds(cls, limit: int = 20) -> int:

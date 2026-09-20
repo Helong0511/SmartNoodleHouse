@@ -528,12 +528,29 @@ class PrintService:
         content: str,
         print_job_id: int | None = None,
     ) -> PrintJob:
-        """创建或更新 PrintJob 为 PENDING，写入已 sanitize 的 content。"""
+        """创建或更新 PrintJob 为 PENDING，写入已 sanitize 的 content。
+
+        P1 修复：按 (order_id, ticket_type) 查找现有 PENDING/PRINTING 任务，
+        存在则复用，避免超时重试重复出票。
+        """
         safe = _prepare_job_content(content)
         digest = _content_hash(safe)
         job: PrintJob | None = None
         if print_job_id:
             job = await db.get(PrintJob, int(print_job_id))
+        if job is None:
+            # 幂等：复用同订单同票型的未完成打印任务，避免重复出票
+            existing = (
+                await db.execute(
+                    select(PrintJob).where(
+                        PrintJob.order_id == int(order_id),
+                        PrintJob.ticket_type == ticket_type,
+                        PrintJob.status.in_(("PENDING", "PRINTING")),
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                job = existing
         if job is None:
             job = PrintJob(
                 store_id=int(store_id),

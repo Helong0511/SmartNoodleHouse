@@ -46,6 +46,8 @@ App({
         this.globalData.store = cached.store
         this.globalData.table = cached.table
         this.globalData.tableToken = cached.token || ''
+        // P2-1：启动恢复后立即校验购物车门店归属，跨店清空
+        try { dineCtx.reconcileCartWithStore() } catch (_) {}
       } else {
         this.globalData.store = null
         this.globalData.table = null

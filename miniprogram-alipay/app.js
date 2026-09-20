@@ -39,6 +39,12 @@ App({
     this.globalData.store = auth.readStorage('dine_store') || null
     this.globalData.table = auth.readStorage('dine_table') || null
     this.globalData.tableToken = auth.readStorage('table_token') || ''
+    // P2-1：启动恢复后立即校验购物车门店归属，跨店清空
+    try {
+      if (typeof auth.ensureCartForCurrentStore === 'function') {
+        auth.ensureCartForCurrentStore()
+      }
+    } catch (_) {}
     tabCartBadge.updateTabCartBadge(this.globalData.cart)
     this.parseLaunch(options)
     privacy.setupPrivacy()

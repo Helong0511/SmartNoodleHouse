@@ -755,7 +755,8 @@ async def kitchen_orders(
 
     effective_store = require_bound_store(user, store_id)
     cap = min(max(1, int(limit or 200)), 500)
-    q = select(Order).where(Order.status.in_(["PENDING_PAYMENT", "PAID", "CONFIRMED", "PREPARING", "COOKING", "READY"]))
+    # P0 修复：KDS 不再展示 PENDING_PAYMENT 订单，避免厨房误接单未支付订单。
+    q = select(Order).where(Order.status.in_(["PAID", "CONFIRMED", "PREPARING", "COOKING", "READY"]))
     if effective_store:
         q = q.where(Order.store_id == effective_store)
     result = await db.execute(

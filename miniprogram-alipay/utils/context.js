@@ -108,8 +108,18 @@ function applyContext(table, store, options) {
     }
   }
   if (store) {
+    const prevStoreId = (g.globalData.store && (g.globalData.store.id || g.globalData.store.store_id)) || null
+    const newStoreId = store.id || store.store_id || null
     g.globalData.store = store
     my.setStorageSync({ key: 'dine_store', data: store })
+    // P2-1：门店切换（或首次绑定）时，校验购物车归属，跨店一律清空
+    if (newStoreId && Number(newStoreId) !== Number(prevStoreId)) {
+      try {
+        if (typeof auth.ensureCartForCurrentStore === 'function') {
+          auth.ensureCartForCurrentStore()
+        }
+      } catch (_) {}
+    }
   }
 }
 
@@ -284,9 +294,11 @@ async function refreshTableBinding(options = {}) {
   const sid = (table && table.store_id) || (store && store.id)
   if (tableId && sid) {
     try {
+      // P1 修复：bind 须传当前扫码 qr_token 凭证，后端校验同门店才允许绑定
       const bound = await api.post('/miniprogram/tables/bind', {
         table_id: tableId,
-        store_id: sid
+        store_id: sid,
+        qr_token: token
       })
       if (bound && bound.qr_token) {
         applyContext(bound, store)

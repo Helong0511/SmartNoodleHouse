@@ -582,9 +582,13 @@ Page({
     let token = t.qr_token
     if (!token && t.id) {
       try {
+        // P1 修复：bind 须传当前扫码 qr_token 凭证，后端校验同门店才允许绑定
+        const cached = dineCtx.readCachedContext() || {}
+        const credToken = String(cached.token || (cached.table && cached.table.qr_token) || '').trim()
         const bound = await api.post('/miniprogram/tables/bind', {
           table_id: t.id,
-          store_id: t.store_id || this.storeId()
+          store_id: t.store_id || this.storeId(),
+          qr_token: credToken
         })
         token = bound && bound.qr_token
         if (bound) {

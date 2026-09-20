@@ -205,6 +205,25 @@ async def query_by_out_trade_no(*, payment_no: str) -> dict[str, Any]:
     }
 
 
+async def close_order(*, payment_no: str) -> dict[str, Any]:
+    """关闭微信侧交易订单（仅未支付可关单；已支付会返回错误）。
+
+    用于本地超时关单时同步撤销渠道交易，避免资金悬挂。
+    参考: https://pay.weixin.qq.com/docs/merchant/apis/v3/payment/transaction/close.html
+    """
+    settings = get_settings()
+    path = f"/v3/pay/transactions/out-trade-no/{payment_no}/close"
+    try:
+        data = await _request("POST", path, {"mchid": settings.wechat_mch_id})
+    except AppException as exc:
+        msg = str(exc.message or "")
+        # 订单已支付/已关单/不存在视为幂等成功，交由上层查单兜底
+        if "ORDERPAID" in msg or "ORDER_CLOSED" in msg or "RESOURCE_NOT_EXISTS" in msg:
+            return {"closed": False, "reason": msg, "raw": {}}
+        raise
+    return {"closed": True, "raw": data}
+
+
 async def refund(
     *,
     payment_no: str,
