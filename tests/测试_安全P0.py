@@ -24,9 +24,14 @@ def test_staff_illegal_skip():
 
 
 def test_payment_only_from_pending():
+    # PENDING_PAYMENT → PAID：正常支付回调路径
     assert_payment_transition("PENDING_PAYMENT", "PAID")
-    with pytest.raises(AppException):
-        assert_payment_transition("CONFIRMED", "PAID")
+    # P0 修复：CONFIRMED → PAID 兜底，避免订单被异常推进到 CONFIRMED 后回调无法入账死锁
+    assert_payment_transition("CONFIRMED", "PAID")
+    # 其他终态/未支付态不允许支付回调再写入 PAID
+    for forbidden in ("COMPLETED", "CANCELLED", "REFUNDED"):
+        with pytest.raises(AppException):
+            assert_payment_transition(forbidden, "PAID")
 
 
 def test_webhook_receipt_key_stable():
