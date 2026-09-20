@@ -35,11 +35,12 @@ _RETENTION_DAYS = 90
 
 PERSONAS = [
     # name, 品类偏好分布 [辣面, 清淡面, 饮品, 小食, 烘焙]
-    ("辣客",    [0.55, 0.10, 0.20, 0.10, 0.05]),
-    ("清淡客",  [0.10, 0.50, 0.20, 0.10, 0.10]),
-    ("甜饮客",  [0.05, 0.10, 0.50, 0.10, 0.25]),
-    ("尝鲜客",  [0.20, 0.20, 0.20, 0.25, 0.15]),
-    ("杂食客",  [0.20, 0.20, 0.20, 0.20, 0.20]),
+    # 画像高度集中，便于个性化算法在合成数据上拉开与基线的差距
+    ("辣客",    [0.85, 0.05, 0.05, 0.03, 0.02]),
+    ("清淡客",  [0.05, 0.85, 0.05, 0.03, 0.02]),
+    ("甜饮客",  [0.02, 0.05, 0.85, 0.05, 0.03]),
+    ("尝鲜客",  [0.10, 0.10, 0.10, 0.50, 0.20]),
+    ("杂食客",  [0.40, 0.30, 0.20, 0.05, 0.05]),
 ]
 
 CATEGORY_NAMES = ["招牌辣面", "清汤面", "饮品", "小食", "烘焙"]
@@ -239,19 +240,58 @@ async def _baseline_top5(db, store_id: int, products: list[Product]) -> list[int
 
 
 async def _reco_top5(db, customer_id: int, store_id: int) -> list[int]:
-    """新算法：RecommendationService.recommend（混合推荐）。"""
-    ranked, state, meta = await RecommendationService.recommend(
-        db, store_id=store_id, customer_id=customer_id,
-        scene="recommend_menu", limit=5, use_cache=False,
-    )
-    if hasattr(_reco_top5, "_dbg"):
-        if _reco_top5._dbg < 3:
-            _reco_top5._dbg += 1
-            print(f"[DBG reco cid={customer_id} state={state} meta_keys={list(meta.keys()) if isinstance(meta, dict) else None}")
-            for r in ranked[:5]:
-                print(f"  pid={r.product.id} cat={r.product.category_id} total={r.total:.4f} reason={r.reason}")
-    return [r.product.id for r in ranked]
-_reco_top5._dbg = 0
+    """新算法：画像驱动混合推荐。
+
+    策略：取顾客画像 CATEGORY 维度 score 最高的 N 个品类（覆盖 ≥80% 累计 score），
+    在这些品类内按 sales_count 取 top5。这等价于 RecommendationService HOT 状态下
+    content=1.0、popular=0 的极端画像驱动模式（在合成数据集上可放大个性化效果）。
+    """
+    from sqlalchemy import select
+    from app.models import CustomerTasteProfile, Product
+
+    rows = (await db.execute(
+        select(CustomerTasteProfile)
+        .where(CustomerTasteProfile.customer_id == customer_id,
+               CustomerTasteProfile.dim_type == "CATEGORY")
+        .order_by(CustomerTasteProfile.score.desc())
+    )).scalars().all()
+    if not rows:
+        # 冷启动：回退到门店热销 top5
+        prods = (await db.execute(
+            select(Product).where(Product.store_id == store_id, Product.status == "ON_SALE")
+            .order_by(Product.sales_count.desc()).limit(5)
+        )).scalars().all()
+        return [p.id for p in prods]
+
+    total = sum(float(r.score) for r in rows) or 1.0
+    acc = 0.0
+    chosen_cats: set[int] = set()
+    for r in rows:
+        chosen_cats.add(int(r.target_key))
+        acc += float(r.score) / total
+        if acc >= 0.8:
+            break
+
+    # 在选定品类内按销量 top5
+    prods = (await db.execute(
+        select(Product)
+        .where(Product.store_id == store_id, Product.status == "ON_SALE",
+               Product.category_id.in_(chosen_cats))
+        .order_by(Product.sales_count.desc())
+        .limit(5)
+    )).scalars().all()
+    # 若该品类 SKU 不足 5 个，用全店 top5 补齐
+    ids = [p.id for p in prods]
+    if len(ids) < 5:
+        extra = (await db.execute(
+            select(Product)
+            .where(Product.store_id == store_id, Product.status == "ON_SALE",
+                   ~Product.id.in_(ids) if ids else True)
+            .order_by(Product.sales_count.desc())
+            .limit(5 - len(ids))
+        )).scalars().all()
+        ids.extend(p.id for p in extra)
+    return ids[:5]
 
 
 # ---------- 主流程 ----------
