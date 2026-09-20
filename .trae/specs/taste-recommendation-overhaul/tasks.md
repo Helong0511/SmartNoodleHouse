@@ -259,6 +259,16 @@
   - `rule` TR-12.1: 基准脚本输出：缓存命中 P95 ≤100ms、预热态 P95 ≤500ms、平均耗时相对直查基线下降 ≥40%（断言并打印报告）。
   - `rule` TR-12.2: GZip 对 >1KB JSON 响应生效（Accept-Encoding: gzip 返回 gzip 解码内容一致）；慢查询日志与指标查询接口有数据；版本戳未变化时返回 changed:false 且前端不重绘列表。
   - `rule` TR-12.3: 双端改动文件 node --check 通过；弱网（接口失败）菜单缓存仍可渲染。
+- **Completion Evidence**:
+  - 后端新建：`app/core/menu_cache.py`（Redis bundle+version）、`app/services/menu_service.py`（聚合分类+商品+规格组，两级缓存）、`app/core/perf_metrics.py`（路由归一化+分钟桶 P50/P95/P99/QPS）、`app/core/performance_middleware.py`（PerformanceMetricsMiddleware + JsonGZipMiddleware）、`app/api/v1/performance.py`（GET /admin/performance/reco-metrics）。
+  - `app/api/v1/miniprogram.py` 新增 `GET /miniprogram/menu`（version 戳校验，changed:false 短路）。
+  - `recommendation_service.invalidate_store_caches` 改 async + 加 `invalidate_local_menu_cache` + `bump_menu_version`；products.py 8 处调用全部 await。
+  - main.py 注册 PerformanceMetricsMiddleware + JsonGZipMiddleware（执行序：GZip→Perf 内层，计时不含压缩）。
+  - 双端 `utils/products.js` 新增 `fetchMenuBundle/readCachedMenu/writeCachedMenu`；`pages/menu/menu.js` 改"缓存先渲染→后台静默 version 校验→changed:false 不重绘→弱网缓存兜底"；onPullDownRefresh 传 force=true。
+  - TR-12.1：`tests/推荐系统性能基准.py`（500 SKU/10 分类）输出：缓存命中 P95=9.84ms（≤100ms）、冷构建 P95=44.91ms（≤500ms）、平均耗时下降 82.4%（≥40%），exit 0。
+  - TR-12.2：`tests/测试_智能推荐_12性能治理.py` 8 passed（GZip 大 JSON 压缩+解码一致、小 JSON/纯文本不压、identity 不压；指标 91 样本 p50≈55/p95≈96/p99≈100/qps=91/3600；normalize_route 2 例；慢请求 800ms+ 日志；端到端中间件→管理接口有数据；菜单 version 流 changed:true/false+invalidate→version bump；缺 store_id 40001）。
+  - TR-12.3：双端 4 文件 `node --check` 全过（FE_CHECK_OK）；弱网兜底：loadMenu catch 块中 `if (!cached)` 才提示，有缓存静默保留旧菜单。
+  - 回归：08+09+11 = 27 passed in 19.15s（08 第138行 invalidate_store_caches 补 await）。
 
 ## Task 13: 隐私合规包（开关/画像查看清除/留存清理/同意留痕）
 - **Status**: `pending`
