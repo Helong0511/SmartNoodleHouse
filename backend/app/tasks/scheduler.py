@@ -332,3 +332,18 @@ def register_tasks(scheduler) -> None:
             if n:
                 await db.commit()
                 logger.info("Face profiles re-encrypted: %s", n)
+
+    @scheduler.scheduled_job("cron", hour=3, minute=15)
+    @_leader_job
+    async def cleanup_expired_behavior_events():
+        """隐私合规：清理超期顾客行为事件（默认 90 天，system_settings 可调）。"""
+        from app.services.privacy_service import PrivacyService
+        from app.services.system_settings_service import SystemSettingsService
+
+        async with AsyncSessionLocal() as db:
+            days = await SystemSettingsService.get_int(
+                db, "behavior_event_retention_days", 90
+            )
+            n = await PrivacyService.cleanup_expired_events(db, retention_days=days)
+        if n:
+            logger.info("Expired behavior events cleaned: %s rows (retention=%sd)", n, days)

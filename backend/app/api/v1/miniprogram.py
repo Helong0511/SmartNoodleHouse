@@ -1229,6 +1229,80 @@ async def get_my_face_status(request: Request, db: DbSession, customer: CurrentC
     return success(await _face_status(db, customer.id), request=request)
 
 
+@router.get("/customers/me/privacy-settings")
+async def get_my_privacy_settings(request: Request, db: DbSession, customer: CurrentCustomer):
+    """个性化推荐开关 + 同意版本/时间（顾客隐私入口）。"""
+    from app.services.privacy_service import PrivacyService
+
+    return success(
+        await PrivacyService.get_privacy_settings(db, customer),
+        request=request,
+    )
+
+
+class PrivacySettingsPatch(BaseModel):
+    recommend_opt_in: int = Field(..., ge=0, le=1, description="0=关闭个性化推荐，1=开启")
+
+
+@router.put("/customers/me/privacy-settings")
+async def update_my_privacy_settings(
+    payload: PrivacySettingsPatch,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """更新个性化推荐开关（写审计）。关闭后端 ingest 立即拒收，前端 tracker 亦停止上报。"""
+    from app.services.privacy_service import PrivacyService
+
+    result = await PrivacyService.update_opt_in(
+        db, customer, int(payload.recommend_opt_in), request=request
+    )
+    await db.commit()
+    return success(result, request=request)
+
+
+@router.get("/customers/me/taste-profile")
+async def get_my_taste_profile(request: Request, db: DbSession, customer: CurrentCustomer):
+    """顾客口味画像可读视图（按维度分组 + 规格偏好）。"""
+    from app.services.privacy_service import PrivacyService
+
+    return success(
+        await PrivacyService.get_taste_profile_view(db, customer),
+        request=request,
+    )
+
+
+@router.post("/customers/me/taste-profile/clear")
+async def clear_my_taste_profile(request: Request, db: DbSession, customer: CurrentCustomer):
+    """清除画像派生数据（行为事件/画像/评价/customer_preferences），订单本体保留；写审计。"""
+    from app.services.privacy_service import PrivacyService
+
+    result = await PrivacyService.clear_taste_profile(db, customer, request=request)
+    await db.commit()
+    return success(result, request=request)
+
+
+class PrivacyConsentRequest(BaseModel):
+    version: str | None = Field(default=None, max_length=40, description="同意版本号")
+
+
+@router.post("/privacy/consent")
+async def record_privacy_consent(
+    payload: PrivacyConsentRequest,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """记录版本化同意留痕：写 consent_version / recommend_consent_at / recommend_opt_in=1。"""
+    from app.services.privacy_service import PrivacyService
+
+    result = await PrivacyService.record_consent(
+        db, customer, version=payload.version, request=request
+    )
+    await db.commit()
+    return success(result, request=request)
+
+
 @router.post("/events")
 async def submit_behavior_events(
     data: BehaviorEventBatch,
