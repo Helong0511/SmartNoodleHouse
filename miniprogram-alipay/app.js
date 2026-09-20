@@ -4,6 +4,7 @@ const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
 const tabCartBadge = require('./utils/tabCartBadge')
 const clientConfig = require('./utils/clientConfig')
+const tracker = require('./utils/tracker')
 const remoteLogger = require('./utils/logger')
 remoteLogger.install()
 
@@ -72,6 +73,11 @@ App({
   onShow(options) {
     if (options) this.parseLaunch(options)
     tabCartBadge.updateTabCartBadge(this.globalData.cart || auth.readStorage('cart') || [])
+    try { tracker.flush() } catch (_) {}
+  },
+  onHide() {
+    // 进入后台/离开前把埋点队列上报出去
+    try { tracker.flush() } catch (_) {}
   },
   parseLaunch(options) {
     if (!options) return

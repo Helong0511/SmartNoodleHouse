@@ -81,6 +81,13 @@ async def _handle_pref_update(db: AsyncSession, row) -> None:
     if not order or not order.customer_id:
         return
     await PreferenceService.update_from_order(db, order.id)
+    # 智能推荐：补记 ORDER_PAID 事件并即时增量学习（event_id 幂等，重试安全）
+    from app.services.taste_learning_service import TasteLearningService
+
+    try:
+        await TasteLearningService.record_paid_order_events(db, order.id)
+    except Exception:
+        logger.exception("推荐画像支付学习失败 order_id=%s", order.id)
 
 
 async def run_paid_side_effects(db: AsyncSession, order, *, do_pref: bool = True) -> None:
@@ -146,3 +153,10 @@ async def _handle_pref_recompute(db: AsyncSession, row) -> None:
     if not order or not order.customer_id:
         return
     await PreferenceService.recompute_for_customer(db, order.customer_id)
+    # 智能推荐：整单退款记负向事件（幂等）；部分退款由既有偏好降权覆盖
+    from app.services.taste_learning_service import TasteLearningService
+
+    try:
+        await TasteLearningService.record_full_refund_events(db, order.id)
+    except Exception:
+        logger.exception("推荐画像退款学习失败 order_id=%s", order.id)

@@ -4,9 +4,13 @@
 > 所有新增后端测试放 `e:\SmartNoodleHouse\tests`；迁移沿用 0017 的 MySQL 原生 SQL + 存在性检查风格，编号 0018。
 
 ## Task 1: 数据模型与 Alembic 0018 迁移
-- **Status**: `pending`
+- **Status**: `completed`
 - **Priority**: high
 - **Depends On**: None
+- **Completion Evidence**:
+  - `backend/app/models/__init__.py`：customers +3 字段、product_categories +recommend_config；新增 ProductTasteProfile/CustomerTasteProfile/CustomerBehaviorEvent/ProductFeedback/AbExperiment/AbAssignment 六模型。
+  - `backend/alembic/versions/0018_taste_recommendation.py`（down_revision=0017_fin_ledger_idempotency，双方言存在性检查，含 downgrade）。
+  - `tests/测试_智能推荐_01模型迁移.py` 7 passed（CRUD 冒烟、event_id/画像/评价/分桶 4 个唯一约束、隐私默认值、迁移链）。
 - **Description**:
   - `backend/app/models/__init__.py` 新增模型：
     - `ProductTasteProfile`（product_id 唯一；spicy/sweetness 等数值维度用 JSON `dimensions`；`tags` JSON 字符串数组；`source` AUTO/MANUAL；`manual_overrides` JSON 保存被手动覆盖的键；时间戳）
@@ -24,10 +28,14 @@
   - `rule` TR-1.2: 唯一约束生效：同 event_id 重复插入、同 (customer,dim,target) 重复画像、同订单产品重复评价均触发 IntegrityError。
 - **Notes**: 模型字段命名与现有 TimestampMixin 风格一致；BigInteger 主键沿用 `.with_variant(Integer, "sqlite")`。
 
-## Task 2: 产品口味画像推导服务与后台读写接口
-- **Status**: `pending`
+## Task 2: 口味画像推导服务与管理端接口
+- **Status**: `completed`
 - **Priority**: high
 - **Depends On**: Task 1
+- **Completion Evidence**:
+  - `backend/app/services/taste_profile_service.py`：词典表驱动（5 维度等级表 + 口感/风味受控词表）、最长具体词匹配、规格组默认档/中位档推断、`recompute_product/upsert_manual/recompute_store/profile_payload`，MANUAL 键 AUTO 重算不覆盖、可 reset 恢复。
+  - `backend/app/api/v1/products.py`：get_product 返回 taste_profile；create/update 自动重算（异常隔离）；新增 `GET/PUT /products/{id}/taste-profile`、`POST /products/taste-profiles/rebuild`（含审计日志与门店越权防护）。
+  - `tests/测试_智能推荐_02口味推导.py` 5 passed（名称推导、默认档/中位档、名称优先、手动接管与恢复、整店重算）。
 - **Description**:
   - 新建 `backend/app/services/taste_profile_service.py`：
     - 可配置词典（辣度 spicy、甜度 sweetness、酸度、麻度、温度 temperature、口感 texture、风味 flavor 等），从 option group/option 的 code+name、产品名、描述、分类名推导；词典以 Python 常量 + system_settings 可选覆盖。
@@ -44,10 +52,13 @@
   - `rule` TR-2.2: MANUAL 覆盖键在 AUTO 重算后保持不变，未覆盖键正常刷新；越权（无令牌顾客端）不可写。
   - `rubric` TR-2.3: 推导规则可扩展性（新增词典项不改核心流程）；scale 1-5；anchors 1=硬编码 if-else 堆叠、3=词典可配但维度固定、5=维度/词表/权重均可配置且有单测表驱动；threshold >= 4；evidence=代码走查+参数化测试。
 
-## Task 3: 后台产品编辑页口味标签微调 UI
-- **Status**: `pending`
-- **Priority**: medium
+## Task 3: 后台产品页口味标签微调 UI
+- **Status**: `completed`
+- **Priority**: `medium`
 - **Depends On**: Task 2
+- **Completion Evidence**:
+  - `frontend/src/views/Products.vue`：编辑对话框新增「口味画像」区（AUTO/MANUAL 来源标识、5 维度滑块+手动接管勾选、标签点选/自定义/移除、保存口味调整、一键恢复自动）；工具栏新增「重算本店口味标签」（超管需先选门店）。
+  - VS Code 诊断 0 错误；接口对接 GET/PUT taste-profile 与 rebuild。
 - **Description**:
   - `frontend/` Vue 后台产品编辑表单新增"口味属性"分区：数值维度滑杆/选择、标签多选+自定义、"恢复自动推导"按钮（清除该键手动态）。
   - 调用 Task 2 的 GET/PUT 接口；保存成功有明确反馈；门店列表/批量操作中提供"重算口味画像"入口（可选二次确认）。
@@ -57,10 +68,14 @@
   - `rubric` TR-3.2: 交互与现有后台表单风格一致性；scale 1-5；anchors 1=风格突兀无校验、3=可用但反馈弱、5=风格统一、有加载/错误/成功态与来源标记；threshold >= 4；evidence=代码走查。
 - **Notes**: 无浏览器环境时以代码走查 + 构建（npm run build 或现有校验脚本）通过为准。
 
-## Task 4: 顾客行为事件采集 API 与双端埋点 SDK
-- **Status**: `pending`
+## Task 4: 行为事件采集 API 与双端埋点 SDK
+- **Status**: `completed`
 - **Priority**: high
 - **Depends On**: Task 1
+- **Completion Evidence**:
+  - 后端 `app/services/behavior_event_service.py`（白名单 7 类事件、event_id 幂等、opt_out 丢弃、payload 2KB 限制、字段截断）+ `POST /miniprogram/events`（schema 批量 1..50）+ `app/schemas/reco.py`。
+  - 双端新增 `utils/tracker.js`（队列持久化/10 条或 15s 批量/未登录暂存/onHide flush/超容量丢低权重），app.js onShow/onHide 挂接触发；菜单点击、快捷加购、详情加购、购物车减到 0/移除均已埋点（微信 5 文件 + 支付宝 5 文件 node --check 全 OK）。
+  - `tests/测试_智能推荐_04行为事件.py` 5 passed（合法入库、跨批/同批幂等、opt_out 不落库、截断与 payload 防护、50 条上限）。
 - **Description**:
   - 后端新建 `backend/app/services/behavior_service.py` + 小程序路由：
     - `POST /miniprogram/events`：顾客 JWT；body `{events:[...]}`，单批 ≤50；event_id 客户端生成 uuid 去重（INSERT 或 IGNORE / 先查后插）；event_type/scene 白名单枚举；字段长度截断/拒绝；ab_bucket 透传；为每条补齐 customer_id/store_id；关闭个性化（recommend_opt_in=0）时除开关审计事件外全部丢弃并返回 accepted=0。

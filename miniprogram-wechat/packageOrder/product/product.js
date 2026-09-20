@@ -4,6 +4,7 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
 const tabCartBadge = require('../../utils/tabCartBadge')
+const tracker = require('../../utils/tracker')
 const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
@@ -148,6 +149,17 @@ Page({
       require_product_ids: p.require_product_ids || []
     })
     auth.saveCart(cart)
+    try {
+      tracker.cartAdd(Number(p.id), {
+        scene: 'product_detail',
+        category_id: p.category_id || null,
+        payload: {
+          qty,
+          options: optionLabels,
+          source: this.data.fromRecommend ? 'recommend' : 'menu'
+        }
+      })
+    } catch (_) {}
     wx.showToast({ title: '已加入', icon: 'success' })
     setTimeout(() => {
       wx.navigateBack({

@@ -23,7 +23,9 @@ from app.models import (
     FaceProfile,
     Store,
 )
+from app.schemas.reco import BehaviorEventBatch
 from app.services.audit_service import AuditService
+from app.services.behavior_event_service import MAX_BATCH, ingest_events
 from app.services.customer_service import CustomerService, PreferenceService
 from app.services.coupon_service import CouponService
 from app.services.dining_session_service import DiningSessionService
@@ -1219,6 +1221,20 @@ async def get_my_preferences(
 @router.get("/customers/me/face-status")
 async def get_my_face_status(request: Request, db: DbSession, customer: CurrentCustomer):
     return success(await _face_status(db, customer.id), request=request)
+
+
+@router.post("/events")
+async def submit_behavior_events(
+    data: BehaviorEventBatch,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """顾客隐式行为批量上报（≤50 条）：event_id 幂等，关闭个性化时直接丢弃。"""
+    if len(data.events) > MAX_BATCH:
+        raise AppException(40001, f"单批最多 {MAX_BATCH} 条事件")
+    result = await ingest_events(db, customer, [e.model_dump() for e in data.events])
+    return success(result, request=request)
 
 
 @router.post("/logout")

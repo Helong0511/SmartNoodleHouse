@@ -47,6 +47,9 @@
         @click="openCopy"
       >复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
+      <el-button type="warning" plain :loading="rebuilding" @click="rebuildStoreTaste">
+        重算本店口味标签
+      </el-button>
     </el-form>
 
     <el-table :data="products" border row-key="id" @selection-change="onSelectionChange">
@@ -281,6 +284,71 @@
           </el-select>
           <p class="hint">仅可选总部共享或本店规格组</p>
         </el-form-item>
+        <el-form-item v-if="form.id" label="口味画像">
+          <div class="taste-box">
+            <div class="taste-head">
+              <el-tag size="small" :type="taste.source === 'MANUAL' ? 'warning' : 'success'">
+                {{ taste.source === 'MANUAL' ? '含手动调整' : '系统自动推导' }}
+              </el-tag>
+              <span v-if="taste.derivedFrom" class="hint">依据：{{ taste.derivedFrom }}</span>
+              <el-button link type="primary" size="small" style="margin-left:auto" @click="resetTasteAuto">
+                全部恢复自动
+              </el-button>
+            </div>
+            <div v-for="d in taste.dimList" :key="d.key" class="taste-dim-row">
+              <el-checkbox v-model="taste.dimManual[d.key]" size="small">手动</el-checkbox>
+              <span class="taste-dim-label">{{ d.label }}</span>
+              <el-slider
+                :model-value="taste.dimValue[d.key] ?? 0"
+                :min="d.min"
+                :max="d.max"
+                :step="1"
+                :disabled="!taste.dimManual[d.key]"
+                :marks="tasteMarks(d)"
+                class="taste-slider"
+                @update:model-value="(v: number) => (taste.dimValue[d.key] = v)"
+              />
+            </div>
+            <div class="taste-tags">
+              <el-tag
+                v-for="t in taste.tags"
+                :key="t"
+                size="small"
+                closable
+                :type="taste.pendingRemove.includes(t) ? 'info' : 'danger'"
+                class="tag-gap"
+                @close="removeTasteTag(t)"
+              >{{ t }}</el-tag>
+              <span v-if="!taste.tags.length" class="hint">暂无标签</span>
+            </div>
+            <div class="taste-vocab">
+              <span class="hint">点选添加：</span>
+              <el-tag
+                v-for="v in taste.vocab"
+                :key="v"
+                size="small"
+                :effect="isTagActive(v) ? 'dark' : 'plain'"
+                class="tag-gap vocab-tag"
+                @click="toggleAddTag(v)"
+              >{{ v }}</el-tag>
+            </div>
+            <div class="taste-custom">
+              <el-input
+                v-model="taste.customTag"
+                size="small"
+                style="width:180px"
+                placeholder="自定义标签"
+                maxlength="12"
+                @keyup.enter="addCustomTag"
+              />
+              <el-button size="small" @click="addCustomTag">添加</el-button>
+              <el-button size="small" type="primary" plain :loading="taste.saving" @click="saveTaste">
+                保存口味调整
+              </el-button>
+            </div>
+            <p class="hint">系统按商品名/描述/规格组自动推导；手动调整后不会被自动重算覆盖，「恢复自动」可交还系统。</p>
+          </div>
+        </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
@@ -378,6 +446,179 @@ const dialogVisible = ref(false)
 const copyVisible = ref(false)
 const selectedRows = ref<any[]>([])
 const codeTouched = ref(false)
+
+// ── 口味画像（Task 3）──
+const DIM_FALLBACK = [
+  { key: 'spicy', label: '辣度', min: 0, max: 3 },
+  { key: 'sweetness', label: '甜度', min: 0, max: 3 },
+  { key: 'sourness', label: '酸度', min: 0, max: 3 },
+  { key: 'numbing', label: '麻度', min: 0, max: 3 },
+  { key: 'temperature', label: '温度', min: 0, max: 3 },
+]
+const DIM_MARKS: Record<string, Record<number, string>> = {
+  spicy: { 0: '不辣', 1: '微辣', 2: '中辣', 3: '特辣' },
+  sweetness: { 0: '无糖', 1: '少糖', 2: '正常', 3: '全糖' },
+  sourness: { 0: '不酸', 1: '微酸', 2: '中酸', 3: '很酸' },
+  numbing: { 0: '不麻', 1: '微麻', 2: '中麻', 3: '特麻' },
+  temperature: { 0: '冰', 1: '凉', 2: '温', 3: '热' },
+}
+const VOCAB_FALLBACK = [
+  '劲道', 'Q弹', '爽滑', '软糯', '酥脆', '爽口', '细腻', '弹牙',
+  '酸辣', '麻辣', '香辣', '藤椒', '酸菜', '番茄', '蒜蓉', '酱香',
+  '葱香', '牛肉', '红烧', '清汤', '浓汤', '卤香', '柠檬', '奶香',
+]
+
+const taste = reactive({
+  loaded: false,
+  saving: false,
+  source: 'AUTO',
+  derivedFrom: '',
+  dimList: [] as Array<{ key: string; label: string; min: number; max: number }>,
+  dimValue: {} as Record<string, number>,
+  dimManual: {} as Record<string, boolean>,
+  originalManualDims: [] as string[],
+  tags: [] as string[],
+  pendingAdd: [] as string[],
+  pendingRemove: [] as string[],
+  vocab: [] as string[],
+  customTag: '',
+})
+const rebuilding = ref(false)
+
+function initTaste(tp: any) {
+  taste.loaded = !!form.id
+  taste.source = tp?.source || 'AUTO'
+  taste.derivedFrom = tp?.derived_from || ''
+  const meta = tp?.dimension_meta || {}
+  taste.dimList =
+    tp && Object.keys(meta).length
+      ? Object.entries(meta).map(([key, v]: [string, any]) => ({
+          key,
+          label: v.label,
+          min: v.min,
+          max: v.max,
+        }))
+      : [...DIM_FALLBACK]
+  taste.dimValue = { ...(tp?.dimensions || {}) }
+  const ov = tp?.manual_overrides || {}
+  taste.dimManual = Object.fromEntries(taste.dimList.map((d) => [d.key, (ov.dim || []).includes(d.key)]))
+  taste.originalManualDims = [...(ov.dim || [])]
+  taste.tags = [...(tp?.tags || [])]
+  taste.pendingAdd = [...(ov.tags_add || [])]
+  taste.pendingRemove = [...(ov.tags_remove || [])]
+  const vocab = tp?.tag_vocab
+  taste.vocab = vocab ? [...(vocab.texture || []), ...(vocab.flavor || [])] : [...VOCAB_FALLBACK]
+  taste.customTag = ''
+}
+
+function tasteMarks(d: { key: string }) {
+  return DIM_MARKS[d.key] || {}
+}
+
+function isTagActive(v: string) {
+  return taste.tags.includes(v) && !taste.pendingRemove.includes(v)
+}
+
+function toggleAddTag(v: string) {
+  if (isTagActive(v)) {
+    // 已生效标签 → 转为移除
+    if (!taste.pendingRemove.includes(v)) taste.pendingRemove.push(v)
+    return
+  }
+  if (taste.pendingRemove.includes(v)) {
+    taste.pendingRemove = taste.pendingRemove.filter((x) => x !== v)
+    return
+  }
+  if (!taste.pendingAdd.includes(v)) taste.pendingAdd.push(v)
+  if (!taste.tags.includes(v)) taste.tags.push(v)
+}
+
+function removeTasteTag(t: string) {
+  if (taste.pendingAdd.includes(t)) {
+    taste.pendingAdd = taste.pendingAdd.filter((x) => x !== t)
+    taste.tags = taste.tags.filter((x) => x !== t)
+  } else if (!taste.pendingRemove.includes(t)) {
+    taste.pendingRemove.push(t)
+  }
+}
+
+function addCustomTag() {
+  const v = taste.customTag.trim().slice(0, 12)
+  taste.customTag = ''
+  if (!v) return
+  if (taste.tags.includes(v)) {
+    ElMessage.warning('标签已存在')
+    return
+  }
+  taste.pendingAdd.push(v)
+  taste.tags.push(v)
+}
+
+async function saveTaste() {
+  if (!form.id) return
+  taste.saving = true
+  try {
+    const manualKeys = taste.dimList.filter((d) => taste.dimManual[d.key]).map((d) => d.key)
+    const resetDims = taste.originalManualDims.filter((k) => !manualKeys.includes(k))
+    const dimensions: Record<string, number> = {}
+    for (const k of manualKeys) dimensions[k] = taste.dimValue[k] ?? 0
+    const res = await api.put(`/products/${form.id}/taste-profile`, {
+      dimensions,
+      tags_add: taste.pendingAdd,
+      tags_remove: taste.pendingRemove,
+      reset_dimensions: resetDims,
+      reset_tags: [],
+    })
+    initTaste(res.data)
+    ElMessage.success('口味调整已保存')
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    taste.saving = false
+  }
+}
+
+async function resetTasteAuto() {
+  if (!form.id) return
+  try {
+    const res = await api.put(`/products/${form.id}/taste-profile`, {
+      dimensions: {},
+      tags_add: [],
+      tags_remove: [],
+      reset_dimensions: taste.originalManualDims,
+      reset_tags: [...taste.pendingAdd, ...taste.pendingRemove],
+    })
+    initTaste(res.data)
+    ElMessage.success('已恢复为系统自动推导')
+  } catch (e: any) {
+    ElMessage.error(e.message || '操作失败')
+  }
+}
+
+async function rebuildStoreTaste() {
+  const sid = effectiveListStoreId.value
+  if (auth.isSuperAdmin && !sid) {
+    ElMessage.warning('超管请先在顶部筛选具体门店，再执行整店重算')
+    return
+  }
+  try {
+    await ElMessageBox.confirm('将按最新商品名/描述/规格重算全店口味画像，手动调整会被保留。是否继续？', '整店重算', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  rebuilding.value = true
+  try {
+    const res = await api.post('/products/taste-profiles/rebuild', { store_id: sid || null })
+    ElMessage.success(`已重算 ${res.data?.rebuilt ?? 0} 个商品`)
+    load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '重算失败')
+  } finally {
+    rebuilding.value = false
+  }
+}
 
 const selectedIds = computed(() => selectedRows.value.map((r) => r.id))
 const copySourceStoreId = computed(() => {
@@ -764,6 +1005,9 @@ async function openForm(row?: any) {
         : [...(detail.require_product_ids_stored ?? detail.require_product_ids ?? [])],
       require_inherited: inherited,
     })
+    initTaste(detail.taste_profile)
+  } else {
+    initTaste(null)
   }
   await loadAllStoreProducts(form.store_id)
   pruneRequireProducts()
@@ -998,4 +1242,13 @@ onMounted(async () => {
   gap: 8px;
   margin-bottom: 4px;
 }
+.taste-box { width: 100%; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; background: #fafbfc; }
+.taste-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.taste-dim-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.taste-dim-label { width: 40px; color: #606266; font-size: 13px; flex-shrink: 0; }
+.taste-slider { flex: 1; margin-right: 8px; }
+.taste-tags { margin: 8px 0; min-height: 24px; }
+.taste-vocab { margin: 6px 0; line-height: 2; }
+.vocab-tag { cursor: pointer; }
+.taste-custom { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 </style>

@@ -5,6 +5,7 @@ const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
 const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
+const tracker = require('../../utils/tracker')
 const { fetchAllProducts } = require('../../utils/products')
 
 function appGlobal() {
@@ -226,7 +227,9 @@ Page({
   },
 
   openProduct(e) {
-    my.navigateTo({ url: `/pages/product/product?id=${e.currentTarget.dataset.id}` })
+    const pid = Number(e.currentTarget.dataset.id)
+    try { tracker.click(pid, { scene: 'menu' }) } catch (_) {}
+    my.navigateTo({ url: `/pages/product/product?id=${pid}` })
   },
 
   fetchProductDetail(id) {
@@ -242,6 +245,13 @@ Page({
   addSimpleToCart(entry) {
     const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
     auth.saveCart(cart)
+    try {
+      tracker.cartAdd(Number(entry.product_id), {
+        scene: 'menu',
+        category_id: entry.category_id || null,
+        payload: { qty: Number(entry.quantity) || 1 }
+      })
+    } catch (_) {}
   },
 
   assertCanAddProduct(productLike) {

@@ -4,6 +4,7 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
+const tracker = require('../../utils/tracker')
 const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
@@ -102,6 +103,7 @@ Page({
     const qty = (item.quantity || 1) + parseInt(delta, 10)
     if (qty <= 0) {
       cart.splice(index, 1)
+      try { tracker.cartRemove(Number(item.product_id), { scene: 'cart', category_id: item.category_id || null }) } catch (_) {}
     } else {
       cartUtil.normalizeItem(item)
       item.quantity = qty
@@ -114,8 +116,12 @@ Page({
   removeItem(e) {
     const index = e.currentTarget.dataset.index
     const cart = auth.getCart()
+    const removed = cart[index]
     cart.splice(index, 1)
     auth.saveCart(cart)
+    if (removed) {
+      try { tracker.cartRemove(Number(removed.product_id), { scene: 'cart', category_id: removed.category_id || null }) } catch (_) {}
+    }
     this.refresh(false)
   },
 

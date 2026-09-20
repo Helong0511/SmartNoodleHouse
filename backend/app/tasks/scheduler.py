@@ -305,6 +305,22 @@ def register_tasks(scheduler) -> None:
         if n:
             logger.info("Stale PRINTING print jobs reclaimed: %s", n)
 
+    @scheduler.scheduled_job("interval", minutes=4)
+    @_leader_job
+    async def learn_taste_profiles():
+        """智能推荐：增量消费最近 15 分钟行为事件，保证画像 5 分钟内更新（支付链路另有即时学习）。"""
+        async with AsyncSessionLocal() as db:
+            from app.services.taste_learning_service import TasteLearningService
+
+            since = naive_local_now() - timedelta(minutes=15)
+            try:
+                stats = await TasteLearningService.learn_recent_customers(db, since=since, limit=200)
+                await db.commit()
+                if stats["events"]:
+                    logger.info("口味画像兜底学习: %s", stats)
+            except Exception:
+                logger.exception("口味画像兜底学习任务异常")
+
     @scheduler.scheduled_job("interval", minutes=30)
     @_leader_job
     async def reencrypt_face_profiles():

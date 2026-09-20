@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +21,7 @@ from app.models import (
     ProductCategory,
     ProductImage,
     ProductOptionGroup,
+    ProductTasteProfile,
     Store,
     StoreProductStock,
 )
@@ -40,6 +41,12 @@ from app.schemas.product import (
 from app.services.audit_service import AuditService
 from app.services.menu_copy_service import MenuCopyService
 from app.services.store_scope import assert_store_access, require_bound_store
+from app.services.taste_profile_service import (
+    profile_payload,
+    recompute_product,
+    recompute_store,
+    upsert_manual,
+)
 from app.services.category_require import (
     normalize_id_list,
     normalize_require_category_ids,
@@ -1170,6 +1177,11 @@ async def get_product(product_id: int, request: Request, db: DbSession):
     imgs_result = await db.execute(
         select(ProductImage).where(ProductImage.product_id == product_id).order_by(ProductImage.sort_order)
     )
+    taste_profile_row = (
+        await db.execute(
+            select(ProductTasteProfile).where(ProductTasteProfile.product_id == product_id)
+        )
+    ).scalar_one_or_none()
     option_group_ids = gids
     store = await db.get(Store, product.store_id) if product.store_id else None
     cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
@@ -1213,6 +1225,7 @@ async def get_product(product_id: int, request: Request, db: DbSession):
             "option_group_ids": option_group_ids,
             "option_groups": option_groups,
             "images": [{"id": i.id, "url": i.image_url, "type": i.image_type} for i in imgs_result.scalars()],
+            "taste_profile": profile_payload(taste_profile_row),
         },
         request=request,
     )
@@ -1302,6 +1315,10 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         request=request,
         store_id=int(product.store_id),
     )
+    try:
+        await recompute_product(db, int(product.id))
+    except Exception:
+        logger.exception("新品口味画像自动推导失败 product_id=%s", product.id)
     return success({"id": product.id, "store_id": product.store_id, "product_no": product.product_no}, request=request)
 
 
@@ -1423,7 +1440,111 @@ async def update_product(
         request=request,
         store_id=int(product.store_id),
     )
+    try:
+        await recompute_product(db, int(product.id))
+    except Exception:
+        logger.exception("商品更新后口味画像重算失败 product_id=%s", product.id)
     return success({"id": product.id, "store_id": product.store_id}, request=request)
+
+
+class TasteProfileManualUpdate(BaseModel):
+    dimensions: dict[str, int] | None = None
+    tags_add: list[str] = Field(default_factory=list)
+    tags_remove: list[str] = Field(default_factory=list)
+    reset_dimensions: list[str] = Field(default_factory=list)
+    reset_tags: list[str] = Field(default_factory=list)
+
+
+class TasteProfileRebuildRequest(BaseModel):
+    store_id: int | None = None
+
+
+@router.get("/products/{product_id}/taste-profile")
+async def get_product_taste_profile(product_id: int, request: Request, db: DbSession):
+    row = (
+        await db.execute(
+            select(ProductTasteProfile).where(ProductTasteProfile.product_id == product_id)
+        )
+    ).scalar_one_or_none()
+    if row is None and (await db.get(Product, product_id)) is None:
+        return success(None, message="商品不存在", request=request)
+    return success(profile_payload(row), request=request)
+
+
+@router.put("/products/{product_id}/taste-profile", dependencies=[require_permission("product:update")])
+async def update_product_taste_profile(
+    product_id: int,
+    data: TasteProfileManualUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    product = await db.get(Product, product_id)
+    if not product:
+        return success(None, message="商品不存在", request=request)
+    assert_store_access(user, product.store_id)
+    profile = await upsert_manual(
+        db,
+        product_id,
+        dimensions=data.dimensions,
+        tags_add=data.tags_add,
+        tags_remove=data.tags_remove,
+        reset_dimensions=data.reset_dimensions,
+        reset_tags=data.reset_tags,
+    )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.taste_profile.update",
+        module="product",
+        target_type="product",
+        target_id=product_id,
+        detail={
+            "dimensions": data.dimensions or {},
+            "tags_add": data.tags_add,
+            "tags_remove": data.tags_remove,
+            "reset_dimensions": data.reset_dimensions,
+            "reset_tags": data.reset_tags,
+        },
+        request=request,
+        store_id=int(product.store_id),
+    )
+    return success(profile_payload(profile), request=request)
+
+
+@router.post("/products/taste-profiles/rebuild", dependencies=[require_permission("product:update")])
+async def rebuild_store_taste_profiles(
+    data: TasteProfileRebuildRequest,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """整店口味画像 AUTO 重算（保留 MANUAL 接管键）。超管需显式指定 store_id。"""
+    store_id = data.store_id
+    if user.role.code == "SUPER_ADMIN":
+        if not store_id:
+            raise AppException(40001, "请指定需要重算的门店")
+    else:
+        if not user.store_id:
+            raise HTTPException(status_code=403, detail="账号未绑定门店")
+        store_id = int(user.store_id)
+    store_id = int(store_id)
+    store = await db.get(Store, store_id)
+    if not store:
+        raise AppException(40004, "门店不存在")
+    rebuilt = await recompute_store(db, store_id)
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="product.taste_profile.rebuild",
+        module="product",
+        target_type="store",
+        target_id=store_id,
+        detail={"store_id": store_id, "rebuilt": rebuilt},
+        request=request,
+        store_id=store_id,
+    )
+    return success({"store_id": store_id, "rebuilt": rebuilt}, request=request)
 
 
 @router.post("/products/{product_id}/image", dependencies=[require_permission("product:update")])

@@ -129,4 +129,4 @@ def test_migration_chain():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert mod.revision == "0018_taste_recommendation"
-    assert mod.down_revision == "0017_financial_ledger_idempotency"
+    assert mod.down_revision == "0017_fin_ledger_idempotency"
