@@ -41,6 +41,15 @@
     </view>
   </view>
 
+  <recommend-strip
+    a:if="{{recoReady && recoStoreId}}"
+    storeId="{{recoStoreId}}"
+    scene="recommend_menu"
+    trackScene="recommend"
+    onOpen="onRecommendOpen"
+    onAdd="onRecommendAdd"
+  />
+
   <skeleton a:if="{{loading && !categories.length}}" type="menu" rows="{{5}}" />
 
   <view class="menu-layout" a:elif="{{categories.length}}">

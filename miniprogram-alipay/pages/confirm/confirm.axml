@@ -96,6 +96,18 @@
     <view class="pack-tip" a:if="{{needPack}}">打包按商品餐盒费加收，以服务器结算为准</view>
   </view>
   <textarea class="remark" placeholder="备注" value="{{remark}}" onInput="onRemark" />
+
+  <recommend-strip
+    a:if="{{settleReady && settleStoreId}}"
+    storeId="{{settleStoreId}}"
+    scene="settle_addon"
+    trackScene="settle_addon"
+    cartItemIds="{{cartIds}}"
+    limit="{{6}}"
+    onOpen="onRecommendOpen"
+    onAdd="onRecommendAdd"
+  />
+
   <view class="pay">支付方式：支付宝</view>
   <button class="btn-primary" loading="{{loading}}" onTap="submit">提交并支付</button>
 </view>

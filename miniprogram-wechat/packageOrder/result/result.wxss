@@ -128,3 +128,29 @@
 .member-banner-desc { font-size: 24rpx; color: #666; line-height: 1.5; margin-bottom: 20rpx; }
 .member-banner-actions { display: flex; gap: 16rpx; }
 .member-banner-actions .mini { flex: 1; margin-top: 0; font-size: 26rpx; }
+
+.feedback-card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 20rpx;
+  text-align: left;
+}
+.feedback-tip { font-size: 22rpx; color: #999; margin-bottom: 16rpx; }
+.fb-item { padding: 12rpx 0 16rpx; border-bottom: 1rpx solid #f5f5f5; }
+.fb-item:last-of-type { border-bottom: none; }
+.fb-name { font-size: 26rpx; color: #333; margin-bottom: 12rpx; }
+.fb-tags { display: flex; flex-wrap: wrap; gap: 12rpx; }
+.fb-tag {
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  background: #f5f5f5;
+  color: #666;
+  border: 1rpx solid transparent;
+}
+.fb-tag.pos.on { background: #fff1ea; color: #ff6b35; border-color: #ff6b35; }
+.fb-tag.neg.on { background: #f2f2f2; color: #333; border-color: #999; }
+.fb-tag.neu.on { background: #eef6ff; color: #2b7de9; border-color: #2b7de9; }
+.fb-actions { display: flex; gap: 16rpx; margin-top: 20rpx; }
+.fb-actions .mini { flex: 1; margin-top: 0; font-size: 26rpx; }

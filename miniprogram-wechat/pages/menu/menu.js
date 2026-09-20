@@ -6,10 +6,8 @@ const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
-const { fetchAllProducts } = require('../../utils/products')
+const productApi = require('../../utils/products')
 const app = getApp()
-
-const MENU_CACHE_MS = 5 * 60 * 1000
 
 function normalizeList(data) {
   if (Array.isArray(data)) return data
@@ -50,7 +48,9 @@ Page({
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',
-    hasTable: false
+    hasTable: false,
+    recoReady: false,
+    recoStoreId: null
   },
 
   onShow() {
@@ -79,7 +79,7 @@ Page({
     Promise.all([
       dineCtx.ensureDineContext({ force: true }).then((ctx) => this.applyDineContext(ctx)),
       this.loadPrefs(true),
-      this.loadMenu()
+      this.loadMenu(true)
     ]).finally(() => wx.stopPullDownRefresh())
   },
 
@@ -133,46 +133,54 @@ Page({
       .filter((c) => c.products.length > 0 || !kw)
   },
 
-  async loadMenu() {
+  async loadMenu(force) {
     const sid = (app.globalData.table && app.globalData.table.store_id)
       || (app.globalData.store && app.globalData.store.id)
       || null
-    const cacheKey = String(sid || 'all')
+    if (!sid) {
+      wx.showToast({ title: '请先扫桌码选择门店', icon: 'none' })
+      this.setData({ loading: false })
+      return
+    }
+    const cacheKey = String(sid)
     const now = Date.now()
-    this.setData({ loading: true })
+    const metrics = media.layoutMetrics()
+
+    // 1) 本地缓存先渲染（弱网兜底 + 首屏提速），不弹骨架
+    const cached = productApi.readCachedMenu(sid)
+    if (cached && cached.categories) {
+      const cachedItems = normalizeList(cached.products)
+      this._catsCache = { key: cacheKey, at: now, cats: cached.categories, metrics }
+      this._lastProductItems = cachedItems
+      const cachedView = this.buildCategories(cached.categories, cachedItems, metrics, this.data.keyword)
+      await this.applyCategories(cachedView, metrics)
+    } else if (!this.data.categories.length) {
+      this.setData({ loading: true })
+    }
+
+    // 2) 后台静默版本校验：changed:false 不重绘
     try {
-      const metrics = media.layoutMetrics()
-      let catList = null
-      if (
-        this._catsCache
-        && this._catsCache.key === cacheKey
-        && now - this._catsCache.at < MENU_CACHE_MS
-      ) {
-        catList = this._catsCache.cats
+      const bundle = await productApi.fetchMenuBundle(api, sid, force ? null : (cached && cached.version))
+      if (bundle.changed === false) {
+        if (this._catsCache) this._catsCache.at = now
+        this.setData({ recoReady: true, recoStoreId: sid })
+        return
       }
-      const [cats, products] = await Promise.all([
-        catList
-          ? Promise.resolve(catList)
-          : sid
-            ? api.get('/categories', { store_id: sid }, false)
-            : Promise.reject(new Error('请先扫桌码选择门店')),
-        sid
-          ? fetchAllProducts(api, { store_id: sid }, false)
-          : Promise.reject(new Error('请先扫桌码选择门店')),
-      ])
-      if (!catList) {
-        catList = normalizeList(cats)
-        this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
-      } else if (this._catsCache) {
-        this._catsCache.metrics = metrics
-      }
-      const items = normalizeList(products)
+      const catList = normalizeList(bundle.categories)
+      const items = normalizeList(bundle.products)
+      productApi.writeCachedMenu(sid, bundle)
+      this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
       this._lastProductItems = items
       const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
       await this.applyCategories(categories, metrics)
+      // 推荐位在菜单首屏渲染完成后再挂载，避免抢占首屏请求
+      this.setData({ recoReady: true, recoStoreId: sid })
     } catch (e) {
-      wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
-      this.setData({ loading: false })
+      // 弱网/接口失败：已有缓存就静默保留旧菜单，无缓存才提示
+      if (!cached) {
+        wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
+        this.setData({ loading: false })
+      }
     }
   },
 
@@ -223,6 +231,32 @@ Page({
     wx.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
   },
 
+  // ---- 推荐位事件（埋点 CLICK/EXPOSE 已在组件内发出）----
+  onRecommendOpen(e) {
+    const pid = Number(e.detail && e.detail.id)
+    if (pid) wx.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
+  },
+
+  onRecommendAdd(e) {
+    const item = (e.detail || {})
+    const found = (this._lastProductItems || []).find((p) => String(p.id) === String(item.id))
+    // 复用 quickAdd 主链路（规格校验/口味偏好）；查不到商品时安全起见走详情页
+    this.quickAdd({
+      currentTarget: {
+        dataset: {
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          image: item.image,
+          hasOptions: found ? !!found.has_options : true,
+          noMemberDiscount: found ? !!found.no_member_discount : false,
+          categoryId: found && found.category_id != null ? found.category_id : item.category_id,
+          trackScene: 'recommend'
+        }
+      }
+    })
+  },
+
   fetchProductDetail(id) {
     if (!this._productDetailCache) this._productDetailCache = {}
     const key = String(id)
@@ -238,7 +272,7 @@ Page({
     auth.saveCart(cart)
     try {
       tracker.cartAdd(Number(entry.product_id), {
-        scene: 'menu',
+        scene: entry._trackScene || 'menu',
         category_id: entry.category_id || null,
         payload: { qty: Number(entry.quantity) || 1 }
       })
@@ -285,7 +319,8 @@ Page({
         no_member_discount: noMemberDiscount,
         category_id: listItem.category_id,
         require_category_ids: listItem.require_category_ids || [],
-        require_product_ids: listItem.require_product_ids || []
+        require_product_ids: listItem.require_product_ids || [],
+        _trackScene: ds.trackScene || 'menu'
       })
       wx.showToast({ title: '已加入', icon: 'success' })
       return
@@ -328,7 +363,8 @@ Page({
         no_member_discount: noMemberDiscount || !!product.no_member_discount,
         category_id: product.category_id,
         require_category_ids: product.require_category_ids || [],
-        require_product_ids: product.require_product_ids || []
+        require_product_ids: product.require_product_ids || [],
+        _trackScene: ds.trackScene || 'menu'
       })
       wx.hideLoading()
       wx.showToast({ title: usePrefs ? '已按爱好加入' : '已加入', icon: 'success' })

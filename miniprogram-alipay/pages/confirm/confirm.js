@@ -6,6 +6,7 @@ const payUtil = require('../../utils/pay')
 const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const tracker = require('../../utils/tracker')
 const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
@@ -93,6 +94,9 @@ Page({
     boxPriceMap: {},
     needScanHint: false,
     hasSpecialItems: false,
+    settleReady: false,
+    settleStoreId: null,
+    cartIds: []
   },
   storeId() {
     return (app.globalData.table && app.globalData.table.store_id)
@@ -593,8 +597,12 @@ Page({
     }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
     await media.hydrateImageUrls(cartPreview, 'imageUrl')
+    const settleStoreId = this.submitStoreId()
     this.setData({
       cartPreview,
+      cartIds: cartPreview.map((it) => it.product_id),
+      settleReady: !!settleStoreId,
+      settleStoreId: settleStoreId || null,
       subtotal: sub.toFixed(2),
       packingFee: pack.toFixed(2),
       discountAmount: discount.toFixed(2),
@@ -639,6 +647,56 @@ Page({
     this.setData({ needPack: String(e.currentTarget.dataset.pack) === '1' }, () => this.refreshSummary())
   },
   onRemark(e) { this.setData({ remark: e.detail.value }) },
+
+  // ---- 顺手再来一份（settle_addon 推荐位）----
+  onRecommendOpen(detail) {
+    const pid = Number(detail && detail.id)
+    if (pid) my.navigateTo({ url: `/pages/product/product?id=${pid}` })
+  },
+
+  onRecommendAdd(detail) {
+    const item = detail || {}
+    const catalog = this._productCatalog || []
+    const found = catalog.find((p) => String(p.id) === String(item.id))
+    if (found && found.has_options) {
+      my.navigateTo({ url: `/pages/product/product?id=${item.id}` })
+      return
+    }
+    const check = cartUtil.checkCategoryRequire(found || {
+      id: item.id, name: item.name, category_id: item.category_id
+    }, auth.getCart(), catalog, [])
+    if (!check.ok) {
+      my.showToast({ content: check.message, type: 'none', duration: 2200 })
+      return
+    }
+    const unit = parseFloat(item.price) || 0
+    const entry = {
+      product_id: Number(item.id),
+      name: item.name,
+      quantity: 1,
+      option_ids: [],
+      option_labels: [],
+      option_text: '',
+      unit_price: unit,
+      subtotal: unit.toFixed(2),
+      imageUrl: item.image || '',
+      main_image: found ? found.main_image || '' : '',
+      no_member_discount: found ? !!found.no_member_discount : false,
+      category_id: found ? found.category_id : item.category_id,
+      require_category_ids: found ? found.require_category_ids || [] : [],
+      require_product_ids: found ? found.require_product_ids || [] : []
+    }
+    auth.saveCart(cartUtil.mergeCartItem(auth.getCart(), entry))
+    try {
+      tracker.cartAdd(Number(item.id), {
+        scene: 'settle_addon',
+        category_id: entry.category_id || null,
+        payload: { qty: 1 }
+      })
+    } catch (_) {}
+    my.showToast({ content: '已加入', type: 'success' })
+    this.refreshSummary()
+  },
   async submit() {
     if (this.data.loading) return
     // 校验前即加锁，防止连点双提交

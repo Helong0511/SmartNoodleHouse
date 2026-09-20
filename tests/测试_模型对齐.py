@@ -18,7 +18,10 @@ def parse_sql_schema(path: Path) -> dict[str, dict[str, str]]:
         cols: dict[str, str] = {}
         for line in body.split("\n"):
             line = line.strip().rstrip(",")
-            if not line or line.startswith(("PRIMARY", "UNIQUE", "INDEX", "KEY", "CONSTRAINT")):
+            # CHECK 约束可能被 SQL 格式化器折成多行（OR/AND 续行），均非列定义
+            if not line or line.startswith(
+                ("PRIMARY", "UNIQUE", "INDEX", "KEY", "CONSTRAINT", "CHECK", "OR", "AND")
+            ):
                 continue
             # 跳过 GENERATED 列（如 cashier_shifts.open_operator_key）
             if "GENERATED ALWAYS" in line.upper():

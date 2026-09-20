@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    ab_experiments,
     audit_logs,
     auth,
     cameras,
@@ -15,6 +16,7 @@ from app.api.v1 import (
     miniprogram,
     orders,
     payments,
+    performance,
     print_jobs,
     products,
     settings,
@@ -48,3 +50,5 @@ api_router.include_router(settings.router)
 api_router.include_router(client_logs.router)
 api_router.include_router(websocket.router)
 api_router.include_router(audit_logs.router)
+api_router.include_router(ab_experiments.router)
+api_router.include_router(performance.router)

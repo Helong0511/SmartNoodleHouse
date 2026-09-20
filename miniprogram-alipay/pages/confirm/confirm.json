@@ -1,3 +1,6 @@
 {
-  "defaultTitle": "确认订单"
+  "defaultTitle": "确认订单",
+  "usingComponents": {
+    "recommend-strip": "/components/recommend-strip/recommend-strip"
+  }
 }

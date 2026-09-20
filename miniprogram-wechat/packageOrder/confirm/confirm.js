@@ -7,6 +7,7 @@ const media = require('../../utils/media')
 const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
+const tracker = require('../../utils/tracker')
 const { fetchAllProducts } = require('../../utils/products')
 const app = getApp()
 
@@ -94,7 +95,10 @@ Page({
     storePhone: '',
     tableName: '',
     tableNo: '',
-    seatLabel: '桌号'
+    seatLabel: '桌号',
+    settleReady: false,
+    settleStoreId: null,
+    cartIds: []
   },
 
   onShow() {
@@ -590,8 +594,12 @@ Page({
     }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
     await media.hydrateImageUrls(cartPreview, 'imageUrl')
+    const settleStoreId = this.submitStoreId()
     this.setData({
       cartPreview,
+      cartIds: cartPreview.map((it) => it.product_id),
+      settleReady: !!settleStoreId,
+      settleStoreId: settleStoreId || null,
       subtotal: sub.toFixed(2),
       packingFee: pack.toFixed(2),
       discountAmount: discount.toFixed(2),
@@ -648,6 +656,56 @@ Page({
 
   onRemark(e) {
     this.setData({ remark: e.detail.value })
+  },
+
+  // ---- 顺手再来一份（settle_addon 推荐位）----
+  onRecommendOpen(e) {
+    const pid = Number(e.detail && e.detail.id)
+    if (pid) wx.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
+  },
+
+  onRecommendAdd(e) {
+    const item = e.detail || {}
+    const catalog = this._productCatalog || []
+    const found = catalog.find((p) => String(p.id) === String(item.id))
+    if (found && found.has_options) {
+      wx.navigateTo({ url: `/packageOrder/product/product?id=${item.id}` })
+      return
+    }
+    const check = cartUtil.checkCategoryRequire(found || {
+      id: item.id, name: item.name, category_id: item.category_id
+    }, auth.getCart(), catalog, [])
+    if (!check.ok) {
+      wx.showToast({ title: check.message, icon: 'none', duration: 2200 })
+      return
+    }
+    const unit = parseFloat(item.price) || 0
+    const entry = {
+      product_id: Number(item.id),
+      name: item.name,
+      quantity: 1,
+      option_ids: [],
+      option_labels: [],
+      option_text: '',
+      unit_price: unit,
+      subtotal: unit.toFixed(2),
+      imageUrl: item.image || '',
+      main_image: found ? found.main_image || '' : '',
+      no_member_discount: found ? !!found.no_member_discount : false,
+      category_id: found ? found.category_id : item.category_id,
+      require_category_ids: found ? found.require_category_ids || [] : [],
+      require_product_ids: found ? found.require_product_ids || [] : []
+    }
+    auth.saveCart(cartUtil.mergeCartItem(auth.getCart(), entry))
+    try {
+      tracker.cartAdd(Number(item.id), {
+        scene: 'settle_addon',
+        category_id: entry.category_id || null,
+        payload: { qty: 1 }
+      })
+    } catch (_) {}
+    wx.showToast({ title: '已加入', icon: 'success' })
+    this.refreshSummary()
   },
 
   _newCheckoutNonce() {

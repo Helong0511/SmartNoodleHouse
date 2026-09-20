@@ -220,6 +220,10 @@ class TasteLearningService:
                 )
         db.add_all([r for r in rows.values()])
         await db.flush()
+        # 画像变更，主动失效该顾客推荐缓存（Redis 异常在缓存层内吞掉）
+        from app.services.reco_cache import invalidate_customer
+
+        await invalidate_customer(customer_id)
         return len(events)
 
     @staticmethod
@@ -248,6 +252,9 @@ class TasteLearningService:
             )
         db.add_all(list(rows.values()))
         await db.flush()
+        from app.services.reco_cache import invalidate_customer
+
+        await invalidate_customer(int(feedback.customer_id))
 
     @staticmethod
     async def record_full_refund_events(db, order_id: int) -> int:
@@ -317,13 +324,11 @@ class TasteLearningService:
             select(OrderItem).where(OrderItem.order_id == order_id)
         )).scalars().all())
         qty_by_product: dict[int, int] = {}
-        cat_by_product: dict[int, int] = {}
         for it in items:
             if not it.product_id:
                 continue
             pid = int(it.product_id)
             qty_by_product[pid] = qty_by_product.get(pid, 0) + int(it.quantity or 1)
-            cat_by_product[pid] = 0  # 类别由学习时产品反查，事件 category_id 可空
 
         existing = {
             r[0]

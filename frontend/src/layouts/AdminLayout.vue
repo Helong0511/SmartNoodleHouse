@@ -44,6 +44,7 @@
           <el-menu-item v-if="showPos" index="/pos">收银点餐</el-menu-item>
           <el-menu-item v-if="showKitchen" index="/kitchen">厨房 KDS</el-menu-item>
           <el-menu-item v-if="showOrders" index="/orders">订单管理</el-menu-item>
+          <el-menu-item v-if="showOrders" index="/recommend-report">推荐效果</el-menu-item>
           <el-menu-item v-if="showPayments" index="/payments">支付记录</el-menu-item>
           <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-settlement">收银日结</el-menu-item>

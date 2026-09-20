@@ -3,6 +3,7 @@
   "enablePullDownRefresh": true,
   "backgroundTextStyle": "dark",
   "usingComponents": {
-    "skeleton": "/components/skeleton/skeleton"
+    "skeleton": "/components/skeleton/skeleton",
+    "recommend-strip": "/components/recommend-strip/recommend-strip"
   }
 }

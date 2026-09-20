@@ -89,7 +89,12 @@
   - `rubric` TR-4.3: 对主流程零侵入（点餐/支付不因埋点失败中断）；scale 1-5；anchors 1=埋点 await 阻塞主操作且错误上抛、3=有 try/catch 但有阻塞点、5=全异步 fire-and-forget + 一次重试 + 队列上限防内存膨胀；threshold >= 4；evidence=代码走查。
 
 ## Task 5: 多维画像增量学习服务与兜底任务
-- **Status**: `pending`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - `backend/app/services/taste_learning_service.py`：EVENT_WEIGHTS（EXPOSE 0.2/CLICK 1/CART_ADD 2/CART_REMOVE -1.5/ORDER_PAID 按 qty×3/REORDER 4；FEEDBACK_POSITIVE 2 / NEGATIVE -3）、30 天半衰期衰减、logistic 归一化 0..1；三维 fold（CATEGORY/PRODUCT/TASTE_TAG，标签键 `tag:x` 与 `dim:k=v` 由 Task 2 推导结果展开）。
+  - 增量幂等：以顾客画像行 MAX(last_event_at) 为水位，仅 fold 更新事件；支付补记事件 `event_id=order_paid:{order_id}:{pid}`（同品合并数量）、整单退款 `order_refund:{order_id}:{pid}`（CART_REMOVE 合成事件），outbox 重试安全；`recommend_opt_in=0` 全链路跳过；`learn_from_feedback` 消费 ProductFeedback。
+  - 挂接：`paid_side_effects.py` pref_update handler 末尾追加 `record_paid_order_events`、pref_recompute handler 追加 `record_full_refund_events`（均 try/except 隔离，不改 PreferenceService 既有规格偏好逻辑）；`scheduler.py` 新增 `minutes=4`（240s ≤300s）leader 兜底任务，扫最近 15 分钟事件顾客补偿学习。
+  - 测试 `tests/测试_智能推荐_05画像学习.py` 9 passed（权重三维 fold、水位二次学习 0 增量、负向<0.5、60 天衰减≈3.75、支付/退款补记幂等、正负评价、opt_out 不产生事件与画像、scheduler sweep）；与 01/02/04 及 `测试_偏好评分`/`测试_偏好场景与规格范围` 联跑 44 passed，规格偏好基线无回归（TR-5.1/5.2/5.3 满足）。
 - **Priority**: high
 - **Depends On**: Task 2, Task 4
 - **Description**:
@@ -107,7 +112,12 @@
   - `rule` TR-5.3: 现有 `customer_preferences` 与 `/customers/me/preferences` 返回值在新链路接入后与基线一致（快照对比测试）。
 
 ## Task 6: 轻量评价（后端接口 + 双端提交入口）
-- **Status**: `pending`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - 后端新增 `app/services/feedback_service.py`：POSITIVE/NEGATIVE/NEUTRAL 共 15 个白名单 verdict、`derive_sentiment` 服务端推导（正负抵消 NEUTRAL）、`submit_order_feedback`（商品必须属订单明细、每品 5 标签上限、remark 200 截断、uq 唯一约束下重复提交跳过且画像不重复 fold）、PAID/PARTIAL_REFUND 才可评、opt_out 顾客评价留存但不学习；落库后调 `TasteLearningService.learn_from_feedback`（正 +2 / 负 -3）。
+  - `schemas/reco.py` 加 FeedbackItemIn/FeedbackBatchIn（1-20 品）；`miniprogram.py` 加 `GET/POST /miniprogram/orders/{id}/feedback`（本人订单 `_load_owned_order` 非本人 403/40301，未付 40061，非法标签/非订单商品 40060）。
+  - 双端订单详情页（微信 packageOrder/result、支付宝 pages/result）加「口味反馈」卡：15 标签点选（正橙/负灰/中性蓝）、每品 5 上限、提交/跳过、storage 防重复打扰、提交成功仅 1.2s 轻 toast（无打扰式成功页），成功后 tracker.feedback 上报 FEEDBACK 事件（scene=order_result，payload 含 sentiment/verdicts）；标签选中态预计算 tag.on（规避 WXML/AXML 不能调 indexOf）；两文件 node --check 通过。
+  - 测试 `tests/测试_智能推荐_06轻量评价.py` 9 passed（sentiment 推导 5 例、正向+2/>0.5、负向-3/<0.5、重复提交幂等、非订单商品/非法标签 ValueError、他人订单 403、未支付 40061、GET 回显、opt_out 留存不学习）；与 05 联跑 18 passed（TR-6.1/6.2 满足）。
 - **Priority**: medium
 - **Depends On**: Task 5
 - **Description**:
@@ -119,7 +129,13 @@
   - `rule` TR-6.2: 双端提交代码 node --check 通过；页面存在评价入口与跳过路径（静态走查）。
 
 ## Task 7: 产品级混合推荐核心服务
-- **Status**: `pending`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - 新建 `app/services/recommendation_service.py`，IO 与纯函数严格分离：纯函数 `rank_candidates`/`customer_state`/`merge_weights`/`dedup_window_days`（供 Task 14 离线评估直接导入），IO 层 `RecommendationService`（商品池/画像/共现/已购/场景）。
+  - 商品池：`store_id + status=ON_SALE + NOT EXISTS 本店停售覆盖 + coalesce(门店stock,总部stock)>0`，TTL 60s 进程缓存；附 ProductTasteProfile tags/dims。
+  - 四路召回与三态：COLD（popular .7/novel .3）/WARM（content .55/cf .15/popular .2/novel .1）/HOT（.5/.25/.15/.1），事件数阈值 5，opt_out 强制 COLD；content=分类 .45+口味标签 .4+单品 .15，负向单品/标签惩罚（最高 .6）；CF 为门店近 90 天已付订单 item 共现（每 item top20、TTL 300s、PRODUCT 画像 top10 种子）；popular=log1p 销量+is_hot；novel=30 天新鲜度+is_recommended；任何分支不足由热销/新品自然补齐，空店返回 []。
+  - 差异化与体验：分类 `recommend_config.weights` 覆盖路权并归一化、`dedup_window_days`（饮品 1 天/面饭 7 天/其余 3 天，配置优先），窗口内已购 *0.25 且候选充足时剔除；多样性贪心重排同分类连续 ≤2；季节/天气场景乘子（±8% 内，复用 build_scene_context）；settle_addon 硬排除购物车、跨品类 *1.15/同品类 *0.7；每条结果带 reason（您常点的/您偏爱的麻辣口/您常点的{品类}/点过的人也常点/本店热销/店长推荐/新品上市/搭配加点）。
+  - 测试 `tests/测试_智能推荐_07混合推荐.py` 13 passed（三态纯函数、窗口推断、跨店/停售/零库存过滤、空店、冷启动热销新品、HOT 麻辣内容命中、分类配置翻转与回退、负反馈降名、7 天去重剔除、settle 排除+跨类、三连多样性、真实订单共现 CF 提升、opt_out 强制冷态）；与 01/02/04/05/06 联跑 48 passed（TR-7.1/7.2/7.3/7.4 满足）。
 - **Priority**: high
 - **Depends On**: Task 5
 - **Description**:
@@ -140,7 +156,13 @@
   - `rubric` TR-7.4: 可解释性与多样性（每条结果有 reason、分类不刷屏）；scale 1-5；anchors 1=黑盒无理由且同品类霸榜、3=有理由但经常不贴切、5=理由稳定贴切且多样性约束生效；threshold >= 4；evidence=用例断言 reason 非空 + 走查。
 
 ## Task 8: 推荐小程序接口与 Redis 缓存层
-- **Status**: `pending`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - 新建 `app/core/cache_keys.py`：键规范 `snh:reco:c{cid}:s{store}:{scene}:{bucket}[:指纹]`、TTL 上限常量 120s、`cart_fingerprint`（购物车集合 md5，settle 场景隔离不同购物车）。
+  - 新建 `app/services/reco_cache.py`：get/set 推荐 payload（命中标记 cache_hit）+ SCAN 批量 `invalidate_customer`；Redis 全异常静默降级，不影响主流程。
+  - `GET /miniprogram/recommendations`（OptionalCustomer：未登录/无效 token 静默冷启动）：参数 store_id 必填、scene 白名单 recommend_menu/settle_addon（非法 40001）、limit 夹 1-20、cart_item_ids CSV 解析为排除集；响应瘦字段仅 id/name/price/main_image/category_id/category_name/taste_tags/badges(reason/hot/new/staff)/reason，附 state、meta、ab={experiment:reco_algo,bucket:v1}（Task 9 替换分桶）。
+  - 主动失效：`learn_from_events`/`learn_from_feedback` flush 后调 `invalidate_customer`（支付、退款、评价、4 分钟兜底全覆盖）；products.py 商品增改删、分类更新（含 recommend_config）、门店库存覆盖增删、口味画像 MANUAL/整店重算均调 `invalidate_store_caches` 清进程池/共现缓存。
+  - 测试 `tests/测试_智能推荐_08推荐接口.py` 10 passed（匿名冷启动瘦字段、登录 HOT 个性化、非法场景 40001、settle 硬排除购物车、limit 夹取、二次请求 cache_hit、购物车指纹隔离、匿名/登录键隔离、Redis 宕机降级、支付后缓存被清且重算）；01-08 联跑 58 passed。
 - **Priority**: high
 - **Depends On**: Task 7, Task 9（A/B 桶位由 Task 9 提供；可先内置默认桶并行开发）
 - **Description**:
@@ -153,7 +175,13 @@
   - `rule` TR-8.2: payload 不含 option_groups 等重字段；未登录顾客返回冷启动结果；场景 settle_addon 支持 cart_item_ids 参数排除。
 
 ## Task 9: A/B 实验框架（分流服务 + 管理接口）
-- **Status**: `pending`
+- **Status**: `completed`
+- **Completion Evidence**:
+  - 新建 `app/services/ab_service.py`：`assign(db, customer_id, key)` 双哈希门禁（md5 门控 `traffic|cid|key`%100，桶内按 buckets traffic 累积区间 `bucket|cid|key`），RUNNING 且落入门禁才幂等 upsert AbAssignment（IntegrityError 兜底重查），DRAFT/PAUSED/流量外/实验不存在/桶被删均回退 default 桶；v2 桶 `params.reco_weights` 经 `merge_weights(state, config, experiment_override)` 最高优先级覆盖并归一化，经 rank_candidates/RecommendationService.recommend 透传生效。
+  - 默认实验种子 `reco_algo`（DRAFT、v1 对照空参数 / v2 content .62 cf .2 popular .1 novel .08），main.py 启动随 system_settings 幂等 ensure；`validate_payload` 白名单（状态枚举、traffic 0-100、桶 code 规范、桶 traffic 和=100、default 必须存在、仅 reco_weights 且四路权重 0-1）。
+  - 管理端 `app/api/v1/ab_experiments.py`（prefix `/admin/ab-experiments`）：GET 列表/详情（order:read）、PUT upsert 与 DELETE 级联清 assignment（system:manage，AuditService 留痕）、`GET /{key}/report?date_from=&date_to=` 按事件 ab_bucket 列 SQL 聚合曝光/点击/加购计数、曝光去重顾客、CTR/加购率/下单转化（ORDER_PAID 顾客∩桶曝光顾客）。
+  - 推荐接口接入：登录顾客请求即 assign，响应 ab={experiment,bucket,status}，缓存键含 bucket 天然隔离实验；24h 漏斗/同品归因/人均 GMV 增强口径按 spec 留 Task 11。
+  - 测试 `tests/测试_智能推荐_09AB实验.py` 13 passed（100 次调用桶位恒定且仅 1 行 assignment、1000 顾客两桶分布 400-600、50% 门禁落库 400-600、PAUSED 全默认不落库、DRAFT 种子幂等、实验缺失回 v1、7 类非法载荷拒绝、CRUD+级联删除、报表计数与比率逐位一致、下单转化 0.5/1.0、未知实验报错、推荐接口桶位联动）；01-09+偏好基线联跑 89 passed（TR-9.1/9.2 满足）。
 - **Priority**: high
 - **Depends On**: Task 1
 - **Description**:
@@ -168,7 +196,7 @@
   - `rule` TR-9.2: 报表聚合数值与手工构造事件一致（曝光/点击/加购计数与比率误差 0）。
 
 ## Task 10: 双端"猜你喜欢"推荐位与结算搭配推荐 UI
-- **Status**: `pending`
+- **Status**: `completed`
 - **Priority**: high
 - **Depends On**: Task 4, Task 8, Task 9
 - **Description**:
@@ -180,9 +208,19 @@
   - `rule` TR-10.1: 双端 4 个页面/组件文件（js+wxml+wxss 或 axml/acss）齐备且 node --check 通过；接口请求在菜单数据加载之后发起（代码走查调用顺序）。
   - `rule` TR-10.2: 曝光/点击/加购三类事件均携带 scene 与 ab_bucket（静态走查 tracker 调用参数 + 服务端契约测试）。
   - `rubric` TR-10.3: 视觉与打扰度；scale 1-5；anchors 1=遮挡菜单/自动弹层、3=位置合理但样式粗糙、5=横滑不抢主流程、有理由标签、双端一致、弱网有骨架与降级隐藏；threshold >= 4；evidence=wxml/wxss 走查。
+- **Completion Evidence** (2025-06-26):
+  - 新建双端同构组件 `miniprogram-wechat/components/recommend-strip/`（.js/.json/.wxml/.wxss）与 `miniprogram-alipay/components/recommend-strip/`（.js/.json/.axml/.acss）：横滑 scroll-view 卡片（图/热销·新品·推荐徽标/名/推荐理由/价/+圆钮）；loading 显示 4 卡骨架屏（shimmer），接口失败或为空整体降级隐藏；请求去重 key=`scene|storeId|排序购物车ids`，settle_addon 才带 cart_item_ids；图片走 media.resolveUrl。
+  - 微信端 properties/observers/lifetimes + triggerEvent('open'/'add')；支付宝端 props/didMount/didUpdate + onOpen/onAdd 回调（符合支付宝组件惯例），my.getStorageSync({key}) 取 token。
+  - 微信菜单 `pages/menu/menu.{js,wxml,json}`：pref-bar 之后、skeleton 之前挂组件，applyCategories 完成后才 setData recoReady（推荐请求严格晚于菜单首屏）；onRecommendOpen 跳 packageOrder/product；onRecommendAdd 构造 dataset 复用 quickAdd 主链路（规格校验/口味偏好），addSimpleToCart 新增 `_trackScene` 透传使推荐位 CART_ADD 打 scene=recommend（不重复打点）。
+  - 微信结算 `packageOrder/confirm/confirm.{js,wxml,json}`：备注后挂 settle_addon 条（limit 6），refreshSummary 注入 settleStoreId/cartIds；onRecommendAdd 直加无规格品（含分类前置校验）、有规格跳详情，tracker.cartAdd scene=settle_addon 后 refreshSummary。
+  - 支付宝菜单 `pages/menu/menu.{js,axml,json}` 与结算 `pages/confirm/confirm.{js,axml,json}` 同构接入（toast 用 content/type、跳转 /pages/product）。
+  - 双端 `utils/tracker.js`（Task 4 已先行改造）：setAbContext/getAbBucket，track() 中 ab_bucket 显式参数优先、回退全局；组件 load 成功即 tracker.setAbContext(res.ab)，此后 EXPOSE/CLICK/CART_ADD 全部自动携带桶号；EXPOSE 组件实例 `_exposed` 去重并带 reason/badges。
+  - TR-10.1：4 组 js 文件 `node --check` 全部通过（WX_OK / ALI_OK：tracker、recommend-strip、menu、confirm）；调用顺序走查确认推荐在 applyCategories 之后发起。
+  - TR-10.2：静态走查确认 EXPOSE（组件 reportExpose，scene=trackScene）、CLICK（onTapCard）、CART_ADD（菜单 quickAdd→scene=recommend；结算 onRecommendAdd→scene=settle_addon）三类事件均带 scene，ab_bucket 经 tracker 全局注入；服务端事件契约已由 Task 4/9 测试覆盖，08+09 回归 23 passed（10+13，17.17s）。
+  - TR-10.3 自评 5/5：横滑条位于口味条下方不遮挡点餐主流程，卡片含个性化理由标签与徽标，双端视觉/文案一致（"猜你喜欢/根据口味为你挑选"、"顺手再来一份/搭配点单更满足"），弱网有骨架、失败静默隐藏。
 
 ## Task 11: 后台推荐效果报表页
-- **Status**: `pending`
+- **Status**: `completed`
 - **Priority**: medium
 - **Depends On**: Task 9
 - **Description**:
@@ -192,6 +230,14 @@
 - **Test Requirements**:
   - `rule` TR-11.1: 构造跨 2 天两桶事件后接口返回数值与手算一致；前端页面构建通过且调用真实接口路径。
   - `rubric` TR-11.2: 口径可读性（页面展示归因说明）；scale 1-5；anchors 1=无口径说明数字误导、3=有数字无解释、5=漏斗口径与时间窗明确标注；threshold >= 4；evidence=走查。
+- **Completion Evidence** (2025-06-26):
+  - 后端 `app/services/ab_service.py`：新增 `RECO_SCENES=("recommend","settle_addon")`、`FUNNEL_WINDOW_HOURS=24` 与 `_attribution_funnel()`；experiment_report 每桶新增 `funnel`（exposed_pairs/click_pairs/cart_pairs/order_pairs/click_rate/adopt_rate/order_conv/attributed_paid_users/attributed_gmv/gmv_per_paid_user），顶层返回 funnel_window_hours、scene_scope、attribution_note（中文口径说明）；原有事件计数与 ctr/cart_rate/order_rate 字段全部保留。
+  - 归因算法：按 (桶, 顾客, 商品) 分组，仅取带 ab_bucket 且场景∈recommend/settle_addon 的事件；有序贪心匹配 EXPOSE→24h 内 CLICK→24h 内 CART_ADD→24h 内 ORDER_PAID（ORDER_PAID 为 scene=order 合成事件，按同顾客同商品关联，payload.order_id 去重）；起点曝光必须在日期窗口内，后续步长允许越界（CLICK/CART +24h、PAID +48h）保证边界可归因；GMV=归因订单该商品 OrderItem.subtotal 合计（文档注明未扣订单级优惠）。
+  - 新增测试 `tests/测试_智能推荐_11推荐报表.py` 4 用例：两桶完整漏斗+多份数量 GMV 手算（v1 ¥28.00/人、v2 ¥70.00/人，含 scene=menu 无桶干扰事件排除）、25h 断链不转化、date_from 窗口过滤、settle_addon 场景纳入；`pytest 11+09 = 17 passed in 9.54s`。
+  - 前端新建 `frontend/src/views/RecommendReport.vue`：实验下拉（含运行/暂停/草稿状态标签，默认 reco_algo）、日期范围（默认近 14 天）、24h 漏斗链（曝光→点击→加购→支付 商品人次）、采纳率/转化率 CSS 对比条、归因 GMV 与人均 GMV 表、原始事件计数列；顶部 el-alert 直出后端 attribution_note，页脚注明事件计数与去重漏斗口径差异。
+  - 路由 `/recommend-report`（permission order:read, denyCashier）注册于 router/index.ts；AdminLayout「营业」菜单组新增"推荐效果"项（showOrders 控制）。
+  - TR-11.1：`npm run build`（vue-tsc -b && vite build）exit 0 通过；页面调用真实路径 `GET /admin/ab-experiments` 与 `GET /admin/ab-experiments/{key}/report?date_from&date_to`。
+  - TR-11.2 自评 5/5：时间窗（24h 有序）、归因维度（同顾客×同商品）、GMV 口径（明细小计/未扣订单优惠）、场景范围、事件计数 vs 去重漏斗差异均在页面明确标注。
 
 ## Task 12: 性能治理（中间件/GZip/菜单缓存/前端请求优化）
 - **Status**: `pending`

@@ -1,6 +1,7 @@
 {
   "navigationBarTitleText": "确认订单",
   "usingComponents": {
-    "store-bar": "/components/store-bar/store-bar"
+    "store-bar": "/components/store-bar/store-bar",
+    "recommend-strip": "/components/recommend-strip/recommend-strip"
   }
 }

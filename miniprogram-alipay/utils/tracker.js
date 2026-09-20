@@ -17,6 +17,21 @@ const VALID_TYPES = ['EXPOSE', 'CLICK', 'CART_ADD', 'CART_REMOVE', 'ORDER_PAID',
 let seq = 0
 let flushing = false
 let lastFlushAt = 0
+// 推荐位当前实验桶（由推荐响应写入）；后续所有事件自动携带，无需逐调用透传
+let abContext = null
+
+function setAbContext(ab) {
+  if (ab && ab.bucket) {
+    abContext = {
+      experiment: ab.experiment || 'reco_algo',
+      bucket: String(ab.bucket)
+    }
+  }
+}
+
+function getAbBucket() {
+  return abContext && abContext.bucket ? abContext.bucket : null
+}
 
 function getAppSafe() {
   try {
@@ -86,7 +101,9 @@ function track(eventType, props) {
     product_id: p.product_id || null,
     category_id: p.category_id || null,
     store_id: p.store_id || currentStoreId() || null,
-    ab_bucket: p.ab_bucket ? String(p.ab_bucket).slice(0, 80) : null,
+    ab_bucket: (p.ab_bucket || getAbBucket())
+      ? String(p.ab_bucket || getAbBucket()).slice(0, 80)
+      : null,
     payload: p.payload || null,
     occurred_at: new Date().toISOString()
   }
@@ -132,6 +149,8 @@ function flush() {
 module.exports = {
   track,
   flush,
+  setAbContext,
+  getAbBucket,
   expose: (productId, extra) => track('EXPOSE', Object.assign({ product_id: productId }, extra || {})),
   click: (productId, extra) => track('CLICK', Object.assign({ product_id: productId }, extra || {})),
   cartAdd: (productId, extra) => track('CART_ADD', Object.assign({ product_id: productId }, extra || {})),

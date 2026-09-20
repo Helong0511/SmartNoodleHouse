@@ -4,7 +4,33 @@ const subscribe = require('../../utils/subscribe')
 const prefUtil = require('../../utils/preferences')
 const pickupUtil = require('../../utils/pickup')
 const dineCtx = require('../../utils/context')
+const tracker = require('../../utils/tracker')
 const app = getApp()
+
+// 轻量评价标签（与后端 feedback_service.VERDICT_WHITELIST 对齐）
+const FEEDBACK_TAGS = [
+  { code: 'TASTY', label: '好吃对味', tone: 'pos' },
+  { code: 'WILL_REORDER', label: '想再点', tone: 'pos' },
+  { code: 'FRESH', label: '新鲜', tone: 'pos' },
+  { code: 'GOOD_PORTION', label: '分量足', tone: 'pos' },
+  { code: 'PORTION_OK', label: '分量合适', tone: 'neu' },
+  { code: 'TOO_SPICY', label: '太辣', tone: 'neg' },
+  { code: 'TOO_SWEET', label: '太甜', tone: 'neg' },
+  { code: 'TOO_SOUR', label: '太酸', tone: 'neg' },
+  { code: 'TOO_SALTY', label: '太咸', tone: 'neg' },
+  { code: 'TOO_BITTER', label: '太苦', tone: 'neg' },
+  { code: 'TOO_BLAND', label: '太淡', tone: 'neg' },
+  { code: 'TOO_SMALL', label: '分量少', tone: 'neg' },
+  { code: 'TOO_EXPENSIVE', label: '不太值', tone: 'neg' },
+  { code: 'NOT_FRESH', label: '不新鲜', tone: 'neg' },
+  { code: 'DISLIKE', label: '不喜欢', tone: 'neg' }
+]
+const FEEDBACK_PAID_STATUSES = ['PAID', 'PARTIAL_REFUND']
+const FEEDBACK_SKIP_PREFIX = 'feedback_skip_'
+
+function buildFeedbackTags(selected) {
+  return FEEDBACK_TAGS.map((t) => Object.assign({}, t, { on: selected.indexOf(t.code) >= 0 }))
+}
 
 function seatFieldsFromOrder(order) {
   const table = (order && order.table) || null
@@ -96,7 +122,10 @@ Page({
     isReady: false,
     showMemberBanner: false,
     activatingMember: false,
-    tasteHint: ''
+    tasteHint: '',
+    feedbackVisible: false,
+    feedbackSubmitting: false,
+    feedbackItems: []
   },
 
   onLoad(query) {
@@ -219,6 +248,9 @@ Page({
         prefUtil.clearPrefsCache(app)
         this._maybeShowMemberBanner(order)
       }
+      if (FEEDBACK_PAID_STATUSES.indexOf(String(order.payment_status || '').toUpperCase()) >= 0) {
+        this._loadFeedback()
+      }
     } catch (e) {
       this.setData({ loading: false })
       if (!silent) wx.showToast({ title: e.message || '加载失败', icon: 'none' })
@@ -324,6 +356,95 @@ Page({
       wx.showToast({ title: e.message || '支付失败', icon: 'none' })
       await this._refreshWithSync(true)
     }
+  },
+
+  async _loadFeedback() {
+    if (!this.orderId || this._feedbackLoaded) return
+    this._feedbackLoaded = true
+    try {
+      const skipped = wx.getStorageSync(FEEDBACK_SKIP_PREFIX + this.orderId)
+      const data = await api.get(`/miniprogram/orders/${this.orderId}/feedback`)
+      if (!data || !data.can_evaluate) return
+      const items = (data.items || []).map((it) => {
+        const selected = it.feedback ? (it.feedback.verdicts || []) : []
+        return {
+          product_id: it.product_id,
+          product_name: it.product_name,
+          given: it.feedback || null,
+          selected,
+          tags: buildFeedbackTags(selected)
+        }
+      })
+      const hasPending = items.some((it) => !it.given)
+      this.setData({ feedbackItems: items, feedbackVisible: hasPending && !skipped })
+    } catch (_) {
+      this._feedbackLoaded = false
+    }
+  },
+
+  toggleFeedbackTag(e) {
+    const ds = e.currentTarget.dataset
+    const idx = Number(ds.idx)
+    const code = ds.code
+    const items = this.data.feedbackItems.slice()
+    const it = items[idx]
+    if (!it || it.given) return
+    const selected = it.selected.slice()
+    const pos = selected.indexOf(code)
+    if (pos >= 0) {
+      selected.splice(pos, 1)
+    } else {
+      if (selected.length >= 5) {
+        wx.showToast({ title: '每道最多选 5 个', icon: 'none' })
+        return
+      }
+      selected.push(code)
+    }
+    it.selected = selected
+    it.tags = buildFeedbackTags(selected)
+    this.setData({ feedbackItems: items })
+  },
+
+  async submitFeedback() {
+    if (this.data.feedbackSubmitting) return
+    const pending = this.data.feedbackItems.filter((it) => !it.given && it.selected.length)
+    if (!pending.length) {
+      wx.showToast({ title: '点选标签后提交，或跳过', icon: 'none' })
+      return
+    }
+    this.setData({ feedbackSubmitting: true })
+    try {
+      await api.post(`/miniprogram/orders/${this.orderId}/feedback`, {
+        items: pending.map((it) => ({ product_id: it.product_id, verdicts: it.selected }))
+      })
+      pending.forEach((it) => {
+        const hasNeg = it.selected.some((c) => {
+          const tag = FEEDBACK_TAGS.find((t) => t.code === c)
+          return tag && tag.tone === 'neg'
+        })
+        const hasPos = it.selected.some((c) => {
+          const tag = FEEDBACK_TAGS.find((t) => t.code === c)
+          return tag && tag.tone === 'pos'
+        })
+        const sentiment = hasNeg && !hasPos ? 'NEGATIVE' : (hasPos && !hasNeg ? 'POSITIVE' : 'NEUTRAL')
+        tracker.feedback(it.product_id, {
+          scene: 'order_result',
+          payload: { sentiment, verdicts: it.selected }
+        })
+      })
+      wx.setStorageSync(FEEDBACK_SKIP_PREFIX + this.orderId, 1)
+      this.setData({ feedbackVisible: false })
+      wx.showToast({ title: '感谢反馈', icon: 'success', duration: 1200 })
+    } catch (e) {
+      wx.showToast({ title: (e && e.message) || '提交失败', icon: 'none' })
+    } finally {
+      this.setData({ feedbackSubmitting: false })
+    }
+  },
+
+  skipFeedback() {
+    wx.setStorageSync(FEEDBACK_SKIP_PREFIX + this.orderId, 1)
+    this.setData({ feedbackVisible: false })
   },
 
   goMenu() {

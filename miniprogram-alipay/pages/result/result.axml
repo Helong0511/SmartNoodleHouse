@@ -89,6 +89,29 @@
       </view>
     </view>
 
+    <view class="feedback-card" a:if="{{feedbackVisible}}">
+      <view class="card-title">口味反馈</view>
+      <view class="feedback-tip">点选真实感受，下次推荐更懂你（可跳过）</view>
+      <view class="fb-item" a:for="{{feedbackItems}}" a:for-item="fb" a:for-index="fidx" a:key="product_id">
+        <view class="fb-name">{{fb.product_name}}</view>
+        <view class="fb-tags">
+          <view
+            a:for="{{fb.tags}}"
+            a:for-item="tag"
+            a:key="code"
+            class="fb-tag {{tag.tone}} {{tag.on ? 'on' : ''}}"
+            data-idx="{{fidx}}"
+            data-code="{{tag.code}}"
+            onTap="toggleFeedbackTag"
+          >{{tag.label}}</view>
+        </view>
+      </view>
+      <view class="fb-actions">
+        <button class="btn-ghost mini" onTap="skipFeedback">跳过</button>
+        <button class="btn-primary mini" loading="{{feedbackSubmitting}}" onTap="submitFeedback">提交反馈</button>
+      </view>
+    </view>
+
     <view class="timeline" a:if="{{statusSteps.length}}">
       <view class="tl-title">订单进度</view>
       <view class="tl-item {{item.active ? 'active' : ''}} {{item.done ? 'done' : ''}}" a:for="{{statusSteps}}" a:key="key">

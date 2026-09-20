@@ -104,6 +104,33 @@ async def get_current_customer(
 CurrentCustomer = Annotated[Customer, Depends(get_current_customer)]
 
 
+async def get_optional_customer(
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> Customer | None:
+    """公开接口用顾客身份：无 token 或 token 无效时静默返回 None（走冷启动）。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        payload = decode_customer_token(authorization.split(" ", 1)[1])
+        customer_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return None
+    customer = await db.get(Customer, customer_id)
+    if (
+        not customer
+        or customer.status != 1
+        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+    ):
+        return None
+    if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
+        return None
+    return customer
+
+
+OptionalCustomer = Annotated[Customer | None, Depends(get_optional_customer)]
+
+
 async def get_staff_or_customer(
     db: DbSession,
     authorization: str | None = Header(default=None),

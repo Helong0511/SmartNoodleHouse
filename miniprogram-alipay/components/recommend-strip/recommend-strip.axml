@@ -1,0 +1,49 @@
+<view class="reco-wrap" a:if="{{items.length}}">
+  <view class="reco-head">
+    <view class="reco-titles">
+      <text class="reco-title">{{title}}</text>
+      <text class="reco-sub">{{subtitle}}</text>
+    </view>
+  </view>
+  <scroll-view class="reco-scroll" scroll-x="{{true}}" show-scrollbar="{{false}}">
+    <view class="reco-list">
+      <view
+        class="reco-card"
+        a:for="{{items}}"
+        a:key="id"
+        data-id="{{item.id}}"
+        onTap="onTapCard"
+      >
+        <view class="card-thumb">
+          <image a:if="{{item.imageUrl}}" class="card-img" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
+          <view a:else class="card-img ph"><text>{{item.name[0] || '荐'}}</text></view>
+          <view class="card-badges" a:if="{{item.badges.length}}">
+            <text class="badge {{b}}" a:for="{{item.badges}}" a:for-item="b" a:key="{{b}}">
+              {{b === 'hot' ? '热销' : (b === 'new' ? '新品' : '推荐')}}
+            </text>
+          </view>
+        </view>
+        <view class="card-name">{{item.name}}</view>
+        <view class="card-reason" a:if="{{item.reason}}">{{item.reason}}</view>
+        <view class="card-bottom">
+          <text class="card-price">¥{{item.price}}</text>
+          <view
+            class="card-add"
+            catchTap="onAddTap"
+            data-id="{{item.id}}"
+          >+</view>
+        </view>
+      </view>
+      <view class="reco-tail"></view>
+    </view>
+  </scroll-view>
+</view>
+
+<view class="reco-skel" a:elif="{{loading}}">
+  <view class="reco-head">
+    <view class="skel-title"></view>
+  </view>
+  <view class="skel-row">
+    <view class="skel-card" a:for="{{[1,2,3,4]}}" a:key="{{item}}"></view>
+  </view>
+</view>

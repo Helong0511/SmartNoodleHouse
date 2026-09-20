@@ -73,6 +73,9 @@ async def lifespan(app: FastAPI):
 
         async with AsyncSessionLocal() as db:
             await SystemSettingsService.ensure_seeded(db)
+            from app.services.ab_service import AbService
+
+            await AbService.ensure_default_experiment(db)
             await db.commit()
             await SystemSettingsService._load_raw(db, force=True)
         logger.info("system_settings 已种子并预热缓存")
@@ -272,6 +275,14 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(WebhookAllowlistMiddleware)
+    # Task 12：性能指标在 GZip 内层（计时不含压缩开销）；GZip 仅压缩 >1KB JSON
+    from app.core.performance_middleware import (
+        JsonGZipMiddleware,
+        PerformanceMetricsMiddleware,
+    )
+
+    app.add_middleware(PerformanceMetricsMiddleware)
+    app.add_middleware(JsonGZipMiddleware)
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     from sqlalchemy.exc import IntegrityError, OperationalError

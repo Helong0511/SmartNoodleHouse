@@ -1,0 +1,186 @@
+.reco-wrap {
+  margin: 16rpx 24rpx 8rpx;
+  padding: 20rpx 0 16rpx;
+  background: #fff8f2;
+  border-radius: 20rpx;
+}
+
+.reco-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20rpx 14rpx;
+}
+
+.reco-titles {
+  display: flex;
+  align-items: baseline;
+}
+
+.reco-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #2b2118;
+}
+
+.reco-sub {
+  margin-left: 12rpx;
+  font-size: 22rpx;
+  color: #a08b78;
+}
+
+.reco-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.reco-list {
+  display: inline-flex;
+  padding: 0 12rpx;
+}
+
+.reco-card {
+  display: inline-flex;
+  flex-direction: column;
+  width: 200rpx;
+  margin: 0 8rpx;
+  padding: 14rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  vertical-align: top;
+  box-shadow: 0 2rpx 10rpx rgba(120, 72, 20, 0.06);
+}
+
+.card-thumb {
+  position: relative;
+  width: 100%;
+  height: 150rpx;
+  border-radius: 12rpx;
+  overflow: hidden;
+  background: #f4ece4;
+}
+
+.card-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.card-img.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #c8b49e;
+  font-size: 44rpx;
+}
+
+.card-badges {
+  position: absolute;
+  left: 8rpx;
+  top: 8rpx;
+  display: flex;
+}
+
+.badge {
+  font-size: 18rpx;
+  line-height: 1;
+  padding: 5rpx 8rpx;
+  border-radius: 6rpx;
+  color: #fff;
+  background: #d8a35c;
+  margin-right: 6rpx;
+}
+
+.badge.hot {
+  background: #e85b3a;
+}
+
+.badge.new {
+  background: #4caf7d;
+}
+
+.badge.staff {
+  background: #d8a35c;
+}
+
+.card-name {
+  margin-top: 10rpx;
+  font-size: 25rpx;
+  color: #2b2118;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-reason {
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  color: #d2691e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-bottom {
+  margin-top: 8rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-price {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #e04a28;
+}
+
+.card-add {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background: #e85b3a;
+  color: #fff;
+  font-size: 36rpx;
+  line-height: 40rpx;
+  text-align: center;
+}
+
+.reco-tail {
+  width: 8rpx;
+  height: 1rpx;
+}
+
+.reco-skel {
+  margin: 16rpx 24rpx 8rpx;
+  padding: 20rpx 0 16rpx;
+  background: #fff8f2;
+  border-radius: 20rpx;
+}
+
+.skel-title {
+  width: 160rpx;
+  height: 30rpx;
+  margin: 0 20rpx 14rpx;
+  border-radius: 8rpx;
+  background: #f0e2d2;
+  animation: recoShimmer 1.2s ease-in-out infinite alternate;
+}
+
+.skel-row {
+  display: flex;
+  padding: 0 12rpx;
+}
+
+.skel-card {
+  width: 200rpx;
+  height: 268rpx;
+  margin: 0 8rpx;
+  border-radius: 16rpx;
+  background: #f0e2d2;
+  animation: recoShimmer 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes recoShimmer {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}

@@ -100,6 +100,18 @@
   </view>
 
   <textarea class="remark" placeholder="备注（如不要香菜）" value="{{remark}}" bindinput="onRemark" />
+
+  <recommend-strip
+    wx:if="{{settleReady && settleStoreId}}"
+    store-id="{{settleStoreId}}"
+    scene="settle_addon"
+    track-scene="settle_addon"
+    cart-item-ids="{{cartIds}}"
+    limit="6"
+    bind:open="onRecommendOpen"
+    bind:add="onRecommendAdd"
+  />
+
   <view class="pay">支付方式：微信支付</view>
   <button class="btn-primary" loading="{{loading}}" bindtap="submit">提交并支付</button>
 </view>

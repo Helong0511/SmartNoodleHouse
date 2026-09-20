@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, File, Request, UploadFile
 
-from app.api.deps import CurrentCustomer, DbSession
+from app.api.deps import CurrentCustomer, DbSession, OptionalCustomer
+from app.core.cache_keys import cart_fingerprint
 from app.core.security import create_customer_token, decode_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
@@ -21,17 +22,22 @@ from app.models import (
     CustomerWechatAccount,
     DiningTable,
     FaceProfile,
+    Order,
     Store,
 )
-from app.schemas.reco import BehaviorEventBatch
+from app.schemas.reco import BehaviorEventBatch, FeedbackBatchIn
 from app.services.audit_service import AuditService
 from app.services.behavior_event_service import MAX_BATCH, ingest_events
 from app.services.customer_service import CustomerService, PreferenceService
+from app.services.feedback_service import EVALUABLE_PAYMENT_STATUSES, FeedbackService
 from app.services.coupon_service import CouponService
 from app.services.dining_session_service import DiningSessionService
 from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
+from app.services.ab_service import DEFAULT_EXPERIMENT_KEY, AbService
+from app.services.reco_cache import get_cached_reco, set_cached_reco
+from app.services.recommendation_service import RecommendationService
 from app.utils.upload import fetch_and_save_remote_image, read_upload_limited, save_upload
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
@@ -1234,6 +1240,172 @@ async def submit_behavior_events(
     if len(data.events) > MAX_BATCH:
         raise AppException(40001, f"单批最多 {MAX_BATCH} 条事件")
     result = await ingest_events(db, customer, [e.model_dump() for e in data.events])
+    return success(result, request=request)
+
+
+@router.get("/menu")
+async def get_menu_bundle_api(
+    request: Request,
+    db: DbSession,
+    store_id: int,
+    version: int | None = None,
+):
+    """菜单聚合（分类 + 在售商品一次成型），带版本戳的轻量校验。
+
+    客户端携带 version 且与服务端一致时仅返回 changed:false（小响应、不查库组装）；
+    否则返回完整 bundle 与新版本。Redis 不可用时降级为每次查库。
+    """
+    if not store_id:
+        raise AppException(40001, "store_id 必填")
+    sid = int(store_id)
+
+    from app.core.menu_cache import get_menu_version
+    from app.services.menu_service import get_or_build_menu_bundle
+
+    current_version = await get_menu_version(sid)
+    if version is not None and current_version and int(version) == int(current_version):
+        return success({"changed": False, "version": current_version}, request=request)
+
+    bundle = await get_or_build_menu_bundle(db, sid)
+    return success(
+        {
+            "changed": True,
+            "version": int(bundle.get("version") or current_version or 0),
+            "categories": bundle["categories"],
+            "products": bundle["products"],
+        },
+        request=request,
+    )
+
+
+_RECO_SCENES = {"recommend_menu", "settle_addon"}
+
+
+def _serialize_reco(ranked, state, meta, ab_bucket, ab_status=None):
+    items = []
+    for r in ranked:
+        p = r.product
+        badges = []
+        if p.is_hot:
+            badges.append("hot")
+        if r.scores.get("novel", 0) >= 0.6:
+            badges.append("new")
+        if p.is_recommended:
+            badges.append("staff")
+        items.append(
+            {
+                "id": p.id,
+                "name": p.name,
+                "price": f"{p.price:.2f}",
+                "main_image": p.main_image,
+                "category_id": p.category_id,
+                "category_name": p.category_name,
+                "taste_tags": list(p.tags),
+                "badges": badges,
+                "reason": r.reason,
+            }
+        )
+    return {
+        "state": state,
+        "items": items,
+        "meta": meta,
+        "ab": {"experiment": DEFAULT_EXPERIMENT_KEY, "bucket": ab_bucket, "status": ab_status},
+    }
+
+
+@router.get("/recommendations")
+async def get_recommendations(
+    request: Request,
+    db: DbSession,
+    customer: OptionalCustomer,
+    store_id: int,
+    scene: str = "recommend_menu",
+    limit: int = 10,
+    cart_item_ids: str | None = None,
+):
+    """智能推荐（未登录/关闭个性化走冷启动热销+新品）。结果 Redis 缓存 ≤120s。"""
+    if not store_id:
+        raise AppException(40001, "store_id 必填")
+    if scene not in _RECO_SCENES:
+        raise AppException(40001, "非法推荐场景")
+    limit = max(1, min(int(limit or 10), 20))
+
+    exclude_ids = []
+    for raw in (cart_item_ids or "").split(","):
+        raw = raw.strip()
+        if raw.isdigit():
+            exclude_ids.append(int(raw))
+
+    ab_bucket = "v1"
+    ab_status = None
+    weight_override = None
+    fingerprint = cart_fingerprint(exclude_ids) if scene == "settle_addon" else ""
+    cid = customer.id if customer else None
+
+    if cid is not None:
+        ab_bucket, ab_params, ab_exp = await AbService.assign(db, cid, DEFAULT_EXPERIMENT_KEY)
+        if ab_exp is not None:
+            ab_status = ab_exp.status
+        weight_override = (ab_params or {}).get("reco_weights")
+
+    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint)
+    if cached is not None:
+        return success(cached, request=request)
+
+    ranked, state, meta = await RecommendationService.recommend(
+        db,
+        store_id,
+        customer_id=cid,
+        scene=scene,
+        limit=limit,
+        exclude_ids=exclude_ids,
+        weight_override=weight_override,
+    )
+    payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
+    await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
+    payload["cache_hit"] = False
+    return success(payload, request=request)
+
+
+async def _load_owned_order(db, order_id: int, customer: Customer) -> Order:
+    order = await db.get(Order, int(order_id))
+    if not order:
+        raise AppException(40404, "订单不存在")
+    if int(order.customer_id or 0) != int(customer.id):
+        raise AppException(40301, "无权操作该订单", status_code=403)
+    return order
+
+
+@router.get("/orders/{order_id}/feedback")
+async def get_order_feedback(
+    order_id: int,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """回显订单可评单品与已提交评价（轻量评价条渲染/置灰用）。"""
+    order = await _load_owned_order(db, order_id, customer)
+    return success(await FeedbackService.order_feedback_payload(db, order), request=request)
+
+
+@router.post("/orders/{order_id}/feedback")
+async def submit_order_feedback(
+    order_id: int,
+    data: FeedbackBatchIn,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """提交订单单品轻量评价：仅本人已支付订单；每单品一次，重复提交幂等。"""
+    order = await _load_owned_order(db, order_id, customer)
+    if (order.payment_status or "") not in EVALUABLE_PAYMENT_STATUSES:
+        raise AppException(40061, "订单未支付，暂不能评价")
+    try:
+        result = await FeedbackService.submit_order_feedback(
+            db, order, [it.model_dump() for it in data.items]
+        )
+    except ValueError as e:
+        raise AppException(40060, str(e)) from e
     return success(result, request=request)
 
 

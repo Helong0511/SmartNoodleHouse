@@ -89,6 +89,29 @@
       </view>
     </view>
 
+    <view class="feedback-card" wx:if="{{feedbackVisible}}">
+      <view class="card-title">口味反馈</view>
+      <view class="feedback-tip">点选真实感受，下次推荐更懂你（可跳过）</view>
+      <view class="fb-item" wx:for="{{feedbackItems}}" wx:for-item="fb" wx:for-index="fidx" wx:key="product_id">
+        <view class="fb-name">{{fb.product_name}}</view>
+        <view class="fb-tags">
+          <view
+            wx:for="{{fb.tags}}"
+            wx:for-item="tag"
+            wx:key="code"
+            class="fb-tag {{tag.tone}} {{tag.on ? 'on' : ''}}"
+            data-idx="{{fidx}}"
+            data-code="{{tag.code}}"
+            bindtap="toggleFeedbackTag"
+          >{{tag.label}}</view>
+        </view>
+      </view>
+      <view class="fb-actions">
+        <button class="btn-ghost mini" bindtap="skipFeedback">跳过</button>
+        <button class="btn-primary mini" loading="{{feedbackSubmitting}}" bindtap="submitFeedback">提交反馈</button>
+      </view>
+    </view>
+
     <view class="timeline" wx:if="{{statusSteps.length}}">
       <view class="tl-title">订单进度</view>
       <view class="tl-item {{item.active ? 'active' : ''}} {{item.done ? 'done' : ''}}" wx:for="{{statusSteps}}" wx:key="key">

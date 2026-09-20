@@ -41,6 +41,15 @@
     </view>
   </view>
 
+  <recommend-strip
+    wx:if="{{recoReady && recoStoreId}}"
+    store-id="{{recoStoreId}}"
+    scene="recommend_menu"
+    track-scene="recommend"
+    bind:open="onRecommendOpen"
+    bind:add="onRecommendAdd"
+  />
+
   <skeleton wx:if="{{loading && !categories.length}}" type="menu" rows="{{5}}" />
 
   <view class="menu-layout" wx:elif="{{categories.length}}">

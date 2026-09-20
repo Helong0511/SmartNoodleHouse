@@ -40,6 +40,7 @@ from app.schemas.product import (
 )
 from app.services.audit_service import AuditService
 from app.services.menu_copy_service import MenuCopyService
+from app.services.recommendation_service import invalidate_store_caches
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.services.taste_profile_service import (
     profile_payload,
@@ -621,6 +622,7 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
     for k, v in payload.items():
         setattr(cat, k, v)
     await db.flush()
+    await invalidate_store_caches(int(cat.store_id))
     await AuditService.log_staff(
         db,
         user=user,
@@ -1074,6 +1076,7 @@ async def upsert_store_stock(
         )
         db.add(row)
     await db.flush()
+    await invalidate_store_caches(int(sid))
     await AuditService.log_staff(
         db,
         user=user,
@@ -1117,6 +1120,7 @@ async def delete_store_stock(
         )
     )
     await db.flush()
+    await invalidate_store_caches(int(sid))
     await AuditService.log_staff(
         db,
         user=user,
@@ -1319,6 +1323,7 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         await recompute_product(db, int(product.id))
     except Exception:
         logger.exception("新品口味画像自动推导失败 product_id=%s", product.id)
+    await invalidate_store_caches(int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id, "product_no": product.product_no}, request=request)
 
 
@@ -1444,6 +1449,7 @@ async def update_product(
         await recompute_product(db, int(product.id))
     except Exception:
         logger.exception("商品更新后口味画像重算失败 product_id=%s", product.id)
+    await invalidate_store_caches(int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id}, request=request)
 
 
@@ -1492,6 +1498,7 @@ async def update_product_taste_profile(
         reset_dimensions=data.reset_dimensions,
         reset_tags=data.reset_tags,
     )
+    await invalidate_store_caches(int(product.store_id))
     await AuditService.log_staff(
         db,
         user=user,
@@ -1533,6 +1540,7 @@ async def rebuild_store_taste_profiles(
     if not store:
         raise AppException(40004, "门店不存在")
     rebuilt = await recompute_store(db, store_id)
+    await invalidate_store_caches(store_id)
     await AuditService.log_staff(
         db,
         user=user,
@@ -1601,6 +1609,7 @@ async def delete_product(product_id: int, request: Request, db: DbSession, user:
     await db.execute(delete(DeliveryProductMap).where(DeliveryProductMap.product_id == product_id))
     await db.delete(product)
     await db.flush()
+    await invalidate_store_caches(int(product.store_id))
     await AuditService.log_staff(
         db,
         user=user,
