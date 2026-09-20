@@ -210,6 +210,11 @@ class Customer(Base, TimestampMixin):
     registered_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None)
     registered_table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"), default=None)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 智能推荐合规：1=开启个性化推荐（默认），0=关闭（退回非个性化热销榜，不采集行为）
+    recommend_opt_in: Mapped[int] = mapped_column(Integer, default=1)
+    # 个性化推荐同意的隐私政策版本与同意时间（版本化留痕，PIPL 合规）
+    consent_version: Mapped[str | None] = mapped_column(String(40), default=None)
+    recommend_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class CustomerIdentity(Base, TimestampMixin):
@@ -291,6 +296,9 @@ class ProductCategory(Base, TimestampMixin):
     status: Mapped[int] = mapped_column(Integer, default=1)
     # 须先点过的分类 id 列表（OR）；空=无限制。例：【加料】依赖【面】
     require_category_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    # 推荐差异化配置：{"weights":{"content":0.45,"cf":0.25,"popular":0.15,"novel":0.15},
+    #   "repurchase_window_days":7}；NULL=继承全局默认（system_settings）
+    recommend_config: Mapped[dict | None] = mapped_column(JSON, default=None)
 
 
 class CategorySortSchedule(Base, TimestampMixin):
@@ -898,3 +906,165 @@ class PrintJob(Base, TimestampMixin):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     locked_by: Mapped[str | None] = mapped_column(String(64))
     succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProductTasteProfile(Base, TimestampMixin):
+    """产品口味画像：自动推导（AUTO）与店长微调（MANUAL）共存。
+
+    dimensions 例：{"spicy":2,"sweetness":0,"sourness":1,"numbing":0,"temperature":1}
+    tags 例：["劲道","酸辣","牛肉","冰饮"]；manual_overrides 记录被人工接管的键，
+    AUTO 重算时跳过这些键（dimensions 的键名或 tags 字面量）。
+    """
+
+    __tablename__ = "product_taste_profiles"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("products.id", ondelete="CASCADE"), unique=True
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
+    dimensions: Mapped[dict | None] = mapped_column(JSON, default=None)
+    tags: Mapped[list | None] = mapped_column(JSON, default=None)
+    source: Mapped[str] = mapped_column(String(10), default="AUTO")
+    manual_overrides: Mapped[list | None] = mapped_column(JSON, default=None)
+    derived_from: Mapped[str | None] = mapped_column(String(200), default=None)
+
+
+class CustomerTasteProfile(Base):
+    """顾客多维口味画像（CATEGORY/PRODUCT/TASTE_TAG），行为事件增量聚合。
+
+    与规格选项维度的 CustomerPreference 并存：本表由行为流驱动，
+    CustomerPreference 仍由已付订单全量重算，两者互不写入。
+    """
+
+    __tablename__ = "customer_taste_profiles"
+    __table_args__ = (
+        UniqueConstraint("customer_id", "dim_type", "target_key", name="uq_ctp_customer_dim_target"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    # CATEGORY=品类亲和 / PRODUCT=单品偏好 / TASTE_TAG=口味标签偏好
+    dim_type: Mapped[str] = mapped_column(String(16))
+    # CATEGORY→category_id 字符串；PRODUCT→product_id 字符串；TASTE_TAG→标签字面量
+    target_key: Mapped[str] = mapped_column(String(100))
+    target_name: Mapped[str | None] = mapped_column(String(100))
+    score: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.0000"))
+    raw_weight: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0.0000"))
+    event_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CustomerBehaviorEvent(Base):
+    """顾客行为事件（曝光/点击/加购/移除/复购/评价等），推荐与 A/B 报表的数据源。
+
+    event_id 为客户端生成的幂等 UUID；不存 PII（手机号/昵称等），按留存期清理。
+    """
+
+    __tablename__ = "customer_behavior_events"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_cbe_event_id"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    # 客户端生成的幂等 UUID，重复上报靠它去重
+    event_id: Mapped[str] = mapped_column(String(64))
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    store_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    # EXPOSE/CLICK/CART_ADD/CART_REMOVE/ORDER_PAID/REORDER/FEEDBACK
+    event_type: Mapped[str] = mapped_column(String(20))
+    # menu/recommend/cart/detail/settle/orders
+    scene: Mapped[str | None] = mapped_column(String(20))
+    product_id: Mapped[int | None] = mapped_column(BigInteger)
+    category_id: Mapped[int | None] = mapped_column(BigInteger)
+    # 命中的 A/B 实验与桶，格式 "reco_algo:v2"，便于聚合归因
+    ab_bucket: Mapped[str | None] = mapped_column(String(80))
+    payload: Mapped[dict | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class ProductFeedback(Base, TimestampMixin):
+    """轻量评价：已支付订单单品可评一次（标签点选，非星级长评）。"""
+
+    __tablename__ = "product_feedbacks"
+    __table_args__ = (
+        UniqueConstraint("order_id", "product_id", "customer_id", name="uq_pf_order_product_customer"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"))
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"))
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    store_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    # 白名单标签，如 ["TOO_SPICY","DISLIKE"] / ["TASTY"]
+    verdicts: Mapped[list | None] = mapped_column(JSON, default=None)
+    # POSITIVE/NEGATIVE/NEUTRAL
+    sentiment: Mapped[str] = mapped_column(String(10), default="NEUTRAL")
+    remark: Mapped[str | None] = mapped_column(String(255))
+
+
+class AbExperiment(Base, TimestampMixin):
+    """A/B 实验定义。buckets 例 [{"code":"v1","traffic":50,"params":{...}},
+    {"code":"v2","traffic":50,"params":{...}}]；traffic 总和为桶内比例。"""
+
+    __tablename__ = "ab_experiments"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    experiment_key: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    # DRAFT/RUNNING/PAUSED
+    status: Mapped[str] = mapped_column(String(10), default="DRAFT")
+    # 参与实验的流量百分比 0-100；其余走 default 桶
+    traffic_percent: Mapped[int] = mapped_column(Integer, default=0)
+    default_bucket: Mapped[str] = mapped_column(String(40), default="v1")
+    buckets: Mapped[list | None] = mapped_column(JSON, default=None)
+    description: Mapped[str | None] = mapped_column(String(255))
+
+
+class AbAssignment(Base):
+    """顾客在某实验中的稳定分桶记录（幂等 upsert，保证桶位恒定）。"""
+
+    __tablename__ = "ab_assignments"
+    __table_args__ = (
+        UniqueConstraint("experiment_key", "customer_id", name="uq_aba_experiment_customer"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    experiment_key: Mapped[str] = mapped_column(String(64), index=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    bucket: Mapped[str] = mapped_column(String(40))
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

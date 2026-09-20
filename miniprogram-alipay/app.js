@@ -45,6 +45,8 @@ App({
         auth.ensureCartForCurrentStore()
       }
     } catch (_) {}
+    // 桌台恢复：qr_token 为静态凭证，是否有效由后端 /entry 裁决，
+    // 本地不再因 4h TTL 删除 token（旧逻辑会导致真机反复要求扫码绑桌）
     tabCartBadge.updateTabCartBadge(this.globalData.cart)
     this.parseLaunch(options)
     privacy.setupPrivacy()

@@ -404,12 +404,22 @@ async function doEnsureLogin(tableToken, opts) {
   }
   applyLoginSession(app, data)
   if (data.table) {
-    app.globalData.table = data.table
-    app.globalData.tableToken = data.table.qr_token
-    wx.setStorageSync('table_token', data.table.qr_token)
-    if (data.table.store) {
-      app.globalData.store = data.table.store
-      wx.setStorageSync('dine_store', data.table.store)
+    // 统一走 applyContext：一次性写全 globalData、dine_table、dine_store、
+    // table_token 与 dine_bound_at。旧逻辑只写 table_token/dine_store 且漏写
+    // dine_bound_at，会让其它页面 onShow 读缓存时误判绑定过期而清空桌台，
+    // 表现为真机上购物车/结算页反复要求「扫码绑桌」。
+    try {
+      require('./context').applyContext(data.table, data.table.store || null)
+    } catch (_) {
+      app.globalData.table = data.table
+      if (data.table.qr_token) {
+        app.globalData.tableToken = data.table.qr_token
+        wx.setStorageSync('table_token', data.table.qr_token)
+      }
+      if (data.table.store) {
+        app.globalData.store = data.table.store
+        wx.setStorageSync('dine_store', data.table.store)
+      }
     }
   }
   wx.setStorageSync('customer_id', data.customer_id)

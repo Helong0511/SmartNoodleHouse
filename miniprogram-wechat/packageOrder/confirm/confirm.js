@@ -100,6 +100,30 @@ Page({
   onShow() {
     // 扫码相机返回会触发 onShow；跳过整页重载，避免与「识别桌台」叠请求变慢
     if (this._bindingTable) return
+    // 同步预读本地桌台凭证：bootstrapCheckout 是异步的，弱网/真机下完成前
+    // data.tableToken 初始为空会让 wxml 先渲染「扫码绑桌」按钮，造成
+    // 「明明已绑桌却提示扫码」的闪烁与误解。本地有凭证时立即展示。
+    try {
+      const cachedTable = app.globalData.table || wx.getStorageSync('dine_table') || null
+      const localToken = String(
+        (cachedTable && cachedTable.qr_token)
+        || app.globalData.tableToken
+        || wx.getStorageSync('table_token')
+        || ''
+      ).trim()
+      if (localToken && !this.data.tableToken) {
+        this.setData({
+          tableToken: localToken,
+          needScanHint: false,
+          tableName: this.data.tableName
+            || (cachedTable && (cachedTable.table_name || cachedTable.table_no))
+            || '',
+          pickedLabel: this.data.pickedLabel
+            || (cachedTable && (cachedTable.table_name || cachedTable.table_no))
+            || '已绑桌'
+        })
+      }
+    } catch (_) {}
     this._memberRate = 1
     this._couponManualPick = false
     this._voucherManualPick = false
@@ -311,8 +335,14 @@ Page({
       }
       return refreshed.token
     }
+    // 网络失败时 refreshTableBinding 保留本地 token（refreshed.token 非空），
+    // 优先采用，避免弱网下误判未绑桌
     return String(
-      this.data.tableToken || app.globalData.tableToken || wx.getStorageSync('table_token') || ''
+      refreshed.token
+      || this.data.tableToken
+      || app.globalData.tableToken
+      || wx.getStorageSync('table_token')
+      || ''
     ).trim()
   },
 
@@ -778,6 +808,9 @@ Page({
           if (retry.ctx) {
             this._applyBoundTable(retry.ctx.table, retry.ctx.store, retry.token)
           }
+        } else if (retry.token) {
+          // 网络失败但本地仍有凭证：保留绑定，仅提示重试
+          wx.showToast({ title: '网络异常，请稍后重试', icon: 'none', duration: 2500 })
         } else {
           this.clearTableBinding()
           await this.resolveTable()

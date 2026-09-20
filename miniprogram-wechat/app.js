@@ -38,26 +38,19 @@ App({
     this.globalData.customerToken = wx.getStorageSync('customer_token') || ''
     this.globalData.customerId = wx.getStorageSync('customer_id') || null
     this.globalData.customerNo = wx.getStorageSync('customer_no') || ''
-    // 桌台缓存有 TTL：过期则清空，避免次日沿用昨日桌号
+    // 桌台恢复：qr_token 为静态凭证，是否有效由后端 /entry 裁决，
+    // 本地不再因 4h TTL 删除 token（旧逻辑会导致真机反复要求扫码绑桌）
     try {
       const dineCtx = require('./utils/context')
       const cached = dineCtx.readCachedContext()
-      if (cached.fresh) {
+      if (cached.token || cached.table || cached.store) {
         this.globalData.store = cached.store
         this.globalData.table = cached.table
         this.globalData.tableToken = cached.token || ''
         // P2-1：启动恢复后立即校验购物车门店归属，跨店清空
         try { dineCtx.reconcileCartWithStore() } catch (_) {}
-      } else {
-        this.globalData.store = null
-        this.globalData.table = null
-        this.globalData.tableToken = ''
       }
-    } catch (_) {
-      this.globalData.store = null
-      this.globalData.table = null
-      this.globalData.tableToken = ''
-    }
+    } catch (_) {}
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)

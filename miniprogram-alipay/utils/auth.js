@@ -424,12 +424,21 @@ async function doEnsureLogin(tableToken, opts) {
   }
   applyLoginSession(app, data)
   if (data.table) {
-    app.globalData.table = data.table
-    app.globalData.tableToken = data.table.qr_token
-    my.setStorageSync({ key: 'table_token', data: data.table.qr_token })
-    if (data.table.store) {
-      app.globalData.store = data.table.store
-      my.setStorageSync({ key: 'dine_store', data: data.table.store })
+    // 统一走 applyContext 写全 dine_table/dine_store/table_token/dine_bound_at，
+    // 旧逻辑漏写 dine_table 与 dine_bound_at，会导致其它页面误判绑定过期而
+    // 反复要求「扫码绑桌」。
+    try {
+      require('./context').applyContext(data.table, data.table.store || null)
+    } catch (_) {
+      app.globalData.table = data.table
+      if (data.table.qr_token) {
+        app.globalData.tableToken = data.table.qr_token
+        my.setStorageSync({ key: 'table_token', data: data.table.qr_token })
+      }
+      if (data.table.store) {
+        app.globalData.store = data.table.store
+        my.setStorageSync({ key: 'dine_store', data: data.table.store })
+      }
     }
   }
   my.setStorageSync({ key: 'customer_id', data: data.customer_id })

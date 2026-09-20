@@ -140,21 +140,18 @@ function readCachedContext() {
   if (!g) return { table: null, store: null, token: '', fresh: false }
   const boundAt = readBoundAt()
   const fresh = isDineCacheFresh(boundAt)
-  if (!fresh) {
-    // 过期：清桌台 token，避免次日静默复绑；门店名可留作展示但无 token 不算堂食会话
-    const hadToken = !!(g.globalData.tableToken || wx.getStorageSync('table_token'))
-    const hadTable = !!(g.globalData.table || wx.getStorageSync('dine_table'))
-    if (hadToken || hadTable) {
-      clearDineContext()
-    }
-    return { table: null, store: null, token: '', fresh: false }
-  }
+  // 注意：fresh 仅表示「本地绑定时间戳是否在 4h 内」，不再作为删除桌台数据的依据。
+  // qr_token 是桌台静态长期凭证（后端 resolve_dining_table 不校验时间），会话有效期
+  // 由后端 DiningSession.start_or_refresh 裁决。旧逻辑在 fresh=false 时直接
+  // removeStorageSync('table_token')，真机上一旦 boundAt 写入竞态/时间异常/登录回写
+  // 未补 boundAt，onShow 同步读缓存就会把刚扫码成功的 token 删掉，导致购物车/结算页
+  // 反复要求「扫码绑桌」。凭证是否真的失效，统一由 refreshTableBinding 请求后端裁决。
   let table = g.globalData.table || wx.getStorageSync('dine_table') || null
   const store = g.globalData.store || wx.getStorageSync('dine_store') || null
   const token = g.globalData.tableToken || wx.getStorageSync('table_token') || ''
   if (table && !g.globalData.table) g.globalData.table = table
   if (store && !g.globalData.store) g.globalData.store = store
-  return { table, store, token, fresh: true }
+  return { table, store, token, fresh }
 }
 
 function contextReady(table, store, token) {
@@ -270,9 +267,13 @@ async function refreshTableBinding(options = {}) {
   const allowReviveByTableId = !!(options && options.allowReviveByTableId)
   const cached = readCachedContext()
   const { table, store, fresh } = cached
-  let token = String(cached.token || (table && table.qr_token) || '').trim()
+  const token = String(cached.token || (table && table.qr_token) || '').trim()
 
-  if (token && fresh) {
+  // 只要本地持有 token 就向后端校验，不再受本地 4h TTL 限制：
+  // - 后端确认有效：applyContext 续期本地时间戳，绑定继续可用（修复真机反复要求扫码）
+  // - 后端明确返回无桌台（非网络错误）：凭证真的失效，才清除本地绑定
+  // - 网络失败：保留本地静态 token 兜底，绝不清空（弱网/真机调试不再误删）
+  if (token) {
     try {
       const entry = await api.get('/miniprogram/entry', { token, channel }, false)
       if (entry && entry.table) {
@@ -280,7 +281,13 @@ async function refreshTableBinding(options = {}) {
         const ctx = displayPayload(entry.store || store, entry.table)
         return { ok: true, token: entry.table.qr_token || token, ctx }
       }
-    } catch (_) {}
+      // 服务器可达但判定凭证无效（如桌台被删除/停用）：清除并要求重新扫码
+      clearDineContext()
+      return { ok: false, token: '' }
+    } catch (_) {
+      // 网络抖动：携带本地 token 返回失败，由调用方自行兜底
+      return { ok: false, token }
+    }
   }
 
   // 仅当会话仍新鲜时，才允许用 table_id 换 token（防昨日桌台污染）
@@ -301,8 +308,7 @@ async function refreshTableBinding(options = {}) {
       }
     } catch (_) {}
   }
-  if (!fresh) clearDineContext()
-  return { ok: false, token: '' }
+  return { ok: false, token: token || '' }
 }
 
 /** 调起扫码并绑定桌台 */

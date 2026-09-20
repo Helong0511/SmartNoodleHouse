@@ -128,18 +128,15 @@ function readCachedContext() {
   if (!g) return { table: null, store: null, token: '', fresh: false }
   const boundAt = readBoundAt()
   const fresh = isDineCacheFresh(boundAt)
-  if (!fresh) {
-    const hadToken = !!(g.globalData.tableToken || auth.readStorage('table_token'))
-    const hadTable = !!(g.globalData.table || auth.readStorage('dine_table'))
-    if (hadToken || hadTable) clearDineContext()
-    return { table: null, store: null, token: '', fresh: false }
-  }
+  // fresh 仅表示本地绑定时间戳是否在 4h 内，不再作为删除静态 qr_token 的依据。
+  // 凭证是否有效统一由后端 /entry 裁决，避免真机因 boundAt 写入竞态/时间异常
+  // 就在 onShow 读缓存时删掉刚扫码成功的 token，导致反复要求「扫码绑桌」。
   let table = g.globalData.table || auth.readStorage('dine_table') || null
   const store = g.globalData.store || auth.readStorage('dine_store') || null
   const token = g.globalData.tableToken || auth.readStorage('table_token') || ''
   if (table && !g.globalData.table) g.globalData.table = table
   if (store && !g.globalData.store) g.globalData.store = store
-  return { table, store, token, fresh: true }
+  return { table, store, token, fresh }
 }
 
 function contextReady(table, store, token) {
@@ -275,10 +272,13 @@ function showScanDebug(title, content) {
 
 async function refreshTableBinding(options = {}) {
   const channel = (options && options.channel) || 'alipay'
+  const allowReviveByTableId = !!(options && options.allowReviveByTableId)
   const cached = readCachedContext()
-  const { table, store } = cached
-  let token = String(cached.token || (table && table.qr_token) || '').trim()
+  const { table, store, fresh } = cached
+  const token = String(cached.token || (table && table.qr_token) || '').trim()
 
+  // 本地持有 token 即向后端校验（不受本地 4h TTL 限制）：
+  // - 后端确认有效：续期本地绑定；明确无效：才清空；网络失败：保留本地兜底
   if (token) {
     try {
       const entry = await api.get('/miniprogram/entry', { token, channel }, false)
@@ -287,14 +287,18 @@ async function refreshTableBinding(options = {}) {
         const ctx = displayPayload(entry.store || store, entry.table)
         return { ok: true, token: entry.table.qr_token || token, ctx }
       }
-    } catch (_) {}
+      clearDineContext()
+      return { ok: false, token: '' }
+    } catch (_) {
+      return { ok: false, token }
+    }
   }
 
+  // 仅会话新鲜时才允许凭 table_id + qr_token 复活（P1 安全约束，与微信端对齐）
   const tableId = table && table.id
   const sid = (table && table.store_id) || (store && store.id)
-  if (tableId && sid) {
+  if (allowReviveByTableId && fresh && tableId && sid) {
     try {
-      // P1 修复：bind 须传当前扫码 qr_token 凭证，后端校验同门店才允许绑定
       const bound = await api.post('/miniprogram/tables/bind', {
         table_id: tableId,
         store_id: sid,
@@ -306,7 +310,7 @@ async function refreshTableBinding(options = {}) {
       }
     } catch (_) {}
   }
-  return { ok: false, token }
+  return { ok: false, token: token || '' }
 }
 
 function isIdeFakeScanRaw(raw) {
