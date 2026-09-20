@@ -240,7 +240,7 @@
   - TR-11.2 自评 5/5：时间窗（24h 有序）、归因维度（同顾客×同商品）、GMV 口径（明细小计/未扣订单优惠）、场景范围、事件计数 vs 去重漏斗差异均在页面明确标注。
 
 ## Task 12: 性能治理（中间件/GZip/菜单缓存/前端请求优化）
-- **Status**: `pending`
+- **Status**: `completed`
 - **Priority**: high
 - **Depends On**: Task 8
 - **Description**:
