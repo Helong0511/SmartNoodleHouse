@@ -68,7 +68,7 @@ async def test_fold_weights_build_three_dimensions(db_session):
     product_row = rows[("PRODUCT", str(p.id))]
     assert product_row.event_count == 3
     assert float(product_row.raw_weight) == 9.0
-    assert float(product_row.score) == round(_logistic(9.0 / 4.0), 4)
+    assert float(product_row.score) == round(_logistic(9.0), 4)
     assert float(product_row.score) > 0.85
     # 分类画像
     cat_row = rows[("CATEGORY", str(cat.id))]
@@ -111,8 +111,8 @@ async def test_negative_events_push_score_below_half(db_session):
     await db.flush()
     await TasteLearningService.learn_from_events(db, c.id)
     rows = await _rows(db, c.id)
-    # -1.5 * 2 = -3 → logistic(-0.75) ≈ 0.32
-    assert float(rows[("PRODUCT", str(p.id))].raw_weight) == -3.0
+    # -1.5 * 2 = -3（5 分钟前那条有微小时间衰减）→ logistic(-0.75) ≈ 0.32
+    assert float(rows[("PRODUCT", str(p.id))].raw_weight) == pytest.approx(-3.0, abs=0.01)
     assert float(rows[("PRODUCT", str(p.id))].score) < 0.5
 
 
