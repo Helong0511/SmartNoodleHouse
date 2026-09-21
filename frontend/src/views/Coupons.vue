@@ -103,10 +103,16 @@
           <el-table-column v-if="auth.isSuperAdmin" label="发券门店" width="120">
             <template #default="{ row }">{{ issuedStoreName(row.issued_at_store_id) }}</template>
           </el-table-column>
+          <el-table-column label="发券人" width="110">
+            <template #default="{ row }">{{ row.issued_by_name || (row.issued_by_user_id ? `#${row.issued_by_user_id}` : '系统/自助') }}</template>
+          </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tag size="small" :type="statusTag(row.status)">{{ statusLabel(row.status) }}</el-tag>
             </template>
+          </el-table-column>
+          <el-table-column prop="obtained_at" label="发券时间" width="170">
+            <template #default="{ row }">{{ row.obtained_at || '—' }}</template>
           </el-table-column>
           <el-table-column prop="expires_at" label="过期时间" width="170" />
           <el-table-column prop="used_at" label="使用时间" width="170">

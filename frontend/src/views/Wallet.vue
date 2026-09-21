@@ -60,7 +60,32 @@
 
       <el-tab-pane label="流水" name="ledger">
         <div class="toolbar">
-          <el-input v-model="ledgerQ.customer_id" placeholder="顾客ID" clearable style="width:140px" />
+          <el-select
+            v-model="ledgerQ.customer_id"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            placeholder="搜索顾客（昵称/手机/编号）"
+            :remote-method="searchLedgerCustomers"
+            :loading="ledgerCustomerSearching"
+            style="width: 260px"
+          >
+            <el-option
+              v-for="c in ledgerCustomerOptions"
+              :key="c.id"
+              :label="customerOptionLabel(c)"
+              :value="c.id"
+            >
+              <div class="opt-row">
+                <el-avatar :size="28" :src="mediaUrl(c.avatar_url) || undefined">客</el-avatar>
+                <div class="opt-meta">
+                  <div>{{ c.display_name || c.nickname || '顾客' }}</div>
+                  <div class="muted">{{ c.phone || '无手机号' }} · {{ c.customer_no }}</div>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
           <el-select
             v-if="auth.isSuperAdmin"
             v-model="ledgerQ.store_id"
@@ -81,17 +106,59 @@
         </div>
         <el-table :data="ledger.items" border style="margin-top:12px">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="customer_id" label="顾客" width="90" />
+          <el-table-column label="顾客" min-width="220">
+            <template #default="{ row }">
+              <div class="cust-cell">
+                <el-image
+                  v-if="row.customer_avatar_url"
+                  :src="mediaUrl(row.customer_avatar_url)"
+                  fit="cover"
+                  class="avatar-thumb"
+                  :preview-src-list="[mediaUrl(row.customer_avatar_url)]"
+                  preview-teleported
+                />
+                <span v-else class="no-avatar">无</span>
+                <div class="cust-meta">
+                  <div class="cust-name">{{ row.customer_name || row.customer_nickname || '—' }}</div>
+                  <div class="cust-sub">
+                    <span v-if="row.customer_phone">{{ row.customer_phone }}</span>
+                    <span v-else class="muted">无手机号</span>
+                    <span class="muted"> · #{{ row.customer_id }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="门店" min-width="120">
             <template #default="{ row }">{{ storeName(row.store_id) }}</template>
           </el-table-column>
-          <el-table-column prop="entry_type" label="类型" width="120" />
+          <el-table-column label="类型" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="entryTypeTag(row.entry_type)">
+                {{ entryTypeLabel(row.entry_type) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="关联单号" min-width="200">
+            <template #default="{ row }">
+              <div v-if="row.order_no || row.order_id">
+                <div>点餐 {{ row.order_no || `#${row.order_id}` }}</div>
+                <div v-if="row.order_id" class="muted">ID {{ row.order_id }}</div>
+              </div>
+              <div v-else-if="row.recharge_no || row.recharge_order_id">
+                <div>充值 {{ row.recharge_no || `#${row.recharge_order_id}` }}</div>
+                <div v-if="row.recharge_order_id" class="muted">ID {{ row.recharge_order_id }}</div>
+              </div>
+              <span v-else class="muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作人" width="110">
+            <template #default="{ row }">{{ row.operator_name || '—' }}</template>
+          </el-table-column>
           <el-table-column prop="delta_principal" label="本金变动" width="110" />
           <el-table-column prop="delta_gift" label="赠送变动" width="110" />
           <el-table-column prop="principal_after" label="本金余额" width="110" />
           <el-table-column prop="gift_after" label="赠送余额" width="110" />
-          <el-table-column prop="order_id" label="订单" width="90" />
-          <el-table-column prop="recharge_order_id" label="充值单" width="90" />
           <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           <el-table-column prop="created_at" label="时间" min-width="170" />
         </el-table>
@@ -108,23 +175,86 @@
       </el-tab-pane>
 
       <el-tab-pane v-if="canManage" label="人工调账" name="adjust">
-        <el-form :model="adjust" label-width="100px" style="max-width:480px">
+        <el-form :model="adjust" label-width="100px" style="max-width:520px">
           <el-form-item v-if="auth.isSuperAdmin" label="归属门店">
             <el-select v-model="adjust.store_id" clearable placeholder="可选，记入流水" style="width:100%">
               <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="顾客ID" required>
-            <el-input-number v-model="adjust.customer_id" :min="1" controls-position="right" />
+          <el-form-item label="顾客" required>
+            <el-select
+              v-model="adjust.customer_id"
+              filterable
+              remote
+              clearable
+              reserve-keyword
+              placeholder="输入昵称 / 手机 / 编号搜索"
+              :remote-method="searchAdjustCustomers"
+              :loading="adjustCustomerSearching"
+              style="width: 100%"
+              @change="onAdjustCustomerChange"
+            >
+              <el-option
+                v-for="c in adjustCustomerOptions"
+                :key="c.id"
+                :label="customerOptionLabel(c)"
+                :value="c.id"
+              >
+                <div class="opt-row">
+                  <el-avatar :size="28" :src="mediaUrl(c.avatar_url) || undefined">客</el-avatar>
+                  <div class="opt-meta">
+                    <div>{{ c.display_name || c.nickname || '顾客' }}</div>
+                    <div class="muted">
+                      {{ c.phone || '无手机号' }} · 余额 ¥{{ c.balance_total || '0.00' }}
+                    </div>
+                  </div>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="selectedAdjustCustomer" label="当前余额">
+            <div class="selected-cust">
+              <el-avatar
+                :size="44"
+                :src="mediaUrl(selectedAdjustCustomer.avatar_url) || undefined"
+              >客</el-avatar>
+              <div class="selected-meta">
+                <div class="cust-name">
+                  {{ selectedAdjustCustomer.display_name || selectedAdjustCustomer.nickname || '顾客' }}
+                  <span class="muted"> · #{{ selectedAdjustCustomer.id }}</span>
+                </div>
+                <div class="cust-sub">
+                  {{ selectedAdjustCustomer.phone || '无手机号' }}
+                  · {{ selectedAdjustCustomer.customer_no }}
+                </div>
+                <div class="balance-line">
+                  本金 ¥{{ selectedAdjustCustomer.balance_principal || '0.00' }}
+                  · 赠送 ¥{{ selectedAdjustCustomer.balance_gift || '0.00' }}
+                  · 合计 <strong>¥{{ selectedAdjustCustomer.balance_total || '0.00' }}</strong>
+                </div>
+              </div>
+            </div>
           </el-form-item>
           <el-form-item label="本金变动">
-            <el-input-number v-model="adjust.delta_principal" :step="1" :precision="2" controls-position="right" />
+            <el-input-number
+              v-model="adjust.delta_principal"
+              :step="1"
+              :precision="2"
+              controls-position="right"
+              style="width: 100%"
+            />
           </el-form-item>
           <el-form-item label="赠送变动">
-            <el-input-number v-model="adjust.delta_gift" :step="1" :precision="2" controls-position="right" />
+            <el-input-number
+              v-model="adjust.delta_gift"
+              :step="1"
+              :precision="2"
+              controls-position="right"
+              style="width: 100%"
+            />
           </el-form-item>
           <el-form-item label="备注">
-            <el-input v-model="adjust.remark" maxlength="255" />
+            <el-input v-model="adjust.remark" maxlength="255" placeholder="调账原因，建议填写" />
           </el-form-item>
           <el-form-item>
             <el-button type="primary" :loading="adjusting" @click="submitAdjust">提交调账</el-button>
@@ -187,6 +317,28 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { mediaUrl } from '@/utils/media'
+
+const ENTRY_TYPE_LABELS: Record<string, string> = {
+  TOPUP: '充值',
+  PAY: '消费',
+  REFUND_RESTORE: '退款回补',
+  ADJUST: '调账',
+}
+
+function entryTypeLabel(t?: string | null) {
+  const key = String(t || '').toUpperCase()
+  return ENTRY_TYPE_LABELS[key] || t || '—'
+}
+
+function entryTypeTag(t?: string | null): '' | 'success' | 'warning' | 'info' | 'danger' {
+  const key = String(t || '').toUpperCase()
+  if (key === 'TOPUP') return 'success'
+  if (key === 'PAY') return 'warning'
+  if (key === 'REFUND_RESTORE') return 'info'
+  if (key === 'ADJUST') return 'danger'
+  return ''
+}
 
 type StoreOpt = { id: number; name: string; store_no?: string }
 
@@ -199,10 +351,19 @@ const stores = ref<StoreOpt[]>([])
 /** 超管筛选：undefined=全部，0=仅总部，>0=指定门店 */
 const pkgFilterStoreId = ref<number | undefined>(undefined)
 const ledger = reactive({ items: [] as any[], total: 0, page: 1, page_size: 20 })
-const ledgerQ = reactive({ customer_id: '', entry_type: '', store_id: undefined as number | undefined })
+const ledgerQ = reactive({
+  customer_id: undefined as number | undefined,
+  entry_type: '',
+  store_id: undefined as number | undefined,
+})
+const ledgerCustomerOptions = ref<any[]>([])
+const ledgerCustomerSearching = ref(false)
 const dlgVisible = ref(false)
 const saving = ref(false)
 const adjusting = ref(false)
+const adjustCustomerOptions = ref<any[]>([])
+const adjustCustomerSearching = ref(false)
+const selectedAdjustCustomer = ref<any | null>(null)
 const editing = reactive({
   id: 0,
   name: '',
@@ -220,6 +381,60 @@ const adjust = reactive({
   delta_gift: 0,
   remark: '',
 })
+
+function customerOptionLabel(c: any) {
+  const name = c?.display_name || c?.nickname || '顾客'
+  const phone = c?.phone ? ` ${c.phone}` : ''
+  return `${name}${phone}（${c?.customer_no || c?.id}）`
+}
+
+async function searchWalletCustomers(keyword: string): Promise<any[]> {
+  const kw = (keyword || '').trim()
+  if (!kw) return []
+  const res: any = await api.get('/wallet/customers/search', { params: { keyword: kw, page_size: 20 } })
+  return res?.data?.items || []
+}
+
+async function searchLedgerCustomers(q: string) {
+  const kw = (q || '').trim()
+  if (!kw) {
+    ledgerCustomerOptions.value = []
+    return
+  }
+  ledgerCustomerSearching.value = true
+  try {
+    ledgerCustomerOptions.value = await searchWalletCustomers(kw)
+  } catch {
+    ledgerCustomerOptions.value = []
+  } finally {
+    ledgerCustomerSearching.value = false
+  }
+}
+
+async function searchAdjustCustomers(q: string) {
+  const kw = (q || '').trim()
+  if (!kw) {
+    adjustCustomerOptions.value = []
+    return
+  }
+  adjustCustomerSearching.value = true
+  try {
+    adjustCustomerOptions.value = await searchWalletCustomers(kw)
+  } catch {
+    adjustCustomerOptions.value = []
+  } finally {
+    adjustCustomerSearching.value = false
+  }
+}
+
+function onAdjustCustomerChange(id: number | undefined) {
+  if (!id) {
+    selectedAdjustCustomer.value = null
+    return
+  }
+  selectedAdjustCustomer.value =
+    adjustCustomerOptions.value.find((c) => c.id === id) || selectedAdjustCustomer.value
+}
 
 function storeName(storeId: number | null | undefined) {
   if (!storeId) return '—'
@@ -390,14 +605,22 @@ async function toggleStatus(row: any) {
 
 async function submitAdjust() {
   if (!adjust.customer_id) {
-    ElMessage.warning('请填写顾客ID')
+    ElMessage.warning('请先搜索并选择顾客')
     return
   }
   if (!adjust.delta_principal && !adjust.delta_gift) {
     ElMessage.warning('本金/赠送至少填一项')
     return
   }
-  await ElMessageBox.confirm('确认提交人工调账？', '调账确认', { type: 'warning' })
+  const name =
+    selectedAdjustCustomer.value?.display_name ||
+    selectedAdjustCustomer.value?.nickname ||
+    `#${adjust.customer_id}`
+  await ElMessageBox.confirm(
+    `确认对「${name}」调账？本金 ${adjust.delta_principal}，赠送 ${adjust.delta_gift}`,
+    '调账确认',
+    { type: 'warning' },
+  )
   adjusting.value = true
   try {
     await api.post('/wallet/adjust', {
@@ -408,6 +631,22 @@ async function submitAdjust() {
       store_id: auth.isSuperAdmin ? adjust.store_id || undefined : undefined,
     })
     ElMessage.success('调账成功')
+    adjust.delta_principal = 0
+    adjust.delta_gift = 0
+    adjust.remark = ''
+    // 刷新已选顾客余额展示
+    if (selectedAdjustCustomer.value?.id) {
+      const refreshed = await searchWalletCustomers(
+        selectedAdjustCustomer.value.phone ||
+          selectedAdjustCustomer.value.customer_no ||
+          String(selectedAdjustCustomer.value.id),
+      )
+      const hit = refreshed.find((c) => c.id === selectedAdjustCustomer.value.id)
+      if (hit) {
+        selectedAdjustCustomer.value = hit
+        adjustCustomerOptions.value = [hit]
+      }
+    }
     tab.value = 'ledger'
     await loadLedger(1)
   } catch (e: any) {
@@ -428,4 +667,22 @@ onMounted(reload)
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .pager { margin-top: 12px; display: flex; justify-content: flex-end; }
 .muted { color: #999; font-size: 13px; }
+.cust-cell { display: flex; align-items: center; gap: 10px; }
+.avatar-thumb { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; }
+.no-avatar {
+  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #f0f0f0; color: #999; font-size: 12px;
+}
+.cust-meta { min-width: 0; line-height: 1.35; }
+.cust-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cust-sub { font-size: 12px; color: #666; margin-top: 2px; }
+.opt-row { display: flex; align-items: center; gap: 8px; }
+.opt-meta { line-height: 1.3; }
+.selected-cust {
+  display: flex; align-items: flex-start; gap: 12px;
+  width: 100%; padding: 10px 12px; background: #f7f8fa; border-radius: 8px;
+}
+.selected-meta { min-width: 0; line-height: 1.4; }
+.balance-line { margin-top: 6px; font-size: 13px; color: #333; }
 </style>

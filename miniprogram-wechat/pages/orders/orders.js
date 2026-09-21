@@ -220,5 +220,9 @@ Page({
 
   goMenu() {
     wx.switchTab({ url: '/pages/menu/menu' })
+  },
+
+  goRechargeRecords() {
+    wx.navigateTo({ url: '/pages/recharge-records/recharge-records' })
   }
 })

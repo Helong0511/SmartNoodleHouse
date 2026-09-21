@@ -29,6 +29,43 @@ function formatExpire(iso) {
 
 const PROFILE_CACHE_MS = 30 * 1000
 
+/** 解析支付宝 my.getOpenUserInfo 真机返回（常为 { response: '{"nickName":"..","avatar":".."}' }） */
+function parseAlipayOpenUserInfo(res) {
+  let raw = res
+  if (typeof res === 'string') {
+    try {
+      raw = JSON.parse(res)
+    } catch (_) {
+      return { nickName: '', avatarUrl: '' }
+    }
+  }
+  if (!raw || typeof raw !== 'object') return { nickName: '', avatarUrl: '' }
+
+  let info = raw
+  // 一层 / 两层 response 字符串或对象
+  for (let i = 0; i < 2; i++) {
+    if (!info || typeof info !== 'object') break
+    if (typeof info.response === 'string') {
+      try {
+        info = JSON.parse(info.response)
+      } catch (_) {
+        break
+      }
+      continue
+    }
+    if (info.response && typeof info.response === 'object') {
+      info = info.response
+      continue
+    }
+    break
+  }
+  if (!info || typeof info !== 'object') return { nickName: '', avatarUrl: '' }
+  return {
+    nickName: String(info.nickName || info.nick || info.userName || info.user_name || '').trim(),
+    avatarUrl: String(info.avatar || info.avatarUrl || info.avatar_url || '').trim()
+  }
+}
+
 Page({
   data: {
     loading: true,
@@ -101,8 +138,19 @@ Page({
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
+    // 充值成功回跳会置 walletDirty，必须强制刷新余额
+    const forceWallet = !!app.globalData.walletDirty
+    if (forceWallet) {
+      app.globalData.walletDirty = false
+      this._profileLoadedAt = 0
+      const snap = app.globalData.walletSnapshot
+      if (snap && snap.balance_total != null) {
+        this.setData({ balanceTotal: snap.balance_total || '0.00' })
+        app.globalData.walletSnapshot = null
+      }
+    }
     const forcePrefs = !app.globalData.prefsAt
-    this.loadProfile(forcePrefs)
+    this.loadProfile(forcePrefs || forceWallet)
   },
 
   applyDineContext(ctx) {
@@ -316,6 +364,10 @@ Page({
     my.navigateTo({ url: '/pages/recharge/recharge' })
   },
 
+  goRechargeRecords() {
+    my.navigateTo({ url: '/pages/recharge-records/recharge-records' })
+  },
+
   async activateSmartMember() {
     if (this.data.activatingMember || this.data.isMember) return
     try {
@@ -443,29 +495,29 @@ Page({
           fail: (e) => reject(e)
         })
       })
-      let nickName = ''
-      let avatarUrl = ''
-      if (res) {
-        // 支付宝返回 JSON 字符串或对象
-        const info = typeof res === 'string' ? JSON.parse(res) : res
-        nickName = info.nickName || info.nick || ''
-        avatarUrl = info.avatar || info.avatarUrl || ''
+      const parsed = parseAlipayOpenUserInfo(res)
+      const nickName = parsed.nickName
+      const avatarUrl = parsed.avatarUrl
+      if (!nickName && !avatarUrl) {
+        my.hideLoading()
+        my.showToast({ content: '未获取到头像或昵称，请重试授权', type: 'none' })
+        return
       }
-      // 头像转存到服务端
+      // 头像转存到服务端（真机多为 CDN 地址，须 avatar-from-url）
       let persistedAvatar = ''
+      let avatarErr = ''
       if (avatarUrl) {
         try {
           persistedAvatar = await avatarUtil.ensureRemoteAvatar(avatarUrl)
         } catch (e) {
-          // 转存失败不阻断流程，继续保存昵称
+          avatarErr = avatarUtil.formatUploadError(e, '头像转存失败')
         }
       }
-      // 保存到 profile
       const patchData = {}
       if (nickName) patchData.nickname = nickName
       if (persistedAvatar) patchData.avatar_url = persistedAvatar
       if (Object.keys(patchData).length > 0) {
-        const saveRes = await auth.patchMemberProfile(patchData)
+        await auth.patchMemberProfile(patchData)
         if (nickName) {
           app.globalData.nickname = nickName
           my.setStorageSync({ key: 'nickname', data: nickName })
@@ -473,13 +525,18 @@ Page({
         if (persistedAvatar) {
           app.globalData.avatarUrl = persistedAvatar
           my.setStorageSync({ key: 'avatar_url', data: persistedAvatar })
+          this.setData({
+            avatarUrl: avatarUtil.resolveDisplayUrl(persistedAvatar)
+          })
         }
       }
       my.hideLoading()
-      // 更新 UI
       this._profileLoadedAt = 0
       await this.loadProfile(true)
-      // 如果非会员且有昵称，自动注册为会员
+      if (avatarUrl && !persistedAvatar) {
+        my.showToast({ content: avatarErr || '昵称已保存，头像转存失败请重试', type: 'none', duration: 2500 })
+        return
+      }
       if (!this.data.isMember && nickName && nickName.length >= 2) {
         my.showToast({ content: '资料已更新，正在开通会员...', type: 'none' })
         await this.activateSmartMember()

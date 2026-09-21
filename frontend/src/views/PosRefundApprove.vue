@@ -39,6 +39,9 @@
     <el-table :data="items" v-loading="loading" stripe style="width:100%;margin-top:12px">
       <el-table-column prop="order_no" label="订单号" min-width="160" show-overflow-tooltip />
       <el-table-column prop="requester_name" label="申请人" width="100" />
+      <el-table-column label="审批人" width="100">
+        <template #default="{ row }">{{ row.reviewer_name || '—' }}</template>
+      </el-table-column>
       <el-table-column label="金额" width="100">
         <template #default="{ row }"><b class="amt">¥{{ row.amount }}</b></template>
       </el-table-column>

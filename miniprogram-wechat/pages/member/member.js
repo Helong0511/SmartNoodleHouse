@@ -101,8 +101,19 @@ Page({
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
+    // 充值成功回跳会置 walletDirty，必须强制刷新余额
+    const forceWallet = !!app.globalData.walletDirty
+    if (forceWallet) {
+      app.globalData.walletDirty = false
+      this._profileLoadedAt = 0
+      const snap = app.globalData.walletSnapshot
+      if (snap && snap.balance_total != null) {
+        this.setData({ balanceTotal: snap.balance_total || '0.00' })
+        app.globalData.walletSnapshot = null
+      }
+    }
     const forcePrefs = !app.globalData.prefsAt
-    this.loadProfile(forcePrefs)
+    this.loadProfile(forcePrefs || forceWallet)
   },
 
   applyDineContext(ctx) {
@@ -319,6 +330,10 @@ Page({
 
   goRecharge() {
     wx.navigateTo({ url: '/pages/recharge/recharge' })
+  },
+
+  goRechargeRecords() {
+    wx.navigateTo({ url: '/pages/recharge-records/recharge-records' })
   },
 
   async activateSmartMember() {

@@ -103,6 +103,7 @@
         <view class="points-line balance-line" wx:if="{{isMember}}">
           储值余额 <text class="pts">¥{{balanceTotal}}</text>
           <text class="link recharge-link" bindtap="goRecharge">去充值</text>
+          <text class="link recharge-link" bindtap="goRechargeRecords">充值记录</text>
         </view>
         <view class="phone" wx:if="{{phone}}">手机 {{phone}}</view>
 

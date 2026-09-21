@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -12,9 +12,10 @@ from app.api.deps import CurrentCustomer, CurrentUser, DbSession, OptionalStaffU
 from app.core.biz_no import generate_no
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, money, success
-from app.models import BalanceLedger, Customer, RechargeOrder, RechargePackage, Store
+from app.models import BalanceLedger, Customer, Order, RechargeOrder, RechargePackage, Store, User
 from app.services.audit_service import AuditService
 from app.services.balance_service import BalanceService
+from app.services.customer_service import CustomerService
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/wallet", tags=["储值"])
@@ -286,25 +287,69 @@ async def admin_ledger(
             )
         ).scalars()
     )
-    items = [
-        {
-            "id": r.id,
-            "customer_id": r.customer_id,
-            "store_id": r.store_id,
-            "order_id": r.order_id,
-            "recharge_order_id": r.recharge_order_id,
-            "payment_id": r.payment_id,
-            "refund_id": r.refund_id,
-            "entry_type": r.entry_type,
-            "delta_principal": str(money(r.delta_principal)),
-            "delta_gift": str(money(r.delta_gift)),
-            "principal_after": str(money(r.principal_after)),
-            "gift_after": str(money(r.gift_after)),
-            "remark": r.remark,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+    cust_ids = list({r.customer_id for r in rows if r.customer_id})
+    cust_map: dict[int, Customer] = {}
+    if cust_ids:
+        cust_map = {
+            c.id: c
+            for c in (await db.execute(select(Customer).where(Customer.id.in_(cust_ids)))).scalars().all()
         }
-        for r in rows
-    ]
+    order_ids = list({r.order_id for r in rows if r.order_id})
+    order_no_map: dict[int, str] = {}
+    if order_ids:
+        for oid, ono in (
+            await db.execute(select(Order.id, Order.order_no).where(Order.id.in_(order_ids)))
+        ).all():
+            order_no_map[int(oid)] = ono
+    recharge_ids = list({r.recharge_order_id for r in rows if r.recharge_order_id})
+    recharge_no_map: dict[int, str] = {}
+    if recharge_ids:
+        for rid, rno in (
+            await db.execute(
+                select(RechargeOrder.id, RechargeOrder.recharge_no).where(RechargeOrder.id.in_(recharge_ids))
+            )
+        ).all():
+            recharge_no_map[int(rid)] = rno
+    op_ids = list({r.operator_id for r in rows if getattr(r, "operator_id", None)})
+    op_map: dict[int, str] = {}
+    if op_ids:
+        for u in (await db.execute(select(User).where(User.id.in_(op_ids)))).scalars().all():
+            op_map[int(u.id)] = u.display_name or u.username
+    items = []
+    for r in rows:
+        cust = cust_map.get(r.customer_id)
+        order_no = order_no_map.get(int(r.order_id)) if r.order_id else None
+        recharge_no = recharge_no_map.get(int(r.recharge_order_id)) if r.recharge_order_id else None
+        op_id = getattr(r, "operator_id", None)
+        items.append(
+            {
+                "id": r.id,
+                "customer_id": r.customer_id,
+                "customer_no": cust.customer_no if cust else None,
+                "customer_name": (cust.display_name or cust.nickname) if cust else None,
+                "customer_nickname": cust.nickname if cust else None,
+                "customer_phone": cust.phone if cust else None,
+                "customer_avatar_url": cust.avatar_url if cust else None,
+                "store_id": r.store_id,
+                "order_id": r.order_id,
+                "order_no": order_no,
+                "recharge_order_id": r.recharge_order_id,
+                "recharge_no": recharge_no,
+                "ref_no": order_no or recharge_no,
+                "ref_kind": "ORDER" if order_no else ("RECHARGE" if recharge_no else None),
+                "payment_id": r.payment_id,
+                "refund_id": r.refund_id,
+                "operator_id": int(op_id) if op_id else None,
+                "operator_name": op_map.get(int(op_id)) if op_id else None,
+                "entry_type": r.entry_type,
+                "delta_principal": str(money(r.delta_principal)),
+                "delta_gift": str(money(r.delta_gift)),
+                "principal_after": str(money(r.principal_after)),
+                "gift_after": str(money(r.gift_after)),
+                "remark": r.remark,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+        )
     return success(
         {
             "items": items,
@@ -317,6 +362,34 @@ async def admin_ledger(
     )
 
 
+@router.get("/customers/search", dependencies=[require_permission("wallet:read")])
+async def search_customers_for_wallet(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    keyword: str = Query(..., min_length=1, max_length=100, description="昵称/手机/顾客编号"),
+    page_size: int = 20,
+):
+    """调账/流水筛选：按门店隔离搜索顾客。超管可搜全库。"""
+    store_id = require_bound_store(user, None)
+    rows, _total = await CustomerService.search_active_customers(
+        db, keyword, page=1, page_size=page_size, store_id=store_id
+    )
+    items = [
+        {
+            "id": c.id,
+            "customer_no": c.customer_no,
+            "display_name": c.display_name or c.nickname,
+            "nickname": c.nickname,
+            "phone": c.phone,
+            "avatar_url": c.avatar_url,
+            **BalanceService.snapshot(c),
+        }
+        for c in rows
+    ]
+    return success({"items": items}, request=request)
+
+
 @router.post("/adjust", dependencies=[require_permission("wallet:manage")])
 async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user: CurrentUser):
     sid = require_bound_store(user, data.store_id) if user.role.code != "SUPER_ADMIN" else data.store_id
@@ -327,6 +400,7 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
         delta_gift=data.delta_gift,
         store_id=sid,
         remark=data.remark,
+        operator_id=user.id,
     )
     await AuditService.log(
         db,
@@ -339,6 +413,7 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
             "delta_principal": str(money(data.delta_principal)),
             "delta_gift": str(money(data.delta_gift)),
             "remark": data.remark,
+            "operator_id": user.id,
         },
         request=request,
     )
@@ -347,6 +422,7 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
             "id": row.id,
             "principal_after": str(money(row.principal_after)),
             "gift_after": str(money(row.gift_after)),
+            "operator_id": user.id,
         },
         request=request,
     )
@@ -385,7 +461,16 @@ async def create_recharge(
             if int(existed.customer_id) != int(customer.id):
                 raise AppException(40909, "幂等键冲突", status_code=409)
             if existed.status == "PAID":
-                return success({**_ro_ser(existed), "already_paid": True, "status": "PAID"}, request=request)
+                cust = await db.get(Customer, customer.id)
+                return success(
+                    {
+                        **_ro_ser(existed),
+                        "already_paid": True,
+                        "status": "PAID",
+                        "wallet": BalanceService.snapshot(cust) if cust else {},
+                    },
+                    request=request,
+                )
             ro = existed
 
     if ro is None:
@@ -432,12 +517,86 @@ async def create_recharge(
         customer_id=customer.id,
         extra=extra,
     )
+    await db.refresh(ro)
+    cust = await db.get(Customer, customer.id)
+    wallet = BalanceService.snapshot(cust) if cust else {}
+    out = {
+        **_ro_ser(ro),
+        "payment_no": payment.payment_no,
+        "amount": str(payment.amount),
+        **pay_data,
+        "wallet": wallet,
+    }
+    return success(out, request=request)
+
+
+@router.get("/recharge/mine")
+async def my_recharge_orders(
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+    page: int = 1,
+    page_size: int = 20,
+    status: str | None = None,
+):
+    """顾客端：我的充值记录。"""
+    page = max(1, page)
+    page_size = min(max(1, page_size), 50)
+    q = select(RechargeOrder).where(RechargeOrder.customer_id == int(customer.id))
+    if status and status.strip():
+        parts = [p.strip().upper() for p in status.split(",") if p.strip()]
+        if len(parts) == 1:
+            q = q.where(RechargeOrder.status == parts[0])
+        elif parts:
+            q = q.where(RechargeOrder.status.in_(parts))
+    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    rows = list(
+        (
+            await db.execute(
+                q.order_by(RechargeOrder.id.desc()).offset((page - 1) * page_size).limit(page_size)
+            )
+        ).scalars()
+    )
+    store_ids = list({r.store_id for r in rows if r.store_id})
+    store_map: dict[int, str] = {}
+    if store_ids:
+        for sid, sname in (await db.execute(select(Store.id, Store.name).where(Store.id.in_(store_ids)))).all():
+            store_map[int(sid)] = sname
+    pkg_ids = list({r.package_id for r in rows if r.package_id})
+    pkg_map: dict[int, str] = {}
+    if pkg_ids:
+        for pid, pname in (
+            await db.execute(select(RechargePackage.id, RechargePackage.name).where(RechargePackage.id.in_(pkg_ids)))
+        ).all():
+            pkg_map[int(pid)] = pname
+    status_labels = {
+        "PENDING": "待支付",
+        "PAID": "已到账",
+        "CANCELLED": "已取消",
+        "EXPIRED": "已过期",
+        "FAILED": "失败",
+    }
+    channel_labels = {"WECHAT": "微信", "ALIPAY": "支付宝"}
+    items = []
+    for r in rows:
+        credit_total = money(r.credit_principal) + money(r.credit_gift)
+        items.append(
+            {
+                **_ro_ser(r),
+                "package_name": pkg_map.get(int(r.package_id)) if r.package_id else None,
+                "store_name": store_map.get(int(r.store_id)) if r.store_id else None,
+                "credit_total": str(credit_total),
+                "status_label": status_labels.get(str(r.status or "").upper(), r.status),
+                "channel_label": channel_labels.get(str(r.channel or "").upper(), r.channel),
+            }
+        )
     return success(
         {
-            **_ro_ser(ro),
-            "payment_no": payment.payment_no,
-            "amount": str(payment.amount),
-            **pay_data,
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total, page_size),
         },
         request=request,
     )

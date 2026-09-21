@@ -127,14 +127,6 @@ INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`
 INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充100得120', 100.00, 20.00, 1, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充100得120');
 INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充200得250', 200.00, 50.00, 2, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充200得250');
 
-INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT 1, '充50得55', 50.00, 5.00, 0, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充50得55');
-INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT 1, '充100得120', 100.00, 20.00, 1, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充100得120');
-INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT 1, '充200得250', 200.00, 50.00, 2, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充200得250');
-
-INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT 2, '充50得55', 50.00, 5.00, 0, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充50得55');
-INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT 2, '充100得120', 100.00, 20.00, 1, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充100得120');
-INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT 2, '充200得250', 200.00, 50.00, 2, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充200得250');
-
 -- 六、门店
 INSERT INTO `stores` (`id`, `store_no`, `name`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) VALUES 
 (1, 'SH01', '肠旺面(总店)', '城南红砖路88号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 

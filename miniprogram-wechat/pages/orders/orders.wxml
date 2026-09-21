@@ -23,6 +23,11 @@
 
   />
 
+  <view class="scope-tabs">
+    <view class="scope-item active">点餐订单</view>
+    <view class="scope-item" bindtap="goRechargeRecords">充值记录</view>
+  </view>
+
   <scroll-view class="tabs" scroll-x enhanced show-scrollbar="{{false}}">
     <view
       wx:for="{{tabs}}"

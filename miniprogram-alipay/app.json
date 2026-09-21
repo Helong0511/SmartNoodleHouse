@@ -6,6 +6,7 @@
     "pages/orders/orders",
     "pages/member/member",
     "pages/recharge/recharge",
+    "pages/recharge-records/recharge-records",
     "pages/product/product",
     "pages/confirm/confirm",
     "pages/result/result"

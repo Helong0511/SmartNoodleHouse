@@ -106,6 +106,14 @@
       <el-table-column label="积分" width="80">
         <template #default="{ row }">{{ row.member_points ?? 0 }}</template>
       </el-table-column>
+      <el-table-column label="储值余额" min-width="150">
+        <template #default="{ row }">
+          <div>¥{{ row.balance_total || '0.00' }}</div>
+          <div class="muted bal-sub">
+            本金 {{ row.balance_principal || '0.00' }} · 赠送 {{ row.balance_gift || '0.00' }}
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="折扣" width="80">
         <template #default="{ row }">
           {{
@@ -210,6 +218,13 @@
           </el-descriptions-item>
           <el-descriptions-item label="会员等级">{{ detail.member_level_name || '—' }}</el-descriptions-item>
           <el-descriptions-item label="当前积分">{{ detail.member_points ?? 0 }}</el-descriptions-item>
+          <el-descriptions-item label="储值余额">
+            <div>合计 <strong>¥{{ detail.balance_total || '0.00' }}</strong></div>
+            <div class="muted">
+              本金 ¥{{ detail.balance_principal || '0.00' }}
+              · 赠送 ¥{{ detail.balance_gift || '0.00' }}
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item label="会员折扣">
             {{
               detail.member_discount_rate != null && Number(detail.member_discount_rate) < 1
@@ -235,6 +250,9 @@
           <el-table v-else-if="customerCoupons.length" :data="customerCoupons" size="small" border>
             <el-table-column prop="template_name" label="名称" min-width="100" />
             <el-table-column prop="summary" label="规则" min-width="110" />
+            <el-table-column label="发券人" width="90">
+              <template #default="{ row }">{{ row.issued_by_name || '—' }}</template>
+            </el-table-column>
             <el-table-column label="状态" width="80">
               <template #default="{ row }">
                 <el-tag size="small" :type="couponStatusTag(row.status)">{{ couponStatusLabel(row.status) }}</el-tag>
@@ -251,6 +269,9 @@
           <el-table v-else-if="customerVouchers.length" :data="customerVouchers" size="small" border>
             <el-table-column prop="template_name" label="名称" min-width="100" />
             <el-table-column prop="summary" label="规则" min-width="110" />
+            <el-table-column label="发券人" width="90">
+              <template #default="{ row }">{{ row.issued_by_name || '—' }}</template>
+            </el-table-column>
             <el-table-column label="状态" width="80">
               <template #default="{ row }">
                 <el-tag size="small" :type="couponStatusTag(row.status)">{{ couponStatusLabel(row.status) }}</el-tag>
@@ -695,6 +716,7 @@ onMounted(async () => {
 
 <style scoped>
 .muted { color: #999; }
+.bal-sub { font-size: 12px; margin-top: 2px; line-height: 1.3; }
 .tip { font-size: 13px; margin: 4px 0 10px; }
 .avatar-thumb {
   width: 40px;

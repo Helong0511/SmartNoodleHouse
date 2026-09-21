@@ -419,6 +419,20 @@ class CouponService:
                     "store_restricted": bool(getattr(cc, "issued_at_store_id", None)),
                 }
             )
+        issuer_ids = list({int(it["issued_by_user_id"]) for it in items if it.get("issued_by_user_id")})
+        if issuer_ids:
+            from app.models import User
+
+            issuer_map = {
+                u.id: (u.display_name or u.username)
+                for u in (await db.execute(select(User).where(User.id.in_(issuer_ids)))).scalars().all()
+            }
+            for it in items:
+                uid = it.get("issued_by_user_id")
+                it["issued_by_name"] = issuer_map.get(int(uid)) if uid else None
+        else:
+            for it in items:
+                it["issued_by_name"] = None
         return items, int(total)
 
     @staticmethod

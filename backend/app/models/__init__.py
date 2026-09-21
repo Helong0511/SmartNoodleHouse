@@ -185,6 +185,7 @@ class BalanceLedger(Base):
     refund_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("payment_refunds.id"), unique=True, default=None
     )
+    operator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), default=None, index=True)
     entry_type: Mapped[str] = mapped_column(String(30))
     delta_principal: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     delta_gift: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))

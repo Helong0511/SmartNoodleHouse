@@ -32,17 +32,20 @@ PLACEHOLDER_NICKNAMES = frozenset({"联调员", "面馆会员", "微信用户", 
 class CustomerService:
     @staticmethod
     def keyword_condition(keyword: str | None):
-        """昵称 / 显示名 / 手机 / 顾客编号 模糊匹配。"""
+        """昵称 / 显示名 / 手机 / 顾客编号 模糊匹配；纯数字时额外精确匹配 ID。"""
         kw = (keyword or "").strip()
         if not kw:
             return None
         like = f"%{kw}%"
-        return or_(
+        clauses = [
             Customer.display_name.like(like),
             Customer.nickname.like(like),
             Customer.phone.like(like),
             Customer.customer_no.like(like),
-        )
+        ]
+        if kw.isdigit():
+            clauses.append(Customer.id == int(kw))
+        return or_(*clauses)
 
     @staticmethod
     async def search_active_customers(

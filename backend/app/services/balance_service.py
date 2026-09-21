@@ -202,6 +202,7 @@ class BalanceService:
         delta_gift: Decimal = Decimal("0"),
         store_id: int | None = None,
         remark: str | None = None,
+        operator_id: int | None = None,
     ) -> BalanceLedger:
         dp = money(delta_principal)
         dg = money(delta_gift)
@@ -221,6 +222,7 @@ class BalanceService:
         row = BalanceLedger(
             customer_id=cust.id,
             store_id=store_id,
+            operator_id=int(operator_id) if operator_id else None,
             entry_type="ADJUST",
             delta_principal=dp,
             delta_gift=dg,

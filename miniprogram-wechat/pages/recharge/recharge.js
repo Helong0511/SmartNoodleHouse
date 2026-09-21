@@ -4,6 +4,56 @@ const payUtil = require('../../utils/pay')
 const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function markMemberWalletDirty(wallet) {
+  try {
+    const app = getApp()
+    if (!app || !app.globalData) return
+    app.globalData.walletDirty = true
+    app.globalData.prefsAt = 0
+    if (wallet && wallet.balance_total != null) {
+      app.globalData.walletSnapshot = wallet
+    }
+  } catch (_) { /* ignore */ }
+}
+
+function applyWalletLocal(page, wallet) {
+  if (!wallet) return
+  page.setData({
+    balanceTotal: wallet.balance_total || '0.00',
+    balancePrincipal: wallet.balance_principal || '0.00',
+    balanceGift: wallet.balance_gift || '0.00'
+  })
+}
+
+async function confirmRechargePaid(rechargeId, maxTries) {
+  const n = maxTries || 8
+  let last = null
+  for (let i = 0; i < n; i++) {
+    last = await api.post(`/wallet/recharge/${rechargeId}/sync`, {})
+    if (last && (last.status === 'PAID' || last.recharge_status === 'PAID' || last.already_paid)) {
+      return last
+    }
+    await sleep(700 + i * 200)
+  }
+  return last
+}
+
+function goMemberAfterSuccess() {
+  markMemberWalletDirty()
+  wx.showToast({ title: '充值成功', icon: 'success' })
+  setTimeout(() => {
+    wx.navigateBack({
+      fail: () => {
+        wx.switchTab({ url: '/pages/member/member' })
+      }
+    })
+  }, 500)
+}
+
 Page({
   data: {
     packages: [],
@@ -70,22 +120,34 @@ Page({
         idempotency_key: `rc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
       })
       if (payRes && (payRes.status === 'PAID' || payRes.already_paid || payRes.mock_settled)) {
-        wx.showToast({ title: '充值成功', icon: 'success' })
-        await this.bootstrap()
+        if (payRes.wallet) applyWalletLocal(this, payRes.wallet)
+        else await this.bootstrap()
+        markMemberWalletDirty(payRes.wallet)
+        goMemberAfterSuccess()
         return
       }
       const rechargeId = payRes && payRes.id
       await payUtil.requestWechatPay(payRes)
-      if (rechargeId) {
-        const synced = await api.post(`/wallet/recharge/${rechargeId}/sync`, {})
-        if (synced && (synced.status === 'PAID' || synced.recharge_status === 'PAID')) {
-          wx.showToast({ title: '充值成功', icon: 'success' })
-          await this.bootstrap()
-          return
-        }
+      if (!rechargeId) {
+        wx.showToast({ title: '支付结果确认中', icon: 'none' })
+        await this.bootstrap()
+        return
       }
-      wx.showToast({ title: '支付结果确认中', icon: 'none' })
-      await this.bootstrap()
+      const synced = await confirmRechargePaid(rechargeId)
+      if (synced && (synced.status === 'PAID' || synced.recharge_status === 'PAID' || synced.already_paid)) {
+        if (synced.wallet) applyWalletLocal(this, synced.wallet)
+        else await this.bootstrap()
+        markMemberWalletDirty(synced.wallet)
+        goMemberAfterSuccess()
+        return
+      }
+      markMemberWalletDirty(synced && synced.wallet)
+      wx.showToast({ title: '支付已提交，余额稍后更新', icon: 'none' })
+      setTimeout(() => {
+        wx.navigateBack({
+          fail: () => wx.switchTab({ url: '/pages/member/member' })
+        })
+      }, 600)
     } catch (e) {
       if (!(e && e.payCancel)) {
         wx.showToast({ title: (e && e.message) || '充值失败', icon: 'none' })

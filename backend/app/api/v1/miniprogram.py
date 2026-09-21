@@ -721,6 +721,14 @@ async def patch_member_profile(
         completed=True if (data.nickname or avatar) else None,
     )
     CustomerService.fill_customer_display_if_empty(customer, nickname=data.nickname, avatar_url=avatar)
+    # 主动更新头像时同步顾客表（后台顾客管理看的是 customers.avatar_url）
+    if avatar:
+        customer.avatar_url = avatar
+    if data.nickname and CustomerService.is_meaningful_nickname(data.nickname):
+        n = str(data.nickname).strip()
+        customer.nickname = n
+        if not customer.display_name:
+            customer.display_name = n
     CustomerService.refresh_profile_status(customer)
     await db.flush()
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)
@@ -777,8 +785,9 @@ async def upload_member_avatar(
     url = await save_upload(file, subdir="avatars")
     channel = _customer_channel_from_request(request, "wechat")
     # 游客也可上传头像（仅写资料，不激活会员）
-    await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url)
-    CustomerService.fill_customer_display_if_empty(customer, avatar_url=url)
+    await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url, completed=True)
+    # 用户主动换头像：同步顾客表，供后台顾客管理展示
+    customer.avatar_url = url
     CustomerService.refresh_profile_status(customer)
     await db.flush()
     await AuditService.log(
@@ -815,8 +824,8 @@ async def import_member_avatar_from_url(
     """chooseAvatar 在支付宝真机常返回 CDN 地址，无法作为 uploadFile 的 filePath，改由服务端拉取转存。"""
     url = await fetch_and_save_remote_image(data.source_url, subdir="avatars")
     channel = _customer_channel_from_request(request, "wechat")
-    await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url)
-    CustomerService.fill_customer_display_if_empty(customer, avatar_url=url)
+    await CustomerService.save_channel_profile(db, customer.id, channel, avatar_url=url, completed=True)
+    customer.avatar_url = url
     CustomerService.refresh_profile_status(customer)
     await db.flush()
     await AuditService.log(

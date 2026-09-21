@@ -1,0 +1,7 @@
+{
+  "defaultTitle": "充值记录",
+  "pullRefresh": true,
+  "usingComponents": {
+    "skeleton": "/components/skeleton/skeleton"
+  }
+}

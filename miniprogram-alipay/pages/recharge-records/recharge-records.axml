@@ -1,0 +1,48 @@
+<view class="page">
+  <privacy-popup id="privacy-popup" />
+
+  <view class="scope-tabs">
+    <view class="scope-item" onTap="goOrders">点餐订单</view>
+    <view class="scope-item active">充值记录</view>
+  </view>
+
+  <scroll-view class="tabs" scroll-x>
+    <view
+      a:for="{{tabs}}"
+      a:key="key"
+      class="tab-item {{activeTab === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      onTap="onTabChange"
+    >{{item.label}}</view>
+  </scroll-view>
+
+  <skeleton a:if="{{loading && !records.length}}" type="order" rows="{{4}}" />
+
+  <view class="empty" a:elif="{{!loading && !records.length}}">
+    <view class="empty-title">暂无充值记录</view>
+    <view class="empty-desc">充值成功后可在此查看到账明细</view>
+    <button class="btn-primary" onTap="goRecharge">去充值</button>
+  </view>
+
+  <block a:else>
+    <view class="card" a:for="{{records}}" a:key="id">
+      <view class="card-head">
+        <text class="ono">{{item.recharge_no}}</text>
+        <text class="st {{item.statusClass}}">{{item.status_label || item.status}}</text>
+      </view>
+      <view class="title">{{item.package_name || '会员储值'}}</view>
+      <view class="meta" a:if="{{item.store_name}}">{{item.store_name}}</view>
+      <view class="foot">
+        <view class="amount">
+          实付 ¥{{item.pay_amount}}
+          <text class="gift" a:if="{{item.credit_gift > 0}}"> · 到账 ¥{{item.credit_total}}</text>
+        </view>
+        <view class="time">{{item.timeText}} · {{item.channel_label || item.channel || ''}}</view>
+      </view>
+    </view>
+    <view class="list-foot">
+      <text a:if="{{loadingMore}}">加载中...</text>
+      <text a:elif="{{noMore}}">— 没有更多了 —</text>
+    </view>
+  </block>
+</view>

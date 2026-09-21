@@ -213,5 +213,9 @@ Page({
 
   goMenu() {
     my.switchTab({ url: '/pages/menu/menu' })
+  },
+
+  goRechargeRecords() {
+    my.navigateTo({ url: '/pages/recharge-records/recharge-records' })
   }
 })

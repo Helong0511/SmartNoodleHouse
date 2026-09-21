@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS `balance_ledger` (
   `recharge_order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联充值单 → recharge_orders.id',
   `payment_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联支付单 → payments.id',
   `refund_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联退款单 → payment_refunds.id',
+  `operator_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '操作员工 → users.id（人工调账等）',
   `entry_type` varchar(30) NOT NULL COMMENT 'TOPUP=充值入账 | PAY=余额消费 | REFUND_RESTORE=退款回补 | ADJUST=人工调账 | MERGE=合并',
   `delta_principal` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '本金变动（可负）',
   `delta_gift` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '赠送金变动（可负）',
@@ -78,9 +79,11 @@ CREATE TABLE IF NOT EXISTS `balance_ledger` (
   INDEX `idx_bl_customer_created`(`customer_id` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_bl_store_created`(`store_id` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_bl_payment`(`payment_id` ASC) USING BTREE,
+  INDEX `idx_bl_operator`(`operator_id` ASC) USING BTREE,
   CONSTRAINT `fk_bl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_bl_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_bl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_bl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_bl_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员储值流水（本金/赠送金）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
