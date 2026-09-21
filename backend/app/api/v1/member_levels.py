@@ -13,7 +13,7 @@ router = APIRouter(prefix="/member-levels", tags=["会员等级"])
 
 @router.get("", dependencies=[require_permission("customer:read")])
 async def list_member_levels(request: Request, db: DbSession, user: CurrentUser):
-    """后台：银卡/金卡升级积分门槛与折扣。"""
+    """后台：会员等级列表（读库 member_levels，按积分升序）。"""
     levels = await CustomerService.list_levels_ordered(db)
     counts_q = (
         select(Customer.member_level_id, func.count())
@@ -39,7 +39,7 @@ async def update_member_levels(
     db: DbSession,
     user: CurrentUser,
 ):
-    """调整银卡/金卡升级积分与折扣；默认保存后重算顾客等级。"""
+    """调整各等级升级积分与折扣；默认保存后重算顾客等级。"""
     try:
         result = await CustomerService.apply_level_updates(
             db, [item.model_dump() for item in data.items], recalculate=data.recalculate

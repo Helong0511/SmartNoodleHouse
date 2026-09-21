@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>会员等级</h2>
-        <p class="hint">{{ pointsRule }}。可调整银卡、金卡的升级积分与折扣；保存后按新门槛重算全部顾客等级。</p>
+        <p class="hint">{{ pointsRule }}。可调整各等级的升级积分与折扣；保存后按新门槛重算全部顾客等级。</p>
       </div>
       <div class="header-actions">
         <el-button @click="load">刷新</el-button>
@@ -19,7 +19,7 @@
       :closable="false"
       class="tip"
       title="规则说明"
-      description="普通会员为起始档，升级积分为 0 且不可改。银卡、金卡须填写更高积分门槛，且金卡门槛必须高于银卡。折扣率 1 表示无折扣，0.98 表示 9.8 折。"
+      description="列表来自数据库 member_levels，按升级积分升序展示。普通会员为起始档（积分为 0 不可改）；更高档门槛须严格递增。折扣率 1 表示无折扣，0.90 表示 9 折。"
     />
 
     <el-table :data="rows" border style="margin-top:16px">
@@ -134,11 +134,14 @@ async function load() {
 
 async function save() {
   if (!rows.value.length) return
-  const silver = rows.value.find((r) => r.name === '银卡会员')
-  const gold = rows.value.find((r) => r.name === '金卡会员')
-  if (silver && gold && gold.min_points <= silver.min_points) {
-    ElMessage.warning('金卡升级积分必须高于银卡')
-    return
+  const ordered = [...rows.value].sort((a, b) => a.min_points - b.min_points)
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i].min_points <= ordered[i - 1].min_points) {
+      ElMessage.warning(
+        `升级积分须递增：${ordered[i - 1].name}（${ordered[i - 1].min_points}）须低于 ${ordered[i].name}（${ordered[i].min_points}）`,
+      )
+      return
+    }
   }
   saving.value = true
   try {

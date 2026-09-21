@@ -285,7 +285,23 @@
           <p class="hint">仅可选总部共享或本店规格组</p>
         </el-form-item>
         <el-form-item v-if="form.id" label="口味画像">
-          <div class="taste-box">
+          <div class="taste-entry">
+            <el-button link type="primary" @click="taste.expanded = !taste.expanded">
+              {{ taste.expanded ? '收起口味画像' : '展开口味画像' }}
+            </el-button>
+            <el-tag
+              v-if="!taste.expanded"
+              size="small"
+              :type="taste.source === 'MANUAL' ? 'warning' : 'info'"
+            >
+              {{ taste.source === 'MANUAL' ? '含手动调整' : '系统自动' }}
+            </el-tag>
+            <span v-if="!taste.expanded && taste.tags.length" class="hint">
+              已有 {{ taste.tags.length }} 个标签
+            </span>
+            <span v-if="!taste.expanded" class="hint">智能推荐用，非点餐规格</span>
+          </div>
+          <div v-show="taste.expanded" class="taste-box">
             <div class="taste-head">
               <el-tag size="small" :type="taste.source === 'MANUAL' ? 'warning' : 'success'">
                 {{ taste.source === 'MANUAL' ? '含手动调整' : '系统自动推导' }}
@@ -296,7 +312,7 @@
               </el-button>
             </div>
             <div v-for="d in taste.dimList" :key="d.key" class="taste-dim-row">
-              <el-checkbox v-model="taste.dimManual[d.key]" size="small">手动</el-checkbox>
+              <el-checkbox v-model="taste.dimManual[d.key]" size="small" class="taste-dim-check">手动</el-checkbox>
               <span class="taste-dim-label">{{ d.label }}</span>
               <el-slider
                 :model-value="taste.dimValue[d.key] ?? 0"
@@ -304,8 +320,9 @@
                 :max="d.max"
                 :step="1"
                 :disabled="!taste.dimManual[d.key]"
-                :marks="tasteMarks(d)"
+                :marks="taste.dimManual[d.key] ? tasteMarks(d) : undefined"
                 class="taste-slider"
+                :class="{ 'is-with-marks': taste.dimManual[d.key] }"
                 @update:model-value="(v: number) => (taste.dimValue[d.key] = v)"
               />
             </div>
@@ -321,17 +338,20 @@
               >{{ t }}</el-tag>
               <span v-if="!taste.tags.length" class="hint">暂无标签</span>
             </div>
-            <div class="taste-vocab">
-              <span class="hint">点选添加：</span>
-              <el-tag
-                v-for="v in taste.vocab"
-                :key="v"
-                size="small"
-                :effect="isTagActive(v) ? 'dark' : 'plain'"
-                class="tag-gap vocab-tag"
-                @click="toggleAddTag(v)"
-              >{{ v }}</el-tag>
-            </div>
+            <el-collapse class="taste-vocab-collapse">
+              <el-collapse-item title="点选添加标签（词表）" name="vocab">
+                <div class="taste-vocab">
+                  <el-tag
+                    v-for="v in taste.vocab"
+                    :key="v"
+                    size="small"
+                    :effect="isTagActive(v) ? 'dark' : 'plain'"
+                    class="tag-gap vocab-tag"
+                    @click="toggleAddTag(v)"
+                  >{{ v }}</el-tag>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
             <div class="taste-custom">
               <el-input
                 v-model="taste.customTag"
@@ -346,7 +366,7 @@
                 保存口味调整
               </el-button>
             </div>
-            <p class="hint">系统按商品名/描述/规格组自动推导；手动调整后不会被自动重算覆盖，「恢复自动」可交还系统。</p>
+            <p class="hint">系统按商品名/描述/规格组自动推导；勾选「手动」后再调滑块。「恢复自动」可交还系统。</p>
           </div>
         </el-form-item>
         <el-form-item label="描述">
@@ -470,6 +490,7 @@ const VOCAB_FALLBACK = [
 
 const taste = reactive({
   loaded: false,
+  expanded: false,
   saving: false,
   source: 'AUTO',
   derivedFrom: '',
@@ -487,6 +508,7 @@ const rebuilding = ref(false)
 
 function initTaste(tp: any) {
   taste.loaded = !!form.id
+  taste.expanded = false
   taste.source = tp?.source || 'AUTO'
   taste.derivedFrom = tp?.derived_from || ''
   const meta = tp?.dimension_meta || {}
@@ -1242,13 +1264,54 @@ onMounted(async () => {
   gap: 8px;
   margin-bottom: 4px;
 }
-.taste-box { width: 100%; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; background: #fafbfc; }
+.taste-box { width: 100%; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; background: #fafbfc; margin-top: 8px; }
+.taste-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .taste-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.taste-dim-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.taste-dim-label { width: 40px; color: #606266; font-size: 13px; flex-shrink: 0; }
-.taste-slider { flex: 1; margin-right: 8px; }
+.taste-dim-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.taste-dim-check { margin-top: 4px; flex-shrink: 0; }
+.taste-dim-label {
+  width: 40px;
+  color: #606266;
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 32px;
+}
+.taste-slider {
+  flex: 1;
+  margin-right: 8px;
+  min-width: 0;
+}
+.taste-slider.is-with-marks {
+  padding-bottom: 22px;
+  margin-bottom: 4px;
+}
+.taste-slider :deep(.el-slider__marks-text) {
+  font-size: 11px;
+  color: #909399;
+  white-space: nowrap;
+  margin-top: 2px;
+}
 .taste-tags { margin: 8px 0; min-height: 24px; }
-.taste-vocab { margin: 6px 0; line-height: 2; }
+.taste-vocab-collapse {
+  border: none;
+  margin: 4px 0;
+  --el-collapse-header-height: 36px;
+}
+.taste-vocab-collapse :deep(.el-collapse-item__header) {
+  background: transparent;
+  border: none;
+  color: #909399;
+  font-size: 12px;
+  font-weight: 400;
+}
+.taste-vocab-collapse :deep(.el-collapse-item__wrap) { border: none; background: transparent; }
+.taste-vocab-collapse :deep(.el-collapse-item__content) { padding-bottom: 4px; }
+.taste-vocab { line-height: 2; }
 .vocab-tag { cursor: pointer; }
 .taste-custom { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 </style>
