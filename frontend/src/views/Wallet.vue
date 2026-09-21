@@ -160,11 +160,18 @@
                 <div>充值 {{ row.recharge_no || `#${row.recharge_order_id}` }}</div>
                 <div v-if="row.recharge_order_id" class="muted">ID {{ row.recharge_order_id }}</div>
               </div>
+              <div v-else-if="row.biz_no">
+                <div>{{ row.entry_type === 'ADJUST' ? '调账' : '单号' }} {{ row.biz_no }}</div>
+              </div>
               <span v-else class="muted">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作人" width="110">
-            <template #default="{ row }">{{ row.operator_name || '—' }}</template>
+          <el-table-column label="操作人" min-width="140">
+            <template #default="{ row }">
+              <div>{{ row.operator_name || '—' }}</div>
+              <div v-if="row.operator_kind === 'CUSTOMER'" class="muted">顾客自助</div>
+              <div v-else-if="row.operator_kind === 'STAFF'" class="muted">员工</div>
+            </template>
           </el-table-column>
           <el-table-column prop="delta_principal" label="本金变动" width="110" />
           <el-table-column prop="delta_gift" label="赠送变动" width="110" />
@@ -642,14 +649,15 @@ async function submitAdjust() {
   )
   adjusting.value = true
   try {
-    await api.post('/wallet/adjust', {
+    const res: any = await api.post('/wallet/adjust', {
       customer_id: adjust.customer_id,
       delta_principal: adjust.delta_principal,
       delta_gift: adjust.delta_gift,
       remark: adjust.remark || undefined,
       store_id: auth.isSuperAdmin ? adjust.store_id || undefined : undefined,
     })
-    ElMessage.success('调账成功')
+    const bizNo = res?.data?.biz_no || res?.biz_no
+    ElMessage.success(bizNo ? `调账成功，单号 ${bizNo}` : '调账成功')
     adjust.delta_principal = 0
     adjust.delta_gift = 0
     adjust.remark = ''

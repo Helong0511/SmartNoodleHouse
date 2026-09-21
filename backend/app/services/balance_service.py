@@ -6,13 +6,21 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.biz_no import generate_no
 from app.core.exceptions import AppException
-from app.core.response import money, now_local
-from app.models import BalanceLedger, Customer, RechargeOrder
+from app.core.response import money
+from app.models import BalanceLedger, Customer, RechargeOrder, Store
 
 
 def _wallet_total(c: Customer) -> Decimal:
     return money(getattr(c, "balance_principal", 0) or 0) + money(getattr(c, "balance_gift", 0) or 0)
+
+
+async def _store_no(db: AsyncSession, store_id: int | None) -> str | None:
+    if not store_id:
+        return None
+    store = await db.get(Store, int(store_id))
+    return (store.store_no if store else None) or f"S{store_id}"
 
 
 class BalanceService:
@@ -34,7 +42,7 @@ class BalanceService:
         recharge: RechargeOrder,
         payment_id: int | None = None,
     ) -> BalanceLedger | None:
-        """充值成功入账（幂等：同一 recharge_order 仅一条 TOPUP）。"""
+        """充值成功入账（幂等：同一 recharge_order 仅一条 TOPUP）。操作人=顾客本人。"""
         if not recharge or not recharge.customer_id:
             return None
         existing = (
@@ -62,12 +70,14 @@ class BalanceService:
             store_id=recharge.store_id,
             recharge_order_id=recharge.id,
             payment_id=payment_id,
+            # 顾客自助充值：无员工 operator_id；操作人展示走顾客本人
+            biz_no=recharge.recharge_no,
             entry_type="TOPUP",
             delta_principal=dp,
             delta_gift=dg,
             principal_after=money(cust.balance_principal),
             gift_after=money(cust.balance_gift),
-            remark=f"recharge_no={recharge.recharge_no}",
+            remark=f"顾客自助充值 recharge_no={recharge.recharge_no}",
         )
         db.add(row)
         await db.flush()
@@ -83,8 +93,9 @@ class BalanceService:
         amount: Decimal,
         store_id: int | None = None,
         payment_id: int | None = None,
+        order_no: str | None = None,
     ) -> BalanceLedger:
-        """余额支付扣款：赠送金优先，不足再扣本金。幂等按 order_id。"""
+        """余额支付扣款：赠送金优先，不足再扣本金。幂等按 order_id。操作人=顾客本人。"""
         pay = money(amount)
         if pay <= 0:
             raise AppException(40051, "余额扣款金额非法")
@@ -113,17 +124,23 @@ class BalanceService:
         use_principal = pay - use_gift
         cust.balance_gift = gift - use_gift
         cust.balance_principal = principal - use_principal
+        # 关联单号优先用订单号；无则生成钱包消费单号
+        biz = (order_no or "").strip() or None
+        if not biz:
+            sno = await _store_no(db, store_id)
+            biz = generate_no("WP", sno, "00")
         row = BalanceLedger(
             customer_id=cust.id,
             store_id=store_id,
             order_id=order_id,
             payment_id=payment_id,
+            biz_no=biz,
             entry_type="PAY",
             delta_principal=-use_principal,
             delta_gift=-use_gift,
             principal_after=money(cust.balance_principal),
             gift_after=money(cust.balance_gift),
-            remark=f"order_id={order_id}",
+            remark=f"顾客余额消费 order_id={order_id}",
         )
         db.add(row)
         await db.flush()
@@ -176,17 +193,19 @@ class BalanceService:
         ).scalar_one()
         cust.balance_principal = money(cust.balance_principal or 0) + principal_share
         cust.balance_gift = money(cust.balance_gift or 0) + gift_share
+        sno = await _store_no(db, store_id)
         row = BalanceLedger(
             customer_id=cust.id,
             store_id=store_id,
             order_id=order_id,
             refund_id=refund_id,
+            biz_no=generate_no("WR", sno, "00"),
             entry_type="REFUND_RESTORE",
             delta_principal=principal_share,
             delta_gift=gift_share,
             principal_after=money(cust.balance_principal),
             gift_after=money(cust.balance_gift),
-            remark=f"refund_id={refund_id}",
+            remark=f"余额退款回补 refund_id={refund_id}",
         )
         db.add(row)
         await db.flush()
@@ -219,10 +238,13 @@ class BalanceService:
             raise AppException(40091, "调账后余额不能为负")
         cust.balance_principal = new_p
         cust.balance_gift = new_g
+        sno = await _store_no(db, store_id)
+        adjust_no = generate_no("WA", sno, "00")
         row = BalanceLedger(
             customer_id=cust.id,
             store_id=store_id,
             operator_id=int(operator_id) if operator_id else None,
+            biz_no=adjust_no,
             entry_type="ADJUST",
             delta_principal=dp,
             delta_gift=dg,

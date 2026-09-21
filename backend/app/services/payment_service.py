@@ -681,6 +681,7 @@ class PaymentService:
                     amount=pay_amount,
                     store_id=order.store_id,
                     payment_id=payment.id,
+                    order_no=getattr(order, "order_no", None),
                 )
             except AppException:
                 if payment.status == "PENDING":

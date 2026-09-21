@@ -340,6 +340,28 @@ async def admin_ledger(
         order_no = order_no_map.get(int(r.order_id)) if r.order_id else None
         recharge_no = recharge_no_map.get(int(r.recharge_order_id)) if r.recharge_order_id else None
         op_id = getattr(r, "operator_id", None)
+        biz_no = getattr(r, "biz_no", None)
+        entry = str(r.entry_type or "").upper()
+        # 充值/消费/退款回补：操作人=顾客本人；调账等：员工
+        if op_id:
+            operator_kind = "STAFF"
+            operator_name = op_map.get(int(op_id))
+        elif entry in ("TOPUP", "PAY", "REFUND_RESTORE"):
+            operator_kind = "CUSTOMER"
+            cname = (cust.display_name or cust.nickname) if cust else None
+            operator_name = f"{cname}（顾客本人）" if cname else "顾客本人"
+        else:
+            operator_kind = None
+            operator_name = None
+        ref_no = order_no or recharge_no or biz_no
+        if order_no:
+            ref_kind = "ORDER"
+        elif recharge_no:
+            ref_kind = "RECHARGE"
+        elif biz_no:
+            ref_kind = "ADJUST" if entry == "ADJUST" else "BIZ"
+        else:
+            ref_kind = None
         items.append(
             {
                 "id": r.id,
@@ -354,12 +376,14 @@ async def admin_ledger(
                 "order_no": order_no,
                 "recharge_order_id": r.recharge_order_id,
                 "recharge_no": recharge_no,
-                "ref_no": order_no or recharge_no,
-                "ref_kind": "ORDER" if order_no else ("RECHARGE" if recharge_no else None),
+                "biz_no": biz_no,
+                "ref_no": ref_no,
+                "ref_kind": ref_kind,
                 "payment_id": r.payment_id,
                 "refund_id": r.refund_id,
                 "operator_id": int(op_id) if op_id else None,
-                "operator_name": op_map.get(int(op_id)) if op_id else None,
+                "operator_kind": operator_kind,
+                "operator_name": operator_name,
                 "entry_type": r.entry_type,
                 "delta_principal": str(money(r.delta_principal)),
                 "delta_gift": str(money(r.delta_gift)),
@@ -433,12 +457,14 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
             "delta_gift": str(money(data.delta_gift)),
             "remark": data.remark,
             "operator_id": user.id,
+            "biz_no": getattr(row, "biz_no", None),
         },
         request=request,
     )
     return success(
         {
             "id": row.id,
+            "biz_no": getattr(row, "biz_no", None),
             "principal_after": str(money(row.principal_after)),
             "gift_after": str(money(row.gift_after)),
             "operator_id": user.id,
