@@ -364,10 +364,6 @@ Page({
     my.navigateTo({ url: '/pages/recharge/recharge' })
   },
 
-  goRechargeRecords() {
-    my.navigateTo({ url: '/pages/recharge-records/recharge-records' })
-  },
-
   async activateSmartMember() {
     if (this.data.activatingMember || this.data.isMember) return
     try {

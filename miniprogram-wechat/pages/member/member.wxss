@@ -73,8 +73,21 @@
 .discount { color: #ff6b35; font-size: 24rpx; font-weight: 600; }
 .hint { color: #999; font-size: 24rpx; }
 .points-line { color: #666; font-size: 24rpx; margin-top: 10rpx; }
-.balance-line { display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap; }
-.recharge-link { color: #ff6b35; font-size: 24rpx; }
+.balance-line { display: flex; align-items: center; gap: 16rpx; flex-wrap: wrap; }
+.recharge-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 52rpx;
+  padding: 0 28rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #fff;
+  background: #ff6b35;
+  border-radius: 26rpx;
+  line-height: 1;
+  box-sizing: border-box;
+}
 .pts { color: #ff6b35; font-weight: 700; font-size: 28rpx; }
 .muted-disc { color: #999; font-weight: 400; }
 .progress-box { margin-top: 24rpx; padding-top: 20rpx; border-top: 1px solid #f0f0f0; }

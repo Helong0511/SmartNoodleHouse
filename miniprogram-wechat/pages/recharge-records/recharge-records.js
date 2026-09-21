@@ -1,5 +1,6 @@
 const api = require('../../utils/api')
 const auth = require('../../utils/auth')
+const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
 
 const TABS = [
@@ -17,13 +18,6 @@ function formatTime(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function statusClass(status) {
-  const s = String(status || '').toUpperCase()
-  if (s === 'PAID') return 'paid'
-  if (s === 'PENDING') return 'pending'
-  return ''
-}
-
 Page({
   data: {
     tabs: TABS,
@@ -34,12 +28,36 @@ Page({
     totalPages: 0,
     loading: false,
     loadingMore: false,
-    noMore: false
+    noMore: false,
+    storeId: null,
+    storeName: '',
+    storeNo: '',
+    storeAddress: '',
+    storePhone: '',
+    tableName: '',
+    tableNo: '',
+    seatLabel: '桌号'
   },
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
+    const ctx = dineCtx.currentDisplay()
+    this.applyDineContext(ctx)
     this.loadRecords(true, this.data.records.length > 0)
+    dineCtx.ensureDineContext().then((fresh) => {
+      this.applyDineContext(fresh)
+    })
+  },
+
+  applyDineContext(ctx) {
+    if (!ctx) return
+    this.setData(dineCtx.pageDineFields(ctx))
+  },
+
+  onTableChange(e) {
+    const ctx = e.detail
+    if (!ctx) return
+    this.applyDineContext(ctx)
   },
 
   onPullDownRefresh() {
@@ -78,8 +96,7 @@ Page({
       const batch = ((res && res.items) || []).map((r) => ({
         ...r,
         credit_gift: Number(r.credit_gift || 0),
-        timeText: formatTime(r.paid_at || r.created_at),
-        statusClass: statusClass(r.status)
+        timeText: formatTime(r.paid_at || r.created_at)
       }))
       const totalPages = (res && res.total_pages) || 0
       const records = reset ? batch : this.data.records.concat(batch)
