@@ -81,7 +81,7 @@ async def test_orders_same_timestamp_pagination_no_dup_or_loss(db_session: Async
             from httpx import ASGITransport, AsyncClient
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                ids, total = await _fetch_all_pages(ac, "/api/v1/orders", 10, 3)
+                ids, total = await _fetch_all_pages(ac, "/api/orders", 10, 3)
     finally:
         app.dependency_overrides.clear()
 
@@ -151,7 +151,7 @@ async def _fetch_products(client, store_id, pages):
     total = 0
     for p in range(1, pages + 1):
         res = await client.get(
-            "/api/v1/products",
+            "/api/products",
             params={"page": p, "page_size": 10, "store_id": store_id, "status": "ON_SALE"},
         )
         assert res.status_code == 200, res.text
@@ -219,7 +219,7 @@ async def test_products_store_stop_override_total_matches_rows(db_session: Async
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 for p in range(1, 4):  # 26 条 / 每页10 = 3 页（10/10/6）
                     res = await ac.get(
-                        "/api/v1/products",
+                        "/api/products",
                         params={"page": p, "page_size": 10, "store_id": store.id, "status": "ON_SALE"},
                     )
                     assert res.status_code == 200, res.text

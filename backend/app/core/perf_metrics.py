@@ -30,7 +30,7 @@ def normalize_route(path: str, route_template: str | None = None) -> str:
     if not raw:
         return "unknown"
     if "{" in raw:
-        # /api/v1/orders/{order_id} → /api/v1/orders/:id
+        # /api/orders/{order_id} → /api/orders/:id
         raw = re.sub(r"\{[^}/]+\}", ":id", raw)
     raw = _UUID_SEG.sub("/:id", raw)
     raw = _HEX_SEG.sub("/:id", raw)

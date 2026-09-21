@@ -65,7 +65,7 @@ async def http_repro(cust, table, prod, coupon_id):
     }
     async with httpx.AsyncClient(base_url="http://127.0.0.1:8000") as client:
         r = await client.post(
-            "/api/v1/orders",
+            "/api/orders",
             json=payload,
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,

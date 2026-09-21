@@ -16,6 +16,6 @@ export function openStaffWebSocket(
     }
   }
   const query = qs.toString()
-  const url = `${proto}://${location.host}/api/v1/ws/${channel}${query ? `?${query}` : ''}`
+  const url = `${proto}://${location.host}/api/ws/${channel}${query ? `?${query}` : ''}`
   return new WebSocket(url, token ? ['access_token', token] : undefined)
 }

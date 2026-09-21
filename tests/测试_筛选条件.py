@@ -91,17 +91,17 @@ async def test_product_low_stock_store_coalesce_and_tag(db_session: AsyncSession
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 low = await ac.get(
-                    "/api/v1/products",
+                    "/api/products",
                     params={"store_id": 9100, "status": "ON_SALE", "low_stock": "true",
                             "stock_threshold": 10, "page_size": 50},
                 )
                 hot = await ac.get(
-                    "/api/v1/products",
+                    "/api/products",
                     params={"store_id": 9100, "status": "ON_SALE", "tag": "HOT", "page_size": 50},
                 )
                 # 超管全店视角按品牌库存判定：覆盖 3 不应让 p2 命中
                 all_low = await ac.get(
-                    "/api/v1/products",
+                    "/api/products",
                     params={"status": "ON_SALE", "low_stock": "true", "stock_threshold": 10,
                             "page_size": 200},
                 )
@@ -148,10 +148,10 @@ async def test_order_keyword_phone_and_operator_filter(db_session: AsyncSession)
     try:
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:read"})):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                by_phone = await ac.get("/api/v1/orders", params={"keyword": "13900000001"})
-                by_name = await ac.get("/api/v1/orders", params={"keyword": "王五"})
-                by_op = await ac.get("/api/v1/orders", params={"operator_id": 9202})
-                no_match = await ac.get("/api/v1/orders", params={"keyword": "13999999999"})
+                by_phone = await ac.get("/api/orders", params={"keyword": "13900000001"})
+                by_name = await ac.get("/api/orders", params={"keyword": "王五"})
+                by_op = await ac.get("/api/orders", params={"operator_id": 9202})
+                no_match = await ac.get("/api/orders", params={"keyword": "13999999999"})
     finally:
         _clear_overrides()
 
@@ -193,10 +193,10 @@ async def test_payment_amount_range_and_operator_filter(db_session: AsyncSession
     try:
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"payment:read"})):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                min_res = await ac.get("/api/v1/payments", params={"amount_min": 10})
-                range_res = await ac.get("/api/v1/payments",
+                min_res = await ac.get("/api/payments", params={"amount_min": 10})
+                range_res = await ac.get("/api/payments",
                                          params={"amount_min": 4, "amount_max": 6})
-                op_res = await ac.get("/api/v1/payments", params={"operator_id": 9302})
+                op_res = await ac.get("/api/payments", params={"operator_id": 9302})
     finally:
         _clear_overrides()
 

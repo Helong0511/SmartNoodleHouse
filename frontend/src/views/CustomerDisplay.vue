@@ -190,7 +190,7 @@ const connLabel = computed(() => {
 })
 
 const publicApi = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 30000,
 })
 

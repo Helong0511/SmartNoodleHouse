@@ -1,4 +1,4 @@
-/** 微信小程序全部日志 → POST /api/v1/client-logs → logs/wechat/ */
+/** 微信小程序全部日志 → POST /api/client-logs → logs/wechat/ */
 const SOURCE = 'wechat'
 const FLUSH_MS = 5000
 const MAX_BATCH = 50

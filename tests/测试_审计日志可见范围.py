@@ -81,7 +81,7 @@ async def _fetch_ids(db_session: AsyncSession, user: SimpleNamespace) -> set[int
     try:
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"audit:read"})):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                res = await ac.get("/api/v1/audit-logs", params={"page": 1, "page_size": 100})
+                res = await ac.get("/api/audit-logs", params={"page": 1, "page_size": 100})
         assert res.status_code == 200, res.text
         body = res.json()
         assert body["code"] == 0
@@ -156,7 +156,7 @@ async def test_cashier_user_id_filter_cannot_bypass_scope(db_session: AsyncSessi
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"audit:read"})):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 res = await ac.get(
-                    "/api/v1/audit-logs",
+                    "/api/audit-logs",
                     params={"page": 1, "page_size": 100, "user_id": _ADMIN},
                 )
         assert res.status_code == 200, res.text

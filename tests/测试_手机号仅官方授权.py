@@ -14,7 +14,7 @@ from app.api.v1 import miniprogram as mp
 from app.core.exceptions import AppException
 
 
-def _request(path: str = "/api/v1/miniprogram/member/phone") -> Request:
+def _request(path: str = "/api/miniprogram/member/phone") -> Request:
     request = Request(
         {
             "type": "http",

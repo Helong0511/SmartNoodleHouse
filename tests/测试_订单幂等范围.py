@@ -140,7 +140,7 @@ async def test_http_create_order_returns_40903_envelope():
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
-                    "/api/v1/orders",
+                    "/api/orders",
                     headers={"Authorization": f"Bearer {token}"},
                     json={
                         "store_id": 1,

@@ -139,7 +139,7 @@ async def test_display_active_api(monkeypatch):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             res = await client.get(
-                "/api/v1/orders/display/active",
+                "/api/orders/display/active",
                 params={"store_id": 1, "token": display_tok},
             )
             assert res.status_code == 200

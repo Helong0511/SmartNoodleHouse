@@ -45,7 +45,7 @@ async def test_store_admin_can_update_own_store(db_session: AsyncSession):
     try:
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"table:manage"})):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                res = await ac.put("/api/v1/settings/stores/9501", json={"name": "改名后"})
+                res = await ac.put("/api/settings/stores/9501", json={"name": "改名后"})
     finally:
         _clear_overrides()
 
@@ -64,7 +64,7 @@ async def test_store_admin_cannot_update_other_store(db_session: AsyncSession):
     try:
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"table:manage"})):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                res = await ac.put("/api/v1/settings/stores/9502", json={"name": "篡改"})
+                res = await ac.put("/api/settings/stores/9502", json={"name": "篡改"})
     finally:
         _clear_overrides()
 

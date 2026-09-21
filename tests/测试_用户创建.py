@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 
 async def _login(client: AsyncClient) -> str:
-    r = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    r = await client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body.get("code") == 0, body
@@ -35,15 +35,15 @@ async def test_create_user_returns_created_at():
         token = await _login(client)
         headers = {"Authorization": f"Bearer {token}"}
 
-        roles = (await client.get("/api/v1/users/roles", headers=headers)).json()["data"]
+        roles = (await client.get("/api/users/roles", headers=headers)).json()["data"]
         cashier = next(r for r in roles if r["code"] == "CASHIER")
-        stores = (await client.get("/api/v1/settings/stores/options", headers=headers)).json()["data"]["items"]
+        stores = (await client.get("/api/settings/stores/options", headers=headers)).json()["data"]["items"]
         assert stores, "测试库需至少一家门店"
         store_id = stores[0]["id"]
 
         username = f"testu_{int(time.time())}"
         r = await client.post(
-            "/api/v1/users",
+            "/api/users",
             headers=headers,
             json={
                 "username": username,

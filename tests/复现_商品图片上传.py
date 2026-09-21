@@ -15,18 +15,18 @@ PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
 )
-BASE = "http://127.0.0.1:8000/api/v1"
+BASE = "http://127.0.0.1:8000/api"
 
 
 @pytest.mark.asyncio
 async def test_upload_product_image_returns_200():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        login = await c.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        login = await c.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
         assert login.status_code == 200
         token = login.json()["data"]["access_token"]
         r = await c.post(
-            "/api/v1/products/1/image",
+            "/api/products/1/image",
             headers={"Authorization": f"Bearer {token}"},
             files={"file": ("t.png", PNG, "image/png")},
         )

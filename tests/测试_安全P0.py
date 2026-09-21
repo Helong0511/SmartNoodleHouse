@@ -99,7 +99,7 @@ def test_eleme_shop_id_extract_no_store_fallback():
 def test_meituan_sign_roundtrip():
     from app.services.delivery_sign import meituan_sign, meituan_verify_callback
 
-    url = "https://example.com/api/v1/delivery/meituan/notify"
+    url = "https://example.com/api/delivery/meituan/notify"
     params = {"order_id": "1", "app_id": "app", "timestamp": "1"}
     secret = "secret"
     params["sig"] = meituan_sign(url, params, secret)

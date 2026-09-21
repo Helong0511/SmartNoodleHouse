@@ -1,4 +1,4 @@
-"""公开健康检查：/health 与 /api/v1/ready。"""
+"""公开健康检查：/health 与 /api/ready。"""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +22,7 @@ async def test_health_ok_when_db_and_redis_up():
         with patch("app.api.v1.health.get_redis", AsyncMock(return_value=AsyncMock(ping=AsyncMock()))):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                for path in ("/health", "/ready", "/api/v1/health", "/api/v1/ready"):
+                for path in ("/health", "/ready", "/api/health", "/api/ready"):
                     res = await client.get(path)
                     assert res.status_code == 200, path
                     body = res.json()

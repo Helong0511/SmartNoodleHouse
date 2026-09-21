@@ -386,7 +386,7 @@ async function openPreview(row: any) {
     const res = await api.post(`/cameras/${row.id}/stream-ticket`)
     const ticket = res.data?.ticket
     if (!ticket) throw new Error('无法签发预览票据')
-    previewUrl.value = `/api/v1/cameras/${row.id}/stream?ticket=${encodeURIComponent(ticket)}`
+    previewUrl.value = `/api/cameras/${row.id}/stream?ticket=${encodeURIComponent(ticket)}`
   } catch (e: any) {
     ElMessage.error(e.message || '打开失败')
     previewVisible.value = false

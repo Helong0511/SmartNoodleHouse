@@ -291,7 +291,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(OperationalError, sqlalchemy_operational_handler)
     app.include_router(api_router)
 
-    # 无前缀探针：与 /api/v1/health、/api/v1/ready 同源（DB+Redis）
+    # 无前缀探针：与 /api/health、/api/ready 同源（DB+Redis）
     from app.api.v1 import health as health_routes
 
     app.include_router(health_routes.router)

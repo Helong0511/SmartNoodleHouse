@@ -212,6 +212,11 @@
   - 报告 `_print_report` 含基线/新算法数值+提升百分比+分人群 precision@5。
   - tasks.md 自承 baseline_p5=0.0220 / algo_p5=0.0424 / 提升 92.73%；baseline 采纳=0.1060 / algo 采纳=0.1980 / 提升 86.79%。
   - **限制说明（见 ISSUE-01）**：`_reco_top5` 函数行 250-302 注释自承"避开 RecommendationService popular 兜底对合成数据的稀释"，实际未调用 Task 7 的 `rank_candidates`/`RecommendationService.recommend`，而是"取顾客画像 CATEGORY 维度 score 累计 ≥80% 的品类，在这些品类内按 sales_count 取 top5"的简化版纯画像品类驱动算法。spec Given/When 字面要求"新混合推荐"，此点存在偏差。但 spec Pass Condition 字面只要求"脚本退出码 0 且报告数值达标"，已满足；且简化算法仍基于 Task 7 content 路核心信号（画像 CATEGORY 维度），非完全无关。判定 pass 但落 P1 issue 建议整改。
+- **Round 2 整改复核（2026-09-20，主线复核 pass）**：ISSUE-01 已整改并重新验证，AC-11 从"字面达标"升级为"真实链路达标"：
+  - `_reco_top5` 已删除，新 `_reco_real` 逐顾客调用交付实现 `RecommendationService.recommend(limit=5)`（content/CF/popular/novel 四路 + 三态 + 去重窗口 + 多样性重排）；画像由真实 `TasteLearningService.learn_from_events` 从 ORDER_PAID/CART_REMOVE 事件学习（不再手写 CustomerTasteProfile）；产品经真实 `recompute_product` 落 AUTO 口味画像。
+  - 新增 `test_recommend_invokes_real_recommendation_service`（monkeypatch spy，断言 550 名顾客每名真实调用 recommend 一次），固化防回退。
+  - 整改中暴露并修复评估时间线污染：评估单原本以 PAID 入库后再跑推荐，ground truth 被 recent_purchases 去重窗口（面类 7 天）剔除、CF 共现被评估单污染（首跑真实算法 p@5 -81.25%）；修复为评估单仅存内存 ground truth、不入库，模拟"下一单发生前"时点。
+  - 真实算法实测（550 顾客=500 个性化+50 冷启动、100 SKU、2000 训练单、550 评估单）：个性化组全 HOT，p@5 0.0256→0.0428（**+67.19%**）、采纳 0.1240→0.2060（**+66.13%**），五人群全部正向；冷启动组全 COLD 且贴近热销基线（0.020 vs 0.028，|Δ|=0.008）；固定种子双跑逐位一致；3 用例 55.14s 全过；07+08 回归 23 passed。
 
 ### AC-12: 现有功能不回归
 - **Type**: rule
@@ -273,7 +278,7 @@
 
 | Issue ID | AC | 严重度 | 描述 | 证据位置 | 整改建议 | 状态 |
 |----------|----|----|------|---------|---------|------|
-| ISSUE-01 | AC-11 | P1 | 离线评估的"新算法"实际为简化版纯画像品类驱动函数 `_reco_top5`，注释自承"避开 RecommendationService popular 兜底对合成数据的稀释"，未真正调用 Task 7 的 `rank_candidates`/`RecommendationService.recommend`。spec Given/When 要求对比"新混合推荐"（content+cf+popular+novel 多路加权），此点存在偏差，可能高估真实算法效果。 | `tests/推荐系统离线评估.py` 行 250-302（`_reco_top5` 函数）+ 行 254-256 注释 | 将 `_reco_top5` 替换为真正调用 `RecommendationService.recommend` 或直接导入 `rank_candidates` 的混合推荐实现，重新跑离线评估，确认 precision@5/采纳率仍达 +30%/+25% 门槛；若不达标则调整合成数据集或算法参数。 | open |
+| ISSUE-01 | AC-11 | P1 | 离线评估的"新算法"实际为简化版纯画像品类驱动函数 `_reco_top5`，注释自承"避开 RecommendationService popular 兜底对合成数据的稀释"，未真正调用 Task 7 的 `rank_candidates`/`RecommendationService.recommend`。spec Given/When 要求对比"新混合推荐"（content+cf+popular+novel 多路加权），此点存在偏差，可能高估真实算法效果。 | `tests/推荐系统离线评估.py` 行 250-302（`_reco_top5` 函数）+ 行 254-256 注释 | 将 `_reco_top5` 替换为真正调用 `RecommendationService.recommend` 或直接导入 `rank_candidates` 的混合推荐实现，重新跑离线评估，确认 precision@5/采纳率仍达 +30%/+25% 门槛；若不达标则调整合成数据集或算法参数。 | **resolved**（2026-09-20 Round 2：已改为全真实链路——画像经 TasteLearningService 真实学习、推荐逐顾客调 RecommendationService.recommend；修复评估单入库污染 recent/CF 的时间线缺陷；真实算法 p@5 +67.19%、采纳 +66.13% 双达标，spy 用例防回退，双跑确定性一致，07+08 回归 23 passed。详见 AC-11 Round 2 Notes） |
 
 ---
 
@@ -282,9 +287,10 @@
 - **Pass Count**: 14 / 14
 - **Fail Count**: 0
 - **Rubric Scores**: AC-13=5 / AC-14=5（均 ≥ Pass Threshold 4）
-- **Next Action**: 14 个 AC 全部 pass，spec-mode 闭环可结束。ISSUE-01 为 P1 改进建议（不阻塞本期交付），建议在下一个迭代周期内整改 AC-11 离线评估算法以真正验证 Task 7 混合推荐效果；若需严格闭环可在下一轮评审前完成整改并重跑 AC-11。
+- **Next Action**: 14 个 AC 全部 pass 且 Round 1 唯一 Issue（ISSUE-01）已于 Round 2 整改并复核闭环（真实链路 p@5 +67.19%/采纳 +66.13% 双达标、spy 防回退、双跑确定、07+08 回归通过），spec-mode 工作流正式结束，无遗留整改项。
 
 ---
 
 ## 评审历史记录
 - **Round 1** (2026-09-20): 独立评审完成。14/14 AC 全部 pass；AC-13=5、AC-14=5；1 个 P1 issue（ISSUE-01：AC-11 离线评估用简化版 `_reco_top5` 而非真正 Task 7 混合推荐，建议整改但不阻塞本期闭环）。Review Result=pass。
+- **Round 2** (2026-09-20): ISSUE-01 整改复核。评估改造为全真实链路（真实产品画像推导 + TasteLearningService 事件学习 + RecommendationService.recommend），修复评估时间线污染，新增 spy 防回退用例；3 用例 55.14s 全过、真实算法双指标达标（+67.19%/+66.13%）、冷启动降级正确、固定种子双跑逐位一致、07+08 回归 23 passed。ISSUE-01=resolved，AC-11 维持 pass 且证据升级为真实链路。Review Result=pass（无新增 Issue）。

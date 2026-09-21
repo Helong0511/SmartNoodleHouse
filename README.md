@@ -216,11 +216,11 @@ DISPLAY_SCREEN_TOKEN=随机一串
 
 | 接口 | 说明 |
 |------|------|
-| `GET /api/v1/orders/kitchen/active` | 厨房 KDS 数据（需厨房权限） |
-| `GET /api/v1/orders/display/active?store_id=` | 叫号屏数据（公开，可选 `token`） |
-| `WS /api/v1/ws/kitchen` | 厨房推送（需员工 token） |
-| `WS /api/v1/ws/display?store_id=` | 叫号屏推送（公开，可选 `token`） |
-| `GET /api/v1/orders/{id}`、`GET /api/v1/orders/mine` | 含 `pickup_code`、`pickup_label`、`customer_status_label` 等字段 |
+| `GET /api/orders/kitchen/active` | 厨房 KDS 数据（需厨房权限） |
+| `GET /api/orders/display/active?store_id=` | 叫号屏数据（公开，可选 `token`） |
+| `WS /api/ws/kitchen` | 厨房推送（需员工 token） |
+| `WS /api/ws/display?store_id=` | 叫号屏推送（公开，可选 `token`） |
+| `GET /api/orders/{id}`、`GET /api/orders/mine` | 含 `pickup_code`、`pickup_label`、`customer_status_label` 等字段 |
 
 ## 外卖接入（美团 / 饿了么）
 
@@ -236,8 +236,8 @@ DISPLAY_SCREEN_TOKEN=随机一串
 
 | 平台 | 路径 | 成功响应 |
 |------|------|----------|
-| 美团 | `POST /api/v1/delivery/meituan/notify` | `{"data":"ok"}`（须 2s 内） |
-| 饿了么 | `POST /api/v1/delivery/eleme/notify` | `{"message":"ok"}` |
+| 美团 | `POST /api/delivery/meituan/notify` | `{"data":"ok"}`（须 2s 内） |
+| 饿了么 | `POST /api/delivery/eleme/notify` | `{"message":"ok"}` |
 
 开发模式：`APP_ENV=development` 且 `APP_DEBUG=true` 时，回调 JSON 可带 `"_dev_simulate": true` 跳过验签。
 
@@ -283,7 +283,7 @@ DISPLAY_SCREEN_TOKEN=随机一串
 | `H5_PUBLIC_BASE_URL` | `http://192.168.x.x:5173` | `https://你的域名` |
 | `DEV_LAN_HOST` | `192.168.x.x` | 留空 |
 | `MINI_PROGRAM_ENV_VERSION` | `develop` | `release` |
-| `VITE_API_BASE_URL` | `/api/v1` | `/api/v1` |
+| `VITE_API_BASE_URL` | `/api` | `/api` |
 | `ALLOW_*_MOCK` | `true` | 全部 `false` |
 | `ALIPAY_AES_KEY` | 可留空（手输手机号） | **必填**（解密授权手机号） |
 | `DISPLAY_SCREEN_TOKEN` | 可留空 | 建议设置 |
@@ -325,7 +325,7 @@ python -m compileall backend
 
 **与本项目的对应关系：**
 
-- 须备案的访问入口：`https://你的域名/`（后台、叫号屏）、`/scan`（桌台 H5）、`/api/v1`（小程序 API）、支付/外卖回调 URL
+- 须备案的访问入口：`https://你的域名/`（后台、叫号屏）、`/scan`（桌台 H5）、`/api`（小程序 API）、支付/外卖回调 URL
 - 微信 [mp.weixin.qq.com](https://mp.weixin.qq.com) → 开发设置 → **服务器域名**：只接受已备案且 HTTPS 的域名
 - 支付宝开放平台 [open.alipay.com](https://open.alipay.com) → **服务器域名白名单**：同样要求可公网访问的合规域名
 - 云厂商（阿里云 / 腾讯云 / 华为云等）购买**大陆地域**云主机时，未备案域名通常**无法**开通 80/443 或绑定证书
@@ -351,8 +351,8 @@ python -m compileall backend
                     API :8000（本机）    ├─ /api       → gunicorn
                                          └─ /uploads   → 本地上传目录
 
-  微信小程序 / 支付宝小程序 ──request──→ https://你的域名/api/v1
-  美团 / 饿了么 ──回调 POST──→ https://你的域名/api/v1/delivery/.../notify
+  微信小程序 / 支付宝小程序 ──request──→ https://你的域名/api
+  美团 / 饿了么 ──回调 POST──→ https://你的域名/api/delivery/.../notify
 ```
 
 要点：
@@ -446,7 +446,7 @@ ENABLE_RATE_LIMIT=true
 CORS_ORIGINS=https://你的域名.com
 H5_PUBLIC_BASE_URL=https://你的域名.com
 MINI_PROGRAM_ENV_VERSION=release
-VITE_API_BASE_URL=/api/v1
+VITE_API_BASE_URL=/api
 UPLOAD_DIR=/var/www/smart-noodle/uploads
 JSON_LOGS=true
 WEBHOOK_REQUIRE_ALLOWLIST=true
@@ -478,7 +478,7 @@ npm ci
 npm run build
 ```
 
-构建产物在 `frontend/dist`；API 使用相对路径 `/api/v1`，由 Nginx 反代到后端。
+构建产物在 `frontend/dist`；API 使用相对路径 `/api`，由 Nginx 反代到后端。
 
 ### 五、Nginx + HTTPS
 
@@ -537,7 +537,7 @@ MySQL / Redis 仅监听 `127.0.0.1`，勿对公网开放。
 
 | 文件 | 生产配置 |
 |------|----------|
-| `miniprogram-wechat/config/env.js` | `PROD_API_BASE=https://你的域名.com/api/v1`；`ENABLE_WX_PRIVACY_APIS=true` |
+| `miniprogram-wechat/config/env.js` | `PROD_API_BASE=https://你的域名.com/api`；`ENABLE_WX_PRIVACY_APIS=true` |
 | `miniprogram-wechat/project.config.json` | `setting.urlCheck: true` |
 | `miniprogram-wechat/app.json` | 已含 `__usePrivacyCheck__` |
 
@@ -591,8 +591,8 @@ https://你的域名.com/scan?token=桌台token
 | 后台管理 | `https://你的域名.com/` |
 | 厨房 KDS | `https://你的域名.com/kitchen` |
 | 顾客叫号屏 | `https://你的域名.com/display?store_id=1&token=…` |
-| 美团回调 | `POST /api/v1/delivery/meituan/notify` |
-| 饿了么回调 | `POST /api/v1/delivery/eleme/notify` |
+| 美团回调 | `POST /api/delivery/meituan/notify` |
+| 饿了么回调 | `POST /api/delivery/eleme/notify` |
 
 微信支付 PEM 放 `/etc/smart-noodle/certs/`，路径与 `.env` 一致。
 

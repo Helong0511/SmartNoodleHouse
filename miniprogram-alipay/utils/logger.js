@@ -1,4 +1,4 @@
-/** 支付宝小程序全部日志 → POST /api/v1/client-logs → logs/alipay/ */
+/** 支付宝小程序全部日志 → POST /api/client-logs → logs/alipay/ */
 const SOURCE = 'alipay'
 const FLUSH_MS = 5000
 const MAX_BATCH = 50

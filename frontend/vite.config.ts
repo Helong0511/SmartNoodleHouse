@@ -8,7 +8,7 @@ import { resolve } from 'node:path'
  * 【本地调试】npm run dev
  *   - host: 0.0.0.0 → 手机可通过局域网 IP 访问 H5 扫码页
  *   - /api、/uploads 代理到 127.0.0.1:8000（后端须已启动）
- *   - VITE_API_BASE_URL 在项目根 .env 中设为 /api/v1
+ *   - VITE_API_BASE_URL 在项目根 .env 中设为 /api
  *
  * 【生产构建】npm run build
  *   - 不使用本 proxy；由 Nginx 将 /api 反代到 uvicorn

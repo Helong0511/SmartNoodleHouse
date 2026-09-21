@@ -13,11 +13,11 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 WEBHOOK_PATHS = (
-    "/api/v1/payments/wechat/notify",
-    "/api/v1/payments/wechat/refund-notify",
-    "/api/v1/payments/alipay/notify",
-    "/api/v1/delivery/meituan/notify",
-    "/api/v1/delivery/eleme/notify",
+    "/api/payments/wechat/notify",
+    "/api/payments/wechat/refund-notify",
+    "/api/payments/alipay/notify",
+    "/api/delivery/meituan/notify",
+    "/api/delivery/eleme/notify",
 )
 
 

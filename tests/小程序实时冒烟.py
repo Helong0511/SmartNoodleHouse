@@ -21,13 +21,13 @@ def ok(name: str, cond: bool, detail: str = "") -> tuple[str, bool, str]:
 
 
 async def _admin_token(c: httpx.AsyncClient) -> str:
-    r = await c.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    r = await c.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
     return (r.json().get("data") or {}).get("access_token", "")
 
 
 async def _first_table(c: httpx.AsyncClient, admin_token: str) -> dict:
     r = await c.get(
-        "/api/v1/tables",
+        "/api/tables",
         headers={"Authorization": f"Bearer {admin_token}"},
         params={"page_size": 1},
     )
@@ -45,7 +45,7 @@ async def main() -> int:
         results.append(ok("获取桌台 token", bool(table_token), table.get("table_no") or ""))
 
         r = await c.post(
-            "/api/v1/miniprogram/wechat/login",
+            "/api/miniprogram/wechat/login",
             json={"code": "live_flow_test", "nickname": "联调员", "table_token": table_token or None},
         )
         login = r.json().get("data") or {}
@@ -57,13 +57,13 @@ async def main() -> int:
 
         headers = {"Authorization": f"Bearer {token}"}
 
-        r = await c.get("/api/v1/miniprogram/customers/me", headers=headers)
+        r = await c.get("/api/miniprogram/customers/me", headers=headers)
         me = r.json().get("data") or {}
         results.append(
             ok("/customers/me", r.json().get("code") == 0 and me.get("customer_id"), me.get("nickname") or "")
         )
 
-        r = await c.get("/api/v1/miniprogram/customers/me/preferences", headers=headers)
+        r = await c.get("/api/miniprogram/customers/me/preferences", headers=headers)
         prefs = r.json().get("data") or {}
         all_p = prefs.get("all") or []
         rec = prefs.get("preferences") or []
@@ -72,11 +72,11 @@ async def main() -> int:
         )
 
         if cid:
-            r = await c.get(f"/api/v1/customers/{cid}/preferences", headers=headers)
+            r = await c.get(f"/api/customers/{cid}/preferences", headers=headers)
             old = r.json().get("data") or {}
             results.append(ok("旧偏好 API 条数一致", len(old.get("all") or []) == len(all_p)))
 
-        r = await c.get("/api/v1/products", params={"page_size": 20, "store_id": store_id})
+        r = await c.get("/api/products", params={"page_size": 20, "store_id": store_id})
         items = (r.json().get("data") or {}).get("items") or []
         results.append(ok("商品列表", bool(items), f"items={len(items)}"))
         if not items:
@@ -87,7 +87,7 @@ async def main() -> int:
         groups: list = []
         for row in items:
             pid = row["id"]
-            r = await c.get(f"/api/v1/products/{pid}")
+            r = await c.get(f"/api/products/{pid}")
             detail = r.json().get("data") or {}
             g = detail.get("option_groups") or []
             if g:
@@ -97,7 +97,7 @@ async def main() -> int:
                 break
         if not product_id:
             product_id = items[0]["id"]
-            r = await c.get(f"/api/v1/products/{product_id}")
+            r = await c.get(f"/api/products/{product_id}")
             product = r.json().get("data") or {}
             groups = product.get("option_groups") or []
 
@@ -118,7 +118,7 @@ async def main() -> int:
             "channel": "WECHAT",
             "items": [{"product_id": product_id, "quantity": 1, "option_ids": []}],
         }
-        r = await c.post("/api/v1/orders", json=body, headers=headers)
+        r = await c.post("/api/orders", json=body, headers=headers)
         msg = r.json().get("message") or ""
         if has_required:
             blocked = r.json().get("code") != 0 and ("规格" in msg or "必选" in msg)
@@ -140,7 +140,7 @@ async def main() -> int:
                 "idempotency_key": f"live_test_{int(time.time() * 1000)}",
                 "items": [{"product_id": product_id, "quantity": 1, "option_ids": opt_ids}],
             }
-            r = await c.post("/api/v1/orders", json=body, headers=headers)
+            r = await c.post("/api/orders", json=body, headers=headers)
             order = r.json().get("data") or {}
             results.append(
                 ok(

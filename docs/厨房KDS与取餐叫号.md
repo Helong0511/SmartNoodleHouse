@@ -43,7 +43,7 @@
 | 权限要求 | `canAccessKitchen()` — 允许角色：`SUPER_ADMIN`、`STORE_ADMIN`、`KITCHEN`，或拥有 `order:update` 权限 |
 | 收银员权限 | ❌ CASHIER 角色无权访问 KDS |
 | WebSocket 传 token | 通过 `Sec-WebSocket-Protocol: access_token, <jwt>` 传递（不写入 URL，避免进访问日志） |
-| API 接口 | `GET /api/v1/orders/kitchen/active`，后端 `require_kitchen()` 依赖校验 |
+| API 接口 | `GET /api/orders/kitchen/active`，后端 `require_kitchen()` 依赖校验 |
 
 ### 1.4 界面与显示内容
 
@@ -236,7 +236,7 @@ if DISPLAY_SCREEN_TOKEN 已配置 AND 传入 token 不匹配:
 
 4. （可选）为不同门店设置独立令牌：
 
-   通过 `PUT /api/v1/settings/stores/{store_id}/business` 设置 `display_screen_token`
+   通过 `PUT /api/settings/stores/{store_id}/business` 设置 `display_screen_token`
 
 ### 3.4 当前环境快速验证
 
@@ -259,7 +259,7 @@ A：当前账号角色不是 SUPER_ADMIN / STORE_ADMIN / KITCHEN，且没有 `or
 **Q：KDS 一直显示「轮询兜底」而非「实时推送」？**
 A：WebSocket 连接失败。检查：
 - 浏览器控制台是否有 WebSocket 报错
-- Nginx `/api/v1/ws/` 是否配置了 Upgrade 头
+- Nginx `/api/ws/` 是否配置了 Upgrade 头
 - 网络是否允许 WebSocket（部分代理会拦截）
 
 **Q：看不到其他门店的订单？**

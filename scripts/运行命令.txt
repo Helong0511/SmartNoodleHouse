@@ -12,9 +12,9 @@
 # 小程序 API 地址：miniprogram-*/config/env.js（见同目录 环境说明.txt）
 #   模拟器     自动 → 127.0.0.1:8000
 #   真机       自动 → 192.168.1.110:8000（改 DEV_LAN_HOST 即可）
-#   正式版     PROD_API_BASE → https://your-domain.com/api/v1
+#   正式版     PROD_API_BASE → https://your-domain.com/api
 #               隐私开关：项目根 .env 的 ENABLE_WX_PRIVACY_APIS / ENABLE_ALIPAY_PRIVACY_APIS=true
-#               （由后端 GET /api/v1/miniprogram/config 下发；勿再改 config/env.js 内已 @deprecated 字段）
+#               （由后端 GET /api/miniprogram/config 下发；勿再改 config/env.js 内已 @deprecated 字段）
 #
 # ── 开放平台入口（常用）──
 #   微信公众平台（小程序）：https://mp.weixin.qq.com
@@ -37,7 +37,7 @@
 #
 # 【微信小程序 miniprogram-wechat】
 #   入口：https://mp.weixin.qq.com （开放平台 https://open.weixin.qq.com ）
-#   config/env.js：PROD_API_BASE=https://你的域名/api/v1
+#   config/env.js：PROD_API_BASE=https://你的域名/api
 #   项目根 .env：ENABLE_WX_PRIVACY_APIS=true（经 /miniprogram/config 下发，勿改 env.js 弃用字段）
 #   https://mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
 #   https://mp.weixin.qq.com → 设置 → 服务内容声明 → 用户隐私保护指引
@@ -50,7 +50,7 @@
 #
 # 【支付宝小程序 miniprogram-alipay】
 #   入口：https://open.alipay.com （文档 https://opendocs.alipay.com ）
-#   config/env.js：PROD_API_BASE=https://你的域名/api/v1
+#   config/env.js：PROD_API_BASE=https://你的域名/api
 #   项目根 .env：ENABLE_ALIPAY_PRIVACY_APIS=true（经 /miniprogram/config 下发）
 #   https://open.alipay.com → 小程序 → 开发设置 → 服务器域名白名单（HTTPS）
 #   基础设置 → 小程序隐私政策（声明手机号等收集类型）
@@ -140,7 +140,7 @@
 #       手机访问 127.0.0.1 等于访问手机自身，不是开发电脑。
 # 处理：
 #   1. .env 设置 H5_PUBLIC_BASE_URL=http://192.168.1.110:5173、DEV_LAN_HOST=192.168.1.110
-#   2. VITE_API_BASE_URL=/api/v1（勿写 127.0.0.1:8000）
+#   2. VITE_API_BASE_URL=/api（勿写 127.0.0.1:8000）
 #   3. 前端 npm run dev 须监听 0.0.0.0（vite.config 已 host:0.0.0.0）
 #   4. 重启后端 + 前端；后台「桌台管理」重新打印/下载二维码（旧 BMP 内 URL 不会自动变）
 #   5. 手机与电脑同一 WiFi；浏览器可先测 http://192.168.1.110:5173/scan?token=桌台token

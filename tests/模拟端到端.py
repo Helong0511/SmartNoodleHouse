@@ -358,7 +358,7 @@ async def run_all_simulations() -> bool:
         results.append(ok("健康检查", r.status_code == 200 and r.json()["status"] == "ok"))
 
         # ── 2. 管理员登录 ──
-        r = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        r = await client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
         body = r.json() if r.content else {}
         if not body:
             body = {"code": -1, "message": r.text[:100]}
@@ -366,7 +366,7 @@ async def run_all_simulations() -> bool:
         results.append(ok("管理员登录", body.get("code") == 0 and bool(admin_token), f"token={admin_token[:20]}..."))
 
         # ── 3. 扫码入口（微信） ──
-        r = await client.get("/api/v1/miniprogram/entry", params={"token": CTX["table_token"], "channel": "wechat"})
+        r = await client.get("/api/miniprogram/entry", params={"token": CTX["table_token"], "channel": "wechat"})
         entry = r.json().get("data", {})
         results.append(
             ok(
@@ -390,7 +390,7 @@ async def run_all_simulations() -> bool:
 
         # ── 4. 微信小程序登录 ──
         r = await client.post(
-            "/api/v1/miniprogram/wechat/login",
+            "/api/miniprogram/wechat/login",
             json={"code": "sim_wx_code_001", "table_token": CTX["table_token"], "nickname": "张先生"},
         )
         wx_login = r.json().get("data", {})
@@ -400,13 +400,13 @@ async def run_all_simulations() -> bool:
 
         # ── 5. 注册会员 + 人脸授权 ──
         r = await client.post(
-            "/api/v1/miniprogram/member/register",
+            "/api/miniprogram/member/register",
             json={"nickname": "张先生"},
             headers=cust_headers(wx_token),
         )
         reg = r.json().get("data", {})
         r = await client.post(
-            "/api/v1/miniprogram/face/consent-base64",
+            "/api/miniprogram/face/consent-base64",
             json={"image_base64": SIM_FACE_B64},
             headers=cust_headers(wx_token),
         )
@@ -421,7 +421,7 @@ async def run_all_simulations() -> bool:
 
         # ── 6. 创建订单（牛肉面 多面+多麻+少辣+加蛋 ×1 = 22） ──
         r = await client.post(
-            "/api/v1/orders",
+            "/api/orders",
             json={
                 "store_id": CTX["store_id"],
                 "table_token": CTX["table_token"],
@@ -449,7 +449,7 @@ async def run_all_simulations() -> bool:
 
         # ── 7. 幂等下单（重复提交） ──
         r2 = await client.post(
-            "/api/v1/orders",
+            "/api/orders",
             json={
                 "store_id": CTX["store_id"],
                 "table_token": CTX["table_token"],
@@ -470,7 +470,7 @@ async def run_all_simulations() -> bool:
 
         # ── 8. 发起微信支付 ──
         r = await client.post(
-            f"/api/v1/payments/orders/{wx_order_id}/pay",
+            f"/api/payments/orders/{wx_order_id}/pay",
             json={"provider": "WECHAT", "channel_type": "miniprogram"},
             headers=cust_headers(wx_token),
         )
@@ -490,10 +490,10 @@ async def run_all_simulations() -> bool:
         ).encode()
         paid_count = 0
         for i in range(20):
-            cr = await client.post("/api/v1/payments/wechat/notify", content=callback_body)
+            cr = await client.post("/api/payments/wechat/notify", content=callback_body)
             if cr.status_code == 200:
                 paid_count += 1
-        r = await client.get(f"/api/v1/orders/{wx_order_id}", headers=cust_headers(wx_token))
+        r = await client.get(f"/api/orders/{wx_order_id}", headers=cust_headers(wx_token))
         order_after_pay = r.json().get("data", {})
         results.append(
             ok(
@@ -504,7 +504,7 @@ async def run_all_simulations() -> bool:
         )
 
         # ── 10. 厨房 KDS ──
-        r = await client.get("/api/v1/orders/kitchen/active", headers={"Authorization": f"Bearer {admin_token}"})
+        r = await client.get("/api/orders/kitchen/active", headers={"Authorization": f"Bearer {admin_token}"})
         kitchen = r.json().get("data", [])
         has_order = any(o.get("id") == wx_order_id for o in kitchen)
         results.append(ok("厨房 KDS 收到订单", has_order, f"活跃订单 {len(kitchen)} 条"))
@@ -512,17 +512,17 @@ async def run_all_simulations() -> bool:
         # 开始制作 → 完成 → 出餐
         for status in ["PREPARING", "READY", "COMPLETED"]:
             await client.patch(
-                f"/api/v1/orders/{wx_order_id}/status",
+                f"/api/orders/{wx_order_id}/status",
                 json={"status": status},
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
-        r = await client.get(f"/api/v1/orders/{wx_order_id}", headers=cust_headers(wx_token))
+        r = await client.get(f"/api/orders/{wx_order_id}", headers=cust_headers(wx_token))
         final_order = r.json().get("data", {})
         results.append(ok("厨房流转 COMPLETED", final_order.get("status") == "COMPLETED"))
 
         # ── 11. 口味画像更新 ──
         r = await client.get(
-            f"/api/v1/customers/{wx_customer_id}/preferences",
+            f"/api/customers/{wx_customer_id}/preferences",
             headers=cust_headers(wx_token),
         )
         prefs = r.json().get("data", {})
@@ -536,7 +536,7 @@ async def run_all_simulations() -> bool:
         )
 
         r = await client.get(
-            "/api/v1/miniprogram/customers/me/preferences",
+            "/api/miniprogram/customers/me/preferences",
             headers=cust_headers(wx_token),
         )
         mp_prefs = r.json().get("data", {}) or {}
@@ -554,11 +554,11 @@ async def run_all_simulations() -> bool:
         # ═══════════════════════════════════════
         print("\n--- 流程2：支付宝扫码 ---")
 
-        r = await client.get("/api/v1/miniprogram/entry", params={"token": CTX["table_token"], "channel": "alipay"})
+        r = await client.get("/api/miniprogram/entry", params={"token": CTX["table_token"], "channel": "alipay"})
         results.append(ok("支付宝扫码识别桌台", r.json().get("data", {}).get("table") is not None))
 
         r = await client.post(
-            "/api/v1/miniprogram/alipay/login",
+            "/api/miniprogram/alipay/login",
             json={"auth_code": "sim_ali_code_001", "table_token": CTX["table_token"], "nickname": "李女士"},
         )
         ali_login = r.json().get("data", {}) or {}
@@ -567,7 +567,7 @@ async def run_all_simulations() -> bool:
         results.append(ok("支付宝小程序登录", bool(ali_customer_id) and bool(ali_token)))
 
         r = await client.post(
-            "/api/v1/orders",
+            "/api/orders",
             json={
                 "store_id": CTX["store_id"],
                 "table_token": CTX["table_token"],
@@ -600,7 +600,7 @@ async def run_all_simulations() -> bool:
         )
 
         r = await client.post(
-            f"/api/v1/payments/orders/{ali_order_id}/pay",
+            f"/api/payments/orders/{ali_order_id}/pay",
             json={"provider": "ALIPAY", "channel_type": "miniprogram"},
             headers=cust_headers(ali_token),
         )
@@ -614,8 +614,8 @@ async def run_all_simulations() -> bool:
                 "total_amount": "44.00",
             }
         ).encode()
-        await client.post("/api/v1/payments/alipay/notify", content=ali_cb)
-        r = await client.get(f"/api/v1/orders/{ali_order_id}", headers=cust_headers(ali_token))
+        await client.post("/api/payments/alipay/notify", content=ali_cb)
+        r = await client.get(f"/api/orders/{ali_order_id}", headers=cust_headers(ali_token))
         results.append(
             ok(
                 "支付宝支付回调",
@@ -646,7 +646,7 @@ async def run_all_simulations() -> bool:
         results.append(ok("欢迎冷却（60秒内不重复）", welcomed2 is False, "冷却期内拒绝重复欢迎"))
 
         r = await client.get(
-            "/api/v1/welcome/logs",
+            "/api/welcome/logs",
             params={"customer_id": wx_customer_id},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
@@ -654,8 +654,8 @@ async def run_all_simulations() -> bool:
         results.append(ok("欢迎日志记录", len(logs) >= 1, f"{len(logs)} 条"))
 
         # 撤销人脸
-        await client.post("/api/v1/miniprogram/face/revoke", headers=cust_headers(wx_token))
-        r = await client.get("/api/v1/miniprogram/customers/me/face-status", headers=cust_headers(wx_token))
+        await client.post("/api/miniprogram/face/revoke", headers=cust_headers(wx_token))
+        r = await client.get("/api/miniprogram/customers/me/face-status", headers=cust_headers(wx_token))
         face_st = r.json().get("data", {})
         results.append(ok("撤销人脸授权", face_st.get("consent_status") == "NONE" and not face_st.get("has_face")))
 
@@ -686,7 +686,7 @@ async def run_all_simulations() -> bool:
         print("\n--- 安全与边界 ---")
 
         r = await client.post(
-            "/api/v1/orders",
+            "/api/orders",
             json={
                 "store_id": CTX["store_id"],
                 "idempotency_key": "sim_price_test",
@@ -704,11 +704,11 @@ async def run_all_simulations() -> bool:
         )
 
         # 伪造桌台 token
-        r = await client.get("/api/v1/miniprogram/entry", params={"token": "FAKE_TABLE_A01", "channel": "wechat"})
+        r = await client.get("/api/miniprogram/entry", params={"token": "FAKE_TABLE_A01", "channel": "wechat"})
         results.append(ok("伪造桌台 token 被拒绝", r.json().get("data") is None))
 
         # Dashboard
-        r = await client.get("/api/v1/dashboard", params={"period": "today"}, headers={"Authorization": f"Bearer {admin_token}"})
+        r = await client.get("/api/dashboard", params={"period": "today"}, headers={"Authorization": f"Bearer {admin_token}"})
         dash = r.json().get("data", {})
         summary = dash.get("summary") or {}
         results.append(
@@ -720,7 +720,7 @@ async def run_all_simulations() -> bool:
         )
 
         # 商品列表
-        r = await client.get("/api/v1/products", params={"page_size": 10})
+        r = await client.get("/api/products", params={"page_size": 10})
         products = r.json().get("data", {}).get("items", [])
         results.append(ok("商品 API", len(products) >= 1, f"{len(products)} 个商品"))
 
@@ -739,25 +739,25 @@ async def run_all_simulations() -> bool:
             recipient_address="测试地址 5 号",
             items=[{"sku_id": "P001", "name": "牛肉面", "quantity": 1, "price": "18.00"}],
         )
-        r = await client.post("/api/v1/delivery/meituan/notify", json=mt_new)
+        r = await client.post("/api/delivery/meituan/notify", json=mt_new)
         results.append(ok("美团新单回调", r.json().get("data") == "ok"))
 
         from app.services.webhook_inbox import process_pending_inbox
 
         await process_pending_inbox()
 
-        r = await client.get("/api/v1/delivery/orders", headers={"Authorization": f"Bearer {admin_token}"})
+        r = await client.get("/api/delivery/orders", headers={"Authorization": f"Bearer {admin_token}"})
         d_orders = r.json().get("data", {}).get("items", [])
         results.append(ok("外卖订单列表", any(d.get("platform_order_id") == "SIM_MT001" for d in d_orders)))
 
         r = await client.post(
-            "/api/v1/delivery/meituan/notify",
+            "/api/delivery/meituan/notify",
             json=mt_simulate(notify_type="urge", order_id="SIM_MT001"),
         )
         results.append(ok("美团催单回调", r.json().get("data") == "ok"))
 
         r = await client.post(
-            "/api/v1/delivery/meituan/notify",
+            "/api/delivery/meituan/notify",
             json=mt_simulate(
                 logistics_status="DELIVERING",
                 order_id="SIM_MT001",
@@ -768,7 +768,7 @@ async def run_all_simulations() -> bool:
         results.append(ok("美团配送状态回调", r.json().get("data") == "ok"))
 
         r = await client.post(
-            "/api/v1/delivery/meituan/notify",
+            "/api/delivery/meituan/notify",
             json=mt_simulate(
                 refund_id="RF_SIM001",
                 order_id="SIM_MT001",
@@ -779,12 +779,12 @@ async def run_all_simulations() -> bool:
         results.append(ok("美团退款申请回调", r.json().get("data") == "ok"))
         await process_pending_inbox()
 
-        r = await client.get("/api/v1/delivery/refunds", headers={"Authorization": f"Bearer {admin_token}"})
+        r = await client.get("/api/delivery/refunds", headers={"Authorization": f"Bearer {admin_token}"})
         refunds = r.json().get("data", {}).get("items", [])
         results.append(ok("外卖退款列表", len(refunds) >= 1))
 
         r = await client.post(
-            "/api/v1/delivery/meituan/notify",
+            "/api/delivery/meituan/notify",
             json=mt_simulate(status=9, order_id="SIM_MT001"),
         )
         results.append(ok("美团取消回调", r.json().get("data") == "ok"))
@@ -805,7 +805,7 @@ async def run_all_simulations() -> bool:
                 }
             },
         }
-        r = await client.post("/api/v1/delivery/eleme/notify", json=el_new)
+        r = await client.post("/api/delivery/eleme/notify", json=el_new)
         results.append(ok("饿了么新单回调", r.json().get("message") == "ok"))
 
     rc.get_redis = orig_get_redis

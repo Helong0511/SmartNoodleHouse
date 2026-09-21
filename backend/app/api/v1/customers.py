@@ -458,9 +458,9 @@ async def get_preferences(
 
 @router.post("/wechat/login")
 async def wechat_login_deprecated():
-    raise HTTPException(status_code=410, detail="已废弃，请使用 POST /api/v1/miniprogram/wechat/login 并传入 code")
+    raise HTTPException(status_code=410, detail="已废弃，请使用 POST /api/miniprogram/wechat/login 并传入 code")
 
 
 @router.post("/alipay/login")
 async def alipay_login_deprecated():
-    raise HTTPException(status_code=410, detail="已废弃，请使用 POST /api/v1/miniprogram/alipay/login 并传入 auth_code")
+    raise HTTPException(status_code=410, detail="已废弃，请使用 POST /api/miniprogram/alipay/login 并传入 auth_code")

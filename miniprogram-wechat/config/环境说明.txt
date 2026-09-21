@@ -18,17 +18,17 @@
   2. 打开 miniprogram-wechat
   3. 右上角「详情」→「本地设置」→ 勾选「不校验合法域名、web-view…」
   4. project.config.json 开发阶段保持 setting.urlCheck=false
-  5. 编译；确认 API 为 http://127.0.0.1:8000/api/v1
+  5. 编译；确认 API 为 http://127.0.0.1:8000/api
 
 【真机调试步骤】
   1. config/env.js 改 DEV_LAN_HOST=电脑局域网 IP
   2. 后端 --host 0.0.0.0:8000；手机与电脑同一 WiFi；VPN 易导致调试通道 IP 错乱
   3. 仍勾选「不校验合法域名」
-  4. 「真机调试」扫码；API 应为 http://192.168.x.x:8000/api/v1
+  4. 「真机调试」扫码；API 应为 http://192.168.x.x:8000/api
      若仍 127.0.0.1：可设 DEV_USE_LAN=true 强制局域网
 
 【正式上线】
-  1. config/env.js：PROD_API_BASE=https://你的域名/api/v1
+  1. config/env.js：PROD_API_BASE=https://你的域名/api
   2. mp.weixin.qq.com → 开发管理 → 开发设置 → 服务器域名（request/upload/download 均 HTTPS）
   3. 上传前 project.config.json → urlCheck=true，并用真机验证合法域名
   4. release 自动走 PROD_API_BASE

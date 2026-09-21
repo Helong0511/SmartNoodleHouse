@@ -30,13 +30,13 @@ async def main() -> None:
     headers = {"Authorization": f"Bearer {token}"}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r = await client.get("/api/v1/orders/mine", headers=headers)
+        r = await client.get("/api/orders/mine", headers=headers)
         body = r.json()
         print("mine", r.status_code, body.get("code"), "total=", (body.get("data") or {}).get("total"))
         assert r.status_code == 200 and body.get("code") == 0
 
         if order:
-            r2 = await client.post(f"/api/v1/orders/{order.id}/reorder", headers=headers)
+            r2 = await client.post(f"/api/orders/{order.id}/reorder", headers=headers)
             body2 = r2.json()
             print(
                 "reorder",

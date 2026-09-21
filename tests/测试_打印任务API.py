@@ -50,7 +50,7 @@ async def test_list_print_jobs_returns_items():
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:update"})):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                res = await client.get("/api/v1/print-jobs", params={"status": "FAILED"})
+                res = await client.get("/api/print-jobs", params={"status": "FAILED"})
         assert res.status_code == 200
         body = res.json()
         assert body["code"] == 0
@@ -98,7 +98,7 @@ async def test_retry_print_job_triggers_process():
             ) as proc:
                 transport = ASGITransport(app=app)
                 async with AsyncClient(transport=transport, base_url="http://test") as client:
-                    res = await client.post("/api/v1/print-jobs/5/retry")
+                    res = await client.post("/api/print-jobs/5/retry")
         assert res.status_code == 200
         body = res.json()
         assert body["code"] == 0

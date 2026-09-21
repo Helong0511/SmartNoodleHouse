@@ -194,6 +194,8 @@ async def build_dataset(db, *, rng_seed: int = SEED) -> dict:
 
     # 评估：每顾客（含冷启动）1 单，按人群权重选品类 + 品类内按 sales_count 加权抽样
     # （模拟顾客偏好稳定、复购热门品；该模型对基线与新算法完全相同，公平对比）
+    # 注意：评估单绝不入库——否则会污染推荐的 recent_purchases（ground truth 被去重窗口
+    # 剔除）与近 90 天 CF 共现矩阵；评估只持有内存中的 ground truth，模拟"下一单发生前"。
     ground_truth: dict[int, set[int]] = {}
     for c in customers:
         persona_idx = persona_of[c.id]
@@ -209,8 +211,11 @@ async def build_dataset(db, *, rng_seed: int = SEED) -> dict:
             total = sum(sales)
             ws = [s / total for s in sales]
             chosen_products.append(rng.choices(prods_in_cat, weights=ws, k=1)[0])
-        order = await _make_order(db, c, store, chosen_products, when=when, payment_status="PAID")
-        eval_orders.append(order)
+        eval_orders.append({
+            "customer_id": c.id,
+            "when": when,
+            "product_ids": [p.id for p in chosen_products],
+        })
         ground_truth[c.id] = {p.id for p in chosen_products}
 
     await db.flush()

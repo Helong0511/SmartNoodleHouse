@@ -15,14 +15,14 @@ logger = logging.getLogger(__name__)
 
 # path 前缀 → (limit, window_seconds)
 SENSITIVE_LIMITS = {
-    "/api/v1/auth/login": (10, 60),
-    "/api/v1/auth/verify-password": (20, 60),
-    "/api/v1/payments/": (60, 60),
-    "/api/v1/welcome/": (30, 60),
-    "/api/v1/miniprogram/": (60, 60),
-    "/api/v1/client-logs": (120, 60),
-    "/api/v1/delivery/meituan/notify": (300, 60),
-    "/api/v1/delivery/eleme/notify": (300, 60),
+    "/api/auth/login": (10, 60),
+    "/api/auth/verify-password": (20, 60),
+    "/api/payments/": (60, 60),
+    "/api/welcome/": (30, 60),
+    "/api/miniprogram/": (60, 60),
+    "/api/client-logs": (120, 60),
+    "/api/delivery/meituan/notify": (300, 60),
+    "/api/delivery/eleme/notify": (300, 60),
 }
 DEFAULT_LIMIT = (120, 60)
 

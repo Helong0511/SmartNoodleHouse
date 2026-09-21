@@ -5,7 +5,7 @@
  *   - API：DEV_SIMULATOR_API / DEV_LAN_API
  *   - 头像 / 昵称 / 手机号开关在项目根 .env：
  *     ENABLE_ALIPAY_AVATAR / ENABLE_ALIPAY_NICKNAME / ENABLE_ALIPAY_PHONE_BIND
- *     （经后端 GET /api/v1/miniprogram/config 下发；改后须重启后端）
+ *     （经后端 GET /api/miniprogram/config 下发；改后须重启后端）
  *
  * 【正式版】release
  *   1. PROD_API_BASE → HTTPS 域名
@@ -16,15 +16,15 @@
  */
 
 /** 生产 API（须 HTTPS，与开放平台服务器域名白名单一致） */
-const PROD_API_BASE = 'https://your-domain.com/api/v1'
+const PROD_API_BASE = 'https://your-domain.com/api'
 
 /** 本地模拟器（支付宝开发者工具） */
-const DEV_SIMULATOR_API = 'http://127.0.0.1:8000/api/v1'
+const DEV_SIMULATOR_API = 'http://127.0.0.1:8000/api'
 
 /** 本地真机：电脑局域网 IP + 后端 uvicorn --host 0.0.0.0 */
 const DEV_LAN_HOST = '192.168.1.110'
 const DEV_USE_LAN = false
-const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api/v1`
+const DEV_LAN_API = `http://${DEV_LAN_HOST}:8000/api`
 
 /** 体验版是否连生产 API（默认 false） */
 const TRIAL_USE_PROD_API = false

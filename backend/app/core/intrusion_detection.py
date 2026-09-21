@@ -11,13 +11,13 @@ from fastapi import Request
 
 # 健康检查与 webhook 回调：不参与检测，避免误杀与性能损耗
 _EXEMPT_PATH_PREFIXES = (
-    "/api/v1/health",
-    "/api/v1/ready",
-    "/api/v1/payments/wechat/notify",
-    "/api/v1/payments/wechat/refund-notify",
-    "/api/v1/payments/alipay/notify",
-    "/api/v1/delivery/meituan/notify",
-    "/api/v1/delivery/eleme/notify",
+    "/api/health",
+    "/api/ready",
+    "/api/payments/wechat/notify",
+    "/api/payments/wechat/refund-notify",
+    "/api/payments/alipay/notify",
+    "/api/delivery/meituan/notify",
+    "/api/delivery/eleme/notify",
 )
 
 # SQL 注入特征

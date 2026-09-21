@@ -49,7 +49,7 @@ def main() -> int:
     code, data = req("GET", "/health")
     check("GET /health", code == 200 and data.get("status") == "ok", str(data))
 
-    code, data = req("POST", "/api/v1/auth/login", {"username": "admin", "password": "admin123"})
+    code, data = req("POST", "/api/auth/login", {"username": "admin", "password": "admin123"})
     ok = code == 200 and data.get("code") == 0 and data.get("data")
     token = None
     user = {}
@@ -65,24 +65,24 @@ def main() -> int:
         print("ABORT: login failed")
         return 1
 
-    code, data = req("GET", "/api/v1/auth/me", token=token)
+    code, data = req("GET", "/api/auth/me", token=token)
     check("GET /auth/me", code == 200 and data.get("code") == 0, f"user={ (data.get('data') or {}).get('username') }")
 
     apis = [
-        ("GET", "/api/v1/dashboard"),
-        ("GET", "/api/v1/products"),
-        ("GET", "/api/v1/categories"),
-        ("GET", "/api/v1/options/groups"),
-        ("GET", "/api/v1/orders"),
-        ("GET", "/api/v1/customers"),
-        ("GET", "/api/v1/tables"),
-        ("GET", "/api/v1/payments"),
-        ("GET", "/api/v1/cameras"),
-        ("GET", "/api/v1/cameras/overview"),
-        ("GET", "/api/v1/delivery/orders"),
-        ("GET", "/api/v1/delivery/stats"),
-        ("GET", "/api/v1/welcome/logs"),
-        ("GET", "/api/v1/settings"),
+        ("GET", "/api/dashboard"),
+        ("GET", "/api/products"),
+        ("GET", "/api/categories"),
+        ("GET", "/api/options/groups"),
+        ("GET", "/api/orders"),
+        ("GET", "/api/customers"),
+        ("GET", "/api/tables"),
+        ("GET", "/api/payments"),
+        ("GET", "/api/cameras"),
+        ("GET", "/api/cameras/overview"),
+        ("GET", "/api/delivery/orders"),
+        ("GET", "/api/delivery/stats"),
+        ("GET", "/api/welcome/logs"),
+        ("GET", "/api/settings"),
     ]
     for method, path in apis:
         code, data = req(method, path, token=token)
@@ -90,7 +90,7 @@ def main() -> int:
         msg = data.get("message") if isinstance(data, dict) else ""
         check(f"{method} {path}", code == 200 and biz == 0, f"http={code} biz={biz} msg={msg}")
 
-    code, data = req("GET", "/api/v1/settings", token=token)
+    code, data = req("GET", "/api/settings", token=token)
     app = (data.get("data") or {}).get("app") or {}
     pr = app.get("process_role")
     check("settings.process_role", pr is not None, f"process_role={pr}")
@@ -102,8 +102,8 @@ def main() -> int:
     except Exception as e:
         check("GET frontend /", False, str(e))
 
-    code, data = req("GET", "/api/v1/auth/me", token=token, base=FE)
-    check("Vite proxy /api/v1/auth/me", code == 200 and data.get("code") == 0, f"user={(data.get('data') or {}).get('username')}")
+    code, data = req("GET", "/api/auth/me", token=token, base=FE)
+    check("Vite proxy /api/auth/me", code == 200 and data.get("code") == 0, f"user={(data.get('data') or {}).get('username')}")
 
     fails = sum(1 for s, _, _ in results if s == "FAIL")
     print()

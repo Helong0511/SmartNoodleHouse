@@ -159,7 +159,7 @@ async def test_log_intrusion_records_path_and_reason(db_session):
     row = await AuditService.log_intrusion(
         db_session,
         reason="sql_injection_union_select",
-        path="/api/v1/products?sort=UNION%20SELECT",
+        path="/api/products?sort=UNION%20SELECT",
         request=_mock_request(ip="10.0.0.5"),
         extra={"user_agent": "curl/8.0"},
     )
@@ -171,7 +171,7 @@ async def test_log_intrusion_records_path_and_reason(db_session):
     assert fresh.ip == "10.0.0.5"
     payload = json.loads(fresh.detail)
     assert payload["reason"] == "sql_injection_union_select"
-    assert payload["path"] == "/api/v1/products?sort=UNION%20SELECT"
+    assert payload["path"] == "/api/products?sort=UNION%20SELECT"
     assert payload["user_agent"] == "curl/8.0"
 
 
@@ -327,10 +327,10 @@ def test_intrusion_detection_sql_injection_path():
     except ImportError:
         pytest.skip("intrusion_detection 模块尚未创建（等待子代理）")
     dangerous_paths = [
-        "/api/v1/products?sort=UNION%20SELECT%20password",
-        "/api/v1/orders?id=1;DROP%20TABLE%20users",
-        "/api/v1/users?name=%27%20OR%20%271%27%3D%271",
-        "/api/v1/products?filter=information_schema.tables",
+        "/api/products?sort=UNION%20SELECT%20password",
+        "/api/orders?id=1;DROP%20TABLE%20users",
+        "/api/users?name=%27%20OR%20%271%27%3D%271",
+        "/api/products?filter=information_schema.tables",
     ]
     for p in dangerous_paths:
         req = _make_intrusion_request(p)
@@ -345,7 +345,7 @@ def test_intrusion_detection_path_traversal():
     except ImportError:
         pytest.skip("intrusion_detection 模块尚未创建（等待子代理）")
     dangerous = [
-        "/api/v1/files/../../../etc/passwd",
+        "/api/files/../../../etc/passwd",
         "/.env",
         "/.git/config",
         "/wp-admin/",
@@ -364,12 +364,12 @@ def test_intrusion_detection_allows_normal_requests():
     except ImportError:
         pytest.skip("intrusion_detection 模块尚未创建（等待子代理）")
     safe = [
-        ("/api/v1/products?page=1&page_size=20", "GET"),
-        ("/api/v1/orders/123", "GET"),
-        ("/api/v1/orders", "POST"),
-        ("/api/v1/auth/login", "POST"),
-        ("/api/v1/health", "GET"),
-        ("/api/v1/audit-logs?page=1&category=STAFF", "GET"),
+        ("/api/products?page=1&page_size=20", "GET"),
+        ("/api/orders/123", "GET"),
+        ("/api/orders", "POST"),
+        ("/api/auth/login", "POST"),
+        ("/api/health", "GET"),
+        ("/api/audit-logs?page=1&category=STAFF", "GET"),
     ]
     for path, method in safe:
         req = _make_intrusion_request(path, method)

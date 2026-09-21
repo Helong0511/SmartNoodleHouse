@@ -1,4 +1,4 @@
-/** 前端 / H5 全部日志 → POST /api/v1/client-logs → logs/frontend/ */
+/** 前端 / H5 全部日志 → POST /api/client-logs → logs/frontend/ */
 const FLUSH_MS = 5000
 const MAX_BATCH = 50
 const MAX_QUEUE = 500
@@ -22,7 +22,7 @@ let reporting = false // 上报过程中禁止再入队，避免环路
 const originalConsole: Partial<Record<string, (...args: unknown[]) => void>> = {}
 
 function apiBase(): string {
-  return (import.meta.env.VITE_API_BASE_URL as string) || '/api/v1'
+  return (import.meta.env.VITE_API_BASE_URL as string) || '/api'
 }
 
 function stringifyArg(v: unknown): string {

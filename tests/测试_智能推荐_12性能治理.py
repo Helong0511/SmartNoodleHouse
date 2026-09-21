@@ -160,9 +160,9 @@ def test_gzip_skips_small_json_and_non_json():
 @pytest.mark.asyncio
 async def test_perf_metrics_percentiles_and_qps(fake_redis):
     for ms in range(10, 101):  # 10..100 共 91 个样本
-        await perf_metrics.record_request_timing("/api/v1/miniprogram/menu", float(ms))
+        await perf_metrics.record_request_timing("/api/miniprogram/menu", float(ms))
     report = await perf_metrics.query_perf_metrics(window_hours=1)
-    row = report["routes"]["/api/v1/miniprogram/menu"]
+    row = report["routes"]["/api/miniprogram/menu"]
     assert row["count"] == 91
     assert row["sample_size"] == 91
     assert 54 <= row["p50_ms"] <= 56
@@ -176,10 +176,10 @@ async def test_perf_metrics_percentiles_and_qps(fake_redis):
 
 
 def test_normalize_route():
-    assert perf_metrics.normalize_route("/api/v1/orders/123", None) == "/api/v1/orders/:id"
+    assert perf_metrics.normalize_route("/api/orders/123", None) == "/api/orders/:id"
     assert perf_metrics.normalize_route(
-        "/x", "/api/v1/orders/{order_id}/items/{item_id}"
-    ) == "/api/v1/orders/:id/items/:id"
+        "/x", "/api/orders/{order_id}/items/{item_id}"
+    ) == "/api/orders/:id/items/:id"
 
 
 def test_slow_request_logged(fake_redis, caplog):
@@ -206,14 +206,14 @@ def test_metrics_endpoint_reads_middleware_data(fake_redis):
 
     client = TestClient(real_app)
     # /health 被中间件跳过；菜单接口缺 store_id 返回 400，但计时在 finally 中仍会落桶
-    client.get("/api/v1/miniprogram/menu")
+    client.get("/api/miniprogram/menu")
 
     import asyncio
     body = asyncio.get_event_loop().run_until_complete(
         reco_metrics(request=None, window_hours=1)
     )
     routes = body["data"]["routes"]
-    # route.path 不含 /api/v1 外层 prefix，键为路由模板 /miniprogram/menu
+    # route.path 不含 /api 外层 prefix，键为路由模板 /miniprogram/menu
     assert "/miniprogram/menu" in routes
     assert routes["/miniprogram/menu"]["count"] >= 1
 

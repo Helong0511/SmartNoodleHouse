@@ -13,7 +13,7 @@ def _request() -> Request:
         {
             "type": "http",
             "method": "POST",
-            "path": "/api/v1/miniprogram/alipay/login",
+            "path": "/api/miniprogram/alipay/login",
             "headers": [],
             "query_string": b"",
             "server": ("test", 80),

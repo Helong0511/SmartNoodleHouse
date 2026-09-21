@@ -52,12 +52,12 @@ async def smoke() -> None:
     headers = {"Authorization": f"Bearer {token}"}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r = await client.get("/api/v1/tables", headers=headers, params={"page_size": 5})
+        r = await client.get("/api/tables", headers=headers, params={"page_size": 5})
         body = r.json()
         print("tables", r.status_code, body.get("code"), "total=", (body.get("data") or {}).get("total"))
         assert r.status_code == 200 and body.get("code") == 0
 
-        r2 = await client.get("/api/v1/settings/stores/options", headers=headers)
+        r2 = await client.get("/api/settings/stores/options", headers=headers)
         body2 = r2.json()
         print("stores", r2.status_code, body2.get("code"), "n=", len((body2.get("data") or {}).get("items") or []))
         assert r2.status_code == 200 and body2.get("code") == 0

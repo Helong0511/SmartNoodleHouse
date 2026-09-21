@@ -30,7 +30,7 @@ async def test_list_products_clamps_page_size():
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            res = await client.get("/api/v1/products", params={"page_size": 9999})
+            res = await client.get("/api/products", params={"page_size": 9999})
         assert res.status_code == 200
         body = res.json()
         assert body["code"] == 0
@@ -63,7 +63,7 @@ async def test_financial_ledger_list_requires_auth_shape():
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"payment:read"})):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                res = await client.get("/api/v1/financial-ledger")
+                res = await client.get("/api/financial-ledger")
         assert res.status_code == 200
         body = res.json()
         assert body["code"] == 0
@@ -102,7 +102,7 @@ async def test_public_product_list_rate_limit_failure_logs_warning(caplog):
         ):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                res = await client.get("/api/v1/products", params={"store_id": 1})
+                res = await client.get("/api/products", params={"store_id": 1})
         # 主流程不被限流检查故障阻塞
         assert res.status_code == 200
         # 限流失效必须有 warning 留痕，便于排查/防爬

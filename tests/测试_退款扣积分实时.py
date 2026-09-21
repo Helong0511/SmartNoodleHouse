@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
     reason="会连接并修改真实 MySQL/API 数据；设置 RUN_INTEGRATION=1 后单独运行",
 )
 
-API = "http://127.0.0.1:8000/api/v1"
+API = "http://127.0.0.1:8000/api"
 
 
 async def _login(client: httpx.AsyncClient) -> str:
