@@ -36,6 +36,7 @@
           <template #title>会员</template>
           <el-menu-item v-if="showCustomers" index="/customers">顾客管理</el-menu-item>
           <el-menu-item v-if="showCustomers" index="/member-levels">会员等级</el-menu-item>
+          <el-menu-item v-if="showWallet" index="/wallet">会员储值</el-menu-item>
           <el-menu-item v-if="showCoupons" index="/coupons">优惠券</el-menu-item>
         </el-sub-menu>
 
@@ -69,6 +70,7 @@
 
         <el-sub-menu v-if="showSystemGroup" index="g-system">
           <template #title>系统管理</template>
+          <el-menu-item v-if="showRolePerms" index="/role-permissions">角色权限</el-menu-item>
           <el-menu-item v-if="showSettings" index="/settings">系统设置</el-menu-item>
           <el-menu-item v-if="showAudit" index="/audit-logs">操作日志</el-menu-item>
         </el-sub-menu>
@@ -108,7 +110,8 @@ const showSettlement = computed(() => auth.canManageSettlement)
 const showCatalog = computed(() => auth.hasPermission('product:read') && notCashier.value)
 const showCustomers = computed(() => auth.hasPermission('customer:read') && notCashier.value)
 const showCoupons = computed(() => auth.hasPermission('coupon:read') && notCashier.value)
-const showMember = computed(() => showCustomers.value || showCoupons.value)
+const showWallet = computed(() => auth.hasPermission('wallet:read') && notCashier.value)
+const showMember = computed(() => showCustomers.value || showCoupons.value || showWallet.value)
 const showTables = computed(() => auth.hasPermission('table:manage'))
 const showUsers = computed(() => auth.hasPermission('user:read'))
 const showStore = computed(() => showTables.value || showUsers.value || auth.hasPermission('system:manage'))
@@ -116,8 +119,9 @@ const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
 const showSmart = computed(() => showCameras.value || showWelcome.value)
 const showSettings = computed(() => auth.hasPermission('system:manage'))
+const showRolePerms = computed(() => auth.hasPermission('system:manage'))
 const showAudit = computed(() => auth.hasPermission('audit:read'))
-const showSystemGroup = computed(() => showSettings.value || showAudit.value)
+const showSystemGroup = computed(() => showSettings.value || showAudit.value || showRolePerms.value)
 const showOps = computed(
   () =>
     showPos.value
@@ -144,7 +148,7 @@ const openGroup = computed(() => {
   if (['/customers', '/member-levels', '/coupons'].includes(p)) return 'g-member'
   if (['/tables', '/users', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
-  if (['/settings', '/audit-logs'].includes(p)) return 'g-system'
+  if (['/settings', '/audit-logs', '/role-permissions'].includes(p)) return 'g-system'
   return ''
 })
 

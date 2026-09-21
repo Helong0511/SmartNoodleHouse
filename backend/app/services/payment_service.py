@@ -13,7 +13,15 @@ from app.core.database import AsyncSessionLocal
 from app.core.biz_no import generate_no, payment_biz, refund_biz, resolve_table_parts
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
-from app.models import DiningTable, Order, Payment, PaymentCallbackReceipt, PaymentRefund, Store
+from app.models import (
+    DiningTable,
+    Order,
+    Payment,
+    PaymentCallbackReceipt,
+    PaymentRefund,
+    RechargeOrder,
+    Store,
+)
 from app.services import alipay_client, wechat_pay_client
 from app.services.order_lifecycle import apply_order_status
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
@@ -480,28 +488,32 @@ class PaymentService:
         provider: str,
         source: str,
     ) -> dict:
-        """本笔支付单已标 PAID 后：未结清→PARTIAL_PAID；结清→订单 PAID。每笔 SUCCESS 记 SALE。"""
-        from app.services.financial_ledger_service import FinancialLedgerService
+        """本笔支付单已标 PAID 后：未结清→PARTIAL_PAID；结清→订单 PAID。
+        微信/支付宝/现金记 SALE；BALANCE 不记 SALE（充值时已记实收，避免重复营收）。
+        """
+        provider_u = (provider or payment.provider or "").upper()
+        if provider_u != "BALANCE":
+            from app.services.financial_ledger_service import FinancialLedgerService
 
-        try:
-            await FinancialLedgerService.record_sale(
-                db,
-                store_id=int(order.store_id),
-                amount=payment.amount,
-                channel=order.channel or payment.channel,
-                provider=provider or payment.provider,
-                order_id=order.id,
-                payment_id=payment.id,
-                remark=f"payment_no={payment.payment_no}",
-            )
-        except Exception as exc:
-            logger.exception(
-                "财务分录 SALE 写入失败 payment_id=%s order_id=%s", payment.id, order.id
-            )
-            from app.core.config import get_settings
+            try:
+                await FinancialLedgerService.record_sale(
+                    db,
+                    store_id=int(order.store_id),
+                    amount=payment.amount,
+                    channel=order.channel or payment.channel,
+                    provider=provider or payment.provider,
+                    order_id=order.id,
+                    payment_id=payment.id,
+                    remark=f"payment_no={payment.payment_no}",
+                )
+            except Exception as exc:
+                logger.exception(
+                    "财务分录 SALE 写入失败 payment_id=%s order_id=%s", payment.id, order.id
+                )
+                from app.core.config import get_settings
 
-            if get_settings().is_production:
-                raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
+                if get_settings().is_production:
+                    raise AppException(50010, "财务分录写入失败，支付未确认，请重试") from exc
 
         paid = await cls.paid_amount(db, order.id)
         remaining = money(order.total_amount) - paid
@@ -578,10 +590,13 @@ class PaymentService:
         )
 
         provider_u = provider.upper()
-        channel = cls.CHANNEL_MAP.get(
-            (provider_u, channel_type.lower()),
-            f"{provider_u}_{channel_type.upper()}",
-        )
+        if provider_u == "BALANCE":
+            channel = "BALANCE"
+        else:
+            channel = cls.CHANNEL_MAP.get(
+                (provider_u, channel_type.lower()),
+                f"{provider_u}_{channel_type.upper()}",
+            )
 
         # 同一订单任一时刻仅允许一个有效支付流程。订单行锁使检查与创建串行化；
         # 全额同渠道重试复用原支付单，跨渠道或分笔并发必须先确认原流程结果。
@@ -640,6 +655,58 @@ class PaymentService:
             await record_payment_status(
                 db, payment_id=payment.id, from_status=None, to_status="PENDING", source="CREATE"
             )
+
+        # 余额支付：本事务内扣款并结清，不走第三方
+        if provider_u == "BALANCE":
+            cid = customer_id or order.customer_id
+            if not cid:
+                raise AppException(40040, "余额支付需绑定顾客")
+            if money(pay_amount) != money(remaining):
+                raise AppException(40052, "余额支付须一次结清待收金额")
+            from app.services.balance_service import BalanceService
+
+            try:
+                await BalanceService.debit_for_order(
+                    db,
+                    customer_id=int(cid),
+                    order_id=order.id,
+                    amount=pay_amount,
+                    store_id=order.store_id,
+                    payment_id=payment.id,
+                )
+            except AppException:
+                if payment.status == "PENDING":
+                    old_fail = payment.status
+                    payment.status = "CLOSED"
+                    await record_payment_status(
+                        db,
+                        payment_id=payment.id,
+                        from_status=old_fail,
+                        to_status="CLOSED",
+                        source="BALANCE",
+                        remark="余额不足或扣款失败",
+                    )
+                    await db.flush()
+                raise
+            old_p = payment.status
+            payment.status = "PAID"
+            payment.provider_trade_no = f"bal_{payment.payment_no}"
+            payment.paid_at = now_local()
+            payment.customer_id = int(cid)
+            await record_payment_status(
+                db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="BALANCE"
+            )
+            progress = await cls._finalize_tender(
+                db, payment=payment, order=order, provider="BALANCE", source="BALANCE"
+            )
+            return payment, {
+                "provider": "BALANCE",
+                "payment_no": payment.payment_no,
+                "amount": str(payment.amount),
+                "status": "PAID",
+                "already_paid": False,
+                **progress,
+            }
 
         # 短事务：落库支付单并释放行锁后再调第三方，避免网络抖动拖垮连接池
         payment_id = payment.id
@@ -750,6 +817,233 @@ class PaymentService:
         return payment, pay_data
 
     @classmethod
+    async def create_recharge_payment(
+        cls,
+        db: AsyncSession,
+        *,
+        recharge: RechargeOrder,
+        provider: str,
+        channel_type: str = "miniprogram",
+        customer_id: int | None = None,
+        extra: dict | None = None,
+    ) -> tuple[Payment, dict]:
+        """储值充值：微信/支付宝实付入账后写入本金+赠送金。"""
+        from types import SimpleNamespace
+
+        locked = (
+            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+        ).scalar_one_or_none()
+        if not locked:
+            raise AppException(40491, "充值单不存在")
+        recharge = locked
+        if recharge.status == "PAID":
+            raise AppException(40010, "充值单已支付")
+        if recharge.status not in ("PENDING",):
+            raise AppException(40012, f"当前充值单状态不可支付: {recharge.status}")
+
+        provider_u = provider.upper()
+        if provider_u not in ("WECHAT", "ALIPAY"):
+            raise AppException(40041, "充值仅支持微信或支付宝")
+        channel = cls.CHANNEL_MAP.get(
+            (provider_u, channel_type.lower()),
+            f"{provider_u}_{channel_type.upper()}",
+        )
+        pay_amount = money(recharge.pay_amount)
+
+        pending = (
+            await db.execute(
+                select(Payment)
+                .where(
+                    Payment.recharge_order_id == recharge.id,
+                    Payment.status == "PENDING",
+                )
+                .order_by(Payment.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        reused = False
+        if pending and pending.provider == provider_u and pending.channel == channel:
+            payment = pending
+            reused = True
+            if customer_id is not None:
+                payment.customer_id = customer_id
+        else:
+            if pending:
+                raise AppException(
+                    40908,
+                    "该充值单已有支付流程进行中，请先查单确认结果",
+                    status_code=409,
+                )
+            store = await db.get(Store, recharge.store_id)
+            sno = store.store_no if store else None
+            payment = Payment(
+                payment_no=generate_no(payment_biz(provider_u), sno, "00"),
+                order_id=None,
+                recharge_order_id=recharge.id,
+                customer_id=customer_id or recharge.customer_id,
+                provider=provider_u,
+                channel=channel,
+                amount=pay_amount,
+                status="PENDING",
+            )
+            db.add(payment)
+            await db.flush()
+            await record_payment_status(
+                db, payment_id=payment.id, from_status=None, to_status="PENDING", source="RECHARGE_CREATE"
+            )
+            recharge.payment_id = payment.id
+            await db.flush()
+
+        payment_id = payment.id
+        recharge_id = recharge.id
+        await db.commit()
+        payment = await db.get(Payment, payment_id)
+        recharge = await db.get(RechargeOrder, recharge_id)
+        if not payment or not recharge:
+            raise AppException(40491, "充值/支付单不存在")
+
+        proxy_order = SimpleNamespace(
+            order_no=recharge.recharge_no,
+            channel="RECHARGE",
+            dining_type=None,
+            table_id=None,
+            store_id=recharge.store_id,
+        )
+
+        if reused:
+            try:
+                synced, sync_meta = await cls.sync_payment_status(db, payment)
+            except AppException as exc:
+                logger.warning("复用充值支付单查单失败 payment=%s: %s", payment.payment_no, exc.message)
+                synced, sync_meta = payment, {"synced": False, "trade_state": "QUERY_FAILED"}
+            if synced.status == "PAID":
+                return synced, {
+                    "status": "PAID",
+                    "already_paid": True,
+                    "synced": True,
+                    **sync_meta,
+                }
+            rebuilt = cls._rebuild_client_pay_params(payment)
+            if rebuilt:
+                rebuilt["reused"] = True
+                return payment, rebuilt
+
+        provider_inst = cls.get_provider(provider_u)
+        try:
+            pay_data = await provider_inst.create_payment(payment, proxy_order, extra)
+        except AppException:
+            raise
+        cls._stash_client_pay_ref(payment, pay_data)
+        await db.flush()
+        if pay_data.get("_mock"):
+            await cls._settle_recharge_payment(
+                db, payment=payment, recharge=recharge, provider=provider_u, source="MOCK_RECHARGE"
+            )
+            pay_data["status"] = "PAID"
+            pay_data["mock_settled"] = True
+        elif pay_data.get("immediate_paid"):
+            trade_no = pay_data.get("provider_trade_no") or pay_data.get("transaction_id") or pay_data.get("trade_no")
+            payment.provider_trade_no = str(trade_no or "")
+            await cls._settle_recharge_payment(
+                db, payment=payment, recharge=recharge, provider=provider_u, source="RECHARGE_IMMEDIATE"
+            )
+            pay_data["status"] = "PAID"
+        return payment, pay_data
+
+    @classmethod
+    async def _settle_recharge_payment(
+        cls,
+        db: AsyncSession,
+        *,
+        payment: Payment,
+        recharge: RechargeOrder,
+        provider: str,
+        source: str,
+        provider_trade_no: str | None = None,
+    ) -> dict:
+        """充值支付成功：记 SALE（实付）、入账本金/赠送金、充值单 PAID。"""
+        if payment.status == "PAID" and recharge.status == "PAID":
+            return {"already_paid": True, "status": "PAID"}
+
+        from app.services.balance_service import BalanceService
+        from app.services.financial_ledger_service import FinancialLedgerService
+
+        locked_p = (
+            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
+        ).scalar_one()
+        locked_r = (
+            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+        ).scalar_one()
+        payment, recharge = locked_p, locked_r
+        if payment.status == "PAID" and recharge.status == "PAID":
+            return {"already_paid": True, "status": "PAID"}
+
+        old_p = payment.status
+        payment.status = "PAID"
+        if provider_trade_no:
+            payment.provider_trade_no = provider_trade_no
+        elif not payment.provider_trade_no:
+            payment.provider_trade_no = f"rc_{payment.payment_no}"
+        payment.paid_at = now_local()
+        await record_payment_status(
+            db, payment_id=payment.id, from_status=old_p, to_status="PAID", source=source
+        )
+
+        try:
+            await FinancialLedgerService.record_sale(
+                db,
+                store_id=int(recharge.store_id),
+                amount=payment.amount,
+                channel="RECHARGE",
+                provider=provider or payment.provider,
+                order_id=None,
+                payment_id=payment.id,
+                remark=f"recharge_no={recharge.recharge_no}",
+            )
+        except Exception as exc:
+            logger.exception("充值财务 SALE 失败 payment_id=%s", payment.id)
+            from app.core.config import get_settings
+
+            if get_settings().is_production:
+                raise AppException(50010, "财务分录写入失败，充值未确认，请重试") from exc
+
+        await BalanceService.credit_topup(db, recharge=recharge, payment_id=payment.id)
+        recharge.status = "PAID"
+        recharge.payment_id = payment.id
+        recharge.paid_at = now_local()
+        recharge.channel = (provider or payment.provider or "").upper()
+        await db.flush()
+        return {"status": "PAID", "recharge_no": recharge.recharge_no}
+
+    @classmethod
+    async def sync_recharge_payment(cls, db: AsyncSession, recharge: RechargeOrder) -> dict:
+        locked = (
+            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+        ).scalar_one_or_none()
+        if not locked:
+            raise AppException(40491, "充值单不存在")
+        recharge = locked
+        if recharge.status == "PAID":
+            return {"synced": False, "already_paid": True, "status": "PAID"}
+        payment = None
+        if recharge.payment_id:
+            payment = await db.get(Payment, recharge.payment_id)
+        if not payment:
+            payment = (
+                await db.execute(
+                    select(Payment)
+                    .where(Payment.recharge_order_id == recharge.id)
+                    .order_by(Payment.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if not payment:
+            return {"synced": False, "trade_state": "NO_PAYMENT"}
+        payment, meta = await cls.sync_payment_status(db, payment)
+        await db.refresh(recharge)
+        return {**meta, "payment_no": payment.payment_no, "recharge_status": recharge.status}
+
+    @classmethod
     def _is_duplicate_out_trade_error(cls, exc: AppException) -> bool:
         """仅匹配明确的商户订单号冲突错误码，避免把限频等临时错误误判为单号冲突。"""
         msg = str(getattr(exc, "message", "") or exc or "")
@@ -824,7 +1118,7 @@ class PaymentService:
             return payment, {"synced": False, "trade_state": payment.status}
 
         provider_u = (payment.provider or "").upper()
-        if provider_u == "CASH":
+        if provider_u in ("CASH", "BALANCE"):
             return payment, {"synced": False, "trade_state": payment.status}
         if provider_u == "WECHAT":
             if not (_wechat_pay_configured() or _wechat_micropay_configured()):
@@ -896,6 +1190,27 @@ class PaymentService:
     ) -> None:
         if payment.status == "PAID":
             return
+        # 储值充值单：无餐饮 order_id
+        if payment.recharge_order_id and not payment.order_id:
+            recharge = (
+                await db.execute(
+                    select(RechargeOrder).where(RechargeOrder.id == payment.recharge_order_id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not recharge:
+                raise AppException(40491, "充值单不存在")
+            await cls._settle_recharge_payment(
+                db,
+                payment=payment,
+                recharge=recharge,
+                provider=provider,
+                source="PAYMENT_QUERY",
+                provider_trade_no=provider_trade_no,
+            )
+            payment.callback_raw = {"source": "PAYMENT_QUERY", "query": query_raw}
+            await db.flush()
+            return
+
         order = (
             await db.execute(select(Order).where(Order.id == payment.order_id).with_for_update())
         ).scalar_one_or_none()
@@ -1334,6 +1649,12 @@ class PaymentService:
         if payment.status == "PAID":
             return payment
 
+        # 储值充值回调
+        if payment.recharge_order_id and not payment.order_id:
+            return await cls._apply_recharge_callback(
+                db, provider_u=provider_u, payment=payment, parsed=parsed, receipt=receipt, data=data
+            )
+
         order = (
             await db.execute(select(Order).where(Order.id == payment.order_id).with_for_update())
         ).scalar_one_or_none()
@@ -1410,6 +1731,76 @@ class PaymentService:
             )
             payment._callback_transitioned_to_paid = True
 
+        await db.flush()
+        return payment
+
+    @classmethod
+    async def _apply_recharge_callback(
+        cls,
+        db: AsyncSession,
+        *,
+        provider_u: str,
+        payment: Payment,
+        parsed: dict,
+        receipt: str,
+        data: dict,
+    ) -> Payment:
+        settings = get_settings()
+        if provider_u == "WECHAT":
+            mch = parsed.get("mchid") or data.get("mchid")
+            if settings.is_production:
+                if not mch:
+                    raise AppException(40301, "支付回调缺少商户号")
+                if str(mch) != str(settings.wechat_mch_id):
+                    raise AppException(40301, "支付商户号不匹配")
+            elif mch and str(mch) != str(settings.wechat_mch_id):
+                raise AppException(40301, "支付商户号不匹配")
+        else:
+            app_id = parsed.get("app_id") or data.get("app_id")
+            if settings.is_production:
+                if not app_id:
+                    raise AppException(40301, "支付回调缺少应用ID")
+                if settings.alipay_app_id and str(app_id) != str(settings.alipay_app_id):
+                    raise AppException(40301, "支付宝 app_id 不匹配")
+            elif app_id and settings.alipay_app_id and str(app_id) != str(settings.alipay_app_id):
+                raise AppException(40301, "支付宝 app_id 不匹配")
+
+        currency = parsed.get("currency")
+        if isinstance(parsed.get("amount"), dict) and not currency:
+            currency = parsed["amount"].get("currency")
+        if currency and str(currency).upper() != "CNY":
+            raise AppException(40302, f"支付币种不匹配，仅支持 CNY，收到: {currency}")
+
+        raw_amount = parsed.get("amount", 0)
+        if isinstance(raw_amount, dict):
+            raw_amount = raw_amount.get("total", 0)
+        if provider_u == "WECHAT":
+            callback_amount = money(Decimal(str(raw_amount)) / 100)
+        else:
+            callback_amount = money(Decimal(str(raw_amount)))
+        if callback_amount != money(payment.amount):
+            raise AppException(40302, "支付金额不匹配")
+
+        if parsed["status"] == "PAID":
+            recharge = (
+                await db.execute(
+                    select(RechargeOrder)
+                    .where(RechargeOrder.id == payment.recharge_order_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not recharge:
+                raise AppException(40491, "充值单不存在")
+            payment.callback_raw = {"receipt": receipt}
+            await cls._settle_recharge_payment(
+                db,
+                payment=payment,
+                recharge=recharge,
+                provider=provider_u,
+                source="CALLBACK",
+                provider_trade_no=parsed.get("provider_trade_no"),
+            )
+            payment._callback_transitioned_to_paid = True
         await db.flush()
         return payment
 
@@ -1553,28 +1944,43 @@ class PaymentService:
                 await db.execute(select(Order).where(Order.id == row.order_id).with_for_update())
             ).scalar_one_or_none()
             if order:
-                try:
-                    from app.services.financial_ledger_service import FinancialLedgerService
+                provider_u = (payment.provider or "").upper()
+                if provider_u != "BALANCE":
+                    try:
+                        from app.services.financial_ledger_service import FinancialLedgerService
 
-                    await FinancialLedgerService.record_refund(
-                        db,
-                        store_id=int(order.store_id),
-                        amount=row.amount,
-                        channel=order.channel or payment.channel,
-                        provider=payment.provider,
-                        order_id=order.id,
-                        payment_id=payment.id,
-                        refund_id=row.id,
-                        remark=f"refund_no={row.refund_no}",
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "财务分录 REFUND 写入失败 refund_id=%s order_id=%s", row.id, order.id
-                    )
-                    from app.core.config import get_settings
+                        await FinancialLedgerService.record_refund(
+                            db,
+                            store_id=int(order.store_id),
+                            amount=row.amount,
+                            channel=order.channel or payment.channel,
+                            provider=payment.provider,
+                            order_id=order.id,
+                            payment_id=payment.id,
+                            refund_id=row.id,
+                            remark=f"refund_no={row.refund_no}",
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "财务分录 REFUND 写入失败 refund_id=%s order_id=%s", row.id, order.id
+                        )
+                        from app.core.config import get_settings
 
-                    if get_settings().is_production:
-                        raise AppException(50010, "财务分录写入失败，退款未确认，请重试") from exc
+                        if get_settings().is_production:
+                            raise AppException(50010, "财务分录写入失败，退款未确认，请重试") from exc
+                else:
+                    # 余额支付退款：回补钱包，不记财务 REFUND（原支付未记 SALE）
+                    if order.customer_id:
+                        from app.services.balance_service import BalanceService
+
+                        await BalanceService.restore_for_refund(
+                            db,
+                            customer_id=int(order.customer_id),
+                            order_id=order.id,
+                            refund_id=row.id,
+                            amount=row.amount,
+                            store_id=order.store_id,
+                        )
                 # 按订单净已收判断：分笔退满一笔不得误标整单 REFUNDED
                 net = await cls.order_net_collected(db, order.id)
                 total = money(order.total_amount)
@@ -1725,14 +2131,18 @@ class PaymentService:
         payment_id = payment.id
         await db.commit()
 
-        provider_inst = cls.get_provider(payment.provider) if (payment.provider or "").upper() != "CASH" else None
+        provider_inst = cls.get_provider(payment.provider) if (payment.provider or "").upper() not in ("CASH", "BALANCE") else None
         try:
             if provider_inst is None:
                 result = {
                     "refund_no": refund_no,
                     "status": "SUCCESS",
                     "amount": str(amount),
-                    "provider_refund_no": f"cash_rf_{refund_no}",
+                    "provider_refund_no": (
+                        f"bal_rf_{refund_no}"
+                        if (payment.provider or "").upper() == "BALANCE"
+                        else f"cash_rf_{refund_no}"
+                    ),
                     "_mock": False,
                 }
             else:

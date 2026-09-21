@@ -10,6 +10,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- 清空所有表
 TRUNCATE TABLE `ab_assignments`;
 TRUNCATE TABLE `ab_experiments`;
+TRUNCATE TABLE `balance_ledger`;
 TRUNCATE TABLE `cameras`;
 TRUNCATE TABLE `cashier_shifts`;
 TRUNCATE TABLE `category_sort_schedule_items`;
@@ -56,6 +57,8 @@ TRUNCATE TABLE `product_images`;
 TRUNCATE TABLE `product_option_groups`;
 TRUNCATE TABLE `product_taste_profiles`;
 TRUNCATE TABLE `products`;
+TRUNCATE TABLE `recharge_orders`;
+TRUNCATE TABLE `recharge_packages`;
 TRUNCATE TABLE `role_permissions`;
 TRUNCATE TABLE `roles`;
 TRUNCATE TABLE `store_business_hours`;
@@ -97,13 +100,15 @@ INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'system:manage', '�
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'coupon:read', '查看优惠券', 'coupon' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'coupon:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'coupon:manage', '管理优惠券', 'coupon' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'coupon:manage');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'audit:read', '查看操作日志', 'audit' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'audit:read');
+INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'wallet:read', '查看储值', 'wallet' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'wallet:read');
+INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'wallet:manage', '管理储值档位与调账', 'wallet' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'wallet:manage');
 
 -- 三、角色权限矩阵
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r CROSS JOIN `permissions` p WHERE `r`.`code` = 'SUPER_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
-INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'order:update', 'customer:read', 'customer:manage', 'camera:read', 'camera:manage', 'welcome:manage', 'payment:read', 'payment:refund', 'table:manage', 'user:read', 'user:manage', 'coupon:read', 'coupon:manage', 'audit:read') WHERE `r`.`code` = 'STORE_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'order:update', 'customer:read', 'customer:manage', 'camera:read', 'camera:manage', 'welcome:manage', 'payment:read', 'payment:refund', 'table:manage', 'user:read', 'user:manage', 'coupon:read', 'coupon:manage', 'audit:read', 'wallet:read', 'wallet:manage') WHERE `r`.`code` = 'STORE_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('order:read', 'order:update') WHERE `r`.`code` = 'KITCHEN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
-INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('order:read', 'order:update', 'payment:read', 'customer:read', 'product:read') WHERE `r`.`code` = 'CASHIER' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
-INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'customer:read', 'payment:read') WHERE `r`.`code` = 'OPERATOR' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('order:read', 'order:update', 'payment:read', 'customer:read', 'product:read', 'wallet:read') WHERE `r`.`code` = 'CASHIER' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'customer:read', 'payment:read', 'wallet:read') WHERE `r`.`code` = 'OPERATOR' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 
 -- 四、会员等级
 INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '普通会员', 0, 1.0000 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '普通会员');
@@ -116,6 +121,11 @@ INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '钻�
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '新客满30减5');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50享打9折', 'PERCENT', 0.9000, 50.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50享打9折');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '10元代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '10元代金券');
+
+-- 五-B、储值档位（射洪友好：充50/100/200）
+INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充50得55', 50.00, 5.00, 0, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充50得55');
+INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充100得120', 100.00, 20.00, 1, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充100得120');
+INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充200得250', 200.00, 50.00, 2, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充200得250');
 
 -- 六、门店
 INSERT INTO `stores` (`id`, `store_no`, `name`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) VALUES 

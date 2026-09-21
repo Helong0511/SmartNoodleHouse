@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="balance-card">
+    <view class="label">当前余额</view>
+    <view class="amount">¥{{balanceTotal}}</view>
+    <view class="sub">本金 ¥{{balancePrincipal}} · 赠送 ¥{{balanceGift}}</view>
+  </view>
+
+  <view class="section">
+    <view class="title">选择充值档位</view>
+    <view
+      class="pkg {{selectedId === item.id ? 'on' : ''}}"
+      wx:for="{{packages}}"
+      wx:key="id"
+      data-id="{{item.id}}"
+      bindtap="onSelect"
+    >
+      <view class="pkg-name">{{item.name}}</view>
+      <view class="pkg-meta">实付 ¥{{item.pay_amount}} · 到账 ¥{{item.credit_total}}</view>
+    </view>
+    <view wx:if="{{!packages.length}}" class="empty">暂无可用档位</view>
+  </view>
+
+  <button class="btn-primary" loading="{{loading}}" disabled="{{!selectedId}}" bindtap="submit">确认充值</button>
+  <view class="tip">充值金额到账后可用于点餐，赠送金优先扣减；余额支付不记二次营收。</view>
+</view>

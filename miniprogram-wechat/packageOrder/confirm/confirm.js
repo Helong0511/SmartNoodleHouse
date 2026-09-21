@@ -71,6 +71,9 @@ Page({
     hasDiscount: false,
     boxPriceMap: {},
     isMember: false,
+    payMethod: 'WECHAT',
+    balanceTotal: '0.00',
+    canPayBalance: false,
     memberLevelName: '',
     memberDiscountText: '',
     nextLevelName: '',
@@ -382,6 +385,8 @@ Page({
       this._memberRate = Number.isFinite(rate) && rate > 0 && rate < 1 ? rate : 1
       this.setData({
         isMember: !!(profile && profile.is_member),
+        balanceTotal: (profile && profile.balance_total) || '0.00',
+        canPayBalance: !!(profile && profile.is_member && parseFloat(profile.balance_total || 0) > 0),
         memberLevelName: (profile && profile.member_level_name) || '',
         memberDiscountText: memberDiscountText(profile && profile.member_discount_rate),
         nextLevelName: (profile && profile.next_level_name) || '',
@@ -396,6 +401,15 @@ Page({
     } catch (_) {
       this._memberRate = 1
     }
+  },
+
+  onPayMethod(e) {
+    const m = String((e.currentTarget.dataset && e.currentTarget.dataset.m) || '').toUpperCase()
+    if (m === 'BALANCE' && !this.data.canPayBalance) {
+      wx.showToast({ title: '余额不足，请先充值', icon: 'none' })
+      return
+    }
+    if (m === 'WECHAT' || m === 'BALANCE') this.setData({ payMethod: m })
   },
 
   storeId() {
@@ -595,6 +609,9 @@ Page({
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
     await media.hydrateImageUrls(cartPreview, 'imageUrl')
     const settleStoreId = this.submitStoreId()
+    const bal = parseFloat(this.data.balanceTotal || 0) || 0
+    const canBal = !!(this.data.isMember && bal + 1e-9 >= pay)
+    const nextPayMethod = (!canBal && this.data.payMethod === 'BALANCE') ? 'WECHAT' : this.data.payMethod
     this.setData({
       cartPreview,
       cartIds: cartPreview.map((it) => it.product_id),
@@ -609,7 +626,9 @@ Page({
       hasVoucherDiscount: voucherDisc > 0,
       payEstimate: pay.toFixed(2),
       hasDiscount: discount > 0,
-      hasSpecialItems: enrichedList.some((i) => i.no_member_discount)
+      hasSpecialItems: enrichedList.some((i) => i.no_member_discount),
+      canPayBalance: canBal,
+      payMethod: nextPayMethod
     })
   },
 
@@ -820,12 +839,19 @@ Page({
         }))
       })
       const payRes = await api.post(`/payments/orders/${order.id}/pay`, {
-        provider: 'WECHAT',
-        channel_type: 'miniprogram'
+        provider: this.data.payMethod === 'BALANCE' ? 'BALANCE' : 'WECHAT',
+        channel_type: this.data.payMethod === 'BALANCE' ? 'balance' : 'miniprogram'
       })
       let payOutcome
       try {
-        payOutcome = await payUtil.payAndConfirm(api, payRes, order.id)
+        if (this.data.payMethod === 'BALANCE') {
+          if (!(payRes && (payRes.status === 'PAID' || payRes.already_paid || payRes.fully_paid))) {
+            throw new Error((payRes && payRes.message) || '余额支付失败')
+          }
+          payOutcome = { paid: true, payRes, sync: null }
+        } else {
+          payOutcome = await payUtil.payAndConfirm(api, payRes, order.id)
+        }
       } catch (payErr) {
         // 订单已创建：保留待确认支付，引导结果页/订单页继续对账或重付
         const ptsFail = payRes && payRes.points_earned ? `&points_earned=${payRes.points_earned}` : ''

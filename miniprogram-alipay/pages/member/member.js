@@ -50,6 +50,7 @@ Page({
     memberLevelName: '',
     memberDiscountText: '',
     memberPoints: 0,
+    balanceTotal: '0.00',
     nextLevelName: '',
     pointsToNext: 0,
     levelProgress: 0,
@@ -161,6 +162,7 @@ Page({
       memberLevelName: isMember ? (profile.member_level_name || '') : '',
       memberDiscountText: isMember ? discountText(profile.member_discount_rate) : '',
       memberPoints: isMember ? (profile.member_points || 0) : 0,
+      balanceTotal: isMember ? (profile.balance_total || '0.00') : '0.00',
       nextLevelName: isMember ? (profile.next_level_name || '') : '',
       pointsToNext: isMember ? (profile.points_to_next_level || 0) : 0,
       levelProgress: isMember ? (profile.level_progress_percent || 0) : 0,
@@ -308,6 +310,10 @@ Page({
       this.setData({ savingName: false })
       my.showToast({ content: e.message || '保存失败', type: 'fail' })
     }
+  },
+
+  goRecharge() {
+    my.navigateTo({ url: '/pages/recharge/recharge' })
   },
 
   async activateSmartMember() {

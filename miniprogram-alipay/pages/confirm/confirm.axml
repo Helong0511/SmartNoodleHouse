@@ -108,6 +108,17 @@
     onAdd="onRecommendAdd"
   />
 
-  <view class="pay">支付方式：支付宝</view>
+  <view class="pay-box">
+    <view class="label">支付方式</view>
+    <view class="pay-row">
+      <view class="pay-opt {{payMethod === 'ALIPAY' ? 'on' : ''}}" data-m="ALIPAY" onTap="onPayMethod">支付宝</view>
+      <view
+        class="pay-opt {{payMethod === 'BALANCE' ? 'on' : ''}} {{!canPayBalance ? 'disabled' : ''}}"
+        data-m="BALANCE"
+        onTap="onPayMethod"
+      >余额支付¥{{balanceTotal}}</view>
+    </view>
+    <view class="pay-tip" a:if="{{isMember && !canPayBalance}}">余额不足时可先到「会员」页充值</view>
+  </view>
   <button class="btn-primary" loading="{{loading}}" onTap="submit">提交并支付</button>
 </view>

@@ -75,7 +75,7 @@ class PosScanPay(BaseModel):
 
 
 class PaymentCreate(BaseModel):
-    provider: str = Field(description="WECHAT or ALIPAY")
+    provider: str = Field(description="WECHAT / ALIPAY / BALANCE")
     channel_type: str = "native"
 
 

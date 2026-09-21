@@ -1,0 +1,15 @@
+.page { padding: 16px 16px 40px; background: #f7f7f7; min-height: 100vh; box-sizing: border-box; }
+.balance-card { background: linear-gradient(135deg, #ff8a4c, #ff6b35); color: #fff; border-radius: 12px; padding: 18px 16px; }
+.balance-card .label { opacity: 0.9; font-size: 13px; }
+.balance-card .amount { font-size: 32px; font-weight: 700; margin-top: 6px; }
+.balance-card .sub { margin-top: 8px; font-size: 12px; opacity: 0.92; }
+.section { margin-top: 16px; background: #fff; border-radius: 12px; padding: 14px; }
+.title { font-weight: 600; margin-bottom: 10px; }
+.pkg { border: 1px solid #eee; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.pkg.on { border-color: #ff6b35; background: #fff7f3; }
+.pkg-name { font-size: 16px; font-weight: 600; }
+.pkg-meta { margin-top: 4px; color: #666; font-size: 13px; }
+.empty { color: #999; font-size: 13px; padding: 8px 0; }
+.btn-primary { margin-top: 20px; background: #ff6b35; color: #fff; border-radius: 24px; }
+.btn-primary[disabled] { opacity: 0.5; }
+.tip { margin-top: 12px; color: #999; font-size: 12px; line-height: 1.5; }

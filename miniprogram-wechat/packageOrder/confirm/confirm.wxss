@@ -85,4 +85,13 @@
 .pack-opt.on { border-color: #ff6b35; color: #ff6b35; background: #fff5f0; font-weight: 600; }
 .pack-tip { margin-top: 12rpx; color: #999; font-size: 24rpx; }
 .remark { width: 100%; background: #fff; border-radius: 12rpx; padding: 20rpx; box-sizing: border-box; min-height: 160rpx; }
+.pay-box { margin: 24rpx 0; background: #fff; border-radius: 12rpx; padding: 20rpx; }
+.pay-row { display: flex; gap: 16rpx; margin-top: 12rpx; }
+.pay-opt {
+  flex: 1; text-align: center; padding: 18rpx 8rpx; border: 1px solid #e5e5e5;
+  border-radius: 12rpx; font-size: 26rpx; color: #333;
+}
+.pay-opt.on { border-color: #ff6b35; color: #ff6b35; background: #fff5f0; font-weight: 600; }
+.pay-opt.disabled { opacity: 0.45; }
+.pay-tip { margin-top: 10rpx; color: #999; font-size: 22rpx; }
 .pay { margin: 24rpx 0; }

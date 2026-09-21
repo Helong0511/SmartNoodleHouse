@@ -10,7 +10,7 @@ from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.core.security import hash_password
-from app.models import Role, Store, User
+from app.models import Permission, Role, RolePermission, Store, User
 from app.services.audit_service import AuditService
 from app.services.store_scope import assert_store_access, require_bound_store
 
@@ -18,6 +18,29 @@ router = APIRouter(prefix="/users", tags=["员工"])
 
 # 门店管理员不可分配的角色
 STORE_ADMIN_FORBIDDEN_ROLES = {"SUPER_ADMIN"}
+
+# 权限矩阵模块展示名（未列出的 module 原样回退）
+MODULE_LABELS: dict[str, str] = {
+    "product": "商品",
+    "order": "订单",
+    "customer": "顾客",
+    "camera": "摄像头",
+    "welcome": "迎宾",
+    "payment": "支付",
+    "table": "桌台",
+    "user": "员工",
+    "system": "系统",
+    "coupon": "优惠券",
+    "audit": "审计",
+    "wallet": "储值",
+}
+
+# 超管角色权限固定为全部，后台不可改
+LOCKED_ROLE_CODES = {"SUPER_ADMIN"}
+
+
+class RolePermissionsUpdate(BaseModel):
+    permission_codes: list[str] = Field(default_factory=list)
 
 
 class UserCreate(BaseModel):
@@ -88,6 +111,150 @@ async def list_roles(request: Request, db: DbSession, user: CurrentUser):
         rows = [r for r in rows if r.code not in STORE_ADMIN_FORBIDDEN_ROLES]
     return success(
         [{"id": r.id, "code": r.code, "name": r.name, "description": r.description} for r in rows],
+        request=request,
+    )
+
+
+@router.get("/role-permissions-matrix", dependencies=[require_permission("system:manage")])
+async def role_permissions_matrix(request: Request, db: DbSession, user: CurrentUser):
+    """角色×权限矩阵（仅超管/持 system:manage 可读）。"""
+    roles = list((await db.execute(select(Role).order_by(Role.id))).scalars().all())
+    perms = list(
+        (await db.execute(select(Permission).order_by(Permission.module, Permission.id))).scalars().all()
+    )
+    rp_rows = list((await db.execute(select(RolePermission))).scalars().all())
+    granted: dict[int, set[str]] = {}
+    code_by_id = {p.id: p.code for p in perms}
+    for rp in rp_rows:
+        code = code_by_id.get(rp.permission_id)
+        if not code:
+            continue
+        granted.setdefault(rp.role_id, set()).add(code)
+
+    modules_map: dict[str, list[dict]] = {}
+    for p in perms:
+        modules_map.setdefault(p.module, []).append(
+            {"id": p.id, "code": p.code, "name": p.name}
+        )
+    modules = [
+        {
+            "module": mod,
+            "label": MODULE_LABELS.get(mod, mod),
+            "permissions": items,
+        }
+        for mod, items in modules_map.items()
+    ]
+
+    role_payload = []
+    for r in roles:
+        codes = sorted(granted.get(r.id, set()))
+        # 超管展示上视为拥有全部权限点
+        if r.code in LOCKED_ROLE_CODES:
+            codes = sorted(code_by_id.values())
+        role_payload.append(
+            {
+                "id": r.id,
+                "code": r.code,
+                "name": r.name,
+                "description": r.description,
+                "editable": r.code not in LOCKED_ROLE_CODES,
+                "permission_codes": codes,
+            }
+        )
+
+    return success(
+        {
+            "roles": role_payload,
+            "modules": modules,
+            "hints": [
+                "超级管理员权限固定为全部，不可在此修改。",
+                "保存后该角色下员工需重新登录或刷新「我的信息」后菜单与接口权限才完全同步。",
+                "退款权限（payment:refund）建议仅授予店长及以上。",
+            ],
+        },
+        request=request,
+    )
+
+
+@router.put("/roles/{role_id}/permissions", dependencies=[require_permission("system:manage")])
+async def update_role_permissions(
+    role_id: int,
+    data: RolePermissionsUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """覆盖保存某角色的权限集合（不可改 SUPER_ADMIN）。"""
+    role = await _get_role(db, role_id)
+    if role.code in LOCKED_ROLE_CODES:
+        raise AppException(40314, "超级管理员权限不可修改")
+
+    wanted = {c.strip() for c in (data.permission_codes or []) if c and c.strip()}
+    # 禁止给非超管角色授予 system:manage，避免越权创建超管
+    if "system:manage" in wanted and role.code != "SUPER_ADMIN":
+        raise AppException(40315, "仅超级管理员可拥有 system:manage")
+
+    all_perms = list((await db.execute(select(Permission))).scalars().all())
+    by_code = {p.code: p for p in all_perms}
+    unknown = sorted(wanted - set(by_code.keys()))
+    if unknown:
+        raise AppException(40084, f"未知权限码：{', '.join(unknown)}")
+
+    old_codes = set(
+        (
+            await db.execute(
+                select(Permission.code)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .where(RolePermission.role_id == role.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    new_codes = set(wanted)
+
+    # 全量替换
+    existing_rps = list(
+        (await db.execute(select(RolePermission).where(RolePermission.role_id == role.id))).scalars().all()
+    )
+    for rp in existing_rps:
+        await db.delete(rp)
+    await db.flush()
+    for code in sorted(new_codes):
+        db.add(RolePermission(role_id=role.id, permission_id=by_code[code].id))
+
+    # 吊销该角色员工旧会话，促使其重新拉权限
+    affected = list(
+        (await db.execute(select(User).where(User.role_id == role.id))).scalars().all()
+    )
+    for u in affected:
+        u.token_version = int(getattr(u, "token_version", 0) or 0) + 1
+
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="role.permissions.update",
+        module="user",
+        target_type="role",
+        target_id=role.id,
+        detail={
+            "role_code": role.code,
+            "added": sorted(new_codes - old_codes),
+            "removed": sorted(old_codes - new_codes),
+            "permission_codes": sorted(new_codes),
+            "affected_users": len(affected),
+        },
+        request=request,
+    )
+    await db.flush()
+    return success(
+        {
+            "id": role.id,
+            "code": role.code,
+            "name": role.name,
+            "permission_codes": sorted(new_codes),
+            "affected_users": len(affected),
+        },
         request=request,
     )
 

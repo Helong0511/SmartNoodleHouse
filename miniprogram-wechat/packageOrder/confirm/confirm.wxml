@@ -112,6 +112,17 @@
     bind:add="onRecommendAdd"
   />
 
-  <view class="pay">支付方式：微信支付</view>
+  <view class="pay-box">
+    <view class="label">支付方式</view>
+    <view class="pay-row">
+      <view class="pay-opt {{payMethod === 'WECHAT' ? 'on' : ''}}" data-m="WECHAT" bindtap="onPayMethod">微信支付</view>
+      <view
+        class="pay-opt {{payMethod === 'BALANCE' ? 'on' : ''}} {{!canPayBalance ? 'disabled' : ''}}"
+        data-m="BALANCE"
+        bindtap="onPayMethod"
+      >余额支付¥{{balanceTotal}}</view>
+    </view>
+    <view class="pay-tip" wx:if="{{isMember && !canPayBalance}}">余额不足时可先到「会员」页充值</view>
+  </view>
   <button class="btn-primary" loading="{{loading}}" bindtap="submit">提交并支付</button>
 </view>

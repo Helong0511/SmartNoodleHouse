@@ -78,6 +78,8 @@
 .muted-disc { color: #999; font-weight: 400; }
 .hint { color: #999; font-size: 24rpx; }
 .points-line { color: #666; font-size: 24rpx; margin-top: 10rpx; }
+.balance-line { display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap; }
+.recharge-link { color: #1677ff; font-size: 24rpx; }
 .pts { color: #1677ff; font-weight: 700; font-size: 28rpx; }
 .phone { color: #666; font-size: 24rpx; margin-top: 8rpx; }
 .progress-box { margin-top: 24rpx; padding-top: 20rpx; border-top: 1px solid #f0f0f0; }

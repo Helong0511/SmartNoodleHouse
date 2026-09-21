@@ -74,6 +74,10 @@
             <button class="btn-primary activate-btn" size="mini" loading="{{activatingMember}}" onTap="activateSmartMember">开启智能会员</button>
           </view>
           <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
+          <view class="points-line balance-line" a:if="{{isMember}}">
+            储值余额 <text class="pts">¥{{balanceTotal}}</text>
+            <text class="link recharge-link" onTap="goRecharge">去充值</text>
+          </view>
           <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
         </view>
       </view>

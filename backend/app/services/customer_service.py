@@ -111,6 +111,12 @@ class CustomerService:
             "member_discount_rate": str(level.discount_rate) if level else None,
             "member_min_points": int(level.min_points) if level else None,
             "member_points": int(customer.points or 0),
+            "balance_principal": str(money(getattr(customer, "balance_principal", 0) or 0)),
+            "balance_gift": str(money(getattr(customer, "balance_gift", 0) or 0)),
+            "balance_total": str(
+                money(getattr(customer, "balance_principal", 0) or 0)
+                + money(getattr(customer, "balance_gift", 0) or 0)
+            ),
         }
 
     @staticmethod

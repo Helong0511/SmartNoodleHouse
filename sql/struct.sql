@@ -52,6 +52,38 @@ CREATE TABLE IF NOT EXISTS `ab_experiments` (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'A/B 实验定义表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for balance_ledger
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `balance_ledger` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '发生门店 → stores.id',
+  `order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联餐饮订单 → orders.id',
+  `recharge_order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联充值单 → recharge_orders.id',
+  `payment_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联支付单 → payments.id',
+  `refund_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联退款单 → payment_refunds.id',
+  `entry_type` varchar(30) NOT NULL COMMENT 'TOPUP=充值入账 | PAY=余额消费 | REFUND_RESTORE=退款回补 | ADJUST=人工调账 | MERGE=合并',
+  `delta_principal` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '本金变动（可负）',
+  `delta_gift` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '赠送金变动（可负）',
+  `principal_after` decimal(10, 2) NOT NULL COMMENT '变动后本金余额',
+  `gift_after` decimal(10, 2) NOT NULL COMMENT '变动后赠送金余额',
+  `remark` varchar(255) NULL DEFAULT NULL COMMENT '备注',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
+  `pay_order_id` bigint UNSIGNED GENERATED ALWAYS AS (if((`entry_type` = _utf8mb4'PAY'), `order_id`, NULL)) STORED COMMENT 'PAY 幂等：每单至多一条扣款' NULL,
+  `topup_recharge_id` bigint UNSIGNED GENERATED ALWAYS AS (if((`entry_type` = _utf8mb4'TOPUP'), `recharge_order_id`, NULL)) STORED COMMENT 'TOPUP 幂等：每充值单至多一条' NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_bl_pay_order`(`pay_order_id` ASC) USING BTREE,
+  UNIQUE INDEX `uk_bl_topup_recharge`(`topup_recharge_id` ASC) USING BTREE,
+  UNIQUE INDEX `uk_bl_refund`(`refund_id` ASC) USING BTREE,
+  INDEX `idx_bl_customer_created`(`customer_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_bl_store_created`(`store_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_bl_payment`(`payment_id` ASC) USING BTREE,
+  CONSTRAINT `fk_bl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_bl_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_bl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员储值流水（本金/赠送金）' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for cameras
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `cameras` (
@@ -326,6 +358,8 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `phone` varchar(11) NULL DEFAULT NULL COMMENT '手机号；绑定后可合并历史账号',
   `member_level_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '当前会员等级 → member_levels.id',
   `points` int NOT NULL DEFAULT 0 COMMENT '累计积分；实付1元=1分，达门槛自动升级',
+  `balance_principal` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '储值本金余额（元，顾客实付充入）',
+  `balance_gift` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '储值赠送金余额（元，活动赠送；优先抵扣）',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '顾客状态：1=正常 0=禁用（兼容字段；以 account_status 为准）',
   `member_status` varchar(20) NOT NULL DEFAULT 'GUEST' COMMENT 'GUEST=游客（可点餐） MEMBER=已主动开通会员',
   `account_status` varchar(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED/DELETED',
@@ -711,7 +745,7 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `packing_fee` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '打包/餐盒费合计',
   `total_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '应付总额（见文件头计算公式）',
   `payment_status` varchar(20) NOT NULL DEFAULT 'UNPAID' COMMENT 'UNPAID/PARTIAL_PAID/PAID/PARTIAL_REFUND/REFUNDING/REFUNDED',
-  `payment_method` varchar(20) NULL DEFAULT NULL COMMENT '支付方式摘要：WECHAT/ALIPAY/CASH/MIXED',
+  `payment_method` varchar(20) NULL DEFAULT NULL COMMENT '支付方式摘要：WECHAT/ALIPAY/CASH/BALANCE/MIXED',
   `channel` varchar(20) NULL DEFAULT NULL COMMENT '下单渠道：WECHAT/ALIPAY/MEITUAN/ELEME/H5',
   `remark` varchar(500) NULL DEFAULT NULL COMMENT '顾客备注',
   `idempotency_key` varchar(64) NULL DEFAULT NULL COMMENT '下单幂等键（按渠道/门店/操作员等作用域拼接，防重复提交；允许多 NULL）',
@@ -843,11 +877,12 @@ CREATE TABLE IF NOT EXISTS `payment_status_history` (
 CREATE TABLE IF NOT EXISTS `payments` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `payment_no` varchar(40) NOT NULL COMMENT '支付单号',
-  `order_id` bigint UNSIGNED NOT NULL COMMENT '关联订单 → orders.id',
+  `order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联餐饮订单 → orders.id；储值充值可空',
+  `recharge_order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联充值单 → recharge_orders.id；餐饮支付可空',
   `customer_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '付款顾客 → customers.id',
   `operator_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '收银操作员 → users.id',
-  `provider` varchar(20) NOT NULL COMMENT '支付渠道：WECHAT | ALIPAY | CASH | MOCK（开发模拟）',
-  `channel` varchar(30) NOT NULL COMMENT '细分渠道，如 miniprogram、native、h5',
+  `provider` varchar(20) NOT NULL COMMENT '支付渠道：WECHAT | ALIPAY | CASH | BALANCE | MOCK',
+  `channel` varchar(30) NOT NULL COMMENT '细分渠道，如 miniprogram、native、h5、BALANCE',
   `amount` decimal(10, 2) NOT NULL COMMENT '支付金额（元）',
   `currency` varchar(10) NOT NULL DEFAULT 'CNY' COMMENT '币种',
   `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PAID/PARTIAL_REFUND/REFUNDED/CLOSED/FAILED',
@@ -861,6 +896,7 @@ CREATE TABLE IF NOT EXISTS `payments` (
   UNIQUE INDEX `payment_no`(`payment_no` ASC) USING BTREE,
   UNIQUE INDEX `uk_provider_trade`(`provider` ASC, `provider_trade_no` ASC) USING BTREE,
   INDEX `idx_payments_order_status`(`order_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_payments_recharge`(`recharge_order_id` ASC, `status` ASC) USING BTREE,
   INDEX `idx_payments_created`(`created_at` ASC) USING BTREE,
   INDEX `idx_payments_paid_at`(`paid_at` ASC) USING BTREE,
   INDEX `idx_payments_status_paid`(`status` ASC, `paid_at` ASC) USING BTREE,
@@ -868,7 +904,12 @@ CREATE TABLE IF NOT EXISTS `payments` (
   INDEX `fk_payments_customer`(`customer_id` ASC) USING BTREE,
   CONSTRAINT `fk_payments_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_payments_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_payments_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_payments_recharge` FOREIGN KEY (`recharge_order_id`) REFERENCES `recharge_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_payments_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_payments_target` CHECK (
+    (`order_id` is not null and `recharge_order_id` is null)
+    or (`order_id` is null and `recharge_order_id` is not null)
+  )
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付单表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1144,6 +1185,56 @@ CREATE TABLE IF NOT EXISTS `products` (
   CONSTRAINT `chk_products_price_pos` CHECK (`price` > 0),
   CONSTRAINT `chk_products_stock_nonneg` CHECK (`stock` >= 0)
 ) ENGINE = InnoDB AUTO_INCREMENT = 15 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品表（按门店）' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for recharge_packages
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `recharge_packages` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT 'NULL=总部全店可用；非空=仅该门店',
+  `name` varchar(100) NOT NULL COMMENT '档位名称，如 充100得120',
+  `pay_amount` decimal(10, 2) NOT NULL COMMENT '顾客实付金额（元）',
+  `gift_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '赠送到账金额（元）',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '展示排序，越小越靠前',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1=上架 0=下架',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_rp_store_status`(`store_id` ASC, `status` ASC, `sort_order` ASC) USING BTREE,
+  CONSTRAINT `fk_rp_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_rp_pay_pos` CHECK (`pay_amount` > 0),
+  CONSTRAINT `chk_rp_gift_nonneg` CHECK (`gift_amount` >= 0)
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员储值充值档位' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for recharge_orders
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `recharge_orders` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `recharge_no` varchar(40) NOT NULL COMMENT '充值单号',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '充值归属门店 → stores.id',
+  `package_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '选用档位 → recharge_packages.id；自定义充值可空',
+  `pay_amount` decimal(10, 2) NOT NULL COMMENT '实付金额（元）',
+  `credit_principal` decimal(10, 2) NOT NULL COMMENT '入账本金（通常=pay_amount）',
+  `credit_gift` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '入账赠送金',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PAID/CLOSED/FAILED',
+  `channel` varchar(20) NULL DEFAULT NULL COMMENT '渠道：WECHAT/ALIPAY/POS',
+  `payment_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '成功支付单 → payments.id',
+  `paid_at` datetime(3) NULL DEFAULT NULL COMMENT '支付成功时间',
+  `idempotency_key` varchar(64) NULL DEFAULT NULL COMMENT '创建幂等键',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_ro_no`(`recharge_no` ASC) USING BTREE,
+  UNIQUE INDEX `uk_ro_idem`(`idempotency_key` ASC) USING BTREE,
+  INDEX `idx_ro_customer`(`customer_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_ro_store_status`(`store_id` ASC, `status` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_ro_package`(`package_id` ASC) USING BTREE,
+  CONSTRAINT `fk_ro_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ro_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ro_package` FOREIGN KEY (`package_id`) REFERENCES `recharge_packages` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员储值充值单' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for role_permissions

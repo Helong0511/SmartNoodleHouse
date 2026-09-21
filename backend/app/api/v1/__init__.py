@@ -22,6 +22,7 @@ from app.api.v1 import (
     settings,
     tables,
     users,
+    wallet,
     welcome,
     websocket,
     pos,
@@ -34,6 +35,7 @@ api_router.include_router(users.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(payments.router)
+api_router.include_router(wallet.router)
 api_router.include_router(financial_ledger.router)
 api_router.include_router(print_jobs.router)
 api_router.include_router(pos.router)
