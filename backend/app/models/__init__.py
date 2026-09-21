@@ -196,6 +196,10 @@ class BalanceLedger(Base):
 
 class RechargePackage(Base, TimestampMixin):
     __tablename__ = "recharge_packages"
+    __table_args__ = (
+        # MySQL 用生成列 scope_store_id=IFNULL(store_id,0) 实现总部唯一；此处与业务校验对齐
+        Index("idx_rp_store_status", "store_id", "status", "sort_order"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, index=True)
     name: Mapped[str] = mapped_column(String(100))

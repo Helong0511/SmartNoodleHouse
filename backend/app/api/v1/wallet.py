@@ -6,6 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, OptionalStaffUser, require_permission
 from app.core.biz_no import generate_no
@@ -52,12 +53,13 @@ class AdjustBody(BaseModel):
     store_id: int | None = None
 
 
-def _pkg_ser(p: RechargePackage) -> dict:
+def _pkg_ser(p: RechargePackage, store_name: str | None = None) -> dict:
     credit = money(p.pay_amount) + money(p.gift_amount)
     return {
         "id": p.id,
         "store_id": p.store_id,
         "store_scope": "HQ" if not p.store_id else "STORE",
+        "store_name": store_name,
         "name": p.name,
         "pay_amount": str(money(p.pay_amount)),
         "gift_amount": str(money(p.gift_amount)),
@@ -65,6 +67,38 @@ def _pkg_ser(p: RechargePackage) -> dict:
         "sort_order": p.sort_order,
         "status": p.status,
     }
+
+
+async def _assert_package_unique(
+    db,
+    *,
+    store_id: int | None,
+    name: str,
+    pay_amount,
+    exclude_id: int | None = None,
+) -> None:
+    """同范围（总部或同一门店）下：名称、实付金额均不可重复（含停用档）。"""
+    name = (name or "").strip()
+    pay = money(pay_amount)
+
+    def _scope(q):
+        if store_id is None:
+            return q.where(RechargePackage.store_id.is_(None))
+        return q.where(RechargePackage.store_id == int(store_id))
+
+    q_name = _scope(select(RechargePackage).where(RechargePackage.name == name))
+    if exclude_id:
+        q_name = q_name.where(RechargePackage.id != int(exclude_id))
+    if (await db.execute(q_name.limit(1))).scalar_one_or_none():
+        scope = "总部" if store_id is None else f"门店#{store_id}"
+        raise AppException(40093, f"{scope}已存在同名档位「{name}」")
+
+    q_pay = _scope(select(RechargePackage).where(RechargePackage.pay_amount == pay))
+    if exclude_id:
+        q_pay = q_pay.where(RechargePackage.id != int(exclude_id))
+    if (await db.execute(q_pay.limit(1))).scalar_one_or_none():
+        scope = "总部" if store_id is None else f"门店#{store_id}"
+        raise AppException(40094, f"{scope}已存在实付 ¥{pay} 的档位，不可重复")
 
 
 def _ro_ser(r: RechargeOrder) -> dict:
@@ -116,7 +150,15 @@ async def list_packages(
     else:
         q = q.where(RechargePackage.status == 1)
     rows = list((await db.execute(q.order_by(RechargePackage.sort_order, RechargePackage.id))).scalars())
-    return success([_pkg_ser(p) for p in rows], request=request)
+    store_ids = [int(p.store_id) for p in rows if p.store_id]
+    name_map: dict[int, str] = {}
+    if store_ids:
+        for s in (await db.execute(select(Store).where(Store.id.in_(store_ids)))).scalars():
+            name_map[int(s.id)] = s.name
+    return success(
+        [_pkg_ser(p, name_map.get(int(p.store_id)) if p.store_id else None) for p in rows],
+        request=request,
+    )
 
 
 @router.post("/packages", dependencies=[require_permission("wallet:manage")])
@@ -128,16 +170,26 @@ async def create_package(data: PackageCreate, request: Request, db: DbSession, u
             raise AppException(40082, "账号未绑定门店")
     elif sid:
         assert_store_access(user, sid)
+    name = data.name.strip()
+    pay_amount = money(data.pay_amount)
+    gift_amount = money(data.gift_amount)
+    await _assert_package_unique(db, store_id=sid, name=name, pay_amount=pay_amount)
     pkg = RechargePackage(
         store_id=sid,
-        name=data.name.strip(),
-        pay_amount=money(data.pay_amount),
-        gift_amount=money(data.gift_amount),
+        name=name,
+        pay_amount=pay_amount,
+        gift_amount=gift_amount,
         sort_order=int(data.sort_order or 0),
         status=1 if data.status is None else int(data.status),
     )
     db.add(pkg)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        msg = str(getattr(exc, "orig", None) or exc).lower()
+        if "uk_rp_scope_pay" in msg:
+            raise AppException(40094, "同范围实付金额档位已存在") from exc
+        raise AppException(40093, "同范围档位名称已存在") from exc
     await AuditService.log(
         db,
         user_id=user.id,
@@ -172,7 +224,20 @@ async def update_package(
         pkg.sort_order = int(data.sort_order)
     if data.status is not None:
         pkg.status = int(data.status)
-    await db.flush()
+    await _assert_package_unique(
+        db,
+        store_id=pkg.store_id,
+        name=pkg.name,
+        pay_amount=pkg.pay_amount,
+        exclude_id=pkg.id,
+    )
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        msg = str(getattr(exc, "orig", None) or exc).lower()
+        if "uk_rp_scope_pay" in msg:
+            raise AppException(40094, "同范围实付金额档位已存在") from exc
+        raise AppException(40093, "同范围档位名称已存在") from exc
     await AuditService.log(
         db,
         user_id=user.id,
