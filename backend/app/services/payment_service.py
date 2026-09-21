@@ -661,6 +661,14 @@ class PaymentService:
             cid = customer_id or order.customer_id
             if not cid:
                 raise AppException(40040, "余额支付需绑定顾客")
+            # 储值已含赠送，禁止再叠会员折扣/券/代金券
+            promo = (
+                money(getattr(order, "discount_amount", 0) or 0)
+                + money(getattr(order, "coupon_discount", 0) or 0)
+                + money(getattr(order, "voucher_discount", 0) or 0)
+            )
+            if promo > 0 or getattr(order, "customer_coupon_id", None) or getattr(order, "customer_voucher_id", None):
+                raise AppException(40053, "余额支付不可叠加会员折扣或优惠券，请重新下单")
             if money(pay_amount) != money(remaining):
                 raise AppException(40052, "余额支付须一次结清待收金额")
             from app.services.balance_service import BalanceService

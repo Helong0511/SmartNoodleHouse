@@ -118,7 +118,8 @@
         onTap="onPayMethod"
       >余额支付¥{{balanceTotal}}</view>
     </view>
-    <view class="pay-tip" a:if="{{isMember && !canPayBalance}}">余额不足时可先到「会员」页充值</view>
+    <view class="pay-tip" a:if="{{payMethod === 'BALANCE'}}">余额支付按原价结算，不叠加会员折扣与优惠券（充值赠送已计入）</view>
+    <view class="pay-tip" a:elif="{{isMember && !canPayBalance}}">余额不足时可先到「会员」页充值</view>
   </view>
   <button class="btn-primary" loading="{{loading}}" onTap="submit">提交并支付</button>
 </view>

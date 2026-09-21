@@ -409,7 +409,23 @@ Page({
       wx.showToast({ title: '余额不足，请先充值', icon: 'none' })
       return
     }
-    if (m === 'WECHAT' || m === 'BALANCE') this.setData({ payMethod: m })
+    if (m !== 'WECHAT' && m !== 'BALANCE') return
+    if (m === 'BALANCE') {
+      // 余额支付不叠会员折扣/券（储值已含赠送）
+      this._couponManualPick = true
+      this._voucherManualPick = true
+      this._selectedCoupon = null
+      this._selectedVoucher = null
+      this.setData({
+        payMethod: m,
+        selectedCouponId: 0,
+        selectedCouponLabel: '不使用优惠券',
+        selectedVoucherId: 0,
+        selectedVoucherLabel: '不使用代金券'
+      }, () => this.refreshSummary())
+      return
+    }
+    this.setData({ payMethod: m }, () => this.refreshSummary())
   },
 
   storeId() {
@@ -547,16 +563,20 @@ Page({
     const sub = parseFloat(total) || 0
     const pack = Math.round(packing * 100) / 100
     const needPack = this.data.needPack
-    const rate = this._memberRate || 1
+    const useBalance = this.data.payMethod === 'BALANCE'
+    const rate = useBalance ? 1 : (this._memberRate || 1)
     let discount = 0
-    if (rate > 0 && rate < 1) {
+    if (!useBalance && rate > 0 && rate < 1) {
       const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
       discount = Math.round(discountable * (1 - rate) * 100) / 100
     }
     const afterMember = Math.max(0, sub - discount)
     const couponEligible = cartUtil.calcCouponEligibleSubtotal(enrichedList, discount)
 
-    if (!this._couponManualPick && (this.data.coupons || []).length) {
+    if (useBalance) {
+      this._selectedCoupon = null
+      this._selectedVoucher = null
+    } else if (!this._couponManualPick && (this.data.coupons || []).length) {
       const bestCoupon = pickBestCoupon(
         this.data.coupons,
         couponEligible,
@@ -569,14 +589,14 @@ Page({
       })
     }
 
-    const couponDisc = this.calcCouponDiscount(couponEligible, this._selectedCoupon)
+    const couponDisc = useBalance ? 0 : this.calcCouponDiscount(couponEligible, this._selectedCoupon)
     let pay = afterMember - couponDisc
     const voucherEligible = cartUtil.calcVoucherEligiblePayable(
       couponEligible, couponDisc, pack, needPack
     )
     if (needPack) pay += pack
 
-    if (!this._voucherManualPick && (this.data.vouchers || []).length) {
+    if (!useBalance && !this._voucherManualPick && (this.data.vouchers || []).length) {
       const bestVoucher = pickBestVoucher(
         this.data.vouchers,
         voucherEligible,
@@ -589,8 +609,8 @@ Page({
       })
     }
 
-    let voucherDisc = this.calcVoucherDiscount(pay, this._selectedVoucher, voucherEligible)
-    if (this._selectedVoucher && voucherDisc <= 0) {
+    let voucherDisc = useBalance ? 0 : this.calcVoucherDiscount(pay, this._selectedVoucher, voucherEligible)
+    if (!useBalance && this._selectedVoucher && voucherDisc <= 0) {
       if (this._voucherManualPick) {
         wx.showToast({
           title: '订单金额未满代金券面额，已取消使用',
@@ -610,8 +630,10 @@ Page({
     await media.hydrateImageUrls(cartPreview, 'imageUrl')
     const settleStoreId = this.submitStoreId()
     const bal = parseFloat(this.data.balanceTotal || 0) || 0
-    const canBal = !!(this.data.isMember && bal + 1e-9 >= pay)
-    const nextPayMethod = (!canBal && this.data.payMethod === 'BALANCE') ? 'WECHAT' : this.data.payMethod
+    const fullPay = Math.max(0, Math.round((sub + (needPack ? pack : 0)) * 100) / 100)
+    const canBal = !!(this.data.isMember && bal + 1e-9 >= fullPay)
+    let nextPayMethod = this.data.payMethod
+    if (!canBal && nextPayMethod === 'BALANCE') nextPayMethod = 'WECHAT'
     this.setData({
       cartPreview,
       cartIds: cartPreview.map((it) => it.product_id),
@@ -628,7 +650,11 @@ Page({
       hasDiscount: discount > 0,
       hasSpecialItems: enrichedList.some((i) => i.no_member_discount),
       canPayBalance: canBal,
-      payMethod: nextPayMethod
+      payMethod: nextPayMethod,
+      selectedCouponId: useBalance ? 0 : (this._selectedCoupon ? this._selectedCoupon.id : (this.data.selectedCouponId || 0)),
+      selectedCouponLabel: useBalance ? '余额支付不可用券' : (this.data.selectedCouponLabel || '不使用优惠券'),
+      selectedVoucherId: useBalance ? 0 : (this._selectedVoucher ? this._selectedVoucher.id : (this.data.selectedVoucherId || 0)),
+      selectedVoucherLabel: useBalance ? '余额支付不可用券' : (this.data.selectedVoucherLabel || '不使用代金券')
     })
   },
 
@@ -830,8 +856,9 @@ Page({
         dining_type: this.data.needPack ? 'TAKEAWAY' : 'DINE_IN',
         remark: this.data.remark,
         idempotency_key: this.makeIdempotencyKey(cart),
-        customer_coupon_id: this.data.selectedCouponId || undefined,
-        customer_voucher_id: this.data.selectedVoucherId || undefined,
+        skip_promotions: this.data.payMethod === 'BALANCE',
+        customer_coupon_id: this.data.payMethod === 'BALANCE' ? undefined : (this.data.selectedCouponId || undefined),
+        customer_voucher_id: this.data.payMethod === 'BALANCE' ? undefined : (this.data.selectedVoucherId || undefined),
         items: cart.map((c) => ({
           product_id: c.product_id,
           quantity: c.quantity || 1,

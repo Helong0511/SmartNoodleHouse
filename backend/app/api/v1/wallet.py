@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, OptionalStaffUser, require_permission
@@ -268,22 +268,41 @@ async def admin_ledger(
     customer_id: int | None = None,
     store_id: int | None = None,
     entry_type: str | None = None,
+    keyword: str | None = None,
 ):
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     effective = require_bound_store(user, store_id)
-    q = select(BalanceLedger)
+    filters = []
     if effective is not None:
-        q = q.where(BalanceLedger.store_id == effective)
+        # 本店流水；人工调账历史可能未记门店，仅 ADJUST 允许 store_id 为空
+        filters.append(
+            or_(
+                BalanceLedger.store_id == effective,
+                and_(BalanceLedger.store_id.is_(None), BalanceLedger.entry_type == "ADJUST"),
+            )
+        )
     if customer_id:
-        q = q.where(BalanceLedger.customer_id == int(customer_id))
-    if entry_type:
-        q = q.where(BalanceLedger.entry_type == entry_type.strip().upper())
-    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
+        filters.append(BalanceLedger.customer_id == int(customer_id))
+    if entry_type and entry_type.strip():
+        filters.append(BalanceLedger.entry_type == entry_type.strip().upper())
+    kw = (keyword or "").strip()
+    if kw:
+        cond = CustomerService.keyword_condition(kw)
+        if cond is not None:
+            filters.append(
+                BalanceLedger.customer_id.in_(select(Customer.id).where(cond))
+            )
+    count_q = select(func.count()).select_from(BalanceLedger)
+    list_q = select(BalanceLedger)
+    for f in filters:
+        count_q = count_q.where(f)
+        list_q = list_q.where(f)
+    total = await db.scalar(count_q) or 0
     rows = list(
         (
             await db.execute(
-                q.order_by(BalanceLedger.id.desc()).offset((page - 1) * page_size).limit(page_size)
+                list_q.order_by(BalanceLedger.id.desc()).offset((page - 1) * page_size).limit(page_size)
             )
         ).scalars()
     )

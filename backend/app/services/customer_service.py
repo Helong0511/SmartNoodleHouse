@@ -1350,6 +1350,7 @@ class OrderCreateService:
         customer_voucher_id: int | None = None,
         waive_packing_fee: bool = False,
         operator_id: int | None = None,
+        skip_promotions: bool = False,
     ) -> Order:
         from sqlalchemy.exc import IntegrityError
 
@@ -1473,32 +1474,41 @@ class OrderCreateService:
         subtotal, packing_fee, discountable_subtotal = await OrderPriceCalculator.build_order_items(
             db, order, items, deduct_stock=True, need_pack=charge_pack
         )
-        rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
-        discount_amount, base_total = CustomerService.calc_member_discount(
-            subtotal, packing_fee, rate, discountable_subtotal=discountable_subtotal
-        )
-        coupon_eligible = CustomerService.calc_coupon_eligible_subtotal(
-            subtotal, discountable_subtotal, discount_amount
-        )
-        from app.services.coupon_service import CouponService
+        if skip_promotions:
+            # 余额支付：按原价（含餐盒），不叠会员折扣/券/代金券
+            discount_amount = money(0)
+            coupon_discount = money(0)
+            voucher_discount = money(0)
+            coupon_id = None
+            voucher_id = None
+            total_amount = money(subtotal + packing_fee)
+        else:
+            rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
+            discount_amount, base_total = CustomerService.calc_member_discount(
+                subtotal, packing_fee, rate, discountable_subtotal=discountable_subtotal
+            )
+            coupon_eligible = CustomerService.calc_coupon_eligible_subtotal(
+                subtotal, discountable_subtotal, discount_amount
+            )
+            from app.services.coupon_service import CouponService
 
-        coupon_discount, coupon_id = await CouponService.resolve_discount(
-            db, customer_coupon_id, customer_id, coupon_eligible,
-            order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
-        )
-        payable_before_voucher = money(base_total - coupon_discount)
-        voucher_eligible = CustomerService.calc_voucher_eligible_payable(
-            coupon_eligible, coupon_discount, packing_fee, need_pack=pack
-        )
-        voucher_discount, voucher_id = await CouponService.resolve_voucher_discount(
-            db,
-            customer_voucher_id,
-            customer_id,
-            payable_before_voucher,
-            eligible_payable=voucher_eligible,
-            order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
-        )
-        total_amount = money(payable_before_voucher - voucher_discount)
+            coupon_discount, coupon_id = await CouponService.resolve_discount(
+                db, customer_coupon_id, customer_id, coupon_eligible,
+                order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
+            )
+            payable_before_voucher = money(base_total - coupon_discount)
+            voucher_eligible = CustomerService.calc_voucher_eligible_payable(
+                coupon_eligible, coupon_discount, packing_fee, need_pack=pack
+            )
+            voucher_discount, voucher_id = await CouponService.resolve_voucher_discount(
+                db,
+                customer_voucher_id,
+                customer_id,
+                payable_before_voucher,
+                eligible_payable=voucher_eligible,
+                order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
+            )
+            total_amount = money(payable_before_voucher - voucher_discount)
         order.subtotal = subtotal
         order.discount_amount = discount_amount
         order.customer_coupon_id = coupon_id
@@ -1508,10 +1518,14 @@ class OrderCreateService:
         order.packing_fee = packing_fee
         order.total_amount = total_amount
         if coupon_id:
+            from app.services.coupon_service import CouponService
+
             await CouponService.reserve_for_order(
                 db, coupon_id, order_id=order.id, customer_id=customer_id
             )
         if voucher_id:
+            from app.services.coupon_service import CouponService
+
             await CouponService.reserve_for_order(
                 db, voucher_id, order_id=order.id, customer_id=customer_id
             )

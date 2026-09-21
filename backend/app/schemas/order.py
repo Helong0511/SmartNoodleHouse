@@ -23,6 +23,11 @@ class OrderCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
     customer_coupon_id: int | None = Field(default=None, description="用户优惠券 ID（满减/折扣）")
     customer_voucher_id: int | None = Field(default=None, description="用户代金券 ID")
+    # 余额支付：储值已含赠送，不可再叠会员折扣/券/代金券
+    skip_promotions: bool = Field(
+        default=False,
+        description="True 时不计会员折扣、优惠券、代金券（余额支付场景）",
+    )
 
 
 class OrderStatusUpdate(BaseModel):

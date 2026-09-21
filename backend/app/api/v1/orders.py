@@ -108,8 +108,9 @@ async def create_order(
         idempotency_key=data.idempotency_key,
         need_pack=data.need_pack,
         dining_type=data.dining_type,
-        customer_coupon_id=data.customer_coupon_id,
-        customer_voucher_id=data.customer_voucher_id,
+        customer_coupon_id=None if data.skip_promotions else data.customer_coupon_id,
+        customer_voucher_id=None if data.skip_promotions else data.customer_voucher_id,
+        skip_promotions=bool(data.skip_promotions),
         operator_id=None,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None

@@ -70,6 +70,8 @@
             :remote-method="searchLedgerCustomers"
             :loading="ledgerCustomerSearching"
             style="width: 260px"
+            @change="loadLedger(1)"
+            @clear="loadLedger(1)"
           >
             <el-option
               v-for="c in ledgerCustomerOptions"
@@ -92,17 +94,26 @@
             clearable
             placeholder="门店"
             style="width:160px"
+            @change="loadLedger(1)"
+            @clear="loadLedger(1)"
           >
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
-          <el-select v-model="ledgerQ.entry_type" clearable placeholder="类型" style="width:140px">
+          <el-select
+            v-model="ledgerQ.entry_type"
+            clearable
+            placeholder="类型"
+            style="width:140px"
+            @change="loadLedger(1)"
+            @clear="loadLedger(1)"
+          >
             <el-option label="充值" value="TOPUP" />
             <el-option label="消费" value="PAY" />
             <el-option label="退款回补" value="REFUND_RESTORE" />
             <el-option label="调账" value="ADJUST" />
           </el-select>
-          <el-button type="primary" @click="loadLedger(1)">查询</el-button>
-          <el-button @click="loadLedger(ledger.page)">刷新</el-button>
+          <el-button type="primary" :loading="ledgerLoading" @click="loadLedger(1)">查询</el-button>
+          <el-button :loading="ledgerLoading" @click="loadLedger(ledger.page)">刷新</el-button>
         </div>
         <el-table :data="ledger.items" border style="margin-top:12px">
           <el-table-column prop="id" label="ID" width="80" />
@@ -358,6 +369,7 @@ const ledgerQ = reactive({
 })
 const ledgerCustomerOptions = ref<any[]>([])
 const ledgerCustomerSearching = ref(false)
+const ledgerLoading = ref(false)
 const dlgVisible = ref(false)
 const saving = ref(false)
 const adjusting = ref(false)
@@ -488,12 +500,19 @@ async function loadLedger(page = 1) {
   if (ledgerQ.customer_id) params.customer_id = Number(ledgerQ.customer_id)
   if (ledgerQ.entry_type) params.entry_type = ledgerQ.entry_type
   if (auth.isSuperAdmin && ledgerQ.store_id) params.store_id = ledgerQ.store_id
-  const res: any = await api.get('/wallet/ledger', { params })
-  const data = res?.data || {}
-  ledger.items = data.items || []
-  ledger.total = data.total || 0
-  ledger.page = data.page || page
-  ledger.page_size = data.page_size || 20
+  ledgerLoading.value = true
+  try {
+    const res: any = await api.get('/wallet/ledger', { params })
+    const data = res?.data || {}
+    ledger.items = data.items || []
+    ledger.total = Number(data.total || 0)
+    ledger.page = Number(data.page || page)
+    ledger.page_size = Number(data.page_size || ledger.page_size || 20)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '流水加载失败')
+  } finally {
+    ledgerLoading.value = false
+  }
 }
 
 async function reloadPackages() {
