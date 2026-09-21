@@ -15,15 +15,17 @@
 -- 删除数据库
 DROP DATABASE IF EXISTS smart_noodle_house;
 CREATE DATABASE IF NOT EXISTS smart_noodle_house DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE smart_noodle_house;
+
 -- 部署前替换下方占位符；禁止把真实数据库密码提交到版本库。
 CREATE USER IF NOT EXISTS 'remote' @'localhost' IDENTIFIED BY 'CHANGE_ME_BEFORE_PRODUCTION';
 GRANT ALL PRIVILEGES ON smart_noodle_house.* TO 'remote' @'localhost';
 FLUSH PRIVILEGES;
+
 -- ============================================================================
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
-CREATE DATABASE IF NOT EXISTS smart_noodle_house DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE smart_noodle_house;
+
 -- ============================================================================
 -- 一、系统用户与 RBAC（角色 / 权限 / 员工）
 -- 用途：后台管理端登录、接口鉴权、操作审计
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS roles (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '后台角色表';
+
 -- 细粒度权限点（与 API require_permission 对应）
 CREATE TABLE IF NOT EXISTS permissions (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -45,6 +48,7 @@ CREATE TABLE IF NOT EXISTS permissions (
   module VARCHAR(50) NOT NULL COMMENT '所属模块：product/order/payment/customer 等',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '权限点表';
+
 -- 角色与权限多对多关联
 CREATE TABLE IF NOT EXISTS role_permissions (
   role_id BIGINT UNSIGNED NOT NULL COMMENT '角色 ID → roles.id',
@@ -53,6 +57,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles(id),
   CONSTRAINT fk_rp_perm FOREIGN KEY (permission_id) REFERENCES permissions(id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '角色-权限关联表';
+
 -- 后台员工账号（JWT typ=staff）
 CREATE TABLE IF NOT EXISTS users (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -69,6 +74,7 @@ CREATE TABLE IF NOT EXISTS users (
   INDEX idx_users_store (store_id),
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '后台员工用户表';
+
 -- 敏感操作审计日志（谁在何时对什么对象做了什么）
 CREATE TABLE IF NOT EXISTS operation_logs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -90,6 +96,7 @@ CREATE TABLE IF NOT EXISTS operation_logs (
   INDEX idx_op_logs_category (category, created_at),
   INDEX idx_op_logs_store (store_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '后台操作审计日志';
+
 -- ============================================================================
 -- 二、门店与桌台
 -- 用途：多店经营、扫码绑桌、门店级参数
@@ -106,6 +113,7 @@ CREATE TABLE IF NOT EXISTS `stores` (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '门店表';
+
 -- 堂食桌台；qr_token 用于扫码点餐，不可伪造桌号
 CREATE TABLE IF NOT EXISTS `tables` (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -118,10 +126,11 @@ CREATE TABLE IF NOT EXISTS `tables` (
   status TINYINT NOT NULL DEFAULT 1 COMMENT '桌台状态：1=启用 0=禁用',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
-  UNIQUE KEY uk_store_table (store_id, table_no),
+  UNIQUE KEY uk_tables_store_no (store_id, table_no),
   INDEX idx_tables_token (qr_token),
   CONSTRAINT fk_tables_store FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '堂食桌台表';
+
 -- 门店级 KV 配置（打包费开关、营业时间等可扩展项）
 CREATE TABLE IF NOT EXISTS store_settings (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -132,6 +141,7 @@ CREATE TABLE IF NOT EXISTS store_settings (
   UNIQUE KEY uk_store_setting (store_id, setting_key),
   CONSTRAINT fk_ss_store FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '门店业务参数表';
+
 -- ============================================================================
 -- 三、顾客 / 会员 / 第三方账号 / 营销券
 -- 用途：C 端身份、会员等级与积分、微信/支付宝绑定、口味学习、优惠券/代金券
@@ -144,6 +154,7 @@ CREATE TABLE IF NOT EXISTS member_levels (
   discount_rate DECIMAL(5, 4) NOT NULL DEFAULT 1.0000 COMMENT '折扣率：1.0000=无折扣，0.9000=九折',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员等级定义表';
+
 -- 券模板（优惠券 + 代金券共用；coupon_type=VOUCHER 时代金券）
 CREATE TABLE IF NOT EXISTS coupon_templates (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -197,6 +208,7 @@ CREATE TABLE IF NOT EXISTS customers (
   CONSTRAINT fk_customers_reg_store FOREIGN KEY (registered_store_id) REFERENCES stores(id),
   CONSTRAINT fk_customers_reg_table FOREIGN KEY (registered_table_id) REFERENCES tables(id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客主表（游客/会员统一身份）';
+
 -- 用户持有的券实例（同模板可多张；按张核销）
 CREATE TABLE IF NOT EXISTS customer_coupons (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键',
@@ -412,7 +424,7 @@ CREATE TABLE IF NOT EXISTS option_groups (
   is_required TINYINT NOT NULL DEFAULT 1 COMMENT '是否必选：1=必选 0=可选',
   sort_order INT NOT NULL DEFAULT 0 COMMENT '展示排序',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
-  store_scope BIGINT UNSIGNED AS (IFNULL(store_id, 0)) STORED COMMENT '唯一约束用：NULL store→0',
+  store_scope BIGINT UNSIGNED NOT NULL AS (IFNULL(store_id, 0)) STORED COMMENT '唯一约束用：NULL store→0',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   UNIQUE KEY uk_og_store_code (store_scope, code),
@@ -705,10 +717,9 @@ CREATE TABLE IF NOT EXISTS financial_ledger (
   INDEX idx_fl_order (order_id),
   INDEX idx_fl_payment (payment_id),
   INDEX idx_fl_refund (refund_id),
-  UNIQUE KEY uk_fl_payment (payment_id),
-  UNIQUE KEY uk_fl_refund (refund_id),
-  UNIQUE KEY uk_fl_delivery_refund (delivery_refund_id),
   -- 0017：分录幂等复合唯一约束（业务键为 NULL 的行不受 MySQL 唯一索引限制）
+  -- 0019：删除 0010 引入的 uk_fl_payment/uk_fl_refund/uk_fl_delivery_refund 单列 UNIQUE
+  --       （已被 0017 复合 UNIQUE 严格覆盖，且单列 UNIQUE 会阻止 REFUND 分录引用同 payment_id）
   UNIQUE KEY uq_fin_ledger_entry_payment (entry_type, payment_id),
   UNIQUE KEY uq_fin_ledger_entry_refund (entry_type, refund_id),
   UNIQUE KEY uq_fin_ledger_entry_delivery_order (entry_type, delivery_order_id),
@@ -769,12 +780,12 @@ CREATE TABLE IF NOT EXISTS delivery_orders (
   rider_name VARCHAR(50) DEFAULT NULL COMMENT '骑手姓名',
   rider_phone VARCHAR(20) DEFAULT NULL COMMENT '骑手电话',
   expected_delivery_at DATETIME(3) DEFAULT NULL COMMENT '预计送达时间',
-  platform_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '平台服务费',
-  packing_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '打包费（平台侧）',
-  delivery_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '配送费',
+  platform_fee DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '平台服务费',
+  packing_fee DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '打包费（平台侧）',
+  delivery_fee DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '配送费',
   logistics_status VARCHAR(30) DEFAULT NULL COMMENT '物流配送状态',
   logistics_code VARCHAR(50) DEFAULT NULL COMMENT '物流状态码',
-  refund_status VARCHAR(30) DEFAULT 'NONE' COMMENT 'NONE/PENDING/APPROVED/REJECTED',
+  refund_status VARCHAR(30) NOT NULL DEFAULT 'NONE' COMMENT 'NONE/PENDING/APPROVED/REJECTED',
   urge_count INT NOT NULL DEFAULT 0 COMMENT '顾客催单次数',
   completed_at DATETIME(3) DEFAULT NULL COMMENT '送达/完成时间',
   raw_payload JSON DEFAULT NULL COMMENT '平台原始订单 JSON',
@@ -818,6 +829,8 @@ CREATE TABLE IF NOT EXISTS delivery_refunds (
   handled_at DATETIME(3) DEFAULT NULL COMMENT '处理完成时间',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   INDEX idx_dr_order (order_id),
+  -- 0019：(platform, platform_refund_id) 复合唯一；platform_refund_id 为 NULL 时不受约束
+  UNIQUE KEY uk_dr_platform_refund (platform, platform_refund_id),
   CONSTRAINT fk_dr_do FOREIGN KEY (delivery_order_id) REFERENCES delivery_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_dr_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '外卖退款单表';
@@ -1164,7 +1177,8 @@ TRUNCATE TABLE system_settings;
 SET FOREIGN_KEY_CHECKS = 1;
 -- 一、角色
 INSERT INTO roles (code, name, description)
-SELECT 'SUPER_ADMIN',
+SELECT 
+  'SUPER_ADMIN',
   '超级管理员',
   '跨店全部权限'
 FROM DUAL
@@ -1174,7 +1188,8 @@ WHERE NOT EXISTS (
     WHERE code = 'SUPER_ADMIN'
   );
 INSERT INTO roles (code, name, description)
-SELECT 'STORE_ADMIN',
+SELECT 
+  'STORE_ADMIN',
   '门店管理员',
   '本店运营（含退款；不含全局系统配置）'
 FROM DUAL
@@ -1184,7 +1199,8 @@ WHERE NOT EXISTS (
     WHERE code = 'STORE_ADMIN'
   );
 INSERT INTO roles (code, name, description)
-SELECT 'CASHIER',
+SELECT 
+  'CASHIER',
   '收银员',
   '订单、支付与收银点餐（不可退款）'
 FROM DUAL
@@ -1194,7 +1210,8 @@ WHERE NOT EXISTS (
     WHERE code = 'CASHIER'
   );
 INSERT INTO roles (code, name, description)
-SELECT 'KITCHEN',
+SELECT 
+  'KITCHEN',
   '厨房',
   'KDS 出餐（不可退款/不可审外卖退款）'
 FROM DUAL
@@ -1202,7 +1219,7 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM roles
     WHERE code = 'KITCHEN'
-  );
+);
 INSERT INTO roles (code, name, description)
 SELECT 'OPERATOR',
   '运营',

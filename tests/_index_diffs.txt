@@ -1,0 +1,117 @@
+﻿  - ab_assignments  cols=('experiment_key',) unique=False db=False orm=True sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - cameras  cols=('store_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - cashier_shifts  cols=('opened_at', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - cashier_shifts  cols=('operator_id', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - category_sort_schedule_items  cols=('category_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - category_sort_schedule_items  cols=('schedule_id', 'sort_order') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - category_sort_schedules  cols=('priority', 'status', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - coupon_templates  cols=('store_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_alipay_accounts  cols=('customer_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_behavior_events  cols=('customer_id',) unique=False db=False orm=True sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_behavior_events  cols=('created_at', 'customer_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_behavior_events  cols=('created_at', 'event_type', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_behavior_events  cols=('store_id',) unique=False db=False orm=True sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_coupons  cols=('template_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_coupons  cols=('issued_at_store_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_coupons  cols=('issued_by_user_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_coupons  cols=('customer_id', 'expires_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_coupons  cols=('customer_id', 'template_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_identities  cols=('customer_id', 'provider') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_preferences  cols=('customer_id', 'preference_score DESC') unique=False db=False orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_preferences  cols=('customer_id', 'preference_score') unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_preferences  cols=('category', 'customer_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_wechat_accounts  cols=('customer_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customer_wechat_accounts  cols=('unionid',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customers  cols=('member_level_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customers  cols=('registered_table_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customers  cols=('last_order_at',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customers  cols=('member_status',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customers  cols=('phone',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - customers  cols=('registered_store_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_callback_logs  cols=('created_at', 'event_type') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_callback_logs  cols=('created_at', 'platform', 'platform_order_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_orders  cols=('created_at', 'delivery_status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_product_maps  cols=('product_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_refunds  cols=('order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_refunds  cols=('delivery_order_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_sync_alerts  cols=('platform_order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - delivery_sync_alerts  cols=('created_at', 'resolved', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - dining_sessions  cols=('table_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - dining_sessions  cols=('customer_id', 'expires_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - dining_sessions  cols=('status', 'store_id', 'table_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - face_profiles  cols=('consent_status', 'customer_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - financial_ledger  cols=('order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - financial_ledger  cols=('payment_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - financial_ledger  cols=('channel', 'created_at', 'entry_type', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - financial_ledger  cols=('created_at', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - financial_ledger  cols=('created_at', 'entry_type') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - financial_ledger  cols=('refund_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - operation_logs  cols=('created_at',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - operation_logs  cols=('created_at', 'user_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - operation_logs  cols=('category', 'created_at') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - operation_logs  cols=('created_at', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - operation_logs  cols=('created_at', 'module') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - option_groups  cols=('store_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - order_item_options  cols=('order_item_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - order_items  cols=('order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - order_items  cols=('product_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - order_status_history  cols=('created_at', 'order_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('dining_session_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('operator_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('kitchen_claimed_by', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('created_at', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('paid_at', 'payment_status', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('created_at', 'customer_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('paid_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('created_at', 'payment_status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('created_at', 'table_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('created_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - orders  cols=('paid_at', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - outbox_events  cols=('next_retry_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - outbox_events  cols=('locked_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_refunds  cols=('operator_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_refunds  cols=('status', 'succeeded_at') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_refunds  cols=('order_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_refunds  cols=('payment_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_refunds  cols=('status',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_refunds  cols=('next_retry_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payment_status_history  cols=('created_at', 'payment_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('operator_id', 'paid_at') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('paid_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('paid_at',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('order_id', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('created_at',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('customer_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - payments  cols=('payment_no',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - platform_category_maps  cols=('platform', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - platform_category_maps  cols=('local_category_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - point_ledger  cols=('order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - point_ledger  cols=('refund_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - point_ledger  cols=('created_at', 'customer_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - pos_refund_requests  cols=('created_at', 'requested_by') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - pos_refund_requests  cols=('order_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - pos_refund_requests  cols=('payment_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - pos_refund_requests  cols=('created_at', 'status', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - print_jobs  cols=('order_id', 'ticket_type') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - print_jobs  cols=('locked_at', 'locked_by') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - print_jobs  cols=('next_retry_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - print_jobs  cols=('created_at', 'status', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - product_categories  cols=('sort_order', 'status', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - product_feedbacks  cols=('product_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - product_images  cols=('product_id', 'sort_order') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - product_option_groups  cols=('group_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - products  cols=('sort_order', 'status', 'store_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - products  cols=('category_id', 'sort_order', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - role_permissions  cols=('permission_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - store_business_hours  cols=('store_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - store_product_stocks  cols=('product_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - tables  cols=('qr_token',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - users  cols=('role_id',) unique=False db=True orm=False sql=False  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - users  cols=('store_id',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - visitor_events  cols=('camera_id', 'event_time') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - visitor_events  cols=('expires_at',) unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - webhook_inbox  cols=('received_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - webhook_inbox  cols=('locked_at', 'locked_by') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - webhook_inbox  cols=('next_retry_at', 'status') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
+  - welcome_logs  cols=('created_at', 'customer_id') unique=False db=True orm=False sql=True  根因:索引三方未对齐  修复:补齐缺失方的索引
