@@ -1,0 +1,28 @@
+# SmartNoodleHouse MySQL 推荐配置片段（开发/单机生产参考）
+# 合并到 my.ini / my.cnf 的 [mysqld] 段后重启 mysqld。
+# 勿原样覆盖商业机上已有完整配置；按机器内存调整 buffer pool。
+
+[mysqld]
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# 慢查询：餐饮 OLTP 建议 0.5~1 秒
+slow_query_log = ON
+long_query_time = 1
+log_queries_not_using_indexes = OFF
+
+# InnoDB：专用库主机可设为物理内存的 50%~70%
+# 本机开发示例（16GB 主机、多应用共存）可用 512M~1G
+innodb_buffer_pool_size = 512M
+innodb_flush_log_at_trx_commit = 1
+sync_binlog = 1
+
+# binlog 保留约 7 天（配合每日逻辑备份）
+binlog_expire_logs_seconds = 604800
+
+# 降低空闲连接堆积（Aborted_clients 偏高时可配合应用侧连接池）
+wait_timeout = 600
+interactive_timeout = 600
+
+[client]
+default-character-set = utf8mb4

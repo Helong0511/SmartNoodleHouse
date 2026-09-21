@@ -1,0 +1,135 @@
+"""备份 smart_noodle_house 到 backups/ 目录（mysqldump + gzip）。
+
+用法：
+  python scripts/备份数据库.py
+  python scripts/备份数据库.py --keep-days 14
+"""
+from __future__ import annotations
+
+import argparse
+import gzip
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+ROOT = Path(__file__).resolve().parents[1]
+BACKUP_DIR = ROOT / "backups"
+
+
+def load_database_url() -> str:
+    for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("DATABASE_URL="):
+            return line.split("=", 1)[1].strip()
+    raise RuntimeError("未找到 DATABASE_URL")
+
+
+def parse_url(url: str) -> dict:
+    cleaned = re.sub(r"^mysql\+[^:]+://", "mysql://", url)
+    p = urlparse(cleaned)
+    return {
+        "host": p.hostname or "127.0.0.1",
+        "port": str(p.port or 3306),
+        "user": unquote(p.username or ""),
+        "password": unquote(p.password or ""),
+        "database": (p.path or "/").lstrip("/").split("?")[0],
+    }
+
+
+def find_mysqldump() -> str:
+    which = shutil.which("mysqldump")
+    if which:
+        return which
+    candidates = [
+        r"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe",
+        r"C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe",
+    ]
+    for c in candidates:
+        if Path(c).is_file():
+            return c
+    raise FileNotFoundError("未找到 mysqldump，请将 MySQL bin 加入 PATH")
+
+
+def prune(keep_days: int) -> int:
+    if keep_days <= 0 or not BACKUP_DIR.exists():
+        return 0
+    cutoff = datetime.now() - timedelta(days=keep_days)
+    removed = 0
+    for f in BACKUP_DIR.glob("smart_noodle_house_*.sql.gz"):
+        try:
+            # smart_noodle_house_YYYYMMDD_HHMMSS.sql.gz
+            stamp = f.name.replace("smart_noodle_house_", "").replace(".sql.gz", "")
+            ts = datetime.strptime(stamp, "%Y%m%d_%H%M%S")
+            if ts < cutoff:
+                f.unlink()
+                removed += 1
+        except ValueError:
+            continue
+    return removed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="备份业务库")
+    parser.add_argument("--keep-days", type=int, default=14, help="保留天数，0=不清理")
+    args = parser.parse_args()
+
+    cfg = parse_url(load_database_url())
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = BACKUP_DIR / f"smart_noodle_house_{stamp}.sql.gz"
+    dump = find_mysqldump()
+
+    env = os.environ.copy()
+    # 避免密码出现在进程参数列表：使用 MYSQL_PWD（仅本子进程）
+    env["MYSQL_PWD"] = cfg["password"]
+
+    cmd = [
+        dump,
+        "-h",
+        cfg["host"],
+        "-P",
+        cfg["port"],
+        "-u",
+        cfg["user"],
+        "--single-transaction",
+        "--routines",
+        "--triggers",
+        "--events",
+        "--default-character-set=utf8mb4",
+        "--set-gtid-purged=OFF",
+        cfg["database"],
+    ]
+    print("备份中…", cfg["database"], "->", out_path.name)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    assert proc.stdout is not None
+    with gzip.open(out_path, "wb", compresslevel=6) as gz:
+        while True:
+            chunk = proc.stdout.read(1024 * 256)
+            if not chunk:
+                break
+            gz.write(chunk)
+    _, err = proc.communicate()
+    if proc.returncode != 0:
+        if out_path.exists():
+            out_path.unlink()
+        sys.stderr.write(err.decode("utf-8", errors="replace"))
+        return proc.returncode
+
+    size_mb = out_path.stat().st_size / 1024 / 1024
+    removed = prune(args.keep_days)
+    print(f"完成：{out_path} ({size_mb:.2f} MB)，清理过期备份 {removed} 个")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

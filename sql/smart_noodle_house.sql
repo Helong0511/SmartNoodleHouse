@@ -1,13 +1,16 @@
 -- =============================================================================
--- SmartNoodleHouse 唯一数据库真源（MySQL 8.0+）
--- 包含：建库与授权、完整表结构、生产基础数据。执行会删除并重建 smart_noodle_house。
--- 所有表/字段/类型/索引/约束/基础数据变更只维护本文件。
+-- 【已拆分，勿再作为唯一真源】
+-- 结构 → sql/struct.sql | 生产数据 → sql/data.sql | 测试数据 → sql/data-test.sql
+-- 本文件仅作历史全量快照参考；新建/变更请改上述三个文件。
 -- =============================================================================
 -- BEGIN DATABASE BOOTSTRAP
 -- ============================================================================
 -- 建库（可选，需 MySQL root）
 -- ============================================================================
--- 本文件已包含建库、结构与生产基础数据；执行后运行 python scripts/init_admin.py 设置强密码。
+-- 执行结构+数据请改用：
+--   mysql … < sql/struct.sql
+--   mysql … < sql/data.sql
+-- 然后运行 python scripts/初始化管理员.py 设置强密码。
 --
 -- 应用账号请与 .env 中 DATABASE_URL 一致，示例：
 --   mysql+aiomysql://remote:强密码@127.0.0.1:3306/smart_noodle_house
@@ -18,12 +21,15 @@ CREATE DATABASE IF NOT EXISTS smart_noodle_house DEFAULT CHARACTER SET utf8mb4 C
 USE smart_noodle_house;
 
 -- 部署前替换下方占位符；禁止把真实数据库密码提交到版本库。
-CREATE USER IF NOT EXISTS 'remote' @'localhost' IDENTIFIED BY 'CHANGE_ME_BEFORE_PRODUCTION';
-GRANT ALL PRIVILEGES ON smart_noodle_house.* TO 'remote' @'localhost';
+CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'REPLACE_ME_DB_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE,
+  CREATE, ALTER, DROP, INDEX, REFERENCES, TRIGGER,
+  CREATE TEMPORARY TABLES, EXECUTE, SHOW VIEW, LOCK TABLES
+  ON `smart_noodle_house`.* TO 'remote'@'localhost';
 FLUSH PRIVILEGES;
 
 -- ============================================================================
-SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ============================================================================

@@ -17,7 +17,7 @@ DROP DATABASE IF EXISTS `smart_noodle_house`;
 CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `smart_noodle_house`;
 -- 部署前替换下方占位符；禁止把真实数据库密码提交到版本库。
-CREATE USER IF NOT EXISTS 'remote' @'localhost' IDENTIFIED BY 'kb7$rL3d8!tQ';
+CREATE USER IF NOT EXISTS 'remote' @'localhost' IDENTIFIED BY 'REPLACE_ME_DB_PASSWORD';
 GRANT ALL PRIVILEGES ON smart_noodle_house.* TO 'remote' @'localhost';
 FLUSH PRIVILEGES;
 SET NAMES utf8mb4;

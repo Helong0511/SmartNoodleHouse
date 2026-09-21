@@ -54,5 +54,9 @@ logs/**
 !logs/**/.gitkeep
 !logs/README.txt
 
+# 数据库备份产物
+backups/
+tests/_db_audit_report.json
+
 # 编译产物
 *.pyc

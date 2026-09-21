@@ -1,15 +1,32 @@
 ---
-description: Enforce the single authoritative MySQL schema file for every database change
+description: 数据库结构、生产必要数据、本地测试数据分别维护在三个 SQL 文件
 alwaysApply: true
 ---
 
-# 数据库唯一真源
+# 数据库 SQL 分工
 
-`sql/smart_noodle_house.sql` 是本项目唯一权威的数据库定义与初始化文件。
+本规则覆盖此前「`sql/smart_noodle_house.sql` 为唯一真源」的约定。结构、生产数据、测试数据以本规则为准。
 
-- 新建或修改表、字段、字段类型、默认值、索引、唯一约束、外键、字符集及初始化数据时，必须在同一变更中更新 `sql/smart_noodle_house.sql`。
-- SQLAlchemy 模型、Alembic 或升级脚本必须与该文件一致；它们只能作为运行时映射或从唯一真源派生的升级手段，不能成为另一套结构真源。
-- 新环境应能仅使用 `sql/smart_noodle_house.sql` 得到当前完整数据库。
-- 测试、部署脚本和文档中的全量建库路径必须指向 `sql/smart_noodle_house.sql`。
+| 文件 | 职责 |
+|------|------|
+| `sql/struct.sql` | 数据库结构：库、表、字段、类型、默认值、索引、唯一约束、外键、字符集 |
+| `sql/data.sql` | 生产必要数据：系统运行所必需的种子数据 |
+| `sql/data-test.sql` | 本地测试数据：只保证本地测试，不得写入生产必要数据 |
 
-禁止只修改模型、Alembic、`sql/001_schema.sql` 或其他补丁 SQL，而不修改 `sql/smart_noodle_house.sql`。
+## 必须同步
+
+- 平台改动库、表、字段、索引等结构时，**同一变更**里按 `sql/struct.sql` 现有风格更新该文件。不要另起补丁 SQL、模型或 Alembic 作为第二套结构真源。
+- 系统运行所必需的数据写入 `sql/data.sql`，按该文件现有写法（`TRUNCATE` 后 `INSERT ... SELECT ... FROM DUAL WHERE NOT EXISTS`）。
+- 仅本地测试使用的数据写入 `sql/data-test.sql`，按该文件现有写法追加。禁止把测试数据放进 `sql/data.sql`，也禁止把生产必要数据只放在测试文件里。
+- SQLAlchemy 模型、Alembic、升级脚本必须与上述文件一致，只能作为运行时映射或派生升级，不能代替这三个文件。
+
+## `sql/struct.sql` 风格
+
+沿用文件现有写法，不要改成另一种导出风格：
+
+- 文件头：`DROP DATABASE` → `CREATE DATABASE ... utf8mb4 / utf8mb4_unicode_ci` → `USE` → 授权语句 → `SET NAMES` / `SET FOREIGN_KEY_CHECKS = 0`
+- 每张表用 `-- Table structure for 表名` 分隔，`CREATE TABLE IF NOT EXISTS`
+- 字段带 `COMMENT`；主键、索引写 `USING BTREE`，索引列带 `ASC`
+- 表选项保持 `ENGINE = InnoDB`、`utf8mb4`、`utf8mb4_unicode_ci`、`ROW_FORMAT = Dynamic`
+
+禁止只改模型、Alembic 或其他 SQL，而不更新对应的 `sql/struct.sql`、`sql/data.sql` 或 `sql/data-test.sql`。

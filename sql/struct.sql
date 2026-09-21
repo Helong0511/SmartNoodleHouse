@@ -7,12 +7,16 @@ CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4
 -- 切换数据库
 USE `smart_noodle_house`;
 
--- 部署前替换下方占位符；禁止把真实数据库密码提交到版本库。
-CREATE USER IF NOT EXISTS 'remote' @'localhost' IDENTIFIED BY 'kb7$rL3d8!tQ';
-GRANT ALL PRIVILEGES ON smart_noodle_house.* TO 'remote' @'localhost';
+-- 部署前替换下方口令占位符；禁止把真实数据库密码提交到版本库。
+-- 仅授权本库；不含 GRANT OPTION / 跨库。生产应用账号可再收紧为仅 DML。
+CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'REPLACE_ME_DB_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE,
+  CREATE, ALTER, DROP, INDEX, REFERENCES, TRIGGER,
+  CREATE TEMPORARY TABLES, EXECUTE, SHOW VIEW, LOCK TABLES
+  ON `smart_noodle_house`.* TO 'remote'@'localhost';
 FLUSH PRIVILEGES;
 
-SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 0;
 -- ----------------------------
 -- Table structure for ab_assignments
@@ -80,10 +84,10 @@ CREATE TABLE IF NOT EXISTS `cashier_shifts` (
   `status` varchar(20) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN=营业中 CLOSED=已交班',
   `opened_at` datetime(3) NOT NULL COMMENT '开班时间',
   `closed_at` datetime(3) NULL DEFAULT NULL COMMENT '交班时间',
-  `total_cash` decimal(10, 2) NULL DEFAULT NULL COMMENT '本班现金收款',
-  `total_wechat` decimal(10, 2) NULL DEFAULT NULL COMMENT '本班微信收款',
-  `total_alipay` decimal(10, 2) NULL DEFAULT NULL COMMENT '本班支付宝收款',
-  `total_amount` decimal(10, 2) NULL DEFAULT NULL COMMENT '本班收款合计',
+  `total_cash` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '本班现金收款',
+  `total_wechat` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '本班微信收款',
+  `total_alipay` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '本班支付宝收款',
+  `total_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '本班收款合计',
   `closing_cash` decimal(10, 2) NULL DEFAULT NULL COMMENT '交班实盘现金（含备用金）',
   `cash_difference` decimal(10, 2) NULL DEFAULT NULL COMMENT '现金长短款',
   `closed_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '确认日结的管理员 → users.id',
@@ -98,6 +102,7 @@ CREATE TABLE IF NOT EXISTS `cashier_shifts` (
   INDEX `idx_shift_store_open`(`store_id` ASC, `opened_at` ASC) USING BTREE,
   INDEX `idx_shift_operator_status`(`operator_id` ASC, `status` ASC) USING BTREE,
   CONSTRAINT `fk_shift_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_shift_closed_by` FOREIGN KEY (`closed_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_shift_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '收银班次表' ROW_FORMAT = Dynamic;
 
@@ -238,8 +243,8 @@ CREATE TABLE IF NOT EXISTS `customer_identities` (
   `provider` varchar(32) NOT NULL COMMENT 'WECHAT_OPENID/WECHAT_UNIONID/ALIPAY_USER_ID/PHONE',
   `provider_subject` varchar(128) NOT NULL COMMENT '渠道稳定身份；日志中必须脱敏',
   `verified` tinyint NOT NULL DEFAULT 1 COMMENT '是否经渠道服务端验证',
-  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_customer_identity_provider_subject`(`provider` ASC, `provider_subject` ASC) USING BTREE,
   INDEX `idx_customer_identity_customer`(`customer_id` ASC, `provider` ASC) USING BTREE,
@@ -265,7 +270,6 @@ CREATE TABLE IF NOT EXISTS `customer_preferences` (
     `category` ASC,
     `option_code` ASC
   ) USING BTREE,
-  INDEX `idx_pref_customer`(`customer_id` ASC, `category` ASC) USING BTREE,
   INDEX `idx_customer_prefs_score`(`customer_id` ASC, `preference_score` DESC) USING BTREE,
   CONSTRAINT `fk_pref_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客口味偏好表（全门店汇总，不按店隔离）' ROW_FORMAT = Dynamic;
@@ -287,7 +291,6 @@ CREATE TABLE IF NOT EXISTS `customer_taste_profiles` (
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_ctp_customer_dim_target`(`customer_id` ASC, `dim_type` ASC, `target_key` ASC) USING BTREE,
-  INDEX `idx_ctp_customer`(`customer_id` ASC) USING BTREE,
   CONSTRAINT `fk_ctp_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客多维口味画像表' ROW_FORMAT = Dynamic;
 
@@ -487,8 +490,8 @@ CREATE TABLE IF NOT EXISTS `dining_sessions` (
   `last_active_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '最近活跃',
   `expires_at` datetime(3) NOT NULL COMMENT '过期时间',
   `ended_at` datetime(3) NULL DEFAULT NULL COMMENT '结束时间',
-  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_ds_customer_status`(`customer_id` ASC, `status` ASC, `expires_at` ASC) USING BTREE,
   INDEX `idx_ds_store_table`(`store_id` ASC, `table_id` ASC, `status` ASC) USING BTREE,
@@ -546,15 +549,17 @@ CREATE TABLE IF NOT EXISTS `financial_ledger` (
   INDEX `idx_fl_store_ch_type_created`(`store_id` ASC, `channel` ASC, `entry_type` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_fl_entry_type`(`entry_type` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_fl_order`(`order_id` ASC) USING BTREE,
-  INDEX `idx_fl_payment`(`payment_id` ASC) USING BTREE,
-  INDEX `idx_fl_refund`(`refund_id` ASC) USING BTREE,
-  CONSTRAINT `fk_fl_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_fl_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_fl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_fl_payment` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_fl_refund` FOREIGN KEY (`refund_id`) REFERENCES `payment_refunds` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_fl_delivery_order` FOREIGN KEY (`delivery_order_id`) REFERENCES `delivery_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_fl_delivery_refund` FOREIGN KEY (`delivery_refund_id`) REFERENCES `delivery_refunds` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '财务分录账本' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for member_levels
 -- ----------------------------
-DROP TABLE IF EXISTS `member_levels`;
 CREATE TABLE IF NOT EXISTS `member_levels` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `name` varchar(50) NOT NULL COMMENT '等级名称，如 普通会员、银卡会员',
@@ -734,6 +739,9 @@ CREATE TABLE IF NOT EXISTS `orders` (
   INDEX `idx_orders_kitchen_claim`(`kitchen_claimed_by` ASC, `status` ASC) USING BTREE,
   INDEX `idx_orders_operator`(`operator_id` ASC) USING BTREE,
   CONSTRAINT `fk_orders_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_orders_dining_session` FOREIGN KEY (`dining_session_id`) REFERENCES `dining_sessions` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_orders_coupon` FOREIGN KEY (`customer_coupon_id`) REFERENCES `customer_coupons` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_orders_voucher` FOREIGN KEY (`customer_voucher_id`) REFERENCES `customer_coupons` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_orders_kitchen_claim` FOREIGN KEY (`kitchen_claimed_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_orders_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_orders_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
@@ -803,14 +811,14 @@ CREATE TABLE IF NOT EXISTS `payment_refunds` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `refund_no`(`refund_no` ASC) USING BTREE,
   UNIQUE INDEX `uk_refund_idempotency`(`idempotency_key` ASC) USING BTREE,
-  INDEX `idx_refunds_status`(`status` ASC) USING BTREE,
   INDEX `idx_refunds_payment`(`payment_id` ASC) USING BTREE,
   INDEX `idx_refunds_operator`(`operator_id` ASC) USING BTREE,
   INDEX `idx_refunds_succeeded`(`status` ASC, `succeeded_at` ASC) USING BTREE,
   INDEX `idx_refunds_retry`(`status` ASC, `next_retry_at` ASC) USING BTREE,
   INDEX `fk_refund_order`(`order_id` ASC) USING BTREE,
   CONSTRAINT `fk_refund_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_refund_payment` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_refund_payment` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_refund_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付退款单表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -852,8 +860,6 @@ CREATE TABLE IF NOT EXISTS `payments` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `payment_no`(`payment_no` ASC) USING BTREE,
   UNIQUE INDEX `uk_provider_trade`(`provider` ASC, `provider_trade_no` ASC) USING BTREE,
-  INDEX `idx_payments_order`(`order_id` ASC) USING BTREE,
-  INDEX `idx_payments_no`(`payment_no` ASC) USING BTREE,
   INDEX `idx_payments_order_status`(`order_id` ASC, `status` ASC) USING BTREE,
   INDEX `idx_payments_created`(`created_at` ASC) USING BTREE,
   INDEX `idx_payments_paid_at`(`paid_at` ASC) USING BTREE,
@@ -861,7 +867,8 @@ CREATE TABLE IF NOT EXISTS `payments` (
   INDEX `idx_payments_operator`(`operator_id` ASC, `paid_at` ASC) USING BTREE,
   INDEX `fk_payments_customer`(`customer_id` ASC) USING BTREE,
   CONSTRAINT `fk_payments_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_payments_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_payments_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_payments_operator` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付单表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -940,8 +947,9 @@ CREATE TABLE IF NOT EXISTS `point_ledger` (
   UNIQUE INDEX `uk_pl_earn_order`(`earn_order_id` ASC) USING BTREE,
   INDEX `idx_pl_customer_created`(`customer_id` ASC, `created_at` ASC) USING BTREE,
   INDEX `idx_pl_order`(`order_id` ASC) USING BTREE,
-  INDEX `idx_pl_refund`(`refund_id` ASC) USING BTREE,
-  CONSTRAINT `fk_pl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_pl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_pl_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_pl_refund` FOREIGN KEY (`refund_id`) REFERENCES `payment_refunds` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员积分流水' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1179,7 +1187,6 @@ CREATE TABLE IF NOT EXISTS `store_business_hours` (
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_sbh_store_day_slot`(`store_id` ASC, `weekday` ASC, `slot_index` ASC) USING BTREE,
-  INDEX `idx_sbh_store`(`store_id` ASC) USING BTREE,
   CONSTRAINT `fk_sbh_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '门店营业时间（多时段/跨午夜）' ROW_FORMAT = Dynamic;
 
@@ -1264,7 +1271,6 @@ CREATE TABLE IF NOT EXISTS `tables` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `qr_token`(`qr_token` ASC) USING BTREE,
   UNIQUE INDEX `uk_store_table`(`store_id` ASC, `table_no` ASC) USING BTREE,
-  INDEX `idx_tables_token`(`qr_token` ASC) USING BTREE,
   CONSTRAINT `fk_tables_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 4 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '堂食桌台表' ROW_FORMAT = Dynamic;
 
@@ -1287,7 +1293,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   UNIQUE INDEX `username`(`username` ASC) USING BTREE,
   INDEX `idx_users_store`(`store_id` ASC) USING BTREE,
   INDEX `fk_users_role`(`role_id` ASC) USING BTREE,
-  CONSTRAINT `fk_users_role` FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_users_role` FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_users_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 5 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '后台员工用户表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1345,7 +1352,9 @@ CREATE TABLE IF NOT EXISTS `welcome_logs` (
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '迎宾时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_welcome_customer`(`customer_id` ASC, `created_at` ASC) USING BTREE,
-  CONSTRAINT `fk_welcome_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  INDEX `idx_welcome_camera`(`camera_id` ASC) USING BTREE,
+  CONSTRAINT `fk_welcome_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_welcome_camera` FOREIGN KEY (`camera_id`) REFERENCES `cameras` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '人脸迎宾记录表' ROW_FORMAT = Dynamic;
 
 SET FOREIGN_KEY_CHECKS = 1;
