@@ -71,6 +71,7 @@
 }
 .meta-t { color: #999; font-size: 22rpx; flex: 1; }
 .discount { color: #e85d4c; margin-left: 4rpx; }
+.gift { color: #e85d4c; font-weight: 500; }
 .btn-mini {
   margin: 0;
   background: #ff6b35;

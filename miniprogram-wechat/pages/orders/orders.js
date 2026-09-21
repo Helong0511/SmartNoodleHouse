@@ -4,12 +4,11 @@ const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
 const tabCartBadge = require('../../utils/tabCartBadge')
-const app = getApp()
 
 const ORDERS_CACHE_MS = 30 * 1000
+const SCOPE_STORAGE_KEY = 'orders_scope_pending'
 
-// tab key 即传给 /orders/mine 的 status（逗号分隔多状态）；空串=全部
-const ORDER_TABS = [
+const DINE_TABS = [
   { key: '', label: '全部' },
   { key: 'PENDING_PAYMENT', label: '待支付' },
   { key: 'PAID,CONFIRMED,PREPARING,COOKING,READY', label: '进行中' },
@@ -17,11 +16,19 @@ const ORDER_TABS = [
   { key: 'CANCELLED,REFUND_PENDING,REFUNDED', label: '取消/退款' }
 ]
 
+const RECHARGE_TABS = [
+  { key: '', label: '全部' },
+  { key: 'PAID', label: '已到账' },
+  { key: 'PENDING', label: '待支付' },
+  { key: 'CANCELLED,EXPIRED,FAILED', label: '取消/失败' }
+]
+
 Page({
   data: {
-    tabs: ORDER_TABS,
+    orderScope: 'dine',
+    tabs: DINE_TABS,
     activeTab: '',
-    orders: [],
+    list: [],
     page: 1,
     pageSize: 15,
     totalPages: 0,
@@ -41,14 +48,21 @@ Page({
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
+    const pending = wx.getStorageSync(SCOPE_STORAGE_KEY)
+    if (pending === 'recharge' || pending === 'dine') {
+      wx.removeStorageSync(SCOPE_STORAGE_KEY)
+      if (pending !== this.data.orderScope) {
+        this.applyScope(pending, { reload: false })
+      }
+    }
     const ctx = dineCtx.currentDisplay()
     this.applyDineContext(ctx)
-    const silent = this.data.orders.length > 0
-    this.loadOrders(true, silent, ctx.storeId)
+    const silent = this.data.list.length > 0
+    this.reloadCurrent(true, silent, ctx.storeId)
     dineCtx.ensureDineContext().then((fresh) => {
       if ((fresh.storeId || null) !== (this.data.storeId || null)) {
         this.applyDineContext(fresh)
-        this.loadOrders(true, !!this.data.orders.length, fresh.storeId)
+        this.reloadCurrent(true, !!this.data.list.length, fresh.storeId)
       }
     })
   },
@@ -65,43 +79,72 @@ Page({
   },
 
   onPullDownRefresh() {
-    this._ordersLoadedAt = 0
+    this._listLoadedAt = 0
     dineCtx.ensureDineContext({ force: true })
       .then((ctx) => {
         this.applyDineContext(ctx)
-        return this.loadOrders(true, false, ctx.storeId)
+        return this.reloadCurrent(true, false, ctx.storeId)
       })
       .finally(() => wx.stopPullDownRefresh())
   },
 
   onReachBottom() {
-    this.loadOrders(false)
+    this.reloadCurrent(false)
+  },
+
+  onScopeChange(e) {
+    const scope = e.currentTarget.dataset.scope || 'dine'
+    if (scope === this.data.orderScope) return
+    this.applyScope(scope, { reload: true })
+  },
+
+  applyScope(scope, { reload = true } = {}) {
+    const next = scope === 'recharge' ? 'recharge' : 'dine'
+    this._listLoadedAt = 0
+    this.setData({
+      orderScope: next,
+      tabs: next === 'recharge' ? RECHARGE_TABS : DINE_TABS,
+      activeTab: '',
+      list: [],
+      page: 1,
+      noMore: false,
+      loading: false,
+      loadingMore: false
+    })
+    if (reload) this.reloadCurrent(true, false)
   },
 
   onTabChange(e) {
     const key = e.currentTarget.dataset.key || ''
     if (key === this.data.activeTab) return
     this.setData({ activeTab: key })
-    this._ordersLoadedAt = 0
-    this.loadOrders(true, false)
+    this._listLoadedAt = 0
+    this.reloadCurrent(true, false)
+  },
+
+  reloadCurrent(reset = true, silent = false, storeId = null) {
+    if (this.data.orderScope === 'recharge') {
+      return this.loadRecharges(reset, silent)
+    }
+    return this.loadOrders(reset, silent, storeId)
   },
 
   async loadOrders(reset = true, silent = false, storeId = null) {
     if (reset) {
       if (this.data.loading) return
       const sid = storeId != null ? storeId : this.data.storeId
-      const cacheKey = `${sid || 'all'}::${this.data.activeTab || 'all'}`
+      const cacheKey = `dine::${sid || 'all'}::${this.data.activeTab || 'all'}`
       const now = Date.now()
       if (
         silent
-        && this._ordersCacheKey === cacheKey
-        && this._ordersLoadedAt
-        && now - this._ordersLoadedAt < ORDERS_CACHE_MS
+        && this._listCacheKey === cacheKey
+        && this._listLoadedAt
+        && now - this._listLoadedAt < ORDERS_CACHE_MS
       ) {
         return
       }
-      if (!silent && !this.data.orders.length) {
-        this.setData({ loading: true, page: 1, noMore: false, orders: [] })
+      if (!silent && !this.data.list.length) {
+        this.setData({ loading: true, page: 1, noMore: false, list: [] })
       } else {
         this.setData({ page: 1, noMore: false })
       }
@@ -126,19 +169,72 @@ Page({
         placeText: [o.store_name, o.table && (o.table.table_name || o.table.table_no)].filter(Boolean).join(' · ')
       }))
       const totalPages = (res && res.total_pages) || 0
-      const orders = reset ? batch : this.data.orders.concat(batch)
+      const list = reset ? batch : this.data.list.concat(batch)
       this.setData({
-        orders,
+        list,
         page,
         totalPages,
         noMore: page >= totalPages || batch.length < this.data.pageSize
       })
       if (reset) {
-        this._ordersLoadedAt = Date.now()
-        this._ordersCacheKey = `${sid || 'all'}::${this.data.activeTab || 'all'}`
+        this._listLoadedAt = Date.now()
+        this._listCacheKey = `dine::${sid || 'all'}::${this.data.activeTab || 'all'}`
       }
     } catch (e) {
-      if (reset) this.setData({ orders: [] })
+      if (reset) this.setData({ list: [] })
+      if (e && e.message) wx.showToast({ title: e.message, icon: 'none' })
+    } finally {
+      this.setData({ loading: false, loadingMore: false })
+    }
+  },
+
+  async loadRecharges(reset = true, silent = false) {
+    if (reset) {
+      if (this.data.loading) return
+      const cacheKey = `recharge::${this.data.activeTab || 'all'}`
+      const now = Date.now()
+      if (
+        silent
+        && this._listCacheKey === cacheKey
+        && this._listLoadedAt
+        && now - this._listLoadedAt < ORDERS_CACHE_MS
+      ) {
+        return
+      }
+      if (!silent && !this.data.list.length) {
+        this.setData({ loading: true, page: 1, noMore: false, list: [] })
+      } else {
+        this.setData({ page: 1, noMore: false })
+      }
+    } else {
+      if (this.data.loading || this.data.loadingMore || this.data.noMore) return
+      this.setData({ loadingMore: true })
+    }
+    const page = reset ? 1 : this.data.page + 1
+    try {
+      await auth.ensureLogin()
+      const params = { page, page_size: this.data.pageSize }
+      if (this.data.activeTab) params.status = this.data.activeTab
+      const res = await api.get('/wallet/recharge/mine', params)
+      const batch = ((res && res.items) || []).map((r) => ({
+        ...r,
+        credit_gift: Number(r.credit_gift || 0),
+        timeText: this.formatTime(r.paid_at || r.created_at)
+      }))
+      const totalPages = (res && res.total_pages) || 0
+      const list = reset ? batch : this.data.list.concat(batch)
+      this.setData({
+        list,
+        page,
+        totalPages,
+        noMore: page >= totalPages || batch.length < this.data.pageSize
+      })
+      if (reset) {
+        this._listLoadedAt = Date.now()
+        this._listCacheKey = `recharge::${this.data.activeTab || 'all'}`
+      }
+    } catch (e) {
+      if (reset) this.setData({ list: [] })
       if (e && e.message) wx.showToast({ title: e.message, icon: 'none' })
     } finally {
       this.setData({ loading: false, loadingMore: false })
@@ -173,7 +269,7 @@ Page({
   async reorderOrder(e) {
     const id = e.currentTarget.dataset.id
     if (!id || this.data.reorderingId) return
-    const item = this.data.orders.find((order) => String(order.id) === String(id))
+    const item = this.data.list.find((order) => String(order.id) === String(id))
     if (item && !item.can_reorder) return
     this.setData({ reorderingId: id })
     try {
@@ -222,7 +318,7 @@ Page({
     wx.switchTab({ url: '/pages/menu/menu' })
   },
 
-  goRechargeRecords() {
-    wx.navigateTo({ url: '/pages/recharge-records/recharge-records' })
+  goRecharge() {
+    wx.navigateTo({ url: '/pages/recharge/recharge' })
   }
 })
