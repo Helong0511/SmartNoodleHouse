@@ -160,47 +160,66 @@ class StoreHoursService:
         """每分钟执行：仅处理 auto_sync_open=true 的有效绑定，按营业时间切换平台营业状态。
 
         返回 {"opened": n, "closed": n, "skipped": n}。
+        逐绑定独立事务 + FOR UPDATE SKIP LOCKED，避免单店失败回滚整批、双进程互踩。
         """
+        from app.core.database import AsyncSessionLocal
         from app.services.delivery_context import get_credentials_for_store
         from app.services.delivery_providers import get_delivery_provider
 
         now = naive_local_now()
         stats = {"opened": 0, "closed": 0, "skipped": 0}
-        bindings = (
-            await db.execute(
-                select(PlatformStoreBinding).where(
-                    PlatformStoreBinding.status == 1,
-                    PlatformStoreBinding.auto_sync_open.is_(True),
+        binding_ids = list(
+            (
+                await db.execute(
+                    select(PlatformStoreBinding.id).where(
+                        PlatformStoreBinding.status == 1,
+                        PlatformStoreBinding.auto_sync_open.is_(True),
+                    )
                 )
-            )
-        ).scalars().all()
+            ).scalars().all()
+        )
 
-        for binding in bindings:
+        for bid in binding_ids:
             try:
-                rows = await StoreHoursService.list_hours(db, binding.store_id)
-                desired = desired_open_status(rows, now)
-                if desired is None:
-                    stats["skipped"] += 1
-                    continue  # 未配置营业时间，不自动控制
-                if binding.platform_open_status == desired:
-                    stats["skipped"] += 1
-                    continue
-                shipping = shipping_time_for_day(rows, _python_weekday(now)) if desired == "REST" else None
-                creds = await get_credentials_for_store(db, binding.platform, binding.store_id)
-                provider = get_delivery_provider(binding.platform, creds)
-                ok = await provider.set_store_open_status(desired, shipping)
-                if not ok:
-                    logger.warning("自动开关店失败 store=%s platform=%s desired=%s",
-                                   binding.store_id, binding.platform, desired)
-                    stats["skipped"] += 1
-                    continue
-                binding.platform_open_status = desired
-                binding.last_sync_at = now
-                stats["opened" if desired == "OPEN" else "closed"] += 1
+                async with AsyncSessionLocal() as sdb:
+                    binding = (
+                        await sdb.execute(
+                            select(PlatformStoreBinding)
+                            .where(PlatformStoreBinding.id == int(bid))
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalar_one_or_none()
+                    if not binding:
+                        stats["skipped"] += 1
+                        continue
+                    rows = await StoreHoursService.list_hours(sdb, binding.store_id)
+                    desired = desired_open_status(rows, now)
+                    if desired is None:
+                        stats["skipped"] += 1
+                        continue
+                    if binding.platform_open_status == desired:
+                        stats["skipped"] += 1
+                        continue
+                    shipping = (
+                        shipping_time_for_day(rows, _python_weekday(now)) if desired == "REST" else None
+                    )
+                    creds = await get_credentials_for_store(sdb, binding.platform, binding.store_id)
+                    provider = get_delivery_provider(binding.platform, creds)
+                    ok = await provider.set_store_open_status(desired, shipping)
+                    if not ok:
+                        logger.warning(
+                            "自动开关店失败 store=%s platform=%s desired=%s",
+                            binding.store_id,
+                            binding.platform,
+                            desired,
+                        )
+                        stats["skipped"] += 1
+                        continue
+                    binding.platform_open_status = desired
+                    binding.last_sync_at = now
+                    await sdb.commit()
+                    stats["opened" if desired == "OPEN" else "closed"] += 1
             except Exception:  # noqa: BLE001 单店失败不影响其它门店
-                logger.exception(
-                    "自动开关店异常 store=%s platform=%s", binding.store_id, binding.platform
-                )
+                logger.exception("自动开关店异常 binding_id=%s", bid)
                 stats["skipped"] += 1
-        await db.commit()
         return stats

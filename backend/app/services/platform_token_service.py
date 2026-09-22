@@ -30,6 +30,7 @@ class PlatformTokenService:
 
         美团按 30 天 access_token + 35 天 refresh_token 设计：到期前 24 小时刷新，
         剩余 1 天容错窗口足够定时任务每 6 小时重试一次。
+        逐条 FOR UPDATE SKIP LOCKED，避免双 Leader / 并发刷新互相踩踏。
         """
         from datetime import timedelta
 
@@ -37,20 +38,34 @@ class PlatformTokenService:
         deadline = now_local() + timedelta(hours=within_hours)
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(PlatformStoreBinding).where(
+                select(PlatformStoreBinding.id).where(
                     PlatformStoreBinding.platform.in_(["MEITUAN", "ELEME"]),
                     PlatformStoreBinding.status == 1,
                     PlatformStoreBinding.refresh_token.isnot(None),
                 )
             )
-            for binding in result.scalars():
-                expires = ensure_local_aware(binding.token_expires_at)
+            binding_ids = [int(i) for i in result.scalars().all()]
+
+        for bid in binding_ids:
+            async with AsyncSessionLocal() as db:
+                locked = (
+                    await db.execute(
+                        select(PlatformStoreBinding)
+                        .where(PlatformStoreBinding.id == bid)
+                        .with_for_update(skip_locked=True)
+                    )
+                ).scalar_one_or_none()
+                if not locked:
+                    continue
+                expires = ensure_local_aware(locked.token_expires_at)
                 if expires and expires > deadline:
                     continue
-                ok = await cls.refresh_single_binding(binding)
+                ok = await cls.refresh_single_binding(locked)
                 if ok:
+                    await db.commit()
                     refreshed += 1
-            await db.commit()
+                else:
+                    await db.rollback()
         if refreshed:
             logger.info("已刷新 %s 个平台门店 Token", refreshed)
         return refreshed

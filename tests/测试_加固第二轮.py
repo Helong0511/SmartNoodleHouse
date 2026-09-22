@@ -124,3 +124,31 @@ async def test_leader_lock_redis_fail_closed():
 
     with patch("app.core.leader_lock.get_redis", AsyncMock(side_effect=RuntimeError("down"))):
         assert await leader_lock.try_acquire_leader("w1") is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_leader_owned_matches_redis():
+    from app.core import leader_lock
+
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w1")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w1")
+    with patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)):
+        assert await leader_lock.confirm_leader_owned() is True
+
+    fake.get = AsyncMock(return_value=b"other")
+    with patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)):
+        assert await leader_lock.confirm_leader_owned() is False
+        assert leader_lock.is_leader_held() is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_leader_owned_fail_closed_on_redis_error():
+    from app.core import leader_lock
+
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w1")
+    with patch("app.core.leader_lock.get_redis", AsyncMock(side_effect=RuntimeError("down"))):
+        assert await leader_lock.confirm_leader_owned() is False
+        assert await leader_lock.confirm_leader_owned(fail_open=True) is True

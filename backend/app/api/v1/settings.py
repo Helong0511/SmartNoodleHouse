@@ -516,17 +516,20 @@ async def update_scheduler_job(
     else:
         if data.enabled is None and data.schedule is None:
             raise AppException(40010, "请提供 enabled 或 schedule，或 reset=true")
-        if data.enabled is not None:
-            current["enabled"] = bool(data.enabled)
-        if data.schedule is not None:
-            current["schedule"] = validate_schedule(data.schedule)
-        # 补齐缺省字段
-        if "enabled" not in current:
-            current["enabled"] = True
-        if "schedule" not in current:
-            current["schedule"] = dict(meta.get("default_schedule") or {})
-        else:
-            current["schedule"] = validate_schedule(current["schedule"])
+        try:
+            if data.enabled is not None:
+                current["enabled"] = bool(data.enabled)
+            if data.schedule is not None:
+                current["schedule"] = validate_schedule(data.schedule)
+            # 补齐缺省字段
+            if "enabled" not in current:
+                current["enabled"] = True
+            if "schedule" not in current:
+                current["schedule"] = dict(meta.get("default_schedule") or {})
+            else:
+                current["schedule"] = validate_schedule(current["schedule"])
+        except (ValueError, TypeError) as e:
+            raise AppException(40010, str(e)) from e
 
         default_sch = dict(meta.get("default_schedule") or {})
         # 与默认完全一致则删除覆盖项
@@ -547,16 +550,26 @@ async def update_scheduler_job(
             schedule = dict(meta.get("default_schedule") or {})
         detail = {"job_id": job_id, "enabled": enabled, "schedule": schedule}
 
+    # operation_logs.target_id 为 bigint，任务 ID 为字符串，只能放 detail.job_id
     await _write_audit(
         db,
         user=user,
         request=request,
         action="settings.scheduler.update",
         target_type="scheduler_job",
-        target_id=job_id,
+        target_id=None,
         detail=detail,
     )
     await db.commit()
+
+    # 任何进程保存后通知 Leader 热应用（本进程若是 Leader 也会收到，幂等）
+    try:
+        from app.services.scheduler_admin import notify_overrides_changed
+
+        await notify_overrides_changed(job_id=job_id)
+    except Exception:
+        logger = __import__("logging").getLogger(__name__)
+        logger.exception("通知 Leader 热更新失败 job_id=%s", job_id)
 
     applied = False
     apply_error = None
@@ -576,8 +589,8 @@ async def update_scheduler_job(
     msg = "已保存"
     if applied:
         msg += "并已热更新本进程调度器"
-    elif not getattr(scheduler, "running", False):
-        msg += "（本进程无运行中调度器，配置已落库）"
+    elif not getattr(scheduler, "running", False) or not is_leader_held():
+        msg += "（已落库并通知 Leader；持锁进程将热生效）"
     return success(payload, message=msg, request=request)
 
 

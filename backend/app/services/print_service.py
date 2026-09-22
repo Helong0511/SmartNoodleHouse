@@ -900,9 +900,11 @@ class PrintService:
 
     @classmethod
     async def reclaim_stale_printing(cls, db: AsyncSession, *, stale_after: int = STALE_PRINTING_SEC) -> int:
-        """回收崩溃残留的 PRINTING 任务：locked_at < now - stale_after → 复位 PENDING。
+        """回收崩溃残留的 PRINTING 任务：locked_at < now - stale_after → 复位 RETRYING。
 
         复位时不清零 attempt_count（避免无限重试），仅释放锁。
+        注意：必须回到 RETRYING（而非 PENDING）——process_pending_print_jobs
+        只认领 RETRYING/FAILED，回到 PENDING 会导致任务永久卡住。
         """
         cutoff = now_local() - timedelta(seconds=stale_after)
         stmt = (
@@ -911,7 +913,12 @@ class PrintService:
                 PrintJob.status == "PRINTING",
                 or_(PrintJob.locked_at.is_(None), PrintJob.locked_at < cutoff),
             )
-            .values(status="PENDING", locked_at=None, locked_by=None)
+            .values(
+                status="RETRYING",
+                locked_at=None,
+                locked_by=None,
+                next_retry_at=now_local(),
+            )
         )
         result = await db.execute(stmt)
         await db.commit()

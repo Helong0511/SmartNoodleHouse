@@ -71,8 +71,8 @@ async def upsert_experiment(
         action="ab.experiment.upsert",
         module="system",
         target_type="ab_experiment",
-        target_id=key,
-        detail={"status": exp.status, "traffic_percent": exp.traffic_percent},
+        target_id=None,  # key 为字符串，不能写入 bigint target_id
+        detail={"key": key, "status": exp.status, "traffic_percent": exp.traffic_percent},
         request=request,
     )
     return success(_experiment_dict(exp), request=request)
@@ -91,7 +91,8 @@ async def delete_experiment(
         action="ab.experiment.delete",
         module="system",
         target_type="ab_experiment",
-        target_id=key,
+        target_id=None,
+        detail={"key": key},
         request=request,
     )
     return success({"deleted": True, "key": key}, request=request)

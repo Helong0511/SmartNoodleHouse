@@ -36,6 +36,7 @@ end
 
 # 本进程是否仍持有 Leader（续期失败时清 False，供调度任务 fence）
 _held = False
+_worker_id: str | None = None
 _on_lost: Callable[[], Awaitable[None] | None] | None = None
 
 
@@ -47,9 +48,19 @@ def is_leader_held() -> bool:
     return bool(_held)
 
 
+def current_leader_worker_id() -> str | None:
+    return _worker_id
+
+
 def set_leader_held(value: bool) -> None:
     global _held
     _held = bool(value)
+
+
+def set_leader_worker_id(worker_id: str | None) -> None:
+    """记录本进程竞选用的 worker_id，供任务 fence 对照 Redis 锁值。"""
+    global _worker_id
+    _worker_id = worker_id
 
 
 def set_on_leader_lost(cb: Callable[[], Awaitable[None] | None] | None) -> None:
@@ -58,8 +69,35 @@ def set_on_leader_lost(cb: Callable[[], Awaitable[None] | None] | None) -> None:
     _on_lost = cb
 
 
+async def confirm_leader_owned(*, fail_open: bool = False) -> bool:
+    """任务执行前二次确认：内存旗标 + Redis 锁值仍为本 worker。
+
+    缩小「锁 TTL 已过期、另一进程已成为 Leader，但本进程尚未跑到续期循环」
+    的双 Leader 窗口。Redis 短暂不可达时默认 fail-closed（跳过本次任务）。
+    """
+    if not _held or not _worker_id:
+        return False
+    try:
+        r = await get_redis()
+        cur = await r.get(LEADER_KEY)
+        if cur is None:
+            set_leader_held(False)
+            return False
+        cur_s = cur.decode() if isinstance(cur, (bytes, bytearray)) else str(cur)
+        if cur_s != _worker_id:
+            set_leader_held(False)
+            return False
+        return True
+    except Exception as e:
+        logger.warning("Leader 持锁二次确认失败: %s", e)
+        if fail_open:
+            return bool(_held)
+        return False
+
+
 async def try_acquire_leader(worker_id: str, *, ttl: int = DEFAULT_TTL) -> bool:
     """尝试成为 leader。已持有则续期。Redis 失败时 fail-closed（不担任 leader）。"""
+    set_leader_worker_id(worker_id)
     try:
         r = await get_redis()
         ok = await r.set(LEADER_KEY, worker_id, nx=True, ex=ttl)
@@ -103,6 +141,7 @@ async def release_leader(worker_id: str) -> None:
 
 async def renew_leader_loop(worker_id: str, stop: asyncio.Event, *, ttl: int = DEFAULT_TTL) -> None:
     """后台续期，直到 stop 置位；锁丢失时触发 on_lost 并退出循环。"""
+    consecutive_errors = 0
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=RENEW_INTERVAL)
@@ -129,5 +168,21 @@ async def renew_leader_loop(worker_id: str, stop: asyncio.Event, *, ttl: int = D
                         logger.exception("Leader 丢失回调失败")
                 stop.set()
                 break
+            consecutive_errors = 0
         except Exception as e:
-            logger.warning("Leader 锁续期异常: %s", e)
+            consecutive_errors += 1
+            logger.warning("Leader 锁续期异常(%s): %s", consecutive_errors, e)
+            # 连续多次异常才放弃，避免 Redis 瞬时抖动误杀 Leader
+            if consecutive_errors >= 3:
+                logger.error("Leader 锁续期连续失败，降级退出 worker_id=%s", worker_id)
+                set_leader_held(False)
+                cb = _on_lost
+                if cb is not None:
+                    try:
+                        maybe = cb()
+                        if asyncio.iscoroutine(maybe) or isinstance(maybe, Awaitable):
+                            await maybe  # type: ignore[arg-type]
+                    except Exception:
+                        logger.exception("Leader 丢失回调失败")
+                stop.set()
+                break

@@ -33,7 +33,13 @@ from app.tasks.scheduler import register_tasks
 from app.workers.tts_worker import TTSWorker
 
 logger = logging.getLogger(__name__)
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(
+    job_defaults={
+        "coalesce": True,  # 积压多次触发合并为一次
+        "max_instances": 1,  # 同进程内禁止同一任务重叠
+        "misfire_grace_time": 60,
+    }
+)
 tts_worker = TTSWorker()
 tts_task: asyncio.Task | None = None
 recognition_task: asyncio.Task | None = None
@@ -93,7 +99,7 @@ async def lifespan(app: FastAPI):
         is_leader = await try_acquire_leader(_leader_worker_id)
         if role == "leader" and not is_leader:
             logger.warning(
-                "PROCESS_ROLE=leader 但未抢到 Redis Leader 锁（worker_id=%s），本进程不启动调度以防重复",
+                "PROCESS_ROLE=leader 但未抢到 Redis Leader 锁（worker_id=%s），稍后后台重试抢锁",
                 _leader_worker_id,
             )
     else:
@@ -101,11 +107,27 @@ async def lifespan(app: FastAPI):
         is_leader = False
 
     await start_ws_subscriber(on_redis_ws_message)
+    _leader_promote_task: asyncio.Task | None = None
+
+    async def _arm_standby_promote() -> None:
+        """非持锁进程：持续争抢，Leader 宕机后自动接管（auto/leader）。"""
+        nonlocal _leader_promote_task
+        if role not in ("auto", "leader"):
+            return
+        if _leader_promote_task is not None and not _leader_promote_task.done():
+            return
+        _leader_promote_task = asyncio.create_task(_standby_promote_loop())
 
     async def _stop_leader_work() -> None:
-        """锁丢失：立即停调度与后台 worker，避免双 Leader。"""
+        """锁丢失：立即停调度与后台 worker，避免双 Leader；随后重新 standby 争抢。"""
         nonlocal is_leader
         logger.warning("执行 Leader 降级：shutdown scheduler / TTS / RecognitionWorker")
+        try:
+            from app.services.scheduler_admin import stop_overrides_watcher
+
+            await stop_overrides_watcher()
+        except Exception:
+            logger.exception("停止 overrides watcher 失败")
         try:
             if scheduler.running:
                 scheduler.shutdown(wait=False)
@@ -120,10 +142,25 @@ async def lifespan(app: FastAPI):
         if recognition_task and not recognition_task.done():
             recognition_task.cancel()
         is_leader = False
+        # gunicorn 其他 worker / 本进程降级后继续争抢，避免调度永久空窗
+        await _arm_standby_promote()
 
-    if is_leader:
+    async def _start_leader_work() -> None:
+        """抢到锁后启动调度器 / TTS / 识别 / 摄像头。"""
+        nonlocal is_leader, _leader_promote_task
+        global tts_task, recognition_task, _leader_stop, _leader_renew_task
         from app.core.leader_lock import is_leader_held, set_leader_held, set_on_leader_lost
 
+        # 成为 Leader 后停掉 standby 争抢
+        if _leader_promote_task is not None and not _leader_promote_task.done():
+            _leader_promote_task.cancel()
+            try:
+                await _leader_promote_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            _leader_promote_task = None
+
+        is_leader = True
         set_leader_held(True)
         set_on_leader_lost(_stop_leader_work)
         # P0-6: 注入 Leader 检查回调到 CameraManager
@@ -132,6 +169,17 @@ async def lifespan(app: FastAPI):
         CameraManager.set_leader_check(is_leader_held)
         _leader_stop = asyncio.Event()
         _leader_renew_task = asyncio.create_task(renew_leader_loop(_leader_worker_id, _leader_stop))
+        # reload 场景下可能曾启动过又关掉，避免重复 register
+        if scheduler.running:
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:
+                logger.exception("重启前关闭旧 scheduler 失败")
+        # 清空旧 job（shutdown 后 job store 仍可能残留于同一实例）
+        try:
+            scheduler.remove_all_jobs()
+        except Exception:
+            pass
         register_tasks(scheduler)
         scheduler.start()
         try:
@@ -140,6 +188,12 @@ async def lifespan(app: FastAPI):
             await apply_scheduler_overrides(scheduler)
         except Exception:
             logger.exception("应用定时任务覆盖失败")
+        try:
+            from app.services.scheduler_admin import start_overrides_watcher
+
+            await start_overrides_watcher(scheduler)
+        except Exception:
+            logger.exception("启动定时任务覆盖订阅失败")
         logger.info("Scheduler started (leader worker_id=%s role=%s)", _leader_worker_id, role)
         if settings.tts_provider == "local":
             tts_task = asyncio.create_task(tts_worker.run(WelcomeService.get_queue()))
@@ -168,11 +222,58 @@ async def lifespan(app: FastAPI):
                 logger.info("Restored %s cameras", len(cams))
         except Exception as e:
             logger.warning("摄像头自动恢复失败: %s", e)
+
+    async def _standby_promote_loop() -> None:
+        """auto/leader 非持锁进程持续争抢；Leader 宕机后自动接管调度。"""
+        nonlocal is_leader
+        attempt = 0
+        while True:
+            await asyncio.sleep(5)
+            if is_leader:
+                return
+            attempt += 1
+            try:
+                ok = await try_acquire_leader(_leader_worker_id)
+            except Exception:
+                logger.exception("standby 抢锁异常 attempt=%s", attempt)
+                continue
+            if ok:
+                logger.info(
+                    "standby 抢锁成功（attempt=%s role=%s worker_id=%s），启动调度",
+                    attempt,
+                    role,
+                    _leader_worker_id,
+                )
+                await _start_leader_work()
+                return
+            if attempt in (1, 6, 24, 120) or attempt % 120 == 0:
+                logger.info(
+                    "standby 等待 Leader 锁（attempt=%s role=%s worker_id=%s）",
+                    attempt,
+                    role,
+                    _leader_worker_id,
+                )
+
+    if is_leader:
+        await _start_leader_work()
     else:
         logger.info("PROCESS_ROLE=%s：跳过 scheduler/TTS/camera 恢复", role)
+        await _arm_standby_promote()
 
     yield
 
+    if _leader_promote_task is not None:
+        _leader_promote_task.cancel()
+        try:
+            await _leader_promote_task
+        except (asyncio.CancelledError, Exception):
+            pass
+    try:
+        from app.services.scheduler_admin import stop_overrides_watcher
+
+        await stop_overrides_watcher()
+    except Exception:
+        pass
     await stop_ws_subscriber()
     await close_http_client()
     if _leader_stop is not None:

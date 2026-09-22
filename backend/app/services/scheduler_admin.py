@@ -1,8 +1,12 @@
-"""定时任务管理：覆盖项持久化 + APScheduler 热更新。"""
+"""定时任务管理：覆盖项持久化 + APScheduler 热更新 + 跨进程通知。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from apscheduler.triggers.cron import CronTrigger
@@ -15,9 +19,22 @@ from app.models import SystemSetting
 logger = logging.getLogger(__name__)
 
 OVERRIDES_KEY = "scheduler_job_overrides"
+OVERRIDES_VER_KEY = "snh:scheduler:overrides:ver"
+OVERRIDES_CHANNEL = "snh:scheduler:overrides"
+
+# Lua：仅当值仍为本 token 时删除，避免误删他人锁
+_LUA_COMPARE_DELETE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+else
+    return 0
+end
+"""
 
 # 内存缓存：供 _leader_job 快速判断 enabled（与 DB 覆盖同步）
 _enabled_cache: dict[str, bool] = {}
+_overrides_watch_task: asyncio.Task | None = None
+_local_overrides_ver: int = 0
 
 
 def is_job_enabled(job_id: str) -> bool:
@@ -116,6 +133,36 @@ async def load_overrides(db: AsyncSession) -> dict[str, Any]:
         return {}
 
 
+async def get_overrides_version() -> int:
+    try:
+        from app.core.redis_client import get_redis
+
+        r = await get_redis()
+        raw = await r.get(OVERRIDES_VER_KEY)
+        if raw is None:
+            return 0
+        return int(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+    except Exception:
+        return 0
+
+
+async def notify_overrides_changed(*, job_id: str | None = None) -> int:
+    """任何进程保存覆盖后调用：bump 版本并 pub，Leader 订阅后热应用。"""
+    global _local_overrides_ver
+    ver = 0
+    try:
+        from app.core.redis_client import get_redis
+
+        r = await get_redis()
+        ver = int(await r.incr(OVERRIDES_VER_KEY))
+        _local_overrides_ver = ver
+        payload = json.dumps({"ver": ver, "job_id": job_id}, ensure_ascii=False)
+        await r.publish(OVERRIDES_CHANNEL, payload)
+    except Exception:
+        logger.exception("通知定时任务覆盖变更失败")
+    return ver
+
+
 async def save_overrides(db: AsyncSession, overrides: dict[str, Any]) -> None:
     raw = json.dumps(overrides, ensure_ascii=False, separators=(",", ":"))
     row = await db.scalar(
@@ -181,3 +228,104 @@ def apply_all_overrides(scheduler, catalog: list[dict], overrides: dict[str, Any
             apply_job_to_scheduler(scheduler, jid, schedule=schedule, enabled=enabled)
         except Exception:
             logger.exception("应用定时任务覆盖失败 job_id=%s", jid)
+
+
+async def reload_overrides_to_scheduler(scheduler) -> None:
+    """Leader：从 DB 重载覆盖并热更新（含 enabled 内存缓存）。"""
+    from app.core.database import AsyncSessionLocal
+    from app.tasks.scheduler import TASK_CATALOG
+
+    if scheduler is None or not getattr(scheduler, "running", False):
+        return
+    async with AsyncSessionLocal() as db:
+        overrides = await load_overrides(db)
+    apply_all_overrides(scheduler, TASK_CATALOG, overrides)
+    global _local_overrides_ver
+    _local_overrides_ver = await get_overrides_version()
+    logger.info("已热应用定时任务覆盖 ver=%s jobs=%s", _local_overrides_ver, len(overrides))
+
+
+async def start_overrides_watcher(scheduler) -> None:
+    """Leader 进程订阅覆盖变更；兼轮询版本以防 pub/sub 丢消息。"""
+    global _overrides_watch_task, _local_overrides_ver
+
+    await stop_overrides_watcher()
+    _local_overrides_ver = await get_overrides_version()
+
+    async def _run() -> None:
+        global _local_overrides_ver
+        while True:
+            try:
+                from app.core.redis_client import get_redis
+
+                r = await get_redis()
+                pubsub = r.pubsub()
+                await pubsub.subscribe(OVERRIDES_CHANNEL)
+                logger.info("scheduler overrides subscriber started")
+                # 用 get_message 轮询，顺便做版本兜底
+                while True:
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if msg and msg.get("type") == "message":
+                        try:
+                            await reload_overrides_to_scheduler(scheduler)
+                        except Exception:
+                            logger.exception("订阅触发重载定时任务覆盖失败")
+                    else:
+                        # 兜底：对比版本号（其他进程已 bump 但 pub 丢失）
+                        try:
+                            ver = await get_overrides_version()
+                            if ver > _local_overrides_ver:
+                                await reload_overrides_to_scheduler(scheduler)
+                        except Exception:
+                            logger.exception("轮询定时任务覆盖版本失败")
+                    await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("scheduler overrides subscriber 断开，3s 后重连: %s", e)
+                await asyncio.sleep(3)
+
+    _overrides_watch_task = asyncio.create_task(_run())
+
+
+async def stop_overrides_watcher() -> None:
+    global _overrides_watch_task
+    if _overrides_watch_task is not None:
+        _overrides_watch_task.cancel()
+        try:
+            await _overrides_watch_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _overrides_watch_task = None
+
+
+@asynccontextmanager
+async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
+    """跨进程任务互斥：双 Leader 短窗口下仍避免 Token/开关店等非 claim 任务双跑。
+
+    yield True 表示拿到锁；False 表示已被占用，调用方应跳过。
+    """
+    from app.core.redis_client import get_redis
+
+    key = f"snh:scheduler:joblock:{job_id}"
+    token = uuid.uuid4().hex
+    acquired = False
+    try:
+        r = await get_redis()
+        acquired = bool(await r.set(key, token, nx=True, ex=max(5, int(ttl))))
+    except Exception as e:
+        logger.warning("任务锁获取失败 job_id=%s: %s（fail-open 继续执行）", job_id, e)
+        # Redis 不可用时 fail-open：依赖 Leader fence，避免调度全停
+        yield True
+        return
+    if not acquired:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            r = await get_redis()
+            await r.eval(_LUA_COMPARE_DELETE, 1, key, token)
+        except Exception:
+            logger.warning("任务锁释放失败 job_id=%s", job_id)

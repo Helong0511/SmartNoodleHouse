@@ -293,6 +293,7 @@ class FaceService:
             )
             .order_by(FaceProfile.id.asc())
             .limit(max(1, min(int(limit), 200)))
+            .with_for_update(skip_locked=True)
         )
         rows = list(result.scalars().all())
         if not rows:

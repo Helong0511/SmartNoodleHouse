@@ -86,7 +86,7 @@ TASK_CATALOG: list[dict] = [
         "title": "清理访客临时数据",
         "category": "清理",
         "description": "删除已过期的 VisitorEvent。",
-        "default_schedule": {"type": "interval", "unit": "hours", "every": 6},
+        "default_schedule": {"type": "interval", "unit": "hours", "every": 72},
     },
     {
         "id": "cleanup_operation_logs",
@@ -134,7 +134,7 @@ TASK_CATALOG: list[dict] = [
         "id": "reclaim_stale_printing_jobs",
         "title": "回收卡住的打印任务",
         "category": "打印",
-        "description": "回收 locked_at 超时的 PRINTING 打印任务。",
+        "description": "回收 locked_at 超时的 PRINTING 打印任务（复位为 RETRYING）。",
         "default_schedule": {"type": "cron_interval", "every_minutes": 2},
     },
     {
@@ -226,7 +226,7 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
         "process_role": settings.process_role,
         "leader_held": bool(is_leader_held()),
         "scheduler_running": scheduler_running,
-        "note": "可启停并修改周期；仅 Leader 进程热生效，其它进程写入配置后在下次成为 Leader 时生效。",
+        "note": "可启停并修改周期；任意进程写入后经 Redis 通知，仅 Leader 热生效；非 Leader 进程 standby 争抢可在宕机后自动接管。",
         "total": len(items),
         "items": items,
     }
@@ -236,13 +236,16 @@ def register_tasks(scheduler) -> None:
     settings = get_settings()
 
     def _leader_job(fn):
-        """调度任务 fence：锁丢失后跳过，避免双 Leader 窗口继续跑任务。"""
+        """调度任务 fence：内存旗标 + Redis 持锁校验，缩小双 Leader 窗口。"""
 
         async def _wrapped(*args, **kwargs):
-            from app.core.leader_lock import is_leader_held
+            from app.core.leader_lock import confirm_leader_owned, is_leader_held
             from app.services.scheduler_admin import is_job_enabled
 
             if not is_leader_held():
+                return None
+            # 二次确认 Redis 锁值仍属本进程（TTL 过期换主后，续期循环最多延迟 RENEW_INTERVAL）
+            if not await confirm_leader_owned():
                 return None
             job_name = getattr(fn, "__name__", "")
             if job_name and not is_job_enabled(job_name):
@@ -275,9 +278,14 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def refresh_platform_tokens():
-        count = await PlatformTokenService.refresh_expiring_tokens(within_hours=24)
-        if count:
-            logger.info("Refreshed %s platform tokens", count)
+        from app.services.scheduler_admin import redis_job_lock
+
+        async with redis_job_lock("refresh_platform_tokens", ttl=600) as ok:
+            if not ok:
+                return
+            count = await PlatformTokenService.refresh_expiring_tokens(within_hours=24)
+            if count:
+                logger.info("Refreshed %s platform tokens", count)
 
     @scheduler.scheduled_job(
         "interval",
@@ -288,12 +296,17 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def auto_open_close_delivery_stores():
         # 外卖门店按本地营业时间自动开/关店（仅 auto_sync_open=true 的绑定）
-        async with AsyncSessionLocal() as db:
-            from app.services.store_hours_service import StoreHoursService
+        from app.services.scheduler_admin import redis_job_lock
 
-            stats = await StoreHoursService.apply_auto_open_tick(db)
-            if stats["opened"] or stats["closed"]:
-                logger.info("外卖自动开关店: %s", stats)
+        async with redis_job_lock("auto_open_close_delivery_stores", ttl=90) as ok:
+            if not ok:
+                return
+            async with AsyncSessionLocal() as db:
+                from app.services.store_hours_service import StoreHoursService
+
+                stats = await StoreHoursService.apply_auto_open_tick(db)
+                if stats["opened"] or stats["closed"]:
+                    logger.info("外卖自动开关店: %s", stats)
 
     @scheduler.scheduled_job(
         "interval", minutes=5, id="delivery_stock_reconcile", name="外卖库存对账"
@@ -301,12 +314,17 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def delivery_stock_reconcile():
         # 外卖库存定时对账：以本地门店库存覆盖推送各平台，纠正任何漂移（最终一致）
-        async with AsyncSessionLocal() as db:
-            from app.services.product_sync_service import ProductSyncService
+        from app.services.scheduler_admin import redis_job_lock
 
-            res = await ProductSyncService.reconcile_stock(db)
-            if res.get("failures"):
-                logger.warning("外卖库存对账存在失败: %s", res)
+        async with redis_job_lock("delivery_stock_reconcile", ttl=240) as ok:
+            if not ok:
+                return
+            async with AsyncSessionLocal() as db:
+                from app.services.product_sync_service import ProductSyncService
+
+                res = await ProductSyncService.reconcile_stock(db)
+                if res.get("failures"):
+                    logger.warning("外卖库存对账存在失败: %s", res)
 
     @scheduler.scheduled_job(
         "interval", minutes=1, id="close_expired_orders", name="支付超时关单"
@@ -513,10 +531,14 @@ def register_tasks(scheduler) -> None:
     async def maintain_file_logs():
         """文件日志：7 天明文→gzip，满月打包，超过 90 天删除。"""
         from app.services.file_log_service import maintain_logs
+        from app.services.scheduler_admin import redis_job_lock
 
-        stats = maintain_logs()
-        if any(stats.values()):
-            logger.info("File logs maintained: %s", stats)
+        async with redis_job_lock("maintain_file_logs", ttl=600) as ok:
+            if not ok:
+                return
+            stats = maintain_logs()
+            if any(stats.values()):
+                logger.info("File logs maintained: %s", stats)
 
     @scheduler.scheduled_job(
         "interval", seconds=30, id="drain_outbox_events", name="消费 Outbox 事件"
@@ -620,9 +642,7 @@ def register_tasks(scheduler) -> None:
 
 async def apply_scheduler_overrides(scheduler) -> None:
     """Leader 启动后：从 DB 加载覆盖并热更新启停/周期。"""
-    from app.services.scheduler_admin import apply_all_overrides, load_overrides
+    from app.services.scheduler_admin import reload_overrides_to_scheduler
 
-    async with AsyncSessionLocal() as db:
-        overrides = await load_overrides(db)
-    apply_all_overrides(scheduler, TASK_CATALOG, overrides)
+    await reload_overrides_to_scheduler(scheduler)
 
