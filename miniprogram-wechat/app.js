@@ -57,6 +57,20 @@ App({
     privacy.bindAppPrivacyHandler(this)
     clientConfig.loadClientConfig().catch(() => {})
     auth.purgeStaleSessionIfNeeded().catch(() => {})
+    // 应用层预拉取：冷启动时提前发起菜单请求，页面 onLoad 时可能已拿到数据
+    const _sid = (this.globalData.table && this.globalData.table.store_id)
+      || (this.globalData.store && this.globalData.store.id)
+      || null
+    if (_sid) {
+      try {
+        const productApi = require('./utils/products')
+        const _api = require('./utils/api')
+        this.globalData._menuPrefetch = {
+          storeId: String(_sid),
+          promise: productApi.fetchMenuBundle(_api, _sid, null).catch(() => null)
+        }
+      } catch (_) {}
+    }
   },
   onError(err) {
     try {

@@ -298,6 +298,11 @@ def create_app() -> FastAPI:
 
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
+    # Windows / 部分 Linux 的 mimetypes 不含 webp，StaticFiles 会落成
+    # application/octet-stream，微信/支付宝 <image> 将拒绝展示。
+    import mimetypes
+
+    mimetypes.add_type("image/webp", ".webp")
     if settings.is_development:
         app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
 

@@ -1,0 +1,125 @@
+<view class="page">
+  <privacy-popup id="privacy-popup" />
+  <store-bar
+    storeName="{{storeName}}"
+    storeNo="{{storeNo}}"
+    storeAddress="{{storeAddress}}"
+    storePhone="{{storePhone}}"
+    tableName="{{tableName}}"
+    tableNo="{{tableNo}}"
+    seatLabel="{{seatLabel}}"
+    compact="{{true}}"
+    onTableChange="onTableChange"
+  />
+  <view class="tip">金额由服务器重新计算，防止篡改</view>
+  <view class="member-bar" a:if="{{isMember && memberLevelName}}">
+    <text class="badge">{{memberLevelName}}</text>
+    <text a:if="{{memberDiscountText}}">享 {{memberDiscountText}} 优惠（与结算金额一致）</text>
+    <text a:elif="{{nextLevelName}}">再积 {{pointsToNext}} 分升级 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
+    <text a:else>会员身份已识别</text>
+  </view>
+  <view class="table-box" a:if="{{!needPack}}">
+    <view class="label">堂食桌号（必选）</view>
+    <view a:if="{{tableToken}}" class="table-on">{{tableName || pickedLabel || '已绑桌'}}</view>
+    <block a:elif="{{!tableToken}}">
+      <view class="scan-btn" onTap="scanTable">扫码绑桌</view>
+      <picker a:if="{{tableOptions.length}}" mode="selector" range="{{tableOptions}}" range-key="label" onChange="onPickTable">
+        <view class="table-pick">{{pickedLabel || '或手动选择桌号'}}</view>
+      </picker>
+      <view a:elif="{{needScanHint}}" class="scan-hint">请先扫描桌台二维码，或联系店员协助选桌</view>
+    </block>
+  </view>
+
+  <view class="cart-box">
+    <view class="label">已选商品</view>
+    <view class="cart-line" a:for="{{cartPreview}}" a:key="index">
+      <image a:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" />
+      <view class="mini placeholder" a:else>{{item.name[0] || '餐'}}</view>
+      <view class="cart-info">
+        <view class="cart-name-row">
+          <text>{{item.name}} ×{{item.quantity}}</text>
+          <text class="special-tag" a:if="{{item.no_member_discount}}">特价</text>
+        </view>
+        <text class="cart-price">¥{{item.subtotal}}</text>
+      </view>
+    </view>
+    <view class="special-hint" a:if="{{hasSpecialItems}}">含特价商品：不参与会员折扣、优惠券及代金券</view>
+    <view class="sum-row">
+      <text>小计</text>
+      <text>¥{{subtotal}}</text>
+    </view>
+    <view class="sum-row discount" a:if="{{hasDiscount}}">
+      <text>会员优惠{{memberDiscountText ? '（' + memberDiscountText + '）' : ''}}</text>
+      <text>-¥{{discountAmount}}</text>
+    </view>
+    <view class="sum-row discount" a:if="{{hasCouponDiscount}}">
+      <text>优惠券{{selectedCouponLabel && selectedCouponLabel != '不使用优惠券' ? '（' + selectedCouponLabel + '）' : ''}}</text>
+      <text>-¥{{couponDiscountAmount}}</text>
+    </view>
+    <view class="sum-row discount" a:if="{{hasVoucherDiscount}}">
+      <text>代金券{{selectedVoucherLabel && selectedVoucherLabel != '不使用代金券' ? '（' + selectedVoucherLabel + '）' : ''}}</text>
+      <text>-¥{{voucherDiscountAmount}}</text>
+    </view>
+    <view class="sum-row" a:if="{{needPack}}">
+      <text>打包费（预估）</text>
+      <text>¥{{packingFee}}</text>
+    </view>
+    <view class="sum-row hint-row" a:if="{{!hasDiscount && nextLevelName}}">
+      <text>升级提示</text>
+      <text class="hint-text">再积 {{pointsToNext}} 分可升 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
+    </view>
+    <view class="sum-row total">
+      <text>应付约</text>
+      <text>¥{{payEstimate}}</text>
+    </view>
+  </view>
+
+  <view class="coupon-box" a:if="{{coupons.length}}">
+    <view class="label">优惠券</view>
+    <picker mode="selector" range="{{couponPickerLabels}}" onChange="onPickCoupon">
+      <view class="coupon-pick">{{selectedCouponLabel}}</view>
+    </picker>
+  </view>
+  <view class="coupon-box" a:if="{{vouchers.length}}">
+    <view class="label">代金券</view>
+    <picker mode="selector" range="{{voucherPickerLabels}}" onChange="onPickVoucher">
+      <view class="coupon-pick">{{selectedVoucherLabel}}</view>
+    </picker>
+  </view>
+
+  <view class="pack-box">
+    <view class="label">用餐方式</view>
+    <view class="pack-row">
+      <view class="pack-opt {{!needPack ? 'on' : ''}}" data-pack="0" onTap="onPack">堂食</view>
+      <view class="pack-opt {{needPack ? 'on' : ''}}" data-pack="1" onTap="onPack">打包外带</view>
+    </view>
+    <view class="pack-tip" a:if="{{needPack}}">打包按商品餐盒费加收，以服务器结算为准</view>
+  </view>
+  <textarea class="remark" placeholder="备注" value="{{remark}}" onInput="onRemark" />
+
+  <recommend-strip
+    a:if="{{settleReady && settleStoreId}}"
+    storeId="{{settleStoreId}}"
+    scene="settle_addon"
+    trackScene="settle_addon"
+    cartItemIds="{{cartIds}}"
+    limit="{{6}}"
+    onOpen="onRecommendOpen"
+    onAdd="onRecommendAdd"
+  />
+
+  <view class="pay-box">
+    <view class="label">支付方式</view>
+    <view class="pay-row">
+      <view class="pay-opt {{payMethod === 'ALIPAY' ? 'on' : ''}}" data-m="ALIPAY" onTap="onPayMethod">支付宝</view>
+      <view
+        class="pay-opt {{payMethod === 'BALANCE' ? 'on' : ''}} {{!canPayBalance ? 'disabled' : ''}}"
+        data-m="BALANCE"
+        onTap="onPayMethod"
+      >余额支付¥{{balanceTotal}}</view>
+    </view>
+    <view class="pay-tip" a:if="{{payMethod === 'BALANCE'}}">余额支付按原价结算，不叠加会员折扣与优惠券（充值赠送已计入）</view>
+    <view class="pay-tip" a:elif="{{isMember && !canPayBalance}}">余额不足时可先到「会员」页充值</view>
+  </view>
+  <button class="btn-primary" loading="{{loading}}" onTap="submit">提交并支付</button>
+</view>

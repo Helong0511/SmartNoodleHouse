@@ -196,6 +196,39 @@ async def read_upload_limited(file: UploadFile, max_bytes: int | None = None) ->
     return b"".join(chunks)
 
 
+def _convert_to_webp(data: bytes, ext: str) -> tuple[bytes, str]:
+    """将 jpg/jpeg/png 自动转换为 WebP 以减小体积（平均缩小 65%+）。
+
+    GIF 保留原格式（动画）。转换失败时安全降级保留原格式。
+    """
+    ext_lower = ext.lower()
+    if ext_lower in ("webp", "gif"):
+        return data, ext
+    if ext_lower not in ("jpg", "jpeg", "png"):
+        return data, ext
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        img = Image.open(BytesIO(data))
+        # PNG 可能带 alpha 通道；RGBA → WebP 保留透明
+        if img.mode not in ("RGB", "RGBA", "L", "LA"):
+            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+        buf = BytesIO()
+        img.save(buf, format="WEBP", quality=85, method=4)
+        webp_data = buf.getvalue()
+        if not webp_data:
+            return data, ext
+        logger.info("WebP 转换: %s → webp (%d → %d bytes, %.0f%%)",
+                     ext, len(data), len(webp_data),
+                     len(webp_data) * 100.0 / max(1, len(data)))
+        return webp_data, "webp"
+    except Exception:
+        logger.warning("WebP 转换失败，保留原格式 %s", ext, exc_info=True)
+        return data, ext
+
+
 async def save_image_bytes(
     data: bytes,
     *,
@@ -216,6 +249,10 @@ async def save_image_bytes(
         raise AppException(40025, "空文件")
     _validate_magic(ext, data)
     assert_image_safe(data)
+    # 自动转换为 WebP 格式（jpg/png → webp，gif 保留原格式）
+    data, ext = _convert_to_webp(data, ext)
+    if ext == "webp":
+        content_type = "image/webp"
     key = make_object_key(subdir, ext)
     return await get_storage().put_bytes(key, data, content_type=content_type or "application/octet-stream")
 

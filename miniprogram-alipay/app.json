@@ -6,10 +6,18 @@
     "pages/orders/orders",
     "pages/member/member",
     "pages/recharge/recharge",
-    "pages/recharge-records/recharge-records",
-    "pages/product/product",
-    "pages/confirm/confirm",
-    "pages/result/result"
+    "pages/recharge-records/recharge-records"
+  ],
+  "subPackages": [
+    {
+      "root": "packageOrder",
+      "name": "order",
+      "pages": [
+        "product/product",
+        "confirm/confirm",
+        "result/result"
+      ]
+    }
   ],
   "window": {
     "defaultTitle": "智能面馆",

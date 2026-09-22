@@ -266,7 +266,7 @@ Page({
   openOrder(e) {
     const id = e.currentTarget.dataset.id
     if (!id) return
-    my.navigateTo({ url: `/pages/result/result?order_id=${id}` })
+    my.navigateTo({ url: `/packageOrder/result/result?order_id=${id}` })
   },
 
   async reorderOrder(e) {

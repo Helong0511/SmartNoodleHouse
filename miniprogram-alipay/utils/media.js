@@ -11,7 +11,8 @@ function getAppSafe() {
 function apiOrigin() {
   const app = getAppSafe()
   const base = (app && app.globalData && app.globalData.apiBase) || ''
-  return String(base).replace(/\/api\/v1\/?$/i, '')
+  // apiBase 形如 http://host:8000/api 或 .../api/v1；uploads 挂在站点根，须去掉 /api 前缀
+  return String(base).replace(/\/api(?:\/v\d+)?\/?$/i, '')
 }
 
 /** 相对路径 /uploads/... → 完整 URL；已是 http(s) 则原样返回；version 用于破除小程序/Nginx 缓存 */
@@ -37,38 +38,10 @@ function imageVersion(source) {
   return source.updated_at || source.image_version || ''
 }
 
-const _localImageCache = {}
-
-/** 开发环境 HTTP 图：downloadFile 转本地临时路径 */
+/** 补全为可展示地址；支付宝 <image> 支持 HTTP，开发版可忽略域名校验 */
 function ensureLocalImage(url) {
   const full = resolveUrl(url)
-  if (!full) return Promise.resolve('')
-  if (/^https:\/\//i.test(full)) return Promise.resolve(full)
-  if (!/^http:\/\//i.test(full)) return Promise.resolve(full)
-  if (_localImageCache[full]) return Promise.resolve(_localImageCache[full])
-
-  const downloader = (typeof my !== 'undefined' && my.downloadFile)
-    ? (opts) => my.downloadFile(opts)
-    : (typeof wx !== 'undefined' && wx.downloadFile)
-      ? wx.downloadFile.bind(wx)
-      : null
-  if (!downloader) return Promise.resolve('')
-
-  return new Promise((resolve) => {
-    downloader({
-      url: full,
-      success: (res) => {
-        const path = res.apFilePath || res.tempFilePath
-        if (path && (!res.statusCode || res.statusCode === 200)) {
-          _localImageCache[full] = path
-          resolve(path)
-        } else {
-          resolve('')
-        }
-      },
-      fail: () => resolve('')
-    })
-  })
+  return Promise.resolve(full || '')
 }
 
 async function hydrateImageUrls(items, field = 'imageUrl') {

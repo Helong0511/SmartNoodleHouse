@@ -35,7 +35,7 @@
   <view class="cart-box">
     <view class="label">已选商品</view>
     <view class="cart-line" wx:for="{{cartPreview}}" wx:key="index">
-      <image wx:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" />
+      <image wx:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" webp="{{true}}" />
       <view class="mini placeholder" wx:else>{{item.name[0] || '餐'}}</view>
       <view class="cart-info">
         <view class="cart-name-row">

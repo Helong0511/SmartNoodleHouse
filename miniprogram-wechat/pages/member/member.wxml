@@ -39,7 +39,7 @@
         open-type="chooseAvatar"
         bindchooseavatar="onChooseAvatar"
       >
-        <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
+        <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" webp="{{true}}" />
         <view class="avatar placeholder" wx:else>{{avatarLetter}}</view>
         <view class="avatar-edit-hint">点击授权头像</view>
       </button>

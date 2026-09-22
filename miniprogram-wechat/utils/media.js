@@ -11,7 +11,8 @@ function getAppSafe() {
 function apiOrigin() {
   const app = getAppSafe()
   const base = (app && app.globalData && app.globalData.apiBase) || ''
-  return String(base).replace(/\/api\/v1\/?$/i, '')
+  // apiBase 形如 http://host:8000/api 或 .../api/v1；uploads 挂在站点根，须去掉 /api 前缀
+  return String(base).replace(/\/api(?:\/v\d+)?\/?$/i, '')
 }
 
 /** 相对路径 /uploads/... → 完整 URL；已是 http(s) 则原样返回；version 用于破除小程序/Nginx 缓存 */
@@ -52,13 +53,24 @@ function ensureLocalImage(url) {
     : (typeof my !== 'undefined' && my.downloadFile)
       ? (opts) => my.downloadFile(opts)
       : null
-  if (!downloader) return Promise.resolve('')
+  if (!downloader) return Promise.resolve(full)
 
-  return new Promise((resolve) => {
-    downloader({
+  // 保留扩展名，避免 WebP 被存成无后缀临时文件导致客户端无法识别
+  const extMatch = full.split('?')[0].match(/\.([a-z0-9]+)$/i)
+  const ext = (extMatch && extMatch[1].toLowerCase()) || 'jpg'
+  let filePath
+  try {
+    if (typeof wx !== 'undefined' && wx.env && wx.env.USER_DATA_PATH) {
+      const hash = full.length.toString(36) + Math.abs(_hashStr(full)).toString(36)
+      filePath = `${wx.env.USER_DATA_PATH}/media_${hash}.${ext}`
+    }
+  } catch (_) { }
+
+  const downloadOnce = (withPath) => new Promise((resolve) => {
+    const opts = {
       url: full,
       success: (res) => {
-        const path = res.tempFilePath || res.apFilePath
+        const path = res.filePath || res.tempFilePath || res.apFilePath
         if (path && (!res.statusCode || res.statusCode === 200)) {
           _localImageCache[full] = path
           resolve(path)
@@ -67,8 +79,22 @@ function ensureLocalImage(url) {
         }
       },
       fail: () => resolve('')
-    })
+    }
+    if (withPath && filePath) opts.filePath = filePath
+    downloader(opts)
   })
+
+  return downloadOnce(true).then((path) => {
+    if (path || !filePath) return path || full
+    return downloadOnce(false).then((p) => p || full)
+  })
+}
+
+function _hashStr(s) {
+  let h = 0
+  const str = String(s || '')
+  for (let i = 0; i < str.length; i++) h = ((h << 5) - h) + str.charCodeAt(i) | 0
+  return h
 }
 
 /** 批量把列表项中的图片字段转为可展示的本地/HTTPS 地址 */
@@ -76,7 +102,10 @@ async function hydrateImageUrls(items, field = 'imageUrl') {
   const list = items || []
   await Promise.all(list.map(async (item) => {
     if (!item || !item[field]) return
-    item[field] = await ensureLocalImage(item[field])
+    const original = item[field]
+    const next = await ensureLocalImage(original)
+    // 下载失败时保留原 URL，避免清空后只剩占位符
+    item[field] = next || original
   }))
   return list
 }

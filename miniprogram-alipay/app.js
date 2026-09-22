@@ -55,6 +55,20 @@ App({
     clientConfig.loadClientConfig().catch(() => {})
     // 库重置后本地 customer_token 会失效；静默探测并清理，避免启动期 Uncaught
     auth.purgeStaleSessionIfNeeded().catch(() => {})
+    // 应用层预拉取：冷启动时提前发起菜单请求，页面 onLoad 时可能已拿到数据
+    const _sid = (this.globalData.table && this.globalData.table.store_id)
+      || (this.globalData.store && this.globalData.store.id)
+      || null
+    if (_sid) {
+      try {
+        const productApi = require('./utils/products')
+        const _api = require('./utils/api')
+        this.globalData._menuPrefetch = {
+          storeId: String(_sid),
+          promise: productApi.fetchMenuBundle(_api, _sid, null).catch(() => null)
+        }
+      } catch (_) {}
+    }
   },
   onError(err) {
     try {

@@ -82,7 +82,7 @@
           >
             <view class="main" bindtap="openProduct" data-id="{{p.id}}">
               <view class="thumb-wrap" style="{{p.thumbStyle}}">
-                <image wx:if="{{p.imageUrl}}" class="thumb" src="{{p.imageUrl}}" mode="aspectFill" lazy-load />
+                <image wx:if="{{p.imageUrl}}" class="thumb" src="{{p.imageUrl}}" mode="aspectFill" lazy-load webp="{{true}}" />
                 <view wx:else class="thumb placeholder">
                   <text class="ph-text">{{p.name[0] || '餐'}}</text>
                 </view>

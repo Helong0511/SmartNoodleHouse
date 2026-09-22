@@ -15,7 +15,7 @@
         bindtap="onTapCard"
       >
         <view class="card-thumb">
-          <image wx:if="{{item.imageUrl}}" class="card-img" src="{{item.imageUrl}}" mode="aspectFill" lazy-load />
+          <image wx:if="{{item.imageUrl}}" class="card-img" src="{{item.imageUrl}}" mode="aspectFill" lazy-load webp="{{true}}" />
           <view wx:else class="card-img ph"><text>{{item.name[0] || '荐'}}</text></view>
           <view class="card-badges" wx:if="{{item.badges.length}}">
             <text class="badge {{b}}" wx:for="{{item.badges}}" wx:for-item="b" wx:key="*this">

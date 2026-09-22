@@ -152,6 +152,6 @@ Page({
       my.showToast({ content: '购物车为空', type: 'fail' })
       return
     }
-    my.navigateTo({ url: '/pages/confirm/confirm' })
+    my.navigateTo({ url: '/packageOrder/confirm/confirm' })
   }
 })

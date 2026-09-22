@@ -61,12 +61,22 @@ Page({
     recoStoreId: null
   },
 
+  onLoad() {
+    // onLoad 先于 onShow，提前发起菜单请求利用页面初始化时间窗口
+    this._menuLoaded = false
+    this.loadMenu()
+  },
+
   onShow() {
     tabCartBadge.syncTabCartBadge()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadPrefs(!(appGlobal().prefsAt))
-    this.loadMenu()
+    // 首次由 onLoad 发起；后续回到页面时刷新（版本校验 changed:false 不重绘）
+    if (this._menuLoaded) {
+      this.loadMenu()
+    }
+    this._menuLoaded = true
   },
 
   applyDineContext(ctx) {
@@ -103,7 +113,7 @@ Page({
   async loadPrefs(force = false) {
     try {
       await auth.ensureLogin()
-    } catch (_) {}
+    } catch (_) { }
     try {
       const view = await prefUtil.loadCustomerPrefs({ globalData: appGlobal() }, api, { force })
       const prefCount = (view && view.prefCount) || 0
@@ -114,7 +124,7 @@ Page({
         prefCount,
         prefExpanded: prefCount > 3 ? this.data.prefExpanded : false
       })
-    } catch (_) {}
+    } catch (_) { }
   },
 
   buildCategories(cats, items, metrics, keyword) {
@@ -154,6 +164,26 @@ Page({
     const cacheKey = String(sid)
     const now = Date.now()
     const metrics = media.layoutMetrics()
+
+    // 0) 消费 app.js 预拉取结果（冷启动提前拉取的菜单数据，跳过二次请求）
+    if (!force && gd._menuPrefetch && gd._menuPrefetch.storeId === cacheKey) {
+      const prefetch = gd._menuPrefetch
+      gd._menuPrefetch = null
+      try {
+        const bundle = await prefetch.promise
+        if (bundle && bundle.changed !== false && bundle.categories) {
+          productApi.writeCachedMenu(sid, bundle)
+          const catList = normalizeList(bundle.categories)
+          const items = normalizeList(bundle.products)
+          this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
+          this._lastProductItems = items
+          const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
+          await this.applyCategories(categories, metrics)
+          this.setData({ recoReady: true, recoStoreId: sid })
+          return
+        }
+      } catch (_) { }
+    }
 
     // 1) 本地缓存先渲染（弱网兜底 + 首屏提速），不弹骨架
     const cached = productApi.readCachedMenu(sid)
@@ -195,19 +225,33 @@ Page({
   async applyCategories(categories, metrics) {
     const m = metrics || media.layoutMetrics()
     const flat = []
-    ;(categories || []).forEach((c) => {
-      ;(c.products || []).forEach((p) => flat.push(p))
-    })
+      ; (categories || []).forEach((c) => {
+        ; (c.products || []).forEach((p) => flat.push(p))
+      })
     await media.hydrateImageUrls(flat, 'imageUrl')
     await media.hydrateImageUrls(flat, 'coverUrl')
     const activeCat = (categories[0] && categories[0].id) || null
+    const all = categories || []
+
+    // 分批 setData：分类超过首批阈值时，先渲染首屏可见分类，剩余延迟补全
+    var firstBatch = all
+    var rest = null
+    if (all.length > 3) {
+      firstBatch = all.slice(0, 3)
+      rest = all.slice(3)
+    }
     this.setData({
-      categories: categories || [],
+      categories: firstBatch,
       isWide: !!m.isWide,
       activeCat,
       scrollInto: activeCat ? `cat-${activeCat}` : '',
       loading: false
     })
+    if (rest && rest.length) {
+      setTimeout(() => {
+        this.setData({ categories: firstBatch.concat(rest) })
+      }, 0)
+    }
   },
 
   onSearch(e) {
@@ -235,14 +279,14 @@ Page({
 
   openProduct(e) {
     const pid = Number(e.currentTarget.dataset.id)
-    try { tracker.click(pid, { scene: 'menu' }) } catch (_) {}
-    my.navigateTo({ url: `/pages/product/product?id=${pid}` })
+    try { tracker.click(pid, { scene: 'menu' }) } catch (_) { }
+    my.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
   },
 
   // ---- 推荐位事件（CLICK/EXPOSE 已在组件内发出）----
   onRecommendOpen(detail) {
     const pid = Number(detail && detail.id)
-    if (pid) my.navigateTo({ url: `/pages/product/product?id=${pid}` })
+    if (pid) my.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
   },
 
   onRecommendAdd(detail) {
@@ -283,7 +327,7 @@ Page({
         category_id: entry.category_id || null,
         payload: { qty: Number(entry.quantity) || 1 }
       })
-    } catch (_) {}
+    } catch (_) { }
   },
 
   assertCanAddProduct(productLike) {
@@ -352,7 +396,7 @@ Page({
       const { selected, multi } = prefUtil.resolveQuickAddSelections(product, prefs, usePrefs)
       if (!prefUtil.selectionsComplete(product, selected, multi)) {
         my.hideLoading()
-        my.navigateTo({ url: `/pages/product/product?id=${id}` })
+        my.navigateTo({ url: `/packageOrder/product/product?id=${id}` })
         return
       }
       const unitPrice = cartUtil.calcUnitPrice(product, selected, multi)
