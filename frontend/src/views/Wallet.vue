@@ -8,56 +8,6 @@
     </div>
 
     <el-tabs v-model="tab">
-      <el-tab-pane label="充值档位" name="packages">
-        <div class="toolbar">
-          <el-select
-            v-if="auth.isSuperAdmin"
-            v-model="pkgFilterStoreId"
-            clearable
-            placeholder="全部门店范围"
-            style="width: 200px"
-            @change="loadPackages"
-          >
-            <el-option label="仅总部" :value="0" />
-            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
-          </el-select>
-          <el-button @click="reloadPackages">刷新</el-button>
-          <el-button v-if="canManage" type="primary" @click="openCreate">新增档位</el-button>
-        </div>
-        <el-table :data="packages" border style="margin-top:12px">
-          <el-table-column prop="name" label="档位" min-width="140" />
-          <el-table-column prop="pay_amount" label="实付" width="100" />
-          <el-table-column prop="gift_amount" label="赠送" width="100" />
-          <el-table-column prop="credit_total" label="到账合计" width="110" />
-          <el-table-column label="归属门店" min-width="140">
-            <template #default="{ row }">
-              <el-tag size="small" :type="!row.store_id ? 'info' : 'success'">
-                {{ scopeLabel(row) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="sort_order" label="排序" width="80" />
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-                {{ row.status === 1 ? '启用' : '停用' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
-            <template #default="{ row }">
-              <template v-if="canEditPackage(row)">
-                <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-                <el-button link :type="row.status === 1 ? 'warning' : 'success'" @click="toggleStatus(row)">
-                  {{ row.status === 1 ? '停用' : '启用' }}
-                </el-button>
-              </template>
-              <span v-else class="muted">总部只读</span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
       <el-tab-pane label="流水" name="ledger">
         <div class="toolbar">
           <el-select
@@ -279,6 +229,56 @@
           </el-form-item>
         </el-form>
       </el-tab-pane>
+
+      <el-tab-pane label="充值档位" name="packages">
+        <div class="toolbar">
+          <el-select
+            v-if="auth.isSuperAdmin"
+            v-model="pkgFilterStoreId"
+            clearable
+            placeholder="全部门店范围"
+            style="width: 200px"
+            @change="loadPackages"
+          >
+            <el-option label="仅总部" :value="0" />
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+          <el-button @click="reloadPackages">刷新</el-button>
+          <el-button v-if="canManage" type="primary" @click="openCreate">新增档位</el-button>
+        </div>
+        <el-table :data="packages" border style="margin-top:12px">
+          <el-table-column prop="name" label="档位" min-width="140" />
+          <el-table-column prop="pay_amount" label="实付" width="100" />
+          <el-table-column prop="gift_amount" label="赠送" width="100" />
+          <el-table-column prop="credit_total" label="到账合计" width="110" />
+          <el-table-column label="归属门店" min-width="140">
+            <template #default="{ row }">
+              <el-tag size="small" :type="!row.store_id ? 'info' : 'success'">
+                {{ scopeLabel(row) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sort_order" label="排序" width="80" />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                {{ row.status === 1 ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <template v-if="canEditPackage(row)">
+                <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+                <el-button link :type="row.status === 1 ? 'warning' : 'success'" @click="toggleStatus(row)">
+                  {{ row.status === 1 ? '停用' : '启用' }}
+                </el-button>
+              </template>
+              <span v-else class="muted">总部只读</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="dlgVisible" :title="editing.id ? '编辑档位' : '新增档位'" width="480px" destroy-on-close>
@@ -363,7 +363,7 @@ type StoreOpt = { id: number; name: string; store_no?: string }
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('wallet:manage'))
 const loading = ref(false)
-const tab = ref('packages')
+const tab = ref('ledger')
 const packages = ref<any[]>([])
 const stores = ref<StoreOpt[]>([])
 /** 超管筛选：undefined=全部，0=仅总部，>0=指定门店 */
