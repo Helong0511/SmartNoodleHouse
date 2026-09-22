@@ -1,4 +1,3 @@
-import time
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -1425,28 +1424,34 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
     ):
         return success({"printed": False, "message": "打印未启用（厨房打印总开关关闭）"}, request=request)
 
-    # 手动补打幂等：短时 Redis NX 锁防止快速重复点击导致重复出票
-    # TTL=15s 足够覆盖一次打印往返；锁自然过期，无需手动释放
-    dedup_key = f"snh:print:dedup:{order_id}:KITCHEN"
-    try:
-        r = await get_redis()
-        acquired = await r.set(dedup_key, str(int(time.time())), nx=True, ex=15)
-        if not acquired:
-            return success(
-                {"printed": False, "message": "正在打印中，请勿重复点击"},
-                request=request,
-            )
-    except Exception:
-        # Redis 不可用时降级放行（不阻断打印主流程）
-        pass
+    # 手动补打幂等：Redis 加速 + MySQL processed_messages 事实源
+    # 短窗内重复点击直接丢弃，避免网络抖动导致重复出票
+    from app.domains.messaging.idempotency import release as release_msg
+    from app.domains.messaging.idempotency import try_acquire as claim_msg
+
+    print_msg_id = f"reprint:kitchen:{order_id}"
+    acquired = await claim_msg(
+        db,
+        scope="print",
+        message_id=print_msg_id,
+        ttl_seconds=30,
+        meta={"order_id": order_id, "ticket": "KITCHEN"},
+    )
+    if not acquired:
+        return success(
+            {"printed": False, "message": "正在打印中或刚打印过，请勿重复点击"},
+            request=request,
+        )
 
     try:
         result = await PrintService.print_order(db, order_id)
     except Exception:
         # 先提交 PrintJob RETRYING/FAILED，避免 get_db 回滚冲掉
+        await release_msg(db, scope="print", message_id=print_msg_id)
         await db.commit()
         raise
     if result is None:
+        await release_msg(db, scope="print", message_id=print_msg_id)
         # 订单已取消等业务跳过（非配置缺失；配置缺失会抛 AppException）
         return success({"printed": False, "message": "当前订单状态不可打印"}, request=request)
     await AuditService.log_staff(

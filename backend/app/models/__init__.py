@@ -1006,6 +1006,26 @@ class PaymentCallbackReceipt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ProcessedMessage(Base):
+    """通用消息幂等：MySQL UNIQUE 为事实源，Redis 仅作已处理缓存。"""
+
+    __tablename__ = "processed_messages"
+    __table_args__ = (
+        UniqueConstraint("scope", "message_id", name="uk_processed_msg"),
+        Index("ix_processed_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    scope: Mapped[str] = mapped_column(String(64))
+    message_id: Mapped[str] = mapped_column(String(128))
+    meta_json: Mapped[str | None] = mapped_column(String(500), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class OutboxEvent(Base):
     """DB 事务型 outbox：与业务状态同事务写入，由 worker 原子 claim 异步消费。
 

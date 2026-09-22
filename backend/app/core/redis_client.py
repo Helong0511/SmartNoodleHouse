@@ -1,4 +1,14 @@
+"""Redis 客户端：缓存加速，不可当作唯一数据源。
+
+约定：
+- 业务正确性必须以 MySQL 为准；
+- Redis 不可用时应降级（查库 / 放行 / 跳过缓存），而不是让全站不可用；
+- Leader 选举等「防双跑」场景可 fail-closed（宁可停调度也不能双写）。
+"""
+from __future__ import annotations
+
 import asyncio
+import logging
 import uuid
 
 import redis.asyncio as redis
@@ -6,6 +16,8 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _redis: redis.Redis | None = None
 _lock = asyncio.Lock()
@@ -19,6 +31,18 @@ async def get_redis() -> redis.Redis:
             if _redis is None:
                 _redis = redis.from_url(get_settings().redis_url, decode_responses=True)
     return _redis
+
+
+async def try_get_redis() -> redis.Redis | None:
+    """获取 Redis；失败返回 None（供降级路径使用）。"""
+    try:
+        r = await get_redis()
+        # 轻量探活：避免拿到已断开的假连接后才在业务里爆炸
+        await r.ping()
+        return r
+    except Exception as e:
+        logger.warning("Redis 不可用，进入降级: %s", e)
+        return None
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

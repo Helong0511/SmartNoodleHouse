@@ -791,6 +791,25 @@ class PrintService:
         """
         wid = _print_worker_id()
         async with AsyncSessionLocal() as db:
+            from app.domains.messaging.idempotency import is_processed, try_acquire
+
+            # 已成功出票的 job：崩溃后 reclaim 再来时直接标 SUCCESS，禁止重复打
+            if await is_processed(db, scope="print", message_id=f"success:{int(job_id)}"):
+                await db.execute(
+                    update(PrintJob)
+                    .where(PrintJob.id == int(job_id))
+                    .values(
+                        status="SUCCESS",
+                        succeeded_at=now_local(),
+                        last_error=None,
+                        next_retry_at=None,
+                        locked_at=None,
+                        locked_by=None,
+                    )
+                )
+                await db.commit()
+                return True
+
             job = await cls.claim_print_job(db, job_id, worker=wid)
             if not job:
                 return False
@@ -803,6 +822,14 @@ class PrintService:
                     order_no=order_no,
                     content=job.content or "",
                     ticket_type=job.ticket_type or TICKET_KITCHEN,
+                )
+                # 业务幂等落库：成功出票后写入 processed_messages
+                await try_acquire(
+                    db,
+                    scope="print",
+                    message_id=f"success:{int(job_id)}",
+                    ttl_seconds=86400 * 7,
+                    meta={"order_id": job.order_id, "ticket_type": job.ticket_type},
                 )
                 # 原子释放：仅当 locked_by 仍为本 worker 时才标记 SUCCESS
                 success_stmt = (

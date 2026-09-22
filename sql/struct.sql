@@ -813,6 +813,20 @@ CREATE TABLE IF NOT EXISTS `outbox_events` (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'DB 事务型 outbox 事件' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for processed_messages
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `processed_messages` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `scope` varchar(64) NOT NULL COMMENT '业务域：payment_callback / print / outbox / webhook / ...',
+  `message_id` varchar(128) NOT NULL COMMENT '业务唯一消息 ID（如 notify_id、print:order:ticket）',
+  `meta_json` varchar(500) NULL DEFAULT NULL COMMENT '可选摘要（排障用，勿存敏感原文）',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次处理时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_processed_msg`(`scope` ASC, `message_id` ASC) USING BTREE,
+  INDEX `idx_processed_created`(`created_at` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '消息消费幂等表（MySQL 为事实源；Redis 仅加速）' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for payment_callback_receipts
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `payment_callback_receipts` (

@@ -175,6 +175,29 @@ async def process_outbox_item(outbox_id: int) -> None:
             return
         # claim 后 row.locked_by 即本 worker 的 owner token
         wid = (row.locked_by or "")[:64]
+        # 若业务幂等已标记完成（上次 handler 成功但 DONE 更新失败），跳过 handler
+        try:
+            from app.domains.messaging.idempotency import is_processed
+
+            msg_id = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
+            if await is_processed(db, scope="outbox", message_id=msg_id):
+                await db.execute(
+                    update(OutboxEvent)
+                    .where(OutboxEvent.id == outbox_id, OutboxEvent.locked_by == wid)
+                    .values(
+                        status="DONE",
+                        processed_at=now_local(),
+                        last_error=None,
+                        next_retry_at=None,
+                        locked_at=None,
+                        locked_by=None,
+                    )
+                )
+                await db.commit()
+                return
+        except Exception:
+            logger.warning("outbox 幂等预检失败 id=%s，继续执行 handler", outbox_id)
+
         handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
         if handler is None:
             logger.error(
@@ -208,6 +231,18 @@ async def process_outbox_item(outbox_id: int) -> None:
                 )
             )
             done_result = await db.execute(done_stmt)
+            # 旁路幂等缓存：handler 已执行成功后写入，防 reclaim 后二次副作用
+            try:
+                from app.domains.messaging.idempotency import try_acquire
+
+                await try_acquire(
+                    db,
+                    scope="outbox",
+                    message_id=f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}",
+                    ttl_seconds=86400 * 7,
+                )
+            except Exception:
+                logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
             await db.commit()
             if not done_result.rowcount:
                 logger.warning(
