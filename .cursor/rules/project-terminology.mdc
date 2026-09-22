@@ -1,0 +1,23 @@
+---
+description: 本项目术语约定：小程序两端含义、本地调试与生产环境
+alwaysApply: true
+---
+
+# 项目术语约定
+
+## 小程序 / 小程序端
+
+用户说「小程序」「小程序端」时，**默认同时指微信小程序与支付宝小程序**，除非明确只提其中一端。
+
+- 微信：`miniprogram-wechat/`
+- 支付宝：`miniprogram-alipay/`
+- 改动、排查、同步须按 `.cursor/rules/miniprogram-wechat-alipay-sync.mdc` 两端对齐
+
+## 环境
+
+| 用户说法 | 含义 |
+|---|---|
+| 本地调试 / 本地 | 本机 Windows（Win10），开发与联调 |
+| 生产环境 / 生产 / 线上 | Ubuntu 22.04.5 服务器 |
+
+写命令、路径、部署说明时按对应系统区分（例如 Windows 用 PowerShell / 盘符路径；生产用 Linux shell / `/` 路径）。

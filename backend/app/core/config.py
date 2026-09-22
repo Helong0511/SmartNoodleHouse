@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     enable_wx_avatar: bool = True
     enable_wx_nickname: bool = True
     enable_wx_phone_bind: bool = False
+    # 点餐页展示开关（种子默认；运行时优先 system_settings）
+    show_menu_search: bool = True
+    show_menu_smart_taste: bool = True
+    show_menu_guess_you_like: bool = True
+    # 会员中心：无可用券时隐藏券区（种子默认；运行时优先 system_settings）
+    hide_member_empty_wallet: bool = True
     # 注册会员自动赠送的券模板名称（种子默认；运行时看 system_settings.welcome_coupon_name）
     welcome_coupon_name: str = "新客满30减5"
 

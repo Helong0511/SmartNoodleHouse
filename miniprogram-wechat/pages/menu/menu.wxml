@@ -17,7 +17,7 @@
     <text>未绑定桌台，点击扫描桌台二维码</text>
   </view>
 
-  <view class="search-wrap">
+  <view class="search-wrap" wx:if="{{showMenuSearch}}">
     <input
       class="search"
       placeholder="搜索菜品"
@@ -27,7 +27,7 @@
     />
   </view>
 
-  <view class="pref-bar" wx:if="{{prefCount}}">
+  <view class="pref-bar" wx:if="{{showMenuSmartTaste && prefCount}}">
     <view class="pref-main" bindtap="togglePrefExpand">
       <text class="pref-title">智能口味</text>
       <view class="pref-tags" wx:if="{{prefExpanded}}">
@@ -42,7 +42,7 @@
   </view>
 
   <recommend-strip
-    wx:if="{{recoReady && recoStoreId}}"
+    wx:if="{{showMenuGuessYouLike && recoReady && recoStoreId}}"
     store-id="{{recoStoreId}}"
     scene="recommend_menu"
     track-scene="recommend"

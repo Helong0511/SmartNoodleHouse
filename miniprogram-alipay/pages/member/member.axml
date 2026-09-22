@@ -107,7 +107,7 @@
       <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；主动开通会员后自动获赠新客券。</view>
     </view>
 
-    <view class="card">
+    <view class="card" a:if="{{walletLoading || coupons.length || !hideMemberEmptyWallet}}">
       <view class="title-row">
         <view class="title">我的优惠券</view>
         <text class="link" onTap="loadWallet">刷新</text>
@@ -123,7 +123,7 @@
       </view>
     </view>
 
-    <view class="card">
+    <view class="card" a:if="{{walletLoading || vouchers.length || !hideMemberEmptyWallet}}">
       <view class="title">我的代金券</view>
       <view class="tip" a:if="{{walletLoading}}">加载中...</view>
       <view class="tip" a:elif="{{!vouchers.length}}">暂无可用代金券</view>

@@ -60,6 +60,7 @@ Page({
     coupons: [],
     vouchers: [],
     walletLoading: false,
+    hideMemberEmptyWallet: true,
     phone: '',
     canWxPhone: false,
     showDevTips: false,
@@ -92,7 +93,10 @@ Page({
       showDevTips: shouldShowDevTips()
     })
     clientConfig.loadClientConfig().then(() => {
-      this.setData(clientConfig.wxPrivacyPageData())
+      this.setData({
+        ...clientConfig.wxPrivacyPageData(),
+        ...clientConfig.memberPageFlags()
+      })
     })
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })

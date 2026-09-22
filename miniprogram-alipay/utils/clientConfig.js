@@ -1,4 +1,4 @@
-/** 从后端 .env 下发的小程序公开配置（GET /miniprogram/config） */
+/** 从后端下发的小程序公开配置（GET /miniprogram/config） */
 
 const api = require('./api')
 
@@ -11,7 +11,11 @@ const DEFAULTS = {
   enable_alipay_phone_bind: false,
   enable_wx_avatar: true,
   enable_wx_nickname: true,
-  enable_wx_phone_bind: false
+  enable_wx_phone_bind: false,
+  show_menu_search: true,
+  show_menu_smart_taste: true,
+  show_menu_guess_you_like: true,
+  hide_member_empty_wallet: true
 }
 
 function getAppSafe() {
@@ -53,6 +57,10 @@ async function loadClientConfig(force = false) {
       app.globalData.enableWxAvatar = !!_cache.enable_wx_avatar
       app.globalData.enableWxNickname = !!_cache.enable_wx_nickname
       app.globalData.enableWxPhoneBind = !!_cache.enable_wx_phone_bind
+      app.globalData.showMenuSearch = !!_cache.show_menu_search
+      app.globalData.showMenuSmartTaste = !!_cache.show_menu_smart_taste
+      app.globalData.showMenuGuessYouLike = !!_cache.show_menu_guess_you_like
+      app.globalData.hideMemberEmptyWallet = !!_cache.hide_member_empty_wallet
     }
     return _cache
   })()
@@ -83,6 +91,38 @@ function isWxPhoneBindEnabled() {
   return boolFlag('enable_wx_phone_bind', DEFAULTS.enable_wx_phone_bind)
 }
 
+function isMenuSearchEnabled() {
+  return boolFlag('show_menu_search', DEFAULTS.show_menu_search)
+}
+
+function isMenuSmartTasteEnabled() {
+  return boolFlag('show_menu_smart_taste', DEFAULTS.show_menu_smart_taste)
+}
+
+function isMenuGuessYouLikeEnabled() {
+  return boolFlag('show_menu_guess_you_like', DEFAULTS.show_menu_guess_you_like)
+}
+
+function isHideMemberEmptyWalletEnabled() {
+  return boolFlag('hide_member_empty_wallet', DEFAULTS.hide_member_empty_wallet)
+}
+
+/** 点餐页展示开关对应的 setData 字段 */
+function menuPageFlags() {
+  return {
+    showMenuSearch: !!isMenuSearchEnabled(),
+    showMenuSmartTaste: !!isMenuSmartTasteEnabled(),
+    showMenuGuessYouLike: !!isMenuGuessYouLikeEnabled()
+  }
+}
+
+/** 会员中心展示开关对应的 setData 字段 */
+function memberPageFlags() {
+  return {
+    hideMemberEmptyWallet: !!isHideMemberEmptyWalletEnabled()
+  }
+}
+
 /** 支付宝页：头像 / 昵称 / 手机号三个开关对应的 setData 字段 */
 function alipayPrivacyPageData() {
   return {
@@ -109,6 +149,12 @@ module.exports = {
   isWxAvatarEnabled,
   isWxNicknameEnabled,
   isWxPhoneBindEnabled,
+  isMenuSearchEnabled,
+  isMenuSmartTasteEnabled,
+  isMenuGuessYouLikeEnabled,
+  isHideMemberEmptyWalletEnabled,
+  menuPageFlags,
+  memberPageFlags,
   alipayPrivacyPageData,
   wxPrivacyPageData
 }

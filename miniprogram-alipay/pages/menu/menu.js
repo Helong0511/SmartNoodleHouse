@@ -7,6 +7,7 @@ const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
+const clientConfig = require('../../utils/clientConfig')
 
 function appGlobal() {
   try {
@@ -58,17 +59,22 @@ Page({
     seatLabel: '桌号',
     hasTable: false,
     recoReady: false,
-    recoStoreId: null
+    recoStoreId: null,
+    showMenuSearch: true,
+    showMenuSmartTaste: true,
+    showMenuGuessYouLike: true
   },
 
   onLoad() {
     // onLoad 先于 onShow，提前发起菜单请求利用页面初始化时间窗口
     this._menuLoaded = false
+    this.applyMenuFlags()
     this.loadMenu()
   },
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
+    this.applyMenuFlags()
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
     this.loadPrefs(!(appGlobal().prefsAt))
@@ -77,6 +83,24 @@ Page({
       this.loadMenu()
     }
     this._menuLoaded = true
+  },
+
+  applyMenuFlags() {
+    const apply = () => {
+      const flags = clientConfig.menuPageFlags()
+      const patch = { ...flags }
+      const hadKeyword = !!this.data.keyword
+      if (!flags.showMenuSearch && hadKeyword) {
+        patch.keyword = ''
+      }
+      this.setData(patch, () => {
+        if (!flags.showMenuSearch && hadKeyword) {
+          this.loadMenu()
+        }
+      })
+    }
+    apply()
+    clientConfig.loadClientConfig().then(apply).catch(() => {})
   },
 
   applyDineContext(ctx) {

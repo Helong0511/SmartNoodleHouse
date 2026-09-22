@@ -208,6 +208,16 @@ async def miniprogram_config(request: Request, db: DbSession):
             "enable_wx_avatar": await _flag("enable_wx_avatar", settings.enable_wx_avatar),
             "enable_wx_nickname": await _flag("enable_wx_nickname", settings.enable_wx_nickname),
             "enable_wx_phone_bind": await _flag("enable_wx_phone_bind", settings.enable_wx_phone_bind),
+            "show_menu_search": await _flag("show_menu_search", settings.show_menu_search),
+            "show_menu_smart_taste": await _flag(
+                "show_menu_smart_taste", settings.show_menu_smart_taste
+            ),
+            "show_menu_guess_you_like": await _flag(
+                "show_menu_guess_you_like", settings.show_menu_guess_you_like
+            ),
+            "hide_member_empty_wallet": await _flag(
+                "hide_member_empty_wallet", settings.hide_member_empty_wallet
+            ),
         },
         request=request,
     )

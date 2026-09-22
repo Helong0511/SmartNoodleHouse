@@ -96,6 +96,7 @@ Page({
     coupons: [],
     vouchers: [],
     walletLoading: false,
+    hideMemberEmptyWallet: true,
     phone: '',
     canAlipayPhone: false,
     showDevTips: false,
@@ -129,7 +130,10 @@ Page({
       showDevTips: shouldShowDevTips()
     })
     clientConfig.loadClientConfig().then(() => {
-      this.setData(clientConfig.alipayPrivacyPageData())
+      this.setData({
+        ...clientConfig.alipayPrivacyPageData(),
+        ...clientConfig.memberPageFlags()
+      })
     })
     privacy.setupPrivacy().then((setting) => {
       this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })

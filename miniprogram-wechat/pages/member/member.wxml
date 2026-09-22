@@ -162,7 +162,7 @@
 
 
 
-  <view class="card">
+  <view class="card" wx:if="{{walletLoading || coupons.length || !hideMemberEmptyWallet}}">
 
     <view class="title-row">
 
@@ -194,7 +194,7 @@
 
 
 
-  <view class="card">
+  <view class="card" wx:if="{{walletLoading || vouchers.length || !hideMemberEmptyWallet}}">
 
     <view class="title">我的代金券</view>
 
