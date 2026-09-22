@@ -230,6 +230,126 @@
         </div>
         <el-empty v-if="!filteredEnvGroups.length" description="无匹配配置项" />
       </el-tab-pane>
+
+      <el-tab-pane label="定时任务" name="scheduler">
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          class="group-alert"
+          :title="schedulerSummary"
+          :description="schedulerJobs?.note || '定时任务仅在 Leader 进程执行。'"
+        />
+        <div class="env-toolbar">
+          <el-input
+            v-model="schedulerKeyword"
+            clearable
+            placeholder="搜索任务 / 分类 / 说明"
+            style="width: 280px"
+          />
+          <el-select v-model="schedulerCategory" clearable placeholder="分类" style="width: 160px">
+            <el-option v-for="c in schedulerCategories" :key="c" :label="c" :value="c" />
+          </el-select>
+          <el-button :loading="schedulerLoading" @click="loadSchedulerJobs">刷新</el-button>
+        </div>
+        <el-table v-loading="schedulerLoading" :data="filteredSchedulerJobs" border size="small">
+          <el-table-column prop="category" label="分类" width="90" />
+          <el-table-column prop="title" label="任务" min-width="150" />
+          <el-table-column label="启用" width="90" align="center">
+            <template #default="{ row }">
+              <el-switch
+                :model-value="row.enabled"
+                :loading="schedulerToggling === row.id"
+                :disabled="!canEditScheduler"
+                @change="(v) => toggleSchedulerJob(row, !!v)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="周期" width="140">
+            <template #default="{ row }">
+              <div>{{ row.trigger }}</div>
+              <div v-if="row.overridden" class="muted">默认 {{ row.default_trigger }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="下次执行" width="170">
+            <template #default="{ row }">
+              <span v-if="!row.enabled" class="muted">已停用</span>
+              <span v-else-if="row.next_run_at">{{ row.next_run_at }}</span>
+              <span v-else class="muted">{{ row.registered ? '—' : '本进程未调度' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="!row.enabled" size="small" type="info">停用</el-tag>
+              <el-tag v-else-if="row.registered" size="small" type="success">运行中</el-tag>
+              <el-tag v-else size="small" type="warning">仅目录</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
+          <el-table-column label="操作" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" :disabled="!canEditScheduler" @click="openSchedulerEdit(row)">
+                修改周期
+              </el-button>
+              <el-button
+                v-if="row.overridden"
+                link
+                type="warning"
+                :disabled="!canEditScheduler"
+                @click="resetSchedulerJob(row)"
+              >
+                恢复默认
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!schedulerLoading && !filteredSchedulerJobs.length" description="无匹配任务" />
+
+        <el-dialog
+          v-model="schedulerDlgVisible"
+          :title="schedulerEditing ? `修改周期 · ${schedulerEditing.title}` : '修改周期'"
+          width="440px"
+          destroy-on-close
+        >
+          <el-form v-if="schedulerForm" label-width="100px">
+            <el-form-item label="任务 ID">
+              <code>{{ schedulerEditing?.id }}</code>
+            </el-form-item>
+            <el-form-item label="启用">
+              <el-switch v-model="schedulerForm.enabled" />
+            </el-form-item>
+            <template v-if="schedulerForm.type === 'interval'">
+              <el-form-item label="间隔">
+                <el-input-number v-model="schedulerForm.every" :min="1" :max="schedulerEveryMax" />
+                <el-select v-model="schedulerForm.unit" style="width: 110px; margin-left: 8px">
+                  <el-option label="秒" value="seconds" />
+                  <el-option label="分钟" value="minutes" />
+                  <el-option label="小时" value="hours" />
+                </el-select>
+              </el-form-item>
+            </template>
+            <template v-else-if="schedulerForm.type === 'cron'">
+              <el-form-item label="每天">
+                <el-input-number v-model="schedulerForm.hour" :min="0" :max="23" />
+                <span style="margin: 0 6px">时</span>
+                <el-input-number v-model="schedulerForm.minute" :min="0" :max="59" />
+                <span style="margin-left: 6px">分</span>
+              </el-form-item>
+            </template>
+            <template v-else-if="schedulerForm.type === 'cron_interval'">
+              <el-form-item label="每隔">
+                <el-input-number v-model="schedulerForm.every_minutes" :min="1" :max="60" />
+                <span style="margin-left: 8px">分钟</span>
+              </el-form-item>
+            </template>
+            <p class="field-desc">默认周期：{{ schedulerEditing?.default_trigger }}</p>
+          </el-form>
+          <template #footer>
+            <el-button @click="schedulerDlgVisible = false">取消</el-button>
+            <el-button type="primary" :loading="schedulerSaving" @click="saveSchedulerJob">保存</el-button>
+          </template>
+        </el-dialog>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -247,6 +367,17 @@ const businessGroups = ref<any[]>([])
 const businessSaving = ref(false)
 const envKeyword = ref('')
 const envGroupFilter = ref('')
+const schedulerLoading = ref(false)
+const schedulerJobs = ref<any>(null)
+const schedulerKeyword = ref('')
+const schedulerCategory = ref('')
+const schedulerToggling = ref('')
+const schedulerDlgVisible = ref(false)
+const schedulerEditing = ref<any>(null)
+const schedulerSaving = ref(false)
+const schedulerForm = ref<any>(null)
+
+const canEditScheduler = computed(() => true)
 
 const ENUM_LABELS: Record<string, Record<string, string>> = {
   kitchen_ticket_order_no: {
@@ -328,6 +459,121 @@ const filteredEnvGroups = computed(() => {
     })
     .filter((g: any) => g.items.length > 0)
 })
+
+const schedulerCategories = computed(() => {
+  const items = schedulerJobs.value?.items || []
+  return Array.from(new Set(items.map((i: any) => i.category).filter(Boolean))) as string[]
+})
+
+const filteredSchedulerJobs = computed(() => {
+  const items = schedulerJobs.value?.items || []
+  const kw = schedulerKeyword.value.trim().toLowerCase()
+  return items.filter((it: any) => {
+    if (schedulerCategory.value && it.category !== schedulerCategory.value) return false
+    if (!kw) return true
+    return (
+      String(it.title || '').toLowerCase().includes(kw)
+      || String(it.category || '').toLowerCase().includes(kw)
+      || String(it.description || '').toLowerCase().includes(kw)
+      || String(it.id || '').toLowerCase().includes(kw)
+      || String(it.trigger || '').toLowerCase().includes(kw)
+    )
+  })
+})
+
+const schedulerSummary = computed(() => {
+  const s = schedulerJobs.value
+  if (!s) return '定时任务'
+  const parts = [
+    `共 ${s.total ?? 0} 个`,
+    `角色 ${s.process_role || '-'}`,
+    s.leader_held ? '持有 Leader 锁' : '未持有 Leader 锁',
+    s.scheduler_running ? '调度器运行中' : '调度器未运行',
+  ]
+  return parts.join(' · ')
+})
+
+const schedulerEveryMax = computed(() => {
+  const unit = schedulerForm.value?.unit
+  if (unit === 'seconds') return 86400
+  if (unit === 'hours') return 168
+  return 1440
+})
+
+function buildSchedulePayload(form: any) {
+  if (form.type === 'interval') {
+    return { type: 'interval', unit: form.unit, every: Number(form.every) }
+  }
+  if (form.type === 'cron') {
+    return { type: 'cron', hour: Number(form.hour), minute: Number(form.minute) }
+  }
+  if (form.type === 'cron_interval') {
+    return { type: 'cron_interval', every_minutes: Number(form.every_minutes) }
+  }
+  return null
+}
+
+function openSchedulerEdit(row: any) {
+  const sch = row.schedule || row.default_schedule || {}
+  schedulerEditing.value = row
+  schedulerForm.value = {
+    enabled: !!row.enabled,
+    type: sch.type || 'interval',
+    unit: sch.unit || 'minutes',
+    every: Number(sch.every ?? 1),
+    hour: Number(sch.hour ?? 3),
+    minute: Number(sch.minute ?? 0),
+    every_minutes: Number(sch.every_minutes ?? 2),
+  }
+  schedulerDlgVisible.value = true
+}
+
+async function toggleSchedulerJob(row: any, enabled: boolean) {
+  schedulerToggling.value = row.id
+  try {
+    const res = await api.put(`/settings/scheduler-jobs/${row.id}`, { enabled })
+    schedulerJobs.value = res.data
+    ElMessage.success(res.message || (enabled ? '已启用' : '已停用'))
+  } catch (e: any) {
+    ElMessage.error(e.message || '更新失败')
+    await loadSchedulerJobs()
+  } finally {
+    schedulerToggling.value = ''
+  }
+}
+
+async function saveSchedulerJob() {
+  if (!schedulerEditing.value || !schedulerForm.value) return
+  const schedule = buildSchedulePayload(schedulerForm.value)
+  if (!schedule) {
+    ElMessage.warning('无法识别的周期类型')
+    return
+  }
+  schedulerSaving.value = true
+  try {
+    const res = await api.put(`/settings/scheduler-jobs/${schedulerEditing.value.id}`, {
+      enabled: !!schedulerForm.value.enabled,
+      schedule,
+    })
+    schedulerJobs.value = res.data
+    schedulerDlgVisible.value = false
+    ElMessage.success(res.message || '已保存')
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    schedulerSaving.value = false
+  }
+}
+
+async function resetSchedulerJob(row: any) {
+  try {
+    const res = await api.put(`/settings/scheduler-jobs/${row.id}`, { reset: true })
+    schedulerJobs.value = res.data
+    ElMessage.success(res.message || '已恢复默认')
+  } catch (e: any) {
+    ElMessage.error(e.message || '恢复失败')
+  }
+}
 
 function parseNum(item: any) {
   const n = item.type === 'float' ? parseFloat(item.value) : parseInt(item.value, 10)
@@ -421,8 +667,21 @@ async function saveBusinessGroup(groupId: string) {
   }
 }
 
-function onTabChange() {
-  // 预留：切换分类时无需额外请求
+function onTabChange(name: string | number) {
+  if (name === 'scheduler' && !schedulerJobs.value) {
+    loadSchedulerJobs()
+  }
+}
+
+async function loadSchedulerJobs() {
+  schedulerLoading.value = true
+  try {
+    schedulerJobs.value = (await api.get('/settings/scheduler-jobs')).data
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载定时任务失败')
+  } finally {
+    schedulerLoading.value = false
+  }
 }
 
 async function load() {

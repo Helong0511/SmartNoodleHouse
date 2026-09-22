@@ -134,6 +134,12 @@ async def lifespan(app: FastAPI):
         _leader_renew_task = asyncio.create_task(renew_leader_loop(_leader_worker_id, _leader_stop))
         register_tasks(scheduler)
         scheduler.start()
+        try:
+            from app.tasks.scheduler import apply_scheduler_overrides
+
+            await apply_scheduler_overrides(scheduler)
+        except Exception:
+            logger.exception("应用定时任务覆盖失败")
         logger.info("Scheduler started (leader worker_id=%s role=%s)", _leader_worker_id, role)
         if settings.tts_provider == "local":
             tts_task = asyncio.create_task(tts_worker.run(WelcomeService.get_queue()))

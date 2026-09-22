@@ -465,6 +465,122 @@ async def settings_health(request: Request, db: DbSession):
     return success(await _check_health(db), request=request)
 
 
+@router.get("/scheduler-jobs", dependencies=[require_permission("system:manage")])
+async def list_scheduler_jobs(request: Request, db: DbSession):
+    """定时任务目录 + 覆盖启停/周期 + Leader 运行时 next_run。"""
+    from app.main import scheduler
+    from app.tasks.scheduler import describe_scheduler_status
+
+    return success(await describe_scheduler_status(scheduler, db=db), request=request)
+
+
+class SchedulerJobUpdate(BaseModel):
+    enabled: bool | None = None
+    schedule: dict | None = None
+    reset: bool = False
+
+
+@router.put("/scheduler-jobs/{job_id}", dependencies=[require_permission("system:manage")])
+async def update_scheduler_job(
+    job_id: str,
+    data: SchedulerJobUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """启停或修改周期；写入 system_settings，Leader 进程立即热更新。"""
+    from app.core.leader_lock import is_leader_held
+    from app.main import scheduler
+    from app.services.scheduler_admin import (
+        apply_job_to_scheduler,
+        effective_schedule,
+        load_overrides,
+        save_overrides,
+        validate_schedule,
+    )
+    from app.tasks.scheduler import TASK_CATALOG, describe_scheduler_status
+
+    meta = next((m for m in TASK_CATALOG if m["id"] == job_id), None)
+    if not meta:
+        raise AppException(40410, f"未知定时任务: {job_id}")
+
+    overrides = await load_overrides(db)
+    current = dict(overrides.get(job_id) or {}) if isinstance(overrides.get(job_id), dict) else {}
+
+    if data.reset:
+        overrides.pop(job_id, None)
+        await save_overrides(db, overrides)
+        schedule = dict(meta.get("default_schedule") or {})
+        enabled = True
+        detail = {"job_id": job_id, "reset": True}
+    else:
+        if data.enabled is None and data.schedule is None:
+            raise AppException(40010, "请提供 enabled 或 schedule，或 reset=true")
+        if data.enabled is not None:
+            current["enabled"] = bool(data.enabled)
+        if data.schedule is not None:
+            current["schedule"] = validate_schedule(data.schedule)
+        # 补齐缺省字段
+        if "enabled" not in current:
+            current["enabled"] = True
+        if "schedule" not in current:
+            current["schedule"] = dict(meta.get("default_schedule") or {})
+        else:
+            current["schedule"] = validate_schedule(current["schedule"])
+
+        default_sch = dict(meta.get("default_schedule") or {})
+        # 与默认完全一致则删除覆盖项
+        if current.get("enabled", True) and current.get("schedule") == default_sch:
+            overrides.pop(job_id, None)
+        else:
+            # 周期等于默认时可不落 schedule，只保留 enabled
+            if current.get("schedule") == default_sch:
+                current = {"enabled": bool(current.get("enabled", True))}
+            overrides[job_id] = current
+        await save_overrides(db, overrides)
+        ov_after = overrides.get(job_id)
+        if isinstance(ov_after, dict):
+            enabled = bool(ov_after.get("enabled", True))
+            schedule = effective_schedule(meta, ov_after)
+        else:
+            enabled = True
+            schedule = dict(meta.get("default_schedule") or {})
+        detail = {"job_id": job_id, "enabled": enabled, "schedule": schedule}
+
+    await _write_audit(
+        db,
+        user=user,
+        request=request,
+        action="settings.scheduler.update",
+        target_type="scheduler_job",
+        target_id=job_id,
+        detail=detail,
+    )
+    await db.commit()
+
+    applied = False
+    apply_error = None
+    if getattr(scheduler, "running", False) and is_leader_held():
+        try:
+            apply_job_to_scheduler(scheduler, job_id, schedule=schedule, enabled=enabled)
+            applied = True
+        except Exception as e:
+            apply_error = str(e)
+            logger = __import__("logging").getLogger(__name__)
+            logger.exception("热更新定时任务失败 job_id=%s", job_id)
+
+    payload = await describe_scheduler_status(scheduler, db=db)
+    payload["applied_runtime"] = applied
+    if apply_error:
+        payload["apply_error"] = apply_error
+    msg = "已保存"
+    if applied:
+        msg += "并已热更新本进程调度器"
+    elif not getattr(scheduler, "running", False):
+        msg += "（本进程无运行中调度器，配置已落库）"
+    return success(payload, message=msg, request=request)
+
+
 @router.put("/business", dependencies=[require_permission("system:manage")])
 async def update_business_settings(
     data: BusinessSettingsUpdate,
