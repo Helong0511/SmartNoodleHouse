@@ -1,48 +1,6 @@
 <template>
   <div v-loading="loading">
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
-      <el-tab-pane label="券模板" name="templates">
-        <div class="toolbar">
-          <el-button v-if="canManage" type="primary" @click="openTemplateForm()">新增模板</el-button>
-          <el-button @click="loadTemplates">刷新</el-button>
-        </div>
-        <el-table :data="templates" border style="margin-top:12px">
-          <el-table-column prop="name" label="名称" min-width="140" />
-          <el-table-column label="归属" width="110">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.store_scope === 'HQ' || !row.store_id ? 'info' : 'success'">
-                {{ scopeLabel(row) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="类型" width="90">
-            <template #default="{ row }">
-              {{ row.coupon_type === 'PERCENT' ? '折扣券' : row.coupon_type === 'VOUCHER' ? '代金券' : '满减券' }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="summary" label="规则" min-width="160" />
-          <el-table-column prop="valid_days" label="有效天数" width="100" />
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-                {{ row.status === 1 ? '启用' : '停用' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
-            <template #default="{ row }">
-              <template v-if="canEditTemplate(row)">
-                <el-button link type="primary" @click="openTemplateForm(row)">编辑</el-button>
-                <el-button link type="warning" @click="toggleTemplate(row)">
-                  {{ row.status === 1 ? '停用' : '启用' }}
-                </el-button>
-              </template>
-              <span v-else class="muted">总部只读</span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
       <el-tab-pane label="持券记录" name="issued">
         <el-form inline class="toolbar">
           <el-form-item>
@@ -130,6 +88,48 @@
           @current-change="loadIssued"
           @size-change="reloadIssued"
         />
+      </el-tab-pane>
+
+      <el-tab-pane label="券模板" name="templates">
+        <div class="toolbar">
+          <el-button v-if="canManage" type="primary" @click="openTemplateForm()">新增模板</el-button>
+          <el-button @click="loadTemplates">刷新</el-button>
+        </div>
+        <el-table :data="templates" border style="margin-top:12px">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column label="归属" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.store_scope === 'HQ' || !row.store_id ? 'info' : 'success'">
+                {{ scopeLabel(row) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="90">
+            <template #default="{ row }">
+              {{ row.coupon_type === 'PERCENT' ? '折扣券' : row.coupon_type === 'VOUCHER' ? '代金券' : '满减券' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="summary" label="规则" min-width="160" />
+          <el-table-column prop="valid_days" label="有效天数" width="100" />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                {{ row.status === 1 ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="canManage" label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <template v-if="canEditTemplate(row)">
+                <el-button link type="primary" @click="openTemplateForm(row)">编辑</el-button>
+                <el-button link type="warning" @click="toggleTemplate(row)">
+                  {{ row.status === 1 ? '停用' : '启用' }}
+                </el-button>
+              </template>
+              <span v-else class="muted">总部只读</span>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-tab-pane>
     </el-tabs>
 
@@ -261,7 +261,7 @@ const canManage = computed(() => auth.hasPermission('coupon:manage'))
 const loading = ref(false)
 const saving = ref(false)
 const issuing = ref(false)
-const activeTab = ref('templates')
+const activeTab = ref('issued')
 const stores = ref<{ id: number; name: string }[]>([])
 
 const templates = ref<any[]>([])
@@ -523,6 +523,7 @@ async function submitIssue() {
 onMounted(async () => {
   await loadStores()
   await loadTemplates()
+  await loadIssued()
 })
 </script>
 
