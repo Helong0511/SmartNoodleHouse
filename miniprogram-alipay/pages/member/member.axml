@@ -94,15 +94,24 @@
       </view>
     </view>
 
-    <view class="card">
+    <view class="card" a:if="{{memberLevels.length}}">
       <view class="title">会员等级与权益</view>
-      <view class="level-item {{item.is_current ? 'current' : ''}} {{item.unlocked ? 'unlocked' : ''}}" a:for="{{memberLevels}}" a:key="id">
-        <view class="lv-head">
-          <text class="lv-name">{{item.name}}</text>
-          <text class="lv-tag" a:if="{{item.is_current}}">当前</text>
-          <text class="lv-tag locked" a:elif="{{!item.unlocked}}">未达成</text>
+      <view class="level-ladder">
+        <view class="ladder-rail">
+          <view class="ladder-fill" style="width:{{levelLadderFill}}%"></view>
         </view>
-        <view class="lv-meta">{{item.min_points}} 积分起 · {{item.discount_text || '无额外折扣'}}</view>
+        <view class="ladder-nodes">
+          <view
+            class="ladder-node {{item.is_current ? 'current' : ''}} {{item.unlocked ? 'on' : ''}}"
+            a:for="{{memberLevels}}"
+            a:key="id"
+          >
+            <view class="ladder-dot"></view>
+            <text class="ladder-name">{{item.shortName}}</text>
+            <text class="ladder-disc">{{item.discLabel}}</text>
+            <text class="ladder-pts">{{item.ptsLabel}}</text>
+          </view>
+        </view>
       </view>
       <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；主动开通会员后自动获赠新客券。</view>
     </view>
@@ -170,11 +179,6 @@
         </view>
       </block>
       <view class="tip" a:else>当前小程序主体暂未开通支付宝一键取号能力，暂不能绑定手机号，不影响正常点餐。</view>
-    </view>
-
-    <view class="card link-card" onTap="goOrders">
-      <text>我的订单</text>
-      <text class="arrow">›</text>
     </view>
 
     <view class="card">

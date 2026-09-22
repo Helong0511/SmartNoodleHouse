@@ -27,6 +27,34 @@ function formatExpire(iso) {
   return `至 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+/** 等级列表 → 横向阶梯节点 + 进度填充比例 */
+function buildLevelLadder(levels) {
+  const list = (levels || []).map((lv) => {
+    const name = String((lv && lv.name) || '')
+    const shortName = name.replace(/会员$/, '') || name || '等级'
+    return {
+      ...lv,
+      shortName,
+      discLabel: (lv && lv.discount_text) || '无折扣',
+      ptsLabel: `${(lv && lv.min_points) != null ? lv.min_points : 0}起`
+    }
+  })
+  let fill = 0
+  if (list.length <= 1) {
+    fill = list[0] && list[0].unlocked ? 100 : 0
+  } else {
+    let idx = list.findIndex((l) => l.is_current)
+    if (idx < 0) {
+      idx = -1
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].unlocked) idx = i
+      }
+    }
+    fill = Math.max(0, Math.min(100, (Math.max(idx, 0) / (list.length - 1)) * 100))
+  }
+  return { memberLevels: list, levelLadderFill: Math.round(fill) }
+}
+
 const PROFILE_CACHE_MS = 30 * 1000
 
 /** 解析支付宝 my.getOpenUserInfo 真机返回（常为 { response: '{"nickName":"..","avatar":".."}' }） */
@@ -93,6 +121,7 @@ Page({
     levelProgress: 0,
     pointsRule: '',
     memberLevels: [],
+    levelLadderFill: 0,
     coupons: [],
     vouchers: [],
     walletLoading: false,
@@ -219,7 +248,7 @@ Page({
       pointsToNext: isMember ? (profile.points_to_next_level || 0) : 0,
       levelProgress: isMember ? (profile.level_progress_percent || 0) : 0,
       pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
-      memberLevels: profile.member_levels || [],
+      ...buildLevelLadder(profile.member_levels || []),
       phone: profile.phone || '',
       loading: false
     })
@@ -478,10 +507,6 @@ Page({
 
   goMenu() {
     my.switchTab({ url: '/pages/menu/menu' })
-  },
-
-  goOrders() {
-    my.switchTab({ url: '/pages/orders/orders' })
   },
 
   async onGetUserInfoAuthorize() {
