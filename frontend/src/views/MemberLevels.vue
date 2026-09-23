@@ -19,7 +19,7 @@
       :closable="false"
       class="tip"
       title="规则说明"
-      description="列表来自数据库 member_levels，按升级积分升序展示。普通会员为起始档（积分为 0 不可改）；更高档门槛须严格递增。折扣率 1 表示无折扣，0.90 表示 9 折。"
+      description="列表来自数据库 member_levels，按升级积分升序展示。普通会员为起始档（积分为 0 不可改）；更高档门槛须严格递增。折扣率保留两位小数：1.00 表示无折扣，0.90 表示 9 折，0.98 表示 9.8 折。"
     />
 
     <el-table :data="rows" border style="margin-top:16px">
@@ -43,14 +43,14 @@
           <el-input-number
             v-if="canManage"
             v-model="row.discount_rate"
-            :min="0.0001"
+            :min="0.01"
             :max="1"
             :step="0.01"
-            :precision="4"
+            :precision="2"
             controls-position="right"
             style="width: 160px"
           />
-          <span v-else>{{ row.discount_rate }}</span>
+          <span v-else>{{ Number(row.discount_rate).toFixed(2) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="权益" width="120">

@@ -2,6 +2,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.response import money
+
 
 class MemberLevelItemUpdate(BaseModel):
     id: int = Field(..., gt=0)
@@ -11,7 +13,7 @@ class MemberLevelItemUpdate(BaseModel):
     @field_validator("discount_rate", mode="before")
     @classmethod
     def coerce_discount_rate(cls, v):
-        return Decimal(str(v)).quantize(Decimal("0.0001"))
+        return money(v)
 
 
 class MemberLevelsBatchUpdate(BaseModel):

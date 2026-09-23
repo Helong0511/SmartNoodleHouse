@@ -22,7 +22,7 @@ from app.models import CouponTemplate
 TEMPLATES = [
     # name, coupon_type, discount_value, min_order_amount, valid_days, status
     ("新客满30减5", "FIXED", Decimal("5.00"), Decimal("30.00"), 30, 1),
-    ("满50享打9折", "PERCENT", Decimal("0.9000"), Decimal("50.00"), 30, 1),
+    ("满50享打9折", "PERCENT", Decimal("0.90"), Decimal("50.00"), 30, 1),
     ("10元代金券", "VOUCHER", Decimal("10.00"), Decimal("0.00"), 30, 1),
 ]
 

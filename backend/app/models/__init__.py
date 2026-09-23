@@ -108,7 +108,7 @@ class MemberLevel(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50))
     min_points: Mapped[int] = mapped_column(Integer, default=0)
-    discount_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("1.0000"))
+    discount_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("1.00"))
 
 
 class CouponTemplate(Base):
@@ -118,7 +118,7 @@ class CouponTemplate(Base):
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, index=True)
     name: Mapped[str] = mapped_column(String(100))
     coupon_type: Mapped[str] = mapped_column(String(20), default="FIXED")
-    discount_value: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    discount_value: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     min_order_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     valid_days: Mapped[int] = mapped_column(Integer, default=30)
     status: Mapped[int] = mapped_column(Integer, default=1)

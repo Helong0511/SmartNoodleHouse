@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS `coupon_templates` (
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT 'NULL=总部全店模板；非空=仅该门店 → stores.id',
   `name` varchar(100) NOT NULL COMMENT '券名称（展示用）',
   `coupon_type` varchar(20) NOT NULL DEFAULT 'FIXED' COMMENT 'FIXED=满减元 | PERCENT=折扣比例 | VOUCHER=代金券抵扣',
-  `discount_value` decimal(10, 4) NOT NULL COMMENT 'FIXED/VOUCHER=减免金额；PERCENT=折扣比例如0.90表示九折',
+  `discount_value` decimal(10, 2) NOT NULL COMMENT 'FIXED/VOUCHER=减免金额（元，两位）；PERCENT=折扣率两位，如0.90表示九折',
   `min_order_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '使用门槛（按会员折后商品小计计）',
   `valid_days` int NOT NULL DEFAULT 30 COMMENT '领取/发放后有效天数',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '模板状态：1=启用 0=停用',
@@ -603,7 +603,7 @@ CREATE TABLE IF NOT EXISTS `member_levels` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `name` varchar(50) NOT NULL COMMENT '等级名称，如 普通会员、银卡会员',
   `min_points` int NOT NULL DEFAULT 0 COMMENT '升级所需累计积分下限',
-  `discount_rate` decimal(5, 2) NOT NULL DEFAULT 1.00 COMMENT '折扣率：1.00=无折扣，0.90=九折',
+  `discount_rate` decimal(5, 2) NOT NULL DEFAULT 1.00 COMMENT '折扣率，保留两位：1.00=无折扣，0.90=九折，0.98=9.8折',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '会员等级定义表' ROW_FORMAT = Dynamic;

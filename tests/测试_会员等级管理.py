@@ -33,7 +33,7 @@ def test_resolve_accepts_silver_gold_threshold_change():
     by_name = {lv.name: (pts, rate) for lv, pts, rate in planned}
     assert by_name["银卡会员"][0] == 200
     assert by_name["金卡会员"][0] == 800
-    assert by_name["银卡会员"][1] == Decimal("0.9700")
+    assert by_name["银卡会员"][1] == Decimal("0.97")
 
 
 def test_resolve_rejects_gold_not_higher_than_silver():

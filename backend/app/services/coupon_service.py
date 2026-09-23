@@ -170,6 +170,10 @@ class CouponService:
     async def create_template(db: AsyncSession, data: dict) -> CouponTemplate:
         CouponService._validate_template_data(data)
         payload = dict(data)
+        if payload.get("discount_value") is not None:
+            payload["discount_value"] = money(payload["discount_value"])
+        if payload.get("min_order_amount") is not None:
+            payload["min_order_amount"] = money(payload["min_order_amount"])
         if "store_id" in payload and payload["store_id"] is not None:
             payload["store_id"] = int(payload["store_id"])
         # P0-6: 创建模板时初始化 remaining = total_quota（NULL=不限；0=禁止发放）
@@ -226,6 +230,10 @@ class CouponService:
             elif key == "remaining":
                 # remaining 不允许直接通过 API 修改
                 continue
+            elif key == "discount_value" and val is not None:
+                tmpl.discount_value = money(val)
+            elif key == "min_order_amount" and val is not None:
+                tmpl.min_order_amount = money(val)
             elif val is not None:
                 setattr(tmpl, key, val)
         await db.flush()

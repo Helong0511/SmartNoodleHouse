@@ -25,7 +25,6 @@ from app.models import (
 from app.services.order_service import OrderPriceCalculator
 
 DEFAULT_MEMBER_LEVEL_NAME = "普通会员"
-MEMBER_DISCOUNT_QUANT = Decimal("0.0001")
 PLACEHOLDER_NICKNAMES = frozenset({"联调员", "面馆会员", "微信用户", "支付宝用户"})
 
 
@@ -171,7 +170,7 @@ class CustomerService:
     @staticmethod
     def level_admin_payload(level: MemberLevel, member_count: int = 0) -> dict:
         """后台会员等级配置展示。"""
-        rate = Decimal(str(level.discount_rate)).quantize(MEMBER_DISCOUNT_QUANT)
+        rate = money(level.discount_rate)
         is_base = level.name == DEFAULT_MEMBER_LEVEL_NAME
         return {
             "id": level.id,
@@ -206,9 +205,9 @@ class CustomerService:
             raw = patch.get(int(lv.id))
             min_pts = int(raw["min_points"]) if raw and "min_points" in raw else int(lv.min_points)
             if raw and raw.get("discount_rate") is not None:
-                rate = Decimal(str(raw["discount_rate"])).quantize(MEMBER_DISCOUNT_QUANT)
+                rate = money(raw["discount_rate"])
             else:
-                rate = Decimal(str(lv.discount_rate)).quantize(MEMBER_DISCOUNT_QUANT)
+                rate = money(lv.discount_rate)
             if min_pts < 0:
                 raise AppException(40092, f"「{lv.name}」升级积分不能为负数")
             if rate <= Decimal("0") or rate > Decimal("1"):
@@ -240,7 +239,7 @@ class CustomerService:
         changed: list[dict] = []
         for lv, min_pts, rate in planned:
             before_pts = int(lv.min_points)
-            before_rate = Decimal(str(lv.discount_rate)).quantize(MEMBER_DISCOUNT_QUANT)
+            before_rate = money(lv.discount_rate)
             if before_pts == min_pts and before_rate == rate:
                 continue
             lv.min_points = min_pts

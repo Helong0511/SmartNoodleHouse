@@ -18,10 +18,10 @@ from app.core.database import AsyncSessionLocal
 from app.models import MemberLevel
 
 LEVELS = [
-    ("普通会员", 0, Decimal("1.0000")),
-    ("银卡会员", 200, Decimal("0.9800")),
-    ("金卡会员", 500, Decimal("0.9500")),
-    ("钻石会员", 1000, Decimal("0.9000")),
+    ("普通会员", 0, Decimal("1.00")),
+    ("银卡会员", 200, Decimal("0.98")),
+    ("金卡会员", 500, Decimal("0.95")),
+    ("钻石会员", 1000, Decimal("0.90")),
 ]
 
 

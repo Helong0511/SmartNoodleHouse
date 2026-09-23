@@ -50,6 +50,7 @@ TRUNCATE TABLE `platform_category_maps`;
 TRUNCATE TABLE `platform_store_bindings`;
 TRUNCATE TABLE `point_ledger`;
 TRUNCATE TABLE `pos_refund_requests`;
+TRUNCATE TABLE `processed_messages`;
 TRUNCATE TABLE `print_jobs`;
 TRUNCATE TABLE `product_categories`;
 TRUNCATE TABLE `product_feedbacks`;
@@ -88,6 +89,7 @@ INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'order:read', '查�
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'order:update', '更新订单', 'order' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'order:update');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'customer:read', '查看顾客', 'customer' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'customer:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'customer:manage', '管理全品牌会员等级', 'customer' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'customer:manage');
+INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'customer:write', '合并顾客', 'customer' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'customer:write');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'camera:read', '查看摄像头', 'camera' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'camera:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'camera:manage', '管理摄像头', 'camera' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'camera:manage');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'welcome:manage', '管理迎宾', 'welcome' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'welcome:manage');
@@ -112,15 +114,15 @@ INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'customer:read', 'payment:read', 'wallet:read') WHERE `r`.`code` = 'OPERATOR' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 
 -- 四、会员等级
-INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '普通会员', 0, 1.0000 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '普通会员');
-INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '银卡会员', 200, 0.9800 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '银卡会员');
-INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '金卡会员', 500, 0.9500 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '金卡会员');
-INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '钻石会员', 1000, 0.9000 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '钻石会员');
+INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '普通会员', 0, 1.00 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '普通会员');
+INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '银卡会员', 200, 0.98 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '银卡会员');
+INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '金卡会员', 500, 0.95 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '金卡会员');
+INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '钻石会员', 1000, 0.90 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `member_levels` WHERE `name` = '钻石会员');
 
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
--- 注册赠券：名称须与 .env WELCOME_COUPON_NAME 一致（默认「新客满30减5」）
+-- 总部新客券名须与系统参数 / 总店 welcome_coupon_name 一致（「新客满30减5」）
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '新客满30减5');
-INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50享打9折', 'PERCENT', 0.9000, 50.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50享打9折');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50享打9折', 'PERCENT', 0.90, 50.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50享打9折');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '10元代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '10元代金券');
 
 -- 五-B、储值档位（射洪友好：充50/100/200）
@@ -202,6 +204,8 @@ DELETE rp FROM `role_permissions` rp JOIN `roles` r ON `r`.`id` = `rp`.`role_id`
 DELETE rp FROM `role_permissions` rp JOIN `roles` r ON `r`.`id` = `rp`.`role_id` JOIN `permissions` p ON `p`.`id` = `rp`.`permission_id` WHERE `r`.`code` = 'STORE_ADMIN' AND `p`.`code` = 'customer:manage';
 UPDATE `permissions` SET `name` = '支付与外卖退款' WHERE `code` = 'payment:refund';
 UPDATE `permissions` SET `name` = '管理全品牌会员等级' WHERE `code` = 'customer:manage';
+UPDATE `permissions` SET `name` = '合并顾客' WHERE `code` = 'customer:write';
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` = 'customer:write' WHERE `r`.`code` = 'SUPER_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 UPDATE `roles` SET `description` = '本店运营（含本店业务设置与退款；不含平台级系统配置）' WHERE `code` = 'STORE_ADMIN';
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` = 'settings:store' WHERE `r`.`code` IN ('SUPER_ADMIN', 'STORE_ADMIN') AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 SELECT (SELECT COUNT(*) FROM `roles`) AS roles, (SELECT COUNT(*) FROM `permissions`) AS permissions, (SELECT COUNT(*) FROM `stores` WHERE `status` = 1) AS active_stores;
