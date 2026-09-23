@@ -14,9 +14,9 @@ const DEFAULTS = {
   enable_wx_avatar: true,
   enable_wx_nickname: true,
   enable_wx_phone_bind: false,
-  show_menu_search: true,
-  show_menu_smart_taste: true,
-  show_menu_guess_you_like: true,
+  show_menu_search: false,
+  show_menu_smart_taste: false,
+  show_menu_guess_you_like: false,
   hide_member_empty_wallet: true,
   enable_customer_display: false
 }

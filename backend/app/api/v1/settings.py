@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, text
 
-from app.api.deps import CurrentUser, DbSession, require_permission
+from app.api.deps import CurrentUser, DbSession, get_user_permissions, require_permission
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
@@ -44,6 +44,16 @@ class StoreCreate(BaseModel):
 
 class StoreBusinessUpdate(BaseModel):
     updates: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+async def _require_store_settings(user: CurrentUser, db: DbSession):
+    """本店业务参数：超管、店长，或持有系统管理 / 门店设置权限。"""
+    if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
+        return user
+    perms = await get_user_permissions(db, user.role_id)
+    if "system:manage" in perms or "settings:store" in perms:
+        return user
+    raise HTTPException(status_code=403, detail="无权管理门店设置")
 
 
 @router.get("/stores/options", dependencies=[require_permission("order:read")])
@@ -623,7 +633,77 @@ async def update_business_settings(
     )
 
 
-@router.get("/stores/{store_id}/business", dependencies=[require_permission("system:manage")])
+async def _welcome_coupon_options(db, store_id: int, *, current: str = "") -> list[dict]:
+    """当前门店可选的新客券：本店模板 + 总部模板（已启用，且总部白名单包含本店）。"""
+    from app.services.coupon_service import CouponService
+
+    rows = await CouponService.list_templates(db, include_disabled=False, store_id=int(store_id))
+    by_name: dict[str, dict] = {}
+    for t in rows:
+        name = str(t.get("name") or "").strip()
+        if not name:
+            continue
+        scope = "STORE" if t.get("store_id") else "HQ"
+        # 同名时保留本店模板，避免下拉值冲突
+        if name in by_name and by_name[name]["scope"] == "STORE":
+            continue
+        summary = str(t.get("summary") or "").strip()
+        label = f"{'本店' if scope == 'STORE' else '总部'} · {name}"
+        if summary:
+            label = f"{label}（{summary}）"
+        by_name[name] = {
+            "value": name,
+            "label": label,
+            "scope": scope,
+            "summary": summary,
+        }
+    options = list(by_name.values())
+    options.sort(key=lambda o: (0 if o["scope"] == "STORE" else 1, o["label"]))
+    seen = set(by_name)
+    cur = (current or "").strip()
+    if cur and cur not in seen:
+        options.append(
+            {
+                "value": cur,
+                "label": f"当前值 · {cur}（已停用或不属于本店/总部）",
+                "scope": "CURRENT",
+                "summary": "",
+            }
+        )
+    return options
+
+
+async def _assert_welcome_coupon_choice(db, store_id: int, name: str) -> None:
+    raw = (name or "").strip()
+    if not raw:
+        return
+    options = await _welcome_coupon_options(db, store_id, current="")
+    allowed = {o["value"] for o in options if o.get("scope") in ("STORE", "HQ")}
+    if raw not in allowed:
+        raise AppException(40014, "新客赠券须选择本店或总部已启用的券模板，或留空表示不赠券")
+
+
+def _group_store_items(items: list[dict]) -> list[dict]:
+    by_group: dict[str, list[dict]] = {}
+    for it in items:
+        by_group.setdefault(it.get("group") or "system", []).append(it)
+    groups = []
+    for g in BUSINESS_SETTING_GROUPS:
+        gitems = by_group.get(g["id"]) or []
+        if not gitems:
+            continue
+        groups.append(
+            {
+                "id": g["id"],
+                "label": g["label"],
+                "description": g.get("description", ""),
+                "items": gitems,
+            }
+        )
+    return groups
+
+
+@router.get("/stores/{store_id}/business", dependencies=[Depends(_require_store_settings)])
 async def get_store_business(
     store_id: int,
     request: Request,
@@ -657,11 +737,21 @@ async def get_store_business(
         }
         if it.get("type") == "bool":
             row["bool_value"] = SystemSettingsService._parse_bool(effective, False)
+        if key == "welcome_coupon_name":
+            row["options"] = await _welcome_coupon_options(db, store_id, current=str(effective or ""))
         items.append(row)
-    return success({"store_id": store_id, "store_name": store.name, "items": items}, request=request)
+    return success(
+        {
+            "store_id": store_id,
+            "store_name": store.name,
+            "items": items,
+            "business_groups": _group_store_items(items),
+        },
+        request=request,
+    )
 
 
-@router.put("/stores/{store_id}/business", dependencies=[require_permission("system:manage")])
+@router.put("/stores/{store_id}/business", dependencies=[Depends(_require_store_settings)])
 async def update_store_business(
     store_id: int,
     data: StoreBusinessUpdate,
@@ -695,9 +785,11 @@ async def update_store_business(
     }
     for key, val in data.updates.items():
         try:
-            sval = SystemSettingsService._validate_value(key, str(val))
+            sval = SystemSettingsService._validate_value(key, str(val if val is not None else ""))
         except ValueError as e:
             raise AppException(40014, str(e)) from e
+        if key == "welcome_coupon_name":
+            await _assert_welcome_coupon_choice(db, store_id, sval)
         if key in existing:
             existing[key].setting_value = sval
         else:
@@ -715,7 +807,7 @@ async def update_store_business(
     return await get_store_business(store_id, request, db, user)
 
 
-@router.delete("/stores/{store_id}/business/{key}", dependencies=[require_permission("system:manage")])
+@router.delete("/stores/{store_id}/business/{key}", dependencies=[Depends(_require_store_settings)])
 async def clear_store_business_key(
     store_id: int,
     key: str,

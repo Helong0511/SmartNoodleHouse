@@ -36,8 +36,14 @@ class PosRefundReview(BaseModel):
     remark: str | None = Field(default=None, max_length=500)
 
 
-def _can_manage_settlement(user) -> bool:
-    return user.role.code in ("SUPER_ADMIN", "STORE_ADMIN")
+async def _can_manage_settlement(user, db) -> bool:
+    """日结与退款审批：店长、超管，或持有 payment:refund 的角色。"""
+    if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
+        return True
+    from app.api.deps import get_user_permissions
+
+    perms = await get_user_permissions(db, user.role_id)
+    return "payment:refund" in perms
 
 
 @router.get("/shifts/current", dependencies=[require_pos()])
@@ -141,7 +147,7 @@ async def daily_settlement(
     store_id: int | None = None,
 ):
     """店长/超管：门店日结报表（各收银员班次、备用金、收款合计）。"""
-    if not _can_manage_settlement(user):
+    if not await _can_manage_settlement(user, db):
         raise HTTPException(status_code=403, detail="仅店长或超管可查看日结报表")
     effective = require_bound_store(user, store_id)
     data = await PosShiftService.daily_settlement(db, store_id=effective, date_str=date)
@@ -241,7 +247,7 @@ async def reject_pos_refund(
     data: PosRefundReview | None = None,
 ):
     """店长/管理员拒绝退款申请。"""
-    if not _can_manage_settlement(user):
+    if not await _can_manage_settlement(user, db):
         raise HTTPException(status_code=403, detail="仅店长或超管可审批退款")
     body = data or PosRefundReview()
     row = await PosRefundService.reject_request(db, user=user, request_id=request_id, remark=body.remark)
@@ -268,7 +274,7 @@ async def approve_pos_refund(
     data: PosRefundReview | None = None,
 ):
     """店长/管理员审批通过并执行退款。"""
-    if not _can_manage_settlement(user):
+    if not await _can_manage_settlement(user, db):
         raise HTTPException(status_code=403, detail="仅店长或超管可审批退款")
     body = data or PosRefundReview()
     row = await PosRefundService.approve_and_execute(

@@ -720,7 +720,7 @@ async def run_all_simulations() -> bool:
         )
 
         # 商品列表
-        r = await client.get("/api/products", params={"page_size": 10})
+        r = await client.get("/api/products", params={"page_size": 10, "store_id": CTX["store_id"]})
         products = r.json().get("data", {}).get("items", [])
         results.append(ok("商品 API", len(products) >= 1, f"{len(products)} 个商品"))
 

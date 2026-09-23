@@ -74,7 +74,7 @@ TRUNCATE TABLE `welcome_logs`;
 
 -- 一、角色
 INSERT INTO `roles` (`code`, `name`, `description`) SELECT 'SUPER_ADMIN', '超级管理员', '跨店全部权限' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'SUPER_ADMIN');
-INSERT INTO `roles` (`code`, `name`, `description`) SELECT 'STORE_ADMIN', '门店管理员', '本店运营（含退款；不含全局系统配置）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'STORE_ADMIN');
+INSERT INTO `roles` (`code`, `name`, `description`) SELECT 'STORE_ADMIN', '门店管理员', '本店运营（含本店业务设置与退款；不含平台级系统配置）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'STORE_ADMIN');
 INSERT INTO `roles` (`code`, `name`, `description`) SELECT 'CASHIER', '收银员', '订单、支付与收银点餐（不可退款）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'CASHIER');
 INSERT INTO `roles` (`code`, `name`, `description`) SELECT 'KITCHEN', '厨房', 'KDS 出餐（不可退款/不可审外卖退款）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'KITCHEN');
 INSERT INTO `roles` (`code`, `name`, `description`) SELECT 'OPERATOR', '运营', '商品与数据（不可退款）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `roles` WHERE `code` = 'OPERATOR');
@@ -87,7 +87,7 @@ INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'product:delete', '�
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'order:read', '查看订单', 'order' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'order:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'order:update', '更新订单', 'order' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'order:update');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'customer:read', '查看顾客', 'customer' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'customer:read');
-INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'customer:manage', '管理会员等级', 'customer' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'customer:manage');
+INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'customer:manage', '管理全品牌会员等级', 'customer' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'customer:manage');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'camera:read', '查看摄像头', 'camera' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'camera:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'camera:manage', '管理摄像头', 'camera' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'camera:manage');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'welcome:manage', '管理迎宾', 'welcome' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'welcome:manage');
@@ -97,6 +97,7 @@ INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'table:manage', '管
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'user:read', '查看员工', 'user' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'user:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'user:manage', '管理员工', 'user' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'user:manage');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'system:manage', '系统管理', 'system' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'system:manage');
+INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'settings:store', '门店业务设置', 'system' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'settings:store');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'coupon:read', '查看优惠券', 'coupon' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'coupon:read');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'coupon:manage', '管理优惠券', 'coupon' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'coupon:manage');
 INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'audit:read', '查看操作日志', 'audit' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `permissions` WHERE `code` = 'audit:read');
@@ -105,7 +106,7 @@ INSERT INTO `permissions` (`code`, `name`, `module`) SELECT 'wallet:manage', '�
 
 -- 三、角色权限矩阵
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r CROSS JOIN `permissions` p WHERE `r`.`code` = 'SUPER_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
-INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'order:update', 'customer:read', 'customer:manage', 'camera:read', 'camera:manage', 'welcome:manage', 'payment:read', 'payment:refund', 'table:manage', 'user:read', 'user:manage', 'coupon:read', 'coupon:manage', 'audit:read', 'wallet:read', 'wallet:manage') WHERE `r`.`code` = 'STORE_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'order:update', 'customer:read', 'camera:read', 'camera:manage', 'welcome:manage', 'payment:read', 'payment:refund', 'table:manage', 'user:read', 'user:manage', 'coupon:read', 'coupon:manage', 'audit:read', 'wallet:read', 'wallet:manage', 'settings:store') WHERE `r`.`code` = 'STORE_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('order:read', 'order:update') WHERE `r`.`code` = 'KITCHEN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('order:read', 'order:update', 'payment:read', 'customer:read', 'product:read', 'wallet:read') WHERE `r`.`code` = 'CASHIER' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` IN ('product:read', 'product:create', 'product:update', 'product:delete', 'order:read', 'customer:read', 'payment:read', 'wallet:read') WHERE `r`.`code` = 'OPERATOR' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
@@ -131,6 +132,9 @@ INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`
 INSERT INTO `stores` (`id`, `store_no`, `name`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) VALUES 
 (1, 'SH01', '肠旺面(总店)', '城南红砖路88号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
 (2, 'SH02', '肠旺面(二店)', '城南红砖路188号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+
+-- 二店新客券（名称与该店 welcome_coupon_name 一致；总店沿用总部模板「新客满30减5」）
+INSERT INTO `coupon_templates` (`store_id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT `s`.`id`, '二店新客满20减3', 'FIXED', 3.00, 20.00, 30 FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '二店新客满20减3');
 
 -- 七、系统参数
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'order_payment_timeout_minutes', '15', '订单支付超时分钟数' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'order_payment_timeout_minutes');
@@ -178,9 +182,28 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SE
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'preference_scene_enabled');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'weather_pref_enabled');
 
--- 八、校正（幂等）：非店长角色不得持有 payment:refund
+-- 七-B、门店业务参数（扫码进店读 store_settings；未写的键回退上面的全局默认）
+-- 总店：点餐页不展示搜索 / 智能口味 / 猜你喜欢；打印机与新客券与二店不同
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'show_menu_search', 'false' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'show_menu_search');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'show_menu_smart_taste', 'false' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'show_menu_smart_taste');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'show_menu_guess_you_like', 'false' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'show_menu_guess_you_like');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'welcome_coupon_name', '新客满30减5' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'welcome_coupon_name');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_host', '192.168.1.150' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_host');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_port', '9100' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_port');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'xpyun_print_copies', '1' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'xpyun_print_copies');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'welcome_coupon_name', '二店新客满20减3' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'welcome_coupon_name');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_host', '192.168.1.151' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_host');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_port', '9100' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_port');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'xpyun_print_copies', '2' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'xpyun_print_copies');
+
+-- 八、校正（幂等）：非店长角色不得持有 payment:refund；店长可管本店业务设置
+-- 会员等级折扣全品牌共用，店长不可改（customer:manage 仅超管）
 DELETE rp FROM `role_permissions` rp JOIN `roles` r ON `r`.`id` = `rp`.`role_id` JOIN `permissions` p ON `p`.`id` = `rp`.`permission_id` WHERE `r`.`code` IN ('CASHIER', 'KITCHEN', 'OPERATOR') AND `p`.`code` = 'payment:refund';
+DELETE rp FROM `role_permissions` rp JOIN `roles` r ON `r`.`id` = `rp`.`role_id` JOIN `permissions` p ON `p`.`id` = `rp`.`permission_id` WHERE `r`.`code` = 'STORE_ADMIN' AND `p`.`code` = 'customer:manage';
 UPDATE `permissions` SET `name` = '支付与外卖退款' WHERE `code` = 'payment:refund';
+UPDATE `permissions` SET `name` = '管理全品牌会员等级' WHERE `code` = 'customer:manage';
+UPDATE `roles` SET `description` = '本店运营（含本店业务设置与退款；不含平台级系统配置）' WHERE `code` = 'STORE_ADMIN';
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` = 'settings:store' WHERE `r`.`code` IN ('SUPER_ADMIN', 'STORE_ADMIN') AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 SELECT (SELECT COUNT(*) FROM `roles`) AS roles, (SELECT COUNT(*) FROM `permissions`) AS permissions, (SELECT COUNT(*) FROM `stores` WHERE `status` = 1) AS active_stores;
 
 -- 添加管理员账号

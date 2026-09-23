@@ -92,10 +92,19 @@
 
       <el-tab-pane label="券模板" name="templates">
         <div class="toolbar">
+          <el-select v-model="templateScope" clearable placeholder="归属：总部或门店" style="width: 200px">
+            <el-option label="总部" value="HQ" />
+            <el-option
+              v-for="s in templateStoreFilters"
+              :key="s.id"
+              :label="s.name"
+              :value="String(s.id)"
+            />
+          </el-select>
           <el-button v-if="canManage" type="primary" @click="openTemplateForm()">新增模板</el-button>
           <el-button @click="loadTemplates">刷新</el-button>
         </div>
-        <el-table :data="templates" border style="margin-top:12px">
+        <el-table :data="filteredTemplates" border style="margin-top:12px">
           <el-table-column prop="name" label="名称" min-width="140" />
           <el-table-column label="归属" width="110">
             <template #default="{ row }">
@@ -265,6 +274,23 @@ const activeTab = ref('issued')
 const stores = ref<{ id: number; name: string }[]>([])
 
 const templates = ref<any[]>([])
+const templateScope = ref<string | undefined>()
+const templateStoreFilters = computed(() => {
+  if (auth.isSuperAdmin && stores.value.length) return stores.value
+  const map = new Map<number, string>()
+  for (const t of templates.value) {
+    if (!t?.store_id) continue
+    map.set(Number(t.store_id), t.store_name || `门店#${t.store_id}`)
+  }
+  return [...map.entries()].map(([id, name]) => ({ id, name }))
+})
+const filteredTemplates = computed(() => {
+  const scope = templateScope.value
+  if (!scope) return templates.value
+  if (scope === 'HQ') return templates.value.filter((t) => !t.store_id || t.store_scope === 'HQ')
+  const sid = Number(scope)
+  return templates.value.filter((t) => Number(t.store_id) === sid)
+})
 const templateDialog = ref(false)
 const templateForm = reactive({
   id: 0,

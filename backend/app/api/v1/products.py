@@ -331,6 +331,8 @@ async def suggest_menu_code(
                 cat.name
             )
     elif kind == "group" and store_id is None and not user.store_id:
+        if getattr(user.role, "code", None) != "SUPER_ADMIN":
+            raise AppException(40301, "账号未绑定门店")
         prefix = HQ_STORE_PREFIX
     elif kind == "category" or (kind == "group" and store_id is not None):
         sid = require_bound_store(user, store_id)
@@ -816,6 +818,8 @@ async def list_products(
     """
     if staff is not None:
         store_id = require_bound_store(staff, store_id)
+    elif store_id is None:
+        raise AppException(40001, "请指定门店 store_id")
     else:
         # P1-2 公开菜单按 IP+store_id 限流，防止批量爬取全部门店菜单
         if store_id is not None:
@@ -1136,10 +1140,13 @@ async def delete_store_stock(
 
 
 @router.get("/products/{product_id}")
-async def get_product(product_id: int, request: Request, db: DbSession):
+async def get_product(product_id: int, request: Request, db: DbSession, staff: OptionalStaffUser):
     product = await db.get(Product, product_id)
     if not product:
         return success(None, message="商品不存在", request=request)
+    # 点餐页无员工令牌仍可按商品 id 打开详情；员工令牌则限制在本店
+    if staff is not None:
+        assert_store_access(staff, product.store_id)
 
     pog_result = await db.execute(
         select(ProductOptionGroup, OptionGroup)
@@ -1465,15 +1472,17 @@ class TasteProfileRebuildRequest(BaseModel):
     store_id: int | None = None
 
 
-@router.get("/products/{product_id}/taste-profile")
-async def get_product_taste_profile(product_id: int, request: Request, db: DbSession):
+@router.get("/products/{product_id}/taste-profile", dependencies=[require_permission("product:read")])
+async def get_product_taste_profile(product_id: int, request: Request, db: DbSession, user: CurrentUser):
+    product = await db.get(Product, product_id)
+    if product is None:
+        return success(None, message="商品不存在", request=request)
+    assert_store_access(user, product.store_id)
     row = (
         await db.execute(
             select(ProductTasteProfile).where(ProductTasteProfile.product_id == product_id)
         )
     ).scalar_one_or_none()
-    if row is None and (await db.get(Product, product_id)) is None:
-        return success(None, message="商品不存在", request=request)
     return success(profile_payload(row), request=request)
 
 
@@ -1688,13 +1697,12 @@ async def _assert_groups_usable_for_store(db: DbSession, group_ids: list[int], s
 
 
 def _assert_option_group_manage(user: CurrentUser, group: OptionGroup | None = None) -> None:
-    """门店仅可改本店规格组；总部共享仅超管/总部账号可改。"""
+    """门店仅可改本店规格组；总部共享仅超管可改。未绑定门店的非超管一律拒绝。"""
     role = getattr(getattr(user, "role", None), "code", None) or ""
-    if role == "SUPER_ADMIN" or not user.store_id:
-        if group is not None and user.store_id and group.store_id is not None:
-            if int(group.store_id) != int(user.store_id) and role != "SUPER_ADMIN":
-                raise AppException(40301, "无权修改其他门店规格组")
+    if role == "SUPER_ADMIN":
         return
+    if not user.store_id:
+        raise AppException(40301, "账号未绑定门店，无法管理规格组")
     if group is None:
         return
     if group.store_id is None:
@@ -1784,9 +1792,13 @@ async def list_option_groups(
         if staff.role.code == "SUPER_ADMIN":
             scope_store = int(store_id) if store_id else None
         else:
-            scope_store = int(staff.store_id) if staff.store_id else None
+            if not staff.store_id:
+                raise HTTPException(status_code=403, detail="账号未绑定门店")
+            scope_store = int(staff.store_id)
     elif store_id:
         scope_store = int(store_id)
+    else:
+        raise AppException(40001, "请指定门店 store_id")
 
     if scope_store is not None:
         q = q.where(or_(OptionGroup.store_id.is_(None), OptionGroup.store_id == scope_store))

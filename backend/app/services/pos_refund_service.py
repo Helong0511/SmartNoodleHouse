@@ -13,8 +13,14 @@ from app.services.payment_service import PaymentService, money
 from app.services.store_scope import assert_order_store_access, assert_store_access
 
 
-def _can_approve(user) -> bool:
-    return user.role.code in ("SUPER_ADMIN", "STORE_ADMIN")
+async def _can_approve(db: AsyncSession, user) -> bool:
+    """店长、超管，或被授予支付退款权限的角色可审批。仍受门店隔离约束。"""
+    if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
+        return True
+    from app.api.deps import get_user_permissions
+
+    perms = await get_user_permissions(db, user.role_id)
+    return "payment:refund" in perms
 
 
 class PosRefundService:
@@ -178,7 +184,7 @@ class PosRefundService:
         ).scalar_one_or_none()
         if not row:
             raise AppException(40404, "退款申请不存在")
-        if row.requested_by != user.id and not _can_approve(user):
+        if row.requested_by != user.id and not await _can_approve(db, user):
             raise AppException(40301, "无权撤销该申请")
         if row.status != "PENDING":
             raise AppException(40014, "仅待审批申请可撤销")
@@ -196,7 +202,7 @@ class PosRefundService:
         request_id: int,
         remark: str | None,
     ) -> PosRefundRequest:
-        if not _can_approve(user):
+        if not await _can_approve(db, user):
             raise AppException(40301, "仅店长或管理员可审批退款")
         # FOR UPDATE：同 cancel_request，拒绝与审批互斥，防止覆写退款结果
         row = (
@@ -227,7 +233,7 @@ class PosRefundService:
         remark: str | None = None,
     ) -> PosRefundRequest:
         """审批通过并执行退款。组合支付按「现金优先 → 扫码」分摊到多笔支付单。"""
-        if not _can_approve(user):
+        if not await _can_approve(db, user):
             raise AppException(40301, "仅店长或管理员可审批退款")
         row = (
             await db.execute(
@@ -355,7 +361,7 @@ class PosRefundService:
         page = max(1, int(page))
         page_size = min(max(1, int(page_size)), 100)
         q = select(PosRefundRequest)
-        if user.role.code == "CASHIER":
+        if not await _can_approve(db, user):
             q = q.where(PosRefundRequest.requested_by == user.id)
         else:
             effective = require_bound_store(user, store_id)

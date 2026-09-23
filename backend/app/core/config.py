@@ -76,15 +76,15 @@ class Settings(BaseSettings):
     enable_wx_avatar: bool = True
     enable_wx_nickname: bool = True
     enable_wx_phone_bind: bool = False
-    # 点餐页展示开关（种子默认；运行时优先 system_settings）
-    show_menu_search: bool = True
-    show_menu_smart_taste: bool = True
-    show_menu_guess_you_like: bool = True
+    # 点餐页展示开关（种子默认关闭；运行时按门店 store_settings，无覆盖再看 system_settings）
+    show_menu_search: bool = False
+    show_menu_smart_taste: bool = False
+    show_menu_guess_you_like: bool = False
     # 会员中心：无可用券时隐藏券区（种子默认；运行时优先 system_settings）
     hide_member_empty_wallet: bool = True
     # 大厅叫号屏（种子默认关闭；运行时优先 system_settings，可按门店覆盖）
     enable_customer_display: bool = False
-    # 注册会员自动赠送的券模板名称（种子默认；运行时看 system_settings.welcome_coupon_name）
+    # 注册会员自动赠送的券模板名称（种子默认；运行时按开卡门店 welcome_coupon_name）
     welcome_coupon_name: str = "新客满30减5"
 
     # 美团外卖开放平台（waimaiopen）

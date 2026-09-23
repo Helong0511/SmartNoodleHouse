@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
@@ -7,19 +7,26 @@ from app.core.response import success
 from app.models import Customer
 from app.schemas.member_level import MemberLevelsBatchUpdate
 from app.services.customer_service import CustomerService
+from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/member-levels", tags=["会员等级"])
 
 
 @router.get("", dependencies=[require_permission("customer:read")])
 async def list_member_levels(request: Request, db: DbSession, user: CurrentUser):
-    """后台：会员等级列表（读库 member_levels，按积分升序）。"""
+    """后台：会员等级列表（读库 member_levels，按积分升序）。人数按当前门店统计。"""
     levels = await CustomerService.list_levels_ordered(db)
     counts_q = (
         select(Customer.member_level_id, func.count())
         .where(Customer.status == 1)
         .group_by(Customer.member_level_id)
     )
+    if user.role.code != "SUPER_ADMIN":
+        from app.api.v1.customers import _customer_in_store
+
+        sid = require_bound_store(user, None)
+        if sid is not None:
+            counts_q = counts_q.where(_customer_in_store(int(sid)))
     counts = {row[0]: int(row[1]) for row in (await db.execute(counts_q)).all()}
     return success(
         {
@@ -39,7 +46,9 @@ async def update_member_levels(
     db: DbSession,
     user: CurrentUser,
 ):
-    """调整各等级升级积分与折扣；默认保存后重算顾客等级。"""
+    """调整各等级升级积分与折扣。规则全品牌共用，仅超级管理员可改。"""
+    if user.role.code != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="会员等级为全品牌规则，仅超级管理员可修改")
     try:
         result = await CustomerService.apply_level_updates(
             db, [item.model_dump() for item in data.items], recalculate=data.recalculate

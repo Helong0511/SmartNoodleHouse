@@ -14,12 +14,30 @@ from app.services.websocket_manager import WS_IDLE_TIMEOUT_SECONDS, ws_manager
 router = APIRouter(tags=["WebSocket"])
 
 PROTECTED_CHANNELS = {"kitchen", "orders", "dashboard", "cameras"}
-CHANNEL_PERMS = {
-    "kitchen": {"SUPER_ADMIN", "STORE_ADMIN", "KITCHEN"},
-    "orders": {"SUPER_ADMIN", "STORE_ADMIN", "CASHIER", "OPERATOR", "KITCHEN"},
-    "dashboard": {"SUPER_ADMIN", "STORE_ADMIN"},
-    "cameras": {"SUPER_ADMIN", "STORE_ADMIN", "OPERATOR"},
+# 角色白名单之外，再按权限放行，避免自定义角色有权限却订不上频道。
+# 摄像头不再按角色放行：运营角色没有 camera:read 时不能看监控。
+CHANNEL_ROLES = {
+    "kitchen": frozenset(),
+    "orders": frozenset(),
+    "dashboard": frozenset({"STORE_ADMIN"}),
+    "cameras": frozenset(),
 }
+CHANNEL_PERMISSION = {
+    "kitchen": "order:update",
+    "orders": "order:read",
+    "dashboard": "system:manage",
+    "cameras": "camera:read",
+}
+
+
+def staff_may_subscribe(role: str | None, channel: str, perms: set[str]) -> bool:
+    """员工是否可订阅该实时频道。超管始终允许。"""
+    if role == "SUPER_ADMIN":
+        return True
+    if role and role in CHANNEL_ROLES.get(channel, frozenset()):
+        return True
+    need = CHANNEL_PERMISSION.get(channel)
+    return bool(need and need in perms)
 
 # 长 JWT 不得出现在 query（易进访问日志）；短 opaque display token 允许
 _JWT_QUERY_MIN_LEN = 80
@@ -207,8 +225,10 @@ async def websocket_endpoint(
                         return
                     role = user.role.code if user.role else None
                     is_super = role == "SUPER_ADMIN"
-                    allowed = CHANNEL_PERMS.get(channel)
-                    if allowed and role not in allowed and not is_super:
+                    from app.api.deps import get_user_permissions
+
+                    perms = set() if is_super else await get_user_permissions(db, user.role_id)
+                    if not staff_may_subscribe(role, channel, perms):
                         await websocket.close(code=4403, reason="角色无权订阅")
                         return
                     user_store_id = user.store_id

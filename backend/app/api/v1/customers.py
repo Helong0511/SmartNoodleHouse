@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
@@ -23,6 +23,29 @@ router = APIRouter(prefix="/customers", tags=["顾客"])
 class CustomerMergeBody(BaseModel):
     source_customer_id: int = Field(..., gt=0)
     reason: str | None = Field(None, max_length=255)
+
+
+def _customer_in_store(store_id: int):
+    """本店可见顾客：在本店下过单，或注册/首次到店记在本店。"""
+    sid = int(store_id)
+    return or_(
+        Customer.registered_store_id == sid,
+        Customer.first_seen_store_id == sid,
+        Customer.id.in_(
+            select(Order.customer_id).where(
+                Order.store_id == sid,
+                Order.customer_id.is_not(None),
+            )
+        ),
+    )
+
+
+async def _assert_customer_in_store(db, customer_id: int, store_id: int, *, action: str = "查看") -> None:
+    hit = await db.scalar(
+        select(Customer.id).where(Customer.id == int(customer_id), _customer_in_store(store_id)).limit(1)
+    )
+    if not hit:
+        raise AppException(40301, f"无权{action}其他门店顾客")
 
 
 @router.get("", dependencies=[require_permission("customer:read")])
@@ -72,14 +95,7 @@ async def list_customers(
         except ValueError:
             pass
     if effective_store is not None:
-        q = q.where(
-            Customer.id.in_(
-                select(Order.customer_id).where(
-                    Order.store_id == effective_store,
-                    Order.customer_id.is_not(None),
-                ).distinct()
-            )
-        )
+        q = q.where(_customer_in_store(effective_store))
     if keyword and keyword.strip():
         q = q.where(CustomerService.keyword_condition(keyword))
     if channel:
@@ -239,16 +255,10 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
     if not customer:
         raise AppException(40401, "顾客不存在")
 
-    # 门店账号仅可查看在本店下过单的顾客；超管可看全量
+    # 门店账号仅可查看本店顾客（下过单，或注册/首次到店在本店）；超管可看全量
     effective_store = require_bound_store(user, None)
     if effective_store is not None:
-        ordered_here = await db.scalar(
-            select(func.count())
-            .select_from(Order)
-            .where(Order.customer_id == customer_id, Order.store_id == effective_store)
-        )
-        if not ordered_here:
-            raise AppException(40301, "无权查看其他门店顾客")
+        await _assert_customer_in_store(db, customer_id, effective_store)
 
     wechat = await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == customer_id))
     alipay = await db.execute(select(CustomerAlipayAccount).where(CustomerAlipayAccount.customer_id == customer_id))
@@ -390,13 +400,7 @@ async def merge_customers(
     effective_store = require_bound_store(user, None)
     if effective_store is not None:
         for cid in (target_id, body.source_customer_id):
-            ordered_here = await db.scalar(
-                select(func.count())
-                .select_from(Order)
-                .where(Order.customer_id == cid, Order.store_id == effective_store)
-            )
-            if not ordered_here:
-                raise HTTPException(status_code=403, detail="无权合并其他门店顾客")
+            await _assert_customer_in_store(db, cid, effective_store, action="合并")
 
     result = await CustomerMergeService.merge(
         db,

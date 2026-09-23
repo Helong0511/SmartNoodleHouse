@@ -118,7 +118,9 @@ const showStore = computed(() => showTables.value || showUsers.value || auth.has
 const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
 const showSmart = computed(() => showCameras.value || showWelcome.value)
-const showSettings = computed(() => auth.hasPermission('system:manage'))
+const showSettings = computed(
+  () => auth.hasPermission('system:manage') || auth.hasPermission('settings:store') || auth.isStoreAdmin,
+)
 const showRolePerms = computed(() => auth.hasPermission('system:manage'))
 const showAudit = computed(() => auth.hasPermission('audit:read'))
 const showSystemGroup = computed(() => showSettings.value || showAudit.value || showRolePerms.value)

@@ -18,15 +18,40 @@ logger = logging.getLogger(__name__)
 # group：前端「系统设置」分页分类
 
 BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
-    {"id": "order", "label": "订单与厨房", "description": "支付超时、厨房自动出餐、大厅叫号屏等堂食履约参数"},
-    {"id": "welcome", "label": "迎宾与人脸", "description": "迎宾冷却、人脸匹配与访客保留"},
-    {"id": "member", "label": "会员与优惠", "description": "新客赠券等会员相关"},
-    {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示、隐私能力、订阅模板、扫码域名与小程序版本"},
-    {"id": "delivery", "label": "外卖", "description": "自动接单与开发兜底门店（生产多店须关闭兜底）"},
-    {"id": "print", "label": "厨房打印", "description": "打印总开关、模式、IP/端口、份数与票面样式"},
-    {"id": "security", "label": "安全与网络", "description": "Token 有效期、Webhook 白名单、可信反代"},
-    {"id": "system", "label": "系统通用", "description": "时区、上传限制与扩展名"},
+    {"id": "order", "label": "订单与厨房", "description": "按当前门店保存：支付超时、厨房自动出餐、大厅叫号屏"},
+    {"id": "welcome", "label": "迎宾与人脸", "description": "按当前门店保存：迎宾冷却与人脸匹配；访客保留天数仍是平台级"},
+    {"id": "member", "label": "会员与优惠", "description": "按当前门店保存：新客赠券模板名，须与本店或总部券模板名称一致"},
+    {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示按当前门店保存；小程序主体隐私、域名与版本为平台级"},
+    {"id": "delivery", "label": "外卖", "description": "自动接单按当前门店保存；.env 兜底门店为平台级"},
+    {"id": "print", "label": "厨房打印", "description": "按当前门店保存：开关、模式、打印机地址、份数与票面"},
+    {"id": "security", "label": "安全与网络", "description": "平台级：Token 有效期、Webhook 白名单、可信反代"},
+    {"id": "system", "label": "系统通用", "description": "口味加权按门店；时区、上传限制与日志保留为平台级"},
 ]
+
+# 全部门店共用，只能由系统管理权限改 system_settings
+PLATFORM_ONLY_KEYS = frozenset({
+    "visitor_data_retention_days",
+    "operation_log_retention_days",
+    "enable_alipay_avatar",
+    "enable_alipay_nickname",
+    "enable_alipay_phone_bind",
+    "enable_wx_avatar",
+    "enable_wx_nickname",
+    "enable_wx_phone_bind",
+    "max_upload_size_mb",
+    "jwt_expire_minutes",
+    "customer_jwt_expire_minutes",
+    "webhook_ip_allowlist",
+    "webhook_require_allowlist",
+    "trusted_proxy_ips",
+    "h5_public_base_url",
+    "dev_lan_host",
+    "mini_program_env_version",
+    "wechat_subscribe_template_order_ready",
+    "allowed_image_extensions",
+    "app_timezone",
+    "delivery_env_fallback_store_id",
+})
 
 BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
     "order_payment_timeout_minutes": {
@@ -115,8 +140,9 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "新客赠券模板名",
         "unit": "",
         "type": "string",
-        "max_length": 64,
-        "description": "须与 coupon_templates.name 完全一致且启用；空则不发券",
+        "max_length": 100,
+        "store_override": True,
+        "description": "从本店或总部已启用的券模板中选择；各店可不同；留空则本店不发新客券",
     },
     "enable_alipay_avatar": {
         "group": "miniprogram",
@@ -781,15 +807,17 @@ class SystemSettingsService:
 
     @classmethod
     def allows_store_override(cls, key: str) -> bool:
-        """是否允许写入 store_settings 覆盖。
+        """是否按门店写入 store_settings。
 
-        - META 显式 store_override 优先
-        - 未声明时：布尔开关默认可覆盖，其它类型默认不可（须显式打开）
+        平台级键（安全、小程序主体、域名等）不可按店覆盖。
+        其余业务参数默认可按店管理；META 里显式 store_override=False 时仍禁止。
         """
+        if key in PLATFORM_ONLY_KEYS:
+            return False
         meta = BUSINESS_SETTING_META.get(key) or {}
         if "store_override" in meta:
             return bool(meta["store_override"])
-        return meta.get("type") == "bool"
+        return key in BUSINESS_SETTING_META
 
     @classmethod
     def group_meta_map(cls) -> dict[str, dict[str, str]]:
@@ -822,6 +850,7 @@ class SystemSettingsService:
                 "group_label": gmeta.get("label", gid),
                 "group_description": gmeta.get("description", ""),
                 "store_override": cls.allows_store_override(key),
+                "scope": "store" if cls.allows_store_override(key) else "platform",
                 "editable": True,
             }
             if meta["type"] == "bool":

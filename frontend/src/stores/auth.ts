@@ -17,7 +17,9 @@ export const useAuthStore = defineStore('auth', () => {
   const isSuperAdmin = computed(() => user.value?.role === 'SUPER_ADMIN')
   const isCashier = computed(() => user.value?.role === 'CASHIER')
   const isStoreAdmin = computed(() => user.value?.role === 'STORE_ADMIN')
-  const canManageSettlement = computed(() => isSuperAdmin.value || isStoreAdmin.value)
+  const canManageSettlement = computed(
+    () => isSuperAdmin.value || isStoreAdmin.value || permissions.value.includes('payment:refund'),
+  )
 
   function hasPermission(code: string) {
     if (isSuperAdmin.value) return true

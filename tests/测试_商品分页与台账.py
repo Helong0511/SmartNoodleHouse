@@ -30,7 +30,7 @@ async def test_list_products_clamps_page_size():
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            res = await client.get("/api/products", params={"page_size": 9999})
+            res = await client.get("/api/products", params={"page_size": 9999, "store_id": 1})
         assert res.status_code == 200
         body = res.json()
         assert body["code"] == 0

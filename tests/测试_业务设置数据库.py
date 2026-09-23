@@ -34,6 +34,17 @@ def test_hotreload_keys_in_business_meta():
         assert BUSINESS_SETTING_META[key].get("group")
 
 
+def test_store_scope_split():
+    assert SystemSettingsService.allows_store_override("show_menu_search") is True
+    assert SystemSettingsService.allows_store_override("show_menu_smart_taste") is True
+    assert SystemSettingsService.allows_store_override("welcome_coupon_name") is True
+    assert SystemSettingsService.allows_store_override("printer_host") is True
+    assert SystemSettingsService.allows_store_override("order_payment_timeout_minutes") is True
+    assert SystemSettingsService.allows_store_override("jwt_expire_minutes") is False
+    assert SystemSettingsService.allows_store_override("enable_wx_phone_bind") is False
+    assert SystemSettingsService.allows_store_override("h5_public_base_url") is False
+
+
 def test_business_groups_cover_meta():
     from app.services.system_settings_service import BUSINESS_SETTING_GROUPS
 

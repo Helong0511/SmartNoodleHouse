@@ -52,9 +52,9 @@ Page({
     hasTable: false,
     recoReady: false,
     recoStoreId: null,
-    showMenuSearch: true,
-    showMenuSmartTaste: true,
-    showMenuGuessYouLike: true
+    showMenuSearch: false,
+    showMenuSmartTaste: false,
+    showMenuGuessYouLike: false
   },
 
   onLoad() {
@@ -66,9 +66,11 @@ Page({
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
-    this.applyMenuFlags()
     this.applyDineContext(dineCtx.currentDisplay())
-    dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
+    dineCtx.ensureDineContext().then((ctx) => {
+      this.applyDineContext(ctx)
+      this.applyMenuFlags(ctx && ctx.storeId)
+    })
     this.loadPrefs(!app.globalData.prefsAt)
     // 首次由 onLoad 发起；后续回到页面时刷新（版本校验 changed:false 不重绘）
     if (this._menuLoaded) {
@@ -77,7 +79,7 @@ Page({
     this._menuLoaded = true
   },
 
-  applyMenuFlags() {
+  applyMenuFlags(storeId) {
     const apply = () => {
       const flags = clientConfig.menuPageFlags()
       const patch = { ...flags }
@@ -91,8 +93,8 @@ Page({
         }
       })
     }
-    apply()
-    clientConfig.loadClientConfig().then(apply).catch(() => {})
+    const sid = storeId || this.data.storeId || null
+    clientConfig.loadClientConfig(!!sid, sid).then(apply).catch(() => {})
   },
 
   applyDineContext(ctx) {
@@ -104,6 +106,7 @@ Page({
     const ctx = e.detail
     if (!ctx) return
     this.applyDineContext(ctx)
+    this.applyMenuFlags(ctx.storeId)
     this._catsCache = null
     this.loadMenu()
   },
@@ -111,7 +114,10 @@ Page({
   onPullDownRefresh() {
     this._catsCache = null
     Promise.all([
-      dineCtx.ensureDineContext({ force: true }).then((ctx) => this.applyDineContext(ctx)),
+      dineCtx.ensureDineContext({ force: true }).then((ctx) => {
+        this.applyDineContext(ctx)
+        this.applyMenuFlags(ctx && ctx.storeId)
+      }),
       this.loadPrefs(true),
       this.loadMenu(true)
     ]).finally(() => wx.stopPullDownRefresh())
@@ -121,6 +127,7 @@ Page({
     const ctx = await dineCtx.scanAndBindTable()
     if (ctx) {
       this.applyDineContext(ctx)
+      this.applyMenuFlags(ctx.storeId)
       this._catsCache = null
       this.loadMenu()
     }

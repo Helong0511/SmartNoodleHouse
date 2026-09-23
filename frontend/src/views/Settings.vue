@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>系统设置</h2>
-        <p class="hint">分类业务参数可在线热更；.env 敏感项只读展示，修改后需重启后端</p>
+        <p class="hint">业务参数按当前门店保存，扫码该店后生效。平台级安全项与 .env 仅系统管理可看</p>
       </div>
       <div class="header-actions">
         <el-tag v-if="overview" size="small" :type="overview.health?.redis ? 'success' : 'warning'">
@@ -24,18 +24,14 @@
       :description="`环境 ${overview.app.env} · 进程角色 ${overview.app.process_role} · ${overview.cache?.multi_worker_note || ''} · 配置文件：${overview.env_file_hint}`"
     />
 
-    <div v-if="overview && String(activeTab).startsWith('biz-')" class="scope-bar">
-      <span class="scope-label">作用范围</span>
-      <el-radio-group v-model="settingScope" size="small" @change="onScopeChange">
-        <el-radio-button value="global">全局默认</el-radio-button>
-        <el-radio-button value="store">门店覆盖</el-radio-button>
-      </el-radio-group>
+    <div class="scope-bar">
+      <span class="scope-label">当前门店</span>
       <el-select
-        v-if="settingScope === 'store'"
+        v-if="auth.isSuperAdmin"
         v-model="scopeStoreId"
         filterable
         placeholder="选择门店"
-        style="width: 220px"
+        style="width: 240px"
         :loading="storesLoading"
         @change="loadStoreBusiness"
       >
@@ -46,18 +42,14 @@
           :value="s.id"
         />
       </el-select>
-      <el-tag v-if="settingScope === 'store' && scopeStoreName" size="small" type="warning">
-        正在编辑：{{ scopeStoreName }}
-      </el-tag>
+      <el-tag v-else size="small" type="warning">{{ scopeStoreName || '本店' }}</el-tag>
       <span class="scope-hint">
-        {{ settingScope === 'global'
-          ? '全局默认对所有门店生效；标注「可门店覆盖」的项可在门店覆盖中单独设置'
-          : '仅显示可按门店覆盖的项；未覆盖时继承全局默认，可「清除覆盖」回退' }}
+        订单、点餐页、打印、新客赠券等只写入当前门店。扫码该店餐桌后按这里生效。未单独设置的项沿用平台默认，可清除后回退。
       </span>
     </div>
 
-    <el-tabs v-if="overview" v-model="activeTab" class="settings-tabs" @tab-change="onTabChange">
-      <el-tab-pane label="运行概览" name="overview">
+    <el-tabs v-if="pageReady" v-model="activeTab" class="settings-tabs" @tab-change="onTabChange">
+      <el-tab-pane v-if="canManagePlatform" label="运行概览" name="overview">
         <el-row :gutter="16">
           <el-col :xs="24" :md="8">
             <el-card shadow="never">
@@ -112,7 +104,7 @@
 
       <!-- 业务参数：按分类分页 -->
       <el-tab-pane
-        v-for="g in businessGroups"
+        v-for="g in storeGroups"
         :key="g.id"
         :name="`biz-${g.id}`"
       >
@@ -124,24 +116,53 @@
         </template>
 
         <el-alert
-          :type="settingScope === 'store' ? 'warning' : 'success'"
+          type="warning"
           show-icon
           :closable="false"
-          :title="g.label"
-          :description="settingScope === 'store'
-            ? `${g.description || ''} 当前为门店覆盖：保存只写入本店 store_settings，清除覆盖后回退全局默认。`
-            : `${g.description || ''} 保存在 system_settings，保存后约 15 秒内多 worker 同步。`"
+          :title="`${g.label} · ${scopeStoreName || '未选门店'}`"
+          :description="`${g.description || ''} 保存只写入本店，约立即生效；清除后回退平台默认。`"
           class="group-alert"
         />
 
         <el-empty
-          v-if="settingScope === 'store' && !itemsOfGroup(g.id).length"
-          description="本分类暂无可按门店覆盖的配置项"
+          v-if="!itemsOfGroup(g.id).length"
+          description="本分类没有可按门店管理的配置项"
         />
 
         <el-form v-else label-width="180px" class="business-form" @submit.prevent>
           <el-form-item v-for="item in itemsOfGroup(g.id)" :key="item.key" :label="item.label">
             <el-switch v-if="item.type === 'bool'" v-model="item.boolValue" />
+            <el-select
+              v-else-if="item.key === 'welcome_coupon_name'"
+              v-model="item.strValue"
+              filterable
+              clearable
+              placeholder="不赠券"
+              style="max-width: 480px; width: 100%"
+            >
+              <el-option-group v-if="couponOptions(item, 'STORE').length" label="本店券模板">
+                <el-option
+                  v-for="opt in couponOptions(item, 'STORE')"
+                  :key="`store-${opt.value}`"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-option-group>
+              <el-option-group v-if="couponOptions(item, 'HQ').length" label="总部券模板">
+                <el-option
+                  v-for="opt in couponOptions(item, 'HQ')"
+                  :key="`hq-${opt.value}`"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-option-group>
+              <el-option
+                v-for="opt in couponOptions(item, 'CURRENT')"
+                :key="`cur-${opt.value}`"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
             <el-select
               v-else-if="item.type === 'enum'"
               v-model="item.strValue"
@@ -190,24 +211,18 @@
             <span v-if="item.unit" class="unit">{{ item.unit }}</span>
             <el-tag v-if="isDirty(item)" size="small" type="warning" style="margin-left:8px">已改</el-tag>
             <el-tag
-              v-if="settingScope === 'global' && item.store_override"
-              size="small"
-              type="info"
-              style="margin-left:8px"
-            >可门店覆盖</el-tag>
-            <el-tag
-              v-if="settingScope === 'store' && item.has_override"
+              v-if="item.has_override"
               size="small"
               type="success"
               style="margin-left:8px"
-            >本店已覆盖</el-tag>
+            >本店已设置</el-tag>
             <el-tag
-              v-else-if="settingScope === 'store' && !item.has_override"
+              v-else
               size="small"
               style="margin-left:8px"
-            >继承全局</el-tag>
+            >沿用平台默认</el-tag>
             <el-button
-              v-if="settingScope === 'store' && item.has_override"
+              v-if="item.has_override"
               link
               type="danger"
               size="small"
@@ -215,12 +230,12 @@
               :loading="clearingKey === item.key"
               @click="clearStoreOverride(item)"
             >
-              清除覆盖
+              清除
             </el-button>
             <p class="field-desc">
               {{ item.description }}
-              <template v-if="settingScope === 'store' && item.global_value != null">
-                · 全局默认 {{ formatGlobalHint(item) }}
+              <template v-if="item.global_value != null">
+                · 平台默认 {{ formatGlobalHint(item) }}
               </template>
               <template v-if="item.type === 'int' || item.type === 'float'">
                 · 范围 {{ item.min }} ~ {{ item.max }}
@@ -235,10 +250,10 @@
             <el-button
               type="primary"
               :loading="businessSaving"
-              :disabled="!canSaveGroup(g.id) || (settingScope === 'store' && !scopeStoreId)"
+              :disabled="!canSaveGroup(g.id) || !scopeStoreId"
               @click="saveBusinessGroup(g.id)"
             >
-              {{ settingScope === 'store' ? `保存本店「${g.label}」` : `保存「${g.label}」` }}
+              {{ `保存本店「${g.label}」` }}
             </el-button>
             <el-button :disabled="!dirtyCountByGroup[g.id]" @click="resetBusinessGroup(g.id)">
               还原本页未保存修改
@@ -248,7 +263,78 @@
         </el-form>
       </el-tab-pane>
 
-      <el-tab-pane label="环境变量" name="env">
+      <el-tab-pane
+        v-for="g in platformGroups"
+        :key="`plat-${g.id}`"
+        :name="`plat-${g.id}`"
+      >
+        <template #label>
+          <span class="tab-label">平台·{{ g.label }}</span>
+        </template>
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          :title="`平台 · ${g.label}`"
+          description="以下项全部门店共用，保存在系统参数中。点餐页开关、打印、新客赠券请在上方门店页签里改。"
+          class="group-alert"
+        />
+        <el-form label-width="180px" class="business-form" @submit.prevent>
+          <el-form-item v-for="item in platformItemsOfGroup(g.id)" :key="item.key" :label="item.label">
+            <el-switch v-if="item.type === 'bool'" v-model="item.boolValue" />
+            <el-select v-else-if="item.type === 'enum'" v-model="item.strValue" style="width: 280px">
+              <el-option v-for="c in item.choices || []" :key="c" :label="enumLabel(item.key, c)" :value="c" />
+            </el-select>
+            <el-input
+              v-else-if="item.type === 'string' && isLongText(item)"
+              v-model="item.strValue"
+              type="textarea"
+              :rows="3"
+              :maxlength="item.max_length || 2000"
+              show-word-limit
+              style="max-width: 520px"
+            />
+            <el-input
+              v-else-if="item.type === 'string'"
+              v-model="item.strValue"
+              :maxlength="item.max_length || 256"
+              show-word-limit
+              style="max-width: 420px"
+              clearable
+            />
+            <el-input-number
+              v-else-if="item.type === 'int'"
+              v-model="item.numValue"
+              :min="item.min"
+              :max="item.max"
+              :step="1"
+            />
+            <el-input-number
+              v-else-if="item.type === 'float'"
+              v-model="item.numValue"
+              :min="item.min"
+              :max="item.max"
+              :step="item.step || 0.01"
+              :precision="2"
+            />
+            <span v-if="item.unit" class="unit">{{ item.unit }}</span>
+            <el-tag v-if="isDirty(item)" size="small" type="warning" style="margin-left:8px">已改</el-tag>
+            <p class="field-desc">{{ item.description }}</p>
+          </el-form-item>
+          <el-form-item v-if="platformItemsOfGroup(g.id).length">
+            <el-button
+              type="primary"
+              :loading="businessSaving"
+              :disabled="!canSavePlatformGroup(g.id)"
+              @click="savePlatformGroup(g.id)"
+            >
+              {{ `保存平台「${g.label}」` }}
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </el-tab-pane>
+
+      <el-tab-pane v-if="canManagePlatform" label="环境变量" name="env">
         <el-alert
           type="warning"
           show-icon
@@ -301,7 +387,7 @@
         <el-empty v-if="!filteredEnvGroups.length" description="无匹配配置项" />
       </el-tab-pane>
 
-      <el-tab-pane label="定时任务" name="scheduler">
+      <el-tab-pane v-if="canManagePlatform" label="定时任务" name="scheduler">
         <el-alert
           type="info"
           show-icon
@@ -436,8 +522,23 @@ const activeTab = ref('overview')
 const overview = ref<any>(null)
 const businessForm = ref<any[]>([])
 const businessGroups = ref<any[]>([])
+const platformForm = ref<any[]>([])
 const businessSaving = ref(false)
-const settingScope = ref<'global' | 'store'>('global')
+const canManagePlatform = computed(() => auth.hasPermission('system:manage'))
+const pageReady = computed(() => !!overview.value || businessGroups.value.length > 0)
+const storeGroups = computed(() =>
+  businessGroups.value.filter((g) => itemsOfGroup(g.id).length > 0),
+)
+const platformGroups = computed(() => {
+  if (!canManagePlatform.value) return []
+  const ids = new Set(platformForm.value.map((i) => i.group))
+  const defs = overview.value?.business_group_defs || overview.value?.business_groups || []
+  return defs.filter((g: any) => ids.has(g.id)).map((g: any) => ({
+    id: g.id,
+    label: g.label,
+    description: g.description,
+  }))
+})
 const storeOptions = ref<any[]>([])
 const storesLoading = ref(false)
 const scopeStoreId = ref<number | undefined>()
@@ -488,7 +589,16 @@ function itemsOfGroup(groupId: string) {
   return businessForm.value.filter((i) => i.group === groupId)
 }
 
+function couponOptions(item: any, scope: 'STORE' | 'HQ' | 'CURRENT') {
+  return (item?.options || []).filter((o: any) => o.scope === scope)
+}
+
+function platformItemsOfGroup(groupId: string) {
+  return platformForm.value.filter((i) => i.group === groupId)
+}
+
 function isDirty(item: any) {
+  if (item.key === 'welcome_coupon_name') return (item.strValue || '') !== (item._savedStr || '')
   if (item.type === 'bool') return item.boolValue !== item._savedBool
   if (item.type === 'string' || item.type === 'enum') return item.strValue !== item._savedStr
   return item.numValue !== item._saved
@@ -503,14 +613,21 @@ const dirtyCountByGroup = computed(() => {
   return map
 })
 
-function canSaveGroup(groupId: string) {
-  const items = itemsOfGroup(groupId)
+function groupSavable(items: any[]) {
   if (!items.length) return false
   if (!items.some((i) => isDirty(i))) return false
   return items.every((i) => {
     if (i.type === 'bool' || i.type === 'string' || i.type === 'enum') return true
     return Number.isFinite(i.numValue)
   })
+}
+
+function canSaveGroup(groupId: string) {
+  return groupSavable(itemsOfGroup(groupId))
+}
+
+function canSavePlatformGroup(groupId: string) {
+  return groupSavable(platformItemsOfGroup(groupId))
 }
 
 const filteredEnvGroups = computed(() => {
@@ -696,15 +813,20 @@ function buildBusinessForm(items: any[]) {
   })
 }
 
-function applyBusinessPayload(data: any) {
-  buildBusinessForm(data.business || [])
-  businessGroups.value = data.business_groups || []
-  if (!businessGroups.value.length && data.business_group_defs) {
-    businessGroups.value = (data.business_group_defs || []).map((g: any) => ({
-      ...g,
-      items: [],
-    }))
-  }
+function buildPlatformForm(items: any[]) {
+  const platform = (items || []).filter((it) => it.scope === 'platform' || it.store_override === false)
+  platformForm.value = platform.map((item) => {
+    if (item.type === 'bool') {
+      const boolValue = parseBool(item)
+      return { ...item, boolValue, _savedBool: boolValue }
+    }
+    if (item.type === 'string' || item.type === 'enum') {
+      const strValue = item.value == null ? '' : String(item.value)
+      return { ...item, strValue, _savedStr: strValue }
+    }
+    const numValue = parseNum(item)
+    return { ...item, numValue, _saved: numValue }
+  })
 }
 
 async function loadStoreOptions() {
@@ -733,24 +855,16 @@ async function loadStoreBusiness() {
     const data = res.data || {}
     scopeStoreName.value = data.store_name || ''
     buildBusinessForm(data.items || [])
+    if (data.business_groups?.length) {
+      businessGroups.value = data.business_groups
+    }
+    if (!canManagePlatform.value && businessGroups.value.length && activeTab.value === 'overview') {
+      activeTab.value = `biz-${businessGroups.value[0].id}`
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '加载门店设置失败')
   } finally {
     loading.value = false
-  }
-}
-
-async function onScopeChange() {
-  if (settingScope.value === 'store') {
-    if (!storeOptions.value.length) await loadStoreOptions()
-    await loadStoreBusiness()
-  } else {
-    scopeStoreName.value = ''
-    if (overview.value) {
-      applyBusinessPayload(overview.value)
-    } else {
-      await load()
-    }
   }
 }
 
@@ -759,7 +873,7 @@ async function clearStoreOverride(item: any) {
   clearingKey.value = item.key
   try {
     await api.delete(`/settings/stores/${scopeStoreId.value}/business/${item.key}`)
-    ElMessage.success(`已清除「${item.label}」的本店覆盖`)
+    ElMessage.success(`已清除「${item.label}」，本店改回平台默认`)
     await loadStoreBusiness()
   } catch (e: any) {
     ElMessage.error(e.message || '清除失败')
@@ -778,6 +892,7 @@ function resetBusinessGroup(groupId: string) {
 
 function payloadOfItem(item: any): string | number | boolean {
   if (item.type === 'bool') return item.boolValue
+  if (item.key === 'welcome_coupon_name') return item.strValue || ''
   if (item.type === 'string' || item.type === 'enum') return item.strValue
   return item.numValue
 }
@@ -799,7 +914,7 @@ async function saveBusinessGroup(groupId: string) {
       return
     }
   }
-  if (settingScope.value === 'store' && !scopeStoreId.value) {
+  if (!scopeStoreId.value) {
     ElMessage.warning('请选择门店')
     return
   }
@@ -809,17 +924,36 @@ async function saveBusinessGroup(groupId: string) {
     for (const item of dirty) {
       settings[item.key] = payloadOfItem(item)
     }
-    if (settingScope.value === 'store') {
-      const res = await api.put(`/settings/stores/${scopeStoreId.value}/business`, { updates: settings })
-      buildBusinessForm(res.data?.items || [])
-      scopeStoreName.value = res.data?.store_name || scopeStoreName.value
-      ElMessage.success(`已保存本店 ${dirty.length} 项`)
-    } else {
-      const res = await api.put('/settings/business', { settings })
-      applyBusinessPayload(res.data)
-      ElMessage.success(`已保存 ${dirty.length} 项`)
-      refreshHealth(false)
+    const res = await api.put(`/settings/stores/${scopeStoreId.value}/business`, { updates: settings })
+    buildBusinessForm(res.data?.items || [])
+    if (res.data?.business_groups?.length) {
+      businessGroups.value = res.data.business_groups
     }
+    scopeStoreName.value = res.data?.store_name || scopeStoreName.value
+    ElMessage.success(`已保存 ${scopeStoreName.value || '本店'} ${dirty.length} 项`)
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    businessSaving.value = false
+  }
+}
+
+async function savePlatformGroup(groupId: string) {
+  const dirty = platformItemsOfGroup(groupId).filter((i) => isDirty(i))
+  if (!dirty.length) {
+    ElMessage.info('没有需要保存的修改')
+    return
+  }
+  businessSaving.value = true
+  try {
+    const settings: Record<string, string | number | boolean> = {}
+    for (const item of dirty) {
+      settings[item.key] = payloadOfItem(item)
+    }
+    const res = await api.put('/settings/business', { settings })
+    buildPlatformForm(res.data?.business || [])
+    ElMessage.success(`已保存平台 ${dirty.length} 项`)
+    refreshHealth(false)
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
   } finally {
@@ -830,9 +964,6 @@ async function saveBusinessGroup(groupId: string) {
 function onTabChange(name: string | number) {
   if (name === 'scheduler' && !schedulerJobs.value) {
     loadSchedulerJobs()
-  }
-  if (String(name).startsWith('biz-') && settingScope.value === 'store' && scopeStoreId.value) {
-    // 切到业务分类时若处于门店模式，保持当前门店表单
   }
 }
 
@@ -850,12 +981,13 @@ async function loadSchedulerJobs() {
 async function load() {
   loading.value = true
   try {
-    overview.value = (await api.get('/settings')).data
-    if (settingScope.value === 'global') {
-      applyBusinessPayload(overview.value)
+    await loadStoreOptions()
+    if (canManagePlatform.value) {
+      overview.value = (await api.get('/settings')).data
+      buildPlatformForm(overview.value?.business || [])
     }
-    if (!storeOptions.value.length) {
-      await loadStoreOptions()
+    if (scopeStoreId.value) {
+      await loadStoreBusiness()
     }
   } catch (e: any) {
     ElMessage.error(e.message || '加载设置失败')

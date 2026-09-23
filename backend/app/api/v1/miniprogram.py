@@ -643,13 +643,15 @@ async def _member_activation_response(
     enable_face: bool,
     request: Request,
 ):
+    store_id = int(getattr(customer, "registered_store_id", 0) or 0) or None
     issued = None
     if newly_activated:
-        issued = await CouponService.issue_welcome_coupon(db, customer.id)
+        issued = await CouponService.issue_welcome_coupon(db, customer.id, store_id=store_id)
     await db.flush()
     profile = await CustomerService.build_member_profile(db, customer)
     welcome = await CouponService.welcome_coupon_payload(db, issued)
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)
+    welcome_name = await CouponService.welcome_template_name(db, store_id=store_id)
     payload = {
         "customer_id": customer.id,
         "customer_no": customer.customer_no,
@@ -665,12 +667,12 @@ async def _member_activation_response(
         "customer_token": _issue_customer_token(customer, channel),
         "welcome_coupon_issued": welcome is not None,
         "welcome_coupon": welcome,
-        "welcome_coupon_name": await CouponService.welcome_template_name(db),
+        "welcome_coupon_name": welcome_name,
     }
     if enable_face:
         return success(payload, message="会员已开通，请完成摄像头人脸采集授权", request=request)
     if newly_activated and welcome:
-        msg = f"已开启智能会员，赠送「{welcome.get('name') or await CouponService.welcome_template_name(db)}」"
+        msg = f"已开启智能会员，赠送「{welcome.get('name') or welcome_name}」"
     elif newly_activated:
         msg = "已开启智能会员"
     else:
@@ -918,7 +920,9 @@ async def _save_unverified_phone_response(
             "need_member_prompt": not CustomerService.is_member(customer),
             "welcome_coupon_issued": False,
             "welcome_coupon": None,
-            "welcome_coupon_name": await CouponService.welcome_template_name(db),
+            "welcome_coupon_name": await CouponService.welcome_template_name(
+                db, store_id=int(getattr(customer, "registered_store_id", 0) or 0) or None
+            ),
             **profile,
         },
         message=message,
@@ -1033,7 +1037,9 @@ async def bind_member_phone(
             "need_member_prompt": not CustomerService.is_member(customer),
             "welcome_coupon_issued": False,
             "welcome_coupon": None,
-            "welcome_coupon_name": await CouponService.welcome_template_name(db),
+            "welcome_coupon_name": await CouponService.welcome_template_name(
+                db, store_id=int(getattr(customer, "registered_store_id", 0) or 0) or None
+            ),
             **profile,
         },
         message=(

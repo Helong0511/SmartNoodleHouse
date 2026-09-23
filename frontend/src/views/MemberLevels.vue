@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>会员等级</h2>
-        <p class="hint">{{ pointsRule }}。可调整各等级的升级积分与折扣；保存后按新门槛重算全部顾客等级。</p>
+        <p class="hint">{{ pointsRule }}。等级与折扣全品牌共用，仅超级管理员可调整；保存后按新门槛重算全部顾客等级。当前人数按您可见的门店统计。</p>
       </div>
       <div class="header-actions">
         <el-button @click="load">刷新</el-button>
@@ -85,7 +85,7 @@ type LevelRow = {
 }
 
 const auth = useAuthStore()
-const canManage = computed(() => auth.hasPermission('customer:manage'))
+const canManage = computed(() => auth.isSuperAdmin)
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<LevelRow[]>([])
