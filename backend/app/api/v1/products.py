@@ -821,7 +821,7 @@ async def list_products(
     elif store_id is None:
         raise AppException(40001, "请指定门店 store_id")
     else:
-        # P1-2 公开菜单按 IP+store_id 限流，防止批量爬取全部门店菜单
+        # 公开菜单按 IP+门店限流（每分钟 180 次）。点餐会连拉多页，阈值过低会把正常翻页打成 429，购物车误判下架。
         if store_id is not None:
             ip = request.client.host if request.client else "unknown"
             rl_key = f"snh:rl:products:public:{ip}:{int(store_id)}"
@@ -830,7 +830,7 @@ async def list_products(
                 cnt = await r.incr(rl_key)
                 if cnt == 1:
                     await r.expire(rl_key, 60)
-                if cnt > 60:
+                if cnt > 180:
                     raise AppException(42901, "请求过于频繁，请稍后再试")
             except AppException:
                 raise

@@ -1099,7 +1099,7 @@ async function loadMenu() {
           all.push(...(data.items || []))
           totalPages = Math.max(1, Number(data.total_pages || 1))
           page += 1
-        } while (page <= totalPages && page <= 20)
+        } while (page <= totalPages && page <= 50)
         return all
       })(),
     ])

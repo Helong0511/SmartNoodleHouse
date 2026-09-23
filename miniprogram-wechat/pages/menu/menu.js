@@ -16,6 +16,21 @@ function normalizeList(data) {
   return []
 }
 
+/** 首屏只放一部分菜，避免上百道菜一次 setData 撑满基础库数据上限。 */
+function sliceMenuForFirstPaint(categories, maxProducts) {
+  const all = categories || []
+  let n = 0
+  for (let i = 0; i < all.length; i++) {
+    const count = ((all[i] && all[i].products) || []).length
+    if (i > 0 && n >= maxProducts) return all.slice(0, i)
+    if (count > maxProducts && i === 0) {
+      return [Object.assign({}, all[0], { products: all[0].products.slice(0, maxProducts) })]
+    }
+    n += count
+  }
+  return all
+}
+
 function askUsePrefsOnQuickAdd(prompt) {
   return new Promise((resolve) => {
     wx.showModal({
@@ -159,7 +174,7 @@ Page({
       .map((c) => {
         if (!c) return null
         const products = productList
-          .filter((p) => p && p.category_id === c.id)
+          .filter((p) => p && Number(p.category_id) === Number(c.id))
           .filter((p) => {
             if (!kw) return true
             return (
@@ -245,36 +260,34 @@ Page({
     }
   },
 
-  async applyCategories(categories, metrics) {
+  applyCategories(categories, metrics) {
     const m = metrics || media.layoutMetrics()
-    const flat = []
-      ; (categories || []).forEach((c) => {
-        ; (c.products || []).forEach((p) => flat.push(p))
-      })
-    await media.hydrateImageUrls(flat, 'imageUrl')
-    await media.hydrateImageUrls(flat, 'coverUrl')
-    const activeCat = (categories[0] && categories[0].id) || null
     const all = categories || []
-
-    // 分批 setData：分类超过首批阈值时，先渲染首屏可见分类，剩余延迟补全
-    var firstBatch = all
-    var rest = null
-    if (all.length > 3) {
-      firstBatch = all.slice(0, 3)
-      rest = all.slice(3)
-    }
+    const first = sliceMenuForFirstPaint(all, 40)
+    const activeCat = (all[0] && all[0].id) || null
     this.setData({
-      categories: firstBatch,
+      categories: first,
       isWide: !!m.isWide,
       activeCat,
       scrollInto: activeCat ? `cat-${activeCat}` : '',
       loading: false
     })
-    if (rest && rest.length) {
-      wx.nextTick(() => {
-        this.setData({ categories: firstBatch.concat(rest) })
-      })
+    const gen = (this._imgGen = (this._imgGen || 0) + 1)
+    if (first !== all) {
+      setTimeout(() => {
+        if (this._imgGen !== gen) return
+        this.setData({ categories: all })
+      }, 60)
     }
+    const flat = []
+    all.forEach((c) => {
+      ;(c.products || []).forEach((p) => flat.push(p))
+    })
+    // 图片在首屏之后限流下载，不堵住购物车拉菜单
+    media.hydrateImageUrls(flat, 'imageUrl').then(() => {
+      if (this._imgGen !== gen) return
+      this.setData({ categories: all })
+    }).catch(() => {})
   },
 
   onSearch(e) {

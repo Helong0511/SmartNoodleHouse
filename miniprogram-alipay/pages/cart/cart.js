@@ -5,7 +5,7 @@ const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
-const { fetchAllProducts } = require('../../utils/products')
+const { loadStoreCatalog } = require('../../utils/products')
 const app = getApp()
 
 Page({
@@ -55,8 +55,14 @@ Page({
   },
 
   storeId() {
-    return (app.globalData.table && app.globalData.table.store_id)
-      || (app.globalData.store && app.globalData.store.id)
+    try {
+      const ctx = dineCtx.currentDisplay()
+      if (ctx && ctx.storeId) return ctx.storeId
+    } catch (_) {}
+    const g = app && app.globalData
+    if (!g) return null
+    return (g.table && g.table.store_id)
+      || (g.store && (g.store.id || g.store.store_id))
       || null
   },
 
@@ -65,20 +71,24 @@ Page({
     const rawCart = auth.getCart()
     let products = []
     let categories = []
+    let complete = false
+    let loadError = ''
     try {
       const sid = this.storeId()
       if (!sid) {
-        throw new Error('请先扫桌码选择门店')
+        loadError = '请先扫桌码选择门店'
+        throw new Error(loadError)
       }
-      const [prodRes, catRes] = await Promise.all([
-        fetchAllProducts(api, { store_id: sid }, false),
-        api.get('/categories', { store_id: sid }, false)
-      ])
-      products = (prodRes && prodRes.items) || []
-      categories = Array.isArray(catRes) ? catRes : ((catRes && catRes.items) || [])
-    } catch (_) {}
+      const catalog = await loadStoreCatalog(api, sid)
+      products = (catalog && catalog.items) || []
+      categories = (catalog && catalog.categories) || []
+      complete = !!(catalog && catalog.complete)
+      if (!complete) loadError = '菜单未加载完整，请下拉重试'
+    } catch (e) {
+      if (!loadError) loadError = (e && e.message) || '菜单加载失败，请下拉重试'
+    }
 
-    const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories)
+    const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories, { complete })
     const cart = list.map((raw) => {
       const item = cartUtil.normalizeItem({ ...raw })
       return {
@@ -96,6 +106,9 @@ Page({
       invalidCount,
       loading: false
     })
+    if (showLoading && !complete && rawCart.length) {
+      my.showToast({ content: loadError || '菜单未加载完整，请下拉重试', type: 'none' })
+    }
   },
 
   changeQty(e) {

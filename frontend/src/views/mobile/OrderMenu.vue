@@ -302,7 +302,7 @@ onMounted(async () => {
     const res: any = await api.get('/products', {
       params: {
         page,
-        page_size: 100,
+        page_size: 200,
         store_id: sid,
       },
     })
@@ -310,7 +310,7 @@ onMounted(async () => {
     allItems.push(...(data.items || []))
     totalPages = Math.max(1, Number(data.total_pages || 1))
     page += 1
-  } while (page <= totalPages && page <= 20)
+  } while (page <= totalPages && page <= 50)
   products.value = allItems.map(decorate)
 })
 </script>

@@ -174,7 +174,8 @@ function mergeCartItem(cart, entry) {
   return list
 }
 
-function reconcileWithProducts(cart, products, categories) {
+function reconcileWithProducts(cart, products, categories, options) {
+  const complete = !options || options.complete !== false
   const map = {}
   ;(products || []).forEach((p) => {
     map[p.id] = p
@@ -188,7 +189,8 @@ function reconcileWithProducts(cart, products, categories) {
     let invalidReason = ''
 
     if (!p) {
-      invalidReason = '已下架或不在本店菜单'
+      // 菜单没拉全时不能把「这页没有」当成下架，否则超过分页后整单变 0 元
+      if (complete) invalidReason = '已下架或不在本店菜单'
     } else if (p.status && p.status !== 'ON_SALE') {
       invalidReason = '暂不可售'
     } else {

@@ -7,7 +7,7 @@ const voucherUtil = require('../../utils/voucher')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const tracker = require('../../utils/tracker')
-const { fetchAllProducts } = require('../../utils/products')
+const { loadStoreCatalog } = require('../../utils/products')
 const app = getApp()
 
 function memberDiscountText(rate) {
@@ -107,13 +107,17 @@ Page({
       || null
   },
   async loadProductCatalog() {
-    if (this._productCatalog && this._productCatalog.length) {
+    if (this._productCatalog && this._catalogComplete) {
       return this._productCatalog
     }
     const sid = this.storeId()
-    const products = await fetchAllProducts(api, { ...(sid ? { store_id: sid } : {}) }, false)
-    const items = (products && products.items) || []
+    const catalog = await loadStoreCatalog(api, sid)
+    if (!catalog || !catalog.complete) {
+      throw new Error('菜单加载不完整，请稍后重试')
+    }
+    const items = catalog.items || []
     this._productCatalog = items
+    this._catalogComplete = true
     const boxMap = {}
     items.forEach((p) => {
       boxMap[p.id] = parseFloat(p.box_price || 0) || 0

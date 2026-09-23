@@ -5,7 +5,7 @@ const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
 const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
-const { fetchAllProducts } = require('../../utils/products')
+const { loadStoreCatalog } = require('../../utils/products')
 const app = getApp()
 
 Page({
@@ -110,16 +110,11 @@ Page({
           || (app.globalData.table && app.globalData.table.store_id)
           || (app.globalData.store && app.globalData.store.id)
           || null
-        const [cats, prodRes] = await Promise.all([
-          sid
-            ? api.get('/categories', { store_id: sid }, false)
-            : Promise.resolve([]),
-          sid
-            ? fetchAllProducts(api, { store_id: sid }, false)
-            : Promise.resolve({ items: [p] })
-        ])
-        categories = Array.isArray(cats) ? cats : []
-        products = (prodRes && prodRes.items) || [p]
+        const catalog = sid
+          ? await loadStoreCatalog(api, sid)
+          : { items: [p], categories: [] }
+        categories = (catalog && catalog.categories) || []
+        products = (catalog && catalog.items && catalog.items.length) ? catalog.items : [p]
       } catch (_) {}
     }
     const check = cartUtil.checkCategoryRequire(p, auth.getCart(), products, categories)

@@ -97,16 +97,34 @@ function _hashStr(s) {
   return h
 }
 
+/** 限制并发，避免上百道菜同时 downloadFile 占满微信 10 路请求，把菜单接口挤超时。 */
+async function mapPool(list, limit, worker) {
+  const items = list || []
+  const cap = Math.max(1, Math.min(limit || 4, items.length || 1))
+  let index = 0
+  async function run() {
+    while (index < items.length) {
+      const i = index
+      index += 1
+      await worker(items[i], i)
+    }
+  }
+  const tasks = []
+  for (let i = 0; i < cap && i < items.length; i++) tasks.push(run())
+  await Promise.all(tasks)
+  return items
+}
+
 /** 批量把列表项中的图片字段转为可展示的本地/HTTPS 地址 */
 async function hydrateImageUrls(items, field = 'imageUrl') {
   const list = items || []
-  await Promise.all(list.map(async (item) => {
+  await mapPool(list, 4, async (item) => {
     if (!item || !item[field]) return
     const original = item[field]
     const next = await ensureLocalImage(original)
     // 下载失败时保留原 URL，避免清空后只剩占位符
     item[field] = next || original
-  }))
+  })
   return list
 }
 
