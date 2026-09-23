@@ -5,6 +5,8 @@ from pathlib import Path
 
 import app.bootstrap_path  # noqa: F401 — 项目根目录加入 sys.path（camera 模块）
 
+from zoneinfo import ZoneInfo
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +36,7 @@ from app.workers.tts_worker import TTSWorker
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(
+    timezone=ZoneInfo("Asia/Shanghai"),
     job_defaults={
         "coalesce": True,  # 积压多次触发合并为一次
         "max_instances": 1,  # 同进程内禁止同一任务重叠

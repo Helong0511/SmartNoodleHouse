@@ -25,7 +25,7 @@ BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
     {"id": "delivery", "label": "外卖", "description": "自动接单按当前门店保存；.env 兜底门店为平台级"},
     {"id": "print", "label": "厨房打印", "description": "按当前门店保存：开关、模式、打印机地址、份数与票面"},
     {"id": "security", "label": "安全与网络", "description": "平台级：Token 有效期、Webhook 白名单、可信反代"},
-    {"id": "system", "label": "系统通用", "description": "口味加权按门店；时区、上传限制与日志保留为平台级"},
+    {"id": "system", "label": "系统通用", "description": "口味加权按门店；时区、夜间批处理、上传限制与日志保留为平台级"},
 ]
 
 # 全部门店共用，只能由系统管理权限改 system_settings
@@ -51,6 +51,14 @@ PLATFORM_ONLY_KEYS = frozenset({
     "allowed_image_extensions",
     "app_timezone",
     "delivery_env_fallback_store_id",
+    "night_batch_enabled",
+    "night_batch_window_start_hour",
+    "night_batch_window_end_hour",
+    "night_batch_sales_lookback_days",
+    "night_batch_hot_top_n",
+    "night_batch_recommend_top_n",
+    "night_batch_taste_customer_limit",
+    "night_batch_taste_lookback_days",
 })
 
 BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
@@ -419,6 +427,84 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "store_override": True,
         "description": "门店配置经纬度后，按实时气温/雨天微调口味推荐；可按门店覆盖",
     },
+    "night_batch_enabled": {
+        "group": "system",
+        "label": "关店夜间批处理",
+        "unit": "",
+        "type": "bool",
+        "default": True,
+        "description": "北京时间关店窗（默认 02:00–05:00）跑销量热销/推荐、商品与顾客口味等慢任务",
+    },
+    "night_batch_window_start_hour": {
+        "group": "system",
+        "label": "夜间批处理开始",
+        "unit": "时",
+        "type": "int",
+        "min": 0,
+        "max": 23,
+        "default": 2,
+        "description": "业务时区整点，含；默认 2 点（北京时间）",
+    },
+    "night_batch_window_end_hour": {
+        "group": "system",
+        "label": "夜间批处理结束",
+        "unit": "时",
+        "type": "int",
+        "min": 0,
+        "max": 24,
+        "default": 5,
+        "description": "业务时区整点，不含；默认 5 点。可跨午夜（如 23→4）",
+    },
+    "night_batch_sales_lookback_days": {
+        "group": "system",
+        "label": "热销统计天数",
+        "unit": "天",
+        "type": "int",
+        "min": 1,
+        "max": 90,
+        "default": 7,
+        "description": "按近 N 日已支付销量刷新 is_hot / is_recommended",
+    },
+    "night_batch_hot_top_n": {
+        "group": "system",
+        "label": "热销 Top N",
+        "unit": "个",
+        "type": "int",
+        "min": 0,
+        "max": 50,
+        "default": 5,
+        "description": "各门店销量前 N 标为热销；0 表示不改热销标记",
+    },
+    "night_batch_recommend_top_n": {
+        "group": "system",
+        "label": "推荐 Top N",
+        "unit": "个",
+        "type": "int",
+        "min": 0,
+        "max": 50,
+        "default": 8,
+        "description": "各门店销量前 N 标为推荐；0 表示不改推荐标记",
+    },
+    "night_batch_taste_customer_limit": {
+        "group": "system",
+        "label": "夜间口味学习人数上限",
+        "unit": "人",
+        "type": "int",
+        "min": 50,
+        "max": 20000,
+        "default": 2000,
+        "description": "关店窗内单次最多学习多少名近期有行为的顾客",
+    },
+    "night_batch_taste_lookback_days": {
+        "group": "system",
+        "label": "夜间口味学习天数",
+        "unit": "天",
+        "type": "int",
+        "min": 1,
+        "max": 30,
+        "default": 3,
+        "description": "扫描近 N 日有行为事件的顾客做智能口味深度学习",
+    },
 }
 
 REDIS_CACHE_VER_KEY = "snh:system_settings:ver"
@@ -445,7 +531,11 @@ class SystemSettingsService:
         if key == "mini_program_env_version":
             raw = (str(val).strip().lower() if val is not None else "")
             return raw if raw in ("develop", "trial", "release") else "auto"
-        return str(val) if val is not None else ""
+        if val is not None:
+            return str(val)
+        if "default" in meta and meta.get("default") is not None:
+            return str(meta["default"])
+        return ""
 
     @classmethod
     async def _remote_version(cls) -> int:

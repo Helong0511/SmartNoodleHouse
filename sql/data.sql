@@ -183,6 +183,14 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SE
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'delivery_env_fallback_store_id', '0', '外卖 .env 兜底门店' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'delivery_env_fallback_store_id');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'preference_scene_enabled', 'true', '口味场景加权（季节/同星期同餐段）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'preference_scene_enabled');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'weather_pref_enabled', 'true', '天气口味加权（需门店经纬度）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'weather_pref_enabled');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_enabled', 'true', '关店夜间批处理开关' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_enabled');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_window_start_hour', '2', '夜间批处理开始整点（含）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_window_start_hour');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_window_end_hour', '5', '夜间批处理结束整点（不含）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_window_end_hour');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_sales_lookback_days', '7', '热销统计天数' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_sales_lookback_days');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_hot_top_n', '5', '热销 Top N' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_hot_top_n');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_recommend_top_n', '8', '推荐 Top N' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_recommend_top_n');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_taste_customer_limit', '2000', '夜间口味学习人数上限' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_taste_customer_limit');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_taste_lookback_days', '3', '夜间口味学习天数' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_taste_lookback_days');
 
 -- 七-B、门店业务参数（扫码进店读 store_settings；未写的键回退上面的全局默认）
 -- 总店：点餐页不展示搜索 / 智能口味 / 猜你喜欢；打印机与新客券与二店不同

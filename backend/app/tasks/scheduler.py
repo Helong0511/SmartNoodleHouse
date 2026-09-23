@@ -158,6 +158,13 @@ TASK_CATALOG: list[dict] = [
         "description": "按 behavior_event_retention_days（默认 90 天）清理行为事件。",
         "default_schedule": {"type": "cron", "hour": 3, "minute": 15},
     },
+    {
+        "id": "night_data_batch",
+        "title": "关店夜间数据批处理",
+        "category": "推荐",
+        "description": "北京时间默认 02:10 启动：按销量刷新热销/推荐、整店重算商品口味画像、深度学习顾客智能口味。",
+        "default_schedule": {"type": "cron", "hour": 2, "minute": 10},
+    },
 ]
 
 
@@ -500,7 +507,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Expired visitor data cleaned")
 
     @scheduler.scheduled_job(
-        "cron", hour=3, minute=0, id="cleanup_operation_logs", name="清理操作日志"
+        "cron", hour=3, minute=0, timezone="Asia/Shanghai", id="cleanup_operation_logs", name="清理操作日志"
     )
     @_leader_job
     async def cleanup_operation_logs():
@@ -514,7 +521,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Operation logs cleaned before %s", cutoff)
 
     @scheduler.scheduled_job(
-        "cron", hour=4, minute=0, id="cleanup_delivery_pii", name="外卖 PII 脱敏"
+        "cron", hour=4, minute=0, timezone="Asia/Shanghai", id="cleanup_delivery_pii", name="外卖 PII 脱敏"
     )
     @_leader_job
     async def cleanup_delivery_pii():
@@ -525,7 +532,7 @@ def register_tasks(scheduler) -> None:
             logger.info("Delivery PII anonymized: %s orders", n)
 
     @scheduler.scheduled_job(
-        "cron", hour=3, minute=30, id="maintain_file_logs", name="维护文件日志"
+        "cron", hour=3, minute=30, timezone="Asia/Shanghai", id="maintain_file_logs", name="维护文件日志"
     )
     @_leader_job
     async def maintain_file_logs():
@@ -622,6 +629,7 @@ def register_tasks(scheduler) -> None:
         "cron",
         hour=3,
         minute=15,
+        timezone="Asia/Shanghai",
         id="cleanup_expired_behavior_events",
         name="清理超期行为事件",
     )
@@ -638,6 +646,37 @@ def register_tasks(scheduler) -> None:
             n = await PrivacyService.cleanup_expired_events(db, retention_days=days)
         if n:
             logger.info("Expired behavior events cleaned: %s rows (retention=%sd)", n, days)
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=2,
+        minute=10,
+        timezone="Asia/Shanghai",
+        id="night_data_batch",
+        name="关店夜间数据批处理",
+        misfire_grace_time=3600,
+    )
+    @_leader_job
+    async def night_data_batch():
+        """关店窗慢任务：销量热销/推荐、商品口味画像、顾客智能口味深度学习。"""
+        from app.services.night_batch_service import run_night_batch
+        from app.services.scheduler_admin import redis_job_lock
+
+        async with redis_job_lock("night_data_batch", ttl=10_800) as acquired:
+            if not acquired:
+                logger.info("夜间批处理跳过：已有实例在跑")
+                return
+            async with AsyncSessionLocal() as db:
+                try:
+                    stats = await run_night_batch(db)
+                    await db.commit()
+                    if stats.get("ran"):
+                        logger.info("夜间批处理完成: %s", stats)
+                    else:
+                        logger.info("夜间批处理未执行: %s", stats.get("skipped"))
+                except Exception:
+                    await db.rollback()
+                    logger.exception("夜间批处理异常")
 
 
 async def apply_scheduler_overrides(scheduler) -> None:

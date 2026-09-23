@@ -63,11 +63,23 @@ def format_trigger_label(schedule: dict[str, Any] | None) -> str:
     if t == "cron":
         hour = int(schedule.get("hour") or 0)
         minute = int(schedule.get("minute") or 0)
-        return f"每天 {hour:02d}:{minute:02d}"
+        return f"每天 {hour:02d}:{minute:02d}（业务时区）"
     if t == "cron_interval":
         every = int(schedule.get("every_minutes") or 1)
         return f"每 {every} 分钟"
     return "—"
+
+
+def _cron_timezone():
+    """cron 一律按业务时区（默认 Asia/Shanghai），避免服务器 UTC 导致凌晨任务错点。"""
+    try:
+        from app.core.response import _biz_timezone
+
+        return _biz_timezone()
+    except Exception:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo("Asia/Shanghai")
 
 
 def validate_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
@@ -108,10 +120,11 @@ def build_trigger(schedule: dict[str, Any]):
         every = s["every"]
         kwargs = {unit: every}
         return IntervalTrigger(**kwargs)
+    tz = _cron_timezone()
     if s["type"] == "cron":
-        return CronTrigger(hour=s["hour"], minute=s["minute"])
+        return CronTrigger(hour=s["hour"], minute=s["minute"], timezone=tz)
     if s["type"] == "cron_interval":
-        return CronTrigger(minute=f"*/{s['every_minutes']}")
+        return CronTrigger(minute=f"*/{s['every_minutes']}", timezone=tz)
     raise ValueError("无法构建 trigger")
 
 
