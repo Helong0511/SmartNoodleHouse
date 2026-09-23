@@ -125,6 +125,16 @@ async def websocket_endpoint(
             await websocket.close(code=4400, reason="缺少 store_id")
             return
         settings = get_settings()
+        try:
+            from app.services.customer_display import is_customer_display_enabled
+
+            async with AsyncSessionLocal() as db:
+                enabled = await is_customer_display_enabled(db, int(store_id))
+        except Exception:
+            enabled = bool(settings.enable_customer_display)
+        if not enabled:
+            await websocket.close(code=4403, reason="本店未开通大厅叫号屏")
+            return
         global_token = (settings.display_screen_token or "").strip()
         # P2-2 优先使用门店级 display token（store_settings），降级到全局 token
         expected = global_token

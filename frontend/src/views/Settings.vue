@@ -24,6 +24,38 @@
       :description="`环境 ${overview.app.env} · 进程角色 ${overview.app.process_role} · ${overview.cache?.multi_worker_note || ''} · 配置文件：${overview.env_file_hint}`"
     />
 
+    <div v-if="overview && String(activeTab).startsWith('biz-')" class="scope-bar">
+      <span class="scope-label">作用范围</span>
+      <el-radio-group v-model="settingScope" size="small" @change="onScopeChange">
+        <el-radio-button value="global">全局默认</el-radio-button>
+        <el-radio-button value="store">门店覆盖</el-radio-button>
+      </el-radio-group>
+      <el-select
+        v-if="settingScope === 'store'"
+        v-model="scopeStoreId"
+        filterable
+        placeholder="选择门店"
+        style="width: 220px"
+        :loading="storesLoading"
+        @change="loadStoreBusiness"
+      >
+        <el-option
+          v-for="s in storeOptions"
+          :key="s.id"
+          :label="s.name"
+          :value="s.id"
+        />
+      </el-select>
+      <el-tag v-if="settingScope === 'store' && scopeStoreName" size="small" type="warning">
+        正在编辑：{{ scopeStoreName }}
+      </el-tag>
+      <span class="scope-hint">
+        {{ settingScope === 'global'
+          ? '全局默认对所有门店生效；标注「可门店覆盖」的项可在门店覆盖中单独设置'
+          : '仅显示可按门店覆盖的项；未覆盖时继承全局默认，可「清除覆盖」回退' }}
+      </span>
+    </div>
+
     <el-tabs v-if="overview" v-model="activeTab" class="settings-tabs" @tab-change="onTabChange">
       <el-tab-pane label="运行概览" name="overview">
         <el-row :gutter="16">
@@ -92,15 +124,22 @@
         </template>
 
         <el-alert
-          type="success"
+          :type="settingScope === 'store' ? 'warning' : 'success'"
           show-icon
           :closable="false"
           :title="g.label"
-          :description="`${g.description || ''} 保存在 system_settings，保存后约 15 秒内多 worker 同步。`"
+          :description="settingScope === 'store'
+            ? `${g.description || ''} 当前为门店覆盖：保存只写入本店 store_settings，清除覆盖后回退全局默认。`
+            : `${g.description || ''} 保存在 system_settings，保存后约 15 秒内多 worker 同步。`"
           class="group-alert"
         />
 
-        <el-form label-width="180px" class="business-form" @submit.prevent>
+        <el-empty
+          v-if="settingScope === 'store' && !itemsOfGroup(g.id).length"
+          description="本分类暂无可按门店覆盖的配置项"
+        />
+
+        <el-form v-else label-width="180px" class="business-form" @submit.prevent>
           <el-form-item v-for="item in itemsOfGroup(g.id)" :key="item.key" :label="item.label">
             <el-switch v-if="item.type === 'bool'" v-model="item.boolValue" />
             <el-select
@@ -150,8 +189,39 @@
             />
             <span v-if="item.unit" class="unit">{{ item.unit }}</span>
             <el-tag v-if="isDirty(item)" size="small" type="warning" style="margin-left:8px">已改</el-tag>
+            <el-tag
+              v-if="settingScope === 'global' && item.store_override"
+              size="small"
+              type="info"
+              style="margin-left:8px"
+            >可门店覆盖</el-tag>
+            <el-tag
+              v-if="settingScope === 'store' && item.has_override"
+              size="small"
+              type="success"
+              style="margin-left:8px"
+            >本店已覆盖</el-tag>
+            <el-tag
+              v-else-if="settingScope === 'store' && !item.has_override"
+              size="small"
+              style="margin-left:8px"
+            >继承全局</el-tag>
+            <el-button
+              v-if="settingScope === 'store' && item.has_override"
+              link
+              type="danger"
+              size="small"
+              style="margin-left:8px"
+              :loading="clearingKey === item.key"
+              @click="clearStoreOverride(item)"
+            >
+              清除覆盖
+            </el-button>
             <p class="field-desc">
               {{ item.description }}
+              <template v-if="settingScope === 'store' && item.global_value != null">
+                · 全局默认 {{ formatGlobalHint(item) }}
+              </template>
               <template v-if="item.type === 'int' || item.type === 'float'">
                 · 范围 {{ item.min }} ~ {{ item.max }}
               </template>
@@ -161,14 +231,14 @@
             </p>
           </el-form-item>
 
-          <el-form-item>
+          <el-form-item v-if="itemsOfGroup(g.id).length">
             <el-button
               type="primary"
               :loading="businessSaving"
-              :disabled="!canSaveGroup(g.id)"
+              :disabled="!canSaveGroup(g.id) || (settingScope === 'store' && !scopeStoreId)"
               @click="saveBusinessGroup(g.id)"
             >
-              保存「{{ g.label }}」
+              {{ settingScope === 'store' ? `保存本店「${g.label}」` : `保存「${g.label}」` }}
             </el-button>
             <el-button :disabled="!dirtyCountByGroup[g.id]" @click="resetBusinessGroup(g.id)">
               还原本页未保存修改
@@ -355,16 +425,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const loading = ref(false)
 const activeTab = ref('overview')
 const overview = ref<any>(null)
 const businessForm = ref<any[]>([])
 const businessGroups = ref<any[]>([])
 const businessSaving = ref(false)
+const settingScope = ref<'global' | 'store'>('global')
+const storeOptions = ref<any[]>([])
+const storesLoading = ref(false)
+const scopeStoreId = ref<number | undefined>()
+const scopeStoreName = ref('')
+const clearingKey = ref('')
 const envKeyword = ref('')
 const envGroupFilter = ref('')
 const schedulerLoading = ref(false)
@@ -589,6 +667,16 @@ function parseBool(item: any) {
   return ['1', 'true', 'yes', 'on', 'y'].includes(s)
 }
 
+function formatGlobalHint(item: any) {
+  const raw = item.global_value
+  if (item.type === 'bool') {
+    const on = ['1', 'true', 'yes', 'on', 'y'].includes(String(raw ?? '').trim().toLowerCase())
+    return on ? '开' : '关'
+  }
+  if (item.type === 'enum') return enumLabel(item.key, String(raw ?? ''))
+  return raw == null || raw === '' ? '（空）' : String(raw)
+}
+
 function buildBusinessForm(items: any[]) {
   businessForm.value = items.map((item) => {
     if (item.type === 'bool') {
@@ -616,6 +704,67 @@ function applyBusinessPayload(data: any) {
       ...g,
       items: [],
     }))
+  }
+}
+
+async function loadStoreOptions() {
+  storesLoading.value = true
+  try {
+    const res = await api.get('/settings/stores/options')
+    storeOptions.value = res.data?.items || []
+    if (!scopeStoreId.value) {
+      scopeStoreId.value = auth.user?.store_id || storeOptions.value[0]?.id
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载门店列表失败')
+  } finally {
+    storesLoading.value = false
+  }
+}
+
+async function loadStoreBusiness() {
+  if (!scopeStoreId.value) {
+    ElMessage.warning('请选择门店')
+    return
+  }
+  loading.value = true
+  try {
+    const res = await api.get(`/settings/stores/${scopeStoreId.value}/business`)
+    const data = res.data || {}
+    scopeStoreName.value = data.store_name || ''
+    buildBusinessForm(data.items || [])
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载门店设置失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function onScopeChange() {
+  if (settingScope.value === 'store') {
+    if (!storeOptions.value.length) await loadStoreOptions()
+    await loadStoreBusiness()
+  } else {
+    scopeStoreName.value = ''
+    if (overview.value) {
+      applyBusinessPayload(overview.value)
+    } else {
+      await load()
+    }
+  }
+}
+
+async function clearStoreOverride(item: any) {
+  if (!scopeStoreId.value || !item?.key) return
+  clearingKey.value = item.key
+  try {
+    await api.delete(`/settings/stores/${scopeStoreId.value}/business/${item.key}`)
+    ElMessage.success(`已清除「${item.label}」的本店覆盖`)
+    await loadStoreBusiness()
+  } catch (e: any) {
+    ElMessage.error(e.message || '清除失败')
+  } finally {
+    clearingKey.value = ''
   }
 }
 
@@ -650,16 +799,27 @@ async function saveBusinessGroup(groupId: string) {
       return
     }
   }
+  if (settingScope.value === 'store' && !scopeStoreId.value) {
+    ElMessage.warning('请选择门店')
+    return
+  }
   businessSaving.value = true
   try {
     const settings: Record<string, string | number | boolean> = {}
     for (const item of dirty) {
       settings[item.key] = payloadOfItem(item)
     }
-    const res = await api.put('/settings/business', { settings })
-    applyBusinessPayload(res.data)
-    ElMessage.success(`已保存 ${dirty.length} 项`)
-    refreshHealth(false)
+    if (settingScope.value === 'store') {
+      const res = await api.put(`/settings/stores/${scopeStoreId.value}/business`, { updates: settings })
+      buildBusinessForm(res.data?.items || [])
+      scopeStoreName.value = res.data?.store_name || scopeStoreName.value
+      ElMessage.success(`已保存本店 ${dirty.length} 项`)
+    } else {
+      const res = await api.put('/settings/business', { settings })
+      applyBusinessPayload(res.data)
+      ElMessage.success(`已保存 ${dirty.length} 项`)
+      refreshHealth(false)
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
   } finally {
@@ -670,6 +830,9 @@ async function saveBusinessGroup(groupId: string) {
 function onTabChange(name: string | number) {
   if (name === 'scheduler' && !schedulerJobs.value) {
     loadSchedulerJobs()
+  }
+  if (String(name).startsWith('biz-') && settingScope.value === 'store' && scopeStoreId.value) {
+    // 切到业务分类时若处于门店模式，保持当前门店表单
   }
 }
 
@@ -688,7 +851,12 @@ async function load() {
   loading.value = true
   try {
     overview.value = (await api.get('/settings')).data
-    applyBusinessPayload(overview.value)
+    if (settingScope.value === 'global') {
+      applyBusinessPayload(overview.value)
+    }
+    if (!storeOptions.value.length) {
+      await loadStoreOptions()
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '加载设置失败')
   } finally {
@@ -719,6 +887,19 @@ onMounted(load)
 </script>
 
 <style scoped>
+.scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+}
+.scope-label { font-size: 13px; color: #606266; font-weight: 500; }
+.scope-hint { font-size: 12px; color: #909399; flex: 1 1 220px; }
 .settings-page { min-height: 360px; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 12px; }
 .page-header h2 { margin: 0; font-size: 18px; }

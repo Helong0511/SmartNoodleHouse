@@ -694,17 +694,20 @@ class PrintService:
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
 
-        # 总开关（历史字段名 XPYUN_ENABLED，对 local / xpyun 两种模式都生效）
-        enabled = await SystemSettingsService.effective_bool(
-            db, "xpyun_enabled", settings.xpyun_enabled, store_id=None
-        )
-        if not enabled:
-            logger.debug("打印已关闭 xpyun_enabled=false order_id=%s", order_id)
-            return None
-
         ctx = await cls.load_context(db, order_id)
         if not ctx:
             logger.warning("打印跳过：订单不存在 order_id=%s", order_id)
+            return None
+
+        # 总开关（历史字段名 XPYUN_ENABLED，对 local / xpyun 两种模式都生效；可按门店覆盖）
+        enabled = await SystemSettingsService.effective_bool(
+            db,
+            "xpyun_enabled",
+            settings.xpyun_enabled,
+            store_id=int(ctx.order.store_id) if ctx.order.store_id else None,
+        )
+        if not enabled:
+            logger.debug("打印已关闭 xpyun_enabled=false order_id=%s", order_id)
             return None
 
         # 已取消/退款：不再打制作单（催单/作废类型仍可由上层决定是否调用）

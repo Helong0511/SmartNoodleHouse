@@ -118,6 +118,7 @@ Page({
     pickupSub: '',
     customerStatusLabel: '',
     pickupHint: '',
+    pickupFoot: '',
     isTakeaway: false,
     isReady: false,
     showMemberBanner: false,

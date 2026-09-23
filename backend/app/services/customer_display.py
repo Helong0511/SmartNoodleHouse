@@ -21,6 +21,23 @@ CUSTOMER_STATUS_LABEL: dict[str, str] = {
 }
 
 
+async def is_customer_display_enabled(
+    db: AsyncSession,
+    store_id: int | None = None,
+) -> bool:
+    """全局/门店是否开通大厅叫号屏（默认关闭）。"""
+    from app.core.config import get_settings
+    from app.services.system_settings_service import SystemSettingsService
+
+    settings = get_settings()
+    return await SystemSettingsService.effective_bool(
+        db,
+        "enable_customer_display",
+        bool(settings.enable_customer_display),
+        store_id=store_id,
+    )
+
+
 def pickup_code_from_order_no(order_no: str) -> str:
     parsed = parse_biz_no(order_no or "")
     if parsed:
@@ -87,7 +104,12 @@ def is_in_store_order(order: Order) -> bool:
     return (order.channel or "") not in ("MEITUAN", "ELEME")
 
 
-def pickup_fields(order: Order, table: DiningTable | None) -> dict:
+def pickup_fields(
+    order: Order,
+    table: DiningTable | None,
+    *,
+    has_customer_display: bool = False,
+) -> dict:
     """小程序/顾客端：取餐号与叫号屏对照字段。"""
     if not is_in_store_order(order):
         return {
@@ -96,6 +118,7 @@ def pickup_fields(order: Order, table: DiningTable | None) -> dict:
             "pickup_sub": None,
             "customer_status_label": None,
             "show_pickup_banner": False,
+            "has_customer_display": False,
         }
     item = build_display_item(order, table)
     status = order.status or ""
@@ -105,4 +128,5 @@ def pickup_fields(order: Order, table: DiningTable | None) -> dict:
         "pickup_sub": item["pickup_sub"],
         "customer_status_label": CUSTOMER_STATUS_LABEL.get(status, status),
         "show_pickup_banner": status in DISPLAY_ACTIVE_STATUSES,
+        "has_customer_display": bool(has_customer_display),
     }

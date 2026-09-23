@@ -23,6 +23,8 @@ function decorate(order) {
       pickupSub: '',
       customerStatusLabel: '',
       pickupHint: '',
+      pickupFoot: '',
+      hasCustomerDisplay: false,
       isTakeaway: false,
       isReady: false
     }
@@ -39,16 +41,34 @@ function decorate(order) {
     && (order.channel || '') !== 'MEITUAN'
     && (order.channel || '') !== 'ELEME'
   const isReady = status === 'READY'
+  const hasCustomerDisplay = !!order.has_customer_display
   let pickupHint = ''
+  let pickupFoot = ''
   if (showPickupBanner) {
-    if (isReady) {
+    if (hasCustomerDisplay) {
+      if (isReady) {
+        pickupHint = isTakeaway
+          ? `取餐号 ${code} 已在叫号屏显示，请到取餐台自取`
+          : `${label} 已在叫号屏「请取餐」区，可到取餐台自取`
+      } else if (isTakeaway) {
+        pickupHint = `取餐号 ${code}，请对照大厅叫号屏查看进度`
+      } else if (label) {
+        pickupHint = `桌号 ${label}，请对照大厅叫号屏查看进度`
+      }
+      pickupFoot = isTakeaway
+        ? '完整订单号末 4 位，与大厅叫号屏一致 · 点击复制'
+        : '请在大厅叫号屏对照此桌号'
+    } else if (isReady) {
       pickupHint = isTakeaway
-        ? `取餐号 ${code} 已在叫号屏显示，请到取餐台自取`
-        : `${label} 已在叫号屏「请取餐」区，可到取餐台自取`
+        ? `取餐号 ${code} 已可取餐，请到取餐台自取`
+        : `${label} 已可取餐，可到取餐台自取`
+      pickupFoot = isTakeaway ? '完整订单号末 4 位 · 点击复制' : '请到取餐台或等候送餐到桌'
     } else if (isTakeaway) {
-      pickupHint = `取餐号 ${code}，请对照大厅叫号屏查看进度`
+      pickupHint = `取餐号 ${code}，请留意取餐进度`
+      pickupFoot = '完整订单号末 4 位 · 点击复制'
     } else if (label) {
-      pickupHint = `桌号 ${label}，请对照大厅叫号屏查看进度`
+      pickupHint = `桌号 ${label}，请留意出餐进度`
+      pickupFoot = '请等候送餐到桌或到取餐台领取'
     }
   }
   return {
@@ -58,6 +78,8 @@ function decorate(order) {
     pickupSub: sub,
     customerStatusLabel: customerStatus,
     pickupHint,
+    pickupFoot,
+    hasCustomerDisplay,
     isTakeaway,
     isReady
   }

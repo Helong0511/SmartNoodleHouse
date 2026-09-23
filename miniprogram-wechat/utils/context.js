@@ -131,6 +131,12 @@ function applyContext(table, store, options) {
     // P2-1：门店切换（或首次绑定）时，校验购物车归属，跨店一律清空
     if (newStoreId && Number(newStoreId) !== Number(prevStoreId)) {
       reconcileCartWithStore(newStoreId)
+      try {
+        require('./clientConfig').invalidateClientConfig()
+        require('./clientConfig').loadClientConfig(true, newStoreId).catch(() => {})
+      } catch (_) {
+        /* ignore */
+      }
     }
   }
 }

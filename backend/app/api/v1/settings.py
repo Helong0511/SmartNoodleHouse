@@ -645,15 +645,19 @@ async def get_store_business(
     items = []
     for it in global_items:
         key = it["key"]
+        if not it.get("store_override", False):
+            continue
         has_ov = key in overrides
-        items.append(
-            {
-                **it,
-                "global_value": it["value"],
-                "value": overrides[key] if has_ov else it["value"],
-                "has_override": has_ov,
-            }
-        )
+        effective = overrides[key] if has_ov else it["value"]
+        row = {
+            **it,
+            "global_value": it["value"],
+            "value": effective,
+            "has_override": has_ov,
+        }
+        if it.get("type") == "bool":
+            row["bool_value"] = SystemSettingsService._parse_bool(effective, False)
+        items.append(row)
     return success({"store_id": store_id, "store_name": store.name, "items": items}, request=request)
 
 
@@ -674,6 +678,14 @@ async def update_store_business(
     unknown = [k for k in data.updates if k not in BUSINESS_SETTING_META]
     if unknown:
         raise AppException(40014, f"不可修改的配置项: {', '.join(unknown)}")
+    not_overrideable = [
+        k for k in data.updates if not SystemSettingsService.allows_store_override(k)
+    ]
+    if not_overrideable:
+        raise AppException(
+            40014,
+            f"以下配置为全局级，不可按门店覆盖: {', '.join(not_overrideable)}",
+        )
 
     existing = {
         r.setting_key: r
@@ -715,6 +727,8 @@ async def clear_store_business_key(
     assert_store_access(user, store_id)
     if key not in BUSINESS_SETTING_META:
         raise AppException(40014, f"未知配置项: {key}")
+    if not SystemSettingsService.allows_store_override(key):
+        raise AppException(40014, f"配置项不可按门店覆盖: {key}")
     from sqlalchemy import delete as sa_delete
 
     await db.execute(

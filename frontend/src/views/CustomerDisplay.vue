@@ -26,11 +26,17 @@
       <p v-if="needToken" class="hint">生产环境还需 <code>&amp;token=您的叫号屏令牌</code></p>
     </div>
 
-    <div v-if="storeId && soundOn && !voiceUnlocked" class="voice-unlock" @click.stop="enableVoice">
+    <div v-else-if="featureDisabled" class="setup">
+      <h2>大厅叫号屏未开通</h2>
+      <p>请在后台「系统设置 → 订单与厨房」开启「大厅叫号屏」后再使用本页。</p>
+      <p class="hint">无叫号屏设备的门店可保持关闭。</p>
+    </div>
+
+    <div v-if="storeId && !featureDisabled && soundOn && !voiceUnlocked" class="voice-unlock" @click.stop="enableVoice">
       点击此处或点击屏幕任意位置，启用取餐语音播报
     </div>
 
-    <div v-if="storeId" class="board">
+    <div v-if="storeId && !featureDisabled" class="board">
       <section class="panel preparing">
         <div class="panel-head">
           <h2>制作中</h2>
@@ -71,7 +77,7 @@
       </section>
     </div>
 
-    <footer v-if="storeId" class="footer">
+    <footer v-if="storeId && !featureDisabled" class="footer">
       <span>堂食：对照您的桌号</span>
       <span>打包/自取：对照取餐号（订单号末 4 位）</span>
     </footer>
@@ -134,6 +140,7 @@ const connStatus = ref<Conn>('connecting')
 const clockText = ref('')
 const fullscreen = ref(false)
 const needToken = ref(false)
+const featureDisabled = ref(false)
 const soundOn = ref(readVoiceSoundOn(VOICE_SOUND_KEYS.display, true))
 
 watch(soundOn, (on) => {
@@ -370,6 +377,7 @@ async function load() {
   if (!storeId.value) return
   try {
     const res = await publicApi.get('/orders/display/active', { params: displayParams() })
+    featureDisabled.value = false
     const data = res.data || {}
     const nextReady = (data.ready || []) as DisplayItem[]
     syncReadyTrack(nextReady)
@@ -383,6 +391,13 @@ async function load() {
     if (data.store?.name) storeName.value = data.store.name
   } catch (e: any) {
     const msg = e?.message || ''
+    if (msg.includes('未开通') || msg.includes('叫号屏')) {
+      featureDisabled.value = true
+      preparing.value = []
+      ready.value = []
+      connStatus.value = 'offline'
+      return
+    }
     if (msg.includes('令牌')) needToken.value = true
   }
 }

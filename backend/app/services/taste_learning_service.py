@@ -50,8 +50,8 @@ def _logistic(raw: float) -> float:
     return 1.0 / (1.0 + math.exp(-max(-60.0, min(60.0, raw / RAW_SCALE))))
 
 
-def _decay_factor(previous_at: datetime | None, now_at: datetime) -> float:
-    if previous_at is None:
+def _decay_factor(previous_at: datetime | None, now_at: datetime | None) -> float:
+    if previous_at is None or now_at is None:
         return 1.0
     delta = (now_at - previous_at).total_seconds()
     if delta <= 0:
@@ -229,6 +229,8 @@ class TasteLearningService:
     @staticmethod
     async def learn_from_feedback(db, feedback) -> None:
         """轻量评价直接 fold（评价明细已独立入库；此处分流口味信号）。"""
+        from datetime import timezone
+
         sentiment = (feedback.sentiment or "NEUTRAL").upper()
         w = FEEDBACK_WEIGHTS.get(sentiment, 0.0)
         if not w or not feedback.product_id:
@@ -242,7 +244,8 @@ class TasteLearningService:
             product_id=feedback.product_id,
             event_type="FEEDBACK",
         )
-        at = feedback.created_at
+        # flush 后 MySQL server_default 可能尚未回填到 ORM，避免 None 时间戳导致折叠崩溃
+        at = feedback.created_at or datetime.now(timezone.utc)
         for dim_type, tkey, tname in TasteLearningService._event_keys(
             fake_ev, products, cat_names, keys_by_product
         ):

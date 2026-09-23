@@ -74,11 +74,12 @@ def test_pickup_fields():
         channel="WECHAT",
     )
     table = DiningTable(id=1, table_no="A01", table_name="A01")
-    fields = pickup_fields(order, table)
+    fields = pickup_fields(order, table, has_customer_display=True)
     assert fields["pickup_code"] == "K7M2"
     assert fields["pickup_label"] == "A01"
     assert fields["show_pickup_banner"] is True
     assert fields["customer_status_label"] == "请取餐"
+    assert fields["has_customer_display"] is True
 
 
 @pytest.mark.asyncio
@@ -94,6 +95,7 @@ async def test_display_active_api(monkeypatch):
     # 强制叫号屏令牌，避免依赖本机 .env 是否已配置 DISPLAY_SCREEN_TOKEN
     real = get_settings()
     monkeypatch.setattr(real, "display_screen_token", display_tok)
+    monkeypatch.setattr(real, "enable_customer_display", True)
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:

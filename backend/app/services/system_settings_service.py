@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # group：前端「系统设置」分页分类
 
 BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
-    {"id": "order", "label": "订单与厨房", "description": "支付超时、厨房自动出餐等堂食履约参数"},
+    {"id": "order", "label": "订单与厨房", "description": "支付超时、厨房自动出餐、大厅叫号屏等堂食履约参数"},
     {"id": "welcome", "label": "迎宾与人脸", "description": "迎宾冷却、人脸匹配与访客保留"},
     {"id": "member", "label": "会员与优惠", "description": "新客赠券等会员相关"},
     {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示、隐私能力、订阅模板、扫码域名与小程序版本"},
@@ -46,6 +46,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "min": 0,
         "max": 1440,
         "description": "支付后厨房 KDS 未处理超过该时间则自动完成出餐；0 表示关闭",
+    },
+    "enable_customer_display": {
+        "group": "order",
+        "label": "大厅叫号屏",
+        "unit": "",
+        "type": "bool",
+        "default": False,
+        "store_override": True,
+        "description": "开启后可用 /display 顾客叫号屏；关闭时 API/推送不可用；无屏门店可关；可按门店覆盖",
     },
     "visitor_data_retention_days": {
         "group": "welcome",
@@ -98,7 +107,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "外卖自动接单",
         "unit": "",
         "type": "bool",
-        "description": "新外卖单是否自动向平台 confirm；关闭则本地 PENDING，需商家确认",
+        "store_override": True,
+        "description": "新外卖单是否自动向平台 confirm；关闭则本地 PENDING，需商家确认；可按门店覆盖",
     },
     "welcome_coupon_name": {
         "group": "member",
@@ -113,42 +123,48 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "支付宝头像能力",
         "unit": "",
         "type": "bool",
-        "description": "经小程序 /miniprogram/config 下发；个人主体请关闭",
+        "store_override": False,
+        "description": "经小程序 /miniprogram/config 下发；个人主体请关闭（小程序主体级，全店共用）",
     },
     "enable_alipay_nickname": {
         "group": "miniprogram",
         "label": "支付宝昵称能力",
         "unit": "",
         "type": "bool",
-        "description": "经小程序 /miniprogram/config 下发",
+        "store_override": False,
+        "description": "经小程序 /miniprogram/config 下发（小程序主体级，全店共用）",
     },
     "enable_alipay_phone_bind": {
         "group": "miniprogram",
         "label": "支付宝手机号绑定",
         "unit": "",
         "type": "bool",
-        "description": "个人主体小程序通常须关闭",
+        "store_override": False,
+        "description": "个人主体小程序通常须关闭（小程序主体级，全店共用）",
     },
     "enable_wx_avatar": {
         "group": "miniprogram",
         "label": "微信头像能力",
         "unit": "",
         "type": "bool",
-        "description": "经小程序 /miniprogram/config 下发",
+        "store_override": False,
+        "description": "经小程序 /miniprogram/config 下发（小程序主体级，全店共用）",
     },
     "enable_wx_nickname": {
         "group": "miniprogram",
         "label": "微信昵称能力",
         "unit": "",
         "type": "bool",
-        "description": "经小程序 /miniprogram/config 下发",
+        "store_override": False,
+        "description": "经小程序 /miniprogram/config 下发（小程序主体级，全店共用）",
     },
     "enable_wx_phone_bind": {
         "group": "miniprogram",
         "label": "微信手机号绑定",
         "unit": "",
         "type": "bool",
-        "description": "个人主体小程序通常须关闭",
+        "store_override": False,
+        "description": "个人主体小程序通常须关闭（小程序主体级，全店共用）",
     },
     "show_menu_search": {
         "group": "miniprogram",
@@ -156,7 +172,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "顾客端点餐页是否显示搜索框；经 /miniprogram/config 下发",
+        "store_override": True,
+        "description": "顾客端点餐页是否显示搜索框；可按门店覆盖",
     },
     "show_menu_smart_taste": {
         "group": "miniprogram",
@@ -164,7 +181,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "顾客端点餐页是否显示智能口味条；经 /miniprogram/config 下发",
+        "store_override": True,
+        "description": "顾客端点餐页是否显示智能口味条；可按门店覆盖",
     },
     "show_menu_guess_you_like": {
         "group": "miniprogram",
@@ -172,7 +190,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "顾客端点餐页是否显示猜你喜欢推荐条；经 /miniprogram/config 下发",
+        "store_override": True,
+        "description": "顾客端点餐页是否显示猜你喜欢推荐条；可按门店覆盖",
     },
     "hide_member_empty_wallet": {
         "group": "miniprogram",
@@ -180,7 +199,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "开启后：无可用优惠券/代金券（含折扣券）时不显示对应区块；关闭则显示「暂无可用」提示",
+        "store_override": True,
+        "description": "开启后无可用优惠券/代金券时不显示对应区块；可按门店覆盖",
     },
     "kitchen_ticket_order_no": {
         "group": "print",
@@ -188,7 +208,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "enum",
         "choices": ["barcode", "text", "off"],
-        "description": "barcode=条码+单号；text=仅单号；off=不打印",
+        "store_override": True,
+        "description": "barcode=条码+单号；text=仅单号；off=不打印；可按门店覆盖",
     },
     "xpyun_print_copies": {
         "group": "print",
@@ -197,7 +218,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "int",
         "min": 1,
         "max": 5,
-        "description": "局域网/云打印出票份数",
+        "store_override": True,
+        "description": "局域网/云打印出票份数；可按门店覆盖",
     },
     "xpyun_voice": {
         "group": "print",
@@ -206,7 +228,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "int",
         "min": 0,
         "max": 3,
-        "description": "仅芯烨云：0取消单 1静音 2来单 3退单",
+        "store_override": True,
+        "description": "仅芯烨云：0取消单 1静音 2来单 3退单；可按门店覆盖",
     },
     "max_upload_size_mb": {
         "group": "system",
@@ -248,7 +271,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "强制 Webhook 白名单",
         "unit": "",
         "type": "bool",
-        "description": "生产环境白名单为空时是否直接拒绝回调",
+        "store_override": False,
+        "description": "生产环境白名单为空时是否直接拒绝回调（全局安全策略，不可按门店覆盖）",
     },
     "trusted_proxy_ips": {
         "group": "security",
@@ -287,7 +311,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "厨房打印总开关",
         "unit": "",
         "type": "bool",
-        "description": "关闭后不再出制作单（历史字段名 XPYUN_ENABLED）",
+        "store_override": True,
+        "description": "关闭后不再出制作单（历史字段名 XPYUN_ENABLED）；可按门店覆盖",
     },
     "printer_mode": {
         "group": "print",
@@ -295,7 +320,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "enum",
         "choices": ["local", "xpyun"],
-        "description": "local=局域网 ESC/POS；xpyun=芯烨云",
+        "store_override": True,
+        "description": "local=局域网 ESC/POS；xpyun=芯烨云；可按门店覆盖",
     },
     "printer_host": {
         "group": "print",
@@ -303,7 +329,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "string",
         "max_length": 128,
-        "description": "局域网模式全局默认；可按门店 store_settings 覆盖",
+        "store_override": True,
+        "description": "局域网模式全局默认；可按门店覆盖",
     },
     "printer_port": {
         "group": "print",
@@ -312,7 +339,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "int",
         "min": 1,
         "max": 65535,
-        "description": "局域网 ESC/POS 端口，默认 9100",
+        "store_override": True,
+        "description": "局域网 ESC/POS 端口，默认 9100；可按门店覆盖",
     },
     "wechat_subscribe_template_order_ready": {
         "group": "miniprogram",
@@ -353,7 +381,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "推荐时按季节/同星期同餐段微调口味排序（不改历史学习分）",
+        "store_override": True,
+        "description": "推荐时按季节/同星期同餐段微调口味排序；可按门店覆盖",
     },
     "weather_pref_enabled": {
         "group": "system",
@@ -361,7 +390,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "门店配置经纬度后，按实时气温/雨天微调口味推荐",
+        "store_override": True,
+        "description": "门店配置经纬度后，按实时气温/雨天微调口味推荐；可按门店覆盖",
     },
 }
 
@@ -750,6 +780,18 @@ class SystemSettingsService:
         )
 
     @classmethod
+    def allows_store_override(cls, key: str) -> bool:
+        """是否允许写入 store_settings 覆盖。
+
+        - META 显式 store_override 优先
+        - 未声明时：布尔开关默认可覆盖，其它类型默认不可（须显式打开）
+        """
+        meta = BUSINESS_SETTING_META.get(key) or {}
+        if "store_override" in meta:
+            return bool(meta["store_override"])
+        return meta.get("type") == "bool"
+
+    @classmethod
     def group_meta_map(cls) -> dict[str, dict[str, str]]:
         return {g["id"]: g for g in BUSINESS_SETTING_GROUPS}
 
@@ -779,6 +821,7 @@ class SystemSettingsService:
                 "group": gid,
                 "group_label": gmeta.get("label", gid),
                 "group_description": gmeta.get("description", ""),
+                "store_override": cls.allows_store_override(key),
                 "editable": True,
             }
             if meta["type"] == "bool":

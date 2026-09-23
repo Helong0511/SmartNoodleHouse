@@ -947,9 +947,13 @@ async def display_active_orders(
         DISPLAY_ACTIVE_STATUSES,
         PREPARING_STATUSES,
         build_display_item,
+        is_customer_display_enabled,
         is_in_store_order,
         load_ready_at_map,
     )
+
+    if not await is_customer_display_enabled(db, int(store_id)):
+        raise HTTPException(status_code=403, detail="本店未开通大厅叫号屏，请在系统设置 → 订单与厨房中开启")
 
     _verify_display_token(token)
     store = await db.get(Store, int(store_id))
@@ -1044,6 +1048,9 @@ async def list_my_orders(
         items_by_order.setdefault(it.order_id, []).append(it)
     table_map = await _load_tables(db, [o.table_id for o in rows if o.table_id])
     store_map = await _load_stores(db, [o.store_id for o in rows if o.store_id])
+    from app.services.customer_display import is_customer_display_enabled, pickup_fields
+
+    display_flag_cache: dict[int, bool] = {}
 
     payload = []
     for o in rows:
@@ -1053,9 +1060,11 @@ async def list_my_orders(
             names.append(f"等{len(o_items)}件")
         t = table_map.get(o.table_id) if o.table_id else None
         store = store_map.get(o.store_id) if o.store_id else None
-        from app.services.customer_display import pickup_fields
-
-        pickup = pickup_fields(o, t)
+        sid = int(o.store_id) if o.store_id else None
+        if sid is not None and sid not in display_flag_cache:
+            display_flag_cache[sid] = await is_customer_display_enabled(db, sid)
+        has_display = display_flag_cache.get(sid or 0, False) if sid else False
+        pickup = pickup_fields(o, t, has_customer_display=has_display)
         payload.append(
             {
                 "id": o.id,
@@ -1162,11 +1171,14 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
     store = await db.get(Store, order.store_id) if order.store_id else None
     from app.models import Customer
-    from app.services.customer_display import pickup_fields
+    from app.services.customer_display import is_customer_display_enabled, pickup_fields
     from app.services.customer_service import CustomerService
 
     table_obj = await db.get(DiningTable, order.table_id) if order.table_id else None
-    pickup = pickup_fields(order, table_obj)
+    has_display = await is_customer_display_enabled(
+        db, int(order.store_id) if order.store_id else None
+    )
+    pickup = pickup_fields(order, table_obj, has_customer_display=has_display)
 
     cust = await db.get(Customer, order.customer_id) if order.customer_id else None
     level = None

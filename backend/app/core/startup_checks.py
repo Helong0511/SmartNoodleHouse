@@ -104,8 +104,10 @@ def validate_settings(settings: Settings) -> None:
     elif is_prod and secret_enc and len(secret_enc) < 32:
         errors.append("SECRET_ENCRYPTION_KEY 须至少 32 字符")
 
-    if is_prod and not (getattr(settings, "display_screen_token", None) or "").strip():
-        errors.append("生产环境须配置 DISPLAY_SCREEN_TOKEN（叫号屏访问令牌）")
+    if is_prod and bool(getattr(settings, "enable_customer_display", False)) and not (
+        getattr(settings, "display_screen_token", None) or ""
+    ).strip():
+        errors.append("已开启大厅叫号屏时，生产环境须配置 DISPLAY_SCREEN_TOKEN")
 
     cors = (getattr(settings, "cors_origins", None) or "").lower()
     if is_prod and ("localhost" in cors or "127.0.0.1" in cors):

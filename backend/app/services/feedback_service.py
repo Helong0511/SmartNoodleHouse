@@ -7,10 +7,14 @@
 """
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Customer, Order, ProductFeedback
+
+logger = logging.getLogger(__name__)
 
 # 正向标签
 POSITIVE_VERDICTS = {
@@ -152,8 +156,18 @@ class FeedbackService:
             await db.flush()
             saved.append(pid)
             # 关闭个性化的顾客：评价仅留存，不更新推荐画像
+            # 画像学习用 savepoint 隔离，失败不回滚已落库的评价
             customer = await db.get(Customer, int(order.customer_id))
             if customer is not None and int(getattr(customer, "recommend_opt_in", 1) or 0) == 1:
-                await TasteLearningService.learn_from_feedback(db, fb)
+                try:
+                    async with db.begin_nested():
+                        await TasteLearningService.learn_from_feedback(db, fb)
+                except Exception:
+                    logger.exception(
+                        "评价画像学习失败 order_id=%s product_id=%s customer_id=%s",
+                        order.id,
+                        pid,
+                        order.customer_id,
+                    )
 
         return {"saved": saved, "skipped_existing": skipped}

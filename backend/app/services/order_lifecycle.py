@@ -75,7 +75,17 @@ async def apply_order_status(
 
     kind = (assert_kind or _infer_assert_kind(source)).upper()
     if kind == "STAFF" and target == "COMPLETED" and old in ("PAID", "CONFIRMED"):
-        raise AppException(40026, "请先点击「制作完成」，叫号屏提醒取餐后再出餐")
+        from app.services.customer_display import is_customer_display_enabled
+
+        has_display = await is_customer_display_enabled(
+            db, int(order.store_id) if order.store_id else None
+        )
+        tip = (
+            "请先点击「制作完成」，叫号屏提醒取餐后再出餐"
+            if has_display
+            else "请先点击「制作完成」后再出餐"
+        )
+        raise AppException(40026, tip)
     if kind == "STAFF" and target == "READY" and old in ("PAID", "CONFIRMED"):
         if not await order_all_no_cooking(db, order.id):
             raise AppException(40027, "订单含需烹饪商品，请按「开始制作」流程操作")

@@ -1,9 +1,11 @@
-/** 从后端下发的小程序公开配置（GET /miniprogram/config） */
+/** 从后端下发的小程序公开配置（GET /miniprogram/config?store_id=） */
 
 const api = require('./api')
 
 let _cache = null
+let _cacheStoreId = null
 let _loading = null
+let _loadingStoreId = null
 
 const DEFAULTS = {
   enable_alipay_avatar: true,
@@ -15,7 +17,8 @@ const DEFAULTS = {
   show_menu_search: true,
   show_menu_smart_taste: true,
   show_menu_guess_you_like: true,
-  hide_member_empty_wallet: true
+  hide_member_empty_wallet: true,
+  enable_customer_display: false
 }
 
 function getAppSafe() {
@@ -24,6 +27,31 @@ function getAppSafe() {
   } catch (_) {
     return null
   }
+}
+
+function resolveStoreId(explicit) {
+  if (explicit != null && explicit !== '') {
+    const n = Number(explicit)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+  try {
+    const auth = require('./auth')
+    if (typeof auth.currentStoreId === 'function') {
+      const sid = auth.currentStoreId()
+      const n = Number(sid)
+      return Number.isFinite(n) && n > 0 ? n : null
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  const app = getAppSafe()
+  const gd = app && app.globalData
+  if (!gd) return null
+  const store = gd.store || {}
+  const table = gd.table || {}
+  const sid = store.id || store.store_id || table.store_id || null
+  const n = Number(sid)
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function boolFlag(key, fallback) {
@@ -36,35 +64,56 @@ function boolFlag(key, fallback) {
   return fallback
 }
 
-async function loadClientConfig(force = false) {
-  if (!force && _cache) return _cache
-  if (!force && _loading) return _loading
+function applyCacheToApp(cache) {
+  const app = getAppSafe()
+  if (!app || !app.globalData) return
+  app.globalData.clientConfig = cache
+  app.globalData.enableAlipayAvatar = !!cache.enable_alipay_avatar
+  app.globalData.enableAlipayNickname = !!cache.enable_alipay_nickname
+  app.globalData.enableAlipayPhoneBind = !!cache.enable_alipay_phone_bind
+  app.globalData.enableWxAvatar = !!cache.enable_wx_avatar
+  app.globalData.enableWxNickname = !!cache.enable_wx_nickname
+  app.globalData.enableWxPhoneBind = !!cache.enable_wx_phone_bind
+  app.globalData.showMenuSearch = !!cache.show_menu_search
+  app.globalData.showMenuSmartTaste = !!cache.show_menu_smart_taste
+  app.globalData.showMenuGuessYouLike = !!cache.show_menu_guess_you_like
+  app.globalData.hideMemberEmptyWallet = !!cache.hide_member_empty_wallet
+  app.globalData.enableCustomerDisplay = !!cache.enable_customer_display
+}
+
+/**
+ * @param {boolean} [force=false]
+ * @param {number|null} [storeId=null] 显式门店；默认从当前桌台/门店上下文解析
+ */
+async function loadClientConfig(force = false, storeId = null) {
+  const sid = resolveStoreId(storeId)
+  if (!force && _cache && _cacheStoreId === sid) return _cache
+  if (!force && _loading && _loadingStoreId === sid) return _loading
+  _loadingStoreId = sid
   _loading = (async () => {
     try {
-      const data = await api.get('/miniprogram/config', {}, false)
+      const params = sid ? { store_id: sid } : {}
+      const data = await api.get('/miniprogram/config', params, false)
       _cache = data && typeof data === 'object' ? { ...DEFAULTS, ...data } : { ...DEFAULTS }
+      _cacheStoreId = sid
     } catch (_) {
       _cache = _cache || { ...DEFAULTS }
     } finally {
       _loading = null
+      _loadingStoreId = null
     }
-    const app = getAppSafe()
-    if (app && app.globalData) {
-      app.globalData.clientConfig = _cache
-      app.globalData.enableAlipayAvatar = !!_cache.enable_alipay_avatar
-      app.globalData.enableAlipayNickname = !!_cache.enable_alipay_nickname
-      app.globalData.enableAlipayPhoneBind = !!_cache.enable_alipay_phone_bind
-      app.globalData.enableWxAvatar = !!_cache.enable_wx_avatar
-      app.globalData.enableWxNickname = !!_cache.enable_wx_nickname
-      app.globalData.enableWxPhoneBind = !!_cache.enable_wx_phone_bind
-      app.globalData.showMenuSearch = !!_cache.show_menu_search
-      app.globalData.showMenuSmartTaste = !!_cache.show_menu_smart_taste
-      app.globalData.showMenuGuessYouLike = !!_cache.show_menu_guess_you_like
-      app.globalData.hideMemberEmptyWallet = !!_cache.hide_member_empty_wallet
-    }
+    applyCacheToApp(_cache)
     return _cache
   })()
   return _loading
+}
+
+/** 切店后丢弃按门店缓存的配置 */
+function invalidateClientConfig() {
+  _cache = null
+  _cacheStoreId = null
+  _loading = null
+  _loadingStoreId = null
 }
 
 function isAlipayAvatarEnabled() {
@@ -143,6 +192,7 @@ function wxPrivacyPageData() {
 
 module.exports = {
   loadClientConfig,
+  invalidateClientConfig,
   isAlipayAvatarEnabled,
   isAlipayNicknameEnabled,
   isAlipayPhoneBindEnabled,

@@ -177,12 +177,20 @@ class PhoneBindRequest(BaseModel):
 
 
 @router.get("/config")
-async def miniprogram_config(request: Request, db: DbSession):
-    """小程序前端配置（订阅模板、隐私能力开关等，不含密钥）。"""
+async def miniprogram_config(
+    request: Request,
+    db: DbSession,
+    store_id: int | None = None,
+):
+    """小程序前端配置（订阅模板、隐私能力开关等，不含密钥）。
+
+    可传 store_id：门店可覆盖的开关走 effective_bool；主体级隐私开关仍为全局。
+    """
     from app.services.system_settings_service import SystemSettingsService
 
     settings = get_settings()
     await SystemSettingsService.ensure_seeded(db)
+    sid = int(store_id) if store_id else None
     tmpl = (
         await SystemSettingsService.get_value(
             db,
@@ -192,14 +200,17 @@ async def miniprogram_config(request: Request, db: DbSession):
     ).strip()
 
     async def _flag(key: str, fallback: bool) -> bool:
-        return await SystemSettingsService.get_bool(db, key, fallback)
+        return await SystemSettingsService.effective_bool(
+            db, key, fallback, store_id=sid
+        )
 
     return success(
         {
+            "store_id": sid,
             "subscribe_templates": {
                 "order_ready": tmpl or None,
             },
-            # 优先 system_settings，种子默认值来自 .env ENABLE_* 
+            # 优先 system_settings / 门店覆盖，种子默认值来自 .env ENABLE_*
             "enable_alipay_avatar": await _flag("enable_alipay_avatar", settings.enable_alipay_avatar),
             "enable_alipay_nickname": await _flag("enable_alipay_nickname", settings.enable_alipay_nickname),
             "enable_alipay_phone_bind": await _flag(
@@ -217,6 +228,9 @@ async def miniprogram_config(request: Request, db: DbSession):
             ),
             "hide_member_empty_wallet": await _flag(
                 "hide_member_empty_wallet", settings.hide_member_empty_wallet
+            ),
+            "enable_customer_display": await _flag(
+                "enable_customer_display", settings.enable_customer_display
             ),
         },
         request=request,

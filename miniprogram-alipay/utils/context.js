@@ -119,6 +119,10 @@ function applyContext(table, store, options) {
           auth.ensureCartForCurrentStore()
         }
       } catch (_) {}
+      try {
+        require('./clientConfig').invalidateClientConfig()
+        require('./clientConfig').loadClientConfig(true, newStoreId).catch(() => {})
+      } catch (_) {}
     }
   }
 }
