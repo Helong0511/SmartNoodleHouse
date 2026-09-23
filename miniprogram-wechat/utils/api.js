@@ -43,6 +43,19 @@ function parseResponseBody(raw) {
   return {}
 }
 
+function formatValidationDetail(detail) {
+  if (!Array.isArray(detail) || !detail.length) return ''
+  const first = detail[0] || {}
+  const loc = Array.isArray(first.loc) ? first.loc : []
+  const field = loc.length ? String(loc[loc.length - 1]) : ''
+  if (field === 'quantity' || /quantity/i.test(loc.join('.'))) {
+    const max = first.ctx && first.ctx.le != null ? first.ctx.le : null
+    return max != null ? `单品数量不能超过 ${max}` : '单品数量超出限制'
+  }
+  if (typeof first.msg === 'string' && first.msg) return first.msg
+  return '请求参数有误'
+}
+
 function pickErrorMessage(resOrErr, fallback) {
   if (!resOrErr) return fallback
   if (typeof resOrErr === 'string') return resOrErr
@@ -50,7 +63,10 @@ function pickErrorMessage(resOrErr, fallback) {
   if (typeof resOrErr.data === 'string' && resOrErr.data.trim()) return resOrErr.data.trim()
   if (body.message) return body.message
   if (body.detail) {
-    return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+    if (typeof body.detail === 'string') return body.detail
+    const friendly = formatValidationDetail(body.detail)
+    if (friendly) return friendly
+    return JSON.stringify(body.detail)
   }
   const status = resOrErr.statusCode
   if (status != null && status >= 400) {

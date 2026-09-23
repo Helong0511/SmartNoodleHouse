@@ -2,10 +2,13 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+# 单行品项数量上限（宴会/团餐可能超过 99；购物车连点也可累加）
+MAX_ORDER_ITEM_QUANTITY = 999
+
 
 class OrderItemCreate(BaseModel):
     product_id: int
-    quantity: int = Field(ge=1, le=99)
+    quantity: int = Field(ge=1, le=MAX_ORDER_ITEM_QUANTITY)
     option_ids: list[int] = []
     remark: str | None = None
 

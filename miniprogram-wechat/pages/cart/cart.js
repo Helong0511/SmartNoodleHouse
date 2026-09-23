@@ -117,6 +117,9 @@ Page({
     if (qty <= 0) {
       cart.splice(index, 1)
       try { tracker.cartRemove(Number(item.product_id), { scene: 'cart', category_id: item.category_id || null }) } catch (_) {}
+    } else if (qty > 999) {
+      wx.showToast({ title: '单品最多 999 份', icon: 'none' })
+      return
     } else {
       cartUtil.normalizeItem(item)
       item.quantity = qty

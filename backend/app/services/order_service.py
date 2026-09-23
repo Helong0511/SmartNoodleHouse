@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppException
 from app.core.response import money
 from app.models import Option, OptionGroup, Order, OrderItem, OrderItemOption, Product, ProductCategory, ProductOptionGroup
+from app.schemas.order import MAX_ORDER_ITEM_QUANTITY
 from app.services.category_require import format_require_hint, resolve_product_requires
 from app.services.stock_service import deduct_for_order_items
 
@@ -356,8 +357,8 @@ class OrderPriceCalculator:
             product_id = int(item["product_id"])
             quantity = int(item["quantity"])
             option_ids = [int(x) for x in (item.get("option_ids") or [])]
-            if quantity <= 0 or quantity > 99:
-                raise AppException(40001, "数量非法")
+            if quantity <= 0 or quantity > MAX_ORDER_ITEM_QUANTITY:
+                raise AppException(40001, f"单品数量须在 1～{MAX_ORDER_ITEM_QUANTITY}")
 
             product = products[product_id]
             bound_groups = bound_by_product.get(product_id, {})

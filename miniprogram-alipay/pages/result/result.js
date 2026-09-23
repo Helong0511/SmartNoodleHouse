@@ -130,12 +130,15 @@ Page({
   onLoad(query) {
     this.orderId = query.order_id
     this.pointsEarned = Number(query.points_earned || 0)
-    this._refreshWithSync()
+    this._boot()
     this._pollTimer = setInterval(() => this._refreshWithSync(true), 8000)
   },
 
   onShow() {
-    if (this.orderId) this._refreshWithSync(true)
+    if (!this.orderId || this._booting) return
+    if (this.data.order && this.data.order.order_no) {
+      this._refreshWithSync(true)
+    }
   },
 
   onUnload() {
@@ -146,22 +149,61 @@ Page({
     this._refreshWithSync(false).finally(() => my.stopPullDownRefresh())
   },
 
-  async _refreshWithSync(silent) {
+  async _boot() {
+    this._booting = true
+    try {
+      await this.loadOrder(false)
+      this._syncPendingInBackground()
+    } finally {
+      this._booting = false
+    }
+  },
+
+  _syncPendingInBackground() {
     const pending = payUtil.readPending()
     const needSync =
       pending &&
       this.orderId &&
       String(pending.orderId) === String(this.orderId)
-    if (needSync) {
-      await payUtil.confirmPending(api, {
+    if (!needSync) return
+    payUtil
+      .confirmPending(api, {
         orderId: this.orderId,
         paymentNo: pending.paymentNo
       })
-    }
-    await this.loadOrder(silent)
-    const order = this.data.order || {}
-    if (order.payment_status === 'PAID' || order.status === 'PAID') {
-      payUtil.clearPending(this.orderId)
+      .then((r) => {
+        if (r && r.paid) return this.loadOrder(true)
+        return new Promise((resolve) => setTimeout(resolve, 600)).then(() => this.loadOrder(true))
+      })
+      .catch(() => {})
+  },
+
+  async _refreshWithSync(silent) {
+    if (this._refreshing) return
+    this._refreshing = true
+    try {
+      const pending = payUtil.readPending()
+      const needSync =
+        pending &&
+        this.orderId &&
+        String(pending.orderId) === String(this.orderId)
+      const syncPromise = needSync
+        ? payUtil.confirmPending(api, {
+            orderId: this.orderId,
+            paymentNo: pending.paymentNo
+          })
+        : Promise.resolve(null)
+      await this.loadOrder(silent)
+      const sync = await syncPromise
+      if (sync && sync.paid) {
+        await this.loadOrder(true)
+      }
+      const order = this.data.order || {}
+      if (order.payment_status === 'PAID' || order.status === 'PAID') {
+        payUtil.clearPending(this.orderId)
+      }
+    } finally {
+      this._refreshing = false
     }
   },
 
@@ -197,9 +239,19 @@ Page({
 
   async loadOrder(silent) {
     if (!this.orderId) return
+    const seq = (this._loadSeq = (this._loadSeq || 0) + 1)
     if (!silent) this.setData({ loading: !this.data.order.order_no })
     try {
-      const order = await api.get(`/orders/${this.orderId}`)
+      let order = await api.get(`/orders/${this.orderId}`)
+      if ((!order || !order.id) && !silent) {
+        await new Promise((resolve) => setTimeout(resolve, 450))
+        if (seq !== this._loadSeq) return
+        order = await api.get(`/orders/${this.orderId}`)
+      }
+      if (seq !== this._loadSeq) return
+      if (!order || !order.id) {
+        throw new Error('订单暂未就绪，请下拉刷新')
+      }
       const fee = Number(order && order.packing_fee)
       const discount = parseFloat(order && order.discount_amount) || 0
       const couponDisc = parseFloat(order && order.coupon_discount) || 0
@@ -237,6 +289,7 @@ Page({
         this._loadFeedback()
       }
     } catch (e) {
+      if (seq !== this._loadSeq) return
       this.setData({ loading: false })
       if (!silent) my.showToast({ content: (e && e.message) || '加载失败', type: 'fail' })
     }

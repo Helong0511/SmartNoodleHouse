@@ -162,7 +162,7 @@ function mergeCartItem(cart, entry) {
   if (idx >= 0) {
     const cur = normalizeItem(list[idx])
     const add = entry.quantity || 1
-    cur.quantity = (cur.quantity || 1) + add
+    cur.quantity = Math.min(999, (cur.quantity || 1) + add)
     cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
     if (entry.no_member_discount != null) cur.no_member_discount = !!entry.no_member_discount
     if (!cur.imageUrl && entry.imageUrl) cur.imageUrl = entry.imageUrl

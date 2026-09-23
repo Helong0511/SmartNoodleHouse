@@ -1137,38 +1137,47 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
     from app.services.order_service import ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL
 
-    items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
+    items_rows = list(
+        (
+            await db.execute(
+                select(OrderItem).where(OrderItem.order_id == order_id).order_by(OrderItem.id)
+            )
+        ).scalars().all()
+    )
+    item_ids = [int(i.id) for i in items_rows]
+    opts_by_item: dict[int, list] = {iid: [] for iid in item_ids}
+    if item_ids:
+        for o in (
+            await db.execute(
+                select(OrderItemOption)
+                .where(OrderItemOption.order_item_id.in_(item_ids))
+                .order_by(OrderItemOption.id)
+            )
+        ).scalars().all():
+            opts_by_item.setdefault(int(o.order_item_id), []).append(o)
 
     items = []
-
-    for item in items_result.scalars():
-
-        opts_result = await db.execute(select(OrderItemOption).where(OrderItemOption.order_item_id == item.id))
-
-        items.append({
-
-            "id": item.id,
-
-            "product_id": item.product_id,
-
-            "product_name": item.product_name_snapshot,
-
-            "unit_price": str(item.unit_price_snapshot),
-
-            "quantity": item.quantity,
-
-            "subtotal": str(item.subtotal),
-
-            "options": [
-
-                {"group": o.group_name_snapshot, "name": o.option_name_snapshot, "code": o.option_code, "extra_price": str(o.extra_price_snapshot)}
-
-                for o in opts_result.scalars()
-
-            ],
-
-        })
-
+    for item in items_rows:
+        opts = opts_by_item.get(int(item.id), [])
+        items.append(
+            {
+                "id": item.id,
+                "product_id": item.product_id,
+                "product_name": item.product_name_snapshot,
+                "unit_price": str(item.unit_price_snapshot),
+                "quantity": item.quantity,
+                "subtotal": str(item.subtotal),
+                "options": [
+                    {
+                        "group": o.group_name_snapshot,
+                        "name": o.option_name_snapshot,
+                        "code": o.option_code,
+                        "extra_price": str(o.extra_price_snapshot),
+                    }
+                    for o in opts
+                ],
+            }
+        )
     store = await db.get(Store, order.store_id) if order.store_id else None
     from app.models import Customer
     from app.services.customer_display import is_customer_display_enabled, pickup_fields

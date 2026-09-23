@@ -74,7 +74,7 @@ Page({
     const delta = parseInt(e.currentTarget.dataset.delta, 10)
     let qty = (this.data.quantity || 1) + delta
     if (qty < 1) qty = 1
-    if (qty > 99) qty = 99
+    if (qty > 999) qty = 999
     this.setData({ quantity: qty }, () => this.updateDisplayPrice())
   },
 
