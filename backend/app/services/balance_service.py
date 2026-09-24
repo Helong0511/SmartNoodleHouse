@@ -115,6 +115,10 @@ class BalanceService:
         ).scalar_one_or_none()
         if not cust:
             raise AppException(40401, "顾客不存在")
+        from app.services.customer_service import CustomerService
+
+        if not CustomerService.is_member(cust):
+            raise AppException(40320, "请先开通会员后再使用余额支付", status_code=403)
         gift = money(cust.balance_gift or 0)
         principal = money(cust.balance_principal or 0)
         if gift + principal < pay:

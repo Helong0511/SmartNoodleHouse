@@ -1,4 +1,4 @@
-/** Tab 页切换时锁定导航栏色，避免回落默认白底闪一下 */
+/** Tab 页导航栏色：以 page.json / app.json 为准，仅在 onShow 轻量补一次 */
 
 const NAV_BG = '#ff6b35'
 const NAV_FRONT = '#ffffff'

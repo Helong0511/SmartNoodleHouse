@@ -7,7 +7,7 @@ CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4
 -- 切换数据库
 USE `smart_noodle_house`;
 
--- 部署前替换下方口令占位符；禁止把真实数据库密码提交到版本库。
+-- 部署前必须将下方口令替换为强密码；禁止把真实数据库密码提交到版本库。
 -- 仅授权本库；不含 GRANT OPTION / 跨库。生产应用账号可再收紧为仅 DML。
 CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'kb7$rL3d8!tQ';
 GRANT SELECT, INSERT, UPDATE, DELETE,
@@ -18,6 +18,9 @@ FLUSH PRIVILEGES;
 
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 0;
+
+-- BEGIN CANONICAL SCHEMA
+-- （Alembic 0001_baseline 仅执行本标记内的 DDL，不执行上方删库/授权）
 -- ----------------------------
 -- Table structure for ab_assignments
 -- ----------------------------
@@ -1472,5 +1475,7 @@ CREATE TABLE IF NOT EXISTS `welcome_logs` (
   CONSTRAINT `fk_welcome_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_welcome_camera` FOREIGN KEY (`camera_id`) REFERENCES `cameras` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '人脸迎宾记录表' ROW_FORMAT = Dynamic;
+
+-- END CANONICAL SCHEMA
 
 SET FOREIGN_KEY_CHECKS = 1;

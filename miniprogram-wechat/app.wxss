@@ -7,6 +7,13 @@ page {
   --radius-card: 20rpx;
   --safe-bottom: env(safe-area-inset-bottom);
 }
+/* 压掉 store-bar 宿主节点默认空隙，替代 virtualHost（避免 Tab 首切白屏） */
+store-bar {
+  display: block;
+  margin: 0;
+  padding: 0;
+  line-height: normal;
+}
 .btn-primary {
   background: #ff6b35;
   color: #fff;

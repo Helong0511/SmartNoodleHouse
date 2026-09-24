@@ -33,7 +33,7 @@ async def main() -> int:
         return 0
     except Exception as e:
         print("FAIL:", e)
-        print("\n请在 E:\\SmartNoodleHouse\\.env 设置正确的 DATABASE_URL，并确保已执行 sql/smart_noodle_house.sql。")
+        print("\n请在 E:\\SmartNoodleHouse\\.env 设置正确的 DATABASE_URL，并确保已执行 sql/struct.sql + sql/data.sql。")
         return 1
 
 

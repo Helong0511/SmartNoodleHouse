@@ -90,9 +90,6 @@ App({
     wx.reLaunch({ url: '/pages/index/index' })
   },
   onShow(options) {
-    try {
-      require('./utils/navBar').pinWechatNavBar()
-    } catch (_) {}
     if (options) this.parseLaunch(options)
     try { tracker.flush() } catch (_) {}
   },

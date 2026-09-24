@@ -20,8 +20,10 @@ function pickField(propVal, ctxVal) {
 
 Component({
   options: {
-    // 去掉自定义组件宿主节点，避免微信端顶栏下方多出一层空白
-    virtualHost: true
+    // 不用 virtualHost：部分基础库在 Tab 首次切入时会导致整页内容层不绘制（白屏）
+    // 宿主空白改由页面侧 store-bar { display:block; margin:0 } + 组件内 compact 贴顶消化
+    styleIsolation: 'apply-shared',
+    multipleSlots: false
   },
 
   properties: {

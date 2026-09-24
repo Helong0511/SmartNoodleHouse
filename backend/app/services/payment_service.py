@@ -14,6 +14,7 @@ from app.core.biz_no import generate_no, payment_biz, refund_biz, resolve_table_
 from app.core.exceptions import AppException
 from app.core.response import money, now_local
 from app.models import (
+    Customer,
     DiningTable,
     Order,
     Payment,
@@ -23,6 +24,7 @@ from app.models import (
     Store,
 )
 from app.services import alipay_client, wechat_pay_client
+from app.services.customer_service import CustomerService
 from app.services.order_lifecycle import apply_order_status
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.status_history import record_payment_status
@@ -661,6 +663,10 @@ class PaymentService:
             cid = customer_id or order.customer_id
             if not cid:
                 raise AppException(40040, "余额支付需绑定顾客")
+            # 游客/匿名会话不得使用储值财产能力
+            payer = await db.get(Customer, int(cid))
+            if not payer or not CustomerService.is_member(payer):
+                raise AppException(40320, "请先开通会员后再使用余额支付", status_code=403)
             # 储值已含赠送，禁止再叠会员折扣/券/代金券
             promo = (
                 money(getattr(order, "discount_amount", 0) or 0)

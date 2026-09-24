@@ -1,4 +1,4 @@
-﻿const api = require('../../utils/api')
+﻿﻿const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
@@ -110,7 +110,6 @@ Page({
   },
 
   onLoad() {
-    navBar.pinAlipayNavBar()
     // onLoad 先于 onShow，提前发起菜单请求利用页面初始化时间窗口
     this._menuLoaded = false
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
@@ -125,10 +124,6 @@ Page({
       this._unsubDine()
       this._unsubDine = null
     }
-  },
-
-  onHide() {
-    navBar.pinAlipayNavBar()
   },
 
   onShow() {

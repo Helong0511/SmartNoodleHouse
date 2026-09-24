@@ -1,3 +1,8 @@
+.store-bar-root {
+  display: block;
+  margin: 0;
+  padding: 0;
+}
 .bar {
   flex-shrink: 0;
   background: linear-gradient(135deg, #f0f7ff, #fff);

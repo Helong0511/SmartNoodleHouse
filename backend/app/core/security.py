@@ -18,6 +18,30 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
+# JWT 标准/内部声明：extra 不得覆盖，防止提权或伪造 typ/sub/exp
+_JWT_RESERVED_CLAIMS = frozenset(
+    {
+        "sub",
+        "exp",
+        "iat",
+        "nbf",
+        "jti",
+        "iss",
+        "aud",
+        "typ",
+        "ver",
+        "cam",
+        "store",
+    }
+)
+
+
+def _safe_extra_claims(extra: dict[str, Any] | None) -> dict[str, Any]:
+    if not extra:
+        return {}
+    return {k: v for k, v in extra.items() if k not in _JWT_RESERVED_CLAIMS}
+
+
 def create_access_token(
     subject: str | int,
     extra: dict[str, Any] | None = None,
@@ -32,19 +56,23 @@ def create_access_token(
         "jwt_expire_minutes", settings.jwt_expire_minutes
     )
     expire = now + timedelta(minutes=max(30, int(ttl)))
-    payload = {
-        "sub": str(subject),
-        "exp": expire,
-        "iat": now,
-        "nbf": now,
-        "jti": uuid4().hex,
-        "iss": settings.app_name,
-        "aud": settings.jwt_audience,
-        "typ": "staff",
-        "ver": token_version,
-    }
+    payload: dict[str, Any] = {}
     if extra:
-        payload.update(extra)
+        payload.update(_safe_extra_claims(extra))
+    # 标准声明最后写入，确保不可被 extra 覆盖
+    payload.update(
+        {
+            "sub": str(subject),
+            "exp": expire,
+            "iat": now,
+            "nbf": now,
+            "jti": uuid4().hex,
+            "iss": settings.app_name,
+            "aud": settings.jwt_audience,
+            "typ": "staff",
+            "ver": token_version,
+        }
+    )
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

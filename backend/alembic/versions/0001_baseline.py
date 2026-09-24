@@ -1,4 +1,4 @@
-"""baseline: 从 sql/smart_noodle_house.sql 的结构段构建完整 schema
+"""baseline: 从 sql/struct.sql 的 CANONICAL SCHEMA 段构建完整 schema
 
 Revision ID: 0001_baseline
 Revises:
@@ -37,17 +37,18 @@ def _repo_root() -> Path:
 
 
 def _schema_sql_path() -> Path:
-    return _repo_root() / "sql" / "smart_noodle_house.sql"
+    # 结构真源：sql/struct.sql（生产种子见 sql/data.sql）
+    return _repo_root() / "sql" / "struct.sql"
 
 
 def _extract_schema_section(raw: str) -> str:
-    """只读取唯一真源的 DDL，绝不执行删库、授权或生产种子段。"""
+    """只读取结构真源的 DDL，绝不执行删库、授权或生产种子段。"""
     start_marker = "-- BEGIN CANONICAL SCHEMA"
     end_marker = "-- END CANONICAL SCHEMA"
     start = raw.find(start_marker)
     end = raw.find(end_marker)
     if start < 0 or end < 0 or end <= start:
-        raise RuntimeError("数据库唯一真源缺少 CANONICAL SCHEMA 分段标记")
+        raise RuntimeError("sql/struct.sql 缺少 CANONICAL SCHEMA 分段标记")
     return raw[start + len(start_marker) : end]
 
 
@@ -63,7 +64,13 @@ def _split_sql_statements(sql: str) -> list[str]:
 
 
 def _should_skip_statement(stmt: str) -> bool:
-    return bool(re.match(r"(?is)^(CREATE\s+DATABASE|USE)\b", stmt))
+    # 防御性跳过：即使误入标记区也不执行删库/授权类语句
+    return bool(
+        re.match(
+            r"(?is)^(DROP\s+DATABASE|CREATE\s+DATABASE|USE|CREATE\s+USER|GRANT\b|FLUSH\s+PRIVILEGES)\b",
+            stmt,
+        )
+    )
 
 
 def _mysql_errno(exc: BaseException) -> int | None:

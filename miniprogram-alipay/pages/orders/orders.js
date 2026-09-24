@@ -1,4 +1,4 @@
-﻿const api = require('../../utils/api')
+﻿﻿const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
@@ -50,7 +50,6 @@ Page({
   },
 
   onLoad() {
-    navBar.pinAlipayNavBar()
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
       this.applyDineContext(ctx)
     })
@@ -61,10 +60,6 @@ Page({
       this._unsubDine()
       this._unsubDine = null
     }
-  },
-
-  onHide() {
-    navBar.pinAlipayNavBar()
   },
 
   onShow() {

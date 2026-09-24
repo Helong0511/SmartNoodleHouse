@@ -156,10 +156,10 @@ Page({
   },
 
   onLoad() {
-    navBar.pinAlipayNavBar()
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
       this.applyDineContext(ctx)
     })
+    this.applyDineContext(dineCtx.currentDisplay())
   },
 
   onUnload() {
@@ -169,44 +169,64 @@ Page({
     }
   },
 
-  onHide() {
-    navBar.pinAlipayNavBar()
+  onReady() {
+    this._ensurePainted()
   },
 
   onShow() {
     navBar.pinAlipayNavBar()
+    this.applyDineContext(dineCtx.currentDisplay())
+    this._ensurePainted()
+
     if (app._privacyPopup && app.globalData.needPrivacyPopup) {
       app._privacyPopup.show()
     }
     this.setData({
       showDevTips: shouldShowDevTips()
     })
-    clientConfig.loadClientConfig().then(() => {
-      this.setData({
-        ...clientConfig.alipayPrivacyPageData(),
-        ...clientConfig.memberPageFlags()
-      })
-    })
-    privacy.setupPrivacy().then((setting) => {
-      this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
-    })
-    this.loadPrivacySettings()
-    this.applyDineContext(dineCtx.currentDisplay())
-    dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
-    // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
-    // 充值成功回跳会置 walletDirty，必须强制刷新余额
-    const forceWallet = !!app.globalData.walletDirty
-    if (forceWallet) {
-      app.globalData.walletDirty = false
-      this._profileLoadedAt = 0
-      const snap = app.globalData.walletSnapshot
-      if (snap && snap.balance_total != null) {
-        this.setData({ balanceTotal: snap.balance_total || '0.00' })
-        app.globalData.walletSnapshot = null
+
+    const runHeavy = () => {
+      clientConfig.loadClientConfig().then(() => {
+        this.setData({
+          ...clientConfig.alipayPrivacyPageData(),
+          ...clientConfig.memberPageFlags()
+        })
+      }).catch(() => {})
+      privacy.setupPrivacy().then((setting) => {
+        this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
+      }).catch(() => {})
+      this.loadPrivacySettings()
+      dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx)).catch(() => {})
+      const forceWallet = !!app.globalData.walletDirty
+      if (forceWallet) {
+        app.globalData.walletDirty = false
+        this._profileLoadedAt = 0
+        const snap = app.globalData.walletSnapshot
+        if (snap && snap.balance_total != null) {
+          this.setData({ balanceTotal: snap.balance_total || '0.00' })
+          app.globalData.walletSnapshot = null
+        }
       }
+      const forcePrefs = !app.globalData.prefsAt
+      this.loadProfile(forcePrefs || forceWallet)
     }
-    const forcePrefs = !app.globalData.prefsAt
-    this.loadProfile(forcePrefs || forceWallet)
+    this._showEpoch = (this._showEpoch || 0) + 1
+    const epoch = this._showEpoch
+    setTimeout(() => {
+      if (this._showEpoch !== epoch) return
+      runHeavy()
+    }, 0)
+    if (this._loadingWatchdog) clearTimeout(this._loadingWatchdog)
+    this._loadingWatchdog = setTimeout(() => {
+      if (this.data.loading) this.setData({ loading: false })
+    }, 8000)
+  },
+
+  _ensurePainted() {
+    if (this.data.loading && !this.data.customerNo && !this._paintNudgeAt) {
+      this._paintNudgeAt = Date.now()
+      this.setData({ loading: true })
+    }
   },
 
   applyDineContext(ctx) {
@@ -279,6 +299,10 @@ Page({
   },
 
   async loadProfile(force = false) {
+    if (this._profileInflight) {
+      if (force) this._profileNeedReload = true
+      return this._profileInflight
+    }
     const hasCache = !!this.data.customerNo
     if (!hasCache) this.setData({ loading: true })
     const now = Date.now()
@@ -291,32 +315,41 @@ Page({
       this.setData({ loading: false })
       return
     }
-    try {
-      await auth.ensureLogin()
-      const cid = app.globalData.customerId || auth.readStorage('customer_id')
-      if (cid) app.globalData.customerId = cid
-      this.setData({ walletLoading: true })
-      const storeId = dineCtx.currentDisplay().storeId
-      const [profile, prefView, couponRes, voucherRes] = await Promise.all([
-        api.get('/miniprogram/customers/me'),
-        prefUtil.loadCustomerPrefs(app, api).catch(() => prefUtil.buildPrefDisplay({})),
-        api.get('/miniprogram/coupons/mine', { store_id: storeId }).catch(() => ({ items: [] })),
-        api.get('/miniprogram/vouchers/mine', { store_id: storeId }).catch(() => ({ items: [] }))
-      ])
-      if (!profile || typeof profile !== 'object') {
-        throw new Error('会员资料加载失败，请稍后重试')
+    this._profileInflight = (async () => {
+      try {
+        await auth.ensureLogin()
+        const cid = app.globalData.customerId || auth.readStorage('customer_id')
+        if (cid) app.globalData.customerId = cid
+        this.setData({ walletLoading: true })
+        const storeId = dineCtx.currentDisplay().storeId
+        const [profile, prefView, couponRes, voucherRes] = await Promise.all([
+          api.get('/miniprogram/customers/me'),
+          prefUtil.loadCustomerPrefs(app, api).catch(() => prefUtil.buildPrefDisplay({})),
+          api.get('/miniprogram/coupons/mine', { store_id: storeId }).catch(() => ({ items: [] })),
+          api.get('/miniprogram/vouchers/mine', { store_id: storeId }).catch(() => ({ items: [] }))
+        ])
+        if (!profile || typeof profile !== 'object') {
+          throw new Error('会员资料加载失败，请稍后重试')
+        }
+        if (profile.customer_id) {
+          app.globalData.customerId = profile.customer_id
+          my.setStorageSync({ key: 'customer_id', data: profile.customer_id })
+        }
+        this.applyProfile(profile, prefView)
+        this.applyWallet(couponRes, voucherRes)
+        this._profileLoadedAt = Date.now()
+      } catch (e) {
+        this.setData({ loading: false, walletLoading: false })
+        if (!hasCache) my.showToast({ content: e.message || '加载失败', type: 'fail' })
+      } finally {
+        this._profileInflight = null
+        if (this._profileNeedReload) {
+          this._profileNeedReload = false
+          this.loadProfile(true)
+        }
       }
-      if (profile.customer_id) {
-        app.globalData.customerId = profile.customer_id
-        my.setStorageSync({ key: 'customer_id', data: profile.customer_id })
-      }
-      this.applyProfile(profile, prefView)
-      this.applyWallet(couponRes, voucherRes)
-      this._profileLoadedAt = now
-    } catch (e) {
-      this.setData({ loading: false, walletLoading: false })
-      if (!hasCache) my.showToast({ content: e.message || '加载失败', type: 'fail' })
-    }
+    })()
+    return this._profileInflight
   },
 
   async loadWallet() {

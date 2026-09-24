@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-SQL_FILE = ROOT / "sql" / "smart_noodle_house.sql"
+SQL_FILE = ROOT / "sql" / "struct.sql"
 # 已知 ORM 通过 TimestampMixin 注入但 SQL 文件实际有 created_at/updated_at 的表
 TIMESTAMP_COLS = frozenset({"created_at", "updated_at"})
 # SQL 文件有但 ORM 不映射的 GENERATED/隐藏列

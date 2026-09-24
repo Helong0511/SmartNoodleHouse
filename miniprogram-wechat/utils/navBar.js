@@ -1,8 +1,7 @@
-/** Tab 页切换时锁定导航栏色，避免 iOS/微信回落默认白底闪一下 */
+/** Tab 页导航栏色：以 page.json / app.json 为准，仅在 onShow 轻量补一次，避免切 Tab 白屏 */
 
 const NAV_BG = '#ff6b35'
 const NAV_FRONT = '#ffffff'
-const PAGE_BG = '#f7f7f7'
 
 function pinWechatNavBar() {
   try {
@@ -11,15 +10,6 @@ function pinWechatNavBar() {
       backgroundColor: NAV_BG,
       animation: { duration: 0, timingFunc: 'linear' }
     })
-  } catch (_) {}
-  try {
-    if (typeof wx.setBackgroundColor === 'function') {
-      wx.setBackgroundColor({
-        backgroundColor: PAGE_BG,
-        backgroundColorTop: NAV_BG,
-        backgroundColorBottom: PAGE_BG
-      })
-    }
   } catch (_) {}
 }
 

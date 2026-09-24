@@ -1,3 +1,4 @@
+<view class="store-bar-root">
 <view class="bar {{compact ? 'compact' : ''}}" wx:if="{{viewStoreName || viewTableName}}">
   <view class="bar-top">
     <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" lazy-load />
@@ -35,4 +36,5 @@
     <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" lazy-load />
     <text class="hint">请扫描桌台二维码进入门店</text>
   </view>
+</view>
 </view>

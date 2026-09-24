@@ -119,10 +119,11 @@ Page({
   },
 
   onLoad() {
-    navBar.pinWechatNavBar()
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
       this.applyDineContext(ctx)
     })
+    // 首屏先用本地桌台上下文铺顶栏，避免等 ensureDineContext 才画
+    this.applyDineContext(dineCtx.currentDisplay())
   },
 
   onUnload() {
@@ -132,44 +133,71 @@ Page({
     }
   },
 
-  onHide() {
-    navBar.pinWechatNavBar()
+  onReady() {
+    // 部分机型 Tab 首切内容层未绘：就绪后再轻推一次差分 setData 触发重绘
+    this._ensurePainted()
   },
 
   onShow() {
     navBar.pinWechatNavBar()
+    this.applyDineContext(dineCtx.currentDisplay())
+    this._ensurePainted()
+
     if (app._privacyPopup && app.globalData.needPrivacyPopup) {
       app._privacyPopup.show()
     }
     this.setData({
       showDevTips: shouldShowDevTips()
     })
-    clientConfig.loadClientConfig().then(() => {
-      this.setData({
-        ...clientConfig.wxPrivacyPageData(),
-        ...clientConfig.memberPageFlags()
-      })
-    })
-    privacy.setupPrivacy().then((setting) => {
-      this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
-    })
-    this.loadPrivacySettings()
-    this.applyDineContext(dineCtx.currentDisplay())
-    dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx))
-    // 支付成功会 clearPrefsCache（prefsAt=0），此处强制重拉，避免 30s 资料缓存挡住智能口味
-    // 充值成功回跳会置 walletDirty，必须强制刷新余额
-    const forceWallet = !!app.globalData.walletDirty
-    if (forceWallet) {
-      app.globalData.walletDirty = false
-      this._profileLoadedAt = 0
-      const snap = app.globalData.walletSnapshot
-      if (snap && snap.balance_total != null) {
-        this.setData({ balanceTotal: snap.balance_total || '0.00' })
-        app.globalData.walletSnapshot = null
+
+    // 重活延后到下一帧，先让 store-bar / 骨架完成首绘（扫码后立刻切会员时尤其重要）
+    const runHeavy = () => {
+      clientConfig.loadClientConfig().then(() => {
+        this.setData({
+          ...clientConfig.wxPrivacyPageData(),
+          ...clientConfig.memberPageFlags()
+        })
+      }).catch(() => {})
+      privacy.setupPrivacy().then((setting) => {
+        this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
+      }).catch(() => {})
+      this.loadPrivacySettings()
+      dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx)).catch(() => {})
+      const forceWallet = !!app.globalData.walletDirty
+      if (forceWallet) {
+        app.globalData.walletDirty = false
+        this._profileLoadedAt = 0
+        const snap = app.globalData.walletSnapshot
+        if (snap && snap.balance_total != null) {
+          this.setData({ balanceTotal: snap.balance_total || '0.00' })
+          app.globalData.walletSnapshot = null
+        }
       }
+      const forcePrefs = !app.globalData.prefsAt
+      this.loadProfile(forcePrefs || forceWallet)
     }
-    const forcePrefs = !app.globalData.prefsAt
-    this.loadProfile(forcePrefs || forceWallet)
+    this._showEpoch = (this._showEpoch || 0) + 1
+    const epoch = this._showEpoch
+    const schedule = typeof wx !== 'undefined' && typeof wx.nextTick === 'function'
+      ? (fn) => wx.nextTick(fn)
+      : (fn) => setTimeout(fn, 0)
+    schedule(() => {
+      if (this._showEpoch !== epoch) return
+      runHeavy()
+    })
+    // 兜底：登录/接口卡住时也要结束骨架，避免长期白屏感
+    if (this._loadingWatchdog) clearTimeout(this._loadingWatchdog)
+    this._loadingWatchdog = setTimeout(() => {
+      if (this.data.loading) this.setData({ loading: false })
+    }, 8000)
+  },
+
+  _ensurePainted() {
+    // 仅在仍停在 loading 且尚无会员编号时轻推，避免无意义整页 setData
+    if (this.data.loading && !this.data.customerNo && !this._paintNudgeAt) {
+      this._paintNudgeAt = Date.now()
+      this.setData({ loading: true })
+    }
   },
 
   applyDineContext(ctx) {
@@ -243,6 +271,10 @@ Page({
   },
 
   async loadProfile(force = false) {
+    if (this._profileInflight) {
+      if (force) this._profileNeedReload = true
+      return this._profileInflight
+    }
     const hasCache = !!this.data.customerNo
     if (!hasCache) this.setData({ loading: true })
     const now = Date.now()
@@ -255,36 +287,45 @@ Page({
       this.setData({ loading: false })
       return
     }
-    try {
-      await auth.ensureLogin()
-      const cid = app.globalData.customerId || auth.readStorage('customer_id')
-      if (cid) app.globalData.customerId = cid
-      this.setData({ walletLoading: true })
-      const storeId = dineCtx.currentDisplay().storeId
-      const [profile, prefView, couponRes, voucherRes] = await Promise.all([
-        api.get('/miniprogram/customers/me'),
-        prefUtil.loadCustomerPrefs(app, api).catch(() => prefUtil.buildPrefDisplay({})),
-        api.get('/miniprogram/coupons/mine', { store_id: storeId }).catch(() => ({ items: [] })),
-        api.get('/miniprogram/vouchers/mine', { store_id: storeId }).catch(() => ({ items: [] }))
-      ])
-      if (!profile || typeof profile !== 'object') {
-        throw new Error('会员资料加载失败，请稍后重试')
+    this._profileInflight = (async () => {
+      try {
+        await auth.ensureLogin()
+        const cid = app.globalData.customerId || auth.readStorage('customer_id')
+        if (cid) app.globalData.customerId = cid
+        this.setData({ walletLoading: true })
+        const storeId = dineCtx.currentDisplay().storeId
+        const [profile, prefView, couponRes, voucherRes] = await Promise.all([
+          api.get('/miniprogram/customers/me'),
+          prefUtil.loadCustomerPrefs(app, api).catch(() => prefUtil.buildPrefDisplay({})),
+          api.get('/miniprogram/coupons/mine', { store_id: storeId }).catch(() => ({ items: [] })),
+          api.get('/miniprogram/vouchers/mine', { store_id: storeId }).catch(() => ({ items: [] }))
+        ])
+        if (!profile || typeof profile !== 'object') {
+          throw new Error('会员资料加载失败，请稍后重试')
+        }
+        if (profile.customer_id) {
+          app.globalData.customerId = profile.customer_id
+          wx.setStorageSync('customer_id', profile.customer_id)
+        }
+        if (profile.customer_no) {
+          app.globalData.customerNo = profile.customer_no
+          wx.setStorageSync('customer_no', profile.customer_no)
+        }
+        this.applyProfile(profile, prefView)
+        this.applyWallet(couponRes, voucherRes)
+        this._profileLoadedAt = Date.now()
+      } catch (e) {
+        this.setData({ loading: false, walletLoading: false })
+        if (!hasCache) wx.showToast({ title: e.message || '加载失败', icon: 'none' })
+      } finally {
+        this._profileInflight = null
+        if (this._profileNeedReload) {
+          this._profileNeedReload = false
+          this.loadProfile(true)
+        }
       }
-      if (profile.customer_id) {
-        app.globalData.customerId = profile.customer_id
-        wx.setStorageSync('customer_id', profile.customer_id)
-      }
-      if (profile.customer_no) {
-        app.globalData.customerNo = profile.customer_no
-        wx.setStorageSync('customer_no', profile.customer_no)
-      }
-      this.applyProfile(profile, prefView)
-      this.applyWallet(couponRes, voucherRes)
-      this._profileLoadedAt = now
-    } catch (e) {
-      this.setData({ loading: false, walletLoading: false })
-      if (!hasCache) wx.showToast({ title: e.message || '加载失败', icon: 'none' })
-    }
+    })()
+    return this._profileInflight
   },
 
   async loadWallet() {

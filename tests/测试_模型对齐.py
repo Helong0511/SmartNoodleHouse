@@ -58,7 +58,7 @@ def parse_models(path: Path) -> dict[str, dict[str, str]]:
 
 
 def test_schema_model_table_alignment():
-    sql_tables = parse_sql_schema(ROOT / "sql" / "smart_noodle_house.sql")
+    sql_tables = parse_sql_schema(ROOT / "sql" / "struct.sql")
     model_tables = parse_models(ROOT / "backend" / "app" / "models" / "__init__.py")
 
     assert not (set(model_tables) - set(sql_tables)), (
@@ -71,8 +71,8 @@ def test_schema_model_table_alignment():
     model_only_cols = []
     sql_only_cols = []
     timestamp_cols = frozenset({"created_at", "updated_at"})
-    # MySQL GENERATED 列可不映射到 ORM
-    skip_sql_cols = frozenset(
+    # MySQL GENERATED 列：SQL 解析器跳过，ORM 可映射；双向忽略
+    skip_generated_cols = frozenset(
         {
             ("cashier_shifts", "open_operator_key"),
             ("option_groups", "store_scope"),
@@ -83,9 +83,11 @@ def test_schema_model_table_alignment():
         mcols = set(model_tables[tname])
         scols = set(sql_tables[tname])
         for c in sorted(mcols - scols):
+            if (tname, c) in skip_generated_cols:
+                continue
             model_only_cols.append((tname, c))
         for c in sorted(scols - mcols):
-            if c in timestamp_cols or (tname, c) in skip_sql_cols:
+            if c in timestamp_cols or (tname, c) in skip_generated_cols:
                 continue
             sql_only_cols.append((tname, c))
 
@@ -94,7 +96,7 @@ def test_schema_model_table_alignment():
 
 
 if __name__ == "__main__":
-    sql_tables = parse_sql_schema(ROOT / "sql" / "smart_noodle_house.sql")
+    sql_tables = parse_sql_schema(ROOT / "sql" / "struct.sql")
     model_tables = parse_models(ROOT / "backend" / "app" / "models" / "__init__.py")
     print("tables model-only:", sorted(set(model_tables) - set(sql_tables)))
     print("tables sql-only:", sorted(set(sql_tables) - set(model_tables)))

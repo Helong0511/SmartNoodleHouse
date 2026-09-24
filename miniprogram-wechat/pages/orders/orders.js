@@ -50,7 +50,6 @@ Page({
   },
 
   onLoad() {
-    navBar.pinWechatNavBar()
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
       this.applyDineContext(ctx)
     })
@@ -61,10 +60,6 @@ Page({
       this._unsubDine()
       this._unsubDine = null
     }
-  },
-
-  onHide() {
-    navBar.pinWechatNavBar()
   },
 
   onShow() {

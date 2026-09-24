@@ -483,6 +483,9 @@ async def create_recharge(
     """顾客选档充值并拉起微信/支付宝支付。"""
     from app.services.payment_service import PaymentService
 
+    if not CustomerService.is_member(customer):
+        raise AppException(40320, "请先开通会员后再充值", status_code=403)
+
     pkg = await db.get(RechargePackage, data.package_id)
     if not pkg or int(pkg.status) != 1:
         raise AppException(40490, "充值档位不可用")

@@ -38,33 +38,33 @@
 
 ### 2. 数据库
 
-**全新环境**执行唯一数据库脚本（会删除并重建同名库，已有业务数据勿执行）：
+**全新环境**按结构 + 生产种子初始化（会删除并重建同名库，已有业务数据勿执行 `struct.sql`）：
 
 ```bash
-mysql -u root -p < sql/smart_noodle_house.sql
-python scripts/init_admin.py
+mysql -u root -p < sql/struct.sql
+mysql -u root -p < sql/data.sql
+python scripts/初始化管理员.py
 ```
 
-生产部署前必须修改脚本内数据库账号密码占位符，并设置管理员强密码：
+生产部署前必须修改 `sql/struct.sql` 内数据库账号密码占位符，并设置管理员强密码：
 
 ```bash
-mysql -u root -p < sql/smart_noodle_house.sql
+# 先把 struct.sql 中 REPLACE_WITH_STRONG_DB_PASSWORD 换成强密码
+mysql -u root -p < sql/struct.sql
+mysql -u root -p < sql/data.sql
 set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
-python scripts/init_admin.py
+python scripts/初始化管理员.py
 ```
 
 | 脚本 | 说明 |
 |------|------|
-| `smart_noodle_house.sql` | **唯一真源**：建库授权、完整结构与生产基础数据 |
-| `002_seed_test.sql` | **仅开发**：样例商品、订单、admin/cashier/manager |
-| `sql/tools/003_capacity_audit.sql` | 容量审计（运维工具，非迁移） |
-| `sql/tools/004_fix_delivery_dining_type.sql` | 历史外卖订单 dining_type 修复（幂等） |
-| `sql/tools/005_backfill_member_level.sql` | 已注册顾客补挂普通会员等级（幂等） |
-| `sql/tools/006_customer_token_version.sql` | 已有库补齐 customers.token_version（幂等） |
-| `sql/tools/008_member_level_manage.sql` | 会员等级管理权限（幂等） |
-| `sql/tools/010_product_no_cooking.sql` | 商品表增加 `no_cooking`（免烹饪 / 直出餐，幂等） |
+| `sql/struct.sql` | **结构真源**：建库授权、完整 DDL（含 Alembic baseline 的 CANONICAL SCHEMA 段） |
+| `sql/data.sql` | **生产必要种子**：角色权限、系统参数、默认会员等级等 |
+| `sql/data_test.sql` | **仅本地测试**：样例商品、订单、admin/cashier/manager（禁止写入生产） |
 
-开发种子默认管理员: `admin` / `admin123`（生产请用 `init_admin.py` 设置强密码）
+已有库升级请用 Alembic：`cd backend && alembic upgrade head`（`0001_baseline` 只执行 `struct.sql` 的 CANONICAL SCHEMA，不删库）。
+
+开发种子默认管理员: `admin` / `admin123`（生产请用 `初始化管理员.py` 设置强密码）
 
 ### 3. 后端
 
