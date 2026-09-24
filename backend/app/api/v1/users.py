@@ -412,6 +412,7 @@ async def update_user(
             raise AppException(40312, "仅超管可清空门店绑定")
         if target.store_id is not None:
             perm_changes["store_id"] = {"from": target.store_id, "to": None}
+            target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
         target.store_id = None
     elif data.store_id is not None:
         assert_store_access(user, data.store_id)
@@ -422,6 +423,7 @@ async def update_user(
                 raise AppException(40313, "不能将员工改绑到其他门店")
         if target.store_id != int(data.store_id):
             perm_changes["store_id"] = {"from": target.store_id, "to": int(data.store_id)}
+            target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
         target.store_id = int(data.store_id)
 
     if data.display_name is not None:

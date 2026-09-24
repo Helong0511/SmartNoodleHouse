@@ -777,12 +777,18 @@ class CouponService:
 
     @staticmethod
     async def release_for_order(db: AsyncSession, order: Order) -> None:
-        """关单/取消时释放预占券。"""
+        """关单/取消时释放预占券；全额退款时回滚已核销券。
+
+        - RESERVED：未支付取消 → 恢复 AVAILABLE
+        - USED：已支付后退款至 REFUNDED → 恢复 AVAILABLE（仅本订单核销的券）
+        """
         for cid in (order.customer_coupon_id, order.customer_voucher_id):
             if not cid:
                 continue
             cc = await db.get(CustomerCoupon, int(cid))
-            if cc and cc.status == "RESERVED" and cc.used_order_id == order.id:
+            if not cc or int(cc.used_order_id or 0) != int(order.id):
+                continue
+            if cc.status in ("RESERVED", "USED"):
                 cc.status = "AVAILABLE"
                 cc.used_order_id = None
                 cc.used_at = None
@@ -790,18 +796,25 @@ class CouponService:
 
     @staticmethod
     async def mark_used(db: AsyncSession, order: Order) -> None:
-        if order.customer_coupon_id:
-            cc = await db.get(CustomerCoupon, int(order.customer_coupon_id))
-            if cc and cc.status in ("AVAILABLE", "RESERVED"):
-                cc.status = "USED"
-                cc.used_order_id = order.id
-                cc.used_at = now_local()
-        if order.customer_voucher_id:
-            vp = await db.get(CustomerCoupon, int(order.customer_voucher_id))
-            if vp and vp.status in ("AVAILABLE", "RESERVED"):
-                vp.status = "USED"
-                vp.used_order_id = order.id
-                vp.used_at = now_local()
+        """支付成功核销：仅 RESERVED 且挂在本单的券可转 USED（行锁防竞态）。"""
+        for attr in ("customer_coupon_id", "customer_voucher_id"):
+            cid = getattr(order, attr, None)
+            if not cid:
+                continue
+            cc = (
+                await db.execute(
+                    select(CustomerCoupon).where(CustomerCoupon.id == int(cid)).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not cc:
+                continue
+            if cc.status == "USED" and int(cc.used_order_id or 0) == int(order.id):
+                continue
+            if cc.status != "RESERVED" or int(cc.used_order_id or 0) != int(order.id):
+                raise AppException(40064, "优惠券状态异常，无法核销")
+            cc.status = "USED"
+            cc.used_order_id = order.id
+            cc.used_at = now_local()
         await db.flush()
 
 

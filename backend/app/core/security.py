@@ -55,7 +55,7 @@ def create_access_token(
     ttl = SystemSettingsService.resolved_int_sync(
         "jwt_expire_minutes", settings.jwt_expire_minutes
     )
-    expire = now + timedelta(minutes=max(30, int(ttl)))
+    expire = now + timedelta(minutes=max(5, int(ttl)))
     payload: dict[str, Any] = {}
     if extra:
         payload.update(_safe_extra_claims(extra))
@@ -80,9 +80,11 @@ def create_stream_ticket(user_id: int, camera_id: int, *, store_id: int | None =
     """摄像头预览短期票据，避免把长生命周期 JWT 放进 URL query。"""
     settings = get_settings()
     now = datetime.now(timezone.utc)
+    # 流票据强制短时：上限 300 秒，默认 120
+    ttl = max(15, min(int(ttl_seconds or 120), 300))
     payload = {
         "sub": str(user_id),
-        "exp": now + timedelta(seconds=ttl_seconds),
+        "exp": now + timedelta(seconds=ttl),
         "iat": now,
         "nbf": now,
         "jti": uuid4().hex,
@@ -112,7 +114,12 @@ def create_customer_token(
         "customer_jwt_expire_minutes",
         int(getattr(settings, "customer_jwt_expire_minutes", None) or settings.jwt_expire_minutes),
     )
-    expire = now + timedelta(minutes=max(30, int(ttl)))
+    # 顾客令牌独立生命周期；下限 5 分钟，与配置一致（不再强制 30 分钟）
+    expire = now + timedelta(minutes=max(5, int(ttl)))
+    # 渠道仅允许微信/支付宝，防止客户端伪造任意 channel 写入令牌
+    ch = (channel or "wechat").strip().lower()
+    if ch not in ("wechat", "alipay"):
+        ch = "wechat"
     payload = {
         "sub": str(customer_id),
         "exp": expire,
@@ -122,7 +129,7 @@ def create_customer_token(
         "iss": settings.app_name,
         "aud": settings.jwt_audience,
         "typ": "customer",
-        "channel": channel,
+        "channel": ch,
         "ver": int(token_version or 0),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)

@@ -232,7 +232,7 @@
                 :model-value="row.enabled"
                 :loading="schedulerToggling === row.id"
                 :disabled="!canEditScheduler"
-                @change="(v) => toggleSchedulerJob(row, !!v)"
+                @change="(v: string | number | boolean) => toggleSchedulerJob(row, !!v)"
               />
             </template>
           </el-table-column>
@@ -502,7 +502,10 @@ function openSchedulerEdit(row: any) {
 async function toggleSchedulerJob(row: any, enabled: boolean) {
   schedulerToggling.value = row.id
   try {
-    const res = await api.put(`/settings/scheduler-jobs/${row.id}`, { enabled })
+    const res = (await api.put(`/settings/scheduler-jobs/${row.id}`, { enabled })) as {
+      data: any
+      message?: string
+    }
     schedulerJobs.value = res.data
     ElMessage.success(res.message || (enabled ? '已启用' : '已停用'))
   } catch (e: any) {
@@ -522,10 +525,10 @@ async function saveSchedulerJob() {
   }
   schedulerSaving.value = true
   try {
-    const res = await api.put(`/settings/scheduler-jobs/${schedulerEditing.value.id}`, {
+    const res = (await api.put(`/settings/scheduler-jobs/${schedulerEditing.value.id}`, {
       enabled: !!schedulerForm.value.enabled,
       schedule,
-    })
+    })) as { data: any; message?: string }
     schedulerJobs.value = res.data
     schedulerDlgVisible.value = false
     ElMessage.success(res.message || '已保存')
@@ -538,7 +541,10 @@ async function saveSchedulerJob() {
 
 async function resetSchedulerJob(row: any) {
   try {
-    const res = await api.put(`/settings/scheduler-jobs/${row.id}`, { reset: true })
+    const res = (await api.put(`/settings/scheduler-jobs/${row.id}`, { reset: true })) as {
+      data: any
+      message?: string
+    }
     schedulerJobs.value = res.data
     ElMessage.success(res.message || '已恢复默认')
   } catch (e: any) {

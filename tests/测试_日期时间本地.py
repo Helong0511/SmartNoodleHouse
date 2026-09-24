@@ -35,16 +35,27 @@ async def test_platform_token_refresh_skips_valid_naive_expiry(monkeypatch):
 
     async def fake_execute(stmt):
         result = MagicMock()
-        result.scalars.return_value = iter([binding])
+        # 第一次会话：select id → scalars().all()
+        # 第二次会话：select binding → scalar_one_or_none()
+        ids = MagicMock()
+        ids.all.return_value = [binding.id]
+        result.scalars.return_value = ids
+        result.scalar_one_or_none.return_value = binding
         return result
 
     db = AsyncMock()
     db.execute = fake_execute
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     monkeypatch.setattr(
         "app.services.platform_token_service.AsyncSessionLocal",
-        MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=db), __aexit__=AsyncMock())),
+        MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=db),
+                __aexit__=AsyncMock(return_value=None),
+            )
+        ),
     )
     refreshed = await PlatformTokenService.refresh_expiring_tokens(within_hours=24)
     assert refreshed == 0

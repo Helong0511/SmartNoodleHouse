@@ -99,7 +99,11 @@ async def _load_customer(db, token: str) -> Customer | None:
     except (JWTError, KeyError, ValueError):
         return None
     customer = await db.get(Customer, customer_id)
-    if not customer or customer.status != 1:
+    if (
+        not customer
+        or customer.status != 1
+        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+    ):
         return None
     if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
         return None

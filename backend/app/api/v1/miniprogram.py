@@ -310,12 +310,12 @@ async def bind_dine_table(
     if not qr_token and not settings.is_development:
         raise AppException(40050, "请先扫码进入门店后再选桌")
     if qr_token:
-        # 校验 qr_token 凭证：必须能解析到桌台，且与目标桌台同门店
+        # 校验 qr_token 凭证：必须能解析到桌台，且与目标桌台为同一桌（禁止同店互绑盗永久码）
         cred_table = await resolve_dining_table(db, qr_token)
         if not cred_table:
             raise AppException(40050, "扫码凭证无效，请重新扫码")
-        if int(cred_table.store_id) != int(table.store_id):
-            raise AppException(40052, "桌台不属于当前门店")
+        if int(cred_table.id) != int(table.id):
+            raise AppException(40052, "扫码桌台与所选桌台不一致，请重新扫码")
     else:
         # 开发环境兜底：须带 store_id 且一致
         if req_store is None:
@@ -354,7 +354,7 @@ async def bind_dine_table(
             "table_no": table.table_no,
             "table_name": table.table_name,
             "store_id": table.store_id,
-            "qr_token": table.qr_token,
+            # 不回传永久 qr_token，避免同店扫码后枚举 table_id 盗取全店桌台凭证
             "dining_session": DiningSessionService._session_payload(session),
         },
         request=request,

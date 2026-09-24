@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.api.deps import CurrentUser, DbSession, require_permission
+from app.core.exceptions import AppException
 from app.core.response import success
 from app.models import (
     DeliveryCallbackLog,
@@ -1398,13 +1399,17 @@ async def sync_shelf(data: ShelfPayload, request: Request, db: DbSession, user: 
 @router.post("/sync/reconcile", dependencies=[require_permission("product:update")])
 async def sync_reconcile(data: ReconcilePayload, request: Request, db: DbSession, user: CurrentUser):
     """手动触发库存对账：本地库存覆盖推送平台。"""
-    from app.services.store_scope import assert_store_access
+    from app.services.store_scope import assert_store_access, require_bound_store
 
-    sid = data.store_id
-    if sid:
+    if user.role.code == "SUPER_ADMIN":
+        sid = int(data.store_id) if data.store_id else None
+        if sid is None:
+            raise AppException(40061, "请指定要对账的门店")
         assert_store_access(user, sid)
-    elif getattr(user, "store_id", None):
-        sid = int(user.store_id)
+    else:
+        sid = require_bound_store(user, data.store_id)
+        if sid is None:
+            raise AppException(40301, "账号未绑定门店")
     result = await ProductSyncService.reconcile_stock(db, sid, data.platform)
     await AuditService.log_staff(
         db,

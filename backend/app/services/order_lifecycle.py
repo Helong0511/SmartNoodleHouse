@@ -114,13 +114,14 @@ async def apply_order_status(
             order.kitchen_claimed_at = None
             if do_restore:
                 await _restore_order_stock(db, order)
-            if target == "CANCELLED" and old == "PENDING_PAYMENT":
+            # 取消未支付：释放 RESERVED；全额退款：回滚 USED 券/代金券
+            if (target == "CANCELLED" and old == "PENDING_PAYMENT") or target == "REFUNDED":
                 try:
                     from app.services.coupon_service import CouponService
 
                     await CouponService.release_for_order(db, order)
                 except Exception:
-                    logger.exception("释放预占券失败 order_id=%s", order.id)
+                    logger.exception("释放/回滚优惠券失败 order_id=%s target=%s", order.id, target)
     elif target == "READY" and old != "READY":
         try:
             await notify_order_ready_subscribe(db, order)

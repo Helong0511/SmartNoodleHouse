@@ -411,17 +411,20 @@ class PaymentService:
 
     @classmethod
     async def paid_amount(cls, db: AsyncSession, order_id: int) -> Decimal:
-        """订单已成功入账金额（PAID 支付单合计）。"""
-        total = await db.scalar(
-            select(func.coalesce(func.sum(Payment.amount), 0)).where(
-                Payment.order_id == int(order_id),
-                Payment.status == "PAID",
-            )
-        )
-        return money(total or 0)
+        """订单净已收金额（已入账支付 − 成功退款）。
+
+        不得只统计 status=PAID：部分退款后支付单变为 PARTIAL_REFUND，
+        若仍按 PAID 合计会导致 remaining 虚高、可重复收款。
+        """
+        return await cls.order_net_collected(db, order_id)
 
     @classmethod
     async def remaining_amount(cls, db: AsyncSession, order: Order) -> Decimal:
+        # 全额退款终态：禁止再收
+        if str(getattr(order, "payment_status", "") or "").upper() == "REFUNDED":
+            return money(0)
+        if str(getattr(order, "status", "") or "").upper() == "REFUNDED":
+            return money(0)
         rem = money(order.total_amount) - await cls.paid_amount(db, order.id)
         return rem if rem > 0 else money(0)
 
@@ -430,7 +433,10 @@ class PaymentService:
         rows = (
             await db.execute(
                 select(Payment)
-                .where(Payment.order_id == int(order_id), Payment.status == "PAID")
+                .where(
+                    Payment.order_id == int(order_id),
+                    Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
+                )
                 .order_by(Payment.id.asc())
             )
         ).scalars().all()
@@ -442,6 +448,7 @@ class PaymentService:
                     "provider": p.provider,
                     "channel": p.channel,
                     "amount": str(money(p.amount)),
+                    "status": p.status,
                     "paid_at": p.paid_at.isoformat() if p.paid_at else None,
                 }
             )
@@ -1150,6 +1157,9 @@ class PaymentService:
                 if isinstance(q.get("raw"), dict) and q["raw"].get("total_fee"):
                     raw_amount = money(Decimal(str(q["raw"]["total_fee"])) / 100)
                     amount_ok = raw_amount == money(payment.amount)
+                elif trade_state == "SUCCESS":
+                    # SUCCESS 必须有金额，禁止缺字段入账
+                    amount_ok = False
             else:
                 if not _wechat_pay_configured():
                     return payment, {"synced": False, "trade_state": "NOT_CONFIGURED"}
@@ -1157,8 +1167,10 @@ class PaymentService:
                 trade_state = str(q.get("trade_state") or "").upper()
                 trade_no = q.get("transaction_id")
                 fen = q.get("amount_total_fen")
-                raw_amount = money(Decimal(str(fen)) / 100) if fen is not None else None
-                amount_ok = raw_amount is None or raw_amount == money(payment.amount)
+                if fen is None:
+                    raise AppException(40302, "查单成功但缺少金额，拒绝入账")
+                raw_amount = money(Decimal(str(fen)) / 100)
+                amount_ok = raw_amount == money(payment.amount)
             if trade_state == "SUCCESS":
                 if not amount_ok:
                     raise AppException(40302, "支付金额不匹配")
@@ -1179,7 +1191,9 @@ class PaymentService:
             trade_status = str(q.get("trade_status") or "").upper()
             if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED"):
                 total = q.get("total_amount")
-                if total is not None and money(Decimal(str(total))) != money(payment.amount):
+                if total is None:
+                    raise AppException(40302, "查单成功但缺少金额，拒绝入账")
+                if money(Decimal(str(total))) != money(payment.amount):
                     raise AppException(40302, "支付金额不匹配")
                 await cls._settle_from_query(
                     db,
@@ -1206,7 +1220,7 @@ class PaymentService:
         if payment.status == "PAID":
             return
         # 储值充值单：无餐饮 order_id
-        if payment.recharge_order_id and not payment.order_id:
+        if getattr(payment, "recharge_order_id", None) and not getattr(payment, "order_id", None):
             recharge = (
                 await db.execute(
                     select(RechargeOrder).where(RechargeOrder.id == payment.recharge_order_id).with_for_update()
@@ -1862,21 +1876,23 @@ class PaymentService:
 
         # P0-11: 退款金额严格校验 — provider refund_fee 必须匹配本地退款金额
         # 支付宝：refund_fee（元）；微信：verifier 回传 amount.refund（分，字段名 refund_amount）
+        # 生产 fail-closed：缺金额或解析失败一律拒绝，禁止按本地金额盲入账
         refund_fee_raw = parsed.get("refund_fee")
         if refund_fee_raw is None:
             refund_amount_raw = parsed.get("refund_amount")
             if refund_amount_raw is not None and provider_u == "WECHAT":
                 try:
                     refund_fee_raw = money(Decimal(str(refund_amount_raw)) / 100)
-                except (InvalidOperation, ValueError):
-                    refund_fee_raw = None
-        if refund_fee_raw is not None:
-            try:
-                provider_refund_amount = money(Decimal(str(refund_fee_raw)))
-                if provider_refund_amount != money(row.amount):
-                    raise AppException(40302, "退款金额不匹配")
-            except (InvalidOperation, ValueError):
-                logger.warning("退款回调 refund_fee 解析失败: %s", refund_fee_raw)
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(40302, "退款金额解析失败") from exc
+        if refund_fee_raw is None:
+            raise AppException(40302, "退款回调缺少金额，拒绝入账")
+        try:
+            provider_refund_amount = money(Decimal(str(refund_fee_raw)))
+        except (InvalidOperation, ValueError) as exc:
+            raise AppException(40302, "退款金额解析失败") from exc
+        if provider_refund_amount != money(row.amount):
+            raise AppException(40302, "退款金额不匹配")
 
         status_raw = str(parsed.get("refund_status") or "").upper()
         if provider_u == "WECHAT":
@@ -1887,8 +1903,16 @@ class PaymentService:
             else:
                 new_status = "PROCESSING"
         else:
-            # 支付宝：带退款字段的异步即视为该笔退款成功（仍以商户退款单对齐）
-            new_status = "SUCCESS"
+            # 支付宝：须有明确退款成功信号，禁止仅因带 refund 字段就 SUCCESS
+            alipay_ok = status_raw in ("SUCCESS", "REFUND_SUCCESS", "")
+            # gmt_refund / refund_fee 已校验金额；无失败码才视为成功
+            fail_code = str(parsed.get("refund_status") or parsed.get("trade_status") or "").upper()
+            if fail_code in ("CLOSED", "FAILED", "REFUND_CLOSED"):
+                new_status = "CLOSED"
+            elif alipay_ok or parsed.get("gmt_refund") or parsed.get("refund_fee"):
+                new_status = "SUCCESS"
+            else:
+                new_status = "PROCESSING"
 
         return await cls._finalize_refund(
             db,

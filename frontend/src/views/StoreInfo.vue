@@ -205,7 +205,7 @@
                   <el-switch
                     :model-value="!!row.auto_sync_open"
                     :disabled="!canEditDelivery || row.status !== 1"
-                    @change="(v) => toggleAutoSync(row, !!v)"
+                    @change="(v: string | number | boolean) => toggleAutoSync(row, !!v)"
                   />
                 </template>
               </el-table-column>

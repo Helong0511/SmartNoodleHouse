@@ -158,7 +158,7 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
 
 @pytest.mark.asyncio
 async def test_reprint_dedup_blocks_rapid_double_click():
-    """Redis NX 锁存在时应返回 "正在打印中"，不调用 print_order。"""
+    """幂等认领失败时应返回「请勿重复」，不调用 print_order。"""
     from app.api.v1.orders import reprint_kitchen_ticket
 
     order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001")
@@ -171,36 +171,23 @@ async def test_reprint_dedup_blocks_rapid_double_click():
     fake_request = MagicMock()
     fake_request.headers = {}
 
-    # 使用 SimpleNamespace + 真正的 async 函数，避免 MagicMock await 问题
-    async def fake_set(*args, **kwargs):
-        return None  # NX 失败 = 锁已存在
-
-    fake_redis = SimpleNamespace(set=fake_set)
-
     print_called = AsyncMock(return_value={"mock": True})
 
     from app.services.system_settings_service import SystemSettingsService
-    # 清除缓存避免之前测试预热影响 resolved_bool_sync 的 fallback 路径
     SystemSettingsService._cache = None
-
-    # 直接注入 _redis 全局变量，避免 patch classmethod 的不稳定性
-    import app.core.redis_client as redis_module
-    original_redis = redis_module._redis
-    redis_module._redis = fake_redis
 
     fake_settings = SimpleNamespace(xpyun_enabled=True)
 
     with patch(
         "app.core.config.get_settings", return_value=fake_settings,
     ), patch(
+        "app.domains.messaging.idempotency.try_acquire",
+        AsyncMock(return_value=False),
+    ), patch(
         "app.services.print_service.PrintService.print_order", print_called,
     ):
         result = await reprint_kitchen_ticket(10, fake_request, db, user)
 
-    # 恢复 _redis
-    redis_module._redis = original_redis
-
-    # print_order 不应被调用
     assert result["data"]["printed"] is False, f"printed should be False, got {result['data']}"
     assert "勿重复" in result["data"]["message"], f"message was: {result['data']['message']}"
     print_called.assert_not_awaited()
@@ -208,7 +195,7 @@ async def test_reprint_dedup_blocks_rapid_double_click():
 
 @pytest.mark.asyncio
 async def test_reprint_dedup_redis_down_degrades_gracefully():
-    """Redis 不可用时应降级放行，不阻断打印主流程。"""
+    """Redis 不可用时应降级走 MySQL 幂等，仍可打印主流程。"""
     from app.api.v1.orders import reprint_kitchen_ticket
 
     order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001", status="PAID")
@@ -217,6 +204,11 @@ async def test_reprint_dedup_redis_down_degrades_gracefully():
     )
     db = MagicMock()
     db.get = AsyncMock(return_value=order)
+    db.scalar = AsyncMock(return_value=None)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.execute = AsyncMock()
+    db.commit = AsyncMock()
 
     fake_request = MagicMock()
     fake_request.headers = {}
@@ -226,26 +218,18 @@ async def test_reprint_dedup_redis_down_degrades_gracefully():
     from app.services.system_settings_service import SystemSettingsService
     SystemSettingsService._cache = None
 
-    # 直接设置 _redis 为 None，让 get_redis() 尝试创建新连接时失败
-    import app.core.redis_client as redis_module
-    original_redis = redis_module._redis
-    redis_module._redis = None
-
     fake_settings = SimpleNamespace(xpyun_enabled=True)
 
     with patch(
         "app.core.config.get_settings", return_value=fake_settings,
     ), patch(
-        "redis.from_url", side_effect=Exception("Redis down"),
+        "app.domains.messaging.idempotency.try_get_redis",
+        AsyncMock(return_value=None),
     ), patch(
         "app.services.print_service.PrintService.print_order", print_called,
     ):
         result = await reprint_kitchen_ticket(10, fake_request, db, user)
 
-    # 恢复 _redis
-    redis_module._redis = original_redis
-
-    # Redis 宕机 → 降级放行 → print_order 被调用
     print_called.assert_awaited_once()
     assert result["data"]["printed"] is False
 
@@ -359,10 +343,12 @@ async def test_print_process_job_uses_atomic_owner_release():
     db = MagicMock()
     db.get = AsyncMock(return_value=order)
     db.execute = AsyncMock(return_value=success_result)
+    db.scalar = AsyncMock(return_value=None)
     db.commit = AsyncMock()
 
     with patch.object(PrintService, "claim_print_job", AsyncMock(return_value=job)), \
-         patch.object(PrintService, "_send_content", AsyncMock(return_value={"mock": True})):
+         patch.object(PrintService, "_send_content", AsyncMock(return_value={"mock": True})), \
+         patch("app.domains.messaging.idempotency.try_acquire", AsyncMock(return_value=True)):
         with patch("app.services.print_service.AsyncSessionLocal") as mock_ctx:
             mock_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
             mock_ctx.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -391,10 +377,12 @@ async def test_print_process_job_reclaimed_during_processing_returns_false():
     db = MagicMock()
     db.get = AsyncMock(return_value=order)
     db.execute = AsyncMock(return_value=success_result)
+    db.scalar = AsyncMock(return_value=None)
     db.commit = AsyncMock()
 
     with patch.object(PrintService, "claim_print_job", AsyncMock(return_value=job)), \
-         patch.object(PrintService, "_send_content", AsyncMock(return_value={"mock": True})):
+         patch.object(PrintService, "_send_content", AsyncMock(return_value={"mock": True})), \
+         patch("app.domains.messaging.idempotency.try_acquire", AsyncMock(return_value=True)):
         with patch("app.services.print_service.AsyncSessionLocal") as mock_ctx:
             mock_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
             mock_ctx.return_value.__aexit__ = AsyncMock(return_value=None)

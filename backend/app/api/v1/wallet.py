@@ -436,6 +436,13 @@ async def search_customers_for_wallet(
 @router.post("/adjust", dependencies=[require_permission("wallet:manage")])
 async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user: CurrentUser):
     sid = require_bound_store(user, data.store_id) if user.role.code != "SUPER_ADMIN" else data.store_id
+    # 非超管必须确认顾客属于本店，禁止凭 customer_id 跨店调账
+    if user.role.code != "SUPER_ADMIN":
+        if not sid:
+            raise AppException(40301, "账号未绑定门店")
+        from app.api.v1.customers import _assert_customer_in_store
+
+        await _assert_customer_in_store(db, data.customer_id, int(sid), action="调账")
     row = await BalanceService.adjust(
         db,
         customer_id=data.customer_id,

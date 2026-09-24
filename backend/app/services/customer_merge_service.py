@@ -14,6 +14,7 @@ Merge policy
 6. FaceProfile：全部挂到目标后，仅保留最新一份 AUTHORIZED，其余 REVOKED。
 7. Order / Payment 的 customer_id 改挂目标；PaymentRefund 无 customer_id 列故跳过。
 8. WelcomeLog / PointLedger 改挂目标；last_order_at 取两者较新。
+9. 储值：本金/赠送金并入目标，写 MERGE 流水；balance_ledger / recharge_orders 改挂目标。
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.models import (
+    BalanceLedger,
     Customer,
     CustomerAlipayAccount,
     CustomerCoupon,
@@ -37,8 +39,10 @@ from app.models import (
     Order,
     Payment,
     PointLedger,
+    RechargeOrder,
     WelcomeLog,
 )
+from app.core.response import money
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
 
@@ -58,6 +62,8 @@ def _customer_snapshot(c: Customer) -> dict[str, Any]:
         "customer_no": c.customer_no,
         "phone": _mask_phone(c.phone),
         "points": int(c.points or 0),
+        "balance_principal": str(money(getattr(c, "balance_principal", 0) or 0)),
+        "balance_gift": str(money(getattr(c, "balance_gift", 0) or 0)),
         "member_level_id": c.member_level_id,
         "status": int(c.status or 0),
         "last_order_at": c.last_order_at.isoformat() if c.last_order_at else None,
@@ -125,6 +131,10 @@ class CustomerMergeService:
             "welcome_logs": 0,
             "point_ledgers": 0,
             "points_added": 0,
+            "balance_principal_added": "0.00",
+            "balance_gift_added": "0.00",
+            "balance_ledgers": 0,
+            "recharge_orders": 0,
         }
 
         await cls._merge_platform_accounts(db, source.id, target.id, stats)
@@ -140,6 +150,7 @@ class CustomerMergeService:
         await cls._reassign_simple(
             db, PointLedger, source.id, target.id, "point_ledgers", stats
         )
+        await cls._merge_wallet(db, source, target, stats)
         await cls._merge_points_and_meta(db, source, target, stats)
 
         source.status = 0
@@ -391,6 +402,46 @@ class CustomerMergeService:
             update(model).where(model.customer_id == source_id).values(customer_id=target_id)
         )
         stats[stat_key] = int(r.rowcount or 0)
+        await db.flush()
+
+    @classmethod
+    async def _merge_wallet(
+        cls, db: AsyncSession, source: Customer, target: Customer, stats: dict
+    ) -> None:
+        """合并储值余额与相关流水/充值单，避免源客禁用后余额滞留。"""
+        dp = money(getattr(source, "balance_principal", 0) or 0)
+        dg = money(getattr(source, "balance_gift", 0) or 0)
+        if dp != 0 or dg != 0:
+            target.balance_principal = money(getattr(target, "balance_principal", 0) or 0) + dp
+            target.balance_gift = money(getattr(target, "balance_gift", 0) or 0) + dg
+            source.balance_principal = money(0)
+            source.balance_gift = money(0)
+            stats["balance_principal_added"] = str(dp)
+            stats["balance_gift_added"] = str(dg)
+            db.add(
+                BalanceLedger(
+                    customer_id=target.id,
+                    store_id=None,
+                    entry_type="MERGE",
+                    delta_principal=dp,
+                    delta_gift=dg,
+                    principal_after=money(target.balance_principal),
+                    gift_after=money(target.balance_gift),
+                    remark=f"合并自顾客#{source.id}",
+                )
+            )
+        moved_bl = await db.execute(
+            update(BalanceLedger)
+            .where(BalanceLedger.customer_id == source.id)
+            .values(customer_id=target.id)
+        )
+        stats["balance_ledgers"] = int(moved_bl.rowcount or 0)
+        moved_ro = await db.execute(
+            update(RechargeOrder)
+            .where(RechargeOrder.customer_id == source.id)
+            .values(customer_id=target.id)
+        )
+        stats["recharge_orders"] = int(moved_ro.rowcount or 0)
         await db.flush()
 
     @classmethod

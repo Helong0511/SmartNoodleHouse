@@ -91,6 +91,7 @@ async def test_sync_payment_status_wechat_success():
         channel="WECHAT_MINIPROGRAM",
         amount=Decimal("10.00"),
         order_id=9,
+        recharge_order_id=None,
         provider_trade_no=None,
         paid_at=None,
         callback_raw=None,

@@ -36,6 +36,7 @@ class PlatformTokenService:
 
         refreshed = 0
         deadline = now_local() + timedelta(hours=within_hours)
+        binding_ids: list[int] = []
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(PlatformStoreBinding.id).where(

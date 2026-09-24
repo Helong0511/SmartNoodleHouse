@@ -38,24 +38,48 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const url = config.url || ''
-  // H5/会员接口优先顾客 token；后台接口优先员工 token
+  const clientHint = String(config.headers?.['X-Client'] || '').toLowerCase()
+  // 后台管理顾客列表/合并等走员工 token；仅显式 X-Client: customer 才用顾客 JWT
   const isCustomerApi =
     url.includes('/miniprogram') ||
-    url.startsWith('/customers/') ||
     url.includes('/orders/mine') ||
     /\/orders\/\d+\/reorder/.test(url) ||
     url.includes('/welcome/face') ||
-    (config.headers?.['X-Client'] === 'customer')
+    clientHint === 'customer' ||
+    (url.startsWith('/customers/') && clientHint === 'customer')
   const staffToken = getStaffToken()
   const customerToken = getCustomerToken()
-  // 顾客订单列表/复购强制用顾客 token，避免后台登录态抢占
+  // 顾客订单列表/复购/小程序强制用顾客 token，避免后台登录态抢占
   const forceCustomer =
     url.includes('/orders/mine') || /\/orders\/\d+\/reorder/.test(url) || url.includes('/miniprogram')
-  const token = forceCustomer
-    ? customerToken
-    : isCustomerApi
-      ? customerToken || staffToken
-      : staffToken || customerToken
+  const isStaffPath =
+    !forceCustomer &&
+    !isCustomerApi &&
+    (url.startsWith('/customers') ||
+      url.startsWith('/orders') ||
+      url.startsWith('/payments') ||
+      url.startsWith('/products') ||
+      url.startsWith('/settings') ||
+      url.startsWith('/users') ||
+      url.startsWith('/wallet') ||
+      url.startsWith('/delivery') ||
+      url.startsWith('/pos') ||
+      url.startsWith('/cameras') ||
+      url.startsWith('/tables') ||
+      url.startsWith('/coupons') ||
+      url.startsWith('/dashboard') ||
+      url.startsWith('/audit') ||
+      url.startsWith('/auth'))
+  let token: string | null | undefined
+  if (forceCustomer) {
+    token = customerToken
+  } else if (isCustomerApi) {
+    token = customerToken || staffToken
+  } else if (isStaffPath) {
+    token = staffToken
+  } else {
+    token = staffToken || customerToken
+  }
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -81,16 +105,30 @@ api.interceptors.response.use(
     if (status === 401) {
       // P1: 401 时区分顾客/员工 API，清理对应 token，避免残留失效态
       const reqUrl = String(err.config?.url || '')
+      const clientHint = String(err.config?.headers?.['X-Client'] || '').toLowerCase()
+      const onAdmin =
+        location.pathname.startsWith('/admin') ||
+        (!location.pathname.startsWith('/scan') &&
+          !location.pathname.startsWith('/order') &&
+          !location.pathname.startsWith('/member') &&
+          !location.pathname.startsWith('/display') &&
+          !location.pathname.startsWith('/kitchen') &&
+          location.pathname !== '/')
       const isCustApi =
         reqUrl.includes('/miniprogram') ||
-        reqUrl.startsWith('/customers/') ||
         reqUrl.includes('/orders/mine') ||
         /\/orders\/\d+\/reorder/.test(reqUrl) ||
         reqUrl.includes('/welcome/face') ||
-        (err.config?.headers?.['X-Client'] === 'customer')
-      if (isCustApi) {
+        clientHint === 'customer' ||
+        (reqUrl.startsWith('/customers/') && clientHint === 'customer')
+      if (isCustApi && !onAdmin) {
         clearCustomerToken()
-        if (!location.pathname.startsWith('/scan') && !location.pathname.startsWith('/order') && !location.pathname.startsWith('/member') && !location.pathname.startsWith('/display')) {
+        if (
+          !location.pathname.startsWith('/scan') &&
+          !location.pathname.startsWith('/order') &&
+          !location.pathname.startsWith('/member') &&
+          !location.pathname.startsWith('/display')
+        ) {
           ElMessage.error('登录已过期，请重新扫码')
           location.href = '/scan'
         }

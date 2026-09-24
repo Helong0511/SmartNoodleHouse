@@ -184,6 +184,9 @@ class PosRefundService:
         ).scalar_one_or_none()
         if not row:
             raise AppException(40404, "退款申请不存在")
+        from app.services.store_scope import assert_store_access
+
+        assert_store_access(user, row.store_id)
         if row.requested_by != user.id and not await _can_approve(db, user):
             raise AppException(40301, "无权撤销该申请")
         if row.status != "PENDING":

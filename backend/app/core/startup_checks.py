@@ -63,6 +63,11 @@ def validate_settings(settings: Settings) -> None:
         msg = "JWT_SECRET 熵过低（重复字符过多），请更换高熵随机串"
         (errors if is_prod else warnings).append(msg)
 
+    alg = (getattr(settings, "jwt_algorithm", None) or "HS256").strip().upper()
+    if alg not in ("HS256",):
+        msg = f"JWT_ALGORITHM 仅允许 HS256，当前为 {alg!r}"
+        (errors if is_prod else warnings).append(msg)
+
     face = (getattr(settings, "face_encryption_key", None) or "").strip()
     if face in _DANGEROUS_FACE or len(face) < 32:
         msg = "FACE_ENCRYPTION_KEY 为默认值/过短/空，必须更换"
