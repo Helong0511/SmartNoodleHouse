@@ -204,15 +204,31 @@ Page({
   },
 
   clearTableBinding() {
-    const g = app.globalData
-    g.table = null
-    g.tableToken = ''
     try {
-      wx.removeStorageSync('table_token')
-      wx.removeStorageSync('dine_table')
-      wx.removeStorageSync('dine_bound_at')
-    } catch (_) {}
-    this.setData({ tableName: '', tableNo: '', seatLabel: '桌号', tableToken: '', pickedLabel: '' })
+      dineCtx.clearDineContext()
+    } catch (_) {
+      const g = app.globalData
+      g.table = null
+      g.store = null
+      g.tableToken = ''
+      try {
+        wx.removeStorageSync('table_token')
+        wx.removeStorageSync('dine_table')
+        wx.removeStorageSync('dine_store')
+        wx.removeStorageSync('dine_bound_at')
+      } catch (__) {}
+    }
+    this.setData({
+      storeName: '',
+      storeNo: '',
+      storeLogo: '',
+      tableName: '',
+      tableNo: '',
+      seatLabel: '桌号',
+      tableToken: '',
+      pickedLabel: '',
+      hasTable: false
+    })
   },
 
   async loadDineContext() {

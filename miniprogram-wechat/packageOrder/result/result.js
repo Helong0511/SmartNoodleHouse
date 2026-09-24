@@ -140,11 +140,17 @@ Page({
   },
 
   onShow() {
-    // 勿与 onLoad 首屏抢跑；回前台且已有订单号时再静默刷新
+    // 勿与 onLoad 首屏抢跑；回前台且已有订单号时再静默刷新，并按状态恢复轮询
     if (!this.orderId || this._booting) return
     if (this.data.order && this.data.order.order_no) {
       this._refreshWithSync(true)
+    } else {
+      this._syncPollByStatus(this.data.order && this.data.order.status)
     }
+  },
+
+  onHide() {
+    this._clearPoll()
   },
 
   onUnload() {

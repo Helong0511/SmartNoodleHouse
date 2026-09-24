@@ -3,6 +3,7 @@ const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
+const navBar = require('../../utils/navBar')
 
 const ORDERS_CACHE_MS = 30 * 1000
 const SCOPE_STORAGE_KEY = 'orders_scope_pending'
@@ -43,10 +44,31 @@ Page({
     storeLogo: '',
     tableName: '',
     tableNo: '',
-    seatLabel: '桌号'
+    seatLabel: '桌号',
+    hasTable: false,
+    isTakeawayChannel: false
+  },
+
+  onLoad() {
+    navBar.pinWechatNavBar()
+    this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
+      this.applyDineContext(ctx)
+    })
+  },
+
+  onUnload() {
+    if (typeof this._unsubDine === 'function') {
+      this._unsubDine()
+      this._unsubDine = null
+    }
+  },
+
+  onHide() {
+    navBar.pinWechatNavBar()
   },
 
   onShow() {
+    navBar.pinWechatNavBar()
     const pending = wx.getStorageSync(SCOPE_STORAGE_KEY)
     if (pending === 'recharge' || pending === 'dine') {
       wx.removeStorageSync(SCOPE_STORAGE_KEY)
@@ -68,20 +90,7 @@ Page({
 
   applyDineContext(ctx) {
     if (!ctx) return
-    const fields = dineCtx.pageDineFields(ctx)
-    const d = this.data
-    if (
-      d.storeId === fields.storeId
-      && d.storeName === fields.storeName
-      && d.storeNo === fields.storeNo
-      && d.storeLogo === fields.storeLogo
-      && d.tableName === fields.tableName
-      && d.tableNo === fields.tableNo
-      && d.seatLabel === fields.seatLabel
-    ) {
-      return
-    }
-    this.setData(fields)
+    dineCtx.applyPageDineFields(this, ctx)
   },
 
   onTableChange(e) {

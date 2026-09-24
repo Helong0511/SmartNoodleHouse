@@ -60,7 +60,25 @@ Component({
     }
   },
 
-  didUpdate() {
+  didUpdate(prevProps) {
+    // 仅 props 变化时同步，避免自身 setData 反复进入 didUpdate
+    const p = this.props
+    const prev = prevProps || {}
+    if (
+      prev.storeName === p.storeName
+      && prev.storeNo === p.storeNo
+      && prev.storeAddress === p.storeAddress
+      && prev.storePhone === p.storePhone
+      && prev.storeLogo === p.storeLogo
+      && prev.tableName === p.tableName
+      && prev.tableNo === p.tableNo
+      && prev.seatLabel === p.seatLabel
+      && prev.compact === p.compact
+      && prev.changeable === p.changeable
+      && prev.autoSync === p.autoSync
+    ) {
+      return
+    }
     this.syncFromContext()
   },
 

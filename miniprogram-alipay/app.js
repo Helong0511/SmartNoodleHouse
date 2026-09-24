@@ -83,6 +83,9 @@ App({
     })
   },
   onShow(options) {
+    try {
+      require('./utils/navBar').pinAlipayNavBar()
+    } catch (_) {}
     if (options) this.parseLaunch(options)
     try { tracker.flush() } catch (_) {}
   },

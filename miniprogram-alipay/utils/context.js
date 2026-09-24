@@ -223,9 +223,8 @@ async function ensureDineContext(options = {}) {
   let { table, store, token } = cached
 
   if (!force && contextReady(table, store, token)) {
-    // 缓存命中也要写回 globalData：否则仅 storage 有桌台时，
-    // 结算页 storeId() 只读 globalData 会得到 null → 菜单校验「加载不完整」
-    if (table || store) applyContext(table, store)
+    // 缓存命中也要写回 globalData，但 silent 避免每次 Tab onShow 广播抖动
+    if (table || store) applyContext(table, store, { silent: true })
     return displayPayload(store, table)
   }
 
@@ -304,7 +303,7 @@ function extractScanRaw(res) {
   if (res == null) return ''
   if (typeof res === 'string' || typeof res === 'number') return String(res).trim()
   if (typeof res !== 'object') return ''
-  const list = [res.result, res.qrCode, res.code, res.barCode]
+  const list = [res.result, res.path, res.qrCode, res.code, res.barCode]
     .map((v) => (v == null ? '' : String(v).trim()))
     .filter(Boolean)
   list.sort((a, b) => scoreScanCandidate(b) - scoreScanCandidate(a))
@@ -316,6 +315,8 @@ function extractScanRaw(res) {
 
 function showScanDebug(title, content) {
   try {
+    const { getEnvDebugInfo } = require('../config/env')
+    if (!(getEnvDebugInfo() && getEnvDebugInfo().isDevtools)) return
     my.alert({ title: title || '扫码调试', content: String(content || '').slice(0, 500) })
   } catch (_) {}
 }
@@ -423,14 +424,13 @@ async function bindParsedScanRaw(raw, resolve) {
       promptPasteTableToken(resolve)
       return
     }
-    showScanDebug('无效桌台二维码', debugMsg)
     resolve(null)
   } catch (e) {
     my.hideLoading()
     const msg = (e && e.message) || '识别失败'
     my.showToast({ content: msg, type: 'none', duration: 3500 })
-    showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)
     if (devtools) {
+      showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)
       promptPasteTableToken(resolve)
       return
     }
@@ -514,6 +514,29 @@ function pageDineFields(ctx) {
   }
 }
 
+function dineFieldsEqual(data, fields) {
+  if (!data || !fields) return false
+  return data.storeId === fields.storeId
+    && data.storeName === fields.storeName
+    && data.storeNo === fields.storeNo
+    && data.storeAddress === fields.storeAddress
+    && data.storePhone === fields.storePhone
+    && data.storeLogo === fields.storeLogo
+    && data.tableName === fields.tableName
+    && data.tableNo === fields.tableNo
+    && data.seatLabel === fields.seatLabel
+    && !!data.isTakeawayChannel === !!fields.isTakeawayChannel
+    && !!data.hasTable === !!fields.hasTable
+}
+
+function applyPageDineFields(page, ctx) {
+  if (!page || typeof page.setData !== 'function') return false
+  const fields = pageDineFields(ctx)
+  if (dineFieldsEqual(page.data, fields)) return false
+  page.setData(fields)
+  return true
+}
+
 module.exports = {
   DINE_BOUND_TTL_MS,
   ensureDineContext,
@@ -523,6 +546,8 @@ module.exports = {
   readCachedContext,
   displayPayload,
   pageDineFields,
+  dineFieldsEqual,
+  applyPageDineFields,
   isTakeawayChannelTable,
   bindTableFromToken,
   refreshTableBinding,

@@ -1,5 +1,10 @@
 {
   "navigationBarTitleText": "点餐",
+  "navigationBarBackgroundColor": "#ff6b35",
+  "navigationBarTextStyle": "white",
+  "backgroundColor": "#f7f7f7",
+  "backgroundColorTop": "#ff6b35",
+  "backgroundColorBottom": "#f7f7f7",
   "enablePullDownRefresh": true,
   "backgroundTextStyle": "dark",
   "usingComponents": {

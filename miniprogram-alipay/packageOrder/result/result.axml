@@ -12,6 +12,7 @@
       seatLabel="{{seatLabel}}"
       compact="{{true}}"
       changeable="{{false}}"
+      autoSync="{{false}}"
     />
 
     <view class="header {{order.status === 'CANCELLED' || order.status === 'REFUNDED' ? 'muted' : ''}}">

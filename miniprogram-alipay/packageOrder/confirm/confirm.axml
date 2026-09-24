@@ -10,6 +10,7 @@
     tableNo="{{tableNo}}"
     seatLabel="{{seatLabel}}"
     compact="{{true}}"
+    autoSync="{{false}}"
     onTableChange="onTableChange"
   />
   <view class="tip">金额由服务器重新计算，防止篡改</view>

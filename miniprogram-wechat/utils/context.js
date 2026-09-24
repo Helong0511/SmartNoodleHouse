@@ -226,6 +226,31 @@ function pageDineFields(ctx) {
   }
 }
 
+/** 页面 data 与桌台字段是否一致（避免无意义 setData） */
+function dineFieldsEqual(data, fields) {
+  if (!data || !fields) return false
+  return data.storeId === fields.storeId
+    && data.storeName === fields.storeName
+    && data.storeNo === fields.storeNo
+    && data.storeAddress === fields.storeAddress
+    && data.storePhone === fields.storePhone
+    && data.storeLogo === fields.storeLogo
+    && data.tableName === fields.tableName
+    && data.tableNo === fields.tableNo
+    && data.seatLabel === fields.seatLabel
+    && !!data.isTakeawayChannel === !!fields.isTakeawayChannel
+    && !!data.hasTable === !!fields.hasTable
+}
+
+/** 差分写入页面桌台字段；有变更返回 true */
+function applyPageDineFields(page, ctx) {
+  if (!page || typeof page.setData !== 'function') return false
+  const fields = pageDineFields(ctx)
+  if (dineFieldsEqual(page.data, fields)) return false
+  page.setData(fields)
+  return true
+}
+
 /** 解析扫码/缓存的门店与桌台（各页 onShow 调用） */
 async function ensureDineContext(options = {}) {
   const force = !!(options && options.force)
@@ -236,9 +261,8 @@ async function ensureDineContext(options = {}) {
   let { table, store, token } = cached
 
   if (!force && contextReady(table, store, token)) {
-    // 缓存命中也要写回 globalData：否则仅 storage 有桌台时，
-    // 结算页 storeId() 只读 globalData 会得到 null → 菜单校验「加载不完整」
-    if (table || store) applyContext(table, store)
+    // 缓存命中也要写回 globalData，但 silent 避免每次 Tab onShow 广播抖动
+    if (table || store) applyContext(table, store, { silent: true })
     return displayPayload(store, table)
   }
 
@@ -408,6 +432,8 @@ function extractScanRaw(res) {
 
 function showScanDebug(title, content) {
   try {
+    const { getEnvDebugInfo } = require('../config/env')
+    if (!(getEnvDebugInfo() && getEnvDebugInfo().isDevtools)) return
     wx.showModal({
       title: title || '扫码调试',
       content: String(content || '').slice(0, 500),
@@ -473,14 +499,13 @@ async function bindParsedScanRaw(raw, resolve) {
       promptPasteTableToken(resolve)
       return
     }
-    showScanDebug('无效桌台二维码', debugMsg)
     resolve(null)
   } catch (e) {
     wx.hideLoading()
     const msg = (e && e.message) || '识别失败'
     wx.showToast({ title: msg, icon: 'none', duration: 3500 })
-    showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)
     if (devtools) {
+      showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)
       promptPasteTableToken(resolve)
       return
     }
@@ -562,6 +587,8 @@ module.exports = {
   readCachedContext,
   displayPayload,
   pageDineFields,
+  dineFieldsEqual,
+  applyPageDineFields,
   isTakeawayChannelTable,
   bindTableFromToken,
   refreshTableBinding,

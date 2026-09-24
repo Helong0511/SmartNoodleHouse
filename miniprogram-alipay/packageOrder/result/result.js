@@ -141,7 +141,13 @@ Page({
     if (!this.orderId || this._booting) return
     if (this.data.order && this.data.order.order_no) {
       this._refreshWithSync(true)
+    } else {
+      this._syncPollByStatus(this.data.order && this.data.order.status)
     }
+  },
+
+  onHide() {
+    this._clearPoll()
   },
 
   onUnload() {

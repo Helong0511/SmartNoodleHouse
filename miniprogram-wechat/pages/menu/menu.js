@@ -7,6 +7,7 @@ const prefUtil = require('../../utils/preferences')
 const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
+const navBar = require('../../utils/navBar')
 const app = getApp()
 
 const MENU_REFRESH_TTL_MS = 30 * 1000
@@ -101,13 +102,30 @@ Page({
   },
 
   onLoad() {
+    navBar.pinWechatNavBar()
     // onLoad 先于 onShow，提前发起菜单请求利用页面初始化时间窗口
     this._menuLoaded = false
+    this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
+      this.applyDineContext(ctx)
+    })
     this.applyMenuFlags()
     this.loadMenu()
   },
 
+  onUnload() {
+    if (typeof this._unsubDine === 'function') {
+      this._unsubDine()
+      this._unsubDine = null
+    }
+  },
+
+  onHide() {
+    // 切 Tab 瞬间先锁住橙底，减少原生导航回落白底的闪一下
+    navBar.pinWechatNavBar()
+  },
+
   onShow() {
+    navBar.pinWechatNavBar()
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     const cartThumbStyle = `width:${px}px;height:${px}px;`
@@ -133,21 +151,7 @@ Page({
 
   applyDineContext(ctx) {
     if (!ctx) return
-    const fields = dineCtx.pageDineFields(ctx)
-    const d = this.data
-    if (
-      d.storeId === fields.storeId
-      && d.storeName === fields.storeName
-      && d.storeNo === fields.storeNo
-      && d.storeLogo === fields.storeLogo
-      && d.tableName === fields.tableName
-      && d.tableNo === fields.tableNo
-      && d.seatLabel === fields.seatLabel
-      && d.hasTable === fields.hasTable
-    ) {
-      return
-    }
-    this.setData(fields)
+    dineCtx.applyPageDineFields(this, ctx)
   },
 
   applyMenuFlags(storeId) {

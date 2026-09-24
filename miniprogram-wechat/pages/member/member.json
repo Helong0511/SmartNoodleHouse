@@ -1,5 +1,10 @@
 {
   "navigationBarTitleText": "会员中心",
+  "navigationBarBackgroundColor": "#ff6b35",
+  "navigationBarTextStyle": "white",
+  "backgroundColor": "#f7f7f7",
+  "backgroundColorTop": "#ff6b35",
+  "backgroundColorBottom": "#f7f7f7",
   "usingComponents": {
     "skeleton": "/components/skeleton/skeleton"
   }

@@ -310,14 +310,30 @@ Page({
     this._checkoutCartFp = this._cartFingerprint()
   },
   clearTableBinding() {
-    app.globalData.table = null
-    app.globalData.tableToken = ''
     try {
-      my.removeStorageSync({ key: 'table_token' })
-      my.removeStorageSync({ key: 'dine_table' })
-      my.removeStorageSync({ key: 'dine_bound_at' })
-    } catch (_) { }
-    this.setData({ tableName: '', tableNo: '', seatLabel: '桌号', tableToken: '', pickedLabel: '' })
+      dineCtx.clearDineContext()
+    } catch (_) {
+      app.globalData.table = null
+      app.globalData.store = null
+      app.globalData.tableToken = ''
+      try {
+        my.removeStorageSync({ key: 'table_token' })
+        my.removeStorageSync({ key: 'dine_table' })
+        my.removeStorageSync({ key: 'dine_store' })
+        my.removeStorageSync({ key: 'dine_bound_at' })
+      } catch (__) {}
+    }
+    this.setData({
+      storeName: '',
+      storeNo: '',
+      storeLogo: '',
+      tableName: '',
+      tableNo: '',
+      seatLabel: '桌号',
+      tableToken: '',
+      pickedLabel: '',
+      hasTable: false
+    })
   },
   _applyBoundTable(table, store, token) {
     const t = table || {}

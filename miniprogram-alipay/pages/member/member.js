@@ -8,6 +8,7 @@ const voucherUtil = require('../../utils/voucher')
 const clientConfig = require('../../utils/clientConfig')
 const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
+const navBar = require('../../utils/navBar')
 const app = getApp()
 
 function discountText(rate) {
@@ -134,6 +135,7 @@ Page({
     useAlipayNickname: false,
     needPrivacyAgree: false,
     nicknameReviewFail: false,
+    storeId: null,
     storeName: '',
     storeNo: '',
     storeAddress: '',
@@ -142,6 +144,8 @@ Page({
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',
+    hasTable: false,
+    isTakeawayChannel: false,
     recommendOptIn: 1,
     consentVersion: '',
     consentAt: '',
@@ -151,7 +155,26 @@ Page({
     updatingOptIn: false
   },
 
+  onLoad() {
+    navBar.pinAlipayNavBar()
+    this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
+      this.applyDineContext(ctx)
+    })
+  },
+
+  onUnload() {
+    if (typeof this._unsubDine === 'function') {
+      this._unsubDine()
+      this._unsubDine = null
+    }
+  },
+
+  onHide() {
+    navBar.pinAlipayNavBar()
+  },
+
   onShow() {
+    navBar.pinAlipayNavBar()
     if (app._privacyPopup && app.globalData.needPrivacyPopup) {
       app._privacyPopup.show()
     }
@@ -188,19 +211,7 @@ Page({
 
   applyDineContext(ctx) {
     if (!ctx) return
-    const fields = dineCtx.pageDineFields(ctx)
-    const d = this.data
-    if (
-      d.storeName === fields.storeName
-      && d.storeNo === fields.storeNo
-      && d.storeLogo === fields.storeLogo
-      && d.tableName === fields.tableName
-      && d.tableNo === fields.tableNo
-      && d.seatLabel === fields.seatLabel
-    ) {
-      return
-    }
-    this.setData(fields)
+    dineCtx.applyPageDineFields(this, ctx)
   },
 
   onTableChange(ctx) {

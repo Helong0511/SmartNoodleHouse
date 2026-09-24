@@ -7,6 +7,7 @@ const dineCtx = require('../../utils/context')
 const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
+const navBar = require('../../utils/navBar')
 
 const MENU_REFRESH_TTL_MS = 30 * 1000
 const PREFS_SKIP_LOGIN_MS = 60 * 1000
@@ -109,13 +110,29 @@ Page({
   },
 
   onLoad() {
+    navBar.pinAlipayNavBar()
     // onLoad 先于 onShow，提前发起菜单请求利用页面初始化时间窗口
     this._menuLoaded = false
+    this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
+      this.applyDineContext(ctx)
+    })
     this.applyMenuFlags()
     this.loadMenu()
   },
 
+  onUnload() {
+    if (typeof this._unsubDine === 'function') {
+      this._unsubDine()
+      this._unsubDine = null
+    }
+  },
+
+  onHide() {
+    navBar.pinAlipayNavBar()
+  },
+
   onShow() {
+    navBar.pinAlipayNavBar()
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     const cartThumbStyle = `width:${px}px;height:${px}px;`
@@ -172,21 +189,7 @@ Page({
 
   applyDineContext(ctx) {
     if (!ctx) return
-    const fields = dineCtx.pageDineFields(ctx)
-    const d = this.data
-    if (
-      d.storeId === fields.storeId
-      && d.storeName === fields.storeName
-      && d.storeNo === fields.storeNo
-      && d.storeLogo === fields.storeLogo
-      && d.tableName === fields.tableName
-      && d.tableNo === fields.tableNo
-      && d.seatLabel === fields.seatLabel
-      && d.hasTable === fields.hasTable
-    ) {
-      return
-    }
-    this.setData(fields)
+    dineCtx.applyPageDineFields(this, ctx)
   },
 
   onTableChange(ctx) {

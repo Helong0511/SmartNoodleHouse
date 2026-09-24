@@ -9,6 +9,8 @@
     tableName="{{tableName}}"
     tableNo="{{tableNo}}"
     seatLabel="{{seatLabel}}"
+    compact="{{true}}"
+    autoSync="{{false}}"
     bind:tablechange="onTableChange"
   />
 
