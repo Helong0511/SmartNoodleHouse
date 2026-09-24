@@ -159,6 +159,7 @@ Page({
     const ctx = e.detail
     if (!ctx) return
     this.applyDineContext(ctx)
+    this.loadWallet()
   },
 
   applyWallet(couponRes, voucherRes) {

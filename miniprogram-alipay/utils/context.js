@@ -310,7 +310,8 @@ async function refreshTableBinding(options = {}) {
         qr_token: token
       })
       if (bound && bound.qr_token) {
-        applyContext(bound, store)
+        const sess = bound.dining_session || null
+        applyContext(bound, store, sess && sess.expires_at ? { expiresAt: sess.expires_at } : {})
         return { ok: true, token: bound.qr_token, ctx: displayPayload(store, bound) }
       }
     } catch (_) {}
@@ -468,9 +469,12 @@ function pageDineFields(ctx) {
 }
 
 module.exports = {
+  DINE_BOUND_TTL_MS,
   ensureDineContext,
   currentDisplay,
   applyContext,
+  clearDineContext,
+  readCachedContext,
   displayPayload,
   pageDineFields,
   isTakeawayChannelTable,

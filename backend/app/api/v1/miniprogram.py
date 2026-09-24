@@ -1373,8 +1373,13 @@ async def get_menu_bundle_api(
         raise AppException(40001, "store_id 必填")
     sid = int(store_id)
 
+    from app.models import Store
     from app.core.menu_cache import get_menu_version
     from app.services.menu_service import get_or_build_menu_bundle
+
+    store = await db.get(Store, sid)
+    if not store or int(getattr(store, "status", 0) or 0) != 1:
+        raise AppException(40011, "门店不存在或已停业")
 
     # 先组装/校验当前时段：跨时段时会 bump version，避免客户端凭旧 version 一直 changed:false
     bundle = await get_or_build_menu_bundle(db, sid)

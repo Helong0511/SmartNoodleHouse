@@ -77,6 +77,7 @@ Page({
     const ctx = e.detail
     if (!ctx) return
     this.applyDineContext(ctx)
+    this.reloadCurrent(true, false, ctx.storeId)
   },
 
   onPullDownRefresh() {

@@ -186,6 +186,7 @@ Page({
     try {
       wx.removeStorageSync('table_token')
       wx.removeStorageSync('dine_table')
+      wx.removeStorageSync('dine_bound_at')
     } catch (_) {}
     this.setData({ tableName: '', tableNo: '', seatLabel: '桌号', tableToken: '', pickedLabel: '' })
   },
@@ -230,15 +231,13 @@ Page({
     const t = table || {}
     const tok = String(token || t.qr_token || '').trim()
     if (!tok) return false
-    app.globalData.table = t
-    app.globalData.tableToken = tok
-    if (store) {
-      app.globalData.store = store
-      wx.setStorageSync('dine_store', store)
-    }
-    wx.setStorageSync('table_token', tok)
-    wx.setStorageSync('dine_table', t)
-    const dine = dineCtx.displayPayload(store || null, t)
+    const tableWithToken = Object.assign({}, t, { qr_token: tok })
+    // 统一走 applyContext：跨店清车、写 dine_bound_at、刷新 clientConfig
+    dineCtx.applyContext(tableWithToken, store || null)
+    const dine = dineCtx.displayPayload(
+      store || app.globalData.store || wx.getStorageSync('dine_store') || null,
+      tableWithToken
+    )
     this.setData({
       ...dineCtx.pageDineFields(dine),
       tableToken: tok,
@@ -478,7 +477,7 @@ Page({
   async loadCoupons() {
     try {
       await auth.ensureLogin()
-      const res = await api.get('/miniprogram/coupons/mine', { store_id: this.currentStoreId() })
+      const res = await api.get('/miniprogram/coupons/mine', { store_id: this.submitStoreId() })
       const items = (res && res.items) || []
       this.setData({
         coupons: items,
@@ -509,7 +508,7 @@ Page({
   async loadVouchers() {
     try {
       await auth.ensureLogin()
-      const res = await api.get('/miniprogram/vouchers/mine', { store_id: this.currentStoreId() })
+      const res = await api.get('/miniprogram/vouchers/mine', { store_id: this.submitStoreId() })
       const items = (res && res.items) || []
       this.setData({
         vouchers: items,

@@ -80,9 +80,6 @@
               </el-form-item>
               <el-form-item>
                 <el-button v-if="canEditBasic" type="primary" :loading="savingBasic" @click="saveBasic">保存基本信息</el-button>
-                <el-button v-if="auth.hasPermission('settings:store') || auth.isStoreAdmin || auth.isSuperAdmin" link type="primary" @click="$router.push('/settings')">
-                  本店业务参数（打印等）
-                </el-button>
                 <span v-if="!canEditBasic" class="muted tip">当前账号仅可查看基本信息</span>
               </el-form-item>
             </el-form>
@@ -242,6 +239,15 @@
             </el-table>
           </el-card>
         </el-tab-pane>
+
+        <el-tab-pane v-if="canManageBiz" label="业务参数" name="biz">
+          <StoreBusinessSettings
+            ref="bizRef"
+            :store-id="activeStoreId"
+            :preferred-group="bizPreferredGroup"
+            @group-change="onBizGroupChange"
+          />
+        </el-tab-pane>
       </el-tabs>
     </template>
 
@@ -281,6 +287,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { mediaUrl } from '@/utils/media'
+import StoreBusinessSettings from '@/components/StoreBusinessSettings.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -290,6 +297,8 @@ const loading = ref(false)
 const stores = ref<any[]>([])
 const activeStoreId = ref<number | undefined>()
 const activeTab = ref('basic')
+const bizPreferredGroup = ref('')
+const bizRef = ref<{ reload: () => Promise<void> } | null>(null)
 const savingBasic = ref(false)
 const logoUploading = ref(false)
 const hoursSaving = ref(false)
@@ -343,6 +352,13 @@ const bindingForm = reactive({
 
 const activeStore = computed(() => stores.value.find((s) => s.id === activeStoreId.value) || null)
 const canEditBasic = computed(() => auth.isSuperAdmin || auth.isStoreAdmin)
+const canManageBiz = computed(
+  () =>
+    auth.isSuperAdmin
+    || auth.isStoreAdmin
+    || auth.hasPermission('settings:store')
+    || auth.hasPermission('system:manage'),
+)
 const canEditDelivery = computed(
   () =>
     auth.isSuperAdmin
@@ -674,6 +690,9 @@ async function createStore() {
 async function onStoreChange() {
   fillFormFromStore(activeStore.value)
   await Promise.all([loadHours(), loadBindings()])
+  if (canManageBiz.value && activeTab.value === 'biz') {
+    await bizRef.value?.reload()
+  }
   syncQuery()
 }
 
@@ -683,9 +702,17 @@ async function reloadAll() {
     await loadStores()
     fillFormFromStore(activeStore.value)
     await Promise.all([loadHours(), loadBindings()])
+    if (canManageBiz.value && activeTab.value === 'biz') {
+      await bizRef.value?.reload()
+    }
   } finally {
     loading.value = false
   }
+}
+
+function onBizGroupChange(groupId: string) {
+  bizPreferredGroup.value = groupId
+  syncQuery()
 }
 
 function syncQuery() {
@@ -693,13 +720,11 @@ function syncQuery() {
   syncingQuery.value = true
   const tab = activeTab.value
   const sid = activeStoreId.value
-  router.replace({
-    path: '/store-info',
-    query: {
-      ...(sid ? { store_id: String(sid) } : {}),
-      ...(tab && tab !== 'basic' ? { tab } : {}),
-    },
-  }).finally(() => {
+  const query: Record<string, string> = {}
+  if (sid) query.store_id = String(sid)
+  if (tab && tab !== 'basic') query.tab = tab
+  if (tab === 'biz' && bizPreferredGroup.value) query.biz = bizPreferredGroup.value
+  router.replace({ path: '/store-info', query }).finally(() => {
     syncingQuery.value = false
   })
 }
@@ -708,7 +733,19 @@ watch(activeTab, () => syncQuery())
 
 onMounted(async () => {
   const tab = String(route.query.tab || '')
-  if (['basic', 'hours', 'delivery'].includes(tab)) activeTab.value = tab
+  const biz = String(route.query.biz || '')
+  if (['basic', 'hours', 'delivery', 'biz'].includes(tab)) activeTab.value = tab
+  // 兼容旧链接：系统设置门店页签 / 叫号屏提示
+  const legacyBiz = ['order', 'welcome', 'member', 'miniprogram', 'delivery', 'print', 'system']
+  if (legacyBiz.includes(tab)) {
+    activeTab.value = 'biz'
+    bizPreferredGroup.value = tab
+  } else if (biz) {
+    bizPreferredGroup.value = biz
+  }
+  if (activeTab.value === 'biz' && !canManageBiz.value) {
+    activeTab.value = 'basic'
+  }
   loading.value = true
   try {
     await loadStores()

@@ -666,6 +666,9 @@ class CouponService:
         if issued_store is not None and order_store_id is not None:
             if int(issued_store) != int(order_store_id):
                 raise AppException(40060, "该优惠券仅在发券门店可用，不可跨门店使用")
+        # 总部模板白名单：无发券门店粘性时，仍须满足模板对当前店可见
+        if order_store_id is not None and not CouponService.template_visible_to_store(tmpl, int(order_store_id)):
+            raise AppException(40060, "该优惠券不可在当前门店使用")
         now = now_local()
         expires = ensure_local_aware(cc.expires_at)
         if expires and expires <= now:
@@ -719,6 +722,8 @@ class CouponService:
         if issued_store is not None and order_store_id is not None:
             if int(issued_store) != int(order_store_id):
                 raise AppException(40060, "该代金券仅在发券门店可用，不可跨门店使用")
+        if order_store_id is not None and not CouponService.template_visible_to_store(tmpl, int(order_store_id)):
+            raise AppException(40060, "该代金券不可在当前门店使用")
         now = now_local()
         expires = ensure_local_aware(cc.expires_at)
         if expires and expires <= now:

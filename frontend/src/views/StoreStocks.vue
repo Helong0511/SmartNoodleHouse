@@ -20,7 +20,7 @@
         @clear="reload"
       />
       <el-button type="primary" @click="reload">查询</el-button>
-      <span class="tip">有覆盖则下单扣本店库存；删除覆盖后回退品牌库存</span>
+      <span class="tip">有覆盖则下单扣本店覆盖库存；删除覆盖后回退商品默认库存</span>
     </div>
 
     <el-alert
@@ -35,7 +35,7 @@
     <el-table :data="items" border style="margin-top:12px">
       <el-table-column prop="product_no" label="编号" width="280" />
       <el-table-column prop="name" label="商品" min-width="160" />
-      <el-table-column prop="brand_stock" label="品牌库存" width="100" />
+      <el-table-column prop="brand_stock" label="默认库存" width="100" />
       <el-table-column label="本店库存" width="140">
         <template #default="{ row }">
           <el-input-number v-model="row.stock" :min="0" :max="999999" size="small" />

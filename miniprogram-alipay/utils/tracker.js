@@ -82,8 +82,10 @@ function optInEnabled() {
 
 function currentStoreId() {
   const app = getAppSafe()
-  const store = app && app.globalData && app.globalData.store
-  return store && store.id ? store.id : null
+  const gd = app && app.globalData
+  const store = gd && gd.store
+  const table = gd && gd.table
+  return (store && (store.id || store.store_id)) || (table && table.store_id) || null
 }
 
 function pruneQueue(queue) {

@@ -19,7 +19,7 @@
         <el-sub-menu v-if="showStore" index="g-store">
           <template #title>门店</template>
           <el-menu-item
-            v-if="auth.hasPermission('table:manage') || auth.hasPermission('order:read') || auth.hasPermission('product:read')"
+            v-if="showStoreInfo"
             index="/store-info"
           >门店信息</el-menu-item>
           <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
@@ -120,17 +120,22 @@ const showUsers = computed(() => auth.hasPermission('user:read'))
 const showStore = computed(() =>
   showTables.value
   || showUsers.value
-  || auth.hasPermission('system:manage')
-  || auth.hasPermission('table:manage')
-  || auth.hasPermission('order:read')
-  || auth.hasPermission('product:read')
+  || showStoreInfo.value
+)
+const showStoreInfo = computed(
+  () =>
+    auth.isSuperAdmin
+    || auth.isStoreAdmin
+    || auth.hasPermission('system:manage')
+    || auth.hasPermission('settings:store')
+    || auth.hasPermission('table:manage')
+    || auth.hasPermission('order:read')
+    || auth.hasPermission('product:read'),
 )
 const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
 const showSmart = computed(() => showCameras.value || showWelcome.value)
-const showSettings = computed(
-  () => auth.hasPermission('system:manage') || auth.hasPermission('settings:store') || auth.isStoreAdmin,
-)
+const showSettings = computed(() => auth.hasPermission('system:manage'))
 const showRolePerms = computed(() => auth.hasPermission('system:manage'))
 const showAudit = computed(() => auth.hasPermission('audit:read'))
 const showSystemGroup = computed(() => showSettings.value || showAudit.value || showRolePerms.value)

@@ -290,18 +290,18 @@ def _build_env_groups(settings) -> list[dict]:
         },
         {
             "title": "外卖业务",
-            "description": "门店 Token 在「外卖管理→门店绑定」；下列默认值仅作 system_settings 种子，正式以「业务参数」页为准",
+            "description": "门店 Token 在「门店 → 门店信息 → 外卖绑定」；下列默认值仅作 system_settings 种子，正式以门店业务参数为准",
             "items": [
                 _env_item(
                     "DELIVERY_AUTO_CONFIRM",
                     str(settings.delivery_auto_confirm).lower(),
-                    "新外卖单自动接单（种子默认；运行时看业务参数）",
+                    "新外卖单自动接单（种子默认；运行时看门店业务参数）",
                     restart=False,
                 ),
                 _env_item(
                     "DELIVERY_ENV_FALLBACK_STORE_ID",
                     str(settings.delivery_env_fallback_store_id),
-                    "无绑定时允许 .env Token 的门店 ID；多店生产须为 0（运行时看业务参数）",
+                    "无绑定时允许 .env Token 的门店 ID；多店生产须为 0（平台级）",
                     restart=False,
                 ),
             ],
@@ -352,7 +352,7 @@ def _build_env_groups(settings) -> list[dict]:
         },
         {
             "title": "业务参数默认值（.env）",
-            "description": "仅当 system_settings 表无对应键时作为种子默认值；正式运行以「业务参数」页为准",
+            "description": "仅当 system_settings 表无对应键时作为种子；门店可覆盖项以「门店信息 → 业务参数」为准，平台项以「系统设置」平台分类为准",
             "items": [
                 _env_item("ORDER_PAYMENT_TIMEOUT_MINUTES", str(settings.order_payment_timeout_minutes), "订单支付超时（分钟）", restart=False),
                 _env_item("KITCHEN_AUTO_COMPLETE_MINUTES", str(settings.kitchen_auto_complete_minutes), "厨房 KDS 未处理自动出餐（分钟，0=关闭）", restart=False),

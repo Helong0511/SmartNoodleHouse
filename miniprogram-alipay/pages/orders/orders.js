@@ -80,6 +80,7 @@ Page({
   onTableChange(ctx) {
     if (!ctx) return
     this.applyDineContext(ctx)
+    this.reloadCurrent(true, false, ctx.storeId)
   },
 
   onPullDownRefresh() {

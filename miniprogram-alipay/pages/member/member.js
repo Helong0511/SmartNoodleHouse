@@ -195,6 +195,7 @@ Page({
   onTableChange(ctx) {
     if (!ctx) return
     this.applyDineContext(ctx)
+    this.loadWallet()
   },
 
   applyWallet(couponRes, voucherRes) {

@@ -170,7 +170,7 @@ async def role_permissions_matrix(request: Request, db: DbSession, user: Current
                 "超级管理员权限固定为全部，不可在此修改。",
                 "保存后该角色下员工需重新登录或刷新「我的信息」后菜单与接口权限才完全同步。",
                 "退款权限（payment:refund）建议仅授予店长及以上。",
-                "门店业务设置（settings:store）只改本店参数；平台级安全与小程序主体仍要 system:manage。",
+                "门店业务设置（settings:store）在「门店 → 门店信息 → 业务参数」只改本店；平台级安全与小程序主体仍要 system:manage。",
             ],
         },
         request=request,

@@ -74,7 +74,7 @@ Page({
     try {
       await auth.ensureLogin()
       const ctx = dineCtx.currentDisplay() || {}
-      const storeId = (ctx.store && ctx.store.id) || appStoreId()
+      const storeId = ctx.storeId || (ctx.store && ctx.store.id) || null
       this.setData({ storeId: storeId || null })
       const [wallet, packages] = await Promise.all([
         api.get('/wallet/me'),
@@ -158,11 +158,3 @@ Page({
   }
 })
 
-function appStoreId() {
-  try {
-    const app = getApp()
-    return (app.globalData && app.globalData.storeId) || null
-  } catch (_) {
-    return null
-  }
-}

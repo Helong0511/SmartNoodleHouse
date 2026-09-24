@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 
 # 可在后台在线修改的业务参数（持久化到 system_settings 表，运行时优先于 .env 默认值）
 # 类型：int / float / bool / string / enum（enum 须带 choices）
-# group：前端「系统设置」分页分类
+# group：前端「门店信息 / 系统设置」分页分类
 
 BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
-    {"id": "order", "label": "订单与厨房", "description": "按当前门店保存：支付超时、厨房自动出餐、大厅叫号屏"},
-    {"id": "welcome", "label": "迎宾与人脸", "description": "按当前门店保存：迎宾冷却与人脸匹配；访客保留天数仍是平台级"},
-    {"id": "member", "label": "会员与优惠", "description": "按当前门店保存：新客赠券模板名，须与本店或总部券模板名称一致"},
-    {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示按当前门店保存；小程序主体隐私、域名与版本为平台级"},
-    {"id": "delivery", "label": "外卖", "description": "自动接单按当前门店保存；.env 兜底门店为平台级"},
-    {"id": "print", "label": "厨房打印", "description": "按当前门店保存：开关、模式、打印机地址、份数与票面"},
+    {"id": "order", "label": "订单与厨房", "description": "写入当前门店：支付超时、厨房自动出餐、大厅叫号屏"},
+    {"id": "welcome", "label": "迎宾与人脸", "description": "写入当前门店：迎宾冷却与人脸匹配；访客保留天数仍是平台级"},
+    {"id": "member", "label": "会员与优惠", "description": "写入当前门店：新客赠券模板名，须与本店或总部券模板名称一致"},
+    {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示写入当前门店；小程序主体隐私、域名与版本为平台级（系统设置）"},
+    {"id": "delivery", "label": "外卖", "description": "自动接单写入当前门店；.env 兜底门店为平台级"},
+    {"id": "print", "label": "厨房打印", "description": "写入当前门店：开关、模式、打印机地址、份数与票面"},
     {"id": "security", "label": "安全与网络", "description": "平台级：Token 有效期、Webhook 白名单、可信反代"},
     {"id": "system", "label": "系统通用", "description": "口味加权按门店；时区、夜间批处理、上传限制与日志保留为平台级"},
 ]
@@ -91,6 +91,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "default": False,
         "store_override": True,
         "description": "开启后可用 /display 顾客叫号屏；关闭时 API/推送不可用；无屏门店可关；可按门店覆盖",
+    },
+    "display_screen_token": {
+        "group": "order",
+        "label": "叫号屏访问令牌",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "store_override": True,
+        "description": "本店叫号屏 URL 的 token 参数；留空则沿用平台 .env 的 DISPLAY_SCREEN_TOKEN；生产环境建议各店独立",
     },
     "visitor_data_retention_days": {
         "group": "welcome",

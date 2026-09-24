@@ -5,7 +5,7 @@
  *   - API：DEV_SIMULATOR_API / DEV_LAN_API
  *   - 头像 / 昵称 / 手机号开关在项目根 .env：
  *     ENABLE_ALIPAY_AVATAR / ENABLE_ALIPAY_NICKNAME / ENABLE_ALIPAY_PHONE_BIND
- *   - 点餐页搜索 / 智能口味 / 猜你喜欢：SHOW_MENU_*（或后台「系统设置 → 小程序与 H5」）
+ *   - 点餐页搜索 / 智能口味 / 猜你喜欢：SHOW_MENU_*（或后台「门店 → 门店信息 → 业务参数」）
  *     （经后端 GET /api/miniprogram/config 下发；后台热更无需重启）
  *
  * 【正式版】release

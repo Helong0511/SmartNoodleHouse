@@ -923,13 +923,10 @@ async def kitchen_orders(
     return success(orders, request=request)
 
 
-def _verify_display_token(token: str | None) -> None:
-    from app.core.config import get_settings
-
-    settings = get_settings()
-    expected = (settings.display_screen_token or "").strip()
-    if settings.is_production and not expected:
-        raise HTTPException(status_code=503, detail="未配置 DISPLAY_SCREEN_TOKEN")
+def _verify_display_token(token: str | None, *, expected: str, is_production: bool) -> None:
+    expected = (expected or "").strip()
+    if is_production and not expected:
+        raise HTTPException(status_code=503, detail="未配置叫号屏访问令牌")
     if expected and (token or "").strip() != expected:
         raise HTTPException(status_code=403, detail="叫号屏访问令牌无效")
 
@@ -939,10 +936,11 @@ async def display_active_orders(
     request: Request,
     db: DbSession,
     store_id: int = Query(..., ge=1, description="门店 ID"),
-    token: str | None = Query(default=None, description="叫号屏令牌（与 DISPLAY_SCREEN_TOKEN 一致）"),
+    token: str | None = Query(default=None, description="叫号屏令牌（本店或平台 DISPLAY_SCREEN_TOKEN）"),
     limit: int = Query(default=200, ge=1, le=500, description="最多返回订单数（防止积压撑爆）"),
 ):
     """顾客叫号屏：仅展示本店堂食/自取订单状态，不含明细与操作。"""
+    from app.core.config import get_settings
     from app.services.customer_display import (
         DISPLAY_ACTIVE_STATUSES,
         PREPARING_STATUSES,
@@ -951,11 +949,21 @@ async def display_active_orders(
         is_in_store_order,
         load_ready_at_map,
     )
+    from app.services.system_settings_service import SystemSettingsService
 
     if not await is_customer_display_enabled(db, int(store_id)):
-        raise HTTPException(status_code=403, detail="本店未开通大厅叫号屏，请在系统设置 → 订单与厨房中开启")
+        raise HTTPException(
+            status_code=403,
+            detail="本店未开通大厅叫号屏，请在门店 → 门店信息 → 业务参数 → 订单与厨房中开启",
+        )
 
-    _verify_display_token(token)
+    settings = get_settings()
+    global_token = (settings.display_screen_token or "").strip()
+    store_tok = await SystemSettingsService.effective_setting(
+        db, "display_screen_token", store_id=int(store_id), fallback=global_token
+    )
+    expected = (store_tok or "").strip() or global_token
+    _verify_display_token(token, expected=expected, is_production=settings.is_production)
     store = await db.get(Store, int(store_id))
     if not store or int(store.status) != 1:
         raise HTTPException(status_code=404, detail="门店不存在或已停业")

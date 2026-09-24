@@ -4,7 +4,7 @@
       <el-form-item v-if="auth.isSuperAdmin">
         <el-select
           v-model="storeFilter"
-          placeholder="全部门店"
+          placeholder="本店相关顾客"
           clearable
           style="width:160px"
           @change="reload"

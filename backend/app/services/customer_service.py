@@ -1409,6 +1409,8 @@ class OrderCreateService:
         charge_pack = pack and not waive_packing_fee
         t_no, t_ph = resolve_table_parts(table_no_raw, channel=channel, dining_type=dtype)
         store = await db.get(Store, int(store_id)) if store_id else None
+        if not store or int(getattr(store, "status", 0) or 0) != 1:
+            raise AppException(40011, "门店不存在或已停业")
         sno = store.store_no if store else None
 
         order_kwargs = dict(

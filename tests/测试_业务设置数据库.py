@@ -40,6 +40,7 @@ def test_store_scope_split():
     assert SystemSettingsService.allows_store_override("welcome_coupon_name") is True
     assert SystemSettingsService.allows_store_override("printer_host") is True
     assert SystemSettingsService.allows_store_override("order_payment_timeout_minutes") is True
+    assert SystemSettingsService.allows_store_override("display_screen_token") is True
     assert SystemSettingsService.allows_store_override("jwt_expire_minutes") is False
     assert SystemSettingsService.allows_store_override("enable_wx_phone_bind") is False
     assert SystemSettingsService.allows_store_override("h5_public_base_url") is False

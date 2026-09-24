@@ -6,6 +6,19 @@
         <div class="kpi-label">{{ k.label }}</div>
       </div>
       <div class="kpi-actions">
+        <el-select
+          v-if="auth.isSuperAdmin"
+          v-model="storeFilter"
+          clearable
+          placeholder="全部门店"
+          style="width: 160px; margin-right: 8px"
+          @change="onStoreFilterChange"
+        >
+          <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+        <el-tag v-else-if="boundStoreName" type="info" style="margin-right: 8px">
+          门店：{{ boundStoreName }}
+        </el-tag>
         <el-button type="primary" @click="openForm()">新增摄像头</el-button>
         <el-button @click="refreshAll">刷新</el-button>
       </div>
@@ -167,6 +180,13 @@ const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const cameras = ref<any[]>([])
+const stores = ref<any[]>([])
+const storeFilter = ref<number | undefined>()
+const boundStoreName = computed(() => {
+  const sid = auth.user?.store_id
+  if (!sid) return ''
+  return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
+})
 const events = ref<any[]>([])
 const eventsLoading = ref(false)
 const eventTypes = ref<string[]>([])
@@ -196,7 +216,6 @@ const form = reactive({
   store_id: undefined as number | undefined,
   auto_start: true,
 })
-const stores = ref<any[]>([])
 
 const kpiCards = computed(() => [
   { label: '摄像头', value: overview.value.camera_count ?? cameras.value.length },
@@ -229,7 +248,9 @@ async function loadOverview() {
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/cameras')
+    const params: Record<string, any> = {}
+    if (auth.isSuperAdmin && storeFilter.value) params.store_id = storeFilter.value
+    const res = await api.get('/cameras', { params })
     const data = res.data
     cameras.value = Array.isArray(data) ? data : data?.items || []
   } catch (e: any) {
@@ -237,6 +258,12 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function onStoreFilterChange() {
+  eventFilter.cameraId = undefined
+  load()
+  loadEvents()
 }
 
 function cameraLabel(c: any) {

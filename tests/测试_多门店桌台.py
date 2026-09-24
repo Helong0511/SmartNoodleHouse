@@ -1,40 +1,18 @@
-"""应用 sql/013 并冒烟验证桌台门店隔离。"""
+"""多门店桌台隔离冒烟（依赖 data.sql + 可选 data_test.sql，结构已在 struct.sql）。"""
 import asyncio
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from sqlalchemy import text
 from httpx import ASGITransport, AsyncClient
-
-from app.core.database import engine
-from app.core.security import create_access_token
-from app.main import app
-from app.models import User
-from app.core.database import AsyncSessionLocal
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-
-async def apply_sql() -> None:
-    sql_path = os.path.join(os.path.dirname(__file__), "..", "sql", "013_table_store_permissions.sql")
-    raw = open(sql_path, encoding="utf-8").read()
-    # 去掉 USE 行，按分号拆（简单脚本）
-    stmts = []
-    buf = []
-    for line in raw.splitlines():
-        s = line.strip()
-        if not s or s.startswith("--") or s.upper().startswith("USE "):
-            continue
-        buf.append(line)
-        if s.endswith(";"):
-            stmts.append("\n".join(buf))
-            buf = []
-    async with engine.begin() as conn:
-        for st in stmts:
-            await conn.execute(text(st))
-    print("applied 013 permissions")
+from app.core.database import AsyncSessionLocal
+from app.core.security import create_access_token
+from app.main import app
+from app.models import User
 
 
 async def smoke() -> None:
@@ -64,7 +42,6 @@ async def smoke() -> None:
 
 
 async def main() -> None:
-    await apply_sql()
     await smoke()
 
 

@@ -1,37 +1,18 @@
-"""应用 014 并冒烟：员工列表 + 分店库存接口。"""
+"""多门店续单相关冒烟：员工列表 + 分店库存 + 门店业务参数（依赖 data.sql + 可选 data_test.sql）。"""
 import asyncio
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from sqlalchemy import text
-from sqlalchemy.orm import selectinload
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import AsyncSessionLocal
 from app.core.security import create_access_token
 from app.main import app
 from app.models import User
-
-
-async def apply_014() -> None:
-    sql_path = os.path.join(os.path.dirname(__file__), "..", "sql", "014_multi_store_continue.sql")
-    raw = open(sql_path, encoding="utf-8").read()
-    stmts, buf = [], []
-    for line in raw.splitlines():
-        s = line.strip()
-        if not s or s.startswith("--") or s.upper().startswith("USE "):
-            continue
-        buf.append(line)
-        if s.endswith(";"):
-            stmts.append("\n".join(buf))
-            buf = []
-    async with engine.begin() as conn:
-        for st in stmts:
-            await conn.execute(text(st))
-    print("applied 014")
 
 
 async def smoke() -> None:
@@ -64,7 +45,6 @@ async def smoke() -> None:
 
 
 async def main() -> None:
-    await apply_014()
     await smoke()
 
 
