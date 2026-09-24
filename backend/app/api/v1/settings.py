@@ -339,6 +339,16 @@ def _build_env_groups(settings) -> list[dict]:
                 _env_item("CAMERA_USERNAME", settings.camera_username, "摄像头默认用户名"),
                 _env_item("CAMERA_PASSWORD", settings.camera_password, "摄像头默认密码", sensitive=True),
                 _env_item("ENABLE_RECOGNITION_WORKER", recognition, "是否启动人脸识别 worker（leader 进程）"),
+                _env_item(
+                    "FACE_LIVENESS_MODE",
+                    settings.face_liveness_mode,
+                    "人脸注册活体：challenge=动作挑战；none=仅 basic 粗检",
+                ),
+                _env_item(
+                    "FACE_LIVENESS_CHALLENGE_TIMEOUT",
+                    str(settings.face_liveness_challenge_timeout),
+                    "活体挑战有效期（秒）",
+                ),
             ],
         },
         {

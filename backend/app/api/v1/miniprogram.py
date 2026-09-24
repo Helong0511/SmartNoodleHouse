@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 
 from app.api.deps import CurrentCustomer, DbSession, OptionalCustomer
 from app.core.cache_keys import cart_fingerprint
@@ -391,7 +391,7 @@ async def scan_entry(
                 # 首次扫码不强制注册；会员引导改到支付成功页等非阻塞时机
                 "ask_register_member": False,
                 "ask_face_welcome": False,
-                "face_consent_text": "开启人脸迎宾后到店可自动欢迎。当前为 basic anti-spoof（清晰度/亮度粗检，非真活体），可随时关闭。",
+                "face_consent_text": "开启人脸迎宾后到店可自动欢迎。注册时需完成动作挑战与摄像头实拍（防重放 token），图像另做清晰度/亮度粗检；可随时关闭。",
                 "member_consent_text": "开启智能会员后系统会记住您的口味爱好，支持一键复购；可领取欢迎券并享受会员等级权益。随时可在「我的」页开通，不影响点餐。",
             },
         },
@@ -1066,8 +1066,15 @@ async def consent_face(
     db: DbSession,
     customer: CurrentCustomer,
     image: UploadFile = File(...),
+    liveness_token: str | None = Form(None),
+    action_completed: bool = Form(True),
 ):
-    """顾客主动授权：摄像头实拍后上传，服务端质量+basic anti-spoof 校验并提取特征，禁止客户端伪造向量"""
+    """顾客主动授权：摄像头实拍后上传，服务端质量+活体挑战+basic anti-spoof 校验并提取特征。"""
+    liveness_mode = await _enforce_liveness_challenge(
+        customer.id,
+        liveness_token=liveness_token,
+        action_completed=action_completed,
+    )
     raw = await read_upload_limited(image)
     if not raw:
         raise AppException(40030, "空图片")
@@ -1085,13 +1092,18 @@ async def consent_face(
         customer_id=customer.id,
         profile_id=profile.id,
         request=request,
-        extra={"via": "upload", "anti_spoof_level": "basic"},
+        extra={
+            "via": "upload",
+            "anti_spoof_level": "basic",
+            "liveness_mode": liveness_mode,
+        },
     )
     return success(
         {
             "profile_id": profile.id,
             "consent_status": profile.consent_status,
             "anti_spoof_level": "basic",
+            "liveness_mode": liveness_mode,
             "quality": {
                 "sharpness": quality.get("sharpness"),
                 "brightness": quality.get("brightness"),
@@ -1104,6 +1116,15 @@ async def consent_face(
     )
 
 
+@router.get("/face/liveness/challenge")
+async def face_liveness_challenge(request: Request, customer: CurrentCustomer):
+    """下发一次性活体挑战（动作 + token）。mode=none 时返回空 token。"""
+    from app.services.face_liveness_service import generate_liveness_challenge
+
+    challenge = await generate_liveness_challenge(customer_id=customer.id)
+    return success(challenge, request=request)
+
+
 @router.post("/face/consent-base64")
 async def consent_face_base64(
     request: Request,
@@ -1114,6 +1135,11 @@ async def consent_face_base64(
     body = await request.json()
     if body.get("feature") is not None or body.get("embedding") is not None or body.get("feature_vector") is not None:
         raise AppException(40036, "禁止客户端上传人脸特征向量，仅接受摄像头实拍图片")
+    liveness_mode = await _enforce_liveness_challenge(
+        customer.id,
+        liveness_token=body.get("liveness_token") or body.get("token"),
+        action_completed=bool(body.get("action_completed", True)),
+    )
     b64 = body.get("image_base64", "")
     if "," in b64:
         b64 = b64.split(",", 1)[1]
@@ -1152,13 +1178,18 @@ async def consent_face_base64(
         customer_id=customer.id,
         profile_id=profile.id,
         request=request,
-        extra={"via": "base64", "anti_spoof_level": "basic"},
+        extra={
+            "via": "base64",
+            "anti_spoof_level": "basic",
+            "liveness_mode": liveness_mode,
+        },
     )
     return success(
         {
             "profile_id": profile.id,
             "consent_status": profile.consent_status,
             "anti_spoof_level": "basic",
+            "liveness_mode": liveness_mode,
             "quality": {
                 "sharpness": quality.get("sharpness"),
                 "brightness": quality.get("brightness"),
@@ -1556,6 +1587,29 @@ async def customer_logout(
     return success({"revoked": True}, request=request)
 
 
+async def _enforce_liveness_challenge(
+    customer_id: int,
+    *,
+    liveness_token: str | None,
+    action_completed: bool = True,
+) -> str:
+    """challenge 模式下强制一次性活体 token；none 模式直接放行。返回实际模式。"""
+    settings = get_settings()
+    mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
+    if mode == "none":
+        return "none"
+    from app.services.face_liveness_service import verify_liveness_challenge
+
+    ok = await verify_liveness_challenge(
+        (liveness_token or "").strip(),
+        action_completed=bool(action_completed),
+        customer_id=int(customer_id),
+    )
+    if not ok:
+        raise AppException(40037, "活体校验未通过或已过期，请重新完成动作挑战后拍照")
+    return "challenge"
+
+
 async def _face_status(db, customer_id: int) -> dict:
     result = await db.execute(
         select(FaceProfile).where(
@@ -1564,9 +1618,12 @@ async def _face_status(db, customer_id: int) -> dict:
         )
     )
     profile = result.scalar_one_or_none()
+    settings = get_settings()
+    mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
     return {
         "consent_status": profile.consent_status if profile else "NONE",
         "has_face": profile is not None,
+        "liveness_mode": mode,
     }
 
 

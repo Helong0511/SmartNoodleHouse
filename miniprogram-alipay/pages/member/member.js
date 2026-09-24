@@ -9,6 +9,7 @@ const clientConfig = require('../../utils/clientConfig')
 const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
 const navBar = require('../../utils/navBar')
+const faceUtil = require('../../utils/face')
 const app = getApp()
 
 function discountText(rate) {
@@ -152,7 +153,9 @@ Page({
     showTasteProfile: false,
     tasteProfile: null,
     clearingProfile: false,
-    updatingOptIn: false
+    updatingOptIn: false,
+    faceEnabled: false,
+    updatingFace: false
   },
 
   onLoad() {
@@ -266,18 +269,25 @@ Page({
     const displayName = nickname || (isMember ? '面馆会员' : '面馆访客')
     if (profile.nickname) app.globalData.nickname = profile.nickname
     if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
-    if (profile.customer_no) app.globalData.customerNo = profile.customer_no
+    if (profile.customer_no) {
+      app.globalData.customerNo = profile.customer_no
+      try {
+        my.setStorageSync({ key: 'customer_no', data: profile.customer_no })
+      } catch (_) {}
+    }
     try {
       my.setStorageSync({ key: 'member_status', data: isMember ? 'MEMBER' : 'GUEST' })
     } catch (_) {}
     const view = prefView || prefUtil.buildPrefDisplay({})
     const rawAvatar = profile.avatar_url || app.globalData.avatarUrl || ''
+    const face = profile.face_status || {}
     this.setData({
       nickname,
       displayName,
       avatarLetter: displayName.charAt(0) || (isMember ? '会' : '访'),
       avatarUrl: avatarUtil.resolveDisplayUrl(rawAvatar),
       customerNo: profile.customer_no || app.globalData.customerNo || '',
+      faceEnabled: !!face.has_face,
       prefs: view.prefs || [],
       prefsConfirmed: view.confirmed || [],
       prefsLearning: view.learning || [],
@@ -334,6 +344,10 @@ Page({
         if (profile.customer_id) {
           app.globalData.customerId = profile.customer_id
           my.setStorageSync({ key: 'customer_id', data: profile.customer_id })
+        }
+        if (profile.customer_no) {
+          app.globalData.customerNo = profile.customer_no
+          my.setStorageSync({ key: 'customer_no', data: profile.customer_no })
         }
         this.applyProfile(profile, prefView)
         this.applyWallet(couponRes, voucherRes)
@@ -742,6 +756,44 @@ Page({
       my.showToast({ content: (err && err.message) || '清除失败', type: 'fail' })
     } finally {
       this.setData({ clearingProfile: false })
+    }
+  },
+
+  async onToggleFace(e) {
+    if (this.data.updatingFace) return
+    const v = e && e.detail
+    const wantOn = typeof v === 'boolean' ? v : !!(v && v.value)
+    if (wantOn === this.data.faceEnabled) return
+    this.setData({ updatingFace: true })
+    try {
+      if (wantOn) {
+        await faceUtil.enrollFaceWelcome()
+        this.setData({ faceEnabled: true })
+        my.showToast({ content: '人脸迎宾已开启', type: 'success' })
+      } else {
+        const ok = await new Promise((resolve) => {
+          my.confirm({
+            title: '关闭人脸迎宾',
+            content: '将删除已保存的人脸特征，到店不再自动欢迎。',
+            confirmButtonText: '确认关闭',
+            cancelButtonText: '取消',
+            success: (r) => resolve(!!r.confirm),
+          })
+        })
+        if (!ok) {
+          this.setData({ faceEnabled: true, updatingFace: false })
+          return
+        }
+        await faceUtil.revokeFaceWelcome()
+        this.setData({ faceEnabled: false })
+        my.showToast({ content: '已关闭人脸迎宾', type: 'none' })
+      }
+    } catch (err) {
+      this.setData({ faceEnabled: !wantOn })
+      const msg = (err && err.message) || '操作失败'
+      if (!/取消/.test(msg)) my.showToast({ content: msg, type: 'fail' })
+    } finally {
+      this.setData({ updatingFace: false })
     }
   }
 })

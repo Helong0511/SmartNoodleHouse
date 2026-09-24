@@ -99,7 +99,14 @@ async def test_generate_liveness_challenge_returns_token_and_action():
 
     fake_redis = MagicMock()
     fake_redis.set = AsyncMock()
-    with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(
+            face_liveness_mode="challenge", face_liveness_challenge_timeout=30
+        ),
+    ):
         result = await generate_liveness_challenge(customer_id=1, camera_id=2)
     assert result["mode"] == "challenge"
     assert result["token"]
@@ -116,7 +123,14 @@ async def test_verify_liveness_challenge_success():
     payload = '{"action": "blink", "customer_id": 1, "camera_id": 2}'
     # 原子 GETDEL 由单条 Lua eval 完成
     fake_redis.eval = AsyncMock(return_value=payload)
-    with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(
+            face_liveness_mode="challenge", face_liveness_challenge_timeout=30
+        ),
+    ):
         ok = await verify_liveness_challenge("valid_token", action_completed=True)
     assert ok is True
     fake_redis.eval.assert_awaited_once()
@@ -129,7 +143,14 @@ async def test_verify_liveness_challenge_replay_blocked():
 
     fake_redis = MagicMock()
     fake_redis.eval = AsyncMock(return_value=None)  # 已被第一次 GETDEL 删除
-    with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(
+            face_liveness_mode="challenge", face_liveness_challenge_timeout=30
+        ),
+    ):
         ok = await verify_liveness_challenge("replayed_token", action_completed=True)
     assert ok is False
 
@@ -142,7 +163,14 @@ async def test_verify_liveness_challenge_action_not_completed():
     fake_redis = MagicMock()
     payload = '{"action": "blink", "customer_id": 1}'
     fake_redis.eval = AsyncMock(return_value=payload)
-    with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(
+            face_liveness_mode="challenge", face_liveness_challenge_timeout=30
+        ),
+    ):
         ok = await verify_liveness_challenge("valid_token", action_completed=False)
     assert ok is False
 
@@ -154,6 +182,13 @@ async def test_verify_liveness_challenge_expired_token():
 
     fake_redis = MagicMock()
     fake_redis.eval = AsyncMock(return_value=None)
-    with patch("app.services.face_liveness_service.get_redis", AsyncMock(return_value=fake_redis)):
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(
+            face_liveness_mode="challenge", face_liveness_challenge_timeout=30
+        ),
+    ):
         ok = await verify_liveness_challenge("expired_or_invalid_token")
     assert ok is False

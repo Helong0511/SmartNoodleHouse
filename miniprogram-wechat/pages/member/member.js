@@ -9,6 +9,7 @@ const clientConfig = require('../../utils/clientConfig')
 const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
 const navBar = require('../../utils/navBar')
+const faceUtil = require('../../utils/face')
 const app = getApp()
 
 function discountText(rate) {
@@ -115,7 +116,9 @@ Page({
     showTasteProfile: false,
     tasteProfile: null,
     clearingProfile: false,
-    updatingOptIn: false
+    updatingOptIn: false,
+    faceEnabled: false,
+    updatingFace: false
   },
 
   onLoad() {
@@ -238,18 +241,25 @@ Page({
     const displayName = nickname || (isMember ? '面馆会员' : '面馆访客')
     if (profile.nickname) app.globalData.nickname = profile.nickname
     if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
-    if (profile.customer_no) app.globalData.customerNo = profile.customer_no
+    if (profile.customer_no) {
+      app.globalData.customerNo = profile.customer_no
+      try {
+        wx.setStorageSync('customer_no', profile.customer_no)
+      } catch (_) {}
+    }
     try {
       wx.setStorageSync('member_status', isMember ? 'MEMBER' : 'GUEST')
     } catch (_) {}
     const view = prefView || prefUtil.buildPrefDisplay({})
     const rawAvatar = profile.avatar_url || app.globalData.avatarUrl || ''
+    const face = profile.face_status || {}
     this.setData({
       nickname,
       displayName,
       avatarLetter: displayName.charAt(0) || (isMember ? '会' : '访'),
       avatarUrl: avatarUtil.resolveDisplayUrl(rawAvatar),
       customerNo: profile.customer_no || app.globalData.customerNo || '',
+      faceEnabled: !!face.has_face,
       prefs: view.prefs || [],
       prefsConfirmed: view.confirmed || [],
       prefsLearning: view.learning || [],
@@ -680,6 +690,43 @@ Page({
       wx.showToast({ title: (err && err.message) || '清除失败', icon: 'none' })
     } finally {
       this.setData({ clearingProfile: false })
+    }
+  },
+
+  async onToggleFace(e) {
+    if (this.data.updatingFace) return
+    const wantOn = !!(e && e.detail && e.detail.value)
+    if (wantOn === this.data.faceEnabled) return
+    this.setData({ updatingFace: true })
+    try {
+      if (wantOn) {
+        await faceUtil.enrollFaceWelcome()
+        this.setData({ faceEnabled: true })
+        wx.showToast({ title: '人脸迎宾已开启', icon: 'success' })
+      } else {
+        const ok = await new Promise((resolve) => {
+          wx.showModal({
+            title: '关闭人脸迎宾',
+            content: '将删除已保存的人脸特征，到店不再自动欢迎。',
+            confirmText: '确认关闭',
+            confirmColor: '#e6433a',
+            success: (r) => resolve(!!r.confirm),
+          })
+        })
+        if (!ok) {
+          this.setData({ faceEnabled: true, updatingFace: false })
+          return
+        }
+        await faceUtil.revokeFaceWelcome()
+        this.setData({ faceEnabled: false })
+        wx.showToast({ title: '已关闭人脸迎宾', icon: 'none' })
+      }
+    } catch (err) {
+      this.setData({ faceEnabled: !wantOn })
+      const msg = (err && err.message) || '操作失败'
+      if (!/取消/.test(msg)) wx.showToast({ title: msg, icon: 'none' })
+    } finally {
+      this.setData({ updatingFace: false })
     }
   }
 })
