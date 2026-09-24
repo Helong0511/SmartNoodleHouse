@@ -2,27 +2,31 @@
 from __future__ import annotations
 
 import ipaddress
+import socket
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 from app.core.exceptions import AppException
 from app.services.face_service import FaceEncryption
 
-# P1: 摄像头 URL 禁止指向的元数据/危险端点
+# P0: 摄像头 URL 禁止指向的元数据/危险端点（允许店内私网 RTSP）
 _BLOCKED_HOSTS = {
     "169.254.169.254",  # AWS/云元数据端点
     "metadata.google.internal",
     "metadata",
     "fd00:ec2::254",  # IPv6 元数据
+    "localhost",
 }
-# 禁止的网段（即使解析到这些 IP 也不允许）
+
+
 def _is_blocked_ip(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)
-        # 禁止回环、链路本地、未指定地址
-        if ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+        # 禁止回环、链路本地、未指定、组播；允许普通私网（店内摄像头）
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
             return True
-        # 禁止元数据端点
         if str(ip) in _BLOCKED_HOSTS:
+            return True
+        if isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.ip_network("169.254.0.0/16"):
             return True
     except ValueError:
         pass
@@ -30,9 +34,10 @@ def _is_blocked_ip(ip_str: str) -> bool:
 
 
 def assert_camera_url_safe(source_url: str) -> None:
-    """P1: 校验摄像头 RTSP/HTTP URL 不指向元数据端点/回环。
-    注意：RTSP 摄像头本身就在内网，因此允许 10.x/172.16-31/192.168.x，
-    但禁止 169.254.169.254 等云元数据端点和 loopback。
+    """校验摄像头 RTSP/HTTP URL 不指向元数据/回环。
+
+    允许 10.x / 172.16-31 / 192.168.x 店内私网。
+    对 hostname 做 DNS 解析，拒绝解析到回环/链路本地/元数据（缓解 DNS rebinding）。
     """
     if not source_url or source_url.isdigit():
         return
@@ -45,11 +50,27 @@ def assert_camera_url_safe(source_url: str) -> None:
     host = (parsed.hostname or "").strip().lower().rstrip(".")
     if not host:
         return
-    if host in _BLOCKED_HOSTS:
+    if host in _BLOCKED_HOSTS or host.endswith(".localhost") or host.endswith(".local"):
         raise AppException(40026, f"摄像头地址禁止指向元数据/危险端点: {host}")
-    # 尝试解析为 IP
     if _is_blocked_ip(host):
-        raise AppException(40026, f"摄像头地址禁止指向回环/链路本地地址")
+        raise AppException(40026, "摄像头地址禁止指向回环/链路本地地址")
+    # DNS 解析复核：hostname 若解析到危险 IP 则拒绝
+    try:
+        ipaddress.ip_address(host)
+        return  # 已是字面量 IP，上面已校验
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        # 无法解析时不放行可疑主机名到云元数据别名；普通局域网主机名允许后续连接失败
+        if "metadata" in host or host.endswith(".internal"):
+            raise AppException(40026, f"摄像头地址禁止指向元数据/危险端点: {host}")
+        return
+    for info in infos:
+        addr = info[4][0]
+        if _is_blocked_ip(str(addr)):
+            raise AppException(40026, f"摄像头地址 DNS 解析到危险地址: {addr}")
 
 
 def encrypt_password(password: str) -> str:

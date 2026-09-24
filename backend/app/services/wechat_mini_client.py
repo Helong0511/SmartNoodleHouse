@@ -23,6 +23,26 @@ def _mock_allowed() -> bool:
     return s.is_development or s.allow_auth_mock
 
 
+_PHONE_CODE_TTL = 600
+_phone_code_local: dict[str, float] = {}
+
+
+def _claim_phone_code_local(digest: str) -> bool:
+    """进程内兜底：Redis 不可用时防同进程并发双消费。"""
+    now = time.time()
+    expired = [k for k, exp in _phone_code_local.items() if exp < now]
+    for k in expired:
+        _phone_code_local.pop(k, None)
+    if digest in _phone_code_local:
+        return False
+    _phone_code_local[digest] = now + _PHONE_CODE_TTL
+    return True
+
+
+def _release_phone_code_local(digest: str) -> None:
+    _phone_code_local.pop(digest, None)
+
+
 async def get_access_token(*, force: bool = False) -> str:
     settings = get_settings()
     if not settings.wechat_app_id or not settings.wechat_app_secret:
@@ -55,40 +75,60 @@ async def get_access_token(*, force: bool = False) -> str:
 
 
 async def get_phone_by_code(code: str) -> str:
-    """getPhoneNumber 动态令牌换手机号。"""
+    """getPhoneNumber 动态令牌换手机号。
+
+    P0：同一 phone_code 仅允许成功消费一次（Redis NX + 进程内兜底），
+    防止并发双请求用同一 code 绑定/合并两个会员。
+    """
     code = (code or "").strip()
     if not code:
         raise AppException(40054, "缺少 phone_code")
 
-    settings = get_settings()
-    if not settings.wechat_app_id or not settings.wechat_app_secret:
-        if _mock_allowed():
-            digest = hashlib.md5(code.encode()).hexdigest()[:8]
-            return f"138{digest[:8]}".ljust(11, "0")[:11]
-        raise AppException(50030, "微信小程序未配置，无法解析手机号")
+    code_digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    from app.services.webhook_replay import claim_once, release_claim
 
-    token = await get_access_token()
-    url = f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}"
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(url, json={"code": code})
-        data = resp.json()
-    if data.get("errcode"):
-        if data.get("errcode") in (40001, 42001):
-            token = await get_access_token(force=True)
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}",
-                    json={"code": code},
-                )
-                data = resp.json()
+    claimed = await claim_once("wx_phone_code", code_digest, ttl=600)
+    if not claimed:
+        raise AppException(40054, "授权码已使用或正在处理，请重新授权获取手机号")
+    if not _claim_phone_code_local(code_digest):
+        await release_claim("wx_phone_code", code_digest)
+        raise AppException(40054, "授权码已使用或正在处理，请重新授权获取手机号")
+
+    settings = get_settings()
+    try:
+        if not settings.wechat_app_id or not settings.wechat_app_secret:
+            if _mock_allowed():
+                digest = hashlib.md5(code.encode()).hexdigest()[:8]
+                return f"138{digest[:8]}".ljust(11, "0")[:11]
+            raise AppException(50030, "微信小程序未配置，无法解析手机号")
+
+        token = await get_access_token()
+        url = f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}"
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={"code": code})
+            data = resp.json()
         if data.get("errcode"):
-            logger.error("微信 getPhoneNumber 失败: %s", data)
-            raise AppException(50033, f"获取手机号失败: {data.get('errmsg', data.get('errcode'))}")
-    info = data.get("phone_info") or {}
-    phone = (info.get("purePhoneNumber") or info.get("phoneNumber") or "").strip()
-    if not phone:
-        raise AppException(50033, "微信未返回手机号")
-    return phone
+            if data.get("errcode") in (40001, 42001):
+                token = await get_access_token(force=True)
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(
+                        f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}",
+                        json={"code": code},
+                    )
+                    data = resp.json()
+            if data.get("errcode"):
+                logger.error("微信 getPhoneNumber 失败: %s", data)
+                raise AppException(50033, f"获取手机号失败: {data.get('errmsg', data.get('errcode'))}")
+        info = data.get("phone_info") or {}
+        phone = (info.get("purePhoneNumber") or info.get("phoneNumber") or "").strip()
+        if not phone:
+            raise AppException(50033, "微信未返回手机号")
+        return phone
+    except Exception:
+        # 换号失败允许重试同一 code（微信侧可能尚未消费）
+        await release_claim("wx_phone_code", code_digest)
+        _release_phone_code_local(code_digest)
+        raise
 
 
 def _url_link_error_hint(errcode: int | None, errmsg: str = "") -> str:

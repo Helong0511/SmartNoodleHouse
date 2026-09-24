@@ -124,3 +124,68 @@ async def test_merge_wallet_moves_balances():
     assert source.balance_gift == Decimal("0.00")
     assert stats["balance_principal_added"] == "30.00"
     db.add.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_wallet_adjust_requires_store_id():
+    from fastapi import Request
+
+    from app.api.v1.wallet import AdjustBody, adjust_balance
+
+    user = SimpleNamespace(id=9, store_id=None, role=SimpleNamespace(code="SUPER_ADMIN"))
+    body = AdjustBody(
+        customer_id=99,
+        delta_principal=Decimal("1.00"),
+        delta_gift=Decimal("0"),
+        store_id=None,
+        remark="test",
+    )
+    with pytest.raises(AppException) as ei:
+        await adjust_balance(body, MagicMock(spec=Request), AsyncMock(), user)
+    assert ei.value.code == 40051
+
+
+def test_wallet_ledger_excludes_null_adjust_cross_store():
+    """门店流水不得再 OR 进 store_id=NULL 的 ADJUST。"""
+    import inspect
+
+    from app.api.v1 import wallet as wallet_mod
+
+    src = inspect.getsource(wallet_mod.admin_ledger)
+    assert "store_id.is_(None)" not in src
+    assert "BalanceLedger.store_id == effective" in src
+
+
+def test_phone_code_cannot_be_consumed_twice():
+    from app.services import wechat_mini_client as wmc
+
+    wmc._phone_code_local.clear()
+    digest = "abc123digest"
+    assert wmc._claim_phone_code_local(digest) is True
+    assert wmc._claim_phone_code_local(digest) is False
+    wmc._release_phone_code_local(digest)
+    assert wmc._claim_phone_code_local(digest) is True
+
+
+@pytest.mark.asyncio
+async def test_get_phone_by_code_rejects_replay():
+    from app.services import wechat_mini_client as wmc
+
+    wmc._phone_code_local.clear()
+    with patch.object(wmc, "_mock_allowed", return_value=True), patch(
+        "app.services.wechat_mini_client.get_settings",
+        return_value=SimpleNamespace(
+            wechat_app_id="",
+            wechat_app_secret="",
+            is_production=False,
+            is_development=True,
+            allow_auth_mock=True,
+        ),
+    ), patch(
+        "app.services.webhook_replay.claim_once", new_callable=AsyncMock, return_value=True
+    ), patch("app.services.webhook_replay.release_claim", new_callable=AsyncMock):
+        phone1 = await wmc.get_phone_by_code("once-code-xyz")
+        assert phone1.startswith("138")
+        with pytest.raises(AppException) as ei:
+            await wmc.get_phone_by_code("once-code-xyz")
+        assert ei.value.code == 40054

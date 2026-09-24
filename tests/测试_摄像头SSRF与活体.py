@@ -48,6 +48,24 @@ def test_camera_url_allows_public_ip():
     assert_camera_url_safe("rtsp://admin:pass@8.8.8.8/Streaming/Channels/101")
 
 
+def test_camera_url_blocks_dns_to_loopback(monkeypatch):
+    """hostname 解析到回环时拒绝（缓解 DNS rebinding）。"""
+
+    def _fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(None, None, None, None, ("127.0.0.1", 0))]
+
+    monkeypatch.setattr("app.services.camera_credentials.socket.getaddrinfo", _fake_getaddrinfo)
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://admin:pass@evil.example/Streaming/Channels/101")
+    assert ei.value.code == 40026
+
+
+def test_camera_url_blocks_localhost_hostname():
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://admin:pass@localhost/Streaming/Channels/101")
+    assert ei.value.code == 40026
+
+
 def test_camera_url_ignores_non_url():
     """USB 数字源（纯数字）跳过校验。"""
     assert_camera_url_safe("1")

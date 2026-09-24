@@ -275,13 +275,10 @@ async def admin_ledger(
     effective = require_bound_store(user, store_id)
     filters = []
     if effective is not None:
-        # 本店流水；人工调账历史可能未记门店，仅 ADJUST 允许 store_id 为空
-        filters.append(
-            or_(
-                BalanceLedger.store_id == effective,
-                and_(BalanceLedger.store_id.is_(None), BalanceLedger.entry_type == "ADJUST"),
-            )
-        )
+        # P0：严格按门店隔离。历史 store_id=NULL 的 ADJUST 不得跨店可见。
+        filters.append(BalanceLedger.store_id == effective)
+    elif user.role.code != "SUPER_ADMIN":
+        raise AppException(40301, "账号未绑定门店")
     if customer_id:
         filters.append(BalanceLedger.customer_id == int(customer_id))
     if entry_type and entry_type.strip():
@@ -435,9 +432,13 @@ async def search_customers_for_wallet(
 
 @router.post("/adjust", dependencies=[require_permission("wallet:manage")])
 async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user: CurrentUser):
-    sid = require_bound_store(user, data.store_id) if user.role.code != "SUPER_ADMIN" else data.store_id
-    # 非超管必须确认顾客属于本店，禁止凭 customer_id 跨店调账
-    if user.role.code != "SUPER_ADMIN":
+    # P0：调账必须落门店，禁止 store_id=NULL 的跨店 ADJUST 流水
+    if user.role.code == "SUPER_ADMIN":
+        sid = data.store_id
+        if not sid:
+            raise AppException(40051, "调账必须指定门店")
+    else:
+        sid = require_bound_store(user, data.store_id)
         if not sid:
             raise AppException(40301, "账号未绑定门店")
         from app.api.v1.customers import _assert_customer_in_store
@@ -448,7 +449,7 @@ async def adjust_balance(data: AdjustBody, request: Request, db: DbSession, user
         customer_id=data.customer_id,
         delta_principal=data.delta_principal,
         delta_gift=data.delta_gift,
-        store_id=sid,
+        store_id=int(sid),
         remark=data.remark,
         operator_id=user.id,
     )
