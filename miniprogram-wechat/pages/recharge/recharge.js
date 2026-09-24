@@ -2,7 +2,6 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const payUtil = require('../../utils/pay')
 const dineCtx = require('../../utils/context')
-const tabCartBadge = require('../../utils/tabCartBadge')
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -66,7 +65,6 @@ Page({
   },
 
   onShow() {
-    tabCartBadge.syncTabCartBadge()
     this.bootstrap()
   },
 

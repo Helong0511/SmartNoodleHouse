@@ -571,7 +571,6 @@ function saveCart(cart, options) {
   } else {
     try { my.removeStorageSync({ key: CART_STORE_ID_KEY }) } catch (_) {}
   }
-  require('./tabCartBadge').updateTabCartBadge(cart)
 }
 
 function getCart() {

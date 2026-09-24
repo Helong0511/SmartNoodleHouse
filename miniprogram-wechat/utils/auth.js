@@ -552,7 +552,6 @@ function saveCart(cart, options) {
   } else {
     try { wx.removeStorageSync(CART_STORE_ID_KEY) } catch (_) {}
   }
-  require('./tabCartBadge').updateTabCartBadge(cart)
 }
 
 function getCart() {

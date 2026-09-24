@@ -168,6 +168,10 @@ async function reorder(orderId: number) {
     }))
     localStorage.setItem('snh_cart', JSON.stringify(cart))
     localStorage.setItem('cart', JSON.stringify(cart))
+    const reorderStoreId = res.data.store_id
+    if (reorderStoreId != null && Number(reorderStoreId) > 0) {
+      localStorage.setItem('snh_cart_store_id', String(Number(reorderStoreId)))
+    }
     const skipped = res.data.skipped || []
     if (skipped.length) {
       await ElMessageBox.alert(`已加入 ${cart.length} 件；${skipped.length} 件不可用已跳过`, '已加入购物车')

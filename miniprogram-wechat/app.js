@@ -2,7 +2,6 @@ const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan, normalizeLaunchQuery } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
-const tabCartBadge = require('./utils/tabCartBadge')
 const clientConfig = require('./utils/clientConfig')
 const tracker = require('./utils/tracker')
 const remoteLogger = require('./utils/logger')
@@ -33,7 +32,6 @@ App({
     }
     const cart = wx.getStorageSync('cart') || []
     this.globalData.cart = cart
-    tabCartBadge.updateTabCartBadge(cart)
     this.globalData.nickname = wx.getStorageSync('nickname') || ''
     this.globalData.avatarUrl = wx.getStorageSync('avatar_url') || ''
     this.globalData.customerToken = wx.getStorageSync('customer_token') || ''
@@ -93,7 +91,6 @@ App({
   },
   onShow(options) {
     if (options) this.parseLaunch(options)
-    tabCartBadge.updateTabCartBadge(this.globalData.cart || wx.getStorageSync('cart') || [])
     try { tracker.flush() } catch (_) {}
   },
   onHide() {

@@ -3,7 +3,6 @@ const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
-const tabCartBadge = require('../../utils/tabCartBadge')
 
 const ORDERS_CACHE_MS = 30 * 1000
 const SCOPE_STORAGE_KEY = 'orders_scope_pending'
@@ -48,7 +47,6 @@ Page({
   },
 
   onShow() {
-    tabCartBadge.syncTabCartBadge()
     let pending = null
     try {
       const res = my.getStorageSync({ key: SCOPE_STORAGE_KEY })

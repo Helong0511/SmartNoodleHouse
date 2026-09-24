@@ -3,7 +3,6 @@ const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
-const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
 const { loadStoreCatalog } = require('../../utils/products')
 const app = getApp()
@@ -153,9 +152,7 @@ Page({
     } catch (_) {}
     my.showToast({ content: '已加入', type: 'success' })
     setTimeout(() => {
-      my.navigateBack({
-        complete: () => tabCartBadge.syncTabCartBadge()
-      })
+      my.navigateBack()
     }, 500)
   }
 })

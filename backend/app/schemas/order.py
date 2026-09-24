@@ -85,21 +85,3 @@ class PosScanPay(BaseModel):
 class PaymentCreate(BaseModel):
     provider: str = Field(description="WECHAT / ALIPAY / BALANCE")
     channel_type: str = "native"
-
-
-class OrderOut(BaseModel):
-    id: int
-    order_no: str
-    customer_id: int | None
-    table_id: int | None
-    store_id: int
-    status: str
-    subtotal: Decimal
-    discount_amount: Decimal
-    total_amount: Decimal
-    payment_status: str
-    payment_method: str | None
-    channel: str | None
-    remark: str | None
-
-    model_config = {"from_attributes": True}

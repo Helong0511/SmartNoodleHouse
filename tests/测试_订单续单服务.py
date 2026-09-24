@@ -67,6 +67,7 @@ async def test_reorder_prices_items_in_order_store(db_session):
             "no_member_discount": False,
         }
     ]
+    assert result["store_id"] == store.id
 
 
 @pytest.mark.asyncio

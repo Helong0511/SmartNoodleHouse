@@ -3,7 +3,6 @@ const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
-const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
 const { loadStoreCatalog } = require('../../utils/products')
 const app = getApp()
@@ -157,9 +156,7 @@ Page({
     } catch (_) {}
     wx.showToast({ title: '已加入', icon: 'success' })
     setTimeout(() => {
-      wx.navigateBack({
-        complete: () => tabCartBadge.syncTabCartBadge()
-      })
+      wx.navigateBack()
     }, 500)
   }
 })

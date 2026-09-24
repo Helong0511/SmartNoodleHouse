@@ -207,6 +207,10 @@ function addToCart() {
   })
   localStorage.setItem('snh_cart', JSON.stringify(cart.value))
   localStorage.setItem('cart', JSON.stringify(cart.value))
+  const bindSid = table.value?.store_id
+  if (bindSid != null && Number(bindSid) > 0) {
+    localStorage.setItem('snh_cart_store_id', String(Number(bindSid)))
+  }
   showProduct.value = false
 }
 
@@ -290,6 +294,14 @@ onMounted(async () => {
     ElMessage.warning('请先扫桌码进入点餐')
     return
   }
+  // 跨店购物车隔离：门店不一致则清空，防止串单
+  const boundCartStore = Number(localStorage.getItem('snh_cart_store_id') || 0)
+  if (boundCartStore > 0 && boundCartStore !== Number(sid)) {
+    cart.value = []
+    localStorage.removeItem('snh_cart')
+    localStorage.removeItem('cart')
+  }
+  localStorage.setItem('snh_cart_store_id', String(Number(sid)))
   categories.value = (
     await api.get('/categories', {
       params: { store_id: sid },

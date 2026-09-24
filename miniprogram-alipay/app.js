@@ -2,7 +2,6 @@ const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan, normalizeLaunchQuery } = require('./utils/scan')
 const { resolveApiBase } = require('./config/env')
 const auth = require('./utils/auth')
-const tabCartBadge = require('./utils/tabCartBadge')
 const clientConfig = require('./utils/clientConfig')
 const tracker = require('./utils/tracker')
 const remoteLogger = require('./utils/logger')
@@ -48,7 +47,6 @@ App({
     } catch (_) {}
     // 桌台恢复：qr_token 为静态凭证，是否有效由后端 /entry 裁决，
     // 本地不再因 4h TTL 删除 token（旧逻辑会导致真机反复要求扫码绑桌）
-    tabCartBadge.updateTabCartBadge(this.globalData.cart)
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
@@ -86,7 +84,6 @@ App({
   },
   onShow(options) {
     if (options) this.parseLaunch(options)
-    tabCartBadge.updateTabCartBadge(this.globalData.cart || auth.readStorage('cart') || [])
     try { tracker.flush() } catch (_) {}
   },
   onHide() {

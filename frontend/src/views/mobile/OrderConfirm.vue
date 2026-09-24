@@ -157,6 +157,7 @@ async function submit() {
     }
     localStorage.removeItem('snh_cart')
     localStorage.removeItem('cart')
+    localStorage.removeItem('snh_cart_store_id')
     checkoutNonce.value = ''
     const pts = payRes?.points_earned ? `&points_earned=${payRes.points_earned}` : ''
     router.push(`/order/result?order_id=${orderId}${pts}`)

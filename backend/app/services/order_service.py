@@ -29,7 +29,9 @@ ORDER_STATUS_LABEL = {
 PAYMENT_STATUS_LABEL = {
     "UNPAID": "未支付",
     "PAID": "已支付",
+    "PARTIAL_PAID": "部分支付",
     "REFUNDING": "退款中",
+    "PARTIAL_REFUND": "部分退款",
     "REFUNDED": "已退款",
 }
 

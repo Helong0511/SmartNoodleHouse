@@ -4,7 +4,6 @@ const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
 const prefUtil = require('../../utils/preferences')
 const dineCtx = require('../../utils/context')
-const tabCartBadge = require('../../utils/tabCartBadge')
 const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
@@ -95,7 +94,6 @@ Page({
   },
 
   onShow() {
-    tabCartBadge.syncTabCartBadge()
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
     this.setData({ cartThumbStyle: `width:${px}px;height:${px}px;` })
@@ -212,11 +210,6 @@ Page({
     if (!cart.length) patch.cartSheetOpen = false
     else if (openSheet) patch.cartSheetOpen = true
     this.setData(patch)
-  },
-
-  toggleCartSheet() {
-    if (!this.data.cart.length) return
-    this.setData({ cartSheetOpen: !this.data.cartSheetOpen })
   },
 
   closeCartSheet() {

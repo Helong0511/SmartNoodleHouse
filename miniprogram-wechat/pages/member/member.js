@@ -8,7 +8,6 @@ const voucherUtil = require('../../utils/voucher')
 const clientConfig = require('../../utils/clientConfig')
 const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
-const tabCartBadge = require('../../utils/tabCartBadge')
 const app = getApp()
 
 function discountText(rate) {
@@ -115,7 +114,6 @@ Page({
   },
 
   onShow() {
-    tabCartBadge.syncTabCartBadge()
     if (app._privacyPopup && app.globalData.needPrivacyPopup) {
       app._privacyPopup.show()
     }
