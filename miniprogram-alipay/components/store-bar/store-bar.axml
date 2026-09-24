@@ -1,32 +1,32 @@
-<view class="bar {{compact ? 'compact' : ''}}" a:if="{{storeName || tableName}}">
+<view class="bar {{compact ? 'compact' : ''}}" a:if="{{viewStoreName || viewTableName}}">
   <view class="bar-top">
-    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" />
+    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" lazy-load="{{true}}" />
     <view class="bar-main">
-  <view class="row" a:if="{{storeName}}">
-    <text class="bar-label">门店</text>
-    <view class="val">
-      <text class="name">{{storeName}}</text>
-      <text class="sub" a:if="{{storeNo}}">#{{storeNo}}</text>
-    </view>
-  </view>
-  <view class="row row-table-action" a:if="{{tableName}}" onTap="onTapTable">
-    <text class="bar-label">{{seatLabel || '桌号'}}</text>
-    <view class="val">
-      <text class="name table">{{tableName}}</text>
-      <text class="sub" a:if="{{tableNo && tableNo != tableName}}">{{tableNo}}</text>
-      <text class="change-hint" a:if="{{changeable}}">更换</text>
-    </view>
-  </view>
-  <view class="extra" a:if="{{!compact && (storeAddress || storePhone)}}">
-    <text a:if="{{storeAddress}}">{{storeAddress}}</text>
-    <text a:if="{{storePhone}}" class="phone">{{storePhone}}</text>
-  </view>
+      <view class="row" a:if="{{viewStoreName}}">
+        <text class="bar-label">门店</text>
+        <view class="val">
+          <text class="name">{{viewStoreName}}</text>
+          <text class="sub" a:if="{{viewStoreNo}}">#{{viewStoreNo}}</text>
+        </view>
+      </view>
+      <view class="row row-table-action" a:if="{{viewTableName}}" onTap="onTapTable">
+        <text class="bar-label">{{viewSeatLabel || '桌号'}}</text>
+        <view class="val">
+          <text class="name table">{{viewTableName}}</text>
+          <text class="sub" a:if="{{viewTableNo && viewTableNo != viewTableName}}">{{viewTableNo}}</text>
+          <text class="change-hint" a:if="{{changeable}}">更换</text>
+        </view>
+      </view>
+      <view class="extra" a:if="{{!compact && (viewStoreAddress || viewStorePhone)}}">
+        <text a:if="{{viewStoreAddress}}">{{viewStoreAddress}}</text>
+        <text a:if="{{viewStorePhone}}" class="phone">{{viewStorePhone}}</text>
+      </view>
     </view>
   </view>
 </view>
-<view class="bar empty" a:else>
+<view class="bar empty {{compact ? 'compact' : ''}}" a:else>
   <view class="bar-top">
-    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" />
+    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" lazy-load="{{true}}" />
     <text class="hint">请扫描桌台二维码进入门店</text>
   </view>
 </view>

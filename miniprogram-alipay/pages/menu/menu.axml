@@ -1,17 +1,6 @@
 ﻿<view class="page">
   <privacy-popup id="privacy-popup" />
-  <store-bar
-    storeName="{{storeName}}"
-    storeNo="{{storeNo}}"
-    storeAddress="{{storeAddress}}"
-    storePhone="{{storePhone}}"
-    storeLogo="{{storeLogo}}"
-    tableName="{{tableName}}"
-    tableNo="{{tableNo}}"
-    seatLabel="{{seatLabel}}"
-    compact="{{true}}"
-    onTableChange="onTableChange"
-  />
+  <store-bar compact="{{true}}" onTableChange="onTableChange" />
 
   <view class="scan-bar" a:if="{{!hasTable && !loading}}" onTap="scanTable">
     <text class="scan-icon">📷</text>

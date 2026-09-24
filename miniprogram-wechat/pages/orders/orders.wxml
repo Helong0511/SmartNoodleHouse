@@ -1,19 +1,9 @@
 ﻿<view class="page">
   <privacy-popup id="privacy-popup" />
 
-  <store-bar
-    storeName="{{storeName}}"
-    storeNo="{{storeNo}}"
-    storeAddress="{{storeAddress}}"
-    storePhone="{{storePhone}}"
-    storeLogo="{{storeLogo}}"
-    tableName="{{tableName}}"
-    tableNo="{{tableNo}}"
-    seatLabel="{{seatLabel}}"
-    compact="{{true}}"
-    bind:tablechange="onTableChange"
-  />
+  <store-bar compact="{{true}}" bind:tablechange="onTableChange" />
 
+  <view class="page-body">
   <view class="scope-tabs">
     <view
       class="scope-item {{orderScope === 'dine' ? 'active' : ''}}"
@@ -107,4 +97,5 @@
       <text wx:elif="{{noMore}}">— 没有更多了 —</text>
     </view>
   </block>
+  </view>
 </view>

@@ -72,7 +72,20 @@ Page({
 
   applyDineContext(ctx) {
     if (!ctx) return
-    this.setData(dineCtx.pageDineFields(ctx))
+    const fields = dineCtx.pageDineFields(ctx)
+    const d = this.data
+    if (
+      d.storeId === fields.storeId
+      && d.storeName === fields.storeName
+      && d.storeNo === fields.storeNo
+      && d.storeLogo === fields.storeLogo
+      && d.tableName === fields.tableName
+      && d.tableNo === fields.tableNo
+      && d.seatLabel === fields.seatLabel
+    ) {
+      return
+    }
+    this.setData(fields)
   },
 
   onTableChange(ctx) {

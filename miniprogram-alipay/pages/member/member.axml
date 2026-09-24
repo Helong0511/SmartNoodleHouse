@@ -1,18 +1,9 @@
 ﻿<view class="page">
   <privacy-popup id="privacy-popup" />
 
-  <store-bar
-    storeName="{{storeName}}"
-    storeNo="{{storeNo}}"
-    storeAddress="{{storeAddress}}"
-    storePhone="{{storePhone}}"
-    storeLogo="{{storeLogo}}"
-    tableName="{{tableName}}"
-    tableNo="{{tableNo}}"
-    seatLabel="{{seatLabel}}"
-    onTableChange="onTableChange"
-  />
+  <store-bar compact="{{true}}" onTableChange="onTableChange" />
 
+  <view class="page-body">
   <skeleton a:if="{{loading}}" type="member" />
 
   <block a:else>
@@ -234,6 +225,8 @@
       <view class="tip consent-tip" a:if="{{consentVersion}}">同意版本 {{consentVersion}}<text a:if="{{consentAt}}"> · {{consentAt}}</text></view>
     </view>
   </block>
+
+  </view>
 
   <view class="profile-mask" a:if="{{showTasteProfile}}" onTap="closeTasteProfile">
     <view class="profile-sheet" catchTap="">

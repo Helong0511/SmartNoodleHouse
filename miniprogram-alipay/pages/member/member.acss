@@ -1,4 +1,12 @@
-.page { padding: 24rpx; padding-bottom: 48rpx; }
+.page {
+  padding: 0;
+  padding-bottom: 48rpx;
+  background: #f7f7f7;
+  box-sizing: border-box;
+}
+.page-body {
+  padding: 12rpx 24rpx 0;
+}
 .loading-tip { text-align: center; padding: 80rpx 0; color: #999; }
 .card { background: #fff; border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
 .member-card { background: linear-gradient(135deg, #f0f7ff, #fff); }

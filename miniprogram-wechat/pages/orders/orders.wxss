@@ -1,4 +1,12 @@
-.page { padding: 24rpx; padding-bottom: calc(24rpx + env(safe-area-inset-bottom)); }
+.page {
+  padding: 0;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+  background: #f7f7f7;
+  box-sizing: border-box;
+}
+.page-body {
+  padding: 12rpx 24rpx 0;
+}
 .scope-tabs {
   display: flex;
   background: #fff;

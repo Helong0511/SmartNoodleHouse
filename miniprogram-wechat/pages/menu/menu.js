@@ -131,6 +131,25 @@ Page({
     this.refreshCartBar({ openSheet })
   },
 
+  applyDineContext(ctx) {
+    if (!ctx) return
+    const fields = dineCtx.pageDineFields(ctx)
+    const d = this.data
+    if (
+      d.storeId === fields.storeId
+      && d.storeName === fields.storeName
+      && d.storeNo === fields.storeNo
+      && d.storeLogo === fields.storeLogo
+      && d.tableName === fields.tableName
+      && d.tableNo === fields.tableNo
+      && d.seatLabel === fields.seatLabel
+      && d.hasTable === fields.hasTable
+    ) {
+      return
+    }
+    this.setData(fields)
+  },
+
   applyMenuFlags(storeId) {
     const apply = () => {
       const flags = clientConfig.menuPageFlags()
@@ -138,6 +157,15 @@ Page({
       const hadKeyword = !!this.data.keyword
       if (!flags.showMenuSearch && hadKeyword) {
         patch.keyword = ''
+      }
+      const d = this.data
+      if (
+        d.showMenuSearch === patch.showMenuSearch
+        && d.showMenuSmartTaste === patch.showMenuSmartTaste
+        && d.showMenuGuessYouLike === patch.showMenuGuessYouLike
+        && (patch.keyword === undefined || d.keyword === patch.keyword)
+      ) {
+        return
       }
       this.setData(patch, () => {
         if (!flags.showMenuSearch && hadKeyword) {
@@ -147,11 +175,6 @@ Page({
     }
     const sid = storeId || this.data.storeId || null
     clientConfig.loadClientConfig(false, sid).then(apply).catch(() => {})
-  },
-
-  applyDineContext(ctx) {
-    if (!ctx) return
-    this.setData(dineCtx.pageDineFields(ctx))
   },
 
   onTableChange(e) {

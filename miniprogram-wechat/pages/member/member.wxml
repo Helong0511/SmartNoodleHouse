@@ -1,28 +1,9 @@
 ﻿<view class="page">
   <privacy-popup id="privacy-popup" />
 
-  <store-bar
-    storeName="{{storeName}}"
+  <store-bar compact="{{true}}" bind:tablechange="onTableChange" />
 
-    storeNo="{{storeNo}}"
-
-    storeAddress="{{storeAddress}}"
-
-    storePhone="{{storePhone}}"
-    storeLogo="{{storeLogo}}"
-
-    tableName="{{tableName}}"
-
-    tableNo="{{tableNo}}"
-
-    seatLabel="{{seatLabel}}"
-
-    bind:tablechange="onTableChange"
-
-  />
-
-
-
+  <view class="page-body">
   <skeleton wx:if="{{loading}}" type="member" />
 
 
@@ -330,6 +311,8 @@
   </view>
 
   </block>
+
+  </view>
 
   <!-- 口味画像查看弹层 -->
   <view class="profile-mask" wx:if="{{showTasteProfile}}" bindtap="closeTasteProfile">

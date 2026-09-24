@@ -151,6 +151,15 @@ Page({
       if (!flags.showMenuSearch && hadKeyword) {
         patch.keyword = ''
       }
+      const d = this.data
+      if (
+        d.showMenuSearch === patch.showMenuSearch
+        && d.showMenuSmartTaste === patch.showMenuSmartTaste
+        && d.showMenuGuessYouLike === patch.showMenuGuessYouLike
+        && (patch.keyword === undefined || d.keyword === patch.keyword)
+      ) {
+        return
+      }
       this.setData(patch, () => {
         if (!flags.showMenuSearch && hadKeyword) {
           this.loadMenu()
@@ -163,7 +172,21 @@ Page({
 
   applyDineContext(ctx) {
     if (!ctx) return
-    this.setData(dineCtx.pageDineFields(ctx))
+    const fields = dineCtx.pageDineFields(ctx)
+    const d = this.data
+    if (
+      d.storeId === fields.storeId
+      && d.storeName === fields.storeName
+      && d.storeNo === fields.storeNo
+      && d.storeLogo === fields.storeLogo
+      && d.tableName === fields.tableName
+      && d.tableNo === fields.tableNo
+      && d.seatLabel === fields.seatLabel
+      && d.hasTable === fields.hasTable
+    ) {
+      return
+    }
+    this.setData(fields)
   },
 
   onTableChange(ctx) {

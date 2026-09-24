@@ -52,6 +52,9 @@ function clearDineContext() {
     my.removeStorageSync({ key: 'table_token' })
     my.removeStorageSync({ key: DINE_BOUND_AT_KEY })
   } catch (_) {}
+  try {
+    notifyDineContextChange(displayPayload(null, null))
+  } catch (_) {}
 }
 
 /** 外带/外卖虚拟桌（种子 table_no=WM），不是堂食实体桌 */
@@ -77,6 +80,38 @@ function tableLabel(table) {
 function storeLabel(store) {
   if (!store) return ''
   return store.name || ''
+}
+
+/** 桌台/门店变更订阅：扫码绑桌后立即刷新各页 store-bar */
+const _dineListeners = []
+
+function subscribeDineContext(fn) {
+  if (typeof fn !== 'function') return function () {}
+  _dineListeners.push(fn)
+  return function unsubscribe() {
+    const i = _dineListeners.indexOf(fn)
+    if (i >= 0) _dineListeners.splice(i, 1)
+  }
+}
+
+function notifyDineContextChange(ctx) {
+  const payload = ctx || currentDisplay()
+  for (let i = 0; i < _dineListeners.length; i++) {
+    try {
+      _dineListeners[i](payload)
+    } catch (_) {}
+  }
+}
+
+async function enrichStore(store, table) {
+  let s = store || null
+  const sid = (table && table.store_id) || (s && (s.id || s.store_id)) || null
+  if (sid && (!s || !s.name)) {
+    try {
+      s = await api.get(`/miniprogram/stores/${sid}`, {}, false)
+    } catch (_) {}
+  }
+  return s
 }
 
 function applyContext(table, store, options) {
@@ -124,6 +159,12 @@ function applyContext(table, store, options) {
         require('./clientConfig').loadClientConfig(true, newStoreId).catch(() => {})
       } catch (_) {}
     }
+  }
+  if (!opts.silent) {
+    notifyDineContextChange(displayPayload(
+      store || (g && g.globalData && g.globalData.store) || null,
+      table || (g && g.globalData && g.globalData.table) || null
+    ))
   }
 }
 
@@ -223,8 +264,9 @@ async function bindTableFromToken(token) {
   if (!raw) return null
   const entry = await api.get('/miniprogram/entry', { token: raw, channel: 'alipay' }, false)
   if (entry && entry.table) {
-    applyContext(entry.table, entry.store || null)
-    return displayPayload(entry.store || null, entry.table)
+    const store = await enrichStore(entry.store || null, entry.table)
+    applyContext(entry.table, store)
+    return displayPayload(store, entry.table)
   }
   return null
 }
@@ -291,8 +333,9 @@ async function refreshTableBinding(options = {}) {
     try {
       const entry = await api.get('/miniprogram/entry', { token, channel }, false)
       if (entry && entry.table) {
-        applyContext(entry.table, entry.store || store || null)
-        const ctx = displayPayload(entry.store || store, entry.table)
+        const fullStore = await enrichStore(entry.store || store || null, entry.table)
+        applyContext(entry.table, fullStore)
+        const ctx = displayPayload(fullStore, entry.table)
         return { ok: true, token: entry.table.qr_token || token, ctx }
       }
       clearDineContext()
@@ -483,5 +526,7 @@ module.exports = {
   isTakeawayChannelTable,
   bindTableFromToken,
   refreshTableBinding,
-  scanAndBindTable
+  scanAndBindTable,
+  subscribeDineContext,
+  notifyDineContextChange
 }

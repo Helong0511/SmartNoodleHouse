@@ -1,38 +1,38 @@
-<view class="bar {{compact ? 'compact' : ''}}" wx:if="{{storeName || tableName}}">
+<view class="bar {{compact ? 'compact' : ''}}" wx:if="{{viewStoreName || viewTableName}}">
   <view class="bar-top">
-    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" />
+    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" lazy-load />
     <view class="bar-main">
-  <view class="row" wx:if="{{storeName}}">
-    <text class="bar-label">门店</text>
-    <view class="val">
-      <text class="name">{{storeName}}</text>
-      <text class="sub" wx:if="{{storeNo}}">#{{storeNo}}</text>
-    </view>
-  </view>
-  <view
-    class="row row-table-action"
-    wx:if="{{tableName}}"
-    hover-class="table-row-hover"
-    hover-stay-time="80"
-    bindtap="onTapTable"
-  >
-    <text class="bar-label">{{seatLabel || '桌号'}}</text>
-    <view class="val">
-      <text class="name table">{{tableName}}</text>
-      <text class="sub" wx:if="{{tableNo && tableNo != tableName}}">{{tableNo}}</text>
-      <text class="change-hint" wx:if="{{changeable}}">更换</text>
-    </view>
-  </view>
-  <view class="extra" wx:if="{{!compact && (storeAddress || storePhone)}}">
-    <text wx:if="{{storeAddress}}">{{storeAddress}}</text>
-    <text wx:if="{{storePhone}}" class="phone">{{storePhone}}</text>
-  </view>
+      <view class="row" wx:if="{{viewStoreName}}">
+        <text class="bar-label">门店</text>
+        <view class="val">
+          <text class="name">{{viewStoreName}}</text>
+          <text class="sub" wx:if="{{viewStoreNo}}">#{{viewStoreNo}}</text>
+        </view>
+      </view>
+      <view
+        class="row row-table-action"
+        wx:if="{{viewTableName}}"
+        hover-class="table-row-hover"
+        hover-stay-time="80"
+        bindtap="onTapTable"
+      >
+        <text class="bar-label">{{viewSeatLabel || '桌号'}}</text>
+        <view class="val">
+          <text class="name table">{{viewTableName}}</text>
+          <text class="sub" wx:if="{{viewTableNo && viewTableNo != viewTableName}}">{{viewTableNo}}</text>
+          <text class="change-hint" wx:if="{{changeable}}">更换</text>
+        </view>
+      </view>
+      <view class="extra" wx:if="{{!compact && (viewStoreAddress || viewStorePhone)}}">
+        <text wx:if="{{viewStoreAddress}}">{{viewStoreAddress}}</text>
+        <text wx:if="{{viewStorePhone}}" class="phone">{{viewStorePhone}}</text>
+      </view>
     </view>
   </view>
 </view>
-<view class="bar empty" wx:else>
+<view class="bar empty {{compact ? 'compact' : ''}}" wx:else>
   <view class="bar-top">
-    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" />
+    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" lazy-load />
     <text class="hint">请扫描桌台二维码进入门店</text>
   </view>
 </view>
