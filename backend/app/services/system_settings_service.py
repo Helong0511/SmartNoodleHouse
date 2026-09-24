@@ -59,6 +59,9 @@ PLATFORM_ONLY_KEYS = frozenset({
     "night_batch_recommend_top_n",
     "night_batch_taste_customer_limit",
     "night_batch_taste_lookback_days",
+    "night_batch_category_sort_enabled",
+    "night_batch_category_sort_lookback_days",
+    "night_batch_category_sort_soft_qty",
 })
 
 BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
@@ -504,6 +507,34 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "max": 30,
         "default": 3,
         "description": "扫描近 N 日有行为事件的顾客做智能口味深度学习",
+    },
+    "night_batch_category_sort_enabled": {
+        "group": "system",
+        "label": "分类时段销量自动排序",
+        "unit": "",
+        "type": "bool",
+        "default": True,
+        "description": "关店窗内按各时段历史销量刷新已开启「销量自动」的分类时段方案",
+    },
+    "night_batch_category_sort_lookback_days": {
+        "group": "system",
+        "label": "分类时段统计天数",
+        "unit": "天",
+        "type": "int",
+        "min": 1,
+        "max": 180,
+        "default": 30,
+        "description": "统计近 N 日该时段已支付销量；天数越长、样本越多，自动排序越稳",
+    },
+    "night_batch_category_sort_soft_qty": {
+        "group": "system",
+        "label": "分类时段满权销量",
+        "unit": "件",
+        "type": "int",
+        "min": 1,
+        "max": 100000,
+        "default": 100,
+        "description": "该时段累计销量达此值时完全按销量排序；不足则与默认序加权混合，数据越多越准",
     },
 }
 

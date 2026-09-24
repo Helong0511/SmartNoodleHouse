@@ -59,6 +59,9 @@ async def test_run_night_batch_skips_outside_window():
                 "recommend_top_n": 8,
                 "taste_customer_limit": 2000,
                 "taste_lookback_days": 3,
+                "category_sort_enabled": True,
+                "category_sort_lookback_days": 30,
+                "category_sort_soft_qty": 100,
             }
         ),
     ):
@@ -82,6 +85,9 @@ async def test_run_night_batch_skips_when_disabled():
                 "recommend_top_n": 8,
                 "taste_customer_limit": 2000,
                 "taste_lookback_days": 3,
+                "category_sort_enabled": True,
+                "category_sort_lookback_days": 30,
+                "category_sort_soft_qty": 100,
             }
         ),
     ):
@@ -161,6 +167,9 @@ async def test_night_batch_settings_in_meta():
         "night_batch_recommend_top_n",
         "night_batch_taste_customer_limit",
         "night_batch_taste_lookback_days",
+        "night_batch_category_sort_enabled",
+        "night_batch_category_sort_lookback_days",
+        "night_batch_category_sort_soft_qty",
     ):
         assert key in BUSINESS_SETTING_META
         assert key in PLATFORM_ONLY_KEYS

@@ -1,4 +1,4 @@
-const api = require('../../utils/api')
+﻿const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const payUtil = require('../../utils/pay')
 const subscribe = require('../../utils/subscribe')
@@ -96,6 +96,7 @@ Page({
     storeNo: '',
     storeAddress: '',
     storePhone: '',
+    storeLogo: '',
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',

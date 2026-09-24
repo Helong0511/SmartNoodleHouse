@@ -83,6 +83,7 @@ class Store(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_no: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(100))
+    logo: Mapped[str | None] = mapped_column(String(500), default=None)
     address: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(20))
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), default=None)
@@ -402,6 +403,8 @@ class CategorySortSchedule(Base, TimestampMixin):
     end_time: Mapped[object] = mapped_column(Time)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[int] = mapped_column(Integer, default=1)
+    auto_sort: Mapped[int] = mapped_column(Integer, default=0)
+    auto_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class CategorySortScheduleItem(Base):

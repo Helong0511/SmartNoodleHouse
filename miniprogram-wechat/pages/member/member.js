@@ -1,4 +1,4 @@
-const api = require('../../utils/api')
+﻿const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
@@ -101,6 +101,7 @@ Page({
     storeNo: '',
     storeAddress: '',
     storePhone: '',
+    storeLogo: '',
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',

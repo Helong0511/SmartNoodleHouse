@@ -1,4 +1,4 @@
-const api = require('../../utils/api')
+﻿const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
 const subscribe = require('../../utils/subscribe')
 const prefUtil = require('../../utils/preferences')
@@ -109,6 +109,7 @@ Page({
     storeNo: '',
     storeAddress: '',
     storePhone: '',
+    storeLogo: '',
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',
@@ -280,6 +281,7 @@ Page({
       const pickup = pickupUtil.decorate(order)
       const pageTitle = PAGE_TITLE[order.status] || order.status_label || '订单详情'
       wx.setNavigationBarTitle({ title: pageTitle })
+      const dine = dineCtx.currentDisplay()
       this.setData({
         order,
         ...pickup,
@@ -297,8 +299,9 @@ Page({
         pageTitle,
         headerIcon: headerIcon(order.status),
         statusSteps: this.buildSteps(order.status),
-        storeName: order.store_name || '',
-        storeNo: order.store_no || '',
+        storeName: order.store_name || dine.storeName || '',
+        storeNo: order.store_no || dine.storeNo || '',
+        storeLogo: dine.storeLogo || '',
         ...seatFieldsFromOrder(order),
         loading: false
       })

@@ -13,6 +13,15 @@
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
       <el-button type="primary" :disabled="!effectiveStoreId" @click="openForm()">新增方案</el-button>
+      <el-button
+        type="success"
+        plain
+        :disabled="!effectiveStoreId"
+        :loading="autoRefreshing"
+        @click="autoRefreshStore"
+      >
+        按销量刷新自动方案
+      </el-button>
       <el-button @click="load">刷新</el-button>
       <el-time-select
         v-model="previewAt"
@@ -25,7 +34,10 @@
       />
       <el-button :disabled="!effectiveStoreId || !previewAt" @click="loadPreview">预览排序</el-button>
     </div>
-    <p class="hint">按门店本地时分命中时段后，覆盖分类默认排序；重叠取优先级更大者；开始晚于结束表示跨午夜。无命中则用分类管理里的默认排序。</p>
+    <p class="hint">
+      按门店本地时分命中时段后，覆盖分类默认排序；重叠取优先级更大者；开始晚于结束表示跨午夜。无命中则用分类管理里的默认排序。
+      开启「销量自动」后，关店夜间批会按该时段历史销量刷新分类序；销量越多权重越高，排序越准。也可点「按销量刷新」立即更新。
+    </p>
 
     <el-table :data="schedules" style="margin-top: 12px" border>
       <el-table-column prop="name" label="方案名" min-width="120" />
@@ -33,11 +45,21 @@
         <template #default="{ row }">{{ row.start_time }} – {{ row.end_time }}</template>
       </el-table-column>
       <el-table-column prop="priority" label="优先级" width="80" />
+      <el-table-column label="销量自动" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.auto_sort === 1 ? 'success' : 'info'" size="small">
+            {{ row.auto_sort === 1 ? '开' : '关' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="分类序" min-width="220">
         <template #default="{ row }">
           <span v-if="!(row.items || []).length" class="muted">未配置（等同默认）</span>
           <span v-else>{{ formatItems(row) }}</span>
         </template>
+      </el-table-column>
+      <el-table-column label="最近自动刷新" width="170">
+        <template #default="{ row }">{{ row.auto_updated_at || '—' }}</template>
       </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
@@ -46,9 +68,12 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="260">
         <template #default="{ row }">
           <el-button link type="primary" @click="openForm(row)">编辑</el-button>
+          <el-button link type="success" :loading="autoRefreshingId === row.id" @click="autoRefreshOne(row)">
+            按销量刷新
+          </el-button>
           <el-button link type="warning" @click="toggleStatus(row)">
             {{ row.status === 1 ? '停用' : '启用' }}
           </el-button>
@@ -90,6 +115,18 @@
         <el-form-item label="状态">
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" />
         </el-form-item>
+        <el-form-item label="销量自动">
+          <el-switch
+            v-model="form.auto_sort"
+            :active-value="1"
+            :inactive-value="0"
+            active-text="按销量自动刷新"
+            inactive-text="仅手动"
+          />
+          <div class="form-tip" style="margin-left:0;margin-top:4px">
+            开启后夜间批与「按销量刷新」会按该时段历史销量重排；样本越多越贴近真实热度
+          </div>
+        </el-form-item>
         <el-form-item label="分类排序">
           <div v-if="!formCategories.length" class="muted">请先选择门店并确保已有分类</div>
           <div v-else class="sort-list">
@@ -120,6 +157,8 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
+const autoRefreshing = ref(false)
+const autoRefreshingId = ref<number | null>(null)
 const schedules = ref<any[]>([])
 const stores = ref<any[]>([])
 const categories = ref<any[]>([])
@@ -136,6 +175,7 @@ const form = reactive({
   end_time: '10:30',
   priority: 0,
   status: 1,
+  auto_sort: 1,
   items: [] as { category_id: number; sort_order: number }[],
 })
 
@@ -254,6 +294,7 @@ function openForm(row?: any) {
   form.end_time = (row?.end_time || '10:30').slice(0, 5)
   form.priority = row?.priority ?? 0
   form.status = row?.status ?? 1
+  form.auto_sort = row?.auto_sort ?? 1
   if (row?.items?.length) {
     const ordered = [...row.items].sort(
       (a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0) || a.category_id - b.category_id,
@@ -293,6 +334,7 @@ async function save() {
       end_time: form.end_time,
       priority: form.priority,
       status: form.status,
+      auto_sort: form.auto_sort,
       items: form.items.map((it, i) => ({ category_id: it.category_id, sort_order: i })),
       ...(form.id ? {} : { store_id: sid }),
     }
@@ -313,6 +355,42 @@ async function toggleStatus(row: any) {
   await api.put(`/category-schedules/${row.id}`, { status: row.status === 1 ? 0 : 1 })
   ElMessage.success('已更新')
   await load()
+}
+
+async function autoRefreshOne(row: any) {
+  autoRefreshingId.value = row.id
+  try {
+    const res: any = await api.post(`/category-schedules/${row.id}/auto-refresh`)
+    const conf = res.data?.result?.confidence
+    const qty = res.data?.result?.total_qty
+    const pct = conf == null ? '' : `，置信 ${(Number(conf) * 100).toFixed(0)}%`
+    ElMessage.success(`已按销量刷新（样本 ${qty ?? 0} 件${pct}）`)
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '刷新失败')
+  } finally {
+    autoRefreshingId.value = null
+  }
+}
+
+async function autoRefreshStore() {
+  const sid = effectiveStoreId.value
+  if (!sid) {
+    ElMessage.warning('请先选择门店')
+    return
+  }
+  autoRefreshing.value = true
+  try {
+    const res: any = await api.post('/category-schedules/auto-refresh', null, {
+      params: { store_id: sid, only_auto: true },
+    })
+    ElMessage.success(`已刷新 ${res.data?.updated ?? 0} 个自动方案`)
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '刷新失败')
+  } finally {
+    autoRefreshing.value = false
+  }
 }
 
 async function remove(row: any) {

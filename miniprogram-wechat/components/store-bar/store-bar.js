@@ -1,4 +1,5 @@
 const dineCtx = require('../../utils/context')
+const media = require('../../utils/media')
 
 Component({
   properties: {
@@ -6,6 +7,7 @@ Component({
     storeNo: { type: String, value: '' },
     storeAddress: { type: String, value: '' },
     storePhone: { type: String, value: '' },
+    storeLogo: { type: String, value: '' },
     tableName: { type: String, value: '' },
     tableNo: { type: String, value: '' },
     seatLabel: { type: String, value: '桌号' },
@@ -14,7 +16,30 @@ Component({
     changeable: { type: Boolean, value: true }
   },
 
+  data: {
+    logoSrc: '/assets/logo.png'
+  },
+
+  lifetimes: {
+    attached() {
+      this._applyLogo(this.properties.storeLogo)
+    }
+  },
+
+  observers: {
+    storeLogo(v) {
+      this._applyLogo(v)
+    }
+  },
+
   methods: {
+    _applyLogo(v) {
+      const raw = String(v || '').trim()
+      this.setData({
+        logoSrc: raw ? (media.resolveUrl(raw) || '/assets/logo.png') : '/assets/logo.png'
+      })
+    },
+
     onTapTable() {
       if (!this.properties.changeable || !this.properties.tableName) return
       const takeaway = this.properties.seatLabel === '用餐'

@@ -1,6 +1,6 @@
 <view class="bar {{compact ? 'compact' : ''}}" a:if="{{storeName || tableName}}">
   <view class="bar-top">
-    <image class="brand-logo" src="/assets/logo.png" mode="aspectFill" />
+    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" />
     <view class="bar-main">
   <view class="row" a:if="{{storeName}}">
     <text class="bar-label">门店</text>
@@ -26,7 +26,7 @@
 </view>
 <view class="bar empty" a:else>
   <view class="bar-top">
-    <image class="brand-logo" src="/assets/logo.png" mode="aspectFill" />
+    <image class="brand-logo" src="{{logoSrc}}" mode="aspectFill" />
     <text class="hint">请扫描桌台二维码进入门店</text>
   </view>
 </view>

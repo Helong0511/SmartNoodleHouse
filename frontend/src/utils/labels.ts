@@ -44,6 +44,9 @@ export const CHANNEL: Record<string, string> = {
   ELEME: '饿了么',
   H5: 'H5点餐',
   POS: '收银POS',
+  CASH: '现金',
+  MIXED: '组合支付',
+  RECHARGE: '充值',
 }
 
 export const PAYMENT_PROVIDER: Record<string, string> = {
@@ -52,6 +55,15 @@ export const PAYMENT_PROVIDER: Record<string, string> = {
   CASH: '现金',
   MIXED: '组合支付',
   MOCK: '模拟支付',
+  BALANCE: '余额支付',
+  MEITUAN: '美团',
+  ELEME: '饿了么',
+}
+
+/** 财务账本分录类型 */
+export const LEDGER_ENTRY_TYPE: Record<string, string> = {
+  SALE: '收款',
+  REFUND: '退款',
 }
 
 export const DELIVERY_STATUS: Record<string, string> = {

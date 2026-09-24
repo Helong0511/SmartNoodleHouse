@@ -6,6 +6,7 @@
     <store-bar
       storeName="{{storeName}}"
       storeNo="{{storeNo}}"
+      storeLogo="{{storeLogo}}"
       tableName="{{tableName}}"
       tableNo="{{tableNo}}"
       seatLabel="{{seatLabel}}"

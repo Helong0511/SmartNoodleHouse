@@ -107,6 +107,7 @@ Page({
     payLabel: '',
     storeName: '',
     storeNo: '',
+    storeLogo: '',
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',
@@ -276,8 +277,9 @@ Page({
         pageTitle,
         headerIcon: headerIcon(order.status),
         statusSteps: this.buildSteps(order.status),
-        storeName: order.store_name || '',
-        storeNo: order.store_no || '',
+        storeName: order.store_name || dineCtx.currentDisplay().storeName || '',
+        storeNo: order.store_no || dineCtx.currentDisplay().storeNo || '',
+        storeLogo: dineCtx.currentDisplay().storeLogo || '',
         ...seatFieldsFromOrder(order),
         loading: false
       })

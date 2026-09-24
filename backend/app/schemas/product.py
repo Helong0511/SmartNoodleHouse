@@ -50,6 +50,7 @@ class CategoryScheduleCreate(BaseModel):
     end_time: str
     priority: int = 0
     status: int = 1
+    auto_sort: int = 0
     items: list[CategoryScheduleItemIn] = []
 
 
@@ -59,6 +60,7 @@ class CategoryScheduleUpdate(BaseModel):
     end_time: str | None = None
     priority: int | None = None
     status: int | None = None
+    auto_sort: int | None = None
     items: list[CategoryScheduleItemIn] | None = None
 
 

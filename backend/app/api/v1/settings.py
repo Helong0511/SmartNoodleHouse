@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy import select, text
 
 from app.api.deps import CurrentUser, DbSession, get_user_permissions, require_permission
@@ -17,6 +17,7 @@ from app.services.system_settings_service import (
     BUSINESS_SETTING_META,
     SystemSettingsService,
 )
+from app.utils.upload import save_store_logo
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/settings", tags=["系统设置"])
@@ -82,6 +83,7 @@ async def list_store_options(
                     "id": s.id,
                     "store_no": s.store_no,
                     "name": s.name,
+                    "logo": getattr(s, "logo", None),
                     "address": s.address,
                     "phone": s.phone,
                     "status": s.status,
@@ -861,6 +863,7 @@ async def update_store(
         raise AppException(40013, "门店名称不能为空")
     before = {
         "name": store.name,
+        "logo": getattr(store, "logo", None),
         "address": store.address,
         "phone": store.phone,
         "latitude": float(store.latitude) if store.latitude is not None else None,
@@ -885,6 +888,44 @@ async def update_store(
     )
     await db.flush()
     return success(
-        {"id": store.id, "name": store.name, "address": store.address, "phone": store.phone, "status": store.status},
+        {
+            "id": store.id,
+            "name": store.name,
+            "logo": store.logo,
+            "address": store.address,
+            "phone": store.phone,
+            "status": store.status,
+        },
         request=request,
     )
+
+
+@router.post("/stores/{store_id}/logo", dependencies=[Depends(_require_store_update)])
+async def upload_store_logo(
+    store_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+):
+    """上传门店 Logo：校验类型/大小后转为正方形 WebP（≤512px），写入 stores.logo。"""
+    assert_store_access(user, store_id)
+    if user.role.code != "SUPER_ADMIN" and user.store_id and int(user.store_id) != int(store_id):
+        raise AppException(40301, "无权修改该门店")
+    store = await db.get(Store, store_id)
+    if not store:
+        raise AppException(40011, "门店不存在")
+    url = await save_store_logo(file)
+    before = store.logo
+    store.logo = url
+    await _write_audit(
+        db,
+        user=user,
+        request=request,
+        action="settings.store.logo_upload",
+        target_type="store",
+        target_id=store.id,
+        detail={"before": before, "logo": url},
+    )
+    await db.flush()
+    return success({"id": store.id, "logo": url}, request=request)

@@ -18,7 +18,10 @@
 
         <el-sub-menu v-if="showStore" index="g-store">
           <template #title>门店</template>
-          <el-menu-item v-if="auth.hasPermission('table:manage')" index="/store-info">门店信息</el-menu-item>
+          <el-menu-item
+            v-if="auth.hasPermission('table:manage') || auth.hasPermission('order:read') || auth.hasPermission('product:read')"
+            index="/store-info"
+          >门店信息</el-menu-item>
           <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
           <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
         </el-sub-menu>
@@ -56,7 +59,7 @@
           <template #title>外卖</template>
           <el-menu-item index="/delivery/orders">外卖订单</el-menu-item>
           <el-menu-item index="/delivery/refunds">退款处理</el-menu-item>
-          <el-menu-item index="/delivery/stores">门店与营业</el-menu-item>
+          <el-menu-item index="/delivery/stores">门店外卖设置</el-menu-item>
           <el-menu-item index="/delivery/menu">外卖餐品</el-menu-item>
           <el-menu-item index="/delivery/sync">同步监控</el-menu-item>
           <el-menu-item index="/delivery/logs">回调日志</el-menu-item>
@@ -114,7 +117,14 @@ const showWallet = computed(() => auth.hasPermission('wallet:read') && notCashie
 const showMember = computed(() => showCustomers.value || showCoupons.value || showWallet.value)
 const showTables = computed(() => auth.hasPermission('table:manage'))
 const showUsers = computed(() => auth.hasPermission('user:read'))
-const showStore = computed(() => showTables.value || showUsers.value || auth.hasPermission('system:manage'))
+const showStore = computed(() =>
+  showTables.value
+  || showUsers.value
+  || auth.hasPermission('system:manage')
+  || auth.hasPermission('table:manage')
+  || auth.hasPermission('order:read')
+  || auth.hasPermission('product:read')
+)
 const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
 const showSmart = computed(() => showCameras.value || showWelcome.value)

@@ -191,6 +191,11 @@ async def read_upload_limited(file: UploadFile, max_bytes: int | None = None) ->
             break
         total += len(chunk)
         if total > limit:
+            if max_bytes is not None:
+                raise AppException(
+                    40022,
+                    f"文件大小超过限制 {max(1, (limit + 1024 * 1024 - 1) // (1024 * 1024))}MB",
+                )
             raise AppException(40022, f"文件大小超过限制 {mb}MB")
         chunks.append(chunk)
     return b"".join(chunks)
@@ -229,6 +234,66 @@ def _convert_to_webp(data: bytes, ext: str) -> tuple[bytes, str]:
         return data, ext
 
 
+# 门店 Logo：更严体积、强制正方形 WebP，便于小程序门店栏加载
+_STORE_LOGO_MAX_BYTES = 5 * 1024 * 1024  # 5MB
+_STORE_LOGO_MAX_EDGE = 512
+_STORE_LOGO_MIN_EDGE = 64
+_STORE_LOGO_EXTS = frozenset({"jpg", "jpeg", "png", "webp"})
+_STORE_LOGO_MIME = frozenset({"image/jpeg", "image/png", "image/webp"})
+
+
+def _normalize_store_logo_webp(data: bytes) -> bytes:
+    """居中裁为正方形、最长边 ≤512，强制输出 WebP（保留透明）。"""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except Exception as exc:
+        raise AppException(40024, "无法解码图片或格式损坏") from exc
+
+    w, h = int(img.size[0]), int(img.size[1])
+    if w <= 0 or h <= 0:
+        raise AppException(40024, "无效图片尺寸")
+    if min(w, h) < _STORE_LOGO_MIN_EDGE:
+        raise AppException(
+            40024, f"Logo 边长至少 {_STORE_LOGO_MIN_EDGE}px（当前 {w}×{h}）"
+        )
+    if w > _MAX_IMAGE_EDGE or h > _MAX_IMAGE_EDGE:
+        raise AppException(40024, f"图片边长超过限制 {_MAX_IMAGE_EDGE}px")
+    if w * h > _MAX_IMAGE_PIXELS:
+        raise AppException(40024, "图片像素过多（疑似解压炸弹）")
+
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    img = img.crop((left, top, left + side, top + side))
+    target = min(side, _STORE_LOGO_MAX_EDGE)
+    if side != target:
+        img = img.resize((target, target), Image.Resampling.LANCZOS)
+
+    buf = BytesIO()
+    img.save(buf, format="WEBP", quality=82, method=4)
+    webp_data = buf.getvalue()
+    if not webp_data:
+        raise AppException(40024, "Logo 转换为 WebP 失败")
+    logger.info(
+        "门店 Logo WebP: %dx%d → %dx%d (%d → %d bytes)",
+        w,
+        h,
+        target,
+        target,
+        len(data),
+        len(webp_data),
+    )
+    return webp_data
+
+
 async def save_image_bytes(
     data: bytes,
     *,
@@ -262,6 +327,44 @@ async def save_upload(file: UploadFile, subdir: str = "products") -> str:
     content_type = file.content_type or mimetypes.guess_type(file.filename or "")[0]
     data = await read_upload_limited(file)
     return await save_image_bytes(data, ext=ext, content_type=content_type, subdir=subdir)
+
+
+async def save_store_logo(file: UploadFile) -> str:
+    """门店 Logo：校验类型/大小 → 正方形缩放 → 强制 WebP → stores/。"""
+    data = await read_upload_limited(file, max_bytes=_STORE_LOGO_MAX_BYTES)
+    if not data:
+        raise AppException(40025, "空文件")
+    if len(data) > _STORE_LOGO_MAX_BYTES:
+        raise AppException(40022, "Logo 文件不能超过 5MB")
+
+    ext = Path(file.filename or "").suffix.lower().lstrip(".")
+    content_type = (file.content_type or mimetypes.guess_type(file.filename or "")[0] or "").lower()
+    try:
+        sniffed_ext, sniffed_mime = sniff_image_type(data)
+    except AppException:
+        raise AppException(40021, "仅支持 JPG / PNG / WebP 图片") from None
+
+    if sniffed_ext == "gif":
+        raise AppException(40021, "门店 Logo 不支持 GIF，请使用 JPG / PNG / WebP")
+
+    # 扩展名缺失或与内容不符时，以魔数为准
+    if not ext or ext not in _STORE_LOGO_EXTS:
+        ext = sniffed_ext
+    elif ext != sniffed_ext and not (
+        ext in ("jpg", "jpeg") and sniffed_ext in ("jpg", "jpeg")
+    ):
+        raise AppException(40024, "文件内容与扩展名不符")
+    if content_type and content_type not in _STORE_LOGO_MIME and content_type != "application/octet-stream":
+        # 部分浏览器对 webp/jpeg 标注不准，仍以魔数为准，仅拒绝明确错误类型
+        if content_type.startswith("image/") and content_type not in _STORE_LOGO_MIME:
+            raise AppException(40021, f"不允许的MIME类型: {content_type}")
+    if ext not in _STORE_LOGO_EXTS:
+        raise AppException(40020, "仅支持 JPG / PNG / WebP")
+
+    _validate_magic(ext if ext != "jpg" else "jpg", data)
+    webp_data = _normalize_store_logo_webp(data)
+    key = make_object_key("stores", "webp")
+    return await get_storage().put_bytes(key, webp_data, content_type="image/webp")
 
 
 async def fetch_and_save_remote_image(url: str, subdir: str = "avatars") -> str:

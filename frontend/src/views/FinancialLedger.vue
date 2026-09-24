@@ -15,8 +15,12 @@
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
         <el-select v-model="entryType" placeholder="分录类型" clearable style="width:120px" @change="reload">
-          <el-option label="收款 SALE" value="SALE" />
-          <el-option label="退款 REFUND" value="REFUND" />
+          <el-option
+            v-for="(text, key) in LEDGER_ENTRY_TYPE"
+            :key="key"
+            :label="text"
+            :value="key"
+          />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -30,12 +34,12 @@
           style="width:130px"
           @change="reload"
         >
-          <el-option label="微信" value="WECHAT" />
-          <el-option label="支付宝" value="ALIPAY" />
-          <el-option label="现金" value="CASH" />
-          <el-option label="组合支付" value="MIXED" />
-          <el-option label="美团" value="MEITUAN" />
-          <el-option label="饿了么" value="ELEME" />
+          <el-option
+            v-for="(text, key) in CHANNEL"
+            :key="key"
+            :label="text"
+            :value="key"
+          />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -58,9 +62,15 @@
       <el-table-column label="门店" width="110">
         <template #default="{ row }">{{ storeName(row.store_id) }}</template>
       </el-table-column>
-      <el-table-column prop="entry_type" label="类型" width="100" />
-      <el-table-column prop="channel" label="渠道" width="110" />
-      <el-table-column prop="provider" label="通道" width="100" />
+      <el-table-column label="类型" width="100">
+        <template #default="{ row }">{{ label(LEDGER_ENTRY_TYPE, row.entry_type) }}</template>
+      </el-table-column>
+      <el-table-column label="渠道" width="110">
+        <template #default="{ row }">{{ label(CHANNEL, row.channel) }}</template>
+      </el-table-column>
+      <el-table-column label="通道" width="100">
+        <template #default="{ row }">{{ label(PAYMENT_PROVIDER, row.provider) }}</template>
+      </el-table-column>
       <el-table-column prop="amount" label="金额" width="110">
         <template #default="{ row }">¥{{ row.amount }}</template>
       </el-table-column>
@@ -90,6 +100,12 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import {
+  CHANNEL,
+  LEDGER_ENTRY_TYPE,
+  PAYMENT_PROVIDER,
+  label,
+} from '@/utils/labels'
 
 const auth = useAuthStore()
 const loading = ref(false)

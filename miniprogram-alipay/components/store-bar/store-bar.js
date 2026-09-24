@@ -1,4 +1,11 @@
 const dineCtx = require('../../utils/context')
+const media = require('../../utils/media')
+
+function resolveLogo(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return '/assets/logo.png'
+  return media.resolveUrl(s) || '/assets/logo.png'
+}
 
 Component({
   props: {
@@ -6,12 +13,27 @@ Component({
     storeNo: '',
     storeAddress: '',
     storePhone: '',
+    storeLogo: '',
     tableName: '',
     tableNo: '',
     seatLabel: '桌号',
     compact: false,
     changeable: true,
     onTableChange: null
+  },
+
+  data: {
+    logoSrc: '/assets/logo.png'
+  },
+
+  didMount() {
+    this.setData({ logoSrc: resolveLogo(this.props.storeLogo) })
+  },
+
+  didUpdate(prev) {
+    if (prev.storeLogo !== this.props.storeLogo) {
+      this.setData({ logoSrc: resolveLogo(this.props.storeLogo) })
+    }
   },
 
   methods: {

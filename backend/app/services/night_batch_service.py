@@ -33,6 +33,9 @@ async def _cfg(db: AsyncSession) -> dict[str, Any]:
     reco_n = await SystemSettingsService.get_int(db, "night_batch_recommend_top_n", 8)
     cust_limit = await SystemSettingsService.get_int(db, "night_batch_taste_customer_limit", 2000)
     taste_days = await SystemSettingsService.get_int(db, "night_batch_taste_lookback_days", 3)
+    from app.services.category_schedule_auto import category_sort_auto_cfg
+
+    cat_sort = await category_sort_auto_cfg(db)
     return {
         "enabled": enabled,
         "start_hour": max(0, min(23, int(start_h))),
@@ -42,6 +45,9 @@ async def _cfg(db: AsyncSession) -> dict[str, Any]:
         "recommend_top_n": max(0, min(50, int(reco_n))),
         "taste_customer_limit": max(50, min(20000, int(cust_limit))),
         "taste_lookback_days": max(1, min(30, int(taste_days))),
+        "category_sort_enabled": bool(cat_sort["enabled"]),
+        "category_sort_lookback_days": cat_sort["lookback_days"],
+        "category_sort_soft_qty": cat_sort["soft_qty"],
     }
 
 
@@ -229,6 +235,19 @@ async def run_night_batch(
 
     result["ran"] = True
     result["sales_flags"] = await refresh_all_sales_flags(db, cfg)
+    if cfg.get("category_sort_enabled", True):
+        from app.services.category_schedule_auto import refresh_all_category_schedule_auto_sort
+
+        result["category_sort"] = await refresh_all_category_schedule_auto_sort(
+            db,
+            {
+                "enabled": True,
+                "lookback_days": cfg["category_sort_lookback_days"],
+                "soft_qty": cfg["category_sort_soft_qty"],
+            },
+        )
+    else:
+        result["category_sort"] = {"skipped": "disabled"}
     result["product_taste"] = await rebuild_all_product_taste_profiles(db)
     result["customer_taste"] = await deep_learn_customer_tastes(db, cfg)
     return result

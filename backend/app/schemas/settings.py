@@ -16,6 +16,7 @@ class BusinessSettingsUpdate(BaseModel):
 
 class StoreUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=100)
+    logo: str | None = Field(default=None, max_length=500)
     address: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=20)
     latitude: float | None = Field(default=None, ge=-90, le=90)
@@ -30,6 +31,20 @@ class StoreUpdate(BaseModel):
         s = v.strip()
         if not s:
             raise ValueError("门店名称不能为空")
+        return s
+
+    @field_validator("logo")
+    @classmethod
+    def logo_path(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        s = v.strip()
+        if not s:
+            return None
+        if s.startswith("uploads/"):
+            s = "/" + s
+        if not s.startswith("/uploads/"):
+            raise ValueError("Logo 须为站内 uploads 路径，请先上传")
         return s
 
     @field_validator("phone")

@@ -1,4 +1,4 @@
-const api = require('../../utils/api')
+﻿const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
@@ -80,6 +80,7 @@ Page({
     storeNo: '',
     storeAddress: '',
     storePhone: '',
+    storeLogo: '',
     tableNo: '',
     seatLabel: '桌号',
     coupons: [],

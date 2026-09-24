@@ -177,6 +177,7 @@ function pageDineFields(ctx) {
     storeNo: c.storeNo,
     storeAddress: c.storeAddress,
     storePhone: c.storePhone,
+    storeLogo: c.storeLogo || '',
     tableName: c.tableName,
     tableNo: c.tableNo,
     seatLabel: c.seatLabel || '桌号',
@@ -235,6 +236,7 @@ function displayPayload(store, table) {
     storeNo: (store && store.store_no) || '',
     storeAddress: (store && store.address) || '',
     storePhone: (store && store.phone) || '',
+    storeLogo: (store && store.logo) || '',
     tableName: name,
     // 虚拟外带桌不展示 WM 编号，避免被当成桌号
     tableNo: takeaway ? '' : ((table && table.table_no) || ''),

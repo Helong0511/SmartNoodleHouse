@@ -1575,6 +1575,7 @@ async def _store_brief(db, store_id: int | None) -> dict | None:
         "id": store.id,
         "store_no": store.store_no,
         "name": store.name,
+        "logo": getattr(store, "logo", None),
         "address": store.address,
         "phone": store.phone,
     }

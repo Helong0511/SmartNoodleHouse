@@ -131,9 +131,9 @@ INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`
 INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充200得250', 200.00, 50.00, 2, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充200得250');
 
 -- 六、门店
-INSERT INTO `stores` (`id`, `store_no`, `name`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) VALUES 
-(1, 'SH01', '肠旺面(总店)', '城南红砖路88号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'), 
-(2, 'SH02', '肠旺面(二店)', '城南红砖路188号', '151-9691-4600', 30.8719, 105.3884, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`stores` (`id`, `store_no`, `name`, `logo`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) VALUES 
+(1, 'SH01', '肠旺面(总店)', '/uploads/stores/SH01.webp', '城南红砖路88号', '151-9691-4600', 30.8719000, 105.3884000, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, 'SH02', '肠旺面(二店)', '/uploads/stores/SH02.webp', '城南红砖路188号', '151-9691-4600', 30.8719000, 105.3884000, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
 -- 二店新客券（名称与该店 welcome_coupon_name 一致；总店沿用总部模板「新客满30减5」）
 INSERT INTO `coupon_templates` (`store_id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT `s`.`id`, '二店新客满20减3', 'FIXED', 3.00, 20.00, 30 FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '二店新客满20减3');
@@ -191,6 +191,9 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SE
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_recommend_top_n', '8', '推荐 Top N' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_recommend_top_n');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_taste_customer_limit', '2000', '夜间口味学习人数上限' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_taste_customer_limit');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_taste_lookback_days', '3', '夜间口味学习天数' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_taste_lookback_days');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_category_sort_enabled', 'true', '夜间按各时段销量自动刷新分类排序' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_category_sort_enabled');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_category_sort_lookback_days', '30', '分类时段自动排序统计天数（越长越稳）' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_category_sort_lookback_days');
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'night_batch_category_sort_soft_qty', '100', '该时段累计销量达此值时完全按销量排序' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'night_batch_category_sort_soft_qty');
 
 -- 七-B、门店业务参数（扫码进店读 store_settings；未写的键回退上面的全局默认）
 -- 总店：点餐页不展示搜索 / 智能口味 / 猜你喜欢；打印机与新客券与二店不同

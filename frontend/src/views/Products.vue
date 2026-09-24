@@ -401,7 +401,7 @@
     <!-- 推送外卖弹窗 -->
     <el-dialog v-model="pushDialog" title="推送商品到外卖平台" width="480px" destroy-on-close>
       <div v-if="!pushPlatforms.length" class="hint" style="text-align:center;padding:20px 0">
-        当前门店尚未绑定任何外卖平台，请先到「外卖 → 门店与营业」绑定。
+        当前门店尚未绑定任何外卖平台，请先到「门店 → 门店信息 → 外卖绑定」设置。
       </div>
       <div v-else>
         <div style="margin-bottom:12px">
