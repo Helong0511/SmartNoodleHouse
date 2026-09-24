@@ -3,10 +3,19 @@
  * - scene=recommend_menu：菜单页"猜你喜欢"；scene=settle_addon：结算页"顺手再来一份"
  * - 菜单首屏渲染后由页面挂载；请求失败/为空时整体降级隐藏，不打扰主流程
  * - EXPOSE 组件实例内去重；CLICK/CART_ADD 由页面复用 quickAdd 链路，埋点经 tracker 全局 AB 上下文
+ * - recommend_menu：30s 内存缓存 + 单飞；settle_addon：cartItemIds 变化 debounce 400ms
  */
 const api = require('../../utils/api')
 const media = require('../../utils/media')
 const tracker = require('../../utils/tracker')
+
+const CACHE_MS = 30 * 1000
+const SETTLE_DEBOUNCE_MS = 400
+
+/** @type {Record<string, { at: number, items: any[], ab?: any }>} */
+const _menuCache = {}
+/** @type {Record<string, Promise<{ items: any[], ab?: any }>>} */
+const _inflight = {}
 
 function idsKey(ids) {
   return (ids || [])
@@ -22,6 +31,18 @@ function hasToken() {
   } catch (_) {
     return false
   }
+}
+
+function menuCacheKey(storeId, scene, limit) {
+  return `${scene}|${storeId || 0}|${limit || 10}`
+}
+
+function reqKey(scene, storeId, limit, cartItemIds) {
+  const base = menuCacheKey(storeId, scene, limit)
+  if (scene === 'settle_addon') {
+    return `${base}|${idsKey(cartItemIds)}`
+  }
+  return base
 }
 
 Component({
@@ -43,10 +64,23 @@ Component({
 
   observers: {
     'storeId, cartItemIds': function () {
-      const key = [this.data.scene, this.data.storeId || 0, idsKey(this.data.cartItemIds)].join('|')
+      const key = [
+        this.data.scene,
+        this.data.storeId || 0,
+        idsKey(this.data.cartItemIds)
+      ].join('|')
       if (key === this._lastKey) return
       this._lastKey = key
-      if (this.data.storeId) this.load()
+      if (!this.data.storeId) return
+      if (this.data.scene === 'settle_addon') {
+        if (this._settleTimer) clearTimeout(this._settleTimer)
+        this._settleTimer = setTimeout(() => {
+          this._settleTimer = null
+          this.load()
+        }, SETTLE_DEBOUNCE_MS)
+        return
+      }
+      this.load()
     }
   },
 
@@ -62,22 +96,57 @@ Component({
     },
     detached() {
       this._exposed = {}
+      if (this._settleTimer) {
+        clearTimeout(this._settleTimer)
+        this._settleTimer = null
+      }
     }
   },
 
   methods: {
+    _applyResult(payload) {
+      const items = (payload && payload.items) || []
+      if (payload && payload.ab) tracker.setAbContext(payload.ab)
+      this.setData({ items, loading: false, failed: false })
+      this.reportExpose(items)
+    },
+
     async load() {
       const sid = this.data.storeId
       if (!sid) return
+      const scene = this.data.scene
+      const limit = this.data.limit || 10
+      const key = reqKey(scene, sid, limit, this.data.cartItemIds)
+
+      if (scene === 'recommend_menu') {
+        const cacheKey = menuCacheKey(sid, scene, limit)
+        const hit = _menuCache[cacheKey]
+        if (hit && Date.now() - hit.at < CACHE_MS) {
+          this._applyResult(hit)
+          return
+        }
+      }
+
+      if (_inflight[key]) {
+        this.setData({ loading: true, failed: false })
+        try {
+          const payload = await _inflight[key]
+          this._applyResult(payload)
+        } catch (_) {
+          this.setData({ items: [], loading: false, failed: true })
+        }
+        return
+      }
+
       this.setData({ loading: true, failed: false })
-      try {
+      const fetchP = (async () => {
         const params = {
           store_id: sid,
-          scene: this.data.scene,
-          limit: this.data.limit || 10
+          scene,
+          limit
         }
         const cartKey = idsKey(this.data.cartItemIds)
-        if (this.data.scene === 'settle_addon' && cartKey) {
+        if (scene === 'settle_addon' && cartKey) {
           params.cart_item_ids = cartKey
         }
         const res = await api.get('/miniprogram/recommendations', params, hasToken())
@@ -86,11 +155,18 @@ Component({
           ...it,
           imageUrl: media.resolveUrl(it.main_image, '') || ''
         }))
-        if (res && res.ab) tracker.setAbContext(res.ab)
-        this.setData({ items, loading: false, failed: false })
-        this.reportExpose(items)
+        const payload = { items, ab: res && res.ab, at: Date.now() }
+        if (scene === 'recommend_menu') {
+          _menuCache[menuCacheKey(sid, scene, limit)] = payload
+        }
+        return payload
+      })()
+
+      _inflight[key] = fetchP.finally(() => { delete _inflight[key] })
+      try {
+        const payload = await _inflight[key]
+        this._applyResult(payload)
       } catch (_) {
-        // 弱网/接口异常：静默隐藏，不影响点餐主流程
         this.setData({ items: [], loading: false, failed: true })
       }
     },

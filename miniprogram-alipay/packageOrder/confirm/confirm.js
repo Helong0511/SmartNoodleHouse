@@ -10,6 +10,8 @@ const tracker = require('../../utils/tracker')
 const { loadStoreCatalog } = require('../../utils/products')
 const app = getApp()
 
+const CHECKOUT_CACHE_MS = 30 * 1000
+
 function memberDiscountText(rate) {
   const n = parseFloat(rate)
   if (!Number.isFinite(n) || n >= 1) return ''
@@ -121,7 +123,19 @@ Page({
     if (!sid) {
       throw new Error('请先扫桌码绑定门店后再结算')
     }
-    const catalog = await loadStoreCatalog(api, sid)
+    const shared = app.globalData && app.globalData._sharedCatalog
+    if (shared && String(shared.storeId) === String(sid) && shared.items && shared.items.length) {
+      const items = shared.items
+      this._productCatalog = items
+      this._catalogComplete = true
+      const boxMap = {}
+      items.forEach((p) => {
+        boxMap[p.id] = parseFloat(p.box_price || 0) || 0
+      })
+      this.setData({ boxPriceMap: boxMap })
+      return items
+    }
+    const catalog = await loadStoreCatalog(api, sid, { preferCache: true })
     const items = (catalog && catalog.items) || []
     if (!catalog || (!catalog.complete && !items.length)) {
       throw new Error('菜单加载不完整，请稍后重试')
@@ -210,6 +224,17 @@ Page({
         })
       }
     } catch (_) { }
+    const cartFp = this._cartFingerprint()
+    const now = Date.now()
+    if (
+      this._checkoutReadyAt
+      && now - this._checkoutReadyAt < CHECKOUT_CACHE_MS
+      && cartFp === this._checkoutCartFp
+      && (this.data.cartPreview || []).length
+    ) {
+      this.refreshSummary()
+      return
+    }
     this._memberRate = 1
     this._couponManualPick = false
     this._voucherManualPick = false
@@ -223,6 +248,13 @@ Page({
       selectedVoucherLabel: '不使用代金券',
     })
     this.bootstrapCheckout()
+  },
+  _cartFingerprint() {
+    const cart = auth.getCart() || []
+    return cart.map((c) => {
+      const opts = (c.option_ids || []).slice().map(String).sort().join('.')
+      return `${c.product_id}x${c.quantity || 1}:${opts}`
+    }).sort().join('|')
   },
   _checkoutStale(gen) {
     return gen !== this._checkoutGen || this._bindingTable
@@ -273,6 +305,9 @@ Page({
     ])
     if (this._checkoutStale(gen)) return
     await this.refreshSummary()
+    if (this._checkoutStale(gen)) return
+    this._checkoutReadyAt = Date.now()
+    this._checkoutCartFp = this._cartFingerprint()
   },
   clearTableBinding() {
     app.globalData.table = null
@@ -434,7 +469,11 @@ Page({
       this._bindingTable = false
     }
   },
-  async loadMember() {
+  async loadMember(force = false) {
+    const now = Date.now()
+    if (!force && this._memberAt && now - this._memberAt < CHECKOUT_CACHE_MS) {
+      return
+    }
     try {
       await auth.ensureLogin()
       const profile = await api.get('/miniprogram/customers/me')
@@ -456,6 +495,7 @@ Page({
           : '',
         pointsToNext: (profile && profile.points_to_next_level) || 0
       })
+      this._memberAt = Date.now()
     } catch (_) {
       this._memberRate = 1
     }
@@ -496,7 +536,11 @@ Page({
       selectedVoucherLabel: '不使用代金券'
     }, () => this.refreshSummary())
   },
-  async loadCoupons() {
+  async loadCoupons(force = false) {
+    const now = Date.now()
+    if (!force && this._couponsAt && now - this._couponsAt < CHECKOUT_CACHE_MS) {
+      return
+    }
     try {
       await auth.ensureLogin()
       const res = await api.get('/miniprogram/coupons/mine', { store_id: this.submitStoreId() })
@@ -505,11 +549,16 @@ Page({
         coupons: items,
         couponPickerLabels: ['不使用优惠券'].concat(items.map((c) => voucherUtil.holdDisplayName(c)))
       })
+      this._couponsAt = Date.now()
     } catch (_) {
       this.setData({ coupons: [] })
     }
   },
-  async loadVouchers() {
+  async loadVouchers(force = false) {
+    const now = Date.now()
+    if (!force && this._vouchersAt && now - this._vouchersAt < CHECKOUT_CACHE_MS) {
+      return
+    }
     try {
       await auth.ensureLogin()
       const res = await api.get('/miniprogram/vouchers/mine', { store_id: this.submitStoreId() })
@@ -518,6 +567,7 @@ Page({
         vouchers: items,
         voucherPickerLabels: ['不使用代金券'].concat(items.map((c) => voucherUtil.holdDisplayName(c)))
       })
+      this._vouchersAt = Date.now()
     } catch (_) {
       this.setData({ vouchers: [] })
     }

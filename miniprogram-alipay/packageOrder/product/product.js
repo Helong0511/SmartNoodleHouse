@@ -26,13 +26,18 @@ Page({
     const metrics = media.layoutMetrics()
     this.setData({ heroStyle: metrics.heroStyle, loading: true })
     try {
-      try { await auth.ensureLogin() } catch (_) {}
+      const loginP = auth.ensureLogin().catch(() => {})
       const product = await api.get(`/products/${query.id}`, {}, false)
       const { selected, multi } = prefUtil.defaultSelections(product)
-      const gallery = await media.hydrateUrlList(media.galleryUrls(product))
-      this.setData({ product, selected, multi, gallery, loading: false })
+      // 先出商品与规格，图库/登录并行，不挡首屏
+      this.setData({ product, selected, multi, loading: false })
       this.updateDisplayPrice()
+      const galleryP = media.hydrateUrlList(media.galleryUrls(product)).then((gallery) => {
+        this.setData({ gallery })
+      }).catch(() => {})
+      await loginP
       await this.applyPreferences(product)
+      await galleryP
     } catch (e) {
       this.setData({ loading: false })
       my.showToast({ content: e.message || '加载失败', type: 'fail' })

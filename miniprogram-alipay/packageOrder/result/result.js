@@ -81,6 +81,9 @@ const STATUS_STEPS = [
   { key: 'COMPLETED', label: '已完成' }
 ]
 
+const POLL_STATUSES = ['PENDING_PAYMENT', 'PAID', 'CONFIRMED', 'PREPARING', 'COOKING', 'READY']
+const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'REFUNDED']
+
 function headerIcon(status) {
   if (status === 'CANCELLED' || status === 'REFUNDED') return '✕'
   if (status === 'READY' || status === 'COMPLETED') return '✓'
@@ -132,7 +135,6 @@ Page({
     this.orderId = query.order_id
     this.pointsEarned = Number(query.points_earned || 0)
     this._boot()
-    this._pollTimer = setInterval(() => this._refreshWithSync(true), 8000)
   },
 
   onShow() {
@@ -143,7 +145,30 @@ Page({
   },
 
   onUnload() {
-    if (this._pollTimer) clearInterval(this._pollTimer)
+    this._clearPoll()
+  },
+
+  _ensurePoll() {
+    if (this._pollTimer) return
+    this._pollTimer = setInterval(() => this._refreshWithSync(true), 8000)
+  },
+
+  _clearPoll() {
+    if (this._pollTimer) {
+      clearInterval(this._pollTimer)
+      this._pollTimer = null
+    }
+  },
+
+  _syncPollByStatus(status) {
+    const s = String(status || '').toUpperCase()
+    if (TERMINAL_STATUSES.indexOf(s) >= 0) {
+      this._clearPoll()
+      return
+    }
+    if (POLL_STATUSES.indexOf(s) >= 0) {
+      this._ensurePoll()
+    }
   },
 
   onPullDownRefresh() {
@@ -283,6 +308,7 @@ Page({
         ...seatFieldsFromOrder(order),
         loading: false
       })
+      this._syncPollByStatus(order.status)
       if (order && (order.status === 'PAID' || order.status === 'COMPLETED' || order.payment_status === 'PAID')) {
         prefUtil.clearPrefsCache(app)
         this._maybeShowMemberBanner(order)

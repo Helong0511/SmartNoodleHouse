@@ -22,6 +22,12 @@
       ]
     }
   ],
+  "preloadRule": {
+    "pages/menu/menu": {
+      "network": "all",
+      "packages": ["order"]
+    }
+  },
   "window": {
     "defaultTitle": "智能面馆",
     "titleBarColor": "#ff6b35",

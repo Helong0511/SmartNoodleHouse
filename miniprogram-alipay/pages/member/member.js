@@ -55,6 +55,7 @@ function buildLevelLadder(levels) {
 }
 
 const PROFILE_CACHE_MS = 30 * 1000
+const PRIVACY_CACHE_MS = 30 * 1000
 
 /** 解析支付宝 my.getOpenUserInfo 真机返回（常为 { response: '{"nickName":"..","avatar":".."}' }） */
 function parseAlipayOpenUserInfo(res) {
@@ -581,7 +582,15 @@ Page({
 
   // ---------- TR-13 隐私合规 ----------
 
-  async loadPrivacySettings() {
+  async loadPrivacySettings(force = false) {
+    const now = Date.now()
+    if (
+      !force
+      && this._privacyLoadedAt
+      && now - this._privacyLoadedAt < PRIVACY_CACHE_MS
+    ) {
+      return
+    }
     try {
       await auth.ensureLogin()
       const s = await api.get('/miniprogram/customers/me/privacy-settings')
@@ -595,6 +604,7 @@ Page({
       app.globalData.recommendOptIn = opt
       app.globalData.recommend_opt_in = opt
       my.setStorageSync({ key: 'recommend_opt_in', data: opt })
+      this._privacyLoadedAt = Date.now()
     } catch (_) { /* 静默 */ }
   },
 
@@ -615,6 +625,7 @@ Page({
       app.globalData.recommendOptIn = opt
       app.globalData.recommend_opt_in = opt
       my.setStorageSync({ key: 'recommend_opt_in', data: opt })
+      this._privacyLoadedAt = Date.now()
       my.showToast({
         content: opt ? '已开启个性化推荐' : '已关闭，后续不会记录你的行为',
         type: 'none'

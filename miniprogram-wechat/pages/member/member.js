@@ -55,6 +55,7 @@ function buildLevelLadder(levels) {
 }
 
 const PROFILE_CACHE_MS = 30 * 1000
+const PRIVACY_CACHE_MS = 30 * 1000
 
 Page({
   data: {
@@ -505,7 +506,15 @@ Page({
 
   // ---------- TR-13 隐私合规 ----------
 
-  async loadPrivacySettings() {
+  async loadPrivacySettings(force = false) {
+    const now = Date.now()
+    if (
+      !force
+      && this._privacyLoadedAt
+      && now - this._privacyLoadedAt < PRIVACY_CACHE_MS
+    ) {
+      return
+    }
     try {
       await auth.ensureLogin()
       const s = await api.get('/miniprogram/customers/me/privacy-settings')
@@ -519,6 +528,7 @@ Page({
       app.globalData.recommendOptIn = opt
       app.globalData.recommend_opt_in = opt
       wx.setStorageSync('recommend_opt_in', opt)
+      this._privacyLoadedAt = Date.now()
     } catch (_) { /* 静默，不打扰用户 */ }
   },
 
@@ -540,6 +550,7 @@ Page({
       app.globalData.recommendOptIn = opt
       app.globalData.recommend_opt_in = opt
       wx.setStorageSync('recommend_opt_in', opt)
+      this._privacyLoadedAt = Date.now()
       wx.showToast({
         title: opt ? '已开启个性化推荐' : '已关闭，后续不会记录你的行为',
         icon: 'none'
