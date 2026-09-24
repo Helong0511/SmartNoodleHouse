@@ -102,17 +102,22 @@ async function fetchMenuBundle(api, storeId, version) {
 /**
  * 点餐用的完整菜单。优先一次拿聚合菜单（不分页），失败再分页，再失败用本地缓存。
  * complete=false 表示这份列表不能用来判断「不在菜单」。
+ * options.preferCache=true 时若本地有商品则直接返回，不打网。
  */
-async function loadStoreCatalog(api, storeId) {
+async function loadStoreCatalog(api, storeId, options) {
   const sid = Number(storeId)
   if (!sid) return { items: [], categories: [], complete: false }
+  const cached = readCachedMenu(sid)
+  const cachedItems = normalizeList(cached && cached.products)
+  const cachedCategories = normalizeList(cached && cached.categories)
+  if (options && options.preferCache && cachedItems.length) {
+    return { items: cachedItems, categories: cachedCategories, complete: true }
+  }
   try {
-    const bundle = await fetchMenuBundle(api, sid, null)
+    const bundle = await fetchMenuBundle(api, sid, cached && cached.version)
     if (bundle && bundle.changed === false) {
-      const cached = readCachedMenu(sid)
-      const items = normalizeList(cached && cached.products)
-      if (items.length) {
-        return { items, categories: normalizeList(cached.categories), complete: true }
+      if (cachedItems.length) {
+        return { items: cachedItems, categories: cachedCategories, complete: true }
       }
       // changed:false 但本地无缓存：继续走下方完整拉取（勿当失败）
     } else if (bundle && bundle.products != null) {
@@ -142,10 +147,10 @@ async function loadStoreCatalog(api, storeId) {
       return { items, categories, complete: true }
     }
   } catch (_) {}
-  const cached = readCachedMenu(sid)
-  const cachedItems = normalizeList(cached && cached.products)
-  if (cachedItems.length) {
-    return { items: cachedItems, categories: normalizeList(cached.categories), complete: true }
+  const fallback = readCachedMenu(sid)
+  const fallbackItems = normalizeList(fallback && fallback.products)
+  if (fallbackItems.length) {
+    return { items: fallbackItems, categories: normalizeList(fallback.categories), complete: true }
   }
   return { items: [], categories: [], complete: false }
 }

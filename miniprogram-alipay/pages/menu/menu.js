@@ -8,6 +8,9 @@ const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
 
+const MENU_REFRESH_TTL_MS = 30 * 1000
+const PREFS_SKIP_LOGIN_MS = 60 * 1000
+
 function appGlobal() {
   try {
     const a = getApp()
@@ -36,6 +39,25 @@ function sliceMenuForFirstPaint(categories, maxProducts) {
     n += count
   }
   return all
+}
+
+/** hydrate 后路径差分；结构长度不一致时返回 null，调用方整表 setData。 */
+function buildImageUrlPatch(prev, next) {
+  if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length) return null
+  const patch = {}
+  for (let ci = 0; ci < next.length; ci++) {
+    const prevProds = (prev[ci] && prev[ci].products) || []
+    const nextProds = (next[ci] && next[ci].products) || []
+    if (prevProds.length !== nextProds.length) return null
+    for (let pi = 0; pi < nextProds.length; pi++) {
+      const oldUrl = prevProds[pi] && prevProds[pi].imageUrl
+      const newUrl = nextProds[pi] && nextProds[pi].imageUrl
+      if (oldUrl !== newUrl) {
+        patch[`categories[${ci}].products[${pi}].imageUrl`] = newUrl
+      }
+    }
+  }
+  return patch
 }
 
 function askUsePrefsOnQuickAdd(prompt) {
@@ -96,7 +118,10 @@ Page({
   onShow() {
     const metrics = media.layoutMetrics()
     const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
-    this.setData({ cartThumbStyle: `width:${px}px;height:${px}px;` })
+    const cartThumbStyle = `width:${px}px;height:${px}px;`
+    if (this.data.cartThumbStyle !== cartThumbStyle) {
+      this.setData({ cartThumbStyle })
+    }
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => {
       this.applyDineContext(ctx)
@@ -104,11 +129,12 @@ Page({
     })
     const g = appGlobal()
     this.loadPrefs(!g.prefsAt)
-    // 首次由 onLoad 发起；后续回到页面时刷新（版本校验 changed:false 不重绘）
+    // 首次由 onLoad 拉；后续回到页面时走 loadMenu（内部 TTL 可跳过）
     if (this._menuLoaded) {
       this.loadMenu()
+    } else {
+      this._menuLoaded = true
     }
-    this._menuLoaded = true
     const openSheet = !!g._openCartSheet
     try {
       const app = getApp()
@@ -132,7 +158,7 @@ Page({
       })
     }
     const sid = storeId || this.data.storeId || null
-    clientConfig.loadClientConfig(!!sid, sid).then(apply).catch(() => {})
+    clientConfig.loadClientConfig(false, sid).then(apply).catch(() => {})
   },
 
   applyDineContext(ctx) {
@@ -143,22 +169,41 @@ Page({
   onTableChange(ctx) {
     if (!ctx) return
     this.applyDineContext(ctx)
-    this.applyMenuFlags(ctx.storeId)
+    clientConfig.invalidateClientConfig()
     this._catsCache = null
-    this.loadMenu()
-    this.refreshCartBar({ openSheet: false })
+    this._lastProductItems = null
+    this._lastMenuFetchAt = 0
+    this._menuFetchStoreId = null
+    this.applyMenuFlags(ctx.storeId)
+    this.loadMenu(true)
+    this.refreshCartBar({ openSheet: false, forceCatalog: true })
   },
 
   onPullDownRefresh() {
     this._catsCache = null
+    this._lastMenuFetchAt = 0
+    this._menuFetchStoreId = null
     Promise.all([
       dineCtx.ensureDineContext({ force: true }).then((ctx) => {
         this.applyDineContext(ctx)
-        this.applyMenuFlags(ctx && ctx.storeId)
+        const sid = (ctx && ctx.storeId) || null
+        return clientConfig.loadClientConfig(true, sid).then(() => {
+          const flags = clientConfig.menuPageFlags()
+          const patch = { ...flags }
+          const hadKeyword = !!this.data.keyword
+          if (!flags.showMenuSearch && hadKeyword) {
+            patch.keyword = ''
+          }
+          this.setData(patch, () => {
+            if (!flags.showMenuSearch && hadKeyword) {
+              this.loadMenu(true)
+            }
+          })
+        }).catch(() => {})
       }),
       this.loadPrefs(true),
       this.loadMenu(true),
-      this.refreshCartBar({ openSheet: false })
+      this.refreshCartBar({ openSheet: false, forceCatalog: true })
     ]).finally(() => my.stopPullDownRefresh())
   },
 
@@ -175,18 +220,33 @@ Page({
 
   async refreshCartBar(opts) {
     const openSheet = !!(opts && opts.openSheet)
+    const forceCatalog = !!(opts && opts.forceCatalog)
     const rawCart = auth.getCart()
     let products = this._lastProductItems || []
     let categories = (this._catsCache && this._catsCache.cats) || this.data.categories || []
     let complete = !!(products && products.length)
     try {
       const sid = this.storeIdForCart()
-      if (sid && rawCart.length) {
-        const catalog = await productApi.loadStoreCatalog(api, sid)
+      const needCatalog = !!sid && (forceCatalog || (rawCart.length > 0 && !products.length))
+      if (needCatalog) {
+        const catalog = await productApi.loadStoreCatalog(api, sid, { preferCache: !forceCatalog })
         products = (catalog && catalog.items) || products
         categories = (catalog && catalog.categories) || categories
         complete = !!(catalog && catalog.complete)
-        if (catalog && catalog.items) this._lastProductItems = catalog.items
+        if (catalog && catalog.items) {
+          this._lastProductItems = catalog.items
+          try {
+            const app = getApp()
+            if (app && app.globalData) {
+              app.globalData._sharedCatalog = {
+                storeId: sid,
+                items: catalog.items,
+                categories: (catalog && catalog.categories) || categories,
+                at: Date.now()
+              }
+            }
+          } catch (_) {}
+        }
       }
     } catch (_) {}
 
@@ -285,17 +345,30 @@ Page({
     dineCtx.scanAndBindTable().then((ctx) => {
       if (ctx) {
         this.applyDineContext(ctx)
-        this.applyMenuFlags(ctx.storeId)
+        clientConfig.invalidateClientConfig()
         this._catsCache = null
-        this.loadMenu()
+        this._lastProductItems = null
+        this._lastMenuFetchAt = 0
+        this._menuFetchStoreId = null
+        this.applyMenuFlags(ctx.storeId)
+        this.loadMenu(true)
+        this.refreshCartBar({ openSheet: false, forceCatalog: true })
       }
     })
   },
 
   async loadPrefs(force = false) {
-    try {
-      await auth.ensureLogin()
-    } catch (_) { }
+    const g = appGlobal()
+    const now = Date.now()
+    const skipLogin = !force
+      && g.prefsAt
+      && g.prefsView
+      && (now - g.prefsAt) < PREFS_SKIP_LOGIN_MS
+    if (!skipLogin) {
+      try {
+        await auth.ensureLogin()
+      } catch (_) { }
+    }
     try {
       const view = await prefUtil.loadCustomerPrefs({ globalData: appGlobal() }, api, { force })
       const prefCount = (view && view.prefCount) || 0
@@ -344,72 +417,118 @@ Page({
       return
     }
     const cacheKey = String(sid)
-    const now = Date.now()
-    const metrics = media.layoutMetrics()
+    if (this._menuInflight && this._menuInflightStoreId === cacheKey) {
+      return this._menuInflight
+    }
+    if (
+      !force
+      && this._lastMenuFetchAt
+      && String(this._menuFetchStoreId) === cacheKey
+      && (Date.now() - this._lastMenuFetchAt) < MENU_REFRESH_TTL_MS
+      && this.data.categories
+      && this.data.categories.length
+    ) {
+      if (!this.data.recoReady) {
+        this.setData({ recoReady: true, recoStoreId: sid })
+      }
+      return
+    }
 
-    // 0) 消费 app.js 预拉取结果（冷启动提前拉取的菜单数据，跳过二次请求）
-    if (!force && gd._menuPrefetch && gd._menuPrefetch.storeId === cacheKey) {
-      const prefetch = gd._menuPrefetch
-      gd._menuPrefetch = null
+    const run = async () => {
+      const now = Date.now()
+      const metrics = media.layoutMetrics()
+      const markFetched = (items, categories) => {
+        this._lastMenuFetchAt = Date.now()
+        this._menuFetchStoreId = sid
+        try {
+          const app = getApp()
+          if (app && app.globalData && items) {
+            app.globalData._sharedCatalog = {
+              storeId: sid,
+              items,
+              categories: categories || [],
+              at: this._lastMenuFetchAt
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 0) 消费 app.js 预拉取结果（冷启动提前拉取的菜单数据，跳过二次请求）
+      if (!force && gd._menuPrefetch && gd._menuPrefetch.storeId === cacheKey) {
+        const prefetch = gd._menuPrefetch
+        gd._menuPrefetch = null
+        try {
+          const bundle = await prefetch.promise
+          if (bundle && bundle.changed !== false && bundle.categories) {
+            const catList = normalizeList(bundle.categories)
+            const items = normalizeList(bundle.products)
+            productApi.writeCachedMenu(sid, {
+              version: bundle.version,
+              categories: catList,
+              products: items
+            })
+            this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
+            this._lastProductItems = items
+            const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
+            await this.applyCategories(categories, metrics)
+            markFetched(items, catList)
+            this.setData({ recoReady: true, recoStoreId: sid })
+            return
+          }
+        } catch (_) { }
+      }
+
+      // 1) 本地缓存先渲染（弱网兜底 + 首屏提速），不弹骨架
+      const cached = productApi.readCachedMenu(sid)
+      if (cached && cached.categories) {
+        const cachedItems = normalizeList(cached.products)
+        this._catsCache = { key: cacheKey, at: now, cats: cached.categories, metrics }
+        this._lastProductItems = cachedItems
+        const cachedView = this.buildCategories(cached.categories, cachedItems, metrics, this.data.keyword)
+        await this.applyCategories(cachedView, metrics)
+      } else if (!this.data.categories.length) {
+        this.setData({ loading: true })
+      }
+
+      // 2) 后台静默版本校验：changed:false 不重绘
       try {
-        const bundle = await prefetch.promise
-        if (bundle && bundle.changed !== false && bundle.categories) {
-          const catList = normalizeList(bundle.categories)
-          const items = normalizeList(bundle.products)
-          productApi.writeCachedMenu(sid, {
-            version: bundle.version,
-            categories: catList,
-            products: items
-          })
-          this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
-          this._lastProductItems = items
-          const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
-          await this.applyCategories(categories, metrics)
+        const bundle = await productApi.fetchMenuBundle(api, sid, force ? null : (cached && cached.version))
+        if (bundle.changed === false) {
+          if (this._catsCache) this._catsCache.at = now
+          markFetched(this._lastProductItems, (this._catsCache && this._catsCache.cats) || [])
           this.setData({ recoReady: true, recoStoreId: sid })
           return
         }
-      } catch (_) { }
-    }
-
-    // 1) 本地缓存先渲染（弱网兜底 + 首屏提速），不弹骨架
-    const cached = productApi.readCachedMenu(sid)
-    if (cached && cached.categories) {
-      const cachedItems = normalizeList(cached.products)
-      this._catsCache = { key: cacheKey, at: now, cats: cached.categories, metrics }
-      this._lastProductItems = cachedItems
-      const cachedView = this.buildCategories(cached.categories, cachedItems, metrics, this.data.keyword)
-      await this.applyCategories(cachedView, metrics)
-    } else if (!this.data.categories.length) {
-      this.setData({ loading: true })
-    }
-
-    // 2) 后台静默版本校验：changed:false 不重绘
-    try {
-      const bundle = await productApi.fetchMenuBundle(api, sid, force ? null : (cached && cached.version))
-      if (bundle.changed === false) {
-        if (this._catsCache) this._catsCache.at = now
+        const catList = normalizeList(bundle.categories)
+        const items = normalizeList(bundle.products)
+        productApi.writeCachedMenu(sid, {
+          version: bundle.version,
+          categories: catList,
+          products: items
+        })
+        this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
+        this._lastProductItems = items
+        const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
+        await this.applyCategories(categories, metrics)
+        markFetched(items, catList)
         this.setData({ recoReady: true, recoStoreId: sid })
-        return
-      }
-      const catList = normalizeList(bundle.categories)
-      const items = normalizeList(bundle.products)
-      productApi.writeCachedMenu(sid, {
-        version: bundle.version,
-        categories: catList,
-        products: items
-      })
-      this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
-      this._lastProductItems = items
-      const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
-      await this.applyCategories(categories, metrics)
-      this.setData({ recoReady: true, recoStoreId: sid })
-    } catch (e) {
-      // 弱网/接口失败：已有缓存就静默保留旧菜单，无缓存才提示
-      if (!cached) {
-        my.showToast({ content: (e && e.message) || '加载失败', type: 'fail' })
-        this.setData({ loading: false })
+      } catch (e) {
+        // 弱网/接口失败：已有缓存就静默保留旧菜单，无缓存才提示
+        if (!cached) {
+          my.showToast({ content: (e && e.message) || '加载失败', type: 'fail' })
+          this.setData({ loading: false })
+        }
       }
     }
+
+    this._menuInflightStoreId = cacheKey
+    this._menuInflight = run().finally(() => {
+      if (this._menuInflightStoreId === cacheKey) {
+        this._menuInflight = null
+        this._menuInflightStoreId = null
+      }
+    })
+    return this._menuInflight
   },
 
   applyCategories(categories, metrics) {
@@ -437,7 +556,12 @@ Page({
     })
     media.hydrateImageUrls(flat, 'imageUrl').then(() => {
       if (this._imgGen !== gen) return
-      this.setData({ categories: all })
+      const patch = buildImageUrlPatch(this.data.categories, all)
+      if (patch) {
+        this.setData(patch)
+      } else {
+        this.setData({ categories: all })
+      }
     }).catch(() => {})
   },
 
