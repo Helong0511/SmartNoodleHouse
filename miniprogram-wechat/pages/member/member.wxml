@@ -95,14 +95,14 @@
 
         </view>
 
-        <view class="level-row" wx:elif="{{!isMember}}">
+        <view class="level-row activate-row" wx:elif="{{!isMember}}">
           <text class="hint">开启智能会员享积分升级与专属折扣（不影响点餐）</text>
           <button class="btn-primary activate-btn" size="mini" loading="{{activatingMember}}" bindtap="activateSmartMember">开启智能会员</button>
         </view>
 
         <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
         <view class="points-line balance-line" wx:if="{{isMember}}">
-          储值余额 <text class="pts">¥{{balanceTotal}}</text>
+          <view class="balance-text">储值余额 <text class="pts">¥{{balanceTotal}}</text></view>
           <view class="recharge-btn" bindtap="goRecharge">去充值</view>
         </view>
         <view class="phone" wx:if="{{phone}}">手机 {{phone}}</view>
