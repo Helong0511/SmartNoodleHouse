@@ -258,3 +258,158 @@ async def test_menu_bundle_requires_store(fake_redis, db_session):
 
     with pytest.raises(AppException):
         await get_menu_bundle_api(request=None, db=db_session, store_id=0)
+
+
+@pytest.mark.asyncio
+async def test_menu_bundle_invalidates_on_category_schedule_change(fake_redis, db_session):
+    """后台改分类时段排序后：版本立刻抬升，小程序旧 version 必须拿到新顺序。"""
+    from datetime import time
+
+    from sqlalchemy import select
+
+    from app.models import CategorySortSchedule, CategorySortScheduleItem
+    from tests.reco_factories import _SCHEDULE_ID, _SCHEDULE_ITEM_ID
+
+    db = db_session
+    store = await make_store(db)
+    c_early = await make_category(db, store.id, name="早点", sort_order=0)
+    c_noodle = await make_category(db, store.id, name="面", sort_order=1)
+    await make_product(db, store.id, c_early.id, name="豆浆")
+    await make_product(db, store.id, c_noodle.id, name="牛肉面")
+
+    sched = CategorySortSchedule(
+        id=next(_SCHEDULE_ID),
+        store_id=store.id,
+        name="午市",
+        start_time=time(0, 0),
+        end_time=time(0, 0),  # 全天
+        priority=10,
+        status=1,
+    )
+    db.add(sched)
+    await db.flush()
+    db.add_all(
+        [
+            CategorySortScheduleItem(
+                id=next(_SCHEDULE_ITEM_ID),
+                schedule_id=sched.id,
+                category_id=c_noodle.id,
+                sort_order=0,
+            ),
+            CategorySortScheduleItem(
+                id=next(_SCHEDULE_ITEM_ID),
+                schedule_id=sched.id,
+                category_id=c_early.id,
+                sort_order=1,
+            ),
+        ]
+    )
+    await db.flush()
+
+    first = await get_menu_bundle_api(request=None, db=db, store_id=store.id)
+    assert first["data"]["changed"] is True
+    v1 = first["data"]["version"]
+    assert [c["id"] for c in first["data"]["categories"]] == [c_noodle.id, c_early.id]
+
+    # 调换时段内分类顺序（模拟后台保存），并走与写接口相同的失效路径
+    items = (
+        await db.execute(
+            select(CategorySortScheduleItem).where(CategorySortScheduleItem.schedule_id == sched.id)
+        )
+    ).scalars().all()
+    for it in items:
+        it.sort_order = 0 if it.category_id == c_early.id else 1
+    await db.flush()
+    await invalidate_store_caches(store.id)
+
+    same_ver = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=v1)
+    assert same_ver["data"]["changed"] is True
+    assert same_ver["data"]["version"] > v1
+    assert [c["id"] for c in same_ver["data"]["categories"]] == [c_early.id, c_noodle.id]
+
+
+@pytest.mark.asyncio
+async def test_menu_bundle_bumps_when_active_schedule_window_changes(fake_redis, db_session):
+    """跨时段窗口：缓存里的 active_schedule_id 与当前不一致时必须 bump，避免一直 changed:false。"""
+    from datetime import datetime, time
+    from unittest.mock import patch
+
+    from app.models import CategorySortSchedule, CategorySortScheduleItem
+    from tests.reco_factories import _SCHEDULE_ID, _SCHEDULE_ITEM_ID
+
+    db = db_session
+    store = await make_store(db)
+    c_a = await make_category(db, store.id, name="A", sort_order=0)
+    c_b = await make_category(db, store.id, name="B", sort_order=1)
+    await make_product(db, store.id, c_a.id, name="A品")
+    await make_product(db, store.id, c_b.id, name="B品")
+
+    lunch = CategorySortSchedule(
+        id=next(_SCHEDULE_ID),
+        store_id=store.id,
+        name="午市",
+        start_time=time(10, 0),
+        end_time=time(14, 0),
+        priority=5,
+        status=1,
+    )
+    dinner = CategorySortSchedule(
+        id=next(_SCHEDULE_ID),
+        store_id=store.id,
+        name="晚市",
+        start_time=time(17, 0),
+        end_time=time(21, 0),
+        priority=5,
+        status=1,
+    )
+    db.add_all([lunch, dinner])
+    await db.flush()
+    db.add_all(
+        [
+            CategorySortScheduleItem(
+                id=next(_SCHEDULE_ITEM_ID),
+                schedule_id=lunch.id,
+                category_id=c_a.id,
+                sort_order=0,
+            ),
+            CategorySortScheduleItem(
+                id=next(_SCHEDULE_ITEM_ID),
+                schedule_id=lunch.id,
+                category_id=c_b.id,
+                sort_order=1,
+            ),
+            CategorySortScheduleItem(
+                id=next(_SCHEDULE_ITEM_ID),
+                schedule_id=dinner.id,
+                category_id=c_b.id,
+                sort_order=0,
+            ),
+            CategorySortScheduleItem(
+                id=next(_SCHEDULE_ITEM_ID),
+                schedule_id=dinner.id,
+                category_id=c_a.id,
+                sort_order=1,
+            ),
+        ]
+    )
+    await db.flush()
+
+    with (
+        patch("app.services.menu_service.now_local") as menu_now,
+        patch("app.services.category_schedule.now_local") as sched_now,
+    ):
+        menu_now.return_value = datetime(2026, 9, 24, 11, 0, 0)
+        sched_now.return_value = datetime(2026, 9, 24, 11, 0, 0)
+        lunch_resp = await get_menu_bundle_api(request=None, db=db, store_id=store.id)
+        v_lunch = lunch_resp["data"]["version"]
+        assert [c["id"] for c in lunch_resp["data"]["categories"]] == [c_a.id, c_b.id]
+
+        # 仍用午市 version 请求，但时钟已到晚市：必须 changed + 新序
+        menu_now.return_value = datetime(2026, 9, 24, 18, 0, 0)
+        sched_now.return_value = datetime(2026, 9, 24, 18, 0, 0)
+        dinner_resp = await get_menu_bundle_api(
+            request=None, db=db, store_id=store.id, version=v_lunch
+        )
+        assert dinner_resp["data"]["changed"] is True
+        assert dinner_resp["data"]["version"] > v_lunch
+        assert [c["id"] for c in dinner_resp["data"]["categories"]] == [c_b.id, c_a.id]

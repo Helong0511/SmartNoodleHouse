@@ -701,6 +701,7 @@ async def create_category_schedule(
     await _replace_schedule_items(db, sched, data.items)
     await db.flush()
     items = (await _load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
+    await invalidate_store_caches(int(sid))
     await AuditService.log_staff(
         db,
         user=user,
@@ -751,6 +752,7 @@ async def update_category_schedule(
         await _replace_schedule_items(db, sched, data.items or [])
     await db.flush()
     items = (await _load_schedule_items(db, [int(sched.id)])).get(int(sched.id), [])
+    await invalidate_store_caches(int(sched.store_id))
     await AuditService.log_staff(
         db,
         user=user,
@@ -783,6 +785,7 @@ async def delete_category_schedule(
     )
     await db.delete(sched)
     await db.flush()
+    await invalidate_store_caches(int(sched.store_id))
     await AuditService.log_staff(
         db,
         user=user,

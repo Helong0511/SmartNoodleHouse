@@ -1365,8 +1365,9 @@ async def get_menu_bundle_api(
 ):
     """菜单聚合（分类 + 在售商品一次成型），带版本戳的轻量校验。
 
-    客户端携带 version 且与服务端一致时仅返回 changed:false（小响应、不查库组装）；
-    否则返回完整 bundle 与新版本。Redis 不可用时降级为每次查库。
+    先经 get_or_build 校验当前分类时段方案；跨时段会 bump version。
+    客户端 version 与当前一致时返回 changed:false；否则返回完整 bundle。
+    Redis 不可用时降级为每次查库。
     """
     if not store_id:
         raise AppException(40001, "store_id 必填")
@@ -1375,21 +1376,21 @@ async def get_menu_bundle_api(
     from app.core.menu_cache import get_menu_version
     from app.services.menu_service import get_or_build_menu_bundle
 
-    current_version = await get_menu_version(sid)
+    # 先组装/校验当前时段：跨时段时会 bump version，避免客户端凭旧 version 一直 changed:false
+    bundle = await get_or_build_menu_bundle(db, sid)
+    current_version = int(bundle.get("version") or await get_menu_version(sid) or 0)
     if version is not None and current_version and int(version) == int(current_version):
         return success({"changed": False, "version": current_version}, request=request)
 
-    bundle = await get_or_build_menu_bundle(db, sid)
     return success(
         {
             "changed": True,
-            "version": int(bundle.get("version") or current_version or 0),
+            "version": current_version,
             "categories": bundle["categories"],
             "products": bundle["products"],
         },
         request=request,
     )
-
 
 _RECO_SCENES = {"recommend_menu", "settle_addon"}
 

@@ -30,11 +30,36 @@ from app.services.category_require import (
     normalize_require_category_ids,
     resolve_product_requires,
 )
-from app.services.category_schedule import apply_category_schedule_sort
+from app.services.category_schedule import (
+    apply_category_schedule_sort,
+    load_enabled_schedules,
+    pick_active_schedule,
+)
+from app.core.response import now_local
 
 _BUILD_TTL_SECONDS = 60
 # 进程内兜底（Redis 不可用时仍避免每次请求重查）
 _build_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+
+
+async def _active_schedule_id(db, store_id: int) -> int | None:
+    """当前业务时刻命中的分类时段方案 id；无方案返回 None。"""
+    schedules = await load_enabled_schedules(db, int(store_id))
+    now_t = now_local().time().replace(tzinfo=None)
+    active = pick_active_schedule(schedules, now_t)
+    return int(active.id) if active else None
+
+
+def _bundle_schedule_id(bundle: dict[str, Any] | None) -> int | None:
+    if not bundle:
+        return None
+    raw = bundle.get("active_schedule_id")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _category_payload(cat: ProductCategory, store_name: str | None) -> dict[str, Any]:
@@ -159,22 +184,33 @@ async def build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         categories.append(row)
 
     return {
+        "active_schedule_id": int(active.id) if active else None,
         "categories": categories,
         "products": {"items": items, "total": len(items)},
     }
 
 
 async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
-    """带 Redis + 进程内两级缓存的菜单 bundle，并确保 version>=1。"""
+    """带 Redis + 进程内两级缓存的菜单 bundle，并确保 version>=1。
+
+    缓存命中时仍校验当前时段方案是否变化：跨午/晚市等窗口切换必须 bump 版本，
+    否则小程序携带旧 version 会一直收到 changed:false，分类顺序不更新。
+    """
     sid = int(store_id)
+    expected_sched = await _active_schedule_id(db, sid)
+
     cached = await get_menu_bundle(sid)
-    if cached is not None:
+    if cached is not None and _bundle_schedule_id(cached) == expected_sched:
         return cached
 
     hit = _build_cache.get(sid)
-    if hit and hit[0] > time.time():
+    if hit and hit[0] > time.time() and _bundle_schedule_id(hit[1]) == expected_sched:
         bundle = hit[1]
     else:
+        # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
+        if cached is not None or (hit and _bundle_schedule_id(hit[1]) != expected_sched):
+            invalidate_local_menu_cache(sid)
+            await bump_menu_version(sid)
         bundle = await build_menu_bundle(db, sid)
         _build_cache[sid] = (time.time() + _BUILD_TTL_SECONDS, bundle)
 

@@ -35,6 +35,8 @@ _BIND_ID = itertools.count(6000)
 _ITEM_ID = itertools.count(6000)
 _ITEM_OPT_ID = itertools.count(6000)
 _ORDER_NO = itertools.count(600000)
+_SCHEDULE_ID = itertools.count(6000)
+_SCHEDULE_ITEM_ID = itertools.count(6000)
 
 
 def utcnow() -> datetime:
