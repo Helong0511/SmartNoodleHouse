@@ -1,7 +1,4 @@
 {
-  "defaultTitle": "购物车",
-  "pullRefresh": true,
-  "usingComponents": {
-    "store-bar": "/components/store-bar/store-bar"
-  }
+  "defaultTitle": "点餐",
+  "usingComponents": {}
 }

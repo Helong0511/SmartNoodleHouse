@@ -1,8 +1,4 @@
 {
-  "navigationBarTitleText": "购物车",
-  "enablePullDownRefresh": true,
-  "backgroundTextStyle": "dark",
-  "usingComponents": {
-    "store-bar": "/components/store-bar/store-bar"
-  }
+  "navigationBarTitleText": "点餐",
+  "usingComponents": {}
 }

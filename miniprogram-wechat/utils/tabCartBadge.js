@@ -1,85 +1,19 @@
-/** TabBar 购物车角标：显示有效商品样数（行数，非总件数） */
-
-const CART_TAB_INDEX = 1
-
-const TAB_ROUTES = {
-  'pages/menu/menu': true,
-  'pages/cart/cart': true,
-  'pages/orders/orders': true,
-  'pages/member/member': true
-}
+/** TabBar 角标：已取消独立购物车 Tab，点餐页底部直接结算，角标不再展示 */
 
 function cartBadgeCount(cart) {
   return (cart || []).filter((i) => !i.invalid).length
 }
 
-function readCart() {
-  try {
-    const app = getApp()
-    if (app && app.globalData && Array.isArray(app.globalData.cart)) {
-      return app.globalData.cart
-    }
-  } catch (_) {}
-  try {
-    return wx.getStorageSync('cart') || []
-  } catch (_) {
-    return []
-  }
+function updateTabCartBadge() {
+  /* no-op：无购物车 Tab */
 }
 
-function isOnTabPage() {
-  try {
-    const pages = getCurrentPages()
-    if (!pages || !pages.length) return false
-    const cur = pages[pages.length - 1]
-    const route = (cur && (cur.route || cur.__route__)) || ''
-    return !!TAB_ROUTES[route]
-  } catch (_) {
-    return false
-  }
-}
-
-function applyBadge(count) {
-  // 非 Tab 页调用会 fail/timeout（微信限制），静默忽略避免 SystemError
-  if (!isOnTabPage()) return
-  const noop = () => {}
-  if (count > 0) {
-    wx.setTabBarBadge({
-      index: CART_TAB_INDEX,
-      text: count > 99 ? '99+' : String(count),
-      fail: noop
-    })
-  } else {
-    wx.removeTabBarBadge({ index: CART_TAB_INDEX, fail: noop })
-  }
-}
-
-/**
- * 更新角标。非 Tab 页调用会失败（微信限制），需在各 Tab 页 onShow 再刷一次。
- */
-function updateTabCartBadge(cart) {
-  const list = cart != null ? cart : readCart()
-  const count = cartBadgeCount(list)
-  try {
-    applyBadge(count)
-  } catch (_) {
-    /* 同步抛错时忽略 */
-  }
-  // 从商品详情返回等时机，延后一帧再试，提高成功率
-  setTimeout(() => {
-    try {
-      applyBadge(count)
-    } catch (_) {}
-  }, 50)
-}
-
-/** Tab 页 onShow 使用：按当前购物车强制同步角标 */
 function syncTabCartBadge() {
-  updateTabCartBadge(readCart())
+  /* no-op */
 }
 
 module.exports = {
-  CART_TAB_INDEX,
+  CART_TAB_INDEX: -1,
   cartBadgeCount,
   updateTabCartBadge,
   syncTabCartBadge

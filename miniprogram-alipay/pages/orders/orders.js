@@ -295,15 +295,46 @@ Page({
         main_image: it.main_image || '',
         no_member_discount: !!it.no_member_discount
       }))
-      auth.saveCart(cart)
+      const reorderStoreId = (res && res.store_id)
+        || (item && item.store_id)
+        || auth.currentStoreId()
+        || null
+      const currentSid = auth.currentStoreId()
+      if (
+        reorderStoreId != null
+        && currentSid != null
+        && Number(reorderStoreId) !== Number(currentSid)
+      ) {
+        my.hideLoading()
+        const goOn = await new Promise((resolve) => {
+          my.confirm({
+            title: '门店不一致',
+            content: '该订单属于其他门店，当前已绑定本店桌台。继续加入后商品可能无法在本桌结算，是否仍要加入？',
+            confirmButtonText: '仍要加入',
+            cancelButtonText: '取消',
+            success: (r) => resolve(!!(r && r.confirm)),
+            fail: () => resolve(false)
+          })
+        })
+        if (!goOn) return
+        my.showLoading({ content: '生成订单中' })
+      }
+      auth.saveCart(cart, reorderStoreId != null ? { store_id: reorderStoreId } : {})
       my.hideLoading()
       const skipped = (res && res.skipped) || []
+      const goMenuSheet = () => {
+        try {
+          const app = getApp()
+          if (app && app.globalData) app.globalData._openCartSheet = true
+        } catch (_) {}
+        my.switchTab({ url: '/pages/menu/menu' })
+      }
       my.alert({
-        title: '已加入购物车',
+        title: '已加入点餐',
         content: skipped.length
           ? `已加入 ${cart.length} 件；${skipped.length} 件不可用已跳过`
           : `已按历史订单加入 ${cart.length} 件`,
-        success: () => my.switchTab({ url: '/pages/cart/cart' })
+        success: goMenuSheet
       })
     } catch (err) {
       my.hideLoading()

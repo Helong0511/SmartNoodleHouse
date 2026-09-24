@@ -539,8 +539,14 @@ function saveCart(cart, options) {
   const opts = options || {}
   app.globalData.cart = cart
   wx.setStorageSync('cart', cart)
-  // 始终把当前门店写入 cart_store_id，确保后续切店可检测
-  const sid = opts.store_id != null ? opts.store_id : currentStoreId()
+  // 显式 store_id > 已绑定的 cart_store_id > 当前桌台门店
+  // 避免点餐页 refreshCartBar 无参 saveCart 把「再来一单」的门店冲成当前桌台店
+  let sid = opts.store_id
+  if (sid == null) {
+    const bound = Number(readStorage(CART_STORE_ID_KEY))
+    if (Number.isFinite(bound) && bound > 0) sid = bound
+    else sid = currentStoreId()
+  }
   if (sid != null) {
     wx.setStorageSync(CART_STORE_ID_KEY, Number(sid) || 0)
   } else {

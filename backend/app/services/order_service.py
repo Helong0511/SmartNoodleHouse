@@ -187,6 +187,7 @@ class OrderReorderService:
         return {
             "order_id": order.id,
             "order_no": order.order_no,
+            "store_id": int(order.store_id) if order.store_id else None,
             "cart_items": cart_items,
             "skipped": skipped,
             "cart_count": sum(i["quantity"] for i in cart_items),

@@ -182,6 +182,9 @@ async function ensureDineContext(options = {}) {
   let { table, store, token } = cached
 
   if (!force && contextReady(table, store, token)) {
+    // 缓存命中也要写回 globalData：否则仅 storage 有桌台时，
+    // 结算页 storeId() 只读 globalData 会得到 null → 菜单校验「加载不完整」
+    if (table || store) applyContext(table, store)
     return displayPayload(store, table)
   }
 

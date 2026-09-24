@@ -36,12 +36,6 @@
         "activeIcon": "assets/tab/menu-active.png"
       },
       {
-        "pagePath": "pages/cart/cart",
-        "name": "购物车",
-        "icon": "assets/tab/cart.png",
-        "activeIcon": "assets/tab/cart-active.png"
-      },
-      {
         "pagePath": "pages/orders/orders",
         "name": "订单",
         "icon": "assets/tab/orders.png",

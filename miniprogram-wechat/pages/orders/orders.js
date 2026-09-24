@@ -294,19 +294,50 @@ Page({
         main_image: it.main_image || '',
         no_member_discount: !!it.no_member_discount
       }))
-      auth.saveCart(cart)
+      const reorderStoreId = (res && res.store_id)
+        || (item && item.store_id)
+        || auth.currentStoreId()
+        || null
+      const currentSid = auth.currentStoreId()
+      if (
+        reorderStoreId != null
+        && currentSid != null
+        && Number(reorderStoreId) !== Number(currentSid)
+      ) {
+        wx.hideLoading()
+        const goOn = await new Promise((resolve) => {
+          wx.showModal({
+            title: '门店不一致',
+            content: '该订单属于其他门店，当前已绑定本店桌台。继续加入后商品可能无法在本桌结算，是否仍要加入？',
+            confirmText: '仍要加入',
+            cancelText: '取消',
+            success: (r) => resolve(!!(r && r.confirm)),
+            fail: () => resolve(false)
+          })
+        })
+        if (!goOn) return
+        wx.showLoading({ title: '生成订单中' })
+      }
+      auth.saveCart(cart, reorderStoreId != null ? { store_id: reorderStoreId } : {})
       wx.hideLoading()
       const skipped = (res && res.skipped) || []
+      const goMenuSheet = () => {
+        try {
+          const app = getApp()
+          if (app && app.globalData) app.globalData._openCartSheet = true
+        } catch (_) {}
+        wx.switchTab({ url: '/pages/menu/menu' })
+      }
       if (skipped.length) {
         wx.showModal({
-          title: '已加入购物车',
+          title: '已加入点餐',
           content: `已加入 ${cart.length} 件；${skipped.length} 件不可用已跳过`,
           showCancel: false,
-          success: () => wx.switchTab({ url: '/pages/cart/cart' })
+          success: goMenuSheet
         })
       } else {
-        wx.showToast({ title: '已加入购物车', icon: 'success' })
-        setTimeout(() => wx.switchTab({ url: '/pages/cart/cart' }), 500)
+        wx.showToast({ title: '已加入点餐', icon: 'success' })
+        setTimeout(goMenuSheet, 500)
       }
     } catch (err) {
       wx.hideLoading()

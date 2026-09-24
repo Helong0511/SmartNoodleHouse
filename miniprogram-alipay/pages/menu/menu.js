@@ -78,7 +78,13 @@ Page({
     recoStoreId: null,
     showMenuSearch: false,
     showMenuSmartTaste: false,
-    showMenuGuessYouLike: false
+    showMenuGuessYouLike: false,
+    cart: [],
+    cartTotal: '0.00',
+    cartCount: 0,
+    invalidCount: 0,
+    cartSheetOpen: false,
+    cartThumbStyle: ''
   },
 
   onLoad() {
@@ -90,17 +96,27 @@ Page({
 
   onShow() {
     tabCartBadge.syncTabCartBadge()
+    const metrics = media.layoutMetrics()
+    const px = Math.round(Math.max(56, (metrics.thumbPx || 80) * 0.85))
+    this.setData({ cartThumbStyle: `width:${px}px;height:${px}px;` })
     this.applyDineContext(dineCtx.currentDisplay())
     dineCtx.ensureDineContext().then((ctx) => {
       this.applyDineContext(ctx)
       this.applyMenuFlags(ctx && ctx.storeId)
     })
-    this.loadPrefs(!(appGlobal().prefsAt))
+    const g = appGlobal()
+    this.loadPrefs(!g.prefsAt)
     // 首次由 onLoad 发起；后续回到页面时刷新（版本校验 changed:false 不重绘）
     if (this._menuLoaded) {
       this.loadMenu()
     }
     this._menuLoaded = true
+    const openSheet = !!g._openCartSheet
+    try {
+      const app = getApp()
+      if (app && app.globalData) app.globalData._openCartSheet = false
+    } catch (_) {}
+    this.refreshCartBar({ openSheet })
   },
 
   applyMenuFlags(storeId) {
@@ -132,6 +148,7 @@ Page({
     this.applyMenuFlags(ctx.storeId)
     this._catsCache = null
     this.loadMenu()
+    this.refreshCartBar({ openSheet: false })
   },
 
   onPullDownRefresh() {
@@ -142,8 +159,133 @@ Page({
         this.applyMenuFlags(ctx && ctx.storeId)
       }),
       this.loadPrefs(true),
-      this.loadMenu(true)
+      this.loadMenu(true),
+      this.refreshCartBar({ openSheet: false })
     ]).finally(() => my.stopPullDownRefresh())
+  },
+
+  storeIdForCart() {
+    try {
+      const ctx = dineCtx.currentDisplay()
+      if (ctx && ctx.storeId) return ctx.storeId
+    } catch (_) {}
+    const g = appGlobal()
+    return (g.table && g.table.store_id)
+      || (g.store && (g.store.id || g.store.store_id))
+      || null
+  },
+
+  async refreshCartBar(opts) {
+    const openSheet = !!(opts && opts.openSheet)
+    const rawCart = auth.getCart()
+    let products = this._lastProductItems || []
+    let categories = (this._catsCache && this._catsCache.cats) || this.data.categories || []
+    let complete = !!(products && products.length)
+    try {
+      const sid = this.storeIdForCart()
+      if (sid && rawCart.length) {
+        const catalog = await productApi.loadStoreCatalog(api, sid)
+        products = (catalog && catalog.items) || products
+        categories = (catalog && catalog.categories) || categories
+        complete = !!(catalog && catalog.complete)
+        if (catalog && catalog.items) this._lastProductItems = catalog.items
+      }
+    } catch (_) {}
+
+    const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories, { complete })
+    const cart = list.map((raw) => {
+      const item = cartUtil.normalizeItem({ ...raw })
+      return {
+        ...item,
+        imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
+      }
+    })
+    const validItems = cart.filter((i) => !i.invalid)
+    const { total, count } = cartUtil.cartSummary(validItems)
+    auth.saveCart(cart)
+    const patch = {
+      cart,
+      cartTotal: total,
+      cartCount: count,
+      invalidCount
+    }
+    if (!cart.length) patch.cartSheetOpen = false
+    else if (openSheet) patch.cartSheetOpen = true
+    this.setData(patch)
+  },
+
+  toggleCartSheet() {
+    if (!this.data.cart.length) return
+    this.setData({ cartSheetOpen: !this.data.cartSheetOpen })
+  },
+
+  closeCartSheet() {
+    this.setData({ cartSheetOpen: false })
+  },
+
+  /** 左下角：收起时打开点餐明细，展开时关闭继续点餐 */
+  onFooterLeftTap() {
+    if (!this.data.cart.length) return
+    this.setData({ cartSheetOpen: !this.data.cartSheetOpen })
+  },
+
+  changeCartQty(e) {
+    const { index, delta } = e.currentTarget.dataset
+    const cart = auth.getCart()
+    const item = cart[index]
+    if (!item || item.invalid) return
+    const qty = (item.quantity || 1) + parseInt(delta, 10)
+    if (qty <= 0) {
+      cart.splice(index, 1)
+      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) {}
+    } else if (qty > 999) {
+      my.showToast({ content: '单品最多 999 份', type: 'none' })
+      return
+    } else {
+      cartUtil.normalizeItem(item)
+      item.quantity = qty
+      item.subtotal = (parseFloat(item.unit_price) * qty).toFixed(2)
+    }
+    auth.saveCart(cart)
+    this.refreshCartBar({ openSheet: !!(this.data.cartSheetOpen && cart.length) })
+  },
+
+  removeCartItem(e) {
+    const index = e.currentTarget.dataset.index
+    const cart = auth.getCart()
+    const removed = cart[index]
+    if (removed == null) return
+    cart.splice(index, 1)
+    auth.saveCart(cart)
+    try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) {}
+    this.refreshCartBar({ openSheet: !!(this.data.cartSheetOpen && cart.length) })
+  },
+
+  clearInvalidCart() {
+    const cart = auth.getCart().filter((i) => !i.invalid)
+    auth.saveCart(cart)
+    my.showToast({ content: '已清除失效商品', type: 'success' })
+    this.refreshCartBar({ openSheet: !!(cart.length) })
+  },
+
+  goCheckout() {
+    if (this.data.invalidCount > 0) {
+      my.confirm({
+        title: '有商品不可下单',
+        content: `${this.data.invalidCount} 件商品已失效或库存不足，请先清除后再结算`,
+        confirmButtonText: '清除失效',
+        cancelButtonText: '返回',
+        success: (res) => {
+          if (res.confirm) this.clearInvalidCart()
+        }
+      })
+      return
+    }
+    if (!this.data.cart.length || this.data.cartCount === 0) {
+      my.showToast({ content: '请先点餐', type: 'none' })
+      return
+    }
+    my.navigateTo({ url: '/packageOrder/confirm/confirm' })
   },
 
   scanTable() {
@@ -219,9 +361,13 @@ Page({
       try {
         const bundle = await prefetch.promise
         if (bundle && bundle.changed !== false && bundle.categories) {
-          productApi.writeCachedMenu(sid, bundle)
           const catList = normalizeList(bundle.categories)
           const items = normalizeList(bundle.products)
+          productApi.writeCachedMenu(sid, {
+            version: bundle.version,
+            categories: catList,
+            products: items
+          })
           this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
           this._lastProductItems = items
           const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
@@ -254,7 +400,11 @@ Page({
       }
       const catList = normalizeList(bundle.categories)
       const items = normalizeList(bundle.products)
-      productApi.writeCachedMenu(sid, bundle)
+      productApi.writeCachedMenu(sid, {
+        version: bundle.version,
+        categories: catList,
+        products: items
+      })
       this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
       this._lastProductItems = items
       const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
@@ -372,6 +522,7 @@ Page({
         payload: { qty: Number(entry.quantity) || 1 }
       })
     } catch (_) { }
+    this.refreshCartBar({ openSheet: true })
   },
 
   assertCanAddProduct(productLike) {

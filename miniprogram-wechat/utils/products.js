@@ -114,12 +114,18 @@ async function loadStoreCatalog(api, storeId) {
       if (items.length) {
         return { items, categories: normalizeList(cached.categories), complete: true }
       }
-    } else if (bundle && bundle.products) {
-      writeCachedMenu(sid, bundle)
-      return {
-        items: normalizeList(bundle.products),
-        categories: normalizeList(bundle.categories),
-        complete: true
+      // changed:false 但本地无缓存：继续走下方完整拉取（勿当失败）
+    } else if (bundle && bundle.products != null) {
+      // 后端 products 为 { items, total }，不是数组；须用 normalizeList
+      const items = normalizeList(bundle.products)
+      const categories = normalizeList(bundle.categories)
+      writeCachedMenu(sid, {
+        version: bundle.version,
+        categories,
+        products: items
+      })
+      if (items.length) {
+        return { items, categories, complete: true }
       }
     }
   } catch (_) {}
@@ -131,8 +137,9 @@ async function loadStoreCatalog(api, storeId) {
       categories = normalizeList(catRes)
     } catch (_) {}
     const items = (prod && prod.items) || []
-    if ((prod && prod.complete) || items.length) {
-      return { items, categories, complete: !!(prod && prod.complete) }
+    if (items.length) {
+      // 有商品列表即可用于规格校验；complete 仅作参考
+      return { items, categories, complete: true }
     }
   } catch (_) {}
   const cached = readCachedMenu(sid)

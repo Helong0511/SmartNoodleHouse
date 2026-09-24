@@ -269,7 +269,15 @@ function validateRequiredOptions(cart, products) {
     const p = map[item.product_id]
     if (!p) return
     const selected = new Set((item.option_ids || []).map((id) => String(id)))
-    ;(p.option_groups || []).forEach((g) => {
+    const groups = p.option_groups || []
+    if (!groups.length) {
+      // 菜单聚合/列表接口只有 has_options，无规格组明细：有规格却未选时仍应拦截
+      if (p.has_options && !selected.size) {
+        issues.push({ name: p.name, group: '规格' })
+      }
+      return
+    }
+    groups.forEach((g) => {
       if (!g.is_required) return
       const ok = (g.options || []).some((o) => selected.has(String(o.id)))
       if (!ok) {

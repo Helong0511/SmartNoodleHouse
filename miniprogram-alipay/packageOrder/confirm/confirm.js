@@ -103,20 +103,29 @@ Page({
     cartIds: []
   },
   storeId() {
-    return (app.globalData.table && app.globalData.table.store_id)
-      || (app.globalData.store && app.globalData.store.id)
+    try {
+      const ctx = dineCtx.currentDisplay()
+      if (ctx && ctx.storeId) return ctx.storeId
+    } catch (_) {}
+    const table = app.globalData.table || auth.readStorage('dine_table') || null
+    const store = app.globalData.store || auth.readStorage('dine_store') || null
+    return (table && table.store_id)
+      || (store && (store.id || store.store_id))
       || null
   },
   async loadProductCatalog() {
     if (this._productCatalog && this._catalogComplete) {
       return this._productCatalog
     }
-    const sid = this.storeId()
+    const sid = this.submitStoreId() || this.storeId()
+    if (!sid) {
+      throw new Error('请先扫桌码绑定门店后再结算')
+    }
     const catalog = await loadStoreCatalog(api, sid)
-    if (!catalog || !catalog.complete) {
+    const items = (catalog && catalog.items) || []
+    if (!catalog || (!catalog.complete && !items.length)) {
       throw new Error('菜单加载不完整，请稍后重试')
     }
-    const items = catalog.items || []
     this._productCatalog = items
     this._catalogComplete = true
     const boxMap = {}
@@ -127,11 +136,17 @@ Page({
     return items
   },
 
-  /** 下单门店：优先已绑桌台，避免与 table_token 所属门店不一致 */
+  /** 下单门店：桌台 > 门店上下文 > 再来一单写入的 cart_store_id */
   submitStoreId() {
     const table = app.globalData.table || auth.readStorage('dine_table') || {}
     if (table && table.store_id) return table.store_id
-    return this.storeId()
+    const fromCtx = this.storeId()
+    if (fromCtx) return fromCtx
+    try {
+      const cartSid = Number(auth.readStorage('cart_store_id'))
+      if (Number.isFinite(cartSid) && cartSid > 0) return cartSid
+    } catch (_) {}
+    return null
   },
 
   _newCheckoutNonce() {
@@ -346,9 +361,7 @@ Page({
 
     try {
       await auth.ensureLogin()
-      const sid = (app.globalData.table && app.globalData.table.store_id)
-        || (app.globalData.store && app.globalData.store.id)
-        || null
+      const sid = this.storeId()
       if (!sid) {
         if (!this._checkoutStale(gen)) {
           this.setData({ tableOptions: [], needScanHint: !token })
@@ -562,12 +575,16 @@ Page({
     const { list, total } = cartUtil.cartSummary(cart)
     const boxMap = this.data.boxPriceMap || {}
     let enrichedList = list
+    let catalogOk = false
     try {
       const productItems = await this.loadProductCatalog()
-      if (productItems.length) {
+      catalogOk = !!(productItems && productItems.length)
+      if (catalogOk) {
         enrichedList = cartUtil.enrichCartFromProducts(list, productItems)
       }
-    } catch (_) { }
+    } catch (_) {
+      catalogOk = false
+    }
     let packing = 0
     const cartPreview = enrichedList.map((item) => {
       const qty = item.quantity || 1
@@ -648,7 +665,7 @@ Page({
     this.setData({
       cartPreview,
       cartIds: cartPreview.map((it) => it.product_id),
-      settleReady: !!settleStoreId,
+      settleReady: !!(settleStoreId && catalogOk),
       settleStoreId: settleStoreId || null,
       subtotal: sub.toFixed(2),
       packingFee: pack.toFixed(2),
@@ -756,6 +773,11 @@ Page({
   },
   async submit() {
     if (this.data.loading) return
+    if (!this.data.settleReady) {
+      my.showToast({ content: '菜单未就绪，请稍后重试', type: 'none' })
+      this.refreshSummary()
+      return
+    }
     // 校验前即加锁，防止连点双提交
     this.setData({ loading: true })
     try {
