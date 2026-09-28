@@ -349,6 +349,12 @@ def _build_env_groups(settings) -> list[dict]:
                     str(settings.face_liveness_challenge_timeout),
                     "活体挑战有效期（秒）",
                 ),
+                _env_item(
+                    "UNKNOWN_VISITOR_CAPTURE_ENABLED",
+                    str(settings.unknown_visitor_capture_enabled).lower(),
+                    "未知访客抓拍（默认开启；图存 visitors/年/月/日/）",
+                    restart=False,
+                ),
             ],
         },
         {
@@ -378,6 +384,12 @@ def _build_env_groups(settings) -> list[dict]:
                 _env_item("ENABLE_WX_AVATAR", str(settings.enable_wx_avatar).lower(), "微信头像能力", restart=False),
                 _env_item("ENABLE_WX_NICKNAME", str(settings.enable_wx_nickname).lower(), "微信昵称能力", restart=False),
                 _env_item("ENABLE_WX_PHONE_BIND", str(settings.enable_wx_phone_bind).lower(), "微信手机号绑定", restart=False),
+                _env_item(
+                    "ENABLE_FACE_WELCOME",
+                    str(settings.enable_face_welcome).lower(),
+                    "小程序人脸迎宾入口（默认关闭）",
+                    restart=False,
+                ),
                 _env_item("KITCHEN_TICKET_ORDER_NO", settings.kitchen_ticket_order_no, "厨房票订单号样式 barcode/text/off", restart=False),
                 _env_item("XPYUN_PRINT_COPIES", str(settings.xpyun_print_copies), "小票打印份数", restart=False),
                 _env_item("XPYUN_VOICE", str(settings.xpyun_voice), "云打印语音 0~3", restart=False),

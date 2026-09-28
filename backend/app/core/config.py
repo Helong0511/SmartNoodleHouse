@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     enable_wx_avatar: bool = True
     enable_wx_nickname: bool = True
     enable_wx_phone_bind: bool = False
+    # 小程序「人脸迎宾」入口（默认关闭；经 /miniprogram/config 下发）
+    enable_face_welcome: bool = False
     # 点餐页展示开关（种子默认关闭；运行时按门店 store_settings，无覆盖再看 system_settings）
     show_menu_search: bool = False
     show_menu_smart_taste: bool = False
@@ -213,8 +215,8 @@ class Settings(BaseSettings):
     # P1: 活体检测模式 — none=多帧确认（被动）；challenge=随机动作挑战（主动）
     face_liveness_mode: str = "challenge"
     face_liveness_challenge_timeout: int = 30  # 挑战有效期（秒）
-    # P0-24: 未知顾客人脸捕获 — 默认关闭，不保存 snapshot/不自动创建 identity
-    unknown_visitor_capture_enabled: bool = False
+    # 店内摄像头未知访客抓拍：默认开启；图片按日期目录保存，随 visitor_data_retention_days 清理
+    unknown_visitor_capture_enabled: bool = True
 
     @property
     def cors_origin_list(self) -> List[str]:

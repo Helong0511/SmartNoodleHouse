@@ -31,7 +31,10 @@ class RecognitionWorker:
         from sqlalchemy import select
 
         settings = get_settings()
-        logger.info("RecognitionWorker started (camera frames only, no image files)")
+        logger.info(
+            "RecognitionWorker started (unknown_visitor_capture=%s)",
+            bool(getattr(settings, "unknown_visitor_capture_enabled", True)),
+        )
         while not self._stop.is_set():
             try:
                 mgr = CameraManager()
@@ -65,19 +68,6 @@ class RecognitionWorker:
                         if frame is None or now - ts > 2:
                             continue
 
-                        # 匿名访客流量：同一摄像头 30s 内最多记 1 次 ENTER
-                        if now - self._last_visitor_at.get(cam_id, 0) >= 30:
-                            # P0-24: 未知顾客捕获默认关闭 — 仅记录 ENTER 事件，不保存人脸 snapshot
-                            if settings.unknown_visitor_capture_enabled:
-                                try:
-                                    await VisitorService.record_event(db, cam_id, "ENTER")
-                                    await db.commit()
-                                    self._last_visitor_at[cam_id] = now
-                                except Exception:
-                                    await db.rollback()
-                            else:
-                                self._last_visitor_at[cam_id] = now
-
                         try:
                             emb = np.array(extract_face_embedding_bgr(frame), dtype=np.float32)
                         except Exception:
@@ -98,7 +88,25 @@ class RecognitionWorker:
                             settings.face_match_threshold,
                             store_id=store_id,
                         )
+                        # 未匹配到授权会员 → 未知访客抓拍（按日目录存图，30s 节流）
                         if best_id is None or best_sim < threshold:
+                            capture_on = await SystemSettingsService.effective_bool(
+                                db,
+                                "unknown_visitor_capture_enabled",
+                                getattr(settings, "unknown_visitor_capture_enabled", True),
+                                store_id=None,
+                            )
+                            if capture_on and now - self._last_visitor_at.get(cam_id, 0) >= 30:
+                                try:
+                                    snap = await VisitorService.save_frame_snapshot(frame, cam_id)
+                                    await VisitorService.record_event(
+                                        db, cam_id, "ENTER", snapshot_path=snap
+                                    )
+                                    await db.commit()
+                                    self._last_visitor_at[cam_id] = now
+                                except Exception:
+                                    await db.rollback()
+                                    logger.exception("未知访客抓拍失败 camera_id=%s", cam_id)
                             continue
                         confirmed, cid, avg = global_tracker.push(cam_id, emb, best_id, best_sim)
                         if confirmed and cid:

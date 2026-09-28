@@ -385,21 +385,39 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mergeDialog" title="合并顾客到当前档案" width="480px" destroy-on-close>
+    <el-dialog v-model="mergeDialog" title="合并顾客到当前档案" width="560px" destroy-on-close>
       <el-alert
         type="warning"
         :closable="false"
         show-icon
         title="不可逆操作"
-        description="将源顾客的账号、订单、券、积分等迁入目标顾客，源顾客停用。请核对 ID。"
+        description="将源顾客的账号、订单、券、积分等迁入目标顾客，源顾客停用。可按手机号、昵称、编号或 ID 搜索选择源顾客。"
         style="margin-bottom: 12px"
       />
       <el-form label-width="100px">
         <el-form-item label="目标顾客">
           <span>{{ mergeTargetLabel }}</span>
         </el-form-item>
-        <el-form-item label="源顾客 ID" required>
-          <el-input-number v-model="mergeSourceId" :min="1" :controls="false" style="width: 100%" placeholder="被合并的顾客主键" />
+        <el-form-item label="源顾客" required>
+          <el-select
+            v-model="mergeSourceId"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            :remote-method="searchMergeSources"
+            :loading="mergeSourceLoading"
+            placeholder="输入手机号 / 昵称 / 编号 / ID 搜索"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="c in mergeSourceOptions"
+              :key="c.id"
+              :label="formatMergeOption(c)"
+              :value="c.id"
+              :disabled="c.id === mergeTarget?.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="原因">
           <el-input v-model="mergeReason" maxlength="255" show-word-limit placeholder="如：同人双号合并" />
@@ -461,6 +479,9 @@ const mergeTarget = ref<any>(null)
 const mergeSourceId = ref<number | undefined>()
 const mergeReason = ref('')
 const merging = ref(false)
+const mergeSourceOptions = ref<any[]>([])
+const mergeSourceLoading = ref(false)
+let mergeSearchSeq = 0
 
 const mergeTargetLabel = computed(() => {
   const c = mergeTarget.value
@@ -468,6 +489,41 @@ const mergeTargetLabel = computed(() => {
   const name = c.display_name || c.nickname || '顾客'
   return `${name}（ID ${c.id} / ${c.customer_no}）`
 })
+
+function formatMergeOption(c: any) {
+  const name = c.display_name || c.nickname || '顾客'
+  const phone = c.phone ? ` · ${c.phone}` : ''
+  const no = c.customer_no ? ` · ${c.customer_no}` : ''
+  return `${name}${phone}${no}（ID ${c.id}）`
+}
+
+async function searchMergeSources(query: string) {
+  const kw = String(query || '').trim()
+  if (!kw) {
+    mergeSourceOptions.value = []
+    return
+  }
+  const seq = ++mergeSearchSeq
+  mergeSourceLoading.value = true
+  try {
+    const params: Record<string, any> = {
+      page: 1,
+      page_size: 30,
+      keyword: kw,
+      status: 1,
+    }
+    // 与列表一致：门店账号随本店范围；超管可带当前筛选门店缩小范围
+    if (storeFilter.value) params.store_id = storeFilter.value
+    const res = await api.get('/customers', { params })
+    if (seq !== mergeSearchSeq) return
+    const tid = mergeTarget.value?.id
+    mergeSourceOptions.value = (res.data?.items || []).filter((c: any) => c.id !== tid)
+  } catch {
+    if (seq === mergeSearchSeq) mergeSourceOptions.value = []
+  } finally {
+    if (seq === mergeSearchSeq) mergeSourceLoading.value = false
+  }
+}
 
 const enabledTemplates = computed(() => couponTemplates.value.filter((t) => t.status === 1))
 
@@ -666,6 +722,7 @@ function openMergeDialog(customer: any) {
   mergeTarget.value = customer
   mergeSourceId.value = undefined
   mergeReason.value = ''
+  mergeSourceOptions.value = []
   mergeDialog.value = true
 }
 
@@ -673,16 +730,18 @@ async function submitMerge() {
   const targetId = mergeTarget.value?.id
   const sourceId = Number(mergeSourceId.value)
   if (!targetId || !sourceId) {
-    ElMessage.warning('请填写源顾客 ID')
+    ElMessage.warning('请搜索并选择源顾客')
     return
   }
   if (sourceId === Number(targetId)) {
     ElMessage.warning('源与目标不能相同')
     return
   }
+  const sourceRow = mergeSourceOptions.value.find((c) => c.id === sourceId)
+  const sourceLabel = sourceRow?.display_name || sourceRow?.nickname || `#${sourceId}`
   try {
     await ElMessageBox.confirm(
-      `确认将顾客 #${sourceId} 合并入 #${targetId}？此操作不可逆。`,
+      `确认将「${sourceLabel}」（ID ${sourceId}）合并入目标顾客 #${targetId}？此操作不可逆。`,
       '确认合并',
       { type: 'warning', confirmButtonText: '合并', cancelButtonText: '取消' },
     )

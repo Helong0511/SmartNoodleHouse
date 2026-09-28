@@ -1,4 +1,4 @@
-﻿const api = require('../../utils/api')
+const api = require('../../utils/api')
 const payUtil = require('../../utils/pay')
 const subscribe = require('../../utils/subscribe')
 const prefUtil = require('../../utils/preferences')

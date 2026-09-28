@@ -142,9 +142,7 @@ Page({
       markMemberWalletDirty(synced && synced.wallet)
       wx.showToast({ title: '支付已提交，余额稍后更新', icon: 'none' })
       setTimeout(() => {
-        wx.navigateBack({
-          fail: () => wx.switchTab({ url: '/pages/member/member' })
-        })
+        wx.switchTab({ url: '/pages/member/member' })
       }, 600)
     } catch (e) {
       if (!(e && e.payCancel)) {

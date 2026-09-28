@@ -243,6 +243,7 @@ async def visitor_events(
             "event_type": e.event_type,
             "event_time": e.event_time.isoformat() if e.event_time else None,
             "expires_at": e.expires_at.isoformat() if e.expires_at else None,
+            "snapshot_path": e.snapshot_path,
         }
         for e in rows
     ]

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
     {"id": "order", "label": "订单与厨房", "description": "写入当前门店：支付超时、厨房自动出餐、大厅叫号屏"},
-    {"id": "welcome", "label": "迎宾与人脸", "description": "写入当前门店：迎宾冷却与人脸匹配；访客保留天数仍是平台级"},
+    {"id": "welcome", "label": "迎宾与人脸", "description": "迎宾冷却、人脸匹配、人脸迎宾入口；访客保留天数为平台级"},
     {"id": "member", "label": "会员与优惠", "description": "写入当前门店：新客赠券模板名，须与本店或总部券模板名称一致"},
     {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示写入当前门店；小程序主体隐私、域名与版本为平台级（系统设置）"},
     {"id": "delivery", "label": "外卖", "description": "自动接单写入当前门店；.env 兜底门店为平台级"},
@@ -32,12 +32,14 @@ BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
 PLATFORM_ONLY_KEYS = frozenset({
     "visitor_data_retention_days",
     "operation_log_retention_days",
+    "unknown_visitor_capture_enabled",
     "enable_alipay_avatar",
     "enable_alipay_nickname",
     "enable_alipay_phone_bind",
     "enable_wx_avatar",
     "enable_wx_nickname",
     "enable_wx_phone_bind",
+    "enable_face_welcome",
     "max_upload_size_mb",
     "jwt_expire_minutes",
     "customer_jwt_expire_minutes",
@@ -147,6 +149,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "max": 30,
         "description": "连续 N 帧匹配成功才触发迎宾",
     },
+    "unknown_visitor_capture_enabled": {
+        "group": "welcome",
+        "label": "未知访客抓拍",
+        "unit": "",
+        "type": "bool",
+        "default": True,
+        "store_override": False,
+        "description": "店内摄像头识别到未登记人脸时抓拍存图；路径 visitors/年/月/日/，按访客保留天数自动清理",
+    },
     "delivery_auto_confirm": {
         "group": "delivery",
         "label": "外卖自动接单",
@@ -211,6 +222,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "bool",
         "store_override": False,
         "description": "个人主体小程序通常须关闭（小程序主体级，全店共用）",
+    },
+    "enable_face_welcome": {
+        "group": "welcome",
+        "label": "人脸迎宾入口",
+        "unit": "",
+        "type": "bool",
+        "default": False,
+        "store_override": False,
+        "description": "会员中心是否显示「人脸迎宾」开关；默认关闭。开启后顾客可挑战+拍照注册特征（平台级，全店共用）",
     },
     "show_menu_search": {
         "group": "miniprogram",

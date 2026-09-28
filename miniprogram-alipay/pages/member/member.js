@@ -1,4 +1,4 @@
-﻿const api = require('../../utils/api')
+const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
@@ -155,7 +155,8 @@ Page({
     clearingProfile: false,
     updatingOptIn: false,
     faceEnabled: false,
-    updatingFace: false
+    updatingFace: false,
+    showFaceWelcome: false
   },
 
   onLoad() {
@@ -760,6 +761,7 @@ Page({
   },
 
   async onToggleFace(e) {
+    if (!this.data.showFaceWelcome) return
     if (this.data.updatingFace) return
     const v = e && e.detail
     const wantOn = typeof v === 'boolean' ? v : !!(v && v.value)

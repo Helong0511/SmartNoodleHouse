@@ -219,6 +219,9 @@ async def miniprogram_config(
             "enable_wx_avatar": await _flag("enable_wx_avatar", settings.enable_wx_avatar),
             "enable_wx_nickname": await _flag("enable_wx_nickname", settings.enable_wx_nickname),
             "enable_wx_phone_bind": await _flag("enable_wx_phone_bind", settings.enable_wx_phone_bind),
+            "enable_face_welcome": await _flag(
+                "enable_face_welcome", settings.enable_face_welcome
+            ),
             "show_menu_search": await _flag("show_menu_search", settings.show_menu_search),
             "show_menu_smart_taste": await _flag(
                 "show_menu_smart_taste", settings.show_menu_smart_taste
@@ -1060,6 +1063,18 @@ async def get_public_store(store_id: int, request: Request, db: DbSession):
     return success(store, request=request)
 
 
+async def _require_face_welcome_enabled(db: AsyncSession) -> None:
+    """功能总开关关闭时拒绝注册/挑战/撤销以外的开启路径。"""
+    from app.services.system_settings_service import SystemSettingsService
+
+    settings = get_settings()
+    enabled = await SystemSettingsService.effective_bool(
+        db, "enable_face_welcome", settings.enable_face_welcome, store_id=None
+    )
+    if not enabled:
+        raise AppException(40340, "人脸迎宾功能未开启")
+
+
 @router.post("/face/consent")
 async def consent_face(
     request: Request,
@@ -1070,6 +1085,7 @@ async def consent_face(
     action_completed: bool = Form(True),
 ):
     """顾客主动授权：摄像头实拍后上传，服务端质量+活体挑战+basic anti-spoof 校验并提取特征。"""
+    await _require_face_welcome_enabled(db)
     liveness_mode = await _enforce_liveness_challenge(
         customer.id,
         liveness_token=liveness_token,
@@ -1117,8 +1133,9 @@ async def consent_face(
 
 
 @router.get("/face/liveness/challenge")
-async def face_liveness_challenge(request: Request, customer: CurrentCustomer):
+async def face_liveness_challenge(request: Request, db: DbSession, customer: CurrentCustomer):
     """下发一次性活体挑战（动作 + token）。mode=none 时返回空 token。"""
+    await _require_face_welcome_enabled(db)
     from app.services.face_liveness_service import generate_liveness_challenge
 
     challenge = await generate_liveness_challenge(customer_id=customer.id)
@@ -1132,6 +1149,7 @@ async def consent_face_base64(
     customer: CurrentCustomer,
 ):
     """小程序摄像头 takePhoto 后的 base64 授权（禁止相册选图 / 禁止客户端上传 embedding）"""
+    await _require_face_welcome_enabled(db)
     body = await request.json()
     if body.get("feature") is not None or body.get("embedding") is not None or body.get("feature_vector") is not None:
         raise AppException(40036, "禁止客户端上传人脸特征向量，仅接受摄像头实拍图片")

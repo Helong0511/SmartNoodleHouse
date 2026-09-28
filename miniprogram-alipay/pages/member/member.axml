@@ -1,4 +1,4 @@
-﻿<view class="page">
+<view class="page">
   <privacy-popup id="privacy-popup" />
 
   <store-bar compact="{{true}}" onTableChange="onTableChange" />
@@ -214,7 +214,7 @@
           disabled="{{updatingOptIn}}"
         />
       </view>
-      <view class="privacy-row">
+      <view class="privacy-row" a:if="{{showFaceWelcome}}">
         <text class="privacy-label">人脸迎宾</text>
         <switch
           checked="{{faceEnabled}}"
@@ -223,7 +223,7 @@
           disabled="{{updatingFace}}"
         />
       </view>
-      <view class="tip">开启后需完成动作挑战并用前置摄像头实拍；仅用于到店迎宾，可随时关闭。</view>
+      <view class="tip" a:if="{{showFaceWelcome}}">开启后需完成动作挑战并用前置摄像头实拍；仅用于到店迎宾，可随时关闭。</view>
       <view class="privacy-row link-row" onTap="onViewTasteProfile">
         <text>查看我的口味画像</text>
         <text class="arrow">›</text>

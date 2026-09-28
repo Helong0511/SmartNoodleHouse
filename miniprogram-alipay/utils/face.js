@@ -2,6 +2,22 @@
 
 const api = require('./api')
 const auth = require('./auth')
+const { appendDevApiHint, resolveApiBase } = require('../config/env')
+const clientConfig = require('./clientConfig')
+
+function friendlyNetError(err) {
+  const raw = String((err && err.message) || err || '')
+  if (/NSURLErrorDomain.*-1004|-1004|无法连接|Cannot connect|ECONNREFUSED|ERR_CONNECTION/i.test(raw)) {
+    return appendDevApiHint(
+      '无法连接服务器，请确认后端已启动且真机请用局域网 IP（勿用 127.0.0.1）',
+      resolveApiBase()
+    )
+  }
+  if (/timeout|超时|TIMED_OUT|-1001/i.test(raw)) {
+    return appendDevApiHint('上传超时，请检查网络后重试', resolveApiBase())
+  }
+  return appendDevApiHint(raw || '人脸授权失败', resolveApiBase())
+}
 
 function confirmAction(label) {
   return new Promise((resolve) => {
@@ -28,7 +44,6 @@ function takeFrontCameraBase64() {
         }
         const fs = my.getFileSystemManager ? my.getFileSystemManager() : null
         if (!fs || !fs.readFile) {
-          // 兜底：部分基础库用 getFileInfo + 上传路径由业务侧处理；此处要求能读 base64
           reject(new Error('当前支付宝基础库不支持读取照片，请升级后重试'))
           return
         }
@@ -52,8 +67,17 @@ function takeFrontCameraBase64() {
  * 开启人脸迎宾：challenge → 引导动作 → 前置摄像头 → 提交授权
  */
 async function enrollFaceWelcome() {
+  await clientConfig.loadClientConfig()
+  if (!clientConfig.isFaceWelcomeEnabled()) {
+    throw new Error('人脸迎宾功能未开启')
+  }
   await auth.ensureLogin()
-  const challenge = await api.get('/miniprogram/face/liveness/challenge')
+  let challenge
+  try {
+    challenge = await api.get('/miniprogram/face/liveness/challenge')
+  } catch (e) {
+    throw new Error(friendlyNetError(e))
+  }
   const mode = (challenge && challenge.mode) || 'challenge'
   let token = ''
   if (mode === 'challenge') {
@@ -92,6 +116,8 @@ async function enrollFaceWelcome() {
       liveness_token: token,
       action_completed: true,
     })
+  } catch (e) {
+    throw new Error(friendlyNetError(e))
   } finally {
     my.hideLoading()
   }

@@ -1,4 +1,4 @@
-﻿const api = require('../../utils/api')
+const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')

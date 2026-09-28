@@ -14,6 +14,7 @@ const DEFAULTS = {
   enable_wx_avatar: true,
   enable_wx_nickname: true,
   enable_wx_phone_bind: false,
+  enable_face_welcome: false,
   show_menu_search: false,
   show_menu_smart_taste: false,
   show_menu_guess_you_like: false,
@@ -79,6 +80,7 @@ function applyCacheToApp(cache) {
   app.globalData.showMenuGuessYouLike = !!cache.show_menu_guess_you_like
   app.globalData.hideMemberEmptyWallet = !!cache.hide_member_empty_wallet
   app.globalData.enableCustomerDisplay = !!cache.enable_customer_display
+  app.globalData.enableFaceWelcome = !!cache.enable_face_welcome
 }
 
 /**
@@ -156,6 +158,10 @@ function isHideMemberEmptyWalletEnabled() {
   return boolFlag('hide_member_empty_wallet', DEFAULTS.hide_member_empty_wallet)
 }
 
+function isFaceWelcomeEnabled() {
+  return boolFlag('enable_face_welcome', DEFAULTS.enable_face_welcome)
+}
+
 /** 点餐页展示开关对应的 setData 字段 */
 function menuPageFlags() {
   return {
@@ -168,7 +174,8 @@ function menuPageFlags() {
 /** 会员中心展示开关对应的 setData 字段 */
 function memberPageFlags() {
   return {
-    hideMemberEmptyWallet: !!isHideMemberEmptyWalletEnabled()
+    hideMemberEmptyWallet: !!isHideMemberEmptyWalletEnabled(),
+    showFaceWelcome: !!isFaceWelcomeEnabled()
   }
 }
 
@@ -203,6 +210,7 @@ module.exports = {
   isMenuSmartTasteEnabled,
   isMenuGuessYouLikeEnabled,
   isHideMemberEmptyWalletEnabled,
+  isFaceWelcomeEnabled,
   menuPageFlags,
   memberPageFlags,
   alipayPrivacyPageData,

@@ -1,0 +1,29 @@
+---
+description: 区分各运行场景；配置/源码/SQL 字符集与文件编码必须正确
+alwaysApply: true
+---
+
+# 场景区分与字符集编码
+
+## 必须区分的场景
+
+改配置、写命令、改路径、写注释或示例时，先标明场景，禁止混用：
+
+| 场景 | 典型特征 | 注意 |
+|---|---|---|
+| 本地调试 | Windows、PowerShell、盘符路径、`.env` / `.env.development.example` | 真机用 `DEV_LAN_HOST`，可开 mock |
+| 生产 / 线上 | Ubuntu 22.04、bash、`/` 路径、`.env.production.example` | 禁 mock、HTTPS、证书路径 |
+| 微信小程序 | `miniprogram-wechat/`、`wx.*`、`.wxml` | 与支付宝行为对齐 |
+| 支付宝小程序 | `miniprogram-alipay/`、`my.*`、`.axml` | 与微信行为对齐 |
+| 后台前端 | `frontend/`、Vite、`VITE_*` | 构建时注入，非后端 Settings |
+| 后端 API | `backend/`、根目录 `.env`、Settings | 运行时真源 |
+
+环境变量模板：`.env.example`（总览）、`.env.development.example`（本地）、`.env.production.example`（生产）、`.env`（本机生效，勿提交）。取值与注释须按场景区分，勿把生产域名/绝对路径写进开发模板默认值（或反过来）。
+
+## 字符集与文件编码
+
+- **源码 / `.env*` / 脚本 / Markdown / Cursor rules**：一律 **UTF-8**（优先无 BOM）。读写用 `encoding="utf-8"`；写回用 `newline="\n"`。
+- **MySQL**：库表字符集 **`utf8mb4` / `utf8mb4_unicode_ci`**（见 `sql/struct.sql`），连接串带 `charset=utf8mb4`。
+- **禁止**：把文件存成 GBK/ANSI；在 `.env` / 注释里用控制台易乱码的特殊符号（如 `▸`、非常见 Unicode 装饰符）；PowerShell 默认 GBK 控制台直接 `print` 中文/特殊字符当「文件已损坏」依据。
+- **校验**：改完含中文的文本后，用编辑器或 `Path.read_text(encoding="utf-8")` 确认可读；勿以 Windows 终端乱码判断文件编码错误。
+- **跨场景命令**：本地给 PowerShell 语法；生产给 bash。涉及路径、换行、编码的脚本在两端分别验证，不要假设同一条命令两边通用。

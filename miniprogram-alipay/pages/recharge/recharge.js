@@ -144,9 +144,7 @@ Page({
       markMemberWalletDirty(synced && synced.wallet)
       my.showToast({ content: '支付已提交，余额稍后更新', type: 'none' })
       setTimeout(() => {
-        my.navigateBack({
-          fail: () => my.switchTab({ url: '/pages/member/member' })
-        })
+        my.switchTab({ url: '/pages/member/member' })
       }, 600)
     } catch (e) {
       if (!(e && e.payCancel)) {

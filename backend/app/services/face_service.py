@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -333,6 +334,50 @@ class FaceService:
 
 class VisitorService:
     @staticmethod
+    def uploads_url_to_key(url: str | None) -> str | None:
+        s = str(url or "").strip().replace("\\", "/")
+        if not s:
+            return None
+        if s.startswith("/uploads/"):
+            return s[len("/uploads/") :]
+        if s.startswith("uploads/"):
+            return s[len("uploads/") :]
+        # 已是相对对象键
+        if s.startswith("visitors/"):
+            return s
+        return None
+
+    @staticmethod
+    def make_snapshot_key(camera_id: int, *, ext: str = "jpg") -> str:
+        """按日期分目录：visitors/YYYY/MM/DD/cam{id}_HHMMSS_xxxx.jpg，便于按天清理。"""
+        from app.core.response import now_local
+
+        now = now_local()
+        stamp = now.strftime("%H%M%S")
+        day = now.strftime("%Y/%m/%d")
+        return f"visitors/{day}/cam{int(camera_id)}_{stamp}_{uuid.uuid4().hex[:8]}.{ext.lstrip('.')}"
+
+    @staticmethod
+    def encode_frame_jpeg(frame, *, quality: int = 85) -> bytes:
+        import cv2
+
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        if not ok or buf is None:
+            raise ValueError("抓拍帧编码失败")
+        return buf.tobytes()
+
+    @classmethod
+    async def save_frame_snapshot(cls, frame, camera_id: int) -> str:
+        """保存摄像头帧为 JPEG，返回 /uploads/visitors/年/月/日/... 路径。"""
+        import asyncio
+
+        from app.services.object_storage import get_storage
+
+        data = await asyncio.to_thread(cls.encode_frame_jpeg, frame)
+        key = cls.make_snapshot_key(camera_id, ext="jpg")
+        return await get_storage().put_bytes(key, data, content_type="image/jpeg")
+
+    @staticmethod
     async def record_event(
         db: AsyncSession,
         camera_id: int,
@@ -342,7 +387,9 @@ class VisitorService:
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
 
-        retention = await SystemSettingsService.get_int(db, "visitor_data_retention_days", settings.visitor_data_retention_days)
+        retention = await SystemSettingsService.get_int(
+            db, "visitor_data_retention_days", settings.visitor_data_retention_days
+        )
         expires = now_local() + timedelta(days=retention)
         cam = await db.get(Camera, camera_id)
         sno = None
@@ -360,6 +407,91 @@ class VisitorService:
         db.add(event)
         await db.flush()
         return event
+
+    @classmethod
+    async def cleanup_expired(cls, db: AsyncSession) -> dict:
+        """删除过期访客事件及其抓拍图；并按保留天数修剪本地 visitors/年/月/日 空目录。"""
+        from sqlalchemy import delete, select
+
+        from app.core.response import naive_local_now, now_local
+        from app.services.object_storage import get_storage
+        from app.services.system_settings_service import SystemSettingsService
+
+        settings = get_settings()
+        now = naive_local_now()
+        rows = list(
+            (
+                await db.execute(select(VisitorEvent).where(VisitorEvent.expires_at <= now))
+            ).scalars().all()
+        )
+        storage = get_storage()
+        deleted_files = 0
+        for row in rows:
+            key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
+            if not key:
+                continue
+            try:
+                await storage.delete(key)
+                deleted_files += 1
+            except Exception:
+                logger.warning("删除访客抓拍失败 path=%s", row.snapshot_path, exc_info=True)
+
+        result = await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= now))
+        deleted_rows = int(result.rowcount or 0)
+        await db.commit()
+
+        retention = await SystemSettingsService.get_int(
+            db, "visitor_data_retention_days", settings.visitor_data_retention_days
+        )
+        pruned_dirs = await cls._prune_local_visitor_dirs(retention_days=int(retention))
+        return {
+            "deleted_rows": deleted_rows,
+            "deleted_files": deleted_files,
+            "pruned_dirs": pruned_dirs,
+        }
+
+    @classmethod
+    async def _prune_local_visitor_dirs(cls, *, retention_days: int) -> int:
+        """本地存储：删除早于保留期的 visitors/YYYY/MM/DD 目录（按目录日期）。"""
+        import asyncio
+        import shutil
+        from datetime import date, timedelta
+        from pathlib import Path
+
+        settings = get_settings()
+        if (getattr(settings, "storage_backend", "local") or "local").lower() != "local":
+            return 0
+        root = Path(settings.upload_dir).resolve() / "visitors"
+        if not root.is_dir():
+            return 0
+        cutoff = (now_local().date() - timedelta(days=max(1, int(retention_days))))
+
+        def _walk() -> int:
+            removed = 0
+            # visitors/YYYY/MM/DD
+            for day_dir in sorted(root.glob("*/*/*")):
+                if not day_dir.is_dir():
+                    continue
+                parts = day_dir.relative_to(root).parts
+                if len(parts) != 3:
+                    continue
+                try:
+                    d = date(int(parts[0]), int(parts[1]), int(parts[2]))
+                except ValueError:
+                    continue
+                if d < cutoff:
+                    shutil.rmtree(day_dir, ignore_errors=True)
+                    removed += 1
+            # 清理空的月/年目录
+            for month_dir in sorted(root.glob("*/*"), reverse=True):
+                if month_dir.is_dir() and not any(month_dir.iterdir()):
+                    month_dir.rmdir()
+            for year_dir in sorted(root.glob("*"), reverse=True):
+                if year_dir.is_dir() and not any(year_dir.iterdir()):
+                    year_dir.rmdir()
+            return removed
+
+        return await asyncio.to_thread(_walk)
 
 
 class WelcomeService:

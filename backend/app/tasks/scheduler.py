@@ -6,7 +6,7 @@ from sqlalchemy import delete, select
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.response import naive_local_now
-from app.models import OperationLog, Order, VisitorEvent
+from app.models import OperationLog, Order
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ TASK_CATALOG: list[dict] = [
         "id": "cleanup_visitor_data",
         "title": "清理访客临时数据",
         "category": "清理",
-        "description": "删除已过期的 VisitorEvent。",
+        "description": "删除已过期 VisitorEvent 及 visitors/年/月/日 抓拍图。",
         "default_schedule": {"type": "interval", "unit": "hours", "every": 72},
     },
     {
@@ -501,10 +501,16 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def cleanup_visitor_data():
+        from app.services.face_service import VisitorService
+
         async with AsyncSessionLocal() as db:
-            await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= naive_local_now()))
-            await db.commit()
-            logger.info("Expired visitor data cleaned")
+            stats = await VisitorService.cleanup_expired(db)
+            logger.info(
+                "Expired visitor data cleaned rows=%s files=%s dirs=%s",
+                stats.get("deleted_rows"),
+                stats.get("deleted_files"),
+                stats.get("pruned_dirs"),
+            )
 
     @scheduler.scheduled_job(
         "cron", hour=3, minute=0, timezone="Asia/Shanghai", id="cleanup_operation_logs", name="清理操作日志"
