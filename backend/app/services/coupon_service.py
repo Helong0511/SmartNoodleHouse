@@ -739,7 +739,7 @@ class CouponService:
                 raise AppException(40066, "优惠券配置异常")
             mr = money(member_rate) if member_rate is not None else Decimal("1")
             if not CouponService.percent_beats_member(rate, mr):
-                raise AppException(40074, "折扣券力度未优于会员折扣，不可使用（同等力度取会员折）")
+                raise AppException(40077, "折扣券力度未优于会员折扣，不可使用（同等力度取会员折）")
             disc = money(eligible * (Decimal("1") - rate))
         else:
             disc = min(money(tmpl.discount_value), eligible)

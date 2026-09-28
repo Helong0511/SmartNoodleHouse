@@ -219,7 +219,7 @@ async def test_resolve_percent_rejects_same_as_member():
         await CouponService.resolve_discount(
             db, 10, 1, Decimal("100"), member_rate=Decimal("0.90")
         )
-    assert ei.value.code == 40074
+    assert ei.value.code == 40077
 
 
 @pytest.mark.asyncio

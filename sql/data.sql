@@ -38,6 +38,7 @@ TRUNCATE TABLE `option_groups`;
 TRUNCATE TABLE `options`;
 TRUNCATE TABLE `order_item_options`;
 TRUNCATE TABLE `order_items`;
+TRUNCATE TABLE `order_milestone_rewards`;
 TRUNCATE TABLE `order_status_history`;
 TRUNCATE TABLE `orders`;
 TRUNCATE TABLE `outbox_events`;
@@ -125,6 +126,19 @@ INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_or
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50享打9折', 'PERCENT', 0.90, 50.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50享打9折');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '10元代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '10元代金券');
 
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满10单免1元', 'FIXED', 1.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满10单免1元');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满20单免3元', 'FIXED', 3.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满20单免3元');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50单免8元', 'FIXED', 8.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50单免8元');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满100单免12元', 'FIXED', 12.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满100单免12元');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满200单免30元', 'FIXED', 30.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满200单免30元');
+
+INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (1, 1, 10, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (2, 1, 20, 5, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (3, 1, 50, 6, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (4, 1, 100, 7, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (5, 1, 200, 8, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+
+
 -- 五-B、储值档位（射洪友好：充50/100/200）
 INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充50得55', 50.00, 5.00, 0, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充50得55');
 INSERT INTO `recharge_packages` (`store_id`, `name`, `pay_amount`, `gift_amount`, `sort_order`, `status`) SELECT NULL, '充100得120', 100.00, 20.00, 1, 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `recharge_packages` WHERE `store_id` IS NULL AND `name` = '充100得120');
@@ -167,9 +181,6 @@ INSERT INTO `smart_noodle_house`.`store_business_hours` (`id`, `store_id`, `week
 (27, 2, 7, 0, '08:00:00', '11:00:00', 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
 (28, 2, 7, 1, '12:00:00', '02:00:00', 1, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
 
-
--- 二店新客券（名称与该店 welcome_coupon_name 一致；总店沿用总部模板「新客满30减5」）
-INSERT INTO `coupon_templates` (`store_id`, `name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT `s`.`id`, '二店新客满20减3', 'FIXED', 3.00, 20.00, 30 FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '二店新客满20减3');
 
 -- 七、系统参数
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`) SELECT 'order_payment_timeout_minutes', '15', '订单支付超时分钟数' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `system_settings` WHERE `setting_key` = 'order_payment_timeout_minutes');
@@ -241,7 +252,7 @@ INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT
 INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_port', '9100' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_port');
 INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'xpyun_print_copies', '1' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'xpyun_print_copies');
 
-INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'welcome_coupon_name', '二店新客满20减3' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'welcome_coupon_name');
+INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'welcome_coupon_name', '新客满30减5' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'welcome_coupon_name');
 INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_host', '192.168.1.151' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_host');
 INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'printer_port', '9100' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'printer_port');
 INSERT INTO `store_settings` (`store_id`, `setting_key`, `setting_value`) SELECT `s`.`id`, 'xpyun_print_copies', '2' FROM `stores` s WHERE `s`.`store_no` = 'SH02' AND NOT EXISTS (SELECT 1 FROM `store_settings` x WHERE `x`.`store_id` = `s`.`id` AND `x`.`setting_key` = 'xpyun_print_copies');
