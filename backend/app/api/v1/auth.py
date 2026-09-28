@@ -12,9 +12,9 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 # 登录防爆破：按「用户名+客户端 IP」累计，避免跨 IP 锁死合法账号
-_LOGIN_FAIL_LIMIT = 8
-_LOGIN_LOCK_SECONDS = 15 * 60
-_LOGIN_FAIL_WINDOW = 15 * 60
+_LOGIN_FAIL_LIMIT = 3
+_LOGIN_LOCK_SECONDS = 5 * 60
+_LOGIN_FAIL_WINDOW = 5 * 60
 
 
 class VerifyPasswordRequest(BaseModel):
@@ -93,7 +93,7 @@ async def login(data: LoginRequest, request: Request, db: DbSession):
     if await _login_is_locked(username, ip):
         return {
             "code": 429,
-            "message": "登录失败次数过多，请 15 分钟后再试",
+            "message": "登录失败次数过多，请 5 分钟后再试",
             "data": None,
         }
 
@@ -180,7 +180,7 @@ async def verify_password_api(data: VerifyPasswordRequest, request: Request, db:
     if await _login_is_locked(lock_name):
         return {
             "code": 429,
-            "message": "密码错误次数过多，请 15 分钟后再试",
+            "message": "密码错误次数过多，请 5 分钟后再试",
             "data": None,
         }
     row = await db.get(User, user.id)

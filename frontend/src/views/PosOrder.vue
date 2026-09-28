@@ -162,6 +162,30 @@
             <span v-else>¥{{ packingFeeDisplay }}</span>
           </div>
           <div class="sum-row"><span>合计</span><span class="sum">¥{{ cartTotal }}</span></div>
+          <div class="member-bind">
+            <label>会员（可选）</label>
+            <el-select
+              v-model="selectedCustomerId"
+              filterable
+              remote
+              clearable
+              reserve-keyword
+              placeholder="手机号 / 会员号 / 昵称"
+              :remote-method="searchPosCustomers"
+              :loading="customerSearching"
+              style="width: 100%"
+              @change="onPosCustomerChange"
+            >
+              <el-option
+                v-for="c in customerOptions"
+                :key="c.id"
+                :label="posCustomerLabel(c)"
+                :value="c.id"
+              />
+            </el-select>
+            <p v-if="selectedCustomerLabel" class="member-tip">已选：{{ selectedCustomerLabel }} · 计入折扣/积分/成单里程碑</p>
+            <p v-else class="member-tip muted">不选则按散客收款，不计会员权益</p>
+          </div>
           <el-input v-model="remark" placeholder="备注（可选）" size="large" class="remark" />
           <div v-if="addingItems && cart.length" class="add-items-actions">
             <el-button
@@ -418,6 +442,29 @@
         <div v-if="checkoutOrderId" class="add-items-hint">
           <span>订单 {{ checkoutOrderNo }} · 待收 ¥{{ remainingAmountDisplay }}</span>
           <el-button size="small" plain @click="enterAddItemsMode">加菜</el-button>
+        </div>
+        <div v-if="checkoutOrderId" class="member-bind pay-member">
+          <label>本单会员</label>
+          <el-select
+            v-model="selectedCustomerId"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            placeholder="手机号 / 会员号 / 昵称"
+            :remote-method="searchPosCustomers"
+            :loading="customerSearching"
+            style="width: 100%"
+            @change="bindCustomerOnCheckoutOrder"
+          >
+            <el-option
+              v-for="c in customerOptions"
+              :key="c.id"
+              :label="posCustomerLabel(c)"
+              :value="c.id"
+            />
+          </el-select>
+          <p class="member-tip">{{ selectedCustomerLabel || '散客（不计入成单里程碑）' }}</p>
         </div>
         <div class="tender-amt-wrap">
           <label>本笔收款</label>
@@ -701,6 +748,14 @@ const diningType = ref<'DINE_IN' | 'TAKEAWAY'>('DINE_IN')
 const waivePackingFee = ref(false)
 const remark = ref('')
 const cart = ref<any[]>([])
+const selectedCustomerId = ref<number | undefined>()
+const customerOptions = ref<any[]>([])
+const customerSearching = ref(false)
+const selectedCustomerLabel = computed(() => {
+  if (!selectedCustomerId.value) return ''
+  const c = customerOptions.value.find((x) => x.id === selectedCustomerId.value)
+  return c ? posCustomerLabel(c) : `会员#${selectedCustomerId.value}`
+})
 const tableDialogVisible = ref(false)
 const productVisible = ref(false)
 const currentProduct = ref<any>(null)
@@ -1277,6 +1332,7 @@ async function createPosOrder() {
     const orderRes = await api.post('/orders/pos', {
       store_id: sid,
       table_id: diningType.value === 'DINE_IN' ? selectedTableId.value : null,
+      customer_id: selectedCustomerId.value || null,
       dining_type: diningType.value,
       need_pack: diningType.value === 'TAKEAWAY',
       waive_packing_fee: diningType.value === 'TAKEAWAY' && waivePackingFee.value,
@@ -1291,6 +1347,9 @@ async function createPosOrder() {
     checkoutOrderId.value = orderRes.data?.id
     checkoutOrderNo.value = orderRes.data?.order_no || ''
     checkoutAmount.value = orderRes.data?.total_amount || cartTotal.value
+    if (orderRes.data?.total_amount) {
+      remainingAmount.value = orderRes.data.total_amount
+    }
     return orderRes.data
   } catch (e: any) {
     // 已付单占用幂等键：清 nonce，下次可再下同款
@@ -1298,6 +1357,71 @@ async function createPosOrder() {
       invalidateCheckoutOrder()
     }
     throw e
+  }
+}
+
+function posCustomerLabel(c: any) {
+  const name = c.display_name || c.nickname || '会员'
+  const phone = c.phone ? ` ${c.phone}` : ''
+  const no = c.customer_no ? ` · ${c.customer_no}` : ''
+  return `${name}${phone}${no}`
+}
+
+async function searchPosCustomers(keyword: string) {
+  const kw = (keyword || '').trim()
+  if (!kw) {
+    customerOptions.value = []
+    return
+  }
+  customerSearching.value = true
+  try {
+    const res = await api.get('/pos/customers/search', {
+      params: { keyword: kw, store_id: effectiveStoreId() || undefined },
+    })
+    customerOptions.value = res.data?.items || []
+  } catch {
+    customerOptions.value = []
+  } finally {
+    customerSearching.value = false
+  }
+}
+
+function onPosCustomerChange() {
+  // 仅本地选中；建单时带上 customer_id
+}
+
+async function bindCustomerOnCheckoutOrder() {
+  if (!checkoutOrderId.value) return
+  try {
+    const res = await api.post(`/orders/${checkoutOrderId.value}/bind-customer`, {
+      customer_id: selectedCustomerId.value || null,
+    })
+    if (res.data?.total_amount != null) {
+      checkoutAmount.value = res.data.total_amount
+      remainingAmount.value = res.data.total_amount
+      const paid = parseFloat(paidAmount.value || '0') || 0
+      const total = parseFloat(res.data.total_amount) || 0
+      remainingAmount.value = Math.max(0, total - paid).toFixed(2)
+      if (!tenders.value.length) {
+        tenderAmount.value = remainingAmount.value
+      }
+    }
+    if (res.data?.customer_id && res.data?.customer_name) {
+      const exists = customerOptions.value.some((x) => x.id === res.data.customer_id)
+      if (!exists) {
+        customerOptions.value = [
+          {
+            id: res.data.customer_id,
+            display_name: res.data.customer_name,
+            phone: res.data.customer_phone,
+          },
+          ...customerOptions.value,
+        ]
+      }
+    }
+    ElMessage.success(selectedCustomerId.value ? '已绑定会员并重算优惠' : '已清除会员绑定')
+  } catch (e: any) {
+    ElMessage.error(e.message || '绑定会员失败')
   }
 }
 
@@ -1340,6 +1464,8 @@ function finishCheckout(msg: string) {
   ElMessage.success(msg)
   cart.value = []
   remark.value = ''
+  selectedCustomerId.value = undefined
+  customerOptions.value = []
   waivePackingFee.value = false
   payDialogVisible.value = false
   resetCheckout()
@@ -1462,6 +1588,18 @@ function resumePendingOrder(o: any, mode: 'add' | 'pay') {
   remark.value = o.remark || ''
   selectedTableId.value = o.table_id || null
   activePendingId.value = null
+  selectedCustomerId.value = o.customer_id || undefined
+  if (o.customer_id) {
+    customerOptions.value = [
+      {
+        id: o.customer_id,
+        display_name: o.customer_name,
+        phone: o.customer_phone,
+      },
+    ]
+  } else {
+    customerOptions.value = []
+  }
 
   if (mode === 'add') {
     addingItems.value = true
@@ -2143,6 +2281,11 @@ watch(() => auth.user?.store_id, () => {
 .sum { font-size: 28px; font-weight: 800; color: #ff6b35; }
 .remark { margin-bottom: 12px; }
 .remark :deep(.el-input__inner) { font-size: 16px; }
+.member-bind { margin: 8px 0 10px; }
+.member-bind label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+.member-tip { margin: 4px 0 0; font-size: 12px; color: #666; }
+.member-tip.muted { color: #999; }
+.pay-member { margin-bottom: 12px; }
 .pay-btn { width: 100%; height: 60px; font-size: 20px; font-weight: 700; border-radius: 12px; }
 .table-grid {
   display: grid;

@@ -7,10 +7,10 @@ from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustome
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
 from app.core.response import calc_pages, ensure_local_aware, money, now_local, success
-from app.models import DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
-from app.schemas.order import OrderCreate, OrderStatusUpdate, PosAddItems, PosOrderCreate
+from app.models import Customer, DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
+from app.schemas.order import OrderCreate, OrderStatusUpdate, PosAddItems, PosBindCustomer, PosOrderCreate
 from app.services.audit_service import AuditService
-from app.services.customer_service import OrderCreateService
+from app.services.customer_service import CustomerService, OrderCreateService
 from app.services.delivery_service import DeliveryService
 from app.services.store_scope import assert_order_store_access, assert_store_access, require_bound_store
 from app.services.websocket_manager import ws_manager
@@ -213,11 +213,21 @@ async def create_pos_order(
 
     await PosShiftService.require_open_shift(db, user.id, store_id=int(store_id))
 
+    pos_customer_id = None
+    if data.customer_id:
+        from app.api.v1.customers import _assert_customer_in_store
+
+        cust = await db.get(Customer, int(data.customer_id))
+        if not cust or int(cust.status) != 1:
+            raise AppException(40406, "顾客不存在或已停用")
+        await _assert_customer_in_store(db, int(data.customer_id), int(store_id), action="收银台绑客")
+        pos_customer_id = int(data.customer_id)
+
     order = await OrderCreateService.create_order(
         db,
         store_id=store_id,
         table_token=table_token,
-        customer_id=None,
+        customer_id=pos_customer_id,
         items=[i.model_dump() for i in data.items],
         remark=data.remark,
         channel="POS",
@@ -254,6 +264,7 @@ async def create_pos_order(
             "dining_type": order.dining_type,
             "total_amount": str(order.total_amount),
             "table_id": int(order.table_id) if order.table_id else None,
+            "customer_id": int(order.customer_id) if order.customer_id else None,
         },
         request=request,
         store_id=int(order.store_id) if order.store_id else None,
@@ -269,8 +280,99 @@ async def create_pos_order(
             "dining_type": order.dining_type,
             "status": order.status,
             "payment_status": order.payment_status,
+            "customer_id": order.customer_id,
             "table_id": order.table_id,
             "table": _table_payload(table),
+        },
+        request=request,
+    )
+
+
+async def _recompute_pos_amounts_for_customer(db, order: Order) -> None:
+    """未收款 POS 单绑定/更换会员后重算会员折与应付（不含券/代金券）。"""
+    items = list(
+        (await db.execute(select(OrderItem).where(OrderItem.order_id == int(order.id)))).scalars().all()
+    )
+    discountable = money(0)
+    for it in items:
+        product = await db.get(Product, int(it.product_id))
+        if product is None or not bool(getattr(product, "no_member_discount", False)):
+            discountable = money(discountable + money(it.subtotal))
+    rate = await CustomerService.resolve_member_discount_rate(db, order.customer_id)
+    discount_amount, total_amount = CustomerService.calc_member_discount(
+        money(order.subtotal),
+        money(order.packing_fee or 0),
+        rate,
+        discountable_subtotal=discountable,
+    )
+    order.discount_amount = discount_amount
+    order.total_amount = total_amount
+    order.coupon_discount = money(0)
+    order.voucher_discount = money(0)
+    order.customer_coupon_id = None
+    order.customer_voucher_id = None
+    await db.flush()
+
+
+@router.post("/{order_id}/bind-customer", dependencies=[require_pos()])
+async def bind_pos_customer(
+    order_id: int,
+    data: PosBindCustomer,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """待支付 POS 单绑定/更换/清除会员；重算会员折扣。"""
+    order = await db.get(Order, order_id)
+    if not order:
+        raise AppException(40404, "订单不存在")
+    assert_order_store_access(user, order)
+    if order.channel != "POS":
+        raise AppException(40009, "仅收银台订单可绑客")
+    if order.status != "PENDING_PAYMENT" or (order.payment_status or "").upper() != "UNPAID":
+        raise AppException(40009, "仅未收款订单可绑定会员")
+
+    new_cid = int(data.customer_id) if data.customer_id else None
+    if new_cid:
+        from app.api.v1.customers import _assert_customer_in_store
+
+        cust = await db.get(Customer, new_cid)
+        if not cust or int(cust.status) != 1:
+            raise AppException(40406, "顾客不存在或已停用")
+        await _assert_customer_in_store(db, new_cid, int(order.store_id), action="收银台绑客")
+    order.customer_id = new_cid
+    await _recompute_pos_amounts_for_customer(db, order)
+    await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="order.bind_customer",
+        module="order",
+        target_type="order",
+        target_id=order.id,
+        detail={
+            "order_no": order.order_no,
+            "customer_id": new_cid,
+            "total_amount": str(order.total_amount),
+            "discount_amount": str(order.discount_amount),
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
+    cust = await db.get(Customer, new_cid) if new_cid else None
+    return success(
+        {
+            "id": order.id,
+            "order_no": order.order_no,
+            "customer_id": order.customer_id,
+            "customer_name": (cust.display_name or cust.nickname) if cust else None,
+            "customer_phone": cust.phone if cust else None,
+            "total_amount": str(order.total_amount),
+            "subtotal": str(order.subtotal),
+            "discount_amount": str(order.discount_amount),
+            "packing_fee": str(order.packing_fee),
+            "payment_status": order.payment_status,
+            "status": order.status,
         },
         request=request,
     )
@@ -509,11 +611,17 @@ async def list_pos_pending_orders(
 
     table_ids = [o.table_id for o in orders_list if o.table_id]
     table_map = await _load_tables(db, table_ids) if table_ids else {}
+    cust_ids = [int(o.customer_id) for o in orders_list if o.customer_id]
+    cust_map: dict[int, Customer] = {}
+    if cust_ids:
+        custs = list((await db.execute(select(Customer).where(Customer.id.in_(cust_ids)))).scalars().all())
+        cust_map = {int(c.id): c for c in custs}
 
     result_list = []
     for o in orders_list:
         o_items = items_by_order.get(o.id, [])
         tbl = table_map.get(o.table_id) if o.table_id else None
+        cust = cust_map.get(int(o.customer_id)) if o.customer_id else None
         result_list.append({
             "id": o.id,
             "order_no": o.order_no,
@@ -523,6 +631,10 @@ async def list_pos_pending_orders(
             "dining_type": o.dining_type,
             "total_amount": str(o.total_amount),
             "subtotal": str(o.subtotal),
+            "discount_amount": str(o.discount_amount or 0),
+            "customer_id": int(o.customer_id) if o.customer_id else None,
+            "customer_name": (cust.display_name or cust.nickname) if cust else None,
+            "customer_phone": cust.phone if cust else None,
             "item_count": len(o_items),
             "ordered_at": ensure_local_aware(o.ordered_at).isoformat() if o.ordered_at else None,
             "remark": o.remark,

@@ -1,13 +1,14 @@
 """收银班次、日结与收银员统计 API。"""
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, DbSession, require_pos
 from app.core.exceptions import AppException
 from app.core.response import success
 from app.services.audit_service import AuditService
+from app.services.customer_service import CustomerService
 from app.services.pos_refund_service import PosRefundService
 from app.services.pos_shift_service import PosShiftService
 from app.services.store_scope import require_bound_store
@@ -34,6 +35,36 @@ class PosRefundApply(BaseModel):
 
 class PosRefundReview(BaseModel):
     remark: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/customers/search", dependencies=[require_pos()])
+async def search_pos_customers(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    keyword: str = Query(..., min_length=1, max_length=100, description="手机号/昵称/会员号"),
+    store_id: int | None = None,
+    page_size: int = 20,
+):
+    """收银台绑客：按本店口径搜索会员（手机号/昵称/编号）。"""
+    sid = require_bound_store(user, store_id)
+    if sid is None:
+        raise AppException(40008, "请选择门店")
+    rows, _total = await CustomerService.search_active_customers(
+        db, keyword, page=1, page_size=page_size, store_id=int(sid)
+    )
+    items = [
+        {
+            "id": c.id,
+            "customer_no": c.customer_no,
+            "display_name": c.display_name or c.nickname,
+            "nickname": c.nickname,
+            "phone": c.phone,
+            "is_member": CustomerService.is_member(c),
+        }
+        for c in rows
+    ]
+    return success({"items": items, "store_id": int(sid)}, request=request)
 
 
 async def _can_manage_settlement(user, db) -> bool:

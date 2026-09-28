@@ -104,6 +104,23 @@ async def _handle_milestone_coupon(db: AsyncSession, row) -> None:
     await CouponService.issue_milestones_after_paid(db, order)
 
 
+@register_outbox_handler("refund", "milestone_reclaim")
+async def _handle_milestone_reclaim(db: AsyncSession, row) -> None:
+    """全额退款后回收超档里程碑券。幂等：status_reason=milestone_reclaim。"""
+    from app.models import Order, PaymentRefund
+    from app.services.coupon_service import CouponService
+
+    refund = await db.get(PaymentRefund, int(row.aggregate_id))
+    if not refund:
+        return
+    order = await db.get(Order, refund.order_id)
+    if not order or not order.customer_id:
+        return
+    await CouponService.reclaim_milestones_after_full_refund(
+        db, order, refund_id=int(refund.id)
+    )
+
+
 async def run_paid_side_effects(db: AsyncSession, order, *, do_pref: bool = True) -> None:
     """[已废弃] 同步执行所有副作用；保留仅供过渡期兼容，主路径已改 outbox。
 

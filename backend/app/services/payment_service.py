@@ -2049,6 +2049,36 @@ class PaymentService:
                                 row.refund_no,
                             )
                             await enqueue_coupon_release(db, int(order.id))
+                    # 全额退：回收因该单计入而超出阈值的未用里程碑券
+                    if order.customer_id:
+                        from app.services.coupon_service import CouponService
+                        from app.services.outbox_worker import enqueue_outbox
+
+                        try:
+                            await CouponService.reclaim_milestones_after_full_refund(
+                                db, order, refund_id=int(row.id)
+                            )
+                        except Exception:
+                            logger.exception(
+                                "里程碑券回收失败，已入队 outbox order_id=%s refund_no=%s",
+                                order.id,
+                                row.refund_no,
+                            )
+                            try:
+                                await enqueue_outbox(
+                                    db,
+                                    aggregate_type="refund",
+                                    aggregate_id=int(row.id),
+                                    event_kind="milestone_reclaim",
+                                    payload={
+                                        "order_id": int(order.id),
+                                        "refund_id": int(row.id),
+                                    },
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "入队 milestone_reclaim 失败 refund_id=%s", row.id
+                                )
                 elif net < total:
                     order.payment_status = "PARTIAL_REFUND"
                 else:

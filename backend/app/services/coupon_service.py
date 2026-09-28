@@ -1084,7 +1084,9 @@ class CouponService:
         )
         issued_all: list[CustomerCoupon] = []
         for rule in rules:
-            req_key = f"MILESTONE:{int(cid)}:{int(sid)}:{int(rule.threshold_orders)}"
+            req_key = CouponService.milestone_client_request_id(
+                int(cid), int(sid), int(rule.threshold_orders)
+            )
             try:
                 issued = await CouponService.issue_by_template_id(
                     db,
@@ -1114,6 +1116,97 @@ class CouponService:
                     rule.threshold_orders,
                 )
         return issued_all
+
+    @staticmethod
+    def milestone_client_request_id(customer_id: int, store_id: int, threshold: int) -> str:
+        return f"MILESTONE:{int(customer_id)}:{int(store_id)}:{int(threshold)}"
+
+    @staticmethod
+    def parse_milestone_threshold(client_request_id: str | None) -> int | None:
+        """从幂等键解析档位；已回收键（含 :REVOKED:）仍返回原 threshold。"""
+        key = (client_request_id or "").strip()
+        if not key.startswith("MILESTONE:"):
+            return None
+        parts = key.split(":")
+        if len(parts) < 4:
+            return None
+        try:
+            return int(parts[3])
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    async def reclaim_milestones_after_full_refund(
+        db: AsyncSession,
+        order: Order,
+        *,
+        refund_id: int | None = None,
+    ) -> list[int]:
+        """全额退款后：计单下降导致未达标的档位，作废未使用里程碑券并释放幂等键以便再达档可重发。
+
+        - 仅处理 AVAILABLE 券；RESERVED/USED 已占用权益，不作废（记日志）
+        - 幂等：已是 EXPIRED + status_reason=milestone_reclaim 则跳过
+        """
+        cid = getattr(order, "customer_id", None)
+        sid = getattr(order, "store_id", None)
+        if not cid or not sid:
+            return []
+        ps = (getattr(order, "payment_status", None) or "").strip().upper()
+        st = (getattr(order, "status", None) or "").strip().upper()
+        if ps != "REFUNDED" and st != "REFUNDED":
+            return []
+
+        count = await CouponService.count_paid_orders_at_store(db, int(cid), int(sid))
+        prefix = f"MILESTONE:{int(cid)}:{int(sid)}:"
+        rows = list(
+            (
+                await db.execute(
+                    select(CustomerCoupon)
+                    .where(
+                        CustomerCoupon.customer_id == int(cid),
+                        CustomerCoupon.client_request_id.isnot(None),
+                        CustomerCoupon.client_request_id.like(f"{prefix}%"),
+                    )
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        revoked: list[int] = []
+        for cc in rows:
+            thr = CouponService.parse_milestone_threshold(cc.client_request_id)
+            if thr is None or thr <= int(count):
+                continue
+            reason = (getattr(cc, "status_reason", None) or "").strip()
+            if cc.status == "EXPIRED" and reason == "milestone_reclaim":
+                continue
+            if cc.status in ("RESERVED", "USED"):
+                logger.info(
+                    "里程碑券已占用不回收 coupon_id=%s status=%s order_id=%s threshold=%s",
+                    cc.id,
+                    cc.status,
+                    order.id,
+                    thr,
+                )
+                continue
+            if cc.status != "AVAILABLE":
+                continue
+            old_key = (cc.client_request_id or "").strip()
+            # 释放原幂等键，允许再次达档后重发
+            suffix = f":REVOKED:{int(refund_id or order.id)}"
+            cc.client_request_id = (old_key + suffix)[:128]
+            cc.status = "EXPIRED"
+            cc.status_reason = "milestone_reclaim"
+            revoked.append(int(cc.id))
+        if revoked:
+            await db.flush()
+            logger.info(
+                "里程碑券已回收 customer=%s store=%s count=%s coupon_ids=%s",
+                cid,
+                sid,
+                count,
+                revoked,
+            )
+        return revoked
 
 
 def coupon_service_min_label(min_amt: Decimal) -> str:

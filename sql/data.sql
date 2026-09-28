@@ -132,11 +132,19 @@ INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_or
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满100单免12元', 'FIXED', 12.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满100单免12元');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满200单免30元', 'FIXED', 30.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满200单免30元');
 
-INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (1, 1, 10, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
-INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (2, 1, 20, 5, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
-INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (3, 1, 50, 6, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
-INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (4, 1, 100, 7, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
-INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES (5, 1, 200, 8, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+INSERT INTO `smart_noodle_house`.`order_milestone_rewards` (`id`, `store_id`, `threshold_orders`, `template_id`, `status`, `created_at`, `updated_at`) VALUES 
+(1, 1, 10, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(2, 1, 20, 5, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(3, 1, 50, 6, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(4, 1, 100, 7, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(5, 1, 200, 8, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+
+(6, 2, 10, 4, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(7, 2, 20, 5, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(8, 2, 50, 6, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(9, 2, 100, 7, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888'),
+(10, 2, 200, 8, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+
 
 
 -- 五-B、储值档位（射洪友好：充50/100/200）

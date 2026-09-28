@@ -172,6 +172,74 @@ async def test_issue_milestones_continues_when_quota_fails():
     assert issue.await_count == 2
 
 
+def test_parse_milestone_threshold():
+    assert CouponService.parse_milestone_threshold("MILESTONE:9:3:20") == 20
+    assert CouponService.parse_milestone_threshold("MILESTONE:9:3:50:REVOKED:88") == 50
+    assert CouponService.parse_milestone_threshold("WELCOME:1:2") is None
+    assert CouponService.parse_milestone_threshold(None) is None
+
+
+@pytest.mark.asyncio
+async def test_reclaim_milestones_revokes_available_above_count():
+    order = SimpleNamespace(
+        id=100,
+        customer_id=9,
+        store_id=3,
+        payment_status="REFUNDED",
+        status="REFUNDED",
+    )
+    keep = SimpleNamespace(
+        id=1,
+        status="AVAILABLE",
+        status_reason=None,
+        client_request_id="MILESTONE:9:3:20",
+    )
+    drop = SimpleNamespace(
+        id=2,
+        status="AVAILABLE",
+        status_reason=None,
+        client_request_id="MILESTONE:9:3:50",
+    )
+    used = SimpleNamespace(
+        id=3,
+        status="USED",
+        status_reason=None,
+        client_request_id="MILESTONE:9:3:100",
+    )
+    exec_result = MagicMock()
+    exec_result.scalars.return_value.all.return_value = [keep, drop, used]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=exec_result)
+    db.flush = AsyncMock()
+
+    with patch.object(CouponService, "count_paid_orders_at_store", new_callable=AsyncMock) as cnt:
+        cnt.return_value = 25  # 仍达 20，未达 50/100
+        revoked = await CouponService.reclaim_milestones_after_full_refund(
+            db, order, refund_id=77
+        )
+
+    assert revoked == [2]
+    assert drop.status == "EXPIRED"
+    assert drop.status_reason == "milestone_reclaim"
+    assert drop.client_request_id.endswith(":REVOKED:77")
+    assert keep.status == "AVAILABLE"
+    assert used.status == "USED"
+
+
+@pytest.mark.asyncio
+async def test_reclaim_milestones_noop_when_not_refunded():
+    order = SimpleNamespace(
+        id=100,
+        customer_id=9,
+        store_id=3,
+        payment_status="PAID",
+        status="PAID",
+    )
+    db = AsyncMock()
+    out = await CouponService.reclaim_milestones_after_full_refund(db, order, refund_id=1)
+    assert out == []
+
+
 @pytest.mark.asyncio
 async def test_replace_milestone_rejects_disabled_template():
     db = AsyncMock()

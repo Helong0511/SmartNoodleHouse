@@ -51,6 +51,7 @@ class PosOrderCreate(BaseModel):
 
     store_id: int | None = None
     table_id: int | None = Field(default=None, description="堂食必选桌台 ID")
+    customer_id: int | None = Field(default=None, description="可选：绑定会员后计折扣/积分/里程碑")
     items: list[OrderItemCreate]
     remark: str | None = None
     need_pack: bool = False
@@ -58,6 +59,11 @@ class PosOrderCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
     waive_packing_fee: bool = Field(default=False, description="收银员免收打包费（仅 POS）")
 
+
+class PosBindCustomer(BaseModel):
+    """待支付 POS 单绑定/更换会员（未收款前）。"""
+
+    customer_id: int | None = Field(default=None, description="None 表示清除会员绑定")
 
 class PosAddItems(BaseModel):
     """收银台加菜（往已有待支付订单追加商品）。"""
