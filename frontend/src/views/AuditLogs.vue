@@ -22,7 +22,7 @@
       </el-form-item>
 
       <el-form-item>
-        <el-input v-model="actionFilter" clearable placeholder="操作 action" style="width:140px" @keyup.enter="reload"
+        <el-input v-model="actionFilter" clearable placeholder="操作（如发券）" style="width:140px" @keyup.enter="reload"
           @clear="reload" />
       </el-form-item>
 
@@ -32,7 +32,7 @@
       </el-form-item>
 
       <el-form-item>
-        <el-input v-model="keyword" clearable placeholder="关键字（action/detail）" style="width:220px" @keyup.enter="reload"
+        <el-input v-model="keyword" clearable placeholder="关键字（操作/详情）" style="width:220px" @keyup.enter="reload"
           @clear="reload" />
       </el-form-item>
 
@@ -72,7 +72,9 @@
         </template>
       </el-table-column>
       <el-table-column prop="module" label="模块" width="120" show-overflow-tooltip />
-      <el-table-column prop="action" label="操作" min-width="160" show-overflow-tooltip />
+      <el-table-column label="操作" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">{{ label(AUDIT_ACTION, row.action) }}</template>
+      </el-table-column>
       <el-table-column label="门店" width="110">
         <template #default="{ row }">{{ storeName(row.store_id) }}</template>
       </el-table-column>
@@ -111,15 +113,15 @@
           </el-descriptions-item>
           <el-descriptions-item label="用户名">{{ currentRow.username || '—' }}</el-descriptions-item>
           <el-descriptions-item label="模块">{{ currentRow.module || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="操作">{{ currentRow.action || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="操作">{{ label(AUDIT_ACTION, currentRow.action) }}</el-descriptions-item>
           <el-descriptions-item label="门店">{{ storeName(currentRow.store_id) }}</el-descriptions-item>
           <el-descriptions-item label="目标">
             <span v-if="currentRow.target_type">{{ currentRow.target_type }}#{{ currentRow.target_id }}</span>
             <span v-else>—</span>
           </el-descriptions-item>
           <el-descriptions-item label="IP">{{ currentRow.ip || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="Request ID">{{ currentRow.request_id || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="User Agent" :span="2">
+          <el-descriptions-item label="请求 ID">{{ currentRow.request_id || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="浏览器 UA" :span="2">
             <span class="ua">{{ currentRow.user_agent || '—' }}</span>
           </el-descriptions-item>
         </el-descriptions>
@@ -143,6 +145,7 @@ import {
   type AuditLogItem,
   type AuditCategoryOption,
 } from '@/api/auditLogs'
+import { AUDIT_ACTION, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const loading = ref(false)

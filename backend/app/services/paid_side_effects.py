@@ -61,14 +61,16 @@ async def _handle_points_award(db: AsyncSession, row) -> None:
 
 @register_outbox_handler("paid_side_effect", "coupon_mark_used")
 async def _handle_coupon_mark_used(db: AsyncSession, row) -> None:
-    """核销券/代金券。幂等：status 守卫，已 USED 则 no-op。"""
+    """核销券/代金券。幂等：订单已退/取消或券已 USED/AVAILABLE 则 no-op。"""
     from app.models import Order
     from app.services.coupon_service import CouponService
 
-    order = await db.get(Order, int(row.aggregate_id))
+    order = (
+        await db.execute(select(Order).where(Order.id == int(row.aggregate_id)).with_for_update())
+    ).scalar_one_or_none()
     if not order:
         return
-    await CouponService.mark_used(db, order)
+    await CouponService.reconcile_for_order(db, order)
 
 
 @register_outbox_handler("paid_side_effect", "pref_update")
@@ -160,3 +162,34 @@ async def _handle_pref_recompute(db: AsyncSession, row) -> None:
         await TasteLearningService.record_full_refund_events(db, order.id)
     except Exception:
         logger.exception("推荐画像退款学习失败 order_id=%s", order.id)
+
+
+@register_outbox_handler("order", "coupon_release")
+async def _handle_coupon_release(db: AsyncSession, row) -> None:
+    """取消/全额退款后回滚优惠券。幂等：release_for_order 行锁 + 状态守卫。
+
+    aggregate_id = order_id。主路径同步 release 失败时入队补偿。
+    """
+    from app.models import Order
+    from app.services.coupon_service import CouponService
+
+    order = (
+        await db.execute(select(Order).where(Order.id == int(row.aggregate_id)).with_for_update())
+    ).scalar_one_or_none()
+    if not order:
+        return
+    await CouponService.reconcile_for_order(db, order)
+
+
+async def enqueue_coupon_release(db: AsyncSession, order_id: int) -> None:
+    """入队订单券回滚补偿（与主事务同提交）。"""
+    try:
+        await enqueue_outbox(
+            db,
+            aggregate_type="order",
+            aggregate_id=int(order_id),
+            event_kind="coupon_release",
+            payload={"order_id": int(order_id)},
+        )
+    except Exception:
+        logger.exception("入队 coupon_release 失败 order_id=%s", order_id)

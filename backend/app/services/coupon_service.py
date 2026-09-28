@@ -777,16 +777,33 @@ class CouponService:
 
     @staticmethod
     async def release_for_order(db: AsyncSession, order: Order) -> None:
-        """关单/取消时释放预占券；全额退款时回滚已核销券。
+        """关单/取消时释放预占券；全额退款时回滚已核销券（行锁防与 mark_used 竞态）。
 
         - RESERVED：未支付取消 → 恢复 AVAILABLE
         - USED：已支付后退款至 REFUNDED → 恢复 AVAILABLE（仅本订单核销的券）
+        幂等：已 AVAILABLE 或 used_order_id 不匹配则跳过。
+        同时按 used_order_id 反查，避免 order 上 FK 丢失导致漏释放。
         """
+        ids: set[int] = set()
         for cid in (order.customer_coupon_id, order.customer_voucher_id):
-            if not cid:
+            if cid:
+                ids.add(int(cid))
+        extra = (
+            await db.execute(
+                select(CustomerCoupon.id).where(CustomerCoupon.used_order_id == int(order.id))
+            )
+        ).scalars().all()
+        ids.update(int(x) for x in extra if x)
+
+        for cid in ids:
+            cc = (
+                await db.execute(
+                    select(CustomerCoupon).where(CustomerCoupon.id == int(cid)).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not cc:
                 continue
-            cc = await db.get(CustomerCoupon, int(cid))
-            if not cc or int(cc.used_order_id or 0) != int(order.id):
+            if int(cc.used_order_id or 0) != int(order.id):
                 continue
             if cc.status in ("RESERVED", "USED"):
                 cc.status = "AVAILABLE"
@@ -796,7 +813,18 @@ class CouponService:
 
     @staticmethod
     async def mark_used(db: AsyncSession, order: Order) -> None:
-        """支付成功核销：仅 RESERVED 且挂在本单的券可转 USED（行锁防竞态）。"""
+        """支付成功核销：仅 RESERVED 且挂在本单的券可转 USED（行锁防竞态）。
+
+        幂等：
+        - 已对本单 USED → 跳过
+        - 订单已退款/取消，或券已被 release 回 AVAILABLE → 跳过（不抛错，避免 outbox 打爆）
+        - 仍挂在本单的 RESERVED（含幂等脏数据）→ 落到 USED
+        """
+        st = (order.status or "").strip().upper()
+        ps = (order.payment_status or "").strip().upper()
+        if st in ("REFUNDED", "CANCELLED") or ps == "REFUNDED":
+            return
+
         for attr in ("customer_coupon_id", "customer_voucher_id"):
             cid = getattr(order, attr, None)
             if not cid:
@@ -810,12 +838,40 @@ class CouponService:
                 continue
             if cc.status == "USED" and int(cc.used_order_id or 0) == int(order.id):
                 continue
+            # 退款竞态：release 已把券还回 AVAILABLE
+            if cc.status == "AVAILABLE":
+                continue
             if cc.status != "RESERVED" or int(cc.used_order_id or 0) != int(order.id):
-                raise AppException(40064, "优惠券状态异常，无法核销")
+                logger.warning(
+                    "优惠券无法核销（跳过）order_id=%s coupon_id=%s status=%s used_order_id=%s",
+                    order.id,
+                    cc.id,
+                    cc.status,
+                    cc.used_order_id,
+                )
+                continue
             cc.status = "USED"
             cc.used_order_id = order.id
             cc.used_at = now_local()
         await db.flush()
+
+    @staticmethod
+    async def reconcile_for_order(db: AsyncSession, order: Order) -> None:
+        """按订单终态对账券：已付→USED；已退/取消→AVAILABLE。供 outbox 补偿调用。"""
+        st = (order.status or "").strip().upper()
+        ps = (order.payment_status or "").strip().upper()
+        if st in ("REFUNDED", "CANCELLED") or ps == "REFUNDED":
+            await CouponService.release_for_order(db, order)
+            return
+        if ps in ("PAID", "PARTIAL_REFUND", "PARTIAL_PAID") or st in (
+            "PAID",
+            "CONFIRMED",
+            "PREPARING",
+            "COOKING",
+            "READY",
+            "COMPLETED",
+        ):
+            await CouponService.mark_used(db, order)
 
 
 def coupon_service_min_label(min_amt: Decimal) -> str:

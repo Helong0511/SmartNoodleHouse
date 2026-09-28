@@ -367,10 +367,10 @@ const canEditScheduler = computed(() => true)
 
 const ENUM_LABELS: Record<string, Record<string, string>> = {
   mini_program_env_version: {
-    auto: '自动（开发→develop / 生产→release）',
-    develop: 'develop 开发版',
-    trial: 'trial 体验版',
-    release: 'release 正式版',
+    auto: '自动（开发→开发版 / 生产→正式版）',
+    develop: '开发版',
+    trial: '体验版',
+    release: '正式版',
   },
 }
 

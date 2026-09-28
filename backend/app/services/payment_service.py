@@ -2036,6 +2036,19 @@ class PaymentService:
                         )
                     else:
                         order.payment_status = "REFUNDED"
+                        # 订单已是终态时 apply_order_status 不会再走 release；幂等补一次
+                        from app.services.coupon_service import CouponService
+                        from app.services.paid_side_effects import enqueue_coupon_release
+
+                        try:
+                            await CouponService.release_for_order(db, order)
+                        except Exception:
+                            logger.exception(
+                                "终态订单补回滚优惠券失败，已入队补偿 order_id=%s refund_no=%s",
+                                order.id,
+                                row.refund_no,
+                            )
+                            await enqueue_coupon_release(db, int(order.id))
                 elif net < total:
                     order.payment_status = "PARTIAL_REFUND"
                 else:

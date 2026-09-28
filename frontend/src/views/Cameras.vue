@@ -26,11 +26,13 @@
 
     <el-table :data="cameras" border size="small" stripe>
       <el-table-column prop="name" label="名称" min-width="120" />
-      <el-table-column prop="camera_type" label="类型" width="80" />
+      <el-table-column label="类型" width="130">
+        <template #default="{ row }">{{ label(CAMERA_TYPE, row.camera_type) }}</template>
+      </el-table-column>
       <el-table-column prop="source_url" label="地址" min-width="160" show-overflow-tooltip />
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+          <el-tag size="small" :type="statusType(row.status)">{{ label(CAMERA_STATUS, row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="运行" width="120">
@@ -86,7 +88,7 @@
             style="width: 130px"
             @change="reloadEvents"
           >
-            <el-option v-for="t in eventTypes" :key="t" :label="t" :value="t" />
+            <el-option v-for="t in eventTypes" :key="t" :label="label(VISITOR_EVENT_TYPE, t)" :value="t" />
           </el-select>
           <el-date-picker
             v-model="eventFilter.dateRange"
@@ -107,7 +109,9 @@
         <el-table-column label="摄像头" min-width="120">
           <template #default="{ row }">{{ cameraName(row.camera_id) }}</template>
         </el-table-column>
-        <el-table-column prop="event_type" label="类型" width="90" />
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }">{{ label(VISITOR_EVENT_TYPE, row.event_type) }}</template>
+        </el-table-column>
       </el-table>
       <div class="pager">
         <el-pagination
@@ -129,8 +133,8 @@
         <el-form-item label="名称" required><el-input v-model="form.name" maxlength="100" /></el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.camera_type" style="width:100%">
-            <el-option label="USB" value="USB" />
-            <el-option label="RTSP" value="RTSP" />
+            <el-option label="USB 摄像头" value="USB" />
+            <el-option label="网络摄像头(RTSP)" value="RTSP" />
           </el-select>
         </el-form-item>
         <el-form-item label="源地址" required>
@@ -175,6 +179,13 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import {
+  CAMERA_STATUS,
+  CAMERA_TYPE,
+  VISITOR_EVENT_TYPE,
+  cameraStatusTagType,
+  label,
+} from '@/utils/labels'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -226,12 +237,7 @@ const kpiCards = computed(() => [
 ])
 
 function statusType(s: string) {
-  if (s === 'ONLINE') return 'success'
-  if (s === 'RECONNECTING') return 'warning'
-  return 'info'
-}
-function statusLabel(s: string) {
-  return ({ ONLINE: '在线', OFFLINE: '离线', RECONNECTING: '重连中', DISABLED: '停用' } as any)[s] || s
+  return cameraStatusTagType(s)
 }
 function fmt(v?: string) {
   return v ? String(v).replace('T', ' ').slice(0, 19) : '-'

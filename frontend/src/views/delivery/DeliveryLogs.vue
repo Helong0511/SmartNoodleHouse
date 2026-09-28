@@ -26,7 +26,7 @@
         style="width: 200px"
         @change="reload"
       >
-        <el-option v-for="t in eventTypeOptions" :key="t" :label="t" :value="t" />
+        <el-option v-for="t in eventTypeOptions" :key="t" :label="label(DELIVERY_LOG_EVENT, t)" :value="t" />
       </el-select>
       <el-date-picker
         v-model="dateRange"
@@ -44,7 +44,9 @@
       <el-table-column label="平台" width="80">
         <template #default="{ row }">{{ platformName(row.platform) }}</template>
       </el-table-column>
-      <el-table-column prop="event_type" label="事件" width="180" show-overflow-tooltip />
+      <el-table-column label="事件" width="180" show-overflow-tooltip>
+        <template #default="{ row }">{{ label(DELIVERY_LOG_EVENT, row.event_type) }}</template>
+      </el-table-column>
       <el-table-column prop="platform_order_id" label="平台单号" min-width="160" show-overflow-tooltip />
       <el-table-column prop="order_id" label="订单ID" width="90" />
       <el-table-column label="时间" width="170">
@@ -72,6 +74,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { DELIVERY_LOG_EVENT, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const loading = ref(false)

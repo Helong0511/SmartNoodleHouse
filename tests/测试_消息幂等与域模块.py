@@ -41,18 +41,33 @@ async def test_release_allows_retry(mem_db):
 
 
 @pytest.mark.asyncio
-async def test_redis_hit_skips_db_insert():
+async def test_redis_hit_requires_mysql_confirmation(mem_db):
+    """Redis 有键但 DB 无记录视为脏缓存：应清除 Redis 并允许认领（防券卡 RESERVED）。"""
     fake = MagicMock()
     fake.exists = AsyncMock(return_value=1)
     fake.set = AsyncMock()
     fake.delete = AsyncMock()
     fake.ping = AsyncMock(return_value=True)
 
-    # 不走真实 DB：Redis 已命中应直接 False
-    db = MagicMock()
     with patch("app.domains.messaging.idempotency.try_get_redis", AsyncMock(return_value=fake)):
-        assert await try_acquire(db, scope="payment", message_id="n1") is False
-    db.add.assert_not_called()
+        # DB 无记录 → 清脏缓存后仍可首次认领
+        assert await try_acquire(mem_db, scope="payment", message_id="n1") is True
+        await mem_db.commit()
+        fake.delete.assert_awaited()
+        # 再次认领：DB 已有 → False
+        assert await try_acquire(mem_db, scope="payment", message_id="n1") is False
+
+
+@pytest.mark.asyncio
+async def test_is_processed_ignores_redis_only_dirty_key(mem_db):
+    """is_processed 不得仅凭 Redis 返回 True（无 MySQL 记录时）。"""
+    fake = MagicMock()
+    fake.exists = AsyncMock(return_value=1)
+    fake.set = AsyncMock()
+    fake.delete = AsyncMock()
+
+    with patch("app.domains.messaging.idempotency.try_get_redis", AsyncMock(return_value=fake)):
+        assert await is_processed(mem_db, scope="outbox", message_id="paid_side_effect:2:coupon_mark_used") is False
 
 
 @pytest.mark.asyncio

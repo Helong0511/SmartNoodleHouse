@@ -55,7 +55,7 @@
 
     <div v-if="showPrintJobs && failedPrintJobs.length" class="print-fail-panel">
       <div v-for="j in failedPrintJobs" :key="j.id" class="print-fail-row">
-        <span>#{{ j.id }} 订单{{ j.order_id }} · {{ j.status }} · 尝试{{ j.attempt_count }}</span>
+        <span>#{{ j.id }} 订单{{ j.order_id }} · {{ label(PRINT_JOB_STATUS, j.status) }} · 尝试{{ j.attempt_count }}</span>
         <span class="err" :title="j.last_error || ''">{{ j.last_error || '无错误信息' }}</span>
         <el-button
           size="small"
@@ -125,7 +125,7 @@
           <div>{{ o.delivery.address }}</div>
           <div>{{ o.delivery.phone }}</div>
           <div v-if="o.delivery.rider_name">骑手：{{ o.delivery.rider_name }} {{ o.delivery.rider_phone }}</div>
-          <div v-if="o.delivery.logistics_status">配送：{{ o.delivery.logistics_status }}</div>
+          <div v-if="o.delivery.logistics_status">配送：{{ label(LOGISTICS_STATUS, o.delivery.logistics_status) }}</div>
         </div>
 
         <div v-if="o.delivery?.urge_count > 0" class="alert urge">催单 ×{{ o.delivery.urge_count }}</div>
@@ -202,7 +202,7 @@ import api from '@/api'
 import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
-import { KDS_ACTIONS, ORDER_STATUS, orderStatusTagType } from '@/utils/labels'
+import { KDS_ACTIONS, ORDER_STATUS, LOGISTICS_STATUS, PRINT_JOB_STATUS, label, orderStatusTagType } from '@/utils/labels'
 import {
   announceKitchenNew,
   announceKitchenUrge,

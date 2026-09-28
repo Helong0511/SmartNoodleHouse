@@ -186,12 +186,36 @@ def test_store_scope_super_admin_ok():
 # ─── 退款回滚已核销券 ───
 
 
+def _exec_scalar_one(value):
+    """模拟 db.execute(...).scalar_one_or_none() / scalars().all()。"""
+    result = MagicMock()
+    result.scalar_one_or_none = MagicMock(return_value=value)
+    result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    return result
+
+
+def _exec_ids(ids, row=None):
+    """第一次 execute 返回 id 列表，后续返回行锁对象。"""
+    calls = {"n": 0}
+
+    async def _execute(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            r = MagicMock()
+            r.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=ids)))
+            r.scalar_one_or_none = MagicMock(return_value=None)
+            return r
+        return _exec_scalar_one(row)
+
+    return AsyncMock(side_effect=_execute)
+
+
 @pytest.mark.asyncio
 async def test_release_for_order_restores_used_coupon_on_refund():
     order = SimpleNamespace(id=42, customer_coupon_id=7, customer_voucher_id=None)
-    coupon = SimpleNamespace(status="USED", used_order_id=42, used_at=datetime.now())
+    coupon = SimpleNamespace(id=7, status="USED", used_order_id=42, used_at=datetime.now())
     db = AsyncMock()
-    db.get = AsyncMock(return_value=coupon)
+    db.execute = _exec_ids([7], row=coupon)
     db.flush = AsyncMock()
 
     await CouponService.release_for_order(db, order)
@@ -204,15 +228,69 @@ async def test_release_for_order_restores_used_coupon_on_refund():
 @pytest.mark.asyncio
 async def test_release_for_order_ignores_other_order_coupon():
     order = SimpleNamespace(id=42, customer_coupon_id=7, customer_voucher_id=None)
-    coupon = SimpleNamespace(status="USED", used_order_id=99, used_at=datetime.now())
+    coupon = SimpleNamespace(id=7, status="USED", used_order_id=99, used_at=datetime.now())
     db = AsyncMock()
-    db.get = AsyncMock(return_value=coupon)
+    db.execute = _exec_ids([7], row=coupon)
     db.flush = AsyncMock()
 
     await CouponService.release_for_order(db, order)
 
     assert coupon.status == "USED"
     assert coupon.used_order_id == 99
+
+
+@pytest.mark.asyncio
+async def test_mark_used_noop_when_order_refunded():
+    order = SimpleNamespace(
+        id=42,
+        status="REFUNDED",
+        payment_status="REFUNDED",
+        customer_coupon_id=7,
+        customer_voucher_id=None,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock()
+    db.flush = AsyncMock()
+
+    await CouponService.mark_used(db, order)
+
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mark_used_noop_when_coupon_already_released():
+    order = SimpleNamespace(
+        id=42,
+        status="PAID",
+        payment_status="PAID",
+        customer_coupon_id=7,
+        customer_voucher_id=None,
+    )
+    coupon = SimpleNamespace(id=7, status="AVAILABLE", used_order_id=None, used_at=None)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_exec_scalar_one(coupon))
+    db.flush = AsyncMock()
+
+    await CouponService.mark_used(db, order)
+
+    assert coupon.status == "AVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_refunded_releases_coupon():
+    order = SimpleNamespace(
+        id=42,
+        status="REFUNDED",
+        payment_status="REFUNDED",
+        customer_coupon_id=7,
+        customer_voucher_id=None,
+    )
+    with patch.object(CouponService, "release_for_order", new_callable=AsyncMock) as rel, patch.object(
+        CouponService, "mark_used", new_callable=AsyncMock
+    ) as mk:
+        await CouponService.reconcile_for_order(AsyncMock(), order)
+    rel.assert_awaited_once()
+    mk.assert_not_called()
 
 
 @pytest.mark.asyncio

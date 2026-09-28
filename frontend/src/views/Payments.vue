@@ -103,7 +103,7 @@
         <template #default="{ row }">{{ label(PAYMENT_PROVIDER, row.provider) }}</template>
       </el-table-column>
       <el-table-column label="通道" width="100">
-        <template #default="{ row }">{{ row.channel || '—' }}</template>
+        <template #default="{ row }">{{ label(PAYMENT_CHANNEL, row.channel, row.channel || '—') }}</template>
       </el-table-column>
       <el-table-column prop="amount" label="支付金额" width="120">
         <template #default="{ row }">
@@ -272,6 +272,7 @@ import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import {
   label,
+  PAYMENT_CHANNEL,
   PAYMENT_PROVIDER,
   PAYMENT_REFUND_STATUS,
   PAYMENT_STATUS,

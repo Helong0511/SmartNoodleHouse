@@ -438,6 +438,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { mediaUrl } from '@/utils/media'
 import { useAuthStore } from '@/stores/auth'
+import { COUPON_STATUS, couponStatusTagType, label } from '@/utils/labels'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -561,11 +562,11 @@ function formatDate(iso?: string | null) {
 }
 
 function couponStatusLabel(s: string) {
-  return { AVAILABLE: '可用', USED: '已使用', EXPIRED: '已过期' }[s] || s
+  return label(COUPON_STATUS, s, s || '—')
 }
 
 function couponStatusTag(s: string) {
-  return { AVAILABLE: 'success', USED: 'info', EXPIRED: 'warning' }[s] || 'info'
+  return couponStatusTagType(s)
 }
 
 function reload() {

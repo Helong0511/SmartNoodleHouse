@@ -231,19 +231,28 @@ async def process_outbox_item(outbox_id: int) -> None:
                 )
             )
             done_result = await db.execute(done_stmt)
-            # 旁路幂等缓存：handler 已执行成功后写入，防 reclaim 后二次副作用
+            # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
+            # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
+            idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
             try:
                 from app.domains.messaging.idempotency import try_acquire
 
                 await try_acquire(
                     db,
                     scope="outbox",
-                    message_id=f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}",
+                    message_id=idem_msg,
                     ttl_seconds=86400 * 7,
+                    mark_redis=False,
                 )
             except Exception:
                 logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
             await db.commit()
+            try:
+                from app.domains.messaging.idempotency import mark_processed_redis
+
+                await mark_processed_redis(scope="outbox", message_id=idem_msg, ttl_seconds=86400 * 7)
+            except Exception:
+                logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
             if not done_result.rowcount:
                 logger.warning(
                     "Outbox 行在处理期间被 reclaim 释放 id=%s", outbox_id

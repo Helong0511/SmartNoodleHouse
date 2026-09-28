@@ -826,13 +826,15 @@ class PrintService:
                     content=job.content or "",
                     ticket_type=job.ticket_type or TICKET_KITCHEN,
                 )
-                # 业务幂等落库：成功出票后写入 processed_messages
+                # 业务幂等落库：成功出票后写入 processed_messages（Redis 等 commit 后回填）
+                print_msg = f"success:{int(job_id)}"
                 await try_acquire(
                     db,
                     scope="print",
-                    message_id=f"success:{int(job_id)}",
+                    message_id=print_msg,
                     ttl_seconds=86400 * 7,
                     meta={"order_id": job.order_id, "ticket_type": job.ticket_type},
+                    mark_redis=False,
                 )
                 # 原子释放：仅当 locked_by 仍为本 worker 时才标记 SUCCESS
                 success_stmt = (
@@ -852,6 +854,12 @@ class PrintService:
                 )
                 ok_result = await db.execute(success_stmt)
                 await db.commit()
+                try:
+                    from app.domains.messaging.idempotency import mark_processed_redis
+
+                    await mark_processed_redis(scope="print", message_id=print_msg, ttl_seconds=86400 * 7)
+                except Exception:
+                    logger.warning("print 幂等 Redis 回填失败 job_id=%s", job_id)
                 if not ok_result.rowcount:
                     logger.warning(
                         "PrintJob 行在处理期间被 reclaim 释放 id=%s", job_id

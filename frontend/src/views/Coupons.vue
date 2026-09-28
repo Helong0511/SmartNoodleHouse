@@ -13,8 +13,9 @@
             />
           </el-form-item>
           <el-form-item>
-            <el-select v-model="issuedStatus" placeholder="状态" clearable style="width: 120px" @change="reloadIssued">
+            <el-select v-model="issuedStatus" placeholder="状态" clearable style="width: 130px" @change="reloadIssued">
               <el-option label="可用" value="AVAILABLE" />
+              <el-option label="下单预占" value="RESERVED" />
               <el-option label="已使用" value="USED" />
               <el-option label="已过期" value="EXPIRED" />
             </el-select>
@@ -115,7 +116,7 @@
           </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
-              {{ row.coupon_type === 'PERCENT' ? '折扣券' : row.coupon_type === 'VOUCHER' ? '代金券' : '满减券' }}
+              {{ couponTypeLabel(row.coupon_type) }}
             </template>
           </el-table-column>
           <el-table-column prop="summary" label="规则" min-width="160" />
@@ -264,6 +265,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { COUPON_STATUS, COUPON_TYPE, couponStatusTagType, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('coupon:manage'))
@@ -359,10 +361,13 @@ const issueQuantityLabel = computed(() => {
 })
 
 function statusLabel(s: string) {
-  return { AVAILABLE: '可用', USED: '已使用', EXPIRED: '已过期' }[s] || s
+  return label(COUPON_STATUS, s, s || '—')
 }
 function statusTag(s: string) {
-  return { AVAILABLE: 'success', USED: 'info', EXPIRED: 'warning' }[s] || 'info'
+  return couponStatusTagType(s)
+}
+function couponTypeLabel(t: string) {
+  return label(COUPON_TYPE, t, t || '—')
 }
 
 async function loadTemplates() {

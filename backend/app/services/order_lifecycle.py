@@ -116,12 +116,18 @@ async def apply_order_status(
                 await _restore_order_stock(db, order)
             # 取消未支付：释放 RESERVED；全额退款：回滚 USED 券/代金券
             if (target == "CANCELLED" and old == "PENDING_PAYMENT") or target == "REFUNDED":
-                try:
-                    from app.services.coupon_service import CouponService
+                from app.services.coupon_service import CouponService
+                from app.services.paid_side_effects import enqueue_coupon_release
 
+                try:
                     await CouponService.release_for_order(db, order)
                 except Exception:
-                    logger.exception("释放/回滚优惠券失败 order_id=%s target=%s", order.id, target)
+                    logger.exception(
+                        "释放/回滚优惠券失败，已入队补偿 order_id=%s target=%s",
+                        order.id,
+                        target,
+                    )
+                    await enqueue_coupon_release(db, int(order.id))
     elif target == "READY" and old != "READY":
         try:
             await notify_order_ready_subscribe(db, order)

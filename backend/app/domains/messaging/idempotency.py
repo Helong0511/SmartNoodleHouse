@@ -68,11 +68,15 @@ async def try_acquire(
     message_id: str,
     ttl_seconds: int = DEFAULT_TTL,
     meta: dict[str, Any] | None = None,
+    mark_redis: bool = True,
 ) -> bool:
     """认领一条消息。True=首次（应处理）；False=重复（应丢弃）。
 
     MySQL ``processed_messages(scope, message_id)`` UNIQUE 是唯一事实源。
     Redis 仅加速「已处理」判断；宕机时直接走 DB，业务仍可用。
+
+    mark_redis: 默认 True。若仍在未提交的外层事务内，应传 False，
+    并在 commit 成功后调用 ``mark_processed_redis``，避免回滚后 Redis 脏标记。
     """
     scope = (scope or "").strip()[:64]
     message_id = (message_id or "").strip()[:128]
@@ -81,7 +85,16 @@ async def try_acquire(
 
     seen = await _redis_seen(scope, message_id)
     if seen is True:
-        return False
+        existed = await db.scalar(
+            select(ProcessedMessage.id).where(
+                ProcessedMessage.scope == scope,
+                ProcessedMessage.message_id == message_id,
+            )
+        )
+        if existed:
+            return False
+        # Redis 有、DB 无：脏缓存（外层事务曾回滚），清除后继续认领
+        await _redis_clear(scope, message_id)
 
     # 先查库：避免 UNIQUE 冲突把共享业务会话打进 PendingRollback（尤以 SQLite 明显）
     existed = await db.scalar(
@@ -91,7 +104,8 @@ async def try_acquire(
         )
     )
     if existed:
-        await _redis_mark(scope, message_id, ttl_seconds)
+        if mark_redis:
+            await _redis_mark(scope, message_id, ttl_seconds)
         return False
 
     meta_json = None
@@ -111,11 +125,26 @@ async def try_acquire(
             db.expunge(row)
         except Exception:
             pass
-        await _redis_mark(scope, message_id, ttl_seconds)
+        if mark_redis:
+            await _redis_mark(scope, message_id, ttl_seconds)
         return False
 
-    await _redis_mark(scope, message_id, ttl_seconds)
+    if mark_redis:
+        await _redis_mark(scope, message_id, ttl_seconds)
     return True
+
+
+async def mark_processed_redis(
+    *,
+    scope: str,
+    message_id: str,
+    ttl_seconds: int = DEFAULT_TTL,
+) -> None:
+    """外层事务 commit 成功后回填 Redis 加速键。"""
+    scope = (scope or "").strip()[:64]
+    message_id = (message_id or "").strip()[:128]
+    if scope and message_id:
+        await _redis_mark(scope, message_id, ttl_seconds)
 
 
 async def release(
@@ -137,9 +166,15 @@ async def release(
 
 
 async def is_processed(db: AsyncSession, *, scope: str, message_id: str) -> bool:
-    seen = await _redis_seen(scope, message_id)
-    if seen is True:
-        return True
+    """是否已处理成功。以 MySQL processed_messages 为准，禁止仅凭 Redis 判定。
+
+    Redis 只作加速缓存：仅在 DB 已有记录时回填。若先信 Redis，会出现
+    「Redis 已标记但外层事务回滚」→ 重试误跳过业务（如券一直停在 RESERVED）。
+    """
+    scope = (scope or "").strip()[:64]
+    message_id = (message_id or "").strip()[:128]
+    if not scope or not message_id:
+        return False
     row = await db.scalar(
         select(ProcessedMessage.id).where(
             ProcessedMessage.scope == scope,
