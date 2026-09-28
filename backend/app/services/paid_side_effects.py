@@ -1,12 +1,12 @@
-"""支付成功后副作用（积分/券核销/口味）：DB 事务型 outbox，不依赖 Redis。
+"""支付成功后副作用（积分/券核销/口味/里程碑发券）：DB 事务型 outbox，不依赖 Redis。
 
-支付 PAID 同事务写入 3 条 outbox 事件：
+支付 PAID 同事务写入 outbox 事件：
   - points_award       → CustomerService.award_points_for_paid_order
   - coupon_mark_used   → CouponService.mark_used
   - pref_update        → PreferenceService.update_from_order
+  - milestone_coupon   → CouponService.issue_milestones_after_paid
 
-各副作用函数自身按 order_id 幂等（point_ledger 去重、cc.status 守卫、pref 重算），
-故 outbox 重试不会重复入账。
+各副作用函数自身按 order_id / 幂等键去重，故 outbox 重试不会重复入账。
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
     if not order or not getattr(order, "id", None):
         return
     order_id = int(order.id)
-    # 3 条独立事件：失败粒度更细，单条 retry 不影响其它
-    for kind in ("points_award", "coupon_mark_used", "pref_update"):
+    # 独立事件：失败粒度更细，单条 retry 不影响其它
+    for kind in ("points_award", "coupon_mark_used", "pref_update", "milestone_coupon"):
         try:
             await enqueue_outbox(
                 db,
@@ -92,6 +92,18 @@ async def _handle_pref_update(db: AsyncSession, row) -> None:
         logger.exception("推荐画像支付学习失败 order_id=%s", order.id)
 
 
+@register_outbox_handler("paid_side_effect", "milestone_coupon")
+async def _handle_milestone_coupon(db: AsyncSession, row) -> None:
+    """累计成单里程碑自动发券。幂等：client_request_id=MILESTONE:{cid}:{sid}:{threshold}。"""
+    from app.models import Order
+    from app.services.coupon_service import CouponService
+
+    order = await db.get(Order, int(row.aggregate_id))
+    if not order or not order.customer_id:
+        return
+    await CouponService.issue_milestones_after_paid(db, order)
+
+
 async def run_paid_side_effects(db: AsyncSession, order, *, do_pref: bool = True) -> None:
     """[已废弃] 同步执行所有副作用；保留仅供过渡期兼容，主路径已改 outbox。
 
@@ -108,6 +120,10 @@ async def run_paid_side_effects(db: AsyncSession, order, *, do_pref: bool = True
         await CouponService.mark_used(db, order)
     except Exception:
         logger.exception("券核销失败 order_id=%s", order.id)
+    try:
+        await CouponService.issue_milestones_after_paid(db, order)
+    except Exception:
+        logger.exception("里程碑发券失败 order_id=%s", order.id)
     if do_pref:
         try:
             await PreferenceService.update_from_order(db, order.id)

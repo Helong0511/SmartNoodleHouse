@@ -204,6 +204,25 @@ CREATE TABLE IF NOT EXISTS `coupon_templates` (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '优惠券/代金券模板表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for order_milestone_rewards
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `order_milestone_rewards` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id（按本店累计成功支付单数）',
+  `threshold_orders` int NOT NULL COMMENT '累计成功支付订单数阈值（如 20/50/100）',
+  `template_id` bigint UNSIGNED NOT NULL COMMENT '发放的券模板 → coupon_templates.id',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_omr_store_threshold`(`store_id` ASC, `threshold_orders` ASC) USING BTREE,
+  INDEX `idx_omr_store_status`(`store_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_omr_template`(`template_id` ASC) USING BTREE,
+  CONSTRAINT `fk_omr_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_omr_template` FOREIGN KEY (`template_id`) REFERENCES `coupon_templates` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '门店累计成单里程碑发券规则' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for customer_alipay_accounts
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `customer_alipay_accounts` (

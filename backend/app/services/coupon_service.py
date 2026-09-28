@@ -90,6 +90,56 @@ class CouponService:
         return (coupon_type or "").upper() == "VOUCHER"
 
     @staticmethod
+    def is_percent_type(coupon_type: str | None) -> bool:
+        return (coupon_type or "").upper() == "PERCENT"
+
+    @staticmethod
+    def percent_beats_member(coupon_rate: Decimal, member_rate: Decimal) -> bool:
+        """折扣券力度是否严格优于会员折（rate 更小=折扣更深）。同等或更弱不可用。"""
+        cr = money(coupon_rate)
+        mr = money(member_rate)
+        if cr <= Decimal("0") or cr >= Decimal("1"):
+            return False
+        if mr <= Decimal("0") or mr > Decimal("1"):
+            mr = Decimal("1")
+        return cr < mr
+
+    @staticmethod
+    def effective_member_rate_with_coupon(member_rate: Decimal, tmpl: CouponTemplate | None) -> Decimal:
+        """PERCENT 券严格更优时跳过会员折（由折扣券独占）；否则保留会员折。"""
+        rate = money(member_rate)
+        if rate <= Decimal("0") or rate > Decimal("1"):
+            rate = Decimal("1")
+        if not tmpl or not CouponService.is_percent_type(tmpl.coupon_type):
+            return rate
+        if CouponService.percent_beats_member(money(tmpl.discount_value), rate):
+            return Decimal("1")
+        return rate
+
+    @staticmethod
+    async def get_hold_template(
+        db: AsyncSession,
+        customer_coupon_id: int | None,
+        customer_id: int | None,
+    ) -> CouponTemplate | None:
+        """读取持券对应模板（不计可用性）；无券或不存在返回 None。"""
+        if not customer_coupon_id or not customer_id:
+            return None
+        row = (
+            await db.execute(
+                select(CustomerCoupon, CouponTemplate)
+                .join(CouponTemplate, CouponTemplate.id == CustomerCoupon.template_id)
+                .where(CustomerCoupon.id == int(customer_coupon_id))
+            )
+        ).first()
+        if not row:
+            return None
+        cc, tmpl = row
+        if int(cc.customer_id) != int(customer_id):
+            return None
+        return tmpl
+
+    @staticmethod
     def template_payload(tmpl: CouponTemplate) -> dict:
         sid = getattr(tmpl, "store_id", None)
         return {
@@ -641,8 +691,12 @@ class CouponService:
         eligible_subtotal: Decimal,
         *,
         order_store_id: int | None = None,
+        member_rate: Decimal | None = None,
     ) -> tuple[Decimal, int | None]:
-        """校验并计算优惠券减免。eligible_subtotal=会员折后可用商品小计（不含特价商品）。"""
+        """校验并计算优惠券减免。eligible_subtotal=可用商品小计（不含特价；PERCENT 取优时为未打会员折基数）。
+
+        PERCENT 与会员折互斥：仅当折扣券力度严格优于会员折时可用；同等或更弱禁用（不可折上折）。
+        """
         if not customer_coupon_id or not customer_id:
             return Decimal("0.00"), None
         row = (
@@ -683,6 +737,9 @@ class CouponService:
             rate = money(tmpl.discount_value)
             if rate <= Decimal("0") or rate >= Decimal("1"):
                 raise AppException(40066, "优惠券配置异常")
+            mr = money(member_rate) if member_rate is not None else Decimal("1")
+            if not CouponService.percent_beats_member(rate, mr):
+                raise AppException(40074, "折扣券力度未优于会员折扣，不可使用（同等力度取会员折）")
             disc = money(eligible * (Decimal("1") - rate))
         else:
             disc = min(money(tmpl.discount_value), eligible)
@@ -872,6 +929,191 @@ class CouponService:
             "COMPLETED",
         ):
             await CouponService.mark_used(db, order)
+
+    # ---------- 累计成单里程碑自动发券 ----------
+
+    @staticmethod
+    async def count_paid_orders_at_store(
+        db: AsyncSession,
+        customer_id: int,
+        store_id: int,
+    ) -> int:
+        """本店累计成功支付订单数（含部分退款；不含未付/全额退/已取消）。"""
+        from sqlalchemy import func
+
+        q = (
+            select(func.count())
+            .select_from(Order)
+            .where(
+                Order.customer_id == int(customer_id),
+                Order.store_id == int(store_id),
+                Order.paid_at.isnot(None),
+                Order.payment_status.in_(("PAID", "PARTIAL_REFUND")),
+                Order.status != "CANCELLED",
+            )
+        )
+        return int(await db.scalar(q) or 0)
+
+    @staticmethod
+    def milestone_payload(row, tmpl: CouponTemplate | None = None) -> dict:
+        from app.models import OrderMilestoneReward
+
+        assert isinstance(row, OrderMilestoneReward) or hasattr(row, "id")
+        out = {
+            "id": int(row.id),
+            "store_id": int(row.store_id),
+            "threshold_orders": int(row.threshold_orders),
+            "template_id": int(row.template_id),
+            "status": int(row.status or 0),
+            "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+            "updated_at": row.updated_at.isoformat() if getattr(row, "updated_at", None) else None,
+        }
+        if tmpl is not None:
+            out["template_name"] = tmpl.name
+            out["template_summary"] = CouponService.summary_label(tmpl)
+            out["coupon_type"] = tmpl.coupon_type
+        return out
+
+    @staticmethod
+    async def list_milestone_rewards(
+        db: AsyncSession,
+        store_id: int,
+        *,
+        include_disabled: bool = True,
+    ) -> list[dict]:
+        from app.models import OrderMilestoneReward
+
+        q = (
+            select(OrderMilestoneReward)
+            .where(OrderMilestoneReward.store_id == int(store_id))
+            .order_by(OrderMilestoneReward.threshold_orders.asc())
+        )
+        if not include_disabled:
+            q = q.where(OrderMilestoneReward.status == 1)
+        rows = list((await db.execute(q)).scalars().all())
+        tmpl_ids = {int(r.template_id) for r in rows}
+        tmpl_map: dict[int, CouponTemplate] = {}
+        if tmpl_ids:
+            tmpls = list(
+                (await db.execute(select(CouponTemplate).where(CouponTemplate.id.in_(tmpl_ids)))).scalars().all()
+            )
+            tmpl_map = {int(t.id): t for t in tmpls}
+        return [
+            CouponService.milestone_payload(r, tmpl_map.get(int(r.template_id)))
+            for r in rows
+        ]
+
+    @staticmethod
+    async def replace_milestone_rewards(
+        db: AsyncSession,
+        store_id: int,
+        items: list[dict],
+    ) -> list[dict]:
+        """整表替换本店里程碑规则（按 threshold 去重；空列表=清空）。"""
+        from app.models import OrderMilestoneReward
+
+        sid = int(store_id)
+        cleaned: list[dict] = []
+        seen: set[int] = set()
+        for raw in items or []:
+            thr = int(raw.get("threshold_orders") or 0)
+            tid = int(raw.get("template_id") or 0)
+            st = int(raw.get("status") if raw.get("status") is not None else 1)
+            if thr < 1 or thr > 100000:
+                raise AppException(40076, "里程碑单数须在 1~100000")
+            if tid < 1:
+                raise AppException(40076, "请选择券模板")
+            if thr in seen:
+                raise AppException(40076, f"重复的里程碑单数：{thr}")
+            seen.add(thr)
+            tmpl = await db.get(CouponTemplate, tid)
+            if not tmpl or int(tmpl.status) != 1:
+                raise AppException(40407, f"券模板不存在或已停用（id={tid}）")
+            if not CouponService.template_visible_to_store(tmpl, sid):
+                raise AppException(40301, f"券模板不可用于本门店：{tmpl.name}")
+            cleaned.append({"threshold_orders": thr, "template_id": tid, "status": 1 if st else 0})
+
+        existing = list(
+            (
+                await db.execute(
+                    select(OrderMilestoneReward).where(OrderMilestoneReward.store_id == sid)
+                )
+            ).scalars().all()
+        )
+        for row in existing:
+            await db.delete(row)
+        await db.flush()
+
+        for item in cleaned:
+            db.add(
+                OrderMilestoneReward(
+                    store_id=sid,
+                    threshold_orders=item["threshold_orders"],
+                    template_id=item["template_id"],
+                    status=item["status"],
+                )
+            )
+        await db.flush()
+        return await CouponService.list_milestone_rewards(db, sid, include_disabled=True)
+
+    @staticmethod
+    async def issue_milestones_after_paid(db: AsyncSession, order: Order) -> list[CustomerCoupon]:
+        """支付成功后：按本店累计成单数，对已达阈值且未发过的规则自动发券。
+
+        幂等键 MILESTONE:{customer_id}:{store_id}:{threshold}，同档只发一次。
+        """
+        from app.models import OrderMilestoneReward
+
+        cid = getattr(order, "customer_id", None)
+        sid = getattr(order, "store_id", None)
+        if not cid or not sid:
+            return []
+        count = await CouponService.count_paid_orders_at_store(db, int(cid), int(sid))
+        rules = list(
+            (
+                await db.execute(
+                    select(OrderMilestoneReward)
+                    .where(
+                        OrderMilestoneReward.store_id == int(sid),
+                        OrderMilestoneReward.status == 1,
+                        OrderMilestoneReward.threshold_orders <= int(count),
+                    )
+                    .order_by(OrderMilestoneReward.threshold_orders.asc())
+                )
+            ).scalars().all()
+        )
+        issued_all: list[CustomerCoupon] = []
+        for rule in rules:
+            req_key = f"MILESTONE:{int(cid)}:{int(sid)}:{int(rule.threshold_orders)}"
+            try:
+                issued = await CouponService.issue_by_template_id(
+                    db,
+                    int(cid),
+                    int(rule.template_id),
+                    quantity=1,
+                    client_request_id=req_key,
+                    issued_by_user_id=None,
+                    issued_at_store_id=int(sid),
+                )
+                issued_all.extend(issued)
+            except AppException as exc:
+                logger.warning(
+                    "里程碑发券跳过 customer=%s store=%s threshold=%s template=%s code=%s msg=%s",
+                    cid,
+                    sid,
+                    rule.threshold_orders,
+                    rule.template_id,
+                    getattr(exc, "code", None),
+                    getattr(exc, "message", str(exc)),
+                )
+            except Exception:
+                logger.exception(
+                    "里程碑发券异常 customer=%s store=%s threshold=%s",
+                    cid,
+                    sid,
+                    rule.threshold_orders,
+                )
+        return issued_all
 
 
 def coupon_service_min_label(min_amt: Decimal) -> str:

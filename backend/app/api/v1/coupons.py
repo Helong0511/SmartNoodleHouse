@@ -17,6 +17,17 @@ class TemplateStatusUpdate(BaseModel):
     status: int = Field(..., ge=0, le=1)
 
 
+class MilestoneRewardItem(BaseModel):
+    threshold_orders: int = Field(..., ge=1, le=100000, description="累计成功支付单数阈值")
+    template_id: int = Field(..., ge=1)
+    status: int = Field(default=1, ge=0, le=1)
+
+
+class MilestoneRewardsReplace(BaseModel):
+    store_id: int | None = Field(default=None, description="超管指定门店；门店账号忽略")
+    items: list[MilestoneRewardItem] = Field(default_factory=list)
+
+
 def _assert_template_manage_access(user, tmpl: CouponTemplate) -> None:
     """门店账号仅可改本店模板；总部模板仅超管可改。"""
     if user.role.code == "SUPER_ADMIN":
@@ -28,6 +39,17 @@ def _assert_template_manage_access(user, tmpl: CouponTemplate) -> None:
     if bound is None or int(sid) != int(bound):
         raise AppException(40301, "无权修改其他门店优惠券模板")
 
+
+def _resolve_milestone_store(user, store_id: int | None) -> int:
+    bound = require_bound_store(user, None)
+    if user.role.code == "SUPER_ADMIN":
+        sid = int(store_id) if store_id else 0
+        if sid < 1:
+            raise AppException(40002, "请指定门店")
+        return sid
+    if bound is None:
+        raise AppException(40301, "账号未绑定门店")
+    return int(bound)
 
 @router.get("/templates", dependencies=[require_permission("coupon:read")])
 async def list_templates(request: Request, db: DbSession, user: CurrentUser, all: bool = True):
@@ -262,3 +284,45 @@ async def issue_coupon(data: CouponIssueRequest, request: Request, db: DbSession
         message=f"已发放 {qty} 张{kind}",
         request=request,
     )
+
+
+@router.get("/milestones", dependencies=[require_permission("coupon:read")])
+async def list_milestones(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+):
+    """门店累计成单里程碑发券规则。"""
+    sid = _resolve_milestone_store(user, store_id)
+    items = await CouponService.list_milestone_rewards(db, sid, include_disabled=True)
+    return success({"store_id": sid, "items": items}, request=request)
+
+
+@router.put("/milestones", dependencies=[require_permission("coupon:manage")])
+async def replace_milestones(
+    data: MilestoneRewardsReplace,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """整表替换本店里程碑规则（空 items 表示清空）。"""
+    sid = _resolve_milestone_store(user, data.store_id)
+    items = await CouponService.replace_milestone_rewards(
+        db,
+        sid,
+        [x.model_dump() for x in data.items],
+    )
+    await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="coupon.milestone.replace",
+        module="coupon",
+        target_type="store",
+        target_id=sid,
+        detail={"store_id": sid, "items": [x.model_dump() for x in data.items]},
+        request=request,
+        store_id=sid,
+    )
+    return success({"store_id": sid, "items": items}, request=request)

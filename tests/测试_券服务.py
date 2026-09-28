@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.core.exceptions import AppException
 from app.core.response import ensure_local_aware, now_local
 from app.services.coupon_service import CouponService
 
@@ -24,6 +25,33 @@ def test_discount_label_voucher():
     tmpl = SimpleNamespace(coupon_type="VOUCHER", discount_value=Decimal("10"), min_order_amount=Decimal("0"))
     assert "10" in CouponService.discount_label(tmpl)
     assert "代金券" in CouponService.discount_label(tmpl)
+
+
+def test_percent_beats_member_same_rate_disabled():
+    assert CouponService.percent_beats_member(Decimal("0.90"), Decimal("0.90")) is False
+
+
+def test_percent_beats_member_weaker_disabled():
+    assert CouponService.percent_beats_member(Decimal("0.95"), Decimal("0.90")) is False
+
+
+def test_percent_beats_member_stronger_ok():
+    assert CouponService.percent_beats_member(Decimal("0.80"), Decimal("0.95")) is True
+
+
+def test_effective_member_rate_skips_when_percent_better():
+    tmpl = SimpleNamespace(coupon_type="PERCENT", discount_value=Decimal("0.80"))
+    assert CouponService.effective_member_rate_with_coupon(Decimal("0.95"), tmpl) == Decimal("1")
+
+
+def test_effective_member_rate_keeps_when_percent_same():
+    tmpl = SimpleNamespace(coupon_type="PERCENT", discount_value=Decimal("0.90"))
+    assert CouponService.effective_member_rate_with_coupon(Decimal("0.90"), tmpl) == Decimal("0.90")
+
+
+def test_effective_member_rate_keeps_for_fixed():
+    tmpl = SimpleNamespace(coupon_type="FIXED", discount_value=Decimal("5"))
+    assert CouponService.effective_member_rate_with_coupon(Decimal("0.90"), tmpl) == Decimal("0.90")
 
 
 def test_hold_payload_includes_template_name():
@@ -164,3 +192,59 @@ async def test_resolve_discount_naive_expires_at():
     disc, cid = await CouponService.resolve_discount(db, 1, 1, Decimal("100"))
     assert disc == Decimal("5.00")
     assert cid == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_percent_rejects_same_as_member():
+    tmpl = SimpleNamespace(
+        coupon_type="PERCENT",
+        discount_value=Decimal("0.90"),
+        min_order_amount=Decimal("0"),
+        store_id=None,
+        store_whitelist=None,
+    )
+    cc = SimpleNamespace(
+        id=10,
+        customer_id=1,
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=7),
+        issued_at_store_id=None,
+    )
+    row = MagicMock()
+    row.first.return_value = (cc, tmpl)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=row)
+    db.flush = AsyncMock()
+    with pytest.raises(AppException) as ei:
+        await CouponService.resolve_discount(
+            db, 10, 1, Decimal("100"), member_rate=Decimal("0.90")
+        )
+    assert ei.value.code == 40074
+
+
+@pytest.mark.asyncio
+async def test_resolve_percent_applies_when_better_than_member():
+    tmpl = SimpleNamespace(
+        coupon_type="PERCENT",
+        discount_value=Decimal("0.80"),
+        min_order_amount=Decimal("0"),
+        store_id=None,
+        store_whitelist=None,
+    )
+    cc = SimpleNamespace(
+        id=11,
+        customer_id=1,
+        status="AVAILABLE",
+        expires_at=datetime.now() + timedelta(days=7),
+        issued_at_store_id=None,
+    )
+    row = MagicMock()
+    row.first.return_value = (cc, tmpl)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=row)
+    db.flush = AsyncMock()
+    disc, cid = await CouponService.resolve_discount(
+        db, 11, 1, Decimal("100"), member_rate=Decimal("0.95")
+    )
+    assert cid == 11
+    assert disc == Decimal("20.00")

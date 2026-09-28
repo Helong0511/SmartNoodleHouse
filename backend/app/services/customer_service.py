@@ -1494,18 +1494,25 @@ class OrderCreateService:
             voucher_id = None
             total_amount = money(subtotal + packing_fee)
         else:
+            from app.services.coupon_service import CouponService
+
             rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
+            # PERCENT 与会员折互斥：券力度严格更优时跳过会员折，由折扣券独占（取最优）
+            hold_tmpl = await CouponService.get_hold_template(db, customer_coupon_id, customer_id)
+            effective_rate = CouponService.effective_member_rate_with_coupon(rate, hold_tmpl)
             discount_amount, base_total = CustomerService.calc_member_discount(
-                subtotal, packing_fee, rate, discountable_subtotal=discountable_subtotal
+                subtotal, packing_fee, effective_rate, discountable_subtotal=discountable_subtotal
             )
             coupon_eligible = CustomerService.calc_coupon_eligible_subtotal(
                 subtotal, discountable_subtotal, discount_amount
             )
-            from app.services.coupon_service import CouponService
-
             coupon_discount, coupon_id = await CouponService.resolve_discount(
-                db, customer_coupon_id, customer_id, coupon_eligible,
+                db,
+                customer_coupon_id,
+                customer_id,
+                coupon_eligible,
                 order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
+                member_rate=rate,
             )
             payable_before_voucher = money(base_total - coupon_discount)
             voucher_eligible = CustomerService.calc_voucher_eligible_payable(

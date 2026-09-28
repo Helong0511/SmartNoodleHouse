@@ -20,22 +20,31 @@ function memberDiscountText(rate) {
   return `${zhe}折`
 }
 
-function pickBestCoupon(coupons, afterMember, calcFn) {
+function pickBestCoupon(coupons, discountable, memberRate, calcTotalSavingsFn) {
+  // 按「总优惠力度」取最优：FIXED=会员折+满减；PERCENT=仅当严格优于会员折时独占折扣
   let best = null
-  let bestDisc = 0
+  let bestSave = 0
   for (const c of coupons || []) {
-    const disc = calcFn(afterMember, c)
-    if (disc <= 0) continue
-    if (disc > bestDisc) {
-      bestDisc = disc
+    const save = calcTotalSavingsFn(discountable, memberRate, c)
+    if (save <= 0) continue
+    if (save > bestSave) {
+      bestSave = save
       best = c
-    } else if (disc === bestDisc && best) {
+    } else if (save === bestSave && best) {
       const expA = c.expires_at || ''
       const expB = best.expires_at || ''
       if (expA && expB && expA < expB) best = c
     }
   }
   return best
+}
+
+function percentBeatsMember(couponRate, memberRate) {
+  const cr = parseFloat(couponRate)
+  const mr = parseFloat(memberRate)
+  if (!Number.isFinite(cr) || cr <= 0 || cr >= 1) return false
+  const m = Number.isFinite(mr) && mr > 0 && mr <= 1 ? mr : 1
+  return cr < m
 }
 
 function pickBestVoucher(vouchers, payable, calcFn) {
@@ -623,18 +632,38 @@ Page({
     return voucherUtil.calcVoucherDiscount(payable, voucher, voucherEligible)
   },
 
-  calcCouponDiscount(couponEligible, coupon) {
+  calcCouponDiscount(couponEligible, coupon, memberRate) {
     if (!coupon || !coupon.id) return 0
     const eligible = couponEligible
     const minAmt = parseFloat(coupon.min_order_amount || 0)
     if (eligible < minAmt) return 0
     if (coupon.coupon_type === 'PERCENT') {
       const rate = parseFloat(coupon.discount_value)
-      if (!Number.isFinite(rate) || rate <= 0 || rate >= 1) return 0
+      if (!percentBeatsMember(rate, memberRate == null ? 1 : memberRate)) return 0
       return Math.round(eligible * (1 - rate) * 100) / 100
     }
     const fixed = parseFloat(coupon.discount_value) || 0
     return Math.min(fixed, eligible)
+  },
+
+  /** 比较总优惠：PERCENT 与会员折互斥取优；FIXED 叠在会员折后 */
+  calcCouponTotalSavings(discountable, memberRate, coupon) {
+    if (!coupon || !coupon.id) return 0
+    const base = Math.max(0, parseFloat(discountable) || 0)
+    const mr = parseFloat(memberRate)
+    const memberR = Number.isFinite(mr) && mr > 0 && mr < 1 ? mr : 1
+    const memberDisc = memberR < 1 ? Math.round(base * (1 - memberR) * 100) / 100 : 0
+    const minAmt = parseFloat(coupon.min_order_amount || 0)
+    if (coupon.coupon_type === 'PERCENT') {
+      const cr = parseFloat(coupon.discount_value)
+      if (!percentBeatsMember(cr, memberR)) return 0
+      if (base < minAmt) return 0
+      return Math.round(base * (1 - cr) * 100) / 100
+    }
+    const afterMember = Math.max(0, base - memberDisc)
+    if (afterMember < minAmt) return 0
+    const fixed = Math.min(parseFloat(coupon.discount_value) || 0, afterMember)
+    return Math.round((memberDisc + fixed) * 100) / 100
   },
 
   async refreshSummary() {
@@ -678,14 +707,22 @@ Page({
       nextPayMethod = 'BALANCE'
     }
     const useBalance = nextPayMethod === 'BALANCE'
-    const rate = useBalance ? 1 : (this._memberRate || 1)
-    let discount = 0
-    if (!useBalance && rate > 0 && rate < 1) {
-      const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
-      discount = Math.round(discountable * (1 - rate) * 100) / 100
+    const memberRate = useBalance ? 1 : (this._memberRate || 1)
+    const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
+
+    // 手动选了不可用的 PERCENT（同等/更弱）则清空
+    if (
+      !useBalance &&
+      this._selectedCoupon &&
+      this._selectedCoupon.coupon_type === 'PERCENT' &&
+      !percentBeatsMember(this._selectedCoupon.discount_value, memberRate)
+    ) {
+      if (this._couponManualPick) {
+        wx.showToast({ title: '折扣力度未优于会员折，已取消使用', icon: 'none', duration: 2500 })
+        this._couponManualPick = false
+      }
+      this._selectedCoupon = null
     }
-    const afterMember = Math.max(0, sub - discount)
-    const couponEligible = cartUtil.calcCouponEligibleSubtotal(enrichedList, discount)
 
     if (useBalance) {
       this._selectedCoupon = null
@@ -693,13 +730,34 @@ Page({
     } else if (!this._couponManualPick && (this.data.coupons || []).length) {
       const bestCoupon = pickBestCoupon(
         this.data.coupons,
-        couponEligible,
-        (amt, c) => this.calcCouponDiscount(amt, c)
+        discountable,
+        memberRate,
+        (base, mr, c) => this.calcCouponTotalSavings(base, mr, c)
       )
       this._selectedCoupon = bestCoupon
     }
 
-    const couponDisc = useBalance ? 0 : this.calcCouponDiscount(couponEligible, this._selectedCoupon)
+    // PERCENT 严格更优时跳过会员折，由折扣券独占
+    let effectiveRate = memberRate
+    const sel = this._selectedCoupon
+    if (
+      !useBalance &&
+      sel &&
+      sel.coupon_type === 'PERCENT' &&
+      percentBeatsMember(sel.discount_value, memberRate)
+    ) {
+      effectiveRate = 1
+    }
+    let discount = 0
+    if (!useBalance && effectiveRate > 0 && effectiveRate < 1) {
+      discount = Math.round(discountable * (1 - effectiveRate) * 100) / 100
+    }
+    const afterMember = Math.max(0, sub - discount)
+    const couponEligible = cartUtil.calcCouponEligibleSubtotal(enrichedList, discount)
+
+    const couponDisc = useBalance
+      ? 0
+      : this.calcCouponDiscount(couponEligible, this._selectedCoupon, memberRate)
     let pay = afterMember - couponDisc
     const voucherEligible = cartUtil.calcVoucherEligiblePayable(
       couponEligible, couponDisc, pack, needPack

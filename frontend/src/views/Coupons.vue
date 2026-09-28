@@ -141,6 +141,62 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
+
+      <el-tab-pane label="成单里程碑" name="milestones">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="按本店累计成功支付单数自动发券（如 20/50/100 单）"
+          description="每位顾客每个档位只发一次；支付成功后自动下发。请先在「券模板」创建对应满减/代金券模板。"
+          class="milestone-alert"
+        />
+        <div class="toolbar" style="margin-top:12px">
+          <el-select
+            v-if="auth.isSuperAdmin"
+            v-model="milestoneStoreId"
+            placeholder="选择门店"
+            filterable
+            style="width: 200px"
+            @change="loadMilestones"
+          >
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+          <el-button @click="loadMilestones">刷新</el-button>
+          <el-button v-if="canManage" @click="addMilestoneRow">添加档位</el-button>
+          <el-button v-if="canManage" type="primary" :loading="milestoneSaving" @click="saveMilestones">保存</el-button>
+        </div>
+        <el-table :data="milestoneRows" border style="margin-top:12px">
+          <el-table-column label="累计成单数" width="160">
+            <template #default="{ row }">
+              <el-input-number v-model="row.threshold_orders" :min="1" :max="100000" :disabled="!canManage" />
+            </template>
+          </el-table-column>
+          <el-table-column label="发放券模板" min-width="220">
+            <template #default="{ row }">
+              <el-select v-model="row.template_id" filterable placeholder="选择模板" :disabled="!canManage" style="width: 100%">
+                <el-option
+                  v-for="t in enabledTemplates"
+                  :key="t.id"
+                  :label="`${t.name}（${t.summary || couponTypeLabel(t.coupon_type)}）`"
+                  :value="t.id"
+                />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="启用" width="90">
+            <template #default="{ row }">
+              <el-switch v-model="row.status" :active-value="1" :inactive-value="0" :disabled="!canManage" />
+            </template>
+          </el-table-column>
+          <el-table-column v-if="canManage" label="操作" width="90">
+            <template #default="{ $index }">
+              <el-button link type="danger" @click="milestoneRows.splice($index, 1)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="hint" style="margin-top:8px">建议档位：20 / 50 / 100。留空并保存即清空本店规则。</p>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="templateDialog" :title="templateForm.id ? '编辑模板' : '新增模板'" width="480px" destroy-on-close>
@@ -185,16 +241,16 @@
           <div class="hint">
             {{
               templateForm.coupon_type === 'PERCENT'
-                ? '如 0.90 表示 9 折（按折后商品小计）'
+                ? '如 0.90 表示 9 折。与会员折互斥：力度相同禁用券；力度更优则取折扣券（不折上折）'
                 : templateForm.coupon_type === 'VOUCHER'
-                  ? '代金面额（元），按应付总额抵扣（可与优惠券叠加）'
-                  : '固定减免金额（元，按折后商品小计）'
+                  ? '代金面额（元），打完折扣后再抵扣（可与优惠券叠加）'
+                  : '固定减免金额（元，按会员折后商品小计）'
             }}
           </div>
         </el-form-item>
         <el-form-item label="使用门槛">
           <el-input-number v-model="templateForm.min_order_amount" :min="0" :precision="2" style="width: 100%" />
-          <div class="hint">按会员折后商品小计计算，0 表示无门槛</div>
+          <div class="hint">按可参与优惠的商品小计计算（PERCENT 取优时为未打会员折基数），0 表示无门槛</div>
         </el-form-item>
         <el-form-item label="有效天数">
           <el-input-number v-model="templateForm.valid_days" :min="1" :max="365" style="width: 100%" />
@@ -274,6 +330,11 @@ const saving = ref(false)
 const issuing = ref(false)
 const activeTab = ref('issued')
 const stores = ref<{ id: number; name: string }[]>([])
+const milestoneStoreId = ref<number | undefined>()
+const milestoneRows = ref<
+  { threshold_orders: number; template_id?: number; status: number }[]
+>([])
+const milestoneSaving = ref(false)
 
 const templates = ref<any[]>([])
 const templateScope = ref<string | undefined>()
@@ -416,6 +477,71 @@ async function loadIssued() {
 
 function onTabChange(name: string | number) {
   if (name === 'issued' && !issued.value.length) loadIssued()
+  if (name === 'milestones') loadMilestones()
+}
+
+async function loadMilestones() {
+  if (auth.isSuperAdmin && !milestoneStoreId.value) {
+    if (!stores.value.length) await loadStores()
+    milestoneStoreId.value = stores.value[0]?.id
+  }
+  if (auth.isSuperAdmin && !milestoneStoreId.value) {
+    milestoneRows.value = []
+    return
+  }
+  loading.value = true
+  try {
+    const res = await api.get('/coupons/milestones', {
+      params: auth.isSuperAdmin ? { store_id: milestoneStoreId.value } : undefined,
+    })
+    milestoneRows.value = (res.data?.items || []).map((x: any) => ({
+      threshold_orders: Number(x.threshold_orders),
+      template_id: Number(x.template_id),
+      status: Number(x.status ?? 1),
+    }))
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载里程碑失败')
+    milestoneRows.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+function addMilestoneRow() {
+  const defaults = [20, 50, 100]
+  const used = new Set(milestoneRows.value.map((r) => r.threshold_orders))
+  const next = defaults.find((n) => !used.has(n)) || Math.max(0, ...used, 0) + 10
+  milestoneRows.value.push({ threshold_orders: next, template_id: undefined, status: 1 })
+}
+
+async function saveMilestones() {
+  if (auth.isSuperAdmin && !milestoneStoreId.value) {
+    ElMessage.warning('请选择门店')
+    return
+  }
+  for (const row of milestoneRows.value) {
+    if (!row.template_id) {
+      ElMessage.warning('请为每个档位选择券模板')
+      return
+    }
+  }
+  milestoneSaving.value = true
+  try {
+    await api.put('/coupons/milestones', {
+      store_id: auth.isSuperAdmin ? milestoneStoreId.value : undefined,
+      items: milestoneRows.value.map((r) => ({
+        threshold_orders: r.threshold_orders,
+        template_id: r.template_id,
+        status: r.status,
+      })),
+    })
+    ElMessage.success('里程碑规则已保存')
+    await loadMilestones()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    milestoneSaving.value = false
+  }
 }
 
 function reloadIssued() {
@@ -574,5 +700,8 @@ onMounted(async () => {
   color: #999;
   font-size: 12px;
   margin-top: 4px;
+}
+.milestone-alert {
+  margin-bottom: 4px;
 }
 </style>

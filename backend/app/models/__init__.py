@@ -156,6 +156,21 @@ class CustomerCoupon(Base):
     issued_at_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, comment="发券门店；NULL=不限门店使用", index=True)
 
 
+class OrderMilestoneReward(Base, TimestampMixin):
+    """门店累计成功支付单数里程碑 → 自动发券规则。"""
+
+    __tablename__ = "order_milestone_rewards"
+    __table_args__ = (
+        UniqueConstraint("store_id", "threshold_orders", name="uk_omr_store_threshold"),
+        Index("idx_omr_store_status", "store_id", "status"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"), index=True)
+    threshold_orders: Mapped[int] = mapped_column(Integer, comment="累计成功支付订单数阈值")
+    template_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("coupon_templates.id"), index=True)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+
+
 class PointLedger(Base):
     """会员积分流水（与 customers.points 对账）"""
     __tablename__ = "point_ledger"
