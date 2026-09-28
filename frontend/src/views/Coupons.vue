@@ -318,7 +318,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { COUPON_STATUS, COUPON_TYPE, couponStatusTagType, label } from '@/utils/labels'
@@ -519,10 +519,22 @@ async function saveMilestones() {
     ElMessage.warning('请选择门店')
     return
   }
-  for (const row of milestoneRows.value) {
-    if (!row.template_id) {
-      ElMessage.warning('请为每个档位选择券模板')
+  if (!milestoneRows.value.length) {
+    try {
+      await ElMessageBox.confirm(
+        '当前无任何档位，保存后将清空本店全部成单里程碑规则。是否继续？',
+        '清空确认',
+        { type: 'warning', confirmButtonText: '清空并保存', cancelButtonText: '取消' },
+      )
+    } catch {
       return
+    }
+  } else {
+    for (const row of milestoneRows.value) {
+      if (!row.template_id) {
+        ElMessage.warning('请为每个档位选择券模板')
+        return
+      }
     }
   }
   milestoneSaving.value = true
@@ -535,7 +547,7 @@ async function saveMilestones() {
         status: r.status,
       })),
     })
-    ElMessage.success('里程碑规则已保存')
+    ElMessage.success(milestoneRows.value.length ? '里程碑规则已保存' : '已清空本店里程碑规则')
     await loadMilestones()
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
