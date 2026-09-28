@@ -45,6 +45,10 @@ class BalanceService:
         """充值成功入账（幂等：同一 recharge_order 仅一条 TOPUP）。操作人=顾客本人。"""
         if not recharge or not recharge.customer_id:
             return None
+        # 先锁顾客，再对流水做锁定读。普通 SELECT 用事务快照，并发入账会把已提交流水看成不存在。
+        cust = (
+            await db.execute(select(Customer).where(Customer.id == recharge.customer_id).with_for_update())
+        ).scalar_one()
         existing = (
             await db.execute(
                 select(BalanceLedger)
@@ -53,14 +57,11 @@ class BalanceService:
                     BalanceLedger.recharge_order_id == recharge.id,
                 )
                 .limit(1)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if existing:
             return existing
-
-        cust = (
-            await db.execute(select(Customer).where(Customer.id == recharge.customer_id).with_for_update())
-        ).scalar_one()
         dp = money(recharge.credit_principal)
         dg = money(recharge.credit_gift)
         cust.balance_principal = money(cust.balance_principal or 0) + dp
@@ -100,21 +101,21 @@ class BalanceService:
         if pay <= 0:
             raise AppException(40051, "余额扣款金额非法")
 
-        existing = (
-            await db.execute(
-                select(BalanceLedger)
-                .where(BalanceLedger.entry_type == "PAY", BalanceLedger.order_id == order_id)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if existing:
-            return existing
-
         cust = (
             await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update())
         ).scalar_one_or_none()
         if not cust:
             raise AppException(40401, "顾客不存在")
+        existing = (
+            await db.execute(
+                select(BalanceLedger)
+                .where(BalanceLedger.entry_type == "PAY", BalanceLedger.order_id == order_id)
+                .limit(1)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return existing
         from app.services.customer_service import CustomerService
 
         if not CustomerService.is_member(cust):
@@ -165,9 +166,15 @@ class BalanceService:
         amt = money(amount)
         if amt <= 0:
             return None
+        cust = (
+            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update())
+        ).scalar_one()
         existing = (
             await db.execute(
-                select(BalanceLedger).where(BalanceLedger.refund_id == refund_id).limit(1)
+                select(BalanceLedger)
+                .where(BalanceLedger.refund_id == refund_id)
+                .limit(1)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if existing:
@@ -178,6 +185,7 @@ class BalanceService:
                 select(BalanceLedger)
                 .where(BalanceLedger.entry_type == "PAY", BalanceLedger.order_id == order_id)
                 .limit(1)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if pay_row:
@@ -192,9 +200,6 @@ class BalanceService:
             gift_share = Decimal("0.00")
             principal_share = amt
 
-        cust = (
-            await db.execute(select(Customer).where(Customer.id == customer_id).with_for_update())
-        ).scalar_one()
         cust.balance_principal = money(cust.balance_principal or 0) + principal_share
         cust.balance_gift = money(cust.balance_gift or 0) + gift_share
         sno = await _store_no(db, store_id)

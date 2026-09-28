@@ -391,10 +391,20 @@ async def test_create_payment_blocks_second_pending_channel():
 async def test_deduct_stock_race_loser_gets_40031():
     from app.services.stock_service import deduct_stock
 
+    async def execute(stmt, params=None):
+        sql = str(stmt).lower()
+        res = MagicMock()
+        if "from products" in sql and "for update" in sql:
+            res.first.return_value = (1,)
+            return res
+        if "store_product_stocks" in sql and "for update" in sql:
+            res.scalar_one_or_none.return_value = SimpleNamespace(id=3, status=1, stock=0)
+            return res
+        res.rowcount = 0  # 并发下 WHERE stock>=qty 未命中
+        return res
+
     db = AsyncMock()
-    result = MagicMock()
-    result.rowcount = 0  # 并发下 WHERE stock>=qty 未命中
-    db.execute = AsyncMock(return_value=result)
+    db.execute = execute
     with pytest.raises(AppException) as ei:
         await deduct_stock(db, product_id=1, qty=1, store_id=1)
     assert ei.value.code == 40031

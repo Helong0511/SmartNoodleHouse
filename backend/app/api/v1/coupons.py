@@ -1,11 +1,9 @@
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
-
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
-from app.models import CouponTemplate, Customer, Order
+from app.models import CouponTemplate, Customer
 from app.schemas.coupon import CouponIssueRequest, CouponTemplateCreate, CouponTemplateUpdate
 from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
@@ -200,25 +198,13 @@ async def issue_coupon(data: CouponIssueRequest, request: Request, db: DbSession
     """向指定顾客发放优惠券/代金券。门店仅可对本店顾客发「总部∪本店」模板。"""
     store_id = require_bound_store(user, None)
     if store_id is not None:
+        from app.api.v1.customers import _assert_customer_in_store
+
         customer = await db.get(Customer, data.customer_id)
         if not customer:
             raise AppException(40401, "顾客不存在")
-        in_scope = await db.scalar(
-            select(Customer.id).where(
-                Customer.id == data.customer_id,
-                or_(
-                    Customer.registered_store_id == store_id,
-                    Customer.id.in_(
-                        select(Order.customer_id).where(
-                            Order.store_id == store_id,
-                            Order.customer_id.isnot(None),
-                        )
-                    ),
-                ),
-            )
-        )
-        if not in_scope:
-            raise AppException(40301, "无权向其他门店顾客发券")
+        # 与顾客列表同一口径：本店注册、首次到店或在本店下过单
+        await _assert_customer_in_store(db, data.customer_id, int(store_id), action="发券")
     tmpl = await db.get(CouponTemplate, data.template_id)
     if not tmpl:
         raise AppException(40407, "优惠券模板不存在")

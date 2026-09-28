@@ -83,6 +83,7 @@ class CustomerMergeService:
         reason: str | None = None,
         operator_id: int | None = None,
         request: Request | None = None,
+        actor_store_id: int | None = None,
     ) -> dict[str, Any]:
         if int(target_customer_id) == int(source_customer_id):
             raise AppException(40061, "不能合并同一顾客")
@@ -99,6 +100,24 @@ class CustomerMergeService:
             raise AppException(40461, "顾客不存在", status_code=404)
         if int(source.status or 0) == 0:
             raise AppException(40062, "源顾客已禁用/已合并")
+        if actor_store_id is not None:
+            sid = int(actor_store_id)
+            foreign_order = (
+                await db.execute(
+                    select(Order.id)
+                    .where(Order.customer_id == source.id, Order.store_id != sid)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            foreign_recharge = (
+                await db.execute(
+                    select(RechargeOrder.id)
+                    .where(RechargeOrder.customer_id == source.id, RechargeOrder.store_id != sid)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if foreign_order or foreign_recharge:
+                raise AppException(40301, "源顾客在其他门店有订单或充值，请由总部账号合并")
 
         before = {
             "target": _customer_snapshot(target),

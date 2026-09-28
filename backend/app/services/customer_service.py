@@ -311,12 +311,17 @@ class CustomerService:
         if not customer:
             return 0
         # 同订单幂等：已有 EARN 流水则跳过
-        existed = await db.scalar(
-            select(PointLedger.id).where(
-                PointLedger.order_id == order.id,
-                PointLedger.entry_type == "EARN",
-            ).limit(1)
-        )
+        existed = (
+            await db.execute(
+                select(PointLedger.id)
+                .where(
+                    PointLedger.order_id == order.id,
+                    PointLedger.entry_type == "EARN",
+                )
+                .limit(1)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if existed:
             return 0
         earned = CustomerService.points_from_amount(order.total_amount)
@@ -358,12 +363,17 @@ class CustomerService:
         if not customer:
             return 0
         if refund_id is not None:
-            existed = await db.scalar(
-                select(PointLedger.id).where(
-                    PointLedger.refund_id == int(refund_id),
-                    PointLedger.entry_type == "REFUND_DEDUCT",
-                ).limit(1)
-            )
+            existed = (
+                await db.execute(
+                    select(PointLedger.id)
+                    .where(
+                        PointLedger.refund_id == int(refund_id),
+                        PointLedger.entry_type == "REFUND_DEDUCT",
+                    )
+                    .limit(1)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
             if existed:
                 return 0
         deducted = CustomerService.points_from_amount(refund_amount)

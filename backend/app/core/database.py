@@ -31,6 +31,8 @@ settings = get_settings()
 _pool_size = max(5, int(getattr(settings, "db_pool_size", 5) or 5))
 _max_overflow = max(0, int(getattr(settings, "db_max_overflow", 10) or 10))
 
+# 固定可重复读：避免会话落到 READ UNCOMMITTED（脏读）。
+# 幻读靠行锁 / 间隙锁（SELECT FOR UPDATE）和唯一约束，不靠快照读判断“是否已存在”。
 engine = create_async_engine(
     settings.database_url,
     echo=settings.db_echo,
@@ -38,6 +40,7 @@ engine = create_async_engine(
     pool_recycle=3600,
     pool_size=_pool_size,
     max_overflow=_max_overflow,
+    isolation_level="REPEATABLE READ",
 )
 
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

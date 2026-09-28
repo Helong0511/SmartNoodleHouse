@@ -4,13 +4,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.core.response import ensure_local_aware, now_local
-from app.models import CashierShift, DiningTable, Order, Payment, User
+from app.models import CashierShift, DiningTable, Order, Payment, RechargeOrder, User
 
 _PAID = "PAID"
 
@@ -43,11 +43,19 @@ async def _aggregate_payments(
     operator_id: int | None,
     since: datetime,
     until: datetime | None = None,
+    store_id: int | None = None,
 ) -> dict[str, Decimal]:
     q = select(Payment.provider, func.coalesce(func.sum(Payment.amount), 0)).where(
         Payment.status == _PAID,
         Payment.paid_at >= since,
     )
+    if store_id is not None:
+        # 订单收款与充值收款都按发生门店归集，避免收银员跨店后把别的门店流水算进本班
+        q = q.outerjoin(Order, Order.id == Payment.order_id).outerjoin(
+            RechargeOrder, RechargeOrder.id == Payment.recharge_order_id
+        ).where(
+            or_(Order.store_id == int(store_id), RechargeOrder.store_id == int(store_id))
+        )
     if until is not None:
         q = q.where(Payment.paid_at < until)
     if operator_id is not None:
@@ -153,6 +161,7 @@ class PosShiftService:
             operator_id=int(shift.operator_id),
             since=ensure_local_aware(shift.opened_at),
             until=until,
+            store_id=int(shift.store_id),
         )
         shift.total_cash = stats["total_cash"]
         shift.total_wechat = stats["total_wechat"]
@@ -256,13 +265,19 @@ class PosShiftService:
     @classmethod
     async def my_today_summary(cls, db: AsyncSession, operator_id: int) -> dict:
         start, end = _day_bounds(None)
+        shift = await cls.get_open_shift(db, operator_id)
+        store_id = int(shift.store_id) if shift else None
+        if store_id is None:
+            user = await db.get(User, int(operator_id))
+            if user and user.store_id:
+                store_id = int(user.store_id)
         stats = await _aggregate_payments(
             db,
             operator_id=int(operator_id),
             since=start,
             until=end,
+            store_id=store_id,
         )
-        shift = await cls.get_open_shift(db, operator_id)
         return {
             "date": start.date().isoformat(),
             "operator_id": operator_id,
@@ -300,7 +315,11 @@ class PosShiftService:
             )
             .distinct()
         )
-        base_q = select(Order).where(Order.id.in_(paid_order_ids), Order.channel == "POS")
+        base_q = select(Order).where(
+            Order.id.in_(paid_order_ids),
+            Order.channel == "POS",
+            Order.store_id == int(shift.store_id),
+        )
         total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar() or 0
         orders = (
             await db.execute(

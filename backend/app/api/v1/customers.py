@@ -409,6 +409,7 @@ async def merge_customers(
         reason=body.reason,
         operator_id=user.id,
         request=request,
+        actor_store_id=int(effective_store) if effective_store else None,
     )
     await db.commit()
     await AuditService.log_staff(

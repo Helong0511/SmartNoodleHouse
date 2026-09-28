@@ -7,7 +7,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.models import OutboxEvent, StoreProductStock
+from app.models import OutboxEvent, Product, StoreProductStock
 from app.services.outbox_worker import enqueue_outbox
 
 # stock=999 视为不限库存
@@ -56,13 +56,27 @@ async def _emit_stock_mirror(
         )
 
 
-async def _has_store_row(db: AsyncSession, store_id: int, product_id: int) -> StoreProductStock | None:
+async def _lock_product_store(db: AsyncSession, product_id: int) -> int | None:
+    """锁定品牌商品行并返回其 store_id。锁定读看最新已提交数据，避免快照把新库存行看成不存在。"""
+    row = (
+        await db.execute(
+            select(Product.store_id).where(Product.id == int(product_id)).with_for_update()
+        )
+    ).first()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
+
+
+async def _lock_store_row(db: AsyncSession, store_id: int, product_id: int) -> StoreProductStock | None:
     return (
         await db.execute(
-            select(StoreProductStock).where(
+            select(StoreProductStock)
+            .where(
                 StoreProductStock.store_id == store_id,
                 StoreProductStock.product_id == product_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
 
@@ -74,14 +88,16 @@ async def deduct_stock(
     *,
     store_id: int | None = None,
 ) -> None:
-    # P1-48: Atomic deduction — single conditional UPDATE (stock = stock - qty WHERE stock >= qty),
-    # NOT SELECT-then-UPDATE. The _has_store_row SELECT above only checks store-listing status,
-    # not stock level; the decrement itself is race-safe in one statement.
+    # 数量用条件 UPDATE 一次完成。先锁商品行再锁门店库存行，锁定读看到最新已提交行，
+    # 避免可重复读快照把刚插入的门店库存看成不存在、进而扣到别的门店商品上。
     if qty <= 0:
         raise AppException(40030, "扣减数量非法")
 
     if store_id:
-        row = await _has_store_row(db, store_id, product_id)
+        owner = await _lock_product_store(db, product_id)
+        if owner is None or int(owner) != int(store_id):
+            raise AppException(40031, f"商品不属于当前门店或不可售: {product_id}")
+        row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
             if int(row.status) != 1:
                 raise AppException(40031, f"本店未上架该商品: {product_id}")
@@ -118,8 +134,11 @@ async def deduct_stock(
                 )
             # 销量仍记在品牌商品上
             await db.execute(
-                text("UPDATE products SET sales_count = sales_count + :qty WHERE id = :pid"),
-                {"pid": product_id, "qty": qty},
+                text(
+                    "UPDATE products SET sales_count = sales_count + :qty "
+                    "WHERE id = :pid AND store_id = :sid"
+                ),
+                {"pid": product_id, "qty": qty, "sid": int(store_id)},
             )
             return
 
@@ -135,9 +154,15 @@ async def deduct_stock(
             WHERE id = :pid
               AND status = 'ON_SALE'
               AND (stock >= :unlimited OR stock >= :qty)
+              AND (:sid IS NULL OR store_id = :sid)
             """
         ),
-        {"pid": product_id, "qty": qty, "unlimited": UNLIMITED_STOCK},
+        {
+            "pid": product_id,
+            "qty": qty,
+            "unlimited": UNLIMITED_STOCK,
+            "sid": int(store_id) if store_id else None,
+        },
     )
     if result.rowcount != 1:
         raise AppException(40031, f"库存不足或商品不可售: {product_id}")
@@ -159,7 +184,10 @@ async def restore_stock(
         return
 
     if store_id:
-        row = await _has_store_row(db, store_id, product_id)
+        owner = await _lock_product_store(db, product_id)
+        if owner is None or int(owner) != int(store_id):
+            return
+        row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
             was_zero = int(row.stock or 0) == 0
             await db.execute(
@@ -182,9 +210,10 @@ async def restore_stock(
                 )
             await db.execute(
                 text(
-                    "UPDATE products SET sales_count = GREATEST(0, sales_count - :qty) WHERE id = :pid"
+                    "UPDATE products SET sales_count = GREATEST(0, sales_count - :qty) "
+                    "WHERE id = :pid AND store_id = :sid"
                 ),
-                {"pid": product_id, "qty": qty},
+                {"pid": product_id, "qty": qty, "sid": int(store_id)},
             )
             return
 
@@ -198,9 +227,15 @@ async def restore_stock(
                 END,
                 sales_count = GREATEST(0, sales_count - :qty)
             WHERE id = :pid
+              AND (:sid IS NULL OR store_id = :sid)
             """
         ),
-        {"pid": product_id, "qty": qty, "unlimited": UNLIMITED_STOCK},
+        {
+            "pid": product_id,
+            "qty": qty,
+            "unlimited": UNLIMITED_STOCK,
+            "sid": int(store_id) if store_id else None,
+        },
     )
 
 
