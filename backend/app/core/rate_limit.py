@@ -72,7 +72,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     content={"code": 429, "message": "请求过于频繁，请稍后再试", "data": None},
                 )
         except Exception as e:
-            # Redis 仅作限流加速；宕机时降级放行，避免全站 503（业务以 MySQL 为准）
+            # Redis 仅作限流加速；宕机时降级放行，避免全站 503（业务以 MySQL 为准）。
+            # 业务侧仍受认证 / 入侵检测 / SQL 注入检测等多层防护兜底。
             logger.error("限流 Redis 不可用，降级放行: %s", e)
 
         return await call_next(request)

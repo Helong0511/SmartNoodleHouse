@@ -400,7 +400,7 @@ async def test_outbox_process_uses_atomic_owner_release():
     from app.services import outbox_worker
 
     row = SimpleNamespace(
-        id=1, aggregate_type="paid_side_effect", event_kind="points_award",
+        id=1, aggregate_type="paid_side_effect", aggregate_id=1, event_kind="points_award",
         payload='{"order_id": 1}', locked_by="host:1234:pid",
         attempt_count=1, max_attempts=8, status="PROCESSING",
     )

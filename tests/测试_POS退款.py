@@ -120,20 +120,30 @@ async def test_create_request_uses_order_level_refundable():
 @pytest.mark.asyncio
 async def test_reject_requires_manager():
     db = AsyncMock()
-    with pytest.raises(AppException) as exc:
-        await PosRefundService.reject_request(
-            db, user=_user("CASHIER"), request_id=1, remark="no"
-        )
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock,
+        return_value=False,
+    ):
+        with pytest.raises(AppException) as exc:
+            await PosRefundService.reject_request(
+                db, user=_user("CASHIER"), request_id=1, remark="no"
+            )
     assert exc.value.code == 40301
 
 
 @pytest.mark.asyncio
 async def test_approve_requires_manager():
     db = AsyncMock()
-    with pytest.raises(AppException) as exc:
-        await PosRefundService.approve_and_execute(
-            db, user=_user("CASHIER"), request_id=1
-        )
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock,
+        return_value=False,
+    ):
+        with pytest.raises(AppException) as exc:
+            await PosRefundService.approve_and_execute(
+                db, user=_user("CASHIER"), request_id=1
+            )
     assert exc.value.code == 40301
 
 

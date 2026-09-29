@@ -91,6 +91,10 @@ async def test_consent_base64_requires_liveness_before_decode():
         }
     )
     with patch(
+        "app.api.v1.miniprogram._require_face_welcome_enabled",
+        new_callable=AsyncMock,
+        return_value=None,
+    ), patch(
         "app.api.v1.miniprogram._enforce_liveness_challenge",
         new_callable=AsyncMock,
         side_effect=AppException(40037, "活体校验未通过"),

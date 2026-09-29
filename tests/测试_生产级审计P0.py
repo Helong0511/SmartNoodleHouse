@@ -77,7 +77,7 @@ async def test_balance_debit_rejects_guest():
     locked.scalar_one_or_none = MagicMock(return_value=guest)
 
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[empty, locked])
+    db.execute = AsyncMock(side_effect=[locked, empty])
 
     with pytest.raises(AppException) as ei:
         await BalanceService.debit_for_order(

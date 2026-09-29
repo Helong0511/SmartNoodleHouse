@@ -53,6 +53,14 @@ async def test_release_for_order_restores_reserved():
     db = AsyncMock()
     db.get = AsyncMock(return_value=cc)
     db.flush = AsyncMock()
+    # release_for_order 内 db.execute 调用顺序：
+    # 1) select CustomerCoupon.id where used_order_id == 99 → scalars().all() 返回空集
+    # 2) select CustomerCoupon where id == 10 → scalar_one_or_none() 返回 cc
+    extra_result = MagicMock()
+    extra_result.scalars.return_value.all.return_value = []
+    cc_result = MagicMock()
+    cc_result.scalar_one_or_none.return_value = cc
+    db.execute = AsyncMock(side_effect=[extra_result, cc_result])
 
     await CouponService.release_for_order(db, order)
 

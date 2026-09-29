@@ -148,6 +148,21 @@ async def test_自动开关店_按营业时间切换并回写状态(db_session, 
 
     # 周一 10:00 营业中：OPEN
     monkeypatch.setattr("app.services.store_hours_service.naive_local_now", lambda: 周一10点)
+    # apply_auto_open_tick 内部 from app.core.database import AsyncSessionLocal 局部导入，
+    # patch 全局 AsyncSessionLocal 让它走测试的 in-memory session
+    from app.core import database as _db_mod
+
+    class _Ctx:
+        def __init__(self):
+            self._db = db_session
+
+        async def __aenter__(self):
+            return self._db
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(_db_mod, "AsyncSessionLocal", _Ctx)
     stats = await StoreHoursService.apply_auto_open_tick(db_session)
     assert stats["opened"] == 1 and stats["closed"] == 0 and stats["skipped"] == 1
     assert binding.platform_open_status == "OPEN"
