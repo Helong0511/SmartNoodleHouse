@@ -1,8 +1,14 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-09-29T06:57:38Z",
+  "updated_at": "2026-09-29T08:44:27Z",
   "files": {
+    ".cursor/mcp.json": {
+      "role": "index",
+      "sha256": "456c6d02051d92171af7c196feb84239eb4287d78829c6412116e4b77e723dc4",
+      "size": 205,
+      "normalized_sha256": "9db4423d3b0174dc324a01ef3ac00ff05d74607c041e97100c78d2415ffe6bf6"
+    },
     ".cursor/rules/database-schema-sync.mdc": {
       "role": "index",
       "sha256": "c0fa9e92f7c3f05b3d473d06fcbdd5dd7f538ac8cf71f1371c37a19b7a854180",
@@ -59,9 +65,9 @@
     },
     ".gitignore": {
       "role": "index",
-      "sha256": "dfe458d655ec568fdf3a3543e4786670f9ed5d6c2f345c81c5f91b53e4dbceb8",
-      "size": 711,
-      "normalized_sha256": "563dd1ef72ebc334df41ee8a3f4480e03462a36d3c3a122bc0f27ec4c3ebd17c"
+      "sha256": "5802564624d14c8f86d69210057cfdd13786415c30bd7762e653e331aab92d2b",
+      "size": 781,
+      "normalized_sha256": "1ac9c022d311ebe57d608e368ffb197df86390f6854a033abf3c0d154ab1baf9"
     },
     ".trae/documents/外卖管理重构_plan.md": {
       "role": "index",
@@ -101,9 +107,15 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "12cbc237b863041b3ab7b6c6330091964cb014a20e624ec1f88de6056aed56c2",
-      "size": 21,
-      "normalized_sha256": "12cbc237b863041b3ab7b6c6330091964cb014a20e624ec1f88de6056aed56c2"
+      "sha256": "5b00aabd09797ed97260d78be7ec9626401a56d1c2e6f66c2961fb26854f466f",
+      "size": 126324,
+      "normalized_sha256": "5b00aabd09797ed97260d78be7ec9626401a56d1c2e6f66c2961fb26854f466f"
+    },
+    "aoci.database.txt": {
+      "role": "index",
+      "sha256": "57817b69c4c1387bee870eb757bd5b93bebb074864bc16035d03e38880dfec4e",
+      "size": 13412,
+      "normalized_sha256": "57817b69c4c1387bee870eb757bd5b93bebb074864bc16035d03e38880dfec4e"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -113,9 +125,9 @@
     },
     "aoci.txt": {
       "role": "index",
-      "sha256": "1b2beddd0bc2dbf912ff3c6544d077f6ed0d44e8a36fdb516c9f5e62a68d822b",
-      "size": 305,
-      "normalized_sha256": "1b2beddd0bc2dbf912ff3c6544d077f6ed0d44e8a36fdb516c9f5e62a68d822b"
+      "sha256": "c427635701816c92464d6716822e4c6d23fe671dd2df25d60a0277ee108a72de",
+      "size": 411,
+      "normalized_sha256": "c427635701816c92464d6716822e4c6d23fe671dd2df25d60a0277ee108a72de"
     },
     "backend/alembic.ini": {
       "role": "index",
@@ -4563,5 +4575,465 @@
       ]
     },
     "apply_authorization_mode": "auto"
+  },
+  "database_cognition": {
+    "version": "database-cognition-binding/v1",
+    "entries": [
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/ab_assignments",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "9cde9f64ec04a72e125a676459891d9512859c08e60690081557a8c25df14bbe",
+        "entry_sha256": "26f9c490cafc5a1cb7f6546b4bb1ade3b17ced79237c0a02491dadf1d39f880c"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/ab_experiments",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "9dd5d9cca9caac28bbdb6bc71a53eb6d57bebdc80abbc53fa5c09faa2c966f4e",
+        "entry_sha256": "23727ecbf50fcc31073053606b166cb117188d456db5a49ecd789cb9f221dacc"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/balance_ledger",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "76142566712d6c7f414be80564a02c105111b56504db4a515763cd9a41885992",
+        "entry_sha256": "8bd1806a59f90f5088a5274703e4436761b17e43fcdf65adbed558252f84af42"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/cameras",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "d7a854642808c70c964f0c15e5bb9846a55beaabd639a3465ef54c2bdc0ea2ab",
+        "entry_sha256": "f68ab3c10abdc11b478fa487447474331e1553dc650f24e7dfd6f9b5a819bb6a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/cashier_shifts",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "c77ee2e4fd9793af0482d24d3f1428a4547d8c39b84e2ffc2adc882b62a7bfa5",
+        "entry_sha256": "ca0e7b70f5c1ff541b6b08abc83ab8c4bf2ef59894daef6cd24ece1b8a7e6cdf"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/category_sort_schedule_items",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "bb297ed197a5e34a7f47438dc4eeb860d2be84929bc53464b8ad337111ec70b5",
+        "entry_sha256": "a339df3519ebb4725e9ea55c94da5b09a28a85c3604b9c47118fba6dce323e55"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/category_sort_schedules",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "4f5315c322a06e07be3f5bfe7f9e2b5bb772f8936b76af916a972f175b9cef3d",
+        "entry_sha256": "1e3d1f021f2b495c8a5142c14418e84fad98cf20cc1373ad6c934d6ce32a4c97"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/coupon_templates",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "cf3efa87ae9d7451adebf9200374d070c355db35f8b3de9d27067cce0dd60ded",
+        "entry_sha256": "2aa7ecf677aa3ac299ce7d40982d82deb54a29c3944915be4efc58f0268be98b"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_alipay_accounts",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "cb6f3253c8514f0a2e6f9c51d794b8bc9e9de5a8045561e0281e4a7212e4d0bd",
+        "entry_sha256": "3da0f2561b4358ba69c4f30daf4b588530c73ad2664ee8ec9f1070ac02cd77bd"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_behavior_events",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "f00ccb255feda601ef882e6badb936bb431844ed0cec73613493d3e4c0780775",
+        "entry_sha256": "a95678b659dc2759781ae5ccf12a64fde51bb614681b42a7262982b7cb50ec4a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_coupons",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "e6400ce2b8f14e84387d67091b817f417177bccbd1958cc41418d06da58f0290",
+        "entry_sha256": "ff4bf6b368bc5838c6b96e059d22f54d66531404a570d909b0f0eef1fd0cd89a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_identities",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "b1830dae846027125f917dc28131d3db5ffac1307125f730dd02a0ba9ec771a6",
+        "entry_sha256": "bc1c39b255915eac6f7abafc0bd30d8640d278259bc934bfcd066bcaca619c40"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_preferences",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "0608009c5716d979384b4b060cfd5ed2a77e62555cbfa642f8f1f3545c98cde1",
+        "entry_sha256": "6a72e7adb3006fec79eb76bf22db0c142c4c3dfa354e08117447f637f75a95f5"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_taste_profiles",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "fdda058c65bc045ab5ef6ecba8dd4ea25bbf79735bbf73760454a46d6e373d9d",
+        "entry_sha256": "5ee9d64ef402c2305622e096da6d4455bf1fd889ae0c81097ad7d72d51d67d19"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_wechat_accounts",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "514a563c526c9c1e455689ead4762370b0c905c8dedbbed81d34fca360cb0660",
+        "entry_sha256": "dc237e4c9ff4fa61e20f827a4773e830662c0208aa28a9bdf537095698e0374b"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customers",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "b530c89b8d3d882fc35695c5271b27a5005b1d7917bad08d4042644b78db5686",
+        "entry_sha256": "c2f6711d40d0156541095a36bda44101e9f4b6cb36590b4814625f392cd849f5"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_callback_logs",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "21f98639b4aabafe63c2fc9ed3c031b8d13e1809e77fe2ae22f8880fe15b369d",
+        "entry_sha256": "29da1abcee24948033a58ecedf6fb08ccf3704cea9e579851f75d67a30ef1eaa"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_orders",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "0939b939cf1fdc4f8db2027d2e96997270646a784c369af957f1c9199723a870",
+        "entry_sha256": "2646f8ac468af1fb4c895a401ec6d2cd7cc335f786556f693ed5102bb4b24cc6"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_product_maps",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "282b526cf750e76a2d371f380294293b9ebfd9055a884b3f57310f80d4800dd6",
+        "entry_sha256": "ef413dd916926cb2d69b6992c109684d1fc6261fbe07113ea4d287b733536a0f"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_refunds",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "50a55452a34a14911120e637e943f46cad661a802c153dfb7eea82a8246fa21c",
+        "entry_sha256": "28912cca89f4356d014189104bf7863fd96ce18056b96e554d12f27876679f48"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_sync_alerts",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "5fdae86d40597ae06be7356986c679c9da6ac86e3e5a35ab4257ac4efa89d244",
+        "entry_sha256": "dcfcd7e6433102933cc64f514d2095fdfcf6205fff83210e31d6cc04538114ac"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/dining_sessions",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "7c6ffbd6837035a134d7d3c188273ad87c93a347bc35b0855542cd92ab1ce510",
+        "entry_sha256": "3d31292f2a23f182f3e60ded00b72182d7b145d705b5274baef62ff460aa1f37"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/face_profiles",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "b2651a2fc59899a0cce4aa23a26bdd94cfc34566fb00f79bc7517a8af77246f3",
+        "entry_sha256": "437e975693d66d56e179d8ecc412fec125d3277705bb0fd8b43bfc4395d54703"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/financial_ledger",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "2c2becb5aec83c38adb1defa3c99db74477386b0416d10d991a01dbf7e6651bf",
+        "entry_sha256": "cbf62719eb8204b7a2d3205db839a7872017732ad4c818df14ab52bfd49b9ae6"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/member_levels",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "ac127fea5534300819f84bbb0c149cba1751004e2f7fc536bf7f6e44e6f26e5a",
+        "entry_sha256": "5ce3f74ca6be564654387e8c2e5a434d8cb02eb99a3e985038f0963a4af77935"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/operation_logs",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "246cd5545a21c243c67f3085e23c3600d650cd0a2af4debfbcf93b9e3e4e6e59",
+        "entry_sha256": "d148750e21666e4e6d4aaac4dabb55327349fe285f0d8099ba3e7052200f940c"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/option_groups",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "192b39853d3b09bc4a45ff0e05468bf117e05d995ba174de6b459a0ecd7fef82",
+        "entry_sha256": "ad9229d7d724fe05a6f5ed36b02a796bf26e77ca1476bccfcb4b012977874552"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/options",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "f2c67f6fabc8b84ef8658d921b835d6a2b3aa5f4fad5f135fe0f120b1d978c27",
+        "entry_sha256": "a49beb689e1373577214c0ac7f4ab36bea7f4df9cd6f5630c791f7c739da5efd"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/order_item_options",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "f1d6bba22daeaffb291c76de3fde0401305495c0fd0782afb14c5c958b6a7d30",
+        "entry_sha256": "1d5ca24e89b617dffc68e70777bb0a63a24381cb8dcb84abb586bccde23f0f7a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/order_items",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "8120dbdc4c54d7cc631dd94055b5ddbe188d83fad36943fbe7e3cbca322ceacb",
+        "entry_sha256": "5acf14c9fab2516d22124d7aa5b8cbf74fd63b414b417f71e1bd9b03715d7056"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/order_milestone_rewards",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "60bf2466f956f8c2519214a36bf4ff1b53f4555ae1d4a956fe5279ee937a0e90",
+        "entry_sha256": "6f63f58353575fd9133fc48aa4b0428f9c42b735d55bca7ede21986d18096f51"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/order_status_history",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "17435617932e2e9836ac17f97649dd86f877be63304dbe448a05874ad6a9b01b",
+        "entry_sha256": "b97cc69734144c0104d528c1f8a0fa396b06f4d2bbb35f1043a3fec709c32c87"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/orders",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "36d3dcc8a84bd324befe900b1ae71b3f1ab006ce1f16b7ead97b794920d006fa",
+        "entry_sha256": "819e20c43e4d02aced82251e0cd6f961170d78c11178c721504f86aebde9d9d0"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/outbox_events",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "5c9b48e9224b91f5b68ec776a4bf3b8de793c350f5b42d033159e53dc626f823",
+        "entry_sha256": "b8890b16c548c6e21431a147f0be6a9cf2f237259625d9a5dfb3d16549961142"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/payment_callback_receipts",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "1979158bb3d861270259399f561286f9aeda047ef10b8b0635a91837ec8081e1",
+        "entry_sha256": "42cffa76e89d655cbbf75bbba699d29e48278eae02d1781ae3dd8db59b6b612c"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/payment_refunds",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "771549e98d34d00318203040f94da06f51247fd1869acd9da4e6f70a36bb8745",
+        "entry_sha256": "1538d8a32cfc1b24a0a841dc307905833121dc897792b03bc82e864cc9690781"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/payment_status_history",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "6c1805f6e4328f3ad295e0259dbdf84bda643df7bc19ac1eb39b563272f880e5",
+        "entry_sha256": "8215048ec07c1186d43128440327f8e90e08f83903ed2d6f48a3f23a963a35b3"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/payments",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "b10c17fcffd58c46fb4b68efc29e8d74865c35507180d181fac4b50d962c5825",
+        "entry_sha256": "0e0168d6c2d640026a4ada9bcc619b64715563c229db886ba94056e85fa4e137"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/permissions",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "09ef8f1b2f07338a84df1a89f768724f80e9899017277dbd46eae871239a2810",
+        "entry_sha256": "71689efa9e78a8348a4ac9824b0232aee642acf462b010cc952b6e75471f0378"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/platform_category_maps",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "c72b2b268fbc5fecc8e0a683d285dc928942ec6be22c5d3d0ba1938431827512",
+        "entry_sha256": "af4efeb345a270e665c92f32aba411e2f2efa1e616f76b4bfaaf3945ddb6b5ba"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/platform_store_bindings",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "db36801bebd0b0bd8ee8f9881d42ce8016f4c301d0a05776f4eea906d63da7ac",
+        "entry_sha256": "83d93df263ad6c2d0c3951d002bc61f193f8d57264f013f7e9c15c06a69fbc40"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/point_ledger",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "516b468f9c0a7204e5300169206a08b13a2b1bd73d7b1e504f517d05fd412f79",
+        "entry_sha256": "ab2d79fd854c3ea28fb52cc200ac695871d0d82426779b05b0a6cea13e8352c9"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/pos_refund_requests",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "7f340051c91583e8041730d0b0a3c1e230055358b64265e643ddd56cb39cd9c4",
+        "entry_sha256": "2be43f5bebef20eddff21a6f04e2efe50ef7bbcb1cda483df96bd9fbc4c25a8e"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/print_jobs",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "91318ac391f06c3357072c27ced6180ad12f63f889f9a8dcdf7267847893e16e",
+        "entry_sha256": "e78dc41f2c296c1429d816bd2f5e2f501d36d9342d6a1da75700cb21fd300db3"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/processed_messages",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "6483f265b70a2b5ddb6ee8f66b4491bf85c288da7a2834103af569c04307b22f",
+        "entry_sha256": "3013e2843936be615d5bc92151348385b31645247f56f866da445f21b5c64e0e"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/product_categories",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "159dbd3fcc61eed0ec53b73dc3d8fffe234f9339f91732aca58c299267de3c99",
+        "entry_sha256": "cef84dfcf794c353446a62745a6f3a311cdb6b8732b2a0ae860122d7348c54b5"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/product_feedbacks",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "671d5988097d258caed59f74b791e2641ba0fc291240561e6d5066720017d97f",
+        "entry_sha256": "7447d7cc61a70dd7a6ec86419ec13f5ef41c508fb3a563a5e5ea49d646a5c5dc"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/product_images",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "fd1fd1992c8ef7438eda4ac8d0a9127685c341f1456b59512d27542ffc80f4cd",
+        "entry_sha256": "2319c165cb898ed9ee26403ac653802dc0580026c0780d14caf3efad34a6e6dd"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/product_option_groups",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "8dfe78751450b00fe473e91996bd9279ee538fccdbc70f1d3735f81502c7850c",
+        "entry_sha256": "3126a2a652aaaca47e958405f38e4d22a718b9b3325359e5c8de918b7469e961"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/product_taste_profiles",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "10cdfa94c189ffa069457ef386bbfe01933fb1223622cb3f463934ced8e2a833",
+        "entry_sha256": "cb5d42228927c0dc39a18bd2854f21f9bb9875b040bdc9c43471e94ccfb20bed"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/products",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "da8baf2537e4c340b0c6077aa1ee535283e885db789de8d6d41cf867508c3467",
+        "entry_sha256": "c130870f0ceace153c8171e2365facd73e963616bc5f716945b5a54f451698c7"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/recharge_orders",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "b1ffb3496427131af5b1480cd59ff87541380c3df34cd76b3c8b8020bcc63dd9",
+        "entry_sha256": "e283749878c829bbe89c3ab3faa2c38fb3b4249969171df1baf1ce7d03687719"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/recharge_packages",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "ceac0b7bcaddc1a31df4782627e5035b28ba357cac5d9c7e05467460cc42f5e2",
+        "entry_sha256": "b1cdc5f47aa576caee9b432f87103f17c57a9feeba9b371b38b9293962f8f73b"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/role_permissions",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "ac45c31e5ddbcd3cf543e0c60f4d1d72c59a314b25c7855c5b3f601177d56551",
+        "entry_sha256": "2cc6682bc4dd6a38d958c17504e7540ba05ddabfc2cd851d5394eb889bdb1cd2"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/roles",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "9a6017a99ac8fe51ecfe0a641fc91800e705f3ce256235b25c51bf6852b448aa",
+        "entry_sha256": "a4d91b855fb74d698923ccfb07906fc5564e198bc2aedf5199967945b7f4d622"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/store_business_hours",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "64d8fae9fb44099f9cb25e9b4ef7734e2f1b0f6444dfd656dc6845537ab79678",
+        "entry_sha256": "08175885291fd3121584785aeebbc55b82c7d0ea8165088963c8a34b14abeb5b"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/store_product_stocks",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "a7db30c957d2f5b5f64131d091d75041d55378f7e1e46d1ba783710282e5e3e9",
+        "entry_sha256": "b2ac11a626c05e668c25ba8917c20a739b653085cae5ec26907d85f8c11126e9"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/store_settings",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "349b752b73c7d2b74e2c722433f172d0ba5316d56be8a5982f0cc5575f2f1042",
+        "entry_sha256": "f1019730857802dc057a35711786a2732d12adb3faa113ad7d2a947033f334e9"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/stores",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "571acaa90ed1a2424c9753d2c057fcc2014468335577b66e94216baf5761930f",
+        "entry_sha256": "c5e83c881ce7bc7ea9630e8317ab689975ce544637e2e075edd35fb49863c257"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/system_settings",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "3ba18ec6405723495c5f62929ef8e58eb9c7e66a01f8ba751b6e5d5df99b1c84",
+        "entry_sha256": "cc7290450a6399a9ace27311199f1c12fdbf25aea800739f897ac4877128449a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/tables",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "70ce9966d7f3788a83927b0a6b03f82fb263d9cf16e66d01bedd2282dfd39cab",
+        "entry_sha256": "c50300f727da552fbc1cdecb43afbd5b873b2c56aa604871ca4605b48f95b7a4"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/users",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "4b8324635d2465e5b78fe384e4859b75380baba16d2d54a6f16fe99af5c5d462",
+        "entry_sha256": "de995591d9f1a35fa7ac1d82488bcdb8925c02bb729fde729860ba1b29c72b4d"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/visitor_events",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "ce6b3aed435d95d9940ba0d434f3da055ca94b4a6617f139e2a63dbc542d94e8",
+        "entry_sha256": "4b8da883c6144b4112cd140278e970d99fb4638d71b557924b1200c769385df5"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/webhook_inbox",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "33fcfc055ecbab856db7e841c406bf2f9bd2627af4d0b1fa56c4c6d027d28e81",
+        "entry_sha256": "59d2c7bbf690c065876f000f643f55c6d6facbf576e3b4442e3770243b8f7bde"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/welcome_logs",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "ccae951a09f836b2aa8eaff1af6394e7ba6d04129f59bd48943b31d571d281fe",
+        "entry_sha256": "cad19896a0b5065928087ef9dfd5506f13e1d8011b88e7801da11eca0ad0f330"
+      }
+    ]
   }
 }

@@ -196,6 +196,20 @@
   "automation": {
     "mode": "auto"
   },
+  "database_sources": [
+    {
+      "source_id": "smart_noodle_house",
+      "engine": "mysql",
+      "database": "smart_noodle_house",
+      "namespaces": [
+        "smart_noodle_house"
+      ],
+      "credential_env": "AOCI_DB_DSN",
+      "connect_timeout_seconds": 10,
+      "query_timeout_seconds": 30,
+      "enabled": true
+    }
+  ],
   "ai": {
     "enabled": false,
     "provider": "openai-compatible",

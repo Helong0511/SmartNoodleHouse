@@ -60,3 +60,7 @@ tests/_db_audit_report.json
 
 # 编译产物
 *.pyc
+
+# AOCI local DB credential pointer (never commit)
+.aoci/db_dsn.env
+

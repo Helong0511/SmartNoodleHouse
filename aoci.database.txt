@@ -1,0 +1,68 @@
+#AOCI-DATABASE-VOLUME: 1
+
+===smart_noodle_house/smart_noodle_house/database://smart_noodle_house/smart_noodle_house/===
+ab_assignments[RA5T]: F:Customer assignment into A/B experiment buckets | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:-
+ab_experiments[EA5S]: F:A/B experiment definitions | R:- | A:- | S:-
+balance_ledger[TF8M]: F:Customer wallet balance movement ledger | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/users,database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:customer.balance must equal sum of accepted ledger deltas; never mutate balance without a ledger row
+cameras[EH6S]: F:Store camera device registry for welcome/face flows | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+cashier_shifts[TF7M]: F:POS cashier shift open/close and cash reconciliation | R:database://smart_noodle_house/smart_noodle_house/users,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:unique(open_operator_key) enforced at DB; duplicate inserts fail
+category_sort_schedule_items[MB4T]: F:Ordered category entries within a sort schedule | R:database://smart_noodle_house/smart_noodle_house/product_categories,database://smart_noodle_house/smart_noodle_house/category_sort_schedules | A:- | S:-
+category_sort_schedules[SB5S]: F:Scheduled category sort order campaigns | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+coupon_templates[EB7S]: F:Coupon template rules for issuance | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+customer_alipay_accounts[EI7S]: F:Alipay user bindings for customers | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:unique(alipay_user_id) enforced at DB; duplicate inserts fail
+customer_behavior_events[LA5S]: F:Behavioral analytics event stream for customers | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:-
+customer_coupons[EB7S]: F:Issued coupon instances owned by customers | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/stores,database://smart_noodle_house/smart_noodle_house/users | A:- | S:status transitions are one-way to USED/EXPIRED; template rules govern eligibility
+customer_identities[EI7T]: F:External identity links for a customer | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:unique(provider,provider_subject) enforced at DB; duplicate inserts fail
+customer_preferences[EU5S]: F:Persisted customer preference flags/settings | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:-
+customer_taste_profiles[EA6S]: F:Customer taste dimension/profile derived state | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:-
+customer_wechat_accounts[EI7S]: F:WeChat openid/unionid bindings for customers | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:openid is app-scoped; unionid may span apps - do not treat them as interchangeable
+customers[EI9L]: F:Customer master: identity, balances, points, member level, store affinity | R:database://smart_noodle_house/smart_noodle_house/member_levels,database://smart_noodle_house/smart_noodle_house/stores,database://smart_noodle_house/smart_noodle_house/tables | A:- | S:balance/points mutations must go through ledgers; do not write balances in place without ledger rows
+delivery_callback_logs[LN5S]: F:Raw delivery callback audit log | R:- | A:- | S:-
+delivery_orders[TN7M]: F:Third-party delivery platform order projection | R:database://smart_noodle_house/smart_noodle_house/orders | A:- | S:unique(order_id) enforced at DB; duplicate inserts fail
+delivery_product_maps[RN5S]: F:Local product to platform SKU mapping | R:database://smart_noodle_house/smart_noodle_house/products,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+delivery_refunds[TN7S]: F:Delivery-channel refund records | R:database://smart_noodle_house/smart_noodle_house/delivery_orders,database://smart_noodle_house/smart_noodle_house/orders | A:- | S:-
+delivery_sync_alerts[EN5S]: F:Delivery sync failure/alert records | R:- | A:- | S:-
+dining_sessions[TB7S]: F:Open table dining session linking customers and orders | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/stores,database://smart_noodle_house/smart_noodle_house/tables | A:- | S:-
+face_profiles[ES7S]: F:Face recognition profile bindings for customers | R:database://smart_noodle_house/smart_noodle_house/customers | A:- | S:biometric payloads are sensitive; do not log template bytes
+financial_ledger[TF8S]: F:Immutable financial movement ledger for cash/receivable reconciliation | R:database://smart_noodle_house/smart_noodle_house/delivery_orders,database://smart_noodle_house/smart_noodle_house/delivery_refunds,database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/payments,database://smart_noodle_house/smart_noodle_house/payment_refunds | A:- | S:append-only; corrections are compensating entries, not in-place edits
+member_levels[CB6T]: F:Membership tier dictionary | R:- | A:- | S:-
+operation_logs[LO6S]: F:Staff/admin operation audit log | R:- | A:- | S:-
+option_groups[EB6S]: F:Configurable product option group | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+options[EB6S]: F:Selectable option within a group | R:database://smart_noodle_house/smart_noodle_house/option_groups | A:- | S:-
+order_item_options[MB6T]: F:Selected option rows attached to an order item | R:database://smart_noodle_house/smart_noodle_house/order_items | A:- | S:-
+order_items[MB6S]: F:Line items for an order with product snapshot pricing | R:database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/products | A:- | S:-
+order_milestone_rewards[TB5T]: F:Milestone reward grants tied to order progress | R:database://smart_noodle_house/smart_noodle_house/stores,database://smart_noodle_house/smart_noodle_house/coupon_templates | A:- | S:-
+order_status_history[HB6S]: F:Append-only order status transition log | R:database://smart_noodle_house/smart_noodle_house/orders | A:- | S:never rewrite historical transitions; insert compensating events if needed
+orders[TB9L]: F:Core sales order header spanning dine-in, pickup, and delivery channels | R:database://smart_noodle_house/smart_noodle_house/customer_coupons,database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/dining_sessions,database://smart_noodle_house/smart_noodle_house/users,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:status transitions append order_status_history; payment_status is separate from order status
+outbox_events[QM7M]: F:Transactional outbox for reliable async side-effects | R:- | A:- | S:publishers mark processed only after successful dispatch; retries use attempt counters
+payment_callback_receipts[SF7T]: F:Idempotent receipt of payment provider callbacks | R:- | A:- | S:unique callback identity prevents double settlement
+payment_refunds[TF8M]: F:Refund transactions against payments with provider reconciliation fields | R:database://smart_noodle_house/smart_noodle_house/users,database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/payments | A:- | S:refund amount cannot exceed remaining refundable payment amount
+payment_status_history[HF6T]: F:Append-only payment status transition log | R:database://smart_noodle_house/smart_noodle_house/payments | A:- | S:-
+payments[TF9M]: F:Payment attempt/settlement records bound to orders or recharges | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/users,database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/recharge_orders | A:- | S:provider callbacks are idempotent via payment_callback_receipts; status history is append-only
+permissions[EI7T]: F:RBAC permission codes | R:- | A:- | S:unique(code) enforced at DB; duplicate inserts fail
+platform_category_maps[RN5S]: F:External platform binding/mapping | R:database://smart_noodle_house/smart_noodle_house/product_categories,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+platform_store_bindings[RN5M]: F:External platform binding/mapping | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+point_ledger[TF7S]: F:Customer points movement ledger | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/payment_refunds | A:- | S:points balance changes require ledger rows; do not edit customer points in place alone
+pos_refund_requests[TW7M]: F:POS-initiated refund approval workflow requests | R:database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/payments,database://smart_noodle_house/smart_noodle_house/users | A:- | S:-
+print_jobs[QW7M]: F:Kitchen/receipt print job queue with retry state | R:database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+processed_messages[SR6T]: F:Deduped processed message identities | R:- | A:- | S:insert-only identity keys; conflicts mean already processed
+product_categories[EB6S]: F:Product category tree nodes | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+product_feedbacks[TU5S]: F:Customer feedback on products/orders | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/orders,database://smart_noodle_house/smart_noodle_house/products | A:- | S:-
+product_images[MB4T]: F:Product image assets ordered per product | R:database://smart_noodle_house/smart_noodle_house/products | A:- | S:-
+product_option_groups[RB5T]: F:Product to option-group association | R:database://smart_noodle_house/smart_noodle_house/option_groups,database://smart_noodle_house/smart_noodle_house/products | A:- | S:-
+product_taste_profiles[EA5S]: F:Derived/manual taste vectors for products | R:database://smart_noodle_house/smart_noodle_house/products,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+products[EB8M]: F:Sellable product catalog master with pricing and visibility flags | R:database://smart_noodle_house/smart_noodle_house/product_categories,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:unique(store_id,product_no) enforced at DB; duplicate inserts fail
+recharge_orders[TF7M]: F:Wallet recharge order headers awaiting/settling payment | R:database://smart_noodle_house/smart_noodle_house/customers,database://smart_noodle_house/smart_noodle_house/recharge_packages,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:unique(idempotency_key) enforced at DB; duplicate inserts fail
+recharge_packages[EF6S]: F:Sellable recharge package definitions | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+role_permissions[RI6T]: F:Many-to-many role to permission mapping | R:database://smart_noodle_house/smart_noodle_house/permissions,database://smart_noodle_house/smart_noodle_house/roles | A:- | S:-
+roles[EI7T]: F:RBAC role definitions | R:- | A:- | S:unique(code) enforced at DB; duplicate inserts fail
+store_business_hours[CC6S]: F:Weekly/exception business hours per store | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+store_product_stocks[SB7T]: F:Per-store product availability and stock counters | R:database://smart_noodle_house/smart_noodle_house/products,database://smart_noodle_house/smart_noodle_house/stores | A:- | S:stock is store-scoped; product master availability is not a substitute for store stock
+store_settings[CC6T]: F:Per-store key-value configuration overrides | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:-
+stores[ET8S]: F:Physical store master used for tenancy and inventory scopes | R:- | A:- | S:unique(store_no) enforced at DB; duplicate inserts fail
+system_settings[CC6T]: F:Global key-value system configuration | R:- | A:- | S:keys are unique; treat values as typed by convention of the key prefix
+tables[EB7S]: F:Dining table / QR binding entities within a store | R:database://smart_noodle_house/smart_noodle_house/stores | A:- | S:unique(qr_token) enforced at DB; duplicate inserts fail
+users[EI8S]: F:Staff/admin accounts for backend POS and management consoles | R:database://smart_noodle_house/smart_noodle_house/roles,database://smart_noodle_house/smart_noodle_house/stores | A:username | S:token_version invalidates issued JWTs on bump; authorization is role_permissions based, not username
+visitor_events[LA4S]: F:Anonymous/visitor tracking events | R:database://smart_noodle_house/smart_noodle_house/cameras | A:- | S:-
+webhook_inbox[QM7M]: F:Inbound webhook dedupe and processing inbox | R:- | A:- | S:unique(channel,event_id) prevents double-apply; mark processed after business commit
+welcome_logs[LU4T]: F:Face/camera welcome greetings log | R:database://smart_noodle_house/smart_noodle_house/cameras,database://smart_noodle_house/smart_noodle_house/customers | A:- | S:-

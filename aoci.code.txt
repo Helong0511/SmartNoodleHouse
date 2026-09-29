@@ -1,1 +1,709 @@
 #AOCI-CODE-VOLUME: 1
+
+===E:/SmartNoodleHouse/===
+.env.development.example[FC7M]: F:Windows local development env template copied to root .env for Settings | R:code:backend/app/core/config.py,code:.env.example | A:APP_ENV DATABASE_URL REDIS_URL | S:APP_ENV defaults to development and must not be used as a production template
+.env.example[FC8M]: F:Master env field catalog pointing to development or production concrete templates | R:code:.env.development.example,code:.env.production.example,code:backend/app/core/config.py | A:DATABASE_URL REDIS_URL JWT_SECRET | S:Filled real-secret .env must never be committed; runtime truth is Settings in config.py
+.env.production.example[FC8M]: F:Ubuntu production env template with hardened defaults for server deploy | R:code:backend/app/core/config.py,code:.env.example | A:APP_ENV APP_HOST APP_DEBUG JSON_LOGS | S:APP_ENV must stay production; development here relaxes startup and mock safety checks
+.gitattributes[FC7T]: F:Forces text=auto eol=lf so every checkout keeps LF line endings | R:- | A:* text=auto eol=lf | S:Without LF forcing Windows autocrlf rewrites make the whole AOCI Baseline look stale
+.gitignore[FC5T]: F:Git ignore secrets venv node_modules uploads logs IDE and local AOCI DSN pointer | R:- | A:- | S:Never list aoci.txt aoci.meta.txt aoci.code.txt or AGENTS.md here or managed-code scan skips them; .aoci/db_dsn.env is local DB credential pointer only
+AGENTS.md[SQ6T]: F:AOCI managed agent integration block describing cognition tools and closing rules | R:- | A:- | S:Host must not invent AOCI state machines; follow live Guide and aoci_rules only
+README.md[SO7L]: F:Project overview install start deploy and module map for SmartNoodleHouse | R:code:sql/struct.sql,code:sql/data.sql | A:- | S:Does not use Docker; MySQL Redis Python Node must be installed on the host
+pytest.ini[FQ5T]: F:Pytest asyncio tests path backend pythonpath | R:code:tests | A:- | S:Tests glob 测试_*.py under tests/
+sc.bat[XV2T]: F:Windows purge __pycache__ and pytest_cache under repo | R:- | A:- | S:Hardcoded targetDir E:\SmartNoodleHouse
+
+===E:/SmartNoodleHouse/.cursor/===
+mcp.json[FC5T]: F:Declares project Cursor MCP server aoci with absolute aoci.exe and repo path | R:- | A:- | S:Cursor must load this file and restart the Agent before aoci_* tools appear
+
+===E:/SmartNoodleHouse/.cursor/rules/===
+database-schema-sync.mdc[SC7T]: F:Cursor rule requiring sql/struct.sql data.sql data-test.sql as schema and seed truth | R:code:sql/struct.sql,code:sql/data.sql,code:sql/data-test.sql | A:- | S:Models Alembic and upgrade scripts must stay consistent with those three files and must not replace them as structure truth
+miniprogram-wechat-alipay-sync.mdc[SC7T]: F:Cursor rule mandating WeChat and Alipay miniprogram behavior stay synchronized | R:- | A:- | S:Changing only one miniprogram without checking the other violates this always-applied rule unless a platform API gap forces the difference
+project-terminology.mdc[SC5T]: F:Defines project terms for dual miniprograms and local vs production environments | R:code:.cursor/rules/miniprogram-wechat-alipay-sync.mdc | A:- | S:Saying miniprogram without naming one end means both WeChat and Alipay by default
+scene-and-encoding.mdc[SC6T]: F:Requires scene-separated configs and UTF-8 utf8mb4 encoding rules | R:code:.env.example,code:sql/struct.sql | A:- | S:Do not judge UTF-8 file corruption from PowerShell GBK console mojibake alone
+
+===E:/SmartNoodleHouse/.github/workflows/===
+ci.yml[OV6T]: F:GitHub Actions CI running backend pytest coverage and frontend build | R:code:scripts/检查门店隔离.py,code:backend/requirements.txt | A:JWT_SECRET FACE_ENCRYPTION_KEY ALLOW_*_MOCK | S:CI injects mock-allow and test secrets only; coverage fail-under is 35
+
+===E:/SmartNoodleHouse/.trae/documents/===
+外卖管理重构_plan.md[SB6S]: F:Implementation plan for multi-store Meituan Eleme delivery overhaul and anti-oversell | R:code:backend/app/services/stock_service.py,code:backend/app/services/delivery_service.py | A:- | S:Local stock_service is the sole stock truth; platforms are mirrors and refuse order when local deduct fails
+
+===E:/SmartNoodleHouse/.trae/specs/taste-recommendation-overhaul/===
+review.md[SQ6S]: F:Independent pass review of taste recommendation AC-1 to AC-14 against evidence | R:code:.trae/specs/taste-recommendation-overhaul/spec.md,code:.trae/specs/taste-recommendation-overhaul/tasks.md | A:- | S:-
+spec.md[SB7S]: F:PRD for taste profile recommendation A/B privacy and dual-miniprogram rollout | R:code:.trae/specs/taste-recommendation-overhaul/tasks.md | A:- | S:No external ML platform or LLM dialogue; MySQL Redis and in-process rules only
+tasks.md[SB6S]: F:Ordered implementation tasks and completion evidence for taste recommendation overhaul | R:code:.trae/specs/taste-recommendation-overhaul/spec.md,code:backend/alembic/versions/0018_taste_recommendation.py | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/===
+alembic.ini[FC4T]: F:Alembic INI locating scripts under alembic with placeholder sqlalchemy.url | R:code:backend/alembic/env.py | A:script_location | S:Real DB URL comes from app Settings in env.py not this placeholder
+requirements.lock[FV5T]: F:Pinned exact Python package versions for reproducible backend installs | R:code:backend/requirements.txt | A:- | S:Must stay within requirements.txt ranges; regenerate via scripts/gen_requirements_lock.py
+requirements.txt[FV6T]: F:Declares backend Python dependency version ranges including InsightFace and Pillow | R:code:backend/requirements.lock | A:- | S:Pillow floor 11.3.2 for CVE; gunicorn floor 23.0.0; InsightFace required in production
+
+===E:/SmartNoodleHouse/backend/alembic/===
+env.py[PC7T]: F:Alembic env loading Settings URL and Base metadata for online offline migrations | R:code:backend/app/core/config.py,code:backend/app/core/database.py,code:backend/app/models/__init__.py | A:get_url | S:Rewrites mysql+aiomysql to mysql+pymysql and sqlite+aiosqlite to sqlite for sync Alembic
+script.py.mako[XC3T]: F:Mako template for newly generated Alembic revision upgrade and downgrade stubs | R:- | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/alembic/versions/===
+0001_baseline.py[PC8T]: F:Baseline migration applying only CANONICAL SCHEMA DDL from sql/struct.sql | R:code:sql/struct.sql | A:upgrade | S:Extracts only BEGIN/END CANONICAL SCHEMA and never runs drop-database grants or seed sections
+0002_p0_hardening.py[PC7M]: F:P0 hardening migration adding operator webhook retry fields and ledger tables | R:code:backend/alembic/versions/0001_baseline.py | A:upgrade | S:Uses information_schema existence checks so re-runs skip already-present columns and indexes
+0003_p1_hardening.py[PC6T]: F:P1 migration that dedupes and adds welcome coupon UNIQUE customer_id template_id | R:code:backend/alembic/versions/0002_p0_hardening.py | A:upgrade | S:Conflicts with later multi-coupon-same-template policy; do not replay upgrade on DBs that need duplicates
+0004_p1_shift_open.py[PC6T]: F:Enforces at most one OPEN cashier_shifts row per operator via migration guards | R:code:backend/alembic/versions/0003_p1_hardening.py | A:upgrade | S:-
+0005_p1_merge_print.py[PC5T]: F:Adds customer_coupons.status_reason for merge_dup without new merge audit tables | R:code:backend/alembic/versions/0004_p1_shift_open.py | A:upgrade | S:Customer merge reuses operation_logs; FinancialLedger already exists in baseline
+0006_print_jobs.py[PC6T]: F:Creates print_jobs persistence table when absent for kitchen print queue | R:code:backend/alembic/versions/0005_p1_merge_print.py | A:upgrade | S:No-ops if print_jobs already exists
+0007_prod_indexes.py[PC6T]: F:Adds production indexes on orders payments refunds ledger and coupons when missing | R:code:backend/alembic/versions/0006_print_jobs.py | A:upgrade | S:Skips create when preferred name or alias index already covers the same columns
+0008_coupon_template_store.py[PC6T]: F:Adds coupon_templates.store_id with index and FK for per-store template isolation | R:code:backend/alembic/versions/0007_prod_indexes.py | A:upgrade | S:NULL store_id means HQ all-store template; non-null is store-only
+0009_product_checks.py[PC5T]: F:Adds CHECK constraints for non-negative stock and positive product and option prices | R:code:backend/alembic/versions/0008_coupon_template_store.py | A:upgrade | S:Idempotent via information_schema constraint existence checks before ADD
+0010_coupon_ledger_idempotency.py[PC7S]: F:Drops per-customer-template coupon uniqueness and adds ledger/point unique idempotency keys | R:code:backend/alembic/versions/0009_product_checks.py | A:upgrade | S:Downgrade never restores uk_cc_customer_template; earn_order_id is generated only for EARN rows
+0011_store_geo_option_scope.py[PC6S]: F:Adds store lat/lng and option_groups.store_id with store-scoped unique code | R:code:backend/alembic/versions/0010_coupon_ledger_idempotency.py | A:upgrade | S:Drops global option_groups code UNIQUE; store_scope is IFNULL(store_id,0) STORED for uniqueness
+0012_guest_member_dining_session.py[PC7S]: F:Adds customer guest/member status fields creates dining_sessions and links orders | R:code:backend/alembic/versions/0011_store_geo_option_scope.py | A:upgrade | S:Historical phones stay unverified without PHONE credentials; backfill promotes GUEST to MEMBER when level or completed profile exists
+0013_customer_identity_phone_security.py[PC7S]: F:Creates customer_identities backfills WeChat/Alipay subjects and resets unverified phones | R:code:backend/alembic/versions/0012_guest_member_dining_session.py | A:upgrade | S:UnionID backfill only when one customer per unionid; phone_verified forced 0 without matching verified PHONE identity
+0014_coupon_template_store_whitelist.py[PC5T]: F:Adds coupon_templates.store_whitelist JSON for HQ template store visibility | R:code:backend/alembic/versions/0013_customer_identity_phone_security.py | A:upgrade | S:NULL whitelist means all stores visible; JSON array limits visibility
+0015_delivery_menu_ops.py[PC6S]: F:Adds delivery hours category maps sync alerts and platform_store_bindings auto-open fields | R:code:backend/alembic/versions/0014_coupon_template_store_whitelist.py | A:upgrade | S:SQLite uses PRAGMA/BOOLEAN branches; MySQL uses information_schema and TINYINT DDL
+0016_audit_log_category_store.py[PC5S]: F:Adds operation_logs category and store_id with module backfill and query indexes | R:code:backend/alembic/versions/0015_delivery_menu_ops.py | A:upgrade | S:SQLite downgrade keeps columns because DROP COLUMN is unsupported
+0017_financial_ledger_idempotency.py[PC7T]: F:Adds composite unique indexes on financial_ledger entry_type plus business keys after dedupe | R:code:backend/alembic/versions/0016_audit_log_category_store.py | A:upgrade | S:Deletes duplicate ledger rows before indexing; NULL business keys remain unconstrained
+0018_taste_recommendation.py[PC7M]: F:Creates taste recommendation tables and customer/category recommend consent columns | R:code:backend/alembic/versions/0017_financial_ledger_idempotency.py | A:upgrade | S:Production CREATE TABLE DDL is MySQL utf8mb4; sqlite helpers only check presence
+0019_three_way_alignment.py[PC7S]: F:Aligns delivery_orders NOT NULL uniques and drops redundant financial_ledger single-column uniques | R:code:backend/alembic/versions/0018_taste_recommendation.py | A:upgrade | S:SQLite NOT NULL modify is skipped; drops uk_fl_* in favor of 0017 composite uniques
+0020_option_group_store_scope_not_null.py[PC5T]: F:Sets option_groups.store_scope GENERATED column to NOT NULL on MySQL | R:code:backend/alembic/versions/0019_three_way_alignment.py | A:upgrade | S:No-op on sqlite or missing/already-NOT-NULL column; MODIFY must restate GENERATED expression
+0021_discount_scale_2.py[PC5T]: F:Forces member_levels.discount_rate and coupon_templates.discount_value to scale-2 decimals | R:code:backend/alembic/versions/0020_option_group_store_scope_not_null.py | A:upgrade | S:No-op on sqlite; skips when NUMERIC_SCALE is already 2
+0022_category_schedule_auto_sort.py[PC4T]: F:Adds category_sort_schedules auto_sort and auto_updated_at for sales-based sorting | R:code:backend/alembic/versions/0021_discount_scale_2.py | A:upgrade | S:SQLite downgrade no-ops because DROP COLUMN is unsupported
+0023_store_logo.py[PC4T]: F:Adds stores.logo nullable varchar path for store branding assets | R:code:backend/alembic/versions/0022_category_schedule_auto_sort.py | A:upgrade | S:Idempotent skip if column exists; sqlite downgrade no-ops
+0024_order_milestone_rewards.py[PC5T]: F:Creates order_milestone_rewards for store cumulative-order coupon thresholds | R:code:backend/alembic/versions/0023_store_logo.py | A:upgrade | S:Unique on store_id+threshold_orders; returns early if table already exists
+
+===E:/SmartNoodleHouse/backend/app/===
+__init__.py[RA1T]: F:Marks the backend FastAPI application package with product docstring | R:- | A:- | S:-
+bootstrap_path.py[RR3T]: F:Inserts repository root into sys.path so camera package imports under backend/ | R:code:camera/__init__.py | A:- | S:parents[2] from backend/app must be repo root
+main.py[AG9L]: F:FastAPI app factory lifespan leader schedulers middleware CORS and router mount | R:code:backend/app/core/startup_checks.py,code:backend/app/core/leader_lock.py,code:backend/app/api/v1/__init__.py | A:lifespan create_app | S:validate_settings runs before serving; production DB connect failure SystemExit; process_role worker never acquires leader
+
+===E:/SmartNoodleHouse/backend/app/api/===
+deps.py[MI8M]: F:FastAPI auth dependencies for staff/customer JWT and permission kitchen POS gates | R:code:backend/app/core/security.py,code:backend/app/core/database.py,code:backend/app/models/__init__.py | A:get_current_user get_current_customer require_permission | S:Staff requires typ=staff and matching token_version; customers also need account_status ACTIVE; SUPER_ADMIN bypasses permission codes; get_staff_or_customer rejects non-staff/non-customer typ
+
+===E:/SmartNoodleHouse/backend/app/api/v1/===
+__init__.py[AN6T]: F:Aggregates all v1 API routers under the /api prefix into api_router | R:code:backend/app/api/deps.py,code:backend/app/api/v1/orders.py,code:backend/app/api/v1/payments.py | A:api_router | S:-
+ab_experiments.py[EA6S]: F:Admin CRUD and date-range report endpoints for A/B experiments | R:code:backend/app/services/ab_service.py,code:backend/app/api/deps.py,code:backend/app/services/audit_service.py | A:list_experiments upsert_experiment experiment_report | S:Audit target_id stays null because experiment key is string not bigint; write paths require system:manage
+audit_logs.py[EO7S]: F:Lists operation audit logs with role-based visibility category filters and paging | R:code:backend/app/api/deps.py,code:backend/app/services/store_scope.py,code:backend/app/models/__init__.py | A:list_audit_logs list_audit_categories | S:Non-super cannot see DANGER/INTRUSION; STORE_ADMIN sees store-or-self; others only self-and-store; LIKE wildcards are escaped
+auth.py[EI8M]: F:Staff login me verify-password and logout issuing JWT with token_version | R:code:backend/app/core/security.py,code:backend/app/api/deps.py | A:login me staff_logout | S:Login lock is per username+IP after 3 fails in 5m; logout increments token_version to revoke prior tokens
+cameras.py[EH8L]: F:Camera CRUD lifecycle visitor stats and MJPEG stream with encrypted credentials | R:code:backend/app/api/deps.py,code:backend/app/core/security.py,code:camera/camera_manager.py | A:list_cameras camera_stream create_camera_stream_ticket | S:Passwords never stored plaintext; query auth must be short stream ticket not long staff JWT; stream ticket cam id and store rechecked
+client_logs.py[EO5S]: F:Ingests frontend WeChat Alipay client log batches into logs/{source}/ files | R:code:backend/app/services/file_log_service.py | A:ingest_client_logs | S:Strips control chars and redacts secrets before write; body size capped by model validators
+coupons.py[EB7M]: F:Admin coupon template issue listing and store milestone reward CRUD | R:code:backend/app/services/coupon_service.py,code:backend/app/api/deps.py,code:backend/app/services/store_scope.py | A:list_templates issue_coupon replace_milestones | S:Template manage access and milestone store resolved via store_scope binding rules
+customers.py[EI7L]: F:Staff customer list detail merge preferences; WeChat/Alipay login routes deprecated | R:code:backend/app/services/customer_merge_service.py,code:backend/app/api/deps.py | A:list_customers merge_customers get_preferences | S:wechat/alipay login endpoints here are deprecated stubs; use miniprogram routes; store-scoped assert before view/merge
+dashboard.py[EA6T]: F:Dashboard revenue KPI series payment and delivery stats for order:read staff | R:code:backend/app/services/revenue_stats.py,code:backend/app/api/deps.py | A:get_dashboard | S:-
+delivery.py[EI8L]: F:Meituan/Eleme webhooks orders refunds bindings maps sync and merchant actions | R:code:backend/app/services/delivery_service.py,code:backend/app/services/webhook_inbox.py,code:backend/app/api/deps.py | A:meituan_notify eleme_notify refund_action | S:Platform notify verifies signature then enqueues webhook_inbox; duplicate inbox items skip reprocess
+financial_ledger.py[EB6T]: F:Read-only paged financial_ledger query scoped by bound store | R:code:backend/app/services/store_scope.py,code:backend/app/api/deps.py | A:list_financial_ledger | S:Requires payment:read; store filter via require_bound_store
+health.py[ER6T]: F:Unauthenticated /health and /ready probing MySQL SELECT 1 and Redis PING | R:code:backend/app/core/redis_client.py,code:backend/app/api/deps.py | A:readiness | S:Returns HTTP 503 when either check fails; no auth required for LB probes
+member_levels.py[EB5T]: F:Lists and batch-updates member_levels for store-scoped staff | R:code:backend/app/services/customer_service.py,code:backend/app/api/deps.py | A:list_member_levels update_member_levels | S:Write path requires customer:manage
+miniprogram.py[EU9L]: F:WeChat/Alipay mini login member profile face dining-session cart and privacy APIs | R:code:backend/app/services/miniprogram_auth.py,code:backend/app/services/dining_session_service.py,code:backend/app/services/face_service.py | A:wechat_mini_login alipay_mini_login scan_entry consent_face | S:Manual phones save with phone_verified=0; face consent requires enable_face_welcome and liveness challenge when mode=challenge
+orders.py[EB9L]: F:Customer POS kitchen display order create list status and table transfer APIs | R:code:backend/app/services/order_service.py,code:backend/app/api/deps.py,code:backend/app/services/order_access.py | A:create_order create_pos_order update_order_status | S:Customer order channel forced from JWT not client POS/外卖; production display requires configured display_screen_token
+payments.py[EB9L]: F:Order pay cash POS-scan refund sync and WeChat/Alipay payment notify callbacks | R:code:backend/app/services/payment_service.py,code:backend/app/api/deps.py | A:create_payment wechat_notify alipay_notify refund_payment | S:Direct refund rejects CASHIER; cashiers must use POS refund approval; wechat refund-notify reuses wechat_notify
+performance.py[EO4T]: F:Admin reco route latency P50/P95/P99 QPS from Redis minute buckets | R:code:backend/app/core/perf_metrics.py,code:backend/app/api/deps.py | A:reco_metrics | S:Requires order:read
+pos.py[EB7M]: F:POS shift open/close daily settlement and cashier refund apply/approve flows | R:code:backend/app/services/pos_shift_service.py,code:backend/app/services/pos_refund_service.py,code:backend/app/api/deps.py | A:open_shift apply_pos_refund approve_pos_refund | S:Refund approve/reject gated beyond plain require_pos; settlement needs manage capability
+print_jobs.py[EB5S]: F:Kitchen print_jobs list and manual retry within store scope | R:code:backend/app/services/print_service.py,code:backend/app/api/deps.py | A:list_print_jobs retry_print_job | S:Requires kitchen gate; assert_store_access before retry
+products.py[EB8L]: F:Categories products options stocks schedules menu-copy and public menu listing APIs | R:code:backend/app/services/menu_service.py,code:backend/app/services/stock_service.py,code:backend/app/api/deps.py | A:list_products list_categories copy_menu_to_store | S:Public menu endpoints allow OptionalStaffUser; product image URLs must pass safe URL assert
+settings.py[EC8L]: F:System/store settings overview health scheduler business keys and store logo upload | R:code:backend/app/core/config.py,code:backend/app/services/system_settings_service.py,code:backend/app/api/deps.py | A:get_settings_overview update_business_settings update_store_business | S:Env overview masks secrets; store business overrides need store settings permission not only system:manage
+tables.py[EB6M]: F:Dining table CRUD POS list QR resolve and regenerate-qr endpoints | R:code:backend/app/services/qr_links.py,code:backend/app/api/deps.py,code:backend/app/services/store_scope.py | A:list_tables create_table resolve_table | S:resolve_table is public by qr_token; manage paths require table:manage and owned-table checks
+users.py[EI7L]: F:Staff user CRUD role permission matrix reset-password with multi-store binding | R:code:backend/app/core/security.py,code:backend/app/api/deps.py | A:list_users create_user update_role_permissions | S:Actors cannot assign roles above their privilege via _assert_can_assign_role
+wallet.py[EB7L]: F:Recharge tiers orders pay notify balance query and staff balance adjust | R:code:backend/app/services/balance_service.py,code:backend/app/services/payment_service.py | A:create_recharge adjust_balance | S:Recharge create reuses existing row when idempotency_key matches
+websocket.py[EM7M]: F:Authenticated WebSocket fanout by channel with role/permission subscribe gates | R:code:backend/app/services/websocket_manager.py,code:backend/app/core/security.py | A:_ws_loop staff_may_subscribe | S:Long JWT forbidden in query; display channel needs opaque display_screen_token not JWT
+welcome.py[EH5S]: F:Welcome/visitor recognition log listing for store staff | R:code:backend/app/api/deps.py,code:backend/app/services/store_scope.py | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/app/core/===
+biz_no.py[CB7S]: F:Generates and parses 27-char order/payment and 20-char customer/visitor biz numbers | R:code:backend/app/core/response.py | A:generate_no parse_biz_no store_code | S:Random alphabet drops O0I1; CU/VI compact 20 chars; unknown payment provider defaults to PW
+cache_keys.py[CD6T]: F:Central Redis key builders for reco menu cache and cart fingerprints | R:- | A:reco_key menu_catalog_key cart_fingerprint | S:RECO_TTL and MENU_CATALOG_TTL capped at 120s; callers must pass TTL within that
+config.py[RC9M]: F:Pydantic Settings loading root/backend .env as runtime truth for all backends | R:code:.env.example,code:.env.development.example,code:.env.production.example | A:Settings get_settings | S:Loads project-root .env before backend/.env; allow_*_mock flags must stay false in production startup
+database.py[PD8T]: F:Creates async SQLAlchemy engine session factory Base and get_db dependency | R:code:backend/app/core/config.py,code:backend/app/core/biz_no.py | A:get_db Base engine | S:Forces REPEATABLE READ isolation; get_db commits on success and rolls back on exception
+error_codes.py[CG4T]: F:Defines numeric business error codes and Chinese message map | R:code:backend/app/core/exceptions.py | A:- | S:-
+exceptions.py[CG6T]: F:AppException and FastAPI handlers mapping integrity and operational DB errors | R:code:backend/app/core/response.py,code:backend/app/core/error_codes.py | A:AppException app_exception_handler | S:Integrity on order_no/idempotency keys returns user-facing duplicate message not raw SQL
+http_client.py[IN5T]: F:Shared httpx AsyncClient pool for outbound HTTP integrations | R:- | A:get_http_client close_http_client | S:follow_redirects=False; connect timeout 5s request 15s
+intrusion_detection.py[MS7S]: F:Detects SQL-injection path-traversal and probe patterns on inbound requests | R:code:backend/app/main.py | A:detect_intrusion | S:Health and payment/delivery notify paths are exempt from scanning
+ip_allowlist.py[MS7S]: F:Resolves client IP via trusted proxies and enforces webhook IP allowlist middleware | R:code:backend/app/core/config.py | A:client_ip WebhookAllowlistMiddleware | S:Production with webhook_require_allowlist rejects non-allowlisted webhook peers
+leader_lock.py[RR8S]: F:Redis NX leader election with atomic Lua renew/release for multi-worker schedulers | R:code:backend/app/core/redis_client.py,code:backend/app/main.py | A:try_acquire_leader renew_leader_loop confirm_leader_owned | S:Release/renew use compare-and-delete/expire Lua so another worker lock cannot be stolen
+logging_config.py[RO5T]: F:Configures console and rotating backend file logging with optional JSON format | R:code:backend/app/core/config.py | A:setup_logging JsonFormatter | S:-
+menu_cache.py[CD6T]: F:Redis menu bundle cache and per-store monotonic version stamps for clients | R:code:backend/app/core/redis_client.py | A:get_menu_bundle bump_menu_version | S:Bundle TTL 60s; Redis failures degrade silently without blocking menu reads
+perf_metrics.py[CP5S]: F:Records per-route minute-bucket latency samples and aggregates P50/P95/P99 QPS | R:code:backend/app/core/redis_client.py | A:record_request_timing query_perf_metrics | S:Redis errors never fail the request path; bucket TTL 25h
+performance_middleware.py[MP5T]: F:Middleware recording route timings and gzipping large JSON responses | R:code:backend/app/core/perf_metrics.py | A:PerformanceMetricsMiddleware JsonGZipMiddleware | S:Skips health docs uploads; gzip only JSON bodies over 1KB
+rate_limit.py[MR7T]: F:Redis fixed-window rate limit middleware with stricter limits on auth/payment paths | R:code:backend/app/core/redis_client.py,code:backend/app/core/config.py | A:RateLimitMiddleware | S:INCR+EXPIRE via Lua so keys never stick without TTL; disabled only when development and enable_rate_limit false
+redis_client.py[RD7T]: F:Async Redis singleton accessor try_get_redis and request-id middleware | R:code:backend/app/core/config.py | A:get_redis try_get_redis RequestIDMiddleware | S:Business truth is MySQL; Redis outage must degrade not take the site down except leader fences
+response.py[CG6T]: F:Standard success/error envelopes money helpers and Asia/Shanghai local time utils | R:code:backend/app/core/config.py | A:success error now_local money | S:now_local uses app_timezone from Settings not server local TZ
+security.py[RI9S]: F:Password hashing and staff/customer/stream JWT create/decode with aud checks | R:code:backend/app/core/config.py,code:backend/app/services/system_settings_service.py | A:create_access_token create_customer_token decode_token | S:Extra claims cannot override reserved typ/sub/ver/aud; stream ticket TTL clamped 15-300s
+startup_checks.py[RC9M]: F:Validates Settings entropy mocks debug and production-only hard requirements at boot | R:code:backend/app/core/config.py,code:backend/app/main.py | A:validate_settings | S:Production errors abort boot for weak JWT/face keys and any allow_*_mock or APP_DEBUG
+
+===E:/SmartNoodleHouse/backend/app/domains/===
+__init__.py[DG3T]: F:Documents domain facade boundaries for auth user product order messaging | R:- | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/app/domains/auth/===
+__init__.py[DI3T]: F:Re-exports auth deps and password/JWT helpers as the auth domain facade | R:code:backend/app/api/deps.py,code:backend/app/core/security.py | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/app/domains/messaging/===
+__init__.py[DM4T]: F:Messaging domain facade for outbox webhook inbox and idempotency helpers | R:code:backend/app/domains/messaging/idempotency.py,code:backend/app/services/outbox_worker.py,code:backend/app/services/webhook_inbox.py | A:- | S:Durable queue is MySQL outbox/inbox not Redis lists
+idempotency.py[DM7S]: F:Message consume idempotency via processed_messages UNIQUE plus Redis accelerate marks | R:code:backend/app/core/redis_client.py,code:backend/app/models/__init__.py | A:try_acquire release mark_processed_redis | S:MySQL UNIQUE is source of truth; pass mark_redis=False inside open transactions then mark after commit
+
+===E:/SmartNoodleHouse/backend/app/domains/order/===
+__init__.py[DB2T]: F:Order domain package placeholder for future order facade exports | R:- | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/app/domains/product/===
+__init__.py[DB2T]: F:Product domain package placeholder for future product facade exports | R:- | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/app/domains/user/===
+__init__.py[DI1T]: F:User domain package placeholder for staff/customer facade exports | R:- | A:- | S:-
+
+===E:/SmartNoodleHouse/backend/app/models/===
+__init__.py[PD9L]: F:SQLAlchemy ORM models for all SmartNoodleHouse tables and relationships | R:code:backend/app/core/database.py,code:sql/struct.sql | A:Base User Order Payment Customer | S:Must stay aligned with sql/struct.sql; models alone are not schema truth
+
+===E:/SmartNoodleHouse/backend/app/schemas/===
+common.py[EI3T]: F:Shared LoginRequest TokenResponse and PaginationParams pydantic schemas | R:code:backend/app/api/v1/auth.py | A:LoginRequest PaginationParams | S:page_size capped at 100
+coupon.py[EB4T]: F:Pydantic schemas for coupon template create/update and issue requests | R:code:backend/app/api/v1/coupons.py | A:CouponTemplateCreate CouponIssueRequest | S:discount_value must be gt 0; coupon_type limited to FIXED|PERCENT|VOUCHER
+member_level.py[EB3T]: F:Batch update schema for member_levels discount_rate and min_points | R:code:backend/app/api/v1/member_levels.py | A:MemberLevelsBatchUpdate | S:discount_rate via money; must be gt0 and le1
+order.py[EB6T]: F:Order POS payment create schemas with quantity and idempotency_key bounds | R:code:backend/app/api/v1/orders.py,code:backend/app/api/v1/payments.py | A:OrderCreate PosOrderCreate PaymentCreate | S:Item quantity max 999; idempotency_key when set must be 8-128 chars
+pagination.py[CG3T]: F:Shared PageParams and clamp_page helper capping page_size | R:- | A:PageParams clamp_page | S:Default max page_size is 100
+product.py[EB5M]: F:Product category option schedule and menu-copy request/response schemas | R:code:backend/app/api/v1/products.py | A:ProductCreate CategoryCreate MenuCopyRequest | S:-
+reco.py[EA4T]: F:Schemas for behavior events feedback A/B upsert and privacy reco payloads | R:code:backend/app/api/v1/ab_experiments.py,code:backend/app/api/v1/miniprogram.py | A:BehaviorEventIn AbExperimentUpsert | S:event_id required 1-64 chars for idempotent ingest
+settings.py[EC4T]: F:BusinessSettingsUpdate and StoreUpdate validators for settings API bodies | R:code:backend/app/api/v1/settings.py | A:BusinessSettingsUpdate StoreUpdate | S:Business batch max 80 keys; store logo must be in-site uploads path
+
+===E:/SmartNoodleHouse/backend/app/services/===
+ab_service.py[DA7L]: F:A/B experiment CRUD stable hash assignment and conversion report aggregates | R:code:backend/app/api/v1/ab_experiments.py,code:backend/app/models/__init__.py | A:AbService.validate_payload assign | S:Bucket traffic must sum to 100; assignment is hashed and persisted idempotently
+alipay_client.py[IB7M]: F:Alipay open-platform RSA2 trade create query refund and barcode pay client | R:code:backend/app/utils/alipay_keys.py,code:backend/app/core/config.py | A:trade_create trade_refund trade_bar_pay | S:Requires app_id private_key public_key; mini pay needs buyer alipay user id
+alipay_mini_client.py[II6S]: F:Decrypts Alipay mini-program phone ciphertext with AES key | R:code:backend/app/core/config.py | A:decrypt_phone_response decrypt_alipay_content | S:Production rejects plaintext phone responses; needs ALIPAY_AES_KEY
+audit_service.py[DO7M]: F:Writes operation_logs with role-based category store inference and secret redaction | R:code:backend/app/models/__init__.py | A:AuditService.log_staff | S:Unset store_id auto-infers from user; explicit None clears store for cross-store system ops
+balance_service.py[DB7M]: F:Wallet principal/gift credit debit and staff adjust with balance_ledger rows | R:code:backend/app/models/__init__.py,code:backend/app/core/biz_no.py | A:BalanceService.debit credit adjust | S:Debit requires MEMBER status; gift balance spends before principal; adjust cannot go negative
+barcode_pay_service.py[IB6S]: F:POS barcode pay settle with WeChat/Alipay USERPAYING poll loops | R:code:backend/app/services/wechat_pay_v2_client.py,code:backend/app/services/alipay_client.py | A:settle_wechat_barcode settle_alipay_barcode | S:Poll waits ~45s per official guidance then times out asking customer confirm
+behavior_event_service.py[DA5S]: F:Ingests whitelisted customer behavior events with event_id idempotent insert | R:code:backend/app/models/__init__.py | A:ingest_events normalize_event | S:Drops events when recommend_opt_in off; duplicates ignored by event_id unique
+camera_credentials.py[IS7M]: F:Encrypts camera passwords and blocks SSRF to metadata/loopback camera URLs | R:code:backend/app/services/face_service.py | A:encrypt_password assert_camera_url_safe build_connect_source | S:Blocks 169.254.169.254 and loopback/link-local; plaintext password must not remain in URL
+category_require.py[DB4T]: F:Resolves product vs category purchase-require ID lists for cart gating | R:- | A:resolve_product_requires normalize_id_list | S:Product-level require overrides category default when customized
+category_schedule.py[DB5S]: F:Picks active category sort schedule by local time window and reorders categories | R:code:backend/app/core/response.py,code:backend/app/models/__init__.py | A:apply_category_schedule_sort pick_active_schedule | S:No-op when categories span multiple stores or store_id missing
+category_schedule_auto.py[DB6M]: F:Auto-refreshes category schedule item order from historical slot sales | R:code:backend/app/services/category_schedule.py,code:backend/app/models/__init__.py | A:refresh_schedule_auto_sort refresh_all_category_schedule_auto_sort | S:Only schedules with auto_sort enabled are rewritten from paid sales
+coupon_service.py[DB8L]: F:Coupon template issue validate price and redeem plus store whitelist visibility | R:code:backend/app/models/__init__.py,code:backend/app/api/v1/coupons.py | A:CouponService | S:HQ templates use store_whitelist JSON; NULL means all stores; store templates only that store
+customer_display.py[DU5S]: F:Builds customer-facing display board payloads for kitchen call screens | R:code:backend/app/models/__init__.py | A:- | S:-
+customer_merge_service.py[DI7L]: F:Merges duplicate customer accounts transferring coupons points faces and orders | R:code:backend/app/models/__init__.py,code:backend/app/services/audit_service.py | A:- | S:Merge is irreversible ledger move; conflicts on unique identities must be resolved before merge
+customer_service.py[DB9L]: F:Customer lifecycle phone bind member activate and OrderCreateService with stock | R:code:backend/app/services/stock_service.py,code:backend/app/services/dining_session_service.py,code:backend/app/models/__init__.py | A:OrderCreateService CustomerService | S:Order idempotency_key is store-scoped; member_status not nickname heuristics; unverified phones stay phone_verified=0
+delivery_context.py[IB5S]: F:Resolves platform store binding context credentials and notify URLs for delivery ops | R:code:backend/app/models/__init__.py,code:backend/app/core/config.py | A:- | S:Env token fallback only when delivery_env_fallback_store_id matches
+delivery_events.py[IM5S]: F:Maps platform webhook event types to internal delivery order state handlers | R:code:backend/app/services/delivery_service.py | A:- | S:-
+delivery_providers.py[IN7L]: F:Meituan/Eleme provider adapters for sign verify menu sync and order APIs | R:code:backend/app/services/delivery_sign.py,code:backend/app/core/config.py | A:verify_notify | S:allow_delivery_mock only outside production; real calls require binding secrets
+delivery_service.py[IB8L]: F:Delivery order ingest confirm cancel refund and stock deduction orchestration | R:code:backend/app/services/stock_service.py,code:backend/app/services/delivery_providers.py,code:backend/app/services/webhook_inbox.py | A:handle_notify merchant_confirm | S:Idempotency key platform:platform_order_id; auto_confirm marks local ACCEPTED before platform confirm with deferred rollback
+delivery_sign.py[IS6S]: F:Meituan/Eleme delivery request and callback signature helpers | R:code:backend/app/services/delivery_providers.py | A:meituan_sign meituan_verify_callback eleme_shop_sign | S:Meituan MD5 uses url+query+secret lowercase; verify must match platform docs exactly
+delivery_sync_handlers.py[IM6S]: F:Outbox handlers mirroring local stock/status to Meituan Eleme platforms | R:code:backend/app/services/outbox_worker.py,code:backend/app/services/delivery_context.py | A:delivery_stock_mirror_handler | S:Handlers must be idempotent; registered via outbox_worker import side effects
+delivery_tasks.py[IW5T]: F:Runs deferred delivery platform API callbacks including confirm rollback | R:code:backend/app/services/delivery_service.py | A:run_deferred_tasks _rollback_confirm | S:_rollback_confirm undoes local ACCEPTED when platform confirm fails
+dining_session_service.py[DB6S]: F:Starts refreshes and expires ACTIVE dining_sessions after table bind | R:code:backend/app/models/__init__.py | A:DiningSessionService | S:expire_stale marks expired sessions before start_or_refresh; inactive customer raises 401
+escpos_client.py[IH6M]: F:Builds ESC/POS bytes for local TCP 9100 kitchen printers including barcode QR | R:code:backend/app/services/print_service.py | A:_encode_text _barcode_code128 _qr_code | S:Assumes 80mm XP-80T class printers over TCP 9100
+face_extractor.py[KH7S]: F:Extracts InsightFace 512D embeddings with quality gates and optional OpenCV fallback | R:code:backend/app/core/config.py | A:extract_face_embedding assess_face_quality | S:Production forbids OpenCV fallback unless allow_opencv_face_fallback; InsightFace preferred
+face_liveness.py[KH6S]: F:Multi-frame face track confirmation and simple liveness heuristics | R:code:backend/app/services/face_service.py | A:MultiFrameTracker check_liveness_simple | S:Tracks expire after ttl_seconds without sightings
+face_liveness_service.py[KS7S]: F:Issues and verifies Redis-backed face liveness challenge tokens | R:code:backend/app/core/redis_client.py,code:backend/app/core/config.py | A:generate_liveness_challenge verify_liveness_challenge | S:Challenge mode fail-closed if Redis down; token deleted atomically to stop replay
+face_service.py[KS8L]: F:Encrypts face embeddings registers matches and drives welcome/visitor flows | R:code:backend/app/core/config.py,code:backend/app/services/face_extractor.py | A:FaceEncryption FaceService WelcomeService | S:Decrypt tries current then previous face_encryption_key; embeddings never stored plaintext
+feedback_service.py[DA5S]: F:Stores product feedback and triggers taste learning when opt-in enabled | R:code:backend/app/services/taste_learning_service.py,code:backend/app/models/__init__.py | A:FeedbackService | S:Learning only for recommend_opt_in=1; unique per order+product+customer upserts
+file_log_service.py[RO5M]: F:Per-source rotating file logs with gzip and monthly tar archives under logs/ | R:code:backend/app/api/v1/client_logs.py | A:write_client_entries NumberedRotatingFileHandler | S:Rotates at 5MB; keeps 7 days then archives by month
+financial_ledger_service.py[DB7S]: F:Inserts SALE/REFUND financial_ledger rows with unique-key idempotent flush | R:code:backend/app/models/__init__.py | A:FinancialLedgerService _flush_idempotent | S:Duplicate unique business keys return existing row instead of raising
+kitchen_auto_service.py[DB5T]: F:Auto-completes stale kitchen orders past store timeout without manual finish | R:code:backend/app/core/config.py,code:backend/app/models/__init__.py | A:auto_complete_stale_kitchen_orders | S:Uses per-store timeout override when configured else global kitchen_auto_complete_minutes
+kitchen_claim.py[DB5S]: F:Kitchen KDS claim and takeover to prevent concurrent cooks on same order | R:code:backend/app/models/__init__.py | A:apply_kitchen_claim_for_status takeover_kitchen_claim | S:Other cook must takeover before conflicting status updates
+menu_copy_service.py[DB7L]: F:Copies categories option groups and products into another store as new rows | R:code:backend/app/models/__init__.py,code:backend/app/api/v1/products.py | A:MenuCopyService | S:Target store must be active; copies create new IDs never overwrite source
+menu_service.py[DB6M]: F:Builds cached mini-program menu bundles with schedule-sorted categories | R:code:backend/app/core/menu_cache.py,code:backend/app/services/category_schedule.py | A:build_menu_bundle get_or_build_menu_bundle | S:Only ON_SALE products and status=1 categories; build cache TTL 60s
+miniprogram_auth.py[II7S]: F:WeChat/Alipay code2session clients with gated auth mock for local debug | R:code:backend/app/core/config.py | A:WechatMiniAuth _mock_allowed | S:Production always forbids mock; mock needs allow_auth_mock or missing keys in development
+night_batch_service.py[DW6M]: F:Night-window batch refreshing sales flags taste profiles and reco learning | R:code:backend/app/services/taste_profile_service.py,code:backend/app/tasks/scheduler.py | A:refresh_all_sales_flags rebuild_all_product_taste_profiles | S:Heavy scans only run inside configured night window to protect peak hours
+object_storage.py[IP5S]: F:Local or S3/MinIO object storage backend for uploads | R:code:backend/app/core/config.py | A:get_storage LocalObjectStorage S3ObjectStorage | S:Backend selected by storage_backend setting local|s3
+option_code.py[DB5M]: F:Generates store-prefixed option/group/product logical business codes | R:code:backend/app/models/__init__.py | A:format_group_code name_to_logical_code | S:HQ shared rows use prefix 0000 when store_id is NULL
+order_access.py[DI6T]: F:Asserts customer owns order dining_session and may pay non-POS orders | R:code:backend/app/models/__init__.py | A:assert_customer_owns_order assert_dining_session_owner | S:Customers cannot access staff POS-created orders they do not own
+order_lifecycle.py[DB8S]: F:Applies order status transitions with history subscribe and stock restore | R:code:backend/app/services/order_state_machine.py,code:backend/app/services/stock_service.py | A:apply_order_status | S:Reloads order FOR UPDATE before transition; payment/mock paths cannot fake staff PAID
+order_service.py[DB7L]: F:Order price calculator with coupon/member rules and reorder helpers | R:code:backend/app/services/coupon_service.py,code:backend/app/services/stock_service.py | A:OrderPriceCalculator OrderReorderService | S:Requires positive store_id for priced carts; item count capped by MAX_ITEMS
+order_state_machine.py[DB8T]: F:Validates legal order status transitions for staff payment and system paths | R:- | A:assert_staff_transition assert_payment_transition | S:Staff cannot write PAID/REFUNDED/CANCELLED; PAID only via payment callback path
+outbox_worker.py[DM7M]: F:Claims processes and retries DB outbox messages with idempotent handlers | R:code:backend/app/domains/messaging/idempotency.py,code:backend/app/models/__init__.py | A:enqueue_outbox claim_outbox_item process_pending_outbox | S:UNIQUE outbox prevents dup enqueue; handlers use messaging idempotency with post-commit Redis mark
+paid_side_effects.py[DM7M]: F:Enqueues and handles PAID/refund outbox side effects for points coupons prefs milestones | R:code:backend/app/services/outbox_worker.py,code:backend/app/services/customer_service.py,code:backend/app/services/coupon_service.py | A:enqueue_paid_side_effects | S:Must enqueue in same txn as PAID; UNIQUE outbox keys make retries idempotent; run_paid_side_effects is deprecated
+payment_barcode.py[DB5T]: F:Detects WeChat vs Alipay auth_code from POS barcode patterns | R:- | A:detect_barcode_provider resolve_barcode_provider | S:WeChat is 18 digits starting 10-15; Alipay is 16-24 digits starting 25-30
+payment_service.py[DB9L]: F:Creates verifies refunds and callbacks WeChat/Alipay/cash payments with amount and replay guards | R:code:backend/app/services/payment_verify.py,code:backend/app/services/order_lifecycle.py,code:backend/app/services/webhook_replay.py | A:PaymentService WechatPayProvider AlipayPayProvider | S:Production forbids payment mock; callbacks claim_once before state change; paid amount must match order
+payment_verify.py[IS8S]: F:Fail-closed WeChat APIv3 and Alipay RSA2 callback signature verify and decrypt | R:code:backend/app/core/config.py,code:backend/app/utils/alipay_keys.py | A:WechatPayVerifier AlipayVerifier | S:Rejects when keys missing unless ALLOW_PAYMENT_MOCK in debug development; WeChat timestamp skew capped at 300s
+pii_cleanup_service.py[DS6T]: F:Anonymizes recipient/rider PII on final-status delivery orders past retention | R:code:backend/app/models/__init__.py | A:anonymize_expired_delivery_pii | S:Only COMPLETED/CANCELLED/REFUNDED rows with recipient_phone still set; helper commits itself
+platform_token_service.py[II7S]: F:Refreshes Meituan/Eleme OAuth tokens before expiry with SKIP LOCKED | R:code:backend/app/services/delivery_sign.py,code:backend/app/services/secret_encryption.py | A:PlatformTokenService | S:FOR UPDATE SKIP LOCKED per binding; tokens stored encrypted via SecretEncryptionService
+pos_refund_service.py[DB8L]: F:POS refund request approve and execute with multi-payment allocation | R:code:backend/app/services/payment_service.py,code:backend/app/services/store_scope.py | A:PosRefundService | S:Cash refunded first then newest payments; approvers need STORE_ADMIN/SUPER_ADMIN or payment:refund
+pos_shift_service.py[DB6M]: F:Cashier shift open/close and per-provider settlement aggregates by store | R:code:backend/app/models/__init__.py | A:_aggregate_payments | S:Joins Order and RechargeOrder so store filter cannot pull other-store cashier payments
+preference_scene.py[DA5S]: F:Applies season weather weekday meal-slot multipliers to preference option scores | R:- | A:calendar_season apply_scene_multipliers | S:Read-side only; caps scene multiplier at 1.35; does not rewrite stored preferences
+print_service.py[IH7L]: F:Builds kitchen ticket text and prints via local ESC/POS or Xpyun cloud with retry jobs | R:code:backend/app/services/escpos_client.py,code:backend/app/services/xpyun_client.py | A:PrintService build_ticket_content print_order | S:XPYUN_ENABLED false skips all print; STALE_PRINTING_SEC 300 reclaim; content strips control chars
+print_tasks.py[IW5T]: F:Schedules deferred kitchen print tasks after commit on the event loop | R:code:backend/app/services/print_service.py | A:schedule_print run_print_ticket handle_deferred_print | S:Always commits PrintJob outcome even on failure; needs a running asyncio loop
+privacy_service.py[DS7M]: F:Manages recommend opt-in consent taste profile export and derived-data wipe | R:code:backend/app/services/audit_service.py | A:PrivacyService | S:Clearing removes behavior/profile/feedback/prefs but keeps orders; retention default 90 days
+product_sync_service.py[II7M]: F:Pushes ON_SALE store products and category maps to Meituan/Eleme | R:code:backend/app/services/delivery_providers.py,code:backend/app/services/delivery_context.py | A:ProductSyncService | S:Platform API failure does not mark local sync success; requires active PlatformStoreBinding
+qr_links.py[II5T]: F:Builds H5 scan and WeChat/Alipay mini-program scheme URLs for table tokens | R:code:backend/app/services/system_settings_service.py,code:backend/app/core/config.py | A:build_table_qr_links resolve_h5_public_base | S:Dev rewrites localhost H5 base to DEV_LAN_HOST for phone scanning
+reco_cache.py[DP5T]: F:Redis caches recommendation payloads with silent degrade on Redis failure | R:code:backend/app/core/redis_client.py,code:backend/app/core/cache_keys.py | A:get_cached_reco set_cached_reco invalidate_customer | S:Redis errors must not fail recommend path; TTL via RECO_TTL_SECONDS
+recommendation_service.py[DA8L]: F:Hybrid content/CF/popular/novel product ranking with COLD/WARM/HOT weights | R:code:backend/app/services/reco_cache.py,code:backend/app/models/__init__.py | A:RecommendationService rank_candidates | S:rank_candidates is pure for offline eval; MAX_SAME_CATEGORY_RUN=2; HOT needs at least 5 events
+revenue_stats.py[DA7L]: F:Computes net revenue paid minus refunds preferring financial_ledger when present | R:code:backend/app/models/__init__.py | A:net_revenue_since resolve_period | S:Refunds in window reduce that period even if payment was earlier; uses ledger SALE-REFUND when entries exist
+scheduler_admin.py[RW6M]: F:Persists APScheduler job overrides and hot-reloads via Redis pubsub | R:code:backend/app/tasks/scheduler.py,code:backend/app/models/__init__.py | A:is_job_enabled apply_overrides | S:Cron uses business timezone Asia/Shanghai not server UTC; missing override means enabled
+secret_encryption.py[IS7T]: F:Fernet-encrypts platform tokens with versioned snhenc prefix and legacy decrypt | R:code:backend/app/core/config.py | A:SecretEncryptionService | S:Requires SECRET_ENCRYPTION_KEY or FACE_ENCRYPTION_KEY; plaintext legacy values returned as-is
+status_history.py[DB5T]: F:Appends order and payment status history rows | R:code:backend/app/models/__init__.py | A:record_order_status record_payment_status | S:-
+stock_service.py[DB8M]: F:Atomically deducts and restores store/product stock and emits delivery stock mirrors | R:code:backend/app/services/outbox_worker.py | A:deduct_stock restore_stock | S:stock=999 means unlimited; lock product then store row; crossing zero resurrects DONE outbox to PENDING
+store_hours_service.py[DB6M]: F:Evaluates store business hours including cross-midnight and auto open/rest | R:code:backend/app/models/__init__.py | A:is_open_at desired_open_status | S:No configured hours returns None so auto open/close is skipped; close_time<=open_time means overnight
+store_scope.py[DI7T]: F:Resolves and asserts staff store isolation for non-super-admin users | R:- | A:effective_store_id require_bound_store assert_store_access | S:Non-super-admin unbound store raises 403; ignores requested store_id for non-admins
+system_settings_service.py[DC8L]: F:Resolves platform and per-store business settings overlaying DB over env defaults | R:code:backend/app/core/config.py | A:SystemSettingsService BUSINESS_SETTING_META | S:PLATFORM_ONLY_KEYS cannot be store-overridden; DB values beat .env at runtime
+table_resolve.py[DB6T]: F:Resolves dining table by qr_token with optional table_no fallback in development | R:code:backend/app/core/config.py | A:resolve_dining_table | S:Production accepts only qr_token; multi-store same table_no without store_id returns None
+taste_learning_service.py[DA7M]: F:Incrementally folds behavior pay and feedback events into customer taste scores | R:code:backend/app/services/taste_profile_service.py | A:TasteLearningService | S:Watermark is MAX last_event_at so only newer events fold; FEEDBACK weight 0 to avoid double-count with product_feedbacks
+taste_profile_service.py[DA7L]: F:Derges product taste dims/tags from rules with MANUAL overrides surviving AUTO | R:code:backend/app/models/__init__.py | A:derive_dimensions_and_tags upsert_manual recompute_product | S:MANUAL dim keys and tags_add/remove are not overwritten by AUTO recompute
+weather_client.py[II5T]: F:Fetches Open-Meteo current weather for store lat/lng with Redis cache | R:code:backend/app/core/redis_client.py | A:fetch_current_weather | S:Failures return None silently; cache TTL 1800s; invalid lat/lng returns None
+webhook_inbox.py[DM8M]: F:Enqueues delivery/payment webhooks then claims and processes them asynchronously | R:code:backend/app/services/delivery_service.py,code:backend/app/services/websocket_manager.py | A:enqueue_delivery_webhook claim_inbox_item process_pending_inbox | S:MAX_ATTEMPTS 8 then stays FAILED; STALE_PROCESSING_SEC 300 reclaim; exponential backoff capped 3600s
+webhook_replay.py[DR7T]: F:Redis soft claim for webhook/payment callback anti-replay wrapping messaging idempotency | R:code:backend/app/domains/messaging/idempotency.py | A:claim_once release_claim make_receipt_key | S:Redis failure allows through; DB UNIQUE on PaymentCallbackReceipt is source of truth; release_claim on process failure
+websocket_manager.py[IN7S]: F:Manages store-scoped WebSocket channels with IP/user quotas and Redis fanout | R:code:backend/app/services/ws_pubsub.py,code:backend/app/services/ws_conn_quota.py | A:ConnectionManager | S:Non-super-admin only joins channel:{store_id}; idle timeout 90s; per-IP 30 per-user 8
+wechat_mini_client.py[II7M]: F:WeChat mini-program access_token phone URL-link wxacode and subscribe message client | R:code:backend/app/core/config.py | A:get_access_token get_phone_by_code send_order_ready_subscribe | S:Production forbids auth mock; phone code local claim TTL 600s to stop replay
+wechat_pay_client.py[II8M]: F:WeChat Pay APIv3 Native JSAPI micropay query and refund HTTP client | R:code:backend/app/core/config.py | A:create_native_order create_jsapi_order refund | S:Requires mch_id api_v3_key cert_serial and app_id or raises 50011
+wechat_pay_v2_client.py[II7S]: F:WeChat Pay V2 micropay and orderquery XML client for POS barcodes | R:code:backend/app/core/config.py | A:micropay order_query | S:Fail-closed response signature verify; missing sign rejects even if result_code present
+ws_conn_quota.py[IP6T]: F:Redis global WebSocket connection quotas per IP and user across workers | R:code:backend/app/core/redis_client.py | A:try_reserve release touch | S:Counters use TTL 300s so crashes self-heal; release failures rely on TTL expiry
+ws_pubsub.py[IM6T]: F:Publishes and subscribes Redis pub/sub for cross-process WebSocket fanout | R:code:backend/app/core/redis_client.py | A:publish_ws_event start_ws_subscriber stop_ws_subscriber | S:-
+xpyun_client.py[IH6T]: F:Xpyun cloud print API client with signed requests for kitchen tickets | R:code:backend/app/core/config.py | A:XpyunClient xpyun_sign | S:Requires XPYUN_USER XPYUN_USER_KEY and printer SN or raises RuntimeError
+
+===E:/SmartNoodleHouse/backend/app/tasks/===
+scheduler.py[RW8L]: F:Registers APScheduler jobs for inbox outbox print tokens kitchen and night batch | R:code:backend/app/services/scheduler_admin.py,code:backend/app/services/outbox_worker.py,code:backend/app/services/webhook_inbox.py | A:register_tasks TASK_CATALOG apply_scheduler_overrides | S:TASK_CATALOG ids must match register_tasks; close_expired_orders queries payment before cancel
+
+===E:/SmartNoodleHouse/backend/app/utils/===
+alipay_keys.py[IS6S]: F:Loads Alipay RSA keys and builds RSA2 signed gateway request helpers | R:- | A:load_alipay_private_key sign_alipay_params_rsa2 alipay_gateway_request | S:Supports PKCS8 and legacy PKCS1 private key blobs; empty key strings raise ValueError
+logo_overlay.py[LU5S]: F:Overlays brand logo centered on images for WeChat mini-program codes | R:- | A:overlay_center_logo resolve_brand_logo_path | S:-
+upload.py[IS8L]: F:Validates uploads and remote image fetch with magic MIME size and SSRF guards | R:code:backend/app/services/object_storage.py,code:backend/app/services/system_settings_service.py | A:assert_image_safe assert_public_http_url read_upload_limited | S:Blocks private/metadata hosts; max 25MP and edge 8192; size from system_settings max_upload_size_mb
+
+===E:/SmartNoodleHouse/backend/app/workers/===
+recognition_worker.py[KH6S]: F:Pulls CameraManager frames matches faces and drives welcome TTS pipeline | R:code:camera/camera_manager.py,code:backend/app/services/face_service.py | A:RecognitionWorker | S:-
+tts_worker.py[IH5T]: F:Queues welcome TTS via Windows SAPI or Linux espeak without failing the pipeline | R:- | A:TTSWorker LocalTTS | S:TTS failures are logged and swallowed so recognition keeps running
+
+===E:/SmartNoodleHouse/backend/scripts/===
+migrate_images_to_webp.py[XV4S]: F:One-shot script converting upload_dir images to WebP and rewriting DB URLs | R:code:backend/app/utils/upload.py | A:main | S:Run from backend cwd; updates DB product image URLs after conversion
+
+===E:/SmartNoodleHouse/camera/===
+__init__.py[RH3T]: F:Marks camera package for face capture under project-root camera/ | R:code:camera/camera_manager.py | A:- | S:Must put project-root camera/ on PYTHONPATH
+camera_manager.py[RH7S]: F:Opens RTSP/local cameras into thread-safe latest-frame buffers for recognition | R:code:camera/__init__.py | A:CameraManager CameraWorker FrameBuffer | S:Non-leader workers raise CameraNotLeaderError and must not open cameras
+
+===E:/SmartNoodleHouse/deploy/===
+nginx.conf[OV2T]: F:Stub pointing production nginx configs to nginx/ directory | R:code:nginx/smart-noodle.conf | A:- | S:Not live; use nginx/smart-noodle.conf
+
+===E:/SmartNoodleHouse/docs/===
+Cwm9_全项目修复完善_Codex提示词.md[SQ5L]: F:Master Codex/Cursor prompt for full-repo production-grade repair and acceptance | R:- | A:- | S:Requires real code changes and tests; forbids inventing platform APIs or writing secrets to repo
+人脸识别.md[SS5T]: F:Face welcome docs requiring consensual encrypted embeddings only | R:code:backend/app/services/face_service.py | A:- | S:Clients must not upload embeddings; dimension mismatch is fail-closed
+厨房KDS与取餐叫号.md[SB5M]: F:Operator guide for kitchen KDS and customer pickup display screens | R:code:frontend/src/views/Kitchen.vue,code:frontend/src/views/CustomerDisplay.vue | A:- | S:-
+外卖对接.md[SI5T]: F:Meituan/Eleme webhook-to-local-order mapping and kitchen shared flow | R:code:backend/app/services/webhook_inbox.py,code:backend/app/services/delivery_service.py | A:- | S:Webhooks must verify sign/IP then inbox before async consume
+多门店管理.md[SI5T]: F:Documents store_id isolation rules for staff tables and business rows | R:code:backend/app/services/store_scope.py,code:sql/struct.sql | A:- | S:qr_token is globally unique; table_no unique per store only
+安全说明.md[SS6T]: F:Security ops notes requiring secret rotation and env-only credentials | R:code:docs/部署说明.md | A:- | S:Historical secrets in git history must be rotated; never put real keys in samples
+小程序上架检查清单.md[SU5M]: F:WeChat/Alipay mini-program console config and review submission checklist | R:code:miniprogram-wechat/app.json,code:miniprogram-alipay/app.json | A:- | S:Replace placeholder production API domain before submit
+支付对接.md[SB6T]: F:Payment flow docs for create notify and mock vs real channel behavior | R:code:backend/app/services/payment_service.py | A:- | S:Real channel pays must verify notify; mock orders have no callback
+故障排查.md[SO5T]: F:Ops troubleshooting for callbacks idempotency proxies and WebSocket auth | R:code:docs/安全说明.md | A:- | S:Staff WS token uses Sec-WebSocket-Protocol not query string
+数据库设计.md[SP5T]: F:Explains Alembic 0001 struct.sql baseline and 0002 hardening patch roles | R:code:sql/struct.sql | A:- | S:0001 must not run DROP DATABASE grant or seed sections
+数据隔离修复.md[SI5M]: F:Defense-in-depth store isolation hardening suggestions after audit | R:code:docs/门店隔离检查清单.md | A:- | S:Audit found no P0 leaks; doc is hardening not emergency fix list
+架构设计.md[SG5T]: F:High-level multi-end dine-in delivery architecture overview | R:code:docs/部署说明.md | A:- | S:-
+退款流程.md[SB5T]: F:Refund path docs for admin direct and POS approve-then-execute flows | R:code:backend/app/services/pos_refund_service.py | A:- | S:payment_refunds require idempotency_key before channel refund API
+部署说明.md[SO6L]: F:From-scratch Ubuntu 22.04 production deploy guide without Docker | R:code:scripts/生产部署-ubuntu.txt,code:nginx/smart-noodle.conf | A:- | S:Real secrets only in root .env; expose HTTPS 443 only publicly
+门店隔离检查清单.md[SI6S]: F:Mandatory PR checklist for store_id filtering on every API change | R:code:backend/app/services/store_scope.py | A:- | S:PR must tick require_bound_store and store_id filters before merge
+
+===E:/SmartNoodleHouse/docs/audit/===
+BASELINE.md[SB5M]: F:Audit baseline mapping modules entrypoints and key files as of 2026-09-29 | R:code:backend/app/main.py | A:- | S:Must re-scan repo before reuse; contains no secret values
+DATABASE_MIGRATION.md[SP5M]: F:Audit report on SQLAlchemy models Alembic and sql/struct.sql alignment | R:code:sql/struct.sql | A:- | S:Treats sql/struct.sql as schema baseline; 0001 reads CANONICAL SCHEMA only
+DEPLOYMENT_AND_OPERATIONS.md[SO5M]: F:Audit of nginx systemd leader election scheduler logging and rollback | R:code:nginx/smart-noodle.conf,code:systemd/smart-noodle.service | A:- | S:-
+MULTI_STORE_AUTH.md[SI5M]: F:Audit of staff roles store isolation and customer ownership controls | R:code:backend/app/services/store_scope.py | A:- | S:-
+PAYMENT_AND_LEDGER.md[SB6M]: F:Audit of WeChat/Alipay POS refunds and financial_ledger money paths | R:code:backend/app/services/payment_service.py | A:- | S:-
+REMAINING_ISSUES.md[SQ5S]: F:Open leftover issues list complementary to closed REPAIR_TRACKER items | R:code:docs/audit/REPAIR_TRACKER.md | A:- | S:Only unfinished real issues; blockers needing external credentials stay open
+REPAIR_TRACKER.md[SQ6S]: F:P0-P2 issue ledger with file paths status and linked tests | R:code:docs/audit/REMAINING_ISSUES.md | A:- | S:Never mark pass without tests; update status after each fix
+SECURITY_REVIEW.md[SS6M]: F:Security audit concluding no remaining unrepaired P0 vulnerabilities | R:code:docs/audit/REPAIR_TRACKER.md | A:- | S:Contains no secret values; claims based on 2026-09-29 code+pytest
+TEST_REPORT.md[SQ5S]: F:Pytest run report for tests/ on Windows Python 3.11 SQLite memory | R:code:pytest.ini | A:- | S:All tests must live under tests/; report dated 2026-09-29
+
+===E:/SmartNoodleHouse/docs/人脸识别和监控/===
+任务清单.md[SH5M]: F:Implementation task list for edge monitoring and unknown-face models | R:code:docs/人脸识别和监控/规格说明.md | A:- | S:Status fields may be pending; verify against current models before coding
+规格说明.md[SH5S]: F:Spec for store-local video monitoring and face recognition evolution | R:code:docs/人脸识别和监控/任务清单.md,code:camera/camera_manager.py | A:- | S:-
+
+===E:/SmartNoodleHouse/frontend/===
+index.html[EU4T]: F:Vite HTML shell mounting Vue admin app with brand title and icons | R:code:frontend/src/main.ts | A:- | S:-
+package-lock.json[FV4L]: F:npm lockfile pinning frontend admin Vue Element Plus Vite deps | R:code:frontend/package.json | A:- | S:lockfileVersion 3; keep in sync with package.json ranges
+package.json[FV5T]: F:Admin frontend npm package Vue3 Vite Element Plus axios pinia scripts | R:code:frontend/vite.config.ts | A:scripts dependencies | S:build runs vue-tsc -b then vite build so type errors fail the production build
+tsconfig.json[FV5T]: F:Frontend TS compiler options with @ alias and vue include globs | R:code:frontend/vite.config.ts | A:paths strict | S:noEmit true; paths @/* maps to ./src/* matching Vite alias
+vite.config.ts[FV7T]: F:Vite Vue app config with @ alias and local /api /uploads proxy | R:code:frontend/src/main.ts,code:frontend/package.json | A:server.proxy | S:Dev host 0.0.0.0:5173 proxies to 127.0.0.1:8000 with ws; production build must not rely on this proxy
+
+===E:/SmartNoodleHouse/frontend/src/===
+App.vue[AU3T]: F:Root Vue shell rendering only router-view with global body reset styles | R:code:frontend/src/router/index.ts | A:- | S:-
+main.ts[EU7T]: F:Bootstraps Vue Pinia ElementPlus router and frontend logger errorHandler | R:code:frontend/src/App.vue,code:frontend/src/router/index.ts,code:frontend/src/utils/logger.ts | A:- | S:-
+vite-env.d.ts[FV3T]: F:TypeScript ambient types for Vite ImportMetaEnv VITE_API_BASE_URL | R:code:frontend/vite.config.ts | A:VITE_API_BASE_URL | S:-
+
+===E:/SmartNoodleHouse/frontend/src/api/===
+auditLogs.ts[II5T]: F:Typed client helpers for audit log list and category option APIs | R:code:frontend/src/api/index.ts | A:- | S:-
+index.ts[II8S]: F:Axios API client attaching staff or customer Bearer and normalizing biz errors | R:code:frontend/src/utils/staffAuth.ts,code:frontend/src/utils/customerAuth.ts | A:ApiError interceptors | S:Miniprogram orders/mine and reorder always force customer token; 401 clears only the matching token realm
+
+===E:/SmartNoodleHouse/frontend/src/components/===
+CopyToStoreDialog.vue[AU6S]: F:Dialog to copy catalog entities to another store with conflict skip or rename | R:code:frontend/src/api/index.ts | A:onConflict targetStoreId | S:-
+StoreBusinessSettings.vue[AU7L]: F:Per-store business settings editor with dirty tabs saving only local store overrides | R:code:frontend/src/api/index.ts | A:- | S:Unsaved edits stay client-side until save; blank store groups mean platform defaults apply
+VoiceSwitch.vue[AU4T]: F:Styled el-switch for enabling kitchen or display voice alerts | R:code:frontend/src/utils/voiceAlert.ts | A:modelValue | S:-
+
+===E:/SmartNoodleHouse/frontend/src/layouts/===
+AdminLayout.vue[AU7M]: F:Admin shell with role-gated sidebar groups for store catalog member ops | R:code:frontend/src/stores/auth.ts,code:frontend/src/router/index.ts | A:- | S:Menu items appear only when auth permission helpers allow that section
+
+===E:/SmartNoodleHouse/frontend/src/router/===
+index.ts[AU8S]: F:Vue Router routes for admin H5 KDS POS with permission and cashier guards | R:code:frontend/src/stores/auth.ts,code:frontend/src/utils/staffAuth.ts | A:beforeEach CASHIER_ALLOWED | S:Public paths use exact Set match so /order never prefixes into /orders or /member-levels
+
+===E:/SmartNoodleHouse/frontend/src/stores/===
+auth.ts[DI8T]: F:Pinia staff auth store for login permissions kitchen and POS access checks | R:code:frontend/src/utils/staffAuth.ts,code:frontend/src/api/index.ts | A:hasPermission assertSessionNotStale | S:assertSessionNotStale logs out when session meta id or role diverges from /auth/me
+
+===E:/SmartNoodleHouse/frontend/src/styles/===
+global.css[FU4T]: F:Shared admin CSS utilities and layout helpers imported at app bootstrap | R:code:frontend/src/main.ts | A:- | S:-
+
+===E:/SmartNoodleHouse/frontend/src/utils/===
+bizCode.ts[CU4T]: F:Helpers mapping backend business error codes to UI handling branches | R:- | A:- | S:-
+brand.ts[CU3T]: F:Exports BRAND_LOGO_URL and related brand asset constants for UI | R:- | A:BRAND_LOGO_URL | S:-
+cart.ts[DU5T]: F:H5 cart line helpers for option keys totals and local cart mutations | R:- | A:- | S:-
+customerAuth.ts[CI7T]: F:Customer H5 JWT storage in sessionStorage with one-time localStorage migrate | R:code:frontend/src/api/index.ts | A:getCustomerToken setCustomerToken | S:Always removes localStorage customer tokens after migrate or set to avoid dual persistence
+date.ts[CU3T]: F:Small date formatting helpers for admin table and filter displays | R:- | A:- | S:-
+labels.ts[CU5T]: F:Enum label maps for order payment camera and other admin display tags | R:- | A:- | S:-
+logger.ts[CO6T]: F:Frontend logger posting client logs to backend with reentrancy guard | R:code:frontend/src/api/index.ts | A:reportApiLog installFrontendLogger | S:reportApiLog no-ops while reporting flag is set to prevent recursive log storms
+media.ts[CU3T]: F:Normalizes upload paths to absolute media URLs and computes thumb sizes | R:- | A:mediaUrl | S:http(s) URLs pass; else ensure leading /
+publicWs.ts[IN5T]: F:Opens unauthenticated WebSocket to /api/ws channel with optional query params | R:- | A:openPublicWebSocket | S:Uses wss only when page protocol is https
+qrWithLogo.ts[KU5S]: F:Renders QR canvases with centered brand logo using object-fit cover draw | R:code:frontend/src/utils/brand.ts | A:- | S:Logo image load uses crossOrigin anonymous; failure rejects before canvas export
+staffAuth.ts[CI8T]: F:Staff token and POS lock state stored only in sessionStorage | R:code:frontend/src/stores/auth.ts | A:getStaffToken setStaffToken clearStaffToken | S:Every get/set/clear also deletes legacy localStorage staff tokens so browser close forces re-login
+voiceAlert.ts[AU7M]: F:KDS and display TTS queue with AudioContext unlock and Chinese voice pick | R:code:frontend/src/components/VoiceSwitch.vue | A:speakNow VOICE_ALERT_REPEAT | S:isVoiceUnlocked is memory-only; session hint alone must not auto-unlock without a user gesture
+ws.ts[IN7T]: F:Opens staff WebSocket putting JWT in Sec-WebSocket-Protocol not the URL | R:code:frontend/src/utils/staffAuth.ts | A:openStaffWebSocket | S:Token is sent as subprotocol access_token so it never appears in URL query logs
+
+===E:/SmartNoodleHouse/frontend/src/views/===
+AuditLogs.vue[AU6M]: F:Admin audit log browser with store category module filters and pagination | R:code:frontend/src/api/auditLogs.ts,code:frontend/src/stores/auth.ts | A:- | S:Store filter UI is super-admin only; bound stores see a fixed store tag
+Cameras.vue[AU7L]: F:Camera CRUD KPI and runtime frame status for store face recognition sources | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:- | S:Super-admin may filter by store; other roles stay on their bound store
+Categories.vue[AU6M]: F:Admin CRUD for menu categories with store filter and copy-to-store | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/components/CopyToStoreDialog.vue,code:frontend/src/utils/bizCode.ts | A:load save | S:Store accounts stay bound to user.store_id; code suggest uses bizCode helpers
+CategorySchedules.vue[AU6L]: F:Admin UI for per-store category time-slot sort schedules and auto-refresh | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load save autoRefresh | S:Schedule category picks are filtered to the selected store active categories only
+Coupons.vue[AU7L]: F:Admin tabs for issued coupons templates milestones and manual issue | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts | A:loadIssued loadTemplates issue | S:Store accounts cannot edit HQ templates; empty last page after leave-enabled filter auto-decrements
+CustomerDisplay.vue[AU8L]: F:Public pickup display with public WS voice reminders and overdue flash | R:code:frontend/src/utils/publicWs.ts,code:frontend/src/utils/voiceAlert.ts,code:frontend/src/components/VoiceSwitch.vue | A:load connectWs tickReadyRemind | S:Uses openPublicWebSocket channel display; voice needs unlockVoice; 8s poll fallback; remind intervals escalate 2/3/5/5/10 min
+Customers.vue[AU7L]: F:Admin customer list merge issue-coupon and member detail management | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts,code:frontend/src/utils/media.ts | A:load merge issueCoupon | S:Store accounts date filters stay within store scope; empty last page after delete/merge auto-decrements
+Dashboard.vue[AA6L]: F:Admin dashboard KPIs charts and store-scoped overview from /dashboard | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load | S:-
+FinancialLedger.vue[AU6S]: F:Admin financial ledger list with store filters and labels | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts | A:load | S:Empty last page after refund-filter changes auto-decrements
+Kitchen.vue[AU9L]: F:Kitchen KDS board with staff WS claim takeover voice and print jobs | R:code:frontend/src/utils/ws.ts,code:frontend/src/utils/voiceAlert.ts,code:frontend/src/stores/auth.ts,code:frontend/src/api/index.ts | A:load connectWs claim takeover | S:Filters out PENDING_PAYMENT to avoid pay-callback deadlock; first snapshot completes before diff; 8s poll when WS down
+Login.vue[AI7T]: F:Staff login form routing cashiers to POS kitchen to KDS others dashboard | R:code:frontend/src/stores/auth.ts | A:handleLogin | S:Username and password start empty; no default credentials are prefilled
+MemberLevels.vue[AU5S]: F:Admin editor for member level thresholds and benefits via PUT batch | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load save | S:-
+Options.vue[AU6L]: F:Admin option-group and option CRUD with store filter and copy-to-store | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/components/CopyToStoreDialog.vue,code:frontend/src/utils/bizCode.ts | A:load save | S:Unlimited option lists are not store-filtered client-side; HQ options stay visible
+OrderDetail.vue[AU6S]: F:Admin order detail with status transitions cancel and item options | R:code:frontend/src/api/index.ts,code:frontend/src/utils/labels.ts | A:load updateStatus | S:Next actions come from ORDER_NEXT_ACTIONS; cancel gated by cancelAllowed
+Orders.vue[AU7M]: F:Admin order list filters pagination and operator store scoping | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts,code:frontend/src/utils/date.ts | A:load | S:date_to is inclusive end-of-day; operators reload when store filter changes; empty last page auto-decrements
+Payments.vue[AU7L]: F:Admin payments and refunds tabs with store operator and date filters | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts,code:frontend/src/utils/date.ts | A:load loadRefunds | S:Operators reload on store change; empty last payment or refund page auto-decrements
+PosMyStats.vue[AU5T]: F:Cashier-only page showing current operator POS summary metrics | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load | S:Loads GET /pos/my-summary only
+PosOrder.vue[AU9L]: F:POS ordering pay shift lock refund and table transfer workstation | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/staffAuth.ts,code:frontend/src/utils/cart.ts | A:submitOrder confirmCashPay confirmOpenShift unlock | S:Orders send idempotency_key; 40903 means key finished so re-order; unlock verifies password via /auth/verify-password; lock uses isPosLocked
+PosRefundApprove.vue[AU6M]: F:Admin approval queue for POS refund requests with store filter | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load approve reject | S:Empty last page after approving last item auto-decrements
+PosSettlement.vue[AU6S]: F:Admin daily POS settlement report by store and local calendar date | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/date.ts | A:load | S:Uses formatYmd local date not toISOString UTC which shifts early-morning dates
+Products.vue[AU8L]: F:Admin product CRUD taste rebuild delivery sync and copy-to-store | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/components/CopyToStoreDialog.vue,code:frontend/src/utils/bizCode.ts | A:load save rebuildTaste | S:Unscoped HQ form uses 0000 prefix and HQ categories; option groups include HQ shared plus selected store private
+RecommendReport.vue[AA6L]: F:Admin A/B experiment report charts for recommendation algorithms | R:code:frontend/src/api/index.ts | A:loadExperiments loadReport | S:Defaults experimentKey to reco_algo when present among /admin/ab-experiments
+RolePermissions.vue[AI7M]: F:Admin matrix editor mapping roles to permission codes | R:code:frontend/src/api/index.ts | A:load save | S:Edits roleId to Set of permission codes then persists the matrix
+Settings.vue[AC8L]: F:Platform settings health business params and Leader scheduler jobs UI | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load saveBusiness loadSchedulerJobs | S:Scheduler jobs run only on Leader process; sensitive settings are tagged in the catalog
+StoreInfo.vue[AU7L]: F:Store profile delivery bindings and embedded StoreBusinessSettings tabs | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/components/StoreBusinessSettings.vue,code:frontend/src/utils/media.ts | A:load save saveBindings | S:Supports legacy deep links for system-manage store tab and Chinese hash tabs
+StoreStocks.vue[AU6S]: F:Per-store product stock list inline edit with pagination | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load save | S:Edits only modify loaded page rows; do not raise page size toward 4000-row full dump
+Tables.vue[AU6L]: F:Admin table CRUD QR download and WeChat debug scheme helpers | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/qrWithLogo.ts | A:load save downloadQr | S:Empty last page after deleting last table auto-decrements; debug QR may override scheme and env_version
+Users.vue[AI6M]: F:Admin staff user CRUD with roles and store assignment | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load save | S:Empty last page after disable or delete auto-decrements
+Wallet.vue[AU7L]: F:Admin wallet packages ledger adjust and customer search for store recharge | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:loadPackages loadLedger adjust | S:Store accounts cannot edit HQ packages; storeId filter 0 means HQ-only packages
+WelcomeLogs.vue[AH6M]: F:Welcome face event logs stats and staff WS live updates | R:code:frontend/src/api/index.ts,code:frontend/src/utils/ws.ts,code:frontend/src/stores/auth.ts | A:load connectWs | S:Realtime WS replaces list only on page 1; other pages show toast to avoid wiping pagination
+
+===E:/SmartNoodleHouse/frontend/src/views/delivery/===
+DeliveryBindings.vue[AU3T]: F:Legacy redirect shim sending delivery bindings to StoreInfo delivery tab | R:code:frontend/src/views/StoreInfo.vue,code:frontend/src/router/index.ts | A:onMounted | S:Keeps store_id query on /store-info?tab=delivery
+DeliveryLogs.vue[AU5S]: F:Delivery platform callback log browser with store and event filters | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts | A:load | S:Empty last page after log retention auto-decrements; event types refresh on platform change
+DeliveryMaps.vue[AU6M]: F:Delivery category and product mapping plus menu price shelf stock sync | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:loadMaps syncMenu | S:Default store for sync uses current list selection; store accounts keep bound store_id
+DeliveryOrders.vue[AU8L]: F:Delivery order ops board with staff WS stats accept and cancel flows | R:code:frontend/src/api/index.ts,code:frontend/src/utils/ws.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts | A:load connectWs | S:Realtime events replace list only on page 1; store or status filter resets to page 1
+DeliveryRefunds.vue[AU6M]: F:Delivery refund approve reject queue with store filters and poll | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/labels.ts | A:load approve reject | S:10s poll swallows errors; non-page-1 refresh only toasts; empty last page auto-decrements
+DeliverySync.vue[AU6M]: F:Delivery sync overview alerts and reconcile action console | R:code:frontend/src/api/index.ts | A:load reconcile | S:Empty last alert page after marking handled auto-decrements
+
+===E:/SmartNoodleHouse/frontend/src/views/mobile/===
+MemberCenter.vue[AU6M]: F:H5 member center profile coupons vouchers orders and face revoke | R:code:frontend/src/api/index.ts,code:frontend/src/utils/customerAuth.ts | A:load revokeFace | S:Production forbids forged WeChat login codes for H5 auth
+OrderCart.vue[AU6S]: F:H5 cart page editing quantities with category-require validation | R:code:frontend/src/utils/cart.ts,code:frontend/src/utils/media.ts | A:validate checkout | S:Uses cart utils for require checks before navigating to confirm
+OrderConfirm.vue[AU7M]: F:H5 checkout submitting customer order with coupons and dining type | R:code:frontend/src/api/index.ts,code:frontend/src/utils/customerAuth.ts | A:submitOrder | S:Calls use X-Client customer; production forbids forged login codes; clears snh_cart_store_id after submit
+OrderHistory.vue[AU6M]: F:H5 customer order history tabs reorder and status filters | R:code:frontend/src/api/index.ts,code:frontend/src/utils/customerAuth.ts | A:load | S:Tab status maps to /orders/mine status CSV matching miniprogram; dedupes append pages
+OrderMenu.vue[AU8M]: F:H5 dine-in menu browse add-to-cart prefs and member register | R:code:frontend/src/api/index.ts,code:frontend/src/utils/cart.ts,code:frontend/src/utils/customerAuth.ts | A:load addToCart | S:Cross-store cart clears when store_id mismatches; production build forbids forged login codes
+OrderResult.vue[AU5T]: F:H5 order result page polling unpaid status then showing totals | R:code:frontend/src/api/index.ts | A:onMounted | S:Fetches /orders/{id} with X-Client customer; unpaid polls up to 3 times every 1.5s
+ScanLanding.vue[AU7M]: F:H5 scan landing resolving table QR into WeChat URL Link or scheme | R:code:frontend/src/api/index.ts | A:load | S:Avoids weixin:// URL Link open that breaks on current page; develop may fall back to open Scheme
+
+===E:/SmartNoodleHouse/miniprogram-alipay/.mini-ide/===
+project-ide.json[FC3T]: F:Alipay mini-ide local flags ignoring HTTP cert and webview domain checks | R:- | A:ignoreHttpDomainCheck | S:IDE-only; production domain whitelist unchanged
+
+===E:/SmartNoodleHouse/miniprogram-alipay/===
+app.acss[FU4T]: F:Alipay global page background and primary ghost button styles | R:code:miniprogram-alipay/app.json | A:.btn-primary .btn-ghost | S:-
+app.js[EU8S]: F:Alipay App launch restoring dine cart privacy clientConfig and menu prefetch | R:code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/privacy.js,code:miniprogram-alipay/config/env.js,code:miniprogram-alipay/utils/products.js | A:onLaunch parseLaunch | S:Does not TTL-delete table_token locally; ensureCartForCurrentStore clears cross-store cart; purgeStaleSessionIfNeeded on launch
+app.json[FC7S]: F:Alipay pages tabBar subPackages preload and global privacy-popup components | R:code:miniprogram-alipay/app.js | A:pages tabBar subPackages usePrivacyCheck | S:usePrivacyCheck true; packageOrder preloads from pages/menu/menu
+mini.project.json[FC4T]: F:Alipay project compile options enabling component2 format | R:code:miniprogram-alipay/app.json | A:component2 | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/components/privacy-popup/===
+privacy-popup.acss[FU3T]: F:Styles for Alipay privacy consent modal mask panel and action buttons | R:code:miniprogram-alipay/components/privacy-popup/privacy-popup.axml | A:.mask .panel | S:-
+privacy-popup.axml[FU4T]: F:Alipay privacy consent markup with agreePrivacyAuthorization button | R:code:miniprogram-alipay/components/privacy-popup/privacy-popup.js | A:onAgree onReject openContract | S:Agree button must use open-type agreePrivacyAuthorization for platform compliance
+privacy-popup.js[AU6T]: F:Alipay privacy popup component bridging app._privacyPopup and privacy utils | R:code:miniprogram-alipay/utils/privacy.js | A:show onAgree onReject | S:Registers as app._privacyPopup; reject toast says avatar nickname need consent
+privacy-popup.json[FC3T]: F:Marks Alipay privacy-popup as a component JSON descriptor | R:code:miniprogram-alipay/components/privacy-popup/privacy-popup.js | A:component | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/components/recommend-strip/===
+recommend-strip.acss[FU4S]: F:Styles for Alipay taste recommendation horizontal card strip | R:code:miniprogram-alipay/components/recommend-strip/recommend-strip.axml | A:.reco-wrap .reco-card | S:-
+recommend-strip.axml[FU5T]: F:Alipay markup for recommend cards scroll and loading skeleton | R:code:miniprogram-alipay/components/recommend-strip/recommend-strip.js | A:onTapCard onAddTap | S:-
+recommend-strip.js[AU7M]: F:Fetches menu or settle-addon recommendations with cache debounce and tracker | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/tracker.js,code:miniprogram-alipay/utils/media.js | A:loadRecommendations onAddTap | S:recommend_menu caches 30s and dedupes inflight; settle_addon debounces 400ms on cartItemIds; EXPOSE events dedupe
+recommend-strip.json[FC3T]: F:Component JSON enabling apply-shared styleIsolation for recommend strip | R:code:miniprogram-alipay/components/recommend-strip/recommend-strip.js | A:styleIsolation | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/components/skeleton/===
+skeleton.acss[FU3T]: F:Shimmer skeleton styles for menu order product and member layouts | R:code:miniprogram-alipay/components/skeleton/skeleton.axml | A:.sk-block | S:-
+skeleton.axml[FU4T]: F:Alipay skeleton templates switched by type menu order product member | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:type rows | S:-
+skeleton.js[AU4T]: F:Builds skeleton rowList from type and rows props for loading placeholders | R:- | A:buildRowList deriveDataFromProps | S:-
+skeleton.json[FC3T]: F:Marks Alipay skeleton as a component JSON descriptor | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:component | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/components/store-bar/===
+store-bar.acss[FU4T]: F:Styles for Alipay store/table header bar including compact and empty states | R:code:miniprogram-alipay/components/store-bar/store-bar.axml | A:.bar .compact | S:-
+store-bar.axml[FU5T]: F:Alipay markup showing store logo table seat and optional change actions | R:code:miniprogram-alipay/components/store-bar/store-bar.js | A:onChangeTable | S:-
+store-bar.js[AU6S]: F:Store/table bar syncing from dine context with logo cache and props merge | R:code:miniprogram-alipay/utils/context.js,code:miniprogram-alipay/utils/media.js | A:syncFromContext | S:autoSync false skips context subscribe; didUpdate ignores self setData loops
+store-bar.json[FC3T]: F:Marks Alipay store-bar as a component JSON descriptor | R:code:miniprogram-alipay/components/store-bar/store-bar.js | A:component | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/config/===
+env.js[FC8S]: F:Resolves Alipay API base by envVersion IDE LAN and production HTTPS | R:code:miniprogram-alipay/config/环境说明.txt,code:miniprogram-alipay/app.js | A:resolveApiBase shouldShowDevTips | S:Release always uses PROD_API_BASE; shouldShowDevTips only for develop; privacy toggles deprecated here and come from /miniprogram/config
+环境说明.txt[SC6T]: F:Alipay env setup guide for IDE LAN device debug and release whitelist | R:code:miniprogram-alipay/config/env.js | A:DEV_LAN_HOST PROD_API_BASE | S:Error 81 domain whitelist is IDE ignore-check not a code bug for local 127.0.0.1
+
+===E:/SmartNoodleHouse/miniprogram-alipay/packageOrder/confirm/===
+confirm.acss[FU4T]: F:Styles for Alipay packageOrder confirm checkout page layout | R:code:miniprogram-alipay/packageOrder/confirm/confirm.axml | A:.page .coupon-box | S:-
+confirm.axml[FU6S]: F:Alipay confirm-order markup with store-bar coupons and recommend-strip | R:code:miniprogram-alipay/packageOrder/confirm/confirm.js | A:onSubmit | S:-
+confirm.js[AU9L]: F:Alipay checkout bootstrap pay coupons vouchers and idempotent order submit | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/pay.js,code:miniprogram-alipay/utils/cart.js,code:miniprogram-alipay/utils/auth.js | A:bootstrapCheckout submitOrder makeIdempotencyKey | S:Idempotency uses content hash plus checkout nonce; checkout caches 30s; sync-reads table_token before async bootstrap to avoid flash
+confirm.json[FC4T]: F:Confirm page JSON registering recommend-strip and default title | R:code:miniprogram-alipay/components/recommend-strip/recommend-strip.js | A:usingComponents | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/packageOrder/product/===
+product.acss[FU4T]: F:Styles for Alipay packageOrder product detail options and footer bar | R:code:miniprogram-alipay/packageOrder/product/product.axml | A:.hero .footer-bar | S:-
+product.axml[FU6T]: F:Alipay product detail markup with gallery options qty and add-cart footer | R:code:miniprogram-alipay/packageOrder/product/product.js,code:miniprogram-alipay/utils/cart.sjs | A:selectSingle selectMulti | S:Imports cart.sjs util.hasId for multi-select option highlighting
+product.js[AU7S]: F:Alipay product detail selecting options prefs and adding to cart | R:code:miniprogram-alipay/utils/cart.js,code:miniprogram-alipay/utils/preferences.js,code:miniprogram-alipay/utils/products.js | A:onLoad addToCart | S:checkCategoryRequire before add; applies customer prefs via prefUtil when available
+product.json[FC3T]: F:Product page JSON registering skeleton and default title | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:usingComponents | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/packageOrder/result/===
+result.acss[FU4S]: F:Styles for Alipay order-result feedback pickup and status cards | R:code:miniprogram-alipay/packageOrder/result/result.axml | A:- | S:-
+result.axml[FU5S]: F:Alipay order-result markup for pay status feedback tags and pickup | R:code:miniprogram-alipay/packageOrder/result/result.js | A:- | S:-
+result.js[AU8L]: F:Alipay order result polling pay status pickup codes and taste feedback | R:code:miniprogram-alipay/utils/pay.js,code:miniprogram-alipay/utils/pickup.js,code:miniprogram-alipay/utils/tracker.js | A:onLoad submitFeedback | S:8s poll while unpaid; feedback tags must match backend VERDICT_WHITELIST; feedback only for PAID or PARTIAL_REFUND
+result.json[FC3T]: F:Result page JSON enabling pullRefresh and skeleton component | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:pullRefresh | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/cart/===
+cart.acss[FU2T]: F:Minimal tip style for cart tab redirect shim page | R:code:miniprogram-alipay/pages/cart/cart.axml | A:.redirect-tip | S:-
+cart.axml[FU2T]: F:Placeholder tip shown while cart tab redirects into menu sheet | R:code:miniprogram-alipay/pages/cart/cart.js | A:- | S:-
+cart.js[AU5T]: F:Cart tab shim setting _openCartSheet then switchTab to menu | R:code:miniprogram-alipay/pages/menu/menu.js | A:onLoad | S:Sets app.globalData._openCartSheet true before switching to /pages/menu/menu
+cart.json[FC2T]: F:Cart tab page JSON with empty usingComponents and default title | R:- | A:defaultTitle | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/confirm/===
+confirm.acss[FU2T]: F:Minimal tip style for main-package confirm redirect shim | R:code:miniprogram-alipay/pages/confirm/confirm.axml | A:.redirect-tip | S:-
+confirm.axml[FU2T]: F:Placeholder tip while redirecting to packageOrder confirm | R:code:miniprogram-alipay/pages/confirm/confirm.js | A:- | S:-
+confirm.js[AU5T]: F:Main-package confirm shim redirecting into packageOrder confirm | R:code:miniprogram-alipay/utils/page-redirect.js,code:miniprogram-alipay/packageOrder/confirm/confirm.js | A:onLoad | S:Uses redirectToPackage preserving query into /packageOrder/confirm/confirm
+confirm.json[FC2T]: F:Confirm shim page JSON with default title only | R:- | A:defaultTitle | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/index/===
+index.acss[FU3T]: F:Styles for Alipay scan-landing hero and boot spinner card | R:code:miniprogram-alipay/pages/index/index.axml | A:.hero .boot-card | S:-
+index.axml[FU4T]: F:Scan-landing markup with privacy-popup hero and boot loading card | R:code:miniprogram-alipay/pages/index/index.js | A:- | S:-
+index.js[EU7T]: F:Scan entry binding table token silent login then switching to menu | R:code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js,code:miniprogram-alipay/utils/scan.js | A:bootstrap onLoad | S:12s BOOT_FALLBACK enters menu as guest even if login pending; avatar phone bind happens later on member page
+index.json[FC2T]: F:Index scan-landing page JSON default title | R:- | A:defaultTitle | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/member/===
+member.acss[FU5M]: F:Styles for Alipay member center profile coupons face and phone blocks | R:code:miniprogram-alipay/pages/member/member.axml | A:- | S:-
+member.axml[FU6M]: F:Member center markup for profile coupons vouchers face and phone auth | R:code:miniprogram-alipay/pages/member/member.js | A:- | S:-
+member.js[AU8L]: F:Alipay member page profile privacy phone face prefs vouchers and recharge entry | R:code:miniprogram-alipay/utils/privacy.js,code:miniprogram-alipay/utils/phoneAuth.js,code:miniprogram-alipay/utils/face.js,code:miniprogram-alipay/config/env.js | A:onShow bindPhone | S:showDevTips only when shouldShowDevTips; privacy must finish before phone avatar APIs
+member.json[FC3T]: F:Member page JSON with orange titleBar and skeleton component | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:titleBarColor | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/menu/===
+menu.acss[FU6L]: F:Styles for Alipay menu dual-pane catalog cart sheet and recommend strip | R:code:miniprogram-alipay/pages/menu/menu.axml | A:- | S:-
+menu.axml[FU7S]: F:Alipay menu markup with store-bar categories products cart and recommend-strip | R:code:miniprogram-alipay/pages/menu/menu.js | A:- | S:-
+menu.js[AU8L]: F:Alipay dine menu cart prefs recommend quick-add and checkout entry | R:code:miniprogram-alipay/utils/products.js,code:miniprogram-alipay/utils/cart.js,code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js | A:loadMenu onShow addSimpleToCart | S:First paint slices 40 products; menu refresh TTL 30s; prefs skip re-login within 60s
+menu.json[FC4T]: F:Menu page JSON enabling pullRefresh skeleton and recommend-strip | R:code:miniprogram-alipay/pages/menu/menu.js | A:usingComponents pullRefresh | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/orders/===
+orders.acss[FU4S]: F:Styles for Alipay orders scope tabs status chips and list cards | R:code:miniprogram-alipay/pages/orders/orders.axml | A:.scope-tabs .tab-item | S:-
+orders.axml[FU5S]: F:Alipay orders markup for dine/recharge scopes status tabs and list | R:code:miniprogram-alipay/pages/orders/orders.js | A:onScopeChange onTabChange | S:-
+orders.js[AU7M]: F:Lists dine and recharge orders with tabs cache reorder and pay resume | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js | A:onShow reloadCurrent | S:List cache 30s; consumes orders_scope_pending to open recharge scope
+orders.json[FC3T]: F:Orders page JSON with pullRefresh and skeleton component | R:code:miniprogram-alipay/pages/orders/orders.js | A:usingComponents | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/product/===
+product.acss[FU1T]: F:Empty stylesheet for legacy product page redirect shim | R:code:miniprogram-alipay/pages/product/product.js | A:- | S:-
+product.axml[FU1T]: F:Empty markup for legacy product page redirect shim | R:code:miniprogram-alipay/pages/product/product.js | A:- | S:-
+product.js[AU4T]: F:Redirects legacy product route into packageOrder product page | R:code:miniprogram-alipay/utils/page-redirect.js,code:miniprogram-alipay/packageOrder/product/product.js | A:onLoad | S:Preserves query via redirectToPackage
+product.json[FC2T]: F:Legacy product page JSON keeping defaultTitle for redirect shim | R:code:miniprogram-alipay/pages/product/product.js | A:defaultTitle | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/recharge-records/===
+recharge-records.acss[FU1T]: F:Minimal stylesheet for recharge-records compatibility entry | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:- | S:-
+recharge-records.axml[FU1T]: F:Empty markup for recharge-records switchTab shim | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:- | S:-
+recharge-records.js[AU4T]: F:Legacy recharge-records entry switching to orders recharge scope | R:code:miniprogram-alipay/pages/orders/orders.js | A:onShow | S:Writes orders_scope_pending=recharge then switchTab to orders
+recharge-records.json[FC3T]: F:Recharge-records page JSON with pullRefresh and skeleton | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:usingComponents | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/recharge/===
+recharge.acss[FU3T]: F:Styles for Alipay wallet recharge package cards and balance | R:code:miniprogram-alipay/pages/recharge/recharge.axml | A:.pkg .balance | S:-
+recharge.axml[FU4T]: F:Alipay recharge markup for packages balance and pay button | R:code:miniprogram-alipay/pages/recharge/recharge.js | A:onSelect onPay | S:-
+recharge.js[AU7S]: F:Loads wallet packages creates Alipay recharge and confirms paid sync | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/pay.js,code:miniprogram-alipay/utils/auth.js | A:bootstrap onPay | S:Each pay builds new idempotency_key; post-pay sync polls up to 8 times; marks walletDirty
+recharge.json[FC2T]: F:Recharge page JSON setting defaultTitle | R:code:miniprogram-alipay/pages/recharge/recharge.js | A:defaultTitle | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/pages/result/===
+result.acss[FU1T]: F:Empty stylesheet for legacy result page redirect shim | R:code:miniprogram-alipay/pages/result/result.js | A:- | S:-
+result.axml[FU1T]: F:Empty markup for legacy result page redirect shim | R:code:miniprogram-alipay/pages/result/result.js | A:- | S:-
+result.js[AU4T]: F:Redirects legacy result route into packageOrder result page | R:code:miniprogram-alipay/utils/page-redirect.js,code:miniprogram-alipay/packageOrder/result/result.js | A:onLoad | S:Preserves query via redirectToPackage
+result.json[FC2T]: F:Legacy result page JSON keeping defaultTitle for redirect shim | R:code:miniprogram-alipay/pages/result/result.js | A:defaultTitle | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/utils/===
+api.js[IN8M]: F:Alipay HTTP client with Bearer auth retries and domain error hints | R:code:miniprogram-alipay/config/env.js,code:miniprogram-alipay/utils/auth.js | A:get post request | S:Only GET auto-retries; rejects plain objects not Error; 401 clears session; GET params must be URL-encoded
+auth.js[RI8L]: F:Alipay customer login session cart store-scope and member profile helpers | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/config/env.js | A:ensureLogin validateCustomerToken saveCart | S:ensureLogin single-flights; probeCustomerMe never rejects; network fail treated as invalid token
+avatar.js[IB7M]: F:Alipay member avatar upload import and persist to /uploads/avatars | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/media.js | A:ensureRemoteAvatar,uploadLocalAvatar,importRemoteAvatar | S:Alipay chooseAvatar CDN URLs use POST avatar-from-url not uploadFile; upload failure on https path falls back to importRemoteAvatar
+cart.js[DB8L]: F:Cart pricing option labels merge reconcile and checkout eligibility helpers | R:- | A:calcUnitPrice,reconcileWithProducts,validateRequiredOptions,validateCategoryRequires | S:reconcileWithProducts complete:false must not mark missing products off-menu; option id compare uses String not ===
+cart.sjs[LZ2T]: F:SJS template helper hasId for option id loose match in axml | R:code:miniprogram-alipay/utils/cart.js | A:hasId | S:-
+clientConfig.js[IC7M]: F:Fetch and cache GET miniprogram/config per store into globalData feature flags | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/auth.js | A:loadClientConfig,invalidateClientConfig,menuPageFlags | S:Store switch must call invalidateClientConfig; boolFlag reads globalData.clientConfig after applyCacheToApp
+context.js[IB8L]: F:Alipay dine table store context bind scan refresh and page store-bar fields | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/scan.js,code:miniprogram-alipay/utils/clientConfig.js | A:ensureDineContext,scanAndBindTable,refreshTableBinding,applyContext | S:Local 4h boundAt does not delete qr_token; token validity only via /miniprogram/entry; cross-store applyContext clears cart via auth.ensureCartForCurrentStore; table_id revive only when fresh and allowReviveByTableId
+face.js[IS6M]: F:Alipay face welcome liveness challenge front camera consent-base64 enroll revoke | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/clientConfig.js | A:enrollFaceWelcome,revokeFaceWelcome | S:Blocked when enable_face_welcome false; image_base64 length under 800 rejected before POST
+logger.js[OC5M]: F:Alipay client log queue hook console and POST client-logs | R:code:miniprogram-alipay/utils/api.js | A:install,logger,reportApi | S:Skips enqueue when reporting true; does not log paths containing /client-logs
+media.js[LC6M]: F:Resolve /uploads URLs from apiBase and layout thumb hero metrics for product images | R:- | A:resolveUrl,decorateProduct,galleryUrls,layoutMetrics | S:Strips /api suffix from apiBase before joining relative upload paths
+navBar.js[AR3T]: F:Pin Alipay tab navigation bar colors on onShow | R:- | A:pinAlipayNavBar | S:-
+page-redirect.js[RC4T]: F:Legacy main-package paths redirect to order subpackage after loadSubPackage | R:- | A:redirectToPackage | S:Uses setTimeout 0 and 1200ms subpackage load cap to avoid page not found on hot reload
+pay.js[IN7M]: F:Alipay my.tradePay mock skip pending storage and payment sync confirm | R:code:miniprogram-alipay/utils/api.js | A:payAndConfirm,confirmPending,requestAlipayPay | S:resultCode 8000 or 6004 triggers sync not hard fail; 99 is explicit failure; mock_settled skips tradePay
+phoneAuth.js[IS6M]: F:Alipay getAuthorize phoneNumber button handlers and merge confirm | R:code:miniprogram-alipay/utils/privacy.js | A:handleGetAuthorizeSuccess,handleAuthError | S:my.getPhoneNumber only after user click with authScope phoneNumber; privacy errors open privacy popup
+pickup.js[DB5M]: F:Order pickup banner labels hints from status dining_type and customer display flag | R:- | A:decorate,pickupCodeFromOrderNo | S:Hides banner for MEITUAN ELEME channels; takeaway code uses order_no last 4 when 27-char no
+preferences.js[DB7M]: F:Smart taste prefs load cache apply to product option selections | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/auth.js | A:loadCustomerPrefs,applyPrefsToProduct,prefLabelsForProduct | S:PREFS_CACHE_MS 60s per store_id; MIN_ORDER_COUNT 2 for learning status text
+privacy.js[IS7M]: F:Alipay privacy authorization popup resolve timeout and agree reject flow | R:- | A:bindAppPrivacyHandler,finishPrivacyAgree,showPrivacyPopup | S:PRIVACY_RESOLVE_TIMEOUT_MS 12000 auto disagree; stores privacy_agreed_v1 on agree
+products.js[IB7M]: F:Store menu bundle version cache paginated products and loadStoreCatalog fallback | R:code:miniprogram-alipay/utils/api.js | A:loadStoreCatalog,fetchMenuBundle,fetchAllProducts | S:complete false means caller must not treat absent ids as delisted; bundle.products is object with items not array
+scan.js[LB6M]: F:Parse table token from scan URL scheme launch query and hash routes | R:- | A:parseTableTokenFromScan,normalizeLaunchQuery | S:Returns empty for http alipays weixin scheme without token param to avoid false bind
+tracker.js[OA6M]: F:Behavior event queue batch POST miniprogram/events with opt-in and AB bucket | R:code:miniprogram-alipay/utils/api.js | A:track,flush,setAbContext | S:No enqueue or flush when recommend_opt_in 0; no send without customer_token
+voucher.js[DB5T]: F:One-shot voucher discount against eligible payable no balance carry | R:- | A:calcVoucherDiscount,isVoucherApplicable | S:Display name prefers template_name over name
+
+===E:/SmartNoodleHouse/miniprogram-wechat/===
+app.js[ER8M]: F:WeChat App onLaunch globalData cart dine restore privacy config menu prefetch | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/privacy.js,code:miniprogram-wechat/utils/tracker.js | A:onLaunch,parseLaunch | S:Does not purge table_token on local TTL; cold start menu prefetch uses fetchMenuBundle when store_id known
+app.json[FR7M]: F:WeChat mini program pages tabBar packageOrder subpackage and global components | R:- | A:- | S:__usePrivacyCheck__ true; preloadRule loads order package from menu tab
+app.wxss[LC5T]: F:Global page theme primary buttons and store-bar host layout reset | R:- | A:- | S:store-bar display block removes default gap to avoid tab first-switch white flash
+project.config.json[FC5T]: F:WeChat IDE project settings urlCheck appid compile options | R:code:miniprogram-wechat/config/env.js | A:- | S:Dev urlCheck false; set true before release upload
+project.private.config.json[FC3T]: F:Local IDE private overrides libVersion urlCheck | R:code:miniprogram-wechat/project.config.json | A:- | S:-
+sitemap.json[FC2T]: F:WeChat sitemap allow all pages for indexing | R:- | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/components/privacy-popup/===
+privacy-popup.js[CU6M]: F:WeChat privacy popup component registers app._privacyPopup agree reject contract | R:code:miniprogram-wechat/utils/privacy.js | A:show,onAgree,onReject | S:attached binds to app when needPrivacyPopup already set
+privacy-popup.json[FC2T]: F:WeChat privacy-popup component declaration | R:code:miniprogram-wechat/components/privacy-popup/privacy-popup.js | A:- | S:-
+privacy-popup.wxml[CU3T]: F:WeChat privacy modal markup agreePrivacyAuthorization and contract link | R:code:miniprogram-wechat/components/privacy-popup/privacy-popup.js | A:- | S:id agree-btn matches finishPrivacyAgree
+privacy-popup.wxss[CU3T]: F:WeChat privacy popup overlay and panel styles | R:code:miniprogram-wechat/components/privacy-popup/privacy-popup.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/components/recommend-strip/===
+recommend-strip.js[CA7S]: F:WeChat recommendation carousel component menu and settle_addon scenes | R:code:miniprogram-wechat/utils/api.js,code:miniprogram-wechat/utils/tracker.js,code:miniprogram-wechat/utils/media.js | A:load,reportExpose | S:recommend_menu 30s cache and inflight dedupe; settle_addon debounce 400ms; empty or fail hides strip; cartAdd only via page add event
+recommend-strip.json[FC2T]: F:WeChat recommend-strip component registration apply-shared isolation | R:code:miniprogram-wechat/components/recommend-strip/recommend-strip.js | A:- | S:-
+recommend-strip.wxml[CU5S]: F:Horizontal recommend cards scroll skeleton loading state | R:code:miniprogram-wechat/components/recommend-strip/recommend-strip.js | A:- | S:Wrap hidden when items empty and not loading
+recommend-strip.wxss[CU5S]: F:Recommend strip card badge and skeleton shimmer styles | R:code:miniprogram-wechat/components/recommend-strip/recommend-strip.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/components/skeleton/===
+skeleton.js[CU4T]: F:WeChat loading skeleton component type menu order product member rows | R:- | A:buildRowList | S:-
+skeleton.json[FC2T]: F:WeChat skeleton component declaration | R:code:miniprogram-wechat/components/skeleton/skeleton.js | A:- | S:-
+skeleton.wxml[CU5S]: F:Placeholder layouts for menu orders product detail member pages | R:code:miniprogram-wechat/components/skeleton/skeleton.js | A:- | S:type prop selects one of four layouts
+skeleton.wxss[CU5S]: F:Shimmer block styles for skeleton variants | R:code:miniprogram-wechat/components/skeleton/skeleton.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/components/store-bar/===
+store-bar.js[CU7S]: F:WeChat store table header autoSync dine context logo cache tap rebind | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/media.js | A:syncFromContext,onTapTable | S:No virtualHost option avoids tab first-switch white screen; module-level logo cache dedupes resolveUrl
+store-bar.json[FC2T]: F:WeChat store-bar component declaration | R:code:miniprogram-wechat/components/store-bar/store-bar.js | A:- | S:-
+store-bar.wxml[CU5S]: F:Store logo name table row compact empty scan hint layout | R:code:miniprogram-wechat/components/store-bar/store-bar.js | A:- | S:seatLabel 用餐 marks takeaway channel display
+store-bar.wxss[CU5S]: F:Store-bar compact tab flush styles and table change hint | R:code:miniprogram-wechat/components/store-bar/store-bar.wxml | A:- | S:compact mode zero horizontal margin for tab switch consistency
+
+===E:/SmartNoodleHouse/miniprogram-wechat/config/===
+env.js[FC6S]: F:WeChat API base resolution by envVersion devtools LAN and prod constants | R:- | A:resolveApiBase,getEnvDebugInfo,appendDevApiHint | S:release always PROD_API_BASE; real device dev uses DEV_LAN_API unless DEV_USE_LAN false and devtools then 127.0.0.1; privacy flags deprecated here use /miniprogram/config
+环境说明.txt[SC4T]: F:WeChat local IDE device and release API domain setup guide | R:code:miniprogram-wechat/config/env.js | A:- | S:Privacy toggles live in repo root .env not this file
+
+===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/cart/===
+cart.js[RR3T]: F:Legacysubpackage cart stub sets openCartSheet and switchTab to menu | R:code:miniprogram-wechat/pages/menu/menu.js | A:onLoad | S:Sets _openCartSheet then switchTab menu
+cart.json[FC2T]: F:Subpackage cart page nav title | R:code:miniprogram-wechat/packageOrder/cart/cart.js | A:- | S:-
+cart.wxml[CU2T]: F:Redirect placeholder text while cart stub switches tab | R:code:miniprogram-wechat/packageOrder/cart/cart.js | A:- | S:-
+cart.wxss[CU2T]: F:Subpackage cart redirect tip style | R:code:miniprogram-wechat/packageOrder/cart/cart.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/confirm/===
+confirm.js[DB8L]: F:WeChat subpackage checkout confirm coupons vouchers pay table pack subscribe | R:code:miniprogram-wechat/utils/cart.js,code:miniprogram-wechat/utils/pay.js,code:miniprogram-wechat/utils/context.js | A:submitOrder | S:CHECKOUT_CACHE_MS 30s; percent coupon only when strictly beats member rate; mirrors alipay confirm pricing rules
+confirm.json[FC3T]: F:Confirm page registers store-bar and recommend-strip | R:code:miniprogram-wechat/packageOrder/confirm/confirm.js | A:- | S:-
+confirm.wxml[CU7M]: F:Subpackage checkout form cart preview coupons vouchers pack pay | R:code:miniprogram-wechat/packageOrder/confirm/confirm.js | A:- | S:-
+confirm.wxss[CU6S]: F:Confirm page layout and coupon voucher row styles | R:code:miniprogram-wechat/packageOrder/confirm/confirm.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/product/===
+product.js[DB7S]: F:Subpackage product detail options prefs gallery add cart | R:code:miniprogram-wechat/utils/cart.js,code:miniprogram-wechat/utils/preferences.js | A:onLoad,addCart | S:-
+product.json[FC3T]: F:Subpackage product page config | R:code:miniprogram-wechat/packageOrder/product/product.js | A:- | S:-
+product.wxml[CU6S]: F:Product hero gallery option groups quantity add bar | R:code:miniprogram-wechat/packageOrder/product/product.js | A:- | S:-
+product.wxss[CU6S]: F:Product detail page styles | R:code:miniprogram-wechat/packageOrder/product/product.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/result/===
+result.js[DB8L]: F:Pay result order status pickup feedback reorder subscribe | R:code:miniprogram-wechat/utils/pay.js,code:miniprogram-wechat/utils/pickup.js | A:onLoad,submitFeedback | S:FEEDBACK_TAGS align backend VERDICT_WHITELIST
+result.json[FC3T]: F:Result page nav and components | R:code:miniprogram-wechat/packageOrder/result/result.js | A:- | S:-
+result.wxml[CU7M]: F:Payment result pickup banner feedback tags reorder UI | R:code:miniprogram-wechat/packageOrder/result/result.js | A:- | S:-
+result.wxss[CU6S]: F:Result and feedback tag styles | R:code:miniprogram-wechat/packageOrder/result/result.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/cart/===
+cart.js[RR3T]: F:Main cart stub opens menu cart sheet via switchTab | R:code:miniprogram-wechat/pages/menu/menu.js | A:onLoad | S:Sets _openCartSheet then switchTab menu
+cart.json[FC2T]: F:Legacy cart page title | R:code:miniprogram-wechat/pages/cart/cart.js | A:- | S:-
+cart.wxml[CU2T]: F:Cart redirect placeholder | R:code:miniprogram-wechat/pages/cart/cart.js | A:- | S:-
+cart.wxss[CU2T]: F:Cart stub tip style | R:code:miniprogram-wechat/pages/cart/cart.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/confirm/===
+confirm.js[RC3T]: F:Main confirm stub redirects to packageOrder confirm | R:code:miniprogram-wechat/utils/page-redirect.js | A:onLoad | S:-
+confirm.json[FC2T]: F:Legacy confirm page config | R:code:miniprogram-wechat/pages/confirm/confirm.js | A:- | S:-
+confirm.wxml[CU2T]: F:Confirm redirect placeholder | R:code:miniprogram-wechat/pages/confirm/confirm.js | A:- | S:-
+confirm.wxss[CU2T]: F:Shared redirect tip style | R:code:miniprogram-wechat/pages/confirm/confirm.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/index/===
+index.js[ER6S]: F:Scan landing bind table silent login then menu within 12s fallback | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/auth.js | A:bootstrap,goMenu | S:BOOT_FALLBACK_MS 12000 guest menu if login slow
+index.json[FC3T]: F:Index landing page config | R:code:miniprogram-wechat/pages/index/index.js | A:- | S:-
+index.wxml[CU4T]: F:Bootstrap loading store table hint before menu | R:code:miniprogram-wechat/pages/index/index.js | A:- | S:-
+index.wxss[CU4T]: F:Index bootstrap splash styles | R:code:miniprogram-wechat/pages/index/index.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/member/===
+member.js[DB8L]: F:Member center profile avatar phone coupons wallet face prefs privacy | R:code:miniprogram-wechat/utils/auth.js,code:miniprogram-wechat/utils/clientConfig.js | A:onShow,saveProfile | S:Dev-only mock phone when shouldShowDevTips; production wx phone only
+member.json[FC3T]: F:Member page components privacy-popup store-bar | R:code:miniprogram-wechat/pages/member/member.js | A:- | S:-
+member.wxml[CU8L]: F:Member profile avatar nickname phone wallet coupons levels face prefs UI | R:code:miniprogram-wechat/pages/member/member.js | A:- | S:-
+member.wxss[CU7M]: F:Member center card ladder wallet coupon styles | R:code:miniprogram-wechat/pages/member/member.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/menu/===
+menu.js[DB9L]: F:Menu tab catalog cart sheet quick add prefs reco search checkout | R:code:miniprogram-wechat/utils/products.js,code:miniprogram-wechat/utils/cart.js | A:loadMenu,goCheckout | S:sliceMenuForFirstPaint caps 40 items; MENU_REFRESH_TTL_MS 30s; _openCartSheet opens sheet once on onShow
+menu.json[FC4T]: F:Menu tab pull refresh skeleton recommend-strip | R:code:miniprogram-wechat/pages/menu/menu.js | A:- | S:-
+menu.wxml[CU8L]: F:Category nav product list cart bar sheet search smart taste reco | R:code:miniprogram-wechat/pages/menu/menu.js | A:- | S:-
+menu.wxss[CU7M]: F:Menu layout cart sheet wide screen styles | R:code:miniprogram-wechat/pages/menu/menu.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/orders/===
+orders.js[DB7M]: F:Orders tab dine and recharge lists tabs pagination reorder pickup | R:code:miniprogram-wechat/utils/pickup.js | A:reloadCurrent,reorder | S:orders_scope_pending storage switches recharge scope on onShow; ORDERS_CACHE_MS 30s
+orders.json[FC4T]: F:Orders tab reach bottom skeleton | R:code:miniprogram-wechat/pages/orders/orders.js | A:- | S:-
+orders.wxml[CU7M]: F:Order scope tabs list cards pickup hints reorder actions | R:code:miniprogram-wechat/pages/orders/orders.js | A:- | S:-
+orders.wxss[CU6S]: F:Orders list tab and card styles | R:code:miniprogram-wechat/pages/orders/orders.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/product/===
+product.js[RC3T]: F:Main product stub redirects to packageOrder product | R:code:miniprogram-wechat/utils/page-redirect.js | A:onLoad | S:-
+product.json[FC2T]: F:Legacy product page title | R:code:miniprogram-wechat/pages/product/product.js | A:- | S:-
+product.wxml[CU2T]: F:Product redirect placeholder | R:code:miniprogram-wechat/pages/product/product.js | A:- | S:-
+product.wxss[CU2T]: F:Shared redirect tip style | R:code:miniprogram-wechat/pages/product/product.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/recharge-records/===
+recharge-records.js[RR3T]: F:Legacy recharge records sets orders_scope_pending recharge | R:code:miniprogram-wechat/pages/orders/orders.js | A:onShow | S:-
+recharge-records.json[FC3T]: F:Legacy recharge records page config | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.js | A:- | S:-
+recharge-records.wxml[CU2T]: F:Recharge records redirect placeholder | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.js | A:- | S:-
+recharge-records.wxss[CU2T]: F:Recharge records stub styles | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/recharge/===
+recharge.js[DB6S]: F:Member wallet recharge packages pay sync mark wallet dirty | R:code:miniprogram-wechat/utils/pay.js,code:miniprogram-wechat/utils/api.js | A:submitRecharge | S:confirmRechargePaid polls wallet recharge sync up to 8 tries
+recharge.json[FC2T]: F:Recharge page nav title | R:code:miniprogram-wechat/pages/recharge/recharge.js | A:- | S:-
+recharge.wxml[CU5S]: F:Recharge package picker and balance display | R:code:miniprogram-wechat/pages/recharge/recharge.js | A:- | S:-
+recharge.wxss[CU5S]: F:Recharge page package card styles | R:code:miniprogram-wechat/pages/recharge/recharge.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/pages/result/===
+result.js[RC3T]: F:Main result stub redirects to packageOrder result | R:code:miniprogram-wechat/utils/page-redirect.js | A:onLoad | S:-
+result.json[FC2T]: F:Legacy result page title | R:code:miniprogram-wechat/pages/result/result.js | A:- | S:-
+result.wxml[CU2T]: F:Result redirect placeholder text | R:code:miniprogram-wechat/pages/result/result.js | A:- | S:-
+result.wxss[CU2T]: F:Shared redirect tip style | R:code:miniprogram-wechat/pages/result/result.wxml | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-wechat/utils/===
+api.js[IN8M]: F:WeChat wx.request wrapper Bearer auth validation errors logging | R:code:miniprogram-wechat/config/env.js,code:miniprogram-wechat/utils/logger.js | A:get,post,request | S:Uses resolveApiBase when globalData.apiBase empty on cold Tab start
+auth.js[IS8L]: F:WeChat silent login session cart store scope reg draft profile | R:code:miniprogram-wechat/utils/api.js | A:ensureLogin,ensureCartForCurrentStore | S:ensureLogin single-flight; cross-store cart cleared in ensureCartForCurrentStore
+avatar.js[IB7M]: F:WeChat member avatar upload wx.uploadFile to /uploads/avatars | R:code:miniprogram-wechat/utils/api.js,code:miniprogram-wechat/utils/media.js | A:ensureRemoteAvatar,uploadLocalAvatar | S:Wx chooseAvatar may return CDN; uses avatar-from-url when upload fails
+cart.js[DB8L]: F:WeChat cart pricing reconcile validate mirrors alipay cart util | R:- | A:reconcileWithProducts,validateRequiredOptions | S:complete false must not mark missing products off-menu
+clientConfig.js[IC7M]: F:WeChat GET miniprogram config per store feature flags | R:code:miniprogram-wechat/utils/api.js | A:loadClientConfig,invalidateClientConfig | S:Store switch must invalidateClientConfig
+context.js[IB8L]: F:WeChat dine context bind scan wx.scanCode refresh store-bar | R:code:miniprogram-wechat/utils/scan.js | A:ensureDineContext,scanAndBindTable | S:Token validity via /miniprogram/entry channel wechat; 4h boundAt does not delete token
+face.js[IS6M]: F:WeChat face welcome liveness camera consent-base64 enroll | R:code:miniprogram-wechat/utils/clientConfig.js | A:enrollFaceWelcome | S:Blocked when enable_face_welcome false
+logger.js[OC5M]: F:WeChat client logs POST client-logs source wechat | R:code:miniprogram-wechat/utils/api.js | A:install,reportApi | S:Skips /client-logs paths in reportApi
+media.js[LC6M]: F:WeChat resolve /uploads URLs layout thumb hero metrics | R:- | A:resolveUrl,decorateProduct | S:Strips /api suffix from apiBase before join
+navBar.js[AR3T]: F:Pin WeChat tab navigation bar colors on onShow | R:- | A:pinWechatNavBar | S:animation duration 0 avoids tab white flash
+page-redirect.js[RC4T]: F:WeChat legacy paths redirect after loadSubPackage order | R:- | A:redirectToPackage | S:1200ms subpackage load cap before navigate
+pay.js[IN7M]: F:WeChat wx.requestPayment mock pending sync confirm | R:code:miniprogram-wechat/utils/api.js | A:payAndConfirm,confirmPending | S:mock_settled skips requestPayment; uncertain codes trigger sync
+phoneAuth.js[IS6M]: F:WeChat getPhoneNumber button handlers merge confirm | R:code:miniprogram-wechat/utils/privacy.js | A:handleGetPhoneNumber,confirmAccountMerge | S:Requires user button tap; privacy errors open popup
+pickup.js[DB5M]: F:Order pickup banner hints shared with alipay pickup util | R:- | A:decorate | S:Hides banner for MEITUAN ELEME channels
+preferences.js[DB7M]: F:WeChat smart taste prefs load apply product selections | R:code:miniprogram-wechat/utils/api.js | A:loadCustomerPrefs,applyPrefsToProduct | S:PREFS_CACHE_MS 60s per store_id
+privacy.js[IS7M]: F:WeChat privacy popup needPrivacyAuthorization agree reject | R:- | A:bindAppPrivacyHandler,finishPrivacyAgree | S:Uses wx.onNeedPrivacyAuthorization and openPrivacyContract
+products.js[IB7M]: F:WeChat menu bundle cache loadStoreCatalog pagination | R:code:miniprogram-wechat/utils/api.js | A:loadStoreCatalog,fetchMenuBundle | S:bundle.products is object with items; complete false no delist infer
+scan.js[LB6M]: F:WeChat parse table token from scan launch query schemes | R:- | A:parseTableTokenFromScan | S:Empty token for bare scheme URL without token param
+subscribe.js[IM5T]: F:WeChat subscribe message order_ready after pay from config | R:code:miniprogram-wechat/utils/api.js | A:requestOrderReadySubscribe | S:No-op when subscribe_templates.order_ready missing
+tracker.js[OA6M]: F:WeChat behavior events queue POST miniprogram events opt-in | R:code:miniprogram-wechat/utils/api.js | A:track,flush | S:No enqueue when recommend_opt_in 0
+voucher.js[DB5T]: F:WeChat one-shot voucher discount no balance carry | R:- | A:calcVoucherDiscount | S:Payable must reach face value or voucher unused
+
+===E:/SmartNoodleHouse/nginx/===
+smart-noodle.conf[OV6M]: F:Production nginx HTTPS site API uploads frontend KDS websocket | R:code:nginx/snippets/proxy-common.conf,code:nginx/snippets/ssl-params.conf | A:- | S:Replace REPLACE_DOMAIN and paths before deploy; client_max_body_size 5m
+安装说明.txt[SO4T]: F:Ubuntu nginx certbot deploy steps for smart-noodle | R:code:nginx/smart-noodle.conf | A:- | S:-
+
+===E:/SmartNoodleHouse/nginx/snippets/===
+proxy-common.conf[ON4T]: F:Nginx reverse proxy headers to local FastAPI | R:code:nginx/smart-noodle.conf | A:- | S:X-Forwarded-For uses remote_addr only not client chain
+ssl-params.conf[OC3T]: F:Shared TLS cipher and session nginx snippet | R:code:nginx/smart-noodle.conf | A:- | S:-
+
+===E:/SmartNoodleHouse/scripts/===
+_run_followup_tests.py[TQ5S]: F:Run follow-up pytest subset from tests dir | R:code:tests | A:main | S:-
+初始化会员等级.py[OP5S]: F:Seed member levels via backend SQLAlchemy session | R:code:sql/data.sql | A:main | S:-
+初始化券模板.py[OP5S]: F:Seed coupon templates into database | R:code:sql/data.sql | A:main | S:-
+初始化权限.py[OP6S]: F:Seed RBAC permissions and role links | R:code:sql/data.sql | A:main | S:-
+初始化管理员.py[OI7S]: F:Create super admin user with password policy | R:code:backend/app/models | A:main | S:Rejects weak passwords and len under 10 without letter digit mix
+初始化角色.py[OP5S]: F:Seed default admin roles | R:code:sql/data.sql | A:main | S:-
+同步品牌Logo.py[OP4T]: F:Sync brand logo file into uploads from config | R:code:backend | A:main | S:-
+备份数据库.py[OR6S]: F:MySQL dump backup using root .env DATABASE_URL | R:code:sql/struct.sql | A:main | S:Outputs under backups/ not for commit
+应用审计结构修复.py[OP5S]: F:Apply audit schema fix SQL against live DB | R:code:sql/struct.sql | A:main | S:One-off migration helper not second schema source
+打印机实时测试.py[OH5T]: F:Local printer ESC/POS live test script | R:code:backend | A:main | S:-
+整理_data_sql.py[OP4T]: F:Maintain sql/data.sql seed formatting helper | R:code:sql/data.sql | A:main | S:-
+检查Python依赖.py[TQ4T]: F:Verify backend Python deps against lock files | R:code:backend | A:main | S:-
+检查门店隔离.py[TQ6S]: F:Audit store_id isolation across ORM queries | R:code:backend | A:main | S:-
+生产部署-ubuntu.txt[SO5M]: F:Ubuntu production deploy checklist bash paths | R:code:systemd/smart-noodle.service,code:nginx/smart-noodle.conf | A:- | S:-
+生成依赖锁定文件.py[TQ4T]: F:Regenerate backend requirements lock from pyproject | R:code:backend | A:main | S:-
+生成密钥.py[OC3T]: F:Generate JWT and secret key material for .env | R:- | A:main | S:Stdout only do not commit output
+运行SQL迁移.py[OP5S]: F:Run sql/tools migration files via pymysql and .env URL | R:code:sql/struct.sql | A:main | S:Reads DATABASE_URL from repo root .env only
+运行命令.txt[SO4T]: F:Dev and ops command cheat sheet Windows and Linux | R:code:scripts | A:- | S:-
+验证数据库.py[TQ7M]: F:Validate required tables alembic version unique FK constraints | R:code:sql/struct.sql | A:main | S:Exit code 1 on any failure; does not connect without backend .env
+
+===E:/SmartNoodleHouse/sql/===
+data.sql[PP8L]: F:Production seed data TRUNCATE and idempotent INSERT for smart_noodle_house | R:code:sql/struct.sql | A:- | S:Not for local-only test rows; pairs with data-test.sql for dev data
+data_test.sql[PP6M]: F:Local-only test seed after struct and data.sql for SH02 fixtures | R:code:sql/struct.sql,code:sql/data.sql | A:- | S:Never import to production; requires data.sql store shell first
+struct.sql[PP9L]: F:Canonical MySQL schema utf8mb4 DROP CREATE GRANT and all CREATE TABLE | R:code:sql/data.sql,code:backend/app/models | A:- | S:DDL between BEGIN/END CANONICAL SCHEMA is Alembic baseline; replace REPLACE_WITH_STRONG_DB_PASSWORD before deploy
+
+===E:/SmartNoodleHouse/systemd/===
+smart-noodle.service[FO7T]: F:Ubuntu systemd unit gunicorn uvicorn on 127.0.0.1:8000 www-data | R:code:nginx/smart-noodle.conf,code:scripts/生产部署-ubuntu.txt | A:- | S:PROCESS_ROLE=auto overrides .env leader; replace REPLACE_DEPLOY_ROOT before enable
+安装说明.txt[SO4T]: F:Ubuntu steps install enable smart-noodle systemd and health check | R:code:systemd/smart-noodle.service | A:- | S:-
