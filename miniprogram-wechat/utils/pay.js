@@ -80,11 +80,19 @@ function requestWechatPay(payData) {
       reject(new Error('支付参数不完整，请确认已配置微信支付'))
       return
     }
+    // signType 必须由后端显式下发：微信支付签名算法可能是 MD5 或 HMAC-SHA256，
+    // 静默兜底成 RSA 会让「后端漏传 + 实际用 MD5」的组合直接调起失败，
+    // 且错误信息不会指向根因。宁可在这里明确报错，也不猜。
+    // 当前后端 wechat_pay_client.build_jsapi_pay_params 固定下发 signType=RSA。
+    if (!signType) {
+      reject(new Error('支付参数缺少 signType（signType 须由后端下发，不可省略）'))
+      return
+    }
     wx.requestPayment({
       timeStamp: String(timeStamp),
       nonceStr,
       package: pkg,
-      signType: signType || 'RSA',
+      signType,
       paySign,
       success: (res) => resolve({ ok: true, res, payData }),
       fail: (err) => {

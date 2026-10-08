@@ -1,11 +1,14 @@
 const privacy = require('./utils/privacy')
 const { parseTableTokenFromScan, normalizeLaunchQuery } = require('./utils/scan')
-const { resolveApiBase } = require('./config/env')
+const { resolveApiBase, isRelease } = require('./config/env')
 const auth = require('./utils/auth')
 const clientConfig = require('./utils/clientConfig')
 const tracker = require('./utils/tracker')
 const remoteLogger = require('./utils/logger')
-remoteLogger.install()
+// 远程日志会上报所有 console 输出（含 API 路径、错误详情），仅在非正式版启用：
+// - 隐私合规：正式版集中收集用户端错误详情需在《隐私保护指引》中声明用途
+// - 性能：每次 console 调用都要 JSON.stringify + 入队，正式版没必要承担
+if (!isRelease()) remoteLogger.install()
 
 App({
   globalData: {
@@ -69,14 +72,17 @@ App({
     }
   },
   onError(err) {
+    if (isRelease()) return
     try {
       remoteLogger.logger.error(String(err || 'App.onError'), err)
     } catch (_) {}
   },
   onPageNotFound(res) {
-    try {
-      remoteLogger.logger.warn('onPageNotFound', res)
-    } catch (_) {}
+    if (!isRelease()) {
+      try {
+        remoteLogger.logger.warn('onPageNotFound', res)
+      } catch (_) {}
+    }
     my.switchTab({
       url: '/pages/menu/menu',
       fail: () => my.reLaunch({ url: '/pages/index/index' })

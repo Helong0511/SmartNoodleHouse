@@ -17,6 +17,8 @@
  */
 
 /** 生产 API（须 HTTPS，与小程序后台 request 合法域名一致） */
+// TODO(发布前必改)：替换为真实域名，并在 mp.weixin.qq.com 配置 request 合法域名。
+// 保持占位符时 release 版本会全部请求失败，请勿直接上传正式版。
 const PROD_API_BASE = 'https://your-domain.com/api'
 
 /** 本地模拟器（微信开发者工具） */
@@ -111,10 +113,5 @@ module.exports = {
   DEV_LAN_HOST,
   DEV_USE_LAN,
   DEV_LAN_API,
-  TRIAL_USE_PROD_API,
-  /** @deprecated 隐私开关已迁至项目根 .env，由 /miniprogram/config 下发 */
-  enableChooseAvatar: false,
-  enableNicknameInput: false,
-  enableWxPhoneBind: false,
-  enableWxPrivacyApis: false
+  TRIAL_USE_PROD_API
 }

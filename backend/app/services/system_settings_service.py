@@ -495,7 +495,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "min": 1,
         "max": 90,
         "default": 7,
-        "description": "按近 N 日已支付销量刷新 is_hot / is_recommended",
+        "description": "按近 N 日已支付销量刷新 is_hot；is_recommended 仅人工勾选、不在此覆盖",
     },
     "night_batch_hot_top_n": {
         "group": "system",

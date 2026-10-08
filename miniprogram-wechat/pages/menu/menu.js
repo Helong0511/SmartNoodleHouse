@@ -263,6 +263,8 @@ Page({
       const item = cartUtil.normalizeItem({ ...raw })
       return {
         ...item,
+        // wx:key 需要稳定唯一值：商品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
+        cartKey: `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
         imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
       }
     })

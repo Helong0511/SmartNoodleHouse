@@ -469,7 +469,10 @@ async function bindParsedScanRaw(raw, resolve) {
   }
 
   const token = parseTableTokenFromScan(text)
-  console.warn('[scan] raw=', text.slice(0, 180), 'token=', token ? `${String(token).slice(0, 4)}***` : '')
+  // 仅开发者工具打印诊断信息，且不输出扫码原文（可能含完整桌台凭证）
+  if (devtools) {
+    console.warn('[scan] token=', token ? `${String(token).slice(0, 4)}***` : '(未识别)')
+  }
   if (!token) {
     const tip = text
       ? `未识别到桌台码\n原文: ${text.slice(0, 120)}`

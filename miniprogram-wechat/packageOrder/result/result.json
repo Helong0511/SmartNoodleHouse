@@ -3,7 +3,6 @@
   "enablePullDownRefresh": true,
   "backgroundTextStyle": "dark",
   "usingComponents": {
-    "store-bar": "/components/store-bar/store-bar",
     "skeleton": "/components/skeleton/skeleton"
   }
 }

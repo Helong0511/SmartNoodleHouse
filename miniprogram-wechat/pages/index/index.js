@@ -5,9 +5,10 @@ const { normalizeLaunchQuery } = require('../../utils/scan')
 /**
  * 扫码落地页：只做「识别桌台 + 静默登录」，随后直接进入点餐页。
  * 不收集头像/昵称/手机号，会员开通与手机号绑定统一在「会员」页完成。
- * 弱网兜底 12 秒：即使登录未完成也以游客身份进入菜单（下单前各页会再次 ensureLogin）。
+ * 弱网兜底 6 秒：即使登录未完成也以游客身份进入菜单（下单前各页会再次 ensureLogin）。
+ * 12 秒对「扫码 → 点餐」太长；6 秒足够覆盖正常弱网，断网时提前进菜单更好。
  */
-const BOOT_FALLBACK_MS = 12000
+const BOOT_FALLBACK_MS = 6000
 
 Page({
   data: {

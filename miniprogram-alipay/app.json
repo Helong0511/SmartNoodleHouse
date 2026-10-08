@@ -26,6 +26,10 @@
     "pages/menu/menu": {
       "network": "all",
       "packages": ["order"]
+    },
+    "pages/orders/orders": {
+      "network": "all",
+      "packages": ["order"]
     }
   },
   "window": {

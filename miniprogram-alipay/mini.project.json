@@ -2,5 +2,9 @@
   "format": 2,
   "compileOptions": {
     "component2": true
-  }
+  },
+  "ignore": [
+    "config/环境说明.txt",
+    "scripts/**"
+  ]
 }

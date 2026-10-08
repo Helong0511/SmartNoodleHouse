@@ -192,7 +192,7 @@ kitchen_claim.py[DB5S]: F:Kitchen KDS claim and takeover to prevent concurrent c
 menu_copy_service.py[DB7L]: F:Copies categories option groups and products into another store as new rows | R:code:backend/app/models/__init__.py,code:backend/app/api/v1/products.py | A:MenuCopyService | S:Target store must be active; copies create new IDs never overwrite source
 menu_service.py[DB6M]: F:Builds cached mini-program menu bundles with schedule-sorted categories | R:code:backend/app/core/menu_cache.py,code:backend/app/services/category_schedule.py | A:build_menu_bundle get_or_build_menu_bundle | S:Only ON_SALE products and status=1 categories; build cache TTL 60s
 miniprogram_auth.py[II7S]: F:WeChat/Alipay code2session clients with gated auth mock for local debug | R:code:backend/app/core/config.py | A:WechatMiniAuth _mock_allowed | S:Production always forbids mock; mock needs allow_auth_mock or missing keys in development
-night_batch_service.py[DW6M]: F:Night-window batch refreshing sales flags taste profiles and reco learning | R:code:backend/app/services/taste_profile_service.py,code:backend/app/tasks/scheduler.py | A:refresh_all_sales_flags rebuild_all_product_taste_profiles | S:Heavy scans only run inside configured night window to protect peak hours
+night_batch_service.py[DW6M]: F:Night-window batch refreshing is_hot taste profiles and reco learning | R:code:backend/app/services/taste_profile_service.py,code:backend/app/tasks/scheduler.py,code:backend/app/services/system_settings_service.py | A:refresh_sales_flags_for_store refresh_all_sales_flags | S:Only rewrites is_hot from sales ranks; is_recommended is staff-only and never overwritten; recommend_top_n kept for signature compat but ignored
 object_storage.py[IP5S]: F:Local or S3/MinIO object storage backend for uploads | R:code:backend/app/core/config.py | A:get_storage LocalObjectStorage S3ObjectStorage | S:Backend selected by storage_backend setting local|s3
 option_code.py[DB5M]: F:Generates store-prefixed option/group/product logical business codes | R:code:backend/app/models/__init__.py | A:format_group_code name_to_logical_code | S:HQ shared rows use prefix 0000 when store_id is NULL
 order_access.py[DI6T]: F:Asserts customer owns order dining_session and may pay non-POS orders | R:code:backend/app/models/__init__.py | A:assert_customer_owns_order assert_dining_session_owner | S:Customers cannot access staff POS-created orders they do not own
@@ -223,7 +223,7 @@ status_history.py[DB5T]: F:Appends order and payment status history rows | R:cod
 stock_service.py[DB8M]: F:Atomically deducts and restores store/product stock and emits delivery stock mirrors | R:code:backend/app/services/outbox_worker.py | A:deduct_stock restore_stock | S:stock=999 means unlimited; lock product then store row; crossing zero resurrects DONE outbox to PENDING
 store_hours_service.py[DB6M]: F:Evaluates store business hours including cross-midnight and auto open/rest | R:code:backend/app/models/__init__.py | A:is_open_at desired_open_status | S:No configured hours returns None so auto open/close is skipped; close_time<=open_time means overnight
 store_scope.py[DI7T]: F:Resolves and asserts staff store isolation for non-super-admin users | R:- | A:effective_store_id require_bound_store assert_store_access | S:Non-super-admin unbound store raises 403; ignores requested store_id for non-admins
-system_settings_service.py[DC8L]: F:Resolves platform and per-store business settings overlaying DB over env defaults | R:code:backend/app/core/config.py | A:SystemSettingsService BUSINESS_SETTING_META | S:PLATFORM_ONLY_KEYS cannot be store-overridden; DB values beat .env at runtime
+system_settings_service.py[DC8L]: F:Resolves platform and per-store business settings overlaying DB over env defaults | R:code:backend/app/core/config.py | A:SystemSettingsService BUSINESS_SETTING_META | S:PLATFORM_ONLY_KEYS cannot be store-overridden; DB beats .env; night_batch_recommend_top_n is deprecated while lookback/hot_top_n still drive is_hot only
 table_resolve.py[DB6T]: F:Resolves dining table by qr_token with optional table_no fallback in development | R:code:backend/app/core/config.py | A:resolve_dining_table | S:Production accepts only qr_token; multi-store same table_no without store_id returns None
 taste_learning_service.py[DA7M]: F:Incrementally folds behavior pay and feedback events into customer taste scores | R:code:backend/app/services/taste_profile_service.py | A:TasteLearningService | S:Watermark is MAX last_event_at so only newer events fold; FEEDBACK weight 0 to avoid double-count with product_feedbacks
 taste_profile_service.py[DA7L]: F:Derges product taste dims/tags from rules with MANUAL overrides surviving AUTO | R:code:backend/app/models/__init__.py | A:derive_dimensions_and_tags upsert_manual recompute_product | S:MANUAL dim keys and tags_add/remove are not overwritten by AUTO recompute
@@ -276,6 +276,7 @@ Cwm9_全项目修复完善_Codex提示词.md[SQ5L]: F:Master Codex/Cursor prompt
 退款流程.md[SB5T]: F:Refund path docs for admin direct and POS approve-then-execute flows | R:code:backend/app/services/pos_refund_service.py | A:- | S:payment_refunds require idempotency_key before channel refund API
 部署说明.md[SO6L]: F:From-scratch Ubuntu 22.04 production deploy guide without Docker | R:code:scripts/生产部署-ubuntu.txt,code:nginx/smart-noodle.conf | A:- | S:Real secrets only in root .env; expose HTTPS 443 only publicly
 门店隔离检查清单.md[SI6S]: F:Mandatory PR checklist for store_id filtering on every API change | R:code:backend/app/services/store_scope.py | A:- | S:PR must tick require_bound_store and store_id filters before merge
+小程序修复提示词.md[SB5L]: F:WeChat miniprogram release-fix prompt covering P0-P2 domain logger pay and cart keys | R:code:miniprogram-wechat/config/env.js,code:miniprogram-wechat/scripts/preflight-check.js | A:- | S:Lists intentional designs that must not be changed; real PROD_API_BASE and urlCheck=true remain manual ops outside code
 
 ===E:/SmartNoodleHouse/docs/audit/===
 BASELINE.md[SB5M]: F:Audit baseline mapping modules entrypoints and key files as of 2026-09-29 | R:code:backend/app/main.py | A:- | S:Must re-scan repo before reuse; contains no secret values
@@ -361,7 +362,7 @@ PosMyStats.vue[AU5T]: F:Cashier-only page showing current operator POS summary m
 PosOrder.vue[AU9L]: F:POS ordering pay shift lock refund and table transfer workstation | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/staffAuth.ts,code:frontend/src/utils/cart.ts | A:submitOrder confirmCashPay confirmOpenShift unlock | S:Orders send idempotency_key; 40903 means key finished so re-order; unlock verifies password via /auth/verify-password; lock uses isPosLocked
 PosRefundApprove.vue[AU6M]: F:Admin approval queue for POS refund requests with store filter | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load approve reject | S:Empty last page after approving last item auto-decrements
 PosSettlement.vue[AU6S]: F:Admin daily POS settlement report by store and local calendar date | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/utils/date.ts | A:load | S:Uses formatYmd local date not toISOString UTC which shifts early-morning dates
-Products.vue[AU8L]: F:Admin product CRUD taste rebuild delivery sync and copy-to-store | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/components/CopyToStoreDialog.vue,code:frontend/src/utils/bizCode.ts | A:load save rebuildTaste | S:Unscoped HQ form uses 0000 prefix and HQ categories; option groups include HQ shared plus selected store private
+Products.vue[AU8L]: F:Admin product CRUD taste rebuild delivery sync and copy-to-store | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts,code:frontend/src/components/CopyToStoreDialog.vue,code:frontend/src/utils/bizCode.ts | A:load save rebuildTaste | S:Unscoped HQ form uses 0000 prefix; is_recommended is manual-only while is_hot may be night-batch refreshed; both show as menu badges
 RecommendReport.vue[AA6L]: F:Admin A/B experiment report charts for recommendation algorithms | R:code:frontend/src/api/index.ts | A:loadExperiments loadReport | S:Defaults experimentKey to reco_algo when present among /admin/ab-experiments
 RolePermissions.vue[AI7M]: F:Admin matrix editor mapping roles to permission codes | R:code:frontend/src/api/index.ts | A:load save | S:Edits roleId to Set of permission codes then persists the matrix
 Settings.vue[AC8L]: F:Platform settings health business params and Leader scheduler jobs UI | R:code:frontend/src/api/index.ts,code:frontend/src/stores/auth.ts | A:load saveBusiness loadSchedulerJobs | S:Scheduler jobs run only on Leader process; sensitive settings are tagged in the catalog
@@ -385,7 +386,7 @@ MemberCenter.vue[AU6M]: F:H5 member center profile coupons vouchers orders and f
 OrderCart.vue[AU6S]: F:H5 cart page editing quantities with category-require validation | R:code:frontend/src/utils/cart.ts,code:frontend/src/utils/media.ts | A:validate checkout | S:Uses cart utils for require checks before navigating to confirm
 OrderConfirm.vue[AU7M]: F:H5 checkout submitting customer order with coupons and dining type | R:code:frontend/src/api/index.ts,code:frontend/src/utils/customerAuth.ts | A:submitOrder | S:Calls use X-Client customer; production forbids forged login codes; clears snh_cart_store_id after submit
 OrderHistory.vue[AU6M]: F:H5 customer order history tabs reorder and status filters | R:code:frontend/src/api/index.ts,code:frontend/src/utils/customerAuth.ts | A:load | S:Tab status maps to /orders/mine status CSV matching miniprogram; dedupes append pages
-OrderMenu.vue[AU8M]: F:H5 dine-in menu browse add-to-cart prefs and member register | R:code:frontend/src/api/index.ts,code:frontend/src/utils/cart.ts,code:frontend/src/utils/customerAuth.ts | A:load addToCart | S:Cross-store cart clears when store_id mismatches; production build forbids forged login codes
+OrderMenu.vue[AU8M]: F:H5 dine-in menu browse add-to-cart prefs and member register | R:code:frontend/src/api/index.ts,code:frontend/src/utils/cart.ts,code:frontend/src/utils/customerAuth.ts | A:load addToCart | S:Cross-store cart clears on store_id mismatch; menu and detail show is_hot/is_recommended badges with tip copy
 OrderResult.vue[AU5T]: F:H5 order result page polling unpaid status then showing totals | R:code:frontend/src/api/index.ts | A:onMounted | S:Fetches /orders/{id} with X-Client customer; unpaid polls up to 3 times every 1.5s
 ScanLanding.vue[AU7M]: F:H5 scan landing resolving table QR into WeChat URL Link or scheme | R:code:frontend/src/api/index.ts | A:load | S:Avoids weixin:// URL Link open that breaks on current page; develop may fall back to open Scheme
 
@@ -394,9 +395,9 @@ project-ide.json[FC3T]: F:Alipay mini-ide local flags ignoring HTTP cert and web
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/===
 app.acss[FU4T]: F:Alipay global page background and primary ghost button styles | R:code:miniprogram-alipay/app.json | A:.btn-primary .btn-ghost | S:-
-app.js[EU8S]: F:Alipay App launch restoring dine cart privacy clientConfig and menu prefetch | R:code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/privacy.js,code:miniprogram-alipay/config/env.js,code:miniprogram-alipay/utils/products.js | A:onLaunch parseLaunch | S:Does not TTL-delete table_token locally; ensureCartForCurrentStore clears cross-store cart; purgeStaleSessionIfNeeded on launch
-app.json[FC7S]: F:Alipay pages tabBar subPackages preload and global privacy-popup components | R:code:miniprogram-alipay/app.js | A:pages tabBar subPackages usePrivacyCheck | S:usePrivacyCheck true; packageOrder preloads from pages/menu/menu
-mini.project.json[FC4T]: F:Alipay project compile options enabling component2 format | R:code:miniprogram-alipay/app.json | A:component2 | S:-
+app.js[EU8S]: F:Alipay App launch restoring dine cart privacy clientConfig and menu prefetch | R:code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/privacy.js,code:miniprogram-alipay/config/env.js,code:miniprogram-alipay/utils/logger.js | A:onLaunch parseLaunch onError | S:Does not TTL-delete table_token; remoteLogger.install and onError/onPageNotFound logging skipped when isRelease
+app.json[FC7S]: F:Alipay pages tabBar subPackages preload and global privacy-popup components | R:code:miniprogram-alipay/app.js | A:pages tabBar subPackages preloadRule | S:usePrivacyCheck true; packageOrder preloads from pages/menu/menu and pages/orders/orders
+mini.project.json[FC4T]: F:Alipay project compile options and upload ignore list | R:code:miniprogram-alipay/app.json,code:miniprogram-alipay/scripts/preflight-check.js | A:component2 ignore | S:ignore excludes config/环境说明.txt and scripts/** from upload package
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/components/privacy-popup/===
 privacy-popup.acss[FU3T]: F:Styles for Alipay privacy consent modal mask panel and action buttons | R:code:miniprogram-alipay/components/privacy-popup/privacy-popup.axml | A:.mask .panel | S:-
@@ -423,7 +424,7 @@ store-bar.js[AU6S]: F:Store/table bar syncing from dine context with logo cache 
 store-bar.json[FC3T]: F:Marks Alipay store-bar as a component JSON descriptor | R:code:miniprogram-alipay/components/store-bar/store-bar.js | A:component | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/config/===
-env.js[FC8S]: F:Resolves Alipay API base by envVersion IDE LAN and production HTTPS | R:code:miniprogram-alipay/config/环境说明.txt,code:miniprogram-alipay/app.js | A:resolveApiBase shouldShowDevTips | S:Release always uses PROD_API_BASE; shouldShowDevTips only for develop; privacy toggles deprecated here and come from /miniprogram/config
+env.js[FC8S]: F:Resolves Alipay API base by envVersion IDE LAN and production HTTPS | R:code:miniprogram-alipay/config/环境说明.txt,code:miniprogram-alipay/app.js,code:miniprogram-alipay/scripts/preflight-check.js | A:resolveApiBase isRelease shouldShowDevTips | S:Release always uses PROD_API_BASE placeholder until replaced; shouldShowDevTips only for develop; privacy toggles come from /miniprogram/config not exports
 环境说明.txt[SC6T]: F:Alipay env setup guide for IDE LAN device debug and release whitelist | R:code:miniprogram-alipay/config/env.js | A:DEV_LAN_HOST PROD_API_BASE | S:Error 81 domain whitelist is IDE ignore-check not a code bug for local 127.0.0.1
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/packageOrder/confirm/===
@@ -433,8 +434,8 @@ confirm.js[AU9L]: F:Alipay checkout bootstrap pay coupons vouchers and idempoten
 confirm.json[FC4T]: F:Confirm page JSON registering recommend-strip and default title | R:code:miniprogram-alipay/components/recommend-strip/recommend-strip.js | A:usingComponents | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/packageOrder/product/===
-product.acss[FU4T]: F:Styles for Alipay packageOrder product detail options and footer bar | R:code:miniprogram-alipay/packageOrder/product/product.axml | A:.hero .footer-bar | S:-
-product.axml[FU6T]: F:Alipay product detail markup with gallery options qty and add-cart footer | R:code:miniprogram-alipay/packageOrder/product/product.js,code:miniprogram-alipay/utils/cart.sjs | A:selectSingle selectMulti | S:Imports cart.sjs util.hasId for multi-select option highlighting
+product.acss[FU4T]: F:Styles for Alipay packageOrder product detail options footer and flag tags | R:code:miniprogram-alipay/packageOrder/product/product.axml | A:.hero .footer-bar .flag-tag | S:-
+product.axml[FU6T]: F:Alipay product detail markup with gallery options qty flags and add-cart footer | R:code:miniprogram-alipay/packageOrder/product/product.js,code:miniprogram-alipay/utils/cart.sjs | A:selectSingle selectMulti | S:Shows is_hot/is_recommended badges plus tip; cart.sjs util.hasId drives multi-select highlight
 product.js[AU7S]: F:Alipay product detail selecting options prefs and adding to cart | R:code:miniprogram-alipay/utils/cart.js,code:miniprogram-alipay/utils/preferences.js,code:miniprogram-alipay/utils/products.js | A:onLoad addToCart | S:checkCategoryRequire before add; applies customer prefs via prefUtil when available
 product.json[FC3T]: F:Product page JSON registering skeleton and default title | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:usingComponents | S:-
 
@@ -459,7 +460,7 @@ confirm.json[FC2T]: F:Confirm shim page JSON with default title only | R:- | A:d
 ===E:/SmartNoodleHouse/miniprogram-alipay/pages/index/===
 index.acss[FU3T]: F:Styles for Alipay scan-landing hero and boot spinner card | R:code:miniprogram-alipay/pages/index/index.axml | A:.hero .boot-card | S:-
 index.axml[FU4T]: F:Scan-landing markup with privacy-popup hero and boot loading card | R:code:miniprogram-alipay/pages/index/index.js | A:- | S:-
-index.js[EU7T]: F:Scan entry binding table token silent login then switching to menu | R:code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js,code:miniprogram-alipay/utils/scan.js | A:bootstrap onLoad | S:12s BOOT_FALLBACK enters menu as guest even if login pending; avatar phone bind happens later on member page
+index.js[EU7T]: F:Scan entry binding table token silent login then switching to menu | R:code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js,code:miniprogram-alipay/utils/scan.js | A:bootstrap onLoad | S:6s BOOT_FALLBACK enters menu as guest if login pending; member avatar/phone bind stays on member page
 index.json[FC2T]: F:Index scan-landing page JSON default title | R:- | A:defaultTitle | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/pages/member/===
@@ -469,9 +470,9 @@ member.js[AU8L]: F:Alipay member page profile privacy phone face prefs vouchers 
 member.json[FC3T]: F:Member page JSON with orange titleBar and skeleton component | R:code:miniprogram-alipay/components/skeleton/skeleton.js | A:titleBarColor | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/pages/menu/===
-menu.acss[FU6L]: F:Styles for Alipay menu dual-pane catalog cart sheet and recommend strip | R:code:miniprogram-alipay/pages/menu/menu.axml | A:- | S:-
-menu.axml[FU7S]: F:Alipay menu markup with store-bar categories products cart and recommend-strip | R:code:miniprogram-alipay/pages/menu/menu.js | A:- | S:-
-menu.js[AU8L]: F:Alipay dine menu cart prefs recommend quick-add and checkout entry | R:code:miniprogram-alipay/utils/products.js,code:miniprogram-alipay/utils/cart.js,code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js | A:loadMenu onShow addSimpleToCart | S:First paint slices 40 products; menu refresh TTL 30s; prefs skip re-login within 60s
+menu.acss[FU6L]: F:Styles for Alipay menu dual-pane catalog cart sheet recommend strip and flag tags | R:code:miniprogram-alipay/pages/menu/menu.axml | A:.flag-tag | S:-
+menu.axml[FU7S]: F:Alipay menu markup with store-bar categories products cart flags and recommend-strip | R:code:miniprogram-alipay/pages/menu/menu.js | A:- | S:Cart list a:key uses cartKey not index to avoid reuse glitches when deleting middle items
+menu.js[AU8L]: F:Alipay dine menu cart prefs recommend quick-add and checkout entry | R:code:miniprogram-alipay/utils/products.js,code:miniprogram-alipay/utils/cart.js,code:miniprogram-alipay/utils/auth.js,code:miniprogram-alipay/utils/context.js | A:loadMenu refreshCartBar onShow addSimpleToCart | S:First paint slices 40 products; refreshCartBar sets cartKey from product_id+sorted option_ids matching cart.itemKey
 menu.json[FC4T]: F:Menu page JSON enabling pullRefresh skeleton and recommend-strip | R:code:miniprogram-alipay/pages/menu/menu.js | A:usingComponents pullRefresh | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/pages/orders/===
@@ -490,7 +491,7 @@ product.json[FC2T]: F:Legacy product page JSON keeping defaultTitle for redirect
 recharge-records.acss[FU1T]: F:Minimal stylesheet for recharge-records compatibility entry | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:- | S:-
 recharge-records.axml[FU1T]: F:Empty markup for recharge-records switchTab shim | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:- | S:-
 recharge-records.js[AU4T]: F:Legacy recharge-records entry switching to orders recharge scope | R:code:miniprogram-alipay/pages/orders/orders.js | A:onShow | S:Writes orders_scope_pending=recharge then switchTab to orders
-recharge-records.json[FC3T]: F:Recharge-records page JSON with pullRefresh and skeleton | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:usingComponents | S:-
+recharge-records.json[FC3T]: F:Compat shell page JSON title only for legacy recharge-records route | R:code:miniprogram-alipay/pages/recharge-records/recharge-records.js | A:- | S:Title-only JSON; page redirects and has no list UI
 
 ===E:/SmartNoodleHouse/miniprogram-alipay/pages/recharge/===
 recharge.acss[FU3T]: F:Styles for Alipay wallet recharge package cards and balance | R:code:miniprogram-alipay/pages/recharge/recharge.axml | A:.pkg .balance | S:-
@@ -511,7 +512,7 @@ avatar.js[IB7M]: F:Alipay member avatar upload import and persist to /uploads/av
 cart.js[DB8L]: F:Cart pricing option labels merge reconcile and checkout eligibility helpers | R:- | A:calcUnitPrice,reconcileWithProducts,validateRequiredOptions,validateCategoryRequires | S:reconcileWithProducts complete:false must not mark missing products off-menu; option id compare uses String not ===
 cart.sjs[LZ2T]: F:SJS template helper hasId for option id loose match in axml | R:code:miniprogram-alipay/utils/cart.js | A:hasId | S:-
 clientConfig.js[IC7M]: F:Fetch and cache GET miniprogram/config per store into globalData feature flags | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/auth.js | A:loadClientConfig,invalidateClientConfig,menuPageFlags | S:Store switch must call invalidateClientConfig; boolFlag reads globalData.clientConfig after applyCacheToApp
-context.js[IB8L]: F:Alipay dine table store context bind scan refresh and page store-bar fields | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/scan.js,code:miniprogram-alipay/utils/clientConfig.js | A:ensureDineContext,scanAndBindTable,refreshTableBinding,applyContext | S:Local 4h boundAt does not delete qr_token; token validity only via /miniprogram/entry; cross-store applyContext clears cart via auth.ensureCartForCurrentStore; table_id revive only when fresh and allowReviveByTableId
+context.js[IB8L]: F:Alipay dine table store context bind scan refresh and page store-bar fields | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/scan.js,code:miniprogram-alipay/utils/clientConfig.js | A:ensureDineContext,scanAndBindTable,refreshTableBinding,applyContext | S:Network failure must not clear qr_token; scan logs omit raw text and print token prefix only in devtools
 face.js[IS6M]: F:Alipay face welcome liveness challenge front camera consent-base64 enroll revoke | R:code:miniprogram-alipay/utils/api.js,code:miniprogram-alipay/utils/clientConfig.js | A:enrollFaceWelcome,revokeFaceWelcome | S:Blocked when enable_face_welcome false; image_base64 length under 800 rejected before POST
 logger.js[OC5M]: F:Alipay client log queue hook console and POST client-logs | R:code:miniprogram-alipay/utils/api.js | A:install,logger,reportApi | S:Skips enqueue when reporting true; does not log paths containing /client-logs
 media.js[LC6M]: F:Resolve /uploads URLs from apiBase and layout thumb hero metrics for product images | R:- | A:resolveUrl,decorateProduct,galleryUrls,layoutMetrics | S:Strips /api suffix from apiBase before joining relative upload paths
@@ -528,10 +529,10 @@ tracker.js[OA6M]: F:Behavior event queue batch POST miniprogram/events with opt-
 voucher.js[DB5T]: F:One-shot voucher discount against eligible payable no balance carry | R:- | A:calcVoucherDiscount,isVoucherApplicable | S:Display name prefers template_name over name
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/===
-app.js[ER8M]: F:WeChat App onLaunch globalData cart dine restore privacy config menu prefetch | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/privacy.js,code:miniprogram-wechat/utils/tracker.js | A:onLaunch,parseLaunch | S:Does not purge table_token on local TTL; cold start menu prefetch uses fetchMenuBundle when store_id known
-app.json[FR7M]: F:WeChat mini program pages tabBar packageOrder subpackage and global components | R:- | A:- | S:__usePrivacyCheck__ true; preloadRule loads order package from menu tab
+app.js[ER8M]: F:WeChat App onLaunch globalData cart dine restore privacy config menu prefetch | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/privacy.js,code:miniprogram-wechat/utils/logger.js,code:miniprogram-wechat/config/env.js | A:onLaunch,parseLaunch,onError | S:Does not purge table_token on local TTL; remoteLogger.install and error logging skipped when isRelease
+app.json[FR7T]: F:WeChat mini program pages tabBar packageOrder subpackage and global components | R:code:miniprogram-wechat/app.js | A:preloadRule | S:__usePrivacyCheck__ true; preloadRule loads order package from menu and orders tabs
 app.wxss[LC5T]: F:Global page theme primary buttons and store-bar host layout reset | R:- | A:- | S:store-bar display block removes default gap to avoid tab first-switch white flash
-project.config.json[FC5T]: F:WeChat IDE project settings urlCheck appid compile options | R:code:miniprogram-wechat/config/env.js | A:- | S:Dev urlCheck false; set true before release upload
+project.config.json[FC5T]: F:WeChat IDE project settings urlCheck pack ignore and compile options | R:code:miniprogram-wechat/config/env.js,code:miniprogram-wechat/scripts/preflight-check.js | A:packOptions.ignore | S:Dev keeps urlCheck false; uploadWithSourceMap false; ignore excludes 环境说明.txt and scripts folder
 project.private.config.json[FC3T]: F:Local IDE private overrides libVersion urlCheck | R:code:miniprogram-wechat/project.config.json | A:- | S:-
 sitemap.json[FC2T]: F:WeChat sitemap allow all pages for indexing | R:- | A:- | S:-
 
@@ -560,7 +561,7 @@ store-bar.wxml[CU5S]: F:Store logo name table row compact empty scan hint layout
 store-bar.wxss[CU5S]: F:Store-bar compact tab flush styles and table change hint | R:code:miniprogram-wechat/components/store-bar/store-bar.wxml | A:- | S:compact mode zero horizontal margin for tab switch consistency
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/config/===
-env.js[FC6S]: F:WeChat API base resolution by envVersion devtools LAN and prod constants | R:- | A:resolveApiBase,getEnvDebugInfo,appendDevApiHint | S:release always PROD_API_BASE; real device dev uses DEV_LAN_API unless DEV_USE_LAN false and devtools then 127.0.0.1; privacy flags deprecated here use /miniprogram/config
+env.js[FC6S]: F:WeChat API base resolution by envVersion devtools LAN and prod constants | R:code:miniprogram-wechat/scripts/preflight-check.js,code:miniprogram-wechat/config/环境说明.txt | A:resolveApiBase,getEnvDebugInfo,isRelease,appendDevApiHint | S:release always PROD_API_BASE; placeholder must be replaced before upload; privacy toggles removed from exports use /miniprogram/config
 环境说明.txt[SC4T]: F:WeChat local IDE device and release API domain setup guide | R:code:miniprogram-wechat/config/env.js | A:- | S:Privacy toggles live in repo root .env not this file
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/cart/===
@@ -571,19 +572,19 @@ cart.wxss[CU2T]: F:Subpackage cart redirect tip style | R:code:miniprogram-wecha
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/confirm/===
 confirm.js[DB8L]: F:WeChat subpackage checkout confirm coupons vouchers pay table pack subscribe | R:code:miniprogram-wechat/utils/cart.js,code:miniprogram-wechat/utils/pay.js,code:miniprogram-wechat/utils/context.js | A:submitOrder | S:CHECKOUT_CACHE_MS 30s; percent coupon only when strictly beats member rate; mirrors alipay confirm pricing rules
-confirm.json[FC3T]: F:Confirm page registers store-bar and recommend-strip | R:code:miniprogram-wechat/packageOrder/confirm/confirm.js | A:- | S:-
+confirm.json[FC3T]: F:Confirm page registers recommend-strip only | R:code:miniprogram-wechat/packageOrder/confirm/confirm.js,code:miniprogram-wechat/app.json | A:- | S:store-bar is global in app.json; do not re-reg
 confirm.wxml[CU7M]: F:Subpackage checkout form cart preview coupons vouchers pack pay | R:code:miniprogram-wechat/packageOrder/confirm/confirm.js | A:- | S:-
 confirm.wxss[CU6S]: F:Confirm page layout and coupon voucher row styles | R:code:miniprogram-wechat/packageOrder/confirm/confirm.wxml | A:- | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/product/===
 product.js[DB7S]: F:Subpackage product detail options prefs gallery add cart | R:code:miniprogram-wechat/utils/cart.js,code:miniprogram-wechat/utils/preferences.js | A:onLoad,addCart | S:-
 product.json[FC3T]: F:Subpackage product page config | R:code:miniprogram-wechat/packageOrder/product/product.js | A:- | S:-
-product.wxml[CU6S]: F:Product hero gallery option groups quantity add bar | R:code:miniprogram-wechat/packageOrder/product/product.js | A:- | S:-
-product.wxss[CU6S]: F:Product detail page styles | R:code:miniprogram-wechat/packageOrder/product/product.wxml | A:- | S:-
+product.wxml[CU6S]: F:Product hero gallery option groups quantity flags and add bar | R:code:miniprogram-wechat/packageOrder/product/product.js | A:- | S:Renders is_hot/is_recommended badges with tip when either flag is set
+product.wxss[CU6S]: F:Product detail page styles including hot and recommend flag tags | R:code:miniprogram-wechat/packageOrder/product/product.wxml | A:.flag-tag | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/packageOrder/result/===
 result.js[DB8L]: F:Pay result order status pickup feedback reorder subscribe | R:code:miniprogram-wechat/utils/pay.js,code:miniprogram-wechat/utils/pickup.js | A:onLoad,submitFeedback | S:FEEDBACK_TAGS align backend VERDICT_WHITELIST
-result.json[FC3T]: F:Result page nav and components | R:code:miniprogram-wechat/packageOrder/result/result.js | A:- | S:-
+result.json[FC3T]: F:Result page nav pullRefresh and skeleton component | R:code:miniprogram-wechat/packageOrder/result/result.js,code:miniprogram-wechat/app.json | A:- | S:store-bar is global; page only registers skeleton
 result.wxml[CU7M]: F:Payment result pickup banner feedback tags reorder UI | R:code:miniprogram-wechat/packageOrder/result/result.js | A:- | S:-
 result.wxss[CU6S]: F:Result and feedback tag styles | R:code:miniprogram-wechat/packageOrder/result/result.wxml | A:- | S:-
 
@@ -600,7 +601,7 @@ confirm.wxml[CU2T]: F:Confirm redirect placeholder | R:code:miniprogram-wechat/p
 confirm.wxss[CU2T]: F:Shared redirect tip style | R:code:miniprogram-wechat/pages/confirm/confirm.wxml | A:- | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/pages/index/===
-index.js[ER6S]: F:Scan landing bind table silent login then menu within 12s fallback | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/auth.js | A:bootstrap,goMenu | S:BOOT_FALLBACK_MS 12000 guest menu if login slow
+index.js[ER6S]: F:Scan landing bind table silent login then menu with weak-net fallback | R:code:miniprogram-wechat/utils/context.js,code:miniprogram-wechat/utils/auth.js | A:bootstrap,goMenu | S:BOOT_FALLBACK_MS 6000 guest menu if login slow; member bind stays on member page
 index.json[FC3T]: F:Index landing page config | R:code:miniprogram-wechat/pages/index/index.js | A:- | S:-
 index.wxml[CU4T]: F:Bootstrap loading store table hint before menu | R:code:miniprogram-wechat/pages/index/index.js | A:- | S:-
 index.wxss[CU4T]: F:Index bootstrap splash styles | R:code:miniprogram-wechat/pages/index/index.wxml | A:- | S:-
@@ -612,10 +613,10 @@ member.wxml[CU8L]: F:Member profile avatar nickname phone wallet coupons levels 
 member.wxss[CU7M]: F:Member center card ladder wallet coupon styles | R:code:miniprogram-wechat/pages/member/member.wxml | A:- | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/pages/menu/===
-menu.js[DB9L]: F:Menu tab catalog cart sheet quick add prefs reco search checkout | R:code:miniprogram-wechat/utils/products.js,code:miniprogram-wechat/utils/cart.js | A:loadMenu,goCheckout | S:sliceMenuForFirstPaint caps 40 items; MENU_REFRESH_TTL_MS 30s; _openCartSheet opens sheet once on onShow
+menu.js[DB9L]: F:Menu tab catalog cart sheet quick add prefs reco search checkout | R:code:miniprogram-wechat/utils/products.js,code:miniprogram-wechat/utils/cart.js | A:loadMenu,refreshCartBar,goCheckout | S:sliceMenuForFirstPaint caps 40; refreshCartBar sets cartKey from product_id+sorted option_ids matching itemKey
 menu.json[FC4T]: F:Menu tab pull refresh skeleton recommend-strip | R:code:miniprogram-wechat/pages/menu/menu.js | A:- | S:-
-menu.wxml[CU8L]: F:Category nav product list cart bar sheet search smart taste reco | R:code:miniprogram-wechat/pages/menu/menu.js | A:- | S:-
-menu.wxss[CU7M]: F:Menu layout cart sheet wide screen styles | R:code:miniprogram-wechat/pages/menu/menu.wxml | A:- | S:-
+menu.wxml[CU8L]: F:Category nav product list cart bar sheet search smart taste reco flags | R:code:miniprogram-wechat/pages/menu/menu.js | A:- | S:Cart list wx:key is cartKey; product cards show is_hot/is_recommended badges
+menu.wxss[CU7M]: F:Menu layout cart sheet wide screen and flag-tag styles | R:code:miniprogram-wechat/pages/menu/menu.wxml | A:.flag-tag | S:-
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/pages/orders/===
 orders.js[DB7M]: F:Orders tab dine and recharge lists tabs pagination reorder pickup | R:code:miniprogram-wechat/utils/pickup.js | A:reloadCurrent,reorder | S:orders_scope_pending storage switches recharge scope on onShow; ORDERS_CACHE_MS 30s
@@ -631,7 +632,7 @@ product.wxss[CU2T]: F:Shared redirect tip style | R:code:miniprogram-wechat/page
 
 ===E:/SmartNoodleHouse/miniprogram-wechat/pages/recharge-records/===
 recharge-records.js[RR3T]: F:Legacy recharge records sets orders_scope_pending recharge | R:code:miniprogram-wechat/pages/orders/orders.js | A:onShow | S:-
-recharge-records.json[FC3T]: F:Legacy recharge records page config | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.js | A:- | S:-
+recharge-records.json[FC3T]: F:Legacy recharge records route title-only page config | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.js | A:- | S:Compat redirect shell; no skeleton/pullDownRefresh
 recharge-records.wxml[CU2T]: F:Recharge records redirect placeholder | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.js | A:- | S:-
 recharge-records.wxss[CU2T]: F:Recharge records stub styles | R:code:miniprogram-wechat/pages/recharge-records/recharge-records.wxml | A:- | S:-
 
@@ -653,13 +654,13 @@ auth.js[IS8L]: F:WeChat silent login session cart store scope reg draft profile 
 avatar.js[IB7M]: F:WeChat member avatar upload wx.uploadFile to /uploads/avatars | R:code:miniprogram-wechat/utils/api.js,code:miniprogram-wechat/utils/media.js | A:ensureRemoteAvatar,uploadLocalAvatar | S:Wx chooseAvatar may return CDN; uses avatar-from-url when upload fails
 cart.js[DB8L]: F:WeChat cart pricing reconcile validate mirrors alipay cart util | R:- | A:reconcileWithProducts,validateRequiredOptions | S:complete false must not mark missing products off-menu
 clientConfig.js[IC7M]: F:WeChat GET miniprogram config per store feature flags | R:code:miniprogram-wechat/utils/api.js | A:loadClientConfig,invalidateClientConfig | S:Store switch must invalidateClientConfig
-context.js[IB8L]: F:WeChat dine context bind scan wx.scanCode refresh store-bar | R:code:miniprogram-wechat/utils/scan.js | A:ensureDineContext,scanAndBindTable | S:Token validity via /miniprogram/entry channel wechat; 4h boundAt does not delete token
+context.js[IB8L]: F:WeChat dine context bind scan wx.scanCode refresh store-bar | R:code:miniprogram-wechat/utils/scan.js,code:miniprogram-wechat/config/env.js | A:ensureDineContext,scanAndBindTable,refreshTableBinding | S:Network failure must not clear qr_token; scan logs omit raw text and print token prefix only in devtools
 face.js[IS6M]: F:WeChat face welcome liveness camera consent-base64 enroll | R:code:miniprogram-wechat/utils/clientConfig.js | A:enrollFaceWelcome | S:Blocked when enable_face_welcome false
 logger.js[OC5M]: F:WeChat client logs POST client-logs source wechat | R:code:miniprogram-wechat/utils/api.js | A:install,reportApi | S:Skips /client-logs paths in reportApi
 media.js[LC6M]: F:WeChat resolve /uploads URLs layout thumb hero metrics | R:- | A:resolveUrl,decorateProduct | S:Strips /api suffix from apiBase before join
 navBar.js[AR3T]: F:Pin WeChat tab navigation bar colors on onShow | R:- | A:pinWechatNavBar | S:animation duration 0 avoids tab white flash
 page-redirect.js[RC4T]: F:WeChat legacy paths redirect after loadSubPackage order | R:- | A:redirectToPackage | S:1200ms subpackage load cap before navigate
-pay.js[IN7M]: F:WeChat wx.requestPayment mock pending sync confirm | R:code:miniprogram-wechat/utils/api.js | A:payAndConfirm,confirmPending | S:mock_settled skips requestPayment; uncertain codes trigger sync
+pay.js[IN7M]: F:WeChat wx.requestPayment mock pending sync confirm | R:code:miniprogram-wechat/utils/api.js | A:payAndConfirm,requestWechatPay,confirmPending | S:signType must come from backend; mock_settled skips requestPayment; uncertain codes trigger sync
 phoneAuth.js[IS6M]: F:WeChat getPhoneNumber button handlers merge confirm | R:code:miniprogram-wechat/utils/privacy.js | A:handleGetPhoneNumber,confirmAccountMerge | S:Requires user button tap; privacy errors open popup
 pickup.js[DB5M]: F:Order pickup banner hints shared with alipay pickup util | R:- | A:decorate | S:Hides banner for MEITUAN ELEME channels
 preferences.js[DB7M]: F:WeChat smart taste prefs load apply product selections | R:code:miniprogram-wechat/utils/api.js | A:loadCustomerPrefs,applyPrefsToProduct | S:PREFS_CACHE_MS 60s per store_id
@@ -707,3 +708,9 @@ struct.sql[PP9L]: F:Canonical MySQL schema utf8mb4 DROP CREATE GRANT and all CRE
 ===E:/SmartNoodleHouse/systemd/===
 smart-noodle.service[FO7T]: F:Ubuntu systemd unit gunicorn uvicorn on 127.0.0.1:8000 www-data | R:code:nginx/smart-noodle.conf,code:scripts/生产部署-ubuntu.txt | A:- | S:PROCESS_ROLE=auto overrides .env leader; replace REPLACE_DEPLOY_ROOT before enable
 安装说明.txt[SO4T]: F:Ubuntu steps install enable smart-noodle systemd and health check | R:code:systemd/smart-noodle.service | A:- | S:-
+
+===E:/SmartNoodleHouse/miniprogram-alipay/scripts/===
+preflight-check.js[TQ5T]: F:Alipay upload preflight checking PROD placeholder ignore list and logger gate | R:code:miniprogram-alipay/config/env.js,code:miniprogram-alipay/mini.project.json,code:miniprogram-alipay/app.js | A:- | S:Exits 1 while PROD_API_BASE is your-domain.com or env doc not ignored or remoteLogger lacks isRelease gate
+
+===E:/SmartNoodleHouse/miniprogram-wechat/scripts/===
+preflight-check.js[TQ5T]: F:WeChat upload preflight for PROD placeholder urlCheck ignore and logger gate | R:code:miniprogram-wechat/config/env.js,code:miniprogram-wechat/project.config.json,code:miniprogram-wechat/app.js | A:- | S:Exits 1 if PROD_API_BASE is placeholder,UrlCheck false, env doc not ignored, or remoteLogger lacks isRelease gate

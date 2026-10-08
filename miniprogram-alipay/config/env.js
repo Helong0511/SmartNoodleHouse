@@ -17,6 +17,8 @@
  */
 
 /** 生产 API（须 HTTPS，与开放平台服务器域名白名单一致） */
+// TODO(发布前必改)：替换为真实 HTTPS 域名，并在 open.alipay.com 配置服务器域名白名单。
+// 保持占位符时 release 版本会全部请求失败，请勿直接上传正式版。
 const PROD_API_BASE = 'https://your-domain.com/api'
 
 /** 本地模拟器（支付宝开发者工具） */
@@ -109,11 +111,5 @@ module.exports = {
   DEV_LAN_HOST,
   DEV_USE_LAN,
   DEV_LAN_API,
-  TRIAL_USE_PROD_API,
-  /** @deprecated 隐私开关已迁至项目根 .env，由 /miniprogram/config 下发 */
-  enableChooseAvatar: false,
-  enableNicknameInput: false,
-  enableAlipayPhoneBind: false,
-  enableAlipayPrivacyApis: false,
-  enableAlipayUserProfile: false
+  TRIAL_USE_PROD_API
 }
