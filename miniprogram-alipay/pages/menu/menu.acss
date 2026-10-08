@@ -200,6 +200,30 @@
   border-radius: 6rpx;
   padding: 2rpx 8rpx;
 }
+.tag-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+  flex-shrink: 0;
+}
+.flag-tag {
+  flex-shrink: 0;
+  font-size: 20rpx;
+  border-radius: 6rpx;
+  padding: 2rpx 8rpx;
+  line-height: 1.4;
+}
+.flag-tag.hot {
+  color: #cf1322;
+  background: #fff1f0;
+  border: 1rpx solid #ffa39e;
+}
+.flag-tag.reco {
+  color: #389e0d;
+  background: #f6ffed;
+  border: 1rpx solid #b7eb8f;
+}
 .desc {
   color: #999;
   font-size: 22rpx;

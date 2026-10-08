@@ -46,9 +46,18 @@ module.exports.hasId = hasId
   <view class="body">
     <view class="title-row">
       <view class="title">{{product.name}}</view>
-      <text class="special-tag" wx:if="{{product.no_member_discount}}">特价</text>
+      <view class="tag-row">
+        <text class="flag-tag hot" wx:if="{{product.is_hot}}">热销</text>
+        <text class="flag-tag reco" wx:if="{{product.is_recommended}}">推荐</text>
+        <text class="special-tag" wx:if="{{product.no_member_discount}}">特价</text>
+      </view>
     </view>
     <view class="desc" wx:if="{{product.description}}">{{product.description}}</view>
+    <view class="flag-tip" wx:if="{{product.is_hot || product.is_recommended}}">
+      <text wx:if="{{product.is_hot && product.is_recommended}}">本店热销 · 店长推荐</text>
+      <text wx:elif="{{product.is_hot}}">本店热销，顾客常点</text>
+      <text wx:else>店长推荐，值得一试</text>
+    </view>
     <view class="special-tip" wx:if="{{product.no_member_discount}}">特价商品不参与会员折扣、优惠券及代金券</view>
     <view class="pref-hint" wx:if="{{prefHint}}">{{prefHint}}</view>
     <view class="price">

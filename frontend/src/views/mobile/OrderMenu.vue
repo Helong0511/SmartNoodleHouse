@@ -33,7 +33,14 @@
           <div v-else class="thumb placeholder">{{ (p.name || '餐')[0] }}</div>
         </div>
         <div class="info">
-          <strong>{{ p.name }}</strong>
+          <div class="name-row">
+            <strong>{{ p.name }}</strong>
+            <span class="tag-row">
+              <span v-if="p.is_hot" class="flag-tag hot">热销</span>
+              <span v-if="p.is_recommended" class="flag-tag reco">推荐</span>
+              <span v-if="p.no_member_discount" class="flag-tag special">特价</span>
+            </span>
+          </div>
           <p v-if="p.description">{{ p.description }}</p>
           <div class="price">¥{{ p.price }}</div>
         </div>
@@ -52,7 +59,19 @@
           />
           <div v-else class="hero-img placeholder">{{ (currentProduct.name || '餐')[0] }}</div>
         </div>
-        <h3>{{ currentProduct.name }} ¥{{ currentProduct.price }}</h3>
+        <div class="drawer-title-row">
+          <h3>{{ currentProduct.name }} ¥{{ currentProduct.price }}</h3>
+          <span class="tag-row">
+            <span v-if="currentProduct.is_hot" class="flag-tag hot">热销</span>
+            <span v-if="currentProduct.is_recommended" class="flag-tag reco">推荐</span>
+            <span v-if="currentProduct.no_member_discount" class="flag-tag special">特价</span>
+          </span>
+        </div>
+        <p v-if="currentProduct.is_hot || currentProduct.is_recommended" class="flag-tip">
+          <template v-if="currentProduct.is_hot && currentProduct.is_recommended">本店热销 · 店长推荐</template>
+          <template v-else-if="currentProduct.is_hot">本店热销，顾客常点</template>
+          <template v-else>店长推荐，值得一试</template>
+        </p>
         <p v-if="prefHint" class="pref-hint">{{ prefHint }}</p>
         <p v-if="currentProduct.description" class="desc">{{ currentProduct.description }}</p>
         <div v-for="g in currentProduct.option_groups" :key="g.id" class="option-group">
@@ -352,6 +371,15 @@ header h1 { font-size: 18px; font-weight: 600; }
   background: linear-gradient(145deg, #ffe8df, #f5f5f5); color: #ff6b35; font-weight: 700; font-size: 22px;
 }
 .info { flex: 1; min-width: 0; }
+.name-row { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.name-row strong { font-size: 15px; min-width: 0; }
+.tag-row { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.flag-tag {
+  font-size: 11px; line-height: 1.3; border-radius: 4px; padding: 1px 6px; border: 1px solid;
+}
+.flag-tag.hot { color: #cf1322; background: #fff1f0; border-color: #ffa39e; }
+.flag-tag.reco { color: #389e0d; background: #f6ffed; border-color: #b7eb8f; }
+.flag-tag.special { color: #ff6b35; background: #fff7f2; border-color: #ffb899; }
 .info p { color: #999; font-size: 13px; margin: 4px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .price { color: #ff6b35; font-weight: bold; font-size: 18px; margin-top: 8px; }
 .cart-bar {
@@ -359,6 +387,11 @@ header h1 { font-size: 18px; font-weight: 600; }
   background: #333; color: #fff; padding: 16px; text-align: center; cursor: pointer;
 }
 .drawer-body { padding-bottom: 24px; }
+.drawer-title-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;
+}
+.drawer-title-row h3 { margin: 0; font-size: 18px; }
+.flag-tip { font-size: 13px; color: #666; margin: 0 0 8px; }
 .hero { width: 100%; border-radius: 12px; overflow: hidden; background: #eee; margin-bottom: 12px; }
 .hero-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hero-img.placeholder {

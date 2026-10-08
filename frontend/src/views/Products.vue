@@ -376,10 +376,13 @@
           <el-input-number v-model="form.sort_order" :min="0" />
         </el-form-item>
         <el-form-item label="标签">
-          <el-checkbox v-model="form.is_recommended">推荐</el-checkbox>
-          <el-checkbox v-model="form.is_hot">热销</el-checkbox>
+          <el-checkbox v-model="form.is_recommended">推荐（店长精选，仅人工勾选）</el-checkbox>
+          <el-checkbox v-model="form.is_hot">热销（夜间批可按销量自动刷新）</el-checkbox>
           <el-checkbox v-model="form.no_member_discount">特价（不参与会员折扣/优惠券/代金券）</el-checkbox>
           <el-checkbox v-model="form.no_cooking">免烹饪（卤味等现成品，KDS 可直出餐）</el-checkbox>
+          <div class="hint" style="margin-top:6px">
+            「推荐」「热销」会在小程序菜单与推荐条展示；推荐不被销量批处理覆盖。
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>

@@ -80,7 +80,11 @@
               <view class="info">
                 <view class="name-row">
                   <view class="name">{{p.name}}</view>
-                  <text class="special-tag" wx:if="{{p.no_member_discount}}">特价</text>
+                  <view class="tag-row">
+                    <text class="flag-tag hot" wx:if="{{p.is_hot}}">热销</text>
+                    <text class="flag-tag reco" wx:if="{{p.is_recommended}}">推荐</text>
+                    <text class="special-tag" wx:if="{{p.no_member_discount}}">特价</text>
+                  </view>
                 </view>
                 <view class="desc" wx:if="{{p.description}}">{{p.description}}</view>
                 <view class="price">¥{{p.price}}</view>

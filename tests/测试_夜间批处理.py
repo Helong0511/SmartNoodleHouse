@@ -98,9 +98,10 @@ async def test_run_night_batch_skips_when_disabled():
 
 @pytest.mark.asyncio
 async def test_refresh_sales_flags_marks_top_products():
+    """夜间批仅刷新 is_hot；is_recommended 保持人工勾选不被覆盖。"""
     p1 = SimpleNamespace(id=1, is_hot=False, is_recommended=False)
     p2 = SimpleNamespace(id=2, is_hot=True, is_recommended=True)
-    p3 = SimpleNamespace(id=3, is_hot=False, is_recommended=False)
+    p3 = SimpleNamespace(id=3, is_hot=False, is_recommended=True)
     db = MagicMock()
     db.flush = AsyncMock()
 
@@ -129,11 +130,11 @@ async def test_refresh_sales_flags_marks_top_products():
         )
     assert out["skipped"] is False
     assert out["hot_ids"] == [1]
-    assert out["recommend_ids"] == [1, 3]
-    assert p1.is_hot is True and p1.is_recommended is True
-    assert p3.is_hot is False and p3.is_recommended is True
-    assert p2.is_hot is False and p2.is_recommended is False
-    assert out["changed"] == 3
+    assert out["recommend_ids"] == []
+    assert p1.is_hot is True and p1.is_recommended is False
+    assert p3.is_hot is False and p3.is_recommended is True  # 人工推荐保留
+    assert p2.is_hot is False and p2.is_recommended is True  # 人工推荐保留
+    assert out["changed"] == 2  # 仅 p1 变热销、p2 取消热销
 
 
 @pytest.mark.asyncio

@@ -103,11 +103,16 @@ async def refresh_sales_flags_for_store(
     store_id: int,
     since: datetime,
     hot_top_n: int,
-    recommend_top_n: int,
+    recommend_top_n: int = 0,
 ) -> dict[str, Any]:
-    """按近 N 日销量刷新本店 is_hot / is_recommended。无销量数据时不改标记。"""
-    need = max(hot_top_n, recommend_top_n)
-    ranked = await rank_store_sales(db, store_id=store_id, since=since, limit=max(need, 1))
+    """按近 N 日销量刷新本店 is_hot（热销）。
+
+    is_recommended（店长推荐）改为仅人工勾选，夜间批不再覆盖。
+    recommend_top_n 保留入参兼容旧调用，已忽略。
+    """
+    del recommend_top_n  # 兼容旧签名；推荐标记不再按销量自动改写
+    need = max(hot_top_n, 1)
+    ranked = await rank_store_sales(db, store_id=store_id, since=since, limit=need)
     if not ranked:
         return {
             "store_id": store_id,
@@ -118,7 +123,6 @@ async def refresh_sales_flags_for_store(
         }
 
     hot_ids = {pid for pid, _ in ranked[:hot_top_n]} if hot_top_n else set()
-    reco_ids = {pid for pid, _ in ranked[:recommend_top_n]} if recommend_top_n else set()
 
     products = list(
         (
@@ -133,10 +137,8 @@ async def refresh_sales_flags_for_store(
     changed = 0
     for p in products:
         want_hot = p.id in hot_ids
-        want_reco = p.id in reco_ids
-        if bool(p.is_hot) != want_hot or bool(p.is_recommended) != want_reco:
+        if bool(p.is_hot) != want_hot:
             p.is_hot = want_hot
-            p.is_recommended = want_reco
             changed += 1
     if changed:
         await db.flush()
@@ -146,7 +148,7 @@ async def refresh_sales_flags_for_store(
         "skipped": False,
         "changed": changed,
         "hot_ids": sorted(hot_ids),
-        "recommend_ids": sorted(reco_ids),
+        "recommend_ids": [],
         "ranked": [{"product_id": pid, "qty": qty} for pid, qty in ranked[:need]],
     }
 
