@@ -1245,7 +1245,7 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
 
     if not order:
 
-        return success(None, message="订单不存在", request=request)
+        raise AppException(40404, "订单不存在")
 
     if user is None and customer is None:
 

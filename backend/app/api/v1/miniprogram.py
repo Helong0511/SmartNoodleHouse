@@ -431,7 +431,7 @@ async def scan_landing(
 
     table = await resolve_dining_table(db, token)
     if not table:
-        return success(None, message="无效桌台二维码", request=request)
+        raise AppException(40404, "无效桌台二维码")
 
     store = await _store_brief(db, table.store_id)
     links = build_table_qr_links(table.qr_token)
