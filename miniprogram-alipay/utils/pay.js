@@ -73,7 +73,9 @@ async function confirmPending(api, opts) {
     if (paid && orderId) clearPending(orderId)
     return { paid, data }
   } catch (e) {
-    return { paid: false, data: null, error: e }
+    // P1-12：查单错误不静默吞掉，记录日志并标记 networkError 供调用方区分
+    try { console.warn('[confirmPending] 查单失败:', e && (e.message || e)) } catch (_) { }
+    return { paid: false, data: null, error: e, networkError: !!(e && (e.status === undefined || e.code === 'NETWORK')) }
   }
 }
 

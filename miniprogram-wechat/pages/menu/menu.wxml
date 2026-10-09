@@ -119,7 +119,7 @@
     <scroll-view class="cart-sheet-body" scroll-y>
       <view class="cart-item {{item.invalid ? 'invalid' : ''}}" wx:for="{{cart}}" wx:key="cartKey">
         <view class="cart-thumb-wrap" style="{{cartThumbStyle}}">
-          <image wx:if="{{item.imageUrl}}" class="cart-thumb" src="{{item.imageUrl}}" mode="aspectFill" webp="{{true}}" />
+          <image wx:if="{{item.imageUrl}}" class="cart-thumb" src="{{item.imageUrl}}" mode="aspectFill" lazy-load webp="{{true}}" />
           <view wx:else class="cart-thumb placeholder">{{item.name[0] || '餐'}}</view>
         </view>
         <view class="cart-info">

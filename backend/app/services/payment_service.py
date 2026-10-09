@@ -197,7 +197,7 @@ class WechatPayProvider:
         return {
             "payment_no": data.get("out_trade_no"),
             "provider_trade_no": data.get("transaction_id"),
-            "amount": total,
+            "amount": str(total),  # 微信回调金额单位：分
             "currency": currency,
             "status": "PAID" if data.get("trade_state") == "SUCCESS" else "FAILED",
             "mchid": data.get("mchid"),
@@ -344,7 +344,7 @@ class AlipayProvider:
         return {
             "payment_no": data.get("out_trade_no"),
             "provider_trade_no": data.get("trade_no"),
-            "amount": data.get("total_amount", "0"),
+            "amount": str(data.get("total_amount", 0)),  # 支付宝回调金额单位：元
             "currency": data.get("currency") or "CNY",
             "status": "PAID" if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED") else "FAILED",
             "app_id": data.get("app_id"),
@@ -1738,10 +1738,16 @@ class PaymentService:
         raw_amount = parsed.get("amount", 0)
         if isinstance(raw_amount, dict):
             raw_amount = raw_amount.get("total", 0)
-        if provider_u == "WECHAT":
-            callback_amount = money(Decimal(str(raw_amount)) / 100)
-        else:
-            callback_amount = money(Decimal(str(raw_amount)))
+        # fail-closed：回调金额缺失或格式非法时拒绝入账，防止 Decimal(str(None)) 崩溃
+        if raw_amount is None:
+            raise AppException(40302, "回调金额缺失或格式非法")
+        try:
+            if provider_u == "WECHAT":
+                callback_amount = money(Decimal(str(raw_amount)) / 100)
+            else:
+                callback_amount = money(Decimal(str(raw_amount)))
+        except (InvalidOperation, ValueError, TypeError):
+            raise AppException(40302, "回调金额缺失或格式非法")
         if callback_amount != money(payment.amount):
             raise AppException(40302, "支付金额不匹配")
 
@@ -1803,10 +1809,16 @@ class PaymentService:
         raw_amount = parsed.get("amount", 0)
         if isinstance(raw_amount, dict):
             raw_amount = raw_amount.get("total", 0)
-        if provider_u == "WECHAT":
-            callback_amount = money(Decimal(str(raw_amount)) / 100)
-        else:
-            callback_amount = money(Decimal(str(raw_amount)))
+        # fail-closed：回调金额缺失或格式非法时拒绝入账，防止 Decimal(str(None)) 崩溃
+        if raw_amount is None:
+            raise AppException(40302, "回调金额缺失或格式非法")
+        try:
+            if provider_u == "WECHAT":
+                callback_amount = money(Decimal(str(raw_amount)) / 100)
+            else:
+                callback_amount = money(Decimal(str(raw_amount)))
+        except (InvalidOperation, ValueError, TypeError):
+            raise AppException(40302, "回调金额缺失或格式非法")
         if callback_amount != money(payment.amount):
             raise AppException(40302, "支付金额不匹配")
 

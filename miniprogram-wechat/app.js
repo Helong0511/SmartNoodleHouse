@@ -27,7 +27,9 @@ App({
     enableWxPhoneBind: false,
     enableWxAvatar: true,
     enableWxNickname: true,
-    clientConfig: null
+    clientConfig: null,
+    networkType: 'unknown', // P3-19：网络状态检测
+    isOnline: true
   },
   onLaunch(options) {
     if (!this.globalData.apiBase) {
@@ -50,14 +52,23 @@ App({
         this.globalData.table = cached.table
         this.globalData.tableToken = cached.token || ''
         // P2-1：启动恢复后立即校验购物车门店归属，跨店清空
-        try { dineCtx.reconcileCartWithStore() } catch (_) {}
+        try { dineCtx.reconcileCartWithStore() } catch (_) { }
       }
-    } catch (_) {}
+    } catch (_) { }
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
-    clientConfig.loadClientConfig().catch(() => {})
-    auth.purgeStaleSessionIfNeeded().catch(() => {})
+    clientConfig.loadClientConfig().catch(() => { })
+    auth.purgeStaleSessionIfNeeded().catch(() => { })
+    // P1-4：启动时恢复查单，防止支付后崩溃/退出导致状态丢失
+    try {
+      const pay = require('./utils/pay')
+      const pending = pay.readPending()
+      if (pending && pending.orderId) {
+        const _api2 = require('./utils/api')
+        pay.confirmPending(_api2, { orderId: pending.orderId, paymentNo: pending.paymentNo }).catch(() => { })
+      }
+    } catch (_) { }
     // 应用层预拉取：冷启动时提前发起菜单请求，页面 onLoad 时可能已拿到数据
     const _sid = (this.globalData.table && this.globalData.table.store_id)
       || (this.globalData.store && this.globalData.store.id)
@@ -70,20 +81,42 @@ App({
           storeId: String(_sid),
           promise: productApi.fetchMenuBundle(_api, _sid, null).catch(() => null)
         }
-      } catch (_) {}
+      } catch (_) { }
     }
+    // P3-19：网络状态检测，断网时提示用户
+    wx.getNetworkType({
+      success: (res) => {
+        this.globalData.networkType = res.networkType || 'unknown'
+        this.globalData.isOnline = res.networkType !== 'none'
+      }
+    })
+    wx.onNetworkStatusChange((res) => {
+      this.globalData.networkType = res.networkType || 'unknown'
+      this.globalData.isOnline = !!res.isConnected
+      if (!res.isConnected) {
+        wx.showToast({ title: '网络已断开', icon: 'none', duration: 2000 })
+      }
+    })
   },
   onError(err) {
-    if (isRelease()) return
-    try {
-      remoteLogger.logger.error(String(err || 'App.onError'), err)
-    } catch (_) {}
+    // P1-5：正式版也记录崩溃，不静默吞掉
+    try { console.error('[onError]', String(err || '')) } catch (_) { }
+    if (!isRelease()) {
+      try { remoteLogger.logger.error(String(err || 'App.onError'), err) } catch (_) { }
+    }
+  },
+  // P2-8：全局未处理 Promise 拒绝
+  onUnhandledRejection(res) {
+    try { console.error('[onUnhandledRejection]', String(res && (res.reason || res))) } catch (_) { }
+    if (!isRelease()) {
+      try { remoteLogger.logger.error('[onUnhandledRejection]', res && res.reason) } catch (_) { }
+    }
   },
   onPageNotFound(res) {
     if (!isRelease()) {
       try {
         remoteLogger.logger.warn('onPageNotFound', res)
-      } catch (_) {}
+      } catch (_) { }
     }
     const path = (res && res.path) || ''
     if (!path) {
@@ -97,11 +130,11 @@ App({
   },
   onShow(options) {
     if (options) this.parseLaunch(options)
-    try { tracker.flush() } catch (_) {}
+    try { tracker.flush() } catch (_) { }
   },
   onHide() {
     // 进入后台/离开前把埋点队列上报出去
-    try { tracker.flush() } catch (_) {}
+    try { tracker.flush() } catch (_) { }
   },
   parseLaunch(options) {
     if (!options) return
@@ -128,7 +161,7 @@ App({
           const nested = normalizeLaunchQuery(scene)
           if (nested.channel) channel = nested.channel
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (token) {

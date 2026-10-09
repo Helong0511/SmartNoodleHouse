@@ -47,7 +47,7 @@ class RefundCreate(BaseModel):
 async def _acquire_sync_cooldown(payment_id: int) -> None:
     """P1-13: per-payment 2s Redis cooldown (SET NX EX 2) to avoid flooding provider query API."""
     redis_client = await get_redis()
-    acquired = await redis_client.set(f"payment_sync:{payment_id}", "1", nx=True, ex=2)
+    acquired = await redis_client.set(f"snh:pay:sync:{payment_id}", "1", nx=True, ex=2)
     if not acquired:
         raise HTTPException(status_code=429, detail="查询过于频繁，请稍后重试")
 
@@ -70,7 +70,8 @@ async def create_payment(
 ):
     order = await db.get(Order, order_id)
     if not order:
-        return success(None, message="订单不存在", request=request)
+        # P2-10：找不到资源应返回 404 而非 success(null)
+        raise AppException(40404, "订单不存在")
     from app.services.order_access import assert_customer_can_pay_order, assert_dining_session_owner
 
     # 禁止顾客 claim 未绑定的 POS 订单；仅本人订单可支付
@@ -79,18 +80,22 @@ async def create_payment(
     extra: dict | None = None
     provider_u = data.provider.upper()
     channel_l = data.channel_type.lower()
+    # P1-6：小程序支付须校验渠道身份——顾客须已绑定对应平台的 openid/buyer_id
     if provider_u == "WECHAT" and channel_l == "miniprogram":
         openid = await _wechat_openid_for_customer(db, customer.id)
-        if openid:
-            extra = {"openid": openid}
+        if not openid:
+            raise AppException(40030, "当前账号未绑定微信，无法使用微信支付")
+        extra = {"openid": openid}
     elif provider_u == "ALIPAY" and channel_l == "miniprogram":
         buyer_id = await _alipay_buyer_id_for_customer(db, customer.id)
-        if buyer_id:
-            extra = {"buyer_id": buyer_id}
+        if not buyer_id:
+            raise AppException(40030, "当前账号未绑定支付宝，无法使用支付宝支付")
+        extra = {"buyer_id": buyer_id}
     payment, pay_data = await PaymentService.create_payment(
         db, order, data.provider, data.channel_type, customer.id, extra=extra
     )
     if pay_data.get("mock_settled"):
+        await db.commit()
         await ws_manager.notify_order_event(
             "ORDER_PAID",
             {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
@@ -311,6 +316,7 @@ async def pay_order_cash(
         round_down=body.round_down,
     )
     if pay_data.get("fully_paid"):
+        await db.commit()
         await ws_manager.notify_order_event(
             "ORDER_PAID",
             {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id, "channel": order.channel},
@@ -390,6 +396,7 @@ async def create_pos_scan_payment(
         amount=data.amount,
     )
     if pay_data.get("fully_paid") and (pay_data.get("mock_settled") or pay_data.get("status") == "PAID"):
+        await db.commit()
         await ws_manager.notify_order_event(
             "ORDER_PAID",
             {
@@ -491,6 +498,7 @@ async def refund_payment(
         store_id=order.store_id,
     )
     if row.status == "SUCCESS":
+        await db.commit()
         await ws_manager.notify_order_event(
             "ORDER_REFUNDED",
             {
@@ -756,7 +764,16 @@ async def list_payments(
                 "paid_at": p.paid_at.isoformat() if p.paid_at else None,
             }
         )
-    return success({"items": items, "total": total or 0, "page": page, "page_size": page_size}, request=request)
+    return success(
+        {
+            "items": items,
+            "total": total or 0,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total or 0, page_size),
+        },
+        request=request,
+    )
 
 
 @router.get("/refunds", dependencies=[require_permission("payment:read")])

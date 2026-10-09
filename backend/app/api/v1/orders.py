@@ -113,6 +113,7 @@ async def create_order(
         operator_id=None,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
+    await db.commit()
     try:
         await ws_manager.notify_order_event(
             "ORDER_CREATED",
@@ -238,19 +239,26 @@ async def create_pos_order(
         operator_id=user.id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
-    await ws_manager.notify_order_event(
-        "ORDER_CREATED",
-        {
-            "order_id": order.id,
-            "order_no": order.order_no,
-            "status": order.status,
-            "store_id": order.store_id,
-            "table_id": order.table_id,
-            "table_no": table.table_no if table else None,
-            "dining_type": order.dining_type,
-            "channel": "POS",
-        },
-    )
+    await db.commit()
+    try:
+        await ws_manager.notify_order_event(
+            "ORDER_CREATED",
+            {
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "status": order.status,
+                "store_id": order.store_id,
+                "table_id": order.table_id,
+                "table_no": table.table_no if table else None,
+                "dining_type": order.dining_type,
+                "channel": "POS",
+            },
+        )
+    except Exception as ws_err:
+        # WS 推送失败不应导致下单事务回滚（顾客已视为下单成功）
+        import logging
+
+        logging.getLogger("app.order").warning("下单 WS 通知失败 order=%s: %s", order.order_no, ws_err)
     await AuditService.log_staff(
         db,
         user=user,
@@ -342,7 +350,7 @@ async def bind_pos_customer(
         await _assert_customer_in_store(db, new_cid, int(order.store_id), action="收银台绑客")
     order.customer_id = new_cid
     await _recompute_pos_amounts_for_customer(db, order)
-    await db.commit()
+    # P2-15：审计日志须在 commit 之前写入，确保与订单变更在同一事务内
     await AuditService.log_staff(
         db,
         user=user,
@@ -359,6 +367,7 @@ async def bind_pos_customer(
         request=request,
         store_id=int(order.store_id) if order.store_id else None,
     )
+    await db.commit()
     cust = await db.get(Customer, new_cid) if new_cid else None
     return success(
         {
@@ -445,6 +454,7 @@ async def add_items_to_order(
     await db.flush()
 
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
+    await db.commit()
     await ws_manager.notify_order_event(
         "ORDER_UPDATED",
         {
@@ -534,6 +544,7 @@ async def transfer_table(
         remark=f"转台: {old_table_no or '散客'} → {new_table.table_no}",
     )
 
+    await db.commit()
     await ws_manager.notify_order_event(
         "TABLE_TRANSFER",
         {
@@ -1454,6 +1465,7 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
         if not await order_all_no_cooking(db, order.id):
             schedule_print(order.id)
 
+    await db.commit()
     await ws_manager.notify_order_event(
         f"ORDER_{data.status}",
         {
@@ -1506,6 +1518,7 @@ async def kitchen_takeover(order_id: int, request: Request, db: DbSession, user:
     prev = order.kitchen_claimed_by
     prev_name = await claimer_display_name(db, prev) if prev else ""
     order = await takeover_kitchen_claim(db, order, operator_id=user.id)
+    await db.commit()
     await ws_manager.notify_order_event(
         "ORDER_KITCHEN_CLAIM",
         {

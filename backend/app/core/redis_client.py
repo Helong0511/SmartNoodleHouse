@@ -29,7 +29,11 @@ async def get_redis() -> redis.Redis:
         # 并发首调仅创建一个实例，避免被覆盖的实例连接泄漏
         async with _lock:
             if _redis is None:
-                _redis = redis.from_url(get_settings().redis_url, decode_responses=True)
+                _redis = redis.from_url(
+                    get_settings().redis_url,
+                    decode_responses=True,
+                    max_connections=get_settings().redis_max_connections,
+                )
     return _redis
 
 

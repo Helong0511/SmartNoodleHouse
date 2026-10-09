@@ -7,8 +7,9 @@ logger = logging.getLogger(__name__)
 
 WS_IP_KEY = "snh:ws:conn:ip:"
 WS_USER_KEY = "snh:ws:conn:user:"
-# 略长于常见空闲超时，断开时再 DECR；崩溃时靠 TTL 回收
-WS_COUNT_TTL = 300
+# P1-7：TTL 须显著大于 WS 空闲超时(90s)，否则心跳连接在 5min 后配额失效。
+# touch() 会在每次心跳时续期，崩溃时靠 TTL 回收。
+WS_COUNT_TTL = 600
 
 # 原子 DECR + 归零删除：避免 DECR 与 DELETE 两次往返之间被新连接 INCR，
 # 导致旧连接的 DELETE 误删新连接的有效计数（配额被低估）。

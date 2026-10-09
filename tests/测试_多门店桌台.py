@@ -1,4 +1,4 @@
-"""多门店桌台隔离冒烟（依赖 data.sql + 可选 data_test.sql，结构已在 struct.sql）。"""
+"""多门店桌台隔离冒烟（依赖 data_sys/data_custom + 可选 data_test.sql，结构已在 struct.sql）。"""
 import asyncio
 import os
 import sys

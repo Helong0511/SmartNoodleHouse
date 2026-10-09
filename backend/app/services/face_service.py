@@ -572,7 +572,7 @@ class WelcomeService:
         pipe = redis.pipeline()
         pipe.rpush(key, f"{similarity:.6f}")
         pipe.ltrim(key, -confirm_frames, -1)
-        pipe.expire(key, 5)
+        pipe.expire(key, 10)
         pipe.llen(key)
         pipe.lrange(key, 0, -1)
         _, _, _, length, values = await pipe.execute()

@@ -14,10 +14,13 @@ from typing import Any
 
 from app.core.redis_client import get_redis
 
-WINDOW_HOURS = 24
+WINDOW_HOURS = 24  # 最大查询窗口
+DEFAULT_QUERY_HOURS = 1  # 默认查询窗口（减少慢查询）
 BUCKET_TTL_SECONDS = 25 * 3600
 SAMPLES_PER_BUCKET = 240
 SLOW_REQUEST_MS = 800.0
+_MAX_PIPE_COMMANDS = 5000  # pipeline 命令数上限，防止慢查询
+_ROUTES_SET_TTL = 48 * 3600  # 路由 Set TTL，自动清理废弃路由
 
 _NUM_SEG = re.compile(r"/\d+(?=/|$)")
 _UUID_SEG = re.compile(r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=/|$)")
@@ -58,6 +61,7 @@ async def record_request_timing(route: str, duration_ms: float, *, now: float | 
         r = await get_redis()
         pipe = r.pipeline()
         pipe.sadd("snh:perf:routes", route)
+        pipe.expire("snh:perf:routes", _ROUTES_SET_TTL)
         sk = _sample_key(bucket, route)
         pipe.rpush(sk, ms)
         pipe.ltrim(sk, -SAMPLES_PER_BUCKET, -1)
@@ -83,10 +87,10 @@ def _percentile(sorted_samples: list[int], pct: float) -> float:
 
 
 async def query_perf_metrics(
-    *, window_hours: int = WINDOW_HOURS, route: str | None = None
+    *, window_hours: int = DEFAULT_QUERY_HOURS, route: str | None = None
 ) -> dict[str, Any]:
     """聚合近 window_hours 小时指标。返回 routes 映射与生成时间。"""
-    hours = max(1, min(int(window_hours or WINDOW_HOURS), 48))
+    hours = max(1, min(int(window_hours or DEFAULT_QUERY_HOURS), WINDOW_HOURS))
     now_bucket = _minute_bucket()
     buckets = [now_bucket - i for i in range(hours * 60)]
     try:
@@ -101,6 +105,11 @@ async def query_perf_metrics(
                 "window_hours": hours,
                 "routes": {},
             }
+        # 命令数上限保护：routes × buckets × 2（lrange + get）不得超过 _MAX_PIPE_COMMANDS
+        max_routes = max(1, _MAX_PIPE_COMMANDS // (len(buckets) * 2))
+        truncated = len(routes) > max_routes
+        if truncated:
+            routes = routes[:max_routes]
         pipe = r.pipeline()
         for rt in routes:
             for b in buckets:
@@ -116,6 +125,7 @@ async def query_perf_metrics(
         }
 
     agg: dict[str, dict[str, Any]] = {}
+    stale_routes: list[str] = []
     idx = 0
     for rt in routes:
         samples: list[int] = []
@@ -127,6 +137,8 @@ async def query_perf_metrics(
             samples.extend(int(x) for x in raw_samples)
             count += int(raw_count or 0)
         if count <= 0:
+            # 该路由在查询窗口内无数据，从 Set 中清理以避免后续无效扫描
+            stale_routes.append(rt)
             continue
         samples.sort()
         sample_total = sum(samples)
@@ -142,8 +154,18 @@ async def query_perf_metrics(
             "sample_size": len(samples),
         }
 
-    return {
+    # 清理废弃路由（查询窗口内无数据）
+    if stale_routes:
+        try:
+            await r.srem("snh:perf:routes", *stale_routes)
+        except Exception:
+            pass
+
+    result: dict[str, Any] = {
         "generated_at": int(time.time()),
         "window_hours": hours,
         "routes": dict(sorted(agg.items(), key=lambda kv: kv[1]["count"], reverse=True)),
     }
+    if truncated:
+        result["note"] = f"routes_truncated_to_{max_routes}"
+    return result

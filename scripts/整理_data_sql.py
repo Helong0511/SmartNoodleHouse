@@ -1,10 +1,14 @@
-"""整理 sql/data.sql：表/字段统一反引号，语句压紧以节省空间。"""
+"""整理 sql/data_sys.sql、sql/data_custom.sql：表/字段统一反引号，语句压紧以节省空间。"""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "sql" / "data.sql"
+SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
+SOURCES = [
+    SQL_DIR / "data_sys.sql",
+    SQL_DIR / "data_custom.sql",
+]
 
 KEYWORDS = {
     "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "AVG", "BETWEEN", "BY", "CASE",
@@ -306,17 +310,17 @@ def process(text: str) -> str:
 
 
 def main() -> None:
-    original = SRC.read_text(encoding="utf-8")
-    formatted = process(original)
-    SRC.write_text(formatted, encoding="utf-8", newline="\n")
-    print(f"lines {original.count(chr(10)) + 1} -> {formatted.count(chr(10)) + 1}")
-    print(f"chars {len(original)} -> {len(formatted)}")
-    # quick samples
-    for needle in ["INSERT INTO `roles`", "FROM DUAL", "FROM `roles`", "`code`"]:
-        print(needle, "OK" if needle in formatted else "MISSING")
-    # should not backtick DUAL
-    print("bad DUAL tick", "`DUAL`" in formatted)
-    print("bare INSERT", len(re.findall(r"INSERT INTO [A-Za-z_]", formatted)))
+    for src in SOURCES:
+        original = src.read_text(encoding="utf-8")
+        formatted = process(original)
+        src.write_text(formatted, encoding="utf-8", newline="\n")
+        print(f"== {src.name} ==")
+        print(f"lines {original.count(chr(10)) + 1} -> {formatted.count(chr(10)) + 1}")
+        print(f"chars {len(original)} -> {len(formatted)}")
+        for needle in ["FROM DUAL", "`code`"]:
+            print(needle, "OK" if needle in formatted else "MISSING")
+        print("bad DUAL tick", "`DUAL`" in formatted)
+        print("bare INSERT", len(re.findall(r"INSERT INTO [A-Za-z_]", formatted)))
 
 
 if __name__ == "__main__":

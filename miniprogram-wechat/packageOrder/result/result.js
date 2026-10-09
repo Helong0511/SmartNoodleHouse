@@ -94,6 +94,8 @@ function headerIcon(status) {
 Page({
   data: {
     loading: true,
+    loadError: false, // P2-18：加载失败态
+    repaying: false, // P3-17：支付按钮防重复提交
     order: {},
     orderItems: [],
     hasPacking: false,
@@ -192,7 +194,7 @@ Page({
       this._syncPendingInBackground()
       try {
         subscribe.requestOrderReadySubscribe()
-      } catch (_) {}
+      } catch (_) { }
     } finally {
       this._booting = false
     }
@@ -214,7 +216,7 @@ Page({
         if (r && r.paid) return this.loadOrder(true)
         return new Promise((resolve) => setTimeout(resolve, 600)).then(() => this.loadOrder(true))
       })
-      .catch(() => {})
+      .catch(() => { })
   },
 
   async _refreshWithSync(silent) {
@@ -229,9 +231,9 @@ Page({
       // 查单与拉单并行：优先展示订单，查单完成后再补刷支付态
       const syncPromise = needSync
         ? payUtil.confirmPending(api, {
-            orderId: this.orderId,
-            paymentNo: pending.paymentNo
-          })
+          orderId: this.orderId,
+          paymentNo: pending.paymentNo
+        })
         : Promise.resolve(null)
       await this.loadOrder(silent)
       const sync = await syncPromise
@@ -334,7 +336,8 @@ Page({
         storeNo: order.store_no || dine.storeNo || '',
         storeLogo: dine.storeLogo || '',
         ...seatFieldsFromOrder(order),
-        loading: false
+        loading: false,
+        loadError: false
       })
       this._syncPollByStatus(order.status)
       if (order && (order.status === 'PAID' || order.status === 'COMPLETED' || order.payment_status === 'PAID')) {
@@ -346,9 +349,16 @@ Page({
       }
     } catch (e) {
       if (seq !== this._loadSeq) return
-      this.setData({ loading: false })
+      // P2-18：设置加载失败态，让用户可点重试按钮
+      this.setData({ loading: false, loadError: true })
       if (!silent) wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
     }
+  },
+
+  // P2-18：重新加载
+  retryLoad() {
+    this.setData({ loadError: false, loading: true })
+    this.loadOrder(false)
   },
 
   async _maybeShowMemberBanner(order) {
@@ -374,7 +384,7 @@ Page({
         tasteHint: tasteParts.join('、') || '您刚点的口味'
       })
       this._memberBannerChecked = true
-    } catch (_) {}
+    } catch (_) { }
   },
 
   dismissMemberBanner() {
@@ -425,6 +435,9 @@ Page({
 
   async repay() {
     if (!this.orderId) return
+    // P3-17：防重复提交
+    if (this.data.repaying) return
+    this.setData({ repaying: true })
     try {
       wx.showLoading({ title: '拉起支付' })
       const payRes = await api.post(`/payments/orders/${this.orderId}/pay`, {
@@ -449,6 +462,8 @@ Page({
       wx.hideLoading()
       wx.showToast({ title: e.message || '支付失败', icon: 'none' })
       await this._refreshWithSync(true)
+    } finally {
+      this.setData({ repaying: false })
     }
   },
 

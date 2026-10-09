@@ -14,9 +14,10 @@ CHANNEL = "snh:ws:broadcast"
 _listener_task: asyncio.Task | None = None
 
 
-async def publish_ws_event(channel: str, event: str, data: dict, store_id: int | None = None) -> None:
+async def publish_ws_event(channel: str, event: str, data: dict, store_id: int | None = None, msg_id: str | None = None) -> None:
     payload = json.dumps(
-        {"channel": channel, "event": event, "data": data, "store_id": store_id},
+        # P1-8：携带 msg_id 供各 worker 去重
+        {"msg_id": msg_id, "channel": channel, "event": event, "data": data, "store_id": store_id},
         default=str,
         ensure_ascii=False,
     )
@@ -27,7 +28,7 @@ async def publish_ws_event(channel: str, event: str, data: dict, store_id: int |
         logger.warning("WS Redis publish 失败，仅本地广播: %s", e)
 
 
-async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None], Awaitable[None]]) -> None:
+async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None, str | None], Awaitable[None]]) -> None:
     """订阅 Redis，收到后回调本地 ConnectionManager.broadcast。"""
     global _listener_task
 
@@ -48,6 +49,7 @@ async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None],
                             payload.get("event") or "UNKNOWN",
                             payload.get("data") or {},
                             payload.get("store_id"),
+                            payload.get("msg_id"),  # P1-8
                         )
                     except Exception as e:
                         logger.warning("WS subscriber 解析失败: %s", e)

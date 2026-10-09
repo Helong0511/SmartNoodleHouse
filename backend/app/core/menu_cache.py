@@ -2,17 +2,29 @@
 
 - bundle：分类 + 在售商品一次成型的 JSON，TTL 60s 兜底，写路径主动失效。
 - version：门店单调递增版本戳（INCR），客户端携带相同版本时返回 changed:false 小响应。
+- 缓存击穿：SET NX EX 互斥锁，避免并发重建压垮 DB。
+- 缓存雪崩：TTL 加 ±20% 随机偏移。
+- 延迟双删：bump_menu_version 删 bundle 后延迟再删一次。
+- 大Key防护：bundle JSON 超 256KB 时跳过缓存。
 Redis 全部异常静默降级为未缓存，不阻塞点餐主流程。
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
 
+from app.core.async_utils import spawn_bg
+from app.core.cache_keys import ttl_with_jitter
 from app.core.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
 
 MENU_TTL_SECONDS = 60
 MENU_VERSION_TTL_SECONDS = 30 * 24 * 3600
+_BUNDLE_MAX_BYTES = 256 * 1024  # bundle JSON 超 256KB 跳过缓存以避免大Key
+_REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s，防持锁进程崩溃后永久锁
 
 
 def menu_bundle_key(store_id: int) -> str:
@@ -21,6 +33,10 @@ def menu_bundle_key(store_id: int) -> str:
 
 def menu_version_key(store_id: int) -> str:
     return f"snh:menu:ver:{int(store_id)}"
+
+
+def _rebuild_lock_key(store_id: int) -> str:
+    return f"snh:menu:lock:{int(store_id)}"
 
 
 async def get_menu_version(store_id: int) -> int:
@@ -32,38 +48,98 @@ async def get_menu_version(store_id: int) -> int:
         return 0
 
 
+async def _delete_with_retry(r, *keys: str, retries: int = 2, delay: float = 0.05) -> int:
+    """删除缓存键，失败时短暂重试。返回删除数量。"""
+    deleted = 0
+    for attempt in range(retries + 1):
+        try:
+            deleted = await r.delete(*keys)
+            if deleted >= len(keys):
+                return deleted
+        except Exception:
+            pass
+        if attempt < retries:
+            await asyncio.sleep(delay)
+    return deleted
+
+
 async def bump_menu_version(store_id: int) -> int:
-    """菜单变更时递增版本并删除聚合缓存；返回新版本号（Redis 不可用时返回 0）。"""
+    """菜单变更时递增版本并删除聚合缓存；返回新版本号（Redis 不可用时返回 0）。
+
+    延迟双删：先删 bundle，0.1s 后再删一次，避免并发读写时刚写入的旧值残留。
+    """
     try:
         r = await get_redis()
         version = int(await r.incr(menu_version_key(store_id)))
-        if version == 1:
-            await r.expire(menu_version_key(store_id), MENU_VERSION_TTL_SECONDS)
-        await r.delete(menu_bundle_key(store_id))
+        await r.expire(menu_version_key(store_id), MENU_VERSION_TTL_SECONDS)
+        await _delete_with_retry(r, menu_bundle_key(store_id))
+        # 延迟双删：防止删后又有并发请求写入旧 bundle
+        spawn_bg(_delayed_delete(menu_bundle_key(store_id), 0.1))
         return version
     except Exception:
         return 0
 
 
+async def _delayed_delete(key: str, delay: float) -> None:
+    """延迟再删一次，防止并发写窗口中旧值残留。"""
+    try:
+        await asyncio.sleep(delay)
+        r = await get_redis()
+        await r.delete(key)
+    except Exception:
+        pass
+
+
 async def get_menu_bundle(store_id: int) -> dict[str, Any] | None:
+    """读取菜单缓存。缓存穿透防护：无额外空值标记，因 build_menu_bundle
+    对不存在的 store 返回空分类/空商品的合法 bundle，空 bundle 本身会被缓存。"""
     try:
         r = await get_redis()
         raw = await r.get(menu_bundle_key(store_id))
-        if not raw:
-            return None
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
+        if raw:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
     except Exception:
-        return None
+        pass
+    return None
 
 
 async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
     try:
         r = await get_redis()
-        await r.set(
-            menu_bundle_key(store_id),
-            json.dumps(bundle, ensure_ascii=False, separators=(",", ":")),
-            ex=MENU_TTL_SECONDS,
-        )
+        raw = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
+        if len(raw.encode("utf-8")) > _BUNDLE_MAX_BYTES:
+            logger.warning(
+                "menu bundle 过大 (store=%s, %dKB)，跳过缓存以避免大Key",
+                store_id, len(raw.encode("utf-8")) // 1024,
+            )
+            return
+        await r.set(menu_bundle_key(store_id), raw, ex=ttl_with_jitter(MENU_TTL_SECONDS))
     except Exception:
         pass
+
+
+async def try_acquire_rebuild_lock(store_id: int) -> bool:
+    """缓存击穿保护：SET NX EX 抢锁，避免并发重建压垮数据库。Redis 不可用时 fail-open。"""
+    try:
+        r = await get_redis()
+        return bool(await r.set(_rebuild_lock_key(store_id), "1", nx=True, ex=_REBUILD_LOCK_TTL))
+    except Exception:
+        return False
+
+
+async def release_rebuild_lock(store_id: int) -> None:
+    try:
+        r = await get_redis()
+        await r.delete(_rebuild_lock_key(store_id))
+    except Exception:
+        pass
+
+
+async def wait_for_rebuild(store_id: int, timeout: float = 0.3) -> dict[str, Any] | None:
+    """未抢到锁的调用方短暂等待后重读缓存。"""
+    try:
+        await asyncio.sleep(timeout)
+        return await get_menu_bundle(store_id)
+    except Exception:
+        return None

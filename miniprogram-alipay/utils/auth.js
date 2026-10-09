@@ -50,11 +50,11 @@ function readStorage(key) {
 function writeStorage(key, data) {
   try {
     my.setStorageSync({ key, data })
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function removeStorage(key) {
-  try { my.removeStorageSync({ key }) } catch (_) {}
+  try { my.removeStorageSync({ key }) } catch (_) { }
 }
 
 function readRegDraft() {
@@ -148,10 +148,12 @@ function clearCustomerSession(app) {
     my.removeStorageSync({ key: 'customer_token' })
     my.removeStorageSync({ key: 'customer_id' })
     my.removeStorageSync({ key: 'customer_no' })
+    // P2-5：清除 token 保存时间
+    my.removeStorageSync({ key: 'customer_token_saved_at' })
     // 库重置后本地昵称/头像属于已删除顾客，必须清掉，否则会写回新客并跳过注册
     my.removeStorageSync({ key: 'nickname' })
     my.removeStorageSync({ key: 'avatar_url' })
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function isStaleCustomerAuthError(err) {
@@ -167,7 +169,7 @@ async function logoutCustomer() {
   const app = getAppSafe()
   try {
     await api.post('/miniprogram/logout', {}, true)
-  } catch (_) {}
+  } catch (_) { }
   if (app) clearCustomerSession(app)
 }
 
@@ -205,7 +207,10 @@ function probeCustomerMe(token) {
   }
   const now = Date.now()
   if (probeState && probeState.token === token && now - probeState.at < PROBE_DEDUP_MS) {
-    return probeState.promise
+    // P2-4：网络失败的探测结果不缓存，允许网络恢复后立即重试
+    if (!probeState.isNetworkError) {
+      return probeState.promise
+    }
   }
   const promise = new Promise((resolve) => {
     my.request({
@@ -246,7 +251,13 @@ function probeCustomerMe(token) {
       }
     })
   })
-  probeState = { token, at: now, promise }
+  probeState = { token, at: now, promise, isNetworkError: false }
+  // P2-4：网络失败结果不缓存，允许恢复后立即重试
+  promise.then((result) => {
+    if (probeState && probeState.token === token) {
+      probeState.isNetworkError = !!result.network
+    }
+  })
   return promise
 }
 
@@ -274,14 +285,14 @@ function applyMeProfile(app, token, me) {
     app.globalData.nickname = nick
     if (nick) my.setStorageSync({ key: 'nickname', data: nick })
     else {
-      try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
+      try { my.removeStorageSync({ key: 'nickname' }) } catch (_) { }
     }
   }
   if (Object.prototype.hasOwnProperty.call(me, 'avatar_url')) {
     app.globalData.avatarUrl = me.avatar_url || ''
     if (me.avatar_url) my.setStorageSync({ key: 'avatar_url', data: me.avatar_url })
     else {
-      try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
+      try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) { }
     }
   }
   if (token) app.globalData._customerIdSyncedForToken = token
@@ -296,7 +307,8 @@ async function validateCustomerToken(token) {
     applyMeProfile(app, token, probed.data)
     return true
   }
-  // 失效或无法确认（含真机 401→fail / 网络失败）：一律视为无效，走重新登录
+  // P1-2：网络瞬断不应清会话强制重新登录；仅在 401/stale 时才视为无效
+  if (probed.network) return true
   return false
 }
 
@@ -333,6 +345,12 @@ function purgeStaleSessionIfNeeded() {
   const app = getAppSafe()
   const token = (app && app.globalData && app.globalData.customerToken) || readStorage('customer_token')
   if (!token || !app) return Promise.resolve(false)
+  // P2-5：本地 token 超过 7 天直接清除，不再探测
+  const savedAt = readStorage('customer_token_saved_at') || 0
+  if (savedAt && Date.now() - Number(savedAt) > 7 * 24 * 60 * 60 * 1000) {
+    clearCustomerSession(app)
+    return Promise.resolve(true)
+  }
   return probeCustomerMe(token).then((probed) => {
     if (probed.stale) {
       clearCustomerSession(app)
@@ -368,6 +386,8 @@ function refreshCustomerToken(app, token, patch = {}) {
   if (token) {
     app.globalData.customerToken = token
     my.setStorageSync({ key: 'customer_token', data: token })
+    // P2-5：记录 token 保存时间
+    my.setStorageSync({ key: 'customer_token_saved_at', data: Date.now() })
   }
   if (patch.customer_id != null) {
     app.globalData.customerId = patch.customer_id
@@ -443,18 +463,20 @@ async function doEnsureLogin(tableToken, opts) {
   }
   my.setStorageSync({ key: 'customer_id', data: data.customer_id })
   my.setStorageSync({ key: 'customer_token', data: data.customer_token })
+  // P2-5：记录 token 保存时间
+  my.setStorageSync({ key: 'customer_token_saved_at', data: Date.now() })
   my.setStorageSync({ key: 'customer_no', data: data.customer_no || '' })
   if (resolveNeedMemberPrompt(data)) {
-    try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
-    try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
+    try { my.removeStorageSync({ key: 'nickname' }) } catch (_) { }
+    try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) { }
   } else {
     if (data.nickname) my.setStorageSync({ key: 'nickname', data: data.nickname })
     else {
-      try { my.removeStorageSync({ key: 'nickname' }) } catch (_) {}
+      try { my.removeStorageSync({ key: 'nickname' }) } catch (_) { }
     }
     if (data.avatar_url) my.setStorageSync({ key: 'avatar_url', data: data.avatar_url })
     else {
-      try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) {}
+      try { my.removeStorageSync({ key: 'avatar_url' }) } catch (_) { }
     }
   }
   return data
@@ -569,7 +591,7 @@ function saveCart(cart, options) {
   if (sid != null) {
     my.setStorageSync({ key: CART_STORE_ID_KEY, data: Number(sid) || 0 })
   } else {
-    try { my.removeStorageSync({ key: CART_STORE_ID_KEY }) } catch (_) {}
+    try { my.removeStorageSync({ key: CART_STORE_ID_KEY }) } catch (_) { }
   }
 }
 
@@ -597,7 +619,7 @@ function ensureCartForCurrentStore() {
       return true
     }
     // 购物车本就空：补记当前门店
-    try { my.setStorageSync({ key: CART_STORE_ID_KEY, data: Number(sid) || 0 }) } catch (_) {}
+    try { my.setStorageSync({ key: CART_STORE_ID_KEY, data: Number(sid) || 0 }) } catch (_) { }
     return false
   }
   if (boundSid !== Number(sid)) {

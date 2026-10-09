@@ -2,23 +2,40 @@
 
 - 仅缓存接口响应 payload（瘦身字段后的 dict），TTL ≤ 120s；
 - Redis 不可用时所有操作静默降级，不影响推荐主流程；
-- 画像更新 / 下单 / 评价后调用 invalidate_customer 主动失效。
+- 画像更新 / 下单 / 评价后调用 invalidate_customer 主动失效；
+- 缓存击穿：SET NX EX 互斥锁，避免并发重建压垮 DB；
+- 缓存雪崩：TTL 加 ±20% 随机偏移；
+- 延迟双删：invalidate_customer 删后延迟再删一次。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
 
-from app.core.cache_keys import RECO_TTL_SECONDS, reco_customer_pattern, reco_key
+from app.core.async_utils import spawn_bg
+from app.core.cache_keys import RECO_TTL_SECONDS, ttl_with_jitter, reco_customer_pattern, reco_key
 from app.core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
+
+_REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s
+
+
+def _rebuild_lock_key(
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+) -> str:
+    cid = int(customer_id) if customer_id else 0
+    base = f"snh:reco:lock:c{cid}:s{int(store_id)}:{scene}:{bucket}"
+    return f"{base}:{fingerprint}" if fingerprint else base
 
 
 async def get_cached_reco(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
 ) -> dict[str, Any] | None:
+    """读取推荐缓存。缓存穿透防护：无额外空值标记，因推荐服务对任意 customer/store
+    都会返回合法 payload（冷启动时返回热门商品），空结果本身会被缓存。"""
     try:
         r = await get_redis()
         raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint))
@@ -47,23 +64,92 @@ async def set_cached_reco(
         await r.set(
             reco_key(customer_id, store_id, scene, bucket, fingerprint),
             json.dumps(body, ensure_ascii=False, separators=(",", ":")),
-            ex=RECO_TTL_SECONDS,
+            ex=ttl_with_jitter(RECO_TTL_SECONDS),
         )
     except Exception:  # noqa: BLE001
         logger.debug("推荐缓存写入失败，忽略", exc_info=True)
 
 
+async def _delete_with_retry(r, *keys: str, retries: int = 2, delay: float = 0.05) -> int:
+    """删除缓存键，失败时短暂重试。"""
+    deleted = 0
+    for attempt in range(retries + 1):
+        try:
+            deleted = await r.delete(*keys)
+            if deleted >= len(keys):
+                return deleted
+        except Exception:
+            pass
+        if attempt < retries:
+            await asyncio.sleep(delay)
+    return deleted
+
+
 async def invalidate_customer(customer_id: int) -> None:
-    """失效某顾客全部场景/桶位的推荐结果。"""
+    """失效某顾客全部场景/桶位的推荐结果。延迟双删防止并发写窗口旧值残留。"""
     if not customer_id:
         return
+    pattern = reco_customer_pattern(customer_id)
     try:
         r = await get_redis()
-        pattern = reco_customer_pattern(customer_id)
+        keys = []
+        async for k in r.scan_iter(match=pattern, count=200):
+            keys.append(k)
+        if keys:
+            await _delete_with_retry(r, *keys)
+        # 延迟双删：防止删后又有并发请求写入旧推荐结果
+        spawn_bg(_delayed_invalidate(pattern))
+    except Exception:  # noqa: BLE001
+        logger.debug("推荐缓存失效失败(customer=%s)，等待 TTL", customer_id, exc_info=True)
+
+
+async def _delayed_invalidate(pattern: str) -> None:
+    """延迟再删一次，防止并发写窗口中旧值残留。"""
+    try:
+        await asyncio.sleep(0.1)
+        r = await get_redis()
         keys = []
         async for k in r.scan_iter(match=pattern, count=200):
             keys.append(k)
         if keys:
             await r.delete(*keys)
-    except Exception:  # noqa: BLE001
-        logger.debug("推荐缓存失效失败(customer=%s)，等待 TTL", customer_id, exc_info=True)
+    except Exception:
+        pass
+
+
+async def try_acquire_reco_lock(
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+) -> bool:
+    """缓存击穿保护：SET NX EX 抢锁。Redis 不可用时 fail-open。"""
+    try:
+        r = await get_redis()
+        return bool(
+            await r.set(
+                _rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+                "1", nx=True, ex=_REBUILD_LOCK_TTL,
+            )
+        )
+    except Exception:
+        return False
+
+
+async def release_reco_lock(
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+) -> None:
+    try:
+        r = await get_redis()
+        await r.delete(_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint))
+    except Exception:
+        pass
+
+
+async def wait_for_reco(
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "",
+    timeout: float = 0.3,
+) -> dict[str, Any] | None:
+    """未抢到锁的调用方短暂等待后重读缓存。"""
+    try:
+        await asyncio.sleep(timeout)
+        return await get_cached_reco(customer_id, store_id, scene, bucket, fingerprint)
+    except Exception:
+        return None

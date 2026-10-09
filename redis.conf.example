@@ -1,0 +1,60 @@
+# SmartNoodleHouse Redis 生产配置模板
+# 复制为 redis.conf 并根据实际环境修改后使用：redis-server /path/to/redis.conf
+# 或在 docker-compose.yml 中通过 command 指定。
+
+# ── 网络 ──
+# 生产环境应绑定内网 IP，禁止暴露到公网
+# bind 10.0.0.1 127.0.0.1
+# protected-mode yes
+# port 6379
+
+# ── 认证（必须设置强密码）──
+requirepass REPLACE_WITH_STRONG_REDIS_PASSWORD
+
+# ── 内存管理 ──
+# 根据 MySQL + Redis 总内存规划，建议物理内存的 25%-50%
+# maxmemory 2gb
+# maxmemory-policy allkeys-lru
+# 当内存达到上限时淘汰最近最少使用的键（防止内存打满导致 OOM）
+
+# ── AOF 持久化（优先于 RDB，数据安全性更高）──
+appendonly yes
+appendfilename "appendonly.aof"
+# 每秒刷盘，在性能与数据安全间取平衡（最多丢 1s 数据）
+appendfsync everysec
+# 重写时不同步刷盘，避免 IO 阻塞
+no-appendfsync-on-rewrite yes
+# AOF 自动重写触发条件
+auto-aof-rewrite-percentage 100
+auto-aof-rewrite-min-size 64mb
+
+# ── RDB 持久化（作为 AOF 的补充灾备）──
+save 900 1
+save 300 10
+save 60 10000
+# RDB 文件压缩（CPU 换空间，通常值得）
+rdbcompression yes
+dbfilename dump.rdb
+
+# ── 慢查询 ──
+# 超过 10ms 的命令记录到慢日志
+slowlog-log-slower-than 10000
+slowlog-max-len 128
+
+# ── 客户端 ──
+# 连接超时 300s（清理空闲连接）
+timeout 300
+# 最大客户端连接数
+# maxclients 1000
+
+# ── 主从配置（如需高可用）───
+# 主从切换时锁丢失风险：建议 Leader 锁使用 Redlock 或 fencing token
+# replicaof <master-ip> <master-port>
+# masterauth REPLACE_WITH_STRONG_REDIS_PASSWORD
+
+# ── 安全加固 ──
+# 禁用危险命令
+rename-command FLUSHDB ""
+rename-command FLUSHALL ""
+rename-command KEYS ""
+rename-command CONFIG "CONFIG_9f3a2b7c"

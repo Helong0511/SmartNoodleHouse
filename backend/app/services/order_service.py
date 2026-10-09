@@ -443,6 +443,9 @@ class OrderPriceCalculator:
         total = Decimal("0.00")
         packing = Decimal("0.00")
         discountable = Decimal("0.00")
+        # zip 静默截断防护：计价结果与输入数量必须一致
+        if len(rows) != len(items_data):
+            raise AppException(50001, "计价结果与输入数量不一致，疑似并发修改")
         for (product, subtotal, options_detail, quantity), item in zip(rows, items_data):
             unit_extra = sum(o.extra_price for _, o, _ in options_detail)
             unit_price = money(product.price + unit_extra)

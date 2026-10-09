@@ -216,13 +216,13 @@ def _convert_to_webp(data: bytes, ext: str) -> tuple[bytes, str]:
 
         from PIL import Image
 
-        img = Image.open(BytesIO(data))
-        # PNG 可能带 alpha 通道；RGBA → WebP 保留透明
-        if img.mode not in ("RGB", "RGBA", "L", "LA"):
-            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
-        buf = BytesIO()
-        img.save(buf, format="WEBP", quality=85, method=4)
-        webp_data = buf.getvalue()
+        with Image.open(BytesIO(data)) as img:
+            # PNG 可能带 alpha 通道；RGBA → WebP 保留透明
+            if img.mode not in ("RGB", "RGBA", "L", "LA"):
+                img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+            buf = BytesIO()
+            img.save(buf, format="WEBP", quality=85, method=4)
+            webp_data = buf.getvalue()
         if not webp_data:
             return data, ext
         logger.info("WebP 转换: %s → webp (%d → %d bytes, %.0f%%)",
@@ -249,37 +249,39 @@ def _normalize_store_logo_webp(data: bytes) -> bytes:
     from PIL import Image
 
     try:
-        img = Image.open(BytesIO(data))
-        img.load()
+        with Image.open(BytesIO(data)) as img:
+            img.load()
     except Exception as exc:
         raise AppException(40024, "无法解码图片或格式损坏") from exc
 
-    w, h = int(img.size[0]), int(img.size[1])
-    if w <= 0 or h <= 0:
-        raise AppException(40024, "无效图片尺寸")
-    if min(w, h) < _STORE_LOGO_MIN_EDGE:
-        raise AppException(
-            40024, f"Logo 边长至少 {_STORE_LOGO_MIN_EDGE}px（当前 {w}×{h}）"
-        )
-    if w > _MAX_IMAGE_EDGE or h > _MAX_IMAGE_EDGE:
-        raise AppException(40024, f"图片边长超过限制 {_MAX_IMAGE_EDGE}px")
-    if w * h > _MAX_IMAGE_PIXELS:
-        raise AppException(40024, "图片像素过多（疑似解压炸弹）")
+    with Image.open(BytesIO(data)) as img:
+        img.load()
+        w, h = int(img.size[0]), int(img.size[1])
+        if w <= 0 or h <= 0:
+            raise AppException(40024, "无效图片尺寸")
+        if min(w, h) < _STORE_LOGO_MIN_EDGE:
+            raise AppException(
+                40024, f"Logo 边长至少 {_STORE_LOGO_MIN_EDGE}px（当前 {w}×{h}）"
+            )
+        if w > _MAX_IMAGE_EDGE or h > _MAX_IMAGE_EDGE:
+            raise AppException(40024, f"图片边长超过限制 {_MAX_IMAGE_EDGE}px")
+        if w * h > _MAX_IMAGE_PIXELS:
+            raise AppException(40024, "图片像素过多（疑似解压炸弹）")
 
-    if img.mode not in ("RGB", "RGBA"):
-        img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
 
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
-    img = img.crop((left, top, left + side, top + side))
-    target = min(side, _STORE_LOGO_MAX_EDGE)
-    if side != target:
-        img = img.resize((target, target), Image.Resampling.LANCZOS)
+        side = min(w, h)
+        left = (w - side) // 2
+        top = (h - side) // 2
+        img = img.crop((left, top, left + side, top + side))
+        target = min(side, _STORE_LOGO_MAX_EDGE)
+        if side != target:
+            img = img.resize((target, target), Image.Resampling.LANCZOS)
 
-    buf = BytesIO()
-    img.save(buf, format="WEBP", quality=82, method=4)
-    webp_data = buf.getvalue()
+        buf = BytesIO()
+        img.save(buf, format="WEBP", quality=82, method=4)
+        webp_data = buf.getvalue()
     if not webp_data:
         raise AppException(40024, "Logo 转换为 WebP 失败")
     logger.info(

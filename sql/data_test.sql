@@ -1,15 +1,19 @@
 -- =============================================================================
 -- 本地测试数据（仅本地联调，勿导入生产）
--- 前置：已执行 sql/struct.sql + sql/data.sql（含 SH01/SH02 门店壳）
+-- 前置：已执行 sql/struct.sql + sql/data_sys.sql + sql/data_custom.sql（含 SH01/SH02 门店壳）
 -- 本文件补齐 SH02 经营实体：分类、精简菜品、桌台、员工、测试摄像头
--- 用法（本地）：mysql ... < sql/struct.sql && mysql ... < sql/data.sql && mysql ... < sql/data_test.sql
+-- 用法（本地）：
+--   mysql ... < sql/struct.sql
+--   && mysql ... < sql/data_sys.sql
+--   && mysql ... < sql/data_custom.sql
+--   && mysql ... < sql/data_test.sql
 -- =============================================================================
 USE `smart_noodle_house`;
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- -----------------------------------------------------------------------------
--- 二店员工（密码哈希与 data.sql 同角色账号一致，便于本地联调）
+-- 二店员工（密码哈希与 data_custom.sql 同角色账号一致，便于本地联调）
 --   cwm2 / 与店长 cwm 同密；syy2 / 与收银 syy 同密；hsf2 / 与厨房 hsf 同密
 -- -----------------------------------------------------------------------------
 INSERT INTO `users` (`username`, `password_hash`, `display_name`, `role_id`, `store_id`, `token_version`, `status`, `created_at`, `updated_at`)

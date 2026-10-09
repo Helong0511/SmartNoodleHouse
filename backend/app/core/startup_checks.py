@@ -149,9 +149,20 @@ def validate_settings(settings: Settings) -> None:
     if is_prod and ("sqlite" in db_url or "localhost" in db_url or "127.0.0.1" in db_url):
         errors.append("生产环境 DATABASE_URL 不得使用 sqlite/localhost，须为生产 MySQL 地址")
 
-    redis_url = (getattr(settings, "redis_url", None) or "").strip().lower()
-    if is_prod and ("localhost" in redis_url or "127.0.0.1" in redis_url) and "redis://" in redis_url:
-        warnings.append("生产环境 REDIS_URL 指向 localhost，请确认是否为生产 Redis")
+    redis_url = (getattr(settings, "redis_url", None) or "").strip()
+    redis_url_lower = redis_url.lower()
+    if is_prod and "redis://" in redis_url_lower:
+        if "localhost" in redis_url_lower or "127.0.0.1" in redis_url_lower:
+            errors.append("生产环境 REDIS_URL 不得指向 localhost/127.0.0.1，须为生产 Redis 地址")
+        # 无密码检查：redis://host:port/db 或 redis://host:port（不含 @）
+        if "@" not in redis_url_lower and "://" in redis_url_lower:
+            errors.append("生产环境 REDIS_URL 须包含密码（redis://:password@host:port/db），当前无认证凭据")
+    if is_prod:
+        # maxmemory 与持久化为 Redis 服务端配置，代码层无法验证，但须提醒运维检查
+        warnings.append(
+            "生产 Redis 须配置 maxmemory + maxmemory-policy=allkeys-lru，"
+            "并启用 AOF（appendonly yes）/ RDB 持久化，参考项目根目录 redis.conf.example"
+        )
 
     process_role = (getattr(settings, "process_role", None) or "").strip().lower()
     if is_prod and process_role not in ("leader", "worker", "auto"):

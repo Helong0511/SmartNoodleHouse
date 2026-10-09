@@ -10,6 +10,16 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# ---------- 活体检测阈值常量（经验值，生产建议按实际环境标定） ----------
+_MIN_SHARP_DEV = 20       # 开发环境最低清晰度（Laplacian 方差）
+_MIN_SHARP_PROD = 35      # 生产环境最低清晰度
+_MIN_BRIGHTNESS = 30      # 最低亮度（0-255 灰度均值）
+_MAX_BRIGHTNESS = 230     # 最高亮度
+_MIN_FACE_RATIO = 0.04    # 人脸占画面最小比例（过小则无法识别）
+_MAX_FACE_RATIO = 0.90    # 人脸占画面最大比例（过近则畸变）
+_MAX_YAW = 40             # 最大偏航角（度）
+_MAX_PITCH = 35           # 最大俯仰角（度）
+
 
 @dataclass
 class TrackState:
@@ -97,10 +107,10 @@ def check_liveness_simple(image_bytes: bytes) -> dict:
     from app.core.config import get_settings
 
     is_dev = get_settings().is_development
-    min_sharp = 20 if is_dev else 35
+    min_sharp = _MIN_SHARP_DEV if is_dev else _MIN_SHARP_PROD
     if sharpness < min_sharp:
         raise ValueError("活体检测失败：画面模糊，请正对镜头、保证光线")
-    if brightness < 30 or brightness > 230:
+    if brightness < _MIN_BRIGHTNESS or brightness > _MAX_BRIGHTNESS:
         raise ValueError("活体检测失败：光线过暗或过曝")
 
     face_ratio = 0.0
@@ -118,14 +128,14 @@ def check_liveness_simple(image_bytes: bytes) -> dict:
         fw = max(1.0, float(bbox[2] - bbox[0]))
         fh = max(1.0, float(bbox[3] - bbox[1]))
         face_ratio = (fw * fh) / float(w * h)
-        if face_ratio < 0.04:
+        if face_ratio < _MIN_FACE_RATIO:
             raise ValueError("活体检测失败：人脸过小，请靠近")
-        if face_ratio > 0.90:
+        if face_ratio > _MAX_FACE_RATIO:
             raise ValueError("活体检测失败：距离过近")
         pose = getattr(faces[0], "pose", None)
         if pose is not None and len(pose) >= 2:
             yaw, pitch = float(pose[0]), float(pose[1])
-            if abs(yaw) > 40 or abs(pitch) > 35:
+            if abs(yaw) > _MAX_YAW or abs(pitch) > _MAX_PITCH:
                 raise ValueError("活体检测失败：请正对摄像头")
     except ImportError:
         logger.warning("InsightFace 不可用，活体仅做清晰度/亮度检查")

@@ -138,7 +138,7 @@ function clearStaleCustomerAuthQuietly() {
     if (auth && typeof auth.clearCustomerSession === 'function') {
       auth.clearCustomerSession(app || { globalData: {} })
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function buildQueryUrl(path, data) {
@@ -175,13 +175,18 @@ function requestOnce(method, path, data = {}, needAuth = true) {
       success(res) {
         const status = Number(res.status != null ? res.status : res.statusCode)
         const body = parseResponseBody(res.data)
-        const msg = pickErrorMessage(res, `请求失败(${status || '?'})`)
+        let msg = pickErrorMessage(res, `请求失败(${status || '?'})`)
+        // P2-9：500 类错误给用户友好提示，不暴露后端错误详情
+        if (status && status >= 500) {
+          msg = '服务器繁忙，请稍后重试'
+        }
         const codeNum = body.code == null ? undefined : Number(body.code)
         if ((status && status >= 400) || (codeNum !== undefined && codeNum !== 0 && !Number.isNaN(codeNum))) {
           try {
             require('./logger').reportApi('ERROR', upper, path, { status, code: body.code, message: msg })
-          } catch (_) {}
-          if (needAuth && (status === 401 || isStaleAuthMessage(msg))) {
+          } catch (_) { }
+          // P1-3：403 也应触发 token 清理（账号被封禁或令牌被撤销）
+          if (needAuth && (status === 401 || status === 403 || isStaleAuthMessage(msg))) {
             clearStaleCustomerAuthQuietly()
             reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))
             return
@@ -195,7 +200,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
         const msg = networkHint(base, pickErrorMessage(err, '网络请求失败'))
         try {
           require('./logger').reportApi('ERROR', upper, path, { message: msg })
-        } catch (_) {}
+        } catch (_) { }
         if (needAuth && isStaleAuthMessage(msg)) {
           clearStaleCustomerAuthQuietly()
           reject(makeRequestError(msg, { code: 'AUTH_STALE' }))
@@ -213,10 +218,14 @@ function request(method, path, data = {}, needAuth = true, retries = 1) {
   return requestOnce(method, path, data, needAuth).catch((err) => {
     // 仅对幂等的 GET 自动重试；POST/PUT/PATCH（下单/支付等）重试可能重复提交
     if (retries > 0 && method === 'GET' && isTransientNetworkError(err && err.message)) {
+      // P3-1：指数退避 + 抖动，避免请求密集重试
+      const attempt = 2 - retries // 0, 1
+      const baseDelay = 400 * Math.pow(2, attempt) // 400ms, 800ms
+      const jitter = Math.floor(Math.random() * 200) // 0~199ms 抖动
       return new Promise((resolve, reject) => {
         setTimeout(() => {
           request(method, path, data, needAuth, retries - 1).then(resolve).catch(reject)
-        }, 400)
+        }, baseDelay + jitter)
       })
     }
     throw err

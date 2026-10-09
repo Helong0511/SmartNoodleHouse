@@ -35,7 +35,7 @@
   <view class="cart-box">
     <view class="label">已选商品</view>
     <view class="cart-line" a:for="{{cartPreview}}" a:key="index">
-      <image a:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" />
+      <image a:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
       <view class="mini placeholder" a:else>{{item.name[0] || '餐'}}</view>
       <view class="cart-info">
         <view class="cart-name-row">

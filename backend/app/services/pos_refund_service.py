@@ -1,13 +1,14 @@
 """收银退款申请：申请 / 审批 / 执行（支持组合分笔支付）。"""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import now_local
+from app.core.response import ensure_local_aware, now_local
 from app.models import DiningTable, Order, Payment, PosRefundRequest, User
 from app.services.payment_service import PaymentService, money
 from app.services.store_scope import assert_order_store_access, assert_store_access
@@ -355,8 +356,6 @@ class PosRefundService:
         page: int = 1,
         page_size: int = 50,
     ) -> dict:
-        from datetime import datetime
-
         from sqlalchemy import or_
 
         from app.services.store_scope import require_bound_store
@@ -381,19 +380,19 @@ class PosRefundService:
             )
         if date_from:
             try:
-                q = q.where(PosRefundRequest.created_at >= datetime.fromisoformat(date_from))
+                dt = ensure_local_aware(datetime.fromisoformat(date_from))
+                q = q.where(PosRefundRequest.created_at >= dt)
             except ValueError:
-                pass
+                raise AppException(40001, f"日期格式非法: {date_from}")
         if date_to:
             try:
                 end = datetime.fromisoformat(date_to)
                 if len(date_to) <= 10:
-                    from datetime import timedelta
-
                     end = end + timedelta(days=1)
+                end = ensure_local_aware(end)
                 q = q.where(PosRefundRequest.created_at < end)
             except ValueError:
-                pass
+                raise AppException(40001, f"日期格式非法: {date_to}")
 
         total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
         rows = (
@@ -401,6 +400,20 @@ class PosRefundService:
                 q.order_by(PosRefundRequest.id.desc()).offset((page - 1) * page_size).limit(page_size)
             )
         ).scalars().all()
+        # 批量预加载关联实体，消除 payload 中逐行 db.get 的 N+1
+        order_ids = {r.order_id for r in rows if r.order_id}
+        payment_ids = {r.payment_id for r in rows if r.payment_id}
+        user_ids = {r.requested_by for r in rows if r.requested_by}
+        user_ids |= {r.reviewed_by for r in rows if r.reviewed_by}
+        if order_ids:
+            loaded_orders = list((await db.execute(select(Order).where(Order.id.in_(order_ids)))).scalars())
+            table_ids = {o.table_id for o in loaded_orders if o.table_id}
+            if table_ids:
+                await db.execute(select(DiningTable).where(DiningTable.id.in_(table_ids)))
+        if payment_ids:
+            await db.execute(select(Payment).where(Payment.id.in_(payment_ids)))
+        if user_ids:
+            await db.execute(select(User).where(User.id.in_(user_ids)))
         items = [await cls.payload(db, r) for r in rows]
         return {"total": int(total), "page": page, "page_size": page_size, "items": items}
 

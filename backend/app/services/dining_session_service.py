@@ -85,7 +85,14 @@ class DiningSessionService:
         token = (table_token or getattr(table, "qr_token", None) or "").strip() or None
 
         active = await DiningSessionService.get_active(db, customer_id)
-        if active and int(active.table_id) == int(table.id) and int(active.store_id) == int(table.store_id):
+        # 判空：active.table_id/store_id 可能为 None（脏数据），为 None 时视为换桌走新建分支
+        if (
+            active
+            and active.table_id is not None
+            and int(active.table_id) == int(table.id)
+            and active.store_id is not None
+            and int(active.store_id) == int(table.store_id)
+        ):
             active.last_active_at = now
             active.expires_at = expires
             if token:

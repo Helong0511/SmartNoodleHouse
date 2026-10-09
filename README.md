@@ -42,7 +42,8 @@
 
 ```bash
 mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data.sql
+mysql -u root -p < sql/data_sys.sql
+mysql -u root -p < sql/data_custom.sql
 python scripts/初始化管理员.py
 ```
 
@@ -51,7 +52,8 @@ python scripts/初始化管理员.py
 ```bash
 # 先把 struct.sql 中 REPLACE_WITH_STRONG_DB_PASSWORD 换成强密码
 mysql -u root -p < sql/struct.sql
-mysql -u root -p < sql/data.sql
+mysql -u root -p < sql/data_sys.sql
+mysql -u root -p < sql/data_custom.sql
 set ADMIN_INITIAL_PASSWORD=YourStrongPass123!
 python scripts/初始化管理员.py
 ```
@@ -59,7 +61,8 @@ python scripts/初始化管理员.py
 | 脚本 | 说明 |
 |------|------|
 | `sql/struct.sql` | **结构真源**：建库授权、完整 DDL（含 Alembic baseline 的 CANONICAL SCHEMA 段） |
-| `sql/data.sql` | **生产必要种子**：角色权限、系统参数、默认会员等级等 |
+| `sql/data_sys.sql` | **系统必要种子**：角色权限、全局系统参数、默认会员等级、平台券模板等 |
+| `sql/data_custom.sql` | **门店经营种子**：门店壳、菜品规格、桌台、门店员工与门店参数等 |
 | `sql/data_test.sql` | **仅本地测试**：样例商品、订单、admin/cashier/manager（禁止写入生产） |
 
 已有库升级请用 Alembic：`cd backend && alembic upgrade head`（`0001_baseline` 只执行 `struct.sql` 的 CANONICAL SCHEMA，不删库）。

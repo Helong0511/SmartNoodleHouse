@@ -2,6 +2,13 @@
   <privacy-popup id="privacy-popup" />
   <skeleton a:if="{{loading}}" type="order" rows="{{2}}" />
 
+  <!-- P2-18：加载失败态 + 重试按钮 -->
+  <view a:elif="{{loadError}}" class="error-state">
+    <view class="error-icon">!</view>
+    <view class="error-text">加载失败，请重试</view>
+    <button class="btn-primary mini" onTap="retryLoad">重新加载</button>
+  </view>
+
   <block a:else>
     <store-bar
       storeName="{{storeName}}"
@@ -130,7 +137,7 @@
       </view>
     </view>
 
-    <button class="btn-primary" a:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" onTap="repay">继续支付</button>
+    <button class="btn-primary" a:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" loading="{{repaying}}" disabled="{{repaying}}" onTap="repay">继续支付</button>
     <button class="btn-primary" onTap="goMenu">继续点餐</button>
   </block>
 </view>

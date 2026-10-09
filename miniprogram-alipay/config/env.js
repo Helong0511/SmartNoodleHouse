@@ -36,14 +36,14 @@ function isDevtools() {
   try {
     // 支付宝 IDE 部分版本 platform 会伪装成 iOS/Android，不能只看 platform
     if (typeof my !== 'undefined' && my.isIDE === true) return true
-  } catch (_) {}
+  } catch (_) { }
   try {
     const sys = my.getSystemInfoSync() || {}
     const blob = [sys.platform, sys.model, sys.brand, sys.system].filter(Boolean).join(' ')
     if (/devtools|simulator|模拟器/i.test(blob)) return true
     // 无真机标识时，开发者工具里常见的桌面环境
     if (!sys.platform && !sys.model) return true
-  } catch (_) {}
+  } catch (_) { }
   return false
 }
 
@@ -85,8 +85,16 @@ function resolveDevApiBase() {
 
 function resolveApiBase() {
   const ver = miniEnvVersion()
-  if (ver === 'release') return PROD_API_BASE
-  if (ver === 'trial' && TRIAL_USE_PROD_API) return PROD_API_BASE
+  if (ver === 'release' || (ver === 'trial' && TRIAL_USE_PROD_API)) {
+    // P0-4：正式版强制校验 HTTPS 且拒绝占位符
+    if (PROD_API_BASE.indexOf('your-domain.com') !== -1) {
+      throw new Error('PROD_API_BASE 仍为占位符，请在 env.js 替换为真实域名后再上传正式版')
+    }
+    if (!/^https:\/\//i.test(PROD_API_BASE)) {
+      throw new Error('PROD_API_BASE 必须为 HTTPS 地址')
+    }
+    return PROD_API_BASE
+  }
   return resolveDevApiBase()
 }
 

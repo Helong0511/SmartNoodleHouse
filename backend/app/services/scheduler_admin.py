@@ -154,7 +154,7 @@ async def get_overrides_version() -> int:
         raw = await r.get(OVERRIDES_VER_KEY)
         if raw is None:
             return 0
-        return int(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+        return int(raw)
     except Exception:
         return 0
 
@@ -168,6 +168,7 @@ async def notify_overrides_changed(*, job_id: str | None = None) -> int:
 
         r = await get_redis()
         ver = int(await r.incr(OVERRIDES_VER_KEY))
+        await r.expire(OVERRIDES_VER_KEY, 30 * 24 * 3600)
         _local_overrides_ver = ver
         payload = json.dumps({"ver": ver, "job_id": job_id}, ensure_ascii=False)
         await r.publish(OVERRIDES_CHANNEL, payload)

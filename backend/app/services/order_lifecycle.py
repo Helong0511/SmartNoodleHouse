@@ -191,5 +191,10 @@ async def _restore_order_stock(db: AsyncSession, order: Order) -> None:
     from app.services.stock_service import restore_stock
 
     items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
+    # 按 product_id 聚合数量，避免同商品多次调用 restore_stock 产生 N+1
+    aggregated: dict[int, int] = {}
     for it in items:
-        await restore_stock(db, it.product_id, it.quantity, store_id=order.store_id)
+        pid = int(it.product_id)
+        aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
+    for product_id, qty in aggregated.items():
+        await restore_stock(db, product_id, qty, store_id=order.store_id)

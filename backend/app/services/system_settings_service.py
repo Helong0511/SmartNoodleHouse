@@ -614,7 +614,9 @@ class SystemSettingsService:
             from app.core.redis_client import get_redis
 
             r = await get_redis()
-            return int(await r.incr(REDIS_CACHE_VER_KEY))
+            new_ver = int(await r.incr(REDIS_CACHE_VER_KEY))
+            await r.expire(REDIS_CACHE_VER_KEY, 30 * 24 * 3600)
+            return new_ver
         except Exception:
             return 0
 

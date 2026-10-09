@@ -13,6 +13,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, func, select
@@ -28,6 +29,7 @@ from app.models import (
     ProductTasteProfile,
     StoreProductStock,
 )
+from app.core.response import money
 
 # ---------- 常量 ----------
 
@@ -88,7 +90,7 @@ _WEATHER_TAG_MULT = {
 class PoolProduct:
     id: int
     name: str
-    price: float
+    price: Decimal
     main_image: str | None
     category_id: int
     category_name: str
@@ -441,7 +443,11 @@ CF_TTL = 300.0
 
 
 async def invalidate_store_caches(store_id: int) -> None:
-    """商品池/共现/菜单聚合缓存失效（产品写路径与 Task 8 主动失效调用）。"""
+    """商品池/共现/菜单聚合缓存失效（产品写路径与 Task 8 主动失效调用）。
+
+    注意：仅清本进程内存缓存。多 worker 部署下其他进程最多 POOL_TTL(60s)/CF_TTL(300s) 后自然过期。
+    如需强一致可走 Redis pubsub 广播失效，当前 TTL 可接受。
+    """
     sid = int(store_id)
     _pool_cache.pop(sid, None)
     _cf_cache.pop(sid, None)
@@ -511,7 +517,7 @@ class RecommendationService:
                 PoolProduct(
                     id=int(p.id),
                     name=p.name,
-                    price=float(p.price or 0),
+                    price=money(p.price or 0),
                     main_image=p.main_image,
                     category_id=int(p.category_id),
                     category_name=cat.name if cat else "",

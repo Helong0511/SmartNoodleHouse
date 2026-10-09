@@ -78,9 +78,13 @@ class WechatMiniAuth:
             "js_code": code,
             "grant_type": "authorization_code",
         }
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url, params=params)
-            data = resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, params=params)
+                data = resp.json()
+        except Exception as e:
+            logger.error("微信 code2session 请求失败: %s", e)
+            raise AppException(50031, "微信登录失败，请稍后重试") from e
         if data.get("errcode"):
             logger.error("微信 code2session 失败: %s", data)
             errmsg = data.get("errmsg") or str(data.get("errcode"))
@@ -152,5 +156,6 @@ class AlipayMiniAuth:
         except AppException:
             raise
         except Exception as e:
+            # P2-17：不将原始异常消息暴露给前端，仅记录日志
             logger.error("支付宝 authCode 换用户失败: %s", e)
-            raise AppException(50033, f"支付宝登录失败: {e}") from e
+            raise AppException(50033, "支付宝登录失败，请稍后重试") from e

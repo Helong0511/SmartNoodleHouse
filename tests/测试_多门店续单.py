@@ -1,4 +1,4 @@
-"""多门店续单相关冒烟：员工列表 + 分店库存 + 门店业务参数（依赖 data.sql + 可选 data_test.sql）。"""
+"""多门店续单相关冒烟：员工列表 + 分店库存 + 门店业务参数（依赖 data_sys/data_custom + 可选 data_test.sql）。"""
 import asyncio
 import os
 import sys

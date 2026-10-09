@@ -36,7 +36,13 @@ from app.services.face_extractor import extract_face_embedding_with_quality
 from app.services.face_service import FaceService
 from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth
 from app.services.ab_service import DEFAULT_EXPERIMENT_KEY, AbService
-from app.services.reco_cache import get_cached_reco, set_cached_reco
+from app.services.reco_cache import (
+    get_cached_reco,
+    release_reco_lock,
+    set_cached_reco,
+    try_acquire_reco_lock,
+    wait_for_reco,
+)
 from app.services.recommendation_service import RecommendationService
 from app.utils.upload import fetch_and_save_remote_image, read_upload_limited, save_upload
 
@@ -300,8 +306,15 @@ async def bind_dine_table(
     from app.core.exceptions import AppException
     from app.services.table_resolve import resolve_dining_table
 
-    body = await request.json()
-    table_id = int(body.get("table_id") or 0)
+    # P1-10：request.json() 可能抛 JSONDecodeError（非 JSON body 或空 body）
+    try:
+        body = await request.json()
+    except Exception:
+        raise AppException(40001, "请求体格式错误，须为合法 JSON")
+    try:
+        table_id = int(body.get("table_id") or 0)
+    except (ValueError, TypeError):
+        raise AppException(40001, "桌台ID无效")
     qr_token = (body.get("qr_token") or body.get("token") or "").strip()
     req_store = body.get("store_id")
     table = await db.get(DiningTable, table_id)
@@ -323,7 +336,11 @@ async def bind_dine_table(
         # 开发环境兜底：须带 store_id 且一致
         if req_store is None:
             raise AppException(40050, "请先扫码进入门店后再选桌")
-        if int(req_store) != int(table.store_id):
+        try:
+            req_store_int = int(req_store)
+        except (ValueError, TypeError):
+            raise AppException(40001, "门店ID无效")
+        if req_store_int != int(table.store_id):
             raise AppException(40052, "桌台不属于当前门店")
 
     session = await DiningSessionService.start_or_refresh(
@@ -461,10 +478,14 @@ async def wechat_debug_qrcode(
     from app.services.table_resolve import resolve_dining_table
     from app.services.wechat_mini_client import generate_wxacode
 
+    # P2-13：生产环境禁用调试二维码端点，防止未鉴权生成小程序码
+    settings = get_settings()
+    if settings.is_production:
+        raise AppException(40301, "调试端点在生产环境不可用")
+
     table = await resolve_dining_table(db, token)
     if not table:
         raise AppException(40403, "无效桌台二维码")
-    settings = get_settings()
     from app.services.system_settings_service import SystemSettingsService
 
     png, err = await generate_wxacode(
@@ -1520,18 +1541,28 @@ async def get_recommendations(
     if cached is not None:
         return success(cached, request=request)
 
-    ranked, state, meta = await RecommendationService.recommend(
-        db,
-        store_id,
-        customer_id=cid,
-        scene=scene,
-        limit=limit,
-        exclude_ids=exclude_ids,
-        weight_override=weight_override,
-    )
-    payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
-    await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
-    payload["cache_hit"] = False
+    # 互斥重建：避免缓存击穿时多请求同时 recommend 压垮 DB
+    lock_ok = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
+    if not lock_ok:
+        waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
+        if waited is not None:
+            return success(waited, request=request)
+    try:
+        ranked, state, meta = await RecommendationService.recommend(
+            db,
+            store_id,
+            customer_id=cid,
+            scene=scene,
+            limit=limit,
+            exclude_ids=exclude_ids,
+            weight_override=weight_override,
+        )
+        payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
+        await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
+        payload["cache_hit"] = False
+    finally:
+        if lock_ok:
+            await release_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
     return success(payload, request=request)
 
 

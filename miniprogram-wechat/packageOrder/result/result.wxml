@@ -2,6 +2,13 @@
   <privacy-popup id="privacy-popup" />
   <skeleton wx:if="{{loading}}" type="order" rows="{{2}}" />
 
+  <!-- P2-18：加载失败态 + 重试按钮 -->
+  <view wx:elif="{{loadError}}" class="error-state">
+    <view class="error-icon">!</view>
+    <view class="error-text">加载失败，请重试</view>
+    <button class="btn-primary mini" bindtap="retryLoad">重新加载</button>
+  </view>
+
   <block wx:else>
     <store-bar
       storeName="{{storeName}}"
@@ -130,7 +137,7 @@
       </view>
     </view>
 
-    <button class="btn-primary" wx:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" bindtap="repay">继续支付</button>
+    <button class="btn-primary" wx:if="{{order.payment_status === 'UNPAID' || order.payment_status === 'PENDING'}}" loading="{{repaying}}" disabled="{{repaying}}" bindtap="repay">继续支付</button>
     <button class="btn-ghost" open-type="share">分享给好友</button>
     <button class="btn-primary" bindtap="goMenu">继续点餐</button>
   </block>

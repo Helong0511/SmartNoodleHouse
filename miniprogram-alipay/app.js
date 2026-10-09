@@ -27,7 +27,9 @@ App({
     enableAlipayPhoneBind: false,
     enableAlipayAvatar: true,
     enableAlipayNickname: true,
-    clientConfig: null
+    clientConfig: null,
+    networkType: 'unknown', // P3-19：网络状态检测
+    isOnline: true
   },
   onLaunch(options) {
     if (!this.globalData.apiBase) {
@@ -47,15 +49,24 @@ App({
       if (typeof auth.ensureCartForCurrentStore === 'function') {
         auth.ensureCartForCurrentStore()
       }
-    } catch (_) {}
+    } catch (_) { }
     // 桌台恢复：qr_token 为静态凭证，是否有效由后端 /entry 裁决，
     // 本地不再因 4h TTL 删除 token（旧逻辑会导致真机反复要求扫码绑桌）
     this.parseLaunch(options)
     privacy.setupPrivacy()
     privacy.bindAppPrivacyHandler(this)
-    clientConfig.loadClientConfig().catch(() => {})
+    clientConfig.loadClientConfig().catch(() => { })
     // 库重置后本地 customer_token 会失效；静默探测并清理，避免启动期 Uncaught
-    auth.purgeStaleSessionIfNeeded().catch(() => {})
+    auth.purgeStaleSessionIfNeeded().catch(() => { })
+    // P1-4：启动时恢复查单，防止支付后崩溃/退出导致状态丢失
+    try {
+      const pay = require('./utils/pay')
+      const pending = pay.readPending()
+      if (pending && pending.orderId) {
+        const _api2 = require('./utils/api')
+        pay.confirmPending(_api2, { orderId: pending.orderId, paymentNo: pending.paymentNo }).catch(() => { })
+      }
+    } catch (_) { }
     // 应用层预拉取：冷启动时提前发起菜单请求，页面 onLoad 时可能已拿到数据
     const _sid = (this.globalData.table && this.globalData.table.store_id)
       || (this.globalData.store && this.globalData.store.id)
@@ -68,20 +79,42 @@ App({
           storeId: String(_sid),
           promise: productApi.fetchMenuBundle(_api, _sid, null).catch(() => null)
         }
-      } catch (_) {}
+      } catch (_) { }
     }
+    // P3-19：网络状态检测，断网时提示用户
+    my.getNetworkType({
+      success: (res) => {
+        this.globalData.networkType = res.networkType || 'unknown'
+        this.globalData.isOnline = res.networkType !== 'none'
+      }
+    })
+    my.onNetworkStatusChange((res) => {
+      this.globalData.networkType = res.networkType || 'unknown'
+      this.globalData.isOnline = !!res.isConnected
+      if (!res.isConnected) {
+        my.showToast({ content: '网络已断开', type: 'none', duration: 2000 })
+      }
+    })
   },
   onError(err) {
-    if (isRelease()) return
-    try {
-      remoteLogger.logger.error(String(err || 'App.onError'), err)
-    } catch (_) {}
+    // P1-5：正式版也记录崩溃，不静默吞掉
+    try { console.error('[onError]', String(err || '')) } catch (_) { }
+    if (!isRelease()) {
+      try { remoteLogger.logger.error(String(err || 'App.onError'), err) } catch (_) { }
+    }
+  },
+  // P2-8：全局未处理 Promise 拒绝
+  onUnhandledRejection(res) {
+    try { console.error('[onUnhandledRejection]', String(res && (res.reason || res))) } catch (_) { }
+    if (!isRelease()) {
+      try { remoteLogger.logger.error('[onUnhandledRejection]', res && res.reason) } catch (_) { }
+    }
   },
   onPageNotFound(res) {
     if (!isRelease()) {
       try {
         remoteLogger.logger.warn('onPageNotFound', res)
-      } catch (_) {}
+      } catch (_) { }
     }
     my.switchTab({
       url: '/pages/menu/menu',
@@ -90,11 +123,11 @@ App({
   },
   onShow(options) {
     if (options) this.parseLaunch(options)
-    try { tracker.flush() } catch (_) {}
+    try { tracker.flush() } catch (_) { }
   },
   onHide() {
     // 进入后台/离开前把埋点队列上报出去
-    try { tracker.flush() } catch (_) {}
+    try { tracker.flush() } catch (_) { }
   },
   parseLaunch(options) {
     if (!options) return
@@ -122,7 +155,7 @@ App({
           const nested = normalizeLaunchQuery(scene)
           if (nested.channel) channel = nested.channel
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (token) {

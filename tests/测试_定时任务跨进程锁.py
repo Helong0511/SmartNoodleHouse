@@ -12,6 +12,7 @@ async def test_notify_overrides_changed_increments_and_publishes():
 
     fake = MagicMock()
     fake.incr = AsyncMock(return_value=7)
+    fake.expire = AsyncMock(return_value=1)
     fake.publish = AsyncMock(return_value=1)
 
     with patch("app.core.redis_client.get_redis", AsyncMock(return_value=fake)):

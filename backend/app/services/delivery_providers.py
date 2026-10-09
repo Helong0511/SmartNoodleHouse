@@ -260,7 +260,7 @@ class MeituanProvider(DeliveryProvider):
             **{k: str(v) for k, v in biz_params.items() if v is not None},
         }
         params["sig"] = meituan_sign(url, params, app_secret)
-        client = get_http_client()
+        client = await get_http_client()
         if method.upper() == "POST":
             resp = await client.post(url, data=params)
         else:
@@ -582,7 +582,7 @@ class ElemeProvider(DeliveryProvider):
             "signature": eleme_shop_sign(action, token, metas, params, settings.eleme_app_secret),
         }
         url = settings.eleme_api_base.rstrip("/") + "/"
-        client = get_http_client()
+        client = await get_http_client()
         resp = await client.post(url, json=payload)
         try:
             data = resp.json()

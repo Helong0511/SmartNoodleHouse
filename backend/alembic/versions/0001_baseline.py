@@ -37,7 +37,7 @@ def _repo_root() -> Path:
 
 
 def _schema_sql_path() -> Path:
-    # 结构真源：sql/struct.sql（生产种子见 sql/data.sql）
+    # 结构真源：sql/struct.sql（生产种子见 sql/data_sys.sql + sql/data_custom.sql）
     return _repo_root() / "sql" / "struct.sql"
 
 

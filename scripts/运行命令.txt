@@ -199,7 +199,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 # 本地: http://127.0.0.1:5173
 
 # ────────── Windows 11：联调冒烟（后端须已启动）──────────
-# 本地多门店联调：先导入 sql/struct.sql + sql/data.sql，再导入 sql/data_test.sql（补齐 SH02 菜品/桌台/员工）
+# 本地多门店联调：先导入 sql/struct.sql + sql/data_sys.sql + sql/data_custom.sql，再导入 sql/data_test.sql（补齐 SH02 菜品/桌台/员工）
 # cd E:\SmartNoodleHouse
 # python tests/live_miniprogram_smoke.py
 #

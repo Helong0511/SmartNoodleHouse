@@ -1,4 +1,8 @@
+import logging
+
 from fastapi import HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 
 class AppException(Exception):
@@ -75,3 +79,18 @@ async def sqlalchemy_operational_handler(request: Request, exc: Exception):
     if settings.is_development and detail:
         msg = f"{msg}：{detail}"
     return JSONResponse(status_code=503, content=error(50000, msg, request))
+
+
+async def generic_exception_handler(request: Request, exc: Exception):
+    """P0-5：兜底异常处理器，返回 JSON 而非 HTML 500，避免小程序只看到 request:ok 但解析失败。"""
+    from fastapi.responses import JSONResponse
+
+    from app.core.config import get_settings
+    from app.core.response import error
+
+    logger.exception("Unhandled exception: %s %s", request.method, request.url.path)
+    settings = get_settings()
+    msg = "服务器内部错误，请稍后重试"
+    if settings.is_development:
+        msg = f"{msg}：{type(exc).__name__}: {exc}"
+    return JSONResponse(status_code=500, content=error(50000, msg, request))

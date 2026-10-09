@@ -6,12 +6,18 @@
 from __future__ import annotations
 
 import hashlib
+import random
 
 RECO_KEY_PREFIX = "snh:reco"
 RECO_TTL_SECONDS = 120  # 推荐结果最长缓存 120s（spec 要求 ≤120s）
 
 MENU_CATALOG_PREFIX = "snh:menu"
 MENU_CATALOG_TTL_SECONDS = 120
+
+
+def ttl_with_jitter(ttl: int, *, min_ratio: float = 0.8, max_ratio: float = 1.2) -> int:
+    """TTL 加随机偏移，防止缓存雪崩（同一批 key 同时过期导致 DB 瞬时压力）。"""
+    return max(1, int(ttl * random.uniform(min_ratio, max_ratio)))
 
 
 def reco_key(customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "") -> str:

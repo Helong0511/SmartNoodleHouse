@@ -1,10 +1,13 @@
 import json
+import logging
 import time
 from typing import Set
 
 from fastapi import WebSocket
 
 from app.services.ws_pubsub import publish_ws_event
+
+logger = logging.getLogger(__name__)
 
 # 连接配额与空闲超时
 MAX_CONNECTIONS_PER_IP = 30
@@ -25,6 +28,8 @@ class ConnectionManager:
         self.meta: dict[WebSocket, dict] = {}
         self._by_ip: dict[str, set[WebSocket]] = {}
         self._by_user: dict[str, set[WebSocket]] = {}
+        # P1-8：消息幂等去重，防止 Redis Pub/Sub 回环导致本地重复投递
+        self._recent_msg_ids: dict[str, float] = {}
 
     def _client_ip(self, websocket: WebSocket) -> str:
         client = websocket.client
@@ -88,7 +93,18 @@ class ConnectionManager:
         meta = self.meta.get(websocket)
         if meta is not None:
             meta["last_seen"] = time.monotonic()
-            # 异步续期放上层；此处仅本地时间戳
+            # P1-7：心跳时同步续期 Redis 全局配额 TTL，防止 5min 后配额失效
+            ip = meta.get("ip")
+            user_key = meta.get("user_key")
+            try:
+                import asyncio
+
+                from app.services import ws_conn_quota
+
+                loop = asyncio.get_running_loop()
+                loop.create_task(ws_conn_quota.touch(ip=ip or "unknown", user_key=user_key))
+            except Exception:
+                pass
 
     def disconnect(self, channel: str, websocket: WebSocket):
         meta = self.meta.pop(websocket, {}) or {}
@@ -114,10 +130,14 @@ class ConnectionManager:
                 loop = asyncio.get_running_loop()
                 loop.create_task(ws_conn_quota.release(ip=ip or "unknown", user_key=user_key))
             except Exception:
-                pass
+                logger.warning("WS配额释放失败 ip=%s user=%s", ip, user_key, exc_info=True)
 
     def cleanup_idle(self, idle_seconds: float = WS_IDLE_TIMEOUT_SECONDS) -> list[WebSocket]:
-        """返回超时连接（调用方负责 close）。"""
+        """P2-1：返回超时连接（调用方负责 close）。
+
+        正常情况下 _ws_loop 的 per-connection 超时会自动断开；
+        此方法作为安全网，可由定时任务调用清理遗漏连接。
+        """
         now = time.monotonic()
         dead: list[WebSocket] = []
         for ws, meta in list(self.meta.items()):
@@ -125,7 +145,31 @@ class ConnectionManager:
                 dead.append(ws)
         return dead
 
-    async def local_broadcast(self, channel: str, event: str, data: dict, store_id: int | None = None):
+    def _should_deliver(self, msg_id: str | None) -> bool:
+        """P1-8：消息幂等去重。返回 True 表示应投递，False 表示重复。"""
+        if not msg_id:
+            return True  # 无 ID 的消息不拦截（向后兼容）
+        now = time.monotonic()
+        # 清理 60s 前的过期记录
+        expired = [k for k, ts in self._recent_msg_ids.items() if now - ts > 60]
+        for k in expired:
+            del self._recent_msg_ids[k]
+        if msg_id in self._recent_msg_ids:
+            return False
+        self._recent_msg_ids[msg_id] = now
+        return True
+
+    async def local_broadcast(
+        self,
+        channel: str,
+        event: str,
+        data: dict,
+        store_id: int | None = None,
+        msg_id: str | None = None,
+    ):
+        # P1-8：Redis Pub/Sub 回环时跳过已投递的消息
+        if not self._should_deliver(msg_id):
+            return
         message = json.dumps({"event": event, "data": data}, default=str)
         targets: Set[WebSocket] = set()
         # 超管全量频道
@@ -151,9 +195,13 @@ class ConnectionManager:
         local_only: bool = False,
     ):
         """local_only=True：仅本进程推送（Redis 订阅回调使用，避免回环）。"""
-        await self.local_broadcast(channel, event, data, store_id=store_id)
+        import uuid
+
+        # P1-8：非 local_only 时生成 msg_id，供 Redis 回环去重
+        msg_id = None if local_only else str(uuid.uuid4())
+        await self.local_broadcast(channel, event, data, store_id=store_id, msg_id=msg_id)
         if not local_only:
-            await publish_ws_event(channel, event, data, store_id=store_id)
+            await publish_ws_event(channel, event, data, store_id=store_id, msg_id=msg_id)
 
     async def notify_order_event(self, event: str, order_data: dict):
         store_id = order_data.get("store_id")
@@ -165,5 +213,6 @@ class ConnectionManager:
 ws_manager = ConnectionManager()
 
 
-async def on_redis_ws_message(channel: str, event: str, data: dict, store_id: int | None):
-    await ws_manager.broadcast(channel, event, data, store_id=store_id, local_only=True)
+async def on_redis_ws_message(channel: str, event: str, data: dict, store_id: int | None, msg_id: str | None = None):
+    # P1-8：传入 msg_id 供 local_broadcast 去重；local_only=True 不再回发 Redis
+    await ws_manager.local_broadcast(channel, event, data, store_id=store_id, msg_id=msg_id)

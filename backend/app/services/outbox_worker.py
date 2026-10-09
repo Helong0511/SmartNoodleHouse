@@ -209,9 +209,11 @@ async def process_outbox_item(outbox_id: int) -> None:
             await _mark_failed(db, row, "handler_not_registered", wid=wid)
             return
         try:
-            payload = json.loads(row.payload) if row.payload else {}
+            json.loads(row.payload) if row.payload else {}
         except (TypeError, ValueError):
-            payload = {}
+            # payload 损坏无法解析，标记失败不再执行 handler，避免空 payload 继续处理
+            await _mark_failed(db, row, "payload_invalid_json", wid=wid)
+            return
         try:
             await handler(db, row)
             # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
@@ -245,6 +247,7 @@ async def process_outbox_item(outbox_id: int) -> None:
                     mark_redis=False,
                 )
             except Exception:
+                # TODO: 考虑补偿监控告警，当前依赖 done_result.rowcount 兜底
                 logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
             await db.commit()
             try:

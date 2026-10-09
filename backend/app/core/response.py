@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+import logging
 from typing import Any, Generic, Optional, TypeVar
 from zoneinfo import ZoneInfo
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
@@ -70,11 +72,21 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def money(value: Decimal | str | int | float) -> Decimal:
-    """金额统一两位小数，四舍五入（ROUND_HALF_UP）。"""
+def money(value: Decimal | str | int | float | None) -> Decimal:
+    """金额统一两位小数，四舍五入（ROUND_HALF_UP）。
+
+    None 或非法值兜底为 Decimal("0.00")，避免回调金额缺失时崩溃。
+    调用方应在拿到结果后自行判断是否为 0 并决定是否拒绝。
+    """
     from decimal import ROUND_HALF_UP
 
-    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if value is None:
+        return Decimal("0.00")
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError, TypeError):
+        logger.warning("money() 收到非法金额值: %r，兜底为 0.00", value)
+        return Decimal("0.00")
 
 
 def calc_pages(total: int, page_size: int) -> int:

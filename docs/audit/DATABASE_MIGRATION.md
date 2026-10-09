@@ -12,7 +12,7 @@
 - 驱动：aiomysql（生产 MySQL 8）、aiosqlite（测试 in-memory）
 - 迁移：Alembic，配置 [backend/alembic.ini](file:///e:/SmartNoodleHouse/backend/alembic.ini)
 - 迁移目录：[backend/alembic/versions/](file:///e:/SmartNoodleHouse/backend/alembic/versions/)，共 24 个版本文件
-- 结构真源：[sql/struct.sql](file:///e:/SmartNoodleHouse/sql/struct.sql)，种子数据 [sql/data.sql](file:///e:/SmartNoodleHouse/sql/data.sql)
+- 结构真源：[sql/struct.sql](file:///e:/SmartNoodleHouse/sql/struct.sql)，种子数据 [sql/data_sys.sql](file:///e:/SmartNoodleHouse/sql/data_sys.sql) + [sql/data_custom.sql](file:///e:/SmartNoodleHouse/sql/data_custom.sql)
 - 字符集：utf8mb4 / utf8mb4_unicode_ci
 - 时区：业务时间 Asia/Shanghai；DB 连接不依赖会话时区
 
@@ -57,7 +57,7 @@
 
 - **不执行** `DROP DATABASE` / `CREATE DATABASE`（避免迁移误删库）。
 - **不执行** `CREATE USER` / `GRANT` / `IDENTIFIED BY`（DBA 职责，不进迁移）。
-- **不执行** 生产种子数据（种子由 sql/data.sql 或应用 ensure_seeded 处理）。
+- **不执行** 生产种子数据（种子由 sql/data_sys.sql + sql/data_custom.sql 或应用 ensure_seeded 处理）。
 - 测试断言：`CREATE TABLE` 在段内；`DROP DATABASE`、`IDENTIFIED BY` 不在段内（测试_生产级审计P0.py）。
 
 ### 3.2 幂等错误忽略

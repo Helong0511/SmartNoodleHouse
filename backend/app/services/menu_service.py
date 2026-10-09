@@ -17,7 +17,10 @@ from app.core.menu_cache import (
     bump_menu_version,
     get_menu_bundle,
     get_menu_version,
+    release_rebuild_lock,
     set_menu_bundle,
+    try_acquire_rebuild_lock,
+    wait_for_rebuild,
 )
 from app.models import (
     Product,
@@ -207,12 +210,24 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     if hit and hit[0] > time.time() and _bundle_schedule_id(hit[1]) == expected_sched:
         bundle = hit[1]
     else:
-        # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
-        if cached is not None or (hit and _bundle_schedule_id(hit[1]) != expected_sched):
-            invalidate_local_menu_cache(sid)
-            await bump_menu_version(sid)
-        bundle = await build_menu_bundle(db, sid)
-        _build_cache[sid] = (time.time() + _BUILD_TTL_SECONDS, bundle)
+        # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
+        lock_ok = await try_acquire_rebuild_lock(sid)
+        if not lock_ok:
+            # 未抢到锁：短暂等待其他进程重建完成后重读缓存
+            waited = await wait_for_rebuild(sid, 0.3)
+            if waited is not None and _bundle_schedule_id(waited) == expected_sched:
+                version = await get_menu_version(sid)
+                return {**waited, "version": version}
+        try:
+            # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
+            if cached is not None or (hit and _bundle_schedule_id(hit[1]) != expected_sched):
+                invalidate_local_menu_cache(sid)
+                await bump_menu_version(sid)
+            bundle = await build_menu_bundle(db, sid)
+            _build_cache[sid] = (time.time() + _BUILD_TTL_SECONDS, bundle)
+        finally:
+            if lock_ok:
+                await release_rebuild_lock(sid)
 
     version = await get_menu_version(sid)
     if version <= 0:

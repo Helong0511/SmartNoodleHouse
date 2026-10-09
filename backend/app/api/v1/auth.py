@@ -64,8 +64,7 @@ async def _record_login_failure(username: str, ip: str = "unknown") -> None:
         r = await get_redis()
         fail_key = _login_fail_key(username, ip)
         count = await r.incr(fail_key)
-        if count == 1:
-            await r.expire(fail_key, _LOGIN_FAIL_WINDOW)
+        await r.expire(fail_key, _LOGIN_FAIL_WINDOW)
         if int(count) >= _LOGIN_FAIL_LIMIT:
             await r.set(_login_lock_key(username, ip), "1", ex=_LOGIN_LOCK_SECONDS)
             await r.delete(fail_key)

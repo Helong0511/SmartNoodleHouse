@@ -93,6 +93,8 @@ function headerIcon(status) {
 Page({
   data: {
     loading: true,
+    loadError: false, // P2-18：加载失败态
+    repaying: false, // P3-17：支付按钮防重复提交
     order: {},
     orderItems: [],
     hasPacking: false,
@@ -207,7 +209,7 @@ Page({
         if (r && r.paid) return this.loadOrder(true)
         return new Promise((resolve) => setTimeout(resolve, 600)).then(() => this.loadOrder(true))
       })
-      .catch(() => {})
+      .catch(() => { })
   },
 
   async _refreshWithSync(silent) {
@@ -221,9 +223,9 @@ Page({
         String(pending.orderId) === String(this.orderId)
       const syncPromise = needSync
         ? payUtil.confirmPending(api, {
-            orderId: this.orderId,
-            paymentNo: pending.paymentNo
-          })
+          orderId: this.orderId,
+          paymentNo: pending.paymentNo
+        })
         : Promise.resolve(null)
       await this.loadOrder(silent)
       const sync = await syncPromise
@@ -312,7 +314,8 @@ Page({
         storeNo: order.store_no || dineCtx.currentDisplay().storeNo || '',
         storeLogo: dineCtx.currentDisplay().storeLogo || '',
         ...seatFieldsFromOrder(order),
-        loading: false
+        loading: false,
+        loadError: false
       })
       this._syncPollByStatus(order.status)
       if (order && (order.status === 'PAID' || order.status === 'COMPLETED' || order.payment_status === 'PAID')) {
@@ -324,9 +327,16 @@ Page({
       }
     } catch (e) {
       if (seq !== this._loadSeq) return
-      this.setData({ loading: false })
+      // P2-18：设置加载失败态，让用户可点重试按钮
+      this.setData({ loading: false, loadError: true })
       if (!silent) my.showToast({ content: (e && e.message) || '加载失败', type: 'fail' })
     }
+  },
+
+  // P2-18：重新加载
+  retryLoad() {
+    this.setData({ loadError: false, loading: true })
+    this.loadOrder(false)
   },
 
   async _maybeShowMemberBanner(order) {
@@ -352,7 +362,7 @@ Page({
         tasteHint: tasteParts.join('、') || '您刚点的口味'
       })
       this._memberBannerChecked = true
-    } catch (_) {}
+    } catch (_) { }
   },
 
   dismissMemberBanner() {
@@ -397,6 +407,9 @@ Page({
 
   async repay() {
     if (!this.orderId) return
+    // P3-17：防重复提交
+    if (this.data.repaying) return
+    this.setData({ repaying: true })
     try {
       my.showLoading({ content: '拉起支付' })
       const payRes = await api.post(`/payments/orders/${this.orderId}/pay`, {
@@ -420,6 +433,8 @@ Page({
       my.hideLoading()
       my.showToast({ content: (e && e.message) || '支付失败', type: 'fail' })
       await this._refreshWithSync(true)
+    } finally {
+      this.setData({ repaying: false })
     }
   },
 

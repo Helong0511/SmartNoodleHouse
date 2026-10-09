@@ -1,4 +1,5 @@
 import asyncio
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
@@ -111,16 +112,30 @@ async def _load_customer(db, token: str) -> Customer | None:
 
 
 async def _ws_loop(channel: str, websocket: WebSocket) -> None:
-    """收消息心跳；空闲超时断开。"""
+    """收消息心跳；空闲超时断开。客户端发送 ping 维持连接。"""
     while True:
         try:
-            await asyncio.wait_for(websocket.receive_text(), timeout=WS_IDLE_TIMEOUT_SECONDS)
+            text = await asyncio.wait_for(websocket.receive_text(), timeout=WS_IDLE_TIMEOUT_SECONDS)
             ws_manager.touch(websocket)
+            # P0-2：响应心跳 ping，让客户端确认连接存活
+            if text:
+                stripped = text.strip().lower()
+                if stripped in ("ping", "heartbeat") or stripped.startswith('{"type":"ping"'):
+                    try:
+                        await websocket.send_text('{"type":"pong"}')
+                    except Exception:
+                        pass
+        except WebSocketDisconnect:
+            ws_manager.disconnect(channel, websocket)
+            return
         except asyncio.TimeoutError:
             try:
                 await websocket.close(code=4408, reason="空闲超时")
             except Exception:
                 pass
+            ws_manager.disconnect(channel, websocket)
+            return
+        except Exception:
             ws_manager.disconnect(channel, websocket)
             return
 
@@ -132,6 +147,31 @@ async def websocket_endpoint(
     token: str | None = Query(default=None),
     store_id: int | None = Query(default=None),
 ):
+    # P1-9：Origin 校验防止跨站 WS 劫持
+    origin = (websocket.headers.get("origin") or "").strip()
+    if origin:
+        host = (websocket.headers.get("host") or "").strip()
+        try:
+            parsed = urlparse(origin)
+            origin_host = parsed.hostname or ""
+            request_host = host.split(":")[0] if host else ""
+            allowed = False
+            if origin_host and request_host and origin_host == request_host:
+                allowed = True
+            if not allowed:
+                settings = get_settings()
+                cors_origins = (getattr(settings, "cors_origins", "") or "").split(",")
+                cors_origins = [o.strip() for o in cors_origins if o.strip() and o.strip() != "*"]
+                for o in cors_origins:
+                    if urlparse(o).hostname == origin_host:
+                        allowed = True
+                        break
+                if not allowed and settings.is_production:
+                    await websocket.close(code=4403, reason="Origin 不允许")
+                    return
+        except Exception:
+            pass
+
     auth_token, reject = _extract_ws_token(websocket, token)
     if reject:
         await websocket.close(code=4401, reason=reject[:120])

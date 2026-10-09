@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
+    generic_exception_handler,
     http_exception_handler,
     sqlalchemy_integrity_handler,
     sqlalchemy_operational_handler,
@@ -90,6 +91,26 @@ async def lifespan(app: FastAPI):
         logger.info("system_settings 已种子并预热缓存")
     except Exception as e:
         logger.warning("system_settings 种子失败（可稍后由后台页触发）: %s", e)
+
+    # 菜单缓存预热：启动时加载在营门店菜单到 Redis，避免首批请求缓存击穿
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.services.menu_service import get_or_build_menu_bundle
+
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+            from app.models import Store
+
+            result = await db.execute(select(Store.id).where(Store.status == 1))
+            store_ids = [r[0] for r in result.all()]
+            for sid in store_ids:
+                try:
+                    await get_or_build_menu_bundle(db, sid)
+                except Exception:
+                    logger.debug("门店 %s 菜单预热失败", sid, exc_info=True)
+        logger.info("菜单缓存预热完成 (%d stores)", len(store_ids))
+    except Exception as e:
+        logger.warning("菜单缓存预热失败（可稍后由首请求触发）: %s", e)
 
     # 必须走 settings（会读 .env）；勿用 os.getenv，否则仅写在 .env 的 PROCESS_ROLE 会被忽略
     from app.core.leader_lock import make_worker_id, release_leader, renew_leader_loop, try_acquire_leader
@@ -399,6 +420,8 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(IntegrityError, sqlalchemy_integrity_handler)
     app.add_exception_handler(OperationalError, sqlalchemy_operational_handler)
+    # P0-5：兜底异常处理器，确保所有未捕获异常返回 JSON 而非 HTML 500
+    app.add_exception_handler(Exception, generic_exception_handler)
     app.include_router(api_router)
 
     # 无前缀探针：与 /api/health、/api/ready 同源（DB+Redis）
