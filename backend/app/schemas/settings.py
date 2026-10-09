@@ -53,7 +53,14 @@ class StoreUpdate(BaseModel):
         if v is None:
             return v
         s = v.strip()
-        return s or None
+        if not s:
+            return None
+        # P3-6: 校验电话号码格式（手机/座机均可，仅允许数字、+、-、空格、括号）
+        import re
+
+        if not re.fullmatch(r"[\d+\-\s()]{7,20}", s):
+            raise ValueError("电话号码格式不合法（仅允许数字、+、-、空格、括号，长度7-20）")
+        return s
 
     @field_validator("address")
     @classmethod

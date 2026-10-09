@@ -908,7 +908,7 @@ async def get_payment(payment_no: str, request: Request, db: DbSession, auth: St
     result = await db.execute(select(Payment).where(Payment.payment_no == payment_no))
     payment = result.scalar_one_or_none()
     if not payment:
-        return success(None, message="支付记录不存在", request=request)
+        raise HTTPException(status_code=404, detail="支付记录不存在")
     if customer and payment.customer_id != customer.id:
         raise HTTPException(status_code=403, detail="无权查看此支付")
     if user is not None:

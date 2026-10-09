@@ -1,4 +1,4 @@
-﻿const api = require('../../utils/api')
+const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const cartUtil = require('../../utils/cart')
 const media = require('../../utils/media')
@@ -120,6 +120,7 @@ Page({
   },
 
   onUnload() {
+    if (this._searchTimer) clearTimeout(this._searchTimer)
     if (typeof this._unsubDine === 'function') {
       this._unsubDine()
       this._unsubDine = null
@@ -151,7 +152,7 @@ Page({
     try {
       const app = getApp()
       if (app && app.globalData) app.globalData._openCartSheet = false
-    } catch (_) {}
+    } catch (_) { }
     this.refreshCartBar({ openSheet })
   },
 
@@ -179,7 +180,7 @@ Page({
       })
     }
     const sid = storeId || this.data.storeId || null
-    clientConfig.loadClientConfig(false, sid).then(apply).catch(() => {})
+    clientConfig.loadClientConfig(false, sid).then(apply).catch(() => { })
   },
 
   applyDineContext(ctx) {
@@ -220,7 +221,7 @@ Page({
               this.loadMenu(true)
             }
           })
-        }).catch(() => {})
+        }).catch(() => { })
       }),
       this.loadPrefs(true),
       this.loadMenu(true),
@@ -232,7 +233,7 @@ Page({
     try {
       const ctx = dineCtx.currentDisplay()
       if (ctx && ctx.storeId) return ctx.storeId
-    } catch (_) {}
+    } catch (_) { }
     const g = appGlobal()
     return (g.table && g.table.store_id)
       || (g.store && (g.store.id || g.store.store_id))
@@ -266,10 +267,10 @@ Page({
                 at: Date.now()
               }
             }
-          } catch (_) {}
+          } catch (_) { }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories, { complete })
     const cart = list.map((raw) => {
@@ -313,7 +314,7 @@ Page({
     const qty = (item.quantity || 1) + parseInt(delta, 10)
     if (qty <= 0) {
       cart.splice(index, 1)
-      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) {}
+      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) { }
     } else if (qty > 999) {
       my.showToast({ content: '单品最多 999 份', type: 'none' })
       return
@@ -333,7 +334,7 @@ Page({
     if (removed == null) return
     cart.splice(index, 1)
     auth.saveCart(cart)
-    try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) {}
+    try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) { }
     this.refreshCartBar({ openSheet: !!(this.data.cartSheetOpen && cart.length) })
   },
 
@@ -473,7 +474,7 @@ Page({
               at: this._lastMenuFetchAt
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // 0) 消费 app.js 预拉取结果（冷启动提前拉取的菜单数据，跳过二次请求）
@@ -575,7 +576,7 @@ Page({
     }
     const flat = []
     all.forEach((c) => {
-      ;(c.products || []).forEach((p) => flat.push(p))
+      ; (c.products || []).forEach((p) => flat.push(p))
     })
     media.hydrateImageUrls(flat, 'imageUrl').then(() => {
       if (this._imgGen !== gen) return
@@ -585,25 +586,29 @@ Page({
       } else {
         this.setData({ categories: all })
       }
-    }).catch(() => {})
+    }).catch(() => { })
   },
 
   onSearch(e) {
     const keyword = (e.detail && e.detail.value) || ''
     this.setData({ keyword })
+    if (this._searchTimer) clearTimeout(this._searchTimer)
     if (!this._catsCache || !this._lastProductItems) {
       this.loadMenu()
       return
     }
-    const { cats, metrics } = this._catsCache
-    const items = this._lastProductItems
-    const rebuilt = this.buildCategories(cats, items, metrics, keyword)
-    const activeCat = (rebuilt[0] && rebuilt[0].id) || null
-    this.setData({
-      categories: rebuilt,
-      activeCat,
-      scrollInto: activeCat ? `cat-${activeCat}` : ''
-    })
+    // P3-7: 搜索防抖300ms，避免每次按键都重建分类列表
+    this._searchTimer = setTimeout(() => {
+      const { cats, metrics } = this._catsCache
+      const items = this._lastProductItems
+      const rebuilt = this.buildCategories(cats, items, metrics, keyword)
+      const activeCat = (rebuilt[0] && rebuilt[0].id) || null
+      this.setData({
+        categories: rebuilt,
+        activeCat,
+        scrollInto: activeCat ? `cat-${activeCat}` : ''
+      })
+    }, 300)
   },
 
   onCatTap(e) {

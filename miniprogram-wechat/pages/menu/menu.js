@@ -112,6 +112,7 @@ Page({
   },
 
   onUnload() {
+    if (this._searchTimer) clearTimeout(this._searchTimer)
     if (typeof this._unsubDine === 'function') {
       this._unsubDine()
       this._unsubDine = null
@@ -172,7 +173,7 @@ Page({
       })
     }
     const sid = storeId || this.data.storeId || null
-    clientConfig.loadClientConfig(false, sid).then(apply).catch(() => {})
+    clientConfig.loadClientConfig(false, sid).then(apply).catch(() => { })
   },
 
   onTableChange(e) {
@@ -209,7 +210,7 @@ Page({
               this.loadMenu(true)
             }
           })
-        }).catch(() => {})
+        }).catch(() => { })
       }),
       this.loadPrefs(true),
       this.loadMenu(true),
@@ -221,7 +222,7 @@ Page({
     try {
       const ctx = dineCtx.currentDisplay()
       if (ctx && ctx.storeId) return ctx.storeId
-    } catch (_) {}
+    } catch (_) { }
     const g = app && app.globalData
     if (!g) return null
     return (g.table && g.table.store_id)
@@ -256,7 +257,7 @@ Page({
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories, { complete })
     const cart = list.map((raw) => {
@@ -300,7 +301,7 @@ Page({
     const qty = (item.quantity || 1) + parseInt(delta, 10)
     if (qty <= 0) {
       cart.splice(index, 1)
-      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) {}
+      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) { }
     } else if (qty > 999) {
       wx.showToast({ title: '单品最多 999 份', icon: 'none' })
       return
@@ -320,7 +321,7 @@ Page({
     if (removed == null) return
     cart.splice(index, 1)
     auth.saveCart(cart)
-    try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) {}
+    try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) { }
     this.refreshCartBar({ openSheet: !!(this.data.cartSheetOpen && cart.length) })
   },
 
@@ -558,7 +559,7 @@ Page({
     }
     const flat = []
     all.forEach((c) => {
-      ;(c.products || []).forEach((p) => flat.push(p))
+      ; (c.products || []).forEach((p) => flat.push(p))
     })
     // 图片在首屏之后限流下载，不堵住购物车拉菜单
     media.hydrateImageUrls(flat, 'imageUrl').then(() => {
@@ -569,25 +570,29 @@ Page({
       } else {
         this.setData({ categories: all })
       }
-    }).catch(() => {})
+    }).catch(() => { })
   },
 
   onSearch(e) {
     const keyword = (e.detail && e.detail.value) || ''
     this.setData({ keyword })
+    if (this._searchTimer) clearTimeout(this._searchTimer)
     if (!this._catsCache || !this._lastProductItems) {
       this.loadMenu()
       return
     }
-    const { cats, metrics } = this._catsCache
-    const items = this._lastProductItems
-    const rebuilt = this.buildCategories(cats, items, metrics, keyword)
-    const activeCat = (rebuilt[0] && rebuilt[0].id) || null
-    this.setData({
-      categories: rebuilt,
-      activeCat,
-      scrollInto: activeCat ? `cat-${activeCat}` : ''
-    })
+    // P3-7: 搜索防抖300ms，避免每次按键都重建分类列表
+    this._searchTimer = setTimeout(() => {
+      const { cats, metrics } = this._catsCache
+      const items = this._lastProductItems
+      const rebuilt = this.buildCategories(cats, items, metrics, keyword)
+      const activeCat = (rebuilt[0] && rebuilt[0].id) || null
+      this.setData({
+        categories: rebuilt,
+        activeCat,
+        scrollInto: activeCat ? `cat-${activeCat}` : ''
+      })
+    }, 300)
   },
 
   onCatTap(e) {
