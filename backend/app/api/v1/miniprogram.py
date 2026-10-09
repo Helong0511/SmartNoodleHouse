@@ -319,7 +319,7 @@ async def bind_dine_table(
     req_store = body.get("store_id")
     table = await db.get(DiningTable, table_id)
     if not table or table.status != 1:
-        return success(None, message="桌台不存在或已禁用", request=request)
+        raise AppException(40404, "桌台不存在或已禁用")
 
     settings = get_settings()
     # 生产必须带 qr_token 凭证；开发可省略但传了仍校验
@@ -393,7 +393,7 @@ async def scan_entry(
 
     table = await resolve_dining_table(db, token, store_id=store_id)
     if not table:
-        return success(None, message="无效桌台二维码", request=request)
+        raise AppException(40404, "无效桌台二维码")
 
     store = await _store_brief(db, table.store_id)
     return success(
