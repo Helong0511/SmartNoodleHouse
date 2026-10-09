@@ -69,9 +69,17 @@ def test_store_update_schema():
         StoreUpdate(name="   ")
     with pytest.raises(Exception):
         StoreUpdate(status=2)
-    ok = StoreUpdate(name=" 总店 ", phone=" 138 ", status=1)
+    ok = StoreUpdate(name=" 总店 ", phone=" 13800138000 ", status=1)
     assert ok.name == "总店"
-    assert ok.phone == "138"
+    assert ok.phone == "13800138000"
+    # P3-6: 无效电话号码格式应被拒绝
+    with pytest.raises(Exception):
+        StoreUpdate(phone="abc123")
+    with pytest.raises(Exception):
+        StoreUpdate(phone="123")
+    # 座机格式应通过
+    ok2 = StoreUpdate(phone="010-12345678")
+    assert ok2.phone == "010-12345678"
 
 
 def test_business_update_schema_empty():
