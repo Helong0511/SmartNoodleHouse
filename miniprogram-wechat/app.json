@@ -17,7 +17,6 @@
       "name": "order",
       "pages": [
         "product/product",
-        "cart/cart",
         "confirm/confirm",
         "result/result"
       ]

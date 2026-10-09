@@ -123,6 +123,8 @@ async def test_finalize_refund_marks_partial():
         new_callable=AsyncMock,
         return_value=Decimal("60.00"),
     ), patch(
+        "app.services.outbox_worker.enqueue_outbox", new_callable=AsyncMock, return_value=(None, True)
+    ), patch(
         "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
     ) as deduct:
         await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
@@ -181,6 +183,8 @@ async def test_finalize_refund_deducts_points_for_customer():
         "app.services.payment_service.PaymentService.order_net_collected",
         new_callable=AsyncMock,
         return_value=Decimal("60.00"),
+    ), patch(
+        "app.services.outbox_worker.enqueue_outbox", new_callable=AsyncMock, return_value=(None, True)
     ), patch(
         "app.services.customer_service.CustomerService.deduct_points_for_refund", new_callable=AsyncMock
     ) as deduct:

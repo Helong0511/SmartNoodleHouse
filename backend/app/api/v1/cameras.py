@@ -1,6 +1,7 @@
 """摄像头 API：鉴权 + 解密密码连接 + 生命周期 + 访客统计"""
 from __future__ import annotations
 
+import asyncio
 import time
 
 import cv2
@@ -304,7 +305,7 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
     )
     if data.auto_start:
         _start_worker(camera, force=True)
-        time.sleep(0.3)
+        await asyncio.sleep(0.3)
         from camera.camera_manager import CameraManager
 
         mgr = CameraManager()
@@ -417,7 +418,7 @@ async def start_camera(camera_id: int, request: Request, db: DbSession, user: Cu
         raise AppException(40420, "摄像头不存在")
     _assert_cam_access(user, camera)
     _start_worker(camera, force=True)
-    time.sleep(0.3)
+    await asyncio.sleep(0.3)
     from camera.camera_manager import CameraManager
 
     st = CameraManager().get_status(camera_id) or "OFFLINE"
