@@ -185,9 +185,8 @@ function requestOnce(method, path, data = {}, needAuth = true) {
           try {
             require('./logger').reportApi('ERROR', upper, path, { status, code: body.code, message: msg })
           } catch (_) { }
-          // P1-3：403 也应触发 token 清理（账号被封禁或令牌被撤销）
+          // P1-3/P2-6：认证失效交给 request() 层先尝试静默刷新并重放，失败才清会话
           if (needAuth && (status === 401 || status === 403 || isStaleAuthMessage(msg))) {
-            clearStaleCustomerAuthQuietly()
             reject(makeRequestError(msg, { code: 'AUTH_STALE', status: status || 401 }))
             return
           }
@@ -202,7 +201,6 @@ function requestOnce(method, path, data = {}, needAuth = true) {
           require('./logger').reportApi('ERROR', upper, path, { message: msg })
         } catch (_) { }
         if (needAuth && isStaleAuthMessage(msg)) {
-          clearStaleCustomerAuthQuietly()
           reject(makeRequestError(msg, { code: 'AUTH_STALE' }))
           return
         }
@@ -214,8 +212,65 @@ function requestOnce(method, path, data = {}, needAuth = true) {
   })
 }
 
-function request(method, path, data = {}, needAuth = true, retries = 1) {
+/** P2-6：静默刷新顾客令牌（单飞）。成功返回 true 并写回新 token，失败返回 false。 */
+let refreshingPromise = null
+function attemptTokenRefresh() {
+  if (refreshingPromise) return refreshingPromise
+  refreshingPromise = new Promise((resolve) => {
+    const base = resolveBaseUrl()
+    if (!base) {
+      resolve(false)
+      return
+    }
+    my.request({
+      url: `${base}/miniprogram/auth/refresh`,
+      method: 'POST',
+      dataType: 'json',
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader()
+      },
+      success(res) {
+        const body = parseResponseBody(res.data)
+        const token = body && body.code === 0 && body.data ? body.data.customer_token : null
+        const status = Number(res.status != null ? res.status : res.statusCode)
+        if (status === 200 && token) {
+          try {
+            const auth = require('./auth')
+            const app = getAppSafe()
+            if (app && typeof auth.refreshCustomerToken === 'function') {
+              const patch = body.data.customer_id != null ? { customer_id: body.data.customer_id } : {}
+              auth.refreshCustomerToken(app, token, patch)
+              resolve(true)
+              return
+            }
+          } catch (_) { }
+          try { my.setStorageSync({ key: 'customer_token', data: token }) } catch (_) { }
+          resolve(true)
+          return
+        }
+        resolve(false)
+      },
+      fail() { resolve(false) }
+    })
+  }).then((ok) => {
+    refreshingPromise = null
+    return ok
+  })
+  return refreshingPromise
+}
+
+function request(method, path, data = {}, needAuth = true, retries = 1, refreshed = false) {
   return requestOnce(method, path, data, needAuth).catch((err) => {
+    // P2-6：令牌失效先静默刷新并重放一次（仅一次防循环；refresh 自身失效不重试）
+    if (needAuth && !refreshed && err && err.code === 'AUTH_STALE' && !/auth\/refresh/.test(String(path))) {
+      return attemptTokenRefresh().then((ok) => {
+        if (ok) return request(method, path, data, needAuth, retries, true)
+        clearStaleCustomerAuthQuietly()
+        throw err
+      })
+    }
     // 仅对幂等的 GET 自动重试；POST/PUT/PATCH（下单/支付等）重试可能重复提交
     if (retries > 0 && method === 'GET' && isTransientNetworkError(err && err.message)) {
       // P3-1：指数退避 + 抖动，避免请求密集重试
@@ -224,10 +279,11 @@ function request(method, path, data = {}, needAuth = true, retries = 1) {
       const jitter = Math.floor(Math.random() * 200) // 0~199ms 抖动
       return new Promise((resolve, reject) => {
         setTimeout(() => {
-          request(method, path, data, needAuth, retries - 1).then(resolve).catch(reject)
+          request(method, path, data, needAuth, retries - 1, refreshed).then(resolve).catch(reject)
         }, baseDelay + jitter)
       })
     }
+    if (err && err.code === 'AUTH_STALE') clearStaleCustomerAuthQuietly()
     throw err
   })
 }

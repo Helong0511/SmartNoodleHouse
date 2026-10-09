@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
+from app.core.error_codes import ACCOUNT_DISABLED, AUTH_FAILED, TOKEN_INVALID
+from app.core.exceptions import AppException
 from app.core.security import decode_customer_token, decode_token
 from app.models import Customer, Permission, RolePermission, User
 
@@ -80,23 +82,24 @@ async def get_current_customer(
     db: DbSession,
     authorization: str | None = Header(default=None),
 ) -> Customer:
+    # P2-11：顾客侧统一 AppException 业务码（HTTP status 保持 401，前端清 token 逻辑不变）
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="请先登录")
+        raise AppException(AUTH_FAILED, "请先登录", status_code=401)
     token = authorization.split(" ", 1)[1]
     try:
         payload = decode_customer_token(token)
         customer_id = int(payload["sub"])
     except (JWTError, KeyError, ValueError):
-        raise HTTPException(status_code=401, detail="无效顾客令牌")
+        raise AppException(TOKEN_INVALID, "无效顾客令牌", status_code=401)
     customer = await db.get(Customer, customer_id)
     if (
         not customer
         or customer.status != 1
         or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
     ):
-        raise HTTPException(status_code=401, detail="顾客不存在或已禁用")
+        raise AppException(ACCOUNT_DISABLED, "顾客不存在或已禁用", status_code=401)
     if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
-        raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
+        raise AppException(TOKEN_INVALID, "令牌已失效，请重新登录", status_code=401)
     request.state.customer = customer
     return customer
 
@@ -141,15 +144,16 @@ async def get_staff_or_customer(
     try:
         payload = decode_token(token)
         if payload.get("typ") == "customer":
+            # P2-11：顾客分支统一 AppException 业务码
             customer = await db.get(Customer, int(payload["sub"]))
             if (
                 not customer
                 or customer.status != 1
                 or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
             ):
-                raise HTTPException(status_code=401, detail="顾客不存在或已禁用")
+                raise AppException(ACCOUNT_DISABLED, "顾客不存在或已禁用", status_code=401)
             if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
-                raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
+                raise AppException(TOKEN_INVALID, "令牌已失效，请重新登录", status_code=401)
             return None, customer
         # 仅接受员工令牌：拒绝 stream 摄像头短票据等其他类型混入
         if payload.get("typ") != "staff":
@@ -164,7 +168,7 @@ async def get_staff_or_customer(
         if int(payload.get("ver") or 0) != int(getattr(user, "token_version", 0) or 0):
             raise HTTPException(status_code=401, detail="令牌已失效，请重新登录")
         return user, None
-    except HTTPException:
+    except (HTTPException, AppException):
         raise
     except (JWTError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="无效令牌")

@@ -135,14 +135,16 @@ def create_customer_token(
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def decode_customer_token(token: str) -> dict[str, Any]:
-    payload = decode_token(token)
+def decode_customer_token(token: str, *, leeway_seconds: int = 0) -> dict[str, Any]:
+    payload = decode_token(token, leeway_seconds=leeway_seconds)
     if payload.get("typ") != "customer":
         raise JWTError("非顾客令牌")
     return payload
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def decode_token(token: str, *, leeway_seconds: int = 0) -> dict[str, Any]:
+    """leeway_seconds：过期容差秒数（P2-6 宽限刷新用）。require_exp 保持开启，
+    exp 声明缺失仍拒绝；leeway 仅放宽「已过期但在容差窗口内」的判定。"""
     settings = get_settings()
     return jwt.decode(
         token,
@@ -156,5 +158,6 @@ def decode_token(token: str) -> dict[str, Any]:
             "require_sub": True,
             "require_nbf": True,
             "require_aud": True,
+            "leeway": int(leeway_seconds or 0),
         },
     )

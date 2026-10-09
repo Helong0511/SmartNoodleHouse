@@ -138,9 +138,8 @@ async def test_staff_api_rejects_customer_and_stream_tokens():
 
 @pytest.mark.asyncio
 async def test_customer_api_rejects_staff_token():
-    from fastapi import HTTPException
-
     from app.api.deps import get_current_customer
+    from app.core.exceptions import AppException
 
     with patch("app.core.security.get_settings", return_value=_jwt_settings()), patch(
         "app.services.system_settings_service.SystemSettingsService.resolved_int_sync",
@@ -150,9 +149,11 @@ async def test_customer_api_rejects_staff_token():
 
     req = MagicMock()
     db = AsyncMock()
-    with pytest.raises(HTTPException) as ei:
+    # P2-11：顾客侧统一 AppException 业务码（HTTP 仍为 401）
+    with pytest.raises(AppException) as ei:
         await get_current_customer(req, db, authorization=f"Bearer {staff}")
     assert ei.value.status_code == 401
+    assert ei.value.code == 40101
 
 
 def test_forged_typ_in_extra_cannot_become_customer_staff_token():

@@ -14,6 +14,11 @@ RECO_TTL_SECONDS = 120  # 推荐结果最长缓存 120s（spec 要求 ≤120s）
 MENU_CATALOG_PREFIX = "snh:menu"
 MENU_CATALOG_TTL_SECONDS = 120
 
+# P2-6/P2-7：顾客令牌刷新旋转保护 & 登录凭证一次性消费
+CUSTOMER_REFRESH_ROTATION_PREFIX = "snh:cust:refresh"
+LOGIN_CREDENTIAL_USED_PREFIX = "snh:authcode:used"
+LOGIN_CREDENTIAL_TTL_SECONDS = 300
+
 
 def ttl_with_jitter(ttl: int, *, min_ratio: float = 0.8, max_ratio: float = 1.2) -> int:
     """TTL 加随机偏移，防止缓存雪崩（同一批 key 同时过期导致 DB 瞬时压力）。"""
@@ -45,3 +50,14 @@ def cart_fingerprint(product_ids) -> str:
         return ""
     raw = ",".join(str(i) for i in ids)
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def customer_refresh_rotation_key(customer_id: int) -> str:
+    """P2-6 刷新旋转保护键：记录该顾客已成功消费的旧令牌最大 exp。"""
+    return f"{CUSTOMER_REFRESH_ROTATION_PREFIX}:{int(customer_id)}"
+
+
+def login_credential_used_key(channel: str, credential: str) -> str:
+    """P2-7 登录凭证一次性消费键：凭证原文不落 Redis，仅存不可逆短指纹。"""
+    digest = hashlib.sha256(str(credential or "").encode("utf-8")).hexdigest()[:32]
+    return f"{LOGIN_CREDENTIAL_USED_PREFIX}:{(channel or 'x').strip().lower()}:{digest}"

@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 1440
     # 顾客 JWT 独立生命周期（默认 24h；原先 staff×7 过长）
     customer_jwt_expire_minutes: int = 1440
+    # P2-6：顾客令牌刷新宽限期（小时）。过期后该窗口内仍可凭旧令牌换新；0 = 关闭宽限刷新
+    customer_refresh_grace_hours: int = 24
     # JWT aud 声明，decode 时强制校验
     jwt_audience: str = "smart-noodle-house"
 

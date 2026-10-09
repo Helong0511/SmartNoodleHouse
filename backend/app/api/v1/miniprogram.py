@@ -2,7 +2,9 @@
 import asyncio
 import base64
 import re
+from datetime import datetime, timezone
 
+from jose import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,10 +12,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, File, Form, Request, UploadFile
 
 from app.api.deps import CurrentCustomer, DbSession, OptionalCustomer
-from app.core.cache_keys import cart_fingerprint
+from app.core.cache_keys import (
+    LOGIN_CREDENTIAL_TTL_SECONDS,
+    cart_fingerprint,
+    customer_refresh_rotation_key,
+    login_credential_used_key,
+)
+from app.core.error_codes import (
+    ACCOUNT_DISABLED,
+    AUTH_FAILED,
+    LOGIN_CREDENTIAL_REUSED,
+    TOKEN_ALREADY_REFRESHED,
+    TOKEN_EXPIRED,
+    TOKEN_INVALID,
+)
 from app.core.security import create_customer_token, decode_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
+from app.core.redis_client import try_get_redis
 from app.core.response import success
 from app.models import (
     Customer,
@@ -113,6 +129,60 @@ async def _channel_login_payload(
     }
 
 
+async def _consume_login_credential(channel: str, credential: str) -> None:
+    """P2-7 防重放：登录 code/auth_code 一次性消费（5 分钟窗口）。
+
+    - 重复使用同一凭证直接拒绝（渠道侧 code 本身也是一次性，此处提前拦截并给统一提示）；
+    - Redis 不可用 fail-open，不阻断登录；
+    - mock: 凭证仅存在于开发环境，跳过以便本地反复调试。
+    """
+    cred = (credential or "").strip()
+    if not cred or cred.startswith("mock:"):
+        return
+    r = await try_get_redis()
+    if r is None:
+        return
+    try:
+        ok = await r.set(
+            login_credential_used_key(channel, cred),
+            "1",
+            nx=True,
+            ex=LOGIN_CREDENTIAL_TTL_SECONDS,
+        )
+    except Exception:
+        return
+    if not ok:
+        raise AppException(LOGIN_CREDENTIAL_REUSED, "登录凭证已使用，请重新获取", status_code=401)
+
+
+async def _consume_refresh_rotation(customer_id: int, token_exp: int, grace_hours: int) -> bool:
+    """P2-6 刷新旋转保护：同一旧令牌只能成功刷新一次。
+
+    Redis 记录该顾客已成功消费的最大旧令牌 exp（Lua 原子比较，exp 单调递增才放行）。
+    Redis 不可用时 fail-open（token_version 撤销与宽限窗口校验仍然生效）。
+    """
+    if token_exp <= 0:
+        return True
+    r = await try_get_redis()
+    if r is None:
+        return True
+    ttl = max(60, int(grace_hours) * 3600)
+    script = """
+    local cur = redis.call('GET', KEYS[1])
+    local exp = tonumber(ARGV[1])
+    if cur and tonumber(cur) >= exp then
+        return 0
+    end
+    redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+    return 1
+    """
+    try:
+        result = await r.eval(script, 1, customer_refresh_rotation_key(customer_id), int(token_exp), ttl)
+        return int(result) == 1
+    except Exception:
+        return True
+
+
 def _persistable_avatar_url(url: str | None) -> str | None:
     """只接受已上传到本系统的头像路径，拒绝小程序本地临时路径。"""
     if not url:
@@ -126,6 +196,57 @@ def _persistable_avatar_url(url: str | None) -> str | None:
     if marker in u and (u.startswith("http://") or u.startswith("https://")):
         return u[u.find(marker) :].split("?", 1)[0]
     return None
+
+
+async def _finalize_channel_login(
+    db,
+    *,
+    customer: Customer,
+    channel: str,
+    account,
+    nickname: str | None,
+    avatar_url: str | None,
+    table_token: str | None,
+    is_mock: bool,
+) -> dict:
+    """P2-16：微信/支付宝登录共用收尾（资料回写 → 桌台/会话 → 登录 payload）。"""
+    # 登录不接受客户端缓存写回新客；资料完善走 /member/profile 或 /member/activate
+    profile_ready = bool(account) and int(getattr(account, "profile_completed", 0) or 0) == 1
+    if profile_ready:
+        await CustomerService.save_channel_profile(
+            db,
+            customer.id,
+            channel,
+            nickname=nickname,
+            avatar_url=_persistable_avatar_url(avatar_url),
+        )
+        CustomerService.fill_customer_display_if_empty(
+            customer,
+            nickname=nickname,
+            avatar_url=_persistable_avatar_url(avatar_url),
+        )
+        CustomerService.refresh_profile_status(customer)
+        await db.flush()
+
+    table_record = await _resolve_table_record(db, table_token) if table_token else None
+    table = await _table_payload(db, table_record)
+    await CustomerService.remember_first_seen(db, customer, table_token, table=table_record)
+    dining_session = None
+    if table_record:
+        dining_session = await DiningSessionService.start_or_refresh(
+            db,
+            customer_id=customer.id,
+            table=table_record,
+            table_token=table_token or table_record.qr_token,
+        )
+    return await _channel_login_payload(
+        db,
+        customer,
+        channel,
+        is_mock=is_mock,
+        table=table,
+        dining_session=dining_session,
+    )
 
 
 class WechatMiniLoginRequest(BaseModel):
@@ -510,56 +631,90 @@ async def wechat_debug_qrcode(
     )
 
 
+@router.post("/auth/refresh")
+async def refresh_customer_token(request: Request, db: DbSession):
+    """P2-6：顾客令牌滑动续期（POST /miniprogram/auth/refresh，须携带旧令牌）。
+
+    - 未过期令牌任意时刻可换新；过期后 customer_refresh_grace_hours 宽限内仍可换新；
+    - 旋转保护：同一旧令牌只能成功刷新一次（防止旧令牌在宽限期内被反复重放）；
+    - token_version 撤销语义保持：版本不匹配即拒绝。
+    """
+    auth_header = request.headers.get("authorization") or ""
+    if not auth_header.startswith("Bearer "):
+        raise AppException(AUTH_FAILED, "请先登录", status_code=401)
+    token = auth_header.split(" ", 1)[1]
+    expired = False
+    # 0 是合法值（关闭宽限刷新），不能用 or 兜底；仅 None/缺省时取默认 24
+    raw_grace = getattr(get_settings(), "customer_refresh_grace_hours", None)
+    grace_hours = 24 if raw_grace is None else int(raw_grace)
+    try:
+        payload = decode_customer_token(token)
+    except ExpiredSignatureError:
+        # 宽限期刷新：leeway 放宽 exp 判定到宽限窗口；窗口外仍过期即拒绝
+        try:
+            payload = decode_customer_token(token, leeway_seconds=grace_hours * 3600)
+        except JWTError:
+            raise AppException(TOKEN_EXPIRED, "登录已过期，请重新登录", status_code=401)
+        expired = True
+    except JWTError:
+        raise AppException(TOKEN_INVALID, "无效顾客令牌", status_code=401)
+
+    token_exp = int(payload.get("exp") or 0)
+
+    try:
+        customer_id = int(payload["sub"])
+    except (KeyError, ValueError):
+        raise AppException(TOKEN_INVALID, "无效顾客令牌", status_code=401)
+    customer = await db.get(Customer, customer_id)
+    if (
+        not customer
+        or customer.status != 1
+        or str(getattr(customer, "account_status", "ACTIVE") or "ACTIVE").upper() != "ACTIVE"
+    ):
+        raise AppException(ACCOUNT_DISABLED, "顾客不存在或已禁用", status_code=401)
+    if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
+        raise AppException(TOKEN_INVALID, "令牌已失效，请重新登录", status_code=401)
+
+    if not await _consume_refresh_rotation(customer_id, token_exp, grace_hours):
+        raise AppException(TOKEN_ALREADY_REFRESHED, "令牌已被刷新，请使用最新令牌重试", status_code=401)
+
+    channel = _customer_channel_from_request(request, "wechat")
+    new_token = _issue_customer_token(customer, channel)
+    return success(
+        {
+            "customer_token": new_token,
+            "customer_id": customer.id,
+            "channel": channel,
+        },
+        request=request,
+    )
+
+
 @router.post("/wechat/login")
 async def wechat_mini_login(data: WechatMiniLoginRequest, request: Request, db: DbSession):
+    await _consume_login_credential("wechat", data.code)
     auth = WechatMiniAuth()
     session = await auth.code2session(data.code)
     customer = await CustomerService.get_or_create_by_wechat(db, session["openid"], session.get("unionid"))
     acc = (
         await db.execute(select(CustomerWechatAccount).where(CustomerWechatAccount.openid == session["openid"]))
     ).scalar_one_or_none()
-    # 登录不接受客户端缓存写回新客；资料完善走 /member/profile 或 /member/activate
-    profile_ready = bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1
-    if profile_ready:
-        await CustomerService.save_channel_profile(
-            db,
-            customer.id,
-            "wechat",
-            nickname=data.nickname,
-            avatar_url=_persistable_avatar_url(data.avatar_url),
-        )
-        CustomerService.fill_customer_display_if_empty(
-            customer,
-            nickname=data.nickname,
-            avatar_url=_persistable_avatar_url(data.avatar_url),
-        )
-        CustomerService.refresh_profile_status(customer)
-        await db.flush()
-
-    table_record = await _resolve_table_record(db, data.table_token) if data.table_token else None
-    table = await _table_payload(db, table_record)
-    await CustomerService.remember_first_seen(db, customer, data.table_token, table=table_record)
-    dining_session = None
-    if table_record:
-        dining_session = await DiningSessionService.start_or_refresh(
-            db,
-            customer_id=customer.id,
-            table=table_record,
-            table_token=data.table_token or table_record.qr_token,
-        )
-    payload = await _channel_login_payload(
+    payload = await _finalize_channel_login(
         db,
-        customer,
-        "wechat",
+        customer=customer,
+        channel="wechat",
+        account=acc,
+        nickname=data.nickname,
+        avatar_url=data.avatar_url,
+        table_token=data.table_token,
         is_mock=bool(session.get("is_mock")),
-        table=table,
-        dining_session=dining_session,
     )
     return success(payload, request=request)
 
 
 @router.post("/alipay/login")
 async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: DbSession):
+    await _consume_login_credential("alipay", data.auth_code)
     auth = AlipayMiniAuth()
     session = await auth.auth_code2user(data.auth_code)
     customer = await CustomerService.get_or_create_by_alipay(db, session["alipay_user_id"])
@@ -568,42 +723,15 @@ async def alipay_mini_login(data: AlipayMiniLoginRequest, request: Request, db: 
             select(CustomerAlipayAccount).where(CustomerAlipayAccount.alipay_user_id == session["alipay_user_id"])
         )
     ).scalar_one_or_none()
-    # 登录不接受客户端缓存写回新客；资料完善走 /member/profile 或 /member/activate
-    profile_ready = bool(acc) and int(getattr(acc, "profile_completed", 0) or 0) == 1
-    if profile_ready:
-        await CustomerService.save_channel_profile(
-            db,
-            customer.id,
-            "alipay",
-            nickname=data.nickname,
-            avatar_url=_persistable_avatar_url(data.avatar_url),
-        )
-        CustomerService.fill_customer_display_if_empty(
-            customer,
-            nickname=data.nickname,
-            avatar_url=_persistable_avatar_url(data.avatar_url),
-        )
-        CustomerService.refresh_profile_status(customer)
-        await db.flush()
-
-    table_record = await _resolve_table_record(db, data.table_token) if data.table_token else None
-    table = await _table_payload(db, table_record)
-    await CustomerService.remember_first_seen(db, customer, data.table_token, table=table_record)
-    dining_session = None
-    if table_record:
-        dining_session = await DiningSessionService.start_or_refresh(
-            db,
-            customer_id=customer.id,
-            table=table_record,
-            table_token=data.table_token or table_record.qr_token,
-        )
-    payload = await _channel_login_payload(
+    payload = await _finalize_channel_login(
         db,
-        customer,
-        "alipay",
+        customer=customer,
+        channel="alipay",
+        account=acc,
+        nickname=data.nickname,
+        avatar_url=data.avatar_url,
+        table_token=data.table_token,
         is_mock=bool(session.get("is_mock")),
-        table=table,
-        dining_session=dining_session,
     )
     return success(payload, request=request)
 
