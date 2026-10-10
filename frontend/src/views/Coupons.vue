@@ -57,7 +57,7 @@
           </el-table-column>
           <el-table-column label="发券人" width="110">
             <template #default="{ row }">{{ row.issued_by_name || (row.issued_by_user_id ? `#${row.issued_by_user_id}` :
-              '系统/自助') }}</template>
+              '系统发放') }}</template>
           </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">

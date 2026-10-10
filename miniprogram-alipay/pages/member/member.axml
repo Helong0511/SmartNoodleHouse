@@ -71,9 +71,17 @@
             <view class="recharge-btn" onTap="goRecharge">去充值</view>
           </view>
           <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
+          <view class="phone birthday-line">
+            <text>生日历法</text>
+            <radio-group class="cal-group" onChange="onBirthdayCalendarChange">
+              <label class="cal-opt"><radio value="SOLAR" checked="{{birthdayCalendar === 'SOLAR'}}" color="#e67e22"/>公历</label>
+              <label class="cal-opt"><radio value="LUNAR" checked="{{birthdayCalendar === 'LUNAR'}}" color="#e67e22"/>农历</label>
+            </radio-group>
+          </view>
           <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange">
-            <view class="phone birthday-line">生日 {{birthday || '未填写 · 点击设置'}}</view>
+            <view class="phone birthday-line">生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}</view>
           </picker>
+          <view class="phone birthday-benefit" a:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
         </view>
       </view>
       <view class="progress-box" a:if="{{nextLevelName}}">

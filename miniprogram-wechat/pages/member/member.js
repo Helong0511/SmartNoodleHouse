@@ -119,6 +119,9 @@ Page({
     updatingFace: false,
     showFaceWelcome: false,
     birthday: '',
+    birthdayCalendar: 'SOLAR',
+    birthdayDisplay: '',
+    birthdayBenefitText: '',
     birthdayEnd: '',
     savingBirthday: false,
     showQueueEntry: false
@@ -284,6 +287,9 @@ Page({
       ...buildLevelLadder(profile.member_levels || []),
       phone: profile.phone || '',
       birthday: profile.birthday || '',
+      birthdayCalendar: profile.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR',
+      birthdayDisplay: profile.birthday_display || profile.birthday || '',
+      birthdayBenefitText: (profile.birthday_benefit && profile.birthday_benefit.text) || '',
       loading: false
     })
   },
@@ -740,6 +746,35 @@ Page({
   },
 
   // ---------- 生日填写 ----------
+  async onBirthdayCalendarChange(e) {
+    if (this.data.savingBirthday) return
+    const birthdayCalendar = (e && e.detail && e.detail.value) || 'SOLAR'
+    if (birthdayCalendar !== 'SOLAR' && birthdayCalendar !== 'LUNAR') return
+    this.setData({ birthdayCalendar, savingBirthday: true })
+    try {
+      await auth.ensureLogin()
+      // 只传历法：有生日时后端按数字月日自动换算
+      const res = await api.patch('/miniprogram/member/profile', {
+        birthday_calendar: birthdayCalendar
+      })
+      const d = (res && res.data) || {}
+      this.setData({
+        birthday: d.birthday || this.data.birthday || '',
+        birthdayCalendar: d.birthday_calendar === 'LUNAR' ? 'LUNAR' : birthdayCalendar,
+        birthdayDisplay: d.birthday_display || d.birthday || this.data.birthday || '',
+        birthdayBenefitText: (d.birthday_benefit && d.birthday_benefit.text) || this.data.birthdayBenefitText
+      })
+      wx.showToast({
+        title: birthdayCalendar === 'LUNAR' ? '已设农历，日期已换算' : '已设公历，日期已换算',
+        icon: 'none'
+      })
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' })
+    } finally {
+      this.setData({ savingBirthday: false })
+    }
+  },
+
   async onBirthdayChange(e) {
     if (this.data.savingBirthday) return
     const birthday = (e && e.detail && e.detail.value) || ''
@@ -747,9 +782,19 @@ Page({
     this.setData({ savingBirthday: true })
     try {
       await auth.ensureLogin()
-      await api.put('/miniprogram/profile', { birthday })
-      this.setData({ birthday })
-      wx.showToast({ title: '生日设置成功，生日当天消费双倍积分', icon: 'none', duration: 2500 })
+      const res = await api.patch('/miniprogram/member/profile', {
+        birthday,
+        birthday_calendar: this.data.birthdayCalendar || 'SOLAR'
+      })
+      const d = (res && res.data) || {}
+      const tip = (d.birthday_benefit && d.birthday_benefit.text) || '生日当天消费可享积分加成'
+      this.setData({
+        birthday,
+        birthdayCalendar: d.birthday_calendar === 'LUNAR' ? 'LUNAR' : (this.data.birthdayCalendar || 'SOLAR'),
+        birthdayDisplay: d.birthday_display || birthday,
+        birthdayBenefitText: tip
+      })
+      wx.showToast({ title: '生日已保存。' + tip, icon: 'none', duration: 2800 })
     } catch (err) {
       wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' })
     } finally {

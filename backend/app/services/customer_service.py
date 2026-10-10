@@ -300,6 +300,84 @@ class CustomerService:
         return int(money(amount or 0).to_integral_value(rounding=ROUND_HALF_UP))
 
     @staticmethod
+    async def resolve_birthday_benefit_mode(
+        db: AsyncSession, store_id: int | None
+    ) -> str:
+        """生日优惠方式；兼容旧键 birthday_points_enabled。"""
+        from app.services.system_settings_service import SystemSettingsService
+        from app.utils.birthday import MODE_OFF, MODE_POINTS, normalize_benefit_mode
+
+        raw = (
+            await SystemSettingsService.effective_setting(
+                db, "birthday_benefit_mode", store_id=store_id, fallback=""
+            )
+        ).strip()
+        if raw:
+            return normalize_benefit_mode(raw)
+        # 旧库仅有 birthday_points_enabled
+        legacy_on = await SystemSettingsService.effective_bool(
+            db, "birthday_points_enabled", True, store_id=store_id
+        )
+        return MODE_POINTS if legacy_on else MODE_OFF
+
+    @staticmethod
+    async def birthday_benefit_payload(
+        db: AsyncSession,
+        store_id: int | None,
+        customer: Customer | None = None,
+        *,
+        try_issue_coupon: bool = False,
+    ) -> dict:
+        """门店生日权益说明；传入 customer 时附带今日是否生日与展示文案。
+
+        try_issue_coupon=True 仅用于顾客端（会员中心）：今日生日且配置含赠券时系统发券。
+        """
+        from app.services.coupon_service import CouponService
+        from app.services.system_settings_service import SystemSettingsService
+        from app.utils.birthday import (
+            MODE_BOTH,
+            MODE_COUPON,
+            benefit_summary,
+            format_birthday_display,
+            is_birthday_today,
+            normalize_calendar,
+        )
+
+        mode = await CustomerService.resolve_birthday_benefit_mode(db, store_id)
+        multiplier = await SystemSettingsService.effective_int(
+            db, "birthday_points_multiplier", 2, store_id=store_id
+        )
+        coupon_name = await CouponService.birthday_coupon_template_name(db, store_id=store_id)
+        cal = normalize_calendar(getattr(customer, "birthday_calendar", None)) if customer else None
+        today = now_local().date()
+        is_today = bool(
+            customer and is_birthday_today(customer.birthday, cal, today=today)
+        )
+        summary = benefit_summary(
+            mode=mode,
+            multiplier=multiplier,
+            coupon_name=coupon_name,
+            calendar=cal,
+            is_today=is_today,
+        )
+        if customer is not None:
+            summary["birthday_display"] = format_birthday_display(customer.birthday, cal)
+            summary["birthday_calendar"] = cal
+            summary["birthday_calendar_label"] = "农历" if cal == "LUNAR" else "公历"
+            summary["birthday_coupon_issued"] = False
+            if (
+                try_issue_coupon
+                and is_today
+                and mode in (MODE_COUPON, MODE_BOTH)
+                and coupon_name
+            ):
+                issued = await CouponService.issue_birthday_coupon(
+                    db, int(customer.id), store_id=store_id, year=today.year
+                )
+                summary["birthday_coupon_issued"] = bool(issued)
+        return summary
+
+    @staticmethod
     async def award_points_for_paid_order(db: AsyncSession, order: Order) -> int:
         """支付成功：实付 1 元 = 1 积分，并尝试升级等级。行锁 + point_ledger。"""
         if not order.customer_id:
@@ -328,11 +406,34 @@ class CustomerService:
         earned = CustomerService.points_from_amount(order.total_amount)
         if earned <= 0:
             return 0
-        # 生日权益：生日当天（月/日匹配）双倍积分
-        if customer.birthday is not None:
-            now = datetime.now()
-            if customer.birthday.month == now.month and customer.birthday.day == now.day:
-                earned *= 2
+        # 生日权益：按门店业务参数 + 顾客公历/农历匹配
+        from app.services.coupon_service import CouponService
+        from app.services.system_settings_service import SystemSettingsService
+        from app.utils.birthday import (
+            MODE_BOTH,
+            MODE_COUPON,
+            MODE_POINTS,
+            is_birthday_today,
+            normalize_calendar,
+        )
+
+        store_id = int(order.store_id) if order.store_id else None
+        mode = await CustomerService.resolve_birthday_benefit_mode(db, store_id)
+        multiplier = await SystemSettingsService.effective_int(
+            db, "birthday_points_multiplier", 2, store_id=store_id
+        )
+        today = now_local().date()
+        is_bday = is_birthday_today(
+            customer.birthday,
+            normalize_calendar(getattr(customer, "birthday_calendar", None)),
+            today=today,
+        )
+        if is_bday and mode in (MODE_POINTS, MODE_BOTH) and multiplier > 1:
+            earned *= max(1, int(multiplier))
+        if is_bday and mode in (MODE_COUPON, MODE_BOTH):
+            await CouponService.issue_birthday_coupon(
+                db, int(customer.id), store_id=store_id, year=today.year
+            )
         customer.points = int(customer.points or 0) + earned
         db.add(
             PointLedger(

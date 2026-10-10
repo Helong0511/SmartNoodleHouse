@@ -308,8 +308,9 @@ class Customer(Base, TimestampMixin):
     registered_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, index=True)
     registered_table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"), default=None, index=True)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    # 生日（仅月/日用于会员日权益，年份可选填）
+    # 生日（仅月/日用于会员日权益；birthday_calendar 区分公历/农历）
     birthday: Mapped[date | None] = mapped_column(Date, default=None)
+    birthday_calendar: Mapped[str] = mapped_column(String(10), default="SOLAR")
     # 智能推荐合规：1=开启个性化推荐（默认），0=关闭（退回非个性化热销榜，不采集行为）
     recommend_opt_in: Mapped[int] = mapped_column(Integer, default=1)
     # 个性化推荐同意的隐私政策版本与同意时间（版本化留痕，PIPL 合规）

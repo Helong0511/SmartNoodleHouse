@@ -23,6 +23,8 @@ numpy>=1.26.0,<3.0
 cryptography>=42.0.4,<46
 Pillow>=11.3.2,<12
 pypinyin>=0.51.0,<1.0
+# 农历生日权益日判定
+zhdate>=0.1,<1.0
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
 onnxruntime>=1.16.0,<2.0

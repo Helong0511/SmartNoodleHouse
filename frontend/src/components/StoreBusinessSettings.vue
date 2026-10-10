@@ -43,7 +43,7 @@
           <el-form-item v-for="item in itemsOfGroup(g.id)" :key="item.key" :label="item.label">
             <el-switch v-if="item.type === 'bool'" v-model="item.boolValue" />
             <el-select
-              v-else-if="item.key === 'welcome_coupon_name'"
+              v-else-if="item.key === 'welcome_coupon_name' || item.key === 'birthday_coupon_name'"
               v-model="item.strValue"
               filterable
               clearable
@@ -208,6 +208,12 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
     local: '局域网 ESC/POS',
     xpyun: '芯烨云',
   },
+  birthday_benefit_mode: {
+    off: '关闭',
+    points: '仅积分倍数',
+    coupon: '仅赠券',
+    points_and_coupon: '积分 + 赠券',
+  },
 }
 
 function enumLabel(key: string, value: string) {
@@ -228,7 +234,9 @@ function couponOptions(item: any, scope: 'STORE' | 'HQ' | 'CURRENT') {
 }
 
 function isDirty(item: any) {
-  if (item.key === 'welcome_coupon_name') return (item.strValue || '') !== (item._savedStr || '')
+  if (item.key === 'welcome_coupon_name' || item.key === 'birthday_coupon_name') {
+    return (item.strValue || '') !== (item._savedStr || '')
+  }
   if (item.type === 'bool') return item.boolValue !== item._savedBool
   if (item.type === 'string' || item.type === 'enum') return item.strValue !== item._savedStr
   return item.numValue !== item._saved
@@ -354,7 +362,9 @@ function resetBusinessGroup(groupId: string) {
 
 function payloadOfItem(item: any): string | number | boolean {
   if (item.type === 'bool') return item.boolValue
-  if (item.key === 'welcome_coupon_name') return item.strValue || ''
+  if (item.key === 'welcome_coupon_name' || item.key === 'birthday_coupon_name') {
+    return item.strValue || ''
+  }
   if (item.type === 'string' || item.type === 'enum') return item.strValue
   return item.numValue
 }

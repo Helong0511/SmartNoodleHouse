@@ -509,6 +509,7 @@ class CouponService:
                 }
             )
         issuer_ids = list({int(it["issued_by_user_id"]) for it in items if it.get("issued_by_user_id")})
+        issuer_map: dict[int, str] = {}
         if issuer_ids:
             from app.models import User
 
@@ -516,12 +517,10 @@ class CouponService:
                 u.id: (u.display_name or u.username)
                 for u in (await db.execute(select(User).where(User.id.in_(issuer_ids)))).scalars().all()
             }
-            for it in items:
-                uid = it.get("issued_by_user_id")
-                it["issued_by_name"] = issuer_map.get(int(uid)) if uid else None
-        else:
-            for it in items:
-                it["issued_by_name"] = None
+        for it in items:
+            uid = it.get("issued_by_user_id")
+            # 扫码/注册/里程碑等系统自动发券：无发券员工时统一展示「系统发放」
+            it["issued_by_name"] = issuer_map.get(int(uid)) if uid else "系统发放"
         return items, int(total)
 
     @staticmethod
@@ -623,6 +622,11 @@ class CouponService:
             if not result.rowcount:
                 return None
 
+        # 发券门店粘性：扫码开卡店；无则继承模板门店
+        effective_store_id = int(store_id) if store_id else None
+        if effective_store_id is None and getattr(tmpl, "store_id", None) is not None:
+            effective_store_id = int(tmpl.store_id)
+
         try:
             async with db.begin_nested():
                 cc = CustomerCoupon(
@@ -632,6 +636,8 @@ class CouponService:
                     status="AVAILABLE",
                     expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
                     client_request_id=req_key,
+                    issued_by_user_id=None,  # 系统发放
+                    issued_at_store_id=effective_store_id,
                 )
                 db.add(cc)
                 await db.flush()
@@ -673,6 +679,96 @@ class CouponService:
         return await CouponService.issue_from_template(
             db, customer_id, welcome_name, store_id=store_id
         )
+
+    @staticmethod
+    async def birthday_coupon_template_name(
+        db: AsyncSession | None = None,
+        store_id: int | None = None,
+    ) -> str:
+        name = ""
+        if db is not None:
+            from app.services.system_settings_service import SystemSettingsService
+
+            name = (
+                await SystemSettingsService.effective_setting(
+                    db, "birthday_coupon_name", store_id=store_id, fallback=""
+                )
+            ).strip()
+        return name
+
+    @staticmethod
+    async def issue_birthday_coupon(
+        db: AsyncSession,
+        customer_id: int,
+        store_id: int | None = None,
+        *,
+        year: int | None = None,
+    ) -> CustomerCoupon | None:
+        """生日赠券：每年每模板最多一张；发券人为系统（issued_by_user_id 空）。"""
+        from sqlalchemy.exc import IntegrityError
+
+        coupon_name = await CouponService.birthday_coupon_template_name(db, store_id=store_id)
+        if not coupon_name:
+            return None
+        tmpl = await CouponService._welcome_template(db, coupon_name, store_id=store_id)
+        if not tmpl:
+            logger.warning("生日券未发放：模板不存在或未启用 name=%r", coupon_name)
+            return None
+        y = int(year or now_local().year)
+        req_key = f"BIRTHDAY:{int(customer_id)}:{y}:{int(tmpl.id)}"
+        existing = (
+            await db.execute(
+                select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return None
+
+        remaining = getattr(tmpl, "remaining", None)
+        if remaining is not None:
+            from sqlalchemy import update as sa_update
+
+            result = await db.execute(
+                sa_update(CouponTemplate)
+                .where(
+                    CouponTemplate.id == tmpl.id,
+                    CouponTemplate.remaining.isnot(None),
+                    CouponTemplate.remaining >= 1,
+                )
+                .values(remaining=CouponTemplate.remaining - 1)
+            )
+            if not result.rowcount:
+                return None
+
+        effective_store_id = int(store_id) if store_id else None
+        if effective_store_id is None and getattr(tmpl, "store_id", None) is not None:
+            effective_store_id = int(tmpl.store_id)
+
+        try:
+            async with db.begin_nested():
+                cc = CustomerCoupon(
+                    customer_id=customer_id,
+                    template_id=tmpl.id,
+                    coupon_no=generate_no("CP"),
+                    status="AVAILABLE",
+                    expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
+                    client_request_id=req_key,
+                    issued_by_user_id=None,
+                    issued_at_store_id=effective_store_id,
+                )
+                db.add(cc)
+                await db.flush()
+                return cc
+        except IntegrityError:
+            if remaining is not None:
+                from sqlalchemy import update as sa_update
+
+                await db.execute(
+                    sa_update(CouponTemplate)
+                    .where(CouponTemplate.id == tmpl.id)
+                    .values(remaining=CouponTemplate.remaining + 1)
+                )
+            return None
 
     @staticmethod
     async def welcome_coupon_payload(db: AsyncSession, issued: CustomerCoupon | None) -> dict | None:

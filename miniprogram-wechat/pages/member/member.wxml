@@ -87,9 +87,17 @@
           <view class="recharge-btn" bindtap="goRecharge">去充值</view>
         </view>
         <view class="phone" wx:if="{{phone}}">手机 {{phone}}</view>
+        <view class="phone birthday-line">
+          <text>生日历法</text>
+          <radio-group class="cal-group" bindchange="onBirthdayCalendarChange">
+            <label class="cal-opt"><radio value="SOLAR" checked="{{birthdayCalendar === 'SOLAR'}}" color="#e67e22"/>公历</label>
+            <label class="cal-opt"><radio value="LUNAR" checked="{{birthdayCalendar === 'LUNAR'}}" color="#e67e22"/>农历</label>
+          </radio-group>
+        </view>
         <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" bindchange="onBirthdayChange">
-          <view class="phone birthday-line">生日 {{birthday || '未填写 · 点击设置'}}</view>
+          <view class="phone birthday-line">生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}</view>
         </picker>
+        <view class="phone birthday-benefit" wx:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
 
       </view>
 

@@ -157,6 +157,10 @@
 }
 .pts { color: #1677ff; font-weight: 700; font-size: 28rpx; flex-shrink: 0; }
 .phone { color: #666; font-size: 24rpx; margin-top: 8rpx; }
+.birthday-line { display: flex; flex-wrap: wrap; align-items: center; gap: 12rpx; }
+.cal-group { display: inline-flex; gap: 16rpx; margin-left: 8rpx; }
+.cal-opt { display: inline-flex; align-items: center; gap: 4rpx; font-size: 24rpx; color: #444; }
+.birthday-benefit { color: #e67e22; font-size: 22rpx; margin-top: 6rpx; line-height: 1.4; }
 .progress-box { margin-top: 24rpx; padding-top: 20rpx; border-top: 1px solid #f0f0f0; }
 .progress-box.done { margin-top: 20rpx; }
 .progress-head { display: flex; justify-content: space-between; font-size: 24rpx; color: #666; margin-bottom: 10rpx; }

@@ -42,6 +42,9 @@ class CustomerUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=20)
     status: int | None = Field(default=None, ge=0, le=1, description="1 启用 / 0 禁用")
     birthday: date | None = None
+    birthday_calendar: str | None = Field(
+        default=None, description="SOLAR=公历 / LUNAR=农历；清空生日时忽略"
+    )
     recommend_opt_in: int | None = Field(default=None, ge=0, le=1)
 
     @field_validator("display_name", "nickname", mode="before")
@@ -63,6 +66,20 @@ class CustomerUpdate(BaseModel):
         if not _PHONE_RE.match(s):
             raise ValueError("手机号须为 11 位中国大陆号段")
         return s
+
+    @field_validator("birthday_calendar", mode="before")
+    @classmethod
+    def normalize_calendar(cls, v):
+        if v is None:
+            return None
+        from app.utils.birthday import VALID_CALENDARS, normalize_calendar
+
+        s = str(v).strip().upper()
+        if not s:
+            return None
+        if s not in VALID_CALENDARS:
+            raise ValueError("生日历法须为 SOLAR（公历）或 LUNAR（农历）")
+        return normalize_calendar(s)
 
 
 async def _list_customer_favorites(db, customer_id: int, store_id: int | None = None) -> list[dict]:
@@ -132,10 +149,13 @@ async def list_customers(
     registered_from: str | None = None,
     registered_to: str | None = None,
     store_id: int | None = None,
+    birthday_today: bool = False,
 ):
     from datetime import datetime, timedelta
 
+    from app.core.response import now_local
     from app.services.store_scope import require_bound_store
+    from app.utils.birthday import is_birthday_today, normalize_calendar
 
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -176,6 +196,34 @@ async def list_customers(
             q = q.where(
                 Customer.id.in_(select(CustomerAlipayAccount.customer_id).distinct())
             )
+    if birthday_today:
+        # 公历/农历月日匹配需应用层判定；先收窄到有生日的顾客再过滤
+        bday_q = select(Customer.id, Customer.birthday, Customer.birthday_calendar).where(
+            Customer.birthday.is_not(None)
+        )
+        if effective_store is not None:
+            bday_q = bday_q.where(_customer_in_store(effective_store))
+        today = now_local().date()
+        hit_ids: list[int] = []
+        for cid, bday, cal in (await db.execute(bday_q)).all():
+            if is_birthday_today(bday, normalize_calendar(cal), today=today):
+                hit_ids.append(int(cid))
+        if not hit_ids:
+            return success(
+                {
+                    "items": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": 0,
+                    "birthday_today": True,
+                    "birthday_benefit": await CustomerService.birthday_benefit_payload(
+                        db, effective_store
+                    ),
+                },
+                request=request,
+            )
+        q = q.where(Customer.id.in_(hit_ids))
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
@@ -304,13 +352,30 @@ async def list_customers(
             "order_count": order_counts.get(c.id, 0),
             "last_order_at": serialize_dt(c.last_order_at),
             "created_at": serialize_dt(c.created_at),
+            "birthday": c.birthday.isoformat() if c.birthday else None,
+            "birthday_calendar": normalize_calendar(getattr(c, "birthday_calendar", None)),
+            "is_birthday_today": is_birthday_today(
+                c.birthday,
+                getattr(c, "birthday_calendar", None),
+                today=now_local().date(),
+            ),
             **scan_map.get(c.id, {}),
             **CustomerService.member_payload(c, level_map.get(c.member_level_id) if c.member_level_id else None),
         }
         for c in customers
     ]
     return success(
-        {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": calc_pages(total, page_size)},
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(total, page_size),
+            "birthday_today": bool(birthday_today),
+            "birthday_benefit": await CustomerService.birthday_benefit_payload(
+                db, effective_store
+            ),
+        },
         request=request,
     )
 
@@ -318,6 +383,7 @@ async def list_customers(
 @router.get("/{customer_id}", dependencies=[require_permission("customer:read")])
 async def get_customer(customer_id: int, request: Request, db: DbSession, user: CurrentUser):
     from app.services.store_scope import require_bound_store
+    from app.utils.birthday import normalize_calendar
 
     customer = await db.get(Customer, customer_id)
     if not customer:
@@ -447,6 +513,10 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             ),
             "preference_scene": prefs.get("scene") or {"enabled": False},
             "birthday": customer.birthday.isoformat() if customer.birthday else None,
+            "birthday_calendar": normalize_calendar(getattr(customer, "birthday_calendar", None)),
+            "birthday_benefit": await CustomerService.birthday_benefit_payload(
+                db, effective_store, customer
+            ),
             "recommend_opt_in": int(customer.recommend_opt_in or 0),
             "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),
         },
@@ -516,6 +586,29 @@ async def update_customer(
             "new": body.birthday.isoformat() if body.birthday else None,
         }
         customer.birthday = body.birthday
+        if body.birthday is None:
+            customer.birthday_calendar = "SOLAR"
+    if "birthday_calendar" in fields and body.birthday_calendar is not None:
+        from app.utils.birthday import convert_birthday_calendar, normalize_calendar
+
+        old_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
+        new_cal = normalize_calendar(body.birthday_calendar)
+        changes["birthday_calendar"] = {"old": old_cal, "new": new_cal}
+        # 仅改历法、未同时改生日时：按数字月日自动换算存储公历日
+        if (
+            "birthday" not in fields
+            and customer.birthday is not None
+            and old_cal != new_cal
+        ):
+            converted = convert_birthday_calendar(customer.birthday, old_cal, new_cal)
+            if converted and converted != customer.birthday:
+                changes["birthday"] = {
+                    "old": customer.birthday.isoformat(),
+                    "new": converted.isoformat(),
+                    "converted_by_calendar": True,
+                }
+                customer.birthday = converted
+        customer.birthday_calendar = new_cal
     if "recommend_opt_in" in fields and body.recommend_opt_in is not None:
         changes["recommend_opt_in"] = {
             "old": int(customer.recommend_opt_in or 0),

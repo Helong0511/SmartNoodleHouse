@@ -39,10 +39,23 @@
         <el-date-picker v-model="registeredRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="注册起"
           end-placeholder="注册止" style="width:240px" @change="reload" />
       </el-form-item>
+      <el-form-item>
+        <el-checkbox v-model="birthdayTodayOnly" @change="reload">今日生日</el-checkbox>
+      </el-form-item>
       <el-button type="primary" @click="reload">搜索</el-button>
       <el-button @click="resetFilters">重置</el-button>
       <el-button @click="goMemberLevels">会员等级设置</el-button>
+      <el-button link type="primary" @click="goBirthdayBenefitSettings">生日优惠怎么改</el-button>
     </el-form>
+    <el-alert
+      v-if="listBirthdayBenefit?.text"
+      type="info"
+      show-icon
+      :closable="false"
+      class="birthday-alert"
+      :title="birthdayTodayOnly ? '今日生日提醒' : '生日权益'"
+      :description="listBirthdayBenefit.text + ' · 修改入口：门店 → 门店信息 → 业务参数 → 会员与优惠'"
+    />
 
     <el-table :data="customers" border class="customer-table">
       <el-table-column label="头像" width="72" align="center">
@@ -80,6 +93,15 @@
       </el-table-column>
       <el-table-column label="积分" width="80">
         <template #default="{ row }">{{ row.member_points ?? 0 }}</template>
+      </el-table-column>
+      <el-table-column label="生日" width="120">
+        <template #default="{ row }">
+          <span v-if="row.birthday">
+            {{ row.birthday_calendar === 'LUNAR' ? '农历' : '公历' }}
+            <el-tag v-if="row.is_birthday_today" size="small" type="danger" style="margin-left:4px">今日</el-tag>
+          </span>
+          <span v-else class="muted">—</span>
+        </template>
       </el-table-column>
       <el-table-column label="储值余额" min-width="150">
         <template #default="{ row }">
@@ -169,10 +191,28 @@
           <el-form-item label="手机">
             <el-input v-model="editForm.phone" maxlength="11" clearable placeholder="11 位手机号，可清空" />
           </el-form-item>
+          <el-form-item label="生日历法">
+            <el-radio-group v-model="editForm.birthday_calendar" @change="onBirthdayCalendarChange">
+              <el-radio value="SOLAR">公历</el-radio>
+              <el-radio value="LUNAR">农历</el-radio>
+            </el-radio-group>
+            <div class="muted tip">切换历法时，按原数字月日自动换算日期</div>
+          </el-form-item>
           <el-form-item label="生日">
             <el-date-picker v-model="editForm.birthday" type="date" value-format="YYYY-MM-DD" clearable
-              placeholder="选填" style="width:100%" />
+              :placeholder="editForm.birthday_calendar === 'LUNAR' ? '选对应公历日（按农历月日记）' : '选填公历日期'"
+              style="width:100%" />
+            <div class="muted tip">农历：选一个公历日，系统按该日对应的农历月日每年匹配</div>
           </el-form-item>
+          <el-alert
+            v-if="detail.birthday_benefit?.text"
+            type="success"
+            show-icon
+            :closable="false"
+            :title="detail.birthday_benefit.is_birthday_today ? '今日生日 · 权益生效中' : '生日优惠'"
+            :description="(detail.birthday_benefit.birthday_display ? detail.birthday_benefit.birthday_display + '。' : '') + detail.birthday_benefit.text"
+            style="margin-bottom:12px"
+          />
           <el-form-item label="账号状态">
             <el-radio-group v-model="editForm.status">
               <el-radio :value="1">启用</el-radio>
@@ -188,7 +228,13 @@
           <el-descriptions-item label="展示名">{{ detail.display_name || '—' }}</el-descriptions-item>
           <el-descriptions-item label="昵称">{{ detail.nickname || '—' }}</el-descriptions-item>
           <el-descriptions-item label="手机">{{ detail.phone || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="生日">{{ detail.birthday || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="生日">
+            {{ detail.birthday_benefit?.birthday_display || detail.birthday || '—' }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detail.birthday_benefit?.text" label="生日优惠">
+            {{ detail.birthday_benefit.text }}
+            <div class="muted tip">{{ detail.birthday_benefit.how_to_edit }}</div>
+          </el-descriptions-item>
           <el-descriptions-item label="账号状态">
             <el-tag size="small" :type="detail.status === 1 ? 'success' : 'danger'">
               {{ detail.status === 1 ? '启用' : '禁用' }}
@@ -286,7 +332,7 @@
             <el-table-column prop="template_name" label="名称" min-width="100" />
             <el-table-column prop="summary" label="规则" min-width="110" />
             <el-table-column label="发券人" width="90">
-              <template #default="{ row }">{{ row.issued_by_name || '—' }}</template>
+              <template #default="{ row }">{{ row.issued_by_name || '系统发放' }}</template>
             </el-table-column>
             <el-table-column label="状态" width="80">
               <template #default="{ row }">
@@ -305,7 +351,7 @@
             <el-table-column prop="template_name" label="名称" min-width="100" />
             <el-table-column prop="summary" label="规则" min-width="110" />
             <el-table-column label="发券人" width="90">
-              <template #default="{ row }">{{ row.issued_by_name || '—' }}</template>
+              <template #default="{ row }">{{ row.issued_by_name || '系统发放' }}</template>
             </el-table-column>
             <el-table-column label="状态" width="80">
               <template #default="{ row }">
@@ -437,6 +483,8 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const keyword = ref('')
+const birthdayTodayOnly = ref(false)
+const listBirthdayBenefit = ref<{ text?: string; enabled?: boolean; points_multiplier?: number } | null>(null)
 const channel = ref<string | undefined>()
 const memberStatusFilter = ref<string | undefined>()
 const levelFilter = ref<number | undefined>()
@@ -462,6 +510,7 @@ const editForm = reactive({
   nickname: '',
   phone: '',
   birthday: '' as string | null,
+  birthday_calendar: 'SOLAR' as 'SOLAR' | 'LUNAR',
   status: 1,
   recommend_opt_in: 1,
 })
@@ -485,8 +534,30 @@ function syncEditForm(d: any) {
   editForm.nickname = d?.nickname || ''
   editForm.phone = d?.phone || ''
   editForm.birthday = d?.birthday || null
+  editForm.birthday_calendar = d?.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR'
   editForm.status = d?.status === 0 ? 0 : 1
   editForm.recommend_opt_in = d?.recommend_opt_in ? 1 : 0
+}
+
+async function onBirthdayCalendarChange(cal: string | number | boolean | undefined) {
+  const id = detail.value?.id
+  const next = cal === 'LUNAR' ? 'LUNAR' : 'SOLAR'
+  if (!id || !editForm.birthday) return
+  savingProfile.value = true
+  try {
+    // 仅改历法：后端按数字月日自动换算生日
+    const res = await api.patch(`/customers/${id}`, { birthday_calendar: next })
+    detail.value = res.data
+    syncEditForm(res.data)
+    ElMessage.success(
+      next === 'LUNAR' ? '已切换农历，日期已自动换算' : '已切换公历，日期已自动换算',
+    )
+  } catch (e: any) {
+    ElMessage.error(e.message || '历法切换失败')
+    editForm.birthday_calendar = detail.value?.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR'
+  } finally {
+    savingProfile.value = false
+  }
 }
 
 const couponTemplates = ref<any[]>([])
@@ -605,11 +676,18 @@ function resetFilters() {
   levelFilter.value = undefined
   statusFilter.value = 1
   registeredRange.value = null
+  birthdayTodayOnly.value = false
   reload()
 }
 
 function goMemberLevels() {
   router.push('/member-levels')
+}
+
+function goBirthdayBenefitSettings() {
+  const sid = storeFilter.value || auth.user?.store_id
+  const q = sid ? `?tab=biz&store_id=${sid}` : '?tab=biz'
+  router.push(`/store-info${q}`)
 }
 
 async function loadLevels() {
@@ -640,8 +718,10 @@ async function load() {
       params.registered_from = registeredRange.value[0]
       params.registered_to = registeredRange.value[1]
     }
+    if (birthdayTodayOnly.value) params.birthday_today = true
     const res = await api.get('/customers', { params })
     const list = res.data.items
+    listBirthdayBenefit.value = res.data.birthday_benefit || null
     // 禁用/合并后末页可能变空，自动回退避免空白页
     if (list.length === 0 && page.value > 1) {
       page.value -= 1
@@ -705,6 +785,7 @@ async function saveProfile() {
       nickname: editForm.nickname?.trim() || null,
       phone: phone || null,
       birthday: editForm.birthday || null,
+      birthday_calendar: editForm.birthday_calendar || 'SOLAR',
       status: editForm.status,
       recommend_opt_in: editForm.recommend_opt_in,
     })
@@ -983,6 +1064,16 @@ onMounted(async () => {
   color: #999;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.tip {
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.birthday-alert {
+  margin: 0 0 12px;
 }
 
 .acct {

@@ -708,6 +708,16 @@ async def _assert_welcome_coupon_choice(db, store_id: int, name: str) -> None:
         raise AppException(40014, "新客赠券须选择本店或总部已启用的券模板，或留空表示不赠券")
 
 
+async def _assert_birthday_coupon_choice(db, store_id: int, name: str) -> None:
+    raw = (name or "").strip()
+    if not raw:
+        return
+    options = await _welcome_coupon_options(db, store_id, current="")
+    allowed = {o["value"] for o in options if o.get("scope") in ("STORE", "HQ")}
+    if raw not in allowed:
+        raise AppException(40014, "生日赠券须选择本店或总部已启用的券模板，或留空表示不赠券")
+
+
 def _group_store_items(items: list[dict]) -> list[dict]:
     by_group: dict[str, list[dict]] = {}
     for it in items:
@@ -762,7 +772,7 @@ async def get_store_business(
         }
         if it.get("type") == "bool":
             row["bool_value"] = SystemSettingsService._parse_bool(effective, False)
-        if key == "welcome_coupon_name":
+        if key in ("welcome_coupon_name", "birthday_coupon_name"):
             row["options"] = await _welcome_coupon_options(db, store_id, current=str(effective or ""))
         items.append(row)
     return success(
@@ -815,6 +825,8 @@ async def update_store_business(
             raise AppException(40014, str(e)) from e
         if key == "welcome_coupon_name":
             await _assert_welcome_coupon_choice(db, store_id, sval)
+        if key == "birthday_coupon_name":
+            await _assert_birthday_coupon_choice(db, store_id, sval)
         if key in existing:
             existing[key].setting_value = sval
         else:

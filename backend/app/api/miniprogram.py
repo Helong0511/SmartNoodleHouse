@@ -287,6 +287,9 @@ class MemberProfilePatchRequest(BaseModel):
     nickname: str | None = None
     avatar_url: str | None = None
     birthday: str | None = Field(default=None, description="生日 YYYY-MM-DD；传空串清除")
+    birthday_calendar: str | None = Field(
+        default=None, description="SOLAR=公历 / LUNAR=农历；生日清空时忽略"
+    )
     channel: str | None = None
 
 
@@ -867,11 +870,14 @@ async def patch_member_profile(
     """修改昵称/头像/生日，不触发会员激活与欢迎券。"""
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
+    from app.utils.birthday import VALID_CALENDARS, normalize_calendar
+
     # 生日：YYYY-MM-DD；传空串清除；不得晚于今天
     if "birthday" in data.model_fields_set:
         raw_birthday = (data.birthday or "").strip()
         if not raw_birthday:
             customer.birthday = None
+            customer.birthday_calendar = "SOLAR"
         else:
             try:
                 parsed_birthday = date.fromisoformat(raw_birthday)
@@ -880,6 +886,25 @@ async def patch_member_profile(
             if parsed_birthday > now_local().date():
                 raise AppException(40031, "生日不能晚于今天")
             customer.birthday = parsed_birthday
+    if "birthday_calendar" in data.model_fields_set and data.birthday_calendar is not None:
+        from app.utils.birthday import convert_birthday_calendar
+
+        raw_cal = str(data.birthday_calendar or "").strip().upper()
+        if raw_cal and raw_cal not in VALID_CALENDARS:
+            raise AppException(40032, "生日历法须为公历或农历")
+        if raw_cal:
+            old_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
+            new_cal = normalize_calendar(raw_cal)
+            # 仅改历法、未同时改生日：自动换算日期
+            if (
+                "birthday" not in data.model_fields_set
+                and customer.birthday is not None
+                and old_cal != new_cal
+            ):
+                converted = convert_birthday_calendar(customer.birthday, old_cal, new_cal)
+                if converted:
+                    customer.birthday = converted
+            customer.birthday_calendar = new_cal
     await CustomerService.save_channel_profile(
         db,
         customer.id,
@@ -916,6 +941,15 @@ async def patch_member_profile(
         request=request,
         category=AuditService.CATEGORY_CUSTOMER,
     )
+    from app.utils.birthday import format_birthday_display, normalize_calendar
+
+    cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
+    store_id = getattr(customer, "registered_store_id", None) or getattr(
+        customer, "first_seen_store_id", None
+    )
+    benefit = await CustomerService.birthday_benefit_payload(
+        db, int(store_id) if store_id else None, customer, try_issue_coupon=True
+    )
     return success(
         {
             "customer_id": customer.id,
@@ -923,6 +957,9 @@ async def patch_member_profile(
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
             "birthday": serialize_dt(customer.birthday),
+            "birthday_calendar": cal,
+            "birthday_display": format_birthday_display(customer.birthday, cal),
+            "birthday_benefit": benefit,
             "need_member_prompt": not CustomerService.is_member(customer),
             **profile,
         },
@@ -1330,6 +1367,15 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
     channel = _customer_channel_from_request(request, "wechat")
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)
     need_prompt = not CustomerService.is_member(customer)
+    from app.utils.birthday import format_birthday_display, normalize_calendar
+
+    cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
+    store_id = getattr(customer, "registered_store_id", None) or getattr(
+        customer, "first_seen_store_id", None
+    )
+    benefit = await CustomerService.birthday_benefit_payload(
+        db, int(store_id) if store_id else None, customer, try_issue_coupon=True
+    )
     return success(
         {
             "customer_id": customer.id,
@@ -1338,6 +1384,9 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
             "birthday": serialize_dt(customer.birthday),
+            "birthday_calendar": cal,
+            "birthday_display": format_birthday_display(customer.birthday, cal),
+            "birthday_benefit": benefit,
             "need_member_prompt": need_prompt,
             "is_guest": need_prompt,
             **profile,

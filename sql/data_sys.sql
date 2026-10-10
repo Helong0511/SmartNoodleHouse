@@ -862,6 +862,36 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'welcome_coupon_name'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'birthday_benefit_mode',
+    'points',
+    '生日优惠方式：off/points/coupon/points_and_coupon'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'birthday_benefit_mode'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'birthday_points_multiplier',
+    '2',
+    '生日积分倍数（相对实付1元=1分）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'birthday_points_multiplier'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'birthday_coupon_name',
+    '',
+    '生日赠券模板名（空=不发）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'birthday_coupon_name'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'enable_alipay_avatar',
     'true',
     '支付宝头像能力'
