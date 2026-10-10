@@ -62,6 +62,7 @@ TRUNCATE TABLE `product_images`;
 TRUNCATE TABLE `product_option_groups`;
 TRUNCATE TABLE `product_taste_profiles`;
 TRUNCATE TABLE `products`;
+TRUNCATE TABLE `queue_tickets`;
 TRUNCATE TABLE `recharge_orders`;
 TRUNCATE TABLE `recharge_packages`;
 TRUNCATE TABLE `role_permissions`;

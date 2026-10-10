@@ -78,7 +78,11 @@ CREATE TABLE IF NOT EXISTS `balance_ledger` (
   `remark` varchar(255) NULL DEFAULT NULL COMMENT '备注',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录时间',
   `pay_order_id` bigint UNSIGNED GENERATED ALWAYS AS (
-    if((`entry_type` = _utf8mb4 'PAY'), `order_id`, NULL)
+    if(
+      (`entry_type` = _utf8mb4 'PAY'),
+      `order_id`,
+      NULL
+    )
   ) STORED COMMENT 'PAY 幂等：每单至多一条扣款' NULL,
   `topup_recharge_id` bigint UNSIGNED GENERATED ALWAYS AS (
     if(
@@ -406,6 +410,7 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `member_status` varchar(20) NOT NULL DEFAULT 'GUEST' COMMENT 'GUEST=游客（可点餐） MEMBER=已主动开通会员',
   `account_status` varchar(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/DISABLED/DELETED',
   `profile_status` varchar(20) NOT NULL DEFAULT 'EMPTY' COMMENT 'EMPTY/PARTIAL/COMPLETED 资料完善度（≠会员）',
+  `birthday` date NULL DEFAULT NULL COMMENT '生日（会员生日权益），yyyy-mm-dd',
   `phone_verified` tinyint NOT NULL DEFAULT 0 COMMENT '手机号是否已验证',
   `member_activated_at` datetime(3) NULL DEFAULT NULL COMMENT '首次主动开通会员时间（≠首次扫码）',
   `first_seen_at` datetime(3) NULL DEFAULT NULL COMMENT '首次扫码/识别时间（≠会员激活）',
@@ -798,6 +803,9 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `cancelled_at` datetime(3) NULL DEFAULT NULL COMMENT '取消时间',
   `kitchen_claimed_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '厨房认领人 → users.id；点「开始制作」写入',
   `kitchen_claimed_at` datetime(3) NULL DEFAULT NULL COMMENT '厨房认领时间',
+  `scheduled_pickup_at` datetime(3) NULL DEFAULT NULL COMMENT '预点单预约取餐时间',
+  `urge_count` int NOT NULL DEFAULT 0 COMMENT '顾客催单次数',
+  `urged_at` datetime(3) NULL DEFAULT NULL COMMENT '最近一次催单时间',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录创建时间',
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '记录更新时间',
   PRIMARY KEY (`id`) USING BTREE,

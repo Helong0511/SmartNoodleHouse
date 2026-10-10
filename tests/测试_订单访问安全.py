@@ -2,8 +2,8 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 
+from app.core.exceptions import AppException
 from app.services.order_access import assert_customer_can_pay_order, assert_customer_owns_order
 
 
@@ -14,23 +14,23 @@ def _order(**kw):
 
 
 def test_customer_cannot_access_unbound_pos_order():
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         assert_customer_owns_order(_order(customer_id=None, channel="POS"), 101)
     assert ei.value.status_code == 403
-    assert "未绑定" in ei.value.detail
+    assert "未绑定" in ei.value.message
 
 
 def test_customer_cannot_pay_unbound_pos_order():
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         assert_customer_can_pay_order(_order(customer_id=None, channel="POS"), 101)
     assert ei.value.status_code == 403
 
 
 def test_customer_a_cannot_access_customer_b_order():
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         assert_customer_owns_order(_order(customer_id=200, channel="WECHAT"), 101)
     assert ei.value.status_code == 403
-    assert "无权访问" in ei.value.detail
+    assert "无权访问" in ei.value.message
 
 
 def test_owner_can_access_own_order():
@@ -40,6 +40,6 @@ def test_owner_can_access_own_order():
 
 def test_unbound_non_pos_also_denied():
     """无 customer_id 的非 POS 单同样拒绝顾客访问（防 claim）。"""
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         assert_customer_owns_order(_order(customer_id=None, channel="WECHAT"), 101, action="同步 POS")
     assert ei.value.status_code == 403

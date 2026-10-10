@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from app.core.exceptions import AppException
 
 from app.services.store_scope import (
     assert_order_store_access,
@@ -26,14 +26,14 @@ def test_require_bound_store_blocks_unbound_staff():
     assert require_bound_store(_user("SUPER_ADMIN", None), None) is None
     assert require_bound_store(_user("SUPER_ADMIN", None), 7) == 7
     assert require_bound_store(_user("KITCHEN", 2), 99) == 2
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         require_bound_store(_user("KITCHEN", None), None)
     assert ei.value.status_code == 403
 
 
 def test_assert_store_access_blocks_cross_store():
     u = _user("MANAGER", 2)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         assert_store_access(u, 9)
     assert ei.value.status_code == 403
     assert_store_access(u, 2)
@@ -42,6 +42,6 @@ def test_assert_store_access_blocks_cross_store():
 
 def test_assert_order_store_access():
     order = SimpleNamespace(store_id=5)
-    with pytest.raises(HTTPException):
+    with pytest.raises(AppException):
         assert_order_store_access(_user("WAITER", 1), order)
     assert_order_store_access(_user("WAITER", 5), order)

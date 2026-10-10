@@ -1,8 +1,7 @@
 """门店隔离辅助"""
 from __future__ import annotations
 
-from fastapi import HTTPException
-
+from app.core.exceptions import AppException
 from app.models import Order, User
 
 
@@ -27,7 +26,7 @@ def require_bound_store(user: User, requested: int | None = None) -> int | None:
     if user.role.code == "SUPER_ADMIN":
         return int(requested) if requested else None
     if not user.store_id:
-        raise HTTPException(status_code=403, detail="账号未绑定门店")
+        raise AppException(40300, "账号未绑定门店", status_code=403)
     return int(user.store_id)
 
 
@@ -35,9 +34,9 @@ def assert_store_access(user: User, store_id: int | None) -> None:
     if user.role.code == "SUPER_ADMIN":
         return
     if user.store_id is None:
-        raise HTTPException(status_code=403, detail="账号未绑定门店")
+        raise AppException(40300, "账号未绑定门店", status_code=403)
     if store_id is None or int(store_id) != int(user.store_id):
-        raise HTTPException(status_code=403, detail="无权访问该门店数据")
+        raise AppException(40300, "无权访问该门店数据", status_code=403)
 
 
 def assert_order_store_access(user: User, order: Order) -> None:

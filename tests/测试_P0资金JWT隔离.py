@@ -117,9 +117,8 @@ def test_cross_type_customer_token_rejected_by_decode_customer():
 @pytest.mark.asyncio
 async def test_staff_api_rejects_customer_and_stream_tokens():
     """get_current_user 只接受 typ=staff。"""
-    from fastapi import HTTPException
-
     from app.api.deps import get_current_user
+    from app.core.exceptions import AppException
 
     with patch("app.core.security.get_settings", return_value=_jwt_settings()), patch(
         "app.services.system_settings_service.SystemSettingsService.resolved_int_sync",
@@ -131,7 +130,7 @@ async def test_staff_api_rejects_customer_and_stream_tokens():
     req = MagicMock()
     db = AsyncMock()
     for tok in (customer, stream):
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(AppException) as ei:
             await get_current_user(req, db, authorization=f"Bearer {tok}")
         assert ei.value.status_code == 401
 
@@ -171,10 +170,10 @@ def test_forged_typ_in_extra_cannot_become_customer_staff_token():
 
 
 def test_store_scope_blocks_cross_store():
-    from fastapi import HTTPException
+    from app.core.exceptions import AppException
 
     user = SimpleNamespace(store_id=1, role=SimpleNamespace(code="CASHIER"))
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         assert_store_access(user, 2)
     assert ei.value.status_code == 403
 

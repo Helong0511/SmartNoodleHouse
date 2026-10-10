@@ -3,8 +3,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
-
 from app.core.exceptions import AppException
 
 
@@ -88,7 +86,7 @@ async def test_dining_session_owner_rejects_mismatch():
     db = AsyncMock()
     db.get = AsyncMock(return_value=session)
 
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(AppException) as ei:
         await assert_dining_session_owner(db, order, 101)
     assert ei.value.status_code == 403
 
