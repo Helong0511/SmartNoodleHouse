@@ -508,20 +508,21 @@ async function activateMember(payload) {
   }
 }
 
-/** 仅更新资料，不激活会员、不发券 */
+/** 仅更新资料，不激活会员、不发券。优先 PUT（支付宝等端对 PATCH 支持不稳定）。 */
 async function patchMemberProfile(payload) {
   await ensureLogin()
   const app = requireApp()
   const channel = (app.globalData && app.globalData.channel) || ''
   const body = Object.assign({}, payload || {})
   if (channel === 'wechat' || channel === 'alipay') body.channel = channel
+  const send = () => api.put('/miniprogram/member/profile', body)
   try {
-    return await api.patch('/miniprogram/member/profile', body)
+    return await send()
   } catch (e) {
     if (!isStaleCustomerAuthError(e)) throw e
     clearCustomerSession(requireApp())
     await ensureLogin()
-    return api.patch('/miniprogram/member/profile', body)
+    return send()
   }
 }
 

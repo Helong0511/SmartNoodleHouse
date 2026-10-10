@@ -60,16 +60,17 @@ def test_benefit_summary_coupon_only():
     assert "生日券" in s["text"]
 
 
-def test_convert_solar_to_lunar_reinterprets_md():
-    # 公历 1990-05-01 → 当作农历五月初一，换算为对应公历日
+def test_convert_keeps_same_solar_anchor():
+    # 同日互转：切换历法不改存储的公历锚点（5/1 公历 ↔ 四月初七）
     out = convert_birthday_calendar(date(1990, 5, 1), CAL_SOLAR, CAL_LUNAR)
-    assert out is not None
-    assert out != date(1990, 5, 1) or True  # 多数年份不同；至少返回合法 date
-    assert isinstance(out, date)
-
-
-def test_convert_roundtrip_numbers_lunar_to_solar():
-    # 先公历→农历，再农历→公历：数字月日应回到 5/1（同年）
-    lunar_stored = convert_birthday_calendar(date(1990, 5, 1), CAL_SOLAR, CAL_LUNAR)
-    back = convert_birthday_calendar(lunar_stored, CAL_LUNAR, CAL_SOLAR)
+    assert out == date(1990, 5, 1)
+    back = convert_birthday_calendar(out, CAL_LUNAR, CAL_SOLAR)
     assert back == date(1990, 5, 1)
+
+
+def test_lunar_match_uses_true_lunar_of_anchor():
+    # 1990-05-01 农历为四月初七；切到农历后仍在该公历日匹配，不在「五月初一」
+    bday = date(1990, 5, 1)
+    assert is_birthday_today(bday, CAL_LUNAR, today=date(1990, 5, 1))
+    # 1990 农历五月初一 ≈ 1990-05-24，不应因错误重解释而命中
+    assert not is_birthday_today(bday, CAL_LUNAR, today=date(1990, 5, 24))

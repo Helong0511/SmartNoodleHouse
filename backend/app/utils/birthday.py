@@ -53,39 +53,21 @@ def convert_birthday_calendar(
     from_calendar: str | None,
     to_calendar: str | None,
 ) -> date | None:
-    """历法切换时按「数字月日」重解释并换算存储用的公历日。
+    """历法切换时的存储日换算（同日互转）。
 
-    - 公历→农历：把原公历的月/日当作农历月日，换算为对应公历日
-    - 农历→公历：取出当前存储日的农历月日，写成同数字的公历日（非法日则钳到当月末日）
+    ``birthday`` 始终按公历落库；``birthday_calendar`` 只决定每年匹配规则与展示文案。
+    公历↔农历切换表示「同一天」改用另一套历法解释，例如公历 1990-05-01
+    ↔ 农历四月初七，存储的公历日不变；展示由 ``format_birthday_display`` 换算。
+
+    历史上曾错误地按「数字月日重解释」（5/1 公历切农历变成五月初一），会导致
+    与匹配/展示语义不一致，故此处恒等返回。
     """
     if birthday is None:
         return None
-    src = normalize_calendar(from_calendar)
-    dst = normalize_calendar(to_calendar)
-    if src == dst:
-        return birthday
-    year = int(birthday.year)
-    if src == CAL_SOLAR and dst == CAL_LUNAR:
-        month = max(1, min(12, int(birthday.month)))
-        day = max(1, min(30, int(birthday.day)))
-        # 从大到小试日，避免农历无此日
-        for d in range(day, 0, -1):
-            try:
-                z = ZhDate(year, month, d, leap_month=False)
-                return z.to_datetime().date()
-            except Exception:
-                continue
-        return birthday
-    # LUNAR → SOLAR：农历月日 → 同数字公历
-    lm, ld, _leap = lunar_md(birthday)
-    month = max(1, min(12, int(lm)))
-    day = max(1, min(31, int(ld)))
-    while day >= 1:
-        try:
-            return date(year, month, day)
-        except ValueError:
-            day -= 1
-    return date(year, month, 1)
+    # 保留 from/to 形参供 API 调用方传入；同日互转不改锚点公历日
+    normalize_calendar(from_calendar)
+    normalize_calendar(to_calendar)
+    return birthday
 
 
 def format_birthday_display(birthday: date | None, calendar: str | None) -> str | None:

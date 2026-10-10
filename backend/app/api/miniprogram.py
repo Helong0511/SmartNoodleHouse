@@ -1,8 +1,11 @@
 """小程序登录与扫码点餐入口"""
 import asyncio
 import base64
+import logging
 import re
 from datetime import date, datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from jose import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, Field
@@ -860,14 +863,17 @@ async def activate_member(
     )
 
 
-@router.patch("/member/profile")
+@router.api_route("/member/profile", methods=["PATCH", "PUT"])
 async def patch_member_profile(
     data: MemberProfilePatchRequest,
     request: Request,
     db: DbSession,
     customer: CurrentCustomer,
 ):
-    """修改昵称/头像/生日，不触发会员激活与欢迎券。"""
+    """修改昵称/头像/生日，不触发会员激活与欢迎券。
+
+    同时接受 PATCH/PUT：微信/支付宝小程序对 PATCH 支持不一致，客户端优先 PUT。
+    """
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
     from app.utils.birthday import VALID_CALENDARS, normalize_calendar
@@ -895,14 +901,14 @@ async def patch_member_profile(
         if raw_cal:
             old_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
             new_cal = normalize_calendar(raw_cal)
-            # 仅改历法、未同时改生日：自动换算日期
+            # 仅改历法：同日互转，锚点公历日不变（展示文案随 calendar 换算）
             if (
                 "birthday" not in data.model_fields_set
                 and customer.birthday is not None
                 and old_cal != new_cal
             ):
                 converted = convert_birthday_calendar(customer.birthday, old_cal, new_cal)
-                if converted:
+                if converted is not None:
                     customer.birthday = converted
             customer.birthday_calendar = new_cal
     await CustomerService.save_channel_profile(
@@ -947,9 +953,20 @@ async def patch_member_profile(
     store_id = getattr(customer, "registered_store_id", None) or getattr(
         customer, "first_seen_store_id", None
     )
-    benefit = await CustomerService.birthday_benefit_payload(
-        db, int(store_id) if store_id else None, customer, try_issue_coupon=True
-    )
+    # 权益说明/发券失败不得回滚已保存的生日
+    try:
+        benefit = await CustomerService.birthday_benefit_payload(
+            db, int(store_id) if store_id else None, customer, try_issue_coupon=True
+        )
+    except Exception:
+        logger.exception("生日权益组装失败 customer_id=%s", customer.id)
+        benefit = {
+            "enabled": False,
+            "text": "",
+            "is_birthday_today": False,
+            "birthday_display": format_birthday_display(customer.birthday, cal),
+            "birthday_calendar": cal,
+        }
     return success(
         {
             "customer_id": customer.id,

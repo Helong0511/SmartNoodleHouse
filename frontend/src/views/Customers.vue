@@ -196,13 +196,13 @@
               <el-radio value="SOLAR">公历</el-radio>
               <el-radio value="LUNAR">农历</el-radio>
             </el-radio-group>
-            <div class="muted tip">切换历法时，按原数字月日自动换算日期</div>
+            <div class="muted tip">切换历法：同一天公历↔农历互转展示，不改锚点日期</div>
           </el-form-item>
           <el-form-item label="生日">
             <el-date-picker v-model="editForm.birthday" type="date" value-format="YYYY-MM-DD" clearable
               :placeholder="editForm.birthday_calendar === 'LUNAR' ? '选对应公历日（按农历月日记）' : '选填公历日期'"
               style="width:100%" />
-            <div class="muted tip">农历：选一个公历日，系统按该日对应的农历月日每年匹配</div>
+            <div class="muted tip">农历：选对应公历日；每年按该日的农历月日匹配（如 5/1 → 四月初七）</div>
           </el-form-item>
           <el-alert
             v-if="detail.birthday_benefit?.text"
@@ -545,12 +545,12 @@ async function onBirthdayCalendarChange(cal: string | number | boolean | undefin
   if (!id || !editForm.birthday) return
   savingProfile.value = true
   try {
-    // 仅改历法：后端按数字月日自动换算生日
+    // 仅改历法：同日互转，锚点公历日不变，展示文案随历法更新
     const res = await api.patch(`/customers/${id}`, { birthday_calendar: next })
     detail.value = res.data
     syncEditForm(res.data)
     ElMessage.success(
-      next === 'LUNAR' ? '已切换农历，日期已自动换算' : '已切换公历，日期已自动换算',
+      next === 'LUNAR' ? '已切换农历（同日对应农历月日）' : '已切换公历（同日公历月日）',
     )
   } catch (e: any) {
     ElMessage.error(e.message || '历法切换失败')

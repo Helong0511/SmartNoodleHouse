@@ -594,14 +594,15 @@ async def update_customer(
         old_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
         new_cal = normalize_calendar(body.birthday_calendar)
         changes["birthday_calendar"] = {"old": old_cal, "new": new_cal}
-        # 仅改历法、未同时改生日时：按数字月日自动换算存储公历日
+        # 仅改历法：同日互转，存储公历日不变；展示/匹配随 calendar 切换
         if (
             "birthday" not in fields
             and customer.birthday is not None
             and old_cal != new_cal
         ):
             converted = convert_birthday_calendar(customer.birthday, old_cal, new_cal)
-            if converted and converted != customer.birthday:
+            if converted is not None and converted != customer.birthday:
+                # 兼容层：若未来换算真正改日，写入审计
                 changes["birthday"] = {
                     "old": customer.birthday.isoformat(),
                     "new": converted.isoformat(),
