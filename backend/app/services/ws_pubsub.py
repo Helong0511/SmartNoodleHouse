@@ -15,11 +15,11 @@ _listener_task: asyncio.Task | None = None
 
 
 async def publish_ws_event(channel: str, event: str, data: dict, store_id: int | None = None, msg_id: str | None = None) -> None:
-    payload = json.dumps(
-        # P1-8：携带 msg_id 供各 worker 去重
+    from app.core.response import dumps_json
+
+    # P1-8：携带 msg_id 供各 worker 去重；allow_nan=False 防脏 JSON
+    payload = dumps_json(
         {"msg_id": msg_id, "channel": channel, "event": event, "data": data, "store_id": store_id},
-        default=str,
-        ensure_ascii=False,
     )
     try:
         r = await get_redis()

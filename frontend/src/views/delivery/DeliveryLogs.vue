@@ -1,14 +1,8 @@
 <template>
   <div class="logs-page" v-loading="loading">
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="storeFilter"
-        clearable
-        placeholder="全部门店"
-        style="width: 160px"
-        @change="reload"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="storeFilter" clearable placeholder="全部门店" style="width: 160px"
+        @change="reload">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info" class="store-tag">门店：{{ boundStoreName }}</el-tag>
@@ -16,27 +10,12 @@
         <el-option label="美团" value="MEITUAN" />
         <el-option label="饿了么" value="ELEME" />
       </el-select>
-      <el-select
-        v-model="eventType"
-        clearable
-        filterable
-        allow-create
-        default-first-option
-        placeholder="事件类型"
-        style="width: 200px"
-        @change="reload"
-      >
+      <el-select v-model="eventType" clearable filterable allow-create default-first-option placeholder="事件类型"
+        style="width: 200px" @change="reload">
         <el-option v-for="t in eventTypeOptions" :key="t" :label="label(DELIVERY_LOG_EVENT, t)" :value="t" />
       </el-select>
-      <el-date-picker
-        v-model="dateRange"
-        type="daterange"
-        value-format="YYYY-MM-DD"
-        start-placeholder="开始"
-        end-placeholder="结束"
-        style="width: 240px"
-        @change="reload"
-      />
+      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始"
+        end-placeholder="结束" style="width: 240px" @change="reload" />
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
     </div>
@@ -54,17 +33,9 @@
       </el-table-column>
     </el-table>
     <div class="pager">
-      <el-pagination
-        v-model:current-page="pager.page"
-        v-model:page-size="pager.pageSize"
-        :total="pager.total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        background
-        small
-        @current-change="loadLogs"
-        @size-change="reload"
-      />
+      <el-pagination v-model:current-page="pager.page" v-model:page-size="pager.pageSize" :total="pager.total"
+        :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" background small @current-change="loadLogs"
+        @size-change="reload" />
     </div>
   </div>
 </template>
@@ -73,12 +44,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { DELIVERY_LOG_EVENT, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const loading = ref(false)
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const logPlatform = ref('')
 const eventType = ref('')
@@ -106,14 +78,6 @@ function platformName(p: string) {
 function fmtTime(v?: string | null) {
   if (!v) return '-'
   return String(v).replace('T', ' ').slice(0, 19)
-}
-
-async function loadStores() {
-  try {
-    stores.value = (await api.get('/settings/stores/options')).data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function loadLogs() {
@@ -179,6 +143,7 @@ onMounted(async () => {
 .logs-page {
   min-height: 400px;
 }
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -186,9 +151,11 @@ onMounted(async () => {
   align-items: center;
   margin-bottom: 12px;
 }
+
 .store-tag {
   margin-right: 4px;
 }
+
 .pager {
   margin-top: 12px;
   display: flex;

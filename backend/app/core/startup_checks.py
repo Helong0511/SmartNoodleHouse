@@ -117,6 +117,10 @@ def validate_settings(settings: Settings) -> None:
     cors = (getattr(settings, "cors_origins", None) or "").lower()
     if is_prod and ("localhost" in cors or "127.0.0.1" in cors):
         errors.append("生产环境 CORS_ORIGINS 不得包含 localhost/127.0.0.1，请改为正式前端域名")
+    # 规则：带 credentials 时禁止 *（浏览器也会拒；运维误配会导致整站跨域失败）
+    cors_raw = (getattr(settings, "cors_origins", None) or "").strip()
+    if is_prod and (cors_raw == "*" or any(p.strip() == "*" for p in cors_raw.split(","))):
+        errors.append("生产环境 CORS_ORIGINS 不得为 *（须为具体前端域名，且与 Allow-Credentials 兼容）")
 
     h5_base = (getattr(settings, "h5_public_base_url", None) or "").strip()
     if is_prod and not h5_base:

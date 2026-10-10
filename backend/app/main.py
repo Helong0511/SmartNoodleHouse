@@ -12,10 +12,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import api_router
-from app.api.v1.favorites import router as favorites_router
-from app.api.v1.invoices import router as invoices_router
-from app.api.v1.queue import router as queue_router
+from app.api import api_router
+from app.api.health import root_router as health_root_router
 from app.core.config import get_settings
 from fastapi.exceptions import RequestValidationError
 
@@ -433,15 +431,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(Exception, generic_exception_handler)
     app.include_router(api_router)
 
-    # 日常体验模块：收藏 / 发票 / 排队（router 内已带 /api 前缀）
-    app.include_router(favorites_router)
-    app.include_router(invoices_router)
-    app.include_router(queue_router)
-
-    # 无前缀探针：与 /api/health、/api/ready 同源（DB+Redis）
-    from app.api.v1 import health as health_routes
-
-    app.include_router(health_routes.router)
+    # 无前缀探针：与 /api/health、/api/ready 同一 handler（独立 router，避免同对象重复注册）
+    app.include_router(health_root_router)
 
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)

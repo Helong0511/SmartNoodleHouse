@@ -462,7 +462,7 @@ async def build_period_stats(
         refunded = await refunded_since(db, since=since, until=until, store_id=store_id)
         net = money(gross - refunded)
     amounts = await order_amount_stats_since(db, since=since, until=until, store_id=store_id)
-    avg_order = round(float(net) / paid_count, 2) if paid_count else 0.0
+    avg_order = str(money(net / paid_count)) if paid_count else "0.00"
 
     new_members = await new_registered_members_since(
         db, since=since, until=until, store_id=store_id
@@ -473,10 +473,12 @@ async def build_period_stats(
             db, since=since, until=until, store_id=store_id
         )
 
+    from app.core.response import serialize_dt
+
     return {
         "period_label": period_label,
-        "since": since.isoformat(),
-        "until": (until or now_local()).isoformat(),
+        "since": serialize_dt(since),
+        "until": serialize_dt(until or now_local()),
         "order_count": placed,
         "paid_order_count": paid_count,
         "gross_revenue": str(gross),
@@ -618,7 +620,7 @@ async def store_period_breakdown(
                 "voucher_discount": str(vou),
                 "total_discount": str(total_disc),
                 "payable_amount": str(money(Decimal(str(pay)))),
-                "avg_order_amount": round(float(net) / paid, 2) if paid else 0.0,
+                "avg_order_amount": str(money(net / paid)) if paid else "0.00",
                 "new_store_customers": int(new_customer_rows.get(sid, 0)),
                 "delivery_pending": int(delivery_pending_rows.get(sid, 0)),
             }

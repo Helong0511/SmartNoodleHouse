@@ -134,7 +134,7 @@ async def test_http_create_order_returns_40903_envelope():
     token = create_customer_token(1, "wechat")
     try:
         with patch(
-            "app.api.v1.orders.OrderCreateService.create_order",
+            "app.api.orders.OrderCreateService.create_order",
             AsyncMock(side_effect=AppException(40903, "该幂等键对应订单已结束，请重新下单")),
         ):
             transport = ASGITransport(app=app)

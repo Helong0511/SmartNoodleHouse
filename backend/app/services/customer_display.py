@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import parse_biz_no
 from app.models import DiningTable, Order, OrderStatusHistory
+from app.core.response import serialize_dt
 
 DISPLAY_ACTIVE_STATUSES = ("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY")
 PREPARING_STATUSES = ("PAID", "CONFIRMED", "PREPARING", "COOKING")
@@ -73,11 +74,11 @@ def build_display_item(
         "status_label": CUSTOMER_STATUS_LABEL.get(status, status),
         "dining_type": order.dining_type,
         "is_takeaway": is_takeaway,
-        "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+        "paid_at": serialize_dt(order.paid_at) if order.paid_at else None,
     }
     if status == "READY":
         at = ready_at or getattr(order, "updated_at", None)
-        item["ready_at"] = at.isoformat() if at else None
+        item["ready_at"] = serialize_dt(at) if at else None
     return item
 
 

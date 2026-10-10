@@ -117,7 +117,11 @@ async def _seed_coupon_template(db, name="支付成功券"):
 
 
 async def _enable_setting(db, key, value):
-    db.add(SystemSetting(setting_key=key, setting_value=value))
+    from sqlalchemy import func, select
+
+    cur = await db.scalar(select(func.coalesce(func.max(SystemSetting.id), 0)))
+    sid = int(cur or 0) + 1
+    db.add(SystemSetting(id=sid, setting_key=key, setting_value=value))
     await db.flush()
     from app.services.system_settings_service import SystemSettingsService
 
@@ -166,7 +170,7 @@ def customer_dep():
 @pytest.fixture
 def no_redis():
     """催单限频放行（模拟 Redis NX 首次成功）。"""
-    with patch("app.api.v1.orders.get_redis", new_callable=AsyncMock) as mock_get:
+    with patch("app.api.orders.get_redis", new_callable=AsyncMock) as mock_get:
         redis = AsyncMock()
         redis.set = AsyncMock(return_value=True)
         mock_get.return_value = redis
@@ -175,7 +179,7 @@ def no_redis():
 
 @pytest.fixture
 def mute_ws():
-    with patch("app.api.v1.orders.ws_manager") as mock_ws:
+    with patch("app.api.orders.ws_manager") as mock_ws:
         mock_ws.notify_order_event = AsyncMock()
         yield mock_ws
 
@@ -193,7 +197,6 @@ async def test_urge_rejected_when_status_not_in_progress(api, customer_dep, no_r
     await db.commit()
     customer_dep.install(cust)
     res = await client.post(f"/api/orders/{order.id}/urge", headers=_auth_headers(cust.id))
-    assert res.status_code == 200
     body = res.json()
     assert body["code"] == 40058
 
@@ -222,7 +225,7 @@ async def test_urge_rate_limited_returns_success_without_increment(api, customer
     order = await _seed_order(db, store, cust, status="COOKING")
     await db.commit()
     customer_dep.install(cust)
-    with patch("app.api.v1.orders.get_redis", new_callable=AsyncMock) as mock_get:
+    with patch("app.api.orders.get_redis", new_callable=AsyncMock) as mock_get:
         redis = AsyncMock()
         redis.set = AsyncMock(return_value=None)  # NX 失败：5 分钟内已催过
         mock_get.return_value = redis

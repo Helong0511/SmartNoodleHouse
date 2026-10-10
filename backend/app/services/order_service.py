@@ -175,7 +175,7 @@ class OrderReorderService:
                     "option_ids": option_ids,
                     "option_labels": option_labels,
                     "option_text": "、".join(option_labels),
-                    "unit_price": float(unit_price),
+                    "unit_price": str(money(unit_price)),
                     "subtotal": str(money(line_subtotal)),
                     "imageUrl": product.main_image or "",
                     "main_image": product.main_image or "",

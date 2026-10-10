@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import ensure_local_aware, now_local
+from app.core.response import ensure_local_aware, now_local, serialize_dt
 from app.models import DiningTable, Order, Payment, PosRefundRequest, User
 from app.services.payment_service import PaymentService, money
 from app.services.store_scope import assert_order_store_access, assert_store_access
@@ -531,7 +531,7 @@ class PosRefundService:
             "requester_name": (requester.display_name or requester.username) if requester else None,
             "reviewed_by": row.reviewed_by,
             "reviewer_name": (reviewer.display_name or reviewer.username) if reviewer else None,
-            "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+            "reviewed_at": serialize_dt(row.reviewed_at),
             "review_remark": row.review_remark,
             "refund_id": row.refund_id,
             "fail_reason": row.fail_reason,
@@ -539,7 +539,7 @@ class PosRefundService:
             "table_no": table.table_no if table else None,
             "table_name": table.table_name if table else None,
             "created_at": (
-                row.created_at.isoformat()
+                serialize_dt(row.created_at)
                 if getattr(row, "created_at", None) is not None
                 else None
             ),

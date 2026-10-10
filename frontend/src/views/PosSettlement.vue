@@ -65,6 +65,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { formatYmd } from '@/utils/date'
 
@@ -74,15 +75,14 @@ const report = ref<any>(null)
 // formatYmd 使用本地时区，避免 toISOString 的 UTC 日期在东八区 0-8 点显示为昨日
 const date = ref(formatYmd())
 const storeId = ref<number | null>(null)
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions({ source: 'kitchen', rethrow: true, clearOnError: false })
 
 async function loadStores() {
   if (!auth.isSuperAdmin) {
     storeId.value = auth.user?.store_id ?? null
     return
   }
-  const res = await api.get('/orders/kitchen/stores')
-  stores.value = res.data?.items || []
+  await fetchStores()
   if (!storeId.value && stores.value.length) storeId.value = stores.value[0].id
 }
 
@@ -108,16 +108,55 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.settlement-page { padding: 4px; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-.tip, .empty { text-align: center; padding: 40px; color: #999; }
-.summary {
-  display: flex; flex-wrap: wrap; gap: 12px;
-  background: #fafafa; border: 1px solid #eee; border-radius: 12px; padding: 16px;
+.settlement-page {
+  padding: 4px;
 }
-.sum-item { min-width: 120px; }
-.sum-item span { display: block; font-size: 13px; color: #888; }
-.sum-item b { font-size: 20px; }
-.sum-item.highlight b { color: #ff6b35; font-size: 24px; }
-.bad { color: #f5222d; font-weight: 700; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tip,
+.empty {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.sum-item {
+  min-width: 120px;
+}
+
+.sum-item span {
+  display: block;
+  font-size: 13px;
+  color: #888;
+}
+
+.sum-item b {
+  font-size: 20px;
+}
+
+.sum-item.highlight b {
+  color: #ff6b35;
+  font-size: 24px;
+}
+
+.bad {
+  color: #f5222d;
+  font-weight: 700;
+}
 </style>

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from jose import JWTError, jwt
 
-from app.api.v1 import miniprogram as mp
+from app.api import miniprogram as mp
 from app.core.exceptions import AppException
 from app.core.security import create_access_token, decode_token
 
@@ -57,12 +57,12 @@ def _refresh_patches(settings, redis=None):
     """统一 patch：security/config 的 get_settings + system_settings TTL + redis。"""
     return (
         patch("app.core.security.get_settings", return_value=settings),
-        patch("app.api.v1.miniprogram.get_settings", return_value=settings),
+        patch("app.api.miniprogram.get_settings", return_value=settings),
         patch(
             "app.services.system_settings_service.SystemSettingsService.resolved_int_sync",
             side_effect=lambda key, fallback: settings.customer_jwt_expire_minutes,
         ),
-        patch("app.api.v1.miniprogram.try_get_redis", AsyncMock(return_value=redis)),
+        patch("app.api.miniprogram.try_get_redis", AsyncMock(return_value=redis)),
     )
 
 
@@ -199,7 +199,7 @@ async def test_refresh_rejects_staff_token():
 @pytest.mark.asyncio
 async def test_login_credential_first_use_allowed():
     redis = _fake_redis(set_result=True)
-    with patch("app.api.v1.miniprogram.try_get_redis", AsyncMock(return_value=redis)):
+    with patch("app.api.miniprogram.try_get_redis", AsyncMock(return_value=redis)):
         await mp._consume_login_credential("wechat", "real-code-123")
     redis.set.assert_awaited_once()
     args, kwargs = redis.set.await_args
@@ -210,7 +210,7 @@ async def test_login_credential_first_use_allowed():
 @pytest.mark.asyncio
 async def test_login_credential_reuse_rejected():
     redis = _fake_redis(set_result=False)  # SET NX 失败 = 凭证已存在
-    with patch("app.api.v1.miniprogram.try_get_redis", AsyncMock(return_value=redis)):
+    with patch("app.api.miniprogram.try_get_redis", AsyncMock(return_value=redis)):
         with pytest.raises(AppException) as ei:
             await mp._consume_login_credential("alipay", "real-auth-code")
     assert ei.value.code == 40104
@@ -220,7 +220,7 @@ async def test_login_credential_reuse_rejected():
 @pytest.mark.asyncio
 async def test_login_credential_mock_prefix_skipped():
     redis = _fake_redis(set_result=False)
-    with patch("app.api.v1.miniprogram.try_get_redis", AsyncMock(return_value=redis)):
+    with patch("app.api.miniprogram.try_get_redis", AsyncMock(return_value=redis)):
         # mock: 凭证跳过一次性消费，本地可反复调试
         await mp._consume_login_credential("wechat", "mock:simulator")
     redis.set.assert_not_awaited()
@@ -228,7 +228,7 @@ async def test_login_credential_mock_prefix_skipped():
 
 @pytest.mark.asyncio
 async def test_login_credential_fails_open_when_redis_down():
-    with patch("app.api.v1.miniprogram.try_get_redis", AsyncMock(return_value=None)):
+    with patch("app.api.miniprogram.try_get_redis", AsyncMock(return_value=None)):
         await mp._consume_login_credential("wechat", "real-code")  # 不抛异常
 
 
@@ -254,10 +254,10 @@ async def test_wechat_login_uses_shared_finalize_and_credential_guard():
     acc = SimpleNamespace(profile_completed=1)
     db = SimpleNamespace(execute=AsyncMock(return_value=Result()))
     settings = _full_settings()
-    with patch("app.api.v1.miniprogram._consume_login_credential", fake_consume), patch(
-        "app.api.v1.miniprogram._finalize_channel_login", fake_finalize
-    ), patch("app.api.v1.miniprogram.WechatMiniAuth") as auth_cls, patch(
-        "app.api.v1.miniprogram.CustomerService.get_or_create_by_wechat", AsyncMock(return_value=_customer())
+    with patch("app.api.miniprogram._consume_login_credential", fake_consume), patch(
+        "app.api.miniprogram._finalize_channel_login", fake_finalize
+    ), patch("app.api.miniprogram.WechatMiniAuth") as auth_cls, patch(
+        "app.api.miniprogram.CustomerService.get_or_create_by_wechat", AsyncMock(return_value=_customer())
     ):
         auth_cls.return_value.code2session = AsyncMock(
             return_value={"openid": "wx-test", "unionid": None, "is_mock": False}

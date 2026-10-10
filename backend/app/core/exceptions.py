@@ -6,11 +6,30 @@ from fastapi.exceptions import RequestValidationError
 logger = logging.getLogger(__name__)
 
 
+def _http_status_from_biz_code(code: int) -> int:
+    """由业务码推导 HTTP 状态：401xx→401、403xx→403、404xx→404、429xx→429、503xx→503、5xxxx→500，其余 400。"""
+    if 40100 <= code < 40200:
+        return 401
+    if 40300 <= code < 40400:
+        return 403
+    if 40400 <= code < 40500:
+        return 404
+    if 41000 <= code < 41100:
+        return 410
+    if 42900 <= code < 43000:
+        return 429
+    if 50300 <= code < 50400:
+        return 503
+    if code >= 50000:
+        return 500
+    return 400
+
+
 class AppException(Exception):
-    def __init__(self, code: int, message: str, status_code: int = 400):
+    def __init__(self, code: int, message: str, status_code: int | None = None):
         self.code = code
         self.message = message
-        self.status_code = status_code
+        self.status_code = int(status_code) if status_code is not None else _http_status_from_biz_code(int(code))
         super().__init__(message)
 
 

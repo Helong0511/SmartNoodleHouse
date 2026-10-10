@@ -31,7 +31,7 @@ def test_scheduler_audit_must_not_use_string_target_id():
     import ast
     from pathlib import Path
 
-    src = Path(__file__).resolve().parents[1] / "backend" / "app" / "api" / "v1" / "settings.py"
+    src = Path(__file__).resolve().parents[1] / "backend" / "app" / "api" / "settings.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     found = False
     for node in ast.walk(tree):

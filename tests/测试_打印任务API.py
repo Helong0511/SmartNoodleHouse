@@ -93,7 +93,7 @@ async def test_retry_print_job_triggers_process():
     try:
         with patch("app.api.deps.get_user_permissions", AsyncMock(return_value=set())):
             with patch(
-                "app.api.v1.print_jobs.PrintService.process_print_job",
+                "app.api.print_jobs.PrintService.process_print_job",
                 AsyncMock(return_value=True),
             ) as proc:
                 transport = ASGITransport(app=app)

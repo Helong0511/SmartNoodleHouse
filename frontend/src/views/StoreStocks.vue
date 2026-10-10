@@ -1,36 +1,18 @@
 <template>
   <div v-loading="loading">
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="storeId"
-        placeholder="选择门店"
-        style="width:200px"
-        @change="load"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="storeId" placeholder="选择门店" style="width:200px" @change="load">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else type="info">本店库存覆盖</el-tag>
-      <el-input
-        v-model="keyword"
-        clearable
-        placeholder="商品编号 / 名称"
-        style="width:220px"
-        @keyup.enter="reload"
-        @clear="reload"
-      />
+      <el-input v-model="keyword" clearable placeholder="商品编号 / 名称" style="width:220px" @keyup.enter="reload"
+        @clear="reload" />
       <el-button type="primary" @click="reload">查询</el-button>
       <span class="tip">有覆盖则下单扣本店覆盖库存；删除覆盖后回退商品默认库存</span>
     </div>
 
-    <el-alert
-      v-if="truncated"
-      type="warning"
-      :closable="false"
-      show-icon
-      style="margin-top:10px"
-      title="商品数量超过 4000 条，当前仅加载前 4000 条，请用编号/名称搜索缩小范围。"
-    />
+    <el-alert v-if="truncated" type="warning" :closable="false" show-icon style="margin-top:10px"
+      title="商品数量超过 4000 条，当前仅加载前 4000 条，请用编号/名称搜索缩小范围。" />
 
     <el-table :data="items" border style="margin-top:12px">
       <el-table-column prop="product_no" label="编号" width="280" />
@@ -67,11 +49,12 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const loading = ref(false)
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions({ rethrow: true, clearOnError: false })
 const storeId = ref<number | undefined>()
 const items = ref<any[]>([])
 const keyword = ref('')
@@ -86,8 +69,7 @@ function reload() {
 }
 
 async function loadStores() {
-  const res = await api.get('/settings/stores/options')
-  stores.value = res.data.items || []
+  await fetchStores()
   storeId.value = auth.user?.store_id || stores.value[0]?.id
 }
 
@@ -152,6 +134,15 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.tip { color: #999; font-size: 12px; }
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tip {
+  color: #999;
+  font-size: 12px;
+}
 </style>

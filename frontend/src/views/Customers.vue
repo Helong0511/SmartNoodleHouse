@@ -2,26 +2,14 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="本店相关顾客"
-          clearable
-          style="width:160px"
-          @change="reload"
-        >
+        <el-select v-model="storeFilter" placeholder="本店相关顾客" clearable style="width:160px" @change="reload">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input
-          v-model="keyword"
-          placeholder="昵称 / 手机 / 编号"
-          clearable
-          style="width: 200px"
-          @keyup.enter="reload"
-          @clear="reload"
-        />
+        <el-input v-model="keyword" placeholder="昵称 / 手机 / 编号" clearable style="width: 200px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
       <el-form-item>
         <el-select v-model="channel" placeholder="渠道" clearable style="width: 120px" @change="reload">
@@ -48,15 +36,8 @@
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-date-picker
-          v-model="registeredRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="注册起"
-          end-placeholder="注册止"
-          style="width:240px"
-          @change="reload"
-        />
+        <el-date-picker v-model="registeredRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="注册起"
+          end-placeholder="注册止" style="width:240px" @change="reload" />
       </el-form-item>
       <el-button type="primary" @click="reload">搜索</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -66,14 +47,8 @@
     <el-table :data="customers" border class="customer-table">
       <el-table-column label="头像" width="72" align="center">
         <template #default="{ row }">
-          <el-image
-            v-if="row.avatar_url"
-            :src="mediaUrl(row.avatar_url)"
-            fit="cover"
-            class="avatar-thumb"
-            :preview-src-list="[mediaUrl(row.avatar_url)]"
-            preview-teleported
-          />
+          <el-image v-if="row.avatar_url" :src="mediaUrl(row.avatar_url)" fit="cover" class="avatar-thumb"
+            :preview-src-list="[mediaUrl(row.avatar_url)]" preview-teleported />
           <span v-else class="no-avatar">无</span>
         </template>
       </el-table-column>
@@ -117,15 +92,13 @@
       <el-table-column label="折扣" width="80">
         <template #default="{ row }">
           {{
-            row.member_discount_rate != null && Number(row.member_discount_rate) < 1
-              ? `${(Number(row.member_discount_rate) * 10).toFixed(1)}折`
-              : (row.is_member ? '无折扣' : '—')
-          }}
-        </template>
+            row.member_discount_rate != null && Number(row.member_discount_rate) < 1 ?
+              `${(Number(row.member_discount_rate) * 10).toFixed(1)}折` : (row.is_member ? '无折扣' : '—') }} </template>
       </el-table-column>
       <el-table-column label="渠道" width="140">
         <template #default="{ row }">
-          <el-tag v-if="row.channels?.includes('WECHAT')" size="small" type="success" style="margin-right:4px">微信</el-tag>
+          <el-tag v-if="row.channels?.includes('WECHAT')" size="small" type="success"
+            style="margin-right:4px">微信</el-tag>
           <el-tag v-if="row.channels?.includes('ALIPAY')" size="small" type="warning">支付宝</el-tag>
           <span v-if="!row.channels?.length" class="muted">—</span>
         </template>
@@ -137,19 +110,10 @@
       </el-table-column>
       <el-table-column label="智能口味" min-width="380" class-name="pref-col">
         <template #default="{ row }">
-          <div
-            v-if="row.preferences?.length"
-            class="pref-tags"
-            :title="row.preferences.map((p: any) => p.label).join('、')"
-          >
-            <el-tag
-              v-for="(p, i) in row.preferences"
-              :key="`${p.option_code || i}-${i}`"
-              size="small"
-              type="danger"
-              effect="plain"
-              class="pref-tag"
-            >{{ p.label }}</el-tag>
+          <div v-if="row.preferences?.length" class="pref-tags"
+            :title="row.preferences.map((p: any) => p.label).join('、')">
+            <el-tag v-for="(p, i) in row.preferences" :key="`${p.option_code || i}-${i}`" size="small" type="danger"
+              effect="plain" class="pref-tag">{{ p.label }}</el-tag>
             <span class="pref-count">共{{ row.preferences.length }}项</span>
           </div>
           <span v-else class="muted">待累计</span>
@@ -171,28 +135,14 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination
-      v-model:current-page="page"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[20, 50, 100]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top:16px"
-      @current-change="load"
-      @size-change="reload"
-    />
+    <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next" style="margin-top:16px" @current-change="load" @size-change="reload" />
 
     <el-drawer v-model="drawer" title="顾客详情 · 会员与口味档案" size="560px">
       <template v-if="detail">
         <div class="detail-head">
-          <el-image
-            v-if="detail.avatar_url"
-            :src="mediaUrl(detail.avatar_url)"
-            fit="cover"
-            class="avatar-lg"
-            :preview-src-list="[mediaUrl(detail.avatar_url)]"
-            preview-teleported
-          />
+          <el-image v-if="detail.avatar_url" :src="mediaUrl(detail.avatar_url)" fit="cover" class="avatar-lg"
+            :preview-src-list="[mediaUrl(detail.avatar_url)]" preview-teleported />
           <div v-else class="avatar-lg placeholder">无头像</div>
           <div class="detail-head-meta">
             <div class="detail-name">{{ detail.display_name || detail.nickname || '—' }}</div>
@@ -227,24 +177,23 @@
           </el-descriptions-item>
           <el-descriptions-item label="会员折扣">
             {{
-              detail.member_discount_rate != null && Number(detail.member_discount_rate) < 1
-                ? `${(Number(detail.member_discount_rate) * 10).toFixed(1)}折`
-                : (detail.is_member ? '无折扣' : '—')
-            }}
-          </el-descriptions-item>
-          <el-descriptions-item label="等级积分门槛">
-            {{ detail.member_min_points != null ? detail.member_min_points : '—' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="订单数">{{ detail.order_count }}</el-descriptions-item>
-          <el-descriptions-item label="人脸迎宾">{{ detail.has_face ? '已授权（到店摄像头识别）' : '未开启' }}</el-descriptions-item>
-          <el-descriptions-item label="注册时间">{{ detail.created_at || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="最近下单">{{ detail.last_order_at || '—' }}</el-descriptions-item>
+              detail.member_discount_rate != null && Number(detail.member_discount_rate) < 1 ?
+                `${(Number(detail.member_discount_rate) * 10).toFixed(1)}折` : (detail.is_member ? '无折扣' : '—') }}
+              </el-descriptions-item>
+              <el-descriptions-item label="等级积分门槛">
+                {{ detail.member_min_points != null ? detail.member_min_points : '—' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="订单数">{{ detail.order_count }}</el-descriptions-item>
+              <el-descriptions-item label="人脸迎宾">{{ detail.has_face ? '已授权（到店摄像头识别）' : '未开启' }}</el-descriptions-item>
+              <el-descriptions-item label="注册时间">{{ detail.created_at || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="最近下单">{{ detail.last_order_at || '—' }}</el-descriptions-item>
         </el-descriptions>
 
         <div class="pref-block">
           <div class="section-head">
             <h4>优惠券</h4>
-            <el-button v-if="canIssueCoupon" type="success" size="small" @click="openIssueDialog(detail)">手动发券</el-button>
+            <el-button v-if="canIssueCoupon" type="success" size="small"
+              @click="openIssueDialog(detail)">手动发券</el-button>
           </div>
           <p v-if="couponsLoading" class="muted">加载中…</p>
           <el-table v-else-if="customerCoupons.length" :data="customerCoupons" size="small" border>
@@ -287,14 +236,8 @@
         <div class="pref-block">
           <h4>智能记录的口味爱好</h4>
           <p class="muted tip">完成订单后自动累计规格偏好；人脸迎宾会播报「今天还是老样子」。</p>
-          <el-alert
-            v-if="detail.welcome_hint"
-            :title="detail.welcome_hint"
-            type="success"
-            :closable="false"
-            show-icon
-            style="margin-bottom:12px"
-          />
+          <el-alert v-if="detail.welcome_hint" :title="detail.welcome_hint" type="success" :closable="false" show-icon
+            style="margin-bottom:12px" />
           <el-table v-if="detail.preferences?.length" :data="detail.preferences" size="small" border>
             <el-table-column prop="category" label="类别" width="100" />
             <el-table-column label="口味" min-width="120">
@@ -313,15 +256,9 @@
         <h4 style="margin-top:16px">微信账号</h4>
         <p v-if="!detail.wechat_accounts?.length" class="muted">无</p>
         <ul v-else class="acct">
-          <li v-for="(w, i) in detail.wechat_accounts" :key="'w'+i" class="acct-row">
-            <el-image
-              v-if="w.avatar_url"
-              :src="mediaUrl(w.avatar_url)"
-              fit="cover"
-              class="avatar-sm"
-              :preview-src-list="[mediaUrl(w.avatar_url)]"
-              preview-teleported
-            />
+          <li v-for="(w, i) in detail.wechat_accounts" :key="'w' + i" class="acct-row">
+            <el-image v-if="w.avatar_url" :src="mediaUrl(w.avatar_url)" fit="cover" class="avatar-sm"
+              :preview-src-list="[mediaUrl(w.avatar_url)]" preview-teleported />
             <div class="acct-meta">
               <div v-if="w.nickname">{{ w.nickname }}</div>
               <code>{{ w.openid }}</code>
@@ -333,15 +270,9 @@
         <h4>支付宝账号</h4>
         <p v-if="!detail.alipay_accounts?.length" class="muted">无</p>
         <ul v-else class="acct">
-          <li v-for="(a, i) in detail.alipay_accounts" :key="'a'+i" class="acct-row">
-            <el-image
-              v-if="a.avatar_url"
-              :src="mediaUrl(a.avatar_url)"
-              fit="cover"
-              class="avatar-sm"
-              :preview-src-list="[mediaUrl(a.avatar_url)]"
-              preview-teleported
-            />
+          <li v-for="(a, i) in detail.alipay_accounts" :key="'a' + i" class="acct-row">
+            <el-image v-if="a.avatar_url" :src="mediaUrl(a.avatar_url)" fit="cover" class="avatar-sm"
+              :preview-src-list="[mediaUrl(a.avatar_url)]" preview-teleported />
             <div class="acct-meta">
               <div v-if="a.nickname">{{ a.nickname }}</div>
               <code>{{ a.alipay_user_id }}</code>
@@ -359,23 +290,12 @@
         </el-form-item>
         <el-form-item label="券模板" required>
           <el-select v-model="issueForm.template_id" placeholder="选择模板" style="width: 100%">
-            <el-option
-              v-for="t in enabledTemplates"
-              :key="t.id"
-              :label="`${t.name} — ${t.summary}`"
-              :value="t.id"
-            />
+            <el-option v-for="t in enabledTemplates" :key="t.id" :label="`${t.name} — ${t.summary}`" :value="t.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="issueQuantityLabel" required>
-          <el-input-number
-            v-model="issueForm.quantity"
-            :min="1"
-            :max="50"
-            :step="1"
-            :disabled="!issueForm.template_id"
-            style="width: 100%"
-          />
+          <el-input-number v-model="issueForm.quantity" :min="1" :max="50" :step="1" :disabled="!issueForm.template_id"
+            style="width: 100%" />
           <div class="hint">同模板可多张，单次最多 50 张</div>
         </el-form-item>
       </el-form>
@@ -386,37 +306,18 @@
     </el-dialog>
 
     <el-dialog v-model="mergeDialog" title="合并顾客到当前档案" width="560px" destroy-on-close>
-      <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="不可逆操作"
-        description="将源顾客的账号、订单、券、积分等迁入目标顾客，源顾客停用。可按手机号、昵称、编号或 ID 搜索选择源顾客。"
-        style="margin-bottom: 12px"
-      />
+      <el-alert type="warning" :closable="false" show-icon title="不可逆操作"
+        description="将源顾客的账号、订单、券、积分等迁入目标顾客，源顾客停用。可按手机号、昵称、编号或 ID 搜索选择源顾客。" style="margin-bottom: 12px" />
       <el-form label-width="100px">
         <el-form-item label="目标顾客">
           <span>{{ mergeTargetLabel }}</span>
         </el-form-item>
         <el-form-item label="源顾客" required>
-          <el-select
-            v-model="mergeSourceId"
-            filterable
-            remote
-            clearable
-            reserve-keyword
-            :remote-method="searchMergeSources"
-            :loading="mergeSourceLoading"
-            placeholder="输入手机号 / 昵称 / 编号 / ID 搜索"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="c in mergeSourceOptions"
-              :key="c.id"
-              :label="formatMergeOption(c)"
-              :value="c.id"
-              :disabled="c.id === mergeTarget?.id"
-            />
+          <el-select v-model="mergeSourceId" filterable remote clearable reserve-keyword
+            :remote-method="searchMergeSources" :loading="mergeSourceLoading" placeholder="输入手机号 / 昵称 / 编号 / ID 搜索"
+            style="width: 100%">
+            <el-option v-for="c in mergeSourceOptions" :key="c.id" :label="formatMergeOption(c)" :value="c.id"
+              :disabled="c.id === mergeTarget?.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="原因">
@@ -436,6 +337,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { mediaUrl } from '@/utils/media'
 import { useAuthStore } from '@/stores/auth'
 import { COUPON_STATUS, couponStatusTagType, label } from '@/utils/labels'
@@ -444,7 +346,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const loading = ref(false)
 const customers = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -589,15 +491,6 @@ function goMemberLevels() {
   router.push('/member-levels')
 }
 
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
-}
-
 async function loadLevels() {
   try {
     const res = await api.get('/member-levels')
@@ -676,7 +569,7 @@ async function showDetail(id: number) {
 async function loadCouponTemplates() {
   if (couponTemplates.value.length) return
   try {
-    const res = await api.get('/coupons/templates', { params: { all: true } })
+    const res = await api.get('/coupons/templates', { params: { include_disabled: true } })
     couponTemplates.value = res.data?.items || []
   } catch {
     couponTemplates.value = []
@@ -775,9 +668,21 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.muted { color: #999; }
-.bal-sub { font-size: 12px; margin-top: 2px; line-height: 1.3; }
-.tip { font-size: 13px; margin: 4px 0 10px; }
+.muted {
+  color: #999;
+}
+
+.bal-sub {
+  font-size: 12px;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.tip {
+  font-size: 13px;
+  margin: 4px 0 10px;
+}
+
 .avatar-thumb {
   width: 40px;
   height: 40px;
@@ -785,18 +690,21 @@ onMounted(async () => {
   display: block;
   margin: 0 auto;
 }
+
 .avatar-sm {
   width: 36px;
   height: 36px;
   border-radius: 50%;
   flex-shrink: 0;
 }
+
 .avatar-lg {
   width: 72px;
   height: 72px;
   border-radius: 50%;
   flex-shrink: 0;
 }
+
 .avatar-lg.placeholder {
   display: flex;
   align-items: center;
@@ -805,38 +713,72 @@ onMounted(async () => {
   color: #909399;
   font-size: 12px;
 }
-.no-avatar { color: #c0c4cc; font-size: 12px; }
+
+.no-avatar {
+  color: #c0c4cc;
+  font-size: 12px;
+}
+
 .detail-head {
   display: flex;
   align-items: center;
   gap: 14px;
   margin-bottom: 16px;
 }
-.detail-head-meta { min-width: 0; }
+
+.detail-head-meta {
+  min-width: 0;
+}
+
 .detail-name {
   font-size: 18px;
   font-weight: 600;
   line-height: 1.3;
   word-break: break-word;
 }
-.pref-block { margin-top: 18px; }
-.pref-block h4 { margin: 0; }
+
+.pref-block {
+  margin-top: 18px;
+}
+
+.pref-block h4 {
+  margin: 0;
+}
+
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
 }
-.hint { color: #999; font-size: 12px; margin-top: 4px; }
-.acct { padding-left: 0; list-style: none; word-break: break-all; }
+
+.hint {
+  color: #999;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.acct {
+  padding-left: 0;
+  list-style: none;
+  word-break: break-all;
+}
+
 .acct-row {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
 }
-.acct-meta { min-width: 0; }
-.acct code { font-size: 12px; }
+
+.acct-meta {
+  min-width: 0;
+}
+
+.acct code {
+  font-size: 12px;
+}
+
 .pref-tags {
   display: flex;
   flex-wrap: wrap;
@@ -844,6 +786,7 @@ onMounted(async () => {
   align-items: center;
   max-width: 100%;
 }
+
 .pref-tag {
   max-width: 100%;
   height: auto !important;
@@ -851,11 +794,13 @@ onMounted(async () => {
   line-height: 1.35 !important;
   padding: 2px 6px !important;
 }
+
 .pref-count {
   color: #909399;
   font-size: 12px;
   white-space: nowrap;
 }
+
 :deep(.customer-table .pref-col .cell) {
   white-space: normal !important;
   word-break: break-word;
@@ -863,6 +808,7 @@ onMounted(async () => {
   overflow: visible !important;
   text-overflow: clip !important;
 }
+
 :deep(.customer-table .pref-col) {
   vertical-align: top;
 }

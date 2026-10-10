@@ -62,6 +62,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -87,7 +88,7 @@ const STATUS_ORDER: Record<string, number> = {
 const auth = useAuthStore()
 const loading = ref(false)
 const items = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 const storeId = ref<number | null>(null)
 const busyId = ref<number | null>(null)
 const nowTick = ref(Date.now())
@@ -113,14 +114,9 @@ const waitingCount = computed(() => items.value.filter((x) => x.status === 'WAIT
 const seatedCount = computed(() => items.value.filter((x) => x.status === 'SEATED').length)
 
 async function loadStores() {
-    try {
-        const res = await api.get('/settings/stores/options')
-        stores.value = res.data.items || []
-        if (auth.isSuperAdmin && !storeId.value && stores.value.length) {
-            storeId.value = stores.value[0].id
-        }
-    } catch {
-        stores.value = []
+    if (!(await fetchStores())) return
+    if (auth.isSuperAdmin && !storeId.value && stores.value.length) {
+        storeId.value = stores.value[0].id
     }
 }
 
@@ -134,7 +130,7 @@ async function load() {
         const params: Record<string, unknown> = {
             store_id: auth.isSuperAdmin ? storeId.value : undefined,
         }
-        const res: any = await api.get('/queue/admin/today', { params })
+        const res: any = await api.get('/admin/queue/today', { params })
         // 防御性解析：兼容 {code,data:{items}} / {items} / 数组
         const body = res?.data ?? res ?? {}
         items.value = Array.isArray(body) ? body : body.items || []
@@ -180,7 +176,7 @@ async function doAction(row: any, action: 'call' | 'seat' | 'cancel') {
     }
     busyId.value = row.id
     try {
-        await api.post(`/queue/admin/${row.id}/${action}`)
+        await api.post(`/admin/queue/${row.id}/${action}`)
         ElMessage.success(action === 'call' ? '已叫号' : action === 'seat' ? '已入座' : '已取消')
         await load()
     } catch (e: any) {

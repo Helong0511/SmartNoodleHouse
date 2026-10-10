@@ -4,7 +4,7 @@ import fnmatch
 
 import pytest
 
-from app.api.v1.miniprogram import get_recommendations
+from app.api.miniprogram import get_recommendations
 from app.core.exceptions import AppException
 from app.models import CustomerTasteProfile
 from app.services.recommendation_service import invalidate_store_caches

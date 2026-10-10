@@ -4,8 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import socket
 from datetime import timedelta
 from typing import Any
 
@@ -14,32 +12,27 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.core.response import now_local
+from app.core.response import dumps_json, now_local
 from app.models import WebhookInbox
 from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
 from app.services.delivery_tasks import run_deferred_tasks
 from app.services.websocket_manager import ws_manager
+from app.services.worker_common import backoff_seconds, worker_id
 
 logger = logging.getLogger(__name__)
 
 # 最大重试次数；超过后保持 FAILED，不再自动 claim
 MAX_ATTEMPTS = 8
-# 指数退避基数（秒）：2^attempt，上限 3600
-BACKOFF_BASE_SEC = 2
+# 指数退避（秒）：2^attempt，上限 1 小时
 BACKOFF_CAP_SEC = 3600
 # PROCESSING 行超时阈值（秒）：超过即视为崩溃残留，由 reclaim 复位 PENDING
 STALE_PROCESSING_SEC = 300
 
 
-def _worker_id() -> str:
-    return f"{socket.gethostname()}:{os.getpid()}"
-
-
 def _backoff_seconds(attempt_count: int) -> int:
     """指数退避：2^attempt 秒，封顶 1 小时。"""
-    exp = max(0, int(attempt_count))
-    return min(BACKOFF_CAP_SEC, BACKOFF_BASE_SEC**exp)
+    return backoff_seconds(attempt_count, cap=BACKOFF_CAP_SEC)
 
 
 def make_event_id(platform: str, raw: dict[str, Any], body: bytes) -> str:
@@ -91,8 +84,8 @@ async def enqueue_delivery_webhook(
         channel=channel,
         event_id=event_id,
         event_type=event_type,
-        payload=json.dumps(envelope, ensure_ascii=False, default=str),
-        headers_json=json.dumps(safe_headers, ensure_ascii=False),
+        payload=dumps_json(envelope),
+        headers_json=dumps_json(safe_headers),
         status="PENDING",
     )
     db.add(row)
@@ -144,7 +137,7 @@ async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | Non
     原子 claim：仅当 status=PENDING（或到点可重试的 FAILED）时 UPDATE 为 PROCESSING。
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = worker or _worker_id()
+    wid = worker or worker_id()
     now = now_local()
     # UPDATE ... WHERE status 条件：跨 MySQL/SQLite 均可，无需 FOR UPDATE SKIP LOCKED
     stmt = (
@@ -187,7 +180,7 @@ async def process_inbox_item(inbox_id: int) -> bool:
     reclaim_stale_inbox 复位并被另一 worker 重新 claim，原 worker 的
     UPDATE 会命中 0 行，不会覆盖新 owner 的锁（避免误释放他人锁）。
     """
-    wid = _worker_id()
+    wid = worker_id()
     async with AsyncSessionLocal() as db:
         row = await claim_inbox_item(db, inbox_id, worker=wid)
         if not row:

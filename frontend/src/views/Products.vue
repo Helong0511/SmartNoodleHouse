@@ -2,13 +2,7 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="全部门店"
-          clearable
-          style="width:160px"
-          @change="onStoreFilterChange"
-        >
+        <el-select v-model="storeFilter" placeholder="全部门店" clearable style="width:160px" @change="onStoreFilterChange">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
@@ -39,13 +33,8 @@
         <el-checkbox v-model="lowStockFilter" @change="reload">仅看低库存（≤{{ lowStockThreshold }}）</el-checkbox>
       </el-form-item>
       <el-button type="primary" @click="openForm()">新增商品</el-button>
-      <el-button
-        v-if="auth.isSuperAdmin"
-        type="success"
-        plain
-        :disabled="!selectedIds.length"
-        @click="openCopy"
-      >复制到门店</el-button>
+      <el-button v-if="auth.isSuperAdmin" type="success" plain :disabled="!selectedIds.length"
+        @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
       <el-button type="warning" plain :loading="rebuilding" @click="rebuildStoreTaste">
         重算本店口味标签
@@ -64,31 +53,23 @@
       <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
       <el-table-column label="图片" width="72" align="center">
         <template #default="{ row }">
-          <el-image
-            v-if="row.main_image"
-            :src="mediaUrl(row.main_image)"
-            fit="cover"
-            class="thumb"
-            :preview-src-list="[mediaUrl(row.main_image)]"
-          />
+          <el-image v-if="row.main_image" :src="mediaUrl(row.main_image)" fit="cover" class="thumb"
+            :preview-src-list="[mediaUrl(row.main_image)]" />
           <span v-else class="no-img">无</span>
         </template>
       </el-table-column>
       <el-table-column prop="price" label="价格" width="88" />
       <el-table-column label="原价" width="88">
-        <template #default="{ row }">{{ row.original_price != null && row.original_price !== '' ? row.original_price : '—' }}</template>
+        <template #default="{ row }">{{ row.original_price != null && row.original_price !== '' ? row.original_price :
+          '—' }}</template>
       </el-table-column>
       <el-table-column prop="box_price" label="餐盒费" width="88" />
       <el-table-column prop="stock" label="库存" width="80" />
       <el-table-column prop="sales_count" label="销量" width="80" />
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-select
-            :model-value="row.status"
-            size="small"
-            class="status-select"
-            @change="(v: string) => changeStatus(row, v)"
-          >
+          <el-select :model-value="row.status" size="small" class="status-select"
+            @change="(v: string) => changeStatus(row, v)">
             <el-option label="在售" value="ON_SALE" />
             <el-option label="下架" value="OFF_SALE" />
           </el-select>
@@ -103,8 +84,7 @@
           <el-tag v-if="row.has_options" size="small" class="tag-gap">规格</el-tag>
           <span
             v-if="!row.is_recommended && !row.is_hot && !row.no_member_discount && !row.no_cooking && !row.has_options"
-            class="no-img"
-          >—</span>
+            class="no-img">—</span>
         </template>
       </el-table-column>
       <el-table-column prop="sort_order" label="排序" width="70" />
@@ -117,27 +97,14 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination
-      v-model:current-page="page"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[20, 50, 100]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top:16px"
-      @current-change="load"
-      @size-change="reload"
-    />
+    <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next" style="margin-top:16px" @current-change="load" @size-change="reload" />
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="640px" destroy-on-close>
       <el-form :model="form" label-width="100px">
         <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店">
-          <el-select
-            v-model="form.store_id"
-            clearable
-            placeholder="不选=总部前缀 0000（编号全店统一风格）"
-            style="width:100%"
-            @change="onFormStoreChange"
-          >
+          <el-select v-model="form.store_id" clearable placeholder="不选=总部前缀 0000（编号全店统一风格）" style="width:100%"
+            @change="onFormStoreChange">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
           <div class="hint">不选门店：编号为 0000-分类-商品；商品归属所选分类所在门店，可用「复制到门店」铺开</div>
@@ -146,19 +113,9 @@
           <span>{{ form.store_name || boundStoreName || (form.store_id ? `门店#${form.store_id}` : '—') }}</span>
         </el-form-item>
         <el-form-item label="分类" required>
-          <el-select
-            v-model="form.category_id"
-            style="width:100%"
-            placeholder="请先选择分类"
-            filterable
-            @change="onFormCategoryChange"
-          >
-            <el-option
-              v-for="c in formCategories"
-              :key="c.id"
-              :label="categoryOptionLabel(c)"
-              :value="c.id"
-            />
+          <el-select v-model="form.category_id" style="width:100%" placeholder="请先选择分类" filterable
+            @change="onFormCategoryChange">
+            <el-option v-for="c in formCategories" :key="c.id" :label="categoryOptionLabel(c)" :value="c.id" />
           </el-select>
           <p v-if="!formCategories.length" class="hint warn">暂无分类，请先到「分类管理」创建</p>
         </el-form-item>
@@ -166,31 +123,18 @@
           <el-input v-model="form.name" placeholder="如 牛肉面" @input="onProductNameInput" />
         </el-form-item>
         <el-form-item label="商品编号" required>
-          <el-input
-            v-model="form.product_no"
-            :disabled="!!form.id"
-            :placeholder="productNoPlaceholder"
-            @input="codeTouched = true"
-          />
+          <el-input v-model="form.product_no" :disabled="!!form.id" :placeholder="productNoPlaceholder"
+            @input="codeTouched = true" />
           <div class="hint">{{ productNoTip }}</div>
         </el-form-item>
         <el-form-item label="预览图">
           <div class="img-row">
-            <el-image
-              v-if="form.main_image"
-              :src="mediaUrl(form.main_image)"
-              fit="cover"
-              class="preview"
-              :preview-src-list="[mediaUrl(form.main_image)]"
-            />
+            <el-image v-if="form.main_image" :src="mediaUrl(form.main_image)" fit="cover" class="preview"
+              :preview-src-list="[mediaUrl(form.main_image)]" />
             <div v-else class="preview empty">暂无图片</div>
             <div class="img-actions">
-              <el-upload
-                :show-file-list="false"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                :http-request="uploadImage"
-                :disabled="!form.id || uploading"
-              >
+              <el-upload :show-file-list="false" accept="image/jpeg,image/png,image/webp,image/gif"
+                :http-request="uploadImage" :disabled="!form.id || uploading">
                 <el-button type="primary" plain :loading="uploading" :disabled="!form.id">
                   {{ form.id ? '上传图片' : '请先保存商品' }}
                 </el-button>
@@ -204,45 +148,18 @@
           <div class="require-box">
             <div class="require-row">
               <span class="require-label">分类</span>
-              <el-select
-                v-model="form.require_category_ids"
-                multiple
-                clearable
-                filterable
-                style="flex:1"
-                placeholder="如：面（满足任一即可）"
-                @change="onRequireCategoriesChange"
-              >
-                <el-option
-                  v-for="c in requireCategoryOptions"
-                  :key="c.id"
-                  :label="c.name"
-                  :value="c.id"
-                />
+              <el-select v-model="form.require_category_ids" multiple clearable filterable style="flex:1"
+                placeholder="如：面（满足任一即可）" @change="onRequireCategoriesChange">
+                <el-option v-for="c in requireCategoryOptions" :key="c.id" :label="c.name" :value="c.id" />
               </el-select>
             </div>
             <div class="require-row">
               <span class="require-label">商品</span>
-              <el-select
-                v-model="form.require_product_ids"
-                multiple
-                clearable
-                filterable
-                style="flex:1"
-                :placeholder="form.require_category_ids.length ? '仅显示已选分类下的商品' : '指定商品（可先选分类缩小范围）'"
-              >
-                <el-option-group
-                  v-for="g in requireProductGroups"
-                  :key="g.id"
-                  :label="g.name"
-                >
-                  <el-option
-                    v-for="p in g.products"
-                    :key="p.id"
-                    :label="p.name"
-                    :value="p.id"
-                    :disabled="p.id === form.id"
-                  />
+              <el-select v-model="form.require_product_ids" multiple clearable filterable style="flex:1"
+                :placeholder="form.require_category_ids.length ? '仅显示已选分类下的商品' : '指定商品（可先选分类缩小范围）'">
+                <el-option-group v-for="g in requireProductGroups" :key="g.id" :label="g.name">
+                  <el-option v-for="p in g.products" :key="p.id" :label="p.name" :value="p.id"
+                    :disabled="p.id === form.id" />
                 </el-option-group>
               </el-select>
             </div>
@@ -275,12 +192,8 @@
         </el-form-item>
         <el-form-item label="规格组">
           <el-select v-model="form.option_group_ids" multiple style="width:100%" placeholder="选择关联规格组">
-            <el-option
-              v-for="g in bindableOptionGroups"
-              :key="g.id"
-              :label="g.store_id == null ? `${g.name}（总部）` : g.name"
-              :value="g.id"
-            />
+            <el-option v-for="g in bindableOptionGroups" :key="g.id"
+              :label="g.store_id == null ? `${g.name}（总部）` : g.name" :value="g.id" />
           </el-select>
           <p class="hint">仅可选总部共享或本店规格组</p>
         </el-form-item>
@@ -289,11 +202,7 @@
             <el-button link type="primary" @click="taste.expanded = !taste.expanded">
               {{ taste.expanded ? '收起口味画像' : '展开口味画像' }}
             </el-button>
-            <el-tag
-              v-if="!taste.expanded"
-              size="small"
-              :type="taste.source === 'MANUAL' ? 'warning' : 'info'"
-            >
+            <el-tag v-if="!taste.expanded" size="small" :type="taste.source === 'MANUAL' ? 'warning' : 'info'">
               {{ taste.source === 'MANUAL' ? '含手动调整' : '系统自动' }}
             </el-tag>
             <span v-if="!taste.expanded && taste.tags.length" class="hint">
@@ -314,53 +223,29 @@
             <div v-for="d in taste.dimList" :key="d.key" class="taste-dim-row">
               <el-checkbox v-model="taste.dimManual[d.key]" size="small" class="taste-dim-check">手动</el-checkbox>
               <span class="taste-dim-label">{{ d.label }}</span>
-              <el-slider
-                :model-value="taste.dimValue[d.key] ?? 0"
-                :min="d.min"
-                :max="d.max"
-                :step="1"
-                :disabled="!taste.dimManual[d.key]"
-                :marks="taste.dimManual[d.key] ? tasteMarks(d) : undefined"
-                class="taste-slider"
-                :class="{ 'is-with-marks': taste.dimManual[d.key] }"
-                @update:model-value="(v: number) => (taste.dimValue[d.key] = v)"
-              />
+              <el-slider :model-value="taste.dimValue[d.key] ?? 0" :min="d.min" :max="d.max" :step="1"
+                :disabled="!taste.dimManual[d.key]" :marks="taste.dimManual[d.key] ? tasteMarks(d) : undefined"
+                class="taste-slider" :class="{ 'is-with-marks': taste.dimManual[d.key] }"
+                @update:model-value="(v: number) => (taste.dimValue[d.key] = v)" />
             </div>
             <div class="taste-tags">
-              <el-tag
-                v-for="t in taste.tags"
-                :key="t"
-                size="small"
-                closable
-                :type="taste.pendingRemove.includes(t) ? 'info' : 'danger'"
-                class="tag-gap"
-                @close="removeTasteTag(t)"
-              >{{ t }}</el-tag>
+              <el-tag v-for="t in taste.tags" :key="t" size="small" closable
+                :type="taste.pendingRemove.includes(t) ? 'info' : 'danger'" class="tag-gap"
+                @close="removeTasteTag(t)">{{ t
+                }}</el-tag>
               <span v-if="!taste.tags.length" class="hint">暂无标签</span>
             </div>
             <el-collapse class="taste-vocab-collapse">
               <el-collapse-item title="点选添加标签（词表）" name="vocab">
                 <div class="taste-vocab">
-                  <el-tag
-                    v-for="v in taste.vocab"
-                    :key="v"
-                    size="small"
-                    :effect="isTagActive(v) ? 'dark' : 'plain'"
-                    class="tag-gap vocab-tag"
-                    @click="toggleAddTag(v)"
-                  >{{ v }}</el-tag>
+                  <el-tag v-for="v in taste.vocab" :key="v" size="small" :effect="isTagActive(v) ? 'dark' : 'plain'"
+                    class="tag-gap vocab-tag" @click="toggleAddTag(v)">{{ v }}</el-tag>
                 </div>
               </el-collapse-item>
             </el-collapse>
             <div class="taste-custom">
-              <el-input
-                v-model="taste.customTag"
-                size="small"
-                style="width:180px"
-                placeholder="自定义标签"
-                maxlength="12"
-                @keyup.enter="addCustomTag"
-              />
+              <el-input v-model="taste.customTag" size="small" style="width:180px" placeholder="自定义标签" maxlength="12"
+                @keyup.enter="addCustomTag" />
               <el-button size="small" @click="addCustomTag">添加</el-button>
               <el-button size="small" type="primary" plain :loading="taste.saving" @click="saveTaste">
                 保存口味调整
@@ -391,15 +276,8 @@
       </template>
     </el-dialog>
 
-    <CopyToStoreDialog
-      v-model="copyVisible"
-      :stores="stores"
-      :exclude-store-id="copySourceStoreId"
-      :selected-count="selectedIds.length"
-      :product-ids="selectedIds"
-      show-product-conflict
-      @done="load"
-    />
+    <CopyToStoreDialog v-model="copyVisible" :stores="stores" :exclude-store-id="copySourceStoreId"
+      :selected-count="selectedIds.length" :product-ids="selectedIds" show-product-conflict @done="load" />
 
     <!-- 推送外卖弹窗 -->
     <el-dialog v-model="pushDialog" title="推送商品到外卖平台" width="480px" destroy-on-close>
@@ -427,12 +305,7 @@
       </div>
       <template #footer>
         <el-button @click="pushDialog = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="pushing"
-          :disabled="!pushSelected.length"
-          @click="doPush"
-        >推送</el-button>
+        <el-button type="primary" :loading="pushing" :disabled="!pushSelected.length" @click="doPush">推送</el-button>
       </template>
     </el-dialog>
   </div>
@@ -442,6 +315,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
 import { storePrefixFromNo, suggestCodeFromName } from '@/utils/bizCode'
@@ -453,7 +327,7 @@ const uploading = ref(false)
 const products = ref<any[]>([])
 const allStoreProducts = ref<any[]>([])
 const categories = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const optionGroups = ref<any[]>([])
 const page = ref(1)
 const pageSize = ref(20)
@@ -518,11 +392,11 @@ function initTaste(tp: any) {
   taste.dimList =
     tp && Object.keys(meta).length
       ? Object.entries(meta).map(([key, v]: [string, any]) => ({
-          key,
-          label: v.label,
-          min: v.min,
-          max: v.max,
-        }))
+        key,
+        label: v.label,
+        min: v.min,
+        max: v.max,
+      }))
       : [...DIM_FALLBACK]
   taste.dimValue = { ...(tp?.dimensions || {}) }
   const ov = tp?.manual_overrides || {}
@@ -865,14 +739,6 @@ async function loadAllStoreProducts(storeId?: number) {
     allStoreProducts.value = all
   } catch {
     allStoreProducts.value = []
-  }
-}
-
-async function loadStores() {
-  try {
-    stores.value = (await api.get('/settings/stores/options')).data.items || []
-  } catch {
-    stores.value = []
   }
 }
 
@@ -1234,49 +1100,124 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { margin-bottom: 12px; }
-.thumb { width: 48px; height: 48px; border-radius: 6px; }
-.no-img { color: #c0c4cc; font-size: 12px; }
-.status-select { width: 88px; }
-.tag-gap { margin: 0 4px 4px 0; }
-.img-row { display: flex; gap: 12px; align-items: flex-start; }
-.preview { width: 96px; height: 96px; border-radius: 8px; }
-.preview.empty {
-  display: flex; align-items: center; justify-content: center;
-  background: #f5f7fa; color: #c0c4cc; font-size: 12px;
+.toolbar {
+  margin-bottom: 12px;
 }
-.img-actions { flex: 1; }
-.hint { margin: 4px 0 0; font-size: 12px; color: #909399; }
-.hint.warn { color: #e6a23c; }
-.require-box { width: 100%; }
+
+.thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+}
+
+.no-img {
+  color: #c0c4cc;
+  font-size: 12px;
+}
+
+.status-select {
+  width: 88px;
+}
+
+.tag-gap {
+  margin: 0 4px 4px 0;
+}
+
+.img-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.preview {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+}
+
+.preview.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #c0c4cc;
+  font-size: 12px;
+}
+
+.img-actions {
+  flex: 1;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.hint.warn {
+  color: #e6a23c;
+}
+
+.require-box {
+  width: 100%;
+}
+
 .require-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 8px;
 }
+
 .require-label {
   width: 36px;
   line-height: 32px;
   color: #606266;
   flex-shrink: 0;
 }
+
 .require-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
 }
-.taste-box { width: 100%; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; background: #fafbfc; margin-top: 8px; }
-.taste-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.taste-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+
+.taste-box {
+  width: 100%;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafbfc;
+  margin-top: 8px;
+}
+
+.taste-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.taste-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .taste-dim-row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   margin-bottom: 10px;
 }
-.taste-dim-check { margin-top: 4px; flex-shrink: 0; }
+
+.taste-dim-check {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
 .taste-dim-label {
   width: 40px;
   color: #606266;
@@ -1284,27 +1225,36 @@ onMounted(async () => {
   flex-shrink: 0;
   line-height: 32px;
 }
+
 .taste-slider {
   flex: 1;
   margin-right: 8px;
   min-width: 0;
 }
+
 .taste-slider.is-with-marks {
   padding-bottom: 22px;
   margin-bottom: 4px;
 }
+
 .taste-slider :deep(.el-slider__marks-text) {
   font-size: 11px;
   color: #909399;
   white-space: nowrap;
   margin-top: 2px;
 }
-.taste-tags { margin: 8px 0; min-height: 24px; }
+
+.taste-tags {
+  margin: 8px 0;
+  min-height: 24px;
+}
+
 .taste-vocab-collapse {
   border: none;
   margin: 4px 0;
   --el-collapse-header-height: 36px;
 }
+
 .taste-vocab-collapse :deep(.el-collapse-item__header) {
   background: transparent;
   border: none;
@@ -1312,9 +1262,28 @@ onMounted(async () => {
   font-size: 12px;
   font-weight: 400;
 }
-.taste-vocab-collapse :deep(.el-collapse-item__wrap) { border: none; background: transparent; }
-.taste-vocab-collapse :deep(.el-collapse-item__content) { padding-bottom: 4px; }
-.taste-vocab { line-height: 2; }
-.vocab-tag { cursor: pointer; }
-.taste-custom { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+
+.taste-vocab-collapse :deep(.el-collapse-item__wrap) {
+  border: none;
+  background: transparent;
+}
+
+.taste-vocab-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 4px;
+}
+
+.taste-vocab {
+  line-height: 2;
+}
+
+.vocab-tag {
+  cursor: pointer;
+}
+
+.taste-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
 </style>

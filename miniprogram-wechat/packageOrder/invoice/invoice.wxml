@@ -1,0 +1,92 @@
+<view class="page">
+  <!-- 开票申请表单 -->
+  <view class="card form-card">
+    <view class="card-title">申请开票</view>
+    <view class="order-box" wx:if="{{orderNo}}">
+      <text class="order-k">关联订单</text>
+      <text class="order-v">{{orderNo}}</text>
+    </view>
+    <view class="field">
+      <view class="field-label">抬头类型</view>
+      <view class="type-tabs">
+        <view
+          class="type-tab {{titleType === 'PERSON' ? 'on' : ''}}"
+          data-type="PERSON"
+          bindtap="switchTitleType"
+        >个人</view>
+        <view
+          class="type-tab {{titleType === 'COMPANY' ? 'on' : ''}}"
+          data-type="COMPANY"
+          bindtap="switchTitleType"
+        >单位</view>
+      </view>
+    </view>
+    <view class="field">
+      <view class="field-label">抬头名称</view>
+      <input
+        class="field-input"
+        placeholder="请填写发票抬头（1-200 字）"
+        placeholder-class="input-ph"
+        value="{{title}}"
+        bindinput="onTitleInput"
+        maxlength="200"
+      />
+    </view>
+    <view class="field" wx:if="{{titleType === 'COMPANY'}}">
+      <view class="field-label">单位税号</view>
+      <input
+        class="field-input"
+        placeholder="请填写税号"
+        placeholder-class="input-ph"
+        value="{{taxNo}}"
+        bindinput="onTaxNoInput"
+        maxlength="50"
+      />
+    </view>
+    <view class="field">
+      <view class="field-label">接收邮箱</view>
+      <input
+        class="field-input"
+        placeholder="电子发票将发送至该邮箱"
+        placeholder-class="input-ph"
+        value="{{email}}"
+        bindinput="onEmailInput"
+      />
+    </view>
+    <button
+      class="btn-primary submit-btn"
+      loading="{{submitting}}"
+      disabled="{{submitting}}"
+      bindtap="submitInvoice"
+    >提交开票申请</button>
+  </view>
+
+  <!-- 我的发票列表 -->
+  <view class="list-section">
+    <view class="card-title list-title">我的发票</view>
+    <view wx:if="{{listLoading}}" class="tip">加载中...</view>
+    <view wx:elif="{{!list.length}}" class="tip">暂无发票申请记录</view>
+    <block wx:else>
+      <view class="invoice-item" wx:for="{{list}}" wx:key="request_id">
+        <view class="inv-head">
+          <view class="inv-title-wrap">
+            <view class="inv-title">{{item.title}}</view>
+            <view class="inv-sub">
+              <text class="inv-tag">{{item.titleTypeText}}</text>
+              <text class="inv-order">{{item.order_no}}</text>
+            </view>
+          </view>
+          <text class="inv-status {{item.statusClass}}">{{item.statusText}}</text>
+        </view>
+        <view class="inv-row">
+          <text class="inv-amount">¥{{item.amount}}</text>
+          <text class="inv-time">{{item.createdText}}</text>
+        </view>
+        <view class="inv-reject" wx:if="{{item.status === 'REJECTED' && item.reject_reason}}">驳回原因：{{item.reject_reason}}</view>
+      </view>
+      <view class="load-more" wx:if="{{loadingMore}}">加载中...</view>
+      <view class="load-more" wx:elif="{{hasMore}}">上拉加载更多</view>
+      <view class="load-more end" wx:else>没有更多了</view>
+    </block>
+  </view>
+</view>

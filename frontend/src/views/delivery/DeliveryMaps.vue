@@ -8,14 +8,8 @@
         <el-option label="美团" value="MEITUAN" />
         <el-option label="饿了么" value="ELEME" />
       </el-select>
-      <el-input
-        v-model="mapKeyword"
-        placeholder="平台SKU / 品名 / 菜品码"
-        clearable
-        style="width: 210px"
-        @keyup.enter="reloadMaps"
-        @clear="reloadMaps"
-      />
+      <el-input v-model="mapKeyword" placeholder="平台SKU / 品名 / 菜品码" clearable style="width: 210px"
+        @keyup.enter="reloadMaps" @clear="reloadMaps" />
       <el-button type="primary" @click="syncMenuBatch">批量推送菜单</el-button>
       <el-button type="success" @click="setPlatformShelf(true)">平台上架</el-button>
       <el-button type="warning" @click="setPlatformShelf(false)">平台下架</el-button>
@@ -40,17 +34,9 @@
       </el-table-column>
     </el-table>
     <div class="pager">
-      <el-pagination
-        v-model:current-page="mapPager.page"
-        v-model:page-size="mapPager.pageSize"
-        :total="mapPager.total"
-        :page-sizes="[20, 50, 100, 200]"
-        layout="total, sizes, prev, pager, next"
-        background
-        small
-        @current-change="loadMaps"
-        @size-change="reloadMaps"
-      />
+      <el-pagination v-model:current-page="mapPager.page" v-model:page-size="mapPager.pageSize" :total="mapPager.total"
+        :page-sizes="[20, 50, 100, 200]" layout="total, sizes, prev, pager, next" background small
+        @current-change="loadMaps" @size-change="reloadMaps" />
     </div>
 
     <!-- 映射弹窗 -->
@@ -126,10 +112,11 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 const maps = ref<any[]>([])
 const syncStoreId = ref<number | undefined>()
 const syncPlatform = ref('MEITUAN')
@@ -166,15 +153,10 @@ function platformName(p: string) {
 }
 
 async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-    if (syncStoreId.value == null) {
-      const defaultSid = auth.user?.store_id || stores.value[0]?.id
-      if (defaultSid) syncStoreId.value = Number(defaultSid)
-    }
-  } catch {
-    stores.value = []
+  if (!(await fetchStores())) return
+  if (syncStoreId.value == null) {
+    const defaultSid = auth.user?.store_id || stores.value[0]?.id
+    if (defaultSid) syncStoreId.value = Number(defaultSid)
   }
 }
 
@@ -337,6 +319,7 @@ onMounted(async () => {
 .maps-page {
   min-height: 400px;
 }
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -344,9 +327,11 @@ onMounted(async () => {
   align-items: center;
   margin-bottom: 12px;
 }
+
 .muted {
   color: #c0c4cc;
 }
+
 .pager {
   margin-top: 12px;
   display: flex;

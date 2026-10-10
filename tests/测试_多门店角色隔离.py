@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.v1.products import _assert_option_group_manage
-from app.api.v1.websocket import staff_may_subscribe
+from app.api.products import _assert_option_group_manage
+from app.api.websocket import staff_may_subscribe
 from app.core.exceptions import AppException
 
 
@@ -66,7 +66,7 @@ async def test_public_product_list_requires_store():
     try:
         transport = ASGITransport(app=app)
         with patch(
-            "app.api.v1.products.get_redis",
+            "app.api.products.get_redis",
             AsyncMock(side_effect=ConnectionError("redis unavailable in tests")),
         ):
             async with AsyncClient(transport=transport, base_url="http://test") as client:

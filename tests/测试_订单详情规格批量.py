@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_get_order_batches_item_options():
-    src = Path(__file__).resolve().parents[1] / "backend" / "app" / "api" / "v1" / "orders.py"
+    src = Path(__file__).resolve().parents[1] / "backend" / "app" / "api" / "orders.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     fn = None
     for node in tree.body:

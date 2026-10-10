@@ -1,8 +1,33 @@
 /** H5 购物车规格计价（与小程序 cart.js 逻辑一致） */
 
+/** 金额 → 分（整数），避免 float 累加误差 */
+function toFen(v: unknown): number {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return 0
+    return Math.round(v * 100)
+  }
+  const s = String(v).trim().replace(/,/g, '')
+  const m = s.match(/^([+-]?)(\d+)(?:\.(\d*))?$/)
+  if (!m) {
+    const n = Number(s)
+    return Number.isFinite(n) ? Math.round(n * 100) : 0
+  }
+  const sign = m[1] === '-' ? -1 : 1
+  const yuan = parseInt(m[2], 10) || 0
+  const frac = (m[3] || '').padEnd(2, '0').slice(0, 2)
+  return sign * (yuan * 100 + (parseInt(frac, 10) || 0))
+}
+
+function fromFen(fen: number): string {
+  const n = Math.trunc(Number(fen) || 0)
+  const sign = n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`
+}
+
 function parseMoney(v: unknown): number {
-  const n = parseFloat(String(v ?? ''))
-  return Number.isFinite(n) ? n : 0
+  return toFen(v) / 100
 }
 
 function findOption(group: any, optionId: number | string) {
@@ -14,21 +39,21 @@ export function calcUnitPrice(
   selected: Record<number, number>,
   multi: Record<number, number[]>,
 ): number {
-  let total = parseMoney(product.price)
+  let fen = toFen(product.price)
   for (const g of product.option_groups || []) {
     if (g.selection_type === 'SINGLE') {
       const sid = selected[g.id]
       const opt = sid != null ? findOption(g, sid) : null
-      if (opt) total += parseMoney(opt.extra_price)
+      if (opt) fen += toFen(opt.extra_price)
     }
     if (g.selection_type === 'MULTIPLE') {
       for (const oid of multi[g.id] || []) {
         const opt = findOption(g, oid)
-        if (opt) total += parseMoney(opt.extra_price)
+        if (opt) fen += toFen(opt.extra_price)
       }
     }
   }
-  return Math.round(total * 100) / 100
+  return Number(fromFen(fen))
 }
 
 export function buildOptionLabels(
@@ -84,7 +109,7 @@ export function mergeCartItem(cart: any[], entry: any) {
     const cur = { ...list[idx] }
     const add = entry.quantity || 1
     cur.quantity = (cur.quantity || 1) + add
-    cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
+    cur.subtotal = fromFen(toFen(cur.unit_price) * cur.quantity)
     list[idx] = cur
   } else {
     list.push({ ...entry })

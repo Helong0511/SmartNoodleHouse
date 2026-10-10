@@ -59,7 +59,8 @@ def test_build_display_item_takeaway():
     assert item["pickup_label"] == pickup_code_from_order_no(order.order_no)
     assert item["pickup_sub"] == "打包自取"
     assert item["status_label"] == "请取餐"
-    assert item["ready_at"] == ready_at.isoformat()
+    # ready_at 走全局 serialize_dt：aware 时间统一转换为中国本地 +08:00
+    assert item["ready_at"] == "2026-08-27T18:00:00+08:00"
 
 
 def test_pickup_fields():

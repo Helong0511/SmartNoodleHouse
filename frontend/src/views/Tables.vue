@@ -1,32 +1,14 @@
 <template>
   <div v-loading="loading">
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="filterStoreId"
-        clearable
-        placeholder="全部门店"
-        style="width: 180px"
-        @change="reload"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="filterStoreId" clearable placeholder="全部门店" style="width: 180px"
+        @change="reload">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
-      <el-input
-        v-model="keyword"
-        placeholder="桌号 / 名称"
-        clearable
-        style="width: 180px"
-        @keyup.enter="reload"
-        @clear="reload"
-      />
-      <el-select
-        v-model="filterStatus"
-        clearable
-        placeholder="全部状态"
-        style="width: 120px"
-        @change="reload"
-      >
+      <el-input v-model="keyword" placeholder="桌号 / 名称" clearable style="width: 180px" @keyup.enter="reload"
+        @clear="reload" />
+      <el-select v-model="filterStatus" clearable placeholder="全部状态" style="width: 120px" @change="reload">
         <el-option label="启用" :value="1" />
         <el-option label="禁用" :value="0" />
       </el-select>
@@ -62,16 +44,9 @@
     </el-table>
 
     <div class="pager">
-      <el-pagination
-        v-model:current-page="pager.page"
-        v-model:page-size="pager.pageSize"
-        :total="pager.total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        background
-        @current-change="load"
-        @size-change="reload"
-      />
+      <el-pagination v-model:current-page="pager.page" v-model:page-size="pager.pageSize" :total="pager.total"
+        :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" background @current-change="load"
+        @size-change="reload" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑桌台' : '新增桌台'" width="420px">
@@ -104,11 +79,7 @@
         </div>
         <div class="qr-row">
           <div class="qr-item primary">
-            <img
-              v-if="printRow.scanQrDataUrl"
-              :src="printRow.scanQrDataUrl"
-              alt="一码通扫"
-            />
+            <img v-if="printRow.scanQrDataUrl" :src="printRow.scanQrDataUrl" alt="一码通扫" />
             <div v-else class="qr-loading primary-loading">正在生成二维码…</div>
             <div class="qr-label">一码通扫（推荐）</div>
             <div class="qr-desc">微信 / 支付宝均可扫 · 中间为门店 Logo</div>
@@ -127,11 +98,7 @@
           <summary>本地调试码（微信 / 支付宝单独扫）</summary>
           <div class="qr-row sub">
             <div class="qr-item">
-              <img
-                v-if="printRow.wechatMinicodeUrl"
-                :src="printRow.wechatMinicodeUrl"
-                alt="微信小程序码"
-              />
+              <img v-if="printRow.wechatMinicodeUrl" :src="printRow.wechatMinicodeUrl" alt="微信小程序码" />
               <div v-else-if="printRow.wechatMinicodeError" class="qr-error">
                 {{ printRow.wechatMinicodeError }}
               </div>
@@ -140,11 +107,7 @@
               <div class="qr-desc">官方小程序码（develop），请用微信扫；勿用 weixin:// 普通二维码</div>
             </div>
             <div class="qr-item">
-              <img
-                v-if="printRow.alipayQrDataUrl"
-                :src="printRow.alipayQrDataUrl"
-                alt="支付宝"
-              />
+              <img v-if="printRow.alipayQrDataUrl" :src="printRow.alipayQrDataUrl" alt="支付宝" />
               <div v-else class="qr-loading">正在生成…</div>
               <div>支付宝 Scheme</div>
               <div class="qr-desc">需配置 ALIPAY_APP_ID；开发版先开联调</div>
@@ -154,11 +117,8 @@
             若仍无法打开：1）开发者工具先「真机预览/真机调试」一次；2）手机微信号须是该小程序的开发者/体验者；
             3）公众平台确认 AppID 与 .env 一致。
           </p>
-          <el-button
-            class="copy-scheme"
-            size="small"
-            @click="copyText(printRow.wechat_scheme || printRow.wechat_qr_url)"
-          >复制微信 Scheme（备用，系统浏览器打开）</el-button>
+          <el-button class="copy-scheme" size="small"
+            @click="copyText(printRow.wechat_scheme || printRow.wechat_qr_url)">复制微信 Scheme（备用，系统浏览器打开）</el-button>
         </details>
       </div>
       <template #footer>
@@ -173,6 +133,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { qrDataUrlWithLogo } from '@/utils/qrWithLogo'
 
@@ -180,7 +141,7 @@ const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const tables = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const filterStoreId = ref<number | undefined>()
 const keyword = ref('')
 const filterStatus = ref<number | undefined>()
@@ -218,15 +179,6 @@ async function buildPrintQrs(row: any) {
   if (!printRow.value || printRow.value.id !== row.id) return
   printRow.value.scanQrDataUrl = scanQrDataUrl
   printRow.value.alipayQrDataUrl = alipayQrDataUrl
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function load() {
@@ -301,15 +253,14 @@ async function openPrint(row: any) {
   printVisible.value = true
   await Promise.all([
     buildPrintQrs(printRow.value),
-    loadWechatMinicode(row.qr_token),
+    loadWechatMinicode(row.id),
   ])
 }
 
-async function loadWechatMinicode(token: string) {
-  if (!token || !printRow.value) return
+async function loadWechatMinicode(tableId: number) {
+  if (!tableId || !printRow.value) return
   try {
-    const res = await api.get('/miniprogram/wechat-debug-qrcode', {
-      params: { token },
+    const res = await api.get(`/tables/${tableId}/qrcode`, {
       responseType: 'blob',
     })
     const blob = res instanceof Blob ? res : (res as any)?.data
@@ -410,9 +361,23 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pager { margin-top: 12px; display: flex; justify-content: flex-end; }
-.print-box { text-align: center; }
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.print-box {
+  text-align: center;
+}
+
 .print-logo {
   display: block;
   width: 88px;
@@ -422,19 +387,61 @@ onMounted(async () => {
   border-radius: 12px;
   background: #fff;
 }
-.print-title { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
-.print-sub { color: #666; margin-bottom: 16px; }
-.qr-row { display: flex; justify-content: center; gap: 24px; margin-bottom: 12px; }
-.qr-item { font-size: 12px; color: #666; }
-.qr-item img { display: block; width: 180px; height: 180px; margin: 0 auto 8px; }
-.qr-item.primary img { width: 220px; height: 220px; }
+
+.print-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.print-sub {
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.qr-row {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+.qr-item {
+  font-size: 12px;
+  color: #666;
+}
+
+.qr-item img {
+  display: block;
+  width: 180px;
+  height: 180px;
+  margin: 0 auto 8px;
+}
+
+.qr-item.primary img {
+  width: 220px;
+  height: 220px;
+}
+
 .qr-loading.primary-loading {
   width: 220px;
   height: 220px;
 }
-.qr-label { font-size: 14px; font-weight: 600; color: #333; margin-top: 4px; }
-.qr-desc { font-size: 12px; color: #888; }
-.qr-loading, .qr-error {
+
+.qr-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-top: 4px;
+}
+
+.qr-desc {
+  font-size: 12px;
+  color: #888;
+}
+
+.qr-loading,
+.qr-error {
   width: 140px;
   height: 140px;
   margin: 0 auto;
@@ -449,16 +456,58 @@ onMounted(async () => {
   border-radius: 8px;
   box-sizing: border-box;
 }
-.qr-error { color: #c45656; background: #fff1f0; }
-.hint.debug-steps { text-align: left; margin-top: 10px; }
-.more-links { margin-top: 16px; text-align: left; font-size: 13px; color: #666; }
-.copy-scheme { margin-top: 10px; }
-.qr-row.sub { margin-top: 12px; }
-.qr-row.sub .qr-item img { width: 140px; height: 140px; }
-.hint { color: #999; font-size: 12px; margin: 8px 0 12px; }
+
+.qr-error {
+  color: #c45656;
+  background: #fff1f0;
+}
+
+.hint.debug-steps {
+  text-align: left;
+  margin-top: 10px;
+}
+
+.more-links {
+  margin-top: 16px;
+  text-align: left;
+  font-size: 13px;
+  color: #666;
+}
+
+.copy-scheme {
+  margin-top: 10px;
+}
+
+.qr-row.sub {
+  margin-top: 12px;
+}
+
+.qr-row.sub .qr-item img {
+  width: 140px;
+  height: 140px;
+}
+
+.hint {
+  color: #999;
+  font-size: 12px;
+  margin: 8px 0 12px;
+}
+
 @media print {
-  body * { visibility: hidden; }
-  #table-qr-print, #table-qr-print * { visibility: visible; }
-  #table-qr-print { position: absolute; left: 0; top: 0; width: 100%; }
+  body * {
+    visibility: hidden;
+  }
+
+  #table-qr-print,
+  #table-qr-print * {
+    visibility: visible;
+  }
+
+  #table-qr-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
 }
 </style>

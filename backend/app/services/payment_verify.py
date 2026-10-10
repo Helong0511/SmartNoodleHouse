@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from app.core.config import get_settings
+from app.core.config import dev_mode_allowed, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,7 @@ _WECHAT_TS_SKEW = 300
 
 
 def _dev_mode_allowed() -> bool:
-    s = get_settings()
-    return s.is_development and s.app_debug and s.allow_payment_mock
+    return dev_mode_allowed("allow_payment_mock")
 
 
 def _load_pem(key_str: str, is_private: bool = False):

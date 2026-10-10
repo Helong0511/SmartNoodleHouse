@@ -2,56 +2,25 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="全部门店"
-          clearable
-          style="width:160px"
-          @change="reload"
-        >
+        <el-select v-model="storeFilter" placeholder="全部门店" clearable style="width:160px" @change="reload">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
         <el-select v-model="entryType" placeholder="分录类型" clearable style="width:120px" @change="reload">
-          <el-option
-            v-for="(text, key) in LEDGER_ENTRY_TYPE"
-            :key="key"
-            :label="text"
-            :value="key"
-          />
+          <el-option v-for="(text, key) in LEDGER_ENTRY_TYPE" :key="key" :label="text" :value="key" />
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-select
-          v-model="channel"
-          clearable
-          filterable
-          allow-create
-          default-first-option
-          placeholder="渠道"
-          style="width:130px"
-          @change="reload"
-        >
-          <el-option
-            v-for="(text, key) in CHANNEL"
-            :key="key"
-            :label="text"
-            :value="key"
-          />
+        <el-select v-model="channel" clearable filterable allow-create default-first-option placeholder="渠道"
+          style="width:130px" @change="reload">
+          <el-option v-for="(text, key) in CHANNEL" :key="key" :label="text" :value="key" />
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="起"
-          end-placeholder="止"
-          style="width:240px"
-          @change="reload"
-        />
+        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="起"
+          end-placeholder="止" style="width:240px" @change="reload" />
       </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -82,15 +51,8 @@
     </el-table>
 
     <div class="pager">
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        @current-change="load"
-        @size-change="reload"
-      />
+      <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next" @current-change="load" @size-change="reload" />
     </div>
   </div>
 </template>
@@ -99,6 +61,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import {
   CHANNEL,
@@ -110,7 +73,7 @@ import {
 const auth = useAuthStore()
 const loading = ref(false)
 const rows = ref<any[]>([])
-const stores = ref<{ id: number; name: string }[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 const storeFilter = ref<number | null>(null)
 const boundStoreName = ref('')
 const entryType = ref('')
@@ -121,15 +84,10 @@ const pageSize = ref(20)
 const total = ref(0)
 
 async function loadStores() {
-  try {
-    const res: any = await api.get('/settings/stores/options')
-    stores.value = res.data?.items || []
-    if (!auth.isSuperAdmin && auth.user?.store_id) {
-      const s = stores.value.find((x) => x.id === auth.user?.store_id)
-      boundStoreName.value = s?.name || `门店#${auth.user.store_id}`
-    }
-  } catch {
-    stores.value = []
+  if (!(await fetchStores())) return
+  if (!auth.isSuperAdmin && auth.user?.store_id) {
+    const s = stores.value.find((x) => x.id === auth.user?.store_id)
+    boundStoreName.value = s?.name || `门店#${auth.user.store_id}`
   }
 }
 
@@ -187,5 +145,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.pager { margin-top: 16px; display: flex; justify-content: flex-end; }
+.pager {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
 </style>

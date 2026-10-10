@@ -38,7 +38,7 @@ from app.services.category_schedule import (
     load_enabled_schedules,
     pick_active_schedule,
 )
-from app.core.response import now_local
+from app.core.response import now_local, serialize_dt
 
 _BUILD_TTL_SECONDS = 60
 # 进程内兜底（Redis 不可用时仍避免每次请求重查）
@@ -155,7 +155,7 @@ async def build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                 "name": p.name,
                 "description": p.description or "",
                 "main_image": p.main_image,
-                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                "updated_at": serialize_dt(p.updated_at) if p.updated_at else None,
                 "price": str(p.price),
                 "original_price": str(p.original_price) if p.original_price else None,
                 "status": p.status,

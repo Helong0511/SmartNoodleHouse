@@ -1,7 +1,7 @@
 """商品主图 URL 白名单。"""
 import pytest
 
-from app.api.v1.products import _assert_safe_product_image_url
+from app.api.products import _assert_safe_product_image_url
 from app.core.exceptions import AppException
 
 

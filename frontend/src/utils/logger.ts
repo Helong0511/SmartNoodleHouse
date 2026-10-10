@@ -85,7 +85,7 @@ async function flush() {
   try {
     const res = await fetch(`${apiBase()}/client-logs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify({
         source: 'frontend',
         app_version: (import.meta.env.VITE_APP_VERSION as string) || undefined,

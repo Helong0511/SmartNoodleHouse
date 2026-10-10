@@ -19,18 +19,23 @@
         "product/product",
         "confirm/confirm",
         "result/result",
-        "queue/queue"
+        "queue/queue",
+        "invoice/invoice"
       ]
     }
   ],
   "preloadRule": {
     "pages/menu/menu": {
       "network": "all",
-      "packages": ["order"]
+      "packages": [
+        "order"
+      ]
     },
     "pages/orders/orders": {
       "network": "all",
-      "packages": ["order"]
+      "packages": [
+        "order"
+      ]
     }
   },
   "window": {

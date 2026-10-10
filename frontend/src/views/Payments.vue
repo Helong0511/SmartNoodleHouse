@@ -2,26 +2,14 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="全部门店"
-          clearable
-          style="width:160px"
-          @change="onStoreChange"
-        >
+        <el-select v-model="storeFilter" placeholder="全部门店" clearable style="width:160px" @change="onStoreChange">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input
-          v-model="keyword"
-          clearable
-          placeholder="支付号 / 订单号"
-          style="width:220px"
-          @keyup.enter="reload"
-          @clear="reload"
-        />
+        <el-input v-model="keyword" clearable placeholder="支付号 / 订单号" style="width:220px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
       <el-form-item>
         <el-select v-model="operatorFilter" placeholder="收银员" clearable filterable style="width:130px" @change="reload">
@@ -39,36 +27,15 @@
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="支付起"
-          end-placeholder="支付止"
-          style="width:240px"
-          @change="reload"
-        />
+        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="支付起"
+          end-placeholder="支付止" style="width:240px" @change="reload" />
       </el-form-item>
       <el-form-item>
-        <el-input-number
-          v-model="amountMin"
-          :min="0"
-          :precision="2"
-          :controls="false"
-          placeholder="金额≥"
-          style="width:110px"
-          @change="reload"
-        />
+        <el-input-number v-model="amountMin" :min="0" :precision="2" :controls="false" placeholder="金额≥"
+          style="width:110px" @change="reload" />
         <span style="margin:0 4px;color:#999">-</span>
-        <el-input-number
-          v-model="amountMax"
-          :min="0"
-          :precision="2"
-          :controls="false"
-          placeholder="金额≤"
-          style="width:110px"
-          @change="reload"
-        />
+        <el-input-number v-model="amountMax" :min="0" :precision="2" :controls="false" placeholder="金额≤"
+          style="width:110px" @change="reload" />
       </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -94,7 +61,8 @@
       </el-table-column>
       <el-table-column label="用餐" width="90">
         <template #default="{ row }">
-          <el-tag v-if="row.order_channel === 'MEITUAN' || row.order_channel === 'ELEME'" size="small" type="info">外卖</el-tag>
+          <el-tag v-if="row.order_channel === 'MEITUAN' || row.order_channel === 'ELEME'" size="small"
+            type="info">外卖</el-tag>
           <el-tag v-else-if="row.dining_type === 'TAKEAWAY'" size="small" type="warning">打包</el-tag>
           <span v-else>堂食</span>
         </template>
@@ -141,12 +109,7 @@
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openRefundDrawer(row)">明细</el-button>
-          <el-button
-            v-if="canRefund(row)"
-            link
-            type="danger"
-            @click="openRefund(row)"
-          >
+          <el-button v-if="canRefund(row)" link type="danger" @click="openRefund(row)">
             退款
           </el-button>
           <el-button link type="primary" @click="$router.push(`/orders/${row.order_id}`)">订单</el-button>
@@ -154,30 +117,17 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination
-      v-model:current-page="page"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[20, 50, 100]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top:16px"
-      @current-change="load"
-      @size-change="reload"
-    />
+    <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next" style="margin-top:16px" @current-change="load" @size-change="reload" />
 
     <el-dialog v-model="refundDialog" title="发起退款" width="400px">
       <el-form label-width="90px">
         <el-form-item label="支付号">{{ refundRow?.payment_no }}</el-form-item>
-        <el-form-item label="门店">{{ refundRow?.store_name || (refundRow?.store_id ? `门店#${refundRow.store_id}` : '—') }}</el-form-item>
+        <el-form-item label="门店">{{ refundRow?.store_name || (refundRow?.store_id ? `门店#${refundRow.store_id}` : '—')
+        }}</el-form-item>
         <el-form-item label="可退余额">¥{{ refundMax }}</el-form-item>
         <el-form-item label="退款金额">
-          <el-input-number
-            v-model="refundAmount"
-            :min="0.01"
-            :max="refundMax"
-            :precision="2"
-            style="width:100%"
-          />
+          <el-input-number v-model="refundAmount" :min="0.01" :max="refundMax" :precision="2" style="width:100%" />
         </el-form-item>
         <el-form-item label="原因">
           <el-input v-model="refundReason" />
@@ -189,28 +139,19 @@
       </template>
     </el-dialog>
 
-    <el-drawer
-      v-model="refundDrawer"
-      :title="refundDrawerTitle"
-      size="720px"
-      destroy-on-close
-    >
+    <el-drawer v-model="refundDrawer" :title="refundDrawerTitle" size="720px" destroy-on-close>
       <div v-loading="refundListLoading">
-        <el-alert
-          v-if="refundDrawerMode === 'inflight'"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="以下为 PENDING / PROCESSING 退款单。可点「同步」向平台查询结果（补偿回调丢失）。"
-          style="margin-bottom:12px"
-        />
+        <el-alert v-if="refundDrawerMode === 'inflight'" type="warning" :closable="false" show-icon
+          title="以下为 PENDING / PROCESSING 退款单。可点「同步」向平台查询结果（补偿回调丢失）。" style="margin-bottom:12px" />
         <el-table :data="refundList" border size="small">
           <el-table-column prop="refund_no" label="退款单号" min-width="260" show-overflow-tooltip />
-          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="payment_no" label="支付号" min-width="240" show-overflow-tooltip />
+          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="payment_no" label="支付号" min-width="240"
+            show-overflow-tooltip />
           <el-table-column prop="order_no" label="订单号" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">{{ row.order_no || '—' }}</template>
           </el-table-column>
-          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="store_name" label="门店" min-width="120" show-overflow-tooltip>
+          <el-table-column v-if="refundDrawerMode === 'inflight'" prop="store_name" label="门店" min-width="120"
+            show-overflow-tooltip>
             <template #default="{ row }">{{ row.store_name || '—' }}</template>
           </el-table-column>
           <el-table-column label="金额" width="90">
@@ -235,30 +176,18 @@
           <el-table-column prop="created_at" label="申请时间" width="160" />
           <el-table-column label="操作" width="100" fixed="right">
             <template #default="{ row }">
-              <el-button
-                v-if="canSyncRefund(row)"
-                link
-                type="warning"
-                :loading="syncingNo === row.refund_no"
-                @click="syncRefund(row)"
-              >
+              <el-button v-if="canSyncRefund(row)" link type="warning" :loading="syncingNo === row.refund_no"
+                @click="syncRefund(row)">
                 同步
               </el-button>
               <span v-else class="muted">—</span>
             </template>
           </el-table-column>
         </el-table>
-        <el-pagination
-          v-if="refundDrawerMode === 'inflight'"
-          v-model:current-page="refundPage"
-          v-model:page-size="refundPageSize"
-          :total="refundTotal"
-          :page-sizes="[20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          style="margin-top:12px"
-          @current-change="loadInflightRefunds"
-          @size-change="reloadInflightRefunds"
-        />
+        <el-pagination v-if="refundDrawerMode === 'inflight'" v-model:current-page="refundPage"
+          v-model:page-size="refundPageSize" :total="refundTotal" :page-sizes="[20, 50, 100]"
+          layout="total, sizes, prev, pager, next" style="margin-top:12px" @current-change="loadInflightRefunds"
+          @size-change="reloadInflightRefunds" />
         <div v-if="!refundList.length && !refundListLoading" class="empty-hint">暂无退款记录</div>
       </div>
     </el-drawer>
@@ -269,6 +198,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import {
   label,
@@ -284,7 +214,7 @@ import { todayDateRange } from '@/utils/date'
 const auth = useAuthStore()
 const loading = ref(false)
 const payments = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const operators = ref<any[]>([])
 const page = ref(1)
 const pageSize = ref(20)
@@ -379,15 +309,6 @@ async function loadOperators() {
     operators.value = res.data?.items || []
   } catch {
     operators.value = []
-  }
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
   }
 }
 
@@ -554,9 +475,27 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { margin-bottom: 12px; }
-.empty-hint { margin-top: 24px; text-align: center; color: #909399; }
-.muted { color: #c0c4cc; }
-.fee-tip { font-size: 11px; color: #e6a23c; line-height: 1.2; }
-.fee-tip.discount { color: #f56c6c; }
+.toolbar {
+  margin-bottom: 12px;
+}
+
+.empty-hint {
+  margin-top: 24px;
+  text-align: center;
+  color: #909399;
+}
+
+.muted {
+  color: #c0c4cc;
+}
+
+.fee-tip {
+  font-size: 11px;
+  color: #e6a23c;
+  line-height: 1.2;
+}
+
+.fee-tip.discount {
+  color: #f56c6c;
+}
 </style>

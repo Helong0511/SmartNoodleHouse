@@ -2,13 +2,9 @@
   <div class="orders-page" v-loading="pageLoading">
     <!-- KPI -->
     <div class="kpi-row">
-      <div
-        v-for="k in kpiCards"
-        :key="k.key"
-        class="kpi-card"
+      <div v-for="k in kpiCards" :key="k.key" class="kpi-card"
         :class="[{ active: quickFilter === k.filter, alert: k.alert && Number(k.value) > 0 }, k.tone]"
-        @click="applyQuick(k.filter)"
-      >
+        @click="applyQuick(k.filter)">
         <div class="kpi-val">{{ k.value }}</div>
         <div class="kpi-label">{{ k.label }}</div>
       </div>
@@ -19,14 +15,8 @@
     </div>
 
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="storeFilter"
-        placeholder="全部门店"
-        clearable
-        style="width: 160px"
-        @change="onStoreChange"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="storeFilter" placeholder="全部门店" clearable style="width: 160px"
+        @change="onStoreChange">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
@@ -34,7 +24,8 @@
         <el-option label="美团" value="MEITUAN" />
         <el-option label="饿了么" value="ELEME" />
       </el-select>
-      <el-select v-model="filters.delivery_status" placeholder="接单状态" clearable style="width: 130px" @change="reloadOrders">
+      <el-select v-model="filters.delivery_status" placeholder="接单状态" clearable style="width: 130px"
+        @change="reloadOrders">
         <el-option v-for="(t, v) in statusOptions" :key="v" :label="t" :value="v" />
       </el-select>
       <el-select v-model="filters.refund_status" placeholder="退款" clearable style="width: 110px" @change="reloadOrders">
@@ -43,31 +34,12 @@
         <el-option label="已同意" value="APPROVED" />
         <el-option label="已拒绝" value="REJECTED" />
       </el-select>
-      <el-input
-        v-model="filters.keyword"
-        clearable
-        placeholder="单号 / 姓名 / 电话 / 地址"
-        style="width: 220px"
-        @keyup.enter="reloadOrders"
-        @clear="reloadOrders"
-      />
-      <el-input
-        v-model="filters.day_seq"
-        clearable
-        placeholder="流水#"
-        style="width: 90px"
-        @keyup.enter="reloadOrders"
-        @clear="reloadOrders"
-      />
-      <el-date-picker
-        v-model="filters.dateRange"
-        type="daterange"
-        value-format="YYYY-MM-DD"
-        start-placeholder="开始"
-        end-placeholder="结束"
-        style="width: 240px"
-        @change="reloadOrders"
-      />
+      <el-input v-model="filters.keyword" clearable placeholder="单号 / 姓名 / 电话 / 地址" style="width: 220px"
+        @keyup.enter="reloadOrders" @clear="reloadOrders" />
+      <el-input v-model="filters.day_seq" clearable placeholder="流水#" style="width: 90px" @keyup.enter="reloadOrders"
+        @clear="reloadOrders" />
+      <el-date-picker v-model="filters.dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始"
+        end-placeholder="结束" style="width: 240px" @change="reloadOrders" />
       <el-checkbox v-model="filters.only_urge" @change="reloadOrders">仅催单</el-checkbox>
       <el-button type="primary" @click="reloadOrders">查询</el-button>
     </div>
@@ -76,14 +48,8 @@
       有新订单或状态更新，点击回到第 1 页查看最新
     </div>
 
-    <el-table
-      :data="orders"
-      size="small"
-      stripe
-      highlight-current-row
-      :row-class-name="orderRowClass"
-      @row-click="(row: any) => openDetail(row)"
-    >
+    <el-table :data="orders" size="small" stripe highlight-current-row :row-class-name="orderRowClass"
+      @row-click="(row: any) => openDetail(row)">
       <el-table-column label="平台" width="72">
         <template #default="{ row }">
           <el-tag size="small" :type="row.platform === 'MEITUAN' ? 'warning' : 'success'" effect="plain">
@@ -118,11 +84,8 @@
       </el-table-column>
       <el-table-column label="退款" width="80">
         <template #default="{ row }">
-          <el-tag
-            v-if="row.refund_status && row.refund_status !== 'NONE'"
-            size="small"
-            :type="row.refund_status === 'PENDING' ? 'danger' : 'info'"
-          >
+          <el-tag v-if="row.refund_status && row.refund_status !== 'NONE'" size="small"
+            :type="row.refund_status === 'PENDING' ? 'danger' : 'info'">
             {{ label(DELIVERY_REFUND_STATUS, row.refund_status) }}
           </el-tag>
           <span v-else class="muted">-</span>
@@ -149,23 +112,11 @@
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
-          <el-button
-            v-if="row.delivery_status === 'PENDING'"
-            link
-            type="success"
-            size="small"
-            :loading="actingId === row.order_id"
-            @click.stop="confirmOrder(row)"
-          >
+          <el-button v-if="row.delivery_status === 'PENDING'" link type="success" size="small"
+            :loading="actingId === row.order_id" @click.stop="confirmOrder(row)">
             接单
           </el-button>
-          <el-button
-            v-if="canCancel(row)"
-            link
-            type="danger"
-            size="small"
-            @click.stop="askCancel(row)"
-          >
+          <el-button v-if="canCancel(row)" link type="danger" size="small" @click.stop="askCancel(row)">
             取消
           </el-button>
         </template>
@@ -173,17 +124,9 @@
     </el-table>
 
     <div class="pager">
-      <el-pagination
-        v-model:current-page="pager.page"
-        v-model:page-size="pager.pageSize"
-        :total="pager.total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        background
-        small
-        @current-change="loadOrders"
-        @size-change="reloadOrders"
-      />
+      <el-pagination v-model:current-page="pager.page" v-model:page-size="pager.pageSize" :total="pager.total"
+        :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" background small
+        @current-change="loadOrders" @size-change="reloadOrders" />
     </div>
 
     <!-- 详情抽屉 -->
@@ -191,7 +134,8 @@
       <div v-loading="detailLoading" class="detail">
         <template v-if="detail">
           <div class="detail-head">
-            <el-tag :type="detail.platform === 'MEITUAN' ? 'warning' : 'success'">{{ platformName(detail.platform) }}</el-tag>
+            <el-tag :type="detail.platform === 'MEITUAN' ? 'warning' : 'success'">{{ platformName(detail.platform)
+            }}</el-tag>
             <span class="seq">#{{ detail.platform_day_seq || '-' }}</span>
             <el-tag :type="deliveryStatusTagType(detail.delivery_status)" size="small">
               {{ label(DELIVERY_STATUS, detail.delivery_status) }}
@@ -203,25 +147,30 @@
             <el-descriptions-item label="本系统单号">{{ detail.order_no }}</el-descriptions-item>
             <el-descriptions-item label="商品小计">¥{{ detail.subtotal || '-' }}</el-descriptions-item>
             <el-descriptions-item label="会员优惠">
-              <span v-if="Number(detail.discount_amount) > 0" class="discount-text">-¥{{ detail.discount_amount }}</span>
+              <span v-if="Number(detail.discount_amount) > 0" class="discount-text">-¥{{ detail.discount_amount
+              }}</span>
               <span v-else class="muted">—</span>
             </el-descriptions-item>
             <el-descriptions-item label="优惠券">
-              <span v-if="Number(detail.coupon_discount) > 0" class="discount-text">-¥{{ detail.coupon_discount }}</span>
+              <span v-if="Number(detail.coupon_discount) > 0" class="discount-text">-¥{{ detail.coupon_discount
+              }}</span>
               <span v-else class="muted">—</span>
             </el-descriptions-item>
             <el-descriptions-item label="代金券">
-              <span v-if="Number(detail.voucher_discount) > 0" class="discount-text">-¥{{ detail.voucher_discount }}</span>
+              <span v-if="Number(detail.voucher_discount) > 0" class="discount-text">-¥{{ detail.voucher_discount
+              }}</span>
               <span v-else class="muted">—</span>
             </el-descriptions-item>
-            <el-descriptions-item label="应付金额"><span class="money">¥{{ detail.total_amount }}</span></el-descriptions-item>
+            <el-descriptions-item label="应付金额"><span class="money">¥{{ detail.total_amount
+            }}</span></el-descriptions-item>
             <el-descriptions-item label="配送费">¥{{ detail.delivery_fee }}</el-descriptions-item>
             <el-descriptions-item label="餐盒费">¥{{ detail.packing_fee }}</el-descriptions-item>
             <el-descriptions-item label="物流">
               {{ label(LOGISTICS_STATUS, detail.logistics_status, detail.logistics_status || '-') }}
               <span v-if="detail.logistics_code" class="muted"> ({{ detail.logistics_code }})</span>
             </el-descriptions-item>
-            <el-descriptions-item label="顾客">{{ detail.recipient_name }} {{ detail.recipient_phone }}</el-descriptions-item>
+            <el-descriptions-item label="顾客">{{ detail.recipient_name }} {{ detail.recipient_phone
+            }}</el-descriptions-item>
             <el-descriptions-item label="地址">{{ detail.recipient_address || '-' }}</el-descriptions-item>
             <el-descriptions-item label="骑手">
               {{ detail.rider_name || '-' }}
@@ -246,12 +195,8 @@
           <div v-if="!(detail.items || []).length" class="muted">暂无明细</div>
 
           <div class="detail-actions mt">
-            <el-button
-              v-if="detail.delivery_status === 'PENDING'"
-              type="success"
-              :loading="actingId === detail.order_id"
-              @click="confirmOrder(detail)"
-            >
+            <el-button v-if="detail.delivery_status === 'PENDING'" type="success"
+              :loading="actingId === detail.order_id" @click="confirmOrder(detail)">
               接单
             </el-button>
             <el-button v-if="canCancel(detail)" type="danger" plain @click="askCancel(detail)">商家取消</el-button>
@@ -282,6 +227,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -294,7 +240,7 @@ import {
 
 const router = useRouter()
 const auth = useAuthStore()
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
@@ -433,15 +379,6 @@ function applyQuick(filter: string) {
     filters.dateRange = [s, s]
   }
   reloadOrders()
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 function onStoreChange() {
@@ -677,6 +614,7 @@ onUnmounted(() => {
 .orders-page {
   min-height: 400px;
 }
+
 .kpi-row {
   display: flex;
   flex-wrap: wrap;
@@ -684,6 +622,7 @@ onUnmounted(() => {
   margin-bottom: 14px;
   align-items: stretch;
 }
+
 .kpi-card {
   min-width: 108px;
   padding: 12px 14px;
@@ -693,39 +632,49 @@ onUnmounted(() => {
   border: 1px solid transparent;
   transition: border-color 0.15s, background 0.15s;
 }
+
 .kpi-card:hover {
   border-color: #c0c4cc;
 }
+
 .kpi-card.active {
   border-color: #409eff;
   background: #ecf5ff;
 }
+
 .kpi-card.alert {
   animation: pulse 1.6s ease-in-out infinite;
 }
+
 .kpi-card.tone-danger {
   background: #fef0f0;
 }
+
 .kpi-card.tone-warn {
   background: #fdf6ec;
 }
+
 .kpi-card.tone-ok {
   background: #f0f9eb;
 }
+
 .kpi-card.tone-discount {
   background: #fef0f0;
 }
+
 .kpi-val {
   font-size: 22px;
   font-weight: 700;
   color: #303133;
   line-height: 1.2;
 }
+
 .kpi-label {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
 }
+
 .kpi-meta {
   margin-left: auto;
   display: flex;
@@ -734,6 +683,7 @@ onUnmounted(() => {
   gap: 6px;
   justify-content: center;
 }
+
 .conn {
   font-size: 12px;
   padding: 2px 8px;
@@ -741,19 +691,23 @@ onUnmounted(() => {
   background: #f4f4f5;
   color: #909399;
 }
+
 .conn.online {
   background: #f0f9eb;
   color: #67c23a;
 }
+
 .conn.polling {
   background: #fdf6ec;
   color: #e6a23c;
 }
+
 .conn.offline,
 .conn.connecting {
   background: #f4f4f5;
   color: #909399;
 }
+
 .new-hint {
   margin-bottom: 10px;
   padding: 8px 14px;
@@ -764,9 +718,11 @@ onUnmounted(() => {
   cursor: pointer;
   text-align: center;
 }
+
 .new-hint:hover {
   background: var(--el-color-primary-light-7);
 }
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -774,40 +730,49 @@ onUnmounted(() => {
   align-items: center;
   margin-bottom: 12px;
 }
+
 .pager {
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
 }
+
 .money {
   font-weight: 600;
   color: #e6a23c;
 }
+
 .discount-tip {
   font-size: 11px;
   color: #f56c6c;
   line-height: 1.2;
 }
+
 .discount-text {
   color: #f56c6c;
   font-weight: 600;
 }
+
 .muted {
   color: #c0c4cc;
 }
+
 .detail-head {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .seq {
   font-size: 20px;
   font-weight: 700;
 }
+
 .mt {
   margin-top: 16px;
 }
+
 .item-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -815,39 +780,50 @@ onUnmounted(() => {
   padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
 }
+
 .item-name {
   font-weight: 500;
 }
+
 .item-remark {
   color: #e6a23c;
   font-size: 12px;
 }
+
 .item-opts {
   grid-column: 1 / -1;
   font-size: 12px;
   color: #909399;
 }
+
 .item-price {
   color: #606266;
 }
+
 .detail-actions {
   display: flex;
   gap: 8px;
 }
+
 :deep(.row-pending) {
   background: #fef0f0 !important;
 }
+
 :deep(.row-urge) {
   background: #fdf6ec !important;
 }
+
 :deep(.row-refund) {
   background: #fdf6ec !important;
 }
+
 @keyframes pulse {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 rgba(245, 108, 108, 0.25);
   }
+
   50% {
     box-shadow: 0 0 0 4px rgba(245, 108, 108, 0.08);
   }

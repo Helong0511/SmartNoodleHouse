@@ -172,7 +172,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
       dataType: 'json',
       timeout: 20000,
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         ...(needAuth ? authHeader() : {})
       },
       success(res) {
@@ -231,7 +231,7 @@ function attemptTokenRefresh() {
       dataType: 'json',
       timeout: 10000,
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         ...authHeader()
       },
       success(res) {

@@ -50,10 +50,10 @@ async def test_verify_rejects_customer_mismatch():
 
 @pytest.mark.asyncio
 async def test_enforce_liveness_required_in_challenge_mode():
-    from app.api.v1 import miniprogram as mp
+    from app.api import miniprogram as mp
 
     with patch(
-        "app.api.v1.miniprogram.get_settings",
+        "app.api.miniprogram.get_settings",
         return_value=SimpleNamespace(face_liveness_mode="challenge"),
     ), patch(
         "app.services.face_liveness_service.verify_liveness_challenge",
@@ -67,10 +67,10 @@ async def test_enforce_liveness_required_in_challenge_mode():
 
 @pytest.mark.asyncio
 async def test_enforce_liveness_skipped_when_mode_none():
-    from app.api.v1 import miniprogram as mp
+    from app.api import miniprogram as mp
 
     with patch(
-        "app.api.v1.miniprogram.get_settings",
+        "app.api.miniprogram.get_settings",
         return_value=SimpleNamespace(face_liveness_mode="none"),
     ):
         mode = await mp._enforce_liveness_challenge(1, liveness_token=None, action_completed=False)
@@ -80,7 +80,7 @@ async def test_enforce_liveness_skipped_when_mode_none():
 @pytest.mark.asyncio
 async def test_consent_base64_requires_liveness_before_decode():
     """缺 token 时在解码图片前即拒绝，避免无挑战也能注册。"""
-    from app.api.v1.miniprogram import consent_face_base64
+    from app.api.miniprogram import FaceConsentBase64Request, consent_face_base64
 
     customer = SimpleNamespace(id=7)
     req = MagicMock()
@@ -90,17 +90,18 @@ async def test_consent_base64_requires_liveness_before_decode():
             # 故意缺 liveness_token
         }
     )
+    body = FaceConsentBase64Request(image_base64="a" * 900)
     with patch(
-        "app.api.v1.miniprogram._require_face_welcome_enabled",
+        "app.api.miniprogram._require_face_welcome_enabled",
         new_callable=AsyncMock,
         return_value=None,
     ), patch(
-        "app.api.v1.miniprogram._enforce_liveness_challenge",
+        "app.api.miniprogram._enforce_liveness_challenge",
         new_callable=AsyncMock,
         side_effect=AppException(40037, "活体校验未通过"),
     ):
         with pytest.raises(AppException) as ei:
-            await consent_face_base64(req, AsyncMock(), customer)
+            await consent_face_base64(req, body, AsyncMock(), customer)
     assert ei.value.code == 40037
 
 

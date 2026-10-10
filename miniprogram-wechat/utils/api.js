@@ -146,7 +146,7 @@ function requestOnce(method, path, data = {}, needAuth = true) {
       method: upper,
       timeout: 20000,
       header: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         ...(needAuth ? authHeader() : {})
       },
       success(res) {
@@ -204,7 +204,7 @@ function attemptTokenRefresh() {
       method: 'POST',
       timeout: 10000,
       header: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         ...authHeader()
       },
       success(res) {

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import BIZ_CU, BIZ_OT, generate_no, resolve_table_parts
 from app.core.exceptions import AppException
-from app.core.response import money, now_local
+from app.core.response import money, now_local, serialize_dt
 from app.models import (
     Customer,
     CustomerAlipayAccount,
@@ -105,7 +105,7 @@ class CustomerService:
             "profile_status": str(getattr(customer, "profile_status", None) or "EMPTY").upper(),
             "phone_verified": bool(int(getattr(customer, "phone_verified", 0) or 0)),
             "member_activated_at": (
-                customer.member_activated_at.isoformat()
+                serialize_dt(customer.member_activated_at)
                 if getattr(customer, "member_activated_at", None)
                 else None
             ),

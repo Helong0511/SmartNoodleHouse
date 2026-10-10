@@ -130,7 +130,7 @@ async def test_merge_wallet_moves_balances():
 async def test_wallet_adjust_requires_store_id():
     from fastapi import Request
 
-    from app.api.v1.wallet import AdjustBody, adjust_balance
+    from app.api.wallet import AdjustBody, adjust_balance
 
     user = SimpleNamespace(id=9, store_id=None, role=SimpleNamespace(code="SUPER_ADMIN"))
     body = AdjustBody(
@@ -149,7 +149,7 @@ def test_wallet_ledger_excludes_null_adjust_cross_store():
     """门店流水不得再 OR 进 store_id=NULL 的 ADJUST。"""
     import inspect
 
-    from app.api.v1 import wallet as wallet_mod
+    from app.api import wallet as wallet_mod
 
     src = inspect.getsource(wallet_mod.admin_ledger)
     assert "store_id.is_(None)" not in src

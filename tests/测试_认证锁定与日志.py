@@ -5,7 +5,7 @@ import pytest
 
 
 def test_client_log_strips_newlines():
-    from app.api.v1.client_logs import _strip_ctrl
+    from app.api.client_logs import _strip_ctrl
 
     assert "\n" not in _strip_ctrl("a\nb\rc")
     assert _strip_ctrl("ok") == "ok"
@@ -13,7 +13,7 @@ def test_client_log_strips_newlines():
 
 @pytest.mark.asyncio
 async def test_login_lock_helpers():
-    from app.api.v1 import auth as auth_mod
+    from app.api import auth as auth_mod
 
     fake = AsyncMock()
     fake.get = AsyncMock(return_value="1")

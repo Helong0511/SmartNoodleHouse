@@ -16,8 +16,8 @@ import logging
 from typing import Any
 
 from app.core.async_utils import spawn_bg
-from app.core.cache_keys import ttl_with_jitter
-from app.core.redis_client import get_redis
+from app.core.cache_keys import menu_rebuild_lock_key, ttl_with_jitter
+from app.core.redis_client import delete_with_retry, get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +35,6 @@ def menu_version_key(store_id: int) -> str:
     return f"snh:menu:ver:{int(store_id)}"
 
 
-def _rebuild_lock_key(store_id: int) -> str:
-    return f"snh:menu:lock:{int(store_id)}"
-
-
 async def get_menu_version(store_id: int) -> int:
     try:
         r = await get_redis()
@@ -46,21 +42,6 @@ async def get_menu_version(store_id: int) -> int:
         return int(raw or 0)
     except Exception:
         return 0
-
-
-async def _delete_with_retry(r, *keys: str, retries: int = 2, delay: float = 0.05) -> int:
-    """删除缓存键，失败时短暂重试。返回删除数量。"""
-    deleted = 0
-    for attempt in range(retries + 1):
-        try:
-            deleted = await r.delete(*keys)
-            if deleted >= len(keys):
-                return deleted
-        except Exception:
-            pass
-        if attempt < retries:
-            await asyncio.sleep(delay)
-    return deleted
 
 
 async def bump_menu_version(store_id: int) -> int:
@@ -72,7 +53,7 @@ async def bump_menu_version(store_id: int) -> int:
         r = await get_redis()
         version = int(await r.incr(menu_version_key(store_id)))
         await r.expire(menu_version_key(store_id), MENU_VERSION_TTL_SECONDS)
-        await _delete_with_retry(r, menu_bundle_key(store_id))
+        await delete_with_retry(r, menu_bundle_key(store_id))
         # 延迟双删：防止删后又有并发请求写入旧 bundle
         spawn_bg(_delayed_delete(menu_bundle_key(store_id), 0.1))
         return version
@@ -107,7 +88,9 @@ async def get_menu_bundle(store_id: int) -> dict[str, Any] | None:
 async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
     try:
         r = await get_redis()
-        raw = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
+        from app.core.response import dumps_json
+
+        raw = dumps_json(bundle, compact=True)
         if len(raw.encode("utf-8")) > _BUNDLE_MAX_BYTES:
             logger.warning(
                 "menu bundle 过大 (store=%s, %dKB)，跳过缓存以避免大Key",
@@ -123,7 +106,7 @@ async def try_acquire_rebuild_lock(store_id: int) -> bool:
     """缓存击穿保护：SET NX EX 抢锁，避免并发重建压垮数据库。Redis 不可用时 fail-open。"""
     try:
         r = await get_redis()
-        return bool(await r.set(_rebuild_lock_key(store_id), "1", nx=True, ex=_REBUILD_LOCK_TTL))
+        return bool(await r.set(menu_rebuild_lock_key(store_id), "1", nx=True, ex=_REBUILD_LOCK_TTL))
     except Exception:
         return False
 
@@ -131,7 +114,7 @@ async def try_acquire_rebuild_lock(store_id: int) -> bool:
 async def release_rebuild_lock(store_id: int) -> None:
     try:
         r = await get_redis()
-        await r.delete(_rebuild_lock_key(store_id))
+        await r.delete(menu_rebuild_lock_key(store_id))
     except Exception:
         pass
 

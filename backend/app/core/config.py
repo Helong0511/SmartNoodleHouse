@@ -233,3 +233,9 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def dev_mode_allowed(mock_flag: str) -> bool:
+    """开发模式综合判定：非生产环境 + debug 开启 + 指定 mock 开关打开。"""
+    s = get_settings()
+    return s.is_development and s.app_debug and bool(getattr(s, mock_flag, False))

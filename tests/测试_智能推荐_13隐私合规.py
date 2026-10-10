@@ -13,12 +13,10 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import func, select
 
-from app.api.v1.miniprogram import (
+from app.api.miniprogram import (
     clear_my_taste_profile,
     get_my_privacy_settings,
     get_my_taste_profile,
-    record_privacy_consent,
-    PrivacyConsentRequest,
     PrivacySettingsPatch,
     update_my_privacy_settings,
 )
@@ -258,11 +256,9 @@ async def test_consent_records_version_timestamp_and_opt_in(db_session):
     assert c.consent_version is None
     assert c.recommend_consent_at is None
 
-    resp = await _call(
-        record_privacy_consent, db, c, payload=PrivacyConsentRequest(version="1.0")
-    )
+    resp = await PrivacyService.record_consent(db, c, version="1.0")
     await db.commit()
-    data = resp["data"]
+    data = resp
     assert data["consent_version"] == "1.0"
     assert data["consented_at"] is not None
     assert data["recommend_opt_in"] == 1

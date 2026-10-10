@@ -10,25 +10,10 @@
     <el-tabs v-model="tab">
       <el-tab-pane label="流水" name="ledger">
         <div class="toolbar">
-          <el-select
-            v-model="ledgerQ.customer_id"
-            filterable
-            remote
-            clearable
-            reserve-keyword
-            placeholder="搜索顾客（昵称/手机/编号）"
-            :remote-method="searchLedgerCustomers"
-            :loading="ledgerCustomerSearching"
-            style="width: 260px"
-            @change="loadLedger(1)"
-            @clear="loadLedger(1)"
-          >
-            <el-option
-              v-for="c in ledgerCustomerOptions"
-              :key="c.id"
-              :label="customerOptionLabel(c)"
-              :value="c.id"
-            >
+          <el-select v-model="ledgerQ.customer_id" filterable remote clearable reserve-keyword
+            placeholder="搜索顾客（昵称/手机/编号）" :remote-method="searchLedgerCustomers" :loading="ledgerCustomerSearching"
+            style="width: 260px" @change="loadLedger(1)" @clear="loadLedger(1)">
+            <el-option v-for="c in ledgerCustomerOptions" :key="c.id" :label="customerOptionLabel(c)" :value="c.id">
               <div class="opt-row">
                 <el-avatar :size="28" :src="mediaUrl(c.avatar_url) || undefined">客</el-avatar>
                 <div class="opt-meta">
@@ -38,25 +23,12 @@
               </div>
             </el-option>
           </el-select>
-          <el-select
-            v-if="auth.isSuperAdmin"
-            v-model="ledgerQ.store_id"
-            clearable
-            placeholder="门店"
-            style="width:160px"
-            @change="loadLedger(1)"
-            @clear="loadLedger(1)"
-          >
+          <el-select v-if="auth.isSuperAdmin" v-model="ledgerQ.store_id" clearable placeholder="门店" style="width:160px"
+            @change="loadLedger(1)" @clear="loadLedger(1)">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
-          <el-select
-            v-model="ledgerQ.entry_type"
-            clearable
-            placeholder="类型"
-            style="width:140px"
-            @change="loadLedger(1)"
-            @clear="loadLedger(1)"
-          >
+          <el-select v-model="ledgerQ.entry_type" clearable placeholder="类型" style="width:140px" @change="loadLedger(1)"
+            @clear="loadLedger(1)">
             <el-option label="充值" value="TOPUP" />
             <el-option label="消费" value="PAY" />
             <el-option label="退款回补" value="REFUND_RESTORE" />
@@ -70,14 +42,8 @@
           <el-table-column label="顾客" min-width="220">
             <template #default="{ row }">
               <div class="cust-cell">
-                <el-image
-                  v-if="row.customer_avatar_url"
-                  :src="mediaUrl(row.customer_avatar_url)"
-                  fit="cover"
-                  class="avatar-thumb"
-                  :preview-src-list="[mediaUrl(row.customer_avatar_url)]"
-                  preview-teleported
-                />
+                <el-image v-if="row.customer_avatar_url" :src="mediaUrl(row.customer_avatar_url)" fit="cover"
+                  class="avatar-thumb" :preview-src-list="[mediaUrl(row.customer_avatar_url)]" preview-teleported />
                 <span v-else class="no-avatar">无</span>
                 <div class="cust-meta">
                   <div class="cust-name">{{ row.customer_name || row.customer_nickname || '—' }}</div>
@@ -131,14 +97,8 @@
           <el-table-column prop="created_at" label="时间" min-width="170" />
         </el-table>
         <div class="pager">
-          <el-pagination
-            background
-            layout="total, prev, pager, next"
-            :total="ledger.total"
-            :page-size="ledger.page_size"
-            :current-page="ledger.page"
-            @current-change="loadLedger"
-          />
+          <el-pagination background layout="total, prev, pager, next" :total="ledger.total"
+            :page-size="ledger.page_size" :current-page="ledger.page" @current-change="loadLedger" />
         </div>
       </el-tab-pane>
 
@@ -150,24 +110,10 @@
             </el-select>
           </el-form-item>
           <el-form-item label="顾客" required>
-            <el-select
-              v-model="adjust.customer_id"
-              filterable
-              remote
-              clearable
-              reserve-keyword
-              placeholder="输入昵称 / 手机 / 编号搜索"
-              :remote-method="searchAdjustCustomers"
-              :loading="adjustCustomerSearching"
-              style="width: 100%"
-              @change="onAdjustCustomerChange"
-            >
-              <el-option
-                v-for="c in adjustCustomerOptions"
-                :key="c.id"
-                :label="customerOptionLabel(c)"
-                :value="c.id"
-              >
+            <el-select v-model="adjust.customer_id" filterable remote clearable reserve-keyword
+              placeholder="输入昵称 / 手机 / 编号搜索" :remote-method="searchAdjustCustomers" :loading="adjustCustomerSearching"
+              style="width: 100%" @change="onAdjustCustomerChange">
+              <el-option v-for="c in adjustCustomerOptions" :key="c.id" :label="customerOptionLabel(c)" :value="c.id">
                 <div class="opt-row">
                   <el-avatar :size="28" :src="mediaUrl(c.avatar_url) || undefined">客</el-avatar>
                   <div class="opt-meta">
@@ -182,10 +128,7 @@
           </el-form-item>
           <el-form-item v-if="selectedAdjustCustomer" label="当前余额">
             <div class="selected-cust">
-              <el-avatar
-                :size="44"
-                :src="mediaUrl(selectedAdjustCustomer.avatar_url) || undefined"
-              >客</el-avatar>
+              <el-avatar :size="44" :src="mediaUrl(selectedAdjustCustomer.avatar_url) || undefined">客</el-avatar>
               <div class="selected-meta">
                 <div class="cust-name">
                   {{ selectedAdjustCustomer.display_name || selectedAdjustCustomer.nickname || '顾客' }}
@@ -204,22 +147,12 @@
             </div>
           </el-form-item>
           <el-form-item label="本金变动">
-            <el-input-number
-              v-model="adjust.delta_principal"
-              :step="1"
-              :precision="2"
-              controls-position="right"
-              style="width: 100%"
-            />
+            <el-input-number v-model="adjust.delta_principal" :step="1" :precision="2" controls-position="right"
+              style="width: 100%" />
           </el-form-item>
           <el-form-item label="赠送变动">
-            <el-input-number
-              v-model="adjust.delta_gift"
-              :step="1"
-              :precision="2"
-              controls-position="right"
-              style="width: 100%"
-            />
+            <el-input-number v-model="adjust.delta_gift" :step="1" :precision="2" controls-position="right"
+              style="width: 100%" />
           </el-form-item>
           <el-form-item label="备注">
             <el-input v-model="adjust.remark" maxlength="255" placeholder="调账原因，建议填写" />
@@ -232,14 +165,8 @@
 
       <el-tab-pane label="充值档位" name="packages">
         <div class="toolbar">
-          <el-select
-            v-if="auth.isSuperAdmin"
-            v-model="pkgFilterStoreId"
-            clearable
-            placeholder="全部门店范围"
-            style="width: 200px"
-            @change="loadPackages"
-          >
+          <el-select v-if="auth.isSuperAdmin" v-model="pkgFilterStoreId" clearable placeholder="全部门店范围"
+            style="width: 200px" @change="loadPackages">
             <el-option label="仅总部" :value="0" />
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
@@ -289,11 +216,7 @@
             <el-radio value="STORE">指定门店</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item
-          v-if="!editing.id && auth.isSuperAdmin && editing.scope === 'STORE'"
-          label="门店"
-          required
-        >
+        <el-form-item v-if="!editing.id && auth.isSuperAdmin && editing.scope === 'STORE'" label="门店" required>
           <el-select v-model="editing.store_id" placeholder="选择门店" style="width: 100%">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
@@ -334,6 +257,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { mediaUrl } from '@/utils/media'
 
@@ -358,14 +282,12 @@ function entryTypeTag(t?: string | null): '' | 'success' | 'warning' | 'info' | 
   return ''
 }
 
-type StoreOpt = { id: number; name: string; store_no?: string }
-
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('wallet:manage'))
 const loading = ref(false)
 const tab = ref('ledger')
 const packages = ref<any[]>([])
-const stores = ref<StoreOpt[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 /** 超管筛选：undefined=全部，0=仅总部，>0=指定门店 */
 const pkgFilterStoreId = ref<number | undefined>(undefined)
 const ledger = reactive({ items: [] as any[], total: 0, page: 1, page_size: 20 })
@@ -471,15 +393,6 @@ function canEditPackage(row: any) {
   if (!canManage.value) return false
   if (auth.isSuperAdmin) return true
   return !!(row?.store_id)
-}
-
-async function loadStores() {
-  try {
-    const res: any = await api.get('/settings/stores/options')
-    stores.value = res?.data?.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function loadPackages() {
@@ -665,8 +578,8 @@ async function submitAdjust() {
     if (selectedAdjustCustomer.value?.id) {
       const refreshed = await searchWalletCustomers(
         selectedAdjustCustomer.value.phone ||
-          selectedAdjustCustomer.value.customer_no ||
-          String(selectedAdjustCustomer.value.id),
+        selectedAdjustCustomer.value.customer_no ||
+        String(selectedAdjustCustomer.value.id),
       )
       const hit = refreshed.find((c) => c.id === selectedAdjustCustomer.value.id)
       if (hit) {
@@ -687,29 +600,115 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.wallet-page { padding: 4px 8px 24px; }
-.page-header { margin-bottom: 8px; }
-.page-header h2 { margin: 0 0 6px; font-size: 20px; }
-.hint { margin: 0; color: #666; font-size: 13px; }
-.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.pager { margin-top: 12px; display: flex; justify-content: flex-end; }
-.muted { color: #999; font-size: 13px; }
-.cust-cell { display: flex; align-items: center; gap: 10px; }
-.avatar-thumb { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; }
+.wallet-page {
+  padding: 4px 8px 24px;
+}
+
+.page-header {
+  margin-bottom: 8px;
+}
+
+.page-header h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.hint {
+  margin: 0;
+  color: #666;
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.muted {
+  color: #999;
+  font-size: 13px;
+}
+
+.cust-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .no-avatar {
-  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: #f0f0f0; color: #999; font-size: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f0f0;
+  color: #999;
+  font-size: 12px;
 }
-.cust-meta { min-width: 0; line-height: 1.35; }
-.cust-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cust-sub { font-size: 12px; color: #666; margin-top: 2px; }
-.opt-row { display: flex; align-items: center; gap: 8px; }
-.opt-meta { line-height: 1.3; }
+
+.cust-meta {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.cust-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cust-sub {
+  font-size: 12px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.opt-meta {
+  line-height: 1.3;
+}
+
 .selected-cust {
-  display: flex; align-items: flex-start; gap: 12px;
-  width: 100%; padding: 10px 12px; background: #f7f8fa; border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: #f7f8fa;
+  border-radius: 8px;
 }
-.selected-meta { min-width: 0; line-height: 1.4; }
-.balance-line { margin-top: 6px; font-size: 13px; color: #333; }
+
+.selected-meta {
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.balance-line {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #333;
+}
 </style>

@@ -5,6 +5,7 @@ const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
 const navBar = require('../../utils/navBar')
 const orderActions = require('../../utils/orderActions')
+const { formatDateTime } = require('../../utils/date')
 
 const ORDERS_CACHE_MS = 30 * 1000
 const SCOPE_STORAGE_KEY = 'orders_scope_pending'
@@ -185,7 +186,7 @@ Page({
         ...pickupUtil.decorate(o),
         ...orderActions.buildActionFlags(o),
         discount_amount: Number(o.discount_amount || 0),
-        timeText: this.formatTime(o.created_at),
+        timeText: formatDateTime(o.created_at),
         payLabel: this.payLabel(o.payment_status),
         placeText: [o.store_name, o.table && (o.table.table_name || o.table.table_no)].filter(Boolean).join(' · ')
       }))
@@ -244,7 +245,7 @@ Page({
       const batch = ((res && res.items) || []).map((r) => ({
         ...r,
         credit_gift: Number(r.credit_gift || 0),
-        timeText: this.formatTime(r.paid_at || r.created_at)
+        timeText: formatDateTime(r.paid_at || r.created_at)
       }))
       const totalPages = (res && res.total_pages) || 0
       let list = batch
@@ -279,14 +280,6 @@ Page({
       PARTIAL_REFUND: '部分退款'
     }
     return map[status] || status || ''
-  },
-
-  formatTime(iso) {
-    if (!iso) return ''
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16).replace('T', ' ')
-    const pad = (n) => (n < 10 ? `0${n}` : `${n}`)
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   },
 
   openOrder(e) {

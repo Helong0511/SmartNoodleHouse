@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from starlette.testclient import TestClient
 
-from app.api.v1.miniprogram import get_menu_bundle_api
+from app.api.miniprogram import get_menu_bundle_api
 from app.core import menu_cache, perf_metrics
 from app.core.performance_middleware import JsonGZipMiddleware, PerformanceMetricsMiddleware
 from app.models import StoreProductStock
@@ -202,7 +202,7 @@ def test_slow_request_logged(fake_redis, caplog):
 def test_metrics_endpoint_reads_middleware_data(fake_redis):
     """真实中间件记录 -> 管理接口能读到数据（TR-12.2 接口有数据）。"""
     from app.main import app as real_app
-    from app.api.v1.performance import reco_metrics
+    from app.api.performance import reco_metrics
 
     client = TestClient(real_app)
     # /health 被中间件跳过；菜单接口缺 store_id 返回 400，但计时在 finally 中仍会落桶

@@ -18,7 +18,7 @@ from datetime import timedelta
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.redis_client import try_get_redis
-from app.core.response import now_local
+from app.core.response import now_local, serialize_dt
 
 logger = logging.getLogger(__name__)
 
@@ -80,16 +80,18 @@ async def generate_liveness_challenge(
         "action": action,
         "customer_id": int(customer_id) if customer_id is not None else None,
         "camera_id": camera_id,
-        "issued_at": now_local().isoformat(),
+        "issued_at": serialize_dt(now_local()),
     }
-    await redis.set(CHALLENGE_KEY.format(token=token), json.dumps(payload), ex=ttl)
+    from app.core.response import dumps_json
+
+    await redis.set(CHALLENGE_KEY.format(token=token), dumps_json(payload), ex=ttl)
     expires_at = now_local() + timedelta(seconds=ttl)
     return {
         "token": token,
         "action": action,
         "action_label": action_label(action),
         "mode": "challenge",
-        "expires_at": expires_at.isoformat(),
+        "expires_at": serialize_dt(expires_at),
     }
 
 

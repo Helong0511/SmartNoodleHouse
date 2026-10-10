@@ -138,6 +138,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import {
   listAuditLogs,
@@ -150,7 +151,7 @@ import { AUDIT_ACTION, label } from '@/utils/labels'
 const auth = useAuthStore()
 const loading = ref(false)
 const rows = ref<AuditLogItem[]>([])
-const stores = ref<{ id: number; name: string }[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 const categories = ref<AuditCategoryOption[]>([])
 const boundStoreName = ref('')
 
@@ -170,15 +171,10 @@ const detailDialog = ref(false)
 const currentRow = ref<AuditLogItem | null>(null)
 
 async function loadStores() {
-  try {
-    const res: any = await api.get('/settings/stores/options')
-    stores.value = res.data?.items || []
-    if (!auth.isSuperAdmin && auth.user?.store_id) {
-      const s = stores.value.find((x) => x.id === auth.user?.store_id)
-      boundStoreName.value = s?.name || `门店#${auth.user.store_id}`
-    }
-  } catch {
-    stores.value = []
+  if (!(await fetchStores())) return
+  if (!auth.isSuperAdmin && auth.user?.store_id) {
+    const s = stores.value.find((x) => x.id === auth.user?.store_id)
+    boundStoreName.value = s?.name || `门店#${auth.user.store_id}`
   }
 }
 

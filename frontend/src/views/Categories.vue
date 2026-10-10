@@ -1,35 +1,18 @@
 <template>
   <div v-loading="loading">
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="filterStoreId"
-        clearable
-        placeholder="全部门店"
-        style="width: 180px"
-        @change="load"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="filterStoreId" clearable placeholder="全部门店" style="width: 180px"
+        @change="load">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
       <el-button type="primary" @click="openForm()">新增分类</el-button>
-      <el-button
-        v-if="auth.isSuperAdmin"
-        type="success"
-        plain
-        :disabled="!selectedIds.length"
-        @click="openCopy"
-      >复制到门店</el-button>
+      <el-button v-if="auth.isSuperAdmin" type="success" plain :disabled="!selectedIds.length"
+        @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
 
-    <el-table
-      :data="categories"
-      style="margin-top:12px"
-      border
-      row-key="id"
-      @selection-change="onSelectionChange"
-    >
+    <el-table :data="categories" style="margin-top:12px" border row-key="id" @selection-change="onSelectionChange">
       <el-table-column v-if="auth.isSuperAdmin" type="selection" width="48" />
       <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="80">
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
@@ -78,33 +61,18 @@
           <el-input v-model="form.name" @input="onNameInput" />
         </el-form-item>
         <el-form-item label="编号" required>
-          <el-input
-            v-model="form.category_no"
-            :disabled="!!form.id"
-            :placeholder="categoryNoPlaceholder"
-            @input="codeTouched = true"
-          />
+          <el-input v-model="form.category_no" :disabled="!!form.id" :placeholder="categoryNoPlaceholder"
+            @input="codeTouched = true" />
           <div class="form-tip">{{ categoryNoTip }}</div>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" />
         </el-form-item>
         <el-form-item label="须先点分类">
-          <el-select
-            v-model="form.require_category_ids"
-            multiple
-            clearable
-            filterable
-            style="width: 100%"
-            placeholder="不选=无限制；例：加料依赖「面」"
-          >
-            <el-option
-              v-for="c in requireOptions"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
-              :disabled="form.id === c.id"
-            />
+          <el-select v-model="form.require_category_ids" multiple clearable filterable style="width: 100%"
+            placeholder="不选=无限制；例：加料依赖「面」">
+            <el-option v-for="c in requireOptions" :key="c.id" :label="c.name" :value="c.id"
+              :disabled="form.id === c.id" />
           </el-select>
           <div class="form-tip">新建商品时默认带入本配置，可在商品编辑里改成指定分类或指定商品</div>
         </el-form-item>
@@ -121,14 +89,8 @@
       </template>
     </el-dialog>
 
-    <CopyToStoreDialog
-      v-model="copyVisible"
-      :stores="stores"
-      :exclude-store-id="copySourceStoreId"
-      :selected-count="selectedIds.length"
-      :category-ids="selectedIds"
-      @done="load"
-    />
+    <CopyToStoreDialog v-model="copyVisible" :stores="stores" :exclude-store-id="copySourceStoreId"
+      :selected-count="selectedIds.length" :category-ids="selectedIds" @done="load" />
   </div>
 </template>
 
@@ -136,6 +98,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
 import { codeHint, storePrefixFromNo, suggestCodeFromName } from '@/utils/bizCode'
@@ -144,7 +107,7 @@ const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const categories = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const filterStoreId = ref<number | undefined>()
 const dialogVisible = ref(false)
 const copyVisible = ref(false)
@@ -232,15 +195,6 @@ function openCopy() {
     return
   }
   copyVisible.value = true
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function load() {
@@ -353,12 +307,14 @@ onMounted(async () => {
   align-items: center;
   flex-wrap: wrap;
 }
+
 .form-tip {
   margin-top: 6px;
   font-size: 12px;
   color: #909399;
   line-height: 1.4;
 }
+
 .muted {
   color: #c0c4cc;
 }

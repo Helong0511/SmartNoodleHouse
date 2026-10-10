@@ -149,6 +149,7 @@ Page({
     canUrge: false,
     urgeOnCooldown: false,
     canSelfRefund: false,
+    canInvoice: false,
     refunding: false
   },
 
@@ -356,6 +357,7 @@ Page({
         // 预约取餐：返回 scheduled_pickup_at 时展示「预约取餐 HH:MM」
         scheduledPickupText: formatScheduledPickup(order.scheduled_pickup_at),
         ...orderActions.buildActionFlags(order),
+        canInvoice: String(order.payment_status || '').toUpperCase() === 'PAID',
         loading: false,
         loadError: false
       })
@@ -588,6 +590,9 @@ Page({
     if (!order || String(order.payment_status || '').toUpperCase() !== 'PAID') return
     try {
       const cfg = await clientConfig.loadClientConfig()
+      // 电子发票开关：默认关闭，后端可在 SystemSettings 里开启
+      const invoiceEnabled = !!(cfg && cfg.invoice_enabled)
+      this.setData({ canInvoice: invoiceEnabled && String(order.payment_status || '').toUpperCase() === 'PAID' })
       const configName = String((cfg && cfg.pay_success_coupon_name) || '').trim()
       if (!configName) {
         this._couponResolved = true
@@ -624,6 +629,16 @@ Page({
       console.warn('[result] claim-coupon failed', e)
       this.setData({ claimingCoupon: false })
     }
+  },
+
+  // ---- 电子发票 ----
+  goInvoice() {
+    const oid = this.orderId || (this.data.order && this.data.order.id) || ''
+    if (!oid) return
+    const no = (this.data.order && this.data.order.order_no) || ''
+    wx.navigateTo({
+      url: `/packageOrder/invoice/invoice?order_id=${oid}&order_no=${encodeURIComponent(no)}`
+    })
   },
 
   // ---- 催单 ----

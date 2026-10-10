@@ -1,28 +1,5 @@
-// P0-2：叫号屏等公开频道 WebSocket 也需心跳保活
-const HEARTBEAT_INTERVAL = 30000
-
-function attachHeartbeat(ws: WebSocket): void {
-  let timer: ReturnType<typeof setInterval> | null = null
-  ws.addEventListener('open', () => {
-    timer = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({ type: 'ping' }))
-        } catch {
-          /* ignore */
-        }
-      }
-    }, HEARTBEAT_INTERVAL)
-  })
-  const clear = () => {
-    if (timer) {
-      clearInterval(timer)
-      timer = null
-    }
-  }
-  ws.addEventListener('close', clear)
-  ws.addEventListener('error', clear)
-}
+// P0-2：叫号屏等公开频道 WebSocket 也需心跳保活（公共实现在 wsHeartbeat.ts）
+import { attachHeartbeat } from './wsHeartbeat'
 
 export function openPublicWebSocket(
   channel: string,

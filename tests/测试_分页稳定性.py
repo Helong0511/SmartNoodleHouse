@@ -129,7 +129,7 @@ async def test_products_same_sort_order_pagination_stable(db_session: AsyncSessi
     try:
         # 公开菜单限流依赖 Redis；测试环境让其 fail-open（与生产 Redis 故障时同一分支）
         with patch(
-            "app.api.v1.products.get_redis",
+            "app.api.products.get_redis",
             AsyncMock(side_effect=ConnectionError("redis unavailable in tests")),
         ):
             from httpx import ASGITransport, AsyncClient
@@ -211,7 +211,7 @@ async def test_products_store_stop_override_total_matches_rows(db_session: Async
     total = 0
     try:
         with patch(
-            "app.api.v1.products.get_redis",
+            "app.api.products.get_redis",
             AsyncMock(side_effect=ConnectionError("redis unavailable in tests")),
         ):
             from httpx import ASGITransport, AsyncClient

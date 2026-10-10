@@ -10,6 +10,7 @@ const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
 const navBar = require('../../utils/navBar')
 const faceUtil = require('../../utils/face')
+const { formatDate } = require('../../utils/date')
 const app = getApp()
 
 function discountText(rate) {
@@ -21,11 +22,8 @@ function discountText(rate) {
 }
 
 function formatExpire(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return `至 ${String(iso).slice(0, 10)}`
-  const pad = (n) => (n < 10 ? `0${n}` : `${n}`)
-  return `至 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const date = formatDate(iso)
+  return date ? `至 ${date}` : ''
 }
 
 /** 等级列表 → 横向阶梯节点 + 进度填充比例 */
@@ -127,10 +125,8 @@ Page({
   },
 
   onLoad() {
-    const d = new Date()
-    const pad = (n) => (n < 10 ? `0${n}` : `${n}`)
     this.setData({
-      birthdayEnd: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      birthdayEnd: formatDate(new Date())
     })
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
       this.applyDineContext(ctx)

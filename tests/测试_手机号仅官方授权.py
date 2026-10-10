@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from starlette.requests import Request
 
-from app.api.v1 import miniprogram as mp
+from app.api import miniprogram as mp
 from app.core.exceptions import AppException
 
 

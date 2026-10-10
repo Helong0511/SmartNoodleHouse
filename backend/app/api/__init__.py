@@ -1,0 +1,62 @@
+from fastapi import APIRouter
+
+from app.api import (
+    ab_experiments,
+    audit_logs,
+    auth,
+    cameras,
+    client_logs,
+    coupons,
+    customers,
+    dashboard,
+    delivery,
+    favorites,
+    financial_ledger,
+    health,
+    invoices,
+    member_levels,
+    miniprogram,
+    orders,
+    payments,
+    performance,
+    print_jobs,
+    products,
+    queue,
+    settings,
+    tables,
+    users,
+    wallet,
+    welcome,
+    websocket,
+    pos,
+)
+
+api_router = APIRouter(prefix="/api")
+api_router.include_router(health.router)
+api_router.include_router(auth.router)
+api_router.include_router(users.router)
+api_router.include_router(products.router)
+api_router.include_router(orders.router)
+api_router.include_router(payments.router)
+api_router.include_router(wallet.router)
+api_router.include_router(financial_ledger.router)
+api_router.include_router(print_jobs.router)
+api_router.include_router(pos.router)
+api_router.include_router(customers.router)
+api_router.include_router(member_levels.router)
+api_router.include_router(coupons.router)
+api_router.include_router(tables.router)
+api_router.include_router(cameras.router)
+api_router.include_router(welcome.router)
+api_router.include_router(dashboard.router)
+api_router.include_router(miniprogram.router)
+api_router.include_router(delivery.router)
+api_router.include_router(settings.router)
+api_router.include_router(client_logs.router)
+api_router.include_router(websocket.router)
+api_router.include_router(audit_logs.router)
+api_router.include_router(ab_experiments.router)
+api_router.include_router(performance.router)
+api_router.include_router(favorites.router)
+api_router.include_router(invoices.router)
+api_router.include_router(queue.router)

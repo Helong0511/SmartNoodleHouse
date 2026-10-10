@@ -13,45 +13,28 @@
 
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="全部门店"
-          clearable
-          style="width:160px"
-          @change="onStoreChange"
-        >
+        <el-select v-model="storeFilter" placeholder="全部门店" clearable style="width:160px" @change="onStoreChange">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input v-model="filters.customerId" placeholder="顾客ID" clearable style="width:110px" @keyup.enter="reload" @clear="reload" />
+        <el-input v-model="filters.customerId" placeholder="顾客ID" clearable style="width:110px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
       <el-form-item>
-        <el-input v-model="filters.keyword" placeholder="欢迎语关键词" clearable style="width:160px" @keyup.enter="reload" @clear="reload" />
+        <el-input v-model="filters.keyword" placeholder="欢迎语关键词" clearable style="width:160px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
       <el-form-item>
-        <el-select
-          v-model="filters.cameraId"
-          placeholder="摄像头"
-          clearable
-          filterable
-          style="width:180px"
-          @change="reload"
-        >
+        <el-select v-model="filters.cameraId" placeholder="摄像头" clearable filterable style="width:180px"
+          @change="reload">
           <el-option v-for="c in cameras" :key="c.id" :label="cameraLabel(c)" :value="c.id" />
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-date-picker
-          v-model="filters.dateRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="开始"
-          end-placeholder="结束"
-          style="width:240px"
-          @change="reload"
-        />
+        <el-date-picker v-model="filters.dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始"
+          end-placeholder="结束" style="width:240px" @change="reload" />
       </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -80,17 +63,8 @@
     </el-table>
 
     <div class="pager">
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        background
-        small
-        @current-change="load"
-        @size-change="reload"
-      />
+      <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next" background small @current-change="load" @size-change="reload" />
     </div>
   </div>
 </template>
@@ -99,13 +73,14 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const loading = ref(false)
 const logs = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const cameras = ref<any[]>([])
 const storeFilter = ref<number | undefined>()
 const page = ref(1)
@@ -181,15 +156,6 @@ function reload() {
   hasNewHint.value = false
   page.value = 1
   return load()
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function loadCameras() {
@@ -332,12 +298,43 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.welcome-page { min-height: 360px; }
-.kpi-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; align-items: stretch; }
-.kpi { min-width: 110px; padding: 12px 14px; background: #f7f8fa; border-radius: 8px; }
-.kpi-val { font-size: 22px; font-weight: 700; }
-.kpi-label { font-size: 12px; color: #909399; margin-top: 4px; }
-.kpi-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.welcome-page {
+  min-height: 360px;
+}
+
+.kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  align-items: stretch;
+}
+
+.kpi {
+  min-width: 110px;
+  padding: 12px 14px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.kpi-val {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.kpi-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.kpi-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .new-hint {
   margin-bottom: 10px;
   padding: 8px 14px;
@@ -348,7 +345,19 @@ onUnmounted(() => {
   cursor: pointer;
   text-align: center;
 }
-.new-hint:hover { background: var(--el-color-primary-light-7); }
-.sub { font-size: 12px; color: #909399; }
-.pager { margin-top: 12px; display: flex; justify-content: flex-end; }
+
+.new-hint:hover {
+  background: var(--el-color-primary-light-7);
+}
+
+.sub {
+  font-size: 12px;
+  color: #909399;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
 </style>

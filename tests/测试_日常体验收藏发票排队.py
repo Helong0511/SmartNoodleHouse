@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_customer, get_current_user, get_db
-from app.api.v1 import queue as queue_module
+from app.api import queue as queue_module
 from app.core.response import now_local
 from app.main import app
 from app.models import (
@@ -60,7 +60,10 @@ async def api_client(db_session: AsyncSession, customer: Customer | None = None,
         yield db_session
 
     async def override_customer():
-        return customer
+        # 共享 session 下，前一请求的 rollback 会 expire fixture 顾客对象；
+        # 经 identity key 重取，避免过期属性在同步路径触发 IO（MissingGreenlet）
+        cid = inspect(customer).identity[0]
+        return await db_session.get(Customer, cid)
 
     async def override_user():
         return staff or _super_user()
@@ -138,6 +141,13 @@ async def _enable_queue(db_session: AsyncSession):
     SystemSettingsService.invalidate_cache_local()
 
 
+async def _enable_invoice(db_session: AsyncSession):
+    """开启电子发票开关（默认关闭，需显式启用）。"""
+    db_session.add(SystemSetting(id=9702, setting_key="invoice_enabled", setting_value="1"))
+    await db_session.flush()
+    SystemSettingsService.invalidate_cache_local()
+
+
 # ---------------------------------------------------------------------------
 # 收藏
 # ---------------------------------------------------------------------------
@@ -168,10 +178,10 @@ async def test_favorites_add_list_delete_idempotent(db_session: AsyncSession, st
             )
         ).scalar_one()
         assert cnt == 1
-        # 下架/不存在 → 40404
+        # 下架/不存在 → HTTP 404 + 业务码 40404
         for pid in (9202, 99999):
             r = await ac.post(f"/api/miniprogram/favorites/{pid}")
-            assert r.status_code == 400
+            assert r.status_code == 404
             assert r.json()["code"] == 40404
         # 列表：字段齐全
         r = await ac.get("/api/miniprogram/favorites")
@@ -205,6 +215,7 @@ async def test_invoice_create_validation_chain(db_session: AsyncSession, store: 
     paid = _add_order(db_session, cust, store, 1)
     unpaid = _add_order(db_session, cust, store, 2, payment_status="UNPAID", status="PENDING_PAYMENT")
     others_paid = _add_order(db_session, other, store, 3)
+    await _enable_invoice(db_session)
     await db_session.commit()
 
     async with api_client(db_session, cust) as ac:
@@ -309,35 +320,35 @@ async def test_invoice_admin_issue_and_reject(db_session: AsyncSession, store: S
 
     async with api_client(db_session, cust) as ac:
         # 后台筛选真分页
-        r = await ac.get("/api/invoices/admin", params={"status": "PENDING"})
+        r = await ac.get("/api/admin/invoices", params={"status": "PENDING"})
         body = r.json()["data"]
         assert body["total"] == 2 and len(body["items"]) == 2
-        r = await ac.get("/api/invoices/admin", params={"store_id": store.id})
+        r = await ac.get("/api/admin/invoices", params={"store_id": store.id})
         assert r.json()["data"]["total"] == 3
         r = await ac.get(
-            "/api/invoices/admin", params={"status": "PENDING", "page": 2, "page_size": 1}
+            "/api/admin/invoices", params={"status": "PENDING", "page": 2, "page_size": 1}
         )
         body = r.json()["data"]
         assert body["total"] == 2 and len(body["items"]) == 1
 
         # 标记开票
-        r = await ac.post(f"/api/invoices/admin/{inv1.id}/issue")
+        r = await ac.post(f"/api/admin/invoices/{inv1.id}/issue")
         assert r.status_code == 200, r.text
         assert r.json()["data"]["status"] == "ISSUED"
         row = await db_session.get(InvoiceRequest, inv1.id)
         assert row.status == "ISSUED" and row.issued_at is not None
         # 非 PENDING 不可重复操作 → 40013
-        r = await ac.post(f"/api/invoices/admin/{inv1.id}/issue")
+        r = await ac.post(f"/api/admin/invoices/{inv1.id}/issue")
         assert r.json()["code"] == 40013
-        r = await ac.post(f"/api/invoices/admin/{inv3.id}/reject", json={"reason": "信息有误"})
+        r = await ac.post(f"/api/admin/invoices/{inv3.id}/reject", json={"reason": "信息有误"})
         assert r.json()["code"] == 40013
         # 驳回
-        r = await ac.post(f"/api/invoices/admin/{inv2.id}/reject", json={"reason": "抬头与税号不一致"})
+        r = await ac.post(f"/api/admin/invoices/{inv2.id}/reject", json={"reason": "抬头与税号不一致"})
         assert r.json()["data"]["status"] == "REJECTED"
         row2 = await db_session.get(InvoiceRequest, inv2.id)
         assert row2.status == "REJECTED" and row2.reject_reason == "抬头与税号不一致"
         # 不存在 → 40404
-        r = await ac.post("/api/invoices/admin/99999/issue")
+        r = await ac.post("/api/admin/invoices/99999/issue")
         assert r.json()["code"] == 40404
 
 
@@ -381,6 +392,8 @@ async def test_queue_take_idempotent_number_guard_and_cancel(db_session: AsyncSe
 
     # ---- 重号防护：MAX 过期快照撞 UNIQUE，自动重试一次 ----
     await db_session.commit()  # 让已取号票在端内 rollback 后仍存在
+    # 端内 rollback 会 expire 共享 session 的 fixture 对象，先固化后续要用的主键
+    store_id = store.id
     real_max = queue_module._max_number
     calls = {"n": 0}
 
@@ -392,7 +405,7 @@ async def test_queue_take_idempotent_number_guard_and_cancel(db_session: AsyncSe
 
     async with api_client(db_session, cust3) as ac:
         with patch.object(queue_module, "_max_number", new=AsyncMock(side_effect=stale_max)):
-            r = await ac.post("/api/miniprogram/queue/take", json={"store_id": store.id, "people_count": 1})
+            r = await ac.post("/api/miniprogram/queue/take", json={"store_id": store_id, "people_count": 1})
         assert r.status_code == 200, r.text
         t3 = r.json()["data"]
         assert calls["n"] >= 2, "应触发一次重号重试"
@@ -402,9 +415,9 @@ async def test_queue_take_idempotent_number_guard_and_cancel(db_session: AsyncSe
     async with api_client(db_session, cust2) as ac:
         r = await ac.post(f"/api/miniprogram/queue/{t2['id']}/cancel")
         assert r.json()["data"]["status"] == "CANCELLED"
-        r = await ac.get("/api/miniprogram/queue/current", params={"store_id": store.id})
+        r = await ac.get("/api/miniprogram/queue/current", params={"store_id": store_id})
         assert r.json()["data"] is None
-        r = await ac.post("/api/miniprogram/queue/take", json={"store_id": store.id, "people_count": 1})
+        r = await ac.post("/api/miniprogram/queue/take", json={"store_id": store_id, "people_count": 1})
         t2b = r.json()["data"]
         assert (t2b["number"], t2b["ticket_no"]) == (4, "A004")
 
@@ -431,7 +444,7 @@ async def test_queue_admin_call_seat_cancel_flow(db_session: AsyncSession, store
     async with api_client(db_session, cust1) as ac:
         with patch.object(queue_module.ws_manager, "broadcast", new=AsyncMock()) as mock_bc:
             # 叫号：WAITING→CALLED + display 渠道广播
-            r = await ac.post(f"/api/queue/admin/{ticket1['id']}/call")
+            r = await ac.post(f"/api/admin/queue/{ticket1['id']}/call")
             assert r.status_code == 200, r.text
             assert r.json()["data"]["status"] == "CALLED"
             mock_bc.assert_awaited_once()
@@ -444,26 +457,26 @@ async def test_queue_admin_call_seat_cancel_flow(db_session: AsyncSession, store
         row = await db_session.get(QueueTicket, ticket1["id"])
         assert row.status == "CALLED" and row.called_at is not None
         # 已叫号不可重复叫号 → 40021
-        r = await ac.post(f"/api/queue/admin/{ticket1['id']}/call")
+        r = await ac.post(f"/api/admin/queue/{ticket1['id']}/call")
         assert r.json()["code"] == 40021
         # 落座
-        r = await ac.post(f"/api/queue/admin/{ticket1['id']}/seat")
+        r = await ac.post(f"/api/admin/queue/{ticket1['id']}/seat")
         assert r.json()["data"]["status"] == "SEATED"
-        r = await ac.post(f"/api/queue/admin/{ticket1['id']}/seat")
+        r = await ac.post(f"/api/admin/queue/{ticket1['id']}/seat")
         assert r.json()["code"] == 40021
         # 员工取消等待中的票
-        r = await ac.post(f"/api/queue/admin/{ticket2['id']}/cancel")
+        r = await ac.post(f"/api/admin/queue/{ticket2['id']}/cancel")
         assert r.json()["data"]["status"] == "CANCELLED"
-        r = await ac.post(f"/api/queue/admin/{ticket2['id']}/cancel")
+        r = await ac.post(f"/api/admin/queue/{ticket2['id']}/cancel")
         assert r.json()["code"] == 40021
         # 当日列表：WAITING 在前按 number 正序
-        r = await ac.get("/api/queue/admin/today", params={"store_id": store.id})
+        r = await ac.get("/api/admin/queue/today", params={"store_id": store.id})
         items = r.json()["data"]
         assert len(items) == 3
         assert items[0]["id"] == ticket3["id"] and items[0]["status"] == "WAITING"
         assert [it["number"] for it in items[1:]] == [1, 2]
         # status 过滤
-        r = await ac.get("/api/queue/admin/today", params={"store_id": store.id, "status": "CANCELLED"})
+        r = await ac.get("/api/admin/queue/today", params={"store_id": store.id, "status": "CANCELLED"})
         data = r.json()["data"]
         assert len(data) == 1 and data[0]["ticket_no"] == ticket2["ticket_no"]
 
@@ -500,37 +513,6 @@ async def test_birthday_update_validation(db_session: AsyncSession):
 
 
 # ---------------------------------------------------------------------------
-# 临时调试（验证后删除）
-# ---------------------------------------------------------------------------
-@pytest.mark.asyncio
-async def test_zz_debug_settings_visibility(db_session: AsyncSession):
-    db_session.add(SystemSetting(id=9701, setting_key="queue_enabled", setting_value="1"))
-    await db_session.flush()
-    SystemSettingsService.invalidate_cache_local()
-    rows = (await db_session.execute(select(SystemSetting))).scalars().all()
-    print("\nROWS:", [(r.id, r.setting_key, r.setting_value) for r in rows], flush=True)
-    v = await SystemSettingsService.get_value(db_session, "queue_enabled", "0")
-    print("GET_VALUE:", repr(v), "CACHE:", SystemSettingsService._cache, flush=True)
-    await db_session.commit()
-    v2 = await SystemSettingsService.get_value(db_session, "queue_enabled", "0")
-    SystemSettingsService.invalidate_cache_local()
-    v3 = await SystemSettingsService.get_value(db_session, "queue_enabled", "0")
-    print("GET_VALUE after commit:", repr(v2), "after invalidate:", repr(v3), flush=True)
-
-
-@pytest.mark.asyncio
-async def test_zz_debug_http_flow(db_session: AsyncSession, store: Store):
-    cust = await _add_customer(db_session, "DAILY-CUST-DBG")
-    db_session.add(SystemSetting(id=9701, setting_key="queue_enabled", setting_value="1"))
-    await db_session.commit()
-    SystemSettingsService.invalidate_cache_local()
-    print("\nTEST SESSION ID:", id(db_session), flush=True)
-    async with api_client(db_session, cust) as ac:
-        r = await ac.post("/api/miniprogram/queue/take", json={"store_id": store.id, "people_count": 1})
-        print("TAKE:", r.status_code, r.text[:200], flush=True)
-
-
-# ---------------------------------------------------------------------------
 # config 下发
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
@@ -540,6 +522,7 @@ async def test_config_exposes_three_daily_keys(db_session: AsyncSession):
         r = await ac.get("/api/miniprogram/config")
         data = r.json()["data"]
         assert data["queue_enabled"] is False
+        assert data["invoice_enabled"] is False
         assert data["pay_success_coupon_name"] == ""
         assert data["quick_remark_options"] == [
             "不要香菜", "少油少盐", "不要辣", "微辣", "多加醋", "加份米饭",

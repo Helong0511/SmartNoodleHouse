@@ -1,37 +1,18 @@
 <template>
   <div v-loading="loading">
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="filterStoreId"
-        clearable
-        placeholder="全部门店"
-        style="width: 180px"
-        @change="onStoreFilter"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="filterStoreId" clearable placeholder="全部门店" style="width: 180px"
+        @change="onStoreFilter">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
       <el-button type="primary" :disabled="!effectiveStoreId" @click="openForm()">新增方案</el-button>
-      <el-button
-        type="success"
-        plain
-        :disabled="!effectiveStoreId"
-        :loading="autoRefreshing"
-        @click="autoRefreshStore"
-      >
+      <el-button type="success" plain :disabled="!effectiveStoreId" :loading="autoRefreshing" @click="autoRefreshStore">
         按销量刷新自动方案
       </el-button>
       <el-button @click="load">刷新</el-button>
-      <el-time-select
-        v-model="previewAt"
-        start="00:00"
-        step="00:30"
-        end="23:30"
-        placeholder="预览时刻"
-        style="width: 140px; margin-left: 8px"
-        :disabled="!effectiveStoreId"
-      />
+      <el-time-select v-model="previewAt" start="00:00" step="00:30" end="23:30" placeholder="预览时刻"
+        style="width: 140px; margin-left: 8px" :disabled="!effectiveStoreId" />
       <el-button :disabled="!effectiveStoreId || !previewAt" @click="loadPreview">预览排序</el-button>
     </div>
     <p class="hint">
@@ -83,7 +64,8 @@
     </el-table>
 
     <div v-if="previewNames.length" class="preview">
-      <div class="preview-title">预览（{{ previewAt }}）{{ previewScheduleName ? `· ${previewScheduleName}` : '· 默认排序' }}</div>
+      <div class="preview-title">预览（{{ previewAt }}）{{ previewScheduleName ? `· ${previewScheduleName}` : '· 默认排序' }}
+      </div>
       <ol>
         <li v-for="(n, i) in previewNames" :key="i">{{ n }}</li>
       </ol>
@@ -103,10 +85,12 @@
           <el-input v-model="form.name" placeholder="如 早餐优先" />
         </el-form-item>
         <el-form-item label="开始" required>
-          <el-time-select v-model="form.start_time" start="00:00" step="00:15" end="23:45" placeholder="含" style="width: 100%" />
+          <el-time-select v-model="form.start_time" start="00:00" step="00:15" end="23:45" placeholder="含"
+            style="width: 100%" />
         </el-form-item>
         <el-form-item label="结束" required>
-          <el-time-select v-model="form.end_time" start="00:00" step="00:15" end="23:45" placeholder="不含" style="width: 100%" />
+          <el-time-select v-model="form.end_time" start="00:00" step="00:15" end="23:45" placeholder="不含"
+            style="width: 100%" />
         </el-form-item>
         <el-form-item label="优先级">
           <el-input-number v-model="form.priority" :min="0" :max="999" />
@@ -116,13 +100,8 @@
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" />
         </el-form-item>
         <el-form-item label="销量自动">
-          <el-switch
-            v-model="form.auto_sort"
-            :active-value="1"
-            :inactive-value="0"
-            active-text="按销量自动刷新"
-            inactive-text="仅手动"
-          />
+          <el-switch v-model="form.auto_sort" :active-value="1" :inactive-value="0" active-text="按销量自动刷新"
+            inactive-text="仅手动" />
           <div class="form-tip" style="margin-left:0;margin-top:4px">
             开启后夜间批与「按销量刷新」会按该时段历史销量重排；样本越多越贴近真实热度
           </div>
@@ -152,6 +131,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -160,7 +140,7 @@ const saving = ref(false)
 const autoRefreshing = ref(false)
 const autoRefreshingId = ref<number | null>(null)
 const schedules = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const categories = ref<any[]>([])
 const filterStoreId = ref<number | undefined>()
 const previewAt = ref('')
@@ -232,15 +212,6 @@ function moveItem(idx: number, delta: number) {
   arr[idx] = arr[j]
   arr[j] = tmp
   form.items = arr.map((it, i) => ({ ...it, sort_order: i }))
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data?.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function loadCategories() {
@@ -416,18 +387,24 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
 }
+
 .hint {
   margin: 10px 0 0;
   color: #909399;
   font-size: 13px;
   line-height: 1.5;
 }
-.muted { color: #909399; }
+
+.muted {
+  color: #909399;
+}
+
 .form-tip {
   margin-left: 8px;
   color: #909399;
   font-size: 12px;
 }
+
 .sort-list {
   width: 100%;
   border: 1px solid #ebeef5;
@@ -435,6 +412,7 @@ onMounted(async () => {
   max-height: 280px;
   overflow: auto;
 }
+
 .sort-row {
   display: flex;
   align-items: center;
@@ -442,23 +420,33 @@ onMounted(async () => {
   padding: 6px 10px;
   border-bottom: 1px solid #f2f3f5;
 }
-.sort-row:last-child { border-bottom: none; }
+
+.sort-row:last-child {
+  border-bottom: none;
+}
+
 .sort-idx {
   width: 22px;
   color: #909399;
   font-size: 12px;
 }
-.sort-name { flex: 1; }
+
+.sort-name {
+  flex: 1;
+}
+
 .preview {
   margin-top: 16px;
   padding: 12px 16px;
   background: #f5f7fa;
   border-radius: 6px;
 }
+
 .preview-title {
   font-weight: 600;
   margin-bottom: 8px;
 }
+
 .preview ol {
   margin: 0;
   padding-left: 20px;

@@ -1,14 +1,8 @@
 <template>
   <div class="refunds-page">
     <div class="toolbar">
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="storeFilter"
-        placeholder="全部门店"
-        clearable
-        style="width: 160px"
-        @change="reloadRefunds"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="storeFilter" placeholder="全部门店" clearable style="width: 160px"
+        @change="reloadRefunds">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
@@ -21,23 +15,10 @@
         <el-option label="美团" value="MEITUAN" />
         <el-option label="饿了么" value="ELEME" />
       </el-select>
-      <el-input
-        v-model="keyword"
-        clearable
-        placeholder="平台单号"
-        style="width: 180px"
-        @keyup.enter="reloadRefunds"
-        @clear="reloadRefunds"
-      />
-      <el-date-picker
-        v-model="dateRange"
-        type="daterange"
-        value-format="YYYY-MM-DD"
-        start-placeholder="开始"
-        end-placeholder="结束"
-        style="width: 240px"
-        @change="reloadRefunds"
-      />
+      <el-input v-model="keyword" clearable placeholder="平台单号" style="width: 180px" @keyup.enter="reloadRefunds"
+        @clear="reloadRefunds" />
+      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始"
+        end-placeholder="结束" style="width: 240px" @change="reloadRefunds" />
       <el-button @click="reloadRefunds">查询</el-button>
     </div>
     <div v-if="hasNewHint" class="new-hint" @click="jumpToLatest">
@@ -67,7 +48,7 @@
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <template v-if="row.status === 'PENDING' && canHandleRefund">
-            <el-button size="small" type="success" @click="handleRefund(row.id, true)">同意</el-button>
+            <el-button size="small" type="success" @click="handleRefund(row.id, 'approve')">同意</el-button>
             <el-button size="small" type="danger" @click="askRejectRefund(row)">拒绝</el-button>
           </template>
           <span v-else-if="row.status === 'PENDING'" class="muted">仅店长可处理</span>
@@ -76,17 +57,9 @@
       </el-table-column>
     </el-table>
     <div class="pager">
-      <el-pagination
-        v-model:current-page="refundPager.page"
-        v-model:page-size="refundPager.pageSize"
-        :total="refundPager.total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        background
-        small
-        @current-change="loadRefunds"
-        @size-change="reloadRefunds"
-      />
+      <el-pagination v-model:current-page="refundPager.page" v-model:page-size="refundPager.pageSize"
+        :total="refundPager.total" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" background small
+        @current-change="loadRefunds" @size-change="reloadRefunds" />
     </div>
 
     <!-- 拒绝退款 -->
@@ -104,12 +77,13 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { REFUND_APPLY_STATUS, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const canHandleRefund = computed(() => auth.hasPermission('payment:refund'))
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
@@ -139,15 +113,6 @@ function platformName(p: string) {
 function fmtTime(v?: string | null) {
   if (!v) return '-'
   return String(v).replace('T', ' ').slice(0, 19)
-}
-
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function loadRefunds() {
@@ -201,13 +166,13 @@ async function jumpToLatest() {
   await loadRefunds()
 }
 
-async function handleRefund(id: number, approve: boolean, reason?: string) {
+async function handleRefund(id: number, action: 'approve' | 'reject', reason?: string) {
   try {
     await api.post(`/delivery/refunds/${id}/action`, {
-      approve,
-      reason: approve ? undefined : reason || '商家拒绝',
+      action,
+      reason: action === 'approve' ? undefined : reason || '商家拒绝',
     })
-    ElMessage.success(approve ? '已同意退款' : '已拒绝退款')
+    ElMessage.success(action === 'approve' ? '已同意退款' : '已拒绝退款')
     await loadRefunds()
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
@@ -226,7 +191,7 @@ async function doRejectRefund() {
     ElMessage.warning('请填写拒绝原因')
     return
   }
-  await handleRefund(rejectId.value, false, rejectReason.value.trim())
+  await handleRefund(rejectId.value, 'reject', rejectReason.value.trim())
   rejectVisible.value = false
 }
 
@@ -257,6 +222,7 @@ onUnmounted(() => {
 .refunds-page {
   min-height: 400px;
 }
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -264,6 +230,7 @@ onUnmounted(() => {
   align-items: center;
   margin-bottom: 12px;
 }
+
 .new-hint {
   margin-bottom: 10px;
   padding: 8px 14px;
@@ -274,18 +241,22 @@ onUnmounted(() => {
   cursor: pointer;
   text-align: center;
 }
+
 .new-hint:hover {
   background: var(--el-color-primary-light-7);
 }
+
 .pager {
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
 }
+
 .money {
   font-weight: 600;
   color: #e6a23c;
 }
+
 .muted {
   color: #c0c4cc;
 }

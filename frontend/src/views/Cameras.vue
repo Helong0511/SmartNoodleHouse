@@ -6,14 +6,8 @@
         <div class="kpi-label">{{ k.label }}</div>
       </div>
       <div class="kpi-actions">
-        <el-select
-          v-if="auth.isSuperAdmin"
-          v-model="storeFilter"
-          clearable
-          placeholder="全部门店"
-          style="width: 160px; margin-right: 8px"
-          @change="onStoreFilterChange"
-        >
+        <el-select v-if="auth.isSuperAdmin" v-model="storeFilter" clearable placeholder="全部门店"
+          style="width: 160px; margin-right: 8px" @change="onStoreFilterChange">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
         <el-tag v-else-if="boundStoreName" type="info" style="margin-right: 8px">
@@ -63,42 +57,16 @@
           <el-button link type="primary" @click="loadEvents">刷新</el-button>
         </div>
         <div class="event-filters">
-          <el-select
-            v-model="eventFilter.cameraId"
-            clearable
-            filterable
-            placeholder="全部摄像头"
-            style="width: 200px"
-            @change="reloadEvents"
-          >
-            <el-option
-              v-for="c in cameras"
-              :key="c.id"
-              :label="cameraLabel(c)"
-              :value="c.id"
-            />
+          <el-select v-model="eventFilter.cameraId" clearable filterable placeholder="全部摄像头" style="width: 200px"
+            @change="reloadEvents">
+            <el-option v-for="c in cameras" :key="c.id" :label="cameraLabel(c)" :value="c.id" />
           </el-select>
-          <el-select
-            v-model="eventFilter.eventType"
-            clearable
-            filterable
-            allow-create
-            default-first-option
-            placeholder="全部类型"
-            style="width: 130px"
-            @change="reloadEvents"
-          >
+          <el-select v-model="eventFilter.eventType" clearable filterable allow-create default-first-option
+            placeholder="全部类型" style="width: 130px" @change="reloadEvents">
             <el-option v-for="t in eventTypes" :key="t" :label="label(VISITOR_EVENT_TYPE, t)" :value="t" />
           </el-select>
-          <el-date-picker
-            v-model="eventFilter.dateRange"
-            type="daterange"
-            value-format="YYYY-MM-DD"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            style="width: 260px"
-            @change="reloadEvents"
-          />
+          <el-date-picker v-model="eventFilter.dateRange" type="daterange" value-format="YYYY-MM-DD"
+            start-placeholder="开始日期" end-placeholder="结束日期" style="width: 260px" @change="reloadEvents" />
         </div>
       </template>
       <el-table :data="events" size="small" border v-loading="eventsLoading">
@@ -114,17 +82,9 @@
         </el-table-column>
       </el-table>
       <div class="pager">
-        <el-pagination
-          v-model:current-page="eventPager.page"
-          v-model:page-size="eventPager.pageSize"
-          :total="eventPager.total"
-          :page-sizes="[20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          background
-          small
-          @current-change="loadEvents"
-          @size-change="reloadEvents"
-        />
+        <el-pagination v-model:current-page="eventPager.page" v-model:page-size="eventPager.pageSize"
+          :total="eventPager.total" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" background
+          small @current-change="loadEvents" @size-change="reloadEvents" />
       </div>
     </el-card>
 
@@ -178,6 +138,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import {
   CAMERA_STATUS,
@@ -191,7 +152,7 @@ const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const cameras = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
@@ -360,14 +321,6 @@ function openForm(row?: any) {
   dialogVisible.value = true
 }
 
-async function loadStores() {
-  try {
-    stores.value = (await api.get('/settings/stores/options')).data.items || []
-  } catch {
-    stores.value = []
-  }
-}
-
 async function save() {
   if (!form.name?.trim() || !form.source_url?.trim()) {
     ElMessage.warning('请填写名称和源地址')
@@ -486,16 +439,75 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.cameras-page { min-height: 360px; }
-.kpi-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; align-items: stretch; }
-.kpi { min-width: 100px; padding: 12px 14px; background: #f7f8fa; border-radius: 8px; }
-.kpi-val { font-size: 22px; font-weight: 700; }
-.kpi-label { font-size: 12px; color: #909399; margin-top: 4px; }
-.kpi-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-.card-head { display: flex; justify-content: space-between; align-items: center; }
-.event-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.pager { margin-top: 12px; display: flex; justify-content: flex-end; }
-.muted { color: #c0c4cc; font-size: 12px; }
-.preview-wrap { text-align: center; }
-.preview-img { max-width: 100%; max-height: 70vh; background: #111; border-radius: 4px; }
+.cameras-page {
+  min-height: 360px;
+}
+
+.kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  align-items: stretch;
+}
+
+.kpi {
+  min-width: 100px;
+  padding: 12px 14px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.kpi-val {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.kpi-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.kpi-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.event-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.muted {
+  color: #c0c4cc;
+  font-size: 12px;
+}
+
+.preview-wrap {
+  text-align: center;
+}
+
+.preview-img {
+  max-width: 100%;
+  max-height: 70vh;
+  background: #111;
+  border-radius: 4px;
+}
 </style>

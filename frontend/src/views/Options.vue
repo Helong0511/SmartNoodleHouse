@@ -2,45 +2,30 @@
   <div v-loading="loading">
     <div class="toolbar">
       <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
-      <el-button
-        v-if="isSuper"
-        type="success"
-        plain
-        :disabled="!selectedIds.length"
-        @click="openCopy"
-      >复制到门店</el-button>
+      <el-button v-if="isSuper" type="success" plain :disabled="!selectedIds.length" @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
-      <el-select
-        v-if="isSuper"
-        v-model="filterStoreId"
-        clearable
-        placeholder="门店筛选（空=全部可见）"
-        style="width:220px;margin-left:12px"
-        @change="load"
-      >
+      <el-select v-if="isSuper" v-model="filterStoreId" clearable placeholder="门店筛选（空=全部可见）"
+        style="width:220px;margin-left:12px" @change="load">
         <el-option label="仅总部共享" :value="0" />
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="load">显示已禁用</el-checkbox>
     </div>
-    <p class="hint">编码规则：总部 <code>0000-Liang</code>；分店 <code>SH01-Liang</code>；选项 <code>SH01-Liang-XiaoWan</code>。可填逻辑码（如 Liang），保存时自动加前缀。复制到门店会按目标店 store_no 重写编码。</p>
+    <p class="hint">编码规则：总部 <code>0000-Liang</code>；分店 <code>SH01-Liang</code>；选项
+      <code>SH01-Liang-XiaoWan</code>。可填逻辑码（如 Liang），保存时自动加前缀。复制到门店会按目标店 store_no 重写编码。
+    </p>
 
-    <el-table
-      :key="tableKey"
-      :data="groups"
-      style="margin-top:12px"
-      border
-      row-key="id"
-      @selection-change="onSelectionChange"
-    >
+    <el-table :key="tableKey" :data="groups" style="margin-top:12px" border row-key="id"
+      @selection-change="onSelectionChange">
       <el-table-column v-if="isSuper" type="selection" width="48" />
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="opts-panel">
-            <el-button size="small" type="primary" :disabled="!canEditGroup(row)" @click="openOptionForm(row)">新增选项</el-button>
+            <el-button size="small" type="primary" :disabled="!canEditGroup(row)"
+              @click="openOptionForm(row)">新增选项</el-button>
             <el-table :data="row.options" size="small" border style="margin-top:8px">
-              <el-table-column prop="name" label="选项名" width="180"/>
-              <el-table-column prop="code" label="编码" width="250"/>
+              <el-table-column prop="name" label="选项名" width="180" />
+              <el-table-column prop="code" label="编码" width="250" />
               <el-table-column prop="extra_price" label="加价" width="90">
                 <template #default="{ row: o }">¥{{ o.extra_price }}</template>
               </el-table-column>
@@ -53,19 +38,16 @@
               </el-table-column>
               <el-table-column label="状态" width="80">
                 <template #default="{ row: o }">
-                  <el-tag :type="o.status === 1 ? 'success' : 'info'" size="small">{{ o.status === 1 ? '启用' : '禁用' }}</el-tag>
+                  <el-tag :type="o.status === 1 ? 'success' : 'info'" size="small">{{ o.status === 1 ? '启用' : '禁用'
+                  }}</el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="操作" width="320">
                 <template #default="{ row: o }">
-                  <el-button link type="primary" :disabled="!canEditGroup(row)" @click="openOptionForm(row, o)">编辑</el-button>
-                  <el-button
-                    v-if="row.selection_type === 'SINGLE' && !isDefaultOption(o) && o.status === 1"
-                    link
-                    type="warning"
-                    :disabled="!canEditGroup(row)"
-                    @click="setDefaultOption(o)"
-                  >设为默认</el-button>
+                  <el-button link type="primary" :disabled="!canEditGroup(row)"
+                    @click="openOptionForm(row, o)">编辑</el-button>
+                  <el-button v-if="row.selection_type === 'SINGLE' && !isDefaultOption(o) && o.status === 1" link
+                    type="warning" :disabled="!canEditGroup(row)" @click="setDefaultOption(o)">设为默认</el-button>
                   <el-button link type="danger" :disabled="!canEditGroup(row)" @click="removeOption(o)">删除</el-button>
                 </template>
               </el-table-column>
@@ -90,7 +72,8 @@
       <el-table-column prop="sort_order" label="排序" width="70" />
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
-          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
+          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '禁用'
+          }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200">
@@ -112,12 +95,8 @@
           <el-input v-model="groupForm.name" @input="onGroupNameInput" />
         </el-form-item>
         <el-form-item label="编码" required>
-          <el-input
-            v-model="groupForm.code"
-            :disabled="!!groupForm.id"
-            :placeholder="groupCodePlaceholder"
-            @input="groupCodeTouched = true"
-          />
+          <el-input v-model="groupForm.code" :disabled="!!groupForm.id" :placeholder="groupCodePlaceholder"
+            @input="groupCodeTouched = true" />
           <div class="form-tip">{{ groupCodeTip }}</div>
         </el-form-item>
         <el-form-item label="选择类型">
@@ -129,7 +108,8 @@
         <el-form-item label="必选"><el-switch v-model="groupForm.is_required" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="groupForm.sort_order" :min="0" /></el-form-item>
         <el-form-item v-if="groupForm.id" label="状态">
-          <el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+          <el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用"
+            inactive-text="禁用" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -144,22 +124,20 @@
           <el-input v-model="optionForm.name" @input="onOptionNameInput" />
         </el-form-item>
         <el-form-item label="编码" required>
-          <el-input
-            v-model="optionForm.code"
-            :disabled="!!optionForm.id"
-            :placeholder="optionCodePlaceholder"
-            @input="optionCodeTouched = true"
-          />
+          <el-input v-model="optionForm.code" :disabled="!!optionForm.id" :placeholder="optionCodePlaceholder"
+            @input="optionCodeTouched = true" />
           <div class="form-tip">可只填 XiaoWan，保存为 前缀-组逻辑-XiaoWan；输入名称后自动建议拼音</div>
         </el-form-item>
-        <el-form-item label="加价"><el-input-number v-model="optionForm.extra_price" :min="0" :precision="2" :step="0.5" /></el-form-item>
+        <el-form-item label="加价"><el-input-number v-model="optionForm.extra_price" :min="0" :precision="2"
+            :step="0.5" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="optionForm.sort_order" :min="0" /></el-form-item>
         <el-form-item v-if="optionGroupType === 'SINGLE'" label="默认项">
           <el-switch v-model="optionForm.is_default" active-text="设为默认" inactive-text="否" />
           <div class="form-tip">菜单页点「+」将按默认规格加购</div>
         </el-form-item>
         <el-form-item v-if="optionForm.id" label="状态">
-          <el-switch v-model="optionForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
+          <el-switch v-model="optionForm.status" :active-value="1" :inactive-value="0" active-text="启用"
+            inactive-text="禁用" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -168,16 +146,9 @@
       </template>
     </el-dialog>
 
-    <CopyToStoreDialog
-      v-model="copyVisible"
-      :stores="stores"
-      :exclude-store-id="copySourceStoreId"
-      :selected-count="selectedIds.length"
-      :option-group-ids="selectedIds"
-      clone-shared-option-groups
-      hint="复制后编码按目标店编号重写：0000-Liang → SH01-Liang，选项同步为 SH01-Liang-XiaoWan。"
-      @done="load"
-    />
+    <CopyToStoreDialog v-model="copyVisible" :stores="stores" :exclude-store-id="copySourceStoreId"
+      :selected-count="selectedIds.length" :option-group-ids="selectedIds" clone-shared-option-groups
+      hint="复制后编码按目标店编号重写：0000-Liang → SH01-Liang，选项同步为 SH01-Liang-XiaoWan。" @done="load" />
   </div>
 </template>
 
@@ -185,6 +156,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
 import { suggestCodeFromName } from '@/utils/bizCode'
@@ -196,7 +168,7 @@ const boundStoreId = computed(() => auth.user?.store_id || null)
 const loading = ref(false)
 const saving = ref(false)
 const groups = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const filterStoreId = ref<number | null>(null)
 const tableKey = ref(0)
 const showDisabled = ref(false)
@@ -315,14 +287,6 @@ function canEditGroup(row: any) {
   if (isSuper.value) return true
   if (row.store_id == null) return false
   return boundStoreId.value != null && Number(row.store_id) === Number(boundStoreId.value)
-}
-
-async function loadStores() {
-  try {
-    stores.value = (await api.get('/settings/stores/options')).data.items || []
-  } catch {
-    stores.value = []
-  }
 }
 
 async function load() {
@@ -527,9 +491,31 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.hint { margin: 8px 0 0; font-size: 12px; color: #909399; }
-.opts-panel { padding: 8px 16px 16px 48px; }
-.muted { color: #999; font-size: 12px; }
-.form-tip { font-size: 12px; color: #909399; margin-top: 4px; }
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.opts-panel {
+  padding: 8px 16px 16px 48px;
+}
+
+.muted {
+  color: #999;
+  font-size: 12px;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
 </style>

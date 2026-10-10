@@ -4,13 +4,8 @@
       <el-tab-pane label="持券记录" name="issued">
         <el-form inline class="toolbar">
           <el-form-item>
-            <el-input
-              v-model="issuedKeyword"
-              placeholder="券号 / 顾客编号 / 手机 / 昵称"
-              clearable
-              style="width: 240px"
-              @keyup.enter="reloadIssued"
-            />
+            <el-input v-model="issuedKeyword" placeholder="券号 / 顾客编号 / 手机 / 昵称" clearable style="width: 240px"
+              @keyup.enter="reloadIssued" />
           </el-form-item>
           <el-form-item>
             <el-select v-model="issuedStatus" placeholder="状态" clearable style="width: 130px" @change="reloadIssued">
@@ -21,20 +16,18 @@
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-select v-model="issuedCouponType" placeholder="券类型" clearable style="width: 120px" @change="reloadIssued">
+            <el-select v-model="issuedCouponType" placeholder="券类型" clearable style="width: 120px"
+              @change="reloadIssued">
               <el-option label="满减券" value="FIXED" />
               <el-option label="折扣券" value="PERCENT" />
               <el-option label="代金券" value="VOUCHER" />
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-select v-model="issuedTemplateId" placeholder="模板" clearable filterable style="width: 180px" @change="reloadIssued">
-              <el-option
-                v-for="t in templates"
-                :key="t.id"
-                :label="t.status === 1 ? t.name : `${t.name}（停用）`"
-                :value="t.id"
-              />
+            <el-select v-model="issuedTemplateId" placeholder="模板" clearable filterable style="width: 180px"
+              @change="reloadIssued">
+              <el-option v-for="t in templates" :key="t.id" :label="t.status === 1 ? t.name : `${t.name}（停用）`"
+                :value="t.id" />
             </el-select>
           </el-form-item>
           <el-form-item v-if="auth.isSuperAdmin">
@@ -63,7 +56,8 @@
             <template #default="{ row }">{{ issuedStoreName(row.issued_at_store_id) }}</template>
           </el-table-column>
           <el-table-column label="发券人" width="110">
-            <template #default="{ row }">{{ row.issued_by_name || (row.issued_by_user_id ? `#${row.issued_by_user_id}` : '系统/自助') }}</template>
+            <template #default="{ row }">{{ row.issued_by_name || (row.issued_by_user_id ? `#${row.issued_by_user_id}` :
+              '系统/自助') }}</template>
           </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
@@ -79,28 +73,16 @@
           </el-table-column>
         </el-table>
 
-        <el-pagination
-          v-model:current-page="issuedPage"
-          v-model:page-size="issuedPageSize"
-          :total="issuedTotal"
-          :page-sizes="[20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          style="margin-top:16px"
-          @current-change="loadIssued"
-          @size-change="reloadIssued"
-        />
+        <el-pagination v-model:current-page="issuedPage" v-model:page-size="issuedPageSize" :total="issuedTotal"
+          :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" style="margin-top:16px"
+          @current-change="loadIssued" @size-change="reloadIssued" />
       </el-tab-pane>
 
       <el-tab-pane label="券模板" name="templates">
         <div class="toolbar">
           <el-select v-model="templateScope" clearable placeholder="归属：总部或门店" style="width: 200px">
             <el-option label="总部" value="HQ" />
-            <el-option
-              v-for="s in templateStoreFilters"
-              :key="s.id"
-              :label="s.name"
-              :value="String(s.id)"
-            />
+            <el-option v-for="s in templateStoreFilters" :key="s.id" :label="s.name" :value="String(s.id)" />
           </el-select>
           <el-button v-if="canManage" type="primary" @click="openTemplateForm()">新增模板</el-button>
           <el-button @click="loadTemplates">刷新</el-button>
@@ -143,23 +125,11 @@
       </el-tab-pane>
 
       <el-tab-pane label="成单里程碑" name="milestones">
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          title="按本店累计成功支付单数自动发券（如 20/50/100 单）"
-          description="每位顾客每个档位只发一次；支付成功后自动下发。请先在「券模板」创建对应满减/代金券模板。"
-          class="milestone-alert"
-        />
+        <el-alert type="info" :closable="false" show-icon title="按本店累计成功支付单数自动发券（如 20/50/100 单）"
+          description="每位顾客每个档位只发一次；支付成功后自动下发。请先在「券模板」创建对应满减/代金券模板。" class="milestone-alert" />
         <div class="toolbar" style="margin-top:12px">
-          <el-select
-            v-if="auth.isSuperAdmin"
-            v-model="milestoneStoreId"
-            placeholder="选择门店"
-            filterable
-            style="width: 200px"
-            @change="loadMilestones"
-          >
+          <el-select v-if="auth.isSuperAdmin" v-model="milestoneStoreId" placeholder="选择门店" filterable
+            style="width: 200px" @change="loadMilestones">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
           <el-button @click="loadMilestones">刷新</el-button>
@@ -174,13 +144,10 @@
           </el-table-column>
           <el-table-column label="发放券模板" min-width="220">
             <template #default="{ row }">
-              <el-select v-model="row.template_id" filterable placeholder="选择模板" :disabled="!canManage" style="width: 100%">
-                <el-option
-                  v-for="t in enabledTemplates"
-                  :key="t.id"
-                  :label="`${t.name}（${t.summary || couponTypeLabel(t.coupon_type)}）`"
-                  :value="t.id"
-                />
+              <el-select v-model="row.template_id" filterable placeholder="选择模板" :disabled="!canManage"
+                style="width: 100%">
+                <el-option v-for="t in enabledTemplates" :key="t.id"
+                  :label="`${t.name}（${t.summary || couponTypeLabel(t.coupon_type)}）`" :value="t.id" />
               </el-select>
             </template>
           </el-table-column>
@@ -207,11 +174,8 @@
             <el-radio value="STORE">指定门店</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item
-          v-if="!templateForm.id && auth.isSuperAdmin && templateForm.scope === 'STORE'"
-          label="门店"
-          required
-        >
+        <el-form-item v-if="!templateForm.id && auth.isSuperAdmin && templateForm.scope === 'STORE'" label="门店"
+          required>
           <el-select v-model="templateForm.store_id" placeholder="选择门店" style="width: 100%">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
@@ -228,16 +192,12 @@
         </el-form-item>
         <el-form-item
           :label="templateForm.coupon_type === 'PERCENT' ? '折扣比例' : templateForm.coupon_type === 'VOUCHER' ? '代金面额' : '减免金额'"
-          required
-        >
-          <el-input-number
-            v-model="templateForm.discount_value"
+          required>
+          <el-input-number v-model="templateForm.discount_value"
             :min="templateForm.coupon_type === 'PERCENT' ? 0.01 : 0.01"
             :max="templateForm.coupon_type === 'PERCENT' ? 0.99 : 9999"
             :step="templateForm.coupon_type === 'PERCENT' ? 0.01 : 1"
-            :precision="templateForm.coupon_type === 'PERCENT' ? 2 : 2"
-            style="width: 100%"
-          />
+            :precision="templateForm.coupon_type === 'PERCENT' ? 2 : 2" style="width: 100%" />
           <div class="hint">
             {{
               templateForm.coupon_type === 'PERCENT'
@@ -268,43 +228,20 @@
     <el-dialog v-model="issueDialog" title="手动发券" width="480px" destroy-on-close>
       <el-form :model="issueForm" label-width="90px">
         <el-form-item label="顾客" required>
-          <el-select
-            v-model="issueForm.customer_id"
-            filterable
-            remote
-            reserve-keyword
-            placeholder="输入编号/手机/昵称搜索"
-            :remote-method="searchCustomers"
-            :loading="customerSearching"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="c in customerOptions"
-              :key="c.id"
-              :label="`${c.display_name || c.nickname || '顾客'}（${c.customer_no}）`"
-              :value="c.id"
-            />
+          <el-select v-model="issueForm.customer_id" filterable remote reserve-keyword placeholder="输入编号/手机/昵称搜索"
+            :remote-method="searchCustomers" :loading="customerSearching" style="width: 100%">
+            <el-option v-for="c in customerOptions" :key="c.id"
+              :label="`${c.display_name || c.nickname || '顾客'}（${c.customer_no}）`" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="券模板" required>
           <el-select v-model="issueForm.template_id" placeholder="选择模板" style="width: 100%">
-            <el-option
-              v-for="t in enabledTemplates"
-              :key="t.id"
-              :label="`${t.name} — ${t.summary}`"
-              :value="t.id"
-            />
+            <el-option v-for="t in enabledTemplates" :key="t.id" :label="`${t.name} — ${t.summary}`" :value="t.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="issueQuantityLabel" required>
-          <el-input-number
-            v-model="issueForm.quantity"
-            :min="1"
-            :max="50"
-            :step="1"
-            :disabled="!issueForm.template_id"
-            style="width: 100%"
-          />
+          <el-input-number v-model="issueForm.quantity" :min="1" :max="50" :step="1" :disabled="!issueForm.template_id"
+            style="width: 100%" />
           <div class="hint">同模板可多张，单次最多 50 张</div>
         </el-form-item>
       </el-form>
@@ -320,6 +257,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { COUPON_STATUS, COUPON_TYPE, couponStatusTagType, label } from '@/utils/labels'
 
@@ -329,7 +267,7 @@ const loading = ref(false)
 const saving = ref(false)
 const issuing = ref(false)
 const activeTab = ref('issued')
-const stores = ref<{ id: number; name: string }[]>([])
+const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 const milestoneStoreId = ref<number | undefined>()
 const milestoneRows = ref<
   { threshold_orders: number; template_id?: number; status: number }[]
@@ -382,12 +320,7 @@ function canEditTemplate(row: any) {
 
 async function loadStores() {
   if (!auth.isSuperAdmin) return
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data?.items || []
-  } catch {
-    stores.value = []
-  }
+  await fetchStores()
 }
 
 const issued = ref<any[]>([])
@@ -434,7 +367,7 @@ function couponTypeLabel(t: string) {
 async function loadTemplates() {
   loading.value = true
   try {
-    const res = await api.get('/coupons/templates', { params: { all: true } })
+    const res = await api.get('/coupons/templates', { params: { include_disabled: true } })
     templates.value = res.data?.items || []
   } finally {
     loading.value = false
@@ -704,15 +637,18 @@ onMounted(async () => {
   flex-wrap: wrap;
   margin-bottom: 4px;
 }
+
 .muted {
   color: #999;
   font-size: 12px;
 }
+
 .hint {
   color: #999;
   font-size: 12px;
   margin-top: 4px;
 }
+
 .milestone-alert {
   margin-bottom: 4px;
 }

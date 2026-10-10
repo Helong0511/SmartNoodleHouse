@@ -4,13 +4,13 @@ Task 4 仅负责可靠落库；画像增量学习在 taste_learning_service（Ta
 """
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from typing import Any
 
 from sqlalchemy import select
 
+from app.core.response import dumps_json
 from app.models import CustomerBehaviorEvent
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def normalize_event(raw: Any) -> tuple[CustomerBehaviorEvent | None, str | None]
             payload = None
         else:
             try:
-                if len(json.dumps(payload, ensure_ascii=False, default=str)) > MAX_PAYLOAD_CHARS:
+                if len(dumps_json(payload)) > MAX_PAYLOAD_CHARS:
                     payload = None
             except (TypeError, ValueError):
                 payload = None

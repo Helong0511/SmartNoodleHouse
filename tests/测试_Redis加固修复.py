@@ -249,7 +249,7 @@ async def test_reco_cache_invalidate_uses_retry(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_auth_login_fail_always_expire():
-    from app.api.v1 import auth
+    from app.api import auth
     from app.core import redis_client
     fake = FakeRedis()
     with patch.object(redis_client, "get_redis", _patch_get_redis(fake)):
@@ -341,7 +341,7 @@ def test_startup_checks_reject_localhost_prod():
 
 @pytest.mark.asyncio
 async def test_payments_sync_cooldown_key_prefix():
-    from app.api.v1 import payments
+    from app.api import payments
     fake = FakeRedis()
     with patch.object(payments, "get_redis", _patch_get_redis(fake)):
         try:

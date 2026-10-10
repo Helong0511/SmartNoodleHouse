@@ -23,6 +23,7 @@ from app.models import (
     ProductFeedback,
 )
 from app.services.audit_service import AuditService
+from app.core.response import serialize_dt
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class PrivacyService:
         return {
             "recommend_opt_in": int(customer.recommend_opt_in or 0),
             "consent_version": customer.consent_version,
-            "consented_at": customer.recommend_consent_at.isoformat()
+            "consented_at": serialize_dt(customer.recommend_consent_at)
             if customer.recommend_consent_at
             else None,
             "retention_days": DEFAULT_RETENTION_DAYS,
@@ -96,7 +97,7 @@ class PrivacyService:
                     "target_name": p.target_name,
                     "score": float(p.score),
                     "event_count": p.event_count,
-                    "last_event_at": p.last_event_at.isoformat() if p.last_event_at else None,
+                    "last_event_at": serialize_dt(p.last_event_at) if p.last_event_at else None,
                 }
             )
 
@@ -115,7 +116,7 @@ class PrivacyService:
                 "option_name": p.option_name,
                 "score": float(p.preference_score) if p.preference_score is not None else None,
                 "order_count": p.order_count,
-                "last_used_at": p.last_used_at.isoformat() if p.last_used_at else None,
+                "last_used_at": serialize_dt(p.last_used_at) if p.last_used_at else None,
             }
             for p in prefs
         ]
@@ -210,14 +211,14 @@ class PrivacyService:
             module="privacy",
             target_type="customer",
             target_id=int(customer.id),
-            detail={"version": ver, "old_version": old_ver, "consented_at": now.isoformat()},
+            detail={"version": ver, "old_version": old_ver, "consented_at": serialize_dt(now)},
             request=request,
             category=AuditService.CATEGORY_CUSTOMER,
         )
 
         return {
             "consent_version": ver,
-            "consented_at": now.isoformat(),
+            "consented_at": serialize_dt(now),
             "recommend_opt_in": 1,
         }
 

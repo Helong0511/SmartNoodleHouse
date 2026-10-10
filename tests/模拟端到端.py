@@ -334,7 +334,7 @@ async def run_all_simulations() -> bool:
     dp._dev_mode_allowed = lambda: True
 
     import app.services.face_extractor as fe
-    import app.api.v1.miniprogram as mp
+    import app.api.miniprogram as mp
 
     def _fake_extract_with_quality(_image_bytes: bytes):
         return mock_feature("sim_face"), {

@@ -11,7 +11,7 @@ from app.services.preference_scene import (
     calendar_season,
     code_boost,
 )
-from app.api.v1.products import _assert_option_group_manage, _assert_groups_usable_for_store
+from app.api.products import _assert_option_group_manage, _assert_groups_usable_for_store
 from app.core.exceptions import AppException
 
 

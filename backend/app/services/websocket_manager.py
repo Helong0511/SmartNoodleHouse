@@ -170,7 +170,9 @@ class ConnectionManager:
         # P1-8：Redis Pub/Sub 回环时跳过已投递的消息
         if not self._should_deliver(msg_id):
             return
-        message = json.dumps({"event": event, "data": data}, default=str)
+        from app.core.response import dumps_json
+
+        message = dumps_json({"event": event, "data": data})
         targets: Set[WebSocket] = set()
         # 超管全量频道
         targets |= set(self.active.get(channel, set()))

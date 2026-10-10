@@ -2,26 +2,14 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select
-          v-model="storeFilter"
-          placeholder="全部门店"
-          clearable
-          style="width:160px"
-          @change="onStoreChange"
-        >
+        <el-select v-model="storeFilter" placeholder="全部门店" clearable style="width:160px" @change="onStoreChange">
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input
-          v-model="keyword"
-          clearable
-          placeholder="订单号/桌号/手机号/姓名"
-          style="width:220px"
-          @keyup.enter="reload"
-          @clear="reload"
-        />
+        <el-input v-model="keyword" clearable placeholder="订单号/桌号/手机号/姓名" style="width:220px" @keyup.enter="reload"
+          @clear="reload" />
       </el-form-item>
       <el-form-item>
         <el-select v-model="operatorFilter" placeholder="收银员" clearable filterable style="width:130px" @change="reload">
@@ -50,16 +38,8 @@
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          start-placeholder="下单起"
-          end-placeholder="下单止"
-          :shortcuts="dateShortcuts"
-          style="width:240px"
-          @change="reload"
-        />
+        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" start-placeholder="下单起"
+          end-placeholder="下单止" :shortcuts="dateShortcuts" style="width:240px" @change="reload" />
       </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -142,16 +122,8 @@
       </el-table-column>
     </el-table>
 
-    <el-pagination
-      v-model:current-page="page"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[20, 50, 100]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top:16px"
-      @current-change="load"
-      @size-change="reload"
-    />
+    <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
+      layout="total, sizes, prev, pager, next" style="margin-top:16px" @current-change="load" @size-change="reload" />
   </div>
 </template>
 
@@ -159,6 +131,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import {
   CHANNEL,
@@ -173,7 +146,7 @@ import { todayDateRange } from '@/utils/date'
 const auth = useAuthStore()
 const loading = ref(false)
 const orders = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -245,15 +218,6 @@ function resetFilters() {
   loadOperators()
 }
 
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
-}
-
 async function loadOperators() {
   try {
     const res = await api.get('/orders/operators', {
@@ -308,6 +272,13 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.fee-tip { font-size: 11px; color: #e6a23c; line-height: 1.2; }
-.fee-tip.discount { color: #f56c6c; }
+.fee-tip {
+  font-size: 11px;
+  color: #e6a23c;
+  line-height: 1.2;
+}
+
+.fee-tip.discount {
+  color: #f56c6c;
+}
 </style>

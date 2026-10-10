@@ -86,7 +86,7 @@ async def test_product_low_stock_store_coalesce_and_tag(db_session: AsyncSession
     app = await _override_app(db_session, staff=_super_user())
     try:
         with patch(
-            "app.api.v1.products.get_redis",
+            "app.api.products.get_redis",
             AsyncMock(side_effect=ConnectionError("redis unavailable in tests")),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

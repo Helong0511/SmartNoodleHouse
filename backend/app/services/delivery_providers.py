@@ -41,8 +41,9 @@ def _ok_or_mock(data: dict, *, ok_expr: bool) -> bool:
 
 
 def _dev_mode_allowed() -> bool:
-    s = get_settings()
-    return s.is_development and s.app_debug and bool(getattr(s, "allow_auth_mock", False))
+    from app.core.config import dev_mode_allowed
+
+    return dev_mode_allowed("allow_auth_mock")
 
 
 class DeliveryProvider(ABC):

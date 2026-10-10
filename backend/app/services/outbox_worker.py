@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import socket
 from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
@@ -19,13 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
 from app.models import OutboxEvent
+from app.services.worker_common import backoff_seconds, worker_id
 
 logger = logging.getLogger(__name__)
 
 # 最大重试次数；超过后保持 FAILED，不再自动 claim
 MAX_ATTEMPTS = 8
-# 指数退避基数（秒）：2^attempt，上限 10 分钟
-BACKOFF_BASE_SEC = 2
+# 指数退避（秒）：2^attempt，上限 10 分钟
 BACKOFF_CAP_SEC = 600
 # stale PROCESSING 回收阈值：locked_at 超过此秒数视为崩溃残留
 STALE_PROCESSING_SEC = 300
@@ -45,14 +43,9 @@ def register_outbox_handler(agg_type: str, kind: str) -> Callable[[OutboxHandler
     return _decorator
 
 
-def _worker_id() -> str:
-    return f"{socket.gethostname()}:{os.getpid()}"
-
-
 def _backoff_seconds(attempt_count: int) -> int:
     """指数退避：2^attempt 秒，封顶 10 分钟。"""
-    exp = max(0, int(attempt_count))
-    return min(BACKOFF_CAP_SEC, BACKOFF_BASE_SEC**exp)
+    return backoff_seconds(attempt_count, cap=BACKOFF_CAP_SEC)
 
 
 async def enqueue_outbox(
@@ -69,7 +62,9 @@ async def enqueue_outbox(
     幂等：(aggregate_type, aggregate_id, event_kind) 冲突时返回已有行且 is_new=False。
     必须在业务事务内调用，commit 由调用方负责。
     """
-    payload_str = json.dumps(payload, ensure_ascii=False, default=str) if payload else None
+    from app.core.response import dumps_json
+
+    payload_str = dumps_json(payload) if payload else None
     row = OutboxEvent(
         aggregate_type=aggregate_type,
         aggregate_id=int(aggregate_id),
@@ -129,7 +124,7 @@ async def claim_outbox_item(
 
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = (worker or _worker_id())[:64]
+    wid = (worker or worker_id())[:64]
     now = now_local()
     stmt = (
         update(OutboxEvent)

@@ -3,18 +3,11 @@
  * P0-3：补齐支付宝端订阅消息推送能力，与微信端对齐
  * 支付宝使用 my.requestSubscribeMessage 发起订阅（需在开放平台配置消息模板）
  */
-var api = require('./api')
-
-var cachedTemplates = null
+var clientConfig = require('./clientConfig')
 
 function loadTemplates() {
-  if (cachedTemplates) return Promise.resolve(cachedTemplates)
-  return api.get('/miniprogram/config', {}, false).then(function (data) {
-    cachedTemplates = (data && data.subscribe_templates) || {}
-    return cachedTemplates
-  }).catch(function () {
-    cachedTemplates = {}
-    return cachedTemplates
+  return clientConfig.loadClientConfig().then(function (cfg) {
+    return (cfg && cfg.subscribe_templates) || {}
   })
 }
 

@@ -259,7 +259,7 @@ async def test_reject_unknown_key(mem_db: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_mask_secret_production():
-    from app.api.v1 import settings as settings_api
+    from app.api import settings as settings_api
     from app.core.config import Settings
 
     with patch.object(settings_api, "get_settings", return_value=Settings(app_env="production", jwt_secret="abc")):

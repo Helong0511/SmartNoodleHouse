@@ -15,20 +15,19 @@ import logging
 from typing import Any
 
 from app.core.async_utils import spawn_bg
-from app.core.cache_keys import RECO_TTL_SECONDS, ttl_with_jitter, reco_customer_pattern, reco_key
-from app.core.redis_client import get_redis
+from app.core.cache_keys import (
+    RECO_TTL_SECONDS,
+    reco_customer_pattern,
+    reco_key,
+    reco_rebuild_lock_key,
+    ttl_with_jitter,
+)
+from app.core.redis_client import delete_with_retry, get_redis
+from app.core.response import dumps_json
 
 logger = logging.getLogger(__name__)
 
 _REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s
-
-
-def _rebuild_lock_key(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
-) -> str:
-    cid = int(customer_id) if customer_id else 0
-    base = f"snh:reco:lock:c{cid}:s{int(store_id)}:{scene}:{bucket}"
-    return f"{base}:{fingerprint}" if fingerprint else base
 
 
 async def get_cached_reco(
@@ -63,26 +62,11 @@ async def set_cached_reco(
         body["cache_hit"] = False
         await r.set(
             reco_key(customer_id, store_id, scene, bucket, fingerprint),
-            json.dumps(body, ensure_ascii=False, separators=(",", ":")),
+            dumps_json(body, compact=True),
             ex=ttl_with_jitter(RECO_TTL_SECONDS),
         )
     except Exception:  # noqa: BLE001
         logger.debug("推荐缓存写入失败，忽略", exc_info=True)
-
-
-async def _delete_with_retry(r, *keys: str, retries: int = 2, delay: float = 0.05) -> int:
-    """删除缓存键，失败时短暂重试。"""
-    deleted = 0
-    for attempt in range(retries + 1):
-        try:
-            deleted = await r.delete(*keys)
-            if deleted >= len(keys):
-                return deleted
-        except Exception:
-            pass
-        if attempt < retries:
-            await asyncio.sleep(delay)
-    return deleted
 
 
 async def invalidate_customer(customer_id: int) -> None:
@@ -96,7 +80,7 @@ async def invalidate_customer(customer_id: int) -> None:
         async for k in r.scan_iter(match=pattern, count=200):
             keys.append(k)
         if keys:
-            await _delete_with_retry(r, *keys)
+            await delete_with_retry(r, *keys)
         # 延迟双删：防止删后又有并发请求写入旧推荐结果
         spawn_bg(_delayed_invalidate(pattern))
     except Exception:  # noqa: BLE001
@@ -125,7 +109,7 @@ async def try_acquire_reco_lock(
         r = await get_redis()
         return bool(
             await r.set(
-                _rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+                reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
                 "1", nx=True, ex=_REBUILD_LOCK_TTL,
             )
         )
@@ -138,7 +122,7 @@ async def release_reco_lock(
 ) -> None:
     try:
         r = await get_redis()
-        await r.delete(_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint))
+        await r.delete(reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint))
     except Exception:
         pass
 

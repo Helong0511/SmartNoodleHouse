@@ -49,6 +49,21 @@ async def try_get_redis() -> redis.Redis | None:
         return None
 
 
+async def delete_with_retry(r, *keys: str, retries: int = 2, delay: float = 0.05) -> int:
+    """删除缓存键，失败时短暂重试。返回删除数量。"""
+    deleted = 0
+    for attempt in range(retries + 1):
+        try:
+            deleted = await r.delete(*keys)
+            if deleted >= len(keys):
+                return deleted
+        except Exception:
+            pass
+        if attempt < retries:
+            await asyncio.sleep(delay)
+    return deleted
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex

@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.api.v1.products import _clear_main_product_images, _set_main_product_image
+from app.api.products import _clear_main_product_images, _set_main_product_image
 from app.models import Product, ProductCategory, ProductImage, Store
 
 

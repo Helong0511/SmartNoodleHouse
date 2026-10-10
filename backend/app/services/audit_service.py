@@ -116,7 +116,9 @@ class AuditService:
             if isinstance(detail, str):
                 payload = detail[:4000]
             else:
-                payload = json.dumps(cls.redact(detail), ensure_ascii=False, default=str)[:4000]
+                from app.core.response import dumps_json
+
+                payload = dumps_json(cls.redact(detail))[:4000]
         row = OperationLog(
             user_id=user_id,
             action=action,

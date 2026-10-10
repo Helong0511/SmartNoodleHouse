@@ -1,12 +1,11 @@
 """库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌商品库存"""
 from __future__ import annotations
 
-import json
-
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
+from app.core.response import dumps_json
 from app.models import OutboxEvent, Product, StoreProductStock
 from app.services.outbox_worker import enqueue_outbox
 
@@ -51,7 +50,7 @@ async def _emit_stock_mirror(
                 locked_at=None,
                 locked_by=None,
                 last_error=None,
-                payload=json.dumps(payload, ensure_ascii=False),
+                payload=dumps_json(payload),
             )
         )
 

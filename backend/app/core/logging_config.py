@@ -1,16 +1,17 @@
 """结构化日志配置：控制台 + logs/backend 文件滚动。"""
 from __future__ import annotations
 
-import json
 import logging
 import sys
-from datetime import datetime, timezone
 
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        from app.core.response import dumps_json, now_local, serialize_dt
+
+        # 业务统一中国时区；日志 ts 与业务时钟一致，便于对照订单时间
         payload = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": serialize_dt(now_local()),
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),
@@ -19,7 +20,7 @@ class JsonFormatter(logging.Formatter):
             payload["request_id"] = record.request_id
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
-        return json.dumps(payload, ensure_ascii=False)
+        return dumps_json(payload)
 
 
 def setup_logging(*, json_logs: bool = False, level: str = "INFO") -> None:

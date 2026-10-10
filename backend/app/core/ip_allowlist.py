@@ -56,11 +56,6 @@ def client_ip(request: Request) -> str:
     return peer
 
 
-def _client_ip(request: Request) -> str:
-    """兼容旧名。"""
-    return client_ip(request)
-
-
 def _parse_allowlist(raw: str) -> list[ipaddress._BaseNetwork | ipaddress._BaseAddress]:
     items = []
     for part in (raw or "").split(","):

@@ -15,7 +15,10 @@ CURRENT_KEY_VERSION = "v1"
 _PREFIX = "snhenc:"
 
 
-def _fernet_from_material(material: bytes, *, legacy: bool = False) -> Fernet:
+def _fernet_from_material(material: bytes | str, *, legacy: bool = False) -> Fernet:
+    """密钥派生：SHA256(material)；legacy 兼容历史「截断+右侧补0」。接受 bytes 或 str。"""
+    if isinstance(material, str):
+        material = (material or "").encode("utf-8")
     if legacy:
         key = material[:32].ljust(32, b"0")
     else:

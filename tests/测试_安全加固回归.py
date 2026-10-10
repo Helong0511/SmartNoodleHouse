@@ -5,8 +5,8 @@ from decimal import Decimal
 
 import pytest
 
-from app.api.v1.auth import _login_fail_key, _login_lock_key, _login_scope
-from app.api.v1.client_logs import _redact_secrets
+from app.api.auth import _login_fail_key, _login_lock_key, _login_scope
+from app.api.client_logs import _redact_secrets
 from app.core.leader_lock import is_leader_held, set_leader_held
 from app.core.response import money
 from app.services.customer_service import CustomerService

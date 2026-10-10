@@ -31,27 +31,39 @@ function parseApiError(err: unknown): string {
   return '网络错误'
 }
 
+/** 顾客侧 API 判定（全仓唯一入口）：请求选顾客 JWT、401 后走顾客刷新/登出流程 */
+function isCustomerApiUrl(url: string, clientHint: string): boolean {
+  return (
+    url.includes('/miniprogram') ||
+    url.includes('/orders/mine') ||
+    /\/orders\/\d+\/reorder/.test(url) ||
+    url.includes('/payments/orders/') ||
+    clientHint === 'customer'
+  )
+}
+
+/** 强制顾客 token 的 API（即便后台员工已登录，也不允许员工态抢占） */
+function isForceCustomerUrl(url: string): boolean {
+  return (
+    url.includes('/miniprogram') || url.includes('/orders/mine') || /\/orders\/\d+\/reorder/.test(url)
+  )
+}
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 30000,
+  headers: { 'Content-Type': 'application/json; charset=utf-8' },
 })
 
 api.interceptors.request.use((config) => {
   const url = config.url || ''
   const clientHint = String(config.headers?.['X-Client'] || '').toLowerCase()
-  // 后台管理顾客列表/合并等走员工 token；仅显式 X-Client: customer 才用顾客 JWT
-  const isCustomerApi =
-    url.includes('/miniprogram') ||
-    url.includes('/orders/mine') ||
-    /\/orders\/\d+\/reorder/.test(url) ||
-    url.includes('/welcome/face') ||
-    clientHint === 'customer' ||
-    (url.startsWith('/customers/') && clientHint === 'customer')
+  // 后台管理顾客列表/合并等走员工 token；仅顾客侧 API 才用顾客 JWT
   const staffToken = getStaffToken()
   const customerToken = getCustomerToken()
   // 顾客订单列表/复购/小程序强制用顾客 token，避免后台登录态抢占
-  const forceCustomer =
-    url.includes('/orders/mine') || /\/orders\/\d+\/reorder/.test(url) || url.includes('/miniprogram')
+  const forceCustomer = isForceCustomerUrl(url)
+  const isCustomerApi = isCustomerApiUrl(url, clientHint)
   const isStaffPath =
     !forceCustomer &&
     !isCustomerApi &&
@@ -97,7 +109,11 @@ async function attemptCustomerTokenRefresh(): Promise<boolean> {
         `${api.defaults.baseURL || '/api'}/miniprogram/auth/refresh`,
         {},
         {
-          headers: { Authorization: `Bearer ${oldToken}`, 'X-Client': 'customer' },
+          headers: {
+            Authorization: `Bearer ${oldToken}`,
+            'X-Client': 'customer',
+            'Content-Type': 'application/json; charset=utf-8',
+          },
           timeout: 10000,
         },
       )
@@ -115,19 +131,6 @@ async function attemptCustomerTokenRefresh(): Promise<boolean> {
     }
   })()
   return customerRefreshPromise
-}
-
-function isCustomerApiUrl(url: string, clientHint: string): boolean {
-  return (
-    url.includes('/miniprogram') ||
-    url.includes('/orders/mine') ||
-    /\/orders\/\d+\/reorder/.test(url) ||
-    url.includes('/welcome/face') ||
-    clientHint === 'customer' ||
-    (url.startsWith('/customers/') && clientHint === 'customer') ||
-    url.includes('/payments/orders/') ||
-    url.startsWith('/orders') && clientHint === 'customer'
-  )
 }
 
 api.interceptors.response.use(
@@ -171,7 +174,7 @@ api.interceptors.response.use(
       ) {
         const ok = await attemptCustomerTokenRefresh()
         if (ok) {
-          ;(cfg as { __customerRefreshed?: boolean }).__customerRefreshed = true
+          ; (cfg as { __customerRefreshed?: boolean }).__customerRefreshed = true
           cfg.headers = cfg.headers || {}
           cfg.headers.Authorization = `Bearer ${getCustomerToken()}`
           return api.request(cfg)
@@ -210,4 +213,3 @@ api.interceptors.response.use(
 )
 
 export default api
-export { api }

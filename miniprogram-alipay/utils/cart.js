@@ -1,8 +1,34 @@
 /** 购物车计价与展示辅助 */
 
+/** 金额 → 分（整数），避免 float 累加误差 */
+function toFen(v) {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return 0
+    return Math.round(v * 100)
+  }
+  const s = String(v).trim().replace(/,/g, '')
+  const m = s.match(/^([+-]?)(\d+)(?:\.(\d*))?$/)
+  if (!m) {
+    const n = Number(s)
+    return Number.isFinite(n) ? Math.round(n * 100) : 0
+  }
+  const sign = m[1] === '-' ? -1 : 1
+  const yuan = parseInt(m[2], 10) || 0
+  const frac = (m[3] || '').padEnd(2, '0').slice(0, 2)
+  return sign * (yuan * 100 + (parseInt(frac, 10) || 0))
+}
+
+function fromFen(fen) {
+  const n = Math.trunc(Number(fen) || 0)
+  const sign = n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`
+}
+
+/** 兼容展示：返回元（两位小数数值，由分还原） */
 function parseMoney(v) {
-  const n = parseFloat(v)
-  return Number.isFinite(n) ? n : 0
+  return toFen(v) / 100
 }
 
 function findOption(group, optionId) {
@@ -16,23 +42,23 @@ function pickSelected(map, gid) {
   return map[String(gid)]
 }
 
-/** 根据所选规格计算单价（基础价 + 加价） */
+/** 根据所选规格计算单价（基础价 + 加价，分整数再还原） */
 function calcUnitPrice(product, selected, multi) {
-  let total = parseMoney(product.price)
+  let fen = toFen(product.price)
   ;(product.option_groups || []).forEach(g => {
     if (g.selection_type === 'SINGLE') {
       const sid = pickSelected(selected, g.id)
       const opt = sid != null ? findOption(g, sid) : null
-      if (opt) total += parseMoney(opt.extra_price)
+      if (opt) fen += toFen(opt.extra_price)
     }
     if (g.selection_type === 'MULTIPLE') {
       ;(pickSelected(multi, g.id) || []).forEach(oid => {
         const opt = findOption(g, oid)
-        if (opt) total += parseMoney(opt.extra_price)
+        if (opt) fen += toFen(opt.extra_price)
       })
     }
   })
-  return Math.round(total * 100) / 100
+  return Number(fromFen(fen))
 }
 
 const OPTION_TEXT_SEP = '、'
@@ -116,38 +142,39 @@ function collectOptionIds(product, selected, multi) {
 function normalizeItem(item) {
   const qty = item.quantity || 1
   if (item.unit_price == null) {
-    item.unit_price = parseMoney(item.subtotal) / qty || 0
+    const unitFen = qty > 0 ? Math.trunc(toFen(item.subtotal) / qty) : 0
+    item.unit_price = Number(fromFen(unitFen))
   }
   item.quantity = qty
-  item.subtotal = (parseMoney(item.unit_price) * qty).toFixed(2)
+  item.subtotal = fromFen(toFen(item.unit_price) * qty)
   return item
 }
 
 function cartSummary(cart) {
   const list = (cart || []).map(normalizeItem)
   const count = list.reduce((s, i) => s + (i.quantity || 1), 0)
-  const total = list.reduce((s, i) => s + parseMoney(i.subtotal), 0)
-  return { count, total: total.toFixed(2), list }
+  const totalFen = list.reduce((s, i) => s + toFen(i.subtotal), 0)
+  return { count, total: fromFen(totalFen), list }
 }
 
 function calcDiscountableSubtotal(cart) {
-  return (cart || []).reduce((s, raw) => {
+  const fen = (cart || []).reduce((s, raw) => {
     const item = normalizeItem({ ...raw })
     if (item.no_member_discount) return s
-    return s + parseMoney(item.subtotal)
+    return s + toFen(item.subtotal)
   }, 0)
+  return Number(fromFen(fen))
 }
 
 function calcCouponEligibleSubtotal(cart, memberDiscount) {
-  const discountable = calcDiscountableSubtotal(cart)
-  const eligible = discountable - parseMoney(memberDiscount)
-  return Math.max(0, Math.round(eligible * 100) / 100)
+  const eligibleFen = Math.max(0, toFen(calcDiscountableSubtotal(cart)) - toFen(memberDiscount))
+  return Number(fromFen(eligibleFen))
 }
 
 function calcVoucherEligiblePayable(couponEligible, couponDiscount, packingFee, needPack) {
-  let base = Math.max(0, parseMoney(couponEligible) - parseMoney(couponDiscount))
-  if (needPack) base += parseMoney(packingFee)
-  return Math.round(base * 100) / 100
+  let fen = Math.max(0, toFen(couponEligible) - toFen(couponDiscount))
+  if (needPack) fen += toFen(packingFee)
+  return Number(fromFen(fen))
 }
 
 function itemKey(item) {
@@ -163,7 +190,7 @@ function mergeCartItem(cart, entry) {
     const cur = normalizeItem(list[idx])
     const add = entry.quantity || 1
     cur.quantity = Math.min(999, (cur.quantity || 1) + add)
-    cur.subtotal = (parseMoney(cur.unit_price) * cur.quantity).toFixed(2)
+    cur.subtotal = fromFen(toFen(cur.unit_price) * cur.quantity)
     if (entry.no_member_discount != null) cur.no_member_discount = !!entry.no_member_discount
     if (!cur.imageUrl && entry.imageUrl) cur.imageUrl = entry.imageUrl
     if (!cur.main_image && entry.main_image) cur.main_image = entry.main_image

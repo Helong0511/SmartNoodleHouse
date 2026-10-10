@@ -19,7 +19,8 @@ const DEFAULTS = {
   show_menu_smart_taste: false,
   show_menu_guess_you_like: false,
   hide_member_empty_wallet: true,
-  enable_customer_display: false
+  enable_customer_display: false,
+  invoice_enabled: false
 }
 
 function getAppSafe() {

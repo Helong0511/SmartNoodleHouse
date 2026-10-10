@@ -94,10 +94,10 @@ async def test_public_product_list_rate_limit_failure_logs_warning(caplog):
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_optional_staff_user] = override_staff
 
-    caplog.set_level(logging.WARNING, logger="app.api.v1.products")
+    caplog.set_level(logging.WARNING, logger="app.api.products")
     try:
         with patch(
-            "app.api.v1.products.get_redis",
+            "app.api.products.get_redis",
             AsyncMock(side_effect=ConnectionError("redis down")),
         ):
             transport = ASGITransport(app=app)

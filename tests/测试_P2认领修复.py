@@ -159,7 +159,7 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
 @pytest.mark.asyncio
 async def test_reprint_dedup_blocks_rapid_double_click():
     """幂等认领失败时应返回「请勿重复」，不调用 print_order。"""
-    from app.api.v1.orders import reprint_kitchen_ticket
+    from app.api.orders import reprint_kitchen_ticket
 
     order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001")
     user = SimpleNamespace(
@@ -196,7 +196,7 @@ async def test_reprint_dedup_blocks_rapid_double_click():
 @pytest.mark.asyncio
 async def test_reprint_dedup_redis_down_degrades_gracefully():
     """Redis 不可用时应降级走 MySQL 幂等，仍可打印主流程。"""
-    from app.api.v1.orders import reprint_kitchen_ticket
+    from app.api.orders import reprint_kitchen_ticket
 
     order = SimpleNamespace(id=10, store_id=1, order_no="SNH-001", status="PAID")
     user = SimpleNamespace(

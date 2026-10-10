@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import hashlib
 import json
 import logging
@@ -7,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import numpy as np
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,17 +17,9 @@ from app.core.redis_client import get_redis
 from app.core.response import now_local
 from app.models import Camera, Customer, FaceProfile, Store, VisitorEvent, WelcomeLog
 from app.services.face_extractor import EMBEDDING_DIM
+from app.services.secret_encryption import _fernet_from_material
 
 logger = logging.getLogger(__name__)
-
-
-def _fernet_from_material(material: str, *, legacy: bool = False) -> Fernet:
-    raw = (material or "").encode("utf-8")
-    if legacy:
-        key = raw[:32].ljust(32, b"0")
-    else:
-        key = hashlib.sha256(raw).digest()
-    return Fernet(base64.urlsafe_b64encode(key))
 
 
 class FaceEncryption:

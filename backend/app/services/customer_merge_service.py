@@ -42,7 +42,7 @@ from app.models import (
     RechargeOrder,
     WelcomeLog,
 )
-from app.core.response import money
+from app.core.response import money, serialize_dt
 from app.services.audit_service import AuditService
 from app.services.customer_service import CustomerService
 
@@ -66,7 +66,7 @@ def _customer_snapshot(c: Customer) -> dict[str, Any]:
         "balance_gift": str(money(getattr(c, "balance_gift", 0) or 0)),
         "member_level_id": c.member_level_id,
         "status": int(c.status or 0),
-        "last_order_at": c.last_order_at.isoformat() if c.last_order_at else None,
+        "last_order_at": serialize_dt(c.last_order_at) if c.last_order_at else None,
         "nickname": c.nickname,
         "display_name": c.display_name,
     }

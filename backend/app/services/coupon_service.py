@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import generate_no
 from app.core.config import get_settings
 from app.core.exceptions import AppException
-from app.core.response import ensure_local_aware, money, now_local, naive_local_now
+from app.core.response import ensure_local_aware, money, now_local, naive_local_now, serialize_dt
 from app.models import CouponTemplate, CustomerCoupon, Order
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ class CouponService:
             "store_whitelist": getattr(tmpl, "store_whitelist", None),
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
-            "created_at": tmpl.created_at.isoformat() if getattr(tmpl, "created_at", None) else None,
+            "created_at": serialize_dt(tmpl.created_at) if getattr(tmpl, "created_at", None) else None,
         }
 
     @staticmethod
@@ -499,10 +499,10 @@ class CouponService:
                     "coupon_type": tmpl.coupon_type,
                     "summary": CouponService.summary_label(tmpl),
                     "status": cc.status,
-                    "obtained_at": cc.obtained_at.isoformat() if cc.obtained_at else None,
-                    "expires_at": cc.expires_at.isoformat() if cc.expires_at else None,
+                    "obtained_at": serialize_dt(cc.obtained_at) if cc.obtained_at else None,
+                    "expires_at": serialize_dt(cc.expires_at) if cc.expires_at else None,
                     "used_order_id": cc.used_order_id,
-                    "used_at": cc.used_at.isoformat() if cc.used_at else None,
+                    "used_at": serialize_dt(cc.used_at) if cc.used_at else None,
                     "issued_by_user_id": int(cc.issued_by_user_id) if getattr(cc, "issued_by_user_id", None) else None,
                     "issued_at_store_id": int(cc.issued_at_store_id) if getattr(cc, "issued_at_store_id", None) else None,
                     "store_restricted": bool(getattr(cc, "issued_at_store_id", None)),
@@ -538,7 +538,7 @@ class CouponService:
             "min_order_amount": str(tmpl.min_order_amount),
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
-            "expires_at": cc.expires_at.isoformat() if cc.expires_at else None,
+            "expires_at": serialize_dt(cc.expires_at) if cc.expires_at else None,
             "issued_at_store_id": int(issued_store_id) if issued_store_id else None,
             "store_restricted": bool(issued_store_id),
         }
@@ -965,8 +965,8 @@ class CouponService:
             "threshold_orders": int(row.threshold_orders),
             "template_id": int(row.template_id),
             "status": int(row.status or 0),
-            "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
-            "updated_at": row.updated_at.isoformat() if getattr(row, "updated_at", None) else None,
+            "created_at": serialize_dt(row.created_at) if getattr(row, "created_at", None) else None,
+            "updated_at": serialize_dt(row.updated_at) if getattr(row, "updated_at", None) else None,
         }
         if tmpl is not None:
             out["template_name"] = tmpl.name

@@ -159,6 +159,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
@@ -201,7 +202,11 @@ const retryBusyId = ref<number | null>(null)
 const failedPrintJobs = ref<any[]>([])
 const showPrintJobs = ref(false)
 const nowTick = ref(Date.now())
-const storeOptions = ref<{ id: number; name: string; store_no?: string }[]>([])
+const { storeOptions, loadStores: fetchStores } = useStoreOptions({
+  source: 'kitchen',
+  clearOnError: false,
+  onError: (e: any) => ElMessage.error(e.message || '加载门店失败'),
+})
 const selectedStoreId = ref<number | null>(null)
 const boundStoreName = ref('')
 
@@ -531,16 +536,10 @@ function tryAlertFromWsEvent(event: string, data: Record<string, any>, beforeIds
 }
 
 async function loadStores() {
-  try {
-    const res = await api.get('/orders/kitchen/stores')
-    const data = res.data || {}
-    storeOptions.value = data.items || []
-    if (!isSuperAdmin.value && storeOptions.value.length) {
-      boundStoreName.value = storeOptions.value[0].name
-      selectedStoreId.value = storeOptions.value[0].id
-    }
-  } catch (e: any) {
-    ElMessage.error(e.message || '加载门店失败')
+  if (!(await fetchStores())) return
+  if (!isSuperAdmin.value && storeOptions.value.length) {
+    boundStoreName.value = storeOptions.value[0].name
+    selectedStoreId.value = storeOptions.value[0].id
   }
 }
 

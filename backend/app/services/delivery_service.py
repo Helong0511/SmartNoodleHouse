@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.biz_no import BIZ_OD, TABLE_DELIVERY, generate_no
 from app.core.exceptions import AppException
-from app.core.response import money, now_local
+from app.core.response import dumps_json, money, now_local
 from app.models import (
     DeliveryCallbackLog,
     DeliveryOrder,
@@ -230,7 +230,7 @@ class DeliveryService:
         if not event_id and platform_order_id:
             event_id = f"{event_type}:{platform_order_id}"
         # 截断 payload，避免无限期保存大量 PII
-        payload = json.dumps(raw, ensure_ascii=False, default=str)
+        payload = dumps_json(raw)
         if len(payload) > 8000:
             payload = payload[:8000] + "...[truncated]"
         db.add(
@@ -401,7 +401,7 @@ class DeliveryService:
             recipient_address=parsed.get("recipient_address"),
             packing_fee=packing,
             delivery_fee=delivery_fee,
-            raw_payload=json.dumps(raw, ensure_ascii=False, default=str),
+            raw_payload=dumps_json(raw),
             last_sync_at=now_local(),
         )
         db.add(d_order)
@@ -748,7 +748,7 @@ class DeliveryService:
                     amount=amount,
                     reason=reason,
                     status="PENDING",
-                    raw_payload=json.dumps(raw, ensure_ascii=False, default=str),
+                    raw_payload=dumps_json(raw),
                 )
             )
         else:
@@ -767,7 +767,7 @@ class DeliveryService:
                             amount=amount,
                             reason=reason,
                             status="PENDING",
-                            raw_payload=json.dumps(raw, ensure_ascii=False, default=str),
+                            raw_payload=dumps_json(raw),
                         )
                     )
             except _IntegrityError:

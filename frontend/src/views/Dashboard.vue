@@ -6,14 +6,8 @@
         <el-radio-button value="yesterday">昨日</el-radio-button>
         <el-radio-button value="month">本月</el-radio-button>
       </el-radio-group>
-      <el-select
-        v-if="auth.isSuperAdmin"
-        v-model="storeFilter"
-        placeholder="全部门店"
-        clearable
-        style="width:180px"
-        @change="load"
-      >
+      <el-select v-if="auth.isSuperAdmin" v-model="storeFilter" placeholder="全部门店" clearable style="width:180px"
+        @change="load">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
@@ -88,14 +82,8 @@
             <h3>各门店{{ periodLabel }}销售</h3>
             <span class="scope-hint">点击行切换单店视图</span>
           </div>
-          <el-table
-            :data="storeRows"
-            size="small"
-            stripe
-            highlight-current-row
-            class="store-table"
-            @row-click="onStoreRowClick"
-          >
+          <el-table :data="storeRows" size="small" stripe highlight-current-row class="store-table"
+            @row-click="onStoreRowClick">
             <el-table-column prop="store_name" label="门店" min-width="110" fixed>
               <template #default="{ row }">
                 <span class="store-link">{{ row.store_name }}</span>
@@ -222,12 +210,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const data = ref<any>(null)
 const loading = ref(false)
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const period = ref<'today' | 'yesterday' | 'month'>('today')
 
@@ -344,15 +333,6 @@ function onStoreRowClick(row: any) {
   load()
 }
 
-async function loadStores() {
-  try {
-    const res = await api.get('/settings/stores/options')
-    stores.value = res.data.items || []
-  } catch {
-    stores.value = []
-  }
-}
-
 async function load() {
   loading.value = true
   try {
@@ -379,33 +359,104 @@ onMounted(async () => {
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
-.scope-hint { color: #909399; font-size: 13px; }
-.stat-card { margin-bottom: 8px; }
-.stat { font-size: 24px; font-weight: bold; color: #409eff; }
-.stat.warn { color: #e6a23c; }
-.stat.discount { color: #f56c6c; }
-.label { color: #999; margin-top: 8px; font-size: 13px; }
-.hint { color: #c0c4cc; font-size: 12px; margin-top: 4px; }
+
+.scope-hint {
+  color: #909399;
+  font-size: 13px;
+}
+
+.stat-card {
+  margin-bottom: 8px;
+}
+
+.stat {
+  font-size: 24px;
+  font-weight: bold;
+  color: #409eff;
+}
+
+.stat.warn {
+  color: #e6a23c;
+}
+
+.stat.discount {
+  color: #f56c6c;
+}
+
+.label {
+  color: #999;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.hint {
+  color: #c0c4cc;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
 }
-.section-head h3 { margin: 0; font-size: 16px; }
-.side-card { height: 100%; margin-bottom: 8px; }
-.pay-note { font-size: 12px; color: #909399; margin: 0 0 10px; }
+
+.section-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.side-card {
+  height: 100%;
+  margin-bottom: 8px;
+}
+
+.pay-note {
+  font-size: 12px;
+  color: #909399;
+  margin: 0 0 10px;
+}
+
 .mini-stat {
   background: #f7f8fa;
   border-radius: 8px;
   padding: 12px;
   text-align: center;
 }
-.mini-stat.alert { background: #fef0f0; }
-.mini-val { font-size: 22px; font-weight: 700; color: #303133; }
-.mini-label { font-size: 12px; color: #909399; margin-top: 4px; }
-.store-table :deep(.el-table__row) { cursor: pointer; }
-.store-link { font-weight: 600; color: #303133; }
-.store-no { margin-left: 6px; font-size: 12px; color: #c0c4cc; }
-.text-warn { color: #e6a23c; }
+
+.mini-stat.alert {
+  background: #fef0f0;
+}
+
+.mini-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.mini-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.store-table :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.store-link {
+  font-weight: 600;
+  color: #303133;
+}
+
+.store-no {
+  margin-left: 6px;
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.text-warn {
+  color: #e6a23c;
+}
 </style>

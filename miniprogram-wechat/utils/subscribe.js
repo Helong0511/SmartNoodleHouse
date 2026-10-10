@@ -1,16 +1,8 @@
-const api = require('./api')
-
-let cachedTemplates = null
+const clientConfig = require('./clientConfig')
 
 async function loadTemplates() {
-  if (cachedTemplates) return cachedTemplates
-  try {
-    const data = await api.get('/miniprogram/config', {}, false)
-    cachedTemplates = (data && data.subscribe_templates) || {}
-  } catch (_) {
-    cachedTemplates = {}
-  }
-  return cachedTemplates
+  const cfg = await clientConfig.loadClientConfig()
+  return (cfg && cfg.subscribe_templates) || {}
 }
 
 /** 下单成功后引导订阅「出餐/待取餐」提醒（需后台配置模板 ID） */

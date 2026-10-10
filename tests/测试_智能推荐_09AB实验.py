@@ -270,7 +270,7 @@ async def test_report_unknown_experiment_raises(db_session):
 
 @pytest.mark.asyncio
 async def test_recommendation_endpoint_uses_ab_bucket(db_session, monkeypatch):
-    from app.api.v1.miniprogram import get_recommendations
+    from app.api.miniprogram import get_recommendations
 
     # 绕过 Redis（测试环境无服务）
     from app.services import reco_cache

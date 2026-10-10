@@ -9,20 +9,17 @@ const prefUtil = require('../../utils/preferences')
 const tracker = require('../../utils/tracker')
 const { loadStoreCatalog } = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
+const { pad2, formatDate } = require('../../utils/date')
 const app = getApp()
 
 const CHECKOUT_CACHE_MS = 30 * 1000
 const REMARK_MAX_LEN = 50
 
-function pad2(n) {
-  return n < 10 ? `0${n}` : `${n}`
-}
-
 /** 今天/明天两档，30 分钟粒度（11:00–20:30），仅保留 ≥ 当前时间+30 分钟的槽位 */
 function buildPickupSlots(dayIdx) {
   const base = new Date()
   base.setDate(base.getDate() + (dayIdx === 1 ? 1 : 0))
-  const dateStr = `${base.getFullYear()}-${pad2(base.getMonth() + 1)}-${pad2(base.getDate())}`
+  const dateStr = formatDate(base)
   const minTime = Date.now() + 30 * 60 * 1000
   const slots = []
   for (let h = 11; h <= 20; h++) {

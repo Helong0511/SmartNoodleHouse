@@ -1,7 +1,7 @@
 """小程序会员头像：只接受本系统 /uploads 路径落库；CDN 地址须服务端转存。"""
 import pytest
 
-from app.api.v1.miniprogram import _persistable_avatar_url
+from app.api.miniprogram import _persistable_avatar_url
 from app.core.exceptions import AppException
 from app.utils.upload import assert_public_http_url, sniff_image_type
 

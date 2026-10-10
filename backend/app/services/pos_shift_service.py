@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import ensure_local_aware, now_local
+from app.core.response import ensure_local_aware, now_local, serialize_dt
 from app.models import CashierShift, DiningTable, Order, Payment, RechargeOrder, User
 
 _PAID = "PAID"
@@ -219,8 +219,8 @@ class PosShiftService:
             "operator_name": (op.display_name or op.username) if op else None,
             "opening_float": str(shift.opening_float),
             "status": shift.status,
-            "opened_at": shift.opened_at.isoformat() if shift.opened_at else None,
-            "closed_at": shift.closed_at.isoformat() if shift.closed_at else None,
+            "opened_at": serialize_dt(shift.opened_at) if shift.opened_at else None,
+            "closed_at": serialize_dt(shift.closed_at) if shift.closed_at else None,
             "total_cash": str(stats["total_cash"]),
             "total_wechat": str(stats["total_wechat"]),
             "total_alipay": str(stats["total_alipay"]),
@@ -353,8 +353,8 @@ class PosShiftService:
                     "payment_status": o.payment_status,
                     "status": o.status,
                     "dining_type": o.dining_type,
-                    "paid_at": o.paid_at.isoformat() if o.paid_at else None,
-                    "ordered_at": o.ordered_at.isoformat() if o.ordered_at else None,
+                    "paid_at": serialize_dt(o.paid_at) if o.paid_at else None,
+                    "ordered_at": serialize_dt(o.ordered_at) if o.ordered_at else None,
                     "table_no": table.table_no if table else None,
                     "table_name": table.table_name if table else None,
                     "remark": o.remark,
@@ -375,7 +375,7 @@ class PosShiftService:
             )
         return {
             "shift_id": shift.id,
-            "opened_at": shift.opened_at.isoformat() if shift.opened_at else None,
+            "opened_at": serialize_dt(shift.opened_at) if shift.opened_at else None,
             "total": int(total),
             "page": page,
             "page_size": page_size,

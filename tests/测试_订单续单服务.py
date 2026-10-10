@@ -60,7 +60,7 @@ async def test_reorder_prices_items_in_order_store(db_session):
             "option_ids": [],
             "option_labels": [],
             "option_text": "",
-            "unit_price": 18.0,
+            "unit_price": "18.00",
             "subtotal": "36.00",
             "imageUrl": "",
             "main_image": "",

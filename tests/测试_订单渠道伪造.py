@@ -16,7 +16,7 @@ def _request(auth: str | None = None):
 
 
 def test_customer_channel_pos_rejected_without_jwt():
-    from app.api.v1.orders import _resolve_customer_order_channel
+    from app.api.orders import _resolve_customer_order_channel
 
     with pytest.raises(AppException) as ei:
         _resolve_customer_order_channel(_request(), "POS")
@@ -24,7 +24,7 @@ def test_customer_channel_pos_rejected_without_jwt():
 
 
 def test_customer_channel_meituan_rejected():
-    from app.api.v1.orders import _resolve_customer_order_channel
+    from app.api.orders import _resolve_customer_order_channel
 
     with pytest.raises(AppException) as ei:
         _resolve_customer_order_channel(_request(), "MEITUAN")
@@ -33,7 +33,7 @@ def test_customer_channel_meituan_rejected():
 
 def test_jwt_wechat_overrides_client_pos():
     """JWT channel=WECHAT 时，客户端传 POS 仍强制为 WECHAT。"""
-    from app.api.v1.orders import _resolve_customer_order_channel
+    from app.api.orders import _resolve_customer_order_channel
 
     with patch(
         "app.core.security.decode_customer_token",
@@ -44,7 +44,7 @@ def test_jwt_wechat_overrides_client_pos():
 
 
 def test_h5_hint_allowed_without_platform_jwt():
-    from app.api.v1.orders import _resolve_customer_order_channel
+    from app.api.orders import _resolve_customer_order_channel
 
     assert _resolve_customer_order_channel(_request(), "H5") == "H5"
     assert _resolve_customer_order_channel(_request(), "WECHAT") == "WECHAT"

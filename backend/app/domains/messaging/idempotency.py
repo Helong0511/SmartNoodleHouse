@@ -110,9 +110,9 @@ async def try_acquire(
 
     meta_json = None
     if meta:
-        import json
+        from app.core.response import dumps_json
 
-        meta_json = json.dumps(meta, ensure_ascii=False, default=str)[:500]
+        meta_json = dumps_json(meta)[:500]
 
     row = ProcessedMessage(scope=scope, message_id=message_id, meta_json=meta_json)
     db.add(row)

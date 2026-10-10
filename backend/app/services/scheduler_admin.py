@@ -170,7 +170,9 @@ async def notify_overrides_changed(*, job_id: str | None = None) -> int:
         ver = int(await r.incr(OVERRIDES_VER_KEY))
         await r.expire(OVERRIDES_VER_KEY, 30 * 24 * 3600)
         _local_overrides_ver = ver
-        payload = json.dumps({"ver": ver, "job_id": job_id}, ensure_ascii=False)
+        from app.core.response import dumps_json
+
+        payload = dumps_json({"ver": ver, "job_id": job_id})
         await r.publish(OVERRIDES_CHANNEL, payload)
     except Exception:
         logger.exception("通知定时任务覆盖变更失败")
@@ -178,7 +180,9 @@ async def notify_overrides_changed(*, job_id: str | None = None) -> int:
 
 
 async def save_overrides(db: AsyncSession, overrides: dict[str, Any]) -> None:
-    raw = json.dumps(overrides, ensure_ascii=False, separators=(",", ":"))
+    from app.core.response import dumps_json
+
+    raw = dumps_json(overrides, compact=True)
     row = await db.scalar(
         select(SystemSetting).where(SystemSetting.setting_key == OVERRIDES_KEY)
     )

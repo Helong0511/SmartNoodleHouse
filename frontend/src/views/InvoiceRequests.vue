@@ -68,6 +68,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -84,7 +85,7 @@ const STATUS_TAG_TYPES: Record<string, string> = {
 const auth = useAuthStore()
 const loading = ref(false)
 const items = ref<any[]>([])
-const stores = ref<any[]>([])
+const { storeOptions: stores, loadStores } = useStoreOptions()
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -109,15 +110,6 @@ function resetFilters() {
     reload()
 }
 
-async function loadStores() {
-    try {
-        const res = await api.get('/settings/stores/options')
-        stores.value = res.data.items || []
-    } catch {
-        stores.value = []
-    }
-}
-
 async function load() {
     loading.value = true
     try {
@@ -127,7 +119,7 @@ async function load() {
             status: statusFilter.value,
             store_id: auth.isSuperAdmin ? storeFilter.value : undefined,
         }
-        const res: any = await api.get('/invoices/admin', { params })
+        const res: any = await api.get('/admin/invoices', { params })
         // 防御性解析：兼容 {code,data:{items,total}} 与直接返回 {items,total} 或数组
         const body = res?.data ?? res ?? {}
         const list = Array.isArray(body) ? body : body.items || []
@@ -164,7 +156,7 @@ async function markIssued(row: any) {
     }
     busyId.value = row.id
     try {
-        await api.post(`/invoices/admin/${row.id}/issue`)
+        await api.post(`/admin/invoices/${row.id}/issue`)
         ElMessage.success('已标记开票')
         await load()
     } catch (e: any) {
@@ -189,7 +181,7 @@ async function reject(row: any) {
     }
     busyId.value = row.id
     try {
-        await api.post(`/invoices/admin/${row.id}/reject`, { reason })
+        await api.post(`/admin/invoices/${row.id}/reject`, { reason })
         ElMessage.success('已驳回')
         await load()
     } catch (e: any) {

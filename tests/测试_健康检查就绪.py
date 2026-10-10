@@ -19,7 +19,7 @@ async def test_health_ok_when_db_and_redis_up():
 
     app.dependency_overrides[get_db] = override_db
     try:
-        with patch("app.api.v1.health.get_redis", AsyncMock(return_value=AsyncMock(ping=AsyncMock()))):
+        with patch("app.api.health.get_redis", AsyncMock(return_value=AsyncMock(ping=AsyncMock()))):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 for path in ("/health", "/ready", "/api/health", "/api/ready"):
@@ -47,7 +47,7 @@ async def test_health_503_when_db_down():
 
     app.dependency_overrides[get_db] = override_db
     try:
-        with patch("app.api.v1.health.get_redis", AsyncMock(return_value=AsyncMock(ping=AsyncMock()))):
+        with patch("app.api.health.get_redis", AsyncMock(return_value=AsyncMock(ping=AsyncMock()))):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.get("/health")

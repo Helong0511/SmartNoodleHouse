@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.biz_no import generate_no, payment_biz, refund_biz, resolve_table_parts
 from app.core.exceptions import AppException
-from app.core.response import money, now_local
+from app.core.response import money, now_local, serialize_dt
 from app.models import (
     Customer,
     DiningTable,
@@ -449,7 +449,7 @@ class PaymentService:
                     "channel": p.channel,
                     "amount": str(money(p.amount)),
                     "status": p.status,
-                    "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+                    "paid_at": serialize_dt(p.paid_at) if p.paid_at else None,
                 }
             )
         return out

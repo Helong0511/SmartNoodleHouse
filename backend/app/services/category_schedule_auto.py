@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.response import naive_local_now, now_local
+from app.core.response import naive_local_now, now_local, serialize_dt
 from app.models import (
     CategorySortSchedule,
     CategorySortScheduleItem,
@@ -223,7 +223,7 @@ async def refresh_schedule_auto_sort(
         "lookback_days": int(lookback_days),
         "soft_qty": int(soft_qty),
         "order": [{"category_id": int(c.id), "name": c.name, "qty": int(sales.get(int(c.id), 0))} for c in ordered],
-        "auto_updated_at": schedule.auto_updated_at.isoformat() if schedule.auto_updated_at else None,
+        "auto_updated_at": serialize_dt(schedule.auto_updated_at) if schedule.auto_updated_at else None,
     }
 
 

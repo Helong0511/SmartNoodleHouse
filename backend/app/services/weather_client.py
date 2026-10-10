@@ -96,7 +96,9 @@ async def fetch_current_weather(lat: float, lng: float) -> dict[str, Any] | None
         from app.core.redis_client import get_redis
 
         r = await get_redis()
-        await r.set(cache_key, json.dumps(payload), ex=ttl_with_jitter(_CACHE_TTL))
+        from app.core.response import dumps_json
+
+        await r.set(cache_key, dumps_json(payload, compact=True), ex=ttl_with_jitter(_CACHE_TTL))
         await r.delete(empty_key)
     except Exception:
         pass

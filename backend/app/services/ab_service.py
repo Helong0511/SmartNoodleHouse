@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
+from app.core.response import serialize_dt
 from app.models import AbAssignment, AbExperiment, CustomerBehaviorEvent, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -359,8 +360,8 @@ class AbService:
                 "traffic_percent": exp.traffic_percent,
                 "default_bucket": exp.default_bucket,
             },
-            "date_from": date_from.isoformat() if date_from else None,
-            "date_to": date_to.isoformat() if date_to else None,
+            "date_from": serialize_dt(date_from),
+            "date_to": serialize_dt(date_to),
             "funnel_window_hours": FUNNEL_WINDOW_HOURS,
             "scene_scope": list(RECO_SCENES),
             "attribution_note": (

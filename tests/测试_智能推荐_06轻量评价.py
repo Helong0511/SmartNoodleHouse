@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.api.v1.miniprogram import _load_owned_order, submit_order_feedback
+from app.api.miniprogram import _load_owned_order, submit_order_feedback
 from app.core.exceptions import AppException
 from app.models import CustomerTasteProfile, ProductFeedback
 from app.schemas.reco import FeedbackBatchIn, FeedbackItemIn

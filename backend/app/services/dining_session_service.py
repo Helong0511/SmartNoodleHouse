@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import ensure_local_aware, now_local
+from app.core.response import ensure_local_aware, now_local, serialize_dt
 from app.models import Customer, DiningSession, DiningTable
 
 # 堂食会话默认有效期（小时）；过期后须重新扫码
@@ -26,9 +26,9 @@ class DiningSessionService:
             "table_id": session.table_id,
             "table_token": session.table_token,
             "status": session.status,
-            "started_at": session.started_at.isoformat() if session.started_at else None,
-            "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
-            "expires_at": session.expires_at.isoformat() if session.expires_at else None,
+            "started_at": serialize_dt(session.started_at) if session.started_at else None,
+            "last_active_at": serialize_dt(session.last_active_at) if session.last_active_at else None,
+            "expires_at": serialize_dt(session.expires_at) if session.expires_at else None,
         }
 
     @staticmethod

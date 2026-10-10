@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.requests import Request
 
-from app.api.v1 import miniprogram as miniprogram_api
+from app.api import miniprogram as miniprogram_api
 
 
 def _request() -> Request:

@@ -140,7 +140,8 @@
       </view>
     </view>
 
-    <view class="order-actions" wx:if="{{canUrge || canSelfRefund}}">
+    <view class="order-actions" wx:if="{{canUrge || canSelfRefund || canInvoice}}">
+      <button class="btn-ghost mini invoice-btn" wx:if="{{canInvoice}}" bindtap="goInvoice">申请开票</button>
       <button class="btn-ghost mini urge-btn {{urgeOnCooldown ? 'is-disabled' : ''}}" wx:if="{{canUrge}}" disabled="{{urgeOnCooldown}}" bindtap="urgeOrderNow">催单</button>
       <button class="btn-ghost mini refund-btn" wx:if="{{canSelfRefund}}" loading="{{refunding}}" bindtap="selfRefundOrder">申请退款</button>
     </view>

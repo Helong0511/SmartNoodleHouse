@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.api.v1.auth import login
+from app.api.auth import login
 from app.schemas.common import LoginRequest
 
 
@@ -30,8 +30,8 @@ async def test_login_updates_last_login_at():
     req = MagicMock()
     data = LoginRequest(username="admin", password="secret")
 
-    with patch("app.api.v1.auth.verify_password", return_value=True), patch(
-        "app.api.v1.auth.create_access_token", return_value="tok"
+    with patch("app.api.auth.verify_password", return_value=True), patch(
+        "app.api.auth.create_access_token", return_value="tok"
     ), patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"order:read"})):
         resp = await login(data, req, db)
 

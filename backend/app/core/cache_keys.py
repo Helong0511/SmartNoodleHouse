@@ -39,6 +39,20 @@ def reco_customer_pattern(customer_id: int) -> str:
     return f"{RECO_KEY_PREFIX}:c{int(customer_id)}:*"
 
 
+def reco_rebuild_lock_key(
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+) -> str:
+    """推荐结果重建互斥锁键。fingerprint 用于 settle_addon 区分不同购物车内容。"""
+    cid = int(customer_id) if customer_id else 0
+    base = f"{RECO_KEY_PREFIX}:lock:c{cid}:s{int(store_id)}:{scene}:{bucket}"
+    return f"{base}:{fingerprint}" if fingerprint else base
+
+
+def menu_rebuild_lock_key(store_id: int) -> str:
+    """菜单 bundle 重建互斥锁键。"""
+    return f"snh:menu:lock:{int(store_id)}"
+
+
 def menu_catalog_key(store_id: int) -> str:
     return f"{MENU_CATALOG_PREFIX}:s{int(store_id)}"
 

@@ -44,7 +44,7 @@ def test_resolve_product_requires_inherit_and_override():
 
 def test_store_require_lists_inherit_vs_custom():
     """创建商品未传依赖时应 custom=False → NULL，才能继续继承分类变更。"""
-    from app.api.v1.products import _store_require_lists
+    from app.api.products import _store_require_lists
 
     assert _store_require_lists([10], [], custom=False) == (None, None)
     assert _store_require_lists([10], [], custom=True) == ([10], [])
