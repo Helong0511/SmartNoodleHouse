@@ -165,6 +165,9 @@ async def list_issued_coupons(
     # 防御：发券门店筛选仅超管可用；门店账号丢弃该参数，沿用本店数据隔离口径
     if user.role.code != "SUPER_ADMIN":
         issued_store_id = None
+    from app.schemas.pagination import clamp_page
+
+    page, page_size = clamp_page(page, page_size)
     items, total = await CouponService.list_customer_coupons_admin(
         db,
         customer_id=customer_id,
@@ -181,8 +184,8 @@ async def list_issued_coupons(
         {
             "items": items,
             "total": total,
-            "page": max(1, page),
-            "page_size": min(max(1, page_size), 100),
+            "page": page,
+            "page_size": page_size,
             "total_pages": calc_pages(total, page_size),
         },
         request=request,

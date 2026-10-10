@@ -4,6 +4,8 @@ const prefUtil = require('../../utils/preferences')
 const pickupUtil = require('../../utils/pickup')
 const dineCtx = require('../../utils/context')
 const tracker = require('../../utils/tracker')
+const clientConfig = require('../../utils/clientConfig')
+const orderActions = require('../../utils/orderActions')
 const app = getApp()
 
 // 轻量评价标签（与后端 feedback_service.VERDICT_WHITELIST 对齐）
@@ -90,6 +92,13 @@ function headerIcon(status) {
   return '…'
 }
 
+/** scheduled_pickup_at（本地时区 ISO）→「HH:MM」，无值返回空串 */
+function formatScheduledPickup(iso) {
+  const s = String(iso || '')
+  const m = s.match(/T(\d{2}:\d{2})/)
+  return m ? m[1] : ''
+}
+
 Page({
   data: {
     loading: true,
@@ -130,7 +139,15 @@ Page({
     tasteHint: '',
     feedbackVisible: false,
     feedbackSubmitting: false,
-    feedbackItems: []
+    feedbackItems: [],
+    showCouponCard: false,
+    claimCouponName: '',
+    claimingCoupon: false,
+    scheduledPickupText: '',
+    canUrge: false,
+    urgeOnCooldown: false,
+    canSelfRefund: false,
+    refunding: false
   },
 
   onLoad(query) {
@@ -314,6 +331,9 @@ Page({
         storeNo: order.store_no || dineCtx.currentDisplay().storeNo || '',
         storeLogo: dineCtx.currentDisplay().storeLogo || '',
         ...seatFieldsFromOrder(order),
+        // 预约取餐：返回 scheduled_pickup_at 时展示「预约取餐 HH:MM」
+        scheduledPickupText: formatScheduledPickup(order.scheduled_pickup_at),
+        ...orderActions.buildActionFlags(order),
         loading: false,
         loadError: false
       })
@@ -322,6 +342,8 @@ Page({
         prefUtil.clearPrefsCache(app)
         this._maybeShowMemberBanner(order)
       }
+      // 支付成功领券：config 下发券名且顾客未领取时展示卡片
+      this._maybeShowCouponCard(order)
       if (FEEDBACK_PAID_STATUSES.indexOf(String(order.payment_status || '').toUpperCase()) >= 0) {
         this._loadFeedback()
       }
@@ -529,5 +551,85 @@ Page({
 
   goMenu() {
     my.switchTab({ url: '/pages/menu/menu' })
+  },
+
+  // ---- 支付成功领券 ----
+  async _maybeShowCouponCard(order) {
+    if (this._couponResolved) return
+    if (!order || String(order.payment_status || '').toUpperCase() !== 'PAID') return
+    try {
+      const cfg = await clientConfig.loadClientConfig()
+      const configName = String((cfg && cfg.pay_success_coupon_name) || '').trim()
+      if (!configName) {
+        this._couponResolved = true
+        return
+      }
+      const info = await api.get(`/orders/${this.orderId}/claimable-coupon`)
+      const available = !!(info && info.available)
+      const claimed = !!(info && info.claimed)
+      if (available && !claimed) {
+        this.setData({
+          showCouponCard: true,
+          claimCouponName: info.coupon_name || configName
+        })
+      } else {
+        this.setData({ showCouponCard: false })
+      }
+      this._couponResolved = true
+    } catch (e) {
+      // 静默：领券不阻塞结果页主流程
+      console.warn('[result] claimable-coupon failed', e)
+    }
+  },
+
+  async claimCoupon() {
+    if (this.data.claimingCoupon || !this.orderId) return
+    this.setData({ claimingCoupon: true })
+    try {
+      await api.post(`/orders/${this.orderId}/claim-coupon`, {})
+      this._couponResolved = true
+      this.setData({ showCouponCard: false, claimingCoupon: false })
+      my.showToast({ content: '已存入卡包', type: 'success' })
+    } catch (e) {
+      // 失败静默，仅记录，不阻塞结果页
+      console.warn('[result] claim-coupon failed', e)
+      this.setData({ claimingCoupon: false })
+    }
+  },
+
+  // ---- 催单 ----
+  async urgeOrderNow() {
+    if (!this.orderId || this.data.urgeOnCooldown) return
+    try {
+      await orderActions.urgeOrder(this.orderId)
+      this.setData({ urgeOnCooldown: true })
+      my.showToast({ content: '已通知后厨加急', type: 'success' })
+    } catch (e) {
+      my.showToast({ content: (e && e.message) || '催单失败，请稍后重试', type: 'none' })
+    }
+  },
+
+  // ---- 自助退款 ----
+  selfRefundOrder() {
+    if (!this.orderId || this.data.refunding) return
+    my.confirm({
+      title: '申请退款',
+      content: '未开始制作的订单可申请全额退款，商家审核后原路退回',
+      confirmButtonText: '申请退款',
+      cancelButtonText: '取消',
+      success: async (r) => {
+        if (!r || !r.confirm) return
+        this.setData({ refunding: true })
+        try {
+          await orderActions.selfRefund(this.orderId)
+          my.showToast({ content: '退款申请已提交，请等待商家审核', type: 'none', duration: 2500 })
+          await this.loadOrder(true)
+        } catch (e) {
+          my.showToast({ content: (e && e.message) || '退款申请失败', type: 'none', duration: 2500 })
+        } finally {
+          this.setData({ refunding: false })
+        }
+      }
+    })
   }
 })

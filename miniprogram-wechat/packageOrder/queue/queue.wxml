@@ -1,0 +1,56 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="tip">加载中...</view>
+
+  <view wx:elif="{{!queueEnabled}}" class="empty">
+    <view class="empty-title">当前门店暂未开放排队取号</view>
+    <button class="btn-primary" bindtap="goMenu">去点餐</button>
+  </view>
+
+  <view wx:elif="{{!storeId}}" class="empty">
+    <view class="empty-title">请先扫描桌台二维码选择门店</view>
+  </view>
+
+  <!-- 未取号：选择人数 → 取号 -->
+  <block wx:elif="{{!queue}}">
+    <view class="card">
+      <view class="title">选择用餐人数</view>
+      <view class="people-grid">
+        <view
+          class="people-item {{peopleCount === item ? 'on' : ''}}"
+          wx:for="{{peopleOptions}}"
+          wx:key="*this"
+          data-n="{{item}}"
+          bindtap="onPickPeople"
+        >{{item}}</view>
+      </view>
+      <button
+        class="btn-primary take-btn"
+        loading="{{taking}}"
+        bindtap="takeNumber"
+      >立即取号</button>
+      <view class="tip">取号后请留意叫号提醒，过号需重新取号。</view>
+    </view>
+  </block>
+
+  <!-- 已取号：号牌 -->
+  <block wx:else>
+    <view class="card queue-card {{queue.isCalled ? 'called' : ''}}">
+      <view class="queue-status">{{queue.statusText}}</view>
+      <view class="queue-no">{{queue.queue_no || queue.number || '-'}}</view>
+      <view class="queue-meta">
+        <text>{{queue.people_count || peopleCount}} 位用餐</text>
+      </view>
+      <view class="ahead-box" wx:if="{{queue.isWaiting}}">
+        <text class="ahead-num">{{queue.ahead_count || 0}}</text>
+        <text class="ahead-unit">桌在您前方</text>
+      </view>
+      <view class="called-tip" wx:if="{{queue.isCalled}}">号码已被叫到，请尽快到店入座</view>
+    </view>
+    <button
+      class="btn-ghost cancel-btn"
+      loading="{{cancelling}}"
+      bindtap="cancelQueue"
+      wx:if="{{queue.active}}"
+    >取消排队</button>
+  </block>
+</view>

@@ -1,6 +1,8 @@
 /** 前端 / H5 全部日志 → POST /api/client-logs → logs/frontend/ */
 const FLUSH_MS = 5000
-const MAX_BATCH = 50
+/** 与后端 client_logs._MAX_ENTRIES / _MAX_MESSAGE 对齐，避免整批 422 */
+const MAX_BATCH = 30
+const MAX_MESSAGE = 2000
 const MAX_QUEUE = 500
 
 type Level = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
@@ -38,7 +40,7 @@ function stringifyArg(v: unknown): string {
 
 function push(level: Level, message: string, extra?: unknown) {
   if (reporting) return
-  const msg = String(message || '').slice(0, 4000)
+  const msg = String(message || '').slice(0, MAX_MESSAGE)
   if (!msg) return
   queue.push({
     level,
@@ -92,10 +94,18 @@ async function flush() {
       }),
       keepalive: true,
     })
-    flushFailures = 0
-    if (res.status === 401 || res.status === 403) {
-      // 未登录/无权限，清空队列不再重试
+    if (res.status === 401 || res.status === 403 || res.status === 422) {
+      // 未登录/无权限/参数校验失败：丢弃本批，勿回队死循环
       queue.length = 0
+      flushFailures = 0
+    } else if (!res.ok) {
+      flushFailures++
+      if (flushFailures >= 3) {
+        queue.length = 0
+        flushFailures = 0
+      }
+    } else {
+      flushFailures = 0
     }
   } catch {
     // 请求被中止（页面跳转/卸载）或网络错误，丢弃当前 batch 不重试

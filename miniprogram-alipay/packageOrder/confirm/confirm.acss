@@ -61,6 +61,33 @@
 .pack-opt { flex: 1; text-align: center; padding: 18rpx 0; border-radius: 10rpx; border: 1px solid #ddd; color: #666; }
 .pack-opt.on { border-color: #1677ff; color: #1677ff; background: #f0f7ff; font-weight: 600; }
 .pack-tip { margin-top: 12rpx; color: #999; font-size: 24rpx; }
+
+/* 预约取餐（打包单） */
+.schedule-box { background: #fff; border-radius: 12rpx; padding: 24rpx; margin-bottom: 20rpx; }
+.schedule-head { display: flex; align-items: center; justify-content: space-between; }
+.schedule-sub { color: #999; font-size: 22rpx; margin-top: 4rpx; }
+.schedule-day-row { display: flex; gap: 16rpx; margin-top: 16rpx; }
+.schedule-day {
+  flex: 1; text-align: center; padding: 14rpx 0; border-radius: 10rpx;
+  border: 1px solid #ddd; color: #666; font-size: 26rpx;
+}
+.schedule-day.on { border-color: #ff6b35; color: #ff6b35; background: #fff5f0; font-weight: 600; }
+.schedule-slots { display: flex; flex-wrap: wrap; gap: 14rpx; margin-top: 16rpx; }
+.schedule-slot {
+  min-width: 128rpx; text-align: center; padding: 12rpx 16rpx; border-radius: 8rpx;
+  border: 1px solid #e5e5e5; color: #555; font-size: 26rpx; box-sizing: border-box;
+}
+.schedule-slot.on { border-color: #ff6b35; color: #ff6b35; background: #fff5f0; font-weight: 600; }
+.schedule-empty { margin-top: 16rpx; color: #999; font-size: 24rpx; }
+
+/* 快捷备注标签 */
+.quick-remarks { background: #fff; border-radius: 12rpx; padding: 24rpx; margin-bottom: 20rpx; }
+.qr-tags { display: flex; flex-wrap: wrap; gap: 14rpx; }
+.qr-tag {
+  padding: 10rpx 22rpx; border-radius: 999rpx; font-size: 24rpx;
+  border: 1px solid #e0e0e0; color: #666; background: #fafafa;
+}
+.qr-tag.on { border-color: #ff6b35; color: #ff6b35; background: #fff5f0; font-weight: 600; }
 .remark { width: 100%; background: #fff; border-radius: 12rpx; padding: 20rpx; min-height: 160rpx; }
 .pay-box { margin: 24rpx 0; background: #fff; border-radius: 12rpx; padding: 20rpx; }
 .pay-row { display: flex; gap: 16rpx; margin-top: 12rpx; }

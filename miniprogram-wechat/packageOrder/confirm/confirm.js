@@ -9,9 +9,33 @@ const dineCtx = require('../../utils/context')
 const prefUtil = require('../../utils/preferences')
 const tracker = require('../../utils/tracker')
 const { loadStoreCatalog } = require('../../utils/products')
+const clientConfig = require('../../utils/clientConfig')
 const app = getApp()
 
 const CHECKOUT_CACHE_MS = 30 * 1000
+const REMARK_MAX_LEN = 50
+
+function pad2(n) {
+  return n < 10 ? `0${n}` : `${n}`
+}
+
+/** 今天/明天两档，30 分钟粒度（11:00–20:30），仅保留 ≥ 当前时间+30 分钟的槽位 */
+function buildPickupSlots(dayIdx) {
+  const base = new Date()
+  base.setDate(base.getDate() + (dayIdx === 1 ? 1 : 0))
+  const dateStr = `${base.getFullYear()}-${pad2(base.getMonth() + 1)}-${pad2(base.getDate())}`
+  const minTime = Date.now() + 30 * 60 * 1000
+  const slots = []
+  for (let h = 11; h <= 20; h++) {
+    for (const m of [0, 30]) {
+      const label = `${pad2(h)}:${pad2(m)}`
+      const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0)
+      if (dt.getTime() < minTime) continue
+      slots.push({ label, iso: `${dateStr}T${label}:00` })
+    }
+  }
+  return slots
+}
 
 function memberDiscountText(rate) {
   const n = parseFloat(rate)
@@ -68,6 +92,12 @@ function pickBestVoucher(vouchers, payable, calcFn) {
 Page({
   data: {
     remark: '',
+    quickRemarks: [],
+    selectedRemarks: [],
+    scheduleEnabled: false,
+    scheduleDayIdx: 0,
+    scheduleSlots: [],
+    scheduleSlotIdx: -1,
     loading: false,
     tableToken: '',
     tableOptions: [],
@@ -119,6 +149,13 @@ Page({
   onShow() {
     // 扫码相机返回会触发 onShow；跳过整页重载，避免与「识别桌台」叠请求变慢
     if (this._bindingTable) return
+    // 快捷备注标签来自后端下发配置（可能为空数组）
+    clientConfig.loadClientConfig().then((cfg) => {
+      const opts = (cfg && Array.isArray(cfg.quick_remark_options)) ? cfg.quick_remark_options : []
+      this.setData({
+        quickRemarks: opts.filter((s) => String(s || '').trim()).map((s) => ({ label: String(s).trim(), on: false }))
+      })
+    }).catch(() => { })
     // 同步预读本地桌台凭证：bootstrapCheckout 是异步的，弱网/真机下完成前
     // data.tableToken 初始为空会让 wxml 先渲染「扫码绑桌」按钮，造成
     // 「明明已绑桌却提示扫码」的闪烁与误解。本地有凭证时立即展示。
@@ -142,7 +179,7 @@ Page({
             || '已绑桌'
         })
       }
-    } catch (_) {}
+    } catch (_) { }
     const cartFp = this._cartFingerprint()
     const now = Date.now()
     if (
@@ -225,7 +262,7 @@ Page({
         wx.removeStorageSync('dine_table')
         wx.removeStorageSync('dine_store')
         wx.removeStorageSync('dine_bound_at')
-      } catch (__) {}
+      } catch (__) { }
     }
     this.setData({
       storeName: '',
@@ -359,13 +396,13 @@ Page({
       const options = (list || [])
         .filter((t) => !dineCtx.isTakeawayChannelTable(t))
         .map((t) => ({
-        label: t.table_name || t.table_no,
-        id: t.id,
-        qr_token: t.qr_token || '',
-        store_id: t.store_id,
-        table_no: t.table_no,
-        table_name: t.table_name,
-      }))
+          label: t.table_name || t.table_no,
+          id: t.id,
+          qr_token: t.qr_token || '',
+          store_id: t.store_id,
+          table_no: t.table_no,
+          table_name: t.table_name,
+        }))
       this.setData({ tableOptions: options, needScanHint: !token && !options.length })
     } catch (_) {
       if (!this._checkoutStale(gen)) {
@@ -499,7 +536,7 @@ Page({
     try {
       const ctx = dineCtx.currentDisplay()
       if (ctx && ctx.storeId) return ctx.storeId
-    } catch (_) {}
+    } catch (_) { }
     const table = app.globalData.table || wx.getStorageSync('dine_table') || null
     const store = app.globalData.store || wx.getStorageSync('dine_store') || null
     return (table && table.store_id)
@@ -552,7 +589,7 @@ Page({
     try {
       const cartSid = Number(wx.getStorageSync('cart_store_id'))
       if (Number.isFinite(cartSid) && cartSid > 0) return cartSid
-    } catch (_) {}
+    } catch (_) { }
     return null
   },
 
@@ -855,11 +892,74 @@ Page({
 
   onPack(e) {
     const needPack = e.currentTarget.dataset.pack === '1' || e.currentTarget.dataset.pack === 1
-    this.setData({ needPack }, () => this.refreshSummary())
+    const patch = { needPack }
+    if (!needPack && this.data.scheduleEnabled) {
+      // 切回堂食：预约取餐随打包单生效，关闭即恢复立即制作
+      patch.scheduleEnabled = false
+      patch.scheduleSlotIdx = -1
+    }
+    this.setData(patch, () => this.refreshSummary())
+  },
+
+  // ---- 快捷备注标签 ----
+  _syncSelectedRemarks(selected) {
+    this.setData({ selectedRemarks: selected })
+  },
+
+  toggleQuickRemark(e) {
+    const label = String(e.currentTarget.dataset.label || '')
+    if (!label) return
+    const list = (this.data.quickRemarks || []).slice()
+    const hit = list.find((t) => t.label === label)
+    if (!hit) return
+    const selected = this.data.selectedRemarks.slice()
+    const pos = selected.indexOf(label)
+    if (pos >= 0) {
+      selected.splice(pos, 1)
+      hit.on = false
+    } else {
+      const merged = selected.concat([label]).join(' ')
+      const manual = String(this.data.remark || '').trim()
+      const total = [merged, manual].filter(Boolean).join(' ')
+      if (total.length > REMARK_MAX_LEN) {
+        wx.showToast({ title: `备注最多 ${REMARK_MAX_LEN} 字`, icon: 'none' })
+        return
+      }
+      selected.push(label)
+      hit.on = true
+    }
+    this._syncSelectedRemarks(selected)
+    this.setData({ quickRemarks: list })
   },
 
   onRemark(e) {
     this.setData({ remark: e.detail.value })
+  },
+
+  // ---- 预约取餐时段（打包单） ----
+  onScheduleToggle(e) {
+    const on = !!(e.detail && e.detail.value)
+    this.setData({
+      scheduleEnabled: on,
+      scheduleSlots: on ? buildPickupSlots(this.data.scheduleDayIdx) : [],
+      scheduleSlotIdx: on ? this.data.scheduleSlotIdx : -1
+    })
+  },
+
+  onScheduleDay(e) {
+    const dayIdx = Number(e.currentTarget.dataset.day) === 1 ? 1 : 0
+    if (dayIdx === this.data.scheduleDayIdx) return
+    this.setData({
+      scheduleDayIdx: dayIdx,
+      scheduleSlots: buildPickupSlots(dayIdx),
+      scheduleSlotIdx: -1
+    })
+  },
+
+  onScheduleSlot(e) {
+    const idx = Number(e.currentTarget.dataset.idx)
+    if (!Number.isFinite(idx)) return
+    this.setData({ scheduleSlotIdx: idx })
   },
 
   // ---- 顺手再来一份（settle_addon 推荐位）----
@@ -907,7 +1007,7 @@ Page({
         category_id: entry.category_id || null,
         payload: { qty: 1 }
       })
-    } catch (_) {}
+    } catch (_) { }
     wx.showToast({ title: '已加入', icon: 'success' })
     this.refreshSummary()
   },
@@ -928,6 +1028,7 @@ Page({
       this.data.needPack ? '1' : '0',
       this.data.selectedCouponId || 0,
       this.data.selectedVoucherId || 0,
+      this._scheduledPickupIso() || '',
       items.join(',')
     ].join('|')
     let h = 2166136261
@@ -947,6 +1048,21 @@ Page({
   clearCheckoutNonce() {
     this._checkoutNonce = null
     this._idemContentKey = null
+  },
+
+  /** 打包单开启预约后返回选定槽位的本地时区 ISO（无 Z 后缀）；关闭/未选返回 null */
+  _scheduledPickupIso() {
+    if (!this.data.needPack || !this.data.scheduleEnabled) return null
+    const slot = (this.data.scheduleSlots || [])[this.data.scheduleSlotIdx]
+    return slot ? slot.iso : null
+  },
+
+  /** 整单备注 = 快捷标签（空格拼接，去重）+ 手动输入 */
+  _composeRemark() {
+    const parts = this.data.selectedRemarks.slice()
+    const manual = String(this.data.remark || '').trim()
+    if (manual) parts.push(manual)
+    return parts.filter(Boolean).join(' ')
   },
 
   async submit() {
@@ -1011,6 +1127,15 @@ Page({
         await this.resolveTable()
         return
       }
+      const remarkText = this._composeRemark()
+      if (remarkText.length > REMARK_MAX_LEN) {
+        wx.showToast({ title: `备注最多 ${REMARK_MAX_LEN} 字`, icon: 'none' })
+        return
+      }
+      if (this.data.needPack && this.data.scheduleEnabled && !this._scheduledPickupIso()) {
+        wx.showToast({ title: '请选择预约取餐时段', icon: 'none' })
+        return
+      }
       await auth.ensureLogin()
       const order = await api.post('/orders', {
         store_id: this.submitStoreId(),
@@ -1018,7 +1143,8 @@ Page({
         channel: 'WECHAT',
         need_pack: !!this.data.needPack,
         dining_type: this.data.needPack ? 'TAKEAWAY' : 'DINE_IN',
-        remark: this.data.remark,
+        remark: remarkText,
+        scheduled_pickup_at: this._scheduledPickupIso() || undefined,
         idempotency_key: this.makeIdempotencyKey(cart),
         skip_promotions: this.data.payMethod === 'BALANCE',
         customer_coupon_id: this.data.payMethod === 'BALANCE' ? undefined : (this.data.selectedCouponId || undefined),
@@ -1067,7 +1193,7 @@ Page({
       await subscribe.requestOrderReadySubscribe()
       const pts =
         (payOutcome && payOutcome.sync && payOutcome.sync.points_earned) ||
-        (payRes && payRes.points_earned)
+          (payRes && payRes.points_earned)
           ? `&points_earned=${(payOutcome && payOutcome.sync && payOutcome.sync.points_earned) || payRes.points_earned}`
           : ''
       wx.redirectTo({ url: `/packageOrder/result/result?order_id=${order.id}${pts}` })

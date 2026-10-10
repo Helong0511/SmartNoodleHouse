@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
@@ -47,11 +47,27 @@ class RechargeCreate(BaseModel):
 
 
 class AdjustBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     customer_id: int
-    delta_principal: Decimal = Decimal("0")
-    delta_gift: Decimal = Decimal("0")
+    delta_principal: Decimal = Field(default=Decimal("0"))
+    delta_gift: Decimal = Field(default=Decimal("0"))
     remark: str | None = Field(default=None, max_length=255)
     store_id: int | None = None
+
+    @model_validator(mode="after")
+    def _normalize_and_reject_noop(self):
+        from app.core.response import money
+
+        self.delta_principal = money(self.delta_principal)
+        self.delta_gift = money(self.delta_gift)
+        if self.delta_principal == 0 and self.delta_gift == 0:
+            raise ValueError("调账金额不能全为 0")
+        # 单次调账绝对值上限，防止误传超大金额
+        limit = Decimal("100000.00")
+        if abs(self.delta_principal) > limit or abs(self.delta_gift) > limit:
+            raise ValueError(f"单次调账金额不能超过 {limit}")
+        return self
 
 
 def _pkg_ser(p: RechargePackage, store_name: str | None = None) -> dict:

@@ -267,5 +267,6 @@ module.exports = {
   get: (path, data, needAuth = true) => request('GET', path, data, needAuth),
   post: (path, data, needAuth = true) => request('POST', path, data, needAuth),
   put: (path, data, needAuth = true) => request('PUT', path, data, needAuth),
-  patch: (path, data, needAuth = true) => request('PATCH', path, data, needAuth)
+  patch: (path, data, needAuth = true) => request('PATCH', path, data, needAuth),
+  delete: (path, data, needAuth = true) => request('DELETE', path, data, needAuth)
 }

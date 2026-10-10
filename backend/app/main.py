@@ -13,12 +13,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
+from app.api.v1.favorites import router as favorites_router
+from app.api.v1.invoices import router as invoices_router
+from app.api.v1.queue import router as queue_router
 from app.core.config import get_settings
+from fastapi.exceptions import RequestValidationError
+
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
     generic_exception_handler,
     http_exception_handler,
+    request_validation_exception_handler,
     sqlalchemy_integrity_handler,
     sqlalchemy_operational_handler,
 )
@@ -397,9 +403,11 @@ def create_app() -> FastAPI:
                     await audit_db.commit()
             except Exception:
                 logger.exception("audit log_intrusion failed: %s", reason)
+            from app.core.response import error as api_error
+
             return JSONResponse(
                 status_code=403,
-                content={"code": 403, "message": "Request blocked by security policy"},
+                content=api_error(40301, "Request blocked by security policy", request),
             )
         return await call_next(request)
 
@@ -416,6 +424,7 @@ def create_app() -> FastAPI:
     app.add_middleware(JsonGZipMiddleware)
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
     from sqlalchemy.exc import IntegrityError, OperationalError
 
     app.add_exception_handler(IntegrityError, sqlalchemy_integrity_handler)
@@ -423,6 +432,11 @@ def create_app() -> FastAPI:
     # P0-5：兜底异常处理器，确保所有未捕获异常返回 JSON 而非 HTML 500
     app.add_exception_handler(Exception, generic_exception_handler)
     app.include_router(api_router)
+
+    # 日常体验模块：收藏 / 发票 / 排队（router 内已带 /api 前缀）
+    app.include_router(favorites_router)
+    app.include_router(invoices_router)
+    app.include_router(queue_router)
 
     # 无前缀探针：与 /api/health、/api/ready 同源（DB+Redis）
     from app.api.v1 import health as health_routes

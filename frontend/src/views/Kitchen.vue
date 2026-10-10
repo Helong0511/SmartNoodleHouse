@@ -12,15 +12,8 @@
             </div>
           </div>
         </div>
-        <el-select
-          v-if="isSuperAdmin"
-          v-model="selectedStoreId"
-          clearable
-          placeholder="全部门店"
-          size="small"
-          style="width: 160px"
-          @change="onStoreChange"
-        >
+        <el-select v-if="isSuperAdmin" v-model="selectedStoreId" clearable placeholder="全部门店" size="small"
+          style="width: 160px" @change="onStoreChange">
           <el-option label="全部门店" :value="null" />
           <el-option v-for="s in storeOptions" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
@@ -57,12 +50,7 @@
       <div v-for="j in failedPrintJobs" :key="j.id" class="print-fail-row">
         <span>#{{ j.id }} 订单{{ j.order_id }} · {{ label(PRINT_JOB_STATUS, j.status) }} · 尝试{{ j.attempt_count }}</span>
         <span class="err" :title="j.last_error || ''">{{ j.last_error || '无错误信息' }}</span>
-        <el-button
-          size="small"
-          type="primary"
-          :loading="retryBusyId === j.id"
-          @click="retryPrintJob(j)"
-        >重试</el-button>
+        <el-button size="small" type="primary" :loading="retryBusyId === j.id" @click="retryPrintJob(j)">重试</el-button>
       </div>
     </div>
     <div v-else-if="showPrintJobs && !failedPrintJobs.length" class="print-fail-panel empty-fail">
@@ -77,20 +65,17 @@
     <div v-if="!filtered.length" class="empty">当前无活跃订单</div>
 
     <div class="orders-grid">
-      <el-card
-        v-for="o in filtered"
-        :key="o.id"
-        class="order-card"
-        :class="[
-          o.status,
-          ageClass(o),
-          {
-            delivery: o.is_delivery,
-            'dine-in': isDineInOrder(o),
-            'pack-order': isPackOrder(o) && !o.is_delivery,
-          },
-        ]"
-      >
+      <el-card v-for="o in filtered" :key="o.id" class="order-card" :class="[
+        o.status,
+        ageClass(o),
+        {
+          delivery: o.is_delivery,
+          'dine-in': isDineInOrder(o),
+          'pack-order': isPackOrder(o) && !o.is_delivery,
+          urged: orderUrgeCount(o) > 0,
+        },
+      ]">
+        <div v-if="orderUrgeCount(o) > 0" class="urge-badge">催单×{{ orderUrgeCount(o) }}</div>
         <div v-if="o.is_delivery" class="mode-banner delivery">{{ deliveryBanner(o) }}</div>
         <div v-else-if="isPackOrder(o)" class="mode-banner pack">打包出餐</div>
         <div v-else-if="isDineInOrder(o)" class="mode-banner dine">堂食</div>
@@ -99,20 +84,19 @@
           <div class="title-block">
             <div class="table">{{ orderTitle(o) }}</div>
             <div class="badges">
-              <el-tag v-if="showStoreTag(o)" size="small" type="success" effect="plain">{{ o.store_name || `店#${o.store_id}` }}</el-tag>
-              <el-tag v-if="o.is_member && o.member_level_name" size="small" type="success" effect="plain">{{ o.member_level_name }}</el-tag>
-              <el-tag v-if="o.is_delivery" size="small" type="danger" effect="dark" class="mode-tag delivery">{{ o.channel_label || '外卖' }}</el-tag>
-              <el-tag v-else-if="isPackOrder(o)" size="small" type="warning" effect="dark" class="mode-tag pack">打包</el-tag>
+              <el-tag v-if="showStoreTag(o)" size="small" type="success" effect="plain">{{ o.store_name ||
+                `店#${o.store_id}` }}</el-tag>
+              <el-tag v-if="o.is_member && o.member_level_name" size="small" type="success" effect="plain">{{
+                o.member_level_name }}</el-tag>
+              <el-tag v-if="o.is_delivery" size="small" type="danger" effect="dark" class="mode-tag delivery">{{
+                o.channel_label || '外卖' }}</el-tag>
+              <el-tag v-else-if="isPackOrder(o)" size="small" type="warning" effect="dark"
+                class="mode-tag pack">打包</el-tag>
               <el-tag v-else size="small" type="primary" effect="dark" class="mode-tag dine">堂食</el-tag>
               <el-tag v-if="o.all_no_cooking" size="small" type="warning" effect="plain">现成品·免烹饪</el-tag>
               <el-tag size="small" effect="dark" :type="statusTag(o.status)">{{ statusLabel(o.status) }}</el-tag>
-              <el-tag
-                v-if="claimLabel(o)"
-                size="small"
-                :type="o.kitchen_claimed_by_me ? 'success' : 'info'"
-                effect="plain"
-                class="claim-tag"
-              >{{ claimLabel(o) }}</el-tag>
+              <el-tag v-if="claimLabel(o)" size="small" :type="o.kitchen_claimed_by_me ? 'success' : 'info'"
+                effect="plain" class="claim-tag">{{ claimLabel(o) }}</el-tag>
             </div>
           </div>
           <div class="meta">
@@ -133,12 +117,7 @@
         <div v-if="o.remark" class="remark">备注：{{ o.remark }}</div>
 
         <div class="items">
-          <div
-            v-for="item in displayItems(o.items)"
-            :key="itemKey(item)"
-            class="item"
-            :class="qtyClass(item.quantity)"
-          >
+          <div v-for="item in displayItems(o.items)" :key="itemKey(item)" class="item" :class="qtyClass(item.quantity)">
             <strong class="item-line">
               <span class="item-name">
                 {{ item.product_name }}
@@ -156,35 +135,16 @@
         <div class="actions">
           <template v-if="isClaimedByOther(o)">
             <div class="claim-hint">已被「{{ o.kitchen_claimed_by_name || '同事' }}」认领，仅可查看或接管</div>
-            <el-button
-              type="danger"
-              plain
-              :loading="busyId === o.id"
-              @click="takeoverOrder(o)"
-            >接管</el-button>
-            <el-button
-              plain
-              :loading="printBusyId === o.id"
-              @click="reprintTicket(o)"
-            >补打小票</el-button>
+            <el-button type="danger" plain :loading="busyId === o.id" @click="takeoverOrder(o)">接管</el-button>
+            <el-button plain :loading="printBusyId === o.id" @click="reprintTicket(o)">补打小票</el-button>
           </template>
           <template v-else>
-            <el-button
-              v-for="act in actionsForOrder(o)"
-              :key="act.status"
-              :type="(act.type || 'default') as any"
-              :plain="!!act.plain"
-              :class="{ 'kds-btn-main': isMainKdsBtn(act.label) }"
-              :loading="busyId === o.id"
-              @click="updateStatus(o.id, act.status)"
-            >
+            <el-button v-for="act in actionsForOrder(o)" :key="act.status" :type="(act.type || 'default') as any"
+              :plain="!!act.plain" :class="{ 'kds-btn-main': isMainKdsBtn(act.label) }" :loading="busyId === o.id"
+              @click="updateStatus(o.id, act.status)">
               {{ act.label }}
             </el-button>
-            <el-button
-              plain
-              :loading="printBusyId === o.id"
-              @click="reprintTicket(o)"
-            >
+            <el-button plain :loading="printBusyId === o.id" @click="reprintTicket(o)">
               补打小票
             </el-button>
           </template>
@@ -335,9 +295,9 @@ const counts = computed(() => {
 
 const filtered = computed(() => {
   const list = [...orders.value].sort((a, b) => {
-    // 催单优先，再按等待时间
-    const ua = a.delivery?.urge_count || 0
-    const ub = b.delivery?.urge_count || 0
+    // 催单优先（订单级催单 / 外卖催单取大），再按等待时间
+    const ua = orderUrgeCount(a)
+    const ub = orderUrgeCount(b)
     if (ub !== ua) return ub - ua
     return waitSeconds(b) - waitSeconds(a)
   })
@@ -362,6 +322,19 @@ const filtered = computed(() => {
 
 function statusLabel(s: string) {
   return ORDER_STATUS[s] || s
+}
+
+/** 订单级催单次数（顾客自助催单）与外卖平台催单取较大值 */
+function orderUrgeCount(o: any) {
+  return Math.max(Number(o?.urge_count) || 0, Number(o?.delivery?.urge_count) || 0)
+}
+
+/** ISO 时间 → 本地 HH:MM */
+function formatHM(v?: string | null) {
+  if (!v) return ''
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 function isPackOrder(o: any) {
@@ -489,7 +462,7 @@ function formatWait(o: any) {
 
 function ageClass(o: any) {
   const m = waitSeconds(o) / 60
-  if (m >= 20 || (o.delivery?.urge_count || 0) > 0) return 'age-critical'
+  if (m >= 20 || orderUrgeCount(o) > 0) return 'age-critical'
   if (m >= 10) return 'age-warn'
   return 'age-ok'
 }
@@ -535,9 +508,9 @@ function tryAlertNewOrders(prevIds: Set<number> | null, data: any[]) {
       alertNewOrderOnce(o)
       return
     }
-    if ((o.delivery?.urge_count || 0) > 0) {
+    if (orderUrgeCount(o) > 0) {
       const prev = orders.value.find((x) => x.id === o.id)
-      if (!prev || (prev.delivery?.urge_count || 0) < o.delivery.urge_count) {
+      if (!prev || orderUrgeCount(prev) < orderUrgeCount(o)) {
         alertUrgeOnce()
       }
     }
@@ -851,9 +824,11 @@ onUnmounted(() => {
   min-height: calc(100vh - 56px);
   color: #eef2ff;
 }
+
 .kitchen.standalone {
   min-height: 100vh;
 }
+
 .kitchen.fullscreen {
   position: fixed;
   inset: 0;
@@ -875,6 +850,7 @@ onUnmounted(() => {
   padding: 8px 0 12px;
   backdrop-filter: blur(6px);
 }
+
 .print-fail-panel {
   padding: 8px 10px;
   margin-bottom: 8px;
@@ -887,10 +863,12 @@ onUnmounted(() => {
   max-height: 160px;
   overflow: auto;
 }
+
 .print-fail-panel.empty-fail {
   color: #fecaca;
   font-size: 13px;
 }
+
 .print-fail-row {
   display: flex;
   align-items: center;
@@ -898,6 +876,7 @@ onUnmounted(() => {
   font-size: 13px;
   color: #fee2e2;
 }
+
 .print-fail-row .err {
   flex: 1;
   opacity: 0.85;
@@ -905,13 +884,22 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.left, .right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.left,
+.right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .head-brand {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
 }
+
 .head-logo {
   flex-shrink: 0;
   width: 48px;
@@ -920,12 +908,14 @@ onUnmounted(() => {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
 }
+
 .head-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
+
 .store-name {
   font-size: clamp(22px, 3.2vw, 32px);
   font-weight: 800;
@@ -937,12 +927,14 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   max-width: min(420px, 42vw);
 }
+
 .head-sub {
   display: flex;
   align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
 }
+
 .kds-label {
   font-size: 12px;
   font-weight: 500;
@@ -950,6 +942,7 @@ onUnmounted(() => {
   color: #64748b;
   text-transform: uppercase;
 }
+
 .clock {
   color: #e2e8f0;
   font-variant-numeric: tabular-nums;
@@ -959,27 +952,67 @@ onUnmounted(() => {
 }
 
 .conn {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; padding: 2px 10px; border-radius: 999px;
-  background: #1b2140; color: #9aa4c7;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #1b2140;
+  color: #9aa4c7;
 }
-.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
-.conn.online { color: #86efac; }
-.conn.online .dot { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-.conn.polling { color: #fde68a; }
-.conn.polling .dot { background: #f59e0b; }
-.conn.offline, .conn.connecting { color: #fca5a5; }
-.conn.offline .dot, .conn.connecting .dot { background: #ef4444; }
+
+.conn .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #666;
+}
+
+.conn.online {
+  color: #86efac;
+}
+
+.conn.online .dot {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.conn.polling {
+  color: #fde68a;
+}
+
+.conn.polling .dot {
+  background: #f59e0b;
+}
+
+.conn.offline,
+.conn.connecting {
+  color: #fca5a5;
+}
+
+.conn.offline .dot,
+.conn.connecting .dot {
+  background: #ef4444;
+}
 
 .filters :deep(.el-radio-button__inner) {
-  background: #1b2140; border-color: #2a335a; color: #c7d2fe;
+  background: #1b2140;
+  border-color: #2a335a;
+  color: #c7d2fe;
 }
+
 .filters :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  background: #334155; border-color: #64748b; box-shadow: none;
+  background: #334155;
+  border-color: #64748b;
+  box-shadow: none;
 }
 
 .empty {
-  margin-top: 80px; text-align: center; color: #64748b; font-size: 18px;
+  margin-top: 80px;
+  text-align: center;
+  color: #64748b;
+  font-size: 18px;
 }
 
 .voice-unlock {
@@ -998,7 +1031,11 @@ onUnmounted(() => {
   z-index: 6;
   animation: voice-pulse 2s ease-in-out infinite;
 }
-.voice-unlock:hover { background: rgba(245, 158, 11, 0.32); }
+
+.voice-unlock:hover {
+  background: rgba(245, 158, 11, 0.32);
+}
+
 .voice-hint-sub {
   display: block;
   margin-top: 4px;
@@ -1006,9 +1043,17 @@ onUnmounted(() => {
   font-weight: 500;
   opacity: 0.85;
 }
+
 @keyframes voice-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35); }
-  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
 }
 
 .orders-grid {
@@ -1028,11 +1073,28 @@ onUnmounted(() => {
   --el-card-bg-color: #16213e;
   --el-card-border-color: #243056;
 }
-.order-card :deep(.el-card__body) { padding: 14px; }
-.order-card.PAID, .order-card.CONFIRMED { border-left: 4px solid #e6a23c; }
-.order-card.PREPARING { border-left: 4px solid #409eff; }
-.order-card.COOKING { border-left: 4px solid #a78bfa; }
-.order-card.READY { border-left: 4px solid #67c23a; }
+
+.order-card :deep(.el-card__body) {
+  padding: 14px;
+}
+
+.order-card.PAID,
+.order-card.CONFIRMED {
+  border-left: 4px solid #e6a23c;
+}
+
+.order-card.PREPARING {
+  border-left: 4px solid #409eff;
+}
+
+.order-card.COOKING {
+  border-left: 4px solid #a78bfa;
+}
+
+.order-card.READY {
+  border-left: 4px solid #67c23a;
+}
+
 .order-card.delivery {
   background: linear-gradient(160deg, #2a1020 0%, #1a1528 55%, #141828 100%);
   border: 2px solid #e11d48;
@@ -1041,21 +1103,32 @@ onUnmounted(() => {
     inset 0 0 28px rgba(225, 29, 72, 0.1);
   animation: delivery-glow 2.6s ease-in-out infinite;
 }
+
 .order-card.delivery.PAID,
-.order-card.delivery.CONFIRMED { border-left-width: 6px; border-left-color: #fb7185; }
+.order-card.delivery.CONFIRMED {
+  border-left-width: 6px;
+  border-left-color: #fb7185;
+}
+
 .order-card.delivery .table {
   color: #fda4af;
   text-shadow: 0 0 14px rgba(251, 113, 133, 0.35);
 }
+
 .order-card.delivery.age-critical {
   animation: delivery-glow 2.6s ease-in-out infinite, pulse 1.6s ease-in-out infinite;
 }
+
 .order-card.dine-in {
   background: linear-gradient(160deg, #121c33 0%, #16213e 100%);
   border-color: #2d4a6f;
   box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.18);
 }
-.order-card.dine-in .table { color: #bfdbfe; }
+
+.order-card.dine-in .table {
+  color: #bfdbfe;
+}
+
 .order-card.pack-order {
   background: linear-gradient(160deg, #2a1808 0%, #221a12 55%, #1a1520 100%);
   border: 2px solid #f59e0b;
@@ -1064,17 +1137,65 @@ onUnmounted(() => {
     inset 0 0 28px rgba(245, 158, 11, 0.1);
   animation: pack-glow 2.4s ease-in-out infinite;
 }
+
 .order-card.pack-order.PAID,
-.order-card.pack-order.CONFIRMED { border-left-width: 6px; border-left-color: #fb923c; }
+.order-card.pack-order.CONFIRMED {
+  border-left-width: 6px;
+  border-left-color: #fb923c;
+}
+
 .order-card.pack-order .table {
   color: #fde68a;
   text-shadow: 0 0 14px rgba(251, 191, 36, 0.35);
 }
-.order-card.age-warn { outline: 1px solid rgba(245, 158, 11, 0.55); }
+
+.order-card.age-warn {
+  outline: 1px solid rgba(245, 158, 11, 0.55);
+}
+
 .order-card.age-critical {
   outline: 2px solid rgba(239, 68, 68, 0.7);
   animation: pulse 1.6s ease-in-out infinite;
 }
+
+/* 订单级顾客催单：红色边框 + 脉冲高亮 */
+.order-card.urged {
+  outline: 2px solid rgba(239, 68, 68, 0.8);
+  animation: urge-pulse 1.6s ease-in-out infinite;
+}
+
+.order-card.urged.age-critical {
+  animation: pulse 1.6s ease-in-out infinite, urge-pulse 1.6s ease-in-out infinite;
+}
+
+.urge-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.55);
+  pointer-events: none;
+}
+
+@keyframes urge-pulse {
+
+  0%,
+  100% {
+    outline-color: rgba(239, 68, 68, 0.85);
+  }
+
+  50% {
+    outline-color: rgba(239, 68, 68, 0.25);
+  }
+}
+
 .order-card.pack-order.age-critical {
   animation: pack-glow 2.4s ease-in-out infinite, pulse 1.6s ease-in-out infinite;
 }
@@ -1087,52 +1208,125 @@ onUnmounted(() => {
   letter-spacing: 1px;
   text-align: center;
 }
+
 .mode-banner.dine {
   background: rgba(59, 130, 246, 0.22);
   color: #93c5fd;
   border-bottom: 1px solid rgba(96, 165, 250, 0.35);
 }
+
 .mode-banner.delivery {
   background: linear-gradient(90deg, #be123c, #e11d48);
   color: #fff1f2;
   border-bottom: 1px solid rgba(251, 113, 133, 0.55);
 }
+
 .mode-banner.pack {
   background: linear-gradient(90deg, #ea580c, #f59e0b);
   color: #1a1208;
   border-bottom: 1px solid rgba(251, 191, 36, 0.6);
 }
-.mode-tag.dine { font-weight: 700; }
-.mode-tag.delivery { font-weight: 800; }
-.mode-tag.pack { font-weight: 800; }
+
+.mode-tag.dine {
+  font-weight: 700;
+}
+
+.mode-tag.delivery {
+  font-weight: 800;
+}
+
+.mode-tag.pack {
+  font-weight: 800;
+}
 
 @keyframes delivery-glow {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.4), inset 0 0 28px rgba(225, 29, 72, 0.08); }
-  50% { box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.5), inset 0 0 36px rgba(225, 29, 72, 0.14); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.4), inset 0 0 28px rgba(225, 29, 72, 0.08);
+  }
+
+  50% {
+    box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.5), inset 0 0 36px rgba(225, 29, 72, 0.14);
+  }
 }
 
 @keyframes pack-glow {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), inset 0 0 28px rgba(245, 158, 11, 0.08); }
-  50% { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55), inset 0 0 36px rgba(245, 158, 11, 0.16); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45), inset 0 0 28px rgba(245, 158, 11, 0.08);
+  }
+
+  50% {
+    box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55), inset 0 0 36px rgba(245, 158, 11, 0.16);
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.25); }
-  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.25);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
 }
 
-.order-header { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-.title-block { min-width: 0; }
-.table { font-size: 22px; font-weight: 800; line-height: 1.2; }
-.badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.meta { text-align: right; flex-shrink: 0; }
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.title-block {
+  min-width: 0;
+}
+
+.table {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.meta {
+  text-align: right;
+  flex-shrink: 0;
+}
+
 .wait {
-  font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: #86efac;
 }
-.wait.age-warn { color: #fbbf24; }
-.wait.age-critical { color: #f87171; }
-.ono { font-size: 11px; color: #94a3b8; margin-top: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+
+.wait.age-warn {
+  color: #fbbf24;
+}
+
+.wait.age-critical {
+  color: #f87171;
+}
+
+.ono {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .delivery-info {
   font-size: 13px;
@@ -1144,41 +1338,103 @@ onUnmounted(() => {
   margin-bottom: 8px;
   line-height: 1.45;
 }
-.remark {
-  background: #2a1f14; color: #fdba74; padding: 6px 8px; border-radius: 6px;
-  font-size: 13px; margin-bottom: 8px;
-}
-.alert { padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; font-weight: 700; }
-.alert.urge { background: #e6a23c; color: #1a1a2e; }
-.alert.refund { background: #f56c6c; color: #fff; }
 
-.items { margin: 4px 0 8px; }
-.item { margin: 8px 0; padding-bottom: 6px; border-bottom: 1px dashed #2a335a; }
-.item:last-child { border-bottom: none; }
-.item-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.item-name { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.item-tag { vertical-align: middle; }
+.remark {
+  background: #2a1f14;
+  color: #fdba74;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.alert {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.alert.urge {
+  background: #e6a23c;
+  color: #1a1a2e;
+}
+
+.alert.refund {
+  background: #f56c6c;
+  color: #fff;
+}
+
+.items {
+  margin: 4px 0 8px;
+}
+
+.item {
+  margin: 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed #2a335a;
+}
+
+.item:last-child {
+  border-bottom: none;
+}
+
+.item-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.item-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.item-tag {
+  vertical-align: middle;
+}
+
 .item-qty {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   font-weight: 800;
 }
+
 /* 1 份：略放大便于辨认 */
-.item.qty-one .item-qty { color: #eef2ff; font-size: 20px; }
+.item.qty-one .item-qty {
+  color: #eef2ff;
+  font-size: 20px;
+}
+
 /* 2 份：琥珀色提醒 */
 .item.qty-multi .item-qty {
   color: #fbbf24;
   font-size: 22px;
   text-shadow: 0 0 10px rgba(251, 191, 36, 0.45);
 }
-.item.qty-multi .item-name { color: #fde68a; }
+
+.item.qty-multi .item-name {
+  color: #fde68a;
+}
+
 /* 3 份及以上：红色高亮 */
 .item.qty-high .item-qty {
   color: #f87171;
   font-size: 26px;
   text-shadow: 0 0 12px rgba(248, 113, 113, 0.55);
 }
-.item.qty-high .item-name { color: #fecaca; font-weight: 700; }
+
+.item.qty-high .item-name {
+  color: #fecaca;
+  font-weight: 700;
+}
+
 .item.qty-high {
   background: rgba(239, 68, 68, 0.08);
   border-radius: 6px;
@@ -1186,17 +1442,43 @@ onUnmounted(() => {
   margin-left: -8px;
   margin-right: -8px;
 }
-.opts { color: #94a3b8; font-size: 13px; margin-top: 2px; }
-.item-remark { color: #fdba74; font-size: 12px; margin-top: 2px; }
-.pack-fee { color: #fbbf24; font-size: 12px; margin-bottom: 8px; }
-.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+
+.opts {
+  color: #94a3b8;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.item-remark {
+  color: #fdba74;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.pack-fee {
+  color: #fbbf24;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .claim-hint {
   width: 100%;
   font-size: 13px;
   color: #909399;
   line-height: 1.4;
 }
-.claim-tag { max-width: 100%; }
+
+.claim-tag {
+  max-width: 100%;
+}
+
 .actions :deep(.el-button.kds-btn-main) {
   flex: 1 1 100%;
   width: 100%;

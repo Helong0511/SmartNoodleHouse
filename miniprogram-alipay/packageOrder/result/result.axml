@@ -70,6 +70,10 @@
         <text class="k">代金券</text>
         <text class="v discount">-¥{{voucherDiscountAmount}}</text>
       </view>
+      <view class="info-row" a:if="{{scheduledPickupText}}">
+        <text class="k">预约取餐</text>
+        <text class="v highlight">{{scheduledPickupText}}</text>
+      </view>
       <view class="info-row" a:if="{{hasPacking}}">
         <text class="k">打包费</text>
         <text class="v">¥{{order.packing_fee}}</text>
@@ -120,12 +124,25 @@
       </view>
     </view>
 
+    <view class="coupon-claim-card" a:if="{{showCouponCard}}">
+      <view class="coupon-claim-main">
+        <view class="coupon-claim-title">支付成功赠券</view>
+        <view class="coupon-claim-name">{{claimCouponName}}</view>
+      </view>
+      <button class="btn-primary mini coupon-claim-btn" loading="{{claimingCoupon}}" onTap="claimCoupon">领取</button>
+    </view>
+
     <view class="timeline" a:if="{{statusSteps.length}}">
       <view class="tl-title">订单进度</view>
       <view class="tl-item {{item.active ? 'active' : ''}} {{item.done ? 'done' : ''}}" a:for="{{statusSteps}}" a:key="key">
         <view class="dot"></view>
         <text>{{item.label}}</text>
       </view>
+    </view>
+
+    <view class="order-actions" a:if="{{canUrge || canSelfRefund}}">
+      <button class="btn-ghost mini urge-btn {{urgeOnCooldown ? 'is-disabled' : ''}}" a:if="{{canUrge}}" disabled="{{urgeOnCooldown}}" onTap="urgeOrderNow">催单</button>
+      <button class="btn-ghost mini refund-btn" a:if="{{canSelfRefund}}" loading="{{refunding}}" onTap="selfRefundOrder">申请退款</button>
     </view>
 
     <view class="member-banner" a:if="{{showMemberBanner}}">

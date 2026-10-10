@@ -4,24 +4,13 @@
       <div class="logo">
         <img src="/logo.png?v=202609080938" alt="肠旺面" class="logo-img" />
       </div>
-      <el-menu
-        :key="openGroup"
-        :default-active="activeMenu"
-        :default-openeds="openGroup ? [openGroup] : []"
-        router
-        background-color="#1d1e1f"
-        text-color="#bbb"
-        active-text-color="#409eff"
-        class="side-menu"
-      >
+      <el-menu :key="openGroup" :default-active="activeMenu" :default-openeds="openGroup ? [openGroup] : []" router
+        background-color="#1d1e1f" text-color="#bbb" active-text-color="#409eff" class="side-menu">
         <el-menu-item v-if="showDashboard" index="/dashboard">数据概览</el-menu-item>
 
         <el-sub-menu v-if="showStore" index="g-store">
           <template #title>门店</template>
-          <el-menu-item
-            v-if="showStoreInfo"
-            index="/store-info"
-          >门店信息</el-menu-item>
+          <el-menu-item v-if="showStoreInfo" index="/store-info">门店信息</el-menu-item>
           <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
           <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
         </el-sub-menu>
@@ -48,6 +37,8 @@
           <el-menu-item v-if="showPos" index="/pos">收银点餐</el-menu-item>
           <el-menu-item v-if="showKitchen" index="/kitchen">厨房 KDS</el-menu-item>
           <el-menu-item v-if="showOrders" index="/orders">订单管理</el-menu-item>
+          <el-menu-item v-if="showQueue" index="/queue-manage">排队管理</el-menu-item>
+          <el-menu-item v-if="showInvoices" index="/invoices">发票申请</el-menu-item>
           <el-menu-item v-if="showOrders" index="/recommend-report">推荐效果</el-menu-item>
           <el-menu-item v-if="showPayments" index="/payments">支付记录</el-menu-item>
           <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
@@ -108,6 +99,8 @@ const showPos = computed(() => auth.canAccessPos() && notCashier.value)
 const showKitchen = computed(() => auth.canAccessKitchen())
 const showDelivery = computed(() => auth.hasPermission('order:read') && notCashier.value)
 const showOrders = computed(() => auth.hasPermission('order:read') && notCashier.value)
+const showQueue = computed(() => auth.hasPermission('order:read') && notCashier.value)
+const showInvoices = computed(() => auth.hasPermission('payment:read') && notCashier.value)
 const showPayments = computed(() => auth.hasPermission('payment:read') && notCashier.value)
 const showSettlement = computed(() => auth.canManageSettlement)
 const showCatalog = computed(() => auth.hasPermission('product:read') && notCashier.value)
@@ -145,6 +138,8 @@ const showOps = computed(
     || showKitchen.value
     || showDelivery.value
     || showOrders.value
+    || showQueue.value
+    || showInvoices.value
     || showPayments.value
     || showSettlement.value,
 )
@@ -158,7 +153,7 @@ const openGroup = computed(() => {
   const p = activeMenu.value
   if (p === '/store-info') return 'g-store'
   if (p.startsWith('/delivery')) return 'g-delivery'
-  if (['/pos', '/kitchen', '/orders', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds'].includes(p)) {
+  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds'].includes(p)) {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
@@ -183,12 +178,20 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.layout { height: 100vh; }
+.layout {
+  height: 100vh;
+}
+
 .aside {
   background: #1d1e1f;
   overflow-y: auto;
 }
-.logo { padding: 16px 12px; text-align: center; }
+
+.logo {
+  padding: 16px 12px;
+  text-align: center;
+}
+
 .logo-img {
   display: block;
   width: 120px;
@@ -198,17 +201,21 @@ onMounted(async () => {
   border-radius: 12px;
   background: #fff;
 }
+
 .side-menu {
   border-right: none;
   padding-bottom: 24px;
 }
+
 .side-menu :deep(.el-sub-menu__title) {
   font-weight: 600;
   color: #ddd !important;
 }
+
 .side-menu :deep(.el-menu-item) {
   min-width: 0;
 }
+
 .header {
   display: flex;
   justify-content: space-between;
@@ -216,6 +223,15 @@ onMounted(async () => {
   background: #fff;
   border-bottom: 1px solid #eee;
 }
-.right { display: flex; align-items: center; gap: 12px; }
-.user { color: #666; font-size: 14px; }
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user {
+  color: #666;
+  font-size: 14px;
+}
 </style>

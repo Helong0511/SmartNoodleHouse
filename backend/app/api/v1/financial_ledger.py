@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Request
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
-from app.core.response import calc_pages, success
+from app.core.response import apply_datetime_range, calc_pages, money, success
 from app.models import FinancialLedger
 from app.services.store_scope import require_bound_store
 
@@ -45,12 +45,8 @@ async def list_financial_ledger(
     if order_id:
         q = q.where(FinancialLedger.order_id == int(order_id))
         cq = cq.where(FinancialLedger.order_id == int(order_id))
-    if date_from:
-        q = q.where(FinancialLedger.created_at >= date_from)
-        cq = cq.where(FinancialLedger.created_at >= date_from)
-    if date_to:
-        q = q.where(FinancialLedger.created_at <= date_to)
-        cq = cq.where(FinancialLedger.created_at <= date_to)
+    q = apply_datetime_range(q, FinancialLedger.created_at, date_from, date_to)
+    cq = apply_datetime_range(cq, FinancialLedger.created_at, date_from, date_to)
 
     total = int((await db.execute(cq)).scalar() or 0)
     rows = (
@@ -65,7 +61,7 @@ async def list_financial_ledger(
             "entry_type": r.entry_type,
             "channel": r.channel,
             "provider": r.provider,
-            "amount": str(r.amount),
+            "amount": str(money(r.amount)),
             "currency": r.currency,
             "order_id": r.order_id,
             "payment_id": r.payment_id,

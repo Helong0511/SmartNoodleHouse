@@ -1,8 +1,11 @@
 /** 支付宝小程序全部日志 → POST /api/client-logs → logs/alipay/ */
 const SOURCE = 'alipay'
 const FLUSH_MS = 5000
-const MAX_BATCH = 50
+/** 与后端 client_logs._MAX_ENTRIES / _MAX_MESSAGE 对齐 */
+const MAX_BATCH = 30
+const MAX_MESSAGE = 2000
 const MAX_QUEUE = 500
+let flushFailures = 0
 
 const queue = []
 let flushTimer = null
@@ -54,7 +57,7 @@ function safeExtra(v) {
 
 function push(level, message, extra) {
   if (reporting) return
-  const msg = String(message || '').slice(0, 4000)
+  const msg = String(message || '').slice(0, MAX_MESSAGE)
   if (!msg) return
   queue.push({
     level,
@@ -95,9 +98,29 @@ function flush() {
   reporting = true
   api
     .post('/client-logs', { source: SOURCE, entries: batch }, false)
-    .catch(() => {
-      queue.unshift(...batch)
-      while (queue.length > MAX_QUEUE) queue.pop()
+    .then(() => {
+      flushFailures = 0
+    })
+    .catch((err) => {
+      // 校验类/权限类错误丢弃本批，避免 unshift 死循环打限流
+      const status = err && (err.status || err.statusCode || err.code)
+      const isValidation =
+        status === 422 ||
+        status === 401 ||
+        status === 403 ||
+        status === 40001 ||
+        (err && /参数|校验|过大|最多/.test(String(err.message || '')))
+      if (isValidation) {
+        flushFailures = 0
+        return
+      }
+      flushFailures++
+      if (flushFailures < 3) {
+        queue.unshift(...batch)
+        while (queue.length > MAX_QUEUE) queue.pop()
+      } else {
+        flushFailures = 0
+      }
     })
     .then(() => {
       reporting = false

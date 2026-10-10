@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, BigInteger, Boolean, Computed, DateTime, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, Time, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, Boolean, Computed, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -308,6 +308,8 @@ class Customer(Base, TimestampMixin):
     registered_store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, index=True)
     registered_table_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tables.id"), default=None, index=True)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    # 生日（仅月/日用于会员日权益，年份可选填）
+    birthday: Mapped[date | None] = mapped_column(Date, default=None)
     # 智能推荐合规：1=开启个性化推荐（默认），0=关闭（退回非个性化热销榜，不采集行为）
     recommend_opt_in: Mapped[int] = mapped_column(Integer, default=1)
     # 个性化推荐同意的隐私政策版本与同意时间（版本化留痕，PIPL 合规）
@@ -588,6 +590,11 @@ class Order(Base, TimestampMixin):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     kitchen_claimed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), default=None)
     kitchen_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 顾客自助催单：累计次数 + 最近催单时间（KDS 高亮用）
+    urge_count: Mapped[int] = mapped_column(Integer, default=0)
+    urged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # 预点单：打包单预约取餐时段（仅 TAKEOUT 类型使用）
+    scheduled_pickup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class OrderItem(Base):
@@ -699,7 +706,8 @@ class PosRefundRequest(Base, TimestampMixin):
     executed_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     reason: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
-    requested_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    # 顾客自助申请时为 NULL（小程序未开始制作订单的全额退款申请）
+    requested_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
     reviewed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_remark: Mapped[str | None] = mapped_column(String(500))
@@ -1274,3 +1282,79 @@ class AbAssignment(Base):
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class CustomerFavoriteProduct(Base, TimestampMixin):
+    """菜品收藏：每位顾客对同一菜品仅一条记录。"""
+
+    __tablename__ = "customer_favorite_products"
+    __table_args__ = (
+        UniqueConstraint("customer_id", "product_id", name="uq_cfp_customer_product"),
+        Index("ix_cfp_customer_store", "customer_id", "store_id"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    product_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
+
+
+class InvoiceRequest(Base, TimestampMixin):
+    """电子发票开票申请：顾客提交，后台标记开票/驳回。"""
+
+    __tablename__ = "invoice_requests"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_invoice_order"),
+        Index("ix_invoice_requests_store_status", "store_id", "status"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id"), index=True)
+    order_no: Mapped[str] = mapped_column(String(40))
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    title_type: Mapped[str] = mapped_column(String(10), default="PERSON")  # PERSON/COMPANY
+    title: Mapped[str] = mapped_column(String(200))
+    tax_no: Mapped[str | None] = mapped_column(String(50), default=None)
+    email: Mapped[str] = mapped_column(String(100))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)  # PENDING/ISSUED/REJECTED
+    reject_reason: Mapped[str | None] = mapped_column(String(255), default=None)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class QueueTicket(Base, TimestampMixin):
+    """排队取号：按门店按天编号，状态机 WAITING→CALLED→SEATED，可取消。"""
+
+    __tablename__ = "queue_tickets"
+    __table_args__ = (
+        UniqueConstraint("store_id", "issue_date", "number", name="uq_queue_store_date_number"),
+        Index("ix_queue_store_status", "store_id", "status"),
+        Index("ix_queue_customer", "customer_id", "issue_date"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("customers.id"))
+    ticket_no: Mapped[str] = mapped_column(String(20))  # 展示号，如 A08
+    number: Mapped[int] = mapped_column(Integer, default=1)
+    issue_date: Mapped[date] = mapped_column(Date)
+    people_count: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="WAITING", index=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    called_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    seated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

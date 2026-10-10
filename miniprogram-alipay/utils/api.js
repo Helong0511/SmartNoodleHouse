@@ -32,10 +32,11 @@ function readStorage(key) {
 }
 
 function resolveCustomerToken() {
+  // 与微信对齐：storage 优先，避免内存旧 token 覆盖刚写入的存储
   const app = getAppSafe()
   const token = String(
-    (app && app.globalData && app.globalData.customerToken)
-    || readStorage('customer_token')
+    readStorage('customer_token')
+    || (app && app.globalData && app.globalData.customerToken)
     || ''
   ).trim()
   if (app && app.globalData && token) {
@@ -80,6 +81,8 @@ function formatValidationDetail(detail) {
 function pickErrorMessage(resOrErr, fallback) {
   if (!resOrErr) return fallback
   if (typeof resOrErr === 'string') return resOrErr
+  // 与微信对齐：网关/代理返回纯文本 data 时直接展示
+  if (typeof resOrErr.data === 'string' && resOrErr.data.trim()) return resOrErr.data.trim()
   const body = parseResponseBody(resOrErr.data)
   if (body.message) return body.message
   if (body.detail) {
@@ -292,5 +295,6 @@ module.exports = {
   get: (path, data, needAuth = true) => request('GET', path, data, needAuth),
   post: (path, data, needAuth = true) => request('POST', path, data, needAuth),
   put: (path, data, needAuth = true) => request('PUT', path, data, needAuth),
-  patch: (path, data, needAuth = true) => request('PATCH', path, data, needAuth)
+  patch: (path, data, needAuth = true) => request('PATCH', path, data, needAuth),
+  delete: (path, data, needAuth = true) => request('DELETE', path, data, needAuth)
 }

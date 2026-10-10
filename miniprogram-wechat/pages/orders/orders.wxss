@@ -97,4 +97,34 @@
 }
 .btn-mini-label { line-height: 1; }
 .btn-mini.is-disabled { opacity: 0.45; }
+/* 催单 / 自助退款操作按钮 */
+.order-ops {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex: 0 0 auto;
+}
+.op-btn {
+  font-size: 22rpx;
+  height: 48rpx;
+  padding: 0 20rpx;
+  border-radius: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+.op-btn.urge {
+  background: #fff;
+  color: #ff6b35;
+  border: 1rpx solid #ff6b35;
+}
+.op-btn.refund {
+  background: #fff;
+  color: #e6a23c;
+  border: 1rpx solid #e6a23c;
+}
+.op-btn.is-disabled { opacity: 0.45; }
 .list-foot { text-align: center; color: #bbb; font-size: 24rpx; padding: 24rpx 0 40rpx; }

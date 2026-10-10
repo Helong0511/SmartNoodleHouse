@@ -471,3 +471,45 @@
 }
 
 .footer-btn.is-disabled { opacity: 0.5; }
+
+/* 菜品收藏 */
+.thumb-wrap { position: relative; }
+.fav-bar {
+  flex-shrink: 0;
+  padding: 0 24rpx 12rpx;
+  display: flex;
+}
+.fav-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8rpx 24rpx;
+  border-radius: 999rpx;
+  background: #fff;
+  color: #999;
+  font-size: 24rpx;
+  border: 1rpx solid #eee;
+}
+.fav-chip.on {
+  background: #fff1ea;
+  color: #ff4d6d;
+  border-color: #ff4d6d;
+  font-weight: 600;
+}
+.fav-btn {
+  position: absolute;
+  top: 6rpx;
+  right: 6rpx;
+  width: 44rpx;
+  height: 44rpx;
+  line-height: 44rpx;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 26rpx;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 2;
+}
+.fav-btn.on {
+  color: #ff4d6d;
+  background: rgba(255, 255, 255, 0.92);
+}

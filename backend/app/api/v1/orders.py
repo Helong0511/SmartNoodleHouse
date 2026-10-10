@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_kitchen, require_permission, require_pos
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
-from app.core.response import calc_pages, ensure_local_aware, money, now_local, success
+from app.core.response import apply_date_range as _apply_date_range, calc_pages, ensure_local_aware, money, now_local, success
 from app.models import Customer, DeliveryOrder, DiningTable, Order, OrderItem, OrderItemOption, Product, Store
 from app.schemas.order import OrderCreate, OrderStatusUpdate, PosAddItems, PosBindCustomer, PosOrderCreate
 from app.services.audit_service import AuditService
@@ -16,23 +16,6 @@ from app.services.store_scope import assert_order_store_access, assert_store_acc
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/orders", tags=["订单"])
-
-
-def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
-    if date_from:
-        try:
-            q = q.where(col >= datetime.fromisoformat(date_from))
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"date_from 格式非法: {date_from}")
-    if date_to:
-        try:
-            end = datetime.fromisoformat(date_to)
-            if len(date_to) <= 10:
-                end = end + timedelta(days=1)
-            q = q.where(col < end)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"date_to 格式非法: {date_to}")
-    return q
 
 
 def _table_payload(table: DiningTable | None) -> dict | None:
@@ -111,6 +94,7 @@ async def create_order(
         customer_voucher_id=None if data.skip_promotions else data.customer_voucher_id,
         skip_promotions=bool(data.skip_promotions),
         operator_id=None,
+        scheduled_pickup_at=data.scheduled_pickup_at,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await db.commit()
@@ -996,7 +980,7 @@ async def kitchen_orders(
         wait_seconds = 0
         if anchor is not None:
             wait_seconds = max(0, int((now - anchor).total_seconds()))
-        packing = float(order.packing_fee or 0)
+        packing = money(order.packing_fee)
         store = store_map.get(order.store_id)
         cust = cust_map.get(order.customer_id) if order.customer_id else None
         level = level_map.get(cust.member_level_id) if cust and cust.member_level_id else None
@@ -1016,8 +1000,8 @@ async def kitchen_orders(
                 "table_no": t.table_no if t else None,
                 "table_name": t.table_name if t else None,
                 "dining_type": order.dining_type,
-                "packing_fee": str(order.packing_fee or "0.00"),
-                "discount_amount": str(order.discount_amount or "0.00"),
+                "packing_fee": str(packing),
+                "discount_amount": str(money(order.discount_amount)),
                 "need_pack": (order.dining_type or "") == "TAKEAWAY" or packing > 0,
                 "remark": order.remark,
                 "store_id": order.store_id,
@@ -1029,6 +1013,11 @@ async def kitchen_orders(
                 "channel": order.channel,
                 "channel_label": channel_label_map.get(order.channel or "", order.channel or "堂食"),
                 "is_delivery": order.channel in ("MEITUAN", "ELEME"),
+                "urge_count": order.urge_count or 0,
+                "urged_at": order.urged_at.isoformat() if order.urged_at else None,
+                "scheduled_pickup_at": (
+                    order.scheduled_pickup_at.isoformat() if order.scheduled_pickup_at else None
+                ),
                 "paid_at": order.paid_at.isoformat() if order.paid_at else None,
                 "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
                 "wait_seconds": wait_seconds,
@@ -1218,6 +1207,11 @@ async def list_my_orders(
                 "item_summary": "、".join(names) if names else "（无明细）",
                 "table": _table_payload(t),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
+                "urge_count": o.urge_count or 0,
+                "urged_at": o.urged_at.isoformat() if o.urged_at else None,
+                "scheduled_pickup_at": (
+                    o.scheduled_pickup_at.isoformat() if o.scheduled_pickup_at else None
+                ),
                 "can_reorder": o.status not in ("PENDING_PAYMENT",) and len(o_items) > 0,
                 **pickup,
             }
@@ -1378,6 +1372,14 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "packing_fee": str(order.packing_fee),
 
             "remark": order.remark,
+
+            "urge_count": order.urge_count or 0,
+
+            "urged_at": order.urged_at.isoformat() if order.urged_at else None,
+
+            "scheduled_pickup_at": (
+                order.scheduled_pickup_at.isoformat() if order.scheduled_pickup_at else None
+            ),
 
             "customer_id": order.customer_id,
 
@@ -1624,3 +1626,189 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
         store_id=int(order.store_id) if order.store_id else None,
     )
     return success({"printed": True, "order_no": order.order_no, "result": result}, request=request)
+
+
+# ---------------------------------------------------------------------------
+# 顾客自助服务：催单 / 支付成功领券 / 未制作整单退款申请
+# ---------------------------------------------------------------------------
+
+_URGE_ALLOWED_STATUSES = {"CONFIRMED", "PREPARING", "COOKING"}
+
+
+async def _get_customer_order_or_404(db, order_id: int, customer_id: int) -> Order:
+    order = await db.get(Order, int(order_id))
+    if not order or order.customer_id != int(customer_id):
+        # 他人订单不暴露存在性
+        raise AppException(40404, "订单不存在")
+    return order
+
+
+@router.post("/{order_id}/urge")
+async def urge_order(order_id: int, request: Request, db: DbSession, customer: CurrentCustomer):
+    """顾客自助催单：限 CONFIRMED/PREPARING/COOKING；5 分钟限频（Redis 故障 fail-open）。"""
+    order = await _get_customer_order_or_404(db, order_id, customer.id)
+    if order.status not in _URGE_ALLOWED_STATUSES:
+        raise AppException(40058, "当前订单状态无法催单")
+    limit_key = f"snh:order:urge:{int(order.id)}"
+    limited = True
+    try:
+        redis = await get_redis()
+        limited = not await redis.set(limit_key, "1", ex=300, nx=True)
+    except Exception:
+        # Redis 不可用时放行（业务幂等：urge_count 只加 1 次，可接受重复催）
+        limited = False
+    if limited:
+        return success(
+            {
+                "urge_count": order.urge_count or 0,
+                "urged_at": order.urged_at.isoformat() if order.urged_at else None,
+                "limited": True,
+            },
+            request=request,
+        )
+    order.urge_count = int(order.urge_count or 0) + 1
+    order.urged_at = now_local()
+    await db.commit()
+    try:
+        await ws_manager.notify_order_event(
+            "ORDER_URGED",
+            {
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "store_id": order.store_id,
+                "urge_count": order.urge_count,
+                "urged_at": order.urged_at.isoformat() if order.urged_at else None,
+            },
+        )
+    except Exception:
+        pass
+    await AuditService.log(
+        db,
+        action="order.urge",
+        module="order",
+        user_id=None,
+        target_type="order",
+        target_id=int(order.id),
+        detail={"order_no": order.order_no, "urge_count": order.urge_count, "by": "customer"},
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
+    return success(
+        {
+            "urge_count": order.urge_count,
+            "urged_at": order.urged_at.isoformat() if order.urged_at else None,
+            "limited": False,
+        },
+        request=request,
+    )
+
+
+@router.get("/{order_id}/claimable-coupon")
+async def get_claimable_coupon(
+    order_id: int, request: Request, db: DbSession, customer: CurrentCustomer
+):
+    """支付成功领券：返回该订单是否可领（pay_success_coupon_name 配置驱动）。"""
+    from app.models import CouponTemplate, CustomerCoupon
+
+    order = await _get_customer_order_or_404(db, order_id, customer.id)
+    if order.payment_status != "PAID":
+        return success({"available": False, "coupon_name": None, "claimed": False}, request=request)
+    from app.services.system_settings_service import SystemSettingsService
+
+    name = (await SystemSettingsService.get_value(db, "pay_success_coupon_name", "") or "").strip()
+    if not name:
+        return success({"available": False, "coupon_name": None, "claimed": False}, request=request)
+    tmpl = (
+        await db.execute(
+            select(CouponTemplate).where(
+                CouponTemplate.name == name,
+                CouponTemplate.status == 1,
+            ).order_by(CouponTemplate.id.desc()).limit(1)
+        )
+    ).scalars().first()
+    if not tmpl:
+        return success({"available": False, "coupon_name": name, "claimed": False}, request=request)
+    claimed = (
+        await db.execute(
+            select(CustomerCoupon.id).where(
+                CustomerCoupon.customer_id == customer.id,
+                CustomerCoupon.template_id == tmpl.id,
+                CustomerCoupon.client_request_id == f"WELCOME:{int(customer.id)}:{int(tmpl.id)}",
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    return success(
+        {
+            "available": claimed is None,
+            "coupon_name": tmpl.name,
+            "discount_value": str(tmpl.discount_value),
+            "coupon_type": tmpl.coupon_type,
+            "claimed": claimed is not None,
+        },
+        request=request,
+    )
+
+
+@router.post("/{order_id}/claim-coupon")
+async def claim_order_coupon(
+    order_id: int, request: Request, db: DbSession, customer: CurrentCustomer
+):
+    """支付成功后领取活动券（幂等：issue_from_template 内部按顾客+模板去重）。"""
+    from app.services.coupon_service import CouponService
+
+    order = await _get_customer_order_or_404(db, order_id, customer.id)
+    if order.payment_status != "PAID":
+        raise AppException(40059, "订单支付完成后方可领券")
+    from app.services.system_settings_service import SystemSettingsService
+
+    name = (await SystemSettingsService.get_value(db, "pay_success_coupon_name", "") or "").strip()
+    if not name:
+        raise AppException(40060, "领券活动未开启")
+    issued = await CouponService.issue_from_template(
+        db, int(customer.id), name, store_id=int(order.store_id) if order.store_id else None
+    )
+    await db.commit()
+    if not issued:
+        # 已领过 / 模板不存在 / 库存空：幂等返回未领取
+        return success({"claimed": False, "coupon": None}, request=request)
+    return success(
+        {
+            "claimed": True,
+            "coupon": {
+                "id": issued.id,
+                "coupon_no": issued.coupon_no,
+                "name": name,
+                "expires_at": issued.expires_at.isoformat() if issued.expires_at else None,
+            },
+        },
+        request=request,
+    )
+
+
+@router.post("/{order_id}/self-refund")
+async def self_refund_order(
+    order_id: int,
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+):
+    """顾客自助退款：已支付且后厨未开始制作的线上整单，创建退款申请走人工审批。"""
+    from app.services.pos_refund_service import PosRefundService
+
+    order = await _get_customer_order_or_404(db, order_id, customer.id)
+    row = await PosRefundService.create_customer_request(
+        db, customer_id=customer.id, order_id=order.id, reason=None
+    )
+    await db.commit()
+    await AuditService.log(
+        db,
+        action="order.self_refund_request",
+        module="order",
+        user_id=None,
+        target_type="order",
+        target_id=int(order.id),
+        detail={"order_no": order.order_no, "request_id": row.id, "amount": str(row.amount)},
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
+    return success({"request_id": row.id, "status": row.status, "amount": str(row.amount)}, request=request)

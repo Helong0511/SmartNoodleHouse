@@ -238,22 +238,9 @@ async def list_delivery_orders(
                 Order.order_no.like(kw),
             )
         )
-    if date_from:
-        try:
-            q = q.where(DeliveryOrder.created_at >= datetime.fromisoformat(date_from))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            # 含当天：传 YYYY-MM-DD 时加一天
-            end = datetime.fromisoformat(date_to)
-            if len(date_to) <= 10:
-                from datetime import timedelta
+    from app.core.response import apply_date_range
 
-                end = end + timedelta(days=1)
-            q = q.where(DeliveryOrder.created_at < end)
-        except ValueError:
-            pass
+    q = apply_date_range(q, DeliveryOrder.created_at, date_from, date_to)
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
@@ -448,24 +435,10 @@ async def list_refunds(
                 Order.order_no.like(kw),
             )
         )
-    if date_from:
-        try:
-            q = q.where(DeliveryRefund.created_at >= datetime.fromisoformat(date_from))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            end = datetime.fromisoformat(date_to)
-            if len(date_to) <= 10:
-                from datetime import timedelta
-
-                end = end + timedelta(days=1)
-            q = q.where(DeliveryRefund.created_at < end)
-        except ValueError:
-            pass
+    from app.core.response import apply_date_range, calc_pages
     from sqlalchemy import func
 
-    from app.core.response import calc_pages
+    q = apply_date_range(q, DeliveryRefund.created_at, date_from, date_to)
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     result = await db.execute(
@@ -615,21 +588,9 @@ async def list_callback_logs(
         q = q.where(DeliveryCallbackLog.platform == platform.upper())
     if event_type:
         q = q.where(DeliveryCallbackLog.event_type == event_type)
-    if date_from:
-        try:
-            q = q.where(DeliveryCallbackLog.created_at >= datetime.fromisoformat(date_from))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            end = datetime.fromisoformat(date_to)
-            if len(date_to) <= 10:
-                from datetime import timedelta
+    from app.core.response import apply_date_range
 
-                end = end + timedelta(days=1)
-            q = q.where(DeliveryCallbackLog.created_at < end)
-        except ValueError:
-            pass
+    q = apply_date_range(q, DeliveryCallbackLog.created_at, date_from, date_to)
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     # 事件类型为平台原始事件码（开放集合），返回当前过滤口径下去重值供前端联动下拉
     event_types = list(

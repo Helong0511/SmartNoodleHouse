@@ -1,0 +1,75 @@
+---
+description: Web 前后端数据交换（API / JSON）缺陷检查规则，用于审查接口、序列化、参数校验与金额时间处理
+globs:
+  - "**/*.py"
+  - "**/*.js"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.vue"
+alwaysApply: false
+---
+
+# 前后端数据交换检查规则
+
+审查或编写涉及前后端数据交换的代码时，遵守以下规则。发现问题必须给出 `文件:行号`，不确定则标注「需人工确认」。
+
+## 硬性规则（违反即报错）
+
+1. **大整数以字符串传输**：雪花 ID、BIGINT 主键、订单号等超过 `2^53` 的数值，接口出参必须是字符串，避免 JS 精度丢失。
+2. **金额不用 float**：传输用字符串或最小单位整数（分），计算全程 `Decimal`，只在展示层格式化。字段名带单位，如 `amount_cents`。
+3. **时间统一 ISO 8601 + 显式时区**（`2026-10-10T12:00:00+08:00` 或 `Z`），数据库存 UTC。禁止裸时间戳、禁止不带时区的字符串。
+4. **响应走字段白名单**：禁止 `to_dict()` / `vars()` / `__dict__` 全量输出，必须显式声明出参字段，防止泄露 `password`、`token`、身份证、手机号。
+5. **后端必须独立校验入参**：禁止只依赖前端校验。使用 Pydantic / marshmallow 等 schema 校验类型、范围、长度、枚举。
+6. **按 ID 取数必须校验归属**：所有 `WHERE id = ?` 的详情/编辑/删除接口都要验证数据属于当前用户或租户，防 IDOR 越权。
+7. **写接口幂等**：下单、支付、扣款等写操作必须有幂等键或业务唯一索引兜底。
+8. **SQL 参数化**：禁止字符串拼接 SQL。排序字段、动态 WHERE 字段走白名单映射。
+9. **字段只增不改**：已有字段不改名、不改类型、不删除。废弃字段保留并标注 `deprecated`。新增字段必须可选或带默认值。
+10. **错误语义正确**：业务失败用 4xx + 结构化 `error.code`，禁止 HTTP 200 包裹业务错误。生产环境不得返回堆栈、SQL、内部路径。
+
+## JSON 处理
+
+- 禁止用 `str(dict)` 或字符串拼接产出 JSON（`True/False/None` 不是合法 JSON）。
+- `json.dumps` 必须能处理 `datetime`、`Decimal`、`UUID`、`bytes`、`set`、ORM 对象，使用 `default=` 钩子或统一序列化器。
+- 设 `allow_nan=False`，防止 `NaN` / `Infinity` 输出导致前端 `JSON.parse` 崩溃。
+- 序列化 ORM 对象前预加载关联（`joinedload` / `selectinload`），禁止在 session 关闭后触发懒加载。
+- 避免双向关系直接序列化造成循环引用，用序列化层显式裁剪字段。
+- 空值统一用 `null`，明确区分「字段缺失」「`null`」「空串」「`0`」的语义，不要混用。
+- 字段命名在边界统一转换（`snake_case` ↔ `camelCase`），不要手写逐个映射。
+- MySQL 一律 `utf8mb4`，支持 emoji 与生僻字。XSS 转义在**输出侧**做，不要入库时转义。
+
+## 数据正确性
+
+- 区分「key 缺失」「`null`」「空串」三种形态，禁止只写 `if not value`。
+- PATCH 语义明确：不传 = 不改，显式 `null` = 置空，并写入文档。
+- 布尔字段 `NOT NULL DEFAULT 0`，避免三态导致 `WHERE flag = 0` 漏掉 `NULL`。
+- 舍入规则显式指定（Python `Decimal` 默认 `ROUND_HALF_EVEN`，对账场景通常要 `ROUND_HALF_UP`）。
+- 分页排序必须有唯一 tiebreaker，如 `ORDER BY created_at DESC, id DESC`；大数据量用游标分页而非大 offset。
+- 并发写加 `version` 乐观锁，或 `UPDATE ... WHERE version = ?` 后判 `affected_rows`。
+- 事务提交后再序列化响应，避免读到半更新状态或懒加载异常。
+- 更新 DB 后删除缓存（不是更新缓存），并设过期时间兜底。
+- 统计报表明确时间边界与时区，统一聚合口径（退款单、取消单、测试单是否计入，是否去重）。
+
+## 传输与调用
+
+- 发送 JSON 显式设置 `Content-Type: application/json; charset=utf-8`。
+- 带凭证的跨域：`Access-Control-Allow-Origin` 必须是具体域名（不能是 `*`），配 `Allow-Credentials: true`，服务端显式处理 `OPTIONS` 预检。
+- 涉及金额/状态的 GET 加 `Cache-Control: no-store` 或版本号，防缓存导致数据陈旧。
+- 查询条件走 query string，不用 GET 带 body。
+- 批量接口的 `ids` / `items` 设 `max_items` 上限并分页处理。
+- 重试只对幂等接口，带指数退避与次数上限。
+- 全链路透传 `request_id` / `trace_id`。
+
+## 前端调用
+
+- `fetch` 必须判 `res.ok`（4xx/5xx 不会 reject）；`axios` 显式处理错误分支。
+- 快速切换筛选条件时用 `AbortController` 取消上一次请求，或用请求序号丢弃过期响应，防竞态覆盖。
+- 表单值提交前做类型转换，`input.value` 永远是字符串（`"0"` 为真值陷阱）。
+- `localStorage` 存取对象必须 `JSON.stringify` / `JSON.parse`。
+- 大整数、高精度小数不要用 `<input type=number>`。
+
+## 输出问题时的格式
+
+| 编号 | 级别 | 规则项 | 位置 | 问题描述 | 触发条件 | 修复建议 |
+|---|---|---|---|---|---|---|
+
+级别定义：P0 会导致线上事故或资损；P1 偶发错误或数据不准；P2 潜在隐患。

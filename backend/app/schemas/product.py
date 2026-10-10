@@ -1,13 +1,15 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CategoryCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     store_id: int | None = None
-    category_no: str | None = None
-    name: str
-    description: str | None = None
+    category_no: str | None = Field(default=None, max_length=32)
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
     sort_order: int = 0
     status: int = 1
     # 须先点过的分类 id 列表（OR：购物车有其中任一分类即可）；空=无限制
@@ -65,14 +67,16 @@ class CategoryScheduleUpdate(BaseModel):
 
 
 class ProductCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     store_id: int | None = None
     category_id: int
-    product_no: str
-    name: str
-    description: str | None = None
+    product_no: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
     price: Decimal = Field(gt=0, description="售价须大于 0")
     original_price: Decimal | None = Field(default=None, ge=0, description="划线价须 ≥ 0")
-    status: str = "ON_SALE"
+    status: str = Field(default="ON_SALE", pattern=r"^(ON_SALE|OFF_SALE|SOLD_OUT)$")
     is_recommended: bool = False
     is_hot: bool = False
     no_member_discount: bool = False
@@ -80,21 +84,23 @@ class ProductCreate(BaseModel):
     sort_order: int = 0
     stock: int = Field(default=999, ge=0, description="库存须 ≥ 0")
     box_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="餐盒/打包费（单价）")
-    main_image: str | None = None
+    main_image: str | None = Field(default=None, max_length=500)
     option_group_ids: list[int] = []
-    # None=创建时自动带入所属分类默认；[]=明确无限制；有值=商品自身配置
+    # None=下单时自动带入所属分类默认；[]=明确无限制；有值=商品自身配置
     require_category_ids: list[int] | None = None
     require_product_ids: list[int] | None = None
 
 
 class ProductUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     store_id: int | None = None
     category_id: int | None = None
-    name: str | None = None
-    description: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
     price: Decimal | None = Field(default=None, gt=0, description="售价须大于 0")
     original_price: Decimal | None = Field(default=None, ge=0, description="划线价须 ≥ 0")
-    status: str | None = None
+    status: str | None = Field(default=None, pattern=r"^(ON_SALE|OFF_SALE|SOLD_OUT)$")
     is_recommended: bool | None = None
     is_hot: bool | None = None
     no_member_discount: bool | None = None
@@ -102,7 +108,7 @@ class ProductUpdate(BaseModel):
     sort_order: int | None = None
     stock: int | None = Field(default=None, ge=0, description="库存须 ≥ 0")
     box_price: Decimal | None = Field(default=None, ge=0)
-    main_image: str | None = None
+    main_image: str | None = Field(default=None, max_length=500)
     option_group_ids: list[int] | None = None
     require_category_ids: list[int] | None = None
     require_product_ids: list[int] | None = None

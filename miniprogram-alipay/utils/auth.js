@@ -403,7 +403,8 @@ function refreshCustomerToken(app, token, patch = {}) {
 async function doEnsureLogin(tableToken, opts) {
   const app = requireApp()
   const forceRelogin = !!(opts && opts.forceRelogin)
-  const cachedToken = app.globalData.customerToken || readStorage('customer_token')
+  // storage 优先，与微信 / api.resolveCustomerToken 对齐
+  const cachedToken = readStorage('customer_token') || app.globalData.customerToken
   if (!forceRelogin && cachedToken) {
     app.globalData.customerToken = cachedToken
     app.globalData.customerId = app.globalData.customerId || readStorage('customer_id')

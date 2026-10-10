@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
-import { clearCustomerToken, getCustomerToken } from '@/utils/customerAuth'
+import { clearCustomerToken, getCustomerToken, setCustomerToken } from '@/utils/customerAuth'
 import { reportApiLog } from '@/utils/logger'
 
 /** 带业务码的 API 错误，便于按 code 分支（如 40903 幂等键已结束） */
@@ -84,6 +84,52 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** 顾客 JWT 滑动续期（单飞）；对齐小程序 /miniprogram/auth/refresh */
+let customerRefreshPromise: Promise<boolean> | null = null
+
+async function attemptCustomerTokenRefresh(): Promise<boolean> {
+  if (customerRefreshPromise) return customerRefreshPromise
+  const oldToken = getCustomerToken()
+  if (!oldToken) return false
+  customerRefreshPromise = (async () => {
+    try {
+      const res = await axios.post(
+        `${api.defaults.baseURL || '/api'}/miniprogram/auth/refresh`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${oldToken}`, 'X-Client': 'customer' },
+          timeout: 10000,
+        },
+      )
+      const body = res.data
+      const token = body?.code === 0 ? body?.data?.customer_token : null
+      if (token) {
+        setCustomerToken(token, body?.data?.customer_id)
+        return true
+      }
+      return false
+    } catch {
+      return false
+    } finally {
+      customerRefreshPromise = null
+    }
+  })()
+  return customerRefreshPromise
+}
+
+function isCustomerApiUrl(url: string, clientHint: string): boolean {
+  return (
+    url.includes('/miniprogram') ||
+    url.includes('/orders/mine') ||
+    /\/orders\/\d+\/reorder/.test(url) ||
+    url.includes('/welcome/face') ||
+    clientHint === 'customer' ||
+    (url.startsWith('/customers/') && clientHint === 'customer') ||
+    url.includes('/payments/orders/') ||
+    url.startsWith('/orders') && clientHint === 'customer'
+  )
+}
+
 api.interceptors.response.use(
   (res) => {
     const data = res.data
@@ -96,16 +142,16 @@ api.interceptors.response.use(
     }
     return data
   },
-  (err) => {
+  async (err) => {
     const status = err.response?.status
     const msg = parseApiError(err)
     const bizCode = err.response?.data?.code
     const url = String(err.config?.url || '')
-    reportApiLog('ERROR', err.config?.method || 'GET', url, { status, message: msg, code: bizCode })
+    const cfg = err.config || {}
+    reportApiLog('ERROR', cfg.method || 'GET', url, { status, message: msg, code: bizCode })
     if (status === 401) {
-      // P1: 401 时区分顾客/员工 API，清理对应 token，避免残留失效态
-      const reqUrl = String(err.config?.url || '')
-      const clientHint = String(err.config?.headers?.['X-Client'] || '').toLowerCase()
+      const reqUrl = String(cfg.url || '')
+      const clientHint = String(cfg.headers?.['X-Client'] || '').toLowerCase()
       const onAdmin =
         location.pathname.startsWith('/admin') ||
         (!location.pathname.startsWith('/scan') &&
@@ -114,13 +160,23 @@ api.interceptors.response.use(
           !location.pathname.startsWith('/display') &&
           !location.pathname.startsWith('/kitchen') &&
           location.pathname !== '/')
-      const isCustApi =
-        reqUrl.includes('/miniprogram') ||
-        reqUrl.includes('/orders/mine') ||
-        /\/orders\/\d+\/reorder/.test(reqUrl) ||
-        reqUrl.includes('/welcome/face') ||
-        clientHint === 'customer' ||
-        (reqUrl.startsWith('/customers/') && clientHint === 'customer')
+      const isCustApi = isCustomerApiUrl(reqUrl, clientHint)
+      // H5 顾客路径：先静默 refresh 再重放一次（对齐小程序）
+      if (
+        isCustApi &&
+        !onAdmin &&
+        !(cfg as { __customerRefreshed?: boolean }).__customerRefreshed &&
+        !/auth\/refresh/.test(reqUrl) &&
+        getCustomerToken()
+      ) {
+        const ok = await attemptCustomerTokenRefresh()
+        if (ok) {
+          ;(cfg as { __customerRefreshed?: boolean }).__customerRefreshed = true
+          cfg.headers = cfg.headers || {}
+          cfg.headers.Authorization = `Bearer ${getCustomerToken()}`
+          return api.request(cfg)
+        }
+      }
       if (isCustApi && !onAdmin) {
         clearCustomerToken()
         if (
@@ -132,7 +188,7 @@ api.interceptors.response.use(
           ElMessage.error('登录已过期，请重新扫码')
           location.href = '/scan'
         }
-      } else {
+      } else if (!isCustApi) {
         clearStaffToken()
         if (!location.pathname.includes('/login')) {
           ElMessage.error('登录已过期，请重新登录')

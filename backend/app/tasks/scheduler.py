@@ -165,6 +165,20 @@ TASK_CATALOG: list[dict] = [
         "description": "北京时间默认 02:10 启动：按销量刷新热销/推荐、分类时段自动排序、整店重算商品口味画像、深度学习顾客智能口味。",
         "default_schedule": {"type": "cron", "hour": 2, "minute": 10},
     },
+    {
+        "id": "sleep_member_wake",
+        "title": "沉睡会员唤醒",
+        "category": "营销",
+        "description": "每日 10:05 按 30/90 天档给沉睡活跃会员发唤醒券（模板名配置后生效，发券幂等）。",
+        "default_schedule": {"type": "cron", "hour": 10, "minute": 5},
+    },
+    {
+        "id": "balance_low_remind",
+        "title": "储值余额提醒",
+        "category": "营销",
+        "description": "每日 11:05 提醒余额偏低（>0 且低于阈值）的活跃会员，30 天一次（Redis 防重）。",
+        "default_schedule": {"type": "cron", "hour": 11, "minute": 5},
+    },
 ]
 
 
@@ -683,6 +697,48 @@ def register_tasks(scheduler) -> None:
                 except Exception:
                     await db.rollback()
                     logger.exception("夜间批处理异常")
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=10,
+        minute=5,
+        timezone="Asia/Shanghai",
+        id="sleep_member_wake",
+        name="沉睡会员唤醒",
+        misfire_grace_time=3600,
+    )
+    @_leader_job
+    async def sleep_member_wake():
+        """每日 10:05 沉睡会员唤醒：按 30/90 天档给活跃会员发唤醒券（模板名空=关闭）。"""
+        from app.services import retention_service
+
+        async with AsyncSessionLocal() as db:
+            try:
+                await retention_service.run_sleep_wake(db)
+            except Exception:
+                await db.rollback()
+                logger.exception("沉睡会员唤醒任务异常")
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=11,
+        minute=5,
+        timezone="Asia/Shanghai",
+        id="balance_low_remind",
+        name="储值余额提醒",
+        misfire_grace_time=3600,
+    )
+    @_leader_job
+    async def balance_low_remind():
+        """每日 11:05 储值余额提醒：余额偏低（>0 且低于阈值）的活跃会员 30 天提醒一次。"""
+        from app.services import retention_service
+
+        async with AsyncSessionLocal() as db:
+            try:
+                await retention_service.run_balance_low_remind(db)
+            except Exception:
+                await db.rollback()
+                logger.exception("储值余额提醒任务异常")
 
 
 async def apply_scheduler_overrides(scheduler) -> None:

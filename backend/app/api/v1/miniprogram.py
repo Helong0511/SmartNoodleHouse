@@ -2,7 +2,7 @@
 import asyncio
 import base64
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from jose import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, Field
@@ -30,7 +30,7 @@ from app.core.security import create_customer_token, decode_customer_token
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.redis_client import try_get_redis
-from app.core.response import success
+from app.core.response import money, now_local, success
 from app.models import (
     Customer,
     CustomerAlipayAccount,
@@ -286,6 +286,7 @@ class MemberProfilePatchRequest(BaseModel):
     """仅修改资料，不触发会员激活/发券。"""
     nickname: str | None = None
     avatar_url: str | None = None
+    birthday: str | None = Field(default=None, description="生日 YYYY-MM-DD；传空串清除")
     channel: str | None = None
 
 
@@ -331,6 +332,15 @@ async def miniprogram_config(
             db, key, fallback, store_id=sid
         )
 
+    # 快捷备注：逗号分隔字符串；空配置回退默认项
+    _DEFAULT_REMARKS = ["不要香菜", "少油少盐", "不要辣", "微辣", "多加醋", "加份米饭"]
+    remark_raw = (
+        await SystemSettingsService.get_value(db, "quick_remark_options", ",".join(_DEFAULT_REMARKS))
+    ).strip()
+    quick_remark_options = [s.strip() for s in remark_raw.split(",") if s.strip()] or list(_DEFAULT_REMARKS)
+    pay_success_coupon_name = await SystemSettingsService.get_value(db, "pay_success_coupon_name", "")
+    queue_enabled = (await SystemSettingsService.get_value(db, "queue_enabled", "0")).strip() == "1"
+
     return success(
         {
             "store_id": sid,
@@ -362,6 +372,9 @@ async def miniprogram_config(
             "enable_customer_display": await _flag(
                 "enable_customer_display", settings.enable_customer_display
             ),
+            "quick_remark_options": quick_remark_options,
+            "pay_success_coupon_name": pay_success_coupon_name,
+            "queue_enabled": queue_enabled,
         },
         request=request,
     )
@@ -887,9 +900,22 @@ async def patch_member_profile(
     db: DbSession,
     customer: CurrentCustomer,
 ):
-    """修改昵称/头像，不触发会员激活与欢迎券。"""
+    """修改昵称/头像/生日，不触发会员激活与欢迎券。"""
     channel = _customer_channel_from_request(request, "wechat", body_channel=data.channel)
     avatar = _persistable_avatar_url(data.avatar_url)
+    # 生日：YYYY-MM-DD；传空串清除；不得晚于今天
+    if "birthday" in data.model_fields_set:
+        raw_birthday = (data.birthday or "").strip()
+        if not raw_birthday:
+            customer.birthday = None
+        else:
+            try:
+                parsed_birthday = date.fromisoformat(raw_birthday)
+            except ValueError:
+                raise AppException(40030, "生日格式不正确")
+            if parsed_birthday > now_local().date():
+                raise AppException(40031, "生日不能晚于今天")
+            customer.birthday = parsed_birthday
     await CustomerService.save_channel_profile(
         db,
         customer.id,
@@ -932,6 +958,7 @@ async def patch_member_profile(
             "nickname": disp["nickname"],
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
+            "birthday": customer.birthday.isoformat() if customer.birthday else None,
             "need_member_prompt": not CustomerService.is_member(customer),
             **profile,
         },
@@ -1299,7 +1326,13 @@ async def consent_face_base64(
 ):
     """小程序摄像头 takePhoto 后的 base64 授权（禁止相册选图 / 禁止客户端上传 embedding）"""
     await _require_face_welcome_enabled(db)
-    body = await request.json()
+    # 对齐选桌：空 body / 非 JSON 统一业务信封，避免裸 request.json() 落到 HTML/非信封 500
+    try:
+        body = await request.json()
+    except Exception:
+        raise AppException(40001, "请求体格式错误，须为合法 JSON")
+    if not isinstance(body, dict):
+        raise AppException(40001, "请求体须为 JSON 对象")
     if body.get("feature") is not None or body.get("embedding") is not None or body.get("feature_vector") is not None:
         raise AppException(40036, "禁止客户端上传人脸特征向量，仅接受摄像头实拍图片")
     liveness_mode = await _enforce_liveness_challenge(
@@ -1425,6 +1458,7 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
             "nickname": disp["nickname"],
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
+            "birthday": customer.birthday.isoformat() if customer.birthday else None,
             "need_member_prompt": need_prompt,
             "is_guest": need_prompt,
             **profile,
@@ -1613,7 +1647,7 @@ def _serialize_reco(ranked, state, meta, ab_bucket, ab_status=None):
             {
                 "id": p.id,
                 "name": p.name,
-                "price": f"{p.price:.2f}",
+                "price": str(money(p.price)),
                 "main_image": p.main_image,
                 "category_id": p.category_id,
                 "category_name": p.category_name,

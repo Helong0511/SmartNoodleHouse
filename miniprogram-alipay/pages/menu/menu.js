@@ -106,7 +106,10 @@ Page({
     cartCount: 0,
     invalidCount: 0,
     cartSheetOpen: false,
-    cartThumbStyle: ''
+    cartThumbStyle: '',
+    favoritesOnly: false,
+    favSet: {},
+    favCount: 0
   },
 
   onLoad() {
@@ -142,6 +145,7 @@ Page({
     })
     const g = appGlobal()
     this.loadPrefs(!g.prefsAt)
+    this.loadFavorites()
     // 首次由 onLoad 拉；后续回到页面时走 loadMenu（内部 TTL 可跳过）
     if (this._menuLoaded) {
       this.loadMenu()
@@ -195,9 +199,10 @@ Page({
     this._catsCache = null
     this._lastProductItems = null
     this._lastMenuFetchAt = 0
-    this._menuFetchStoreId = null
+    this._favLoadedAt = 0
     this.applyMenuFlags(ctx.storeId)
     this.loadMenu(true)
+    this.loadFavorites(true)
     this.refreshCartBar({ openSheet: false, forceCatalog: true })
   },
 
@@ -224,6 +229,7 @@ Page({
         }).catch(() => { })
       }),
       this.loadPrefs(true),
+      this.loadFavorites(true),
       this.loadMenu(true),
       this.refreshCartBar({ openSheet: false, forceCatalog: true })
     ]).finally(() => my.stopPullDownRefresh())
@@ -409,6 +415,8 @@ Page({
   buildCategories(cats, items, metrics, keyword) {
     const m = metrics || media.layoutMetrics()
     const kw = (keyword || '').trim().toLowerCase()
+    const favOnly = !!this.data.favoritesOnly
+    const favSet = this._favSet || {}
     const catList = normalizeList(cats)
     const productList = normalizeList(items)
     return catList
@@ -423,11 +431,12 @@ Page({
               || String(p.description || '').toLowerCase().includes(kw)
             )
           })
-          .map((p) => media.decorateProduct(p, m))
+          .filter((p) => !favOnly || !!favSet[String(p.id)])
+          .map((p) => ({ ...media.decorateProduct(p, m), fav: !!favSet[String(p.id)] }))
         return { ...c, products }
       })
       .filter(Boolean)
-      .filter((c) => c.products.length > 0 || !kw)
+      .filter((c) => c.products.length > 0 || (!kw && !favOnly))
   },
 
   async loadMenu(force) {
@@ -773,6 +782,93 @@ Page({
       return
     }
     this.setData({ prefExpanded: !this.data.prefExpanded })
+  },
+
+  // ---- 菜品收藏 ----
+  async loadFavorites(force = false) {
+    const now = Date.now()
+    const gd = appGlobal()
+    const sid = (gd.table && gd.table.store_id)
+      || (gd.store && gd.store.id)
+      || null
+    const sidKey = String(sid || '')
+    if (
+      !force
+      && this._favLoadedAt
+      && this._favLoadedStoreId === sidKey
+      && now - this._favLoadedAt < 60 * 1000
+    ) {
+      return
+    }
+    try {
+      await auth.ensureLogin()
+      const params = {}
+      if (sid) params.store_id = sid
+      const res = await api.get('/miniprogram/favorites', params)
+      const favSet = {}
+        ; (Array.isArray(res) ? res : (res && res.items) || []).forEach((x) => {
+          const pid = x && typeof x === 'object' ? (x.product_id != null ? x.product_id : x.id) : x
+          if (pid != null) favSet[String(pid)] = true
+        })
+      this._favSet = favSet
+      this._favLoadedAt = Date.now()
+      this._favLoadedStoreId = sidKey
+      this.setData({ favSet, favCount: Object.keys(favSet).length })
+      if (this.data.categories.length) this.rebuildMenuView()
+    } catch (_) {
+      // 未登录 / 失败静默
+    }
+  },
+
+  async toggleFav(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    if (!id || this._favToggling) return
+    const prevSet = this._favSet || {}
+    const wasFav = !!prevSet[String(id)]
+    const nextSet = { ...prevSet }
+    if (wasFav) delete nextSet[String(id)]
+    else nextSet[String(id)] = true
+    this._favToggling = true
+    this._favSet = nextSet
+    this.setData({ favSet: nextSet, favCount: Object.keys(nextSet).length })
+    this.rebuildMenuView()
+    try {
+      await auth.ensureLogin()
+      if (wasFav) await api.delete(`/miniprogram/favorites/${id}`, {})
+      else await api.post(`/miniprogram/favorites/${id}`, {})
+    } catch (err) {
+      // 失败回滚并静默
+      const rollback = { ...(this._favSet || {}) }
+      if (wasFav) rollback[String(id)] = true
+      else delete rollback[String(id)]
+      this._favSet = rollback
+      this.setData({ favSet: rollback, favCount: Object.keys(rollback).length })
+      this.rebuildMenuView()
+      console.warn('收藏操作失败', err)
+    } finally {
+      this._favToggling = false
+    }
+  },
+
+  toggleFavFilter() {
+    this.setData({ favoritesOnly: !this.data.favoritesOnly }, () => this.rebuildMenuView())
+  },
+
+  /** 基于 _catsCache/_lastProductItems 重建当前菜单视图（搜索词 + 收藏筛选） */
+  rebuildMenuView() {
+    if (!this._catsCache || !this._lastProductItems) {
+      this.loadMenu()
+      return
+    }
+    const { cats, metrics } = this._catsCache
+    const items = this._lastProductItems
+    const rebuilt = this.buildCategories(cats, items, metrics, this.data.keyword)
+    const activeCat = (rebuilt[0] && rebuilt[0].id) || null
+    this.setData({
+      categories: rebuilt,
+      activeCat,
+      scrollInto: activeCat ? `cat-${activeCat}` : ''
+    })
   },
 
   goMember() {

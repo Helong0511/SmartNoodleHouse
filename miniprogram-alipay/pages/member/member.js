@@ -156,10 +156,19 @@ Page({
     updatingOptIn: false,
     faceEnabled: false,
     updatingFace: false,
-    showFaceWelcome: false
+    showFaceWelcome: false,
+    birthday: '',
+    birthdayEnd: '',
+    savingBirthday: false,
+    showQueueEntry: false
   },
 
   onLoad() {
+    const d = new Date()
+    const pad = (n) => (n < 10 ? `0${n}` : `${n}`)
+    this.setData({
+      birthdayEnd: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    })
     this._unsubDine = dineCtx.subscribeDineContext((ctx) => {
       this.applyDineContext(ctx)
     })
@@ -193,14 +202,15 @@ Page({
       clientConfig.loadClientConfig().then(() => {
         this.setData({
           ...clientConfig.alipayPrivacyPageData(),
-          ...clientConfig.memberPageFlags()
+          ...clientConfig.memberPageFlags(),
+          showQueueEntry: clientConfig.boolFlag('queue_enabled')
         })
-      }).catch(() => {})
+      }).catch(() => { })
       privacy.setupPrivacy().then((setting) => {
         this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
-      }).catch(() => {})
+      }).catch(() => { })
       this.loadPrivacySettings()
-      dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx)).catch(() => {})
+      dineCtx.ensureDineContext().then((ctx) => this.applyDineContext(ctx)).catch(() => { })
       const forceWallet = !!app.globalData.walletDirty
       if (forceWallet) {
         app.globalData.walletDirty = false
@@ -274,11 +284,11 @@ Page({
       app.globalData.customerNo = profile.customer_no
       try {
         my.setStorageSync({ key: 'customer_no', data: profile.customer_no })
-      } catch (_) {}
+      } catch (_) { }
     }
     try {
       my.setStorageSync({ key: 'member_status', data: isMember ? 'MEMBER' : 'GUEST' })
-    } catch (_) {}
+    } catch (_) { }
     const view = prefView || prefUtil.buildPrefDisplay({})
     const rawAvatar = profile.avatar_url || app.globalData.avatarUrl || ''
     const face = profile.face_status || {}
@@ -305,6 +315,7 @@ Page({
       pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
       ...buildLevelLadder(profile.member_levels || []),
       phone: profile.phone || '',
+      birthday: profile.birthday || '',
       loading: false
     })
   },
@@ -797,5 +808,28 @@ Page({
     } finally {
       this.setData({ updatingFace: false })
     }
+  },
+
+  // ---------- 生日填写 ----------
+  async onBirthdayChange(e) {
+    if (this.data.savingBirthday) return
+    const birthday = (e && e.detail && e.detail.value) || ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthday)) return
+    this.setData({ savingBirthday: true })
+    try {
+      await auth.ensureLogin()
+      await api.put('/miniprogram/profile', { birthday })
+      this.setData({ birthday })
+      my.showToast({ content: '生日设置成功，生日当天消费双倍积分', type: 'none', duration: 2500 })
+    } catch (err) {
+      my.showToast({ content: (err && err.message) || '保存失败', type: 'fail' })
+    } finally {
+      this.setData({ savingBirthday: false })
+    }
+  },
+
+  // ---------- 排队取号入口 ----------
+  goQueue() {
+    my.navigateTo({ url: '/packageOrder/queue/queue' })
   }
 })

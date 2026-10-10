@@ -102,7 +102,46 @@
     <view class="pack-tip" wx:if="{{needPack}}">打包按商品餐盒费加收，以服务器结算为准</view>
   </view>
 
-  <textarea class="remark" placeholder="备注（如不要香菜）" value="{{remark}}" bindinput="onRemark" />
+  <view class="schedule-box" wx:if="{{needPack}}">
+    <view class="schedule-head">
+      <view>
+        <view class="label">预约取餐</view>
+        <view class="schedule-sub">{{scheduleEnabled ? '到点开始制作，请按时到店取餐' : '关闭则下单后立即制作'}}</view>
+      </view>
+      <switch checked="{{scheduleEnabled}}" bindchange="onScheduleToggle" color="#ff6b35" />
+    </view>
+    <block wx:if="{{scheduleEnabled}}">
+      <view class="schedule-day-row">
+        <view class="schedule-day {{scheduleDayIdx === 0 ? 'on' : ''}}" data-day="0" bindtap="onScheduleDay">今天</view>
+        <view class="schedule-day {{scheduleDayIdx === 1 ? 'on' : ''}}" data-day="1" bindtap="onScheduleDay">明天</view>
+      </view>
+      <view class="schedule-slots" wx:if="{{scheduleSlots.length}}">
+        <view
+          class="schedule-slot {{scheduleSlotIdx === index ? 'on' : ''}}"
+          wx:for="{{scheduleSlots}}"
+          wx:key="label"
+          data-idx="{{index}}"
+          bindtap="onScheduleSlot"
+        >{{item.label}}</view>
+      </view>
+      <view class="schedule-empty" wx:else>当前时段已无可约，请选明天</view>
+    </block>
+  </view>
+
+  <view class="quick-remarks" wx:if="{{quickRemarks.length}}">
+    <view class="label">快捷备注</view>
+    <view class="qr-tags">
+      <view
+        class="qr-tag {{item.on ? 'on' : ''}}"
+        wx:for="{{quickRemarks}}"
+        wx:key="label"
+        data-label="{{item.label}}"
+        bindtap="toggleQuickRemark"
+      >{{item.label}}</view>
+    </view>
+  </view>
+
+  <textarea class="remark" placeholder="备注（如不要香菜）" value="{{remark}}" bindinput="onRemark" maxlength="50" />
 
   <recommend-strip
     wx:if="{{settleReady && settleStoreId}}"

@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,26 @@ class AppException(Exception):
         self.message = message
         self.status_code = status_code
         super().__init__(message)
+
+
+def _format_validation_errors(errors: list) -> str:
+    """把 Pydantic/FastAPI 校验错误压成一条中文摘要，避免前端只看到笼统「参数有误」。"""
+    parts: list[str] = []
+    for err in errors[:8]:
+        loc = err.get("loc") or ()
+        # 跳过 body/query/path 前缀
+        path = ".".join(str(x) for x in loc if x not in ("body", "query", "path", "header"))
+        msg = str(err.get("msg") or "校验失败")
+        if path:
+            parts.append(f"{path}: {msg}")
+        else:
+            parts.append(msg)
+    if not parts:
+        return "请求参数有误"
+    summary = "；".join(parts)
+    if len(errors) > 8:
+        summary = f"{summary}（另有 {len(errors) - 8} 项）"
+    return summary
 
 
 async def app_exception_handler(request: Request, exc: AppException):
@@ -27,6 +48,18 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     from app.core.response import error
 
     return JSONResponse(status_code=exc.status_code, content=error(exc.status_code, str(exc.detail), request))
+
+
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    """校验失败统一为业务信封，避免 FastAPI 默认 {detail:[...]} 与小程序/前端解析脱节。"""
+    from fastapi.responses import JSONResponse
+
+    from app.core.response import error
+
+    return JSONResponse(
+        status_code=422,
+        content=error(40001, _format_validation_errors(list(exc.errors())), request),
+    )
 
 
 def _integrity_user_message(exc: Exception) -> str:

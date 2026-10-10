@@ -327,6 +327,7 @@ onMounted(async () => {
     })
   ).data
   const allItems: any[] = []
+  const seenIds = new Set<number>()
   let page = 1
   let totalPages = 1
   do {
@@ -338,7 +339,12 @@ onMounted(async () => {
       },
     })
     const data = res?.data || {}
-    allItems.push(...(data.items || []))
+    for (const item of data.items || []) {
+      const id = Number(item?.id)
+      if (!id || seenIds.has(id)) continue
+      seenIds.add(id)
+      allItems.push(item)
+    }
     totalPages = Math.max(1, Number(data.total_pages || 1))
     page += 1
   } while (page <= totalPages && page <= 50)

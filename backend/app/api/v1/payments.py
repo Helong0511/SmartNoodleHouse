@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission, require_pos
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
-from app.core.response import calc_pages, success
+from app.core.response import apply_date_range as _apply_date_range, calc_pages, success
 from app.models import Order, Payment, PaymentRefund
 from app.schemas.order import PaymentCreate, PosCashPay, PosScanPay
 from app.services.audit_service import AuditService
@@ -20,23 +19,6 @@ from app.services.store_scope import assert_order_store_access, require_bound_st
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/payments", tags=["支付"])
-
-
-def _apply_date_range(q, col, date_from: str | None, date_to: str | None):
-    if date_from:
-        try:
-            q = q.where(col >= datetime.fromisoformat(date_from))
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"date_from 格式非法: {date_from}")
-    if date_to:
-        try:
-            end = datetime.fromisoformat(date_to)
-            if len(date_to) <= 10:
-                end = end + timedelta(days=1)
-            q = q.where(col < end)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"date_to 格式非法: {date_to}")
-    return q
 
 
 class RefundCreate(BaseModel):

@@ -131,12 +131,17 @@ async function submit() {
   loading.value = true
   try {
     if (!checkoutNonce.value) checkoutNonce.value = newCheckoutNonce()
+    const storeIdRaw = localStorage.getItem('snh_cart_store_id') || localStorage.getItem('snh_store_id')
+    const storeId = storeIdRaw ? Number(storeIdRaw) : undefined
     const orderRes = await api.post('/orders', {
       table_token: tableToken,
+      store_id: storeId && Number.isFinite(storeId) ? storeId : undefined,
       channel,
       need_pack: needPack.value,
       dining_type: needPack.value ? 'TAKEAWAY' : 'DINE_IN',
       remark: remark.value,
+      // H5 演示不叠券；正式能力走小程序 confirm（含 coupon/voucher/skip_promotions/预约）
+      skip_promotions: false,
       items: cart.value.map((c: any) => ({
         product_id: c.product_id,
         quantity: c.quantity || 1,
@@ -145,6 +150,7 @@ async function submit() {
       idempotency_key: idempotencyKey(),
     }, { headers: { 'X-Client': 'customer' } })
     const orderId = orderRes.data.id
+    // H5 扫码页走 native/qr 二维码通道（非小程序 JSAPI）；生产正式支付以小程序 miniprogram 渠道为准
     const payRes = (
       await api.post(
         `/payments/orders/${orderId}/pay`,

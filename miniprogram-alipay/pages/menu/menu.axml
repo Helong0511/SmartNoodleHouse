@@ -17,6 +17,10 @@
     />
   </view>
 
+  <view class="fav-bar" a:if="{{favCount}}">
+    <view class="fav-chip {{favoritesOnly ? 'on' : ''}}" catchTap="toggleFavFilter">♥ 收藏 · {{favCount}}</view>
+  </view>
+
   <view class="pref-bar" a:if="{{showMenuSmartTaste && prefCount}}">
     <view class="pref-main" onTap="togglePrefExpand">
       <text class="pref-title">智能口味</text>
@@ -74,6 +78,7 @@
                 <view a:else class="thumb placeholder">
                   <text class="ph-text">{{p.name[0] || '餐'}}</text>
                 </view>
+                <view class="fav-btn {{p.fav ? 'on' : ''}}" catchTap="toggleFav" data-id="{{p.id}}">♥</view>
               </view>
               <view class="info">
                 <view class="name-row">
@@ -105,7 +110,7 @@
     </scroll-view>
   </view>
 
-  <view class="empty-tip" a:elif="{{!loading && !categories.length}}">暂无菜品</view>
+  <view class="empty-tip" a:elif="{{!loading && !categories.length}}">{{favoritesOnly ? '暂无收藏菜品' : '暂无菜品'}}</view>
 
   <view class="cart-mask" a:if="{{cartSheetOpen && cart.length}}" catchTap="closeCartSheet"></view>
   <view class="cart-sheet {{cartSheetOpen ? 'open' : ''}}" a:if="{{cart.length}}">

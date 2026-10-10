@@ -71,6 +71,9 @@
             <view class="recharge-btn" onTap="goRecharge">去充值</view>
           </view>
           <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
+          <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange">
+            <view class="phone birthday-line">生日 {{birthday || '未填写 · 点击设置'}}</view>
+          </picker>
         </view>
       </view>
       <view class="progress-box" a:if="{{nextLevelName}}">
@@ -200,6 +203,14 @@
         </view>
         <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
       </block>
+    </view>
+
+    <view class="card" a:if="{{showQueueEntry}}">
+      <view class="privacy-row link-row" onTap="goQueue">
+        <text>排队取号</text>
+        <text class="arrow">›</text>
+      </view>
+      <view class="tip">到店高峰可先取号排队，叫号前会提醒你就近等位。</view>
     </view>
 
     <view class="card">

@@ -103,12 +103,10 @@ async def list_audit_logs(
         kw = f"%{raw}%"
         q = q.where(or_(OperationLog.action.like(kw, escape="\\"), OperationLog.detail.like(kw, escape="\\")))
         cq = cq.where(or_(OperationLog.action.like(kw, escape="\\"), OperationLog.detail.like(kw, escape="\\")))
-    if date_from:
-        q = q.where(OperationLog.created_at >= date_from)
-        cq = cq.where(OperationLog.created_at >= date_from)
-    if date_to:
-        q = q.where(OperationLog.created_at <= date_to)
-        cq = cq.where(OperationLog.created_at <= date_to)
+    from app.core.response import apply_datetime_range
+
+    q = apply_datetime_range(q, OperationLog.created_at, date_from, date_to)
+    cq = apply_datetime_range(cq, OperationLog.created_at, date_from, date_to)
 
     total = int((await db.execute(cq)).scalar() or 0)
     # 排序加 id 兜底，避免翻页重复/丢行

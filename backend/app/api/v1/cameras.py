@@ -183,11 +183,9 @@ async def visitor_events(
     page: int = 1,
     page_size: int = 50,
 ):
-    from datetime import datetime, timedelta
-
     from sqlalchemy import distinct
 
-    from app.core.response import calc_pages
+    from app.core.response import apply_date_range, calc_pages
 
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -203,17 +201,7 @@ async def visitor_events(
         if sid is not None:
             cam_ids = (await db.execute(select(Camera.id).where(Camera.store_id == sid))).scalars().all()
             q = q.where(VisitorEvent.camera_id.in_(list(cam_ids) or [-1]))
-    if date_from:
-        try:
-            q = q.where(VisitorEvent.event_time >= datetime.fromisoformat(date_from))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            # 结束日期按自然日含全天：date_to + 1 天取开区间
-            q = q.where(VisitorEvent.event_time < datetime.fromisoformat(date_to) + timedelta(days=1))
-        except ValueError:
-            pass
+    q = apply_date_range(q, VisitorEvent.event_time, date_from, date_to)
     if event_type and event_type.strip():
         q = q.where(VisitorEvent.event_type == event_type.strip().upper())
 

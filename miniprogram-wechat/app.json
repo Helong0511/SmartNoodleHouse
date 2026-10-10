@@ -18,7 +18,8 @@
       "pages": [
         "product/product",
         "confirm/confirm",
-        "result/result"
+        "result/result",
+        "queue/queue"
       ]
     }
   ],

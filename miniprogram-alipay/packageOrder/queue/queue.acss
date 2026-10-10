@@ -1,0 +1,86 @@
+.page { padding: 32rpx; }
+.tip { color: #999; font-size: 26rpx; text-align: center; padding: 24rpx 0; }
+.empty { text-align: center; padding: 120rpx 40rpx; }
+.empty-title { font-size: 32rpx; font-weight: 600; color: #333; margin-bottom: 40rpx; }
+.card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 32rpx;
+}
+.title { font-size: 30rpx; font-weight: 600; margin-bottom: 24rpx; }
+.people-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-bottom: 32rpx;
+}
+.people-item {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: #f5f5f5;
+  color: #666;
+  font-size: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid transparent;
+  box-sizing: border-box;
+}
+.people-item.on {
+  background: #e6f4ff;
+  color: #1677ff;
+  border-color: #1677ff;
+  font-weight: 700;
+}
+.take-btn { margin-top: 8rpx; }
+.btn-primary {
+  background: #1677ff;
+  color: #fff;
+  border-radius: 48rpx;
+}
+.btn-ghost {
+  margin-top: 24rpx;
+  background: #fff;
+  color: #999;
+  border: 1rpx solid #ddd;
+  border-radius: 48rpx;
+}
+.queue-card {
+  text-align: center;
+  padding: 64rpx 32rpx;
+  background: linear-gradient(160deg, #f0f7ff 0%, #fff 100%);
+  border: 2rpx solid #91caff;
+}
+.queue-card.called {
+  background: linear-gradient(160deg, #f6ffed 0%, #fff 100%);
+  border-color: #b7eb8f;
+}
+.queue-status { font-size: 26rpx; color: #999; }
+.queue-card.called .queue-status { color: #52c41a; font-weight: 600; }
+.queue-no {
+  font-size: 120rpx;
+  font-weight: 800;
+  color: #1677ff;
+  line-height: 1.2;
+  letter-spacing: 4rpx;
+  margin: 16rpx 0 8rpx;
+}
+.queue-card.called .queue-no { color: #389e0d; }
+.queue-meta { font-size: 24rpx; color: #999; }
+.ahead-box {
+  margin-top: 40rpx;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 12rpx;
+}
+.ahead-num { font-size: 64rpx; font-weight: 700; color: #333; }
+.ahead-unit { font-size: 26rpx; color: #999; }
+.called-tip {
+  margin-top: 32rpx;
+  font-size: 26rpx;
+  color: #389e0d;
+  font-weight: 600;
+}
+.cancel-btn { margin-top: 32rpx; }

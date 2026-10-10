@@ -82,12 +82,30 @@
       <view class="order-body">{{item.item_summary}}</view>
       <view class="order-foot">
         <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}<text a:if="{{item.discount_amount > 0}}" class="discount">（已优惠¥{{item.discount_amount}}）</text> · {{item.payLabel}}</text>
-        <view
-          class="btn-mini {{!item.can_reorder || reorderingId == item.id ? 'is-disabled' : ''}}"
-          catchTap="reorderOrder"
-          data-id="{{item.id}}"
-        >
-          <text class="btn-mini-label">再来一单</text>
+        <view class="order-ops">
+          <view
+            class="op-btn urge {{item.urgeOnCooldown || urgingId == item.id ? 'is-disabled' : ''}}"
+            a:if="{{item.canUrge}}"
+            catchTap="urgeOrder"
+            data-id="{{item.id}}"
+          >
+            <text>{{item.urgeOnCooldown ? '已催单' : '催单'}}</text>
+          </view>
+          <view
+            class="op-btn refund {{refundingId == item.id ? 'is-disabled' : ''}}"
+            a:if="{{item.canSelfRefund}}"
+            catchTap="selfRefundOrder"
+            data-id="{{item.id}}"
+          >
+            <text>{{refundingId == item.id ? '提交中…' : '申请退款'}}</text>
+          </view>
+          <view
+            class="btn-mini {{!item.can_reorder || reorderingId == item.id ? 'is-disabled' : ''}}"
+            catchTap="reorderOrder"
+            data-id="{{item.id}}"
+          >
+            <text class="btn-mini-label">再来一单</text>
+          </view>
         </view>
       </view>
     </view>

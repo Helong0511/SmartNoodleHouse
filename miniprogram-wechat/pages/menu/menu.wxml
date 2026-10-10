@@ -17,6 +17,10 @@
     />
   </view>
 
+  <view class="fav-bar" wx:if="{{favCount}}">
+    <view class="fav-chip {{favoritesOnly ? 'on' : ''}}" catchtap="toggleFavFilter">♥ 收藏 · {{favCount}}</view>
+  </view>
+
   <view class="pref-bar" wx:if="{{showMenuSmartTaste && prefCount}}">
     <view class="pref-main" bindtap="togglePrefExpand">
       <text class="pref-title">智能口味</text>
@@ -76,6 +80,7 @@
                 <view wx:else class="thumb placeholder">
                   <text class="ph-text">{{p.name[0] || '餐'}}</text>
                 </view>
+                <view class="fav-btn {{p.fav ? 'on' : ''}}" catchtap="toggleFav" data-id="{{p.id}}">♥</view>
               </view>
               <view class="info">
                 <view class="name-row">
@@ -107,7 +112,7 @@
     </scroll-view>
   </view>
 
-  <view class="empty-tip" wx:elif="{{!loading && !categories.length}}">暂无菜品</view>
+  <view class="empty-tip" wx:elif="{{!loading && !categories.length}}">{{favoritesOnly ? '暂无收藏菜品' : '暂无菜品'}}</view>
 
   <!-- 已选清单（无删除按钮；减到 0 即移除） -->
   <view class="cart-mask" wx:if="{{cartSheetOpen && cart.length}}" catchtap="closeCartSheet"></view>

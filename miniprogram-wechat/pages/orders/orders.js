@@ -4,6 +4,7 @@ const media = require('../../utils/media')
 const dineCtx = require('../../utils/context')
 const pickupUtil = require('../../utils/pickup')
 const navBar = require('../../utils/navBar')
+const orderActions = require('../../utils/orderActions')
 
 const ORDERS_CACHE_MS = 30 * 1000
 const SCOPE_STORAGE_KEY = 'orders_scope_pending'
@@ -36,6 +37,8 @@ Page({
     loadingMore: false,
     noMore: false,
     reorderingId: null,
+    urgingId: null,
+    refundingId: null,
     storeId: null,
     storeName: '',
     storeNo: '',
@@ -180,13 +183,18 @@ Page({
       const batch = ((res && res.items) || []).map((o) => ({
         ...o,
         ...pickupUtil.decorate(o),
+        ...orderActions.buildActionFlags(o),
         discount_amount: Number(o.discount_amount || 0),
         timeText: this.formatTime(o.created_at),
         payLabel: this.payLabel(o.payment_status),
         placeText: [o.store_name, o.table && (o.table.table_name || o.table.table_no)].filter(Boolean).join(' · ')
       }))
       const totalPages = (res && res.total_pages) || 0
-      const list = reset ? batch : this.data.list.concat(batch)
+      let list = batch
+      if (!reset) {
+        const seen = new Set((this.data.list || []).map((o) => o && o.id).filter((id) => id != null))
+        list = (this.data.list || []).concat(batch.filter((o) => o && o.id != null && !seen.has(o.id)))
+      }
       this.setData({
         list,
         page,
@@ -239,7 +247,11 @@ Page({
         timeText: this.formatTime(r.paid_at || r.created_at)
       }))
       const totalPages = (res && res.total_pages) || 0
-      const list = reset ? batch : this.data.list.concat(batch)
+      let list = batch
+      if (!reset) {
+        const seen = new Set((this.data.list || []).map((o) => o && o.id).filter((id) => id != null))
+        list = (this.data.list || []).concat(batch.filter((o) => o && o.id != null && !seen.has(o.id)))
+      }
       this.setData({
         list,
         page,
@@ -340,7 +352,7 @@ Page({
         try {
           const app = getApp()
           if (app && app.globalData) app.globalData._openCartSheet = true
-        } catch (_) {}
+        } catch (_) { }
         wx.switchTab({ url: '/pages/menu/menu' })
       }
       if (skipped.length) {
@@ -368,5 +380,51 @@ Page({
 
   goRecharge() {
     wx.navigateTo({ url: '/pages/recharge/recharge' })
+  },
+
+  // ---- 催单 / 自助退款（列表内操作，catchtap 阻止冒泡进入详情） ----
+  async urgeOrder(e) {
+    const id = e.currentTarget.dataset.id
+    if (!id || this.data.urgingId) return
+    if (orderActions.isUrgeOnCooldown(id)) return
+    this.setData({ urgingId: id })
+    try {
+      await orderActions.urgeOrder(id)
+      this.patchOrderFlags(id, { urgeOnCooldown: true })
+      wx.showToast({ title: '已通知后厨加急', icon: 'success' })
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '催单失败，请稍后重试', icon: 'none' })
+    } finally {
+      this.setData({ urgingId: null })
+    }
+  },
+
+  selfRefundOrder(e) {
+    const id = e.currentTarget.dataset.id
+    if (!id || this.data.refundingId) return
+    wx.showModal({
+      title: '申请退款',
+      content: '未开始制作的订单可申请全额退款，商家审核后原路退回',
+      confirmText: '申请退款',
+      success: async (r) => {
+        if (!r.confirm) return
+        this.setData({ refundingId: id })
+        try {
+          await orderActions.selfRefund(id)
+          wx.showToast({ title: '退款申请已提交，请等待商家审核', icon: 'none', duration: 2500 })
+          this._listLoadedAt = 0
+          this.reloadCurrent(true, true)
+        } catch (err) {
+          wx.showToast({ title: (err && err.message) || '退款申请失败', icon: 'none', duration: 2500 })
+        } finally {
+          this.setData({ refundingId: null })
+        }
+      }
+    })
+  },
+
+  patchOrderFlags(id, patch) {
+    const list = this.data.list.map((o) => (String(o.id) === String(id) ? { ...o, ...patch } : o))
+    this.setData({ list })
   }
 })

@@ -97,7 +97,47 @@
     </view>
     <view class="pack-tip" a:if="{{needPack}}">打包按商品餐盒费加收，以服务器结算为准</view>
   </view>
-  <textarea class="remark" placeholder="备注" value="{{remark}}" onInput="onRemark" />
+
+  <view class="schedule-box" a:if="{{needPack}}">
+    <view class="schedule-head">
+      <view>
+        <view class="label">预约取餐</view>
+        <view class="schedule-sub">{{scheduleEnabled ? '到点开始制作，请按时到店取餐' : '关闭则下单后立即制作'}}</view>
+      </view>
+      <switch checked="{{scheduleEnabled}}" onChange="onScheduleToggle" color="#ff6b35" />
+    </view>
+    <block a:if="{{scheduleEnabled}}">
+      <view class="schedule-day-row">
+        <view class="schedule-day {{scheduleDayIdx === 0 ? 'on' : ''}}" data-day="0" onTap="onScheduleDay">今天</view>
+        <view class="schedule-day {{scheduleDayIdx === 1 ? 'on' : ''}}" data-day="1" onTap="onScheduleDay">明天</view>
+      </view>
+      <view class="schedule-slots" a:if="{{scheduleSlots.length}}">
+        <view
+          class="schedule-slot {{scheduleSlotIdx === index ? 'on' : ''}}"
+          a:for="{{scheduleSlots}}"
+          a:key="label"
+          data-idx="{{index}}"
+          onTap="onScheduleSlot"
+        >{{item.label}}</view>
+      </view>
+      <view class="schedule-empty" a:else>当前时段已无可约，请选明天</view>
+    </block>
+  </view>
+
+  <view class="quick-remarks" a:if="{{quickRemarks.length}}">
+    <view class="label">快捷备注</view>
+    <view class="qr-tags">
+      <view
+        class="qr-tag {{item.on ? 'on' : ''}}"
+        a:for="{{quickRemarks}}"
+        a:key="label"
+        data-label="{{item.label}}"
+        onTap="toggleQuickRemark"
+      >{{item.label}}</view>
+    </view>
+  </view>
+
+  <textarea class="remark" placeholder="备注" value="{{remark}}" onInput="onRemark" maxlength="50" />
 
   <recommend-strip
     a:if="{{settleReady && settleStoreId}}"

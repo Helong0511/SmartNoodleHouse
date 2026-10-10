@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select, update
@@ -327,6 +328,11 @@ class CustomerService:
         earned = CustomerService.points_from_amount(order.total_amount)
         if earned <= 0:
             return 0
+        # 生日权益：生日当天（月/日匹配）双倍积分
+        if customer.birthday is not None:
+            now = datetime.now()
+            if customer.birthday.month == now.month and customer.birthday.day == now.day:
+                earned *= 2
         customer.points = int(customer.points or 0) + earned
         db.add(
             PointLedger(
@@ -1360,6 +1366,7 @@ class OrderCreateService:
         waive_packing_fee: bool = False,
         operator_id: int | None = None,
         skip_promotions: bool = False,
+        scheduled_pickup_at: str | None = None,
     ) -> Order:
         from sqlalchemy.exc import IntegrityError
 
@@ -1417,6 +1424,23 @@ class OrderCreateService:
             dtype = "TAKEAWAY" if need_pack else "DINE_IN"
         pack = need_pack or dtype == "TAKEAWAY"
         charge_pack = pack and not waive_packing_fee
+        # 预点单：仅打包单支持预约取餐时段（未来 10 分钟 ~ 2 天内）
+        scheduled_dt: datetime | None = None
+        raw_scheduled = (scheduled_pickup_at or "").strip()
+        if raw_scheduled and dtype == "TAKEAWAY":
+            try:
+                scheduled_dt = datetime.fromisoformat(raw_scheduled)
+            except ValueError:
+                raise AppException(40061, "预约取餐时间格式不正确")
+            if scheduled_dt.tzinfo is not None:
+                scheduled_dt = scheduled_dt.replace(tzinfo=None)
+            now = now_local()
+            if now.tzinfo is not None:
+                now = now.replace(tzinfo=None)
+            if scheduled_dt < now + timedelta(minutes=10):
+                raise AppException(40062, "预约取餐时间至少需晚于当前 10 分钟")
+            if scheduled_dt > now + timedelta(days=2):
+                raise AppException(40063, "预约取餐时间不能超过 2 天后")
         t_no, t_ph = resolve_table_parts(table_no_raw, channel=channel, dining_type=dtype)
         store = await db.get(Store, int(store_id)) if store_id else None
         if not store or int(getattr(store, "status", 0) or 0) != 1:
@@ -1436,6 +1460,8 @@ class OrderCreateService:
             idempotency_key=scoped_key,
             ordered_at=now_local(),
         )
+        if scheduled_dt is not None:
+            order_kwargs["scheduled_pickup_at"] = scheduled_dt
         # 关联当前 ACTIVE 就餐会话（过期则不挂旧桌）
         if customer_id and table_id and hasattr(Order, "dining_session_id"):
             from app.services.dining_session_service import DiningSessionService

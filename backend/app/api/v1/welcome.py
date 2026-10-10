@@ -81,21 +81,9 @@ async def welcome_logs(
     if keyword:
         kw = f"%{keyword.strip()}%"
         q = q.where(WelcomeLog.welcome_text.like(kw))
-    if date_from:
-        try:
-            q = q.where(WelcomeLog.created_at >= datetime.fromisoformat(date_from))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            end = datetime.fromisoformat(date_to)
-            if len(date_to) <= 10:
-                from datetime import timedelta
+    from app.core.response import apply_date_range
 
-                end = end + timedelta(days=1)
-            q = q.where(WelcomeLog.created_at < end)
-        except ValueError:
-            pass
+    q = apply_date_range(q, WelcomeLog.created_at, date_from, date_to)
 
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     # 迎宾日志高频写入且可能同秒多条，id 兜底保证翻页不重复/不丢行

@@ -175,6 +175,74 @@ class PosRefundService:
         return row
 
     @classmethod
+    async def create_customer_request(
+        cls,
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        order_id: int,
+        reason: str | None,
+    ) -> PosRefundRequest:
+        """顾客自助退款：仅线上点餐渠道、已支付且后厨未开始制作的整单全额退款申请。
+
+        幂等：该订单已有待审批申请时直接返回原申请。资金执行复用现有审批流
+        （店长/超管审批 → 按支付分摊原路退回）。
+        """
+        order = await db.get(Order, int(order_id))
+        if not order:
+            raise AppException(40404, "订单不存在")
+        if order.customer_id != int(customer_id):
+            # 他人订单不暴露存在性
+            raise AppException(40404, "订单不存在")
+        if (order.channel or "").upper() not in ("WECHAT", "ALIPAY", "H5"):
+            raise AppException(40055, "仅线上点餐订单支持自助退款")
+        if order.payment_status != "PAID":
+            raise AppException(40056, "仅已支付订单可申请退款")
+        if order.status != "CONFIRMED" or order.kitchen_claimed_by is not None:
+            raise AppException(40057, "订单已开始制作，请联系商家协商退款")
+        pending = (
+            (
+                await db.execute(
+                    select(PosRefundRequest)
+                    .where(
+                        PosRefundRequest.order_id == order.id,
+                        PosRefundRequest.status == "PENDING",
+                    )
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if pending is not None:
+            return pending
+        all_paid = await cls._list_paid_payments(db, order.id)
+        if not all_paid:
+            raise AppException(40401, "未找到可退款的支付记录")
+        refundable, pairs = await cls._refundable_pairs(db, order.id)
+        if refundable <= 0 or not pairs:
+            raise AppException(40053, "可退余额为 0")
+        amt = money(refundable)
+        if amt <= 0:
+            raise AppException(40051, "退款金额非法")
+        alloc = cls._allocate(amt, pairs)
+        reason_s = f"[顾客自助] {(reason or '未开始制作，申请全额退款').strip()}"[:255]
+        row = PosRefundRequest(
+            store_id=order.store_id,
+            order_id=order.id,
+            payment_id=alloc[0][0].id,  # 主支付单；执行时仍按分摊多笔退
+            amount=amt,
+            executed_amount=money(0),
+            reason=reason_s,
+            status="PENDING",
+            requested_by=None,
+        )
+        db.add(row)
+        await db.flush()
+        await db.refresh(row)
+        return row
+
+    @classmethod
     async def cancel_request(cls, db: AsyncSession, *, user, request_id: int) -> PosRefundRequest:
         # FOR UPDATE：与 approve_and_execute（可能正调用外部退款渠道）互斥，
         # 避免审批提交后被无锁的撤销覆写成 CANCELLED（钱已退、单据丢失）。
@@ -415,7 +483,15 @@ class PosRefundService:
         if user_ids:
             await db.execute(select(User).where(User.id.in_(user_ids)))
         items = [await cls.payload(db, r) for r in rows]
-        return {"total": int(total), "page": page, "page_size": page_size, "items": items}
+        from app.core.response import calc_pages
+
+        return {
+            "total": int(total),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(int(total), page_size),
+            "items": items,
+        }
 
     @classmethod
     async def payload(cls, db: AsyncSession, row: PosRefundRequest) -> dict:
