@@ -138,7 +138,7 @@
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
       layout="total, sizes, prev, pager, next" style="margin-top:16px" @current-change="load" @size-change="reload" />
 
-    <el-drawer v-model="drawer" title="顾客详情 · 会员与口味档案" size="560px">
+    <el-drawer v-model="drawer" title="顾客详情 · 会员与口味档案" size="640px">
       <template v-if="detail">
         <div class="detail-head">
           <el-image v-if="detail.avatar_url" :src="mediaUrl(detail.avatar_url)" fit="cover" class="avatar-lg"
@@ -149,9 +149,55 @@
             <div class="muted">{{ detail.customer_no }}</div>
           </div>
         </div>
-        <el-descriptions :column="1" border>
+
+        <div class="section-head">
+          <h4>基本信息</h4>
+          <el-button v-if="canEditCustomer" type="primary" size="small" :loading="savingProfile" @click="saveProfile">
+            保存修改
+          </el-button>
+        </div>
+        <el-form v-if="canEditCustomer" label-width="96px" class="edit-form" @submit.prevent>
+          <el-form-item label="编号">
+            <span>{{ detail.customer_no }}</span>
+          </el-form-item>
+          <el-form-item label="展示名">
+            <el-input v-model="editForm.display_name" maxlength="100" clearable placeholder="顾客展示名" />
+          </el-form-item>
+          <el-form-item label="昵称">
+            <el-input v-model="editForm.nickname" maxlength="100" clearable placeholder="昵称" />
+          </el-form-item>
+          <el-form-item label="手机">
+            <el-input v-model="editForm.phone" maxlength="11" clearable placeholder="11 位手机号，可清空" />
+          </el-form-item>
+          <el-form-item label="生日">
+            <el-date-picker v-model="editForm.birthday" type="date" value-format="YYYY-MM-DD" clearable
+              placeholder="选填" style="width:100%" />
+          </el-form-item>
+          <el-form-item label="账号状态">
+            <el-radio-group v-model="editForm.status">
+              <el-radio :value="1">启用</el-radio>
+              <el-radio :value="0">禁用</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="智能推荐">
+            <el-switch v-model="editForm.recommend_opt_in" :active-value="1" :inactive-value="0" />
+          </el-form-item>
+        </el-form>
+        <el-descriptions v-else :column="1" border>
           <el-descriptions-item label="编号">{{ detail.customer_no }}</el-descriptions-item>
-          <el-descriptions-item label="昵称">{{ detail.display_name || detail.nickname || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="展示名">{{ detail.display_name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="昵称">{{ detail.nickname || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="手机">{{ detail.phone || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="生日">{{ detail.birthday || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="账号状态">
+            <el-tag size="small" :type="detail.status === 1 ? 'success' : 'danger'">
+              {{ detail.status === 1 ? '启用' : '禁用' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="智能推荐">{{ detail.recommend_opt_in ? '开启' : '关闭' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <el-descriptions :column="1" border style="margin-top:12px">
           <el-descriptions-item label="注册门店">
             <template v-if="detail.registered_store_name">
               {{ detail.registered_store_name }}
@@ -160,7 +206,6 @@
             </template>
             <span v-else>—</span>
           </el-descriptions-item>
-          <el-descriptions-item label="手机">{{ detail.phone || '—' }}</el-descriptions-item>
           <el-descriptions-item label="是否会员">
             <el-tag size="small" :type="detail.is_member ? 'success' : 'info'">
               {{ detail.is_member ? '已注册会员' : '未注册/游客' }}
@@ -177,17 +222,58 @@
           </el-descriptions-item>
           <el-descriptions-item label="会员折扣">
             {{
-              detail.member_discount_rate != null && Number(detail.member_discount_rate) < 1 ?
-                `${(Number(detail.member_discount_rate) * 10).toFixed(1)}折` : (detail.is_member ? '无折扣' : '—') }}
-              </el-descriptions-item>
-              <el-descriptions-item label="等级积分门槛">
-                {{ detail.member_min_points != null ? detail.member_min_points : '—' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="订单数">{{ detail.order_count }}</el-descriptions-item>
-              <el-descriptions-item label="人脸迎宾">{{ detail.has_face ? '已授权（到店摄像头识别）' : '未开启' }}</el-descriptions-item>
-              <el-descriptions-item label="注册时间">{{ detail.created_at || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="最近下单">{{ detail.last_order_at || '—' }}</el-descriptions-item>
+              detail.member_discount_rate != null && Number(detail.member_discount_rate) < 1
+                ? `${(Number(detail.member_discount_rate) * 10).toFixed(1)}折`
+                : (detail.is_member ? '无折扣' : '—')
+            }}
+          </el-descriptions-item>
+          <el-descriptions-item label="等级积分门槛">
+            {{ detail.member_min_points != null ? detail.member_min_points : '—' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="订单数">{{ detail.order_count }}</el-descriptions-item>
+          <el-descriptions-item label="人脸迎宾">
+            {{ detail.has_face ? '已授权（到店摄像头识别）' : '未开启' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="注册时间">{{ detail.created_at || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="最近下单">{{ detail.last_order_at || '—' }}</el-descriptions-item>
         </el-descriptions>
+
+        <div class="pref-block">
+          <div class="section-head">
+            <h4>收藏餐品</h4>
+          </div>
+          <div v-if="canEditCustomer" class="fav-add">
+            <el-select v-model="favAddProductId" filterable remote clearable reserve-keyword
+              placeholder="搜索商品名/编号添加收藏" :remote-method="searchProductsForFav" :loading="favSearching"
+              style="flex:1" @change="onFavProductPicked">
+              <el-option v-for="p in favProductOptions" :key="p.id"
+                :label="`${p.name}（¥${p.price}）`" :value="p.id"
+                :disabled="favoriteProductIds.has(p.id)" />
+            </el-select>
+          </div>
+          <el-table v-if="detail.favorites?.length" :data="detail.favorites" size="small" border>
+            <el-table-column label="商品" min-width="140">
+              <template #default="{ row }">{{ row.name }}</template>
+            </el-table-column>
+            <el-table-column label="价格" width="80">
+              <template #default="{ row }">¥{{ row.price }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="80">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.status === 'ON_SALE' ? 'success' : 'info'">
+                  {{ row.status === 'ON_SALE' ? (row.is_sold_out ? '售罄' : '在售') : '下架' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="canEditCustomer" label="操作" width="72" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="danger" :loading="favBusyId === row.product_id"
+                  @click="removeFavorite(row.product_id)">移除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p v-else class="muted">暂无收藏餐品</p>
+        </div>
 
         <div class="pref-block">
           <div class="section-head">
@@ -367,6 +453,41 @@ const canIssueCoupon = computed(() => auth.hasPermission('coupon:manage'))
 const canMergeCustomer = computed(
   () => auth.isSuperAdmin || auth.hasPermission('customer:write'),
 )
+const canEditCustomer = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('customer:write'),
+)
+
+const editForm = reactive({
+  display_name: '',
+  nickname: '',
+  phone: '',
+  birthday: '' as string | null,
+  status: 1,
+  recommend_opt_in: 1,
+})
+const savingProfile = ref(false)
+const favAddProductId = ref<number | undefined>()
+const favProductOptions = ref<any[]>([])
+const favSearching = ref(false)
+const favBusyId = ref<number | null>(null)
+let favSearchSeq = 0
+
+const favoriteProductIds = computed(() => {
+  const set = new Set<number>()
+  for (const f of detail.value?.favorites || []) {
+    if (f?.product_id != null) set.add(Number(f.product_id))
+  }
+  return set
+})
+
+function syncEditForm(d: any) {
+  editForm.display_name = d?.display_name || ''
+  editForm.nickname = d?.nickname || ''
+  editForm.phone = d?.phone || ''
+  editForm.birthday = d?.birthday || null
+  editForm.status = d?.status === 0 ? 0 : 1
+  editForm.recommend_opt_in = d?.recommend_opt_in ? 1 : 0
+}
 
 const couponTemplates = ref<any[]>([])
 const issueDialog = ref(false)
@@ -559,11 +680,103 @@ async function showDetail(id: number) {
   detail.value = null
   customerCoupons.value = []
   customerVouchers.value = []
+  favAddProductId.value = undefined
+  favProductOptions.value = []
   const [detailRes] = await Promise.all([
     api.get(`/customers/${id}`),
     loadCustomerCoupons(id),
   ])
   detail.value = detailRes.data
+  syncEditForm(detailRes.data)
+}
+
+async function saveProfile() {
+  const id = detail.value?.id
+  if (!id) return
+  const phone = String(editForm.phone || '').trim()
+  if (phone && !/^1\d{10}$/.test(phone)) {
+    ElMessage.warning('手机号须为 11 位中国大陆号段')
+    return
+  }
+  savingProfile.value = true
+  try {
+    const res = await api.patch(`/customers/${id}`, {
+      display_name: editForm.display_name?.trim() || null,
+      nickname: editForm.nickname?.trim() || null,
+      phone: phone || null,
+      birthday: editForm.birthday || null,
+      status: editForm.status,
+      recommend_opt_in: editForm.recommend_opt_in,
+    })
+    detail.value = res.data
+    syncEditForm(res.data)
+    ElMessage.success('顾客信息已保存')
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+async function searchProductsForFav(query: string) {
+  const kw = String(query || '').trim()
+  if (!kw) {
+    favProductOptions.value = []
+    return
+  }
+  const seq = ++favSearchSeq
+  favSearching.value = true
+  try {
+    const params: Record<string, any> = {
+      page: 1,
+      page_size: 30,
+      keyword: kw,
+      status: 'ON_SALE',
+    }
+    if (storeFilter.value) params.store_id = storeFilter.value
+    const res: any = await api.get('/products', { params })
+    if (seq !== favSearchSeq) return
+    favProductOptions.value = res.data?.items || []
+  } catch {
+    if (seq === favSearchSeq) favProductOptions.value = []
+  } finally {
+    if (seq === favSearchSeq) favSearching.value = false
+  }
+}
+
+async function onFavProductPicked(productId: number | undefined) {
+  if (!productId || !detail.value?.id) return
+  if (favoriteProductIds.value.has(productId)) {
+    ElMessage.info('已在收藏中')
+    favAddProductId.value = undefined
+    return
+  }
+  favBusyId.value = productId
+  try {
+    const res = await api.post(`/customers/${detail.value.id}/favorites/${productId}`)
+    detail.value = { ...detail.value, favorites: res.data?.favorites || [] }
+    ElMessage.success('已添加收藏')
+  } catch (e: any) {
+    ElMessage.error(e.message || '添加失败')
+  } finally {
+    favBusyId.value = null
+    favAddProductId.value = undefined
+  }
+}
+
+async function removeFavorite(productId: number) {
+  if (!detail.value?.id) return
+  favBusyId.value = productId
+  try {
+    const res = await api.delete(`/customers/${detail.value.id}/favorites/${productId}`)
+    detail.value = { ...detail.value, favorites: res.data?.favorites || [] }
+    ElMessage.success('已移除收藏')
+  } catch (e: any) {
+    ElMessage.error(e.message || '移除失败')
+  } finally {
+    favBusyId.value = null
+  }
 }
 
 async function loadCouponTemplates() {
@@ -750,6 +963,20 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
+}
+
+.section-head h4 {
+  margin: 0;
+}
+
+.edit-form {
+  margin-bottom: 8px;
+}
+
+.fav-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .hint {

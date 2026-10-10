@@ -1,17 +1,22 @@
+import re
+from datetime import date
+
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
-from app.core.response import calc_pages, success, serialize_dt
+from app.core.response import calc_pages, money, success, serialize_dt
 from app.models import (
     Customer,
     CustomerAlipayAccount,
+    CustomerFavoriteProduct,
     CustomerPreference,
     CustomerWechatAccount,
     FaceProfile,
     Order,
+    Product,
 )
 from app.services.audit_service import AuditService
 from app.services.customer_merge_service import CustomerMergeService
@@ -19,10 +24,73 @@ from app.services.customer_service import CustomerService, PreferenceService
 
 router = APIRouter(prefix="/customers", tags=["顾客"])
 
+_PHONE_RE = re.compile(r"^1\d{10}$")
+
 
 class CustomerMergeBody(BaseModel):
     source_customer_id: int = Field(..., gt=0)
     reason: str | None = Field(None, max_length=255)
+
+
+class CustomerUpdate(BaseModel):
+    """员工编辑顾客档案。未传字段不改；显式 null 可清空可空字段（phone/birthday）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, max_length=100)
+    nickname: str | None = Field(default=None, max_length=100)
+    phone: str | None = Field(default=None, max_length=20)
+    status: int | None = Field(default=None, ge=0, le=1, description="1 启用 / 0 禁用")
+    birthday: date | None = None
+    recommend_opt_in: int | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("display_name", "nickname", mode="before")
+    @classmethod
+    def strip_name(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def normalize_phone(cls, v):
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        if not _PHONE_RE.match(s):
+            raise ValueError("手机号须为 11 位中国大陆号段")
+        return s
+
+
+async def _list_customer_favorites(db, customer_id: int, store_id: int | None = None) -> list[dict]:
+    stmt = (
+        select(CustomerFavoriteProduct, Product)
+        .join(Product, Product.id == CustomerFavoriteProduct.product_id)
+        .where(CustomerFavoriteProduct.customer_id == int(customer_id))
+    )
+    if store_id is not None:
+        stmt = stmt.where(CustomerFavoriteProduct.store_id == int(store_id))
+    stmt = stmt.order_by(
+        CustomerFavoriteProduct.created_at.desc(), CustomerFavoriteProduct.id.desc()
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "product_id": int(product.id),
+            "name": product.name,
+            "price": str(money(product.price)),
+            "image_url": product.main_image,
+            "main_image": product.main_image,
+            "store_id": int(product.store_id) if product.store_id else None,
+            "status": product.status,
+            "is_sold_out": int(product.stock or 0) <= 0,
+            "favorited_at": serialize_dt(fav.created_at),
+        }
+        for fav, product in rows
+    ]
 
 
 def _customer_in_store(store_id: int):
@@ -378,6 +446,204 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
                 else None
             ),
             "preference_scene": prefs.get("scene") or {"enabled": False},
+            "birthday": customer.birthday.isoformat() if customer.birthday else None,
+            "recommend_opt_in": int(customer.recommend_opt_in or 0),
+            "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),
+        },
+        request=request,
+    )
+
+
+@router.patch("/{customer_id}", dependencies=[require_permission("customer:write")])
+async def update_customer(
+    customer_id: int,
+    body: CustomerUpdate,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """员工编辑顾客基础信息（昵称/展示名/手机/启用状态/生日/推荐开关）。"""
+    from app.services.store_scope import require_bound_store
+
+    customer = await db.get(Customer, customer_id)
+    if not customer:
+        raise AppException(40401, "顾客不存在")
+    effective_store = require_bound_store(user, None)
+    if effective_store is not None:
+        await _assert_customer_in_store(db, customer_id, effective_store, action="编辑")
+
+    fields = body.model_fields_set
+    if not fields:
+        raise AppException(40001, "未提交任何可修改字段")
+
+    changes: dict = {}
+    if "display_name" in fields:
+        changes["display_name"] = {"old": customer.display_name, "new": body.display_name}
+        customer.display_name = body.display_name
+    if "nickname" in fields:
+        changes["nickname"] = {"old": customer.nickname, "new": body.nickname}
+        customer.nickname = body.nickname
+    if "phone" in fields:
+        new_phone = body.phone
+        if new_phone:
+            dup = await db.scalar(
+                select(Customer.id).where(
+                    Customer.phone == new_phone,
+                    Customer.id != int(customer_id),
+                    Customer.status == 1,
+                ).limit(1)
+            )
+            if dup:
+                raise AppException(40002, "该手机号已被其他顾客使用")
+        changes["phone"] = {"old": customer.phone, "new": new_phone}
+        customer.phone = new_phone
+        if new_phone:
+            customer.phone_verified = int(customer.phone_verified or 0)
+        else:
+            customer.phone_verified = 0
+    if "status" in fields and body.status is not None:
+        changes["status"] = {"old": int(customer.status or 0), "new": int(body.status)}
+        customer.status = int(body.status)
+        if int(body.status) == 0:
+            # 禁用时抬升 token_version，使既有顾客 JWT 失效
+            customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
+            customer.account_status = "DISABLED"
+        elif str(getattr(customer, "account_status", "") or "").upper() == "DISABLED":
+            customer.account_status = "ACTIVE"
+    if "birthday" in fields:
+        changes["birthday"] = {
+            "old": customer.birthday.isoformat() if customer.birthday else None,
+            "new": body.birthday.isoformat() if body.birthday else None,
+        }
+        customer.birthday = body.birthday
+    if "recommend_opt_in" in fields and body.recommend_opt_in is not None:
+        changes["recommend_opt_in"] = {
+            "old": int(customer.recommend_opt_in or 0),
+            "new": int(body.recommend_opt_in),
+        }
+        customer.recommend_opt_in = int(body.recommend_opt_in)
+
+    await db.flush()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="customer.update",
+        module="customer",
+        target_type="customer",
+        target_id=int(customer_id),
+        detail={"changes": changes},
+        request=request,
+        store_id=int(effective_store) if effective_store else None,
+    )
+    # 复用详情接口数据形状，便于前端刷新抽屉
+    return await get_customer(customer_id, request, db, user)
+
+
+@router.post("/{customer_id}/favorites/{product_id}", dependencies=[require_permission("customer:write")])
+async def staff_add_favorite(
+    customer_id: int,
+    product_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """员工代为收藏菜品（幂等）。"""
+    from app.services.store_scope import require_bound_store
+
+    customer = await db.get(Customer, customer_id)
+    if not customer:
+        raise AppException(40401, "顾客不存在")
+    effective_store = require_bound_store(user, None)
+    if effective_store is not None:
+        await _assert_customer_in_store(db, customer_id, effective_store, action="编辑")
+
+    product = await db.get(Product, product_id)
+    if not product:
+        raise AppException(40404, "商品不存在")
+    if effective_store is not None and int(product.store_id or 0) != int(effective_store):
+        raise AppException(40301, "无权收藏其他门店商品")
+
+    existing = (
+        await db.execute(
+            select(CustomerFavoriteProduct).where(
+                CustomerFavoriteProduct.customer_id == int(customer_id),
+                CustomerFavoriteProduct.product_id == int(product.id),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        db.add(
+            CustomerFavoriteProduct(
+                customer_id=int(customer_id),
+                product_id=int(product.id),
+                store_id=int(product.store_id),
+            )
+        )
+        await db.flush()
+        await AuditService.log_staff(
+            db,
+            user=user,
+            action="customer.favorite.add",
+            module="customer",
+            target_type="customer",
+            target_id=int(customer_id),
+            detail={"product_id": int(product.id), "store_id": int(product.store_id)},
+            request=request,
+            store_id=int(effective_store) if effective_store else int(product.store_id),
+        )
+    return success(
+        {
+            "favorited": True,
+            "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),
+        },
+        request=request,
+    )
+
+
+@router.delete("/{customer_id}/favorites/{product_id}", dependencies=[require_permission("customer:write")])
+async def staff_remove_favorite(
+    customer_id: int,
+    product_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """员工取消顾客收藏（幂等）。"""
+    from app.services.store_scope import require_bound_store
+
+    customer = await db.get(Customer, customer_id)
+    if not customer:
+        raise AppException(40401, "顾客不存在")
+    effective_store = require_bound_store(user, None)
+    if effective_store is not None:
+        await _assert_customer_in_store(db, customer_id, effective_store, action="编辑")
+
+    fav = (
+        await db.execute(
+            select(CustomerFavoriteProduct).where(
+                CustomerFavoriteProduct.customer_id == int(customer_id),
+                CustomerFavoriteProduct.product_id == int(product_id),
+            )
+        )
+    ).scalar_one_or_none()
+    if fav is not None:
+        await db.delete(fav)
+        await db.flush()
+        await AuditService.log_staff(
+            db,
+            user=user,
+            action="customer.favorite.remove",
+            module="customer",
+            target_type="customer",
+            target_id=int(customer_id),
+            detail={"product_id": int(product_id)},
+            request=request,
+            store_id=int(effective_store) if effective_store else None,
+        )
+    return success(
+        {
+            "favorited": False,
+            "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),
         },
         request=request,
     )
