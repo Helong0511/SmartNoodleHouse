@@ -129,7 +129,6 @@ INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`) SELECT '钻�
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '新客满30减5', 'FIXED', 5.00, 30.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '新客满30减5');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50享打9折', 'PERCENT', 0.90, 50.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50享打9折');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '10元代金券', 'VOUCHER', 10.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '10元代金券');
-
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满10单免1元', 'FIXED', 1.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满10单免1元');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满20单免3元', 'FIXED', 3.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满20单免3元');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`) SELECT '满50单免8元', 'FIXED', 8.00, 0.00, 30 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '满50单免8元');
@@ -211,12 +210,10 @@ UPDATE `permissions` SET `name` = '合并顾客' WHERE `code` = 'customer:write'
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` = 'customer:write' WHERE `r`.`code` = 'SUPER_ADMIN' AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
 UPDATE `roles` SET `description` = '本店运营（含本店业务设置与退款；不含平台级系统配置）' WHERE `code` = 'STORE_ADMIN';
 INSERT INTO `role_permissions` (`role_id`, `permission_id`) SELECT `r`.`id`, `p`.`id` FROM `roles` r JOIN `permissions` p ON `p`.`code` = 'settings:store' WHERE `r`.`code` IN ('SUPER_ADMIN', 'STORE_ADMIN') AND NOT EXISTS (SELECT 1 FROM `role_permissions` rp WHERE `rp`.`role_id` = `r`.`id` AND `rp`.`permission_id` = `p`.`id`);
-
 SELECT (SELECT COUNT(*) FROM `roles`) AS roles, (SELECT COUNT(*) FROM `permissions`) AS permissions;
 
--- 平台超级管理员（生产请立即改密）
-INSERT INTO `users` (`id`, `username`, `password_hash`, `display_name`, `role_id`, `store_id`, `token_version`, `status`, `last_login_at`, `created_at`, `updated_at`) VALUES
-(1, 'admin', '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm', '系统管理员', 1, NULL, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888');
+-- 平台超级管理员（生产请立即执行 scripts/初始化管理员.py 改强密码）
+INSERT INTO `users` (`username`, `password_hash`, `display_name`, `role_id`, `store_id`, `token_version`, `status`, `last_login_at`, `created_at`, `updated_at`) SELECT 'admin', '$2b$12$38dPQAo/7seG5MQ9uCaLg.eysxss7vHFFOYSORWyAO5sNflaFgaQm', '系统管理员', `r`.`id`, NULL, 0, 1, NULL, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888' FROM `roles` r WHERE `r`.`code` = 'SUPER_ADMIN' AND NOT EXISTS (SELECT 1 FROM `users` u WHERE `u`.`username` = 'admin');
 
 -- END SYSTEM SEED
 SET FOREIGN_KEY_CHECKS = 1;

@@ -9,7 +9,7 @@ USE `smart_noodle_house`;
 
 -- 部署前必须将下方口令替换为强密码；禁止把真实数据库密码提交到版本库。
 -- 仅授权本库；不含 GRANT OPTION / 跨库。生产应用账号可再收紧为仅 DML。
-CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'REPLACE_WITH_STRONG_DB_PASSWORD';
+CREATE USER IF NOT EXISTS 'remote'@'localhost' IDENTIFIED BY 'kb7$rL3d8!tQ';
 GRANT SELECT, INSERT, UPDATE, DELETE,
   CREATE, ALTER, DROP, INDEX, REFERENCES, TRIGGER,
   CREATE TEMPORARY TABLES, EXECUTE, SHOW VIEW, LOCK TABLES
@@ -514,6 +514,7 @@ CREATE TABLE IF NOT EXISTS `delivery_refunds` (
   `handled_at` datetime(3) NULL DEFAULT NULL COMMENT '处理完成时间',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_dr_platform_refund`(`platform` ASC, `platform_refund_id` ASC) USING BTREE,
   INDEX `idx_dr_order`(`order_id` ASC) USING BTREE,
   INDEX `fk_dr_do`(`delivery_order_id` ASC) USING BTREE,
   CONSTRAINT `fk_dr_do` FOREIGN KEY (`delivery_order_id`) REFERENCES `delivery_orders` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
@@ -601,9 +602,6 @@ CREATE TABLE IF NOT EXISTS `financial_ledger` (
   `remark` varchar(500) NULL DEFAULT NULL COMMENT '备注',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '入账时间',
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `uk_fl_payment`(`payment_id` ASC) USING BTREE,
-  UNIQUE INDEX `uk_fl_refund`(`refund_id` ASC) USING BTREE,
-  UNIQUE INDEX `uk_fl_delivery_refund`(`delivery_refund_id` ASC) USING BTREE,
   UNIQUE INDEX `uq_fin_ledger_entry_payment`(`entry_type` ASC, `payment_id` ASC) USING BTREE,
   UNIQUE INDEX `uq_fin_ledger_entry_refund`(`entry_type` ASC, `refund_id` ASC) USING BTREE,
   UNIQUE INDEX `uq_fin_ledger_entry_delivery_order`(`entry_type` ASC, `delivery_order_id` ASC) USING BTREE,
@@ -664,7 +662,7 @@ CREATE TABLE IF NOT EXISTS `option_groups` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT 'NULL=总部共享；非空=仅该门店',
   `name` varchar(50) NOT NULL COMMENT '规格组显示名',
-  `code` varchar(64) NOT NULL COMMENT '规格组编码：SH01-Liang 或 SH01-Liang',
+  `code` varchar(64) NOT NULL COMMENT '规格组编码：如 SH01-Liang（店内唯一，配合 store_scope）',
   `selection_type` varchar(20) NOT NULL DEFAULT 'SINGLE' COMMENT 'SINGLE=单选 | MULTIPLE=多选',
   `is_required` tinyint NOT NULL DEFAULT 1 COMMENT '是否必选：1=必选 0=可选',
   `sort_order` int NOT NULL DEFAULT 0 COMMENT '展示排序',
@@ -685,7 +683,7 @@ CREATE TABLE IF NOT EXISTS `options` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `group_id` bigint UNSIGNED NOT NULL COMMENT '规格组 → option_groups.id',
   `name` varchar(50) NOT NULL COMMENT '选项显示名，如 大份、微辣',
-  `code` varchar(80) NOT NULL COMMENT '选项编码：SH01-Liang-XiaoWan 或 SH01-Liang-XiaoWan',
+  `code` varchar(80) NOT NULL COMMENT '选项编码：如 SH01-Liang-XiaoWan（组内唯一）',
   `extra_price` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '相对基础价的加价',
   `sort_order` int NOT NULL DEFAULT 0 COMMENT '组内排序',
   `is_default` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否默认选项（同组单选仅一个；菜单+一键加购）',

@@ -61,9 +61,9 @@ python scripts/初始化管理员.py
 | 脚本 | 说明 |
 |------|------|
 | `sql/struct.sql` | **结构真源**：建库授权、完整 DDL（含 Alembic baseline 的 CANONICAL SCHEMA 段） |
-| `sql/data_sys.sql` | **系统必要种子**：角色权限、全局系统参数、默认会员等级、平台券模板等 |
-| `sql/data_custom.sql` | **门店经营种子**：门店壳、菜品规格、桌台、门店员工与门店参数等 |
-| `sql/data_test.sql` | **仅本地测试**：样例商品、订单、admin/cashier/manager（禁止写入生产） |
+| `sql/data_sys.sql` | **系统必要种子**：角色权限、全局系统参数、默认会员等级、平台券模板等（含全表 TRUNCATE） |
+| `sql/data_custom.sql` | **门店经营种子**：SH01 菜单/规格/桌台 + SH01/SH02 门店壳与里程碑等（幂等，无 TRUNCATE） |
+| `sql/data_test.sql` | **仅本地测试**：补齐 SH02 分类/菜品/桌台/员工/摄像头/人脸样例（禁止写入生产） |
 
 已有库升级请用 Alembic：`cd backend && alembic upgrade head`（`0001_baseline` 只执行 `struct.sql` 的 CANONICAL SCHEMA，不删库）。
 
@@ -408,14 +408,16 @@ FLUSH PRIVILEGES;
 sudo systemctl enable redis-server && sudo systemctl start redis-server
 ```
 
-**生产**按顺序执行（勿执行 `002_seed_test.sql`）：
+**生产**按顺序执行（勿执行 `sql/data_test.sql`）：
 
 ```bash
 cd /var/www/smart-noodle
-mysql -u root -p < sql/smart_noodle_house.sql
+mysql -u root -p < sql/struct.sql
+mysql -u root -p < sql/data_sys.sql
+mysql -u root -p < sql/data_custom.sql
 
 export ADMIN_INITIAL_PASSWORD='超管强密码'
-python3 scripts/init_admin.py
+python3 scripts/初始化管理员.py
 ```
 
 ### 三、部署代码与后端 `.env`

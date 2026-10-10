@@ -39,7 +39,7 @@ async def main():
             if not password:
                 print("已存在管理员账号。更新密码必须显式设置环境变量：")
                 print("  set ADMIN_INITIAL_PASSWORD=YourStrongPass123!")
-                print("  python scripts/init_admin.py")
+                print("  python scripts/初始化管理员.py")
                 sys.exit(1)
             user.password_hash = hash_password(password)
             user.status = 1
@@ -48,16 +48,16 @@ async def main():
             return
 
         if not password:
-            print("未找到管理员账号。请先执行 sql/smart_noodle_house.sql，并设置强密码：")
+            print("未找到管理员账号。请先执行 sql/struct.sql + sql/data_sys.sql，并设置强密码：")
             print("  set ADMIN_INITIAL_PASSWORD=YourStrongPass123!")
-            print("  python scripts/init_admin.py")
+            print("  python scripts/初始化管理员.py")
             sys.exit(1)
 
         role = (
             await db.execute(select(Role).where(Role.code == "SUPER_ADMIN"))
         ).scalar_one_or_none()
         if not role:
-            print("未找到 SUPER_ADMIN 角色，请先执行 sql/smart_noodle_house.sql")
+            print("未找到 SUPER_ADMIN 角色，请先执行 sql/data_sys.sql")
             sys.exit(1)
 
         db.add(

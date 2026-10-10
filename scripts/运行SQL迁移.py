@@ -81,7 +81,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
         raise SystemExit(
-            "请显式传入旧库增量脚本；全新建库请直接运行 "
-            "sql/smart_noodle_house.sql"
+            "请显式传入旧库增量脚本；全新建库请按序执行 "
+            "sql/struct.sql → sql/data_sys.sql → sql/data_custom.sql"
         )
     main(args)

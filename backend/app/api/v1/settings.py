@@ -483,8 +483,8 @@ async def get_settings_overview(request: Request, db: DbSession):
                 "multi_worker_note": "多 worker 通过 Redis 版本号同步失效；无 Redis 时最长延迟约 TTL 秒",
             },
             "scripts": [
-                {"name": "初始化管理员", "command": "python scripts/init_admin.py", "note": "首次部署后执行并设置强密码"},
-                {"name": "数据库初始化", "command": "smart_noodle_house.sql + init_admin", "note": "全新库专用；会删库重建"},
+                {"name": "初始化管理员", "command": "python scripts/初始化管理员.py", "note": "首次部署后执行并设置强密码"},
+                {"name": "数据库初始化", "command": "struct.sql + data_sys.sql + data_custom.sql + 初始化管理员.py", "note": "全新库专用；struct.sql 会删库重建"},
                 {"name": "启动后端", "command": "cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000", "note": "Windows PowerShell 同理"},
                 {"name": "启动前端", "command": "cd frontend && npm run dev", "note": "http://localhost:5173"},
                 {"name": "系统设置并发测试", "command": "pytest tests/test_settings_concurrency.py -q", "note": "高并发读写/校验"},

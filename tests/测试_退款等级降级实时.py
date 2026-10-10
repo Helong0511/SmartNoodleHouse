@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
 
 API = "http://127.0.0.1:8000/api"
 
-# 与 sql/002_seed_test.sql 一致（后台可改门槛）
+# 与本地测试种子/后台可改门槛一致（见 sql/data_test.sql 与会员等级配置）
 GOLD_MIN = 300
 SILVER_MIN = 120
 LEVEL_REGULAR = 1

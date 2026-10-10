@@ -23,6 +23,7 @@ env/
 dist/
 build/
 .pytest_cache/
+pytest_out.txt
 .mypy_cache/
 .ruff_cache/
 htmlcov/

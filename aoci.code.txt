@@ -5,9 +5,9 @@
 .env.example[FC8M]: F:Master env field catalog pointing to development or production concrete templates | R:code:.env.development.example,code:.env.production.example,code:backend/app/core/config.py | A:DATABASE_URL REDIS_URL JWT_SECRET | S:Filled real-secret .env must never be committed; runtime truth is Settings in config.py
 .env.production.example[FC8M]: F:Ubuntu production env template with hardened defaults for server deploy | R:code:backend/app/core/config.py,code:.env.example | A:APP_ENV APP_HOST APP_DEBUG JSON_LOGS | S:APP_ENV must stay production; development here relaxes startup and mock safety checks
 .gitattributes[FC7T]: F:Forces text=auto eol=lf so every checkout keeps LF line endings | R:- | A:* text=auto eol=lf | S:Without LF forcing Windows autocrlf rewrites make the whole AOCI Baseline look stale
-.gitignore[FC5T]: F:Git ignore secrets venv node_modules uploads logs IDE and local AOCI DSN pointer | R:- | A:- | S:Never list aoci.txt aoci.meta.txt aoci.code.txt or AGENTS.md here or managed-code scan skips them; .aoci/db_dsn.env is local DB credential pointer only
+.gitignore[FC5T]: F:Git ignore secrets venv node_modules uploads logs IDE pytest_out and local AOCI DSN pointer | R:- | A:- | S:Never list aoci.txt aoci.meta.txt aoci.code.txt or AGENTS.md here or managed-code scan skips them; .aoci/db_dsn.env is local DB credential pointer only
 AGENTS.md[SQ6T]: F:AOCI managed agent integration block describing cognition tools and closing rules | R:- | A:- | S:Host must not invent AOCI state machines; follow live Guide and aoci_rules only
-README.md[SO7L]: F:Project overview install start deploy and module map for SmartNoodleHouse | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql | A:- | S:Does not use Docker; MySQL Redis Python Node must be installed on the host
+README.md[SO7L]: F:Project overview install start deploy and module map for SmartNoodleHouse | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql,code:sql/data_test.sql | A:- | S:No Docker; host MySQL Redis Python Node required; production loads struct+data_sys+data_custom only; data_test is SH02 local fixtures
 pytest.ini[FQ5T]: F:Pytest asyncio tests path backend pythonpath | R:code:tests | A:- | S:Tests glob 测试_*.py under tests/
 sc.bat[XV2T]: F:Windows purge __pycache__ and pytest_cache under repo | R:- | A:- | S:Hardcoded targetDir E:\SmartNoodleHouse
 redis.conf.example[FC5S]: F:Production Redis config template requiring password AOF and memory policy | R:- | A:- | S:requirepass placeholder must be replaced; bind to private network not public; appendfsync everysec
@@ -16,7 +16,7 @@ redis.conf.example[FC5S]: F:Production Redis config template requiring password 
 mcp.json[FC5T]: F:Declares project Cursor MCP server aoci with absolute aoci.exe and repo path | R:- | A:- | S:Cursor must load this file and restart the Agent before aoci_* tools appear
 
 ===E:/SmartNoodleHouse/.cursor/rules/===
-database-schema-sync.mdc[SC8T]: F:Cursor rule requiring struct.sql data_sys.sql data_custom.sql data_test.sql as schema and seed truth | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql,code:sql/data_test.sql | A:- | S:Import order is struct then data_sys then data_custom then optional data_test; models and Alembic must not replace these four files as truth
+database-schema-sync.mdc[SC8T]: F:Cursor rule keeping struct data_sys data_custom data_test as schema and seed truth | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql,code:sql/data_test.sql | A:- | S:Import order struct→data_sys→data_custom→optional data_test; seeds must be idempotent by business keys and must not hardcode auto-increment id; SH02 menus live in data_test; models/Alembic must not replace the four files
 miniprogram-wechat-alipay-sync.mdc[SC7T]: F:Cursor rule mandating WeChat and Alipay miniprogram behavior stay synchronized | R:- | A:- | S:Changing only one miniprogram without checking the other violates this always-applied rule unless a platform API gap forces the difference
 project-terminology.mdc[SC5T]: F:Defines project terms for dual miniprograms and local vs production environments | R:code:.cursor/rules/miniprogram-wechat-alipay-sync.mdc | A:- | S:Saying miniprogram without naming one end means both WeChat and Alipay by default
 scene-and-encoding.mdc[SC6T]: F:Requires scene-separated configs and UTF-8 utf8mb4 encoding rules | R:code:.env.example,code:sql/struct.sql | A:- | S:Do not judge UTF-8 file corruption from PowerShell GBK console mojibake alone
@@ -96,7 +96,7 @@ performance.py[EO4T]: F:Admin reco route latency P50/P95/P99 QPS from Redis minu
 pos.py[EB7M]: F:POS shift open/close daily settlement and cashier refund apply/approve flows | R:code:backend/app/services/pos_shift_service.py,code:backend/app/services/pos_refund_service.py,code:backend/app/api/deps.py | A:open_shift apply_pos_refund approve_pos_refund | S:Refund approve/reject gated beyond plain require_pos; settlement needs manage capability
 print_jobs.py[EB5S]: F:Kitchen print_jobs list and manual retry within store scope | R:code:backend/app/services/print_service.py,code:backend/app/api/deps.py | A:list_print_jobs retry_print_job | S:Requires kitchen gate; assert_store_access before retry
 products.py[EB8L]: F:Categories products options stocks schedules menu-copy and public menu listing APIs | R:code:backend/app/services/menu_service.py,code:backend/app/services/stock_service.py,code:backend/app/api/deps.py | A:list_products list_categories copy_menu_to_store | S:Public menu endpoints allow OptionalStaffUser; product image URLs must pass safe URL assert
-settings.py[EC8L]: F:System/store settings overview health scheduler business keys and store logo upload | R:code:backend/app/core/config.py,code:backend/app/services/system_settings_service.py,code:backend/app/api/deps.py | A:get_settings_overview update_business_settings update_store_business | S:Env overview masks secrets; store business overrides need store settings permission not only system:manage
+settings.py[EC8L]: F:System/store settings overview health scheduler business keys and store logo upload | R:code:backend/app/core/config.py,code:backend/app/services/system_settings_service.py,code:backend/app/api/deps.py | A:get_settings_overview update_business_settings update_store_business | S:Env overview masks secrets; store business overrides need store settings permission not only system:manage; DB init hint is struct+data_sys+data_custom
 tables.py[EB6M]: F:Dining table CRUD POS list QR resolve and regenerate-qr endpoints | R:code:backend/app/services/qr_links.py,code:backend/app/api/deps.py,code:backend/app/services/store_scope.py | A:list_tables create_table resolve_table | S:resolve_table is public by qr_token; manage paths require table:manage and owned-table checks
 users.py[EI7L]: F:Staff user CRUD role permission matrix reset-password with multi-store binding | R:code:backend/app/core/security.py,code:backend/app/api/deps.py | A:list_users create_user update_role_permissions | S:Actors cannot assign roles above their privilege via _assert_can_assign_role
 wallet.py[EB7L]: F:Recharge tiers orders pay notify balance query and staff balance adjust | R:code:backend/app/services/balance_service.py,code:backend/app/services/payment_service.py | A:create_recharge adjust_balance | S:Recharge create reuses existing row when idempotency_key matches
@@ -686,11 +686,11 @@ ssl-params.conf[OC3T]: F:Shared TLS cipher and session nginx snippet | R:code:ng
 
 ===E:/SmartNoodleHouse/scripts/===
 _run_followup_tests.py[TQ5S]: F:Run follow-up pytest subset from tests dir | R:code:tests | A:main | S:-
-初始化会员等级.py[OP5S]: F:Seed member levels via backend SQLAlchemy session | R:code:sql/data.sql | A:main | S:-
-初始化券模板.py[OP5S]: F:Seed coupon templates into database | R:code:sql/data.sql | A:main | S:-
-初始化权限.py[OP6S]: F:Seed RBAC permissions and role links | R:code:sql/data.sql | A:main | S:-
-初始化管理员.py[OI7S]: F:Create super admin user with password policy | R:code:backend/app/models | A:main | S:Rejects weak passwords and len under 10 without letter digit mix
-初始化角色.py[OP5S]: F:Seed default admin roles | R:code:sql/data.sql | A:main | S:-
+初始化会员等级.py[OP5S]: F:Seed member levels via backend SQLAlchemy session | R:code:sql/data_sys.sql | A:main | S:-
+初始化券模板.py[OP5S]: F:Seed coupon templates into database | R:code:sql/data_sys.sql | A:main | S:-
+初始化权限.py[OP6S]: F:Seed RBAC permissions and role links | R:code:sql/data_sys.sql | A:main | S:-
+初始化管理员.py[OI7S]: F:Create or reset super admin user with password policy | R:code:sql/data_sys.sql,code:backend/app/models | A:main | S:Rejects weak passwords and len under 10 without letter digit mix; requires SUPER_ADMIN from data_sys
+初始化角色.py[OP5S]: F:Seed default admin roles | R:code:sql/data_sys.sql | A:main | S:-
 同步品牌Logo.py[OP4T]: F:Sync brand logo file into uploads from config | R:code:backend | A:main | S:-
 备份数据库.py[OR6S]: F:MySQL dump backup using root .env DATABASE_URL | R:code:sql/struct.sql | A:main | S:Outputs under backups/ not for commit
 应用审计结构修复.py[OP5S]: F:Apply audit schema fix SQL against live DB | R:code:sql/struct.sql | A:main | S:One-off migration helper not second schema source
@@ -701,15 +701,15 @@ _run_followup_tests.py[TQ5S]: F:Run follow-up pytest subset from tests dir | R:c
 生产部署-ubuntu.txt[SO5M]: F:Ubuntu production deploy checklist bash paths | R:code:systemd/smart-noodle.service,code:nginx/smart-noodle.conf | A:- | S:-
 生成依赖锁定文件.py[TQ4T]: F:Regenerate backend requirements lock from pyproject | R:code:backend | A:main | S:-
 生成密钥.py[OC3T]: F:Generate JWT and secret key material for .env | R:- | A:main | S:Stdout only do not commit output
-运行SQL迁移.py[OP5S]: F:Run sql/tools migration files via pymysql and .env URL | R:code:sql/struct.sql | A:main | S:Reads DATABASE_URL from repo root .env only
+运行SQL迁移.py[OP5S]: F:Run sql/tools migration files via pymysql and .env URL | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql | A:main | S:Reads DATABASE_URL from repo root .env only; new DB should use struct then data_sys then data_custom
 运行命令.txt[SO4T]: F:Dev and ops command cheat sheet Windows and Linux | R:code:scripts,code:sql/data_sys.sql,code:sql/data_custom.sql | A:- | S:Local multi-store needs struct then data_sys then data_custom then optional data_test
 验证数据库.py[TQ7M]: F:Validate required tables alembic version unique FK constraints | R:code:sql/struct.sql | A:main | S:Exit code 1 on any failure; does not connect without backend .env
 
 ===E:/SmartNoodleHouse/sql/===
-data_test.sql[PP6M]: F:Local-only test seed after struct data_sys data_custom for SH02 fixtures | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql | A:- | S:Never import to production; requires data_custom store shell first
-struct.sql[PP9L]: F:Canonical MySQL schema utf8mb4 DROP CREATE GRANT and all CREATE TABLE | R:code:sql/data.sql,code:backend/app/models | A:- | S:DDL between BEGIN/END CANONICAL SCHEMA is Alembic baseline; replace REPLACE_WITH_STRONG_DB_PASSWORD before deploy
-data_custom.sql[PP8L]: F:Store operating seed stores hours menus options tables staff milestones store_settings | R:code:sql/struct.sql,code:sql/data_sys.sql | A:- | S:No TRUNCATE; depends on data_sys roles and settings; do not put platform RBAC or global system_settings here
-data_sys.sql[PP8M]: F:Platform system seed TRUNCATE then idempotent RBAC settings member levels coupons packages admin | R:code:sql/struct.sql,code:sql/data_custom.sql | A:- | S:Must run after struct and before data_custom; owns all TRUNCATE; never put store menu tables here
+data_test.sql[PP6M]: F:Local-only test seed after struct data_sys data_custom for SH02 fixtures and face sample | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql | A:- | S:Never import to production; face sample keys off customer_no TEST-CUST-FACE-001 without hardcoded ids
+struct.sql[PP9L]: F:Canonical MySQL schema utf8mb4 DROP CREATE GRANT and all CREATE TABLE | R:code:sql/data_sys.sql,code:sql/data_custom.sql,code:backend/app/models | A:- | S:CANONICAL SCHEMA is Alembic baseline; delivery_refunds has uk_dr_platform_refund; financial_ledger keeps only uq_fin_ledger_entry_* uniques
+data_custom.sql[PP8M]: F:Idempotent store seed stores hours menus options tables staff milestones settings category sort | R:code:sql/struct.sql,code:sql/data_sys.sql | A:- | S:No TRUNCATE and no literal auto-increment id; join roles/coupons/categories by code/name/no; SH02 menu in data_test; WeChat QR env_version=release with null alipay_qr_url
+data_sys.sql[PP8M]: F:Platform system seed TRUNCATE then idempotent RBAC settings member levels coupons packages admin | R:code:sql/struct.sql,code:sql/data_custom.sql | A:- | S:Must run after struct and before data_custom; owns all TRUNCATE; admin joins SUPER_ADMIN by username without hardcoded user id
 
 ===E:/SmartNoodleHouse/systemd/===
 smart-noodle.service[FO7T]: F:Ubuntu systemd unit gunicorn uvicorn on 127.0.0.1:8000 www-data | R:code:nginx/smart-noodle.conf,code:scripts/生产部署-ubuntu.txt | A:- | S:PROCESS_ROLE=auto overrides .env leader; replace REPLACE_DEPLOY_ROOT before enable

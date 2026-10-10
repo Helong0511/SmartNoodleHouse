@@ -20,7 +20,8 @@ alwaysApply: true
 
 - 平台改动库、表、字段、索引等结构时，**同一变更**里按 `sql/struct.sql` 现有风格更新该文件。不要另起补丁 SQL、模型或 Alembic 作为第二套结构真源。
 - 系统运行所必需的数据写入 `sql/data_sys.sql`，按该文件现有写法（文件头 `TRUNCATE` 后 `INSERT ... SELECT ... FROM DUAL WHERE NOT EXISTS`）。
-- 门店经营相关数据写入 `sql/data_custom.sql`（**不再** `TRUNCATE`；依赖已导入的 `data_sys.sql`）。禁止把平台 RBAC / 全局 `system_settings` 写进门店种子。
+- 门店经营相关数据写入 `sql/data_custom.sql`（**不再** `TRUNCATE`；依赖已导入的 `data_sys.sql`；按业务键 `INSERT…SELECT…WHERE NOT EXISTS` 幂等，外键用角色 code / 券名 / `store_no` / `category_no` 等 JOIN，**禁止写入自增主键 `id` 字面量**）。禁止把平台 RBAC / 全局 `system_settings` / 人脸样例写进门店种子。SH02 完整菜单/桌台默认在 `data_test.sql`。
+- `data_sys.sql` / `data_test.sql` 同样禁止硬编码自增 `id`（admin、测试顾客、人脸等按 username / customer_no 等业务键幂等）。
 - 仅本地测试使用的数据写入 `sql/data_test.sql`，按该文件现有写法追加。禁止把测试数据放进 `data_sys.sql` / `data_custom.sql`，也禁止把生产必要数据只放在测试文件里。
 - SQLAlchemy 模型、Alembic、升级脚本必须与上述文件一致，只能作为运行时映射或派生升级，不能代替这四个文件。
 

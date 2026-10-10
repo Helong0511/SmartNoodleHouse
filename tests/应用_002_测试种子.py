@@ -1,4 +1,8 @@
-"""Apply sql/002_seed_test.sql (idempotent) and print seed counts."""
+"""Apply sql/data_test.sql (idempotent) and print SH02 seed counts.
+
+历史文件名保留；原 002_seed_test.sql 已并入 data_test.sql。
+前置：已导入 sql/struct.sql + sql/data_sys.sql + sql/data_custom.sql。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -9,10 +13,13 @@ from sqlalchemy import text
 from app.core.database import engine
 
 ROOT = Path(__file__).resolve().parents[1]
-SEED = ROOT / "sql" / "002_seed_test.sql"
+SEED = ROOT / "sql" / "data_test.sql"
 
 
 async def main() -> None:
+    if not SEED.is_file():
+        raise SystemExit(f"missing seed file: {SEED}")
+
     raw = SEED.read_text(encoding="utf-8")
     parts: list[str] = []
     buf: list[str] = []
@@ -35,16 +42,20 @@ async def main() -> None:
                 text(
                     """
                     SELECT
-                      (SELECT COUNT(*) FROM customers WHERE customer_no LIKE 'SEED-%') AS customers,
-                      (SELECT COUNT(*) FROM orders WHERE order_no LIKE 'SEED-%') AS orders,
-                      (SELECT COUNT(*) FROM payments WHERE payment_no LIKE 'SEED-%') AS payments,
-                      (SELECT COUNT(*) FROM payment_refunds WHERE refund_no LIKE 'SEED-%') AS refunds,
-                      (SELECT COUNT(*) FROM users WHERE username = 'cashier') AS cashier
+                      (SELECT COUNT(*) FROM users WHERE username IN ('cwm2','syy2','hsf2')) AS sh02_users,
+                      (SELECT COUNT(*) FROM product_categories c
+                         JOIN stores s ON s.id = c.store_id WHERE s.store_no = 'SH02') AS sh02_categories,
+                      (SELECT COUNT(*) FROM products p
+                         JOIN stores s ON s.id = p.store_id WHERE s.store_no = 'SH02') AS sh02_products,
+                      (SELECT COUNT(*) FROM tables t
+                         JOIN stores s ON s.id = t.store_id WHERE s.store_no = 'SH02') AS sh02_tables,
+                      (SELECT COUNT(*) FROM cameras c
+                         JOIN stores s ON s.id = c.store_id WHERE s.store_no = 'SH02') AS sh02_cameras
                     """
                 )
             )
         ).mappings().one()
-    print("seed applied:", dict(row))
+    print("data_test applied:", dict(row))
 
 
 if __name__ == "__main__":
