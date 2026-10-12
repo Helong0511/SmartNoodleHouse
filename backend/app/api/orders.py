@@ -946,6 +946,12 @@ async def list_orders(
             for u in (await db.execute(select(User).where(User.id.in_(op_ids)))).scalars().all()
         }
 
+    from app.services.social_benefit_service import SocialBenefitService
+
+    social_map = await SocialBenefitService.orders_social_map(
+        db, [int(o.id) for o in order_rows]
+    )
+
     items = []
     for o in order_rows:
         t = table_map.get(o.table_id) if o.table_id else None
@@ -960,6 +966,7 @@ async def list_orders(
             "member_discount_rate": None,
             "member_min_points": None,
         }
+        social_snap = social_map.get(int(o.id)) or SocialBenefitService._empty_social_snapshot()
         items.append(
             {
                 "id": o.id,
@@ -988,6 +995,7 @@ async def list_orders(
                 "operator_id": o.operator_id,
                 "operator_name": (op.display_name or op.username) if op else None,
                 "created_at": serialize_dt(o.created_at),
+                **social_snap,
             }
         )
 
@@ -1499,6 +1507,9 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "member_min_points": None,
         }
     )
+    from app.services.social_benefit_service import SocialBenefitService
+
+    social_snap = await SocialBenefitService.order_social_snapshot(db, int(order.id))
     return success_no_store(
         {
             "id": order.id,
@@ -1533,6 +1544,7 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "items": items,
             "can_reorder": bool(items) and order.status not in ("PENDING_PAYMENT",),
             **pickup,
+            **social_snap,
         },
         request=request,
     )

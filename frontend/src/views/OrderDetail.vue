@@ -25,8 +25,13 @@
           <span v-else>堂食</span>
         </el-descriptions-item>
         <el-descriptions-item label="小计">¥{{ order.subtotal }}</el-descriptions-item>
-        <el-descriptions-item label="会员优惠">
-          <span v-if="Number(order.discount_amount) > 0" class="discount">-¥{{ order.discount_amount }}</span>
+        <el-descriptions-item :label="order.social_applied ? '公益优惠' : '会员优惠'">
+          <span v-if="Number(order.discount_amount) > 0" class="discount">
+            -¥{{ order.discount_amount }}
+            <span v-if="order.social_applied && order.social_identity_code" class="muted">
+              （{{ socialIdentityLabel(order.social_identity_code) }}）
+            </span>
+          </span>
           <span v-else>—</span>
         </el-descriptions-item>
         <el-descriptions-item label="优惠券">
@@ -118,6 +123,19 @@ import {
 const route = useRoute()
 const loading = ref(false)
 const order = ref<any>(null)
+
+const SOCIAL_IDENTITY_LABELS: Record<string, string> = {
+  SANITATION: '环卫工',
+  RIDER: '骑手',
+  ELDER: '长者',
+  TEACHER: '教师',
+  STUDENT: '学生',
+}
+
+function socialIdentityLabel(code: string) {
+  const key = String(code || '').toUpperCase()
+  return SOCIAL_IDENTITY_LABELS[key] || code || ''
+}
 
 const nextActions = computed(() => ORDER_NEXT_ACTIONS[order.value?.status] || [])
 const canCancel = computed(() => order.value && cancelAllowed(order.value.status))

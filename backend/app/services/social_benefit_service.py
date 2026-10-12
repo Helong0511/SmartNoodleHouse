@@ -553,6 +553,14 @@ class SocialBenefitService:
         return hit
 
     @staticmethod
+    def _empty_social_snapshot() -> dict[str, Any]:
+        return {
+            "social_applied": False,
+            "social_identity_code": None,
+            "social_discount": "0.00",
+        }
+
+    @staticmethod
     async def order_social_snapshot(db: AsyncSession, order_id: int) -> dict[str, Any]:
         """订单是否已挂公益台账（PENDING/NORMAL）。"""
         row = (
@@ -572,16 +580,47 @@ class SocialBenefitService:
             )
         ).scalar_one_or_none()
         if not row:
-            return {
-                "social_applied": False,
-                "social_identity_code": None,
-                "social_discount": "0.00",
-            }
+            return SocialBenefitService._empty_social_snapshot()
         return {
             "social_applied": True,
             "social_identity_code": row.identity_code,
             "social_discount": str(money(row.subsidy_amount or 0)),
         }
+
+    @staticmethod
+    async def orders_social_map(
+        db: AsyncSession, order_ids: list[int]
+    ) -> dict[int, dict[str, Any]]:
+        """批量：order_id → social snapshot（列表页用）。"""
+        ids = sorted({int(x) for x in order_ids if x})
+        if not ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(SocialBenefitRedemption)
+                .where(
+                    SocialBenefitRedemption.order_id.in_(ids),
+                    SocialBenefitRedemption.status.in_(
+                        (
+                            SocialBenefitService.REDEEM_PENDING,
+                            SocialBenefitService.REDEEM_NORMAL,
+                        )
+                    ),
+                )
+                .order_by(SocialBenefitRedemption.id.desc())
+            )
+        ).scalars().all()
+        out: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            oid = int(r.order_id)
+            if oid in out:
+                continue  # 已按 id desc，保留最新一条
+            out[oid] = {
+                "social_applied": True,
+                "social_identity_code": r.identity_code,
+                "social_discount": str(money(r.subsidy_amount or 0)),
+            }
+        return out
 
     @staticmethod
     def calc_social_discount(

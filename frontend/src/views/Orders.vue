@@ -86,7 +86,7 @@
         <template #default="{ row }">
           ¥{{ row.total_amount }}
           <div v-if="Number(row.discount_amount) > 0" class="fee-tip discount">
-            会员优惠 -¥{{ row.discount_amount }}
+            {{ row.social_applied ? '公益优惠' : '会员优惠' }} -¥{{ row.discount_amount }}
           </div>
           <div v-if="Number(row.coupon_discount) > 0" class="fee-tip discount">
             优惠券 -¥{{ row.coupon_discount }}
