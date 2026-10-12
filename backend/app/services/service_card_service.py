@@ -136,11 +136,13 @@ class ServiceCardService:
         likes = likes[:5]
         aversions = aversions[:5]
 
-        # 可用券（脱敏，仅张数与名称）
+        # 可用券（收银选券用：含类型与摘要；仍不回传明文手机）
+        from app.services.coupon_service import CouponService
+
         coupon_rows = list(
             (
                 await db.execute(
-                    select(CustomerCoupon, CouponTemplate.name)
+                    select(CustomerCoupon, CouponTemplate)
                     .join(CouponTemplate, CouponTemplate.id == CustomerCoupon.template_id)
                     .where(
                         CustomerCoupon.customer_id == customer.id,
@@ -152,14 +154,21 @@ class ServiceCardService:
                 )
             ).all()
         )
-        coupons = [
-            {
-                "id": int(cc.id),
-                "name": tname,
-                "expires_at": serialize_dt(cc.expires_at),
-            }
-            for cc, tname in coupon_rows
-        ]
+        coupons = []
+        for cc, tmpl in coupon_rows:
+            is_voucher = CouponService.is_voucher_type(tmpl.coupon_type)
+            coupons.append(
+                {
+                    "id": int(cc.id),
+                    "name": tmpl.name,
+                    "coupon_type": tmpl.coupon_type,
+                    "kind": "VOUCHER" if is_voucher else "COUPON",
+                    "summary": CouponService.summary_label(tmpl),
+                    "discount_label": CouponService.discount_label(tmpl),
+                    "min_order_amount": str(tmpl.min_order_amount or "0.00"),
+                    "expires_at": serialize_dt(cc.expires_at),
+                }
+            )
 
         # 公益身份（无证件图）
         id_rows = list(

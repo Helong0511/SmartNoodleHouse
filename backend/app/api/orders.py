@@ -274,6 +274,10 @@ async def create_pos_order(
             "total_amount": str(order.total_amount),
             "subtotal": str(order.subtotal),
             "discount_amount": str(order.discount_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
+            "customer_coupon_id": int(order.customer_coupon_id) if order.customer_coupon_id else None,
+            "customer_voucher_id": int(order.customer_voucher_id) if order.customer_voucher_id else None,
             "packing_fee": str(order.packing_fee),
             "dining_type": order.dining_type,
             "status": order.status,
@@ -286,8 +290,30 @@ async def create_pos_order(
     )
 
 
-async def _recompute_pos_amounts_for_customer(db, order: Order) -> None:
-    """未收款 POS 单绑定/更换会员后重算会员折与应付（不含券/代金券）。"""
+async def _recompute_pos_amounts_for_customer(
+    db,
+    order: Order,
+    *,
+    customer_coupon_id: int | None = None,
+    customer_voucher_id: int | None = None,
+    use_social_benefit: bool = False,
+    social_rule_id: int | None = None,
+    operator_id: int | None = None,
+) -> None:
+    """未收款 POS 单绑客/改券后重算：会员折 + 优惠券/代金券（或公益，互斥）。"""
+    from decimal import Decimal
+
+    from app.services.coupon_service import CouponService
+    from app.services.social_benefit_service import SocialBenefitService
+
+    # 先释放旧券预占与公益台账，再按新选择重算
+    await CouponService.release_for_order(db, order)
+    order.customer_coupon_id = None
+    order.customer_voucher_id = None
+    order.coupon_discount = money(0)
+    order.voucher_discount = money(0)
+    await SocialBenefitService.reverse_for_order(db, int(order.id))
+
     items = list(
         (await db.execute(select(OrderItem).where(OrderItem.order_id == int(order.id)))).scalars().all()
     )
@@ -296,19 +322,128 @@ async def _recompute_pos_amounts_for_customer(db, order: Order) -> None:
         product = await db.get(Product, int(it.product_id))
         if product is None or not bool(getattr(product, "no_member_discount", False)):
             discountable = money(discountable + money(it.subtotal))
-    rate = await CustomerService.resolve_member_discount_rate(db, order.customer_id)
-    discount_amount, total_amount = CustomerService.calc_member_discount(
-        money(order.subtotal),
-        money(order.packing_fee or 0),
-        rate,
-        discountable_subtotal=discountable,
+
+    subtotal = money(order.subtotal)
+    packing_fee = money(order.packing_fee or 0)
+    pack = (order.dining_type or "").upper() == "TAKEAWAY" or packing_fee > 0
+    customer_id = int(order.customer_id) if order.customer_id else None
+
+    if not customer_id:
+        order.discount_amount = money(0)
+        order.total_amount = money(subtotal + packing_fee)
+        await db.flush()
+        return
+
+    if customer_coupon_id or customer_voucher_id:
+        if use_social_benefit or social_rule_id:
+            raise AppException(40008, "公益折扣不可与优惠券同享，请取消券后重试")
+
+    social_hit = None
+    if use_social_benefit or social_rule_id:
+        pids = [int(it.product_id) for it in items]
+        prods = (
+            (await db.execute(select(Product).where(Product.id.in_(pids)))).scalars().all()
+            if pids
+            else []
+        )
+        cids = [int(p.category_id) for p in prods if p.category_id]
+        if social_rule_id:
+            from app.models import SocialBenefitRule
+
+            rule = await db.get(SocialBenefitRule, int(social_rule_id))
+            codes = await SocialBenefitService.active_codes(db, int(customer_id))
+            if (
+                rule
+                and int(rule.status) == 1
+                and rule.identity_code in codes
+                and rule.benefit_type == "ORDER_DISCOUNT"
+                and rule.discount_rate is not None
+                and (rule.store_id is None or int(rule.store_id) == int(order.store_id))
+            ):
+                social_hit = (rule, rule.identity_code)
+        if social_hit is None and use_social_benefit:
+            social_hit = await SocialBenefitService.find_best_rule(
+                db,
+                customer_id=int(customer_id),
+                store_id=int(order.store_id),
+                product_ids=pids,
+                category_ids=cids,
+            )
+
+    if social_hit:
+        rule, identity_code = social_hit
+        rate = money(rule.discount_rate)
+        special = money(subtotal - discountable)
+        if special < 0:
+            special = money(0)
+        subsidy = money(discountable * (Decimal("1") - rate))
+        if rule.max_subsidy_amount is not None:
+            subsidy = min(subsidy, money(rule.max_subsidy_amount))
+        order.discount_amount = subsidy
+        order.total_amount = money(discountable - subsidy + special + packing_fee)
+        await SocialBenefitService.reserve_for_order(
+            db,
+            order_id=int(order.id),
+            customer_id=int(customer_id),
+            store_id=int(order.store_id),
+            rule=rule,
+            identity_code=identity_code,
+            subsidy_amount=subsidy,
+            operator_user_id=operator_id,
+            meta={
+                "discount_rate": str(rate),
+                "stack_policy": rule.stack_policy,
+                "subtotal": str(subtotal),
+                "discountable_subtotal": str(discountable),
+                "source": "pos_recompute",
+            },
+        )
+        await db.flush()
+        return
+
+    rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
+    hold_tmpl = await CouponService.get_hold_template(db, customer_coupon_id, customer_id)
+    effective_rate = CouponService.effective_member_rate_with_coupon(rate, hold_tmpl)
+    discount_amount, base_total = CustomerService.calc_member_discount(
+        subtotal, packing_fee, effective_rate, discountable_subtotal=discountable
+    )
+    coupon_eligible = CustomerService.calc_coupon_eligible_subtotal(
+        subtotal, discountable, discount_amount
+    )
+    coupon_discount, coupon_id = await CouponService.resolve_discount(
+        db,
+        customer_coupon_id,
+        customer_id,
+        coupon_eligible,
+        order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
+        member_rate=rate,
+    )
+    payable_before_voucher = money(base_total - coupon_discount)
+    voucher_eligible = CustomerService.calc_voucher_eligible_payable(
+        coupon_eligible, coupon_discount, packing_fee, need_pack=pack
+    )
+    voucher_discount, voucher_id = await CouponService.resolve_voucher_discount(
+        db,
+        customer_voucher_id,
+        customer_id,
+        payable_before_voucher,
+        eligible_payable=voucher_eligible,
+        order_store_id=int(order.store_id) if getattr(order, "store_id", None) else None,
     )
     order.discount_amount = discount_amount
-    order.total_amount = total_amount
-    order.coupon_discount = money(0)
-    order.voucher_discount = money(0)
-    order.customer_coupon_id = None
-    order.customer_voucher_id = None
+    order.customer_coupon_id = coupon_id
+    order.coupon_discount = coupon_discount
+    order.customer_voucher_id = voucher_id
+    order.voucher_discount = voucher_discount
+    order.total_amount = money(payable_before_voucher - voucher_discount)
+    if coupon_id:
+        await CouponService.reserve_for_order(
+            db, coupon_id, order_id=int(order.id), customer_id=customer_id
+        )
+    if voucher_id:
+        await CouponService.reserve_for_order(
+            db, voucher_id, order_id=int(order.id), customer_id=customer_id
+        )
     await db.flush()
 
 
@@ -320,7 +455,7 @@ async def bind_pos_customer(
     db: DbSession,
     user: CurrentUser,
 ):
-    """待支付 POS 单绑定/更换/清除会员；重算会员折扣。"""
+    """待支付 POS 单绑定/更换/清除会员；重算会员折扣与优惠券。"""
     order = await db.get(Order, order_id)
     if not order:
         raise AppException(40404, "订单不存在")
@@ -339,7 +474,15 @@ async def bind_pos_customer(
             raise AppException(40406, "顾客不存在或已停用")
         await _assert_customer_in_store(db, new_cid, int(order.store_id), action="收银台绑客")
     order.customer_id = new_cid
-    await _recompute_pos_amounts_for_customer(db, order)
+    await _recompute_pos_amounts_for_customer(
+        db,
+        order,
+        customer_coupon_id=data.customer_coupon_id if new_cid else None,
+        customer_voucher_id=data.customer_voucher_id if new_cid else None,
+        use_social_benefit=bool(data.use_social_benefit) if new_cid else False,
+        social_rule_id=data.social_rule_id if new_cid else None,
+        operator_id=user.id,
+    )
     # P2-15：审计日志须在 commit 之前写入，确保与订单变更在同一事务内
     await AuditService.log_staff(
         db,
@@ -351,8 +494,12 @@ async def bind_pos_customer(
         detail={
             "order_no": order.order_no,
             "customer_id": new_cid,
+            "customer_coupon_id": int(order.customer_coupon_id) if order.customer_coupon_id else None,
+            "customer_voucher_id": int(order.customer_voucher_id) if order.customer_voucher_id else None,
             "total_amount": str(order.total_amount),
             "discount_amount": str(order.discount_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
         },
         request=request,
         store_id=int(order.store_id) if order.store_id else None,
@@ -369,6 +516,10 @@ async def bind_pos_customer(
             "total_amount": str(order.total_amount),
             "subtotal": str(order.subtotal),
             "discount_amount": str(order.discount_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
+            "customer_coupon_id": int(order.customer_coupon_id) if order.customer_coupon_id else None,
+            "customer_voucher_id": int(order.customer_voucher_id) if order.customer_voucher_id else None,
             "packing_fee": str(order.packing_fee),
             "payment_status": order.payment_status,
             "status": order.status,
@@ -422,26 +573,34 @@ async def add_items_to_order(
             )
 
     items_data = [i.model_dump() for i in data.items]
+    from app.models import SocialBenefitRedemption
     from app.services.order_service import OrderPriceCalculator
-    add_subtotal, add_packing, add_discountable = await OrderPriceCalculator.build_order_items(
+    from app.services.social_benefit_service import SocialBenefitService
+
+    add_subtotal, add_packing, _add_discountable = await OrderPriceCalculator.build_order_items(
         db, order, items_data, deduct_stock=True, need_pack=(order.dining_type == "TAKEAWAY"),
     )
-    # 重算金额：原 subtotal + 加菜 subtotal
-    new_subtotal = money(order.subtotal) + add_subtotal
-    new_packing = money(order.packing_fee) + add_packing
-    # 会员折扣：POS 订单无顾客则无折扣；有顾客则按原折扣率重算
-    from app.services.customer_service import CustomerService
-    rate = await CustomerService.resolve_member_discount_rate(db, order.customer_id)
-    old_discountable = order.subtotal - order.discount_amount  # 已下单的可折扣小计
-    new_discountable = old_discountable + add_discountable
-    discount_amount, base_total = CustomerService.calc_member_discount(
-        new_subtotal, new_packing, rate, discountable_subtotal=new_discountable
+    # 重算金额：原 subtotal + 加菜；优惠（会员折/券/公益）统一走 _recompute，避免加菜后丢券
+    order.subtotal = money(order.subtotal) + add_subtotal
+    order.packing_fee = money(order.packing_fee) + add_packing
+    keep_coupon_id = int(order.customer_coupon_id) if order.customer_coupon_id else None
+    keep_voucher_id = int(order.customer_voucher_id) if order.customer_voucher_id else None
+    pending_social = (
+        await db.execute(
+            select(SocialBenefitRedemption.id).where(
+                SocialBenefitRedemption.order_id == int(order.id),
+                SocialBenefitRedemption.status == SocialBenefitService.REDEEM_PENDING,
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    await _recompute_pos_amounts_for_customer(
+        db,
+        order,
+        customer_coupon_id=keep_coupon_id,
+        customer_voucher_id=keep_voucher_id,
+        use_social_benefit=bool(pending_social),
+        operator_id=user.id,
     )
-    order.subtotal = new_subtotal
-    order.discount_amount = discount_amount
-    order.packing_fee = new_packing
-    order.total_amount = money(base_total)
-    await db.flush()
 
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await db.commit()
@@ -469,6 +628,7 @@ async def add_items_to_order(
             "store_id": int(order.store_id) if order.store_id else None,
             "subtotal": str(order.subtotal),
             "total_amount": str(order.total_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
             "items_added": len(items_data),
         },
         request=request,
@@ -481,6 +641,10 @@ async def add_items_to_order(
             "total_amount": str(order.total_amount),
             "subtotal": str(order.subtotal),
             "discount_amount": str(order.discount_amount),
+            "coupon_discount": str(order.coupon_discount or "0.00"),
+            "voucher_discount": str(order.voucher_discount or "0.00"),
+            "customer_coupon_id": int(order.customer_coupon_id) if order.customer_coupon_id else None,
+            "customer_voucher_id": int(order.customer_voucher_id) if order.customer_voucher_id else None,
             "packing_fee": str(order.packing_fee),
             "status": order.status,
             "payment_status": order.payment_status,
@@ -633,6 +797,10 @@ async def list_pos_pending_orders(
             "total_amount": str(o.total_amount),
             "subtotal": str(o.subtotal),
             "discount_amount": str(o.discount_amount or 0),
+            "coupon_discount": str(o.coupon_discount or "0.00"),
+            "voucher_discount": str(o.voucher_discount or "0.00"),
+            "customer_coupon_id": int(o.customer_coupon_id) if o.customer_coupon_id else None,
+            "customer_voucher_id": int(o.customer_voucher_id) if o.customer_voucher_id else None,
             "customer_id": int(o.customer_id) if o.customer_id else None,
             "customer_name": (cust.display_name or cust.nickname) if cust else None,
             "customer_phone": cust.phone if cust else None,

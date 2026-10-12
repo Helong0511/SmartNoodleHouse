@@ -538,6 +538,22 @@ class SocialBenefitService:
             )
         ).scalar_one_or_none()
         if existing:
+            # 绑客/加菜重算：REVERSED 行可复活；已 PENDING/NORMAL 则刷新补贴金额
+            if existing.status in (
+                SocialBenefitService.REDEEM_REVERSED,
+                SocialBenefitService.REDEEM_PENDING,
+            ):
+                existing.customer_id = int(customer_id)
+                existing.store_id = int(store_id)
+                existing.identity_code = identity_code
+                existing.rule_id = int(rule.id)
+                existing.benefit_type = rule.benefit_type
+                existing.subsidy_amount = money(subsidy_amount)
+                existing.operator_user_id = int(operator_user_id) if operator_user_id else None
+                existing.meta = meta or {}
+                existing.status = SocialBenefitService.REDEEM_PENDING
+                existing.redeemed_at = None
+                await db.flush()
             return existing
         # 再验限次（防并发）
         day = now_local().date()

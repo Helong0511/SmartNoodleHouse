@@ -133,8 +133,43 @@
             <p v-if="selectedCustomerLabel" class="member-tip">已选：{{ selectedCustomerLabel }} · 计入折扣/积分/成单里程碑</p>
             <p v-else class="member-tip muted">不选则按散客收款，不计会员权益</p>
             <div v-if="selectedCustomerId" class="social-row">
-              <el-checkbox v-model="useSocialBenefit">公益折扣</el-checkbox>
+              <el-checkbox v-model="useSocialBenefit" @change="onSocialBenefitToggle">公益折扣</el-checkbox>
               <el-button size="small" :loading="socialVerifying" @click="posSocialVerify">公益核验(环卫)</el-button>
+            </div>
+            <div v-if="selectedCustomerId && !useSocialBenefit" class="coupon-pick">
+              <label>优惠券</label>
+              <el-select
+                v-model="selectedCouponId"
+                clearable
+                placeholder="不使用优惠券"
+                style="width: 100%"
+                :disabled="!availableCoupons.length"
+              >
+                <el-option
+                  v-for="c in availableCoupons"
+                  :key="c.id"
+                  :label="couponOptionLabel(c)"
+                  :value="c.id"
+                />
+              </el-select>
+              <label class="coupon-pick-gap">代金券</label>
+              <el-select
+                v-model="selectedVoucherId"
+                clearable
+                placeholder="不使用代金券"
+                style="width: 100%"
+                :disabled="!availableVouchers.length"
+              >
+                <el-option
+                  v-for="c in availableVouchers"
+                  :key="c.id"
+                  :label="couponOptionLabel(c)"
+                  :value="c.id"
+                />
+              </el-select>
+              <p v-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
+                该会员有可用券，请选择后才会计入收款优惠
+              </p>
             </div>
             <div v-if="selectedCustomerId && serviceCard" class="service-card" v-loading="serviceCardLoading">
               <div class="sc-title">服务卡 · {{ serviceCard.greeting }}</div>
@@ -158,7 +193,7 @@
               </div>
               <div v-if="serviceCard.available_coupons?.length" class="sc-block">
                 <b>券</b>
-                {{ serviceCard.available_coupons.slice(0, 3).map((c: any) => c.name).join('、') }}
+                {{ serviceCard.available_coupons.slice(0, 3).map((c: any) => c.summary || c.name).join('、') }}
               </div>
               <div v-if="serviceCard.social_identities?.length" class="sc-block">
                 <b>公益</b>
@@ -288,6 +323,22 @@
     <el-dialog v-model="payDialogVisible" title="收款" width="560px" class="pay-dialog" :close-on-click-modal="false"
       @closed="resetCheckout">
       <div class="pay-summary">
+        <div v-if="checkoutSubtotal" class="pay-summary-row muted">
+          <span>商品小计</span>
+          <span>¥{{ checkoutSubtotal }}</span>
+        </div>
+        <div v-if="hasPromoDiscount" class="pay-summary-row muted">
+          <span>会员折</span>
+          <span>-¥{{ checkoutMemberDiscount || '0.00' }}</span>
+        </div>
+        <div v-if="Number(checkoutCouponDiscount || 0) > 0" class="pay-summary-row muted">
+          <span>优惠券</span>
+          <span>-¥{{ checkoutCouponDiscount }}</span>
+        </div>
+        <div v-if="Number(checkoutVoucherDiscount || 0) > 0" class="pay-summary-row muted">
+          <span>代金券</span>
+          <span>-¥{{ checkoutVoucherDiscount }}</span>
+        </div>
         <div class="pay-summary-row">
           <span>应收</span>
           <b class="pay-total">¥{{ checkoutAmount }}</b>
@@ -331,10 +382,50 @@
           <label>本单会员</label>
           <el-select v-model="selectedCustomerId" filterable remote clearable reserve-keyword
             placeholder="手机号 / 会员号 / 昵称" :remote-method="searchPosCustomers" :loading="customerSearching"
-            style="width: 100%" @change="bindCustomerOnCheckoutOrder">
+            style="width: 100%" @change="onCheckoutMemberChange">
             <el-option v-for="c in customerOptions" :key="c.id" :label="posCustomerLabel(c)" :value="c.id" />
           </el-select>
           <p class="member-tip">{{ selectedCustomerLabel || '散客（不计入成单里程碑）' }}</p>
+          <div v-if="selectedCustomerId" class="social-row">
+            <el-checkbox v-model="useSocialBenefit" @change="onPaySocialToggle">公益折扣</el-checkbox>
+          </div>
+          <div v-if="selectedCustomerId && !useSocialBenefit" class="coupon-pick">
+            <label>优惠券</label>
+            <el-select
+              v-model="selectedCouponId"
+              clearable
+              placeholder="不使用优惠券"
+              style="width: 100%"
+              :disabled="!availableCoupons.length"
+              @change="bindCustomerOnCheckoutOrder"
+            >
+              <el-option
+                v-for="c in availableCoupons"
+                :key="c.id"
+                :label="couponOptionLabel(c)"
+                :value="c.id"
+              />
+            </el-select>
+            <label class="coupon-pick-gap">代金券</label>
+            <el-select
+              v-model="selectedVoucherId"
+              clearable
+              placeholder="不使用代金券"
+              style="width: 100%"
+              :disabled="!availableVouchers.length"
+              @change="bindCustomerOnCheckoutOrder"
+            >
+              <el-option
+                v-for="c in availableVouchers"
+                :key="c.id"
+                :label="couponOptionLabel(c)"
+                :value="c.id"
+              />
+            </el-select>
+            <p v-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
+              有可用券未选用，切换券后会立即重算应收
+            </p>
+          </div>
         </div>
         <div class="tender-amt-wrap">
           <label>本笔收款</label>
@@ -579,10 +670,30 @@ const socialVerifying = ref(false)
 const customerSearching = ref(false)
 const serviceCard = ref<any | null>(null)
 const serviceCardLoading = ref(false)
+/** 满减/折扣券（customer_coupons.id） */
+const selectedCouponId = ref<number | undefined>()
+/** 代金券 */
+const selectedVoucherId = ref<number | undefined>()
+const checkoutSubtotal = ref('')
+const checkoutMemberDiscount = ref('')
+const checkoutCouponDiscount = ref('')
+const checkoutVoucherDiscount = ref('')
 const selectedCustomerLabel = computed(() => {
   if (!selectedCustomerId.value) return ''
   const c = customerOptions.value.find((x) => x.id === selectedCustomerId.value)
   return c ? posCustomerLabel(c) : `会员#${selectedCustomerId.value}`
+})
+const availableCoupons = computed(() =>
+  (serviceCard.value?.available_coupons || []).filter((c: any) => (c.kind || '').toUpperCase() !== 'VOUCHER'),
+)
+const availableVouchers = computed(() =>
+  (serviceCard.value?.available_coupons || []).filter((c: any) => (c.kind || '').toUpperCase() === 'VOUCHER'),
+)
+const hasPromoDiscount = computed(() => {
+  const m = Number(checkoutMemberDiscount.value || 0)
+  const c = Number(checkoutCouponDiscount.value || 0)
+  const v = Number(checkoutVoucherDiscount.value || 0)
+  return m > 0 || c > 0 || v > 0
 })
 const tableDialogVisible = ref(false)
 const productVisible = ref(false)
@@ -1181,8 +1292,69 @@ async function posSocialVerify() {
   }
 }
 
+function couponOptionLabel(c: any) {
+  const summary = c.summary || c.discount_label || c.name || `券#${c.id}`
+  return summary
+}
+
+function applyOrderPromoSnapshot(data: any) {
+  if (!data) return
+  if (data.total_amount != null) checkoutAmount.value = String(data.total_amount)
+  if (data.subtotal != null) checkoutSubtotal.value = String(data.subtotal)
+  if (data.discount_amount != null) checkoutMemberDiscount.value = String(data.discount_amount)
+  if (data.coupon_discount != null) checkoutCouponDiscount.value = String(data.coupon_discount)
+  if (data.voucher_discount != null) checkoutVoucherDiscount.value = String(data.voucher_discount)
+  if (Object.prototype.hasOwnProperty.call(data, 'customer_coupon_id')) {
+    selectedCouponId.value = data.customer_coupon_id != null ? Number(data.customer_coupon_id) : undefined
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'customer_voucher_id')) {
+    selectedVoucherId.value = data.customer_voucher_id != null ? Number(data.customer_voucher_id) : undefined
+  }
+}
+
+function clearCouponSelection() {
+  selectedCouponId.value = undefined
+  selectedVoucherId.value = undefined
+}
+
+/** 本单已预占的券不会出现在 AVAILABLE 列表，补一条选项避免下拉空白 */
+function ensureSelectedCouponOptions(extra?: { couponId?: number | null; voucherId?: number | null; couponLabel?: string; voucherLabel?: string }) {
+  if (!serviceCard.value) {
+    serviceCard.value = { available_coupons: [], coupon_count: 0 }
+  }
+  const list = [...(serviceCard.value.available_coupons || [])]
+  const cid = extra?.couponId ?? selectedCouponId.value
+  const vid = extra?.voucherId ?? selectedVoucherId.value
+  if (cid && !list.some((c: any) => Number(c.id) === Number(cid))) {
+    list.push({
+      id: Number(cid),
+      name: extra?.couponLabel || '本单已用优惠券',
+      kind: 'COUPON',
+      summary: extra?.couponLabel || '本单已用优惠券',
+    })
+  }
+  if (vid && !list.some((c: any) => Number(c.id) === Number(vid))) {
+    list.push({
+      id: Number(vid),
+      name: extra?.voucherLabel || '本单已用代金券',
+      kind: 'VOUCHER',
+      summary: extra?.voucherLabel || '本单已用代金券',
+    })
+  }
+  serviceCard.value = {
+    ...serviceCard.value,
+    available_coupons: list,
+    coupon_count: Math.max(Number(serviceCard.value.coupon_count || 0), list.length),
+  }
+}
+
+function onSocialBenefitToggle() {
+  if (useSocialBenefit.value) clearCouponSelection()
+}
+
 async function createPosOrder() {
   const sid = effectiveStoreId()
+  const useSocial = !!(useSocialBenefit.value && selectedCustomerId.value)
   try {
     const orderRes = await api.post('/orders/pos', {
       store_id: sid,
@@ -1192,7 +1364,9 @@ async function createPosOrder() {
       need_pack: diningType.value === 'TAKEAWAY',
       waive_packing_fee: diningType.value === 'TAKEAWAY' && waivePackingFee.value,
       remark: remark.value.trim() || null,
-      use_social_benefit: !!(useSocialBenefit.value && selectedCustomerId.value),
+      use_social_benefit: useSocial,
+      customer_coupon_id: useSocial ? null : (selectedCouponId.value || null),
+      customer_voucher_id: useSocial ? null : (selectedVoucherId.value || null),
       items: cart.value.map((c) => ({
         product_id: c.product_id,
         quantity: c.quantity || 1,
@@ -1202,10 +1376,15 @@ async function createPosOrder() {
     })
     checkoutOrderId.value = orderRes.data?.id
     checkoutOrderNo.value = orderRes.data?.order_no || ''
-    checkoutAmount.value = orderRes.data?.total_amount || cartTotal.value
-    if (orderRes.data?.total_amount) {
-      remainingAmount.value = orderRes.data.total_amount
+    applyOrderPromoSnapshot(orderRes.data)
+    ensureSelectedCouponOptions({
+      couponId: orderRes.data?.customer_coupon_id,
+      voucherId: orderRes.data?.customer_voucher_id,
+    })
+    if (orderRes.data?.total_amount == null) {
+      checkoutAmount.value = cartTotal.value
     }
+    remainingAmount.value = checkoutAmount.value
     return orderRes.data
   } catch (e: any) {
     // 已付单占用幂等键：清 nonce，下次可再下同款
@@ -1242,15 +1421,27 @@ async function searchPosCustomers(keyword: string) {
   }
 }
 
-async function loadServiceCard(customerId?: number) {
+async function loadServiceCard(customerId?: number, opts?: { keepSelection?: boolean }) {
   if (!customerId) {
     serviceCard.value = null
+    if (!opts?.keepSelection) clearCouponSelection()
     return
   }
   serviceCardLoading.value = true
   try {
     const res = await api.get(`/customers/${customerId}/service-card`)
     serviceCard.value = res.data || null
+    if (!opts?.keepSelection) {
+      // 换会员时清空旧券；若仅刷新服务卡则保留当前选择
+      const couponIds = new Set(availableCoupons.value.map((c: any) => c.id))
+      const voucherIds = new Set(availableVouchers.value.map((c: any) => c.id))
+      if (selectedCouponId.value && !couponIds.has(selectedCouponId.value)) {
+        selectedCouponId.value = undefined
+      }
+      if (selectedVoucherId.value && !voucherIds.has(selectedVoucherId.value)) {
+        selectedVoucherId.value = undefined
+      }
+    }
   } catch {
     serviceCard.value = null
   } finally {
@@ -1259,19 +1450,39 @@ async function loadServiceCard(customerId?: number) {
 }
 
 async function onPosCustomerChange() {
-  // 仅本地选中；建单时带上 customer_id；拉取服务卡侧栏
+  clearCouponSelection()
+  useSocialBenefit.value = false
   await loadServiceCard(selectedCustomerId.value)
+}
+
+async function onCheckoutMemberChange() {
+  clearCouponSelection()
+  useSocialBenefit.value = false
+  await loadServiceCard(selectedCustomerId.value)
+  await bindCustomerOnCheckoutOrder()
+}
+
+async function onPaySocialToggle() {
+  if (useSocialBenefit.value) clearCouponSelection()
+  await bindCustomerOnCheckoutOrder()
 }
 
 async function bindCustomerOnCheckoutOrder() {
   if (!checkoutOrderId.value) return
+  const useSocial = !!(useSocialBenefit.value && selectedCustomerId.value)
   try {
     const res = await api.post(`/orders/${checkoutOrderId.value}/bind-customer`, {
       customer_id: selectedCustomerId.value || null,
+      customer_coupon_id: useSocial ? null : (selectedCouponId.value || null),
+      customer_voucher_id: useSocial ? null : (selectedVoucherId.value || null),
+      use_social_benefit: useSocial,
+    })
+    applyOrderPromoSnapshot(res.data)
+    ensureSelectedCouponOptions({
+      couponId: res.data?.customer_coupon_id,
+      voucherId: res.data?.customer_voucher_id,
     })
     if (res.data?.total_amount != null) {
-      checkoutAmount.value = res.data.total_amount
-      remainingAmount.value = res.data.total_amount
       const paid = parseFloat(paidAmount.value || '0') || 0
       const total = parseFloat(res.data.total_amount) || 0
       remainingAmount.value = Math.max(0, total - paid).toFixed(2)
@@ -1341,6 +1552,11 @@ function finishCheckout(msg: string) {
   customerOptions.value = []
   serviceCard.value = null
   useSocialBenefit.value = false
+  clearCouponSelection()
+  checkoutSubtotal.value = ''
+  checkoutMemberDiscount.value = ''
+  checkoutCouponDiscount.value = ''
+  checkoutVoucherDiscount.value = ''
   waivePackingFee.value = false
   payDialogVisible.value = false
   resetCheckout()
@@ -1453,7 +1669,7 @@ function formatPendingTime(iso: string | null) {
 }
 
 /** 恢复挂单订单：mode=add 继续加餐，mode=pay 去结算 */
-function resumePendingOrder(o: any, mode: 'add' | 'pay') {
+async function resumePendingOrder(o: any, mode: 'add' | 'pay') {
   checkoutOrderId.value = o.id
   checkoutOrderNo.value = o.order_no
   checkoutAmount.value = o.total_amount
@@ -1464,6 +1680,9 @@ function resumePendingOrder(o: any, mode: 'add' | 'pay') {
   selectedTableId.value = o.table_id || null
   activePendingId.value = null
   selectedCustomerId.value = o.customer_id || undefined
+  selectedCouponId.value = o.customer_coupon_id || undefined
+  selectedVoucherId.value = o.customer_voucher_id || undefined
+  applyOrderPromoSnapshot(o)
   if (o.customer_id) {
     customerOptions.value = [
       {
@@ -1472,8 +1691,15 @@ function resumePendingOrder(o: any, mode: 'add' | 'pay') {
         phone: o.customer_phone,
       },
     ]
+    await loadServiceCard(o.customer_id, { keepSelection: true })
+    ensureSelectedCouponOptions({
+      couponId: o.customer_coupon_id,
+      voucherId: o.customer_voucher_id,
+    })
   } else {
     customerOptions.value = []
+    serviceCard.value = null
+    clearCouponSelection()
   }
 
   if (mode === 'add') {
@@ -2457,6 +2683,34 @@ watch(() => auth.user?.store_id, () => {
 
 .member-tip.muted {
   color: #999;
+}
+
+.member-tip.warn-tip {
+  color: #c45600;
+}
+
+.coupon-pick {
+  margin-top: 10px;
+}
+
+.coupon-pick label {
+  display: block;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.coupon-pick-gap {
+  margin-top: 8px !important;
+}
+
+.pay-summary-row.muted {
+  color: #888;
+  font-size: 13px;
+}
+
+.pay-summary-row.muted span:last-child {
+  color: #67c23a;
 }
 
 .social-row {

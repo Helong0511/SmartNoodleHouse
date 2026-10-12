@@ -88,6 +88,10 @@ class PosBindCustomer(BaseModel):
     """待支付 POS 单绑定/更换会员（未收款前）。"""
 
     customer_id: int | None = Field(default=None, description="None 表示清除会员绑定")
+    customer_coupon_id: int | None = Field(default=None, description="优惠券（满减/折扣，与公益互斥）")
+    customer_voucher_id: int | None = Field(default=None, description="代金券（与公益互斥）")
+    use_social_benefit: bool = Field(default=False, description="使用公益身份折扣（与券互斥）")
+    social_rule_id: int | None = Field(default=None, description="指定公益规则 ID（可选）")
 
 class PosAddItems(BaseModel):
     """收银台加菜（往已有待支付订单追加商品）。"""
