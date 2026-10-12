@@ -95,6 +95,8 @@ async def create_order(
         skip_promotions=bool(data.skip_promotions),
         operator_id=None,
         scheduled_pickup_at=data.scheduled_pickup_at,
+        use_social_benefit=bool(data.use_social_benefit),
+        social_rule_id=data.social_rule_id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await db.commit()
@@ -221,6 +223,10 @@ async def create_pos_order(
         dining_type=dtype,
         waive_packing_fee=bool(data.waive_packing_fee),
         operator_id=user.id,
+        use_social_benefit=bool(data.use_social_benefit),
+        social_rule_id=data.social_rule_id,
+        customer_coupon_id=data.customer_coupon_id,
+        customer_voucher_id=data.customer_voucher_id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
     await db.commit()

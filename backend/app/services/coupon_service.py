@@ -655,12 +655,76 @@ class CouponService:
             return None
 
     @staticmethod
+    async def _welcome_bundle_template_ids(
+        db: AsyncSession, store_id: int | None = None
+    ) -> list[int]:
+        """解析 welcome_bundle_template_ids（JSON 数组）；非法则空列表。"""
+        import json
+
+        from app.services.system_settings_service import SystemSettingsService
+
+        raw = (
+            await SystemSettingsService.effective_setting(
+                db, "welcome_bundle_template_ids", store_id=store_id, fallback=""
+            )
+        ).strip()
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("welcome_bundle_template_ids JSON 无效: %r", raw)
+            return []
+        if not isinstance(data, list):
+            return []
+        out: list[int] = []
+        for x in data:
+            try:
+                tid = int(x)
+            except (TypeError, ValueError):
+                continue
+            if tid > 0:
+                out.append(tid)
+        return out
+
+    @staticmethod
     async def issue_welcome_coupon(
         db: AsyncSession,
         customer_id: int,
         store_id: int | None = None,
     ) -> CustomerCoupon | None:
-        """注册会员赠送新客券（按开卡门店的模板名；每人限领该模板一张）。"""
+        """注册会员赠送新客券。
+
+        优先 welcome_bundle_template_ids（多券幂等 welcome_pack:{cid}:{tid}:v1）；
+        否则回退 welcome_coupon_name 单券逻辑。
+        返回最后成功发放的一张（兼容旧调用方）。
+        """
+        bundle_ids = await CouponService._welcome_bundle_template_ids(db, store_id=store_id)
+        if bundle_ids:
+            last: CustomerCoupon | None = None
+            for tid in bundle_ids:
+                req = f"welcome_pack:{int(customer_id)}:{int(tid)}:v1"
+                try:
+                    issued_list = await CouponService.issue_by_template_id(
+                        db,
+                        customer_id=int(customer_id),
+                        template_id=int(tid),
+                        quantity=1,
+                        client_request_id=req,
+                        issued_at_store_id=int(store_id) if store_id else None,
+                    )
+                except AppException as exc:
+                    logger.warning(
+                        "欢迎礼包跳过 template_id=%s customer=%s: %s",
+                        tid,
+                        customer_id,
+                        getattr(exc, "message", exc),
+                    )
+                    continue
+                if issued_list:
+                    last = issued_list[-1]
+            return last
+
         welcome_name = await CouponService.welcome_template_name(db, store_id=store_id)
         tmpl = await CouponService._welcome_template(db, welcome_name, store_id=store_id)
         if not tmpl:

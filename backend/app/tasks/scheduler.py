@@ -179,6 +179,20 @@ TASK_CATALOG: list[dict] = [
         "description": "每日 11:05 提醒余额偏低（>0 且低于阈值）的活跃会员，30 天一次（Redis 防重）。",
         "default_schedule": {"type": "cron", "hour": 11, "minute": 5},
     },
+    {
+        "id": "marketing_task_worker",
+        "title": "营销任务消费",
+        "category": "营销",
+        "description": "消费 marketing_tasks PENDING（ISSUE_COUPON），幂等 mkt: 前缀；并推进活动 SCHEDULED/ENDED。",
+        "default_schedule": {"type": "interval", "unit": "seconds", "every": 30},
+    },
+    {
+        "id": "social_love_day_issue",
+        "title": "爱心日公益发券",
+        "category": "营销",
+        "description": "每日 09:10 若当日为爱心日星期且已配模板名，给 ACTIVE 公益身份发券（love_day: 幂等）。",
+        "default_schedule": {"type": "cron", "hour": 9, "minute": 10},
+    },
 ]
 
 
@@ -739,6 +753,51 @@ def register_tasks(scheduler) -> None:
             except Exception:
                 await db.rollback()
                 logger.exception("储值余额提醒任务异常")
+
+    @scheduler.scheduled_job(
+        "interval",
+        seconds=30,
+        id="marketing_task_worker",
+        name="营销任务消费",
+        misfire_grace_time=60,
+    )
+    @_leader_job
+    async def marketing_task_worker():
+        """消费营销 PENDING 任务：只调 CouponService；活动生命周期推进。"""
+        from app.services.marketing_service import MarketingService
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stats = await MarketingService.process_pending_tasks(db, limit=50)
+                await db.commit()
+                if stats.get("processed"):
+                    logger.info("营销任务消费: %s", stats)
+            except Exception:
+                await db.rollback()
+                logger.exception("营销任务消费异常")
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=9,
+        minute=10,
+        id="social_love_day_issue",
+        name="爱心日公益发券",
+        misfire_grace_time=3600,
+    )
+    @_leader_job
+    async def social_love_day_issue():
+        """爱心日：ACTIVE 公益身份发豆浆券（模板名配置后生效）。"""
+        from app.services.social_benefit_service import SocialBenefitService
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stats = await SocialBenefitService.run_love_day_issue(db)
+                await db.commit()
+                if not stats.get("skipped"):
+                    logger.info("爱心日发券: %s", stats)
+            except Exception:
+                await db.rollback()
+                logger.exception("爱心日发券异常")
 
 
 async def apply_scheduler_overrides(scheduler) -> None:

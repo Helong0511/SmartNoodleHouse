@@ -94,7 +94,8 @@ def upgrade() -> None:
         if _should_skip_statement(stmt):
             continue
         try:
-            conn.execute(text(stmt))
+            # 用驱动原生 SQL，避免 COMMENT/JSON 示例中的 ":50" 被 text() 当成绑定参数
+            conn.exec_driver_sql(stmt)
         except (ProgrammingError, DBAPIError) as exc:
             errno = _mysql_errno(exc)
             if errno in _IGNORE_MYSQL_ERRNOS:

@@ -40,6 +40,25 @@
           end-placeholder="注册止" style="width:240px" @change="reload" />
       </el-form-item>
       <el-form-item>
+        <el-select v-model="lifecycleFilter" placeholder="生命周期" clearable style="width: 130px" @change="reload">
+          <el-option label="新客 NEW" value="NEW" />
+          <el-option label="活跃 ACTIVE" value="ACTIVE" />
+          <el-option label="风险 AT_RISK" value="AT_RISK" />
+          <el-option label="沉睡 DORMANT" value="DORMANT" />
+          <el-option label="流失 LOST" value="LOST" />
+          <el-option label="游客 GUEST" value="GUEST" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <el-select v-model="rfmFilter" placeholder="RFM 分群" clearable style="width: 140px" @change="reload">
+          <el-option label="冠军 CHAMPIONS" value="CHAMPIONS" />
+          <el-option label="忠诚 LOYAL" value="LOYAL" />
+          <el-option label="潜力 NEW_PROMISING" value="NEW_PROMISING" />
+          <el-option label="风险 AT_RISK" value="AT_RISK" />
+          <el-option label="休眠 HIBERNATING" value="HIBERNATING" />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
         <el-checkbox v-model="birthdayTodayOnly" @change="reload">今日生日</el-checkbox>
       </el-form-item>
       <el-button type="primary" @click="reload">搜索</el-button>
@@ -88,6 +107,12 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="生命周期" width="100">
+        <template #default="{ row }">{{ row.lifecycle_code || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="RFM" width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.rfm_segment || '—' }}</template>
+      </el-table-column>
       <el-table-column label="会员等级" width="110">
         <template #default="{ row }">{{ row.member_level_name || '—' }}</template>
       </el-table-column>
@@ -97,7 +122,7 @@
       <el-table-column label="生日" width="120">
         <template #default="{ row }">
           <span v-if="row.birthday">
-            {{ row.birthday_calendar === 'LUNAR' ? '农历' : '公历' }}
+            {{ row.birthday_calendar === 'LUNAR' ? '农历' : '公历' }} {{ row.birthday }}
             <el-tag v-if="row.is_birthday_today" size="small" type="danger" style="margin-left:4px">今日</el-tag>
           </span>
           <span v-else class="muted">—</span>
@@ -192,17 +217,37 @@
             <el-input v-model="editForm.phone" maxlength="11" clearable placeholder="11 位手机号，可清空" />
           </el-form-item>
           <el-form-item label="生日历法">
-            <el-radio-group v-model="editForm.birthday_calendar" @change="onBirthdayCalendarChange">
+            <el-radio-group
+              v-model="editForm.birthday_calendar"
+              :disabled="savingProfile"
+              @change="onBirthdayCalendarChange"
+            >
               <el-radio value="SOLAR">公历</el-radio>
               <el-radio value="LUNAR">农历</el-radio>
             </el-radio-group>
-            <div class="muted tip">切换历法：同一天公历↔农历互转展示，不改锚点日期</div>
+            <div class="muted tip">切换历法：同一天按公历/农历换展示与每年匹配规则；存库仍为对应公历锚点日</div>
           </el-form-item>
           <el-form-item label="生日">
-            <el-date-picker v-model="editForm.birthday" type="date" value-format="YYYY-MM-DD" clearable
+            <el-date-picker
+              v-model="editForm.birthday"
+              type="date"
+              value-format="YYYY-MM-DD"
+              clearable
+              :disabled="savingProfile"
               :placeholder="editForm.birthday_calendar === 'LUNAR' ? '选对应公历日（按农历月日记）' : '选填公历日期'"
-              style="width:100%" />
-            <div class="muted tip">农历：选对应公历日；每年按该日的农历月日匹配（如 5/1 → 四月初七）</div>
+              style="width:100%"
+              @change="onBirthdayDateChange"
+            />
+            <div v-if="birthdayDisplayText" class="birthday-live">
+              当前展示：<strong>{{ birthdayDisplayText }}</strong>
+            </div>
+            <div class="muted tip">
+              {{
+                editForm.birthday_calendar === 'LUNAR'
+                  ? '农历模式：请选「对应公历日」；上方会显示换算后的农历月日'
+                  : '公历模式：直接选公历年月日'
+              }}
+            </div>
           </el-form-item>
           <el-alert
             v-if="detail.birthday_benefit?.text"
@@ -210,7 +255,7 @@
             show-icon
             :closable="false"
             :title="detail.birthday_benefit.is_birthday_today ? '今日生日 · 权益生效中' : '生日优惠'"
-            :description="(detail.birthday_benefit.birthday_display ? detail.birthday_benefit.birthday_display + '。' : '') + detail.birthday_benefit.text"
+            :description="(birthdayDisplayText ? birthdayDisplayText + '。' : '') + detail.birthday_benefit.text"
             style="margin-bottom:12px"
           />
           <el-form-item label="账号状态">
@@ -229,7 +274,7 @@
           <el-descriptions-item label="昵称">{{ detail.nickname || '—' }}</el-descriptions-item>
           <el-descriptions-item label="手机">{{ detail.phone || '—' }}</el-descriptions-item>
           <el-descriptions-item label="生日">
-            {{ detail.birthday_benefit?.birthday_display || detail.birthday || '—' }}
+            {{ detail.birthday_display || detail.birthday_benefit?.birthday_display || detail.birthday || '—' }}
           </el-descriptions-item>
           <el-descriptions-item v-if="detail.birthday_benefit?.text" label="生日优惠">
             {{ detail.birthday_benefit.text }}
@@ -487,6 +532,8 @@ const birthdayTodayOnly = ref(false)
 const listBirthdayBenefit = ref<{ text?: string; enabled?: boolean; points_multiplier?: number } | null>(null)
 const channel = ref<string | undefined>()
 const memberStatusFilter = ref<string | undefined>()
+const lifecycleFilter = ref<string | undefined>()
+const rfmFilter = ref<string | undefined>()
 const levelFilter = ref<number | undefined>()
 const statusFilter = ref<number | undefined>(1)
 const registeredRange = ref<string[] | null>(null)
@@ -539,22 +586,84 @@ function syncEditForm(d: any) {
   editForm.recommend_opt_in = d?.recommend_opt_in ? 1 : 0
 }
 
+/** 历法切换后的展示文案（顶层优先，与权益说明内文案一致） */
+const birthdayDisplayText = computed(() => {
+  const d = detail.value
+  if (!d) return ''
+  return (
+    d.birthday_display
+    || d.birthday_benefit?.birthday_display
+    || ''
+  )
+})
+
+function applyDetailPayload(payload: any) {
+  detail.value = payload
+  syncEditForm(payload)
+}
+
 async function onBirthdayCalendarChange(cal: string | number | boolean | undefined) {
   const id = detail.value?.id
   const next = cal === 'LUNAR' ? 'LUNAR' : 'SOLAR'
-  if (!id || !editForm.birthday) return
+  if (!id) return
+  // 尚无生日：只改本地历法，等选日期后再保存联动
+  if (!editForm.birthday) {
+    editForm.birthday_calendar = next
+    return
+  }
   savingProfile.value = true
   try {
-    // 仅改历法：同日互转，锚点公历日不变，展示文案随历法更新
-    const res = await api.patch(`/customers/${id}`, { birthday_calendar: next })
-    detail.value = res.data
-    syncEditForm(res.data)
+    const body: Record<string, any> = { birthday_calendar: next }
+    // 表单日期若尚未落库，一并提交，避免历法已切但展示仍用旧锚点
+    if (editForm.birthday !== detail.value?.birthday) {
+      body.birthday = editForm.birthday
+    }
+    const res = await api.patch(`/customers/${id}`, body)
+    applyDetailPayload(res.data)
     ElMessage.success(
-      next === 'LUNAR' ? '已切换农历（同日对应农历月日）' : '已切换公历（同日公历月日）',
+      next === 'LUNAR'
+        ? `已切换农历：${birthdayDisplayText.value || '同日对应农历月日'}`
+        : `已切换公历：${birthdayDisplayText.value || '同日公历月日'}`,
     )
+    await load()
   } catch (e: any) {
     ElMessage.error(e.message || '历法切换失败')
     editForm.birthday_calendar = detail.value?.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR'
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+/** 改日期后若已有历法，立即落库刷新展示（与历法联动） */
+async function onBirthdayDateChange(val: string | null) {
+  const id = detail.value?.id
+  if (!id) return
+  // 清空生日
+  if (!val) {
+    savingProfile.value = true
+    try {
+      const res = await api.patch(`/customers/${id}`, { birthday: null })
+      applyDetailPayload(res.data)
+      await load()
+    } catch (e: any) {
+      ElMessage.error(e.message || '清空生日失败')
+      editForm.birthday = detail.value?.birthday || null
+    } finally {
+      savingProfile.value = false
+    }
+    return
+  }
+  savingProfile.value = true
+  try {
+    const res = await api.patch(`/customers/${id}`, {
+      birthday: val,
+      birthday_calendar: editForm.birthday_calendar || 'SOLAR',
+    })
+    applyDetailPayload(res.data)
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e.message || '生日更新失败')
+    editForm.birthday = detail.value?.birthday || null
   } finally {
     savingProfile.value = false
   }
@@ -673,6 +782,8 @@ function resetFilters() {
   keyword.value = ''
   channel.value = undefined
   memberStatusFilter.value = undefined
+  lifecycleFilter.value = undefined
+  rfmFilter.value = undefined
   levelFilter.value = undefined
   statusFilter.value = 1
   registeredRange.value = null
@@ -708,6 +819,8 @@ async function load() {
       keyword: keyword.value.trim() || undefined,
       channel: channel.value || undefined,
       member_status: memberStatusFilter.value || undefined,
+      lifecycle: lifecycleFilter.value || undefined,
+      rfm_segment: rfmFilter.value || undefined,
       member_level_id: levelFilter.value,
       store_id: storeFilter.value,
     }
@@ -766,8 +879,7 @@ async function showDetail(id: number) {
     api.get(`/customers/${id}`),
     loadCustomerCoupons(id),
   ])
-  detail.value = detailRes.data
-  syncEditForm(detailRes.data)
+  applyDetailPayload(detailRes.data)
 }
 
 async function saveProfile() {
@@ -789,8 +901,7 @@ async function saveProfile() {
       status: editForm.status,
       recommend_opt_in: editForm.recommend_opt_in,
     })
-    detail.value = res.data
-    syncEditForm(res.data)
+    applyDetailPayload(res.data)
     ElMessage.success('顾客信息已保存')
     await load()
   } catch (e: any) {
@@ -1074,6 +1185,12 @@ onMounted(async () => {
 
 .birthday-alert {
   margin: 0 0 12px;
+}
+.birthday-live {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-color-primary);
+  line-height: 1.5;
 }
 
 .acct {

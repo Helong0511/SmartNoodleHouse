@@ -254,3 +254,94 @@ INSERT INTO `category_sort_schedule_items` (`schedule_id`, `category_id`, `sort_
 
 -- END CUSTOM STORE SEED
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- 社会贡献：总部环卫工全天 8 折（P0）
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'SANITATION', '环卫工全天8折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.80, 1, 'EXCLUSIVE', 20.00, 10, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'SANITATION'
+          AND `name` = '环卫工全天8折'
+          AND `store_id` IS NULL
+    );
+
+-- 社会贡献 P1：骑手下午窗 8 折、老人全天 8.5 折
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'RIDER', '骑手下午茶窗8折', JSON_ARRAY(JSON_ARRAY('14:00', '17:00')), NULL,
+       'ORDER_DISCOUNT', 0.80, 1, 'EXCLUSIVE', 15.00, 20, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'RIDER'
+          AND `name` = '骑手下午茶窗8折'
+          AND `store_id` IS NULL
+    );
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'ELDER', '老人全天8.5折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.85, 1, 'EXCLUSIVE', 15.00, 30, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'ELDER'
+          AND `name` = '老人全天8.5折'
+          AND `store_id` IS NULL
+    );
+
+-- 预置客户分群（总部，动态条件）
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'sleep30', '沉睡30天', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'days_since_order', 'op', 'gte', 'value', 30),
+         JSON_OBJECT('field', 'days_since_order', 'op', 'lt', 'value', 90)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'sleep30');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'sleep90', '沉睡90天+', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'days_since_order', 'op', 'gte', 'value', 90)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'sleep90');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'new_member', '新会员7日', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'days_since_member', 'op', 'lte', 'value', 7)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'new_member');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'low_balance', '低余额会员', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'balance_total', 'op', 'gt', 'value', 0),
+         JSON_OBJECT('field', 'balance_total', 'op', 'lt', 'value', 20)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'low_balance');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'champions', '高积分活跃', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'points', 'op', 'gte', 'value', 500),
+         JSON_OBJECT('field', 'days_since_order', 'op', 'lte', 'value', 30)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'champions');

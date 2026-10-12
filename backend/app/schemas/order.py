@@ -45,6 +45,8 @@ class OrderCreate(BaseModel):
     scheduled_pickup_at: str | None = Field(
         default=None, max_length=32, description="预约取餐时间 YYYY-MM-DDTHH:mm:ss（仅打包单）"
     )
+    use_social_benefit: bool = Field(default=False, description="结算使用公益身份折扣（与券/会员折互斥）")
+    social_rule_id: int | None = Field(default=None, description="指定公益规则 ID（可选）")
 
 
 class OrderStatusUpdate(BaseModel):
@@ -76,6 +78,10 @@ class PosOrderCreate(BaseModel):
     )
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
     waive_packing_fee: bool = Field(default=False, description="收银员免收打包费（仅 POS）")
+    use_social_benefit: bool = Field(default=False, description="使用公益身份折扣")
+    social_rule_id: int | None = Field(default=None, description="指定公益规则 ID")
+    customer_coupon_id: int | None = Field(default=None, description="优惠券（与公益互斥）")
+    customer_voucher_id: int | None = Field(default=None, description="代金券（与公益互斥）")
 
 
 class PosBindCustomer(BaseModel):

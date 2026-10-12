@@ -350,6 +350,13 @@ async def miniprogram_config(
             settings.wechat_subscribe_template_order_ready or "",
         )
     ).strip()
+    tmpl_balance_low = (
+        await SystemSettingsService.get_value(
+            db,
+            "wechat_subscribe_template_balance_low",
+            getattr(settings, "wechat_subscribe_template_balance_low", "") or "",
+        )
+    ).strip()
 
     async def _flag(key: str, fallback: bool) -> bool:
         return await SystemSettingsService.effective_bool(
@@ -371,6 +378,7 @@ async def miniprogram_config(
             "store_id": sid,
             "subscribe_templates": {
                 "order_ready": tmpl or None,
+                "balance_low": tmpl_balance_low or None,
             },
             # 优先 system_settings / 门店覆盖，种子默认值来自 .env ENABLE_*
             "enable_alipay_avatar": await _flag("enable_alipay_avatar", settings.enable_alipay_avatar),

@@ -1591,5 +1591,304 @@ CREATE TABLE IF NOT EXISTS `queue_tickets` (
   CONSTRAINT `fk_queue_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_queue_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '到店排队取号表' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for social_identity_types
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `social_identity_types` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `code` varchar(32) NOT NULL COMMENT '身份编码 SANITATION/RIDER/ELDER/...',
+  `name` varchar(50) NOT NULL COMMENT '展示名称',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序升序',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `default_verify_hints` json NULL COMMENT '建议核验凭证提示',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_sit_code`(`code` ASC) USING BTREE,
+  INDEX `idx_sit_status_sort`(`status` ASC, `sort_order` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '社会贡献身份类型字典' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for customer_social_identities
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `customer_social_identities` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `identity_code` varchar(32) NOT NULL COMMENT '身份编码 → social_identity_types.code',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '认定门店 → stores.id；NULL=总部认定',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/ACTIVE/REJECTED/EXPIRED/REVOKED',
+  `verify_method` varchar(50) NULL DEFAULT NULL COMMENT '核验方式 POS/MINI/MANUAL',
+  `credential_note` varchar(255) NULL DEFAULT NULL COMMENT '凭证备注（脱敏）',
+  `credential_media_url` varchar(500) NULL DEFAULT NULL COMMENT '证件图路径（仅店长可读）',
+  `valid_from` datetime(3) NULL DEFAULT NULL COMMENT '生效开始',
+  `valid_to` datetime(3) NULL DEFAULT NULL COMMENT '生效结束',
+  `reviewed_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '审核人 → users.id',
+  `reviewed_at` datetime(3) NULL DEFAULT NULL COMMENT '审核时间',
+  `reject_reason` varchar(255) NULL DEFAULT NULL COMMENT '拒绝原因',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_csi_customer_status`(`customer_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_csi_store_status`(`store_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_csi_code_status`(`identity_code` ASC, `status` ASC) USING BTREE,
+  CONSTRAINT `fk_csi_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_csi_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_csi_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客社会贡献身份认定' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for social_benefit_rules
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `social_benefit_rules` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店 → stores.id；NULL=总部通用',
+  `identity_code` varchar(32) NOT NULL COMMENT '适用身份编码',
+  `name` varchar(100) NOT NULL COMMENT '规则名称',
+  `time_windows` json NULL COMMENT '时段 [["06:00","23:59"],...]',
+  `weekdays` json NULL COMMENT '星期 1-7；NULL=每天',
+  `date_from` date NULL DEFAULT NULL COMMENT '生效日起',
+  `date_to` date NULL DEFAULT NULL COMMENT '生效日止',
+  `benefit_type` varchar(30) NOT NULL DEFAULT 'ORDER_DISCOUNT' COMMENT 'ORDER_DISCOUNT/COUPON/GIFT_ITEM/FREE_PRODUCT',
+  `discount_rate` decimal(5, 2) NULL DEFAULT NULL COMMENT '折扣率 0.80=八折',
+  `coupon_template_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '公益券模板',
+  `gift_product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '赠品商品',
+  `applicable_category_ids` json NULL COMMENT '适用分类；NULL=全部',
+  `applicable_product_ids` json NULL COMMENT '适用商品；NULL=全部',
+  `daily_limit` int NOT NULL DEFAULT 1 COMMENT '每客每店每日限次',
+  `monthly_budget` decimal(12, 2) NULL DEFAULT NULL COMMENT '月补贴预算',
+  `budget_action` varchar(10) NOT NULL DEFAULT 'WARN' COMMENT '超预算 WARN/BLOCK',
+  `stack_policy` varchar(30) NOT NULL DEFAULT 'EXCLUSIVE' COMMENT 'EXCLUSIVE=与会员折/券互斥',
+  `max_subsidy_amount` decimal(10, 2) NULL DEFAULT NULL COMMENT '单次补贴上限',
+  `priority` int NOT NULL DEFAULT 100 COMMENT '优先级，越小越优先',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_sbr_store_code_status`(`store_id` ASC, `identity_code` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_sbr_priority`(`priority` ASC, `status` ASC) USING BTREE,
+  CONSTRAINT `fk_sbr_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbr_coupon` FOREIGN KEY (`coupon_template_id`) REFERENCES `coupon_templates` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbr_gift` FOREIGN KEY (`gift_product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '社会贡献权益规则' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for social_benefit_redemptions
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `social_benefit_redemptions` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  `order_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '订单 → orders.id',
+  `identity_code` varchar(32) NOT NULL COMMENT '身份编码',
+  `rule_id` bigint UNSIGNED NOT NULL COMMENT '规则 → social_benefit_rules.id',
+  `benefit_type` varchar(30) NOT NULL COMMENT '权益类型快照',
+  `subsidy_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '补贴金额',
+  `coupon_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联发放的券',
+  `operator_user_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '操作员 → users.id',
+  `idempotency_key` varchar(128) NOT NULL COMMENT '幂等键',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/NORMAL/REVERSED',
+  `redeemed_at` datetime(3) NULL DEFAULT NULL COMMENT '正式核销时间（支付成功）',
+  `meta` json NULL COMMENT '计价快照等',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_sbrd_idem`(`idempotency_key` ASC) USING BTREE,
+  INDEX `idx_sbrd_customer_store_day`(`customer_id` ASC, `store_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_sbrd_order`(`order_id` ASC) USING BTREE,
+  INDEX `idx_sbrd_rule_status`(`rule_id` ASC, `status` ASC) USING BTREE,
+  CONSTRAINT `fk_sbrd_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbrd_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbrd_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbrd_rule` FOREIGN KEY (`rule_id`) REFERENCES `social_benefit_rules` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbrd_coupon` FOREIGN KEY (`coupon_id`) REFERENCES `customer_coupons` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sbrd_operator` FOREIGN KEY (`operator_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '社会贡献权益核销台账' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for customer_segments
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `customer_segments` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店；NULL=总部',
+  `code` varchar(64) NOT NULL COMMENT '业务键',
+  `name` varchar(100) NOT NULL COMMENT '分群名称',
+  `segment_type` varchar(20) NOT NULL DEFAULT 'DYNAMIC' COMMENT 'STATIC/DYNAMIC',
+  `rules_json` json NULL COMMENT '条件树',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `estimated_count` int NULL DEFAULT NULL COMMENT '最近估人数',
+  `materialized_at` datetime(3) NULL DEFAULT NULL COMMENT '最近物化时间',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_cseg_store_code`(`store_id` ASC, `code` ASC) USING BTREE,
+  INDEX `idx_cseg_status`(`status` ASC) USING BTREE,
+  CONSTRAINT `fk_cseg_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '客户分群' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for customer_segment_members
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `customer_segment_members` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `segment_id` bigint UNSIGNED NOT NULL COMMENT '分群 → customer_segments.id',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '入群时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_csm_seg_customer`(`segment_id` ASC, `customer_id` ASC) USING BTREE,
+  INDEX `idx_csm_customer`(`customer_id` ASC) USING BTREE,
+  CONSTRAINT `fk_csm_segment` FOREIGN KEY (`segment_id`) REFERENCES `customer_segments` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_csm_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '分群成员快照' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_campaigns
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_campaigns` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店；NULL=总部',
+  `code` varchar(64) NOT NULL COMMENT '业务键',
+  `name` varchar(100) NOT NULL COMMENT '活动名',
+  `campaign_type` varchar(30) NOT NULL DEFAULT 'MEMBER_DAY' COMMENT 'FESTIVAL/MEMBER_DAY/TIME_SLOT/SOCIAL/...',
+  `status` varchar(20) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/SCHEDULED/RUNNING/PAUSED/ENDED/CANCELLED',
+  `segment_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '圈人分群',
+  `coupon_template_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '发券模板',
+  `start_at` datetime(3) NULL DEFAULT NULL COMMENT '开始',
+  `end_at` datetime(3) NULL DEFAULT NULL COMMENT '结束',
+  `budget_cap` decimal(12, 2) NULL DEFAULT NULL COMMENT '预算上限',
+  `weekly_cap_override` int NULL DEFAULT NULL COMMENT '覆盖周频控',
+  `boost_product_ids` json NULL COMMENT '推荐加权商品',
+  `remark` varchar(500) NULL DEFAULT NULL COMMENT '备注',
+  `published_at` datetime(3) NULL DEFAULT NULL COMMENT '发布时间',
+  `created_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '创建人',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mc_store_code`(`store_id` ASC, `code` ASC) USING BTREE,
+  INDEX `idx_mc_status_time`(`status` ASC, `start_at` ASC, `end_at` ASC) USING BTREE,
+  CONSTRAINT `fk_mc_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mc_segment` FOREIGN KEY (`segment_id`) REFERENCES `customer_segments` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mc_coupon` FOREIGN KEY (`coupon_template_id`) REFERENCES `coupon_templates` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mc_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '营销活动' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_rules
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_rules` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '活动 → marketing_campaigns.id',
+  `rule_type` varchar(30) NOT NULL DEFAULT 'SEGMENT' COMMENT 'SEGMENT/EVENT/CRON/WINDOW/SOCIAL_LINK',
+  `config_json` json NULL COMMENT '规则配置',
+  `priority` int NOT NULL DEFAULT 100 COMMENT '优先级',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_mr_campaign`(`campaign_id` ASC, `status` ASC) USING BTREE,
+  CONSTRAINT `fk_mr_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '营销活动规则' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_tasks
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_tasks` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '活动',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '目标顾客',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店快照',
+  `action_type` varchar(30) NOT NULL DEFAULT 'ISSUE_COUPON' COMMENT 'ISSUE_COUPON/ISSUE_BUNDLE/SEND_SUBSCRIBE/...',
+  `payload_json` json NULL COMMENT '动作参数',
+  `idempotency_key` varchar(128) NOT NULL COMMENT '幂等键',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/RUNNING/SUCCESS/FAILED/SKIPPED/CANCELLED',
+  `try_count` int NOT NULL DEFAULT 0 COMMENT '尝试次数',
+  `last_error` varchar(500) NULL DEFAULT NULL COMMENT '最近错误',
+  `result_json` json NULL COMMENT '结果',
+  `scheduled_at` datetime(3) NULL DEFAULT NULL COMMENT '计划执行',
+  `executed_at` datetime(3) NULL DEFAULT NULL COMMENT '执行完成',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mt_idem`(`idempotency_key` ASC) USING BTREE,
+  INDEX `idx_mt_status_sched`(`status` ASC, `scheduled_at` ASC) USING BTREE,
+  INDEX `idx_mt_campaign`(`campaign_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_mt_customer`(`customer_id` ASC) USING BTREE,
+  CONSTRAINT `fk_mt_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mt_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mt_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '营销任务队列' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for marketing_message_logs
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `marketing_message_logs` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店',
+  `campaign_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '活动；NULL=系统旅程',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客',
+  `channel` varchar(20) NOT NULL DEFAULT 'WECHAT' COMMENT 'WECHAT/ALIPAY/SMS/LOG',
+  `template_key` varchar(64) NOT NULL COMMENT '业务模板键',
+  `template_id` varchar(120) NULL DEFAULT NULL COMMENT '平台模板ID',
+  `payload_json` json NULL COMMENT '发送摘要（无敏感原文）',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/SUCCESS/FAILED/SKIPPED',
+  `error_message` varchar(500) NULL DEFAULT NULL COMMENT '失败原因',
+  `idempotency_key` varchar(128) NOT NULL COMMENT '幂等键',
+  `sent_at` datetime(3) NULL DEFAULT NULL COMMENT '发送时间',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mml_idem`(`idempotency_key` ASC) USING BTREE,
+  INDEX `idx_mml_customer_sent`(`customer_id` ASC, `sent_at` ASC) USING BTREE,
+  INDEX `idx_mml_campaign_status`(`campaign_id` ASC, `status` ASC) USING BTREE,
+  CONSTRAINT `fk_mml_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mml_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_mml_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '营销触达日志' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for campaign_attributions
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `campaign_attributions` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `campaign_id` bigint UNSIGNED NOT NULL COMMENT '活动',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店',
+  `order_id` bigint UNSIGNED NOT NULL COMMENT '订单',
+  `attribution_type` varchar(20) NOT NULL DEFAULT 'COUPON' COMMENT 'COUPON/MESSAGE/SOCIAL',
+  `coupon_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '归因券',
+  `gross_amount` decimal(12, 2) NOT NULL DEFAULT 0.00 COMMENT '归因实收（支付）',
+  `subsidy_amount` decimal(12, 2) NOT NULL DEFAULT 0.00 COMMENT '补贴/券面额',
+  `net_amount` decimal(12, 2) NOT NULL DEFAULT 0.00 COMMENT '净贡献',
+  `status` varchar(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/REVERSED',
+  `idempotency_key` varchar(128) NOT NULL COMMENT '幂等键',
+  `meta` json NULL COMMENT '扩展',
+  `attributed_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '归因时间',
+  `reversed_at` datetime(3) NULL DEFAULT NULL COMMENT '冲减时间',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_ca_idem`(`idempotency_key` ASC) USING BTREE,
+  INDEX `idx_ca_campaign_status`(`campaign_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_ca_order`(`order_id` ASC) USING BTREE,
+  INDEX `idx_ca_customer`(`customer_id` ASC) USING BTREE,
+  CONSTRAINT `fk_ca_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `marketing_campaigns` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ca_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ca_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ca_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ca_coupon` FOREIGN KEY (`coupon_id`) REFERENCES `customer_coupons` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '营销活动归因' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for customer_lifecycle
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `customer_lifecycle` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `lifecycle_code` varchar(20) NOT NULL DEFAULT 'GUEST' COMMENT 'GUEST/NEW/ACTIVE/AT_RISK/DORMANT/LOST',
+  `rfm_segment` varchar(32) NULL DEFAULT NULL COMMENT 'RFM 分群标签',
+  `r_score` tinyint NULL DEFAULT NULL COMMENT '近期分 1-5',
+  `f_score` tinyint NULL DEFAULT NULL COMMENT '频次分 1-5',
+  `m_score` tinyint NULL DEFAULT NULL COMMENT '金额分 1-5',
+  `silence_days` int NOT NULL DEFAULT 0 COMMENT '距上次下单天数；无单=9999',
+  `order_count_90d` int NOT NULL DEFAULT 0 COMMENT '近90天订单数',
+  `pay_amount_90d` decimal(12, 2) NOT NULL DEFAULT 0.00 COMMENT '近90天实付',
+  `computed_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '计算时间',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_cl_customer`(`customer_id` ASC) USING BTREE,
+  INDEX `idx_cl_lifecycle`(`lifecycle_code` ASC) USING BTREE,
+  INDEX `idx_cl_rfm`(`rfm_segment` ASC) USING BTREE,
+  INDEX `idx_cl_silence`(`silence_days` ASC) USING BTREE,
+  CONSTRAINT `fk_cl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客生命周期与RFM快照' ROW_FORMAT = Dynamic;
 -- END CANONICAL SCHEMA
 SET FOREIGN_KEY_CHECKS = 1;

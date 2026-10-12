@@ -285,6 +285,59 @@ def _wxacode_error_hint(errcode: int | None, errmsg: str = "") -> str:
     return "微信小程序码生成失败"
 
 
+async def send_balance_low_subscribe(
+    *,
+    openid: str,
+    customer_id: int,
+    balance: str,
+    threshold: str,
+) -> bool:
+    """储值余额偏低订阅消息（未配置模板则跳过）。"""
+    settings = get_settings()
+    from app.services.system_settings_service import SystemSettingsService
+
+    tmpl = SystemSettingsService.resolved_str_sync(
+        "wechat_subscribe_template_balance_low",
+        getattr(settings, "wechat_subscribe_template_balance_low", "") or "",
+    ).strip()
+    if not tmpl or not openid:
+        return False
+    if not settings.wechat_app_id or not settings.wechat_app_secret:
+        if _mock_allowed():
+            logger.info(
+                "Mock 订阅消息 balance_low customer=%s balance=%s",
+                customer_id,
+                balance,
+            )
+            return True
+        return False
+
+    token = await get_access_token()
+    url = f"https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token={token}"
+    payload = {
+        "touser": openid,
+        "template_id": tmpl,
+        "page": "pages/recharge/recharge",
+        "miniprogram_state": "formal",
+        "lang": "zh_CN",
+        "data": {
+            "amount1": {"value": f"{balance}元"},
+            "thing2": {"value": "储值余额偏低，欢迎到店充值"},
+            "amount3": {"value": f"{threshold}元"},
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload)
+            data = resp.json()
+        if data.get("errcode") == 0:
+            return True
+        logger.warning("余额提醒订阅失败 customer=%s err=%s", customer_id, data)
+    except Exception as e:
+        logger.warning("余额提醒订阅异常 customer=%s: %s", customer_id, e)
+    return False
+
+
 async def send_order_ready_subscribe(
     *,
     openid: str,

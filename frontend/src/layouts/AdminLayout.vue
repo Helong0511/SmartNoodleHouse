@@ -30,6 +30,10 @@
           <el-menu-item v-if="showCustomers" index="/member-levels">会员等级</el-menu-item>
           <el-menu-item v-if="showWallet" index="/wallet">会员储值</el-menu-item>
           <el-menu-item v-if="showCoupons" index="/coupons">优惠券</el-menu-item>
+          <el-menu-item v-if="showCustomers" index="/social-benefits">社会贡献</el-menu-item>
+          <el-menu-item v-if="showCustomers" index="/marketing/segments">客户分群</el-menu-item>
+          <el-menu-item v-if="showCoupons" index="/marketing/campaigns">营销活动</el-menu-item>
+          <el-menu-item v-if="showCoupons" index="/marketing/report">营销报表</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showOps" index="g-ops">
@@ -157,7 +161,7 @@ const openGroup = computed(() => {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
-  if (['/customers', '/member-levels', '/coupons', '/wallet'].includes(p)) return 'g-member'
+  if (['/customers', '/member-levels', '/coupons', '/wallet', '/social-benefits'].includes(p)) return 'g-member'
   if (['/tables', '/users', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
   if (['/settings', '/audit-logs', '/role-permissions'].includes(p)) return 'g-system'

@@ -2,6 +2,7 @@ const api = require('../../utils/api')
 const auth = require('../../utils/auth')
 const payUtil = require('../../utils/pay')
 const dineCtx = require('../../utils/context')
+const subscribe = require('../../utils/subscribe')
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -85,6 +86,8 @@ Page({
         packages: Array.isArray(packages) ? packages : [],
         selectedId: (packages && packages[0] && packages[0].id) || 0
       })
+      // 引导订阅余额偏低提醒（模板未配置时静默跳过）
+      try { await subscribe.requestBalanceLowSubscribe() } catch (_) { /* ignore */ }
     } catch (e) {
       wx.showToast({ title: (e && e.message) || '加载失败', icon: 'none' })
     }

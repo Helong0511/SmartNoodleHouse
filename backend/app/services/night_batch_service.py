@@ -252,4 +252,11 @@ async def run_night_batch(
         result["category_sort"] = {"skipped": "disabled"}
     result["product_taste"] = await rebuild_all_product_taste_profiles(db)
     result["customer_taste"] = await deep_learn_customer_tastes(db, cfg)
+    try:
+        from app.services.lifecycle_service import LifecycleService
+
+        result["lifecycle"] = await LifecycleService.refresh_all(db)
+    except Exception:
+        logger.exception("夜间 lifecycle/RFM 刷新失败")
+        result["lifecycle"] = {"error": True}
     return result

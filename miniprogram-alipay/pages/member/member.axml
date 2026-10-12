@@ -119,6 +119,23 @@
       <view class="coupon-note">结算页可选优惠券与代金券（可叠加）；主动开通会员后自动获赠新客券。</view>
     </view>
 
+    <view class="card">
+      <view class="title">社会贡献公益</view>
+      <view class="tip" a:if="{{socialLoading}}">加载中...</view>
+      <view class="tip" a:elif="{{!socialIdentities.length}}">到店出示工牌，可由收银员当场认定；也可在此申请。</view>
+      <view class="wallet-item" a:for="{{socialIdentities}}" a:key="id">
+        <view class="wallet-main">
+          <view class="wallet-name">{{item.identity_code}} · {{item.status}}</view>
+          <view class="wallet-rule">{{item.credential_note || '已提交'}}</view>
+        </view>
+      </view>
+      <view class="btn-row">
+        <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="SANITATION" onTap="applySocialIdentity">申请环卫工</button>
+        <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="RIDER" onTap="applySocialIdentity">申请骑手</button>
+        <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="ELDER" onTap="applySocialIdentity">申请长者</button>
+      </view>
+    </view>
+
     <view class="card" a:if="{{walletLoading || coupons.length || !hideMemberEmptyWallet}}">
       <view class="title-row">
         <view class="title">我的优惠券</view>

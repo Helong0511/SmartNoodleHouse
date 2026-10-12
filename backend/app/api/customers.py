@@ -12,6 +12,7 @@ from app.models import (
     Customer,
     CustomerAlipayAccount,
     CustomerFavoriteProduct,
+    CustomerLifecycle,
     CustomerPreference,
     CustomerWechatAccount,
     FaceProfile,
@@ -150,6 +151,9 @@ async def list_customers(
     registered_to: str | None = None,
     store_id: int | None = None,
     birthday_today: bool = False,
+    lifecycle: str | None = None,
+    rfm_segment: str | None = None,
+    silence_days_min: int | None = None,
 ):
     from datetime import datetime, timedelta
 
@@ -196,6 +200,32 @@ async def list_customers(
             q = q.where(
                 Customer.id.in_(select(CustomerAlipayAccount.customer_id).distinct())
             )
+    lc_code = (lifecycle or "").strip().upper()
+    if lc_code:
+        q = q.where(
+            Customer.id.in_(
+                select(CustomerLifecycle.customer_id).where(
+                    CustomerLifecycle.lifecycle_code == lc_code
+                )
+            )
+        )
+    rfm = (rfm_segment or "").strip().upper()
+    if rfm:
+        q = q.where(
+            Customer.id.in_(
+                select(CustomerLifecycle.customer_id).where(
+                    CustomerLifecycle.rfm_segment == rfm
+                )
+            )
+        )
+    if silence_days_min is not None and int(silence_days_min) > 0:
+        q = q.where(
+            Customer.id.in_(
+                select(CustomerLifecycle.customer_id).where(
+                    CustomerLifecycle.silence_days >= int(silence_days_min)
+                )
+            )
+        )
     if birthday_today:
         # 公历/农历月日匹配需应用层判定；先收窄到有生日的顾客再过滤
         bday_q = select(Customer.id, Customer.birthday, Customer.birthday_calendar).where(
@@ -327,6 +357,14 @@ async def list_customers(
 
     level_map = await CustomerService.load_levels_map(db, [c.member_level_id for c in customers])
     scan_map = await CustomerService.registered_scan_map(db, customers)
+    lc_map: dict[int, CustomerLifecycle] = {}
+    if ids:
+        for row in (
+            await db.execute(
+                select(CustomerLifecycle).where(CustomerLifecycle.customer_id.in_(ids))
+            )
+        ).scalars().all():
+            lc_map[int(row.customer_id)] = row
 
     def _avatar_for(c: Customer) -> str | None:
         raw = str(c.avatar_url or "").strip()
@@ -359,6 +397,9 @@ async def list_customers(
                 getattr(c, "birthday_calendar", None),
                 today=now_local().date(),
             ),
+            "lifecycle_code": (lc_map[c.id].lifecycle_code if c.id in lc_map else None),
+            "rfm_segment": (lc_map[c.id].rfm_segment if c.id in lc_map else None),
+            "silence_days": (lc_map[c.id].silence_days if c.id in lc_map else None),
             **scan_map.get(c.id, {}),
             **CustomerService.member_payload(c, level_map.get(c.member_level_id) if c.member_level_id else None),
         }
@@ -380,10 +421,39 @@ async def list_customers(
     )
 
 
+@router.get("/{customer_id}/lifecycle", dependencies=[require_permission("customer:read")])
+async def get_customer_lifecycle(
+    customer_id: int, request: Request, db: DbSession, user: CurrentUser
+):
+    """生命周期 / RFM 只读（优先夜批快照，无快照则即时估算）。"""
+    from app.services.lifecycle_service import LifecycleService
+    from app.services.store_scope import require_bound_store
+
+    require_bound_store(user, None)
+    customer = await db.get(Customer, int(customer_id))
+    if not customer:
+        raise AppException(40401, "顾客不存在")
+    data = await LifecycleService.get_payload(db, int(customer_id))
+    return success(data, request=request)
+
+
+@router.get("/{customer_id}/service-card", dependencies=[require_permission("customer:read")])
+async def get_service_card(customer_id: int, request: Request, db: DbSession, user: CurrentUser):
+    """POS/迎宾服务卡：脱敏摘要，不含证件原图。"""
+    from app.services.service_card_service import ServiceCardService
+    from app.services.store_scope import require_bound_store
+
+    effective_store = require_bound_store(user, None)
+    if effective_store is not None:
+        await _assert_customer_in_store(db, customer_id, effective_store)
+    card = await ServiceCardService.build(db, customer_id, store_id=effective_store)
+    return success(card, request=request)
+
+
 @router.get("/{customer_id}", dependencies=[require_permission("customer:read")])
 async def get_customer(customer_id: int, request: Request, db: DbSession, user: CurrentUser):
     from app.services.store_scope import require_bound_store
-    from app.utils.birthday import normalize_calendar
+    from app.utils.birthday import format_birthday_display, normalize_calendar
 
     customer = await db.get(Customer, customer_id)
     if not customer:
@@ -434,6 +504,10 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             if a:
                 avatar = a
                 break
+    birthday_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
+    birthday_benefit = await CustomerService.birthday_benefit_payload(
+        db, effective_store, customer
+    )
     return success(
         {
             "id": customer.id,
@@ -513,10 +587,10 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             ),
             "preference_scene": prefs.get("scene") or {"enabled": False},
             "birthday": customer.birthday.isoformat() if customer.birthday else None,
-            "birthday_calendar": normalize_calendar(getattr(customer, "birthday_calendar", None)),
-            "birthday_benefit": await CustomerService.birthday_benefit_payload(
-                db, effective_store, customer
-            ),
+            "birthday_calendar": birthday_cal,
+            # 顶层展示文案：历法切换后前端可直接联动（日期选择器仍存公历锚点）
+            "birthday_display": format_birthday_display(customer.birthday, birthday_cal),
+            "birthday_benefit": birthday_benefit,
             "recommend_opt_in": int(customer.recommend_opt_in or 0),
             "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),
         },

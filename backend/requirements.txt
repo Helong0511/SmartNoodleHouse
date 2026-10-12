@@ -9,7 +9,8 @@ pydantic>=2.5.0,<3.0
 pydantic-settings>=2.1.0,<3.0
 python-jose[cryptography]>=3.4.0,<4.0
 passlib[bcrypt]>=1.7.4,<2.0
-bcrypt>=4.1.0,<5.0
+# bcrypt>=4.1 移除 __about__，passlib 1.7.4 会 WARNING；钉 4.0.x 兼容（哈希格式不变）
+bcrypt>=4.0.1,<4.1
 redis>=5.0.0,<6.0
 httpx>=0.26.0,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
@@ -19,9 +20,11 @@ apscheduler>=3.10.4,<4.0
 websockets>=12.0,<14
 opencv-python-headless>=4.9.0,<5.0
 numpy>=1.26.0,<3.0
-# CVE-2024-26130 影响 42.0.0-42.0.3；CVE-2025-48379 影响 Pillow<11.3.2（服务端处理用户上传图片）
+# CVE-2024-26130 影响 42.0.0-42.0.3；上传图处理需较新 Pillow。
+# 注意：PyPI 无 11.3.2（旧约束会在 Win/Ubuntu 同时装失败）；11.x 最高 11.3.0，12.x 有 manylinux/cp311 轮子。
+# 生产 Ubuntu 22.04 + python3.11：与本地同约束；lock 钉 11.3.0，requirements.txt 允许升到 12.x。
 cryptography>=42.0.4,<46
-Pillow>=11.3.2,<12
+Pillow>=11.3.0,<13
 pypinyin>=0.51.0,<1.0
 # 农历生日权益日判定
 zhdate>=0.1,<1.0

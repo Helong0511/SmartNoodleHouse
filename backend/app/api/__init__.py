@@ -14,6 +14,7 @@ from app.api import (
     financial_ledger,
     health,
     invoices,
+    marketing,
     member_levels,
     miniprogram,
     orders,
@@ -23,6 +24,7 @@ from app.api import (
     products,
     queue,
     settings,
+    social_benefits,
     tables,
     users,
     wallet,
@@ -60,3 +62,5 @@ api_router.include_router(performance.router)
 api_router.include_router(favorites.router)
 api_router.include_router(invoices.router)
 api_router.include_router(queue.router)
+api_router.include_router(social_benefits.router)
+api_router.include_router(marketing.router)

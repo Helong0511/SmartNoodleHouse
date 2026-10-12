@@ -2036,6 +2036,18 @@ class PaymentService:
                 net = await cls.order_net_collected(db, order.id)
                 total = money(order.total_amount)
                 if net <= 0:
+                    try:
+                        from app.services.social_benefit_service import SocialBenefitService
+
+                        await SocialBenefitService.reverse_for_order(db, int(order.id))
+                    except Exception:
+                        logger.exception("公益台账退款冲减失败 order_id=%s", order.id)
+                    try:
+                        from app.services.attribution_service import AttributionService
+
+                        await AttributionService.reverse_for_order(db, int(order.id))
+                    except Exception:
+                        logger.exception("营销归因退款冲减失败 order_id=%s", order.id)
                     if order.status not in ("CANCELLED", "REFUNDED"):
                         await apply_order_status(
                             db,

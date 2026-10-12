@@ -132,6 +132,41 @@
             </el-select>
             <p v-if="selectedCustomerLabel" class="member-tip">已选：{{ selectedCustomerLabel }} · 计入折扣/积分/成单里程碑</p>
             <p v-else class="member-tip muted">不选则按散客收款，不计会员权益</p>
+            <div v-if="selectedCustomerId" class="social-row">
+              <el-checkbox v-model="useSocialBenefit">公益折扣</el-checkbox>
+              <el-button size="small" :loading="socialVerifying" @click="posSocialVerify">公益核验(环卫)</el-button>
+            </div>
+            <div v-if="selectedCustomerId && serviceCard" class="service-card" v-loading="serviceCardLoading">
+              <div class="sc-title">服务卡 · {{ serviceCard.greeting }}</div>
+              <div class="sc-line">
+                <span>{{ serviceCard.level_name || '会员' }}</span>
+                <span>{{ serviceCard.lifecycle }}</span>
+                <span v-if="serviceCard.phone_masked">{{ serviceCard.phone_masked }}</span>
+              </div>
+              <div class="sc-line muted">储值 ¥{{ serviceCard.balance_total }} · 积分 {{ serviceCard.points }} · 可用券 {{ serviceCard.coupon_count }}</div>
+              <div v-if="serviceCard.frequent_products?.length" class="sc-block">
+                <b>常点</b>
+                {{ serviceCard.frequent_products.map((p: any) => p.name).join('、') }}
+              </div>
+              <div v-if="serviceCard.taste_likes?.length" class="sc-block">
+                <b>口味</b>
+                {{ serviceCard.taste_likes.map((p: any) => p.label).join('、') }}
+              </div>
+              <div v-if="serviceCard.taste_aversions?.length" class="sc-block warn">
+                <b>忌口</b>
+                {{ serviceCard.taste_aversions.map((p: any) => p.label).join('、') }}
+              </div>
+              <div v-if="serviceCard.available_coupons?.length" class="sc-block">
+                <b>券</b>
+                {{ serviceCard.available_coupons.slice(0, 3).map((c: any) => c.name).join('、') }}
+              </div>
+              <div v-if="serviceCard.social_identities?.length" class="sc-block">
+                <b>公益</b>
+                {{ serviceCard.social_identities.map((s: any) => `${s.identity_name}(${s.status})`).join('、') }}
+                <span v-if="serviceCard.social_today_used"> · 今日已享</span>
+                <span v-else> · 今日未用</span>
+              </div>
+            </div>
           </div>
           <el-input v-model="remark" placeholder="备注（可选）" size="large" class="remark" />
           <div v-if="addingItems && cart.length" class="add-items-actions">
@@ -539,7 +574,11 @@ const remark = ref('')
 const cart = ref<any[]>([])
 const selectedCustomerId = ref<number | undefined>()
 const customerOptions = ref<any[]>([])
+const useSocialBenefit = ref(false)
+const socialVerifying = ref(false)
 const customerSearching = ref(false)
+const serviceCard = ref<any | null>(null)
+const serviceCardLoading = ref(false)
 const selectedCustomerLabel = computed(() => {
   if (!selectedCustomerId.value) return ''
   const c = customerOptions.value.find((x) => x.id === selectedCustomerId.value)
@@ -1114,6 +1153,34 @@ function validateBeforeCheckout(): boolean {
   return true
 }
 
+async function posSocialVerify() {
+  if (!selectedCustomerId.value) {
+    ElMessage.warning('请先选择会员')
+    return
+  }
+  const sid = effectiveStoreId()
+  if (!sid) {
+    ElMessage.warning('请先选择门店')
+    return
+  }
+  socialVerifying.value = true
+  try {
+    await api.post('/social-benefits/identities/pos-verify', {
+      customer_id: selectedCustomerId.value,
+      identity_code: 'SANITATION',
+      store_id: sid,
+      activate: true,
+      credential_note: 'POS当场核验',
+    })
+    useSocialBenefit.value = true
+    ElMessage.success('已认定环卫身份，可勾选公益折扣下单')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '公益核验失败')
+  } finally {
+    socialVerifying.value = false
+  }
+}
+
 async function createPosOrder() {
   const sid = effectiveStoreId()
   try {
@@ -1125,6 +1192,7 @@ async function createPosOrder() {
       need_pack: diningType.value === 'TAKEAWAY',
       waive_packing_fee: diningType.value === 'TAKEAWAY' && waivePackingFee.value,
       remark: remark.value.trim() || null,
+      use_social_benefit: !!(useSocialBenefit.value && selectedCustomerId.value),
       items: cart.value.map((c) => ({
         product_id: c.product_id,
         quantity: c.quantity || 1,
@@ -1174,8 +1242,25 @@ async function searchPosCustomers(keyword: string) {
   }
 }
 
-function onPosCustomerChange() {
-  // 仅本地选中；建单时带上 customer_id
+async function loadServiceCard(customerId?: number) {
+  if (!customerId) {
+    serviceCard.value = null
+    return
+  }
+  serviceCardLoading.value = true
+  try {
+    const res = await api.get(`/customers/${customerId}/service-card`)
+    serviceCard.value = res.data || null
+  } catch {
+    serviceCard.value = null
+  } finally {
+    serviceCardLoading.value = false
+  }
+}
+
+async function onPosCustomerChange() {
+  // 仅本地选中；建单时带上 customer_id；拉取服务卡侧栏
+  await loadServiceCard(selectedCustomerId.value)
 }
 
 async function bindCustomerOnCheckoutOrder() {
@@ -1254,6 +1339,8 @@ function finishCheckout(msg: string) {
   remark.value = ''
   selectedCustomerId.value = undefined
   customerOptions.value = []
+  serviceCard.value = null
+  useSocialBenefit.value = false
   waivePackingFee.value = false
   payDialogVisible.value = false
   resetCheckout()
@@ -2370,6 +2457,54 @@ watch(() => auth.user?.store_id, () => {
 
 .member-tip.muted {
   color: #999;
+}
+
+.social-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.service-card {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #333;
+}
+
+.service-card .sc-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.service-card .sc-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.service-card .sc-line.muted,
+.service-card .muted {
+  color: #888;
+}
+
+.service-card .sc-block {
+  margin-top: 4px;
+}
+
+.service-card .sc-block.warn {
+  color: #b45309;
+}
+
+.service-card .sc-block b {
+  margin-right: 4px;
+  color: #555;
 }
 
 .pay-member {

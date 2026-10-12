@@ -148,13 +148,88 @@ async def run_sleep_wake(
     return stats
 
 
+async def _send_balance_low_to_customer(
+    db: AsyncSession,
+    customer: Customer,
+    *,
+    threshold: Decimal,
+) -> str:
+    """尝试发微信订阅并写 marketing_message_logs。返回 SUCCESS/FAILED/SKIPPED/LOG。"""
+    from app.models import CustomerWechatAccount, MarketingMessageLog
+    from app.services.wechat_mini_client import send_balance_low_subscribe
+
+    bal = (customer.balance_principal or Decimal("0")) + (customer.balance_gift or Decimal("0"))
+    bal_s = f"{bal:.2f}"
+    thr_s = f"{threshold:.2f}"
+    idem = f"balance_low:{int(customer.id)}:{naive_local_now().strftime('%Y%m%d')}"
+    exists = await db.scalar(
+        select(MarketingMessageLog.id).where(MarketingMessageLog.idempotency_key == idem)
+    )
+    if exists:
+        return "SKIPPED"
+
+    wx = await db.scalar(
+        select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == int(customer.id)).limit(1)
+    )
+    openid = (wx.openid if wx else None) or None
+    tmpl = (
+        await SystemSettingsService.effective_setting(
+            db, "wechat_subscribe_template_balance_low", fallback=""
+        )
+        or ""
+    ).strip()
+
+    status = "LOG"
+    err = None
+    channel = "LOG"
+    if tmpl and openid:
+        channel = "WECHAT"
+        try:
+            ok = await send_balance_low_subscribe(
+                openid=str(openid),
+                customer_id=int(customer.id),
+                balance=bal_s,
+                threshold=thr_s,
+            )
+            status = "SUCCESS" if ok else "FAILED"
+            if not ok:
+                err = "subscribe_send_failed"
+        except Exception as exc:
+            status = "FAILED"
+            err = str(exc)[:400]
+    elif not tmpl:
+        status = "LOG"
+        err = "template_not_configured"
+    else:
+        status = "SKIPPED"
+        err = "no_wechat_openid"
+
+    db.add(
+        MarketingMessageLog(
+            store_id=customer.registered_store_id,
+            campaign_id=None,
+            customer_id=int(customer.id),
+            channel=channel,
+            template_key="balance_low",
+            template_id=tmpl or None,
+            payload_json={"balance": bal_s, "threshold": thr_s},
+            status=status,
+            error_message=err,
+            idempotency_key=idem,
+            sent_at=naive_local_now() if status in ("SUCCESS", "LOG") else None,
+        )
+    )
+    await db.flush()
+    return status
+
+
 async def run_balance_low_remind(
     db: AsyncSession, *, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> dict:
     """储值余额偏低提醒：0 < 余额 < 阈值 的活跃会员，30 天提醒一次。
 
     阈值 0/缺失/非法 = 关闭；Redis 不可用或异常时 fail-open 跳过本轮。
-    本期仅记录提醒清单日志，订阅消息发送留待后续接入。
+    配置 wechat_subscribe_template_balance_low 后真正发订阅；否则写 LOG 触达记录。
     """
     raw = (
         (await SystemSettingsService.get_value(db, SETTING_BALANCE_LOW_THRESHOLD, "0")) or ""
@@ -168,6 +243,9 @@ async def run_balance_low_remind(
         "enabled": threshold > 0,
         "threshold": str(threshold) if threshold > 0 else None,
         "reminded": 0,
+        "sent_success": 0,
+        "sent_failed": 0,
+        "logged_only": 0,
         "customer_ids": [],
         "skipped": None,
     }
@@ -207,23 +285,32 @@ async def run_balance_low_remind(
             try:
                 set_ok = bool(await r.set(key, "1", nx=True, ex=BALANCE_NOTIFY_TTL_SECONDS))
             except Exception as exc:
-                # Redis 中途异常：跳过本轮剩余顾客（fail-open），下次再提醒
                 stats["skipped"] = "redis_error"
                 logger.warning("储值余额提醒 Redis 异常，本轮中断: %s", exc)
                 return stats
             if not set_ok:
-                continue  # 30 天内已提醒过
+                continue
+            result = await _send_balance_low_to_customer(db, customer, threshold=threshold)
             stats["reminded"] += 1
             stats["customer_ids"].append(int(customer.id))
+            if result == "SUCCESS":
+                stats["sent_success"] += 1
+            elif result == "FAILED":
+                stats["sent_failed"] += 1
+            else:
+                stats["logged_only"] += 1
+        await db.commit()
         last_id = int(rows[-1].id)
         if len(rows) < batch_size:
             break
 
     if stats["reminded"]:
         logger.info(
-            "储值余额提醒: %s 人余额低于阈值 %s 元（30 天仅提醒一次）: %s",
+            "储值余额提醒: %s 人（成功推送 %s / 失败 %s / 仅日志 %s），阈值 %s 元",
             stats["reminded"],
+            stats["sent_success"],
+            stats["sent_failed"],
+            stats["logged_only"],
             threshold,
-            stats["customer_ids"][:50],
         )
     return stats

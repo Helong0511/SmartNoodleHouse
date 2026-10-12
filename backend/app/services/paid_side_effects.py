@@ -29,7 +29,14 @@ async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
         return
     order_id = int(order.id)
     # 独立事件：失败粒度更细，单条 retry 不影响其它
-    for kind in ("points_award", "coupon_mark_used", "pref_update", "milestone_coupon"):
+    for kind in (
+        "points_award",
+        "coupon_mark_used",
+        "pref_update",
+        "milestone_coupon",
+        "social_benefit_confirm",
+        "campaign_attribution",
+    ):
         try:
             await enqueue_outbox(
                 db,
@@ -102,6 +109,22 @@ async def _handle_milestone_coupon(db: AsyncSession, row) -> None:
     if not order or not order.customer_id:
         return
     await CouponService.issue_milestones_after_paid(db, order)
+
+
+@register_outbox_handler("paid_side_effect", "social_benefit_confirm")
+async def _handle_social_benefit_confirm(db: AsyncSession, row) -> None:
+    """支付成功将公益台账 PENDING→NORMAL。幂等：已 NORMAL 则跳过。"""
+    from app.services.social_benefit_service import SocialBenefitService
+
+    await SocialBenefitService.confirm_paid(db, int(row.aggregate_id))
+
+
+@register_outbox_handler("paid_side_effect", "campaign_attribution")
+async def _handle_campaign_attribution(db: AsyncSession, row) -> None:
+    """支付成功写活动归因（券优先）。幂等：uk_ca_idem。"""
+    from app.services.attribution_service import AttributionService
+
+    await AttributionService.attribute_paid_order(db, int(row.aggregate_id))
 
 
 @register_outbox_handler("refund", "milestone_reclaim")

@@ -862,6 +862,17 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'welcome_coupon_name'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'welcome_bundle_template_ids',
+    '',
+    '新人礼包模板ID JSON数组；空则用 welcome_coupon_name'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'welcome_bundle_template_ids'
+    );
+
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'birthday_benefit_mode',
     'points',
     '生日优惠方式：off/points/coupon/points_and_coupon'
@@ -891,6 +902,117 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'birthday_coupon_name'
     );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'sleep_wake_coupon_name_30',
+    '',
+    '沉睡30-90天唤醒券模板名（空=关）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'sleep_wake_coupon_name_30'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'sleep_wake_coupon_name_90',
+    '',
+    '沉睡>=90天唤醒券模板名（空=关）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'sleep_wake_coupon_name_90'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'balance_low_threshold',
+    '20',
+    '储值余额低于该值提醒（0=关）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'balance_low_threshold'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'enable_social_benefit',
+    'true',
+    '社会贡献公益开关'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'enable_social_benefit'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'marketing_weekly_cap',
+    '3',
+    '营销活动每人每周发券上限'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'marketing_weekly_cap'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'attribution_window_hours',
+    '48',
+    '营销归因推送窗口小时'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'attribution_window_hours'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'wechat_subscribe_template_balance_low',
+    '',
+    '微信余额提醒订阅模板ID'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'wechat_subscribe_template_balance_low'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'lifecycle_thresholds_json',
+    '{"new_days":7,"active_days":30,"at_risk_days":90,"dormant_days":120}',
+    '生命周期天数阈值 JSON'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'lifecycle_thresholds_json'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'rfm_thresholds_json',
+    '{"r_days":[7,30,60,90],"f_orders":[1,2,4,8],"m_amount":[30,80,150,300]}',
+    'RFM 分档阈值 JSON'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'rfm_thresholds_json'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'love_day_soy_template_name',
+    '',
+    '爱心日豆浆券模板名（空=关）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'love_day_soy_template_name'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'love_day_weekday',
+    '0',
+    '爱心日星期（0=周一）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'love_day_weekday'
+    );
+
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'enable_alipay_avatar',
     'true',
@@ -1422,3 +1544,20 @@ WHERE `r`.`code` = 'SUPER_ADMIN'
     );
 -- END SYSTEM SEED
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- 社会贡献身份字典（系统必要）
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'SANITATION', '环卫工', 10, 1, JSON_ARRAY('环卫工牌', '工作服')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'SANITATION');
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'RIDER', '外卖骑手', 20, 1, JSON_ARRAY('工服', '平台工牌')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'RIDER');
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'ELDER', '老人', 30, 1, JSON_ARRAY('身份证', '老年证')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'ELDER');
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'TEACHER', '教师', 40, 1, JSON_ARRAY('教师证', '工牌')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'TEACHER');
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'STUDENT', '学生', 50, 1, JSON_ARRAY('学生证')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'STUDENT');

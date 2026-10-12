@@ -20,7 +20,23 @@ async function requestOrderReadySubscribe() {
   })
 }
 
+/** 储值页引导订阅「余额偏低」提醒（需后台配置 balance_low 模板 ID） */
+async function requestBalanceLowSubscribe() {
+  if (!wx.requestSubscribeMessage) return
+  const tmpls = await loadTemplates()
+  const tmplId = tmpls.balance_low
+  if (!tmplId) return
+  return new Promise((resolve) => {
+    wx.requestSubscribeMessage({
+      tmplIds: [tmplId],
+      success: (res) => resolve(res),
+      fail: () => resolve(null)
+    })
+  })
+}
+
 module.exports = {
   loadTemplates,
-  requestOrderReadySubscribe
+  requestOrderReadySubscribe,
+  requestBalanceLowSubscribe
 }

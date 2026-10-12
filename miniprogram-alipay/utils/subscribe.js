@@ -31,7 +31,27 @@ function requestOrderReadySubscribe() {
   })
 }
 
+/**
+ * 储值页引导订阅「余额偏低」提醒
+ * 优先 alipay_balance_low，降级 balance_low
+ */
+function requestBalanceLowSubscribe() {
+  if (typeof my === 'undefined' || !my.requestSubscribeMessage) return Promise.resolve(null)
+  return loadTemplates().then(function (tmpls) {
+    var tmplId = tmpls.alipay_balance_low || tmpls.balance_low
+    if (!tmplId) return null
+    return new Promise(function (resolve) {
+      my.requestSubscribeMessage({
+        templateIds: [tmplId],
+        success: function (res) { resolve(res) },
+        fail: function () { resolve(null) }
+      })
+    })
+  })
+}
+
 module.exports = {
   loadTemplates: loadTemplates,
-  requestOrderReadySubscribe: requestOrderReadySubscribe
+  requestOrderReadySubscribe: requestOrderReadySubscribe,
+  requestBalanceLowSubscribe: requestBalanceLowSubscribe
 }

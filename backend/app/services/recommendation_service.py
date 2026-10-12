@@ -16,12 +16,13 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Customer,
     CustomerTasteProfile,
+    MarketingCampaign,
     Order,
     OrderItem,
     Product,
@@ -41,6 +42,8 @@ CF_WINDOW_DAYS = 90
 CF_TOP_K_PER_ITEM = 20
 CF_SEED_LIMIT = 10
 NOVEL_FRESH_DAYS = 30
+# 活动 RUNNING 时对 boost_product_ids 的分数乘子（约 +25% 曝光倾向）
+CAMPAIGN_BOOST_FACTOR = 1.25
 
 # 三态默认路权（content/cf/popular/novel）
 STATE_WEIGHTS: dict[str, dict[str, float]] = {
@@ -333,12 +336,15 @@ def rank_candidates(
     now: datetime | None = None,
     cart_category_ids: set[int] | None = None,
     weight_override: dict[str, float] | None = None,
+    boost_product_ids: set[int] | None = None,
+    boost_factor: float = CAMPAIGN_BOOST_FACTOR,
 ) -> list[RankedItem]:
     """纯函数：打分 → 去重降权 → 排序 → 多样性重排 → 热销补齐。"""
     now_dt = _naive(now or datetime.utcnow())
     scene_ctx = scene_ctx or {}
     exclude = set(exclude_ids or [])
     cart_cats = set(cart_category_ids or [])
+    boost_ids = set(boost_product_ids or [])
     candidates = [p for p in pool if p.id not in exclude]
     if not candidates or limit <= 0:
         return []
@@ -366,6 +372,9 @@ def rank_candidates(
         # settle_addon：跨购物车品类的搭配向加权，同品类降权
         if scene == "settle_addon" and cart_cats:
             total *= 0.7 if p.category_id in cart_cats else 1.15
+        # 营销活动 RUNNING：目标 SKU 加权（活动结束后 boost 为空即消失）
+        if p.id in boost_ids and boost_factor > 1.0:
+            total *= float(boost_factor)
         # 近期已购：窗口内降权（候选不足时仍保留）
         last_buy = recent_purchases.get(p.id)
         in_window = False
@@ -639,6 +648,36 @@ class RecommendationService:
         except Exception:
             return {}
 
+    @staticmethod
+    async def load_campaign_boost_ids(db: AsyncSession, store_id: int) -> set[int]:
+        """合并本店+总部 RUNNING 活动的 boost_product_ids。"""
+        now = datetime.utcnow()
+        rows = (
+            await db.execute(
+                select(MarketingCampaign.boost_product_ids).where(
+                    MarketingCampaign.status == "RUNNING",
+                    MarketingCampaign.boost_product_ids.is_not(None),
+                    or_(
+                        MarketingCampaign.store_id.is_(None),
+                        MarketingCampaign.store_id == int(store_id),
+                    ),
+                    or_(MarketingCampaign.start_at.is_(None), MarketingCampaign.start_at <= now),
+                    or_(MarketingCampaign.end_at.is_(None), MarketingCampaign.end_at >= now),
+                )
+            )
+        ).scalars().all()
+        out: set[int] = set()
+        for raw in rows:
+            if not raw:
+                continue
+            items = raw if isinstance(raw, list) else []
+            for x in items:
+                try:
+                    out.add(int(x))
+                except (TypeError, ValueError):
+                    continue
+        return out
+
     # ---------- 顶层入口 ----------
 
     @staticmethod
@@ -686,6 +725,7 @@ class RecommendationService:
 
         configs = {cid: (cat.recommend_config if cat else None) for cid, cat in cat_map.items()}
         scene_ctx = await RecommendationService.load_scene_context(db, store_id)
+        boost_ids = await RecommendationService.load_campaign_boost_ids(db, store_id)
 
         cart_cats: set[int] = set()
         if scene == "settle_addon" and exclude_ids:
@@ -704,5 +744,10 @@ class RecommendationService:
             scene_ctx=scene_ctx,
             cart_category_ids=cart_cats,
             weight_override=weight_override,
+            boost_product_ids=boost_ids,
         )
-        return ranked, state, {"pool_size": len(pool), "total_events": total_events}
+        return ranked, state, {
+            "pool_size": len(pool),
+            "total_events": total_events,
+            "boost_product_ids": sorted(boost_ids),
+        }

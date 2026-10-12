@@ -90,6 +90,9 @@ Page({
     vouchers: [],
     walletLoading: false,
     hideMemberEmptyWallet: true,
+    socialIdentities: [],
+    socialLoading: false,
+    socialApplying: false,
     phone: '',
     canWxPhone: false,
     showDevTips: false,
@@ -188,6 +191,7 @@ Page({
       }
       const forcePrefs = !app.globalData.prefsAt
       this.loadProfile(forcePrefs || forceWallet)
+      this.loadSocialIdentities()
     }
     this._showEpoch = (this._showEpoch || 0) + 1
     const epoch = this._showEpoch
@@ -223,6 +227,44 @@ Page({
     if (!ctx) return
     this.applyDineContext(ctx)
     this.loadWallet()
+    this.loadSocialIdentities()
+  },
+
+  async loadSocialIdentities() {
+    if (!auth.getToken()) return
+    this.setData({ socialLoading: true })
+    try {
+      const res = await api.get('/social-benefits/identities/mine')
+      this.setData({ socialIdentities: (res && res.items) || [], socialLoading: false })
+    } catch (e) {
+      this.setData({ socialIdentities: [], socialLoading: false })
+    }
+  },
+
+  async applySanitationIdentity() {
+    return this.applySocialIdentity({ currentTarget: { dataset: { code: 'SANITATION' } } })
+  },
+
+  async applySocialIdentity(e) {
+    if (!auth.getToken()) {
+      wx.showToast({ title: '请先登录', icon: 'none' })
+      return
+    }
+    const code = ((e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.code) || 'SANITATION').toUpperCase()
+    this.setData({ socialApplying: true })
+    try {
+      await api.post('/social-benefits/identities/apply', {
+        identity_code: code,
+        store_id: this.data.storeId || null,
+        credential_note: '小程序申请'
+      })
+      wx.showToast({ title: '已提交申请', icon: 'success' })
+      this.loadSocialIdentities()
+    } catch (err) {
+      wx.showToast({ title: (err && err.message) || '申请失败', icon: 'none' })
+    } finally {
+      this.setData({ socialApplying: false })
+    }
   },
 
   applyWallet(couponRes, voucherRes) {
