@@ -1,5 +1,13 @@
 <template>
   <div v-loading="loading">
+    <el-alert
+      type="info"
+      show-icon
+      :closable="false"
+      class="coupon-tip"
+      title="与营销活动的关系"
+      description="本页维护券模板与手动发券/里程碑。批量按人群发券请：客户分群（圈人物化）→ 营销活动（选模板发布）→ 营销报表（核销与 ROI）。社会贡献身份折扣与券默认互斥，勿与营销发券混淆。"
+    />
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
       <el-tab-pane label="持券记录" name="issued">
         <el-form inline class="toolbar">
@@ -651,5 +659,9 @@ onMounted(async () => {
 
 .milestone-alert {
   margin-bottom: 4px;
+}
+
+.coupon-tip {
+  margin-bottom: 12px;
 }
 </style>

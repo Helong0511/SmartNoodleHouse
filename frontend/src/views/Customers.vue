@@ -67,6 +67,14 @@
       <el-button link type="primary" @click="goBirthdayBenefitSettings">生日优惠怎么改</el-button>
     </el-form>
     <el-alert
+      type="info"
+      show-icon
+      :closable="false"
+      class="birthday-alert"
+      title="生命周期 / RFM"
+      description="生命周期与 RFM 由夜间批处理刷新（新客/活跃/风险/沉睡/流失等）。筛选用作运营排查；圈人发券请到「客户分群 → 营销活动」。社会贡献身份审核在「社会贡献」。"
+    />
+    <el-alert
       v-if="listBirthdayBenefit?.text"
       type="info"
       show-icon

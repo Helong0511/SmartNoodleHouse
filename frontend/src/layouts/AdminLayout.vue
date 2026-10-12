@@ -161,7 +161,10 @@ const openGroup = computed(() => {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
-  if (['/customers', '/member-levels', '/coupons', '/wallet', '/social-benefits'].includes(p)) return 'g-member'
+  if (
+    ['/customers', '/member-levels', '/coupons', '/wallet', '/social-benefits'].includes(p)
+    || p.startsWith('/marketing/')
+  ) return 'g-member'
   if (['/tables', '/users', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
   if (['/settings', '/audit-logs', '/role-permissions'].includes(p)) return 'g-system'
