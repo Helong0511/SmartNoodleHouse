@@ -30,9 +30,26 @@
       description="本页只统计营销活动（发券归因）。环卫/骑手/长者等身份折扣的人次与补贴在「社会贡献 → 本月看板」，不要混在同一张 ROI 表里解读。"
     />
 
+    <div class="filter-bar">
+      <el-select
+        v-if="auth.isSuperAdmin"
+        v-model="filterStoreId"
+        clearable
+        placeholder="门店（空=全部/含总部）"
+        style="width: 200px"
+        @change="load"
+      >
+        <el-option v-for="s in storeOptions" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
+    </div>
+
     <el-empty v-if="!loading && !items.length" description="暂无活动数据；发布并产生发券/核销后才会出现在此" />
     <el-table v-else :data="items" v-loading="loading" stripe>
       <el-table-column prop="campaign_id" label="ID" width="70" />
+      <el-table-column label="门店" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ storeLabel(row.store_id) }}</template>
+      </el-table-column>
       <el-table-column prop="code" label="编码" width="120" />
       <el-table-column prop="name" label="活动" min-width="140" />
       <el-table-column prop="status" label="状态" width="100" />
@@ -56,13 +73,31 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 
 const router = useRouter()
+const auth = useAuthStore()
+const { storeOptions, loadStores } = useStoreOptions()
 const loading = ref(false)
 const items = ref<any[]>([])
+const filterStoreId = ref<number | undefined>()
+
+const boundStoreName = computed(() => {
+  if (auth.isSuperAdmin) return ''
+  const sid = auth.user?.store_id
+  const s = storeOptions.value.find((x) => x.id === sid)
+  return s?.name || auth.user?.store_name || (sid ? `门店#${sid}` : '')
+})
+
+function storeLabel(id: number | null | undefined) {
+  if (id == null) return '总部'
+  const s = storeOptions.value.find((x) => x.id === id)
+  return s?.name || `#${id}`
+}
 
 function goCampaigns() {
   router.push('/marketing/campaigns')
@@ -74,8 +109,16 @@ function goSocial() {
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/marketing/reports/overview')
-    items.value = res.data?.items || []
+    await loadStores()
+    if (!auth.isSuperAdmin && auth.user?.store_id) filterStoreId.value = auth.user.store_id
+    const sid = auth.isSuperAdmin ? filterStoreId.value : auth.user?.store_id
+    const res = await api.get('/marketing/reports/overview', {
+      params: sid ? { store_id: sid } : {},
+    })
+    items.value = (res.data?.items || []).map((row: any) => ({
+      ...row,
+      store_id: row.store_id ?? null,
+    }))
   } finally {
     loading.value = false
   }
@@ -135,4 +178,5 @@ onMounted(load)
 .sub { margin: 0; font-size: 13px; color: #888; line-height: 1.5; max-width: 640px; }
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
 .tip { margin-bottom: 10px; }
+.filter-bar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
 </style>

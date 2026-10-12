@@ -651,6 +651,11 @@ class RecommendationService:
     @staticmethod
     async def load_campaign_boost_ids(db: AsyncSession, store_id: int) -> set[int]:
         """合并本店+总部 RUNNING 活动的 boost_product_ids。"""
+        from app.services.marketing_service import MarketingService
+
+        # 本店关闭营销活动时，不应用任何推荐加权（含总部活动）
+        if not await MarketingService.is_enabled(db, int(store_id)):
+            return set()
         now = datetime.utcnow()
         rows = (
             await db.execute(

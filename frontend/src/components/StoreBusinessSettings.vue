@@ -43,12 +43,12 @@
           <el-form-item v-for="item in itemsOfGroup(g.id)" :key="item.key" :label="item.label">
             <el-switch v-if="item.type === 'bool'" v-model="item.boolValue" />
             <el-select
-              v-else-if="item.key === 'welcome_coupon_name' || item.key === 'birthday_coupon_name'"
+              v-else-if="isCouponNameSelect(item.key)"
               v-model="item.strValue"
               filterable
               clearable
-              placeholder="不赠券"
-              style="max-width: 480px; width: 100%"
+              placeholder="不赠券 / 关闭"
+              style="max-width: 520px; width: 100%"
             >
               <el-option-group v-if="couponOptions(item, 'STORE').length" label="本店券模板">
                 <el-option
@@ -69,6 +69,41 @@
               <el-option
                 v-for="opt in couponOptions(item, 'CURRENT')"
                 :key="`cur-${opt.value}`"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+            <el-select
+              v-else-if="item.key === 'welcome_bundle_template_ids'"
+              v-model="item.idListValue"
+              multiple
+              filterable
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              placeholder="不选则回退「新客赠券模板名」"
+              style="max-width: 560px; width: 100%"
+              @change="onBundleIdsChange(item)"
+            >
+              <el-option-group v-if="couponOptions(item, 'STORE').length" label="本店券模板">
+                <el-option
+                  v-for="opt in couponOptions(item, 'STORE')"
+                  :key="`b-store-${opt.value}`"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-option-group>
+              <el-option-group v-if="couponOptions(item, 'HQ').length" label="总部券模板">
+                <el-option
+                  v-for="opt in couponOptions(item, 'HQ')"
+                  :key="`b-hq-${opt.value}`"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-option-group>
+              <el-option
+                v-for="opt in couponOptions(item, 'CURRENT')"
+                :key="`b-cur-${opt.value}`"
                 :label="opt.label"
                 :value="opt.value"
               />
@@ -216,11 +251,25 @@ const ENUM_LABELS: Record<string, Record<string, string>> = {
   },
 }
 
+const COUPON_NAME_SELECT_KEYS = new Set([
+  'welcome_coupon_name',
+  'birthday_coupon_name',
+  'sleep_wake_coupon_name_30',
+  'sleep_wake_coupon_name_90',
+  'love_day_soy_template_name',
+])
+
+function isCouponNameSelect(key: string) {
+  return COUPON_NAME_SELECT_KEYS.has(key)
+}
+
 function enumLabel(key: string, value: string) {
   return ENUM_LABELS[key]?.[value] || value
 }
 
 function isLongText(item: any) {
+  // 新人礼包虽 max_length≥500，但用多选，不当成长文本框
+  if (item.key === 'welcome_bundle_template_ids') return false
   const max = Number(item.max_length || 0)
   return max >= 500
 }
@@ -233,8 +282,30 @@ function couponOptions(item: any, scope: 'STORE' | 'HQ' | 'CURRENT') {
   return (item?.options || []).filter((o: any) => o.scope === scope)
 }
 
+function parseBundleIdList(raw: string, idValues?: string[]): string[] {
+  if (Array.isArray(idValues) && idValues.length) {
+    return idValues.map((x) => String(x))
+  }
+  const text = (raw || '').trim()
+  if (!text) return []
+  try {
+    const data = JSON.parse(text)
+    if (!Array.isArray(data)) return []
+    return data.map((x) => String(parseInt(String(x), 10))).filter((x) => /^\d+$/.test(x) && Number(x) > 0)
+  } catch {
+    return []
+  }
+}
+
+function onBundleIdsChange(item: any) {
+  const ids = (item.idListValue || [])
+    .map((x: string) => parseInt(String(x), 10))
+    .filter((n: number) => Number.isFinite(n) && n > 0)
+  item.strValue = ids.length ? JSON.stringify(ids) : ''
+}
+
 function isDirty(item: any) {
-  if (item.key === 'welcome_coupon_name' || item.key === 'birthday_coupon_name') {
+  if (isCouponNameSelect(item.key) || item.key === 'welcome_bundle_template_ids') {
     return (item.strValue || '') !== (item._savedStr || '')
   }
   if (item.type === 'bool') return item.boolValue !== item._savedBool
@@ -293,7 +364,11 @@ function buildBusinessForm(items: any[]) {
     }
     if (item.type === 'string' || item.type === 'enum') {
       const strValue = item.value == null ? '' : String(item.value)
-      return { ...item, strValue, _savedStr: strValue }
+      const row: any = { ...item, strValue, _savedStr: strValue }
+      if (item.key === 'welcome_bundle_template_ids') {
+        row.idListValue = parseBundleIdList(strValue, item.id_values)
+      }
+      return row
     }
     const numValue = parseNum(item)
     return { ...item, numValue, _saved: numValue }
@@ -355,14 +430,18 @@ async function clearStoreOverride(item: any) {
 function resetBusinessGroup(groupId: string) {
   for (const item of itemsOfGroup(groupId)) {
     if (item.type === 'bool') item.boolValue = item._savedBool
-    else if (item.type === 'string' || item.type === 'enum') item.strValue = item._savedStr
-    else item.numValue = item._saved
+    else if (item.type === 'string' || item.type === 'enum') {
+      item.strValue = item._savedStr
+      if (item.key === 'welcome_bundle_template_ids') {
+        item.idListValue = parseBundleIdList(item._savedStr || '', item.id_values)
+      }
+    } else item.numValue = item._saved
   }
 }
 
 function payloadOfItem(item: any): string | number | boolean {
   if (item.type === 'bool') return item.boolValue
-  if (item.key === 'welcome_coupon_name' || item.key === 'birthday_coupon_name') {
+  if (isCouponNameSelect(item.key) || item.key === 'welcome_bundle_template_ids') {
     return item.strValue || ''
   }
   if (item.type === 'string' || item.type === 'enum') return item.strValue

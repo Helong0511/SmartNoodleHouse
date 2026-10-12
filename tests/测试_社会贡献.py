@@ -1,13 +1,15 @@
-"""社会贡献 P0：限次、互斥、台账、门店隔离、幂等。"""
+"""社会贡献 P0：限次、互斥、台账、门店隔离、幂等；小程序申请→审核。"""
 from decimal import Decimal
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.core.exceptions import AppException
 from app.core.response import money
 from app.models import (
     Customer,
+    CustomerSocialIdentity,
     MemberLevel,
     Product,
     ProductCategory,
@@ -260,3 +262,155 @@ async def test_支付确认与退款冲减(db_session, sb):
     await SocialBenefitService.reverse_for_order(db_session, 9004)
     await db_session.refresh(row)
     assert row.status == "REVERSED"
+
+
+@pytest.mark.asyncio
+async def test_小程序申请进入PENDING并可审核(db_session, sb):
+    row = await SocialBenefitService.apply_identity(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        verify_method="MINI",
+        credential_note="小程序申请",
+    )
+    await db_session.commit()
+    assert row.status == SocialBenefitService.PENDING
+    assert row.verify_method == "MINI"
+    assert int(row.store_id) == int(sb["store1"].id)
+
+    # 幂等：重复申请返回同一 PENDING
+    again = await SocialBenefitService.apply_identity(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        verify_method="MINI",
+        credential_note="再次点申请",
+    )
+    assert again.id == row.id
+
+    items, total = await SocialBenefitService.list_identities(
+        db_session, store_id=sb["store1"].id, status="PENDING"
+    )
+    assert total >= 1
+    hit = next(x for x in items if int(x["id"]) == int(row.id))
+    assert hit.get("customer_nickname") or hit.get("customer_no") or hit.get("customer_id")
+
+    approved = await SocialBenefitService.review_identity(
+        db_session,
+        identity_id=int(row.id),
+        approve=True,
+        reviewer_id=1,
+        store_id=sb["store1"].id,
+    )
+    await db_session.commit()
+    assert approved.status == SocialBenefitService.ACTIVE
+
+    # ACTIVE 后再申请应拒绝
+    with pytest.raises(AppException) as ei:
+        await SocialBenefitService.apply_identity(
+            db_session,
+            customer_id=sb["c1"].id,
+            identity_code="SANITATION",
+            store_id=sb["store1"].id,
+            verify_method="MINI",
+        )
+    assert ei.value.code == 40901
+
+    revoked = await SocialBenefitService.revoke_identity(
+        db_session,
+        identity_id=int(approved.id),
+        operator_id=1,
+        store_id=sb["store1"].id,
+        reason="顾客管理取消",
+    )
+    await db_session.commit()
+    assert revoked.status == SocialBenefitService.REVOKED
+    assert "取消" in (revoked.reject_reason or "")
+
+    # 取消后禁止再申请（任意公益身份）
+    with pytest.raises(AppException) as ej:
+        await SocialBenefitService.apply_identity(
+            db_session,
+            customer_id=sb["c1"].id,
+            identity_code="SANITATION",
+            store_id=sb["store1"].id,
+            verify_method="MINI",
+            credential_note="取消后再申请",
+        )
+    assert ej.value.code == 40901
+    assert "不可再次申请" in ej.value.message
+
+
+@pytest.mark.asyncio
+async def test_申请无效身份类型(db_session, sb):
+    with pytest.raises(AppException) as ei:
+        await SocialBenefitService.apply_identity(
+            db_session,
+            customer_id=sb["c1"].id,
+            identity_code="NOT_A_TYPE",
+            store_id=sb["store1"].id,
+            verify_method="MINI",
+        )
+    assert ei.value.code == 40002
+    assert "无效公益身份" in ei.value.message
+
+
+@pytest.mark.asyncio
+async def test_建单公益与券互斥(db_session, sb):
+    from app.services.customer_service import OrderCreateService
+
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.commit()
+
+    with pytest.raises(AppException) as ei:
+        await OrderCreateService.create_order(
+            db_session,
+            store_id=sb["store1"].id,
+            table_token=None,
+            customer_id=sb["c1"].id,
+            channel="H5",
+            dining_type="TAKEAWAY",
+            need_pack=True,
+            items=[{"product_id": sb["prod"].id, "quantity": 1, "option_ids": []}],
+            use_social_benefit=True,
+            customer_coupon_id=999001,
+            idempotency_key="sb-exclusive-coupon-1",
+        )
+    assert ei.value.code == 40008
+    assert "不可与优惠券同享" in ei.value.message
+
+    order = await OrderCreateService.create_order(
+        db_session,
+        store_id=sb["store1"].id,
+        table_token=None,
+        customer_id=sb["c1"].id,
+        channel="H5",
+        dining_type="TAKEAWAY",
+        need_pack=True,
+        items=[{"product_id": sb["prod"].id, "quantity": 1, "option_ids": []}],
+        use_social_benefit=True,
+        idempotency_key="sb-social-only-1",
+    )
+    await db_session.commit()
+    assert money(order.discount_amount) == money("4.00")
+    assert money(order.coupon_discount) == money("0.00")
+    assert order.customer_coupon_id is None
+    assert money(order.total_amount) == money("16.00")
+    red = (
+        await db_session.execute(
+            select(CustomerSocialIdentity).where(
+                CustomerSocialIdentity.customer_id == sb["c1"].id,
+                CustomerSocialIdentity.identity_code == "SANITATION",
+                CustomerSocialIdentity.status == "ACTIVE",
+            )
+        )
+    ).scalar_one()
+    assert red is not None

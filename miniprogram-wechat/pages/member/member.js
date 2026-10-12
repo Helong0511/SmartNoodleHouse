@@ -93,6 +93,11 @@ Page({
     socialIdentities: [],
     socialLoading: false,
     socialApplying: false,
+    socialExpanded: false,
+    socialCanApply: true,
+    socialApproved: false,
+    socialRevoked: false,
+    socialSummary: '点击展开申请',
     phone: '',
     canWxPhone: false,
     showDevTips: false,
@@ -230,14 +235,71 @@ Page({
     this.loadSocialIdentities()
   },
 
+  _socialLabelMap() {
+    return { SANITATION: '环卫工', RIDER: '骑手', ELDER: '长者', TEACHER: '教师', STUDENT: '学生' }
+  },
+
+  _socialStatusMap() {
+    return {
+      PENDING: '待审核',
+      ACTIVE: '已生效',
+      REJECTED: '已拒绝',
+      REVOKED: '已取消',
+      EXPIRED: '已过期'
+    }
+  },
+
+  _buildSocialState(items) {
+    const labelMap = this._socialLabelMap()
+    const statusMap = this._socialStatusMap()
+    const list = (items || []).map((item) => {
+      const code = String(item.identity_code || '').toUpperCase()
+      const st = String(item.status || '').toUpperCase()
+      return {
+        ...item,
+        identity_code: code,
+        status: st,
+        displayLabel: labelMap[code] || code,
+        statusLabel: statusMap[st] || st
+      }
+    })
+    const active = list.find((i) => i.status === 'ACTIVE')
+    const pending = list.find((i) => i.status === 'PENDING')
+    const revoked = list.find((i) => i.status === 'REVOKED')
+    let socialSummary = '点击展开申请'
+    if (revoked) socialSummary = '已取消，不可再申请'
+    else if (active) socialSummary = `已通过 · ${active.displayLabel}`
+    else if (pending) socialSummary = `待审核 · ${pending.displayLabel}`
+    return {
+      socialIdentities: list,
+      socialCanApply: !active && !revoked,
+      socialApproved: !!active,
+      socialRevoked: !!revoked,
+      socialSummary
+    }
+  },
+
+  toggleSocialExpand() {
+    this.setData({ socialExpanded: !this.data.socialExpanded })
+  },
+
   async loadSocialIdentities() {
+    if (!auth.getToken()) {
+      try { await auth.ensureLogin() } catch (_) { return }
+    }
     if (!auth.getToken()) return
     this.setData({ socialLoading: true })
     try {
       const res = await api.get('/social-benefits/identities/mine')
-      this.setData({ socialIdentities: (res && res.items) || [], socialLoading: false })
+      this.setData({
+        ...this._buildSocialState((res && res.items) || []),
+        socialLoading: false
+      })
     } catch (e) {
-      this.setData({ socialIdentities: [], socialLoading: false })
+      this.setData({
+        ...this._buildSocialState([]),
+        socialLoading: false
+      })
     }
   },
 
@@ -246,22 +308,56 @@ Page({
   },
 
   async applySocialIdentity(e) {
+    if (this.data.socialRevoked) {
+      wx.showToast({ title: '公益身份已取消，不可再申请', icon: 'none' })
+      return
+    }
+    if (this.data.socialApproved || !this.data.socialCanApply) {
+      wx.showToast({ title: '公益身份已通过，无需再申请', icon: 'none' })
+      return
+    }
+    try {
+      await auth.ensureLogin()
+    } catch (_) {
+      wx.showToast({ title: '请先登录', icon: 'none' })
+      return
+    }
     if (!auth.getToken()) {
       wx.showToast({ title: '请先登录', icon: 'none' })
       return
     }
     const code = ((e && e.currentTarget && e.currentTarget.dataset && e.currentTarget.dataset.code) || 'SANITATION').toUpperCase()
+    const labelMap = this._socialLabelMap()
     this.setData({ socialApplying: true })
     try {
-      await api.post('/social-benefits/identities/apply', {
+      // 优先桌台上下文门店，避免 store_id 为空导致后台难按店归集
+      let storeId = this.data.storeId || null
+      try {
+        const ctx = dineCtx.currentDisplay() || {}
+        if (ctx.storeId) storeId = ctx.storeId
+      } catch (_) { /* ignore */ }
+      const row = await api.post('/social-benefits/identities/apply', {
         identity_code: code,
-        store_id: this.data.storeId || null,
+        store_id: storeId,
         credential_note: '小程序申请'
       })
-      wx.showToast({ title: '已提交申请', icon: 'success' })
+      const st = (row && row.status) || 'PENDING'
+      wx.showToast({
+        title: st === 'ACTIVE' ? `${labelMap[code] || code}已生效` : `${labelMap[code] || code}已提交，待店员审核`,
+        icon: 'success',
+        duration: 2500
+      })
+      this.setData({ socialExpanded: true })
       this.loadSocialIdentities()
     } catch (err) {
-      wx.showToast({ title: (err && err.message) || '申请失败', icon: 'none' })
+      const msg = (err && err.message) || '申请失败'
+      wx.showModal({
+        title: '申请未成功',
+        content: /无效公益身份/.test(msg)
+          ? `${msg}\n请确认后台已导入社会贡献身份类型（social_identity_types）。`
+          : msg,
+        showCancel: false
+      })
     } finally {
       this.setData({ socialApplying: false })
     }

@@ -59,15 +59,22 @@ async def list_segments(
     request: Request,
     db: DbSession,
     user: CurrentUser,
+    store_id: int | None = Query(default=None, description="超管按门店筛选；本店账号忽略"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    store_id = require_bound_store(user, None)
+    sid = require_bound_store(user, store_id)
     items, total = await SegmentService.list_segments(
-        db, store_id=store_id, page=page, page_size=page_size
+        db, store_id=sid, page=page, page_size=page_size
     )
     return success(
-        {"items": items, "total": total, "page": page, "pages": calc_pages(total, page_size)},
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "pages": calc_pages(total, page_size),
+            "filter_store_id": sid,
+        },
         request=request,
     )
 
@@ -167,16 +174,25 @@ async def list_campaigns(
     request: Request,
     db: DbSession,
     user: CurrentUser,
+    store_id: int | None = Query(default=None, description="超管按门店筛选；本店账号忽略"),
     status: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    store_id = require_bound_store(user, None)
+    sid = require_bound_store(user, store_id)
     items, total = await MarketingService.list_campaigns(
-        db, store_id=store_id, status=status, page=page, page_size=page_size
+        db, store_id=sid, status=status, page=page, page_size=page_size
     )
+    enabled = await MarketingService.is_enabled(db, sid)
     return success(
-        {"items": items, "total": total, "page": page, "pages": calc_pages(total, page_size)},
+        {
+            "items": items,
+            "total": total,
+            "page": page,
+            "pages": calc_pages(total, page_size),
+            "filter_store_id": sid,
+            "marketing_enabled": enabled,
+        },
         request=request,
     )
 
@@ -332,8 +348,15 @@ async def retry_failed_tasks(
 
 
 @router.get("/reports/overview", dependencies=[require_permission("coupon:read")])
-async def marketing_report_overview(request: Request, db: DbSession, user: CurrentUser):
+async def marketing_report_overview(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = Query(default=None, description="超管按门店筛选；本店账号忽略"),
+):
     """活动核销率 / 归因实收 / ROI（无明文手机）。"""
-    store_id = require_bound_store(user, None)
-    data = await MarketingService.report_overview(db, store_id=store_id)
+    sid = require_bound_store(user, store_id)
+    data = await MarketingService.report_overview(db, store_id=sid)
+    data["filter_store_id"] = sid
+    data["marketing_enabled"] = await MarketingService.is_enabled(db, sid)
     return success(data, request=request)

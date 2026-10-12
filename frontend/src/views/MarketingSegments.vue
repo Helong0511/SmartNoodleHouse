@@ -29,9 +29,26 @@
       description="支持 field：member_status / days_since_order / days_since_member / points / balance_total / has_order / status / account_status / registered_store_id。运算符：eq / gt / gte / lt / lte。结构示例：{&quot;all&quot;:[{&quot;field&quot;:&quot;member_status&quot;,&quot;op&quot;:&quot;eq&quot;,&quot;value&quot;:&quot;MEMBER&quot;}]}。导出与估人数均无明文手机。"
     />
 
+    <div class="filter-bar">
+      <el-select
+        v-if="auth.isSuperAdmin"
+        v-model="filterStoreId"
+        clearable
+        placeholder="门店（空=全部/含总部）"
+        style="width: 200px"
+        @change="load"
+      >
+        <el-option v-for="s in storeOptions" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
+    </div>
+
     <el-empty v-if="!loading && !items.length" description="暂无分群；可新建，或确认已导入 data_custom 预置分群" />
     <el-table v-else :data="items" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="70" />
+      <el-table-column label="门店" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ storeLabel(row.store_id) }}</template>
+      </el-table-column>
       <el-table-column prop="code" label="编码" width="140" />
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="segment_type" label="类型" width="100" />
@@ -57,6 +74,14 @@
         title="编码建议用英文业务键（如 sleep30）。保存后可估人数；发券前建议先物化。"
       />
       <el-form label-width="100px">
+        <el-form-item v-if="auth.isSuperAdmin" label="归属门店">
+          <el-select v-model="form.store_id" clearable placeholder="总部（全店共享）" style="width:100%" :disabled="!!form.id">
+            <el-option v-for="s in storeOptions" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="归属门店">
+          <el-tag type="info">{{ boundStoreName || '本店' }}</el-tag>
+        </el-form-item>
         <el-form-item label="编码"><el-input v-model="form.code" placeholder="如 sleep30" /></el-form-item>
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 沉睡30天" /></el-form-item>
         <el-form-item label="类型">
@@ -104,26 +129,45 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import { useStoreOptions } from '@/composables/useStoreOptions'
 
 const router = useRouter()
+const auth = useAuthStore()
+const { storeOptions, loadStores } = useStoreOptions()
 const loading = ref(false)
 const saving = ref(false)
 const items = ref<any[]>([])
+const filterStoreId = ref<number | undefined>()
 const dlg = ref(false)
 const estDlg = ref(false)
 const rulesText = ref('{"all":[{"field":"member_status","op":"eq","value":"MEMBER"}]}')
 const form = reactive<any>({
   id: null,
+  store_id: null as number | null,
   code: '',
   name: '',
   segment_type: 'DYNAMIC',
   status: 1,
 })
 const est = reactive<{ count: number; samples: any[] }>({ count: 0, samples: [] })
+
+const boundStoreName = computed(() => {
+  if (auth.isSuperAdmin) return ''
+  const sid = auth.user?.store_id
+  const s = storeOptions.value.find((x) => x.id === sid)
+  return s?.name || auth.user?.store_name || (sid ? `门店#${sid}` : '')
+})
+
+function storeLabel(id: number | null | undefined) {
+  if (id == null) return '总部'
+  const s = storeOptions.value.find((x) => x.id === id)
+  return s?.name || `#${id}`
+}
 
 function goCampaigns() {
   router.push('/marketing/campaigns')
@@ -132,7 +176,12 @@ function goCampaigns() {
 async function load() {
   loading.value = true
   try {
-    const res = await api.get('/marketing/segments', { params: { page_size: 50 } })
+    await loadStores()
+    if (!auth.isSuperAdmin && auth.user?.store_id) filterStoreId.value = auth.user.store_id
+    const sid = auth.isSuperAdmin ? filterStoreId.value : auth.user?.store_id
+    const res = await api.get('/marketing/segments', {
+      params: { page_size: 50, ...(sid ? { store_id: sid } : {}) },
+    })
     items.value = res.data?.items || []
   } finally {
     loading.value = false
@@ -142,6 +191,7 @@ async function load() {
 function openEdit(row?: any) {
   if (row) {
     form.id = row.id
+    form.store_id = row.store_id ?? null
     form.code = row.code
     form.name = row.name
     form.segment_type = row.segment_type || 'DYNAMIC'
@@ -149,6 +199,9 @@ function openEdit(row?: any) {
     rulesText.value = JSON.stringify(row.rules_json || { all: [] }, null, 2)
   } else {
     form.id = null
+    form.store_id = auth.isSuperAdmin
+      ? (filterStoreId.value ?? null)
+      : (auth.user?.store_id ?? null)
     form.code = ''
     form.name = ''
     form.segment_type = 'DYNAMIC'
@@ -174,6 +227,7 @@ async function save() {
       segment_type: form.segment_type,
       rules_json: rules,
       status: form.status,
+      store_id: auth.isSuperAdmin ? (form.store_id || null) : (auth.user?.store_id || null),
     }
     if (form.id) await api.put(`/marketing/segments/${form.id}`, body)
     else await api.post('/marketing/segments', body)
@@ -186,9 +240,11 @@ async function save() {
 }
 
 async function estimate(row: any) {
+  const sid = row.store_id || filterStoreId.value || auth.user?.store_id
   const res = await api.post('/marketing/segments/estimate', {
     rules_json: row.rules_json,
     sample_limit: 20,
+    store_id: sid || null,
   })
   est.count = res.data?.count || 0
   est.samples = res.data?.samples || []
@@ -217,4 +273,5 @@ onMounted(load)
 .sub { margin: 0; font-size: 13px; color: #888; line-height: 1.5; max-width: 720px; }
 .header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .tip { margin-bottom: 10px; }
+.filter-bar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
 </style>

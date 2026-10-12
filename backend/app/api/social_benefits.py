@@ -4,7 +4,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Query, Request
 
-from app.api.deps import CurrentCustomer, CurrentUser, DbSession, require_permission, require_pos
+from app.api.deps import (
+    CurrentCustomer,
+    CurrentUser,
+    DbSession,
+    require_permission,
+    require_pos,
+    require_social_identity_manage,
+)
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.services.audit_service import AuditService
@@ -34,6 +41,10 @@ class ReviewIn(BaseModel):
     reject_reason: str | None = Field(default=None, max_length=255)
 
 
+class RevokeIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=255)
+
+
 class PreviewIn(BaseModel):
     customer_id: int | None = Field(default=None, ge=1)
     store_id: int = Field(..., ge=1)
@@ -50,6 +61,16 @@ async def identity_types(request: Request, db: DbSession):
     return success({"items": items}, request=request)
 
 
+def _mini_verify_method(request: Request) -> str:
+    """小程序申请落库：按 JWT channel 区分微信/支付宝；未知则回退 MINI。"""
+    ch = str(getattr(request.state, "customer_channel", "") or "").strip().lower()
+    if ch == "wechat":
+        return "WECHAT"
+    if ch == "alipay":
+        return "ALIPAY"
+    return "MINI"
+
+
 @router.post("/identities/apply")
 async def apply_identity(
     data: ApplyIdentityIn, request: Request, db: DbSession, customer: CurrentCustomer
@@ -59,7 +80,7 @@ async def apply_identity(
         customer_id=int(customer.id),
         identity_code=data.identity_code.strip().upper(),
         store_id=data.store_id,
-        verify_method="MINI",
+        verify_method=_mini_verify_method(request),
         credential_note=data.credential_note,
         credential_media_url=data.credential_media_url,
     )
@@ -98,7 +119,7 @@ async def list_identities(
     )
 
 
-@router.post("/identities/{identity_id}/review", dependencies=[require_permission("customer:manage")])
+@router.post("/identities/{identity_id}/review", dependencies=[require_social_identity_manage()])
 async def review_identity(
     identity_id: int,
     data: ReviewIn,
@@ -124,6 +145,39 @@ async def review_identity(
         target_type="customer_social_identity",
         target_id=row.id,
         detail={"approve": data.approve, "status": row.status},
+        request=request,
+        store_id=row.store_id,
+    )
+    return success(SocialBenefitService._identity_payload(row, staff=True), request=request)
+
+
+@router.post("/identities/{identity_id}/revoke", dependencies=[require_social_identity_manage()])
+async def revoke_identity(
+    identity_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    data: RevokeIn = RevokeIn(),
+):
+    """取消顾客公益身份：已生效→REVOKED，待审→REJECTED。"""
+    store_id = require_bound_store(user, None)
+    reason = data.reason
+    row = await SocialBenefitService.revoke_identity(
+        db,
+        identity_id=identity_id,
+        operator_id=int(user.id),
+        store_id=store_id,
+        reason=reason,
+    )
+    await db.commit()
+    await AuditService.log(
+        db,
+        action="social.identity.revoke",
+        module="social",
+        user_id=user.id,
+        target_type="customer_social_identity",
+        target_id=row.id,
+        detail={"status": row.status, "reason": row.reject_reason},
         request=request,
         store_id=row.store_id,
     )

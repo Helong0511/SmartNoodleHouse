@@ -21,6 +21,13 @@ function isProfileComplete(source) {
   return !isPlaceholderNickname(nickname)
 }
 
+function getToken() {
+  const app = getAppSafe()
+  return String(
+    (app && app.globalData && app.globalData.customerToken) || readStorage('customer_token') || ''
+  ).trim()
+}
+
 function getAppSafe() {
   try {
     return getApp()
@@ -618,6 +625,7 @@ module.exports = {
   patchMemberProfile,
   saveCart,
   getCart,
+  getToken,
   currentStoreId,
   ensureCartForCurrentStore,
   logoutCustomer,

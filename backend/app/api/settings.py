@@ -698,24 +698,121 @@ async def _welcome_coupon_options(db, store_id: int, *, current: str = "") -> li
     return options
 
 
-async def _assert_welcome_coupon_choice(db, store_id: int, name: str) -> None:
+# 按「模板名」下拉选择的门店业务项（与新客/生日同一套 options）
+_COUPON_NAME_SELECT_KEYS = frozenset(
+    {
+        "welcome_coupon_name",
+        "birthday_coupon_name",
+        "sleep_wake_coupon_name_30",
+        "sleep_wake_coupon_name_90",
+        "love_day_soy_template_name",
+    }
+)
+
+_COUPON_NAME_SELECT_HINT = {
+    "welcome_coupon_name": "新客赠券",
+    "birthday_coupon_name": "生日赠券",
+    "sleep_wake_coupon_name_30": "沉睡唤醒券(30–90天)",
+    "sleep_wake_coupon_name_90": "沉睡唤醒券(≥90天)",
+    "love_day_soy_template_name": "爱心日豆浆券",
+}
+
+
+async def _assert_coupon_name_choice(db, store_id: int, key: str, name: str) -> None:
     raw = (name or "").strip()
     if not raw:
         return
     options = await _welcome_coupon_options(db, store_id, current="")
     allowed = {o["value"] for o in options if o.get("scope") in ("STORE", "HQ")}
     if raw not in allowed:
-        raise AppException(40014, "新客赠券须选择本店或总部已启用的券模板，或留空表示不赠券")
+        label = _COUPON_NAME_SELECT_HINT.get(key, "赠券")
+        raise AppException(40014, f"{label}须选择本店或总部已启用的券模板，或留空表示关闭")
 
 
-async def _assert_birthday_coupon_choice(db, store_id: int, name: str) -> None:
-    raw = (name or "").strip()
-    if not raw:
-        return
-    options = await _welcome_coupon_options(db, store_id, current="")
-    allowed = {o["value"] for o in options if o.get("scope") in ("STORE", "HQ")}
-    if raw not in allowed:
-        raise AppException(40014, "生日赠券须选择本店或总部已启用的券模板，或留空表示不赠券")
+async def _coupon_template_id_options(db, store_id: int, *, current_ids: list[int] | None = None) -> list[dict]:
+    """新人礼包多选：value=模板 id（字符串），便于前端多选。"""
+    from app.services.coupon_service import CouponService
+
+    rows = await CouponService.list_templates(db, include_disabled=False, store_id=int(store_id))
+    options: list[dict] = []
+    seen: set[int] = set()
+    for t in rows:
+        tid = int(t.get("id") or 0)
+        name = str(t.get("name") or "").strip()
+        if tid <= 0 or not name:
+            continue
+        scope = "STORE" if t.get("store_id") else "HQ"
+        summary = str(t.get("summary") or "").strip()
+        label = f"{'本店' if scope == 'STORE' else '总部'} · {name} #{tid}"
+        if summary:
+            label = f"{label}（{summary}）"
+        options.append(
+            {
+                "value": str(tid),
+                "label": label,
+                "scope": scope,
+                "summary": summary,
+                "name": name,
+            }
+        )
+        seen.add(tid)
+    options.sort(key=lambda o: (0 if o["scope"] == "STORE" else 1, o["label"]))
+    for tid in current_ids or []:
+        if int(tid) in seen:
+            continue
+        options.append(
+            {
+                "value": str(int(tid)),
+                "label": f"当前值 · 模板#{int(tid)}（已停用或不属于本店/总部）",
+                "scope": "CURRENT",
+                "summary": "",
+                "name": "",
+            }
+        )
+    return options
+
+
+def _parse_welcome_bundle_ids(raw: str) -> list[int]:
+    import json
+
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise AppException(40014, "新人礼包须为 JSON 数组，如 [1,2,3]") from e
+    if not isinstance(data, list):
+        raise AppException(40014, "新人礼包须为 JSON 数组")
+    out: list[int] = []
+    for x in data:
+        try:
+            tid = int(x)
+        except (TypeError, ValueError) as e:
+            raise AppException(40014, "新人礼包模板 ID 须为正整数") from e
+        if tid <= 0:
+            raise AppException(40014, "新人礼包模板 ID 须为正整数")
+        if tid not in out:
+            out.append(tid)
+    return out
+
+
+async def _assert_welcome_bundle_choice(db, store_id: int, raw: str) -> str:
+    """校验并规范化 welcome_bundle_template_ids，返回紧凑 JSON 字符串。"""
+    import json
+
+    ids = _parse_welcome_bundle_ids(raw)
+    if not ids:
+        return ""
+    options = await _coupon_template_id_options(db, store_id, current_ids=[])
+    allowed = {int(o["value"]) for o in options if o.get("scope") in ("STORE", "HQ")}
+    bad = [i for i in ids if i not in allowed]
+    if bad:
+        raise AppException(
+            40014,
+            f"新人礼包含不可用模板 ID: {', '.join(str(x) for x in bad)}；请从本店或总部已启用模板中选择",
+        )
+    return json.dumps(ids, ensure_ascii=False, separators=(",", ":"))
 
 
 def _group_store_items(items: list[dict]) -> list[dict]:
@@ -772,8 +869,15 @@ async def get_store_business(
         }
         if it.get("type") == "bool":
             row["bool_value"] = SystemSettingsService._parse_bool(effective, False)
-        if key in ("welcome_coupon_name", "birthday_coupon_name"):
+        if key in _COUPON_NAME_SELECT_KEYS:
             row["options"] = await _welcome_coupon_options(db, store_id, current=str(effective or ""))
+        if key == "welcome_bundle_template_ids":
+            try:
+                cur_ids = _parse_welcome_bundle_ids(str(effective or ""))
+            except AppException:
+                cur_ids = []
+            row["options"] = await _coupon_template_id_options(db, store_id, current_ids=cur_ids)
+            row["id_values"] = [str(i) for i in cur_ids]
         items.append(row)
     return success(
         {
@@ -823,10 +927,10 @@ async def update_store_business(
             sval = SystemSettingsService._validate_value(key, str(val if val is not None else ""))
         except ValueError as e:
             raise AppException(40014, str(e)) from e
-        if key == "welcome_coupon_name":
-            await _assert_welcome_coupon_choice(db, store_id, sval)
-        if key == "birthday_coupon_name":
-            await _assert_birthday_coupon_choice(db, store_id, sval)
+        if key in _COUPON_NAME_SELECT_KEYS:
+            await _assert_coupon_name_choice(db, store_id, key, sval)
+        if key == "welcome_bundle_template_ids":
+            sval = await _assert_welcome_bundle_choice(db, store_id, sval)
         if key in existing:
             existing[key].setting_value = sval
         else:

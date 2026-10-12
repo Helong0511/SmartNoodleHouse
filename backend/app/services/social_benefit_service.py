@@ -79,7 +79,10 @@ class SocialBenefitService:
             )
         ).scalar_one_or_none()
         if not row:
-            raise AppException(40002, f"无效公益身份: {code}")
+            raise AppException(
+                40002,
+                f"无效公益身份: {code}（库中无启用的身份类型，请导入 sql/data_sys.sql 中的 social_identity_types，或到「社会贡献」确认身份配置）",
+            )
         return row
 
     @staticmethod
@@ -114,10 +117,25 @@ class SocialBenefitService:
         credential_note: str | None = None,
         credential_media_url: str | None = None,
     ) -> CustomerSocialIdentity:
+        if not await SocialBenefitService.is_enabled(db, store_id=store_id):
+            raise AppException(40008, "本店暂未开启社会贡献公益，请联系店员")
         await SocialBenefitService._get_type(db, identity_code)
         cust = await db.get(Customer, int(customer_id))
         if not cust or int(cust.status) != 1:
             raise AppException(40406, "顾客不存在或已停用")
+        # 曾被店员取消（REVOKED）的顾客禁止再申请任意公益身份
+        revoked = (
+            await db.execute(
+                select(CustomerSocialIdentity.id)
+                .where(
+                    CustomerSocialIdentity.customer_id == int(customer_id),
+                    CustomerSocialIdentity.status == SocialBenefitService.REVOKED,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if revoked is not None:
+            raise AppException(40901, "您的公益身份已被取消，不可再次申请，如有疑问请到店咨询")
         existing = (
             await db.execute(
                 select(CustomerSocialIdentity).where(
@@ -258,6 +276,35 @@ class SocialBenefitService:
         return row
 
     @staticmethod
+    async def revoke_identity(
+        db: AsyncSession,
+        *,
+        identity_id: int,
+        operator_id: int,
+        store_id: int | None = None,
+        reason: str | None = None,
+    ) -> CustomerSocialIdentity:
+        """取消公益身份：ACTIVE/PENDING 均→REVOKED（取消后不可再小程序申请）。"""
+        row = await db.get(CustomerSocialIdentity, int(identity_id))
+        if not row:
+            raise AppException(40406, "认定记录不存在")
+        if store_id is not None and row.store_id and int(row.store_id) != int(store_id):
+            raise AppException(40301, "无权取消其他门店认定")
+        if row.status not in (SocialBenefitService.PENDING, SocialBenefitService.ACTIVE):
+            raise AppException(40008, f"当前状态不可取消: {row.status}")
+        now = now_local()
+        if now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        note = (reason or "").strip()[:255]
+        row.reviewed_by = int(operator_id)
+        row.reviewed_at = now
+        was_pending = row.status == SocialBenefitService.PENDING
+        row.status = SocialBenefitService.REVOKED
+        row.reject_reason = note or ("店员取消申请" if was_pending else "店员取消公益身份")
+        await db.flush()
+        return row
+
+    @staticmethod
     async def list_identities(
         db: AsyncSession,
         *,
@@ -292,7 +339,22 @@ class SocialBenefitService:
                 .limit(page_size)
             )
         ).scalars().all()
-        return [SocialBenefitService._identity_payload(r, staff=True) for r in rows], total
+        items = [SocialBenefitService._identity_payload(r, staff=True) for r in rows]
+        # 待审列表补姓名/手机，方便店员核对（不改表结构）
+        cids = sorted({int(r.customer_id) for r in rows if r.customer_id})
+        if cids:
+            custs = (
+                await db.execute(select(Customer).where(Customer.id.in_(cids)))
+            ).scalars().all()
+            cmap = {int(c.id): c for c in custs}
+            for it in items:
+                c = cmap.get(int(it["customer_id"]))
+                if not c:
+                    continue
+                it["customer_nickname"] = c.nickname or c.display_name
+                it["customer_phone"] = c.phone
+                it["customer_no"] = getattr(c, "customer_no", None)
+        return items, total
 
     @staticmethod
     async def mine_identities(db: AsyncSession, customer_id: int) -> list[dict]:

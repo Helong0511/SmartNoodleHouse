@@ -101,6 +101,9 @@ async def get_current_customer(
     if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
         raise AppException(TOKEN_INVALID, "令牌已失效，请重新登录", status_code=401)
     request.state.customer = customer
+    # 微信/支付宝小程序 JWT channel，供申请公益身份等按渠道落库
+    ch = str(payload.get("channel") or "").strip().lower()
+    request.state.customer_channel = ch if ch in ("wechat", "alipay") else ""
     return customer
 
 
@@ -228,5 +231,19 @@ def require_settlement_manage(detail: str = "仅店长或超管可执行该操�
         if "payment:refund" not in perms:
             raise AppException(40300, detail, status_code=403)
         return user
+
+    return Depends(checker)
+
+
+def require_social_identity_manage():
+    """社会贡献认定审核/取消：超管、店长，或持有 customer:manage / customer:write。"""
+
+    async def checker(user: CurrentUser, db: DbSession):
+        if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
+            return user
+        perms = await get_user_permissions(db, user.role_id)
+        if "customer:manage" in perms or "customer:write" in perms:
+            return user
+        raise AppException(40300, "无权管理社会贡献认定", status_code=403)
 
     return Depends(checker)

@@ -132,9 +132,33 @@
             </el-select>
             <p v-if="selectedCustomerLabel" class="member-tip">已选：{{ selectedCustomerLabel }} · 计入折扣/积分/成单里程碑</p>
             <p v-else class="member-tip muted">不选则按散客收款，不计会员权益</p>
-            <div v-if="selectedCustomerId" class="social-row">
-              <el-checkbox v-model="useSocialBenefit" @change="onSocialBenefitToggle">公益折扣</el-checkbox>
-              <el-button size="small" :loading="socialVerifying" @click="posSocialVerify">公益核验(环卫)</el-button>
+            <div v-if="selectedCustomerId" class="social-block">
+              <div class="social-row">
+                <el-checkbox v-model="useSocialBenefit" @change="onSocialBenefitToggle">公益折扣</el-checkbox>
+                <el-select
+                  v-model="verifyIdentityCode"
+                  placeholder="核验身份"
+                  size="small"
+                  style="width: 120px"
+                  :disabled="!socialIdentityTypes.length"
+                >
+                  <el-option
+                    v-for="t in socialIdentityTypes"
+                    :key="t.code"
+                    :label="t.name"
+                    :value="t.code"
+                  />
+                </el-select>
+                <el-button size="small" :loading="socialVerifying" :disabled="!verifyIdentityCode" @click="posSocialVerify">
+                  当场核验
+                </el-button>
+              </div>
+              <p v-if="!socialIdentityTypes.length" class="member-tip warn-tip">
+                未加载到公益身份类型（库缺 social_identity_types）。请导入 sql/data_sys.sql 后再核验。
+              </p>
+              <p v-else class="member-tip muted">
+                按「已认定身份 + 规则时段」生效（如环卫全天8折、骑手14–17点），不是教师节等节日才出现教师项；教师需先配置规则并核验 TEACHER。
+              </p>
             </div>
             <div v-if="selectedCustomerId && !useSocialBenefit" class="coupon-pick">
               <label>优惠券</label>
@@ -144,6 +168,7 @@
                 placeholder="不使用优惠券"
                 style="width: 100%"
                 :disabled="!availableCoupons.length"
+                @change="onCouponSelectionChange"
               >
                 <el-option
                   v-for="c in availableCoupons"
@@ -159,6 +184,7 @@
                 placeholder="不使用代金券"
                 style="width: 100%"
                 :disabled="!availableVouchers.length"
+                @change="onCouponSelectionChange"
               >
                 <el-option
                   v-for="c in availableVouchers"
@@ -168,7 +194,7 @@
                 />
               </el-select>
               <p v-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
-                该会员有可用券，请选择后才会计入收款优惠
+                该会员有可用券，请选择后点「去收款」才会按券重算应收
               </p>
             </div>
             <div v-if="selectedCustomerId && serviceCard" class="service-card" v-loading="serviceCardLoading">
@@ -667,6 +693,8 @@ const selectedCustomerId = ref<number | undefined>()
 const customerOptions = ref<any[]>([])
 const useSocialBenefit = ref(false)
 const socialVerifying = ref(false)
+const socialIdentityTypes = ref<any[]>([])
+const verifyIdentityCode = ref<string>('SANITATION')
 const customerSearching = ref(false)
 const serviceCard = ref<any | null>(null)
 const serviceCardLoading = ref(false)
@@ -1250,10 +1278,15 @@ function idempotencyKey() {
 }
 
 function validateBeforeCheckout(): boolean {
-  if (!cart.value.length) return false
   const sid = effectiveStoreId()
   if (!sid) {
     ElMessage.warning('请先选择门店')
+    return false
+  }
+  // 挂单恢复 / 分笔收款：订单已创建，购物车可能已空，仍应允许结算
+  if (checkoutOrderId.value) return true
+  if (!cart.value.length) {
+    ElMessage.warning('请先点餐')
     return false
   }
   const catIssues = validateCategoryRequires(cart.value, products.value, categories.value)
@@ -1262,6 +1295,21 @@ function validateBeforeCheckout(): boolean {
     return false
   }
   return true
+}
+
+async function loadSocialIdentityTypes() {
+  try {
+    const res = await api.get('/social-benefits/identity-types')
+    socialIdentityTypes.value = res.data?.items || []
+    if (
+      socialIdentityTypes.value.length
+      && !socialIdentityTypes.value.some((t: any) => t.code === verifyIdentityCode.value)
+    ) {
+      verifyIdentityCode.value = socialIdentityTypes.value[0].code
+    }
+  } catch {
+    socialIdentityTypes.value = []
+  }
 }
 
 async function posSocialVerify() {
@@ -1274,17 +1322,30 @@ async function posSocialVerify() {
     ElMessage.warning('请先选择门店')
     return
   }
+  const code = (verifyIdentityCode.value || '').trim().toUpperCase()
+  if (!code) {
+    ElMessage.warning('请选择要核验的公益身份')
+    return
+  }
+  if (!socialIdentityTypes.value.length) {
+    ElMessage.error('库中无公益身份类型，请先导入 sql/data_sys.sql（social_identity_types）')
+    return
+  }
   socialVerifying.value = true
   try {
+    const typeName = socialIdentityTypes.value.find((t: any) => t.code === code)?.name || code
     await api.post('/social-benefits/identities/pos-verify', {
       customer_id: selectedCustomerId.value,
-      identity_code: 'SANITATION',
+      identity_code: code,
       store_id: sid,
       activate: true,
       credential_note: 'POS当场核验',
     })
+    clearCouponSelection()
     useSocialBenefit.value = true
-    ElMessage.success('已认定环卫身份，可勾选公益折扣下单')
+    await loadServiceCard(selectedCustomerId.value, { keepSelection: true })
+    ElMessage.success(`已认定「${typeName}」，勾选公益折扣后下单生效（须命中规则时段）`)
+    if (checkoutOrderId.value) await bindCustomerOnCheckoutOrder()
   } catch (e: any) {
     ElMessage.error(e?.message || '公益核验失败')
   } finally {
@@ -1350,6 +1411,19 @@ function ensureSelectedCouponOptions(extra?: { couponId?: number | null; voucher
 
 function onSocialBenefitToggle() {
   if (useSocialBenefit.value) clearCouponSelection()
+  if (checkoutOrderId.value) bindCustomerOnCheckoutOrder()
+}
+
+async function onCouponSelectionChange() {
+  if (useSocialBenefit.value) {
+    clearCouponSelection()
+    ElMessage.warning('已勾选公益折扣，不可同时用券')
+    return
+  }
+  // 已建单则立即重算；未建单则等「去收款」建单时带上所选券
+  if (checkoutOrderId.value) {
+    await bindCustomerOnCheckoutOrder()
+  }
 }
 
 async function createPosOrder() {
@@ -1849,16 +1923,32 @@ async function confirmCloseShift() {
   }
 }
 
-function openCheckout() {
+async function openCheckout() {
   if (!validateBeforeCheckout()) return
+  // 先建单再弹收款：把会员折/券/公益一次性算进应收，避免弹窗仍显示购物车原价
   invalidateCheckoutOrder()
-  payStep.value = 'pick'
-  checkoutAmount.value = cartTotal.value
-  paidAmount.value = '0.00'
-  remainingAmount.value = cartTotal.value
-  tenders.value = []
-  tenderAmount.value = cartTotal.value
-  payDialogVisible.value = true
+  paying.value = true
+  try {
+    await createPosOrder()
+    payStep.value = 'pick'
+    paidAmount.value = '0.00'
+    remainingAmount.value = checkoutAmount.value
+    tenders.value = []
+    tenderAmount.value = remainingAmount.value
+    payDialogVisible.value = true
+    const couponOff = Number(checkoutCouponDiscount.value || 0)
+    const voucherOff = Number(checkoutVoucherDiscount.value || 0)
+    const memberOff = Number(checkoutMemberDiscount.value || 0)
+    if (selectedCouponId.value || selectedVoucherId.value || useSocialBenefit.value) {
+      if (couponOff + voucherOff + memberOff <= 0 && (selectedCouponId.value || selectedVoucherId.value)) {
+        ElMessage.warning('已选券但未产生减免，请核对满减门槛 / 门店限制 / 是否与会员折互斥')
+      }
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '建单失败，无法进入收款')
+  } finally {
+    paying.value = false
+  }
 }
 
 /** 挂单：创建订单后不进入支付，回到菜单继续操作 */
@@ -1972,23 +2062,19 @@ async function ensureOrder() {
   if (checkoutOrderId.value) return checkoutOrderId.value
   // 建单前先记住本笔金额，避免被重置成全额待收
   const keepTender = tenderAmount.value
-  paying.value = true
-  try {
-    const data = await createPosOrder()
-    checkoutAmount.value = data.total_amount || cartTotal.value
-    paidAmount.value = '0.00'
-    remainingAmount.value = checkoutAmount.value
-    const keep = parseFloat(keepTender)
-    const rem = parseFloat(String(remainingAmount.value))
-    if (Number.isFinite(keep) && keep > 0 && Number.isFinite(rem) && keep <= rem + 0.001) {
-      tenderAmount.value = keep.toFixed(2)
-    } else {
-      tenderAmount.value = remainingAmount.value
-    }
-    return data.id as number
-  } finally {
-    paying.value = false
+  // 不在此改 paying：由 confirmCashPay / startBarcodePay 等调用方统一控制 loading
+  const data = await createPosOrder()
+  checkoutAmount.value = data.total_amount || cartTotal.value
+  paidAmount.value = '0.00'
+  remainingAmount.value = checkoutAmount.value
+  const keep = parseFloat(keepTender)
+  const rem = parseFloat(String(remainingAmount.value))
+  if (Number.isFinite(keep) && keep > 0 && Number.isFinite(rem) && keep <= rem + 0.001) {
+    tenderAmount.value = keep.toFixed(2)
+  } else {
+    tenderAmount.value = remainingAmount.value
   }
+  return data.id as number
 }
 
 function openCashPay() {
@@ -2172,6 +2258,7 @@ onMounted(async () => {
   await loadMenu()
   await loadShift()
   await loadPendingOrders()
+  await loadSocialIdentityTypes()
   if (standalone.value) document.title = '收银点餐'
   document.addEventListener('fullscreenchange', onFsChange)
 })
@@ -2713,11 +2800,14 @@ watch(() => auth.user?.store_id, () => {
   color: #67c23a;
 }
 
+.social-block {
+  margin-top: 8px;
+}
+
 .social-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
   flex-wrap: wrap;
 }
 

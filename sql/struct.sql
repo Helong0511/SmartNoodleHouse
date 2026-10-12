@@ -1616,7 +1616,7 @@ CREATE TABLE IF NOT EXISTS `customer_social_identities` (
   `identity_code` varchar(32) NOT NULL COMMENT '身份编码 → social_identity_types.code',
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '认定门店 → stores.id；NULL=总部认定',
   `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/ACTIVE/REJECTED/EXPIRED/REVOKED',
-  `verify_method` varchar(50) NULL DEFAULT NULL COMMENT '核验方式 POS/MINI/MANUAL',
+  `verify_method` varchar(50) NULL DEFAULT NULL COMMENT '核验方式 POS/WECHAT/ALIPAY/MINI/MANUAL',
   `credential_note` varchar(255) NULL DEFAULT NULL COMMENT '凭证备注（脱敏）',
   `credential_media_url` varchar(500) NULL DEFAULT NULL COMMENT '证件图路径（仅店长可读）',
   `valid_from` datetime(3) NULL DEFAULT NULL COMMENT '生效开始',

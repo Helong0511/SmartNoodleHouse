@@ -178,12 +178,12 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
     },
     "welcome_bundle_template_ids": {
         "group": "member",
-        "label": "新人礼包模板ID列表",
+        "label": "新人礼包券模板",
         "unit": "",
         "type": "string",
         "max_length": 500,
         "store_override": True,
-        "description": "JSON 数组如 [1,2,3]；非空时按 ID 发多张欢迎券（幂等）；空则回退「新客赠券模板名」",
+        "description": "多选本店/总部已启用券模板；非空时按所选发多张欢迎券（幂等）；空则回退「新客赠券模板名」",
     },
     "birthday_benefit_mode": {
         "group": "member",
@@ -222,7 +222,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "string",
         "max_length": 100,
         "store_override": True,
-        "description": "距上次消费 30–90 天会员唤醒券模板名；留空关闭该档",
+        "description": "从本店或总部已启用券模板中选择；距上次消费 30–90 天唤醒；留空关闭该档",
     },
     "sleep_wake_coupon_name_90": {
         "group": "member",
@@ -231,7 +231,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "string",
         "max_length": 100,
         "store_override": True,
-        "description": "距上次消费 ≥90 天会员唤醒券模板名；留空关闭该档",
+        "description": "从本店或总部已启用券模板中选择；距上次消费 ≥90 天唤醒；留空关闭该档",
     },
     "balance_low_threshold": {
         "group": "member",
@@ -252,6 +252,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "default": True,
         "store_override": True,
         "description": "开启后 POS/小程序可核验公益身份并按规则打折",
+    },
+    "enable_marketing_campaigns": {
+        "group": "member",
+        "label": "营销活动",
+        "unit": "",
+        "type": "bool",
+        "default": True,
+        "store_override": True,
+        "description": "关闭后本店不可新建/发布营销活动，推荐加权也不再生效；总部活动仍可由超管在「总部」范围发布",
     },
     "marketing_weekly_cap": {
         "group": "member",
@@ -297,13 +306,13 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
     },
     "love_day_soy_template_name": {
         "group": "member",
-        "label": "爱心日豆浆券模板名",
+        "label": "爱心日豆浆券模板",
         "unit": "",
         "type": "string",
         "max_length": 100,
         "default": "",
         "store_override": True,
-        "description": "空=关闭；配置后每周爱心日给 ACTIVE 公益身份顾客发券（幂等 love_day:）",
+        "description": "从本店或总部已启用券模板中选择；空=关闭；配置后每周爱心日给 ACTIVE 公益身份发券（幂等 love_day:）",
     },
     "love_day_weekday": {
         "group": "member",

@@ -120,19 +120,32 @@
     </view>
 
     <view class="card">
-      <view class="title">社会贡献公益</view>
-      <view class="tip" a:if="{{socialLoading}}">加载中...</view>
-      <view class="tip" a:elif="{{!socialIdentities.length}}">到店出示工牌，可由收银员当场认定；也可在此申请。</view>
-      <view class="wallet-item" a:for="{{socialIdentities}}" a:key="id">
-        <view class="wallet-main">
-          <view class="wallet-name">{{item.identity_code}} · {{item.status}}</view>
-          <view class="wallet-rule">{{item.credential_note || '已提交'}}</view>
+      <view class="title-row social-toggle" onTap="toggleSocialExpand">
+        <view class="social-title-wrap">
+          <view class="title">社会贡献公益</view>
+          <view class="social-summary" a:if="{{socialSummary}}">{{socialSummary}}</view>
         </view>
+        <text class="social-chevron">{{socialExpanded ? '▾' : '›'}}</text>
       </view>
-      <view class="btn-row">
-        <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="SANITATION" onTap="applySocialIdentity">申请环卫工</button>
-        <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="RIDER" onTap="applySocialIdentity">申请骑手</button>
-        <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="ELDER" onTap="applySocialIdentity">申请长者</button>
+      <view a:if="{{socialExpanded}}">
+        <view class="tip" a:if="{{socialLoading}}">加载中...</view>
+        <block a:else>
+          <view class="tip" a:if="{{socialRevoked}}">您的公益身份已被取消，不可再次申请；如有疑问请到店咨询。</view>
+          <view class="tip" a:elif="{{socialApproved}}">您的公益身份已审核通过，结算时可选用公益折扣。</view>
+          <view class="tip" a:elif="{{!socialIdentities.length}}">到店出示工牌，可由收银员当场认定；也可在此申请（提交后进后台「社会贡献 → 待审认定」）。</view>
+          <view class="wallet-item" a:for="{{socialIdentities}}" a:key="id">
+            <view class="wallet-main">
+              <view class="wallet-name">{{item.displayLabel}} · {{item.statusLabel}}</view>
+              <view class="wallet-rule">{{item.credential_note || '已提交'}}</view>
+            </view>
+          </view>
+          <view class="tip">公益折扣与会员折/优惠券默认互斥：结算时请二选一（公益，或会员+券）。</view>
+          <view class="btn-row" a:if="{{socialCanApply}}">
+            <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="SANITATION" onTap="applySocialIdentity">申请环卫工</button>
+            <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="RIDER" onTap="applySocialIdentity">申请骑手</button>
+            <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="ELDER" onTap="applySocialIdentity">申请长者</button>
+          </view>
+        </block>
       </view>
     </view>
 

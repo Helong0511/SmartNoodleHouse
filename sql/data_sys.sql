@@ -943,6 +943,16 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'enable_social_benefit'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'enable_marketing_campaigns',
+    'true',
+    '营销活动开关（可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'enable_marketing_campaigns'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'marketing_weekly_cap',
     '3',
     '营销活动每人每周发券上限'

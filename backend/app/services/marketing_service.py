@@ -48,6 +48,27 @@ class MarketingService:
             return DEFAULT_WEEKLY_CAP
 
     @classmethod
+    async def is_enabled(cls, db: AsyncSession, store_id: int | None) -> bool:
+        """门店/总部是否开启营销活动（store_settings 覆盖优先）。"""
+        raw = await SystemSettingsService.effective_setting(
+            db,
+            "enable_marketing_campaigns",
+            store_id=int(store_id) if store_id is not None else None,
+            fallback="true",
+        )
+        return SystemSettingsService._parse_bool(raw, True)
+
+    @classmethod
+    async def assert_enabled(cls, db: AsyncSession, store_id: int | None) -> None:
+        if await cls.is_enabled(db, store_id):
+            return
+        scope = f"门店#{int(store_id)}" if store_id is not None else "总部/全局"
+        raise AppException(
+            40008,
+            f"{scope}已关闭「营销活动」。请到门店信息 → 业务参数 → 会员与优惠中开启 enable_marketing_campaigns",
+        )
+
+    @classmethod
     async def count_weekly_issues(cls, db: AsyncSession, customer_id: int) -> int:
         since = naive_local_now() - timedelta(days=7)
         cnt = await db.scalar(
@@ -171,6 +192,10 @@ class MarketingService:
             row = MarketingCampaign(store_id=store_id, code=code, status="DRAFT", created_by=created_by)
             db.add(row)
 
+        # 新建时校验门店营销开关；编辑草稿仍允许改内容，发布时再校验
+        if campaign_id is None:
+            await cls.assert_enabled(db, store_id)
+
         if segment_id:
             await SegmentService.get_segment(db, segment_id)
         if coupon_template_id:
@@ -196,6 +221,7 @@ class MarketingService:
     async def publish(cls, db: AsyncSession, campaign_id: int, *, enqueue: bool = True) -> dict:
         """发布：DRAFT/SCHEDULED → SCHEDULED|RUNNING，并入队 ISSUE_COUPON。"""
         camp = await cls.get_campaign(db, campaign_id)
+        await cls.assert_enabled(db, camp.store_id)
         if camp.status not in PUBLISHABLE_STATUSES:
             raise AppException(40001, f"当前状态不可发布: {camp.status}")
         if not camp.segment_id:
@@ -573,6 +599,7 @@ class MarketingService:
             items.append(
                 {
                     "campaign_id": int(c.id),
+                    "store_id": int(c.store_id) if c.store_id else None,
                     "code": c.code,
                     "name": c.name,
                     "status": c.status,

@@ -20,6 +20,17 @@
     <text a:elif="{{nextLevelName}}">再积 {{pointsToNext}} 分升级 {{nextLevelName}}{{nextLevelDiscountText ? '（' + nextLevelDiscountText + '）' : ''}}</text>
     <text a:else>会员身份已识别</text>
   </view>
+  <view class="coupon-box" a:if="{{hasSocialBenefit && payMethod !== 'BALANCE'}}">
+    <view class="label">社会贡献公益</view>
+    <view class="pack-row" style="justify-content:space-between;align-items:center">
+      <view>
+        <view>{{socialBenefitLabel || '公益折扣'}}</view>
+        <view class="pack-tip">与会员折/优惠券互斥，开启后不可用券</view>
+        <view class="pack-tip" a:if="{{socialRecommendTip && !useSocialBenefit}}">{{socialRecommendTip}}</view>
+      </view>
+      <switch checked="{{useSocialBenefit}}" onChange="onToggleSocial" color="#ff6b35" />
+    </view>
+  </view>
   <view class="table-box" a:if="{{!needPack}}">
     <view class="label">堂食桌号（必选）</view>
     <view a:if="{{tableToken}}" class="table-on">{{tableName || pickedLabel || '已绑桌'}}</view>
@@ -54,6 +65,10 @@
       <text>会员优惠{{memberDiscountText ? '（' + memberDiscountText + '）' : ''}}</text>
       <text>-¥{{discountAmount}}</text>
     </view>
+    <view class="sum-row discount" a:if="{{hasSocialDiscount}}">
+      <text>公益折扣{{socialBenefitLabel ? '（' + socialBenefitLabel + '）' : ''}}</text>
+      <text>-¥{{socialDiscountAmount}}</text>
+    </view>
     <view class="sum-row discount" a:if="{{hasCouponDiscount}}">
       <text>优惠券{{selectedCouponLabel && selectedCouponLabel != '不使用优惠券' ? '（' + selectedCouponLabel + '）' : ''}}</text>
       <text>-¥{{couponDiscountAmount}}</text>
@@ -76,13 +91,13 @@
     </view>
   </view>
 
-  <view class="coupon-box" a:if="{{coupons.length}}">
+  <view class="coupon-box" a:if="{{coupons.length && !useSocialBenefit}}">
     <view class="label">优惠券</view>
     <picker mode="selector" range="{{couponPickerLabels}}" onChange="onPickCoupon">
       <view class="coupon-pick">{{selectedCouponLabel}}</view>
     </picker>
   </view>
-  <view class="coupon-box" a:if="{{vouchers.length}}">
+  <view class="coupon-box" a:if="{{vouchers.length && !useSocialBenefit}}">
     <view class="label">代金券</view>
     <picker mode="selector" range="{{voucherPickerLabels}}" onChange="onPickVoucher">
       <view class="coupon-pick">{{selectedVoucherLabel}}</view>

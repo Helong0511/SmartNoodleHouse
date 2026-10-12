@@ -28,12 +28,28 @@
         />
         <el-empty v-if="!loading && !identities.length" description="暂无待审申请；可让顾客在小程序申请，或收银当场核验" />
         <el-table v-else :data="identities" v-loading="loading" stripe>
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="customer_id" label="顾客ID" width="100" />
-          <el-table-column prop="identity_code" label="身份" width="120" />
-          <el-table-column prop="credential_note" label="凭证备注" min-width="160" />
-          <el-table-column prop="status" label="状态" width="100" />
-          <el-table-column label="操作" width="180">
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column label="顾客" min-width="140">
+            <template #default="{ row }">
+              <div>{{ row.customer_nickname || row.customer_no || ('#' + row.customer_id) }}</div>
+              <div style="color:#888;font-size:12px">{{ row.customer_phone || '无手机' }} · ID {{ row.customer_id }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="身份" width="110">
+            <template #default="{ row }">{{ identityLabel(row.identity_code) }}</template>
+          </el-table-column>
+          <el-table-column label="来源" width="90">
+            <template #default="{ row }">{{ verifyMethodLabel(row.verify_method) }}</template>
+          </el-table-column>
+          <el-table-column prop="store_id" label="门店" width="80">
+            <template #default="{ row }">{{ row.store_id ?? '未绑店' }}</template>
+          </el-table-column>
+          <el-table-column prop="credential_note" label="凭证备注" min-width="140" />
+          <el-table-column prop="created_at" label="申请时间" min-width="160" />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">{{ identityStatusLabel(row.status) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <el-button
                 v-if="row.status === 'PENDING'"
@@ -63,10 +79,14 @@
         <el-table v-else :data="rules" v-loading="loading" stripe>
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="name" label="名称" min-width="140" />
-          <el-table-column prop="identity_code" label="身份" width="120" />
+          <el-table-column label="身份" width="120">
+            <template #default="{ row }">{{ identityLabel(row.identity_code) }}</template>
+          </el-table-column>
           <el-table-column prop="discount_rate" label="折扣率" width="100" />
           <el-table-column prop="daily_limit" label="日限次" width="90" />
-          <el-table-column prop="stack_policy" label="叠加策略" width="120" />
+          <el-table-column label="叠加策略" width="120">
+            <template #default="{ row }">{{ stackPolicyLabel(row.stack_policy) }}</template>
+          </el-table-column>
           <el-table-column prop="store_id" label="门店" width="90">
             <template #default="{ row }">{{ row.store_id ?? '总部' }}</template>
           </el-table-column>
@@ -85,9 +105,13 @@
         <el-table v-else :data="redemptions" v-loading="loading" stripe>
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="customer_id" label="顾客" width="90" />
-          <el-table-column prop="identity_code" label="身份" width="110" />
+          <el-table-column label="身份" width="110">
+            <template #default="{ row }">{{ identityLabel(row.identity_code) }}</template>
+          </el-table-column>
           <el-table-column prop="subsidy_amount" label="补贴" width="90" />
-          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">{{ redeemStatusLabel(row.status) }}</template>
+          </el-table-column>
           <el-table-column prop="order_id" label="订单" width="90" />
           <el-table-column prop="created_at" label="时间" min-width="160" />
         </el-table>
@@ -99,7 +123,7 @@
           :closable="false"
           show-icon
           class="tab-tip"
-          title="按自然月统计 NORMAL 核销。可与「营销报表」对照活动补贴，勿把公益台账与营销归因混为一谈。"
+          title="按自然月统计已生效核销。可与「营销报表」对照活动补贴，勿把公益台账与营销归因混为一谈。"
         />
         <el-descriptions v-loading="loading" :column="3" border style="margin-bottom:12px">
           <el-descriptions-item label="月份">{{ stats?.year }}-{{ stats?.month }}</el-descriptions-item>
@@ -109,7 +133,9 @@
         </el-descriptions>
         <el-empty v-if="!loading && !(stats?.by_identity || []).length" description="本月尚无按身份汇总的核销" />
         <el-table v-else :data="stats?.by_identity || []" stripe>
-          <el-table-column prop="identity_code" label="身份" />
+          <el-table-column label="身份">
+            <template #default="{ row }">{{ identityLabel(row.identity_code) }}</template>
+          </el-table-column>
           <el-table-column prop="redemptions" label="人次" width="100" />
           <el-table-column prop="subsidy_amount" label="补贴" width="120" />
         </el-table>
@@ -129,6 +155,62 @@ const identities = ref<any[]>([])
 const rules = ref<any[]>([])
 const redemptions = ref<any[]>([])
 const stats = ref<any>(null)
+
+const VERIFY_LABELS: Record<string, string> = {
+  WECHAT: '微信',
+  ALIPAY: '支付宝',
+  MINI: '小程序',
+  POS: '收银核验',
+  MANUAL: '手工认定',
+}
+const IDENTITY_LABELS: Record<string, string> = {
+  SANITATION: '环卫工',
+  RIDER: '骑手',
+  ELDER: '长者',
+  TEACHER: '教师',
+  STUDENT: '学生',
+}
+const IDENTITY_STATUS_LABELS: Record<string, string> = {
+  PENDING: '待审核',
+  ACTIVE: '已生效',
+  REJECTED: '已拒绝',
+  REVOKED: '已取消',
+  EXPIRED: '已过期',
+}
+const REDEEM_STATUS_LABELS: Record<string, string> = {
+  PENDING: '待确认',
+  NORMAL: '已生效',
+  REVERSED: '已冲减',
+}
+const STACK_POLICY_LABELS: Record<string, string> = {
+  EXCLUSIVE: '互斥（不可叠券/会员折）',
+  STACKABLE: '可叠加',
+}
+
+function verifyMethodLabel(method: string) {
+  const key = String(method || '').toUpperCase()
+  return VERIFY_LABELS[key] || method || '—'
+}
+
+function identityLabel(code: string) {
+  const key = String(code || '').toUpperCase()
+  return IDENTITY_LABELS[key] || code || '—'
+}
+
+function identityStatusLabel(status: string) {
+  const key = String(status || '').toUpperCase()
+  return IDENTITY_STATUS_LABELS[key] || status || '—'
+}
+
+function redeemStatusLabel(status: string) {
+  const key = String(status || '').toUpperCase()
+  return REDEEM_STATUS_LABELS[key] || status || '—'
+}
+
+function stackPolicyLabel(policy: string) {
+  const key = String(policy || '').toUpperCase()
+  return STACK_POLICY_LABELS[key] || policy || '—'
+}
 
 async function loadPending() {
   loading.value = true

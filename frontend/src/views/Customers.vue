@@ -339,6 +339,47 @@
 
         <div class="pref-block">
           <div class="section-head">
+            <h4>社会贡献公益</h4>
+            <el-button size="small" :loading="socialLoading" @click="loadCustomerSocial(detail.id)">刷新</el-button>
+          </div>
+          <p class="muted tip">展示该顾客公益身份认定；取消后立即失效，且该顾客不可再通过小程序申请公益身份。</p>
+          <p v-if="socialLoading" class="muted">加载中…</p>
+          <el-table v-else-if="socialIdentities.length" :data="socialIdentities" size="small" border>
+            <el-table-column label="身份" width="100">
+              <template #default="{ row }">{{ socialIdentityLabel(row.identity_code) }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="socialStatusTag(row.status)">{{ socialStatusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="来源" width="90">
+              <template #default="{ row }">{{ socialVerifyLabel(row.verify_method) }}</template>
+            </el-table-column>
+            <el-table-column label="备注" min-width="120">
+              <template #default="{ row }">{{ row.credential_note || row.reject_reason || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="时间" width="160">
+              <template #default="{ row }">{{ row.created_at || '—' }}</template>
+            </el-table-column>
+            <el-table-column v-if="canManageSocial" label="操作" width="88" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.status === 'ACTIVE' || row.status === 'PENDING'"
+                  link
+                  type="danger"
+                  :loading="socialBusyId === row.id"
+                  @click="revokeSocialIdentity(row)"
+                >取消</el-button>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p v-else class="muted">暂无公益身份认定</p>
+        </div>
+
+        <div class="pref-block">
+          <div class="section-head">
             <h4>收藏餐品</h4>
           </div>
           <div v-if="canEditCustomer" class="fav-add">
@@ -559,6 +600,63 @@ const canMergeCustomer = computed(
 const canEditCustomer = computed(
   () => auth.isSuperAdmin || auth.hasPermission('customer:write'),
 )
+const canManageSocial = computed(
+  () =>
+    auth.isSuperAdmin
+    || auth.isStoreAdmin
+    || auth.hasPermission('customer:manage')
+    || auth.hasPermission('customer:write'),
+)
+
+const socialIdentities = ref<any[]>([])
+const socialLoading = ref(false)
+const socialBusyId = ref<number | null>(null)
+
+const SOCIAL_IDENTITY_LABELS: Record<string, string> = {
+  SANITATION: '环卫工',
+  RIDER: '骑手',
+  ELDER: '长者',
+  TEACHER: '教师',
+  STUDENT: '学生',
+}
+const SOCIAL_STATUS_LABELS: Record<string, string> = {
+  PENDING: '待审核',
+  ACTIVE: '已生效',
+  REJECTED: '已拒绝',
+  REVOKED: '已取消',
+  EXPIRED: '已过期',
+}
+const SOCIAL_VERIFY_LABELS: Record<string, string> = {
+  WECHAT: '微信',
+  ALIPAY: '支付宝',
+  MINI: '小程序',
+  POS: '收银核验',
+  MANUAL: '手工认定',
+}
+
+function socialIdentityLabel(code: string) {
+  const key = String(code || '').toUpperCase()
+  return SOCIAL_IDENTITY_LABELS[key] || code || '—'
+}
+
+function socialVerifyLabel(method: string) {
+  const key = String(method || '').toUpperCase()
+  return SOCIAL_VERIFY_LABELS[key] || method || '—'
+}
+
+function socialStatusLabel(status: string) {
+  const key = String(status || '').toUpperCase()
+  return SOCIAL_STATUS_LABELS[key] || status || '—'
+}
+
+function socialStatusTag(status: string) {
+  const key = String(status || '').toUpperCase()
+  if (key === 'ACTIVE') return 'success'
+  if (key === 'PENDING') return 'warning'
+  if (key === 'REJECTED' || key === 'REVOKED') return 'info'
+  if (key === 'EXPIRED') return 'danger'
+  return 'info'
+}
 
 const editForm = reactive({
   display_name: '',
@@ -876,16 +974,62 @@ async function loadCustomerCoupons(customerId: number) {
   }
 }
 
+async function loadCustomerSocial(customerId: number) {
+  socialLoading.value = true
+  socialIdentities.value = []
+  try {
+    const res = await api.get('/social-benefits/identities', {
+      params: { customer_id: customerId, page: 1, page_size: 50 },
+    })
+    socialIdentities.value = res.data?.items || []
+  } catch {
+    socialIdentities.value = []
+  } finally {
+    socialLoading.value = false
+  }
+}
+
+async function revokeSocialIdentity(row: any) {
+  if (!row?.id || !canManageSocial.value) return
+  const name = socialIdentityLabel(row.identity_code)
+  const isPending = row.status === 'PENDING'
+  try {
+    await ElMessageBox.confirm(
+      isPending
+        ? `确认取消该顾客的「${name}」待审申请？取消后该顾客不可再申请公益身份。`
+        : `确认取消该顾客的「${name}」公益身份？取消后结算无法再用公益折扣，且该顾客不可再申请。`,
+      '取消社会贡献公益',
+      { type: 'warning', confirmButtonText: '确认取消', cancelButtonText: '返回' },
+    )
+  } catch {
+    return
+  }
+  socialBusyId.value = row.id
+  try {
+    await api.post(`/social-benefits/identities/${row.id}/revoke`, {
+      reason: isPending ? '顾客管理取消申请' : '顾客管理取消公益身份',
+    })
+    ElMessage.success(isPending ? '已取消申请' : '已取消公益身份')
+    if (detail.value?.id) await loadCustomerSocial(detail.value.id)
+  } catch (e: any) {
+    ElMessage.error(e.message || '取消失败')
+  } finally {
+    socialBusyId.value = null
+  }
+}
+
 async function showDetail(id: number) {
   drawer.value = true
   detail.value = null
   customerCoupons.value = []
   customerVouchers.value = []
+  socialIdentities.value = []
   favAddProductId.value = undefined
   favProductOptions.value = []
   const [detailRes] = await Promise.all([
     api.get(`/customers/${id}`),
     loadCustomerCoupons(id),
+    loadCustomerSocial(id),
   ])
   applyDetailPayload(detailRes.data)
 }
