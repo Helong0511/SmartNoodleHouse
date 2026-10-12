@@ -1655,7 +1655,8 @@ class OrderCreateService:
                     ):
                         social_hit = (rule, rule.identity_code)
                 if social_hit is None and use_social_benefit:
-                    social_hit = await SocialBenefitService.find_best_rule(
+                    # 显式勾选公益：必须命中，禁止静默改走会员折
+                    social_hit = await SocialBenefitService.require_best_rule(
                         db,
                         customer_id=int(customer_id),
                         store_id=int(order.store_id),

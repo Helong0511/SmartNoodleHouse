@@ -358,6 +358,28 @@ async def test_申请无效身份类型(db_session, sb):
 
 
 @pytest.mark.asyncio
+async def test_勾选公益无身份须报错(db_session, sb):
+    """显式 use_social_benefit 但无 ACTIVE 身份时，禁止静默回落会员折。"""
+    from app.services.customer_service import OrderCreateService
+
+    with pytest.raises(AppException) as ei:
+        await OrderCreateService.create_order(
+            db_session,
+            store_id=sb["store1"].id,
+            table_token=None,
+            customer_id=sb["c2"].id,  # 无公益身份
+            channel="H5",
+            dining_type="TAKEAWAY",
+            need_pack=True,
+            items=[{"product_id": sb["prod"].id, "quantity": 1, "option_ids": []}],
+            use_social_benefit=True,
+            idempotency_key="sb-no-identity-1",
+        )
+    assert ei.value.code == 40008
+    assert "尚无已生效的公益身份" in ei.value.message
+
+
+@pytest.mark.asyncio
 async def test_建单公益与券互斥(db_session, sb):
     from app.services.customer_service import OrderCreateService
 

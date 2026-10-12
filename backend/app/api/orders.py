@@ -263,10 +263,14 @@ async def create_pos_order(
             "total_amount": str(order.total_amount),
             "table_id": int(order.table_id) if order.table_id else None,
             "customer_id": int(order.customer_id) if order.customer_id else None,
+            "use_social_benefit": bool(data.use_social_benefit),
         },
         request=request,
         store_id=int(order.store_id) if order.store_id else None,
     )
+    from app.services.social_benefit_service import SocialBenefitService
+
+    social_snap = await SocialBenefitService.order_social_snapshot(db, int(order.id))
     return success(
         {
             "id": order.id,
@@ -285,6 +289,7 @@ async def create_pos_order(
             "customer_id": order.customer_id,
             "table_id": order.table_id,
             "table": _table_payload(table),
+            **social_snap,
         },
         request=request,
     )
@@ -362,7 +367,8 @@ async def _recompute_pos_amounts_for_customer(
             ):
                 social_hit = (rule, rule.identity_code)
         if social_hit is None and use_social_benefit:
-            social_hit = await SocialBenefitService.find_best_rule(
+            # 显式勾选公益：必须命中，禁止静默改走会员折
+            social_hit = await SocialBenefitService.require_best_rule(
                 db,
                 customer_id=int(customer_id),
                 store_id=int(order.store_id),
@@ -500,12 +506,16 @@ async def bind_pos_customer(
             "discount_amount": str(order.discount_amount),
             "coupon_discount": str(order.coupon_discount or "0.00"),
             "voucher_discount": str(order.voucher_discount or "0.00"),
+            "use_social_benefit": bool(data.use_social_benefit) if new_cid else False,
         },
         request=request,
         store_id=int(order.store_id) if order.store_id else None,
     )
     await db.commit()
     cust = await db.get(Customer, new_cid) if new_cid else None
+    from app.services.social_benefit_service import SocialBenefitService
+
+    social_snap = await SocialBenefitService.order_social_snapshot(db, int(order.id))
     return success(
         {
             "id": order.id,
@@ -523,6 +533,7 @@ async def bind_pos_customer(
             "packing_fee": str(order.packing_fee),
             "payment_status": order.payment_status,
             "status": order.status,
+            **social_snap,
         },
         request=request,
     )

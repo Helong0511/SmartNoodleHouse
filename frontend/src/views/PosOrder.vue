@@ -223,10 +223,13 @@
               </div>
               <div v-if="serviceCard.social_identities?.length" class="sc-block">
                 <b>公益</b>
-                {{ serviceCard.social_identities.map((s: any) => `${s.identity_name}(${s.status})`).join('、') }}
+                {{ serviceCard.social_identities.map((s: any) => `${s.identity_name}(${socialStatusZh(s.status)})`).join('、') }}
                 <span v-if="serviceCard.social_today_used"> · 今日已享</span>
                 <span v-else> · 今日未用</span>
               </div>
+              <p v-else-if="selectedCustomerId" class="member-tip warn-tip">
+                暂无已生效公益身份：勾选公益前请先「当场核验」或完成小程序审核
+              </p>
             </div>
           </div>
           <el-input v-model="remark" placeholder="备注（可选）" size="large" class="remark" />
@@ -353,7 +356,11 @@
           <span>商品小计</span>
           <span>¥{{ checkoutSubtotal }}</span>
         </div>
-        <div v-if="hasPromoDiscount" class="pay-summary-row muted">
+        <div v-if="checkoutSocialApplied && Number(checkoutMemberDiscount || 0) > 0" class="pay-summary-row muted">
+          <span>公益折扣{{ checkoutSocialLabel ? `（${checkoutSocialLabel}）` : '' }}</span>
+          <span class="social-off">-¥{{ checkoutMemberDiscount || '0.00' }}</span>
+        </div>
+        <div v-else-if="Number(checkoutMemberDiscount || 0) > 0" class="pay-summary-row muted">
           <span>会员折</span>
           <span>-¥{{ checkoutMemberDiscount || '0.00' }}</span>
         </div>
@@ -735,8 +742,38 @@ const checkoutOrderId = ref<number | null>(null)
 const posCheckoutNonce = ref('')
 const checkoutOrderNo = ref('')
 const checkoutAmount = ref('0.00')
+const checkoutSocialApplied = ref(false)
+const checkoutSocialCode = ref('')
 const paidAmount = ref('0.00')
 const remainingAmount = ref('0.00')
+
+const SOCIAL_CODE_LABELS: Record<string, string> = {
+  SANITATION: '环卫工',
+  RIDER: '骑手',
+  ELDER: '长者',
+  TEACHER: '教师',
+  STUDENT: '学生',
+}
+const checkoutSocialLabel = computed(() => {
+  const code = String(checkoutSocialCode.value || '').toUpperCase()
+  return SOCIAL_CODE_LABELS[code] || code
+})
+
+function socialStatusZh(status: string) {
+  const key = String(status || '').toUpperCase()
+  if (key === 'ACTIVE') return '已生效'
+  if (key === 'PENDING') return '待审核'
+  if (key === 'REVOKED') return '已取消'
+  if (key === 'REJECTED') return '已拒绝'
+  if (key === 'EXPIRED') return '已过期'
+  return status || '—'
+}
+
+function hasActiveSocialIdentity() {
+  return (serviceCard.value?.social_identities || []).some(
+    (s: any) => String(s.status || '').toUpperCase() === 'ACTIVE',
+  )
+}
 const tenders = ref<any[]>([])
 const tenderAmount = ref('')
 /** 进入现金/扫码步骤后锁定的本笔金额，避免建单或进度回写改掉 */
@@ -1344,7 +1381,7 @@ async function posSocialVerify() {
     clearCouponSelection()
     useSocialBenefit.value = true
     await loadServiceCard(selectedCustomerId.value, { keepSelection: true })
-    ElMessage.success(`已认定「${typeName}」，勾选公益折扣后下单生效（须命中规则时段）`)
+    ElMessage.success(`已认定「${typeName}」并勾选公益折扣，去收款后按规则重算应收`)
     if (checkoutOrderId.value) await bindCustomerOnCheckoutOrder()
   } catch (e: any) {
     ElMessage.error(e?.message || '公益核验失败')
@@ -1365,6 +1402,16 @@ function applyOrderPromoSnapshot(data: any) {
   if (data.discount_amount != null) checkoutMemberDiscount.value = String(data.discount_amount)
   if (data.coupon_discount != null) checkoutCouponDiscount.value = String(data.coupon_discount)
   if (data.voucher_discount != null) checkoutVoucherDiscount.value = String(data.voucher_discount)
+  if (Object.prototype.hasOwnProperty.call(data, 'social_applied')) {
+    checkoutSocialApplied.value = !!data.social_applied
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'social_identity_code')) {
+    checkoutSocialCode.value = data.social_identity_code ? String(data.social_identity_code) : ''
+  }
+  if (data.social_applied && data.social_discount != null) {
+    // 公益补贴写入 discount_amount；若响应带 social_discount 则对齐展示
+    checkoutMemberDiscount.value = String(data.social_discount)
+  }
   if (Object.prototype.hasOwnProperty.call(data, 'customer_coupon_id')) {
     selectedCouponId.value = data.customer_coupon_id != null ? Number(data.customer_coupon_id) : undefined
   }
@@ -1410,7 +1457,17 @@ function ensureSelectedCouponOptions(extra?: { couponId?: number | null; voucher
 }
 
 function onSocialBenefitToggle() {
-  if (useSocialBenefit.value) clearCouponSelection()
+  if (useSocialBenefit.value) {
+    clearCouponSelection()
+    if (!hasActiveSocialIdentity()) {
+      ElMessage.warning('该会员尚无已生效公益身份，请先「当场核验」后再勾选公益折扣')
+      useSocialBenefit.value = false
+      return
+    }
+  } else {
+    checkoutSocialApplied.value = false
+    checkoutSocialCode.value = ''
+  }
   if (checkoutOrderId.value) bindCustomerOnCheckoutOrder()
 }
 
@@ -1537,7 +1594,17 @@ async function onCheckoutMemberChange() {
 }
 
 async function onPaySocialToggle() {
-  if (useSocialBenefit.value) clearCouponSelection()
+  if (useSocialBenefit.value) {
+    clearCouponSelection()
+    if (!hasActiveSocialIdentity()) {
+      ElMessage.warning('该会员尚无已生效公益身份，请先返回点餐区「当场核验」')
+      useSocialBenefit.value = false
+      return
+    }
+  } else {
+    checkoutSocialApplied.value = false
+    checkoutSocialCode.value = ''
+  }
   await bindCustomerOnCheckoutOrder()
 }
 
@@ -1577,8 +1644,19 @@ async function bindCustomerOnCheckoutOrder() {
         ]
       }
     }
-    ElMessage.success(selectedCustomerId.value ? '已绑定会员并重算优惠' : '已清除会员绑定')
+    if (useSocial && res.data?.social_applied) {
+      ElMessage.success(
+        `已按公益折扣重算 · 减免 ¥${res.data.social_discount || checkoutMemberDiscount.value || '0.00'} · 应收 ¥${res.data.total_amount}`,
+      )
+    } else {
+      ElMessage.success(selectedCustomerId.value ? '已绑定会员并重算优惠' : '已清除会员绑定')
+    }
   } catch (e: any) {
+    if (useSocial) {
+      useSocialBenefit.value = false
+      checkoutSocialApplied.value = false
+      checkoutSocialCode.value = ''
+    }
     ElMessage.error(e.message || '绑定会员失败')
   }
 }
@@ -1631,6 +1709,8 @@ function finishCheckout(msg: string) {
   checkoutMemberDiscount.value = ''
   checkoutCouponDiscount.value = ''
   checkoutVoucherDiscount.value = ''
+  checkoutSocialApplied.value = false
+  checkoutSocialCode.value = ''
   waivePackingFee.value = false
   payDialogVisible.value = false
   resetCheckout()
@@ -1939,12 +2019,19 @@ async function openCheckout() {
     const couponOff = Number(checkoutCouponDiscount.value || 0)
     const voucherOff = Number(checkoutVoucherDiscount.value || 0)
     const memberOff = Number(checkoutMemberDiscount.value || 0)
-    if (selectedCouponId.value || selectedVoucherId.value || useSocialBenefit.value) {
-      if (couponOff + voucherOff + memberOff <= 0 && (selectedCouponId.value || selectedVoucherId.value)) {
+    if (useSocialBenefit.value && checkoutSocialApplied.value) {
+      ElMessage.success(
+        `公益折扣已生效${checkoutSocialLabel.value ? `（${checkoutSocialLabel.value}）` : ''} · 减免 ¥${checkoutMemberDiscount.value || '0.00'} · 应收 ¥${checkoutAmount.value}`,
+      )
+    } else if (selectedCouponId.value || selectedVoucherId.value) {
+      if (couponOff + voucherOff + memberOff <= 0) {
         ElMessage.warning('已选券但未产生减免，请核对满减门槛 / 门店限制 / 是否与会员折互斥')
       }
     }
   } catch (e: any) {
+    if (useSocialBenefit.value) {
+      // 建单因公益未命中失败时保持勾选状态，便于收银员看清错误后去核验
+    }
     ElMessage.error(e?.message || '建单失败，无法进入收款')
   } finally {
     paying.value = false

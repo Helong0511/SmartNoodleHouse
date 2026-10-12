@@ -519,6 +519,71 @@ class SocialBenefitService:
         return None
 
     @staticmethod
+    async def require_best_rule(
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        store_id: int,
+        product_ids: list[int] | None = None,
+        category_ids: list[int] | None = None,
+        at: datetime | None = None,
+    ) -> tuple[SocialBenefitRule, str]:
+        """显式勾选公益折扣时：必须命中规则，否则抛清晰错误（禁止静默回落会员折）。"""
+        if not await SocialBenefitService.is_enabled(db, store_id):
+            raise AppException(40008, "本店暂未开启社会贡献公益")
+        codes = await SocialBenefitService.active_codes(db, customer_id)
+        if not codes:
+            raise AppException(
+                40008,
+                "该会员尚无已生效的公益身份，请先在收银台「当场核验」或完成小程序申请审核",
+            )
+        hit = await SocialBenefitService.find_best_rule(
+            db,
+            customer_id=customer_id,
+            store_id=store_id,
+            product_ids=product_ids,
+            category_ids=category_ids,
+            at=at,
+        )
+        if not hit:
+            raise AppException(
+                40008,
+                "当前无法享用公益折扣：可能不在规则时段、今日次数已用完，或商品不适用",
+            )
+        return hit
+
+    @staticmethod
+    async def order_social_snapshot(db: AsyncSession, order_id: int) -> dict[str, Any]:
+        """订单是否已挂公益台账（PENDING/NORMAL）。"""
+        row = (
+            await db.execute(
+                select(SocialBenefitRedemption)
+                .where(
+                    SocialBenefitRedemption.order_id == int(order_id),
+                    SocialBenefitRedemption.status.in_(
+                        (
+                            SocialBenefitService.REDEEM_PENDING,
+                            SocialBenefitService.REDEEM_NORMAL,
+                        )
+                    ),
+                )
+                .order_by(SocialBenefitRedemption.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if not row:
+            return {
+                "social_applied": False,
+                "social_identity_code": None,
+                "social_discount": "0.00",
+            }
+        return {
+            "social_applied": True,
+            "social_identity_code": row.identity_code,
+            "social_discount": str(money(row.subsidy_amount or 0)),
+        }
+
+    @staticmethod
     def calc_social_discount(
         *,
         discountable_subtotal: Decimal,

@@ -201,9 +201,10 @@ class ServiceCardService:
             )
 
         today_start = naive_local_now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # 台账状态：PENDING=预占，NORMAL=已核销（无 CONFIRMED）
         redeemed_q = select(func.count()).select_from(SocialBenefitRedemption).where(
             SocialBenefitRedemption.customer_id == customer.id,
-            SocialBenefitRedemption.status.in_(["CONFIRMED", "PENDING"]),
+            SocialBenefitRedemption.status.in_(["PENDING", "NORMAL"]),
             SocialBenefitRedemption.created_at >= today_start,
         )
         if store_id is not None:
