@@ -262,8 +262,36 @@
 .manual-phone { margin-top: 20rpx; padding-top: 20rpx; border-top: 1px dashed #e5e5e5; }
 .or-line { color: #999; font-size: 24rpx; margin-bottom: 12rpx; text-align: center; }
 .manual-phone-btn { margin-top: 12rpx; }
-.btn-ghost { margin-top: 8rpx; }
-.btn-row { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 16rpx; }
+.social-apply-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+.social-apply-btn {
+  margin: 0;
+  padding: 18rpx 8rpx;
+  width: 100%;
+  min-height: 76rpx;
+  height: auto;
+  box-sizing: border-box;
+  font-size: 24rpx;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #c2571a;
+  background: linear-gradient(180deg, #fffaf7 0%, #fff3eb 100%);
+  border: none;
+  border-radius: 16rpx;
+  box-shadow: inset 0 0 0 1px rgba(230, 126, 34, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.social-apply-btn--active {
+  background: #ffe8d9;
+  box-shadow: inset 0 0 0 1px rgba(230, 126, 34, 0.45);
+}
 .social-toggle { cursor: pointer; }
 .social-title-wrap { flex: 1; min-width: 0; }
 .social-summary { margin-top: 6rpx; font-size: 24rpx; color: #999; line-height: 1.4; }

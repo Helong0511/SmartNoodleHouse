@@ -532,6 +532,11 @@ Page({
   async loadSocialBenefit() {
     this._socialHint = null
     try {
+      await clientConfig.loadClientConfig().catch(() => { })
+      if (!clientConfig.isSocialBenefitEnabled()) {
+        this.setData({ hasSocialBenefit: false, useSocialBenefit: false, socialBenefitLabel: '' })
+        return
+      }
       if (!auth.getToken()) {
         this.setData({ hasSocialBenefit: false, useSocialBenefit: false, socialBenefitLabel: '' })
         return

@@ -5,6 +5,7 @@
   "backgroundColor": "#f7f7f7",
   "backgroundColorTop": "#ff6b35",
   "backgroundColorBottom": "#f7f7f7",
+  "enablePullDownRefresh": true,
   "usingComponents": {
     "skeleton": "/components/skeleton/skeleton"
   }

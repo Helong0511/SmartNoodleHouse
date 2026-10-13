@@ -155,7 +155,7 @@
 
   </view>
 
-  <view class="card">
+  <view class="card" wx:if="{{showSocialBenefit}}">
     <view class="title-row social-toggle" bindtap="toggleSocialExpand">
       <view class="social-title-wrap">
         <view class="title">社会贡献公益</view>
@@ -176,10 +176,10 @@
           </view>
         </view>
         <view class="tip">公益折扣与会员折/优惠券默认互斥：结算时请二选一（公益，或会员+券）。</view>
-        <view class="btn-row" wx:if="{{socialCanApply}}">
-          <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="SANITATION" bindtap="applySocialIdentity">申请环卫工</button>
-          <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="RIDER" bindtap="applySocialIdentity">申请骑手</button>
-          <button class="btn-ghost" size="mini" loading="{{socialApplying}}" data-code="ELDER" bindtap="applySocialIdentity">申请长者</button>
+        <view class="social-apply-grid" wx:if="{{socialCanApply}}">
+          <button class="social-apply-btn" plain hover-class="social-apply-btn--active" loading="{{socialApplying}}" data-code="SANITATION" bindtap="applySocialIdentity">申请环卫工</button>
+          <button class="social-apply-btn" plain hover-class="social-apply-btn--active" loading="{{socialApplying}}" data-code="RIDER" bindtap="applySocialIdentity">申请骑手</button>
+          <button class="social-apply-btn" plain hover-class="social-apply-btn--active" loading="{{socialApplying}}" data-code="ELDER" bindtap="applySocialIdentity">申请长者</button>
         </view>
       </block>
     </view>

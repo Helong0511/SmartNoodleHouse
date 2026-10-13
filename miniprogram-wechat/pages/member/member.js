@@ -10,7 +10,7 @@ const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
 const navBar = require('../../utils/navBar')
 const faceUtil = require('../../utils/face')
-const { formatDate } = require('../../utils/date')
+const { formatDate, normalizePickerDate } = require('../../utils/date')
 const app = getApp()
 
 function discountText(rate) {
@@ -90,6 +90,7 @@ Page({
     vouchers: [],
     walletLoading: false,
     hideMemberEmptyWallet: true,
+    showSocialBenefit: true,
     socialIdentities: [],
     socialLoading: false,
     socialApplying: false,
@@ -172,13 +173,8 @@ Page({
 
     // 重活延后到下一帧，先让 store-bar / 骨架完成首绘（扫码后立刻切会员时尤其重要）
     const runHeavy = () => {
-      clientConfig.loadClientConfig().then(() => {
-        this.setData({
-          ...clientConfig.wxPrivacyPageData(),
-          ...clientConfig.memberPageFlags(),
-          showQueueEntry: clientConfig.boolFlag('queue_enabled')
-        })
-      }).catch(() => { })
+      // force：门店开关改完后切 Tab 须重新拉 config，避免关了再开仍隐藏公益区
+      this.refreshMemberFlags(true)
       privacy.setupPrivacy().then((setting) => {
         this.setData({ needPrivacyAgree: !!(setting && setting.needAuthorization) })
       }).catch(() => { })
@@ -196,7 +192,6 @@ Page({
       }
       const forcePrefs = !app.globalData.prefsAt
       this.loadProfile(forcePrefs || forceWallet)
-      this.loadSocialIdentities()
     }
     this._showEpoch = (this._showEpoch || 0) + 1
     const epoch = this._showEpoch
@@ -212,6 +207,32 @@ Page({
     this._loadingWatchdog = setTimeout(() => {
       if (this.data.loading) this.setData({ loading: false })
     }, 8000)
+  },
+
+  /** 拉取门店配置并刷新会员页开关（公益区等） */
+  refreshMemberFlags(force = false) {
+    const sid = this.data.storeId || null
+    return clientConfig.loadClientConfig(!!force, sid).then(() => {
+      const flags = clientConfig.memberPageFlags()
+      this.setData({
+        ...clientConfig.wxPrivacyPageData(),
+        ...flags,
+        showQueueEntry: !!clientConfig.boolFlag('queue_enabled')
+      })
+      if (flags.showSocialBenefit) this.loadSocialIdentities()
+      else this.setData({ ...this._buildSocialState([]), socialLoading: false, socialExpanded: false })
+    }).catch(() => { })
+  },
+
+  onPullDownRefresh() {
+    this._profileLoadedAt = 0
+    Promise.all([
+      dineCtx.ensureDineContext({ force: true }).then((ctx) => {
+        this.applyDineContext(ctx)
+        return this.refreshMemberFlags(true)
+      }),
+      this.loadProfile(true)
+    ]).finally(() => wx.stopPullDownRefresh())
   },
 
   _ensurePainted() {
@@ -232,7 +253,7 @@ Page({
     if (!ctx) return
     this.applyDineContext(ctx)
     this.loadWallet()
-    this.loadSocialIdentities()
+    this.refreshMemberFlags(true)
   },
 
   _socialLabelMap() {
@@ -284,6 +305,10 @@ Page({
   },
 
   async loadSocialIdentities() {
+    if (!clientConfig.isSocialBenefitEnabled()) {
+      this.setData({ ...this._buildSocialState([]), socialLoading: false, showSocialBenefit: false })
+      return
+    }
     if (!auth.getToken()) {
       try { await auth.ensureLogin() } catch (_) { return }
     }
@@ -449,6 +474,7 @@ Page({
       this.setData({ loading: false })
       return
     }
+    const loadGen = (this._profileLoadGen = (this._profileLoadGen || 0) + 1)
     this._profileInflight = (async () => {
       try {
         await auth.ensureLogin()
@@ -462,6 +488,7 @@ Page({
           api.get('/miniprogram/coupons/mine', { store_id: storeId }).catch(() => ({ items: [] })),
           api.get('/miniprogram/vouchers/mine', { store_id: storeId }).catch(() => ({ items: [] }))
         ])
+        if (loadGen !== this._profileLoadGen) return
         if (!profile || typeof profile !== 'object') {
           throw new Error('会员资料加载失败，请稍后重试')
         }
@@ -899,7 +926,8 @@ Page({
         birthdayDisplay: d.birthday_display || d.birthday || this.data.birthday || '',
         birthdayBenefitText: (d.birthday_benefit && d.birthday_benefit.text) || this.data.birthdayBenefitText
       })
-      this._profileLoadedAt = 0
+      this._profileLoadGen = (this._profileLoadGen || 0) + 1
+      this._profileLoadedAt = Date.now()
       wx.showToast({
         title: birthdayCalendar === 'LUNAR' ? '已设为农历（同日）' : '已设为公历（同日）',
         icon: 'none'
@@ -914,8 +942,11 @@ Page({
 
   async onBirthdayChange(e) {
     if (this.data.savingBirthday) return
-    const birthday = (e && e.detail && e.detail.value) || ''
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthday)) return
+    const birthday = normalizePickerDate((e && e.detail && e.detail.value) || '')
+    if (!birthday) {
+      wx.showToast({ title: '生日格式无效，请重选', icon: 'none' })
+      return
+    }
     this.setData({ savingBirthday: true })
     try {
       const d = (await auth.patchMemberProfile({
@@ -929,7 +960,8 @@ Page({
         birthdayDisplay: d.birthday_display || d.birthday || birthday,
         birthdayBenefitText: tip || this.data.birthdayBenefitText || ''
       })
-      this._profileLoadedAt = 0
+      this._profileLoadGen = (this._profileLoadGen || 0) + 1
+      this._profileLoadedAt = Date.now()
       wx.showToast({ title: '生日已保存', icon: 'success' })
     } catch (err) {
       wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' })

@@ -344,6 +344,49 @@ async def test_小程序申请进入PENDING并可审核(db_session, sb):
 
 
 @pytest.mark.asyncio
+async def test_拒绝后再申请可重新进入PENDING(db_session, sb):
+    """拒绝后再次申请应复用记录并回到 PENDING；序列化不得 MissingGreenlet。"""
+    row = await SocialBenefitService.apply_identity(
+        db_session,
+        customer_id=sb["c2"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        verify_method="MINI",
+        credential_note="首次申请",
+    )
+    await db_session.commit()
+    rejected = await SocialBenefitService.review_identity(
+        db_session,
+        identity_id=int(row.id),
+        approve=False,
+        reviewer_id=1,
+        reject_reason="材料不全",
+        store_id=sb["store1"].id,
+    )
+    await db_session.commit()
+    assert rejected.status == SocialBenefitService.REJECTED
+
+    again = await SocialBenefitService.apply_identity(
+        db_session,
+        customer_id=sb["c2"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        verify_method="WECHAT",
+        credential_note="补材料再申请",
+    )
+    await db_session.commit()
+    assert again.id == row.id
+    assert again.status == SocialBenefitService.PENDING
+    assert again.reject_reason is None
+    assert again.credential_note == "补材料再申请"
+    # 模拟接口：commit 后再读 created_at 也不应惰性加载失败
+    payload = SocialBenefitService._identity_payload(again)
+    assert payload["id"] == again.id
+    assert payload["status"] == SocialBenefitService.PENDING
+    assert payload.get("created_at")
+
+
+@pytest.mark.asyncio
 async def test_申请无效身份类型(db_session, sb):
     with pytest.raises(AppException) as ei:
         await SocialBenefitService.apply_identity(

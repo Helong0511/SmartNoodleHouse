@@ -402,6 +402,8 @@ async def miniprogram_config(
             "hide_member_empty_wallet": await _flag(
                 "hide_member_empty_wallet", settings.hide_member_empty_wallet
             ),
+            "enable_social_benefit": await _flag("enable_social_benefit", True),
+            "enable_marketing_campaigns": await _flag("enable_marketing_campaigns", True),
             "enable_customer_display": await _flag(
                 "enable_customer_display", settings.enable_customer_display
             ),
@@ -893,8 +895,10 @@ async def patch_member_profile(
             customer.birthday = None
             customer.birthday_calendar = "SOLAR"
         else:
+            from app.utils.birthday import parse_birthday_input
+
             try:
-                parsed_birthday = date.fromisoformat(raw_birthday)
+                parsed_birthday = parse_birthday_input(raw_birthday)
             except ValueError:
                 raise AppException(40030, "生日格式不正确")
             if parsed_birthday > now_local().date():

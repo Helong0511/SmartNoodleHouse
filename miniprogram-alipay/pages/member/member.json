@@ -2,6 +2,7 @@
   "defaultTitle": "会员中心",
   "titleBarColor": "#ff6b35",
   "backgroundColor": "#f7f7f7",
+  "pullRefresh": true,
   "usingComponents": {
     "skeleton": "/components/skeleton/skeleton"
   }

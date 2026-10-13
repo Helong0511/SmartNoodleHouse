@@ -492,14 +492,20 @@ async def test_birthday_update_validation(db_session: AsyncSession):
 
     async with api_client(db_session, cust) as ac:
         # 正常设置
-        r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": "2000-02-29"})
+        r = await ac.put("/api/miniprogram/member/profile", json={"birthday": "2000-02-29"})
         assert r.status_code == 200, r.text
         assert r.json()["data"]["birthday"] == "2000-02-29"
+        # 兼容 YYYY-M-D（部分端 picker 不补零）
+        r = await ac.put("/api/miniprogram/member/profile", json={"birthday": "1990-5-1"})
+        assert r.json()["data"]["birthday"] == "1990-05-01"
         # GET profile 返回生日
         r = await ac.get("/api/miniprogram/customers/me")
-        assert r.json()["data"]["birthday"] == "2000-02-29"
-        # 格式错误 → 40030
+        assert r.json()["data"]["birthday"] == "1990-05-01"
+        # 斜杠分隔
         r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": "2000/01/01"})
+        assert r.json()["data"]["birthday"] == "2000-01-01"
+        # 格式错误 → 40030
+        r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": "not-a-date"})
         assert r.json()["code"] == 40030
         assert r.json()["message"] == "生日格式不正确"
         # 晚于今天 → 40031
@@ -523,6 +529,8 @@ async def test_config_exposes_three_daily_keys(db_session: AsyncSession):
         data = r.json()["data"]
         assert data["queue_enabled"] is False
         assert data["invoice_enabled"] is False
+        assert data["enable_social_benefit"] is True
+        assert data["enable_marketing_campaigns"] is True
         assert data["pay_success_coupon_name"] == ""
         assert data["quick_remark_options"] == [
             "不要香菜", "少油少盐", "不要辣", "微辣", "多加醋", "加份米饭",

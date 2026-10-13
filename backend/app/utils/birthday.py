@@ -1,6 +1,7 @@
 """生日日历（公历/农历）与权益日判定。"""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -68,6 +69,17 @@ def convert_birthday_calendar(
     normalize_calendar(from_calendar)
     normalize_calendar(to_calendar)
     return birthday
+
+
+def parse_birthday_input(raw: str) -> date:
+    """解析 YYYY-MM-DD / YYYY-M-D / 斜杠分隔；非法则 ValueError。"""
+    s = (raw or "").strip()
+    if not s:
+        raise ValueError("empty birthday")
+    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", s)
+    if m:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return date.fromisoformat(s)
 
 
 def format_birthday_display(birthday: date | None, calendar: str | None) -> str | None:

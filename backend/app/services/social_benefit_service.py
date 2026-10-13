@@ -151,17 +151,45 @@ class SocialBenefitService:
             if existing.status == SocialBenefitService.ACTIVE:
                 raise AppException(40901, "该身份已认定生效")
             return existing
-        row = CustomerSocialIdentity(
-            customer_id=int(customer_id),
-            identity_code=identity_code,
-            store_id=int(store_id) if store_id else None,
-            status=SocialBenefitService.PENDING,
-            verify_method=verify_method,
-            credential_note=(credential_note or "").strip()[:255] or None,
-            credential_media_url=(credential_media_url or "").strip()[:500] or None,
-        )
-        db.add(row)
+        # 拒绝后再申请：复用同顾客同身份最新 REJECTED 记录，避免堆多条且便于审核追溯
+        rejected = (
+            await db.execute(
+                select(CustomerSocialIdentity)
+                .where(
+                    CustomerSocialIdentity.customer_id == int(customer_id),
+                    CustomerSocialIdentity.identity_code == identity_code,
+                    CustomerSocialIdentity.status == SocialBenefitService.REJECTED,
+                )
+                .order_by(CustomerSocialIdentity.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if rejected:
+            row = rejected
+            row.store_id = int(store_id) if store_id else None
+            row.status = SocialBenefitService.PENDING
+            row.verify_method = verify_method
+            row.credential_note = (credential_note or "").strip()[:255] or None
+            row.credential_media_url = (credential_media_url or "").strip()[:500] or None
+            row.reject_reason = None
+            row.reviewed_by = None
+            row.reviewed_at = None
+            row.valid_from = None
+            row.valid_to = None
+        else:
+            row = CustomerSocialIdentity(
+                customer_id=int(customer_id),
+                identity_code=identity_code,
+                store_id=int(store_id) if store_id else None,
+                status=SocialBenefitService.PENDING,
+                verify_method=verify_method,
+                credential_note=(credential_note or "").strip()[:255] or None,
+                credential_media_url=(credential_media_url or "").strip()[:500] or None,
+            )
+            db.add(row)
         await db.flush()
+        # server_default 的 created_at/updated_at 须 refresh，否则 commit 后读属性会 MissingGreenlet
+        await db.refresh(row)
         return row
 
     @staticmethod

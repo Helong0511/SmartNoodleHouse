@@ -4,8 +4,13 @@ const api = require('./api')
 
 let _cache = null
 let _cacheStoreId = null
+let _cacheAt = 0
 let _loading = null
 let _loadingStoreId = null
+let _loadGen = 0
+
+/** 门店业务开关（公益/营销等）可随时改，短 TTL 避免关了再开仍读旧缓存 */
+const CACHE_TTL_MS = 15 * 1000
 
 const DEFAULTS = {
   enable_alipay_avatar: true,
@@ -19,6 +24,8 @@ const DEFAULTS = {
   show_menu_smart_taste: false,
   show_menu_guess_you_like: false,
   hide_member_empty_wallet: true,
+  enable_social_benefit: true,
+  enable_marketing_campaigns: true,
   enable_customer_display: false,
   invoice_enabled: false
 }
@@ -80,6 +87,8 @@ function applyCacheToApp(cache) {
   app.globalData.showMenuSmartTaste = !!cache.show_menu_smart_taste
   app.globalData.showMenuGuessYouLike = !!cache.show_menu_guess_you_like
   app.globalData.hideMemberEmptyWallet = !!cache.hide_member_empty_wallet
+  app.globalData.enableSocialBenefit = !!cache.enable_social_benefit
+  app.globalData.enableMarketingCampaigns = !!cache.enable_marketing_campaigns
   app.globalData.enableCustomerDisplay = !!cache.enable_customer_display
   app.globalData.enableFaceWelcome = !!cache.enable_face_welcome
 }
@@ -90,22 +99,32 @@ function applyCacheToApp(cache) {
  */
 async function loadClientConfig(force = false, storeId = null) {
   const sid = resolveStoreId(storeId)
-  if (!force && _cache && _cacheStoreId === sid) return _cache
+  const now = Date.now()
+  const fresh = _cache && _cacheStoreId === sid && _cacheAt && now - _cacheAt < CACHE_TTL_MS
+  if (!force && fresh) return _cache
   if (!force && _loading && _loadingStoreId === sid) return _loading
+  const gen = ++_loadGen
   _loadingStoreId = sid
   _loading = (async () => {
     try {
       const params = sid ? { store_id: sid } : {}
       const data = await api.get('/miniprogram/config', params, false)
+      if (gen !== _loadGen) return _cache
       _cache = data && typeof data === 'object' ? { ...DEFAULTS, ...data } : { ...DEFAULTS }
       _cacheStoreId = sid
+      _cacheAt = Date.now()
     } catch (_) {
-      _cache = _cache || { ...DEFAULTS }
+      if (gen === _loadGen) {
+        _cache = _cache || { ...DEFAULTS }
+        if (!_cacheAt) _cacheAt = Date.now()
+      }
     } finally {
-      _loading = null
-      _loadingStoreId = null
+      if (gen === _loadGen) {
+        _loading = null
+        _loadingStoreId = null
+      }
     }
-    applyCacheToApp(_cache)
+    if (gen === _loadGen) applyCacheToApp(_cache)
     return _cache
   })()
   return _loading
@@ -115,8 +134,10 @@ async function loadClientConfig(force = false, storeId = null) {
 function invalidateClientConfig() {
   _cache = null
   _cacheStoreId = null
+  _cacheAt = 0
   _loading = null
   _loadingStoreId = null
+  _loadGen += 1
 }
 
 function isAlipayAvatarEnabled() {
@@ -163,6 +184,14 @@ function isFaceWelcomeEnabled() {
   return boolFlag('enable_face_welcome', DEFAULTS.enable_face_welcome)
 }
 
+function isSocialBenefitEnabled() {
+  return boolFlag('enable_social_benefit', DEFAULTS.enable_social_benefit)
+}
+
+function isMarketingCampaignsEnabled() {
+  return boolFlag('enable_marketing_campaigns', DEFAULTS.enable_marketing_campaigns)
+}
+
 /** 点餐页展示开关对应的 setData 字段 */
 function menuPageFlags() {
   return {
@@ -176,7 +205,9 @@ function menuPageFlags() {
 function memberPageFlags() {
   return {
     hideMemberEmptyWallet: !!isHideMemberEmptyWalletEnabled(),
-    showFaceWelcome: !!isFaceWelcomeEnabled()
+    showFaceWelcome: !!isFaceWelcomeEnabled(),
+    showSocialBenefit: !!isSocialBenefitEnabled(),
+    showMarketingCampaigns: !!isMarketingCampaignsEnabled()
   }
 }
 
@@ -212,6 +243,9 @@ module.exports = {
   isMenuGuessYouLikeEnabled,
   isHideMemberEmptyWalletEnabled,
   isFaceWelcomeEnabled,
+  isSocialBenefitEnabled,
+  isMarketingCampaignsEnabled,
+  boolFlag,
   menuPageFlags,
   memberPageFlags,
   alipayPrivacyPageData,

@@ -84,8 +84,10 @@ async def apply_identity(
         credential_note=data.credential_note,
         credential_media_url=data.credential_media_url,
     )
+    # 先序列化再 commit：避免提交后惰性加载 created_at 触发 MissingGreenlet
+    payload = SocialBenefitService._identity_payload(row)
     await db.commit()
-    return success(SocialBenefitService._identity_payload(row), request=request)
+    return success(payload, request=request)
 
 
 @router.get("/identities/mine")
@@ -136,19 +138,20 @@ async def review_identity(
         reject_reason=data.reject_reason,
         store_id=store_id,
     )
-    await db.commit()
+    payload = SocialBenefitService._identity_payload(row, staff=True)
     await AuditService.log(
         db,
         action="social.identity.review",
         module="social",
         user_id=user.id,
         target_type="customer_social_identity",
-        target_id=row.id,
+        target_id=int(row.id),
         detail={"approve": data.approve, "status": row.status},
         request=request,
         store_id=row.store_id,
     )
-    return success(SocialBenefitService._identity_payload(row, staff=True), request=request)
+    await db.commit()
+    return success(payload, request=request)
 
 
 @router.post("/identities/{identity_id}/revoke", dependencies=[require_social_identity_manage()])
@@ -169,19 +172,20 @@ async def revoke_identity(
         store_id=store_id,
         reason=reason,
     )
-    await db.commit()
+    payload = SocialBenefitService._identity_payload(row, staff=True)
     await AuditService.log(
         db,
         action="social.identity.revoke",
         module="social",
         user_id=user.id,
         target_type="customer_social_identity",
-        target_id=row.id,
+        target_id=int(row.id),
         detail={"status": row.status, "reason": row.reject_reason},
         request=request,
         store_id=row.store_id,
     )
-    return success(SocialBenefitService._identity_payload(row, staff=True), request=request)
+    await db.commit()
+    return success(payload, request=request)
 
 
 @router.post("/identities/pos-verify", dependencies=[require_pos()])
@@ -199,19 +203,21 @@ async def pos_verify(data: PosVerifyIn, request: Request, db: DbSession, user: C
         credential_note=data.credential_note,
         activate=bool(data.activate),
     )
-    await db.commit()
+    await db.refresh(row)
+    payload = SocialBenefitService._identity_payload(row, staff=True)
     await AuditService.log(
         db,
         action="social.identity.pos_verify",
         module="social",
         user_id=user.id,
         target_type="customer_social_identity",
-        target_id=row.id,
+        target_id=int(row.id),
         detail={"identity_code": row.identity_code, "status": row.status},
         request=request,
         store_id=int(store_id),
     )
-    return success(SocialBenefitService._identity_payload(row, staff=True), request=request)
+    await db.commit()
+    return success(payload, request=request)
 
 
 @router.post("/preview")
