@@ -1305,6 +1305,56 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'wechat_subscribe_template_order_ready'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'alipay_subscribe_template_order_ready',
+    '',
+    '支付宝出餐订阅模板（与微信模板 ID 禁止混用）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'alipay_subscribe_template_order_ready'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'alipay_subscribe_template_balance_low',
+    '',
+    '支付宝余额提醒订阅模板（与微信模板 ID 禁止混用）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'alipay_subscribe_template_balance_low'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'queue_enabled',
+    'false',
+    '取餐排队码（小程序 config 下发，可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'queue_enabled'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'quick_remark_options',
+    '不要香菜,少油少盐,不要辣,微辣,多加醋,加份米饭',
+    '结算快捷备注（逗号分隔，可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'quick_remark_options'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'pay_success_coupon_name',
+    '',
+    '支付成功领券模板名（空=关闭，可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'pay_success_coupon_name'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'allowed_image_extensions',
     'jpg, jpeg, png, webp, gif',
     '允许的图片扩展名'

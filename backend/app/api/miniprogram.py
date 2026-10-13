@@ -357,28 +357,48 @@ async def miniprogram_config(
             getattr(settings, "wechat_subscribe_template_balance_low", "") or "",
         )
     ).strip()
+    alipay_tmpl_ready = (
+        await SystemSettingsService.get_value(db, "alipay_subscribe_template_order_ready", "")
+    ).strip()
+    alipay_tmpl_balance = (
+        await SystemSettingsService.get_value(db, "alipay_subscribe_template_balance_low", "")
+    ).strip()
 
     async def _flag(key: str, fallback: bool) -> bool:
         return await SystemSettingsService.effective_bool(
             db, key, fallback, store_id=sid
         )
 
-    # 快捷备注：逗号分隔字符串；空配置回退默认项
+    # 快捷备注：逗号分隔；支持门店覆盖
     _DEFAULT_REMARKS = ["不要香菜", "少油少盐", "不要辣", "微辣", "多加醋", "加份米饭"]
     remark_raw = (
-        await SystemSettingsService.get_value(db, "quick_remark_options", ",".join(_DEFAULT_REMARKS))
+        await SystemSettingsService.effective_setting(
+            db,
+            "quick_remark_options",
+            store_id=sid,
+            fallback=",".join(_DEFAULT_REMARKS),
+        )
     ).strip()
     quick_remark_options = [s.strip() for s in remark_raw.split(",") if s.strip()] or list(_DEFAULT_REMARKS)
-    pay_success_coupon_name = await SystemSettingsService.get_value(db, "pay_success_coupon_name", "")
-    queue_enabled = (await SystemSettingsService.get_value(db, "queue_enabled", "0")).strip() == "1"
+    pay_success_coupon_name = (
+        await SystemSettingsService.effective_setting(
+            db, "pay_success_coupon_name", store_id=sid, fallback=""
+        )
+    ).strip()
+    queue_enabled = await SystemSettingsService.effective_bool(
+        db, "queue_enabled", False, store_id=sid
+    )
     invoice_enabled = await SystemSettingsService.get_bool(db, "invoice_enabled", False)
 
     return success(
         {
             "store_id": sid,
             "subscribe_templates": {
+                # 微信端只用 order_ready / balance_low；支付宝只用 alipay_*，禁止跨端混用
                 "order_ready": tmpl or None,
                 "balance_low": tmpl_balance_low or None,
+                "alipay_order_ready": alipay_tmpl_ready or None,
+                "alipay_balance_low": alipay_tmpl_balance or None,
             },
             # 优先 system_settings / 门店覆盖，种子默认值来自 .env ENABLE_*
             "enable_alipay_avatar": await _flag("enable_alipay_avatar", settings.enable_alipay_avatar),

@@ -51,6 +51,9 @@ PLATFORM_ONLY_KEYS = frozenset({
     "dev_lan_host",
     "mini_program_env_version",
     "wechat_subscribe_template_order_ready",
+    "wechat_subscribe_template_balance_low",
+    "alipay_subscribe_template_order_ready",
+    "alipay_subscribe_template_balance_low",
     "allowed_image_extensions",
     "app_timezone",
     "delivery_env_fallback_store_id",
@@ -333,7 +336,56 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "max_length": 120,
         "default": "",
         "store_override": False,
-        "description": "空=仅记日志不推送；配置后 run_balance_low_remind 真正发订阅",
+        "description": "空=仅记日志不推送；配置后 run_balance_low_remind 真正发订阅（平台级）",
+    },
+    "alipay_subscribe_template_order_ready": {
+        "group": "miniprogram",
+        "label": "支付宝出餐订阅模板",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "default": "",
+        "store_override": False,
+        "description": "支付宝小程序订阅消息模板 ID；空则不下发授权；与微信模板 ID 禁止混用",
+    },
+    "alipay_subscribe_template_balance_low": {
+        "group": "miniprogram",
+        "label": "支付宝余额提醒订阅模板",
+        "unit": "",
+        "type": "string",
+        "max_length": 128,
+        "default": "",
+        "store_override": False,
+        "description": "支付宝余额偏低订阅模板 ID；空则仅记日志；与微信模板 ID 禁止混用",
+    },
+    "queue_enabled": {
+        "group": "miniprogram",
+        "label": "取餐排队码",
+        "unit": "",
+        "type": "bool",
+        "default": False,
+        "store_override": True,
+        "description": "经 /miniprogram/config 下发；开启后顾客可查排队；可按门店覆盖",
+    },
+    "quick_remark_options": {
+        "group": "miniprogram",
+        "label": "结算快捷备注",
+        "unit": "",
+        "type": "string",
+        "max_length": 500,
+        "default": "不要香菜,少油少盐,不要辣,微辣,多加醋,加份米饭",
+        "store_override": True,
+        "description": "逗号分隔；经 /miniprogram/config 下发到结算页；可按门店覆盖",
+    },
+    "pay_success_coupon_name": {
+        "group": "miniprogram",
+        "label": "支付成功领券模板名",
+        "unit": "",
+        "type": "string",
+        "max_length": 100,
+        "default": "",
+        "store_override": True,
+        "description": "结果页「支付成功领券」匹配的券模板名；空=关闭；可按门店覆盖",
     },
     "enable_alipay_avatar": {
         "group": "miniprogram",
@@ -741,6 +793,8 @@ REDIS_CACHE_VER_KEY = "snh:system_settings:ver"
 
 class SystemSettingsService:
     _cache: dict[str, str] | None = None
+    # invalidate 后 _cache 为空时，sync 读优先用上次 DB 快照，禁止直接回退 .env（热更黑洞）
+    _last_db_cache: dict[str, str] | None = None
     _cache_at: float = 0.0
     _cache_ver: int = -1
     CACHE_TTL = 15.0
@@ -802,13 +856,17 @@ class SystemSettingsService:
             return cls._cache
         result = await db.execute(select(SystemSetting))
         cls._cache = {row.setting_key: row.setting_value for row in result.scalars()}
+        cls._last_db_cache = dict(cls._cache)
         cls._cache_at = now
         cls._cache_ver = remote_ver
         return cls._cache
 
     @classmethod
     async def invalidate_cache(cls) -> None:
-        """本进程立即失效，并 bump Redis 版本使其他 worker 在下次读取时失效。"""
+        """本进程立即失效，并 bump Redis 版本使其他 worker 在下次读取时失效。
+
+        保留 _last_db_cache：sync 路径在重载前仍可读到最近一次 DB 值，避免回退 .env。
+        """
         cls._cache = None
         cls._cache_at = 0.0
         cls._cache_ver = -1
@@ -816,10 +874,18 @@ class SystemSettingsService:
 
     @classmethod
     def invalidate_cache_local(cls) -> None:
-        """仅清本进程（测试或 Redis 不可用时）。"""
+        """仅清本进程（测试或 Redis 不可用时）。保留 _last_db_cache。"""
         cls._cache = None
         cls._cache_at = 0.0
         cls._cache_ver = -1
+
+    @classmethod
+    def _patch_last_db_cache(cls, patch: dict[str, str]) -> None:
+        if not patch:
+            return
+        if cls._last_db_cache is None:
+            cls._last_db_cache = {}
+        cls._last_db_cache.update(patch)
 
     @classmethod
     async def _sqlite_next_id(cls, db: AsyncSession) -> int:
@@ -884,9 +950,11 @@ class SystemSettingsService:
 
     @classmethod
     def peek_cached(cls, key: str) -> str | None:
-        """同步窥视本进程缓存（未预热则返回 None，调用方回退 .env）。"""
+        """同步窥视：热缓存 → 上次 DB 快照；皆无则 None（调用方才可回退 .env）。"""
         if cls._cache is not None and key in cls._cache:
             return cls._cache[key]
+        if cls._last_db_cache is not None and key in cls._last_db_cache:
+            return cls._last_db_cache[key]
         return None
 
     @classmethod
@@ -1234,6 +1302,8 @@ class SystemSettingsService:
             await cls._apply_side_effects(db, key, normalized)
 
         await db.flush()
-        await cls.invalidate_cache()
-        logger.info("Business settings updated: %s", changed)
+        if changed:
+            cls._patch_last_db_cache(changed)
+            await cls.invalidate_cache()
+            logger.info("Business settings updated: %s", changed)
         return await cls.list_business(db)

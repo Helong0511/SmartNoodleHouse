@@ -12,17 +12,16 @@ function loadTemplates() {
 }
 
 /**
- * 下单成功后引导订阅「出餐/待取餐」提醒
- * 支付宝模板 ID 字段优先使用 alipay_order_ready，降级到通用 order_ready
+ * 下单成功后引导订阅「出餐/待取餐」提醒。
+ * 只用 alipay_order_ready，禁止降级微信 order_ready（模板 ID 不互通）。
  */
 function requestOrderReadySubscribe() {
   if (typeof my === 'undefined' || !my.requestSubscribeMessage) return Promise.resolve(null)
   return loadTemplates().then(function (tmpls) {
-    var tmplId = tmpls.alipay_order_ready || tmpls.order_ready
+    var tmplId = tmpls.alipay_order_ready
     if (!tmplId) return null
     return new Promise(function (resolve) {
       my.requestSubscribeMessage({
-        // 支付宝用 templateIds 而非微信的 tmplIds
         templateIds: [tmplId],
         success: function (res) { resolve(res) },
         fail: function () { resolve(null) }
@@ -32,13 +31,13 @@ function requestOrderReadySubscribe() {
 }
 
 /**
- * 储值页引导订阅「余额偏低」提醒
- * 优先 alipay_balance_low，降级 balance_low
+ * 储值页引导订阅「余额偏低」提醒。
+ * 只用 alipay_balance_low，禁止降级微信 balance_low。
  */
 function requestBalanceLowSubscribe() {
   if (typeof my === 'undefined' || !my.requestSubscribeMessage) return Promise.resolve(null)
   return loadTemplates().then(function (tmpls) {
-    var tmplId = tmpls.alipay_balance_low || tmpls.balance_low
+    var tmplId = tmpls.alipay_balance_low
     if (!tmplId) return null
     return new Promise(function (resolve) {
       my.requestSubscribeMessage({

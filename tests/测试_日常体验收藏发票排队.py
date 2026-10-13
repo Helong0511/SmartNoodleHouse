@@ -134,18 +134,28 @@ def _body(**kw):
     return base
 
 
-async def _enable_queue(db_session: AsyncSession):
-    # sqlite 下 BigInteger 主键不自增，需显式 id（同 SystemSettingsService._sqlite_next_id）
-    db_session.add(SystemSetting(id=9701, setting_key="queue_enabled", setting_value="1"))
+async def _upsert_system_setting(db_session: AsyncSession, key: str, value: str, *, sid: int) -> None:
+    """幂等写入 system_settings，并同步 _last_db_cache（避免 invalidate 后仍读旧快照）。"""
+    from sqlalchemy import select
+
+    row = await db_session.scalar(select(SystemSetting).where(SystemSetting.setting_key == key))
+    if row:
+        row.setting_value = value
+    else:
+        # sqlite 下 BigInteger 主键不自增，需显式 id
+        db_session.add(SystemSetting(id=sid, setting_key=key, setting_value=value))
     await db_session.flush()
+    SystemSettingsService._patch_last_db_cache({key: value})
     SystemSettingsService.invalidate_cache_local()
+
+
+async def _enable_queue(db_session: AsyncSession):
+    await _upsert_system_setting(db_session, "queue_enabled", "1", sid=9701)
 
 
 async def _enable_invoice(db_session: AsyncSession):
     """开启电子发票开关（默认关闭，需显式启用）。"""
-    db_session.add(SystemSetting(id=9702, setting_key="invoice_enabled", setting_value="1"))
-    await db_session.flush()
-    SystemSettingsService.invalidate_cache_local()
+    await _upsert_system_setting(db_session, "invoice_enabled", "1", sid=9702)
 
 
 # ---------------------------------------------------------------------------
@@ -536,15 +546,10 @@ async def test_config_exposes_three_daily_keys(db_session: AsyncSession):
             "不要香菜", "少油少盐", "不要辣", "微辣", "多加醋", "加份米饭",
         ]
 
-    db_session.add_all(
-        [
-            SystemSetting(id=9701, setting_key="queue_enabled", setting_value="1"),
-            SystemSetting(id=9702, setting_key="pay_success_coupon_name", setting_value="好评有礼券"),
-            SystemSetting(id=9703, setting_key="quick_remark_options", setting_value=" 微辣 ,免葱,,加冰 "),
-        ]
-    )
+    await _upsert_system_setting(db_session, "queue_enabled", "1", sid=9701)
+    await _upsert_system_setting(db_session, "pay_success_coupon_name", "好评有礼券", sid=9703)
+    await _upsert_system_setting(db_session, "quick_remark_options", " 微辣 ,免葱,,加冰 ", sid=9704)
     await db_session.commit()
-    SystemSettingsService.invalidate_cache_local()
     async with api_client(db_session) as ac:
         r = await ac.get("/api/miniprogram/config")
         data = r.json()["data"]

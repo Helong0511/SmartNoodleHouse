@@ -1732,9 +1732,14 @@ async def reprint_kitchen_ticket(order_id: int, request: Request, db: DbSession,
     from app.core.config import get_settings
     from app.services.system_settings_service import SystemSettingsService
 
-    if not SystemSettingsService.resolved_bool_sync(
-        "xpyun_enabled", get_settings().xpyun_enabled
-    ):
+    # 门店覆盖优先；禁止 sync 全局读绕过 store_settings
+    print_on = await SystemSettingsService.effective_bool(
+        db,
+        "xpyun_enabled",
+        get_settings().xpyun_enabled,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
+    if not print_on:
         return success({"printed": False, "message": "打印未启用（厨房打印总开关关闭）"}, request=request)
 
     # 手动补打幂等：Redis 加速 + MySQL processed_messages 事实源
