@@ -1250,6 +1250,10 @@ CREATE TABLE IF NOT EXISTS `products` (
   `is_hot` tinyint NOT NULL DEFAULT 0 COMMENT '热销标签：1=是 0=否（可夜间批按销量自动刷新）',
   `no_member_discount` tinyint NOT NULL DEFAULT 0 COMMENT '特价/不参与会员折扣：1=是 0=否',
   `no_cooking` tinyint NOT NULL DEFAULT 0 COMMENT '免烹饪/现成品（卤味等）：1=KDS可直出餐 0=需正常制作',
+  `visibility_rule` varchar(20) NOT NULL DEFAULT 'ALWAYS' COMMENT '展示规则：ALWAYS=常显 DATE_RANGE=日期区间 ANNUAL_MD=每年月日 BIRTHDAY_TODAY=顾客今日生日',
+  `visibility_calendar` varchar(10) NOT NULL DEFAULT 'SOLAR' COMMENT '展示历法：SOLAR=公历 LUNAR=农历（ANNUAL_MD按历法月日每年匹配；DATE_RANGE仍按落库公历绝对日期）',
+  `visible_from` date NULL DEFAULT NULL COMMENT 'DATE_RANGE起/ANNUAL_MD起始月日（存公历锚点；ANNUAL_MD年忽略；农历时取该日对应农历月日）',
+  `visible_to` date NULL DEFAULT NULL COMMENT 'DATE_RANGE止/ANNUAL_MD结束月日（空=仅起日当天）',
   `sort_order` int NOT NULL DEFAULT 0 COMMENT '分类内排序',
   `sales_count` int NOT NULL DEFAULT 0 COMMENT '累计销量（冗余统计）',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
@@ -1596,7 +1600,7 @@ CREATE TABLE IF NOT EXISTS `queue_tickets` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `social_identity_types` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `code` varchar(32) NOT NULL COMMENT '身份编码 SANITATION/RIDER/ELDER/...',
+  `code` varchar(32) NOT NULL COMMENT '身份编码 SANITATION/RIDER/ELDER/TEACHER/STUDENT/MEDICAL/...（字典可扩展）',
   `name` varchar(50) NOT NULL COMMENT '展示名称',
   `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序升序',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',

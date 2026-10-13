@@ -80,6 +80,11 @@
           <el-tag v-if="row.is_recommended" size="small" type="success" class="tag-gap">推荐</el-tag>
           <el-tag v-if="row.is_hot" size="small" type="danger" class="tag-gap">热销</el-tag>
           <el-tag v-if="row.no_member_discount" size="small" type="warning" class="tag-gap">特价</el-tag>
+          <el-tag v-if="row.visibility_rule === 'ANNUAL_MD'" size="small" type="success" class="tag-gap">
+            年节{{ row.visibility_calendar === 'LUNAR' ? '·农历' : '·公历' }}
+          </el-tag>
+          <el-tag v-if="row.visibility_rule === 'DATE_RANGE'" size="small" type="success" class="tag-gap">限时</el-tag>
+          <el-tag v-if="row.visibility_rule === 'BIRTHDAY_TODAY'" size="small" type="danger" class="tag-gap">生日</el-tag>
           <el-tag v-if="row.no_cooking" size="small" type="info" class="tag-gap">免烹饪</el-tag>
           <el-tag v-if="row.has_options" size="small" class="tag-gap">规格</el-tag>
           <span
@@ -189,6 +194,61 @@
             <el-radio value="ON_SALE">在售</el-radio>
             <el-radio value="OFF_SALE">下架</el-radio>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="展示规则">
+          <el-select v-model="form.visibility_rule" style="width:100%" @change="onVisibilityRuleChange">
+            <el-option label="常显（默认）" value="ALWAYS" />
+            <el-option label="日期区间（如活动周，按公历绝对日期）" value="DATE_RANGE" />
+            <el-option label="每年固定月日（教师节公历 / 春节农历）" value="ANNUAL_MD" />
+            <el-option label="顾客今日生日（如长寿面，跟顾客公历/农历）" value="BIRTHDAY_TODAY" />
+          </el-select>
+          <p class="hint">限时/生日菜保持「在售」即可，非命中日自动从菜单隐藏。命中日一律按北京时间（Asia/Shanghai）判定。</p>
+        </el-form-item>
+        <el-form-item v-if="form.visibility_rule === 'ANNUAL_MD'" label="历法">
+          <el-radio-group v-model="form.visibility_calendar">
+            <el-radio value="SOLAR">公历</el-radio>
+            <el-radio value="LUNAR">农历</el-radio>
+          </el-radio-group>
+          <p class="hint">
+            公历：按公历月日每年重复（如教师节 09-10）。农历：选任意一年中对应农历日的公历日期，系统按农历月日每年匹配（如春节、中秋）。
+          </p>
+        </el-form-item>
+        <p v-if="form.visibility_rule === 'DATE_RANGE'" class="hint" style="margin:-8px 0 12px 120px">
+          日期区间按所选起止的公历绝对日期生效（具体活动周）。农历春节等每年循环节日请用「每年固定月日」+农历。
+        </p>
+        <el-form-item v-if="form.visibility_rule === 'DATE_RANGE'" label="展示日期">
+          <el-date-picker
+            v-model="form.visible_range"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="开始"
+            end-placeholder="结束"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item v-if="form.visibility_rule === 'ANNUAL_MD'" label="每年月日">
+          <el-date-picker
+            v-model="form.visible_from"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :placeholder="form.visibility_calendar === 'LUNAR' ? '选对应农历日的公历日期' : '选一天即可（年份忽略）'"
+            style="width:48%"
+          />
+          <span class="hint" style="margin:0 8px">至</span>
+          <el-date-picker
+            v-model="form.visible_to"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="可空=仅当天"
+            style="width:40%"
+          />
+          <p class="hint">
+            {{
+              form.visibility_calendar === 'LUNAR'
+                ? '例：春节可选 2025-01-29（农历正月初一那天），之后每年按农历正月初一展示。'
+                : '例：教师节选任意年的 09-10；跨年区间如 12-20～01-05 也可。'
+            }}
+          </p>
         </el-form-item>
         <el-form-item label="规格组">
           <el-select v-model="form.option_group_ids" multiple style="width:100%" placeholder="选择关联规格组">
@@ -606,11 +666,58 @@ const form = reactive({
   is_hot: false,
   no_member_discount: false,
   no_cooking: false,
+  visibility_rule: 'ALWAYS' as string,
+  visibility_calendar: 'SOLAR' as string,
+  visible_from: null as string | null,
+  visible_to: null as string | null,
+  visible_range: null as [string, string] | null,
   option_group_ids: [] as number[],
   require_category_ids: [] as number[],
   require_product_ids: [] as number[],
   require_inherited: false,
 })
+
+function onVisibilityRuleChange() {
+  if (form.visibility_rule === 'ALWAYS' || form.visibility_rule === 'BIRTHDAY_TODAY') {
+    form.visible_from = null
+    form.visible_to = null
+    form.visible_range = null
+    form.visibility_calendar = 'SOLAR'
+  }
+}
+
+function visibilityPayload() {
+  const rule = form.visibility_rule || 'ALWAYS'
+  const calendar =
+    rule === 'DATE_RANGE' || rule === 'ANNUAL_MD'
+      ? form.visibility_calendar === 'LUNAR'
+        ? 'LUNAR'
+        : 'SOLAR'
+      : 'SOLAR'
+  if (rule === 'DATE_RANGE') {
+    const range = form.visible_range
+    return {
+      visibility_rule: rule,
+      visibility_calendar: calendar,
+      visible_from: range?.[0] || null,
+      visible_to: range?.[1] || null,
+    }
+  }
+  if (rule === 'ANNUAL_MD') {
+    return {
+      visibility_rule: rule,
+      visibility_calendar: calendar,
+      visible_from: form.visible_from || null,
+      visible_to: form.visible_to || form.visible_from || null,
+    }
+  }
+  return {
+    visibility_rule: rule,
+    visibility_calendar: 'SOLAR',
+    visible_from: null,
+    visible_to: null,
+  }
+}
 
 const boundStoreName = computed(() => {
   const sid = auth.user?.store_id
@@ -853,6 +960,11 @@ function resetForm() {
     is_hot: false,
     no_member_discount: false,
     no_cooking: false,
+    visibility_rule: 'ALWAYS',
+    visibility_calendar: 'SOLAR',
+    visible_from: null,
+    visible_to: null,
+    visible_range: null,
     option_group_ids: [],
     require_category_ids: [],
     require_product_ids: [],
@@ -887,6 +999,14 @@ async function openForm(row?: any) {
       is_hot: detail.is_hot ?? false,
       no_member_discount: detail.no_member_discount ?? false,
       no_cooking: detail.no_cooking ?? false,
+      visibility_rule: detail.visibility_rule || 'ALWAYS',
+      visibility_calendar: detail.visibility_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR',
+      visible_from: detail.visible_from || null,
+      visible_to: detail.visible_to || null,
+      visible_range:
+        detail.visibility_rule === 'DATE_RANGE' && detail.visible_from
+          ? [detail.visible_from, detail.visible_to || detail.visible_from]
+          : null,
       option_group_ids: detail.option_group_ids || [],
       require_category_ids: inherited
         ? [...(detail.require_category_ids || [])]
@@ -959,7 +1079,6 @@ async function save() {
   try {
     const payload: Record<string, unknown> = {
       category_id: form.category_id,
-      product_no: productNo,
       name: form.name.trim(),
       price: form.price,
       box_price: form.box_price ?? 0,
@@ -971,19 +1090,32 @@ async function save() {
       is_hot: form.is_hot,
       no_member_discount: form.no_member_discount,
       no_cooking: form.no_cooking,
+      ...visibilityPayload(),
       option_group_ids: form.option_group_ids,
       require_category_ids: form.require_category_ids || [],
       require_product_ids: form.require_product_ids || [],
+    }
+    if (form.visibility_rule === 'DATE_RANGE' && !form.visible_range?.[0]) {
+      ElMessage.warning('请选择展示日期区间')
+      saving.value = false
+      return
+    }
+    if (form.visibility_rule === 'ANNUAL_MD' && !form.visible_from) {
+      ElMessage.warning('请选择每年展示的月日')
+      saving.value = false
+      return
     }
     if (form.original_price != null && form.original_price > 0) {
       payload.original_price = form.original_price
     }
     if (form.id) {
+      // 更新接口 ProductUpdate 禁止 product_no（编号创建后不可改）
       await api.put(`/products/${form.id}`, payload)
       ElMessage.success('已更新')
       dialogVisible.value = false
       load()
     } else {
+      payload.product_no = productNo
       payload.store_id = form.store_id || null
       const res = await api.post('/products', payload)
       form.id = res.data.id

@@ -47,14 +47,22 @@ const SOCIAL_RATE_HINT = {
   RIDER: 0.8,
   ELDER: 0.85,
   TEACHER: 0.9,
-  STUDENT: 0.9
+  STUDENT: 0.9,
+  MEDICAL: 0.85,
+  DISABLED: 0.85,
+  VETERAN: 0.85,
+  VOLUNTEER: 0.9
 }
 const SOCIAL_LABEL = {
   SANITATION: '环卫工公益',
   RIDER: '骑手公益',
   ELDER: '长者公益',
   TEACHER: '教师公益',
-  STUDENT: '学生公益'
+  STUDENT: '学生公益',
+  MEDICAL: '医护公益',
+  DISABLED: '残障公益',
+  VETERAN: '退役军人公益',
+  VOLUNTEER: '志愿者公益'
 }
 
 function bestSocialHint(codes) {

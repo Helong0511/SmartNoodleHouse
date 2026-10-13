@@ -462,6 +462,12 @@ class Product(Base, TimestampMixin):
     is_hot: Mapped[bool] = mapped_column(Boolean, default=False)
     no_member_discount: Mapped[bool] = mapped_column(Boolean, default=False)
     no_cooking: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ALWAYS / DATE_RANGE / ANNUAL_MD / BIRTHDAY_TODAY
+    visibility_rule: Mapped[str] = mapped_column(String(20), default="ALWAYS")
+    # SOLAR=公历 / LUNAR=农历（ANNUAL_MD 每年按历法月日匹配）
+    visibility_calendar: Mapped[str] = mapped_column(String(10), default="SOLAR")
+    visible_from: Mapped[date | None] = mapped_column(Date, default=None)
+    visible_to: Mapped[date | None] = mapped_column(Date, default=None)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     sales_count: Mapped[int] = mapped_column(Integer, default=0)
     stock: Mapped[int] = mapped_column(Integer, default=999)

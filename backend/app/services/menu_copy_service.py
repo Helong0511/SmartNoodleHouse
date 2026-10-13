@@ -480,6 +480,12 @@ class MenuCopyService:
                 is_hot=bool(src.is_hot),
                 no_member_discount=bool(src.no_member_discount),
                 no_cooking=bool(src.no_cooking),
+                visibility_rule=str(getattr(src, "visibility_rule", None) or "ALWAYS"),
+                visibility_calendar=str(
+                    getattr(src, "visibility_calendar", None) or "SOLAR"
+                ),
+                visible_from=getattr(src, "visible_from", None),
+                visible_to=getattr(src, "visible_to", None),
                 sort_order=src.sort_order,
                 sales_count=0,
                 stock=src.stock,

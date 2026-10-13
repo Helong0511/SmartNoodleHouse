@@ -75,8 +75,14 @@ App({
       try {
         const productApi = require('./utils/products')
         const _api = require('./utils/api')
+        let authFinger = '0'
+        try {
+          const auth = require('./utils/auth')
+          authFinger = auth.getToken && auth.getToken() ? '1' : '0'
+        } catch (_) { }
         this.globalData._menuPrefetch = {
           storeId: String(_sid),
+          authFinger,
           promise: productApi.fetchMenuBundle(_api, _sid, null).catch(() => null)
         }
       } catch (_) { }

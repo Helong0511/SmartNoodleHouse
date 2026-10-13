@@ -6,7 +6,13 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
-from app.api.deps import CurrentUser, DbSession, OptionalStaffUser, require_permission
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    OptionalCustomer,
+    OptionalStaffUser,
+    require_permission,
+)
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
 from app.core.response import calc_pages, success, serialize_dt
@@ -67,6 +73,12 @@ def _fmt_time(t) -> str:
     if t is None:
         return ""
     return t.strftime("%H:%M:%S") if hasattr(t, "strftime") else str(t)
+
+
+def _visibility_fields(p) -> dict:
+    from app.utils.product_visibility import visibility_payload
+
+    return visibility_payload(p)
 
 
 def _schedule_payload(sched: CategorySortSchedule, items: list[CategorySortScheduleItem] | None = None) -> dict:
@@ -906,6 +918,7 @@ async def list_products(
     request: Request,
     db: DbSession,
     staff: OptionalStaffUser,
+    customer: OptionalCustomer = None,
     page: int = 1,
     page_size: int = 20,
     category_id: int | None = None,
@@ -915,10 +928,12 @@ async def list_products(
     low_stock: bool = False,
     stock_threshold: int = 10,
     store_id: int | None = None,
+    sale_visible: bool = False,
 ):
     """商品列表。传 store_id 时只看该店商品，并合并分店库存覆盖（本店停售剔除）。
 
     员工登录时强制门店隔离（非超管忽略越权 store_id）；小程序/H5 无员工令牌时仍可按 store_id 公开查询。
+    公开查询或 sale_visible=1（收银点餐）时按限时/生日规则过滤；后台商品管理不加过滤。
     """
     if staff is not None:
         store_id = require_bound_store(staff, store_id)
@@ -1067,6 +1082,7 @@ async def list_products(
                 "is_hot": p.is_hot,
                 "no_member_discount": p.no_member_discount,
                 "no_cooking": p.no_cooking,
+                **_visibility_fields(p),
                 "sort_order": p.sort_order,
                 "sales_count": p.sales_count,
                 "stock": ov.stock if ov is not None else p.stock,
@@ -1074,6 +1090,22 @@ async def list_products(
                 "store_stock_override": ov is not None,
                 "has_options": p.id in has_options,
             }
+        )
+    # 公开菜单 / 收银点餐：按限时与生日过滤；后台商品管理（员工且未声明 sale_visible）不过滤
+    apply_vis = staff is None or bool(sale_visible)
+    if apply_vis:
+        from app.utils.birthday import is_birthday_today, normalize_calendar, today_beijing
+        from app.utils.product_visibility import filter_visible_product_dicts
+
+        # 收银员可看到生日菜（由店员确认身份）；顾客端仅今日生日可见
+        is_bday = bool(staff is not None and sale_visible)
+        if customer is not None:
+            is_bday = is_birthday_today(
+                customer.birthday,
+                normalize_calendar(getattr(customer, "birthday_calendar", None)),
+            ) or is_bday
+        items = filter_visible_product_dicts(
+            items, today=today_beijing(), is_birthday_today=is_bday
         )
     return success(
         {
@@ -1244,13 +1276,34 @@ async def delete_store_stock(
 
 
 @router.get("/products/{product_id}")
-async def get_product(product_id: int, request: Request, db: DbSession, staff: OptionalStaffUser):
+async def get_product(
+    product_id: int,
+    request: Request,
+    db: DbSession,
+    staff: OptionalStaffUser,
+    customer: OptionalCustomer = None,
+):
     product = await db.get(Product, product_id)
     if not product:
         return success(None, message="商品不存在", request=request)
     # 点餐页无员工令牌仍可按商品 id 打开详情；员工令牌则限制在本店
     if staff is not None:
         assert_store_access(staff, product.store_id)
+    else:
+        # 公开详情：限时/生日未命中则不可打开（防深链偷看后加购）
+        from app.utils.birthday import is_birthday_today, normalize_calendar, today_beijing
+        from app.utils.product_visibility import is_product_visible
+
+        is_bday = False
+        if customer is not None:
+            is_bday = is_birthday_today(
+                customer.birthday,
+                normalize_calendar(getattr(customer, "birthday_calendar", None)),
+            )
+        if not is_product_visible(
+            product, today=today_beijing(), is_birthday_today=is_bday
+        ):
+            raise AppException(40002, "该商品今日不可点（限时或生日专属）")
 
     pog_result = await db.execute(
         select(ProductOptionGroup, OptionGroup)
@@ -1334,6 +1387,7 @@ async def get_product(product_id: int, request: Request, db: DbSession, staff: O
             "is_hot": product.is_hot,
             "no_member_discount": product.no_member_discount,
             "no_cooking": product.no_cooking,
+            **_visibility_fields(product),
             "sort_order": product.sort_order,
             "stock": product.stock,
             "box_price": str(product.box_price or "0.00"),

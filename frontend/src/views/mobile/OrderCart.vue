@@ -37,7 +37,9 @@ async function validateStock() {
     item._stockError = ''
     item.imageUrl = item.imageUrl || mediaUrl(item.main_image)
     try {
-      const res = await api.get(`/products/${item.product_id}`)
+      const res = await api.get(`/products/${item.product_id}`, {
+        headers: { 'X-Client': 'customer' },
+      })
       const p = res.data
       if (!p || p.status !== 'ON_SALE') {
         item._stockError = '商品已下架'

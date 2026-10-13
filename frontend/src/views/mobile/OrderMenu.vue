@@ -145,7 +145,8 @@ function decorate(p: any) {
 const prefHint = ref('')
 
 async function openProduct(p: any) {
-  const res = await api.get(`/products/${p.id}`)
+  // X-Client=customer：带上顾客 JWT，生日专属菜详情才可见
+  const res = await api.get(`/products/${p.id}`, { headers: { 'X-Client': 'customer' } })
   currentProduct.value = decorate(res.data)
   prefHint.value = ''
   Object.keys(selectedOptions).forEach((k) => delete selectedOptions[Number(k)])
@@ -337,6 +338,7 @@ onMounted(async () => {
         page_size: 200,
         store_id: sid,
       },
+      headers: { 'X-Client': 'customer' },
     })
     const data = res?.data || {}
     for (const item of data.items || []) {

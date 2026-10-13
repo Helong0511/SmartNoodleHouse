@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -30,7 +30,9 @@ from app.models import (
     ProductTasteProfile,
     StoreProductStock,
 )
-from app.core.response import money
+from app.core.response import money, now_local
+from app.utils.birthday import is_birthday_today, normalize_calendar
+from app.utils.product_visibility import is_product_visible
 
 # ---------- 常量 ----------
 
@@ -104,6 +106,10 @@ class PoolProduct:
     stock: int
     tags: list[str] = field(default_factory=list)
     dimensions: dict[str, int] = field(default_factory=dict)
+    visibility_rule: str = "ALWAYS"
+    visibility_calendar: str = "SOLAR"
+    visible_from: date | None = None
+    visible_to: date | None = None
 
     @property
     def taste_keys(self) -> list[str]:
@@ -537,6 +543,12 @@ class RecommendationService:
                     stock=effective_stock,
                     tags=list(tp.tags or []) if tp else [],
                     dimensions=dict(tp.dimensions or {}) if tp else {},
+                    visibility_rule=str(getattr(p, "visibility_rule", None) or "ALWAYS"),
+                    visibility_calendar=str(
+                        getattr(p, "visibility_calendar", None) or "SOLAR"
+                    ),
+                    visible_from=getattr(p, "visible_from", None),
+                    visible_to=getattr(p, "visible_to", None),
                 )
             )
         if use_cache:
@@ -703,15 +715,34 @@ class RecommendationService:
         if not pool:
             return [], "COLD", {"pool_size": 0}
 
-        pool_ids = {p.id for p in pool}
         profiles: dict[tuple[str, str], ProfilePoint] = {}
         total_events = 0
         opt_in = False
+        is_bday = False
+        customer = None
         if customer_id:
             customer = await db.get(Customer, int(customer_id))
             opt_in = customer is not None and int(getattr(customer, "recommend_opt_in", 1) or 0) == 1
+            if customer is not None:
+                is_bday = is_birthday_today(
+                    customer.birthday,
+                    normalize_calendar(getattr(customer, "birthday_calendar", None)),
+                )
             if opt_in:
                 profiles, total_events = await RecommendationService.load_profiles(db, customer_id)
+
+        # 与菜单一致：限时/年节/非今日生日不进推荐池（防推荐条偷露出）
+        from app.utils.birthday import today_beijing
+
+        today = today_beijing()
+        pool = [
+            p
+            for p in pool
+            if is_product_visible(p, today=today, is_birthday_today=is_bday)
+        ]
+        if not pool:
+            return [], "COLD", {"pool_size": 0}
+        pool_ids = {p.id for p in pool}
 
         state = customer_state(total_events, opt_in)
         cf_scores: dict[int, float] = {}

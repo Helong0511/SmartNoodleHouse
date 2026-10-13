@@ -127,6 +127,7 @@ Page({
     walletLoading: false,
     showSocialBenefit: true,
     socialIdentities: [],
+    socialApplyTypes: [],
     socialLoading: false,
     socialApplying: false,
     socialExpanded: false,
@@ -285,7 +286,48 @@ Page({
   },
 
   _socialLabelMap() {
-    return { SANITATION: '环卫工', RIDER: '骑手', ELDER: '长者', TEACHER: '教师', STUDENT: '学生' }
+    const map = {
+      SANITATION: '环卫工',
+      RIDER: '外卖骑手',
+      ELDER: '长者',
+      TEACHER: '教师',
+      STUDENT: '学生',
+      MEDICAL: '医护人员',
+      DISABLED: '残障人士',
+      VETERAN: '退役军人',
+      VOLUNTEER: '志愿者'
+    }
+    ;(this.data.socialApplyTypes || []).forEach((t) => {
+      if (t && t.code) map[String(t.code).toUpperCase()] = t.name || map[String(t.code).toUpperCase()] || t.code
+    })
+    return map
+  },
+
+  async loadSocialIdentityTypes() {
+    try {
+      const res = await api.get('/social-benefits/identity-types', {}, false)
+      const items = ((res && res.items) || []).map((t) => ({
+        code: String((t && t.code) || '').toUpperCase(),
+        name: (t && t.name) || String((t && t.code) || '')
+      })).filter((t) => t.code)
+      this.setData({ socialApplyTypes: items })
+    } catch (_) {
+      if (!(this.data.socialApplyTypes || []).length) {
+        this.setData({
+          socialApplyTypes: [
+            { code: 'SANITATION', name: '环卫工' },
+            { code: 'RIDER', name: '外卖骑手' },
+            { code: 'ELDER', name: '长者' },
+            { code: 'TEACHER', name: '教师' },
+            { code: 'STUDENT', name: '学生' },
+            { code: 'MEDICAL', name: '医护人员' },
+            { code: 'DISABLED', name: '残障人士' },
+            { code: 'VETERAN', name: '退役军人' },
+            { code: 'VOLUNTEER', name: '志愿者' }
+          ]
+        })
+      }
+    }
   },
 
   _socialStatusMap() {
@@ -337,6 +379,7 @@ Page({
       this.setData({ ...this._buildSocialState([]), socialLoading: false, showSocialBenefit: false })
       return
     }
+    this.loadSocialIdentityTypes()
     if (!auth.getToken()) {
       try { await auth.ensureLogin() } catch (_) { return }
     }
@@ -354,10 +397,6 @@ Page({
         socialLoading: false
       })
     }
-  },
-
-  async applySanitationIdentity() {
-    return this.applySocialIdentity({ currentTarget: { dataset: { code: 'SANITATION' } } })
   },
 
   async applySocialIdentity(e) {

@@ -1,20 +1,30 @@
-"""生日日历（公历/农历）与权益日判定。"""
+"""生日日历（公历/农历）与权益日判定。
+
+「今日」一律按北京时间（Asia/Shanghai）日历日判定。
+"""
 from __future__ import annotations
 
 import re
 from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from zhdate import ZhDate
 
 CAL_SOLAR = "SOLAR"
 CAL_LUNAR = "LUNAR"
 VALID_CALENDARS = frozenset({CAL_SOLAR, CAL_LUNAR})
+_BEIJING = ZoneInfo("Asia/Shanghai")
 
 
 def normalize_calendar(raw: str | None) -> str:
     v = (raw or CAL_SOLAR).strip().upper()
     return v if v in VALID_CALENDARS else CAL_SOLAR
+
+
+def today_beijing() -> date:
+    """业务「今日」：北京时间日历日。"""
+    return datetime.now(_BEIJING).date()
 
 
 def _solar_to_lunar(d: date) -> ZhDate:
@@ -33,10 +43,10 @@ def is_birthday_today(
     *,
     today: date | None = None,
 ) -> bool:
-    """是否处于生日权益日（按公历或农历月日匹配）。"""
+    """是否处于生日权益日（按公历或农历月日匹配；今日=北京时间）。"""
     if birthday is None:
         return False
-    day = today or date.today()
+    day = today or today_beijing()
     cal = normalize_calendar(calendar)
     if cal == CAL_SOLAR:
         return birthday.month == day.month and birthday.day == day.day

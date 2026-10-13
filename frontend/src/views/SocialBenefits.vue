@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>社会贡献</h2>
-        <p class="sub">环卫 / 骑手 / 长者等公益身份认定、优惠规则与核销台账（默认与会员折/券互斥）。</p>
+        <p class="sub">环卫、骑手、长者、教师、学生、医护、残障、退役军人、志愿者等公益身份认定、优惠规则与核销台账（默认与会员折/券互斥）。</p>
       </div>
       <el-button @click="reloadCurrent">刷新</el-button>
     </div>
@@ -14,7 +14,7 @@
       :closable="false"
       class="tip"
       title="店长怎么用"
-      description="① 小程序会员中心可申请身份，或收银 POS「公益核验」当场认定；② 本页审核 PENDING→ACTIVE；③ 规则在「权益规则」查看（种子含环卫全天8折、骑手下午窗、老人8.5折）；④ 「核销台账 / 本月看板」看人次与补贴。证件图不在此展示。"
+      description="① 小程序会员中心可申请身份（类型来自身份字典），或收银 POS「公益核验」当场认定；② 本页审核 PENDING→ACTIVE；③ 规则在「权益规则」查看（种子含环卫/骑手/长者/教师/学生/医护等）；④ 「核销台账 / 本月看板」看人次与补贴。证件图不在此展示。"
     />
 
     <el-tabs v-model="tab" class="tabs">
@@ -165,11 +165,16 @@ const VERIFY_LABELS: Record<string, string> = {
 }
 const IDENTITY_LABELS: Record<string, string> = {
   SANITATION: '环卫工',
-  RIDER: '骑手',
+  RIDER: '外卖骑手',
   ELDER: '长者',
   TEACHER: '教师',
   STUDENT: '学生',
+  MEDICAL: '医护人员',
+  DISABLED: '残障人士',
+  VETERAN: '退役军人',
+  VOLUNTEER: '志愿者',
 }
+const identityTypeMap = ref<Record<string, string>>({})
 const IDENTITY_STATUS_LABELS: Record<string, string> = {
   PENDING: '待审核',
   ACTIVE: '已生效',
@@ -194,7 +199,21 @@ function verifyMethodLabel(method: string) {
 
 function identityLabel(code: string) {
   const key = String(code || '').toUpperCase()
-  return IDENTITY_LABELS[key] || code || '—'
+  return identityTypeMap.value[key] || IDENTITY_LABELS[key] || code || '—'
+}
+
+async function loadIdentityTypes() {
+  try {
+    const res = await api.get('/social-benefits/identity-types')
+    const map: Record<string, string> = {}
+    for (const t of res.data?.items || []) {
+      const code = String(t.code || '').toUpperCase()
+      if (code) map[code] = t.name || code
+    }
+    identityTypeMap.value = map
+  } catch {
+    identityTypeMap.value = {}
+  }
 }
 
 function identityStatusLabel(status: string) {
@@ -277,7 +296,10 @@ watch(tab, (t) => {
   else loadRedemptions()
 })
 
-onMounted(loadPending)
+onMounted(() => {
+  loadIdentityTypes()
+  loadPending()
+})
 </script>
 
 <style scoped>

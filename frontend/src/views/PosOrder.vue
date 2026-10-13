@@ -157,7 +157,7 @@
                 未加载到公益身份类型（库缺 social_identity_types）。请导入 sql/data_sys.sql 后再核验。
               </p>
               <p v-else class="member-tip muted">
-                按「已认定身份 + 规则时段」生效（如环卫全天8折、骑手14–17点），不是教师节等节日才出现教师项；教师需先配置规则并核验 TEACHER。
+                身份类型来自字典（环卫/骑手/长者/教师/学生/医护等）。按「已认定身份 + 规则时段」生效；节日营销发券与当场身份折扣不同。
               </p>
             </div>
             <div v-if="selectedCustomerId && !useSocialBenefit" class="coupon-pick">
@@ -749,14 +749,19 @@ const remainingAmount = ref('0.00')
 
 const SOCIAL_CODE_LABELS: Record<string, string> = {
   SANITATION: '环卫工',
-  RIDER: '骑手',
+  RIDER: '外卖骑手',
   ELDER: '长者',
   TEACHER: '教师',
   STUDENT: '学生',
+  MEDICAL: '医护人员',
+  DISABLED: '残障人士',
+  VETERAN: '退役军人',
+  VOLUNTEER: '志愿者',
 }
 const checkoutSocialLabel = computed(() => {
   const code = String(checkoutSocialCode.value || '').toUpperCase()
-  return SOCIAL_CODE_LABELS[code] || code
+  const fromApi = socialIdentityTypes.value.find((t: any) => String(t.code || '').toUpperCase() === code)
+  return (fromApi && fromApi.name) || SOCIAL_CODE_LABELS[code] || code
 })
 
 function socialStatusZh(status: string) {
@@ -1151,7 +1156,7 @@ async function loadMenu() {
         let totalPages = 1
         do {
           const res: any = await api.get('/products', {
-            params: { store_id: sid, page, page_size: 200 },
+            params: { store_id: sid, page, page_size: 200, sale_visible: true },
           })
           const data = res?.data || {}
           all.push(...(data.items || []))

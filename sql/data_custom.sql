@@ -291,14 +291,88 @@ INSERT INTO `social_benefit_rules` (
     `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
     `max_subsidy_amount`, `priority`, `status`
 )
-SELECT NULL, 'ELDER', '老人全天8.5折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+SELECT NULL, 'ELDER', '长者全天8.5折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
        'ORDER_DISCOUNT', 0.85, 1, 'EXCLUSIVE', 15.00, 30, 1
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1 FROM `social_benefit_rules`
         WHERE `identity_code` = 'ELDER'
-          AND `name` = '老人全天8.5折'
+          AND (`name` = '长者全天8.5折' OR `name` = '老人全天8.5折')
           AND `store_id` IS NULL
+    );
+
+-- 社会贡献：教师 / 学生 / 医护 / 残障 / 退役军人 / 志愿者（总部默认折扣，门店可另配）
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'TEACHER', '教师全天9折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.90, 1, 'EXCLUSIVE', 15.00, 40, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'TEACHER' AND `name` = '教师全天9折' AND `store_id` IS NULL
+    );
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'STUDENT', '学生全天9折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.90, 1, 'EXCLUSIVE', 12.00, 50, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'STUDENT' AND `name` = '学生全天9折' AND `store_id` IS NULL
+    );
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'MEDICAL', '医护全天8.5折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.85, 1, 'EXCLUSIVE', 15.00, 60, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'MEDICAL' AND `name` = '医护全天8.5折' AND `store_id` IS NULL
+    );
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'DISABLED', '残障全天8.5折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.85, 1, 'EXCLUSIVE', 15.00, 70, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'DISABLED' AND `name` = '残障全天8.5折' AND `store_id` IS NULL
+    );
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'VETERAN', '退役军人全天8.5折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.85, 1, 'EXCLUSIVE', 15.00, 80, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'VETERAN' AND `name` = '退役军人全天8.5折' AND `store_id` IS NULL
+    );
+INSERT INTO `social_benefit_rules` (
+    `store_id`, `identity_code`, `name`, `time_windows`, `weekdays`,
+    `benefit_type`, `discount_rate`, `daily_limit`, `stack_policy`,
+    `max_subsidy_amount`, `priority`, `status`
+)
+SELECT NULL, 'VOLUNTEER', '志愿者全天9折', JSON_ARRAY(JSON_ARRAY('00:00', '23:59')), NULL,
+       'ORDER_DISCOUNT', 0.90, 1, 'EXCLUSIVE', 12.00, 90, 1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1 FROM `social_benefit_rules`
+        WHERE `identity_code` = 'VOLUNTEER' AND `name` = '志愿者全天9折' AND `store_id` IS NULL
     );
 
 -- 预置客户分群（总部，动态条件）

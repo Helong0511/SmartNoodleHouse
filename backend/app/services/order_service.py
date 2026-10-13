@@ -154,12 +154,13 @@ class OrderReorderService:
                 )
                 continue
 
-            # 用服务端计价，保证与下单一致
+            # 用服务端计价，保证与下单一致（含限时/生日可见性，需带原单顾客）
             try:
                 priced = await OrderPriceCalculator.calculate_items_batch(
                     db,
                     [{"product_id": product.id, "quantity": item.quantity, "option_ids": option_ids}],
                     store_id=order.store_id,
+                    customer_id=int(order.customer_id) if order.customer_id else None,
                 )
                 _p, line_subtotal, _detail, qty = priced[0]
                 unit_price = money(line_subtotal / Decimal(qty)) if qty else line_subtotal
@@ -207,6 +208,7 @@ class OrderPriceCalculator:
         items_data: list[dict],
         *,
         store_id: int | None = None,
+        customer_id: int | None = None,
     ) -> list[tuple[Product, Decimal, list[tuple[OptionGroup, Option, int]], int]]:
         if not items_data:
             raise AppException(40000, "订单商品不能为空")
@@ -242,6 +244,27 @@ class OrderPriceCalculator:
                 raise AppException(40002, f"商品不属于本门店，禁止跨店下单: {sorted(cross)}")
             missing = set(product_ids) - set(products)
             raise AppException(40002, f"商品不可用: {sorted(missing)}")
+
+        # 限时/生日专属：不可点则拒绝（防改请求偷加）
+        from app.models import Customer
+        from app.utils.birthday import is_birthday_today, normalize_calendar, today_beijing
+        from app.utils.product_visibility import is_product_visible
+
+        is_bday = False
+        if customer_id:
+            cust = await db.get(Customer, int(customer_id))
+            if cust:
+                is_bday = is_birthday_today(
+                    cust.birthday,
+                    normalize_calendar(getattr(cust, "birthday_calendar", None)),
+                )
+        today = today_beijing()
+        for p in products.values():
+            if not is_product_visible(p, today=today, is_birthday_today=is_bday):
+                raise AppException(
+                    40002,
+                    f"「{p.name}」今日不可点（限时或生日专属）",
+                )
 
         # 购买依赖（商品级优先，否则继承分类默认；分类 OR 指定商品）
         cat_ids = list({p.category_id for p in products.values() if p.category_id})
@@ -425,7 +448,10 @@ class OrderPriceCalculator:
     ) -> tuple[Decimal, Decimal, Decimal]:
         """返回 (商品小计, 打包费, 可参与会员折扣的小计)。打包费 = Σ(商品 box_price × 数量)，仅 need_pack 时计。"""
         rows = await OrderPriceCalculator.calculate_items_batch(
-            db, items_data, store_id=order.store_id
+            db,
+            items_data,
+            store_id=order.store_id,
+            customer_id=int(order.customer_id) if order.customer_id else None,
         )
         # P1-1 纵深防御：最终断言所有商品门店与订单门店一致（calculate_items_batch 已校验，此处为第二道防线）
         if rows and order.store_id is not None:

@@ -1530,12 +1530,14 @@ async def get_menu_bundle_api(
     db: DbSession,
     store_id: int,
     version: int | None = None,
+    customer: OptionalCustomer = None,
 ):
     """菜单聚合（分类 + 在售商品一次成型），带版本戳的轻量校验。
 
     先经 get_or_build 校验当前分类时段方案；跨时段会 bump version。
     客户端 version 与当前一致时返回 changed:false；否则返回完整 bundle。
     Redis 不可用时降级为每次查库。
+    限时/生日菜在返回前按今日与顾客生日过滤。
     """
     if not store_id:
         raise AppException(40001, "store_id 必填")
@@ -1543,7 +1545,8 @@ async def get_menu_bundle_api(
 
     from app.models import Store
     from app.core.menu_cache import get_menu_version
-    from app.services.menu_service import get_or_build_menu_bundle
+    from app.services.menu_service import apply_menu_visibility, get_or_build_menu_bundle
+    from app.utils.birthday import is_birthday_today, normalize_calendar
 
     store = await db.get(Store, sid)
     if not store or int(getattr(store, "status", 0) or 0) != 1:
@@ -1552,15 +1555,47 @@ async def get_menu_bundle_api(
     # 先组装/校验当前时段：跨时段时会 bump version，避免客户端凭旧 version 一直 changed:false
     bundle = await get_or_build_menu_bundle(db, sid)
     current_version = int(bundle.get("version") or await get_menu_version(sid) or 0)
-    if version is not None and current_version and int(version) == int(current_version):
-        return success({"changed": False, "version": current_version}, request=request)
+    from app.utils.birthday import today_beijing
+    from app.utils.product_visibility import VIS_ALWAYS, normalize_visibility_rule
+
+    visibility_day = today_beijing().isoformat()
+    # 限时/年节/生日：可见集合随「日期」或「顾客」变化，不能仅凭 menu version 短路，
+    # 否则跨日仍 changed:false 会让客户端一直展示昨日菜单（如教师节隔天仍可见）。
+    has_dynamic_visibility = any(
+        normalize_visibility_rule((it or {}).get("visibility_rule")) != VIS_ALWAYS
+        for it in ((bundle.get("products") or {}).get("items") or [])
+    )
+    if (
+        version is not None
+        and current_version
+        and int(version) == int(current_version)
+        and not has_dynamic_visibility
+    ):
+        return success(
+            {
+                "changed": False,
+                "version": current_version,
+                "visibility_day": visibility_day,
+            },
+            request=request,
+        )
+
+    is_bday = False
+    if customer is not None:
+        is_bday = is_birthday_today(
+            customer.birthday,
+            normalize_calendar(getattr(customer, "birthday_calendar", None)),
+        )
+    visible = apply_menu_visibility(bundle, is_birthday_today=is_bday)
 
     return success(
         {
             "changed": True,
             "version": current_version,
-            "categories": bundle["categories"],
-            "products": bundle["products"],
+            "visibility_day": visibility_day,
+            "categories": visible["categories"],
+            "products": visible["products"],
+            "is_birthday_today": is_bday,
         },
         request=request,
     )

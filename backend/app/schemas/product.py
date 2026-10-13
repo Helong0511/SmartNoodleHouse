@@ -1,6 +1,14 @@
+from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.utils.birthday import VALID_CALENDARS
+from app.utils.product_visibility import (
+    VALID_VISIBILITY_RULES,
+    normalize_visibility_calendar,
+    normalize_visibility_rule,
+)
 
 
 class CategoryCreate(BaseModel):
@@ -81,6 +89,10 @@ class ProductCreate(BaseModel):
     is_hot: bool = False
     no_member_discount: bool = False
     no_cooking: bool = False
+    visibility_rule: str = Field(default="ALWAYS", description="ALWAYS/DATE_RANGE/ANNUAL_MD/BIRTHDAY_TODAY")
+    visibility_calendar: str = Field(default="SOLAR", description="SOLAR=公历 / LUNAR=农历")
+    visible_from: date | None = None
+    visible_to: date | None = None
     sort_order: int = 0
     stock: int = Field(default=999, ge=0, description="库存须 ≥ 0")
     box_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="餐盒/打包费（单价）")
@@ -89,6 +101,36 @@ class ProductCreate(BaseModel):
     # None=下单时自动带入所属分类默认；[]=明确无限制；有值=商品自身配置
     require_category_ids: list[int] | None = None
     require_product_ids: list[int] | None = None
+
+    @field_validator("visibility_rule")
+    @classmethod
+    def _norm_vis_create(cls, v: str) -> str:
+        raw = str(v or "").strip().upper()
+        if raw and raw not in VALID_VISIBILITY_RULES:
+            raise ValueError("visibility_rule 无效")
+        return normalize_visibility_rule(v)
+
+    @field_validator("visibility_calendar")
+    @classmethod
+    def _norm_cal_create(cls, v: str) -> str:
+        raw = str(v or "").strip().upper()
+        if raw and raw not in VALID_CALENDARS:
+            raise ValueError("visibility_calendar 须为 SOLAR 或 LUNAR")
+        return normalize_visibility_calendar(v)
+
+    @model_validator(mode="after")
+    def _vis_dates_create(self):
+        rule = normalize_visibility_rule(self.visibility_rule)
+        if rule in ("DATE_RANGE", "ANNUAL_MD") and self.visible_from is None:
+            raise ValueError("限时展示须填写 visible_from")
+        if (
+            self.visible_from
+            and self.visible_to
+            and rule == "DATE_RANGE"
+            and self.visible_to < self.visible_from
+        ):
+            raise ValueError("visible_to 不能早于 visible_from")
+        return self
 
 
 class ProductUpdate(BaseModel):
@@ -105,6 +147,10 @@ class ProductUpdate(BaseModel):
     is_hot: bool | None = None
     no_member_discount: bool | None = None
     no_cooking: bool | None = None
+    visibility_rule: str | None = None
+    visibility_calendar: str | None = None
+    visible_from: date | None = None
+    visible_to: date | None = None
     sort_order: int | None = None
     stock: int | None = Field(default=None, ge=0, description="库存须 ≥ 0")
     box_price: Decimal | None = Field(default=None, ge=0)
@@ -112,6 +158,55 @@ class ProductUpdate(BaseModel):
     option_group_ids: list[int] | None = None
     require_category_ids: list[int] | None = None
     require_product_ids: list[int] | None = None
+
+    @field_validator("visibility_rule")
+    @classmethod
+    def _norm_vis_update(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        rule = normalize_visibility_rule(v)
+        raw = str(v).strip().upper()
+        if raw and raw not in VALID_VISIBILITY_RULES:
+            raise ValueError("visibility_rule 无效")
+        return rule
+
+    @field_validator("visibility_calendar")
+    @classmethod
+    def _norm_cal_update(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        raw = str(v).strip().upper()
+        if raw and raw not in VALID_CALENDARS:
+            raise ValueError("visibility_calendar 须为 SOLAR 或 LUNAR")
+        return normalize_visibility_calendar(v)
+
+    @model_validator(mode="after")
+    def _vis_dates_update(self):
+        # 仅当本次请求显式改了规则或日期时校验，避免局部更新误伤
+        fields = getattr(self, "model_fields_set", None) or set()
+        if not fields.intersection(
+            {"visibility_rule", "visibility_calendar", "visible_from", "visible_to"}
+        ):
+            return self
+        rule = (
+            normalize_visibility_rule(self.visibility_rule)
+            if self.visibility_rule is not None
+            else None
+        )
+        if (
+            "visibility_rule" in fields
+            and rule in ("DATE_RANGE", "ANNUAL_MD")
+            and self.visible_from is None
+        ):
+            raise ValueError("限时展示须填写 visible_from")
+        if (
+            self.visible_from
+            and self.visible_to
+            and rule == "DATE_RANGE"
+            and self.visible_to < self.visible_from
+        ):
+            raise ValueError("visible_to 不能早于 visible_from")
+        return self
 
 
 class ProductOut(BaseModel):
@@ -129,6 +224,10 @@ class ProductOut(BaseModel):
     is_hot: bool
     no_member_discount: bool
     no_cooking: bool
+    visibility_rule: str = "ALWAYS"
+    visibility_calendar: str = "SOLAR"
+    visible_from: date | None = None
+    visible_to: date | None = None
     sort_order: int
     sales_count: int
     require_category_ids: list[int] | None = None

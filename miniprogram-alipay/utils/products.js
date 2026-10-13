@@ -5,6 +5,25 @@ function normalizeList(data) {
 }
 
 /**
+ * 业务「今日」日历日 YYYY-MM-DD：固定北京时间（Asia/Shanghai），
+ * 与后端 visibility_day / now_local 对齐，不跟手机系统时区。
+ */
+function localVisibilityDay() {
+  try {
+    // en-CA → YYYY-MM-DD
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date())
+  } catch (_) {
+    const d = new Date(Date.now() + 8 * 3600 * 1000)
+    return d.toISOString().slice(0, 10)
+  }
+}
+
+/**
  * 分页拉齐门店在售商品。
  * 单页最多 200；某一页失败或重复时返回已拿到的部分，并标 complete:false，
  * 调用方不得把「没拉到」当成下架。
@@ -67,11 +86,15 @@ function menuCacheKey(storeId) {
   return `${MENU_CACHE_PREFIX}${storeId}`
 }
 
-/** 读本地菜单缓存（弱网兜底渲染）。无缓存返回 null。 */
+/** 读本地菜单缓存（弱网兜底渲染）。跨日或无缓存返回 null。 */
 function readCachedMenu(storeId) {
   try {
     const res = my.getStorageSync({ key: menuCacheKey(storeId) })
-    return (res && res.data) || null
+    const cached = (res && res.data) || null
+    if (!cached) return null
+    const day = cached.visibility_day || ''
+    if (day && day !== localVisibilityDay()) return null
+    return cached
   } catch (_) {
     return null
   }
@@ -83,6 +106,7 @@ function writeCachedMenu(storeId, bundle) {
       key: menuCacheKey(storeId),
       data: {
         version: bundle.version,
+        visibility_day: bundle.visibility_day || localVisibilityDay(),
         categories: bundle.categories,
         products: bundle.products,
         cached_at: Date.now()
@@ -99,7 +123,13 @@ function writeCachedMenu(storeId, bundle) {
 async function fetchMenuBundle(api, storeId, version) {
   const params = { store_id: storeId }
   if (version) params.version = version
-  const data = await api.get('/miniprogram/menu', params, false)
+  // 有顾客 token 时带上，便于下发生日专属菜；无 token 仍可匿名拉菜单
+  let needAuth = false
+  try {
+    const auth = require('./auth')
+    needAuth = !!(auth.getToken && auth.getToken())
+  } catch (_) { }
+  const data = await api.get('/miniprogram/menu', params, needAuth)
   return data || { changed: true }
 }
 
@@ -118,18 +148,25 @@ async function loadStoreCatalog(api, storeId, options) {
     return { items: cachedItems, categories: cachedCategories, complete: true }
   }
   try {
-    const bundle = await fetchMenuBundle(api, sid, cached && cached.version)
+    // 跨日缓存已在 readCachedMenu 作废，此处仅同日才带 version 短路
+    let bundle = await fetchMenuBundle(api, sid, cached && cached.version)
     if (bundle && bundle.changed === false) {
-      if (cachedItems.length) {
+      const sameDay =
+        !bundle.visibility_day ||
+        bundle.visibility_day === localVisibilityDay()
+      if (cachedItems.length && sameDay) {
         return { items: cachedItems, categories: cachedCategories, complete: true }
       }
-      // changed:false 但本地无缓存：继续走下方完整拉取（勿当失败）
-    } else if (bundle && bundle.products != null) {
+      // changed:false 但跨日/无本地：强制全量，勿直接掉到分页兜底
+      bundle = await fetchMenuBundle(api, sid, null)
+    }
+    if (bundle && bundle.changed !== false && bundle.products != null) {
       // 后端 products 为 { items, total }，不是数组；须用 normalizeList
       const items = normalizeList(bundle.products)
       const categories = normalizeList(bundle.categories)
       writeCachedMenu(sid, {
         version: bundle.version,
+        visibility_day: bundle.visibility_day || localVisibilityDay(),
         categories,
         products: items
       })
@@ -139,7 +176,12 @@ async function loadStoreCatalog(api, storeId, options) {
     }
   } catch (_) {}
   try {
-    const prod = await fetchAllProducts(api, { store_id: sid }, false)
+    let needAuth = false
+    try {
+      const auth = require('./auth')
+      needAuth = !!(auth.getToken && auth.getToken())
+    } catch (_) { }
+    const prod = await fetchAllProducts(api, { store_id: sid }, needAuth)
     let categories = []
     try {
       const catRes = await api.get('/categories', { store_id: sid }, false)
@@ -147,6 +189,7 @@ async function loadStoreCatalog(api, storeId, options) {
     } catch (_) {}
     const items = (prod && prod.items) || []
     if (items.length) {
+      // 有商品列表即可用于规格校验；complete 仅作参考
       return { items, categories, complete: true }
     }
   } catch (_) {}
@@ -164,5 +207,6 @@ module.exports = {
   loadStoreCatalog,
   readCachedMenu,
   writeCachedMenu,
-  menuCacheKey
+  menuCacheKey,
+  localVisibilityDay
 }

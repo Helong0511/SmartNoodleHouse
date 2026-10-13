@@ -1555,19 +1555,39 @@ WHERE `r`.`code` = 'SUPER_ADMIN'
 -- END SYSTEM SEED
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 社会贡献身份字典（系统必要）
+-- 社会贡献身份字典（系统必要；可扩展，小程序/POS 从本表动态拉取，勿写死三种）
 INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'SANITATION', '环卫工', 10, 1, JSON_ARRAY('环卫工牌', '工作服')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'SANITATION');
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'RIDER', '外卖骑手', 20, 1, JSON_ARRAY('工服', '平台工牌')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'RIDER');
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'ELDER', '老人', 30, 1, JSON_ARRAY('身份证', '老年证')
+SELECT 'ELDER', '长者', 30, 1, JSON_ARRAY('身份证', '老年证')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'ELDER');
+
 INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
 SELECT 'TEACHER', '教师', 40, 1, JSON_ARRAY('教师证', '工牌')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'TEACHER');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'VETERAN', '退役军人', 80, 1, JSON_ARRAY('退役军人优待证', '军官证/士兵证')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'VETERAN');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'SANITATION', '环卫工', 10, 1, JSON_ARRAY('环卫工牌', '工作服')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'SANITATION');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'RIDER', '外卖骑手', 20, 1, JSON_ARRAY('工服', '平台工牌')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'RIDER');
+
 INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
 SELECT 'STUDENT', '学生', 50, 1, JSON_ARRAY('学生证')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'STUDENT');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'MEDICAL', '医护人员', 60, 1, JSON_ARRAY('执业证', '工牌')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'MEDICAL');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'DISABLED', '残障人士', 70, 1, JSON_ARRAY('残疾人证')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'DISABLED');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'VOLUNTEER', '志愿者', 90, 1, JSON_ARRAY('志愿证', '服务证明')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'VOLUNTEER');

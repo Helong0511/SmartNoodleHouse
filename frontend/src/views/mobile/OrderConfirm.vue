@@ -228,7 +228,9 @@ onMounted(async () => {
   for (const item of cart.value) {
     if (item.box_price != null) continue
     try {
-      const p = (await api.get(`/products/${item.product_id}`)).data
+      const p = (
+        await api.get(`/products/${item.product_id}`, { headers: { 'X-Client': 'customer' } })
+      ).data
       item.box_price = p.box_price || '0'
       item.no_member_discount = !!p.no_member_discount
       if (!item.imageUrl) item.imageUrl = mediaUrl(p.main_image)

@@ -39,6 +39,11 @@ from app.services.category_schedule import (
     pick_active_schedule,
 )
 from app.core.response import now_local, serialize_dt
+from app.utils.birthday import today_beijing
+from app.utils.product_visibility import (
+    filter_visible_product_dicts,
+    visibility_payload,
+)
 
 _BUILD_TTL_SECONDS = 60
 # 进程内兜底（Redis 不可用时仍避免每次请求重查）
@@ -163,6 +168,7 @@ async def build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                 "is_hot": p.is_hot,
                 "no_member_discount": p.no_member_discount,
                 "no_cooking": p.no_cooking,
+                **visibility_payload(p),
                 "sort_order": p.sort_order,
                 "sales_count": p.sales_count,
                 "stock": int(stock_override) if stock_override is not None else p.stock,
@@ -193,6 +199,25 @@ async def build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     }
 
 
+def apply_menu_visibility(
+    bundle: dict[str, Any],
+    *,
+    is_birthday_today: bool = False,
+) -> dict[str, Any]:
+    """按今日日历/生日规则过滤菜单商品（不改缓存原文）。"""
+    products = (bundle.get("products") or {}) if isinstance(bundle, dict) else {}
+    raw_items = products.get("items") if isinstance(products, dict) else None
+    if not isinstance(raw_items, list):
+        return bundle
+    today = today_beijing()
+    filtered = filter_visible_product_dicts(
+        raw_items, today=today, is_birthday_today=is_birthday_today
+    )
+    out = dict(bundle)
+    out["products"] = {"items": filtered, "total": len(filtered)}
+    return out
+
+
 async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     """带 Redis + 进程内两级缓存的菜单 bundle，并确保 version>=1。
 
@@ -202,12 +227,32 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     sid = int(store_id)
     expected_sched = await _active_schedule_id(db, sid)
 
+    def _bundle_has_visibility_meta(bundle: dict[str, Any] | None) -> bool:
+        """旧缓存若无 visibility_rule 字段，过滤会把限时菜当常显，须重建。"""
+        if not bundle:
+            return False
+        products = bundle.get("products") or {}
+        items = products.get("items") if isinstance(products, dict) else None
+        if not isinstance(items, list) or not items:
+            return True
+        sample = items[0] if isinstance(items[0], dict) else {}
+        return "visibility_rule" in sample
+
     cached = await get_menu_bundle(sid)
-    if cached is not None and _bundle_schedule_id(cached) == expected_sched:
+    if (
+        cached is not None
+        and _bundle_schedule_id(cached) == expected_sched
+        and _bundle_has_visibility_meta(cached)
+    ):
         return cached
 
     hit = _build_cache.get(sid)
-    if hit and hit[0] > time.time() and _bundle_schedule_id(hit[1]) == expected_sched:
+    if (
+        hit
+        and hit[0] > time.time()
+        and _bundle_schedule_id(hit[1]) == expected_sched
+        and _bundle_has_visibility_meta(hit[1])
+    ):
         bundle = hit[1]
     else:
         # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
@@ -215,7 +260,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         if not lock_ok:
             # 未抢到锁：短暂等待其他进程重建完成后重读缓存
             waited = await wait_for_rebuild(sid, 0.3)
-            if waited is not None and _bundle_schedule_id(waited) == expected_sched:
+            if (
+                waited is not None
+                and _bundle_schedule_id(waited) == expected_sched
+                and _bundle_has_visibility_meta(waited)
+            ):
                 version = await get_menu_version(sid)
                 return {**waited, "version": version}
         try:

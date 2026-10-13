@@ -19,6 +19,15 @@ function normalizeList(data) {
   return []
 }
 
+/** 登录态指纹：宾客↔登录切换后须重拉菜单（生日菜因人而异）。 */
+function menuAuthFinger() {
+  try {
+    return auth.getToken && auth.getToken() ? '1' : '0'
+  } catch (_) {
+    return '0'
+  }
+}
+
 /** 首屏只放一部分菜，避免上百道菜一次 setData 撑满基础库数据上限。 */
 function sliceMenuForFirstPaint(categories, maxProducts) {
   const all = categories || []
@@ -189,6 +198,8 @@ Page({
     this._lastProductItems = null
     this._lastMenuFetchAt = 0
     this._menuFetchStoreId = null
+    this._menuVisibilityDay = null
+    this._menuAuthFinger = null
     this._favLoadedAt = 0
     this.applyMenuFlags(ctx.storeId)
     this.loadMenu(true)
@@ -200,6 +211,8 @@ Page({
     this._catsCache = null
     this._lastMenuFetchAt = 0
     this._menuFetchStoreId = null
+    this._menuVisibilityDay = null
+    this._menuAuthFinger = null
     Promise.all([
       dineCtx.ensureDineContext({ force: true }).then((ctx) => {
         this.applyDineContext(ctx)
@@ -368,6 +381,8 @@ Page({
       this._lastProductItems = null
       this._lastMenuFetchAt = 0
       this._menuFetchStoreId = null
+      this._menuVisibilityDay = null
+      this._menuAuthFinger = null
       this.applyMenuFlags(ctx.storeId)
       this.loadMenu(true)
       this.refreshCartBar({ openSheet: false, forceCatalog: true })
@@ -381,10 +396,19 @@ Page({
       && g.prefsAt
       && g.prefsView
       && (now - g.prefsAt) < PREFS_SKIP_LOGIN_MS
+    const fingerBefore = menuAuthFinger()
     if (!skipLogin) {
       try {
         await auth.ensureLogin()
       } catch (_) { }
+    }
+    // 登录态变化（尤其宾客→登录）须立刻重拉菜单，否则生日菜要等下次 onShow/TTL
+    const fingerAfter = menuAuthFinger()
+    if (
+      fingerAfter !== fingerBefore
+      || (this._menuAuthFinger != null && fingerAfter !== this._menuAuthFinger)
+    ) {
+      this.loadMenu(true)
     }
     try {
       const view = await prefUtil.loadCustomerPrefs(app, api, { force })
@@ -439,11 +463,16 @@ Page({
     if (this._menuInflight && this._menuInflightStoreId === cacheKey) {
       return this._menuInflight
     }
+    const todayKey = productApi.localVisibilityDay()
+    const authFinger = menuAuthFinger()
+    // 跨日或登录态变化：禁止 30s TTL 短路，否则限时菜/生日菜会该显不显、该藏不藏
     if (
       !force
       && this._lastMenuFetchAt
       && String(this._menuFetchStoreId) === cacheKey
       && (Date.now() - this._lastMenuFetchAt) < MENU_REFRESH_TTL_MS
+      && this._menuVisibilityDay === todayKey
+      && this._menuAuthFinger === authFinger
       && this.data.categories
       && this.data.categories.length
     ) {
@@ -456,9 +485,11 @@ Page({
     const run = async () => {
       const now = Date.now()
       const metrics = media.layoutMetrics()
-      const markFetched = (items, categories) => {
+      const markFetched = (items, categories, visibilityDay) => {
         this._lastMenuFetchAt = Date.now()
         this._menuFetchStoreId = sid
+        this._menuVisibilityDay = visibilityDay || productApi.localVisibilityDay()
+        this._menuAuthFinger = menuAuthFinger()
         if (app.globalData && items) {
           app.globalData._sharedCatalog = {
             storeId: sid,
@@ -469,29 +500,38 @@ Page({
         }
       }
 
-      // 0) 消费 app.js 预拉取结果（冷启动提前拉取的菜单数据，跳过二次请求）
+      const applyBundle = async (bundle) => {
+        const catList = normalizeList(bundle.categories)
+        const items = normalizeList(bundle.products)
+        const vday = bundle.visibility_day || productApi.localVisibilityDay()
+        productApi.writeCachedMenu(sid, {
+          version: bundle.version,
+          visibility_day: vday,
+          categories: catList,
+          products: items
+        })
+        this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
+        this._lastProductItems = items
+        const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
+        await this.applyCategories(categories, metrics)
+        markFetched(items, catList, vday)
+        this.setData({ recoReady: true, recoStoreId: sid })
+      }
+
+      // 0) 消费 app.js 预拉取：仅当登录态与预拉时一致才跳过二次请求，
+      // 避免冷启动宾客菜单把已登录用户的生日菜「吃掉」后直接 return。
       if (!force && app.globalData._menuPrefetch && app.globalData._menuPrefetch.storeId === cacheKey) {
         const prefetch = app.globalData._menuPrefetch
         app.globalData._menuPrefetch = null
-        try {
-          const bundle = await prefetch.promise
-          if (bundle && bundle.changed !== false && bundle.categories) {
-            const catList = normalizeList(bundle.categories)
-            const items = normalizeList(bundle.products)
-            productApi.writeCachedMenu(sid, {
-              version: bundle.version,
-              categories: catList,
-              products: items
-            })
-            this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
-            this._lastProductItems = items
-            const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
-            await this.applyCategories(categories, metrics)
-            markFetched(items, catList)
-            this.setData({ recoReady: true, recoStoreId: sid })
-            return
-          }
-        } catch (_) { }
+        if (String(prefetch.authFinger || '0') === authFinger) {
+          try {
+            const bundle = await prefetch.promise
+            if (bundle && bundle.changed !== false && bundle.categories) {
+              await applyBundle(bundle)
+              return
+            }
+          } catch (_) { }
+        }
       }
 
       // 1) 本地缓存先渲染（弱网兜底 + 首屏提速），不弹骨架
@@ -506,29 +546,23 @@ Page({
         this.setData({ loading: true })
       }
 
-      // 2) 后台静默版本校验：changed:false 不重绘
+      // 2) 后台静默版本校验：changed:false 且同日才保留本地；跨日强制全量
       try {
-        const bundle = await productApi.fetchMenuBundle(api, sid, force ? null : (cached && cached.version))
+        let bundle = await productApi.fetchMenuBundle(api, sid, force ? null : (cached && cached.version))
         if (bundle.changed === false) {
-          if (this._catsCache) this._catsCache.at = now
-          markFetched(this._lastProductItems, (this._catsCache && this._catsCache.cats) || [])
-          this.setData({ recoReady: true, recoStoreId: sid })
-          return
+          const day = bundle.visibility_day || ''
+          const sameDay = !day || day === productApi.localVisibilityDay()
+          if (sameDay && this._lastProductItems && this._lastProductItems.length) {
+            if (this._catsCache) this._catsCache.at = now
+            markFetched(this._lastProductItems, (this._catsCache && this._catsCache.cats) || [], day)
+            this.setData({ recoReady: true, recoStoreId: sid })
+            return
+          }
+          bundle = await productApi.fetchMenuBundle(api, sid, null)
         }
-        const catList = normalizeList(bundle.categories)
-        const items = normalizeList(bundle.products)
-        productApi.writeCachedMenu(sid, {
-          version: bundle.version,
-          categories: catList,
-          products: items
-        })
-        this._catsCache = { key: cacheKey, at: now, cats: catList, metrics }
-        this._lastProductItems = items
-        const categories = this.buildCategories(catList, items, metrics, this.data.keyword)
-        await this.applyCategories(categories, metrics)
-        markFetched(items, catList)
-        // 推荐位在菜单首屏渲染完成后再挂载，避免抢占首屏请求
-        this.setData({ recoReady: true, recoStoreId: sid })
+        if (bundle && bundle.changed !== false && bundle.products != null) {
+          await applyBundle(bundle)
+        }
       } catch (e) {
         // 弱网/接口失败：已有缓存就静默保留旧菜单，无缓存才提示
         if (!cached) {
