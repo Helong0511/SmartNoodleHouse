@@ -844,6 +844,16 @@ class SystemSettingsService:
             return 0
 
     @classmethod
+    async def public_config_version(cls) -> int:
+        """小程序/公开 API 用的配置世代号；全局或门店业务写路径 bump 后递增。"""
+        return await cls._remote_version()
+
+    @classmethod
+    async def bump_public_config_version(cls) -> int:
+        """门店覆盖等不走 invalidate_cache 的写路径，仍须 bump 以便客户端感知。"""
+        return await cls._bump_remote_version()
+
+    @classmethod
     async def _load_raw(cls, db: AsyncSession, *, force: bool = False) -> dict[str, str]:
         now = time.monotonic()
         remote_ver = await cls._remote_version()

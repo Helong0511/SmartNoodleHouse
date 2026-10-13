@@ -390,9 +390,13 @@ async def miniprogram_config(
     )
     invoice_enabled = await SystemSettingsService.get_bool(db, "invoice_enabled", False)
 
+    config_version = await SystemSettingsService.public_config_version()
+
     return success(
         {
             "store_id": sid,
+            # 全局/门店业务写路径 bump；小程序用此字段在 TTL 内静默探测热更
+            "config_version": int(config_version or 0),
             "subscribe_templates": {
                 # 微信端只用 order_ready / balance_low；支付宝只用 alipay_*，禁止跨端混用
                 "order_ready": tmpl or None,

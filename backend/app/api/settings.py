@@ -945,6 +945,8 @@ async def update_store_business(
         detail={"updates": {k: str(v) for k, v in data.updates.items()}},
     )
     await db.flush()
+    # 门店覆盖不进全局 settings 进程缓存，但仍 bump 公开 config_version 供小程序感知
+    await SystemSettingsService.bump_public_config_version()
     return await get_store_business(store_id, request, db, user)
 
 
@@ -977,6 +979,7 @@ async def clear_store_business_key(
         detail={"key": key},
     )
     await db.flush()
+    await SystemSettingsService.bump_public_config_version()
     return success({"cleared": True, "store_id": store_id, "key": key}, request=request)
 
 
