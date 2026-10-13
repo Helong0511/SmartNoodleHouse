@@ -844,6 +844,7 @@ Page({
       app.globalData.recommend_opt_in = opt
       wx.setStorageSync('recommend_opt_in', opt)
       this._privacyLoadedAt = Date.now()
+      try { prefUtil.clearPrefsCache(app) } catch (_) { }
       wx.showToast({
         title: opt ? '已开启个性化推荐' : '已关闭，后续不会记录你的行为',
         icon: 'none'

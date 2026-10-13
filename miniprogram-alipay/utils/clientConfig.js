@@ -8,9 +8,14 @@ let _cacheAt = 0
 let _loading = null
 let _loadingStoreId = null
 let _loadGen = 0
+let _softProbe = null
+let _softProbeStoreId = null
+let _softProbeAt = 0
 
-/** 门店业务开关（公益/营销等）可随时改，短 TTL 避免关了再开仍读旧缓存 */
+/** 门店业务开关（公益/营销等）可随时改；TTL 内靠 config_version 静默探测 */
 const CACHE_TTL_MS = 15 * 1000
+/** 版本探测最短间隔，避免 Tab 连点打满 config */
+const SOFT_PROBE_COOLDOWN_MS = 3 * 1000
 
 const DEFAULTS = {
   enable_alipay_avatar: true,
@@ -27,7 +32,8 @@ const DEFAULTS = {
   enable_social_benefit: true,
   enable_marketing_campaigns: true,
   enable_customer_display: false,
-  invoice_enabled: false
+  invoice_enabled: false,
+  config_version: 0
 }
 
 function getAppSafe() {
@@ -77,6 +83,7 @@ function applyCacheToApp(cache) {
   const app = getAppSafe()
   if (!app || !app.globalData) return
   app.globalData.clientConfig = cache
+  app.globalData.configVersion = Number((cache && cache.config_version) || 0) || 0
   app.globalData.enableAlipayAvatar = !!cache.enable_alipay_avatar
   app.globalData.enableAlipayNickname = !!cache.enable_alipay_nickname
   app.globalData.enableAlipayPhoneBind = !!cache.enable_alipay_phone_bind
@@ -93,6 +100,50 @@ function applyCacheToApp(cache) {
   app.globalData.enableFaceWelcome = !!cache.enable_face_welcome
 }
 
+function applyFetched(data, sid, gen) {
+  if (gen !== _loadGen) return _cache
+  _cache = data && typeof data === 'object' ? { ...DEFAULTS, ...data } : { ...DEFAULTS }
+  _cacheStoreId = sid
+  _cacheAt = Date.now()
+  applyCacheToApp(_cache)
+  return _cache
+}
+
+/** TTL 命中时探测 config_version；有变更则立刻替换缓存。返回 Promise 供调用方等齐再 apply UI。 */
+function softProbeConfig(sid) {
+  if (_softProbe && _softProbeStoreId === sid) return _softProbe
+  const now = Date.now()
+  if (_softProbeAt && now - _softProbeAt < SOFT_PROBE_COOLDOWN_MS && _cache && _cacheStoreId === sid) {
+    return Promise.resolve(_cache)
+  }
+  const known = Number((_cache && _cache.config_version) || 0) || 0
+  _softProbeStoreId = sid
+  _softProbeAt = now
+  _softProbe = (async () => {
+    try {
+      const params = sid ? { store_id: sid } : {}
+      const data = await api.get('/miniprogram/config', params, false)
+      const ver = Number((data && data.config_version) || 0) || 0
+      if (!_cache || _cacheStoreId !== sid) {
+        applyFetched(data, sid, _loadGen)
+        return _cache
+      }
+      if (ver !== known) {
+        applyFetched(data, sid, _loadGen)
+      } else {
+        _cacheAt = Date.now()
+      }
+      return _cache
+    } catch (_) {
+      return _cache
+    } finally {
+      _softProbe = null
+      _softProbeStoreId = null
+    }
+  })()
+  return _softProbe
+}
+
 /**
  * @param {boolean} [force=false]
  * @param {number|null} [storeId=null] 显式门店；默认从当前桌台/门店上下文解析
@@ -101,7 +152,9 @@ async function loadClientConfig(force = false, storeId = null) {
   const sid = resolveStoreId(storeId)
   const now = Date.now()
   const fresh = _cache && _cacheStoreId === sid && _cacheAt && now - _cacheAt < CACHE_TTL_MS
-  if (!force && fresh) return _cache
+  if (!force && fresh) {
+    return softProbeConfig(sid).then((cfg) => cfg || _cache)
+  }
   if (!force && _loading && _loadingStoreId === sid) return _loading
   const gen = ++_loadGen
   _loadingStoreId = sid
@@ -109,23 +162,20 @@ async function loadClientConfig(force = false, storeId = null) {
     try {
       const params = sid ? { store_id: sid } : {}
       const data = await api.get('/miniprogram/config', params, false)
-      if (gen !== _loadGen) return _cache
-      _cache = data && typeof data === 'object' ? { ...DEFAULTS, ...data } : { ...DEFAULTS }
-      _cacheStoreId = sid
-      _cacheAt = Date.now()
+      return applyFetched(data, sid, gen) || _cache
     } catch (_) {
       if (gen === _loadGen) {
         _cache = _cache || { ...DEFAULTS }
         if (!_cacheAt) _cacheAt = Date.now()
+        applyCacheToApp(_cache)
       }
+      return _cache
     } finally {
       if (gen === _loadGen) {
         _loading = null
         _loadingStoreId = null
       }
     }
-    if (gen === _loadGen) applyCacheToApp(_cache)
-    return _cache
   })()
   return _loading
 }
@@ -137,7 +187,14 @@ function invalidateClientConfig() {
   _cacheAt = 0
   _loading = null
   _loadingStoreId = null
+  _softProbe = null
+  _softProbeStoreId = null
+  _softProbeAt = 0
   _loadGen += 1
+}
+
+function currentConfigVersion() {
+  return Number((_cache && _cache.config_version) || 0) || 0
 }
 
 function isAlipayAvatarEnabled() {
@@ -211,7 +268,6 @@ function memberPageFlags() {
   }
 }
 
-/** 支付宝页：头像 / 昵称 / 手机号三个开关对应的 setData 字段 */
 function alipayPrivacyPageData() {
   return {
     canChooseAvatar: !!isAlipayAvatarEnabled(),
@@ -220,7 +276,6 @@ function alipayPrivacyPageData() {
   }
 }
 
-/** 微信页：头像 / 昵称 / 手机号三个开关对应的 setData 字段 */
 function wxPrivacyPageData() {
   return {
     canChooseAvatar: !!isWxAvatarEnabled(),
@@ -232,6 +287,7 @@ function wxPrivacyPageData() {
 module.exports = {
   loadClientConfig,
   invalidateClientConfig,
+  currentConfigVersion,
   isAlipayAvatarEnabled,
   isAlipayNicknameEnabled,
   isAlipayPhoneBindEnabled,

@@ -542,6 +542,8 @@ async def test_config_exposes_three_daily_keys(db_session: AsyncSession):
         assert data["enable_social_benefit"] is True
         assert data["enable_marketing_campaigns"] is True
         assert data["pay_success_coupon_name"] == ""
+        assert "config_version" in data
+        assert isinstance(data["config_version"], int)
         assert data["quick_remark_options"] == [
             "不要香菜", "少油少盐", "不要辣", "微辣", "多加醋", "加份米饭",
         ]

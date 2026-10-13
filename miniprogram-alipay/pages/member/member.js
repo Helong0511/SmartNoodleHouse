@@ -912,6 +912,7 @@ Page({
       app.globalData.recommend_opt_in = opt
       my.setStorageSync({ key: 'recommend_opt_in', data: opt })
       this._privacyLoadedAt = Date.now()
+      try { prefUtil.clearPrefsCache(app) } catch (_) { }
       my.showToast({
         content: opt ? '已开启个性化推荐' : '已关闭，后续不会记录你的行为',
         type: 'none'
