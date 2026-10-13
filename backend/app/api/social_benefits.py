@@ -8,6 +8,7 @@ from app.api.deps import (
     CurrentCustomer,
     CurrentUser,
     DbSession,
+    OptionalCustomer,
     require_permission,
     require_pos,
     require_social_identity_manage,
@@ -221,13 +222,21 @@ async def pos_verify(data: PosVerifyIn, request: Request, db: DbSession, user: C
 
 
 @router.post("/preview")
-async def preview(data: PreviewIn, request: Request, db: DbSession):
-    """预览公益折扣。顾客端与 POS 均可调用，须传 customer_id。"""
+async def preview(
+    data: PreviewIn,
+    request: Request,
+    db: DbSession,
+    customer: OptionalCustomer,
+):
+    """预览公益折扣。有顾客 JWT 时强制本人；否则须显式传 customer_id（如 POS）。"""
     from decimal import Decimal
 
     from app.core.response import money
 
-    if data.customer_id is None:
+    cid = int(data.customer_id) if data.customer_id else None
+    if customer is not None:
+        cid = int(customer.id)
+    if cid is None:
         raise AppException(40008, "请指定顾客")
     subtotal = money(Decimal(str(data.subtotal)))
     disc = money(
@@ -242,7 +251,7 @@ async def preview(data: PreviewIn, request: Request, db: DbSession):
     pack = money(Decimal(str(data.packing_fee or "0")))
     result = await SocialBenefitService.preview(
         db,
-        customer_id=int(data.customer_id),
+        customer_id=cid,
         store_id=int(data.store_id),
         subtotal=subtotal,
         discountable_subtotal=disc,

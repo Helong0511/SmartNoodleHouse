@@ -137,6 +137,9 @@ async def create_order(
         category=AuditService.CATEGORY_CUSTOMER,
         store_id=int(order.store_id) if order.store_id else None,
     )
+    from app.services.social_benefit_service import SocialBenefitService
+
+    social_snap = await SocialBenefitService.order_social_snapshot(db, int(order.id))
     return success(
         {
             "id": order.id,
@@ -152,6 +155,7 @@ async def create_order(
             "payment_status": order.payment_status,
             "table_id": order.table_id,
             "table": _table_payload(table),
+            **social_snap,
         },
         request=request,
     )
@@ -305,7 +309,7 @@ async def _recompute_pos_amounts_for_customer(
     social_rule_id: int | None = None,
     operator_id: int | None = None,
 ) -> None:
-    """未收款 POS 单绑客/改券后重算：会员折 + 优惠券/代金券（或公益，互斥）。"""
+    """未收款 POS 单绑客/改券后重算：会员折 + 券，或公益（与券互斥；与会员折取更优）。"""
     from decimal import Decimal
 
     from app.services.coupon_service import CouponService
@@ -376,36 +380,48 @@ async def _recompute_pos_amounts_for_customer(
                 category_ids=cids,
             )
 
+    apply_social = False
+    social_subsidy = money(0)
     if social_hit:
         rule, identity_code = social_hit
         rate = money(rule.discount_rate)
-        special = money(subtotal - discountable)
-        if special < 0:
-            special = money(0)
-        subsidy = money(discountable * (Decimal("1") - rate))
+        social_subsidy = money(discountable * (Decimal("1") - rate))
         if rule.max_subsidy_amount is not None:
-            subsidy = min(subsidy, money(rule.max_subsidy_amount))
-        order.discount_amount = subsidy
-        order.total_amount = money(discountable - subsidy + special + packing_fee)
-        await SocialBenefitService.reserve_for_order(
-            db,
-            order_id=int(order.id),
-            customer_id=int(customer_id),
-            store_id=int(order.store_id),
-            rule=rule,
-            identity_code=identity_code,
-            subsidy_amount=subsidy,
-            operator_user_id=operator_id,
-            meta={
-                "discount_rate": str(rate),
-                "stack_policy": rule.stack_policy,
-                "subtotal": str(subtotal),
-                "discountable_subtotal": str(discountable),
-                "source": "pos_recompute",
-            },
+            social_subsidy = min(social_subsidy, money(rule.max_subsidy_amount))
+        member_rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
+        member_discount, _ = CustomerService.calc_member_discount(
+            subtotal, packing_fee, member_rate, discountable_subtotal=discountable
         )
-        await db.flush()
-        return
+        apply_social = SocialBenefitService.social_beats_member(
+            social_subsidy=social_subsidy,
+            member_discount=member_discount,
+        )
+        if apply_social:
+            special = money(subtotal - discountable)
+            if special < 0:
+                special = money(0)
+            order.discount_amount = social_subsidy
+            order.total_amount = money(discountable - social_subsidy + special + packing_fee)
+            await SocialBenefitService.reserve_for_order(
+                db,
+                order_id=int(order.id),
+                customer_id=int(customer_id),
+                store_id=int(order.store_id),
+                rule=rule,
+                identity_code=identity_code,
+                subsidy_amount=social_subsidy,
+                operator_user_id=operator_id,
+                meta={
+                    "discount_rate": str(rate),
+                    "stack_policy": rule.stack_policy,
+                    "subtotal": str(subtotal),
+                    "discountable_subtotal": str(discountable),
+                    "source": "pos_recompute",
+                    "picked_over_member": True,
+                },
+            )
+            await db.flush()
+            return
 
     rate = await CustomerService.resolve_member_discount_rate(db, customer_id)
     hold_tmpl = await CouponService.get_hold_template(db, customer_coupon_id, customer_id)

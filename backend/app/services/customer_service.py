@@ -48,6 +48,54 @@ class CustomerService:
         return or_(*clauses)
 
     @staticmethod
+    async def find_active_by_phone(db: AsyncSession, phone: str) -> Customer | None:
+        """按完整手机号找启用顾客（不限门店）；已验证优先。"""
+        phone = (phone or "").strip()
+        if not phone:
+            return None
+        return (
+            await db.execute(
+                select(Customer)
+                .where(Customer.status == 1, Customer.phone == phone)
+                .order_by(Customer.phone_verified.desc(), Customer.id.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
+    async def remember_pos_phone(
+        db: AsyncSession,
+        phone: str,
+        *,
+        store_id: int,
+    ) -> tuple[Customer, bool]:
+        """收银预留手机号：已有则复用；没有则建 GUEST 壳账号（未验证）。
+
+        顾客日后小程序官方授权同一手机号时，会把本壳上的积分/订单/公益身份并入扫码账号。
+        """
+        import re
+
+        phone = (phone or "").strip()
+        if not re.fullmatch(r"1\d{10}", phone):
+            raise AppException(40053, "手机号格式不正确")
+        existing = await CustomerService.find_active_by_phone(db, phone)
+        if existing is not None:
+            if not getattr(existing, "registered_store_id", None):
+                existing.registered_store_id = int(store_id)
+                await db.flush()
+            return existing, False
+        customer = CustomerService._new_guest_customer()
+        customer.phone = phone
+        customer.phone_verified = 0
+        customer.display_name = f"收银预留·{phone[-4:]}"
+        customer.nickname = customer.display_name
+        customer.registered_store_id = int(store_id)
+        customer.profile_status = "PARTIAL"
+        db.add(customer)
+        await db.flush()
+        return customer, True
+
+    @staticmethod
     async def search_active_customers(
         db: AsyncSession,
         keyword: str,
@@ -57,6 +105,8 @@ class CustomerService:
         store_id: int | None = None,
     ) -> tuple[list[Customer], int]:
         """搜索启用顾客。store_id 非空时限定本店注册或本店下过单的顾客。"""
+        import re
+
         kw = (keyword or "").strip()
         if not kw:
             return [], 0
@@ -88,6 +138,11 @@ class CustomerService:
                 )
             ).scalars().all()
         )
+        # 完整手机号在本店口径下无命中时，再按全局精确手机号兜底（便于选中「收银预留」壳）
+        if not rows and re.fullmatch(r"1\d{10}", kw):
+            exact = await CustomerService.find_active_by_phone(db, kw)
+            if exact is not None:
+                return [exact], 1
         return rows, int(total)
 
     @staticmethod
@@ -1211,7 +1266,7 @@ class CustomerService:
             if not confirm_merge:
                 raise AppException(
                     40906,
-                    "该已验证手机号已关联其他账号，确认后可合并历史订单、积分和优惠券",
+                    "该已验证手机号已关联其他账号，确认后可合并历史订单、积分、优惠券与公益身份",
                     status_code=409,
                 )
             from app.services.customer_merge_service import CustomerMergeService
@@ -1241,7 +1296,66 @@ class CustomerService:
         customer.phone_verified = 1
         CustomerService.refresh_profile_status(customer)
         await db.flush()
+
+        # 收银预留壳 / 其它同号未验证账号 → 并入当前官方绑号账号（积分、订单、公益身份）
+        phone_peers = list(
+            (
+                await db.execute(
+                    select(Customer)
+                    .where(
+                        Customer.status == 1,
+                        Customer.phone == phone,
+                        Customer.id != int(customer.id),
+                    )
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        if phone_peers:
+            from app.services.customer_merge_service import CustomerMergeService
+
+            for peer in phone_peers:
+                has_platform = await CustomerService._customer_has_platform_login(db, int(peer.id))
+                if has_platform and not confirm_merge:
+                    raise AppException(
+                        40906,
+                        "该手机号在收银侧已有关联账号，确认后可合并积分、订单、优惠券与公益身份",
+                        status_code=409,
+                    )
+                await CustomerMergeService.merge(
+                    db,
+                    target_customer_id=int(customer.id),
+                    source_customer_id=int(peer.id),
+                    reason=f"官方{source}绑号合并收银预留/同号账号",
+                    request=request,
+                )
+                merged = True
+            customer = await db.get(Customer, int(customer.id))
+            if not customer:
+                raise AppException(40905, "账号合并失败，请重试", status_code=409)
+            customer.phone = phone
+            customer.phone_verified = 1
+            CustomerService.refresh_profile_status(customer)
+            await db.flush()
+
         return customer, merged
+
+    @staticmethod
+    async def _customer_has_platform_login(db: AsyncSession, customer_id: int) -> bool:
+        """是否已有微信/支付宝登录身份（非纯收银预留壳）。"""
+        wx = await db.scalar(
+            select(CustomerWechatAccount.id)
+            .where(CustomerWechatAccount.customer_id == int(customer_id))
+            .limit(1)
+        )
+        if wx:
+            return True
+        ali = await db.scalar(
+            select(CustomerAlipayAccount.id)
+            .where(CustomerAlipayAccount.customer_id == int(customer_id))
+            .limit(1)
+        )
+        return bool(ali)
 
     @staticmethod
     async def remember_first_seen(
@@ -1628,7 +1742,7 @@ class OrderCreateService:
             from app.services.social_benefit_service import SocialBenefitService
             from app.models import Product
 
-            # 公益优先（互斥）：显式 use_social_benefit 或传入 social_rule_id
+            # 公益与券互斥；与会员折比补贴，取更优（折扣更低者）
             social_hit = None
             if customer_id and (use_social_benefit or social_rule_id):
                 if customer_coupon_id or customer_voucher_id:
@@ -1655,7 +1769,7 @@ class OrderCreateService:
                     ):
                         social_hit = (rule, rule.identity_code)
                 if social_hit is None and use_social_benefit:
-                    # 显式勾选公益：必须命中，禁止静默改走会员折
+                    # 显式勾选公益：须可命中规则（再与会员折比优）
                     social_hit = await SocialBenefitService.require_best_rule(
                         db,
                         customer_id=int(customer_id),
@@ -1664,35 +1778,57 @@ class OrderCreateService:
                         category_ids=cids,
                     )
 
+            apply_social = False
+            social_subsidy = money(0)
+            social_rule = None
+            social_identity_code = None
             if social_hit:
-                rule, identity_code = social_hit
-                rate = money(rule.discount_rate)
+                social_rule, social_identity_code = social_hit
+                rate = money(social_rule.discount_rate)
+                social_subsidy = money(discountable_subtotal * (Decimal("1") - rate))
+                if social_rule.max_subsidy_amount is not None:
+                    social_subsidy = min(social_subsidy, money(social_rule.max_subsidy_amount))
+                member_rate = await CustomerService.resolve_member_discount_rate(
+                    db, customer_id
+                )
+                member_discount, _ = CustomerService.calc_member_discount(
+                    subtotal,
+                    packing_fee,
+                    member_rate,
+                    discountable_subtotal=discountable_subtotal,
+                )
+                apply_social = SocialBenefitService.social_beats_member(
+                    social_subsidy=social_subsidy,
+                    member_discount=member_discount,
+                )
+
+            if apply_social and social_rule is not None and social_identity_code is not None:
                 special = money(subtotal - discountable_subtotal)
                 if special < 0:
                     special = money(0)
-                subsidy = money(discountable_subtotal * (Decimal("1") - rate))
-                if rule.max_subsidy_amount is not None:
-                    subsidy = min(subsidy, money(rule.max_subsidy_amount))
-                discount_amount = subsidy
+                discount_amount = social_subsidy
                 coupon_discount = money(0)
                 voucher_discount = money(0)
                 coupon_id = None
                 voucher_id = None
-                total_amount = money(discountable_subtotal - subsidy + special + packing_fee)
+                total_amount = money(
+                    discountable_subtotal - social_subsidy + special + packing_fee
+                )
                 await SocialBenefitService.reserve_for_order(
                     db,
                     order_id=int(order.id),
                     customer_id=int(customer_id),
                     store_id=int(order.store_id),
-                    rule=rule,
-                    identity_code=identity_code,
-                    subsidy_amount=subsidy,
+                    rule=social_rule,
+                    identity_code=social_identity_code,
+                    subsidy_amount=social_subsidy,
                     operator_user_id=operator_id,
                     meta={
-                        "discount_rate": str(rate),
-                        "stack_policy": rule.stack_policy,
+                        "discount_rate": str(money(social_rule.discount_rate)),
+                        "stack_policy": social_rule.stack_policy,
                         "subtotal": str(subtotal),
                         "discountable_subtotal": str(discountable_subtotal),
+                        "picked_over_member": True,
                     },
                 )
                 social_applied = True

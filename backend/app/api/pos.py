@@ -37,6 +37,11 @@ class PosRefundReview(BaseModel):
     remark: str | None = Field(default=None, max_length=500)
 
 
+class RememberPhoneIn(BaseModel):
+    phone: str = Field(..., min_length=11, max_length=11, description="11 位手机号")
+    store_id: int | None = None
+
+
 @router.get("/customers/search", dependencies=[require_pos()])
 async def search_pos_customers(
     request: Request,
@@ -61,10 +66,69 @@ async def search_pos_customers(
             "nickname": c.nickname,
             "phone": c.phone,
             "is_member": CustomerService.is_member(c),
+            "phone_verified": bool(int(getattr(c, "phone_verified", 0) or 0)),
+            "is_phone_shell": bool(
+                (c.display_name or "").startswith("收银预留")
+                or (c.nickname or "").startswith("收银预留")
+            ),
         }
         for c in rows
     ]
     return success({"items": items, "store_id": int(sid)}, request=request)
+
+
+@router.post("/customers/remember-phone", dependencies=[require_pos()])
+async def remember_pos_customer_phone(
+    data: RememberPhoneIn,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """未找到会员时预留手机号：建/复用壳账号，便于本单计积分与当场公益核验。
+
+    顾客日后小程序扫码并用官方授权绑定同一手机号时，积分、订单、公益身份会并入扫码账号。
+    """
+    sid = require_bound_store(user, data.store_id)
+    if sid is None:
+        raise AppException(40008, "请选择门店")
+    customer, created = await CustomerService.remember_pos_phone(
+        db, data.phone, store_id=int(sid)
+    )
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="pos.customer.remember_phone",
+        module="pos",
+        target_type="customer",
+        target_id=int(customer.id),
+        detail={
+            "store_id": int(sid),
+            "customer_id": int(customer.id),
+            "phone_tail": str(data.phone)[-4:],
+            "created": bool(created),
+        },
+        request=request,
+        store_id=int(sid),
+    )
+    await db.commit()
+    return success(
+        {
+            "id": customer.id,
+            "customer_no": customer.customer_no,
+            "display_name": customer.display_name or customer.nickname,
+            "nickname": customer.nickname,
+            "phone": customer.phone,
+            "is_member": CustomerService.is_member(customer),
+            "phone_verified": bool(int(getattr(customer, "phone_verified", 0) or 0)),
+            "is_phone_shell": True,
+            "created": bool(created),
+            "store_id": int(sid),
+        },
+        message="已记住手机号，顾客扫码绑号后可自动合并积分与公益身份"
+        if created
+        else "已找到该手机号对应顾客",
+        request=request,
+    )
 
 
 @router.get("/shifts/current", dependencies=[require_pos()])

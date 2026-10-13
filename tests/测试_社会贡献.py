@@ -400,6 +400,22 @@ async def test_申请无效身份类型(db_session, sb):
     assert "无效公益身份" in ei.value.message
 
 
+def test_公益与会员折取更优_比较函数():
+    """补贴更大才用公益；相等或会员更优走会员（例：公益9.5折 vs 会员8折）。"""
+    # 可打折小计 20：公益 0.95 → 补贴 1；会员 0.80 → 补贴 4 → 会员更优
+    assert SocialBenefitService.social_beats_member(
+        social_subsidy=money("1.00"), member_discount=money("4.00")
+    ) is False
+    # 公益 0.80 → 补贴 4；会员 0.95 → 补贴 1 → 公益更优
+    assert SocialBenefitService.social_beats_member(
+        social_subsidy=money("4.00"), member_discount=money("1.00")
+    ) is True
+    # 相等：走会员，不占公益日限
+    assert SocialBenefitService.social_beats_member(
+        social_subsidy=money("2.00"), member_discount=money("2.00")
+    ) is False
+
+
 @pytest.mark.asyncio
 async def test_勾选公益无身份须报错(db_session, sb):
     """显式 use_social_benefit 但无 ACTIVE 身份时，禁止静默回落会员折。"""
@@ -420,6 +436,47 @@ async def test_勾选公益无身份须报错(db_session, sb):
         )
     assert ei.value.code == 40008
     assert "尚无已生效的公益身份" in ei.value.message
+
+
+@pytest.mark.asyncio
+async def test_公益95折与会员8折用会员(db_session, sb):
+    """勾选公益但会员折更低时，按会员折结算且不写公益台账。"""
+    from app.services.customer_service import OrderCreateService
+
+    # 会员升到 8 折；公益规则改为 9.5 折
+    sb["lv"].discount_rate = Decimal("0.80")
+    sb["rule"].discount_rate = Decimal("0.95")
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.commit()
+
+    order = await OrderCreateService.create_order(
+        db_session,
+        store_id=sb["store1"].id,
+        table_token=None,
+        customer_id=sb["c1"].id,
+        channel="H5",
+        dining_type="TAKEAWAY",
+        need_pack=True,
+        items=[{"product_id": sb["prod"].id, "quantity": 1, "option_ids": []}],
+        use_social_benefit=True,
+        idempotency_key="sb-member-beats-social-1",
+    )
+    await db_session.commit()
+    # 会员 8 折：20 * 0.2 = 4 补贴；公益 9.5 仅 1，应走会员
+    assert money(order.discount_amount) == money("4.00")
+    assert money(order.total_amount) == money("16.00")
+    reds = (
+        await db_session.execute(
+            select(SocialBenefitRedemption).where(SocialBenefitRedemption.order_id == order.id)
+        )
+    ).scalars().all()
+    assert reds == []
 
 
 @pytest.mark.asyncio

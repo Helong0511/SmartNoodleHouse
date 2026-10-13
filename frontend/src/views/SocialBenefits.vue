@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>社会贡献</h2>
-        <p class="sub">环卫、骑手、长者、教师、学生、医护、残障、退役军人、志愿者等公益身份认定、优惠规则与核销台账（默认与会员折/券互斥）。</p>
+        <p class="sub">环卫、骑手、长者、教师、学生、医护、残障、退役军人、志愿者等公益身份认定、优惠规则与核销台账（与券互斥；与会员折取更优）。</p>
       </div>
       <el-button @click="reloadCurrent">刷新</el-button>
     </div>
@@ -73,7 +73,7 @@
           :closable="false"
           show-icon
           class="tab-tip"
-          title="规则由系统种子 / 运维配置。stack_policy=EXCLUSIVE 表示不可与会员折、优惠券同享。门店列为空=总部通用。"
+          title="规则由系统种子 / 运维配置。EXCLUSIVE：与券互斥，与会员折取更优（折扣更低者）。STACKABLE 暂未接线结算。门店列为空=总部通用。"
         />
         <el-empty v-if="!loading && !rules.length" description="暂无启用规则，请检查 data_custom 种子或 enable_social_benefit" />
         <el-table v-else :data="rules" v-loading="loading" stripe>
@@ -188,7 +188,7 @@ const REDEEM_STATUS_LABELS: Record<string, string> = {
   REVERSED: '已冲减',
 }
 const STACK_POLICY_LABELS: Record<string, string> = {
-  EXCLUSIVE: '互斥（不可叠券/会员折）',
+  EXCLUSIVE: '与券互斥；与会员折取更优（折扣更低者）',
   STACKABLE: '可叠加',
 }
 

@@ -39,7 +39,7 @@ function memberDiscountText(rate) {
   return `${Math.round(n * 100) / 10}折`
 }
 
-/** 与 data_custom 种子规则对齐的客户端预估折扣（最终以服务器结算为准） */
+/** 本地兜底费率（无 preview 时用；正式以 /social-benefits/preview 为准） */
 const SOCIAL_RATE_HINT = {
   SANITATION: 0.8,
   RIDER: 0.8,
@@ -74,7 +74,24 @@ function bestSocialHint(codes) {
     }
   }
   if (!bestCode) return null
-  return { code: bestCode, rate: bestRate, label: SOCIAL_LABEL[bestCode] || bestCode }
+  return { code: bestCode, rate: bestRate, label: SOCIAL_LABEL[bestCode] || bestCode, fromPreview: false }
+}
+
+function socialSubsidyOf(hint, discountable) {
+  if (!hint) return 0
+  const s = parseFloat(hint.subsidy)
+  if (Number.isFinite(s) && s >= 0) return Math.round(s * 100) / 100
+  const r = parseFloat(hint.rate)
+  if (!(r > 0 && r < 1)) return 0
+  const base = Math.max(0, parseFloat(discountable) || 0)
+  return Math.round(base * (1 - r) * 100) / 100
+}
+
+function memberOnlySave(discountable, memberRate) {
+  const base = Math.max(0, parseFloat(discountable) || 0)
+  const mr = parseFloat(memberRate)
+  if (!(Number.isFinite(mr) && mr > 0 && mr < 1)) return 0
+  return Math.round(base * (1 - mr) * 100) / 100
 }
 
 function pickBestCoupon(coupons, discountable, memberRate, calcTotalSavingsFn) {
@@ -841,7 +858,7 @@ Page({
     const memberRate = useBalance || useSocial ? 1 : (this._memberRate || 1)
     const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
 
-    // 公益路径：与券/会员折互斥
+    // 公益路径：与券互斥；与会员折比补贴取更优（服务端也会再比一次）
     if (useSocial) {
       this._selectedCoupon = null
       this._selectedVoucher = null
@@ -966,7 +983,9 @@ Page({
       const socialSave = Math.round(discountable * (1 - this._socialHint.rate) * 100) / 100
       const memberPathSave = Math.round((discount + couponDisc + voucherDisc) * 100) / 100
       if (socialSave > memberPathSave + 0.009) {
-        socialRecommendTip = `开启公益约多省¥${(socialSave - memberPathSave).toFixed(2)}（与券互斥）`
+        socialRecommendTip = `开启公益约多省¥${(socialSave - memberPathSave).toFixed(2)}（优于会员折；不可用券）`
+      } else if (memberPathSave > socialSave + 0.009) {
+        socialRecommendTip = '当前会员折更优，勾选公益也会按会员折结算'
       }
     }
     await media.hydrateImageUrls(cartPreview, 'imageUrl')

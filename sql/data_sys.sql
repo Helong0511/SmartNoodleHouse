@@ -1585,9 +1585,9 @@ SELECT 'MEDICAL', '医护人员', 60, 1, JSON_ARRAY('执业证', '工牌')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'MEDICAL');
 
 INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'DISABLED', '残障人士', 70, 1, JSON_ARRAY('残疾人证')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'DISABLED');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
 SELECT 'VOLUNTEER', '志愿者', 90, 1, JSON_ARRAY('志愿证', '服务证明')
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'VOLUNTEER');
+
+INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
+SELECT 'DISABLED', '残障人士', 70, 1, JSON_ARRAY('残疾人证')
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'DISABLED');

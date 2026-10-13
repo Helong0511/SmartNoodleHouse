@@ -15,6 +15,8 @@ Merge policy
 7. Order / Payment 的 customer_id 改挂目标；PaymentRefund 无 customer_id 列故跳过。
 8. WelcomeLog / PointLedger 改挂目标；last_order_at 取两者较新。
 9. 储值：本金/赠送金并入目标，写 MERGE 流水；balance_ledger / recharge_orders 改挂目标。
+10. 公益身份 CustomerSocialIdentity / 核销台账 social_benefit_redemptions 改挂目标；
+    同 identity_code 若目标已有 ACTIVE 则源侧 ACTIVE/PENDING 改为 REVOKED，避免双生效。
 """
 from __future__ import annotations
 
@@ -33,6 +35,7 @@ from app.models import (
     CustomerCoupon,
     CustomerIdentity,
     CustomerPreference,
+    CustomerSocialIdentity,
     CustomerWechatAccount,
     DiningSession,
     FaceProfile,
@@ -40,6 +43,7 @@ from app.models import (
     Payment,
     PointLedger,
     RechargeOrder,
+    SocialBenefitRedemption,
     WelcomeLog,
 )
 from app.core.response import money, serialize_dt
@@ -154,6 +158,9 @@ class CustomerMergeService:
             "balance_gift_added": "0.00",
             "balance_ledgers": 0,
             "recharge_orders": 0,
+            "social_identities_moved": 0,
+            "social_identities_revoked": 0,
+            "social_redemptions": 0,
         }
 
         await cls._merge_platform_accounts(db, source.id, target.id, stats)
@@ -163,6 +170,7 @@ class CustomerMergeService:
         await cls._merge_coupons(db, source.id, target.id, stats)
         await cls._merge_preferences(db, source.id, target.id, stats)
         await cls._merge_faces(db, source.id, target.id, stats)
+        await cls._merge_social_benefits(db, source.id, target.id, stats)
         await cls._reassign_simple(
             db, WelcomeLog, source.id, target.id, "welcome_logs", stats
         )
@@ -461,6 +469,55 @@ class CustomerMergeService:
             .values(customer_id=target.id)
         )
         stats["recharge_orders"] = int(moved_ro.rowcount or 0)
+        await db.flush()
+
+    @classmethod
+    async def _merge_social_benefits(
+        cls, db: AsyncSession, source_id: int, target_id: int, stats: dict
+    ) -> None:
+        """合并公益身份认定与核销台账。"""
+        target_rows = list(
+            (
+                await db.execute(
+                    select(CustomerSocialIdentity)
+                    .where(CustomerSocialIdentity.customer_id == int(target_id))
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        target_active_codes = {
+            str(r.identity_code or "").upper()
+            for r in target_rows
+            if str(r.status or "").upper() == "ACTIVE"
+        }
+        source_rows = list(
+            (
+                await db.execute(
+                    select(CustomerSocialIdentity)
+                    .where(CustomerSocialIdentity.customer_id == int(source_id))
+                    .with_for_update()
+                )
+            ).scalars().all()
+        )
+        for row in source_rows:
+            code = str(row.identity_code or "").upper()
+            st = str(row.status or "").upper()
+            if st in ("ACTIVE", "PENDING") and code in target_active_codes:
+                row.status = "REVOKED"
+                row.reject_reason = row.reject_reason or "合并账号：目标已有同身份生效"
+                stats["social_identities_revoked"] += 1
+            row.customer_id = int(target_id)
+            stats["social_identities_moved"] += 1
+            if st == "ACTIVE" and code not in target_active_codes:
+                target_active_codes.add(code)
+        await db.flush()
+
+        moved = await db.execute(
+            update(SocialBenefitRedemption)
+            .where(SocialBenefitRedemption.customer_id == int(source_id))
+            .values(customer_id=int(target_id))
+        )
+        stats["social_redemptions"] = int(moved.rowcount or 0)
         await db.flush()
 
     @classmethod

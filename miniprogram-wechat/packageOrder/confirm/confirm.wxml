@@ -28,7 +28,7 @@
     <view class="pack-row" style="justify-content:space-between;align-items:center">
       <view>
         <view>{{socialBenefitLabel || '公益折扣'}}</view>
-        <view class="pack-tip">与会员折/优惠券互斥，开启后不可用券</view>
+        <view class="pack-tip">与会员折取更优（折扣更低者）；开启后不可用券</view>
         <view class="pack-tip" wx:if="{{socialRecommendTip && !useSocialBenefit}}">{{socialRecommendTip}}</view>
       </view>
       <switch checked="{{useSocialBenefit}}" bindchange="onToggleSocial" color="#ff6b35" />

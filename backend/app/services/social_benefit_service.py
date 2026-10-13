@@ -669,6 +669,15 @@ class SocialBenefitService:
         return subsidy, total
 
     @staticmethod
+    def social_beats_member(*, social_subsidy: Decimal, member_discount: Decimal) -> bool:
+        """公益是否严优于会员折（补贴更大 = 折扣更低）。
+
+        相等时用会员折，避免无谓占用公益日限次。
+        例：公益 9.5 折 vs 会员 8 折 → 会员更优，返回 False。
+        """
+        return money(social_subsidy) > money(member_discount)
+
+    @staticmethod
     async def preview(
         db: AsyncSession,
         *,

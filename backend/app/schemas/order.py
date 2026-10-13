@@ -45,7 +45,9 @@ class OrderCreate(BaseModel):
     scheduled_pickup_at: str | None = Field(
         default=None, max_length=32, description="预约取餐时间 YYYY-MM-DDTHH:mm:ss（仅打包单）"
     )
-    use_social_benefit: bool = Field(default=False, description="结算使用公益身份折扣（与券/会员折互斥）")
+    use_social_benefit: bool = Field(
+        default=False, description="结算使用公益身份折扣（与券互斥；与会员折取更优）"
+    )
     social_rule_id: int | None = Field(default=None, description="指定公益规则 ID（可选）")
 
 
@@ -90,7 +92,9 @@ class PosBindCustomer(BaseModel):
     customer_id: int | None = Field(default=None, description="None 表示清除会员绑定")
     customer_coupon_id: int | None = Field(default=None, description="优惠券（满减/折扣，与公益互斥）")
     customer_voucher_id: int | None = Field(default=None, description="代金券（与公益互斥）")
-    use_social_benefit: bool = Field(default=False, description="使用公益身份折扣（与券互斥）")
+    use_social_benefit: bool = Field(
+        default=False, description="使用公益身份折扣（与券互斥；与会员折取更优）"
+    )
     social_rule_id: int | None = Field(default=None, description="指定公益规则 ID（可选）")
 
 class PosAddItems(BaseModel):

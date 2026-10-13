@@ -130,7 +130,20 @@
               style="width: 100%" @change="onPosCustomerChange">
               <el-option v-for="c in customerOptions" :key="c.id" :label="posCustomerLabel(c)" :value="c.id" />
             </el-select>
-            <p v-if="selectedCustomerLabel" class="member-tip">已选：{{ selectedCustomerLabel }} · 计入折扣/积分/成单里程碑</p>
+            <div v-if="canRememberPhone" class="remember-phone-row">
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :loading="rememberPhoneLoading"
+                @click="rememberPosPhone"
+              >记住该手机号</el-button>
+              <span class="member-tip muted">未找到会员也可先记下来；顾客扫码官方绑号后，积分与公益身份会并入</span>
+            </div>
+            <p v-if="selectedCustomerLabel" class="member-tip">
+              已选：{{ selectedCustomerLabel }} · 计入折扣/积分/成单里程碑
+              <template v-if="selectedIsPhoneShell">（收银预留，待扫码合并）</template>
+            </p>
             <p v-else class="member-tip muted">不选则按散客收款，不计会员权益</p>
             <div v-if="selectedCustomerId" class="social-block">
               <div class="social-row">
@@ -418,7 +431,19 @@
             style="width: 100%" @change="onCheckoutMemberChange">
             <el-option v-for="c in customerOptions" :key="c.id" :label="posCustomerLabel(c)" :value="c.id" />
           </el-select>
-          <p class="member-tip">{{ selectedCustomerLabel || '散客（不计入成单里程碑）' }}</p>
+          <div v-if="canRememberPhone" class="remember-phone-row">
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :loading="rememberPhoneLoading"
+              @click="rememberPosPhone"
+            >记住该手机号</el-button>
+          </div>
+          <p class="member-tip">
+            {{ selectedCustomerLabel || '散客（不计入成单里程碑）' }}
+            <template v-if="selectedIsPhoneShell"> · 收银预留待扫码合并</template>
+          </p>
           <div v-if="selectedCustomerId" class="social-row">
             <el-checkbox v-model="useSocialBenefit" @change="onPaySocialToggle">公益折扣</el-checkbox>
           </div>
@@ -698,6 +723,8 @@ const remark = ref('')
 const cart = ref<any[]>([])
 const selectedCustomerId = ref<number | undefined>()
 const customerOptions = ref<any[]>([])
+const customerSearchKeyword = ref('')
+const rememberPhoneLoading = ref(false)
 const useSocialBenefit = ref(false)
 const socialVerifying = ref(false)
 const socialIdentityTypes = ref<any[]>([])
@@ -1535,11 +1562,28 @@ function posCustomerLabel(c: any) {
   const name = c.display_name || c.nickname || '会员'
   const phone = c.phone ? ` ${c.phone}` : ''
   const no = c.customer_no ? ` · ${c.customer_no}` : ''
-  return `${name}${phone}${no}`
+  const shell = c.is_phone_shell ? ' · 预留' : ''
+  return `${name}${phone}${no}${shell}`
 }
+
+function isMobilePhone(kw: string) {
+  return /^1\d{10}$/.test((kw || '').trim())
+}
+
+const canRememberPhone = computed(() => {
+  const kw = customerSearchKeyword.value.trim()
+  return isMobilePhone(kw) && !customerSearching.value && customerOptions.value.length === 0 && !selectedCustomerId.value
+})
+
+const selectedIsPhoneShell = computed(() => {
+  if (!selectedCustomerId.value) return false
+  const c = customerOptions.value.find((x) => x.id === selectedCustomerId.value)
+  return !!(c && c.is_phone_shell)
+})
 
 async function searchPosCustomers(keyword: string) {
   const kw = (keyword || '').trim()
+  customerSearchKeyword.value = kw
   if (!kw) {
     customerOptions.value = []
     return
@@ -1554,6 +1598,48 @@ async function searchPosCustomers(keyword: string) {
     customerOptions.value = []
   } finally {
     customerSearching.value = false
+  }
+}
+
+async function rememberPosPhone() {
+  const phone = customerSearchKeyword.value.trim()
+  if (!isMobilePhone(phone)) {
+    ElMessage.warning('请输入 11 位手机号后再记住')
+    return
+  }
+  const sid = effectiveStoreId()
+  if (!sid) {
+    ElMessage.warning('请先选择门店')
+    return
+  }
+  rememberPhoneLoading.value = true
+  try {
+    const res = await api.post('/pos/customers/remember-phone', {
+      phone,
+      store_id: sid,
+    })
+    const row = res.data || {}
+    const option = {
+      id: row.id,
+      customer_no: row.customer_no,
+      display_name: row.display_name,
+      nickname: row.nickname,
+      phone: row.phone,
+      is_member: !!row.is_member,
+      phone_verified: !!row.phone_verified,
+      is_phone_shell: true,
+    }
+    customerOptions.value = [option]
+    selectedCustomerId.value = option.id
+    ElMessage.success(res.message || '已记住手机号')
+    await onPosCustomerChange()
+    if (checkoutOrderId.value) {
+      await bindCustomerOnCheckoutOrder()
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '记住手机号失败')
+  } finally {
+    rememberPhoneLoading.value = false
   }
 }
 
@@ -1653,6 +1739,8 @@ async function bindCustomerOnCheckoutOrder() {
       ElMessage.success(
         `已按公益折扣重算 · 减免 ¥${res.data.social_discount || checkoutMemberDiscount.value || '0.00'} · 应收 ¥${res.data.total_amount}`,
       )
+    } else if (useSocial && selectedCustomerId.value) {
+      ElMessage.info('会员折更优，已按会员优惠结算（与券互斥的公益未占用日限次）')
     } else {
       ElMessage.success(selectedCustomerId.value ? '已绑定会员并重算优惠' : '已清除会员绑定')
     }
@@ -2028,6 +2116,8 @@ async function openCheckout() {
       ElMessage.success(
         `公益折扣已生效${checkoutSocialLabel.value ? `（${checkoutSocialLabel.value}）` : ''} · 减免 ¥${checkoutMemberDiscount.value || '0.00'} · 应收 ¥${checkoutAmount.value}`,
       )
+    } else if (useSocialBenefit.value && selectedCustomerId.value && !checkoutSocialApplied.value) {
+      ElMessage.info('会员折更优，已按会员优惠结算（公益日限次未占用）')
     } else if (selectedCouponId.value || selectedVoucherId.value) {
       if (couponOff + voucherOff + memberOff <= 0) {
         ElMessage.warning('已选券但未产生减免，请核对满减门槛 / 门店限制 / 是否与会员折互斥')
@@ -2852,6 +2942,14 @@ watch(() => auth.user?.store_id, () => {
   font-size: 12px;
   color: #666;
   margin-bottom: 4px;
+}
+
+.remember-phone-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .member-tip {
