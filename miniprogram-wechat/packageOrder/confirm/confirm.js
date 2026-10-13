@@ -14,6 +14,8 @@ const { pad2, formatDate } = require('../../utils/date')
 const app = getApp()
 
 const CHECKOUT_CACHE_MS = 30 * 1000
+/** 结算目录最长复用菜单页共享缓存；超时必须走网络/version，防错价错盒费 */
+const CATALOG_TTL_MS = 15 * 1000
 const REMARK_MAX_LEN = 50
 
 /** 今天/明天两档，30 分钟粒度（11:00–20:30），仅保留 ≥ 当前时间+30 分钟的槽位 */
@@ -207,8 +209,8 @@ Page({
   onShow() {
     // 扫码相机返回会触发 onShow；跳过整页重载，避免与「识别桌台」叠请求变慢
     if (this._bindingTable) return
-    // 快捷备注标签来自后端下发配置（可能为空数组）
-    clientConfig.loadClientConfig().then((cfg) => {
+    // 快捷备注标签来自后端下发配置（可能为空数组）；force 避免 15s 内存缓存挡住开关变更
+    clientConfig.loadClientConfig(true, this.submitStoreId && this.submitStoreId()).then((cfg) => {
       const opts = (cfg && Array.isArray(cfg.quick_remark_options)) ? cfg.quick_remark_options : []
       this.setData({
         quickRemarks: opts.filter((s) => String(s || '').trim()).map((s) => ({ label: String(s).trim(), on: false }))
@@ -246,7 +248,17 @@ Page({
       && cartFp === this._checkoutCartFp
       && (this.data.cartPreview || []).length
     ) {
-      this.refreshSummary()
+      // 车未变：仍强制刷新配置/会员/券/公益，避免余额与开关陈旧
+      const sid = this.submitStoreId() || this.storeId()
+      clientConfig.loadClientConfig(true, sid).catch(() => { })
+      Promise.all([
+        this.loadMember(true),
+        this.loadSocialBenefit(),
+        this.loadCoupons(true),
+        this.loadVouchers(true)
+      ])
+        .catch(() => { })
+        .then(() => this.refreshSummary())
       return
     }
     this._memberRate = 1
@@ -255,6 +267,9 @@ Page({
     this._payMethodManualPick = false
     this._selectedCoupon = null
     this._selectedVoucher = null
+    this._productCatalog = null
+    this._catalogComplete = false
+    this._catalogAt = 0
     this.setData({
       selectedCouponId: 0,
       selectedCouponLabel: '不使用优惠券',
@@ -558,7 +573,7 @@ Page({
     this._socialHint = null
     this._socialIdentityCodes = []
     try {
-      await clientConfig.loadClientConfig().catch(() => { })
+      await clientConfig.loadClientConfig(true, sid).catch(() => { })
       if (!clientConfig.isSocialBenefitEnabled()) {
         this.setData({ hasSocialBenefit: false, useSocialBenefit: false, socialBenefitLabel: '' })
         return
@@ -788,7 +803,13 @@ Page({
   },
 
   async loadProductCatalog() {
-    if (this._productCatalog && this._catalogComplete) {
+    const now = Date.now()
+    if (
+      this._productCatalog
+      && this._catalogComplete
+      && this._catalogAt
+      && now - this._catalogAt < CATALOG_TTL_MS
+    ) {
       return this._productCatalog
     }
     const sid = this.submitStoreId() || this.storeId()
@@ -796,10 +817,18 @@ Page({
       throw new Error('请先扫桌码绑定门店后再结算')
     }
     const shared = app.globalData && app.globalData._sharedCatalog
-    if (shared && String(shared.storeId) === String(sid) && shared.items && shared.items.length) {
+    if (
+      shared
+      && String(shared.storeId) === String(sid)
+      && shared.items
+      && shared.items.length
+      && shared.at
+      && now - Number(shared.at) < CATALOG_TTL_MS
+    ) {
       const items = shared.items
       this._productCatalog = items
       this._catalogComplete = true
+      this._catalogAt = Number(shared.at) || now
       const boxMap = {}
       items.forEach((p) => {
         boxMap[p.id] = parseFloat(p.box_price || 0) || 0
@@ -807,7 +836,8 @@ Page({
       this.setData({ boxPriceMap: boxMap })
       return items
     }
-    const catalog = await loadStoreCatalog(api, sid, { preferCache: true })
+    // 结算必须走网络/version，禁止长期 preferCache 错价
+    const catalog = await loadStoreCatalog(api, sid, { preferCache: false })
     const items = (catalog && catalog.items) || []
     // 有商品即可做规格校验；complete=false 仅表示分页未拉全，不应阻断结算
     if (!catalog || (!catalog.complete && !items.length)) {
@@ -815,6 +845,15 @@ Page({
     }
     this._productCatalog = items
     this._catalogComplete = true
+    this._catalogAt = Date.now()
+    if (app.globalData) {
+      app.globalData._sharedCatalog = {
+        storeId: sid,
+        items,
+        categories: (catalog && catalog.categories) || [],
+        at: this._catalogAt
+      }
+    }
     const boxMap = {}
     items.forEach((p) => {
       boxMap[p.id] = parseFloat(p.box_price || 0) || 0

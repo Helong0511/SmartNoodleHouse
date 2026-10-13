@@ -31,6 +31,18 @@ class SocialBenefitService:
     REDEEM_REVERSED = "REVERSED"
 
     @staticmethod
+    def _is_staff_reapply_ban(reject_reason: str | None) -> bool:
+        """店员主动取消才禁止小程序再申请；合并/换证作废不封禁。"""
+        r = (reject_reason or "").strip()
+        if not r:
+            return False
+        return (
+            r.startswith("店员取消")
+            or "顾客管理取消" in r
+            or r.startswith("禁止再申请")
+        )
+
+    @staticmethod
     async def is_enabled(db: AsyncSession, store_id: int | None = None) -> bool:
         # 优先读门店覆盖，再回落全局
         if store_id:
@@ -123,18 +135,16 @@ class SocialBenefitService:
         cust = await db.get(Customer, int(customer_id))
         if not cust or int(cust.status) != 1:
             raise AppException(40406, "顾客不存在或已停用")
-        # 曾被店员取消（REVOKED）的顾客禁止再申请任意公益身份
-        revoked = (
+        # 仅「店员主动取消」永久禁申；合并冲突 / 换证作废产生的 REVOKED 不封禁
+        revoked_rows = (
             await db.execute(
-                select(CustomerSocialIdentity.id)
-                .where(
+                select(CustomerSocialIdentity.reject_reason).where(
                     CustomerSocialIdentity.customer_id == int(customer_id),
                     CustomerSocialIdentity.status == SocialBenefitService.REVOKED,
                 )
-                .limit(1)
             )
-        ).scalar_one_or_none()
-        if revoked is not None:
+        ).scalars().all()
+        if any(SocialBenefitService._is_staff_reapply_ban(r) for r in revoked_rows):
             raise AppException(40901, "您的公益身份已被取消，不可再次申请，如有疑问请到店咨询")
         existing = (
             await db.execute(
@@ -224,6 +234,7 @@ class SocialBenefitService:
         ).scalars().all()
         for a in actives:
             a.status = SocialBenefitService.REVOKED
+            a.reject_reason = "换证作废：同身份已重新认定"
 
         pending = (
             await db.execute(
@@ -294,6 +305,7 @@ class SocialBenefitService:
             ).scalars().all()
             for o in others:
                 o.status = SocialBenefitService.REVOKED
+                o.reject_reason = "换证作废：同身份已重新认定"
             row.status = SocialBenefitService.ACTIVE
             row.valid_from = row.valid_from or now
             row.reject_reason = None

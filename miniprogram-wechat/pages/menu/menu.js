@@ -10,7 +10,6 @@ const clientConfig = require('../../utils/clientConfig')
 const navBar = require('../../utils/navBar')
 const app = getApp()
 
-const MENU_REFRESH_TTL_MS = 30 * 1000
 const PREFS_SKIP_LOGIN_MS = 60 * 1000
 
 function normalizeList(data) {
@@ -463,24 +462,9 @@ Page({
     if (this._menuInflight && this._menuInflightStoreId === cacheKey) {
       return this._menuInflight
     }
-    const todayKey = productApi.localVisibilityDay()
     const authFinger = menuAuthFinger()
-    // 跨日或登录态变化：禁止 30s TTL 短路，否则限时菜/生日菜会该显不显、该藏不藏
-    if (
-      !force
-      && this._lastMenuFetchAt
-      && String(this._menuFetchStoreId) === cacheKey
-      && (Date.now() - this._lastMenuFetchAt) < MENU_REFRESH_TTL_MS
-      && this._menuVisibilityDay === todayKey
-      && this._menuAuthFinger === authFinger
-      && this.data.categories
-      && this.data.categories.length
-    ) {
-      if (!this.data.recoReady) {
-        this.setData({ recoReady: true, recoStoreId: sid })
-      }
-      return
-    }
+    // 不再用页面 TTL 跳过拉取：每次 onShow/loadMenu 走「缓存先显 + version 探测」，
+    // 后台改价/上下架可在回到菜单时立刻生效；同 version 仅轻量回包。
 
     const run = async () => {
       const now = Date.now()

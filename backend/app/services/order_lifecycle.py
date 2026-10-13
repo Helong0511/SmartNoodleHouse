@@ -114,10 +114,11 @@ async def apply_order_status(
             order.kitchen_claimed_at = None
             if do_restore:
                 await _restore_order_stock(db, order)
-            # 取消未支付：释放 RESERVED；全额退款：回滚 USED 券/代金券
+            # 取消未支付：释放 RESERVED；全额退款：回滚 USED 券/代金券；同步冲减公益 PENDING/NORMAL 台账
             if (target == "CANCELLED" and old == "PENDING_PAYMENT") or target == "REFUNDED":
                 from app.services.coupon_service import CouponService
                 from app.services.paid_side_effects import enqueue_coupon_release
+                from app.services.social_benefit_service import SocialBenefitService
 
                 try:
                     await CouponService.release_for_order(db, order)
@@ -128,6 +129,14 @@ async def apply_order_status(
                         target,
                     )
                     await enqueue_coupon_release(db, int(order.id))
+                try:
+                    await SocialBenefitService.reverse_for_order(db, int(order.id))
+                except Exception:
+                    logger.exception(
+                        "冲减公益台账失败 order_id=%s target=%s",
+                        order.id,
+                        target,
+                    )
     elif target == "READY" and old != "READY":
         try:
             await notify_order_ready_subscribe(db, order)

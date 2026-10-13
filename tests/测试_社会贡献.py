@@ -480,6 +480,102 @@ async def test_公益95折与会员8折用会员(db_session, sb):
 
 
 @pytest.mark.asyncio
+async def test_未支付关单冲减公益台账(db_session, sb):
+    """PENDING_PAYMENT→CANCELLED 须 reverse 公益，避免占日限次。"""
+    from app.services.customer_service import OrderCreateService
+    from app.services.order_lifecycle import apply_order_status
+
+    # 恢复规则：公益 8 折严优于默认会员 9.5
+    sb["lv"].discount_rate = Decimal("0.95")
+    sb["rule"].discount_rate = Decimal("0.80")
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.commit()
+
+    order = await OrderCreateService.create_order(
+        db_session,
+        store_id=sb["store1"].id,
+        table_token=None,
+        customer_id=sb["c1"].id,
+        channel="H5",
+        dining_type="TAKEAWAY",
+        need_pack=True,
+        items=[{"product_id": sb["prod"].id, "quantity": 1, "option_ids": []}],
+        use_social_benefit=True,
+        idempotency_key="sb-cancel-release-1",
+    )
+    await db_session.commit()
+    red = (
+        await db_session.execute(
+            select(SocialBenefitRedemption).where(SocialBenefitRedemption.order_id == order.id)
+        )
+    ).scalar_one()
+    assert red.status == SocialBenefitService.REDEEM_PENDING
+
+    await apply_order_status(
+        db_session,
+        order,
+        "CANCELLED",
+        source="SYSTEM",
+        payment_status="CANCELLED",
+        restore_inventory=False,  # 测台账冲减即可，避开 sqlite 无 GREATEST
+    )
+    await db_session.commit()
+    await db_session.refresh(red)
+    assert red.status == SocialBenefitService.REDEEM_REVERSED
+
+    # 关单后当日仍可再享
+    hit = await SocialBenefitService.find_best_rule(
+        db_session, customer_id=sb["c1"].id, store_id=sb["store1"].id
+    )
+    assert hit is not None
+
+
+@pytest.mark.asyncio
+async def test_换证作废不永久禁申(db_session, sb):
+    """POS 换证产生的 REVOKED 不得封禁其他身份申请。"""
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c2"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.flush()
+    # 再次核验同身份：旧 ACTIVE→换证作废 REVOKED
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c2"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.commit()
+    # 仍可申请其他身份类型（种子有 SANITATION；用 TEACHER 类型需先插入类型）
+    db_session.add(
+        SocialIdentityType(
+            code="TEACHER", name="教师", sort_order=20, status=1, default_verify_hints=["工作证"]
+        )
+    )
+    await db_session.flush()
+    row = await SocialBenefitService.apply_identity(
+        db_session,
+        customer_id=sb["c2"].id,
+        identity_code="TEACHER",
+        store_id=sb["store1"].id,
+        verify_method="MINI",
+        credential_note="换证后另申教师",
+    )
+    await db_session.commit()
+    assert row.status == SocialBenefitService.PENDING
+
+
+@pytest.mark.asyncio
 async def test_建单公益与券互斥(db_session, sb):
     from app.services.customer_service import OrderCreateService
 

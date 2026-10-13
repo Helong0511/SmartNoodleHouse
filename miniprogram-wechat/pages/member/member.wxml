@@ -175,7 +175,7 @@
             <view class="wallet-rule">{{item.credential_note || '已提交'}}</view>
           </view>
         </view>
-        <view class="tip">公益折扣与会员折/优惠券默认互斥：结算时请二选一（公益，或会员+券）。</view>
+        <view class="tip">公益与优惠券互斥；与会员折结算时取更优（折扣更低者）。开启公益后不可用券。</view>
         <view class="social-apply-grid" wx:if="{{socialCanApply && socialApplyTypes.length}}">
           <button
             class="social-apply-btn"

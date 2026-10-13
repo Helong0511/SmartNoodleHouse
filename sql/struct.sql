@@ -1659,7 +1659,7 @@ CREATE TABLE IF NOT EXISTS `social_benefit_rules` (
   `daily_limit` int NOT NULL DEFAULT 1 COMMENT '每客每店每日限次',
   `monthly_budget` decimal(12, 2) NULL DEFAULT NULL COMMENT '月补贴预算',
   `budget_action` varchar(10) NOT NULL DEFAULT 'WARN' COMMENT '超预算 WARN/BLOCK',
-  `stack_policy` varchar(30) NOT NULL DEFAULT 'EXCLUSIVE' COMMENT 'EXCLUSIVE=与会员折/券互斥',
+  `stack_policy` varchar(30) NOT NULL DEFAULT 'EXCLUSIVE' COMMENT 'EXCLUSIVE=与券互斥、与会员折取更优；STACKABLE结算暂未接线',
   `max_subsidy_amount` decimal(10, 2) NULL DEFAULT NULL COMMENT '单次补贴上限',
   `priority` int NOT NULL DEFAULT 100 COMMENT '优先级，越小越优先',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
