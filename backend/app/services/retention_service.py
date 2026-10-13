@@ -154,14 +154,18 @@ async def _send_balance_low_to_customer(
     *,
     threshold: Decimal,
 ) -> str:
-    """尝试发微信订阅并写 marketing_message_logs。返回 SUCCESS/FAILED/SKIPPED/LOG。"""
-    from app.models import CustomerWechatAccount, MarketingMessageLog
+    """尝试微信/支付宝订阅并写 marketing_message_logs。返回 SUCCESS/FAILED/SKIPPED/LOG。"""
+    from app.models import CustomerAlipayAccount, CustomerWechatAccount, MarketingMessageLog
+    from app.services.alipay_mini_client import (
+        send_balance_low_subscribe as send_alipay_balance_low,
+    )
     from app.services.wechat_mini_client import send_balance_low_subscribe
 
     bal = (customer.balance_principal or Decimal("0")) + (customer.balance_gift or Decimal("0"))
     bal_s = f"{bal:.2f}"
     thr_s = f"{threshold:.2f}"
-    idem = f"balance_low:{int(customer.id)}:{naive_local_now().strftime('%Y%m%d')}"
+    day = naive_local_now().strftime("%Y%m%d")
+    idem = f"balance_low:{int(customer.id)}:{day}"
     exists = await db.scalar(
         select(MarketingMessageLog.id).where(MarketingMessageLog.idempotency_key == idem)
     )
@@ -172,9 +176,22 @@ async def _send_balance_low_to_customer(
         select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == int(customer.id)).limit(1)
     )
     openid = (wx.openid if wx else None) or None
-    tmpl = (
+    alipay_row = await db.scalar(
+        select(CustomerAlipayAccount)
+        .where(CustomerAlipayAccount.customer_id == int(customer.id))
+        .limit(1)
+    )
+    alipay_uid = (alipay_row.alipay_user_id if alipay_row else None) or None
+
+    wx_tmpl = (
         await SystemSettingsService.effective_setting(
             db, "wechat_subscribe_template_balance_low", fallback=""
+        )
+        or ""
+    ).strip()
+    alipay_tmpl = (
+        await SystemSettingsService.effective_setting(
+            db, "alipay_subscribe_template_balance_low", fallback=""
         )
         or ""
     ).strip()
@@ -182,27 +199,57 @@ async def _send_balance_low_to_customer(
     status = "LOG"
     err = None
     channel = "LOG"
-    if tmpl and openid:
+    tmpl_used = ""
+    wx_ok = False
+    alipay_ok = False
+
+    if wx_tmpl and openid:
         channel = "WECHAT"
+        tmpl_used = wx_tmpl
         try:
-            ok = await send_balance_low_subscribe(
+            wx_ok = await send_balance_low_subscribe(
                 openid=str(openid),
                 customer_id=int(customer.id),
                 balance=bal_s,
                 threshold=thr_s,
             )
-            status = "SUCCESS" if ok else "FAILED"
-            if not ok:
-                err = "subscribe_send_failed"
         except Exception as exc:
-            status = "FAILED"
             err = str(exc)[:400]
-    elif not tmpl:
+
+    if alipay_tmpl and alipay_uid:
+        try:
+            alipay_ok = await send_alipay_balance_low(
+                alipay_user_id=str(alipay_uid),
+                customer_id=int(customer.id),
+                balance=bal_s,
+                threshold=thr_s,
+            )
+            if alipay_ok and not wx_ok:
+                channel = "ALIPAY"
+                tmpl_used = alipay_tmpl
+            elif alipay_ok and wx_ok:
+                channel = "WECHAT+ALIPAY"
+                tmpl_used = f"{wx_tmpl}|{alipay_tmpl}"
+            elif not tmpl_used:
+                tmpl_used = alipay_tmpl
+                channel = "ALIPAY"
+        except Exception as exc:
+            if not err:
+                err = str(exc)[:400]
+
+    if wx_ok or alipay_ok:
+        status = "SUCCESS"
+        err = None
+    elif (wx_tmpl and openid) or (alipay_tmpl and alipay_uid):
+        status = "FAILED"
+        if not err:
+            err = "subscribe_send_failed"
+    elif not wx_tmpl and not alipay_tmpl:
         status = "LOG"
         err = "template_not_configured"
     else:
         status = "SKIPPED"
-        err = "no_wechat_openid"
+        err = "no_channel_identity"
 
     db.add(
         MarketingMessageLog(
@@ -211,7 +258,7 @@ async def _send_balance_low_to_customer(
             customer_id=int(customer.id),
             channel=channel,
             template_key="balance_low",
-            template_id=tmpl or None,
+            template_id=tmpl_used or None,
             payload_json={"balance": bal_s, "threshold": thr_s},
             status=status,
             error_message=err,

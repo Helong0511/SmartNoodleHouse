@@ -21,11 +21,14 @@ function requestOrderReadySubscribe() {
     var tmplId = tmpls.alipay_order_ready
     if (!tmplId) return null
     return new Promise(function (resolve) {
-      my.requestSubscribeMessage({
-        templateIds: [tmplId],
+      // 新基础库用 entityIds；旧版回退 templateIds
+      var opts = {
         success: function (res) { resolve(res) },
         fail: function () { resolve(null) }
-      })
+      }
+      opts.entityIds = [tmplId]
+      opts.templateIds = [tmplId]
+      my.requestSubscribeMessage(opts)
     })
   })
 }
@@ -40,11 +43,13 @@ function requestBalanceLowSubscribe() {
     var tmplId = tmpls.alipay_balance_low
     if (!tmplId) return null
     return new Promise(function (resolve) {
-      my.requestSubscribeMessage({
-        templateIds: [tmplId],
+      var opts = {
         success: function (res) { resolve(res) },
         fail: function () { resolve(null) }
-      })
+      }
+      opts.entityIds = [tmplId]
+      opts.templateIds = [tmplId]
+      my.requestSubscribeMessage(opts)
     })
   })
 }

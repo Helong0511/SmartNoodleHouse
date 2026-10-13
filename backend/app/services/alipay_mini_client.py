@@ -1,10 +1,12 @@
-"""支付宝小程序：手机号密文解密等。"""
+"""支付宝小程序：手机号密文解密、订阅消息发送等。"""
 from __future__ import annotations
 
 import base64
 import json
 import logging
 import re
+from datetime import datetime
+from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
@@ -15,6 +17,135 @@ from app.core.exceptions import AppException
 logger = logging.getLogger(__name__)
 
 _OK_CODES = frozenset({"", "10000", "200"})
+
+
+def _mock_allowed() -> bool:
+    s = get_settings()
+    return s.is_development or bool(getattr(s, "allow_auth_mock", False))
+
+
+def _alipay_mini_configured() -> bool:
+    s = get_settings()
+    return bool(s.alipay_app_id and s.alipay_private_key and s.alipay_public_key)
+
+
+async def _templatemessage_gateway(biz: dict[str, Any]) -> dict[str, Any]:
+    """调用 alipay.open.app.mini.templatemessage.send。"""
+    from app.utils.alipay_keys import alipay_gateway_request, sign_alipay_params_rsa2
+
+    settings = get_settings()
+    method = "alipay.open.app.mini.templatemessage.send"
+    params = {
+        "app_id": settings.alipay_app_id,
+        "method": method,
+        "format": "JSON",
+        "charset": "utf-8",
+        "sign_type": "RSA2",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "version": "1.0",
+        "biz_content": json.dumps(biz, ensure_ascii=False, separators=(",", ":")),
+    }
+    params["sign"] = sign_alipay_params_rsa2(params, settings.alipay_private_key)
+    data = await alipay_gateway_request(params, timeout=10.0)
+    resp_key = method.replace(".", "_") + "_response"
+    return data.get(resp_key) or data.get("error_response") or data
+
+
+async def send_order_ready_subscribe(
+    *,
+    alipay_user_id: str,
+    order_no: str,
+    order_id: int,
+    table_label: str | None = None,
+) -> bool:
+    """订单 READY：支付宝订阅消息（未配置模板则跳过；订阅类不传 form_id）。"""
+    from app.services.system_settings_service import SystemSettingsService
+
+    tmpl = SystemSettingsService.resolved_str_sync(
+        "alipay_subscribe_template_order_ready",
+        "",
+    ).strip()
+    user_id = (alipay_user_id or "").strip()
+    if not tmpl or not user_id:
+        return False
+    if not _alipay_mini_configured():
+        if _mock_allowed():
+            import hashlib
+
+            fp = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:12]
+            logger.info("Mock 支付宝订阅 order_ready identity_fp=%s order=%s", fp, order_no)
+            return True
+        return False
+
+    table_text = (table_label or "堂食").strip()[:20] or "堂食"
+    # keyword 顺序须与开放平台模板一致；运营改模板后请同步此处占位
+    data_obj = {
+        "keyword1": {"value": (order_no or "-")[:32]},
+        "keyword2": {"value": "餐品已备好，请取餐"},
+        "keyword3": {"value": table_text},
+    }
+    biz = {
+        "to_user_id": user_id,
+        "user_template_id": tmpl,
+        "page": f"packageOrder/result/result?order_id={order_id}",
+        "data": json.dumps(data_obj, ensure_ascii=False, separators=(",", ":")),
+    }
+    try:
+        body = await _templatemessage_gateway(biz)
+        if str(body.get("code") or "") == "10000":
+            return True
+        logger.warning("支付宝出餐订阅失败 order=%s err=%s", order_no, body)
+    except Exception as e:
+        logger.warning("支付宝出餐订阅异常 order=%s: %s", order_no, e)
+    return False
+
+
+async def send_balance_low_subscribe(
+    *,
+    alipay_user_id: str,
+    customer_id: int,
+    balance: str,
+    threshold: str,
+) -> bool:
+    """储值余额偏低：支付宝订阅消息。"""
+    from app.services.system_settings_service import SystemSettingsService
+
+    tmpl = SystemSettingsService.resolved_str_sync(
+        "alipay_subscribe_template_balance_low",
+        "",
+    ).strip()
+    user_id = (alipay_user_id or "").strip()
+    if not tmpl or not user_id:
+        return False
+    if not _alipay_mini_configured():
+        if _mock_allowed():
+            logger.info(
+                "Mock 支付宝订阅 balance_low customer=%s balance=%s",
+                customer_id,
+                balance,
+            )
+            return True
+        return False
+
+    data_obj = {
+        "keyword1": {"value": f"{balance}元"},
+        "keyword2": {"value": "储值余额偏低，欢迎到店充值"},
+        "keyword3": {"value": f"{threshold}元"},
+    }
+    biz = {
+        "to_user_id": user_id,
+        "user_template_id": tmpl,
+        "page": "pages/recharge/recharge",
+        "data": json.dumps(data_obj, ensure_ascii=False, separators=(",", ":")),
+    }
+    try:
+        body = await _templatemessage_gateway(biz)
+        if str(body.get("code") or "") == "10000":
+            return True
+        logger.warning("支付宝余额提醒订阅失败 customer=%s err=%s", customer_id, body)
+    except Exception as e:
+        logger.warning("支付宝余额提醒订阅异常 customer=%s: %s", customer_id, e)
+    return False
 
 
 def _friendly_alipay_phone_error(msg: str) -> str:

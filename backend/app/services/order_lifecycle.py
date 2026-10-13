@@ -164,27 +164,42 @@ async def apply_order_status(
 
 
 async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
-    """订单进入 READY 时尝试推送订阅消息（失败不阻断主流程）。"""
+    """订单进入 READY 时尝试推送订阅消息（失败不阻断主流程）。
+
+    微信 / 支付宝各自模板与身份；能发则都尝试（用户可能双端都订过）。
+    """
     if not order.customer_id:
         return
     from app.models import DiningTable
+    from app.services.alipay_mini_client import (
+        send_order_ready_subscribe as send_alipay_order_ready,
+    )
     from app.services.customer_service import CustomerService
     from app.services.wechat_mini_client import send_order_ready_subscribe
 
-    openid = await CustomerService.resolve_wechat_openid(db, order.customer_id)
-    if not openid:
-        return
     table_label = None
     if order.table_id:
         t = await db.get(DiningTable, order.table_id)
         if t:
             table_label = t.table_name or t.table_no
-    await send_order_ready_subscribe(
-        openid=openid,
-        order_no=order.order_no,
-        order_id=order.id,
-        table_label=table_label,
-    )
+
+    openid = await CustomerService.resolve_wechat_openid(db, order.customer_id)
+    if openid:
+        await send_order_ready_subscribe(
+            openid=openid,
+            order_no=order.order_no,
+            order_id=order.id,
+            table_label=table_label,
+        )
+
+    alipay_uid = await CustomerService.resolve_alipay_user_id(db, order.customer_id)
+    if alipay_uid:
+        await send_alipay_order_ready(
+            alipay_user_id=alipay_uid,
+            order_no=order.order_no,
+            order_id=order.id,
+            table_label=table_label,
+        )
 
 
 def _infer_assert_kind(source: str) -> str:
