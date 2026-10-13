@@ -624,6 +624,7 @@ Page({
   },
   async loadSocialBenefit() {
     this._socialHint = null
+    this._socialIdentityCodes = []
     try {
       await clientConfig.loadClientConfig().catch(() => { })
       if (!clientConfig.isSocialBenefitEnabled()) {
@@ -638,24 +639,148 @@ Page({
       const codes = ((res && res.items) || [])
         .filter((x) => x && x.status === 'ACTIVE')
         .map((x) => String(x.identity_code || '').toUpperCase())
+      this._socialIdentityCodes = codes
       const hint = bestSocialHint(codes)
       this._socialHint = hint
       this.setData({
         hasSocialBenefit: !!hint,
         socialBenefitLabel: hint ? hint.label : '',
-        // 有身份时不默认打开，避免静默覆盖会员+券路径；用户显式开关
         useSocialBenefit: hint ? !!this.data.useSocialBenefit : false
       })
     } catch (_) {
       this._socialHint = null
+      this._socialIdentityCodes = []
       this.setData({ hasSocialBenefit: false, useSocialBenefit: false, socialBenefitLabel: '' })
     }
+  },
+
+  async syncSocialPreview(sub, discountable, packingFee, productIds) {
+    if (!(this._socialIdentityCodes && this._socialIdentityCodes.length)) return
+    const storeId = this.submitStoreId && this.submitStoreId()
+    if (!storeId) return
+    let customerId = 0
+    try {
+      customerId = parseInt(
+        (app && app.globalData && app.globalData.customerId) ||
+          auth.readStorage('customer_id') ||
+          0,
+        10
+      ) || 0
+    } catch (_) {
+      customerId = 0
+    }
+    try {
+      const prev = await api.post('/social-benefits/preview', {
+        customer_id: customerId || undefined,
+        store_id: storeId,
+        subtotal: Number(sub || 0).toFixed(2),
+        discountable_subtotal: Number(discountable || 0).toFixed(2),
+        packing_fee: Number(packingFee || 0).toFixed(2),
+        product_ids: productIds || []
+      })
+      if (prev && prev.eligible) {
+        const code = String(prev.identity_code || '').toUpperCase()
+        const rate = parseFloat(prev.discount_rate)
+        const subsidy = parseFloat(prev.subsidy_amount)
+        this._socialHint = {
+          code,
+          rate: Number.isFinite(rate) ? rate : 1,
+          label: prev.rule_name || SOCIAL_LABEL[code] || code,
+          subsidy: Number.isFinite(subsidy) ? subsidy : undefined,
+          fromPreview: true
+        }
+        this.setData({
+          hasSocialBenefit: true,
+          socialBenefitLabel: this._socialHint.label
+        })
+      } else {
+        const fallback = bestSocialHint(this._socialIdentityCodes)
+        this._socialHint = fallback
+          ? { ...fallback, eligible: false, reason: (prev && prev.reason) || '当前不可用' }
+          : null
+        if (this.data.useSocialBenefit) {
+          this.setData({ useSocialBenefit: false })
+        }
+        this.setData({
+          hasSocialBenefit: !!fallback,
+          socialBenefitLabel: fallback ? fallback.label : ''
+        })
+      }
+    } catch (_) {
+      /* 网络失败：沿用本地兜底 */
+    }
+  },
+
+  estimateMemberPathSave(discountable, memberRate) {
+    const memberDisc = memberOnlySave(discountable, memberRate)
+    let coupon = this._selectedCoupon
+    if (!this._couponManualPick && (this.data.coupons || []).length) {
+      coupon = pickBestCoupon(
+        this.data.coupons,
+        discountable,
+        memberRate,
+        (base, mr, c) => this.calcCouponTotalSavings(base, mr, c)
+      )
+    }
+    let couponSave = 0
+    let effectiveMember = memberDisc
+    if (coupon) {
+      const total = this.calcCouponTotalSavings(discountable, memberRate, coupon)
+      if (coupon.coupon_type === 'PERCENT' && percentBeatsMember(coupon.discount_value, memberRate)) {
+        effectiveMember = 0
+        couponSave = total
+      } else {
+        couponSave = Math.max(0, total - memberDisc)
+      }
+    }
+    let voucherSave = 0
+    const afterMemberCoupon = Math.max(0, (parseFloat(discountable) || 0) - effectiveMember - couponSave)
+    let voucher = this._selectedVoucher
+    if (!this._voucherManualPick && (this.data.vouchers || []).length) {
+      voucher = pickBestVoucher(
+        this.data.vouchers,
+        afterMemberCoupon,
+        (amt, v) => this.calcVoucherDiscount(amt, v, amt)
+      )
+    }
+    if (voucher) {
+      voucherSave = this.calcVoucherDiscount(afterMemberCoupon, voucher, afterMemberCoupon) || 0
+    }
+    return Math.round((effectiveMember + couponSave + voucherSave) * 100) / 100
   },
 
   onToggleSocial(e) {
     const raw = e && e.detail ? e.detail.value : false
     const on = raw === true || raw === 'true' || raw === 1 || raw === '1'
     if (on) {
+      if (!this._socialHint || this._socialHint.eligible === false) {
+        my.showToast({ content: '当前不可用公益折扣', type: 'none' })
+        this.setData({ useSocialBenefit: false })
+        return
+      }
+      const cart = auth.getCart()
+      const { list, total } = cartUtil.cartSummary(cart)
+      let discountable = parseFloat(total) || 0
+      try {
+        const items = this._productCatalog
+        if (items && items.length) {
+          const enriched = cartUtil.enrichCartFromProducts(list, items)
+          discountable = cartUtil.calcDiscountableSubtotal(enriched)
+        }
+      } catch (_) { /* ignore */ }
+      const socialSave = socialSubsidyOf(this._socialHint, discountable)
+      const memberRate = this._memberRate || 1
+      const memberPathSave = this.estimateMemberPathSave(discountable, memberRate)
+      const memberSave = memberOnlySave(discountable, memberRate)
+      if (socialSave <= memberPathSave + 0.009) {
+        const tip =
+          memberPathSave > memberSave + 0.009
+            ? '开启公益不可用券，总优惠不如会员折+券'
+            : '会员折更优或相同，无需开启公益'
+        my.showToast({ content: tip, type: 'none', duration: 2800 })
+        this.setData({ useSocialBenefit: false })
+        return
+      }
       this._couponManualPick = true
       this._voucherManualPick = true
       this._selectedCoupon = null
@@ -854,19 +979,29 @@ Page({
       nextPayMethod = 'BALANCE'
     }
     const useBalance = nextPayMethod === 'BALANCE'
-    const useSocial = !useBalance && !!this.data.useSocialBenefit && !!this._socialHint
-    const memberRate = useBalance || useSocial ? 1 : (this._memberRate || 1)
     const discountable = cartUtil.calcDiscountableSubtotal(enrichedList)
+    const productIds = enrichedList.map((i) => i.product_id).filter(Boolean)
+    await this.syncSocialPreview(sub, discountable, needPack ? pack : 0, productIds)
 
-    // 公益路径：与券互斥；与会员折比补贴取更优（服务端也会再比一次）
+    let wantSocial = !useBalance && !!this.data.useSocialBenefit && !!this._socialHint
+    const memberRateForCompare = this._memberRate || 1
+    if (wantSocial) {
+      const socialSave = socialSubsidyOf(this._socialHint, discountable)
+      const pathSave = this.estimateMemberPathSave(discountable, memberRateForCompare)
+      if (!(socialSave > pathSave + 0.009) || this._socialHint.eligible === false) {
+        wantSocial = false
+        if (this.data.useSocialBenefit) {
+          this.setData({ useSocialBenefit: false })
+        }
+      }
+    }
+    const useSocial = wantSocial
+    const memberRate = useBalance || useSocial ? 1 : memberRateForCompare
+
     if (useSocial) {
       this._selectedCoupon = null
       this._selectedVoucher = null
-      const socialRate = this._socialHint.rate
-      let socialDisc = 0
-      if (socialRate > 0 && socialRate < 1) {
-        socialDisc = Math.round(discountable * (1 - socialRate) * 100) / 100
-      }
+      const socialDisc = socialSubsidyOf(this._socialHint, discountable)
       let pay = Math.max(0, sub - socialDisc)
       if (needPack) pay += pack
       pay = Math.max(0, Math.round(pay * 100) / 100)
@@ -979,14 +1114,19 @@ Page({
     }
     pay = Math.max(0, Math.round((pay - voucherDisc) * 100) / 100)
     let socialRecommendTip = ''
-    if (!useBalance && this._socialHint) {
-      const socialSave = Math.round(discountable * (1 - this._socialHint.rate) * 100) / 100
+    if (!useBalance && this._socialHint && this._socialHint.eligible !== false) {
+      const socialSave = socialSubsidyOf(this._socialHint, discountable)
       const memberPathSave = Math.round((discount + couponDisc + voucherDisc) * 100) / 100
+      const memberSave = memberOnlySave(discountable, memberRateForCompare)
       if (socialSave > memberPathSave + 0.009) {
-        socialRecommendTip = `开启公益约多省¥${(socialSave - memberPathSave).toFixed(2)}（优于会员折；不可用券）`
-      } else if (memberPathSave > socialSave + 0.009) {
-        socialRecommendTip = '当前会员折更优，勾选公益也会按会员折结算'
+        socialRecommendTip = `开启公益约多省¥${(socialSave - memberPathSave).toFixed(2)}（优于会员折+券；不可用券）`
+      } else if (socialSave > memberSave + 0.009 && memberPathSave > socialSave + 0.009) {
+        socialRecommendTip = '开启公益不可用券，总优惠不如当前会员折+券'
+      } else if (memberSave >= socialSave - 0.009) {
+        socialRecommendTip = '会员折更优或相同，建议不用公益'
       }
+    } else if (!useBalance && this._socialHint && this._socialHint.eligible === false) {
+      socialRecommendTip = this._socialHint.reason || '当前时段/次数不可用公益'
     }
     await media.hydrateImageUrls(cartPreview, 'imageUrl')
     const settleStoreId = this.submitStoreId()

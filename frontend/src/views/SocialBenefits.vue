@@ -189,7 +189,7 @@ const REDEEM_STATUS_LABELS: Record<string, string> = {
 }
 const STACK_POLICY_LABELS: Record<string, string> = {
   EXCLUSIVE: '与券互斥；与会员折取更优（折扣更低者）',
-  STACKABLE: '可叠加',
+  STACKABLE: '可叠加（结算尚未接线，请勿依赖）',
 }
 
 function verifyMethodLabel(method: string) {
