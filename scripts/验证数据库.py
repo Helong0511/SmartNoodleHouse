@@ -111,6 +111,7 @@ REQUIRED_COLUMNS = [
     ("print_jobs", "content"),
     ("coupon_templates", "store_id"),
     ("customers", "birthday_calendar"),
+    ("customers", "birthday_locked"),
     ("products", "visibility_rule"),
     ("products", "visibility_calendar"),
     ("stores", "logo"),
