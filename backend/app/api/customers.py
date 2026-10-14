@@ -702,6 +702,9 @@ async def update_customer(
             }
             customer.birthday = None
             customer.birthday_calendar = "SOLAR"
+            if int(getattr(customer, "birthday_locked", 0) or 0):
+                changes["birthday_locked"] = {"old": 1, "new": 0}
+            customer.birthday_locked = 0
         else:
             cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
             try:
@@ -719,6 +722,10 @@ async def update_customer(
                 "input_calendar": cal,
             }
             customer.birthday = stored
+            # 后台写入生日后一并锁定，避免顾客自行再改
+            if not int(getattr(customer, "birthday_locked", 0) or 0):
+                changes["birthday_locked"] = {"old": 0, "new": 1}
+            customer.birthday_locked = 1
     if "recommend_opt_in" in fields and body.recommend_opt_in is not None:
         changes["recommend_opt_in"] = {
             "old": int(customer.recommend_opt_in or 0),

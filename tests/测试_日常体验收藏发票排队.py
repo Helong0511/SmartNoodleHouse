@@ -501,31 +501,52 @@ async def test_birthday_update_validation(db_session: AsyncSession):
     tomorrow = (now_local() + timedelta(days=1)).date().isoformat()
 
     async with api_client(db_session, cust) as ac:
-        # 正常设置
-        r = await ac.put("/api/miniprogram/member/profile", json={"birthday": "2000-02-29"})
-        assert r.status_code == 200, r.text
-        assert r.json()["data"]["birthday"] == "2000-02-29"
-        # 兼容 YYYY-M-D（部分端 picker 不补零）
-        r = await ac.put("/api/miniprogram/member/profile", json={"birthday": "1990-5-1"})
-        assert r.json()["data"]["birthday"] == "1990-05-01"
-        # GET profile 返回生日
-        r = await ac.get("/api/miniprogram/customers/me")
-        assert r.json()["data"]["birthday"] == "1990-05-01"
-        # 斜杠分隔
-        r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": "2000/01/01"})
-        assert r.json()["data"]["birthday"] == "2000-01-01"
-        # 格式错误 → 40030
+        # 格式错误 → 40030（未锁定时）
         r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": "not-a-date"})
         assert r.json()["code"] == 40030
         assert r.json()["message"] == "生日格式不正确"
         # 晚于今天 → 40031
         r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": tomorrow})
         assert r.json()["code"] == 40031
-        # 空串清除
-        r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": ""})
-        assert r.json()["data"]["birthday"] is None
+        # 兼容 YYYY-M-D（部分端 picker 不补零）；确认后锁定
+        r = await ac.put("/api/miniprogram/member/profile", json={"birthday": "1990-5-1"})
+        assert r.status_code == 200, r.text
+        body = r.json()["data"]
+        assert body["birthday"] == "1990-05-01"
+        assert body["birthday_locked"] is True
+        # GET profile 返回生日与锁定态
         r = await ac.get("/api/miniprogram/customers/me")
+        me = r.json()["data"]
+        assert me["birthday"] == "1990-05-01"
+        assert me["birthday_locked"] is True
+        # 锁定后不可再改
+        r = await ac.put("/api/miniprogram/member/profile", json={"birthday": "2000-02-29"})
+        assert r.json()["code"] == 40033
+        r = await ac.patch(
+            "/api/miniprogram/member/profile", json={"birthday_calendar": "LUNAR"}
+        )
+        assert r.json()["code"] == 40033
+        r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": ""})
+        assert r.json()["code"] == 40033
+
+
+@pytest.mark.asyncio
+async def test_birthday_calendar_alone_does_not_lock(db_session: AsyncSession):
+    """仅改历法不锁定；空串清除在未锁定时允许。"""
+    cust = await _add_customer(db_session, "DAILY-CUST-11B")
+    await db_session.commit()
+    async with api_client(db_session, cust) as ac:
+        r = await ac.put(
+            "/api/miniprogram/member/profile",
+            json={"birthday_calendar": "LUNAR"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["birthday_calendar"] == "LUNAR"
+        assert r.json()["data"]["birthday_locked"] is False
+        r = await ac.patch("/api/miniprogram/member/profile", json={"birthday": ""})
+        assert r.status_code == 200, r.text
         assert r.json()["data"]["birthday"] is None
+        assert r.json()["data"]["birthday_locked"] is False
 
 
 # ---------------------------------------------------------------------------

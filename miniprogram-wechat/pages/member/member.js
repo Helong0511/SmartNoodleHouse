@@ -132,6 +132,7 @@ Page({
     birthdayCalendar: 'SOLAR',
     birthdayDisplay: '',
     birthdayBenefitText: '',
+    birthdayLocked: false,
     birthdayEnd: '',
     savingBirthday: false,
     showQueueEntry: false
@@ -498,6 +499,7 @@ Page({
       birthdayCalendar: profile.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR',
       birthdayDisplay: profile.birthday_display || profile.birthday || '',
       birthdayBenefitText: (profile.birthday_benefit && profile.birthday_benefit.text) || '',
+      birthdayLocked: !!profile.birthday_locked,
       loading: false
     })
   },
@@ -956,9 +958,19 @@ Page({
     }
   },
 
-  // ---------- 生日填写 ----------
+  // ---------- 生日填写（确认后锁定，不可再改） ----------
+  onBirthdayTap() {
+    if (this.data.birthdayLocked) {
+      wx.showToast({ title: '生日已确认，不可自行修改', icon: 'none' })
+    }
+  },
+
   async onBirthdayCalendarChange(e) {
     if (this.data.savingBirthday) return
+    if (this.data.birthdayLocked) {
+      wx.showToast({ title: '生日已确认，不可自行修改', icon: 'none' })
+      return
+    }
     const birthdayCalendar = (e && e.detail && e.detail.value) || 'SOLAR'
     if (birthdayCalendar !== 'SOLAR' && birthdayCalendar !== 'LUNAR') return
     const prevCal = this.data.birthdayCalendar || 'SOLAR'
@@ -970,7 +982,8 @@ Page({
         birthday: d.birthday_picker || d.birthday || this.data.birthday || '',
         birthdayCalendar: d.birthday_calendar === 'LUNAR' ? 'LUNAR' : birthdayCalendar,
         birthdayDisplay: d.birthday_display || d.birthday || this.data.birthday || '',
-        birthdayBenefitText: (d.birthday_benefit && d.birthday_benefit.text) || this.data.birthdayBenefitText
+        birthdayBenefitText: (d.birthday_benefit && d.birthday_benefit.text) || this.data.birthdayBenefitText,
+        birthdayLocked: !!d.birthday_locked
       })
       this._profileLoadGen = (this._profileLoadGen || 0) + 1
       this._profileLoadedAt = Date.now()
@@ -988,11 +1001,27 @@ Page({
 
   async onBirthdayChange(e) {
     if (this.data.savingBirthday) return
+    if (this.data.birthdayLocked) {
+      wx.showToast({ title: '生日已确认，不可自行修改', icon: 'none' })
+      return
+    }
     const birthday = normalizePickerDate((e && e.detail && e.detail.value) || '')
     if (!birthday) {
       wx.showToast({ title: '生日格式无效，请重选', icon: 'none' })
       return
     }
+    const calLabel = this.data.birthdayCalendar === 'LUNAR' ? '农历' : '公历'
+    const confirmed = await new Promise((resolve) => {
+      wx.showModal({
+        title: '确认生日',
+        content: `确认为${calLabel} ${birthday}？确认后不可自行修改。`,
+        confirmText: '确认',
+        cancelText: '再想想',
+        success: (res) => resolve(!!(res && res.confirm)),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
     this.setData({ savingBirthday: true })
     try {
       const d = (await auth.patchMemberProfile({
@@ -1004,11 +1033,12 @@ Page({
         birthday: d.birthday_picker || d.birthday || birthday,
         birthdayCalendar: d.birthday_calendar === 'LUNAR' ? 'LUNAR' : (this.data.birthdayCalendar || 'SOLAR'),
         birthdayDisplay: d.birthday_display || d.birthday || birthday,
-        birthdayBenefitText: tip || this.data.birthdayBenefitText || ''
+        birthdayBenefitText: tip || this.data.birthdayBenefitText || '',
+        birthdayLocked: d.birthday_locked !== undefined ? !!d.birthday_locked : true
       })
       this._profileLoadGen = (this._profileLoadGen || 0) + 1
       this._profileLoadedAt = Date.now()
-      wx.showToast({ title: '生日已保存', icon: 'success' })
+      wx.showToast({ title: '生日已确认', icon: 'success' })
     } catch (err) {
       wx.showToast({ title: (err && err.message) || '保存失败', icon: 'none' })
     } finally {

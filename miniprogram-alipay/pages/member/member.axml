@@ -74,14 +74,18 @@
           <view class="phone birthday-line">
             <text>生日历法</text>
             <radio-group class="cal-group" onChange="onBirthdayCalendarChange">
-              <label class="cal-opt"><radio value="SOLAR" checked="{{birthdayCalendar === 'SOLAR'}}" color="#e67e22"/>公历</label>
-              <label class="cal-opt"><radio value="LUNAR" checked="{{birthdayCalendar === 'LUNAR'}}" color="#e67e22"/>农历</label>
+              <label class="cal-opt"><radio value="SOLAR" checked="{{birthdayCalendar === 'SOLAR'}}" color="#e67e22" disabled="{{birthdayLocked}}"/>公历</label>
+              <label class="cal-opt"><radio value="LUNAR" checked="{{birthdayCalendar === 'LUNAR'}}" color="#e67e22" disabled="{{birthdayLocked}}"/>农历</label>
             </radio-group>
           </view>
-          <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange">
-            <view class="phone birthday-line">生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}</view>
+          <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange" disabled="{{birthdayLocked}}">
+            <view class="phone birthday-line {{birthdayLocked ? 'birthday-locked' : ''}}" onTap="onBirthdayTap">
+              生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}
+            </view>
           </picker>
-          <view class="phone birthday-hint" a:if="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）</view>
+          <view class="phone birthday-hint" a:if="{{birthdayLocked}}">生日已确认，不可自行修改</view>
+          <view class="phone birthday-hint" a:elif="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）；确认后不可再改</view>
+          <view class="phone birthday-hint" a:else>设置生日后需确认，确认后不可自行修改</view>
           <view class="phone birthday-benefit" a:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
         </view>
       </view>

@@ -915,7 +915,15 @@ async def patch_member_profile(
     # 生日：YYYY-MM-DD；传空串清除；不得晚于今天。
     # 历法=农历时，控件数字即农历年月日，落库前换算为公历锚点。
     # 同请求既改历法又改日期时，先定历法再解释日期。
-    if "birthday_calendar" in data.model_fields_set and data.birthday_calendar is not None:
+    # 小程序确认后 birthday_locked=1，不可再改历法/日期（后台可改）。
+    birthday_locked = int(getattr(customer, "birthday_locked", 0) or 0) == 1
+    touching_birthday = "birthday" in data.model_fields_set
+    touching_calendar = (
+        "birthday_calendar" in data.model_fields_set and data.birthday_calendar is not None
+    )
+    if birthday_locked and (touching_birthday or touching_calendar):
+        raise AppException(40033, "生日已确认，不可自行修改，请联系门店")
+    if touching_calendar:
         from app.utils.birthday import convert_birthday_calendar
 
         raw_cal = str(data.birthday_calendar or "").strip().upper()
@@ -926,7 +934,7 @@ async def patch_member_profile(
             new_cal = normalize_calendar(raw_cal)
             # 仅改历法（未同时改日期）：同日互转，锚点公历日不变
             if (
-                "birthday" not in data.model_fields_set
+                not touching_birthday
                 and customer.birthday is not None
                 and old_cal != new_cal
             ):
@@ -934,11 +942,12 @@ async def patch_member_profile(
                 if converted is not None:
                     customer.birthday = converted
             customer.birthday_calendar = new_cal
-    if "birthday" in data.model_fields_set:
+    if touching_birthday:
         raw_birthday = (data.birthday or "").strip()
         if not raw_birthday:
             customer.birthday = None
             customer.birthday_calendar = "SOLAR"
+            customer.birthday_locked = 0
         else:
             from app.utils.birthday import resolve_birthday_input
 
@@ -953,6 +962,7 @@ async def patch_member_profile(
             if parsed_birthday > now_local().date():
                 raise AppException(40031, "生日不能晚于今天")
             customer.birthday = parsed_birthday
+            customer.birthday_locked = 1
     await CustomerService.save_channel_profile(
         db,
         customer.id,
@@ -1023,6 +1033,7 @@ async def patch_member_profile(
             "birthday_picker": birthday_for_picker(customer.birthday, cal),
             "birthday_calendar": cal,
             "birthday_display": format_birthday_display(customer.birthday, cal),
+            "birthday_locked": int(getattr(customer, "birthday_locked", 0) or 0) == 1,
             "birthday_benefit": benefit,
             "need_member_prompt": not CustomerService.is_member(customer),
             **profile,
@@ -1455,6 +1466,7 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
             "birthday_picker": birthday_for_picker(customer.birthday, cal),
             "birthday_calendar": cal,
             "birthday_display": format_birthday_display(customer.birthday, cal),
+            "birthday_locked": int(getattr(customer, "birthday_locked", 0) or 0) == 1,
             "birthday_benefit": benefit,
             "need_member_prompt": need_prompt,
             "is_guest": need_prompt,

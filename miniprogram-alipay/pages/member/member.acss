@@ -162,6 +162,7 @@
 .cal-opt { display: inline-flex; align-items: center; gap: 4rpx; font-size: 24rpx; color: #444; }
 .birthday-benefit { color: #e67e22; font-size: 22rpx; margin-top: 6rpx; line-height: 1.4; }
 .birthday-hint { color: #999; font-size: 22rpx; margin-top: 4rpx; line-height: 1.4; }
+.birthday-locked { color: #888; }
 .progress-box { margin-top: 24rpx; padding-top: 20rpx; border-top: 1px solid #f0f0f0; }
 .progress-box.done { margin-top: 20rpx; }
 .progress-head { display: flex; justify-content: space-between; font-size: 24rpx; color: #666; margin-bottom: 10rpx; }
