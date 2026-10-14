@@ -37,6 +37,22 @@ REQUIRED_TABLES = [
     "print_jobs",
     "delivery_orders",
     "cashier_shifts",
+    # 0025+ 日常体验 / 营销 / 社会身份 / 生命周期
+    "customer_favorite_products",
+    "invoice_requests",
+    "queue_tickets",
+    "social_identity_types",
+    "customer_social_identities",
+    "social_benefit_rules",
+    "social_benefit_redemptions",
+    "customer_segments",
+    "customer_segment_members",
+    "marketing_campaigns",
+    "marketing_rules",
+    "marketing_tasks",
+    "marketing_message_logs",
+    "campaign_attributions",
+    "customer_lifecycle",
     "alembic_version",
 ]
 
@@ -94,6 +110,10 @@ REQUIRED_COLUMNS = [
     ("print_jobs", "next_retry_at"),
     ("print_jobs", "content"),
     ("coupon_templates", "store_id"),
+    ("customers", "birthday_calendar"),
+    ("products", "visibility_rule"),
+    ("products", "visibility_calendar"),
+    ("stores", "logo"),
 ]
 
 

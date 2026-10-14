@@ -44,19 +44,24 @@ WHERE s.`store_no` = 'SH02'
 -- 二店分类
 -- -----------------------------------------------------------------------------
 INSERT INTO `product_categories` (`store_id`, `category_no`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`)
-SELECT s.`id`, 'SH02-ZhaoPaiMian', '招牌面·汤面', '二店招牌汤面（测试）', 6, 1, NOW(3), NOW(3)
+SELECT s.`id`, 'SH02-ZhaoPaiMian', '招牌面·汤面', '二店招牌汤面（测试）', 1, 1, NOW(3), NOW(3)
 FROM `stores` s WHERE s.`store_no` = 'SH02'
   AND NOT EXISTS (SELECT 1 FROM `product_categories` c WHERE c.`store_id` = s.`id` AND c.`category_no` = 'SH02-ZhaoPaiMian');
 
 INSERT INTO `product_categories` (`store_id`, `category_no`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`)
-SELECT s.`id`, 'SH02-GanBanMian', '干拌面', '二店干拌面（测试）', 7, 1, NOW(3), NOW(3)
+SELECT s.`id`, 'SH02-GanBanMian', '干拌面', '二店干拌面（测试）', 2, 1, NOW(3), NOW(3)
 FROM `stores` s WHERE s.`store_no` = 'SH02'
   AND NOT EXISTS (SELECT 1 FROM `product_categories` c WHERE c.`store_id` = s.`id` AND c.`category_no` = 'SH02-GanBanMian');
 
 INSERT INTO `product_categories` (`store_id`, `category_no`, `name`, `description`, `sort_order`, `status`, `created_at`, `updated_at`)
-SELECT s.`id`, 'SH02-YinPin', '饮品', '二店饮品（测试）', 20, 1, NOW(3), NOW(3)
+SELECT s.`id`, 'SH02-YinPin', '饮品', '二店饮品（测试）', 3, 1, NOW(3), NOW(3)
 FROM `stores` s WHERE s.`store_no` = 'SH02'
   AND NOT EXISTS (SELECT 1 FROM `product_categories` c WHERE c.`store_id` = s.`id` AND c.`category_no` = 'SH02-YinPin');
+
+-- 已导入库对齐：分类 sort_order 从 1 起连续
+UPDATE `product_categories` c JOIN `stores` s ON `s`.`id` = `c`.`store_id` AND `s`.`store_no` = 'SH02' SET `c`.`sort_order` = 1 WHERE `c`.`category_no` = 'SH02-ZhaoPaiMian';
+UPDATE `product_categories` c JOIN `stores` s ON `s`.`id` = `c`.`store_id` AND `s`.`store_no` = 'SH02' SET `c`.`sort_order` = 2 WHERE `c`.`category_no` = 'SH02-GanBanMian';
+UPDATE `product_categories` c JOIN `stores` s ON `s`.`id` = `c`.`store_id` AND `s`.`store_no` = 'SH02' SET `c`.`sort_order` = 3 WHERE `c`.`category_no` = 'SH02-YinPin';
 
 -- -----------------------------------------------------------------------------
 -- 二店精简规格（量/辣）
