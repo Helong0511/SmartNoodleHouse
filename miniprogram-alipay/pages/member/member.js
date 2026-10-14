@@ -518,7 +518,8 @@ Page({
       pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
       ...buildLevelLadder(profile.member_levels || []),
       phone: profile.phone || '',
-      birthday: profile.birthday || '',
+      // birthday 仅作日期控件 value：农历时为农历年-月-日数字，不是公历锚点
+      birthday: profile.birthday_picker || profile.birthday || '',
       birthdayCalendar: profile.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR',
       birthdayDisplay: profile.birthday_display || profile.birthday || '',
       birthdayBenefitText: (profile.birthday_benefit && profile.birthday_benefit.text) || '',
@@ -1030,7 +1031,7 @@ Page({
       // api 层已解包 data；auth.patchMemberProfile 走 PUT，兼容支付宝
       const d = (await auth.patchMemberProfile({ birthday_calendar: birthdayCalendar })) || {}
       this.setData({
-        birthday: d.birthday || this.data.birthday || '',
+        birthday: d.birthday_picker || d.birthday || this.data.birthday || '',
         birthdayCalendar: d.birthday_calendar === 'LUNAR' ? 'LUNAR' : birthdayCalendar,
         birthdayDisplay: d.birthday_display || d.birthday || this.data.birthday || '',
         birthdayBenefitText: (d.birthday_benefit && d.birthday_benefit.text) || this.data.birthdayBenefitText
@@ -1064,7 +1065,7 @@ Page({
       })) || {}
       const tip = (d.birthday_benefit && d.birthday_benefit.text) || ''
       this.setData({
-        birthday: d.birthday || birthday,
+        birthday: d.birthday_picker || d.birthday || birthday,
         birthdayCalendar: d.birthday_calendar === 'LUNAR' ? 'LUNAR' : (this.data.birthdayCalendar || 'SOLAR'),
         birthdayDisplay: d.birthday_display || d.birthday || birthday,
         birthdayBenefitText: tip || this.data.birthdayBenefitText || ''

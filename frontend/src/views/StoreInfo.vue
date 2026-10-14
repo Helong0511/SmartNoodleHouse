@@ -42,7 +42,10 @@
                     fit="cover"
                     class="logo-preview"
                     :preview-src-list="[mediaUrl(form.logo)]"
+                    preview-teleported
+                    :z-index="4000"
                   />
+
                   <div v-else class="logo-preview empty">暂无</div>
                   <div class="logo-actions">
                     <el-upload

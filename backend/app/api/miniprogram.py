@@ -912,22 +912,9 @@ async def patch_member_profile(
     avatar = _persistable_avatar_url(data.avatar_url)
     from app.utils.birthday import VALID_CALENDARS, normalize_calendar
 
-    # 生日：YYYY-MM-DD；传空串清除；不得晚于今天
-    if "birthday" in data.model_fields_set:
-        raw_birthday = (data.birthday or "").strip()
-        if not raw_birthday:
-            customer.birthday = None
-            customer.birthday_calendar = "SOLAR"
-        else:
-            from app.utils.birthday import parse_birthday_input
-
-            try:
-                parsed_birthday = parse_birthday_input(raw_birthday)
-            except ValueError:
-                raise AppException(40030, "生日格式不正确")
-            if parsed_birthday > now_local().date():
-                raise AppException(40031, "生日不能晚于今天")
-            customer.birthday = parsed_birthday
+    # 生日：YYYY-MM-DD；传空串清除；不得晚于今天。
+    # 历法=农历时，控件数字即农历年月日，落库前换算为公历锚点。
+    # 同请求既改历法又改日期时，先定历法再解释日期。
     if "birthday_calendar" in data.model_fields_set and data.birthday_calendar is not None:
         from app.utils.birthday import convert_birthday_calendar
 
@@ -937,7 +924,7 @@ async def patch_member_profile(
         if raw_cal:
             old_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
             new_cal = normalize_calendar(raw_cal)
-            # 仅改历法：同日互转，锚点公历日不变（展示文案随 calendar 换算）
+            # 仅改历法（未同时改日期）：同日互转，锚点公历日不变
             if (
                 "birthday" not in data.model_fields_set
                 and customer.birthday is not None
@@ -947,6 +934,25 @@ async def patch_member_profile(
                 if converted is not None:
                     customer.birthday = converted
             customer.birthday_calendar = new_cal
+    if "birthday" in data.model_fields_set:
+        raw_birthday = (data.birthday or "").strip()
+        if not raw_birthday:
+            customer.birthday = None
+            customer.birthday_calendar = "SOLAR"
+        else:
+            from app.utils.birthday import resolve_birthday_input
+
+            cal_for_input = normalize_calendar(getattr(customer, "birthday_calendar", None))
+            try:
+                parsed_birthday = resolve_birthday_input(raw_birthday, cal_for_input)
+            except ValueError:
+                raise AppException(
+                    40030,
+                    "生日格式不正确" if cal_for_input != "LUNAR" else "农历日期无效，请重选",
+                )
+            if parsed_birthday > now_local().date():
+                raise AppException(40031, "生日不能晚于今天")
+            customer.birthday = parsed_birthday
     await CustomerService.save_channel_profile(
         db,
         customer.id,
@@ -983,7 +989,11 @@ async def patch_member_profile(
         request=request,
         category=AuditService.CATEGORY_CUSTOMER,
     )
-    from app.utils.birthday import format_birthday_display, normalize_calendar
+    from app.utils.birthday import (
+        birthday_for_picker,
+        format_birthday_display,
+        normalize_calendar,
+    )
 
     cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
     store_id = getattr(customer, "registered_store_id", None) or getattr(
@@ -1010,6 +1020,7 @@ async def patch_member_profile(
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
             "birthday": serialize_dt(customer.birthday),
+            "birthday_picker": birthday_for_picker(customer.birthday, cal),
             "birthday_calendar": cal,
             "birthday_display": format_birthday_display(customer.birthday, cal),
             "birthday_benefit": benefit,
@@ -1420,7 +1431,11 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
     channel = _customer_channel_from_request(request, "wechat")
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)
     need_prompt = not CustomerService.is_member(customer)
-    from app.utils.birthday import format_birthday_display, normalize_calendar
+    from app.utils.birthday import (
+        birthday_for_picker,
+        format_birthday_display,
+        normalize_calendar,
+    )
 
     cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
     store_id = getattr(customer, "registered_store_id", None) or getattr(
@@ -1437,6 +1452,7 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
             "birthday": serialize_dt(customer.birthday),
+            "birthday_picker": birthday_for_picker(customer.birthday, cal),
             "birthday_calendar": cal,
             "birthday_display": format_birthday_display(customer.birthday, cal),
             "birthday_benefit": benefit,

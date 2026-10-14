@@ -81,6 +81,7 @@
           <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange">
             <view class="phone birthday-line">生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}</view>
           </picker>
+          <view class="phone birthday-hint" a:if="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）</view>
           <view class="phone birthday-benefit" a:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
         </view>
       </view>

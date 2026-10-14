@@ -8,9 +8,13 @@ from app.utils.birthday import (
     MODE_OFF,
     MODE_POINTS,
     benefit_summary,
+    birthday_for_picker,
     convert_birthday_calendar,
     is_birthday_today,
+    lunar_ymd_to_solar,
     normalize_calendar,
+    resolve_birthday_input,
+    resolve_birthday_storage,
 )
 
 
@@ -74,3 +78,20 @@ def test_lunar_match_uses_true_lunar_of_anchor():
     assert is_birthday_today(bday, CAL_LUNAR, today=date(1990, 5, 1))
     # 1990 农历五月初一 ≈ 1990-05-24，不应因错误重解释而命中
     assert not is_birthday_today(bday, CAL_LUNAR, today=date(1990, 5, 24))
+
+
+def test_lunar_input_means_lunar_ymd_not_solar_convert():
+    """农历模式下用户选 5月1日 = 五月初一，不是把公历 5/1 再转农历。"""
+    # 农历 1990-05-01 → 公历约 1990-05-24
+    solar = lunar_ymd_to_solar(1990, 5, 1)
+    assert solar == date(1990, 5, 24)
+    assert resolve_birthday_storage(date(1990, 5, 1), CAL_LUNAR) == solar
+    assert resolve_birthday_input("1990-05-01", CAL_LUNAR) == solar
+    # 公历模式仍按数字原样存
+    assert resolve_birthday_storage(date(1990, 5, 1), CAL_SOLAR) == date(1990, 5, 1)
+    # 落库后按农历五月初一匹配
+    assert is_birthday_today(solar, CAL_LUNAR, today=date(1990, 5, 24))
+    assert not is_birthday_today(solar, CAL_LUNAR, today=date(1990, 5, 1))
+    # 控件回填应为农历数字
+    assert birthday_for_picker(solar, CAL_LUNAR) == "1990-05-01"
+    assert birthday_for_picker(date(1990, 5, 1), CAL_SOLAR) == "1990-05-01"

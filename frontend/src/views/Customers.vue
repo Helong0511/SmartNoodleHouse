@@ -79,7 +79,7 @@
       <el-table-column label="头像" width="72" align="center">
         <template #default="{ row }">
           <el-image v-if="row.avatar_url" :src="mediaUrl(row.avatar_url)" fit="cover" class="avatar-thumb"
-            :preview-src-list="[mediaUrl(row.avatar_url)]" preview-teleported />
+            :preview-src-list="[mediaUrl(row.avatar_url)]" preview-teleported :z-index="4000" />
           <span v-else class="no-avatar">无</span>
         </template>
       </el-table-column>
@@ -121,7 +121,7 @@
       <el-table-column label="生日" width="120">
         <template #default="{ row }">
           <span v-if="row.birthday">
-            {{ row.birthday_calendar === 'LUNAR' ? '农历' : '公历' }} {{ row.birthday }}
+            {{ row.birthday_display || ((row.birthday_calendar === 'LUNAR' ? '农历' : '公历') + ' ' + row.birthday) }}
             <el-tag v-if="row.is_birthday_today" size="small" type="danger" style="margin-left:4px">今日</el-tag>
           </span>
           <span v-else class="muted">—</span>
@@ -188,7 +188,7 @@
       <template v-if="detail">
         <div class="detail-head">
           <el-image v-if="detail.avatar_url" :src="mediaUrl(detail.avatar_url)" fit="cover" class="avatar-lg"
-            :preview-src-list="[mediaUrl(detail.avatar_url)]" preview-teleported />
+            :preview-src-list="[mediaUrl(detail.avatar_url)]" preview-teleported :z-index="4000" />
           <div v-else class="avatar-lg placeholder">无头像</div>
           <div class="detail-head-meta">
             <div class="detail-name">{{ detail.display_name || detail.nickname || '—' }}</div>
@@ -224,7 +224,7 @@
               <el-radio value="SOLAR">公历</el-radio>
               <el-radio value="LUNAR">农历</el-radio>
             </el-radio-group>
-            <div class="muted tip">切换历法：同一天按公历/农历换展示与每年匹配规则；存库仍为对应公历锚点日</div>
+            <div class="muted tip">切换历法：同一天改匹配规则；存库仍为公历锚点。农历下再改日期时，所选数字=农历月日</div>
           </el-form-item>
           <el-form-item label="生日">
             <el-date-picker
@@ -233,7 +233,7 @@
               value-format="YYYY-MM-DD"
               clearable
               :disabled="savingProfile"
-              :placeholder="editForm.birthday_calendar === 'LUNAR' ? '选对应公历日（按农历月日记）' : '选填公历日期'"
+              :placeholder="editForm.birthday_calendar === 'LUNAR' ? '选农历年月日（数字即农历）' : '选填公历日期'"
               style="width:100%"
               @change="onBirthdayDateChange"
             />
@@ -243,7 +243,7 @@
             <div class="muted tip">
               {{
                 editForm.birthday_calendar === 'LUNAR'
-                  ? '农历模式：请选「对应公历日」；上方会显示换算后的农历月日'
+                  ? '农历模式：所选月日即为农历（如 5月1日 = 五月初一），不是先选公历再换算'
                   : '公历模式：直接选公历年月日'
               }}
             </div>
@@ -475,7 +475,7 @@
         <ul v-else class="acct">
           <li v-for="(w, i) in detail.wechat_accounts" :key="'w' + i" class="acct-row">
             <el-image v-if="w.avatar_url" :src="mediaUrl(w.avatar_url)" fit="cover" class="avatar-sm"
-              :preview-src-list="[mediaUrl(w.avatar_url)]" preview-teleported />
+              :preview-src-list="[mediaUrl(w.avatar_url)]" preview-teleported :z-index="4000" />
             <div class="acct-meta">
               <div v-if="w.nickname">{{ w.nickname }}</div>
               <code>{{ w.openid }}</code>
@@ -489,7 +489,7 @@
         <ul v-else class="acct">
           <li v-for="(a, i) in detail.alipay_accounts" :key="'a' + i" class="acct-row">
             <el-image v-if="a.avatar_url" :src="mediaUrl(a.avatar_url)" fit="cover" class="avatar-sm"
-              :preview-src-list="[mediaUrl(a.avatar_url)]" preview-teleported />
+              :preview-src-list="[mediaUrl(a.avatar_url)]" preview-teleported :z-index="4000" />
             <div class="acct-meta">
               <div v-if="a.nickname">{{ a.nickname }}</div>
               <code>{{ a.alipay_user_id }}</code>
@@ -677,7 +677,8 @@ function syncEditForm(d: any) {
   editForm.display_name = d?.display_name || ''
   editForm.nickname = d?.nickname || ''
   editForm.phone = d?.phone || ''
-  editForm.birthday = d?.birthday || null
+  // 日期控件：农历用 birthday_picker（农历数字），公历用 ISO 锚点
+  editForm.birthday = d?.birthday_picker || d?.birthday || null
   editForm.birthday_calendar = d?.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR'
   editForm.status = d?.status === 0 ? 0 : 1
   editForm.recommend_opt_in = d?.recommend_opt_in ? 1 : 0
@@ -711,8 +712,9 @@ async function onBirthdayCalendarChange(cal: string | number | boolean | undefin
   savingProfile.value = true
   try {
     const body: Record<string, any> = { birthday_calendar: next }
-    // 表单日期若尚未落库，一并提交，避免历法已切但展示仍用旧锚点
-    if (editForm.birthday !== detail.value?.birthday) {
+    // 表单日期若相对 picker 回填值有改动，一并提交（按新历法解释数字）
+    const prevPicker = detail.value?.birthday_picker || detail.value?.birthday || null
+    if (editForm.birthday && editForm.birthday !== prevPicker) {
       body.birthday = editForm.birthday
     }
     const res = await api.patch(`/customers/${id}`, body)

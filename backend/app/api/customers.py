@@ -159,7 +159,12 @@ async def list_customers(
 
     from app.core.response import now_local
     from app.services.store_scope import require_bound_store
-    from app.utils.birthday import is_birthday_today, normalize_calendar
+    from app.utils.birthday import (
+        birthday_for_picker,
+        format_birthday_display,
+        is_birthday_today,
+        normalize_calendar,
+    )
 
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
@@ -392,6 +397,12 @@ async def list_customers(
             "created_at": serialize_dt(c.created_at),
             "birthday": c.birthday.isoformat() if c.birthday else None,
             "birthday_calendar": normalize_calendar(getattr(c, "birthday_calendar", None)),
+            "birthday_display": format_birthday_display(
+                c.birthday, getattr(c, "birthday_calendar", None)
+            ),
+            "birthday_picker": birthday_for_picker(
+                c.birthday, getattr(c, "birthday_calendar", None)
+            ),
             "is_birthday_today": is_birthday_today(
                 c.birthday,
                 getattr(c, "birthday_calendar", None),
@@ -453,7 +464,11 @@ async def get_service_card(customer_id: int, request: Request, db: DbSession, us
 @router.get("/{customer_id}", dependencies=[require_permission("customer:read")])
 async def get_customer(customer_id: int, request: Request, db: DbSession, user: CurrentUser):
     from app.services.store_scope import require_bound_store
-    from app.utils.birthday import format_birthday_display, normalize_calendar
+    from app.utils.birthday import (
+        birthday_for_picker,
+        format_birthday_display,
+        normalize_calendar,
+    )
 
     customer = await db.get(Customer, customer_id)
     if not customer:
@@ -587,8 +602,9 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             ),
             "preference_scene": prefs.get("scene") or {"enabled": False},
             "birthday": customer.birthday.isoformat() if customer.birthday else None,
+            "birthday_picker": birthday_for_picker(customer.birthday, birthday_cal),
             "birthday_calendar": birthday_cal,
-            # 顶层展示文案：历法切换后前端可直接联动（日期选择器仍存公历锚点）
+            # 顶层展示文案；日期控件 value 用 birthday_picker（农历为农历数字）
             "birthday_display": format_birthday_display(customer.birthday, birthday_cal),
             "birthday_benefit": birthday_benefit,
             "recommend_opt_in": int(customer.recommend_opt_in or 0),
@@ -607,6 +623,7 @@ async def update_customer(
     user: CurrentUser,
 ):
     """员工编辑顾客基础信息（昵称/展示名/手机/启用状态/生日/推荐开关）。"""
+    from app.core.response import now_local
     from app.services.store_scope import require_bound_store
 
     customer = await db.get(Customer, customer_id)
@@ -654,21 +671,13 @@ async def update_customer(
             customer.account_status = "DISABLED"
         elif str(getattr(customer, "account_status", "") or "").upper() == "DISABLED":
             customer.account_status = "ACTIVE"
-    if "birthday" in fields:
-        changes["birthday"] = {
-            "old": customer.birthday.isoformat() if customer.birthday else None,
-            "new": body.birthday.isoformat() if body.birthday else None,
-        }
-        customer.birthday = body.birthday
-        if body.birthday is None:
-            customer.birthday_calendar = "SOLAR"
     if "birthday_calendar" in fields and body.birthday_calendar is not None:
         from app.utils.birthday import convert_birthday_calendar, normalize_calendar
 
         old_cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
         new_cal = normalize_calendar(body.birthday_calendar)
         changes["birthday_calendar"] = {"old": old_cal, "new": new_cal}
-        # 仅改历法：同日互转，存储公历日不变；展示/匹配随 calendar 切换
+        # 仅改历法（未同时改日期）：同日互转，存储公历日不变
         if (
             "birthday" not in fields
             and customer.birthday is not None
@@ -676,7 +685,6 @@ async def update_customer(
         ):
             converted = convert_birthday_calendar(customer.birthday, old_cal, new_cal)
             if converted is not None and converted != customer.birthday:
-                # 兼容层：若未来换算真正改日，写入审计
                 changes["birthday"] = {
                     "old": customer.birthday.isoformat(),
                     "new": converted.isoformat(),
@@ -684,6 +692,33 @@ async def update_customer(
                 }
                 customer.birthday = converted
         customer.birthday_calendar = new_cal
+    if "birthday" in fields:
+        from app.utils.birthday import normalize_calendar, resolve_birthday_storage
+
+        if body.birthday is None:
+            changes["birthday"] = {
+                "old": customer.birthday.isoformat() if customer.birthday else None,
+                "new": None,
+            }
+            customer.birthday = None
+            customer.birthday_calendar = "SOLAR"
+        else:
+            cal = normalize_calendar(getattr(customer, "birthday_calendar", None))
+            try:
+                stored = resolve_birthday_storage(body.birthday, cal)
+            except ValueError as exc:
+                raise AppException(
+                    40030,
+                    "农历日期无效，请重选" if cal == "LUNAR" else "生日格式不正确",
+                ) from exc
+            if stored > now_local().date():
+                raise AppException(40031, "生日不能晚于今天")
+            changes["birthday"] = {
+                "old": customer.birthday.isoformat() if customer.birthday else None,
+                "new": stored.isoformat(),
+                "input_calendar": cal,
+            }
+            customer.birthday = stored
     if "recommend_opt_in" in fields and body.recommend_opt_in is not None:
         changes["recommend_opt_in"] = {
             "old": int(customer.recommend_opt_in or 0),

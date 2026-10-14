@@ -98,6 +98,10 @@ async def test_copy_categories_and_products(db_session: AsyncSession, two_stores
         )
     ).scalar_one()
     assert int(dst_prod.category_id) == int(dst_cat.id)
+    assert int(dst_cat.store_id) == int(dst.id)
+    assert dst_cat.name == "面"
+    # 复制后目标餐品不得继续指向源店分类 id
+    assert int(dst_prod.category_id) != int(cat.id)
     links = list(
         (
             await db_session.execute(

@@ -37,6 +37,60 @@ def lunar_md(d: date) -> tuple[int, int, bool]:
     return int(z.lunar_month), int(z.lunar_day), bool(z.leap_month)
 
 
+def solar_to_lunar_ymd(d: date) -> tuple[int, int, int, bool]:
+    """公历日期 → (农历年, 农历月, 农历日, 是否闰月)。"""
+    z = _solar_to_lunar(d)
+    return int(z.lunar_year), int(z.lunar_month), int(z.lunar_day), bool(z.leap_month)
+
+
+def lunar_ymd_to_solar(
+    year: int,
+    month: int,
+    day: int,
+    *,
+    leap: bool = False,
+) -> date:
+    """农历年月日 → 对应公历日（落库锚点）。
+
+    小程序/后台在历法=农历时，日期控件选中的数字就是农历月日，须经此函数再写入
+    ``customers.birthday``（库内始终存公历）。非法农历日抛 ValueError。
+    """
+    try:
+        z = ZhDate(int(year), int(month), int(day), bool(leap))
+        dt = z.to_datetime()
+    except Exception as exc:  # zhdate 对越界抛 TypeError/ValueError
+        raise ValueError(f"invalid lunar date {year}-{month}-{day}") from exc
+    return date(dt.year, dt.month, dt.day)
+
+
+def resolve_birthday_storage(ymd: date, calendar: str | None) -> date:
+    """按历法解释用户选定的年月日，得到落库公历锚点。
+
+    - SOLAR：数字即公历，原样返回
+    - LUNAR：数字即农历年月日（非闰月），换算为公历后再存
+    """
+    cal = normalize_calendar(calendar)
+    if cal == CAL_SOLAR:
+        return ymd
+    return lunar_ymd_to_solar(ymd.year, ymd.month, ymd.day, leap=False)
+
+
+def resolve_birthday_input(raw: str, calendar: str | None) -> date:
+    """解析字符串生日并按历法落库。"""
+    return resolve_birthday_storage(parse_birthday_input(raw), calendar)
+
+
+def birthday_for_picker(birthday: date | None, calendar: str | None) -> str | None:
+    """给日期控件的 value：公历用 ISO；农历回填农历年-月-日数字。"""
+    if birthday is None:
+        return None
+    cal = normalize_calendar(calendar)
+    if cal == CAL_SOLAR:
+        return birthday.isoformat()
+    y, m, d, _leap = solar_to_lunar_ymd(birthday)
+    return f"{y:04d}-{m:02d}-{d:02d}"
+
+
 def is_birthday_today(
     birthday: date | None,
     calendar: str | None,

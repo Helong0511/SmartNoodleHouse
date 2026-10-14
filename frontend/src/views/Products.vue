@@ -47,14 +47,14 @@
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
       </el-table-column>
       <el-table-column label="分类" min-width="90" show-overflow-tooltip>
-        <template #default="{ row }">{{ categoryName(row.category_id) }}</template>
+        <template #default="{ row }">{{ row.category_name || categoryName(row.category_id) }}</template>
       </el-table-column>
       <el-table-column prop="product_no" label="编号" min-width="160" show-overflow-tooltip />
       <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
       <el-table-column label="图片" width="72" align="center">
         <template #default="{ row }">
           <el-image v-if="row.main_image" :src="mediaUrl(row.main_image)" fit="cover" class="thumb"
-            :preview-src-list="[mediaUrl(row.main_image)]" />
+            :preview-src-list="[mediaUrl(row.main_image)]" preview-teleported :z-index="4000" />
           <span v-else class="no-img">无</span>
         </template>
       </el-table-column>
@@ -135,7 +135,7 @@
         <el-form-item label="预览图">
           <div class="img-row">
             <el-image v-if="form.main_image" :src="mediaUrl(form.main_image)" fit="cover" class="preview"
-              :preview-src-list="[mediaUrl(form.main_image)]" />
+              :preview-src-list="[mediaUrl(form.main_image)]" preview-teleported :z-index="4000" />
             <div v-else class="preview empty">暂无图片</div>
             <div class="img-actions">
               <el-upload :show-file-list="false" accept="image/jpeg,image/png,image/webp,image/gif"
@@ -337,7 +337,7 @@
     </el-dialog>
 
     <CopyToStoreDialog v-model="copyVisible" :stores="stores" :exclude-store-id="copySourceStoreId"
-      :selected-count="selectedIds.length" :product-ids="selectedIds" show-product-conflict @done="load" />
+      :selected-count="selectedIds.length" :product-ids="selectedIds" show-product-conflict @done="onCopyDone" />
 
     <!-- 推送外卖弹窗 -->
     <el-dialog v-model="pushDialog" title="推送餐品到外卖平台" width="480px" destroy-on-close>
@@ -786,8 +786,14 @@ function mediaUrl(path: string) {
 }
 
 function categoryName(id: number) {
-  const c = categories.value.find((x) => x.id === id)
+  const c = categories.value.find((x) => Number(x.id) === Number(id))
   return c?.name || id
+}
+
+/** 复制会新建目标店分类；须先刷新分类元数据再刷列表，否则分类列会显示裸 id */
+async function onCopyDone() {
+  await loadMeta()
+  await load()
 }
 
 function pruneRequireProducts() {

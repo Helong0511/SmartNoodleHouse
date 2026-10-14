@@ -43,7 +43,7 @@
             <template #default="{ row }">
               <div class="cust-cell">
                 <el-image v-if="row.customer_avatar_url" :src="mediaUrl(row.customer_avatar_url)" fit="cover"
-                  class="avatar-thumb" :preview-src-list="[mediaUrl(row.customer_avatar_url)]" preview-teleported />
+                  class="avatar-thumb" :preview-src-list="[mediaUrl(row.customer_avatar_url)]" preview-teleported :z-index="4000" />
                 <span v-else class="no-avatar">无</span>
                 <div class="cust-meta">
                   <div class="cust-name">{{ row.customer_name || row.customer_nickname || '—' }}</div>
