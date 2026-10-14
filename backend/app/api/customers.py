@@ -606,6 +606,7 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
             "birthday_calendar": birthday_cal,
             # 顶层展示文案；日期控件 value 用 birthday_picker（农历为农历数字）
             "birthday_display": format_birthday_display(customer.birthday, birthday_cal),
+            "birthday_locked": int(getattr(customer, "birthday_locked", 0) or 0) == 1,
             "birthday_benefit": birthday_benefit,
             "recommend_opt_in": int(customer.recommend_opt_in or 0),
             "favorites": await _list_customer_favorites(db, customer_id, store_id=effective_store),

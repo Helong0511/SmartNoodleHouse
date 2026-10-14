@@ -99,9 +99,9 @@
             生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}
           </view>
         </picker>
-        <view class="phone birthday-hint" wx:if="{{birthdayLocked}}">生日已确认，不可自行修改</view>
-        <view class="phone birthday-hint" wx:elif="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）；确认后不可再改</view>
-        <view class="phone birthday-hint" wx:else>设置生日后需确认，确认后不可自行修改</view>
+        <view class="phone birthday-hint" wx:if="{{birthdayLocked}}">生日已确认，不可自行修改；如需更正请联系门店</view>
+        <view class="phone birthday-hint" wx:elif="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）；确认后不可自行修改，更正请联系门店</view>
+        <view class="phone birthday-hint" wx:else>设置后需确认；确认后不可自行修改，如需更正请联系门店</view>
         <view class="phone birthday-benefit" wx:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
 
       </view>

@@ -247,6 +247,9 @@
                   : '公历模式：直接选公历年月日'
               }}
             </div>
+            <div v-if="detail.birthday_locked" class="muted tip">
+              小程序端已锁定：顾客不可自改。此处可改日期（仍锁定），或清空生日以解锁其自助重设。
+            </div>
           </el-form-item>
           <el-alert
             v-if="detail.birthday_benefit?.text"
@@ -274,6 +277,7 @@
           <el-descriptions-item label="手机">{{ detail.phone || '—' }}</el-descriptions-item>
           <el-descriptions-item label="生日">
             {{ detail.birthday_display || detail.birthday_benefit?.birthday_display || detail.birthday || '—' }}
+            <el-tag v-if="detail.birthday_locked" size="small" type="warning" style="margin-left:6px">已锁定</el-tag>
           </el-descriptions-item>
           <el-descriptions-item v-if="detail.birthday_benefit?.text" label="生日优惠">
             {{ detail.birthday_benefit.text }}

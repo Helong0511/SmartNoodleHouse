@@ -1440,7 +1440,8 @@ Page({
       })
       const payRes = await api.post(`/payments/orders/${order.id}/pay`, {
         provider: this.data.payMethod === 'BALANCE' ? 'BALANCE' : 'ALIPAY',
-        channel_type: this.data.payMethod === 'BALANCE' ? 'balance' : 'miniprogram'
+        // channel_type 仅描述下单入口；余额支付由 provider=BALANCE 区分，禁止传 balance
+        channel_type: 'miniprogram'
       })
       let payOutcome
       try {

@@ -961,14 +961,14 @@ Page({
   // ---------- 生日填写（确认后锁定，不可再改） ----------
   onBirthdayTap() {
     if (this.data.birthdayLocked) {
-      wx.showToast({ title: '生日已确认，不可自行修改', icon: 'none' })
+      wx.showToast({ title: '不可自行修改，请联系门店', icon: 'none' })
     }
   },
 
   async onBirthdayCalendarChange(e) {
     if (this.data.savingBirthday) return
     if (this.data.birthdayLocked) {
-      wx.showToast({ title: '生日已确认，不可自行修改', icon: 'none' })
+      wx.showToast({ title: '不可自行修改，请联系门店', icon: 'none' })
       return
     }
     const birthdayCalendar = (e && e.detail && e.detail.value) || 'SOLAR'
@@ -1002,7 +1002,7 @@ Page({
   async onBirthdayChange(e) {
     if (this.data.savingBirthday) return
     if (this.data.birthdayLocked) {
-      wx.showToast({ title: '生日已确认，不可自行修改', icon: 'none' })
+      wx.showToast({ title: '不可自行修改，请联系门店', icon: 'none' })
       return
     }
     const birthday = normalizePickerDate((e && e.detail && e.detail.value) || '')
@@ -1014,7 +1014,7 @@ Page({
     const confirmed = await new Promise((resolve) => {
       wx.showModal({
         title: '确认生日',
-        content: `确认为${calLabel} ${birthday}？确认后不可自行修改。`,
+        content: `确认为${calLabel} ${birthday}？确认后不可自行修改；如需更正请联系门店。`,
         confirmText: '确认',
         cancelText: '再想想',
         success: (res) => resolve(!!(res && res.confirm)),
