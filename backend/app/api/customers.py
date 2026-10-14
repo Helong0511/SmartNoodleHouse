@@ -727,9 +727,9 @@ async def staff_add_favorite(
 
     product = await db.get(Product, product_id)
     if not product:
-        raise AppException(40404, "商品不存在")
+        raise AppException(40404, "餐品不存在")
     if effective_store is not None and int(product.store_id or 0) != int(effective_store):
-        raise AppException(40301, "无权收藏其他门店商品")
+        raise AppException(40301, "无权收藏其他门店餐品")
 
     existing = (
         await db.execute(

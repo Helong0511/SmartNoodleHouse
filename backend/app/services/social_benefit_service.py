@@ -588,7 +588,7 @@ class SocialBenefitService:
         if not hit:
             raise AppException(
                 40008,
-                "当前无法享用公益折扣：可能不在规则时段、今日次数已用完，或商品不适用",
+                "当前无法享用公益折扣：可能不在规则时段、今日次数已用完，或餐品不适用",
             )
         return hit
 
@@ -712,7 +712,7 @@ class SocialBenefitService:
             return {"eligible": False, "reason": "无可用公益权益"}
         rule, identity_code = hit
         rate = money(rule.discount_rate)
-        # 补贴仅作用于可打折部分；特价/不可打折商品与打包费原价
+        # 补贴仅作用于可打折部分；特价/不可打折餐品与打包费原价
         special = money(money(subtotal) - money(discountable_subtotal))
         if special < 0:
             special = money(0)

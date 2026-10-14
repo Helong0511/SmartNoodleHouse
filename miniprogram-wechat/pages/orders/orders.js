@@ -187,7 +187,8 @@ Page({
         ...orderActions.buildActionFlags(o),
         discount_amount: Number(o.discount_amount || 0),
         timeText: formatDateTime(o.created_at),
-        payLabel: this.payLabel(o.payment_status),
+        statusText: this.orderStatusLabel(o.status, o.status_label),
+        payLabel: this.payLabel(o.payment_status) || o.payment_status_label || '',
         placeText: [o.store_name, o.table && (o.table.table_name || o.table.table_no)].filter(Boolean).join(' · ')
       }))
       const totalPages = (res && res.total_pages) || 0
@@ -245,7 +246,9 @@ Page({
       const batch = ((res && res.items) || []).map((r) => ({
         ...r,
         credit_gift: Number(r.credit_gift || 0),
-        timeText: formatDateTime(r.paid_at || r.created_at)
+        timeText: formatDateTime(r.paid_at || r.created_at),
+        statusText: this.rechargeStatusLabel(r.status, r.status_label),
+        channelText: this.channelLabel(r.channel, r.channel_label)
       }))
       const totalPages = (res && res.total_pages) || 0
       let list = batch
@@ -276,10 +279,49 @@ Page({
       PAID: '已支付',
       UNPAID: '待支付',
       PENDING: '待支付',
+      PARTIAL_PAID: '部分支付',
+      REFUNDING: '退款中',
       REFUNDED: '已退款',
-      PARTIAL_REFUND: '部分退款'
+      PARTIAL_REFUND: '部分退款',
+      CANCELLED: '已取消',
+      FAILED: '支付失败'
     }
-    return map[status] || status || ''
+    return map[status] || ''
+  },
+
+  orderStatusLabel(status, fallback) {
+    const map = {
+      PENDING_PAYMENT: '待支付',
+      PAID: '已支付',
+      CONFIRMED: '已接单',
+      PREPARING: '备餐中',
+      COOKING: '制作中',
+      READY: '待取餐',
+      COMPLETED: '已完成',
+      CANCELLED: '已取消',
+      REFUND_PENDING: '退款中',
+      REFUNDED: '已退款'
+    }
+    const key = String(status || '').toUpperCase()
+    return map[key] || fallback || ''
+  },
+
+  rechargeStatusLabel(status, fallback) {
+    const map = {
+      PENDING: '待支付',
+      PAID: '已到账',
+      CANCELLED: '已取消',
+      EXPIRED: '已过期',
+      FAILED: '失败'
+    }
+    const key = String(status || '').toUpperCase()
+    return map[key] || fallback || ''
+  },
+
+  channelLabel(channel, fallback) {
+    const map = { WECHAT: '微信', ALIPAY: '支付宝' }
+    const key = String(channel || '').toUpperCase()
+    return map[key] || fallback || '充值'
   },
 
   openOrder(e) {
@@ -299,7 +341,7 @@ Page({
       const res = await api.post(`/orders/${id}/reorder`, {})
       const items = (res && res.cart_items) || []
       if (!items.length) {
-        throw new Error((res && res.message) || '没有可复购商品')
+        throw new Error((res && res.message) || '没有可复购餐品')
       }
       const cart = items.map((it) => ({
         product_id: it.product_id,
@@ -328,7 +370,7 @@ Page({
         const goOn = await new Promise((resolve) => {
           wx.showModal({
             title: '门店不一致',
-            content: '该订单属于其他门店，当前已绑定本店桌台。继续加入后商品可能无法在本桌结算，是否仍要加入？',
+            content: '该订单属于其他门店，当前已绑定本店桌台。继续加入后餐品可能无法在本桌结算，是否仍要加入？',
             confirmText: '仍要加入',
             cancelText: '取消',
             success: (r) => resolve(!!(r && r.confirm)),

@@ -20,7 +20,7 @@ async def test_build_order_items_rejects_mismatched_store(monkeypatch):
         price=10, box_price=0, no_member_discount=False,
     )
 
-    # mock calculate_items_batch 直接返回跨店商品行，单独测试 build_order_items 的断言
+    # mock calculate_items_batch 直接返回跨店餐品行，单独测试 build_order_items 的断言
     async def fake_calc(db, items_data, *, store_id):
         return [(product_b, 10, [], 1)]
 
@@ -38,7 +38,7 @@ async def test_build_order_items_rejects_mismatched_store(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_order_items_accepts_matching_store(monkeypatch):
-    """商品门店与订单门店一致时正常通过。"""
+    """餐品门店与订单门店一致时正常通过。"""
     from app.services.order_service import OrderPriceCalculator
 
     store = 1

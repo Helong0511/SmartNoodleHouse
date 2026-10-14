@@ -19,7 +19,7 @@
       :closable="false"
       class="tip"
       title="口径说明"
-      description="发券/核销来自活动任务与券核销；归因实收与补贴来自 campaign_attributions（订单用券优先归因到对应活动）。ROI = (归因实收 − 补贴) / 补贴；补贴为 0 时 ROI 显示为 —。导出不含明文手机。"
+      description="发券/核销来自活动任务与券核销；归因实收与补贴来自营销归因台账（订单用券优先归因到对应活动）。ROI = (归因实收 − 补贴) / 补贴；补贴为 0 时 ROI 显示为 —。导出不含明文手机。"
     />
     <el-alert
       type="warning"
@@ -52,7 +52,9 @@
       </el-table-column>
       <el-table-column prop="code" label="编码" width="120" />
       <el-table-column prop="name" label="活动" min-width="140" />
-      <el-table-column prop="status" label="状态" width="100" />
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">{{ label(MARKETING_CAMPAIGN_STATUS, row.status) }}</template>
+      </el-table-column>
       <el-table-column prop="coupons_issued" label="发券" width="80" />
       <el-table-column prop="coupons_used" label="核销" width="80" />
       <el-table-column label="核销率" width="90">
@@ -78,6 +80,7 @@ import { useRouter } from 'vue-router'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
+import { MARKETING_CAMPAIGN_STATUS, label } from '@/utils/labels'
 
 const router = useRouter()
 const auth = useAuthStore()

@@ -98,7 +98,7 @@ class ProductCreate(BaseModel):
     box_price: Decimal = Field(default=Decimal("0.00"), ge=0, description="餐盒/打包费（单价）")
     main_image: str | None = Field(default=None, max_length=500)
     option_group_ids: list[int] = []
-    # None=下单时自动带入所属分类默认；[]=明确无限制；有值=商品自身配置
+    # None=下单时自动带入所属分类默认；[]=明确无限制；有值=餐品自身配置
     require_category_ids: list[int] | None = None
     require_product_ids: list[int] | None = None
 
@@ -263,14 +263,14 @@ class OptionOut(BaseModel):
 
 
 class MenuCopyRequest(BaseModel):
-    """跨门店复制分类/规格组/商品到目标店（新建副本）。"""
+    """跨门店复制分类/规格组/餐品到目标店（新建副本）。"""
     target_store_id: int = Field(..., gt=0)
     category_ids: list[int] = []
     option_group_ids: list[int] = []
     product_ids: list[int] = []
     # 目标店已有同 product_no：skip=跳过；rename=自动改编号后创建
     on_product_conflict: str = Field(default="skip", pattern="^(skip|rename)$")
-    # 规格管理页：将总部共享也克隆为目标店私有副本；商品复制时默认 false（共享组直接沿用）
+    # 规格管理页：将总部共享也克隆为目标店私有副本；餐品复制时默认 false（共享组直接沿用）
     clone_shared_option_groups: bool = False
 
 

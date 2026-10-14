@@ -314,7 +314,7 @@ def _group_metrics(customers, truth, base_top, reco_lists) -> dict:
 
 async def _run_once(db_session, rng_seed: int) -> dict:
     db = db_session
-    # 隔离同进程其他测试遗留的商品池/共现缓存
+    # 隔离同进程其他测试遗留的餐品池/共现缓存
     _RECO_POOL_CACHE.clear()
     _RECO_CF_CACHE.clear()
 

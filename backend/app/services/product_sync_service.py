@@ -68,14 +68,14 @@ class ProductSyncService:
                 else:
                     errors.append(f"{p.name}:{result.get('error') or '平台返回失败'}")
             except Exception as e:
-                logger.exception("同步商品失败 %s: %s", p.name, e)
+                logger.exception("同步餐品失败 %s: %s", p.name, e)
                 errors.append(f"{p.name}:{e}")
 
         return {"ok": len(errors) == 0, "synced": synced, "total": len(products), "errors": errors}
 
     @classmethod
     async def sync_single_product(cls, db: AsyncSession, store_id: int, platform: str, product_id: int) -> dict:
-        """推送单个商品到指定外卖平台。"""
+        """推送单个餐品到指定外卖平台。"""
         binding = (
             await db.execute(
                 select(PlatformStoreBinding).where(
@@ -90,7 +90,7 @@ class ProductSyncService:
 
         product = await db.get(Product, product_id)
         if not product:
-            return {"ok": False, "message": "商品不存在"}
+            return {"ok": False, "message": "餐品不存在"}
 
         cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
         creds = await get_credentials_for_store(db, platform, store_id)

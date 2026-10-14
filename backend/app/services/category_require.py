@@ -1,4 +1,4 @@
-"""购买依赖：商品级优先，分类级作默认（方案 A）"""
+"""购买依赖：餐品级优先，分类级作默认（方案 A）"""
 from __future__ import annotations
 
 import json
@@ -38,7 +38,7 @@ normalize_require_category_ids = normalize_id_list
 
 
 def product_has_custom_require(product: Any) -> bool:
-    """商品是否单独配置过依赖（任一字段非 NULL 即视为自定义）。"""
+    """餐品是否单独配置过依赖（任一字段非 NULL 即视为自定义）。"""
     return getattr(product, "require_category_ids", None) is not None or getattr(
         product, "require_product_ids", None
     ) is not None
@@ -50,7 +50,7 @@ def resolve_product_requires(
 ) -> tuple[list[int], list[int], bool]:
     """返回 (require_category_ids, require_product_ids, inherited)。
 
-    - 商品任一依赖字段非 NULL：用商品自身（可为空=明确无限制）
+    - 餐品任一依赖字段非 NULL：用餐品自身（可为空=明确无限制）
     - 否则继承所属分类的 require_category_ids
     """
     if product_has_custom_require(product):
@@ -79,7 +79,7 @@ def format_require_hint(
         name = category_names.get(cid) or f"分类#{cid}"
         labels.append(f"「{name}」类")
     for pid in require_product_ids:
-        name = product_names.get(pid) or f"商品#{pid}"
+        name = product_names.get(pid) or f"餐品#{pid}"
         labels.append(f"「{name}」")
     if not labels:
         return ""

@@ -8,7 +8,7 @@
     </div>
 
     <div class="card">
-      <div class="label">已选商品</div>
+      <div class="label">已选餐品</div>
       <div v-for="(item, idx) in cart" :key="idx" class="line">
         <img v-if="item.imageUrl" :src="item.imageUrl" class="mini" alt="" />
         <div v-else class="mini placeholder">{{ (item.name || '餐')[0] }}</div>
@@ -33,7 +33,7 @@
         <button type="button" :class="['pack-opt', { on: !needPack }]" @click="needPack = false">堂食</button>
         <button type="button" :class="['pack-opt', { on: needPack }]" @click="needPack = true">打包外带</button>
       </div>
-      <p v-if="needPack" class="tip">打包按商品餐盒费加收，以服务器结算为准</p>
+      <p v-if="needPack" class="tip">打包按餐品餐盒费加收，以服务器结算为准</p>
     </div>
 
     <el-input v-model="remark" placeholder="备注" style="margin:12px 0" />

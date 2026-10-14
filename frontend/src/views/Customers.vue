@@ -41,21 +41,12 @@
       </el-form-item>
       <el-form-item>
         <el-select v-model="lifecycleFilter" placeholder="生命周期" clearable style="width: 130px" @change="reload">
-          <el-option label="新客 NEW" value="NEW" />
-          <el-option label="活跃 ACTIVE" value="ACTIVE" />
-          <el-option label="风险 AT_RISK" value="AT_RISK" />
-          <el-option label="沉睡 DORMANT" value="DORMANT" />
-          <el-option label="流失 LOST" value="LOST" />
-          <el-option label="游客 GUEST" value="GUEST" />
+          <el-option v-for="(lbl, key) in CUSTOMER_LIFECYCLE" :key="key" :label="lbl" :value="key" />
         </el-select>
       </el-form-item>
       <el-form-item>
         <el-select v-model="rfmFilter" placeholder="RFM 分群" clearable style="width: 140px" @change="reload">
-          <el-option label="冠军 CHAMPIONS" value="CHAMPIONS" />
-          <el-option label="忠诚 LOYAL" value="LOYAL" />
-          <el-option label="潜力 NEW_PROMISING" value="NEW_PROMISING" />
-          <el-option label="风险 AT_RISK" value="AT_RISK" />
-          <el-option label="休眠 HIBERNATING" value="HIBERNATING" />
+          <el-option v-for="(lbl, key) in CUSTOMER_RFM" :key="key" :label="lbl" :value="key" />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -116,10 +107,10 @@
         </template>
       </el-table-column>
       <el-table-column label="生命周期" width="100">
-        <template #default="{ row }">{{ row.lifecycle_code || '—' }}</template>
+        <template #default="{ row }">{{ label(CUSTOMER_LIFECYCLE, row.lifecycle_code) }}</template>
       </el-table-column>
       <el-table-column label="RFM" width="110" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.rfm_segment || '—' }}</template>
+        <template #default="{ row }">{{ label(CUSTOMER_RFM, row.rfm_segment) }}</template>
       </el-table-column>
       <el-table-column label="会员等级" width="110">
         <template #default="{ row }">{{ row.member_level_name || '—' }}</template>
@@ -384,7 +375,7 @@
           </div>
           <div v-if="canEditCustomer" class="fav-add">
             <el-select v-model="favAddProductId" filterable remote clearable reserve-keyword
-              placeholder="搜索商品名/编号添加收藏" :remote-method="searchProductsForFav" :loading="favSearching"
+              placeholder="搜索餐品名/编号添加收藏" :remote-method="searchProductsForFav" :loading="favSearching"
               style="flex:1" @change="onFavProductPicked">
               <el-option v-for="p in favProductOptions" :key="p.id"
                 :label="`${p.name}（¥${p.price}）`" :value="p.id"
@@ -392,7 +383,7 @@
             </el-select>
           </div>
           <el-table v-if="detail.favorites?.length" :data="detail.favorites" size="small" border>
-            <el-table-column label="商品" min-width="140">
+            <el-table-column label="餐品" min-width="140">
               <template #default="{ row }">{{ row.name }}</template>
             </el-table-column>
             <el-table-column label="价格" width="80">
@@ -566,7 +557,14 @@ import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { mediaUrl } from '@/utils/media'
 import { useAuthStore } from '@/stores/auth'
-import { COUPON_STATUS, couponStatusTagType, label } from '@/utils/labels'
+import {
+  COUPON_STATUS,
+  CUSTOMER_LIFECYCLE,
+  CUSTOMER_RFM,
+  SOCIAL_IDENTITY,
+  couponStatusTagType,
+  label,
+} from '@/utils/labels'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -612,13 +610,6 @@ const socialIdentities = ref<any[]>([])
 const socialLoading = ref(false)
 const socialBusyId = ref<number | null>(null)
 
-const SOCIAL_IDENTITY_LABELS: Record<string, string> = {
-  SANITATION: '环卫工',
-  RIDER: '骑手',
-  ELDER: '长者',
-  TEACHER: '教师',
-  STUDENT: '学生',
-}
 const SOCIAL_STATUS_LABELS: Record<string, string> = {
   PENDING: '待审核',
   ACTIVE: '已生效',
@@ -636,17 +627,17 @@ const SOCIAL_VERIFY_LABELS: Record<string, string> = {
 
 function socialIdentityLabel(code: string) {
   const key = String(code || '').toUpperCase()
-  return SOCIAL_IDENTITY_LABELS[key] || code || '—'
+  return SOCIAL_IDENTITY[key] || '—'
 }
 
 function socialVerifyLabel(method: string) {
   const key = String(method || '').toUpperCase()
-  return SOCIAL_VERIFY_LABELS[key] || method || '—'
+  return SOCIAL_VERIFY_LABELS[key] || '—'
 }
 
 function socialStatusLabel(status: string) {
   const key = String(status || '').toUpperCase()
-  return SOCIAL_STATUS_LABELS[key] || status || '—'
+  return SOCIAL_STATUS_LABELS[key] || '—'
 }
 
 function socialStatusTag(status: string) {
@@ -871,7 +862,7 @@ function formatDate(iso?: string | null) {
 }
 
 function couponStatusLabel(s: string) {
-  return label(COUPON_STATUS, s, s || '—')
+  return label(COUPON_STATUS, s)
 }
 
 function couponStatusTag(s: string) {

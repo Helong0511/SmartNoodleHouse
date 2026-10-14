@@ -58,8 +58,12 @@ const PAY_LABEL = {
   PAID: '已支付',
   UNPAID: '待支付',
   PENDING: '待支付',
+  PARTIAL_PAID: '部分支付',
+  REFUNDING: '退款中',
   REFUNDED: '已退款',
-  PARTIAL_REFUND: '部分退款'
+  PARTIAL_REFUND: '部分退款',
+  CANCELLED: '已取消',
+  FAILED: '支付失败'
 }
 
 const PAGE_TITLE = {
@@ -71,6 +75,7 @@ const PAGE_TITLE = {
   READY: '餐品已备好',
   COMPLETED: '订单已完成',
   CANCELLED: '订单已取消',
+  REFUND_PENDING: '退款中',
   REFUNDED: '已退款'
 }
 
@@ -302,7 +307,7 @@ Page({
       const opts = (it.options || []).map((o) => o.name || o.code).filter(Boolean)
       const optText = opts.length ? `（${opts.join('、')}）` : ''
       return {
-        name: it.product_name || it.name || '商品',
+        name: it.product_name || it.name || '餐品',
         quantity: it.quantity || 1,
         subtotal: it.subtotal || it.line_total || '',
         optionText: optText
@@ -346,7 +351,7 @@ Page({
         voucherDiscountAmount: order.voucher_discount || '0.00',
         pointsEarned: this.pointsEarned || (order.payment_status === 'PAID' ? Math.floor(parseFloat(order.total_amount) || 0) : 0),
         memberLevelName: order.member_level_name || '',
-        payLabel: PAY_LABEL[order.payment_status] || order.payment_status_label || order.payment_status || '',
+        payLabel: PAY_LABEL[order.payment_status] || order.payment_status_label || '',
         pageTitle,
         headerIcon: headerIcon(order.status),
         statusSteps: this.buildSteps(order.status),

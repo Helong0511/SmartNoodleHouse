@@ -1,4 +1,4 @@
-"""会员折扣计价（商品小计打折，打包费不参与）。"""
+"""会员折扣计价（餐品小计打折，打包费不参与）。"""
 from decimal import Decimal
 
 from app.core.response import money

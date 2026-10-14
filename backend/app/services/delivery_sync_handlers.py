@@ -27,7 +27,7 @@ _PLATFORM_UNLIMITED = 9999
 
 
 async def _push_store_product_stock(db, store_id: int, product_id: int) -> int:
-    """把某门店某商品的当前本地库存镜像到该店所有有效平台绑定。返回失败平台数。"""
+    """把某门店某餐品的当前本地库存镜像到该店所有有效平台绑定。返回失败平台数。"""
     row = (
         await db.execute(
             select(StoreProductStock).where(
@@ -68,7 +68,7 @@ async def _push_store_product_stock(db, store_id: int, product_id: int) -> int:
             )
         ).scalars().all()
         if not maps:
-            continue  # 该平台尚未建档此商品，无需推库存
+            continue  # 该平台尚未建档此餐品，无需推库存
         items = [
             {
                 "app_food_code": m.app_food_code or m.platform_sku_id,

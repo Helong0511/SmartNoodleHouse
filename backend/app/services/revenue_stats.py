@@ -303,7 +303,7 @@ async def order_amount_stats_since(
     store_id: int | None = None,
     channels: list[str] | None = None,
 ) -> dict[str, Decimal]:
-    """有效已付订单：商品小计、实付、会员/券/代金券优惠。"""
+    """有效已付订单：餐品小计、实付、会员/券/代金券优惠。"""
     q = select(
         func.coalesce(func.sum(Order.subtotal), 0),
         func.coalesce(func.sum(Order.discount_amount), 0),

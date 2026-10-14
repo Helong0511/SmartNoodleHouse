@@ -38,7 +38,7 @@
 .sk-order-head .sk-line-lg { width: 55%; }
 .sk-order-head .sk-line-sm { width: 80rpx; }
 
-/* 商品详情 */
+/* 餐品详情 */
 .sk-product-detail { padding: 0; }
 .sk-hero { width: 100%; height: 420rpx; border-radius: 0; }
 .sk-pd-body { padding: 24rpx; }

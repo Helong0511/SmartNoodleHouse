@@ -30,7 +30,7 @@
 | 0006_print_jobs | 0006 | PrintJob 表 + 幂等约束 + 状态索引 |
 | 0007_prod_indexes | [0007_prod_indexes.py](file:///e:/SmartNoodleHouse/backend/alembic/versions/0007_prod_indexes.py) | 生产索引增量（先查 information_schema 再 ADD，防锁表/重复执行） |
 | 0008_coupon_template_store | 0008 | 优惠券模板门店字段 |
-| 0009_product_checks | 0009 | 商品 CHECK 约束 |
+| 0009_product_checks | 0009 | 餐品 CHECK 约束 |
 | 0010_coupon_ledger_idempotency | 0010 | 券流水幂等键 |
 | 0011_store_geo_option_scope | 0011 | 门店地理/规格作用域 |
 | 0012_guest_member_dining_session | 0012 | 游客/会员/用餐会话 |
@@ -204,7 +204,7 @@ id: Mapped[int] = mapped_column(
 ### 7.4 软删除
 
 - 核心业务对象（订单/支付/顾客）不物理删除，使用状态字段。
-- 商品/分类可停用，保留历史订单引用完整性。
+- 餐品/分类可停用，保留历史订单引用完整性。
 - 顾客合并走 CustomerMergeLog，不删除源顾客。
 
 ---

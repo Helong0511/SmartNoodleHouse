@@ -78,7 +78,7 @@ function bestSocialHint(codes) {
     }
   }
   if (!bestCode) return null
-  return { code: bestCode, rate: bestRate, label: SOCIAL_LABEL[bestCode] || bestCode, fromPreview: false }
+  return { code: bestCode, rate: bestRate, label: SOCIAL_LABEL[bestCode] || '公益优惠', fromPreview: false }
 }
 
 function socialSubsidyOf(hint, discountable) {
@@ -635,7 +635,7 @@ Page({
         this._socialHint = {
           code,
           rate: Number.isFinite(rate) ? rate : 1,
-          label: prev.rule_name || SOCIAL_LABEL[code] || code,
+          label: prev.rule_name || SOCIAL_LABEL[code] || '公益优惠',
           subsidy: Number.isFinite(subsidy) ? subsidy : undefined,
           fromPreview: true
         }
@@ -839,7 +839,7 @@ Page({
     // 结算必须走网络/version，禁止长期 preferCache 错价
     const catalog = await loadStoreCatalog(api, sid, { preferCache: false })
     const items = (catalog && catalog.items) || []
-    // 有商品即可做规格校验；complete=false 仅表示分页未拉全，不应阻断结算
+    // 有餐品即可做规格校验；complete=false 仅表示分页未拉全，不应阻断结算
     if (!catalog || (!catalog.complete && !items.length)) {
       throw new Error('菜单加载不完整，请稍后重试')
     }
@@ -1442,7 +1442,7 @@ Page({
       } catch (e) {
         wx.showModal({
           title: '无法校验规格',
-          content: (e && e.message) || '商品信息加载失败，请检查网络后重试',
+          content: (e && e.message) || '餐品信息加载失败，请检查网络后重试',
           showCancel: false
         })
         return
@@ -1450,7 +1450,7 @@ Page({
       if (!Array.isArray(productItems) || !productItems.length) {
         wx.showModal({
           title: '无法校验规格',
-          content: '未能加载商品规格，请返回菜单刷新后重试',
+          content: '未能加载餐品规格，请返回菜单刷新后重试',
           showCancel: false
         })
         return
@@ -1460,10 +1460,10 @@ Page({
         const first = optionIssues[0]
         const hint = optionIssues.length === 1
           ? `「${first.name}」缺少必选规格：${first.group}`
-          : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
+          : `有 ${optionIssues.length} 件餐品缺少必选规格，请返回餐品页重新选择`
         wx.showModal({
           title: '无法下单',
-          content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。`,
+          content: `${hint}。请从菜单进入餐品详情，选完面量/辣度等后再加入购物车。`,
           showCancel: false
         })
         return
@@ -1472,7 +1472,7 @@ Page({
       if (catIssues.length) {
         wx.showModal({
           title: '无法下单',
-          content: catIssues[0].message || '加料类商品须先点主餐',
+          content: catIssues[0].message || '加料类餐品须先点主餐',
           showCancel: false
         })
         return

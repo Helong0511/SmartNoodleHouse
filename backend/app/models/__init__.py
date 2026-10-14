@@ -397,7 +397,7 @@ class ProductCategory(Base, TimestampMixin):
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
-    # 门店前缀编号，如 SH01-Mian；与商品/规格编码规则一致
+    # 门店前缀编号，如 SH01-Mian；与餐品/规格编码规则一致
     category_no: Mapped[str] = mapped_column(String(64), default="")
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(String(255))
@@ -473,7 +473,7 @@ class Product(Base, TimestampMixin):
     stock: Mapped[int] = mapped_column(Integer, default=999)
     box_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     min_order_count: Mapped[int] = mapped_column(Integer, default=1)
-    # NULL=继承所属分类默认；[]/有值=商品自身配置（与 require_product_ids 合并 OR）
+    # NULL=继承所属分类默认；[]/有值=餐品自身配置（与 require_product_ids 合并 OR）
     require_category_ids: Mapped[list | None] = mapped_column(JSON, default=None)
     require_product_ids: Mapped[list | None] = mapped_column(JSON, default=None)
 
@@ -495,7 +495,7 @@ class OptionGroup(Base, TimestampMixin):
     # （MySQL/SQLite 唯一索引对 NULL 不生效，必须用 GENERATED 列把 NULL 归一为 0）
     __table_args__ = (UniqueConstraint("store_scope", "code", name="uk_og_store_code"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    # NULL=总部共享（全店可用）；非空=仅该门店可改/可绑本店商品
+    # NULL=总部共享（全店可用）；非空=仅该门店可改/可绑本店餐品
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id"), default=None, index=True)
     name: Mapped[str] = mapped_column(String(50))
     code: Mapped[str] = mapped_column(String(64))
@@ -535,7 +535,7 @@ class ProductOptionGroup(Base):
 
 
 class StoreProductStock(Base, TimestampMixin):
-    """分店库存与上架覆盖；无记录则回退品牌商品 stock/status"""
+    """分店库存与上架覆盖；无记录则回退品牌餐品 stock/status"""
     __tablename__ = "store_product_stocks"
     __table_args__ = (UniqueConstraint("store_id", "product_id"),)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -800,7 +800,7 @@ class SystemSetting(Base):
 
 
 class DeliveryProductMap(Base, TimestampMixin):
-    """平台菜品 ↔ 本系统商品"""
+    """平台菜品 ↔ 本系统餐品"""
 
     __tablename__ = "delivery_product_maps"
     __table_args__ = (UniqueConstraint("store_id", "platform", "platform_sku_id"),)
@@ -895,7 +895,7 @@ class StoreBusinessHours(Base, TimestampMixin):
 
 
 class PlatformCategoryMap(Base, TimestampMixin):
-    """本地商品分类 ↔ 外卖平台分类映射。store_id=NULL 表示总部默认映射。"""
+    """本地餐品分类 ↔ 外卖平台分类映射。store_id=NULL 表示总部默认映射。"""
 
     __tablename__ = "platform_category_maps"
     __table_args__ = (

@@ -1,4 +1,4 @@
-"""Task 7 验收：商品池过滤、三态分支、四路打分、分类权重翻转、负反馈降权、
+"""Task 7 验收：餐品池过滤、三态分支、四路打分、分类权重翻转、负反馈降权、
 去重窗口、settle 搭配排除、多样性、共现 CF、reason 非空。"""
 import pytest
 
@@ -70,7 +70,7 @@ def test_dedup_window_by_category_and_config():
     assert dedup_window_days("招牌饮品", {"dedup_window_days": 14}) == 14
 
 
-# ---------- IO：商品池 ----------
+# ---------- IO：餐品池 ----------
 
 
 @pytest.mark.asyncio

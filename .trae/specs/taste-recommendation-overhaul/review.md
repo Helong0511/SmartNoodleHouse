@@ -69,7 +69,7 @@
 - **Result**: pass
 - **Notes**: 抽样打开 `tests/测试_智能推荐_07混合推荐.py`（13 用例）+ `recommendation_service.py`：
   - `test_customer_state_three_tiers` 行 59-63：**三态判定函数断言存在** —— (0,True)→COLD、(3,True)→WARM、(5,True)→HOT、(99,False)→COLD。
-  - `test_pool_cross_store_and_off_sale_and_stock_filtered` 行 77-95：跨店商品、停售品、零库存被过滤，门店库存覆盖生效——**门店隔离断言存在**。
+  - `test_pool_cross_store_and_off_sale_and_stock_filtered` 行 77-95：跨店餐品、停售品、零库存被过滤，门店库存覆盖生效——**门店隔离断言存在**。
   - `test_empty_store_returns_empty` 行 99-105：空店返回 []、state=COLD——**空店不报错断言存在**。
   - `test_cold_customer_prefers_hot_and_novel`：冷启动热销+新品。
   - `test_hot_customer_content_matches_spicy_profile`：HOT 状态麻辣内容命中。

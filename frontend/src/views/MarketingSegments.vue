@@ -51,7 +51,9 @@
       </el-table-column>
       <el-table-column prop="code" label="编码" width="140" />
       <el-table-column prop="name" label="名称" min-width="140" />
-      <el-table-column prop="segment_type" label="类型" width="100" />
+      <el-table-column label="类型" width="100">
+        <template #default="{ row }">{{ label(SEGMENT_TYPE, row.segment_type) }}</template>
+      </el-table-column>
       <el-table-column prop="estimated_count" label="估人数" width="90" />
       <el-table-column prop="status" label="状态" width="80">
         <template #default="{ row }">{{ row.status === 1 ? '启用' : '停用' }}</template>
@@ -86,8 +88,8 @@
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="如 沉睡30天" /></el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.segment_type" style="width:100%">
-            <el-option label="动态 DYNAMIC（按规则实时算）" value="DYNAMIC" />
-            <el-option label="静态 STATIC（依赖物化快照）" value="STATIC" />
+            <el-option label="动态（按规则实时算）" value="DYNAMIC" />
+            <el-option label="静态（依赖物化快照）" value="STATIC" />
           </el-select>
         </el-form-item>
         <el-form-item label="规则 JSON">
@@ -122,7 +124,9 @@
         <el-table-column prop="customer_no" label="编号" width="120" />
         <el-table-column prop="display_name" label="昵称" />
         <el-table-column prop="phone_masked" label="手机" width="120" />
-        <el-table-column prop="member_status" label="状态" width="90" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">{{ label(MEMBER_STATUS, row.member_status) }}</template>
+        </el-table-column>
       </el-table>
     </el-dialog>
   </div>
@@ -135,6 +139,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
+import { MEMBER_STATUS, SEGMENT_TYPE, label } from '@/utils/labels'
 
 const router = useRouter()
 const auth = useAuthStore()

@@ -5,18 +5,18 @@
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else type="info">本店库存覆盖</el-tag>
-      <el-input v-model="keyword" clearable placeholder="商品编号 / 名称" style="width:220px" @keyup.enter="reload"
+      <el-input v-model="keyword" clearable placeholder="餐品编号 / 名称" style="width:220px" @keyup.enter="reload"
         @clear="reload" />
       <el-button type="primary" @click="reload">查询</el-button>
-      <span class="tip">有覆盖则下单扣本店覆盖库存；删除覆盖后回退商品默认库存</span>
+      <span class="tip">有覆盖则下单扣本店覆盖库存；删除覆盖后回退餐品默认库存</span>
     </div>
 
     <el-alert v-if="truncated" type="warning" :closable="false" show-icon style="margin-top:10px"
-      title="商品数量超过 4000 条，当前仅加载前 4000 条，请用编号/名称搜索缩小范围。" />
+      title="餐品数量超过 4000 条，当前仅加载前 4000 条，请用编号/名称搜索缩小范围。" />
 
     <el-table :data="items" border style="margin-top:12px">
       <el-table-column prop="product_no" label="编号" width="280" />
-      <el-table-column prop="name" label="商品" min-width="160" />
+      <el-table-column prop="name" label="餐品" min-width="160" />
       <el-table-column prop="brand_stock" label="默认库存" width="100" />
       <el-table-column label="本店库存" width="140">
         <template #default="{ row }">

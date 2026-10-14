@@ -853,7 +853,7 @@ class CouponService:
         order_store_id: int | None = None,
         member_rate: Decimal | None = None,
     ) -> tuple[Decimal, int | None]:
-        """校验并计算优惠券减免。eligible_subtotal=可用商品小计（不含特价；PERCENT 取优时为未打会员折基数）。
+        """校验并计算优惠券减免。eligible_subtotal=可用餐品小计（不含特价；PERCENT 取优时为未打会员折基数）。
 
         PERCENT 与会员折互斥：仅当折扣券力度严格优于会员折时可用；同等或更弱禁用（不可折上折）。
         """
@@ -915,7 +915,7 @@ class CouponService:
         eligible_payable: Decimal | None = None,
         order_store_id: int | None = None,
     ) -> tuple[Decimal, int | None]:
-        """校验并计算代金券抵扣。payable_amount=订单应付；eligible_payable=可参与代金券的基数（不含特价商品）。"""
+        """校验并计算代金券抵扣。payable_amount=订单应付；eligible_payable=可参与代金券的基数（不含特价餐品）。"""
         if not customer_voucher_id or not customer_id:
             return Decimal("0.00"), None
         row = (

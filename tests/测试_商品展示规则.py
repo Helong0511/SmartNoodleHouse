@@ -1,4 +1,4 @@
-"""商品限时/生日展示规则（含公历/农历）。"""
+"""餐品限时/生日展示规则（含公历/农历）。"""
 from __future__ import annotations
 
 from datetime import date

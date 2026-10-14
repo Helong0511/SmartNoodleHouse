@@ -1,4 +1,4 @@
-"""库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌商品库存"""
+"""库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌餐品库存"""
 from __future__ import annotations
 
 from sqlalchemy import select, text, update
@@ -23,7 +23,7 @@ async def _emit_stock_mirror(
 ) -> None:
     """库存跨 0 翻转时发出外卖镜像信号（同事务）。
 
-    复用 outbox：aggregate 用门店库存行 id（每店每品唯一）。因同一商品会反复
+    复用 outbox：aggregate 用门店库存行 id（每店每品唯一）。因同一餐品会反复
     售罄/补货，而 outbox 键永久唯一，信号行为 DONE 时将其复活为 PENDING；
     handler 执行时重读最新库存再推送，乱序/重复均收敛到最新值，天然幂等。
     """
@@ -56,7 +56,7 @@ async def _emit_stock_mirror(
 
 
 async def _lock_product_store(db: AsyncSession, product_id: int) -> int | None:
-    """锁定品牌商品行并返回其 store_id。锁定读看最新已提交数据，避免快照把新库存行看成不存在。"""
+    """锁定品牌餐品行并返回其 store_id。锁定读看最新已提交数据，避免快照把新库存行看成不存在。"""
     row = (
         await db.execute(
             select(Product.store_id).where(Product.id == int(product_id)).with_for_update()
@@ -87,19 +87,19 @@ async def deduct_stock(
     *,
     store_id: int | None = None,
 ) -> None:
-    # 数量用条件 UPDATE 一次完成。先锁商品行再锁门店库存行，锁定读看到最新已提交行，
-    # 避免可重复读快照把刚插入的门店库存看成不存在、进而扣到别的门店商品上。
+    # 数量用条件 UPDATE 一次完成。先锁餐品行再锁门店库存行，锁定读看到最新已提交行，
+    # 避免可重复读快照把刚插入的门店库存看成不存在、进而扣到别的门店餐品上。
     if qty <= 0:
         raise AppException(40030, "扣减数量非法")
 
     if store_id:
         owner = await _lock_product_store(db, product_id)
         if owner is None or int(owner) != int(store_id):
-            raise AppException(40031, f"商品不属于当前门店或不可售: {product_id}")
+            raise AppException(40031, f"餐品不属于当前门店或不可售: {product_id}")
         row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
             if int(row.status) != 1:
-                raise AppException(40031, f"本店未上架该商品: {product_id}")
+                raise AppException(40031, f"本店未上架该餐品: {product_id}")
             result = await db.execute(
                 text(
                     """
@@ -116,7 +116,7 @@ async def deduct_stock(
                 {"sid": store_id, "pid": product_id, "qty": qty, "unlimited": UNLIMITED_STOCK},
             )
             if result.rowcount != 1:
-                raise AppException(40031, f"本店库存不足或商品不可售: {product_id}")
+                raise AppException(40031, f"本店库存不足或餐品不可售: {product_id}")
             # 扣减成功时扣前必 >0（条件 UPDATE 保证）；若扣后归 0 即 >0→0 售罄翻转
             after = (
                 await db.execute(
@@ -131,7 +131,7 @@ async def deduct_stock(
                 await _emit_stock_mirror(
                     db, store_id=store_id, product_id=product_id, mirror_id=row.id, zero=True
                 )
-            # 销量仍记在品牌商品上
+            # 销量仍记在品牌餐品上
             await db.execute(
                 text(
                     "UPDATE products SET sales_count = sales_count + :qty "
@@ -164,7 +164,7 @@ async def deduct_stock(
         },
     )
     if result.rowcount != 1:
-        raise AppException(40031, f"库存不足或商品不可售: {product_id}")
+        raise AppException(40031, f"库存不足或餐品不可售: {product_id}")
 
 
 async def restore_stock(

@@ -7,7 +7,7 @@
     <p v-if="order?.table">桌号: {{ order.table.table_name || order.table.table_no }}</p>
     <p>用餐: {{ order?.dining_type === 'TAKEAWAY' ? '打包外带' : '堂食' }}</p>
     <div v-if="order" class="amount-card">
-      <div class="line"><span>商品小计</span><span>¥{{ order.subtotal }}</span></div>
+      <div class="line"><span>餐品小计</span><span>¥{{ order.subtotal }}</span></div>
       <div v-if="Number(order.discount_amount) > 0" class="line discount">
         <span>会员优惠{{ order.member_level_name ? `（${order.member_level_name}）` : '' }}</span>
         <span>-¥{{ order.discount_amount }}</span>
@@ -21,7 +21,7 @@
       </div>
       <div class="line total"><span>应付</span><span>¥{{ order.total_amount }}</span></div>
     </div>
-    <p>支付状态: {{ order?.payment_status_label || order?.payment_status }}</p>
+    <p>支付状态: {{ paymentStatusText }}</p>
     <el-button type="primary" style="margin-top:16px;width:100%" @click="$router.push('/order/history')">查看订单</el-button>
   </div>
 </template>
@@ -29,12 +29,16 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api'
+import { PAYMENT_STATUS, label } from '@/utils/labels'
 const route = useRoute()
 const order = ref<any>(null)
 const paid = computed(() => {
   const ps = order.value?.payment_status
   return ps === 'PAID' || ps === 'PARTIAL_REFUND'
 })
+const paymentStatusText = computed(() =>
+  label(PAYMENT_STATUS, order.value?.payment_status, order.value?.payment_status_label || '—'),
+)
 onMounted(async () => {
   const id = route.query.order_id
   if (!id) return

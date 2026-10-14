@@ -1,4 +1,4 @@
-"""商品主图更新时同步 product_images"""
+"""餐品主图更新时同步 product_images"""
 from decimal import Decimal
 
 import pytest

@@ -17,7 +17,7 @@
 1. **无门店营业时间模型 / 无自动开店关店**（全仓 grep `business_hours|open_time|shipping_time|开店|关店` 零命中）。
 2. **平台库存不随本地售罄联动**：本地面只剩 5 碗卖完后，美团/饿了么仍显示有货，两平台并发来单会超卖（仅靠落单时扣减兜底，且失败只抛错重试，**不会主动拒单**，平台侧挂单）。
 3. 平台用的是**旧版逐个接口**，未用官方推荐的批量 `food/batchinitdata`、批量上下架 `food/sku/sellStatus`、**原子增减** `food/sku/inc_stock`、`food/sku/desc_stock`。
-4. **商品改价/上下架/库存变更无自动同步钩子**，只能手动点按钮。
+4. **餐品改价/上下架/库存变更无自动同步钩子**，只能手动点按钮。
 5. **无平台分类映射表**（目前直接传本地分类名）。
 6. 外卖是 [Delivery.vue](file:///e:/SmartNoodleHouse/frontend/src/views/Delivery.vue) 内的 Tab，不是独立【外卖】菜单；缺少"营业时间、平台上下架、库存对账、同步监控"运营界面。
 
@@ -27,19 +27,19 @@
   - 菜品：`foodCat/update`（分类）、`food/batchinitdata`（批量，建议 ≤200/次，含 `is_sold_out/stock/skus/available_times`）、`food/sku/sellStatus`（批量上下架，sell_status 1下架/0上架）。
   - 库存：`food/sku/price`、`food/sku/stock`（覆盖）、`food/sku/inc_stock`、`food/sku/desc_stock`（**原子增减**）。
   - 业务规则：库存归 0 = 售罄（补货后自动恢复展示）；"下架"后补货不自动恢复，需重新上架。
-  - 来源：developer.waimai.meituan.com/home/guide/4（门店/商品/价格库存方案）、/docDetail/59（batchinitdata）、/docDetail/70（sellStatus）、developer.meituan.com poi/save。
-- 饿了么（沿用项目现用餐饮 JSON-RPC `eleme.*`）：商品 `eleme.product.item.*`（onShelf/offShelf/updateShelfStock）、门店营业 `eleme.shop.*`；库存/价格更新走原子接口。开放平台已演进为淘宝闪购 `open-retail.ele.me`（餐饮与零售/连锁模型不同），本项目维持餐饮 `eleme.*` RPC 体系，不迁移网关。
+  - 来源：developer.waimai.meituan.com/home/guide/4（门店/餐品/价格库存方案）、/docDetail/59（batchinitdata）、/docDetail/70（sellStatus）、developer.meituan.com poi/save。
+- 饿了么（沿用项目现用餐饮 JSON-RPC `eleme.*`）：餐品 `eleme.product.item.*`（onShelf/offShelf/updateShelfStock）、门店营业 `eleme.shop.*`；库存/价格更新走原子接口。开放平台已演进为淘宝闪购 `open-retail.ele.me`（餐饮与零售/连锁模型不同），本项目维持餐饮 `eleme.*` RPC 体系，不迁移网关。
 - **不贸然切换**到美团 `api-open-cater.meituan.com` 新版网关（鉴权改为 appAuthToken+businessId+developerId+sign），避免在无真实凭证时引入鉴权断层；新接口在现有体系内补齐，mock 兜底，标注待真机联调。
 
 ## 二、核心设计：跨平台防超卖闭环
 
 本地 `stock_service` 是唯一真实源，平台库存只做镜像。三道闸：
 
-1. **接单强闸（最后防线）**：平台推单 → 落单时原子扣本地库存 → 成功才确认接单；扣减失败（`AppException 40031`）则**不建本地单**，立即调平台"商家取消/拒单（原因：库存不足）"，记录告警与同步监控，并触发该商品平台库存归 0。替换当前"抛异常→Inbox 反复重试"的行为。
+1. **接单强闸（最后防线）**：平台推单 → 落单时原子扣本地库存 → 成功才确认接单；扣减失败（`AppException 40031`）则**不建本地单**，立即调平台"商家取消/拒单（原因：库存不足）"，记录告警与同步监控，并触发该餐品平台库存归 0。替换当前"抛异常→Inbox 反复重试"的行为。
 2. **售罄即时镜像（主防线）**：扣减/回库事务中检测库存**跨 0 翻转**（>0→0 售罄、0→>0 恢复），经 Outbox 给该门店已绑定的**每个平台**各发一条镜像事件。事件 handler 执行时**重新读取最新本地库存再推送**（美团 `food/sku/stock=0`，饿了么 updateShelfStock），因此即使 Outbox 乱序/去重也最终收敛到正确值（售罄只置库存 0，不做"下架"，补货可自动恢复）。
-3. **定时对账（兜底）**：每 5 分钟按门店+平台把本地在售商品库存/价格/上下架状态对账覆盖一次，修复任何漏推。
+3. **定时对账（兜底）**：每 5 分钟按门店+平台把本地在售餐品库存/价格/上下架状态对账覆盖一次，修复任何漏推。
 
-> Outbox 幂等合并是期望行为：同一商品已有未消费的"售罄"事件时，新的售罄事件被合并；"售罄/恢复"是不同 `event_kind` 不会互相吞；handler 以实时库存为准，乱序无害。
+> Outbox 幂等合并是期望行为：同一餐品已有未消费的"售罄"事件时，新的售罄事件被合并；"售罄/恢复"是不同 `event_kind` 不会互相吞；handler 以实时库存为准，乱序无害。
 
 ## 三、文件与模块改动
 
@@ -60,8 +60,8 @@
   - `(delivery_menu, *, stock_zero|stock_resume|stock_reconcile)`
   - `(delivery_menu, *, product_changed|price_changed|shelf_changed)`
   - `(delivery_store, *, open|close|hours_changed)`（遍历该门店所有平台 binding 推送）。
-- [stock_service.py](file:///e:/SmartNoodleHouse/backend/app/services/stock_service.py)：扣减/回库后检测跨 0 翻转，事务内 `enqueue_outbox`（仅在该商品存在平台映射时；门店维度）。
-- 商品/分店库存后台写入处（products、store-stocks 对应 service）：改价/上下架/库存保存成功后 enqueue 平台同步事件。
+- [stock_service.py](file:///e:/SmartNoodleHouse/backend/app/services/stock_service.py)：扣减/回库后检测跨 0 翻转，事务内 `enqueue_outbox`（仅在该餐品存在平台映射时；门店维度）。
+- 餐品/分店库存后台写入处（products、store-stocks 对应 service）：改价/上下架/库存保存成功后 enqueue 平台同步事件。
 - [delivery_service.py](file:///e:/SmartNoodleHouse/backend/app/services/delivery_service.py) `_create_from_platform`：包裹扣库存 `except AppException(40031)` → 主动 `provider.cancel_order(库存不足)` + 写告警 + 触发售罄镜像，不创建本地单。
 - [tasks/scheduler.py](file:///e:/SmartNoodleHouse/backend/app/tasks/scheduler.py)：
   - 每分钟 `store_hours_tick`：对开启 `auto_sync_open` 的门店按时段自动开/关店（Leader only）。
@@ -78,7 +78,7 @@
 - 新增视图目录 `frontend/src/views/delivery/`：
   - `DeliveryOrders.vue`：迁移现有订单+退款 Tab。
   - `DeliveryStores.vue`：多门店绑定卡片（平台、门店、授权状态、Token 过期、营业状态徽标）+ 手动开/关店 + 进入营业时间配置（周几多时段、跨天、自动开关店开关，默认关）。
-  - `DeliveryMenu.vue`：按门店+平台筛选；商品列表（本地名/平台 SKU/价格/本地库存/平台库存/上下架）；批量同步菜单、单个/批量上架下架、改价、库存对账、分类映射维护。
+  - `DeliveryMenu.vue`：按门店+平台筛选；餐品列表（本地名/平台 SKU/价格/本地库存/平台库存/上下架）；批量同步菜单、单个/批量上架下架、改价、库存对账、分类映射维护。
   - `DeliverySync.vue`：最近同步任务状态（成功/失败/重试次数）、拒单与告警、回调日志入口。
   - 现有 [Delivery.vue](file:///e:/SmartNoodleHouse/frontend/src/views/Delivery.vue) 逻辑拆分迁移；bindings/maps/logs 能力迁入对应新页。
 
@@ -88,7 +88,7 @@
 2. **平台能力层**：美团/饿了么批量、上下架、原子库存、开关店/营业时间接口（mock 兜底）。
 3. **营业时间服务 + 调度**：`store_hours_service` + `store_hours_tick`（默认仅对 `auto_sync_open=true` 生效）。
 4. **防超卖闭环**：stock 跨 0 翻转 enqueue；Outbox handler 推送平台；落单扣减失败主动拒单+告警。
-5. **商品变更钩子 + 对账**：改价/上下架/库存事件；批量菜单/分类映射；`reconcile_store` 定时任务。
+5. **餐品变更钩子 + 对账**：改价/上下架/库存事件；批量菜单/分类映射；`reconcile_store` 定时任务。
 6. **后端 API**：营业时间、开关店、批量同步、上下架、分类映射、监控路由。
 7. **前端重构**：独立【外卖】菜单 + 4 个视图迁移与新建。
 8. **验证**：单测 + 构建（见下）。
@@ -110,5 +110,5 @@
 - **真实平台字段/鉴权差异**：沿用现网关系列，接口按官方文档实现 + mock；真机联调若字段不符，仅调整 provider 映射，不动业务闭环。
 - **误关店影响营业**：自动同步默认关闭 + 手动二次确认 + 仅 Leader 执行。
 - **事件乱序/重复**：handler 读实时库存对账；Outbox 幂等 + 过期回收 + 退避已具备。
-- **拒单合规**：仅在本地确实无库存时拒单，原因固定"商品售罄"，并留告警供人工核对。
+- **拒单合规**：仅在本地确实无库存时拒单，原因固定"餐品售罄"，并留告警供人工核对。
 - **工作量大**：按八步顺序提交，每步可独立验证；前端为纯迁移+新增，不影响既有页面路由可用旧路径重定向过渡。

@@ -283,7 +283,7 @@ Page({
       const item = cartUtil.normalizeItem({ ...raw })
       return {
         ...item,
-        // wx:key 需要稳定唯一值：商品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
+        // wx:key 需要稳定唯一值：餐品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
         cartKey: `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
         imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
       }
@@ -347,15 +347,15 @@ Page({
   clearInvalidCart() {
     const cart = auth.getCart().filter((i) => !i.invalid)
     auth.saveCart(cart)
-    wx.showToast({ title: '已清除失效商品', icon: 'success' })
+    wx.showToast({ title: '已清除失效餐品', icon: 'success' })
     this.refreshCartBar({ openSheet: !!(cart.length) })
   },
 
   goCheckout() {
     if (this.data.invalidCount > 0) {
       wx.showModal({
-        title: '有商品不可下单',
-        content: `${this.data.invalidCount} 件商品已失效或库存不足，请先清除后再结算`,
+        title: '有餐品不可下单',
+        content: `${this.data.invalidCount} 件餐品已失效或库存不足，请先清除后再结算`,
         confirmText: '清除失效',
         cancelText: '返回',
         success: (res) => {
@@ -643,7 +643,7 @@ Page({
   onRecommendAdd(e) {
     const item = (e.detail || {})
     const found = (this._lastProductItems || []).find((p) => String(p.id) === String(item.id))
-    // 复用 quickAdd 主链路（规格校验/口味偏好）；查不到商品时安全起见走详情页
+    // 复用 quickAdd 主链路（规格校验/口味偏好）；查不到餐品时安全起见走详情页
     this.quickAdd({
       currentTarget: {
         dataset: {

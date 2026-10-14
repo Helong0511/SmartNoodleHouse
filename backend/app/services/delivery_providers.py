@@ -81,7 +81,7 @@ class DeliveryProvider(ABC):
         return True
 
     async def sync_product(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """同步单个商品到平台。返回 {"ok": bool, "platform_id": str|None, "error": str|None}。
+        """同步单个餐品到平台。返回 {"ok": bool, "platform_id": str|None, "error": str|None}。
         platform_id 用于落库到 DeliveryProductMap.platform_sku_id，便于后续 updateItem/price/stock。
         """
         logger.info("[%s mock] sync_product %s", self.platform, payload.get("name"))
@@ -202,7 +202,7 @@ class MeituanProvider(DeliveryProvider):
             items.append(
                 {
                     "platform_sku_id": str(it.get("sku_id") or it.get("app_food_code") or it.get("food_id") or ""),
-                    "name": it.get("name") or it.get("food_name") or "外卖商品",
+                    "name": it.get("name") or it.get("food_name") or "外卖餐品",
                     "quantity": int(it.get("quantity") or it.get("num") or 1),
                     "price": Decimal(str(it.get("price") or it.get("food_price") or "0")),
                     "options": it.get("options") or [],
@@ -522,7 +522,7 @@ class ElemeProvider(DeliveryProvider):
                 items.append(
                     {
                         "platform_sku_id": str(it.get("vfoodId") or it.get("skuId") or it.get("food_id") or ""),
-                        "name": it.get("name") or "外卖商品",
+                        "name": it.get("name") or "外卖餐品",
                         "quantity": int(it.get("quantity") or 1),
                         "price": Decimal(str(it.get("price") or "0")),
                         "options": it.get("newSpecs") or it.get("options") or [],
@@ -633,7 +633,7 @@ class ElemeProvider(DeliveryProvider):
         settings = get_settings()
         if not settings.eleme_app_id:
             if settings.is_production or not settings.allow_delivery_mock:
-                raise ValueError("饿了么未配置，禁止 Mock 同步商品")
+                raise ValueError("饿了么未配置，禁止 Mock 同步餐品")
             return {"ok": True, "platform_id": None}
         data = await self._rpc(
             "eleme.product.item.createItem",

@@ -3,7 +3,7 @@
 规则：
 - 总部共享（规格组 store_id=NULL）前缀 0000
 - 门店数据前缀 = stores.store_no（如 SH01）
-- 分类/商品/规格组：{前缀}-{逻辑}，如 SH01-NiuRouMian
+- 分类/餐品/规格组：{前缀}-{逻辑}，如 SH01-NiuRouMian
 - 规格选项：{前缀}-{组逻辑}-{选项逻辑}，如 SH01-Liang-XiaoWan
 - 逻辑段由汉字转拼音（每音节首字母大写）或用户输入的英文数字组成
 """
@@ -111,7 +111,7 @@ def format_option_code(store_prefix: str, group_code: str, logical_or_raw: str) 
 
 
 def format_entity_code(store_prefix: str, logical_or_raw: str, *, max_len: int) -> str:
-    """分类编号 / 商品编号（与规格组同形态）。"""
+    """分类编号 / 餐品编号（与规格组同形态）。"""
     prefix = normalize_store_prefix(store_prefix)
     key = group_logical_key(logical_or_raw)
     if not key:
@@ -127,13 +127,13 @@ def format_category_no(store_prefix: str, logical_or_raw: str) -> str:
 
 
 def product_logical_key(code: str, category_logical: str | None = None) -> str:
-    """从商品编号取出商品逻辑段（去掉门店前缀与分类段）。"""
+    """从餐品编号取出餐品逻辑段（去掉门店前缀与分类段）。"""
     _, rest = split_store_prefix(code)
     rest = (rest or "").strip()
     if not rest:
         return ""
     if not category_logical:
-        # 无分类时：若已是 分类-商品 两段，整段保留供 format 再拼
+        # 无分类时：若已是 分类-餐品 两段，整段保留供 format 再拼
         return rest
     cat = group_logical_key(category_logical)
     if not cat:
@@ -142,11 +142,11 @@ def product_logical_key(code: str, category_logical: str | None = None) -> str:
     prefix_cat = cat.upper() + "-"
     if upper.startswith(prefix_cat):
         return rest[len(cat) + 1 :]
-    # 用户只填了商品逻辑，或旧版两段编号
+    # 用户只填了餐品逻辑，或旧版两段编号
     if "-" not in rest:
         return rest
-    # 旧编号仅「前缀-商品」且商品段不含分类：整段当商品逻辑会变成 前缀-分类-旧整段，不理想
-    # 若 rest 第一段 == cat，去掉；否则把 rest 最后一段当商品名
+    # 旧编号仅「前缀-餐品」且餐品段不含分类：整段当餐品逻辑会变成 前缀-分类-旧整段，不理想
+    # 若 rest 第一段 == cat，去掉；否则把 rest 最后一段当餐品名
     parts = rest.split("-")
     if parts[0].upper() == cat.upper() and len(parts) >= 2:
         return "-".join(parts[1:])
@@ -158,7 +158,7 @@ def format_product_no(
     product_logical_or_raw: str,
     category_logical: str | None = None,
 ) -> str:
-    """商品编号：{前缀}-{分类逻辑}-{商品逻辑}，如 0000-Mian-NiuRouMian / SH01-Mian-NiuRouMian。"""
+    """餐品编号：{前缀}-{分类逻辑}-{餐品逻辑}，如 0000-Mian-NiuRouMian / SH01-Mian-NiuRouMian。"""
     prefix = normalize_store_prefix(store_prefix)
     if category_logical:
         cat_raw = group_logical_key(category_logical) or (category_logical or "").strip()
@@ -175,15 +175,15 @@ def format_product_no(
         if prod and not re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", prod):
             prod = name_to_logical_code(prod)
         if not prod:
-            raise ValueError("商品编码逻辑段不能为空")
+            raise ValueError("餐品编码逻辑段不能为空")
         code = f"{prefix}-{cat}-{prod}"
     else:
         key = group_logical_key(product_logical_or_raw)
         if not key:
-            raise ValueError("商品编码逻辑段不能为空")
+            raise ValueError("餐品编码逻辑段不能为空")
         code = f"{prefix}-{key}"
     if len(code) > MAX_PRODUCT_NO:
-        raise ValueError(f"商品编号过长（最多 {MAX_PRODUCT_NO} 字符）: {code}")
+        raise ValueError(f"餐品编号过长（最多 {MAX_PRODUCT_NO} 字符）: {code}")
     return code
 
 

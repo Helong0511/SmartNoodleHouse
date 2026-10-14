@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # 埋点事件白名单（学习权重见 taste_learning_service.EVENT_WEIGHTS）
 EVENT_TYPES: frozenset[str] = frozenset({
     "EXPOSE",        # 推荐位曝光
-    "CLICK",         # 点击商品/推荐卡片
+    "CLICK",         # 点击餐品/推荐卡片
     "CART_ADD",      # 加入购物车
     "CART_REMOVE",   # 移出购物车（负反馈）
     "ORDER_PAID",    # 支付成功（服务端支付链路也会补记）

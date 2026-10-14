@@ -62,7 +62,7 @@ function run(name, cart) {
     assert.strictEqual(r.list[0].invalid, false, `${name} 分页未完不判下架`)
   }
 
-  // complete=true 且商品不存在才判失效
+  // complete=true 且餐品不存在才判失效
   {
     const r = cart.reconcileWithProducts(
       [{ product_id: 999, quantity: 1, unit_price: 10, subtotal: '10.00' }],
@@ -85,7 +85,7 @@ function run(name, cart) {
     assert.strictEqual(r.list[0].invalidReason, '仅剩 2 份', `${name} 库存文案`)
   }
 
-  // mergeCartItem：同商品同规格合并数量
+  // mergeCartItem：同餐品同规格合并数量
   {
     const list = cart.mergeCartItem(
       [{ product_id: 1, option_ids: [2, 3], quantity: 1, unit_price: 10 }],

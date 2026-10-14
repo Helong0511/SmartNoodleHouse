@@ -1,4 +1,4 @@
-"""跨门店复制分类 / 规格组 / 商品（新建副本，不改源数据）。"""
+"""跨门店复制分类 / 规格组 / 餐品（新建副本，不改源数据）。"""
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -50,7 +50,7 @@ class MenuCopyService:
         group_ids = [int(x) for x in (option_group_ids or []) if x]
         prod_ids = [int(x) for x in (product_ids or []) if x]
         if not cat_ids and not group_ids and not prod_ids:
-            raise AppException(40001, "请至少选择分类、规格组或商品")
+            raise AppException(40001, "请至少选择分类、规格组或餐品")
 
         summary: dict[str, Any] = {
             "target_store_id": int(target_store_id),
@@ -64,7 +64,7 @@ class MenuCopyService:
         }
 
         products = await cls._load_products(db, prod_ids)
-        # 商品自动带上所属分类 + 私有规格组
+        # 餐品自动带上所属分类 + 私有规格组
         for p in products:
             cat_ids.append(int(p.category_id))
             for rid in p.require_category_ids or []:
@@ -96,7 +96,7 @@ class MenuCopyService:
             summary,
         )
 
-        # 商品 require_product_ids 二次映射
+        # 餐品 require_product_ids 二次映射
         for old_id, new_id in prod_map.items():
             src = next((p for p in products if int(p.id) == int(old_id)), None)
             if not src:
@@ -132,10 +132,10 @@ class MenuCopyService:
         found = {int(p.id) for p in rows}
         missing = [i for i in product_ids if i not in found]
         if missing:
-            raise AppException(40003, f"商品不存在: {missing}")
+            raise AppException(40003, f"餐品不存在: {missing}")
         stores = {int(p.store_id) for p in rows}
         if len(stores) > 1:
-            raise AppException(40001, "请选择同一门店的商品再复制")
+            raise AppException(40001, "请选择同一门店的餐品再复制")
         return rows
 
     @classmethod
@@ -421,7 +421,7 @@ class MenuCopyService:
         for src in products:
             new_cat = cat_map.get(int(src.category_id))
             if not new_cat:
-                raise AppException(40003, f"商品「{src.name}」所属分类未能映射到目标店")
+                raise AppException(40003, f"餐品「{src.name}」所属分类未能映射到目标店")
             dst_cat = await db.get(ProductCategory, int(new_cat))
             cat_logical = (
                 group_logical_key(getattr(dst_cat, "category_no", None) or "")
@@ -434,11 +434,11 @@ class MenuCopyService:
                 if on_conflict == "skip":
                     summary["products"]["skipped"] += 1
                     summary["warnings"].append(
-                        f"目标店已有编号「{product_no}」，已跳过商品「{src.name}」"
+                        f"目标店已有编号「{product_no}」，已跳过餐品「{src.name}」"
                     )
                     continue
                 logical = group_logical_key(product_no)
-                # 取商品段再加后缀
+                # 取餐品段再加后缀
                 prod_stem = logical.split("-")[-1] if logical else "Item"
                 n = 1
                 while True:
@@ -451,7 +451,7 @@ class MenuCopyService:
                         break
                     n += 1
                     if n > 99:
-                        raise AppException(40003, f"无法为商品编号「{src.product_no}」生成副本名")
+                        raise AppException(40003, f"无法为餐品编号「{src.product_no}」生成副本名")
 
             require_cats = None
             if src.require_category_ids is not None:

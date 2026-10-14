@@ -48,7 +48,7 @@ async def _make_product(db, store: Store, no: str, price: str = "18.00") -> Prod
     db.add(cat)
     await db.flush()
     p = Product(
-        id=next(_seq), store_id=store.id, category_id=cat.id, product_no=no, name=f"商品{no}",
+        id=next(_seq), store_id=store.id, category_id=cat.id, product_no=no, name=f"餐品{no}",
         price=Decimal(price), status="ON_SALE", stock=UNLIMITED_STOCK,
     )
     db.add(p)
@@ -130,7 +130,7 @@ async def test_未扣到0不发镜像(db_session):
     assert await _outbox_row(db_session, stock_row.id) is None
 
 
-# ── 信号行复活：同一商品反复售罄/补货只保留一行 ────────────────────────────
+# ── 信号行复活：同一餐品反复售罄/补货只保留一行 ────────────────────────────
 
 @pytest.mark.asyncio
 async def test_补货时已完成信号行被复活而非新增(db_session):

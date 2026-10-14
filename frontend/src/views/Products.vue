@@ -8,7 +8,7 @@
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input v-model="keyword" placeholder="搜索商品名" clearable @keyup.enter="reload" />
+        <el-input v-model="keyword" placeholder="搜索餐品名" clearable @keyup.enter="reload" />
       </el-form-item>
       <el-form-item>
         <el-select v-model="statusFilter" placeholder="状态" style="width:120px" @change="reload">
@@ -32,7 +32,7 @@
       <el-form-item>
         <el-checkbox v-model="lowStockFilter" @change="reload">仅看低库存（≤{{ lowStockThreshold }}）</el-checkbox>
       </el-form-item>
-      <el-button type="primary" @click="openForm()">新增商品</el-button>
+      <el-button type="primary" @click="openForm()">新增餐品</el-button>
       <el-button v-if="auth.isSuperAdmin" type="success" plain :disabled="!selectedIds.length"
         @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
@@ -105,14 +105,14 @@
     <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]"
       layout="total, sizes, prev, pager, next" style="margin-top:16px" @current-change="load" @size-change="reload" />
 
-    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑商品' : '新增商品'" width="640px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑餐品' : '新增餐品'" width="640px" destroy-on-close>
       <el-form :model="form" label-width="100px">
         <el-form-item v-if="!form.id && auth.isSuperAdmin" label="门店">
           <el-select v-model="form.store_id" clearable placeholder="不选=总部前缀 0000（编号全店统一风格）" style="width:100%"
             @change="onFormStoreChange">
             <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
-          <div class="hint">不选门店：编号为 0000-分类-商品；商品归属所选分类所在门店，可用「复制到门店」铺开</div>
+          <div class="hint">不选门店：编号为 0000-分类-餐品；餐品归属所选分类所在门店，可用「复制到门店」铺开</div>
         </el-form-item>
         <el-form-item v-else-if="form.id || !auth.isSuperAdmin" label="门店">
           <span>{{ form.store_name || boundStoreName || (form.store_id ? `门店#${form.store_id}` : '—') }}</span>
@@ -127,7 +127,7 @@
         <el-form-item label="名称" required>
           <el-input v-model="form.name" placeholder="如 牛肉面" @input="onProductNameInput" />
         </el-form-item>
-        <el-form-item label="商品编号" required>
+        <el-form-item label="餐品编号" required>
           <el-input v-model="form.product_no" :disabled="!!form.id" :placeholder="productNoPlaceholder"
             @input="codeTouched = true" />
           <div class="hint">{{ productNoTip }}</div>
@@ -141,7 +141,7 @@
               <el-upload :show-file-list="false" accept="image/jpeg,image/png,image/webp,image/gif"
                 :http-request="uploadImage" :disabled="!form.id || uploading">
                 <el-button type="primary" plain :loading="uploading" :disabled="!form.id">
-                  {{ form.id ? '上传图片' : '请先保存商品' }}
+                  {{ form.id ? '上传图片' : '请先保存餐品' }}
                 </el-button>
               </el-upload>
               <el-button v-if="form.main_image" link type="danger" @click="clearImage">清除</el-button>
@@ -159,9 +159,9 @@
               </el-select>
             </div>
             <div class="require-row">
-              <span class="require-label">商品</span>
+              <span class="require-label">餐品</span>
               <el-select v-model="form.require_product_ids" multiple clearable filterable style="flex:1"
-                :placeholder="form.require_category_ids.length ? '仅显示已选分类下的商品' : '指定商品（可先选分类缩小范围）'">
+                :placeholder="form.require_category_ids.length ? '仅显示已选分类下的餐品' : '指定餐品（可先选分类缩小范围）'">
                 <el-option-group v-for="g in requireProductGroups" :key="g.id" :label="g.name">
                   <el-option v-for="p in g.products" :key="p.id" :label="p.name" :value="p.id"
                     :disabled="p.id === form.id" />
@@ -170,9 +170,9 @@
             </div>
             <div class="require-actions">
               <el-button link type="primary" @click="applyCategoryRequireDefault">应用分类默认</el-button>
-              <span v-if="form.require_inherited" class="hint">当前继承分类默认，保存后将固定到本商品</span>
+              <span v-if="form.require_inherited" class="hint">当前继承分类默认，保存后将固定到本餐品</span>
             </div>
-            <p class="hint">选了分类后，下方商品只显示这些分类里的品；勾选项之间为「或」</p>
+            <p class="hint">选了分类后，下方餐品只显示这些分类里的品；勾选项之间为「或」</p>
           </div>
         </el-form-item>
         <el-form-item label="价格" required>
@@ -311,7 +311,7 @@
                 保存口味调整
               </el-button>
             </div>
-            <p class="hint">系统按商品名/描述/规格组自动推导；勾选「手动」后再调滑块。「恢复自动」可交还系统。</p>
+            <p class="hint">系统按餐品名/描述/规格组自动推导；勾选「手动」后再调滑块。「恢复自动」可交还系统。</p>
           </div>
         </el-form-item>
         <el-form-item label="描述">
@@ -340,13 +340,13 @@
       :selected-count="selectedIds.length" :product-ids="selectedIds" show-product-conflict @done="load" />
 
     <!-- 推送外卖弹窗 -->
-    <el-dialog v-model="pushDialog" title="推送商品到外卖平台" width="480px" destroy-on-close>
+    <el-dialog v-model="pushDialog" title="推送餐品到外卖平台" width="480px" destroy-on-close>
       <div v-if="!pushPlatforms.length" class="hint" style="text-align:center;padding:20px 0">
         当前门店尚未绑定任何外卖平台，请先到「门店 → 门店信息 → 外卖绑定」设置。
       </div>
       <div v-else>
         <div style="margin-bottom:12px">
-          <span class="hint">商品：</span>
+          <span class="hint">餐品：</span>
           <span style="font-weight:600">{{ pushProduct?.name }}</span>
           <span class="hint" style="margin-left:12px">门店：</span>
           <span>{{ pushStoreName }}</span>
@@ -561,7 +561,7 @@ async function rebuildStoreTaste() {
     return
   }
   try {
-    await ElMessageBox.confirm('将按最新商品名/描述/规格重算全店口味画像，手动调整会被保留。是否继续？', '整店重算', {
+    await ElMessageBox.confirm('将按最新餐品名/描述/规格重算全店口味画像，手动调整会被保留。是否继续？', '整店重算', {
       type: 'warning',
     })
   } catch {
@@ -570,7 +570,7 @@ async function rebuildStoreTaste() {
   rebuilding.value = true
   try {
     const res = await api.post('/products/taste-profiles/rebuild', { store_id: sid || null })
-    ElMessage.success(`已重算 ${res.data?.rebuilt ?? 0} 个商品`)
+    ElMessage.success(`已重算 ${res.data?.rebuilt ?? 0} 个餐品`)
     load()
   } catch (e: any) {
     ElMessage.error(e.message || '重算失败')
@@ -591,12 +591,12 @@ function onSelectionChange(rows: any[]) {
 
 function openCopy() {
   if (!selectedIds.value.length) {
-    ElMessage.warning('请先勾选商品')
+    ElMessage.warning('请先勾选餐品')
     return
   }
   const storesSet = new Set(selectedRows.value.map((r) => Number(r.store_id)))
   if (storesSet.size > 1) {
-    ElMessage.warning('请选择同一门店的商品再复制')
+    ElMessage.warning('请选择同一门店的餐品再复制')
     return
   }
   copyVisible.value = true
@@ -616,7 +616,7 @@ const productNoPlaceholder = computed(() => {
 const productNoTip = computed(() =>
   form.id
     ? '编号创建后不可改'
-    : `规则：${formStorePrefix()}-分类拼音-商品拼音；先选分类再填名称会自动建议。`,
+    : `规则：${formStorePrefix()}-分类拼音-餐品拼音；先选分类再填名称会自动建议。`,
 )
 
 function categoryOptionLabel(c: any) {
@@ -1027,7 +1027,7 @@ async function openForm(row?: any) {
 
 async function uploadImage(option: { file: File }) {
   if (!form.id) {
-    ElMessage.warning('请先保存商品再上传图片')
+    ElMessage.warning('请先保存餐品再上传图片')
     return
   }
   uploading.value = true
@@ -1060,7 +1060,7 @@ async function clearImage() {
 async function save() {
   const productNo = form.product_no?.trim()
   if (!productNo || !form.name?.trim()) {
-    ElMessage.warning('请填写商品编号和名称')
+    ElMessage.warning('请填写餐品编号和名称')
     return
   }
   if (!form.id && !auth.isSuperAdmin && !form.store_id) {
@@ -1147,7 +1147,7 @@ async function changeStatus(row: any, status: string) {
 async function remove(row: any) {
   try {
     await ElMessageBox.confirm(
-      `确定删除商品「${row.name}」（${row.product_no}）？删除后不可恢复。`,
+      `确定删除餐品「${row.name}」（${row.product_no}）？删除后不可恢复。`,
       '确认删除',
       { type: 'warning' },
     )

@@ -29,7 +29,7 @@ Page({
       const loginP = auth.ensureLogin().catch(() => {})
       const product = await api.get(`/products/${query.id}`, {}, false)
       const { selected, multi } = prefUtil.defaultSelections(product)
-      // 先出商品与规格，图库/登录并行，不挡首屏
+      // 先出餐品与规格，图库/登录并行，不挡首屏
       this.setData({ product, selected, multi, loading: false })
       this.updateDisplayPrice()
       const galleryP = media.hydrateUrlList(media.galleryUrls(product)).then((gallery) => {

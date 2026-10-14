@@ -87,7 +87,7 @@
       </div>
 
       <el-table :data="order.items" style="margin-top:16px" border>
-        <el-table-column prop="product_name" label="商品" />
+        <el-table-column prop="product_name" label="餐品" />
         <el-table-column label="规格" min-width="160">
           <template #default="{ row }">
             <span v-if="row.options?.length">
@@ -116,6 +116,7 @@ import {
   ORDER_NEXT_ACTIONS,
   ORDER_STATUS,
   PAYMENT_STATUS,
+  SOCIAL_IDENTITY,
   orderStatusTagType,
   paymentStatusTagType,
 } from '@/utils/labels'
@@ -124,17 +125,9 @@ const route = useRoute()
 const loading = ref(false)
 const order = ref<any>(null)
 
-const SOCIAL_IDENTITY_LABELS: Record<string, string> = {
-  SANITATION: '环卫工',
-  RIDER: '骑手',
-  ELDER: '长者',
-  TEACHER: '教师',
-  STUDENT: '学生',
-}
-
 function socialIdentityLabel(code: string) {
   const key = String(code || '').toUpperCase()
-  return SOCIAL_IDENTITY_LABELS[key] || code || ''
+  return SOCIAL_IDENTITY[key] || code || ''
 }
 
 const nextActions = computed(() => ORDER_NEXT_ACTIONS[order.value?.status] || [])

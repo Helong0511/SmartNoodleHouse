@@ -34,7 +34,7 @@ async def get_cached_reco(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
 ) -> dict[str, Any] | None:
     """读取推荐缓存。缓存穿透防护：无额外空值标记，因推荐服务对任意 customer/store
-    都会返回合法 payload（冷启动时返回热门商品），空结果本身会被缓存。"""
+    都会返回合法 payload（冷启动时返回热门餐品），空结果本身会被缓存。"""
     try:
         r = await get_redis()
         raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint))

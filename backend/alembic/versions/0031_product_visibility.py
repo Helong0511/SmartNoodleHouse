@@ -1,4 +1,4 @@
-"""商品展示规则：日历限时 / 生日可见。
+"""餐品展示规则：日历限时 / 生日可见。
 
 Revision ID: 0031_product_visibility
 Revises: 0030_customer_lifecycle

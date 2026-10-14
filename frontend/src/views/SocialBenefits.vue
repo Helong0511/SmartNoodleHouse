@@ -14,7 +14,7 @@
       :closable="false"
       class="tip"
       title="店长怎么用"
-      description="① 小程序会员中心可申请身份（类型来自身份字典），或收银 POS「公益核验」当场认定；② 本页审核 PENDING→ACTIVE；③ 规则在「权益规则」查看（种子含环卫/骑手/长者/教师/学生/医护等）；④ 「核销台账 / 本月看板」看人次与补贴。证件图不在此展示。"
+      description="① 小程序会员中心可申请身份（类型来自身份字典），或收银 POS「公益核验」当场认定；② 本页审核「待审核 → 已生效」；③ 规则在「权益规则」查看（种子含环卫/骑手/长者/教师/学生/医护等）；④ 「核销台账 / 本月看板」看人次与补贴。证件图不在此展示。"
     />
 
     <el-tabs v-model="tab" class="tabs">
@@ -24,7 +24,7 @@
           :closable="false"
           show-icon
           class="tab-tip"
-          title="只显示 PENDING。通过后顾客下单可走公益折扣；拒绝请填写原因便于审计。"
+          title="只显示待审核申请。通过后顾客下单可走公益折扣；拒绝请填写原因便于审计。"
         />
         <el-empty v-if="!loading && !identities.length" description="暂无待审申请；可让顾客在小程序申请，或收银当场核验" />
         <el-table v-else :data="identities" v-loading="loading" stripe>
@@ -73,9 +73,9 @@
           :closable="false"
           show-icon
           class="tab-tip"
-          title="规则由系统种子 / 运维配置。EXCLUSIVE：与券互斥，与会员折取更优（折扣更低者）。STACKABLE 暂未接线结算。门店列为空=总部通用。"
+          title="规则由系统种子 / 运维配置。「与券互斥」：与会员折取更优（折扣更低者）。「可叠加」暂未接线结算。门店列为空=总部通用。"
         />
-        <el-empty v-if="!loading && !rules.length" description="暂无启用规则，请检查 data_custom 种子或 enable_social_benefit" />
+        <el-empty v-if="!loading && !rules.length" description="暂无启用规则，请检查系统种子或是否开启社会贡献公益" />
         <el-table v-else :data="rules" v-loading="loading" stripe>
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="name" label="名称" min-width="140" />
@@ -99,7 +99,7 @@
           :closable="false"
           show-icon
           class="tab-tip"
-          title="每笔公益优惠落台账。退款会冲减（REVERSED）。补贴金额用于本月看板汇总。"
+          title="每笔公益优惠落台账。退款会冲减（已冲减）。补贴金额用于本月看板汇总。"
         />
         <el-empty v-if="!loading && !redemptions.length" description="暂无核销记录" />
         <el-table v-else :data="redemptions" v-loading="loading" stripe>
@@ -148,6 +148,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { SOCIAL_IDENTITY } from '@/utils/labels'
 
 const tab = ref('pending')
 const loading = ref(false)
@@ -162,17 +163,6 @@ const VERIFY_LABELS: Record<string, string> = {
   MINI: '小程序',
   POS: '收银核验',
   MANUAL: '手工认定',
-}
-const IDENTITY_LABELS: Record<string, string> = {
-  SANITATION: '环卫工',
-  RIDER: '外卖骑手',
-  ELDER: '长者',
-  TEACHER: '教师',
-  STUDENT: '学生',
-  MEDICAL: '医护人员',
-  DISABLED: '残障人士',
-  VETERAN: '退役军人',
-  VOLUNTEER: '志愿者',
 }
 const identityTypeMap = ref<Record<string, string>>({})
 const IDENTITY_STATUS_LABELS: Record<string, string> = {
@@ -194,12 +184,12 @@ const STACK_POLICY_LABELS: Record<string, string> = {
 
 function verifyMethodLabel(method: string) {
   const key = String(method || '').toUpperCase()
-  return VERIFY_LABELS[key] || method || '—'
+  return VERIFY_LABELS[key] || '—'
 }
 
 function identityLabel(code: string) {
   const key = String(code || '').toUpperCase()
-  return identityTypeMap.value[key] || IDENTITY_LABELS[key] || code || '—'
+  return identityTypeMap.value[key] || SOCIAL_IDENTITY[key] || '—'
 }
 
 async function loadIdentityTypes() {
@@ -208,7 +198,8 @@ async function loadIdentityTypes() {
     const map: Record<string, string> = {}
     for (const t of res.data?.items || []) {
       const code = String(t.code || '').toUpperCase()
-      if (code) map[code] = t.name || code
+      const name = String(t.name || '').trim()
+      if (code && name) map[code] = name
     }
     identityTypeMap.value = map
   } catch {
@@ -218,17 +209,17 @@ async function loadIdentityTypes() {
 
 function identityStatusLabel(status: string) {
   const key = String(status || '').toUpperCase()
-  return IDENTITY_STATUS_LABELS[key] || status || '—'
+  return IDENTITY_STATUS_LABELS[key] || '—'
 }
 
 function redeemStatusLabel(status: string) {
   const key = String(status || '').toUpperCase()
-  return REDEEM_STATUS_LABELS[key] || status || '—'
+  return REDEEM_STATUS_LABELS[key] || '—'
 }
 
 function stackPolicyLabel(policy: string) {
   const key = String(policy || '').toUpperCase()
-  return STACK_POLICY_LABELS[key] || policy || '—'
+  return STACK_POLICY_LABELS[key] || '—'
 }
 
 async function loadPending() {

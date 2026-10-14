@@ -78,7 +78,7 @@ Page({
     return {
       ...q,
       status,
-      statusText: STATUS_TEXT[status] || status,
+      statusText: STATUS_TEXT[status] || '未知状态',
       isWaiting: status === 'WAITING',
       isCalled: status === 'CALLED',
       active: status === 'WAITING' || status === 'CALLED'

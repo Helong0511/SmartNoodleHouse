@@ -525,7 +525,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "int",
         "min": 1,
         "max": 50,
-        "description": "单文件上传上限（商品图/头像等）；改后对新上传生效",
+        "description": "单文件上传上限（餐品图/头像等）；改后对新上传生效",
     },
     "jwt_expire_minutes": {
         "group": "security",
@@ -686,7 +686,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": True,
-        "description": "北京时间关店窗（默认 02:00–05:00）跑销量热销/推荐、商品与顾客口味等慢任务",
+        "description": "北京时间关店窗（默认 02:00–05:00）跑销量热销/推荐、餐品与顾客口味等慢任务",
     },
     "night_batch_window_start_hour": {
         "group": "system",
@@ -736,7 +736,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "min": 0,
         "max": 50,
         "default": 8,
-        "description": "已停用：推荐改为店长在商品管理中人工勾选，夜间批不再按销量覆盖",
+        "description": "已停用：推荐改为店长在餐品管理中人工勾选，夜间批不再按销量覆盖",
     },
     "night_batch_taste_customer_limit": {
         "group": "system",

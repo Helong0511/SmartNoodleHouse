@@ -133,6 +133,7 @@ function payLabel(m: string) {
 function statusLabel(s: string) {
   const map: Record<string, string> = {
     PENDING: '待审批',
+    PROCESSING: '处理中',
     SUCCESS: '已退款',
     REJECTED: '已拒绝',
     FAILED: '失败',

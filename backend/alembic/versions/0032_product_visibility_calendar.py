@@ -1,4 +1,4 @@
-"""商品展示规则历法：公历/农历。
+"""餐品展示规则历法：公历/农历。
 
 Revision ID: 0032_product_visibility_calendar
 Revises: 0031_product_visibility

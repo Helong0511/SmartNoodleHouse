@@ -21,7 +21,7 @@ STORE_ADMIN_FORBIDDEN_ROLES = {"SUPER_ADMIN"}
 
 # 权限矩阵模块展示名（未列出的 module 原样回退）
 MODULE_LABELS: dict[str, str] = {
-    "product": "商品",
+    "product": "餐品",
     "order": "订单",
     "customer": "顾客",
     "camera": "摄像头",

@@ -48,7 +48,7 @@
         <view class="head-left">
           <text class="ono">{{item.recharge_no}}</text>
         </view>
-        <text class="st">{{item.status_label || item.status}}</text>
+        <text class="st">{{item.statusText || item.status_label}}</text>
       </view>
       <view class="place" wx:if="{{item.store_name}}">{{item.store_name}}</view>
       <view class="order-body">
@@ -56,7 +56,7 @@
         <text wx:if="{{item.credit_gift > 0}}" class="gift"> · 到账 ¥{{item.credit_total}}</text>
       </view>
       <view class="order-foot">
-        <text class="meta-t">{{item.timeText}} · ¥{{item.pay_amount}} · {{item.channel_label || item.channel || '充值'}}</text>
+        <text class="meta-t">{{item.timeText}} · ¥{{item.pay_amount}} · {{item.channelText || item.channel_label || '充值'}}</text>
         <view class="btn-mini" catchtap="goRecharge">
           <text class="btn-mini-label">再充一笔</text>
         </view>
@@ -77,7 +77,7 @@
           </text>
           <text class="ono" wx:else>{{item.order_no}}</text>
         </view>
-        <text class="st">{{item.status_label || item.status}}</text>
+        <text class="st">{{item.statusText || item.status_label}}</text>
       </view>
       <view class="place" wx:if="{{item.placeText}}">{{item.placeText}}</view>
       <view class="order-body">{{item.item_summary}}</view>

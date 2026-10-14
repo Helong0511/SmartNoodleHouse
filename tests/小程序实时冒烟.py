@@ -78,7 +78,7 @@ async def main() -> int:
 
         r = await c.get("/api/products", params={"page_size": 20, "store_id": store_id})
         items = (r.json().get("data") or {}).get("items") or []
-        results.append(ok("商品列表", bool(items), f"items={len(items)}"))
+        results.append(ok("餐品列表", bool(items), f"items={len(items)}"))
         if not items:
             return _summary(results)
 
@@ -103,7 +103,7 @@ async def main() -> int:
 
         results.append(
             ok(
-                "商品详情含 option_groups",
+                "餐品详情含 option_groups",
                 bool(groups),
                 f"product_id={product_id} groups={len(groups)}",
             )
@@ -124,7 +124,7 @@ async def main() -> int:
             blocked = r.json().get("code") != 0 and ("规格" in msg or "必选" in msg)
             results.append(ok("缺规格下单拦截", blocked, msg[:80]))
         else:
-            results.append(ok("缺规格下单拦截", True, "skip: 无必选规格商品"))
+            results.append(ok("缺规格下单拦截", True, "skip: 无必选规格餐品"))
 
         opt_ids = []
         for group in groups:

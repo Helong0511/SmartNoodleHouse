@@ -180,7 +180,7 @@ INSERT INTO `options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, 
 INSERT INTO `options` (`group_id`, `name`, `code`, `extra_price`, `sort_order`, `is_default`, `status`, `created_at`, `updated_at`) SELECT `g`.`id`, '复蒸加热', 'SH01-ShiFouJiaRe-FuZheng', 0.00, 1, 0, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888' FROM `option_groups` g WHERE `g`.`code` = 'SH01-ShiFouJiaRe' AND NOT EXISTS (SELECT 1 FROM `options` o WHERE `o`.`group_id` = `g`.`id` AND `o`.`code` = 'SH01-ShiFouJiaRe-FuZheng');
 
 -- 四、新增 14 道餐品
---     product_no 规则：{store_no}-分类逻辑-商品拼音
+--     product_no 规则：{store_no}-分类逻辑-餐品拼音
 --     main_image：1200×1200 方图，实际文件由配图步骤生成到 /uploads/products/
 -- ============================================================================
 -- 4.1 招牌面·汤面 -----------------------------------------------------------
@@ -208,7 +208,7 @@ INSERT INTO `products` (`store_id`, `category_id`, `product_no`, `name`, `descri
 INSERT INTO `products` (`store_id`, `category_id`, `product_no`, `name`, `description`, `main_image`, `price`, `original_price`, `stock`, `box_price`, `min_order_count`, `status`, `is_recommended`, `is_hot`, `no_member_discount`, `no_cooking`, `sort_order`, `sales_count`) SELECT `s`.`id`, `c`.`id`, 'SH01-BaoZiDianXin-JiangRouBao', '酱肉包', '酱色猪肉馅，咸甜适口，汁香浓郁（1个起售）', '/uploads/products/jiangroubao.webp', 2.50, NULL, 9999, 0.00, 1, 'ON_SALE', 0, 0, 0, 0, 1, 0 FROM `stores` s JOIN `product_categories` c ON `c`.`store_id` = `s`.`id` AND `c`.`category_no` = 'SH01-BaoZiDianXin' WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `products` p WHERE `p`.`store_id` = `s`.`id` AND `p`.`product_no` = 'SH01-BaoZiDianXin-JiangRouBao');
 
 -- ============================================================================
--- 五、商品-规格组绑定（按分类批量绑定，已存在则跳过）
+-- 五、餐品-规格组绑定（按分类批量绑定，已存在则跳过）
 -- ============================================================================
 -- 5.1 招牌面·汤面 + 干拌面：完整面类规格（量/加料/辣/麻/葱/香菜/蒜末/姜末/面型/口感/汤汁/加臊子/加蛋加菜）
 INSERT INTO `product_option_groups` (`product_id`, `group_id`, `sort_order`) SELECT `p`.`id`, `g`.`id`, `g`.`sort_order` FROM `products` p JOIN `product_categories` c ON `c`.`id` = `p`.`category_id` JOIN `option_groups` g ON `g`.`code` IN ('SH01-Liang', 'SH01-JiaLiao', 'SH01-La', 'SH01-Ma', 'SH01-Cong', 'SH01-XiangCai', 'SH01-SuanMo', 'SH01-JiangMo', 'SH01-MianXing', 'SH01-KouGan', 'SH01-TangZhi', 'SH01-JiaSaoZi', 'SH01-JiaDanJiaCai') WHERE `p`.`store_id` = (SELECT `id` FROM `stores` WHERE `store_no` = 'SH01') AND `c`.`category_no` IN ('SH01-ZhaoPaiMian', 'SH01-GanBanMian') AND NOT EXISTS (SELECT 1 FROM `product_option_groups` pog WHERE `pog`.`product_id` = `p`.`id` AND `pog`.`group_id` = `g`.`id`);

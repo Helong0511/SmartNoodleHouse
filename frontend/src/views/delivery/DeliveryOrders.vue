@@ -79,7 +79,7 @@
       </el-table-column>
       <el-table-column label="物流" width="100">
         <template #default="{ row }">
-          {{ label(LOGISTICS_STATUS, row.logistics_status, row.logistics_status || '-') }}
+          {{ label(LOGISTICS_STATUS, row.logistics_status, '—') }}
         </template>
       </el-table-column>
       <el-table-column label="退款" width="80">
@@ -145,7 +145,7 @@
           <el-descriptions :column="1" border size="small" class="mt">
             <el-descriptions-item label="平台单号">{{ detail.platform_order_id }}</el-descriptions-item>
             <el-descriptions-item label="本系统单号">{{ detail.order_no }}</el-descriptions-item>
-            <el-descriptions-item label="商品小计">¥{{ detail.subtotal || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="餐品小计">¥{{ detail.subtotal || '-' }}</el-descriptions-item>
             <el-descriptions-item label="会员优惠">
               <span v-if="Number(detail.discount_amount) > 0" class="discount-text">-¥{{ detail.discount_amount
               }}</span>
@@ -166,7 +166,7 @@
             <el-descriptions-item label="配送费">¥{{ detail.delivery_fee }}</el-descriptions-item>
             <el-descriptions-item label="餐盒费">¥{{ detail.packing_fee }}</el-descriptions-item>
             <el-descriptions-item label="物流">
-              {{ label(LOGISTICS_STATUS, detail.logistics_status, detail.logistics_status || '-') }}
+              {{ label(LOGISTICS_STATUS, detail.logistics_status, '—') }}
               <span v-if="detail.logistics_code" class="muted"> ({{ detail.logistics_code }})</span>
             </el-descriptions-item>
             <el-descriptions-item label="顾客">{{ detail.recipient_name }} {{ detail.recipient_phone
@@ -333,7 +333,7 @@ const cancelVisible = ref(false)
 const cancelLoading = ref(false)
 const cancelReason = ref('商家忙碌，无法接单')
 const cancelTarget = ref<any>(null)
-const cancelReasons = ['商家忙碌，无法接单', '商品售罄', '超出配送范围', '顾客要求取消', '其他原因']
+const cancelReasons = ['商家忙碌，无法接单', '餐品售罄', '超出配送范围', '顾客要求取消', '其他原因']
 
 let ws: WebSocket | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null

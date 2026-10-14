@@ -123,7 +123,7 @@ class FeedbackService:
         for raw in items:
             pid = int(raw["product_id"])
             if pid not in valid_pids:
-                raise ValueError(f"商品 {pid} 不属于该订单")
+                raise ValueError(f"餐品 {pid} 不属于该订单")
             if pid in existing:
                 skipped.append(pid)
                 continue

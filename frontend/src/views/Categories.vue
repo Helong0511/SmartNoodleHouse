@@ -74,7 +74,7 @@
             <el-option v-for="c in requireOptions" :key="c.id" :label="c.name" :value="c.id"
               :disabled="form.id === c.id" />
           </el-select>
-          <div class="form-tip">新建商品时默认带入本配置，可在商品编辑里改成指定分类或指定商品</div>
+          <div class="form-tip">新建餐品时默认带入本配置，可在餐品编辑里改成指定分类或指定餐品</div>
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.sort_order" :min="0" />

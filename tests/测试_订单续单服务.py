@@ -13,7 +13,7 @@ from app.services.order_service import OrderReorderService
 
 @pytest.mark.asyncio
 async def test_reorder_prices_items_in_order_store(db_session):
-    """复购计价必须带上原订单门店，否则商品会被全部跳过。"""
+    """复购计价必须带上原订单门店，否则餐品会被全部跳过。"""
     store = Store(id=901, store_no="REORDER-STORE", name="复购测试店", status=1)
     category = ProductCategory(
         id=902,

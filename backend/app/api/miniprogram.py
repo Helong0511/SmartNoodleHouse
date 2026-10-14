@@ -1556,7 +1556,7 @@ async def get_menu_bundle_api(
     version: int | None = None,
     customer: OptionalCustomer = None,
 ):
-    """菜单聚合（分类 + 在售商品一次成型），带版本戳的轻量校验。
+    """菜单聚合（分类 + 在售餐品一次成型），带版本戳的轻量校验。
 
     先经 get_or_build 校验当前分类时段方案；跨时段会 bump version。
     客户端 version 与当前一致时返回 changed:false；否则返回完整 bundle。

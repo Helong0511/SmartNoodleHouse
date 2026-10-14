@@ -275,7 +275,7 @@ function enrichCartFromProducts(list, products) {
   })
 }
 
-/** 检查购物车是否满足商品必选规格（与后端下单校验一致） */
+/** 检查购物车是否满足餐品必选规格（与后端下单校验一致） */
 function validateRequiredOptions(cart, products) {
   const map = {}
   ;(products || []).forEach((p) => {
@@ -389,9 +389,9 @@ function checkCategoryRequire(product, cart, products, categories) {
   requireCats.forEach((id) => labels.push(`「${(cmap[id] && cmap[id].name) || ('分类#' + id)}」类`))
   requireProds.forEach((id) => {
     const p = pmap[id]
-    labels.push(`「${(p && p.name) || ('商品#' + id)}」`)
+    labels.push(`「${(p && p.name) || ('餐品#' + id)}」`)
   })
-  const name = (product && product.name) || '该商品'
+  const name = (product && product.name) || '该餐品'
   return {
     ok: false,
     message: `请先点${labels.join('或')}，再点「${name}」`

@@ -49,7 +49,7 @@ class RevokeIn(BaseModel):
 class PreviewIn(BaseModel):
     customer_id: int | None = Field(default=None, ge=1)
     store_id: int = Field(..., ge=1)
-    subtotal: str = Field(..., description="商品小计")
+    subtotal: str = Field(..., description="餐品小计")
     discountable_subtotal: str | None = None
     packing_fee: str = "0"
     product_ids: list[int] = Field(default_factory=list)

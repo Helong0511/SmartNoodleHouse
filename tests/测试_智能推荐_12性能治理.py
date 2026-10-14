@@ -244,7 +244,7 @@ async def test_menu_bundle_version_flow(fake_redis, db_session):
     fresh = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=1)
     assert fresh["data"] == {"changed": False, "version": 1}
 
-    # 商品写路径失效：版本递增，客户端旧版本重新拿全量
+    # 餐品写路径失效：版本递增，客户端旧版本重新拿全量
     await invalidate_store_caches(store.id)
     changed = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=1)
     assert changed["data"]["changed"] is True

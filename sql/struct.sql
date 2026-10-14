@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS `coupon_templates` (
   `name` varchar(100) NOT NULL COMMENT '券名称（展示用）',
   `coupon_type` varchar(20) NOT NULL DEFAULT 'FIXED' COMMENT 'FIXED=满减元 | PERCENT=折扣比例 | VOUCHER=代金券抵扣',
   `discount_value` decimal(10, 2) NOT NULL COMMENT 'FIXED/VOUCHER=减免金额（元，两位）；PERCENT=折扣率两位，如0.90表示九折',
-  `min_order_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '使用门槛（按会员折后商品小计计）',
+  `min_order_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '使用门槛（按会员折后餐品小计计）',
   `valid_days` int NOT NULL DEFAULT 30 COMMENT '领取/发放后有效天数',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '模板状态：1=启用 0=停用',
   `total_quota` int NULL DEFAULT NULL COMMENT 'P0-6: 发放总量上限；NULL=不限',
@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS `customer_behavior_events` (
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '发生门店 → stores.id',
   `event_type` varchar(20) NOT NULL COMMENT 'EXPOSE/CLICK/CART_ADD/CART_REMOVE/ORDER_PAID/REORDER/FEEDBACK',
   `scene` varchar(20) NULL DEFAULT NULL COMMENT '场景：menu/recommend/cart/detail/settle/orders',
-  `product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联商品 → products.id',
+  `product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联餐品 → products.id',
   `category_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '关联分类 → product_categories.id',
   `ab_bucket` varchar(80) NULL DEFAULT NULL COMMENT '命中的 A/B 桶，如 reco_algo:v2',
   `payload` json NULL COMMENT '事件附加属性（不含手机号/昵称等 PII）',
@@ -357,7 +357,7 @@ CREATE TABLE IF NOT EXISTS `customer_taste_profiles` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   `dim_type` varchar(16) NOT NULL COMMENT '维度类型：CATEGORY/PRODUCT/TASTE_TAG',
-  `target_key` varchar(100) NOT NULL COMMENT '目标键：分类/商品 id 字符串或标签字面量',
+  `target_key` varchar(100) NOT NULL COMMENT '目标键：分类/餐品 id 字符串或标签字面量',
   `target_name` varchar(100) NULL DEFAULT NULL COMMENT '目标名称快照（展示用）',
   `score` decimal(6, 4) NOT NULL DEFAULT 0.0000 COMMENT '归一化偏好得分',
   `raw_weight` decimal(12, 4) NOT NULL DEFAULT 0.0000 COMMENT '衰减前原始权重',
@@ -502,10 +502,10 @@ CREATE TABLE IF NOT EXISTS `delivery_product_maps` (
   `platform` varchar(20) NOT NULL COMMENT 'MEITUAN=美团 | ELEME=饿了么',
   `platform_sku_id` varchar(64) NOT NULL COMMENT '平台 SKU ID',
   `platform_spu_code` varchar(64) NULL DEFAULT NULL COMMENT '平台 SPU / app_food_code',
-  `app_food_code` varchar(64) NULL DEFAULT NULL COMMENT '本系统对外商品编码',
+  `app_food_code` varchar(64) NULL DEFAULT NULL COMMENT '本系统对外餐品编码',
   `option_signature` varchar(128) NULL DEFAULT NULL COMMENT '规格组合签名（区分同 SKU 不同加料）',
   `platform_sku_name` varchar(100) NULL DEFAULT NULL COMMENT '平台侧 SKU 名称',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '映射的本系统商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '映射的本系统餐品 → products.id',
   `option_map_json` json NULL COMMENT '平台规格项 → 本系统 options 的映射 JSON',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
@@ -519,7 +519,7 @@ CREATE TABLE IF NOT EXISTS `delivery_product_maps` (
   INDEX `idx_dpm_product`(`product_id` ASC) USING BTREE,
   CONSTRAINT `fk_dpm_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_dpm_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '外卖平台商品映射表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '外卖平台餐品映射表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for delivery_refunds
 -- ----------------------------
@@ -699,7 +699,7 @@ CREATE TABLE IF NOT EXISTS `option_groups` (
   UNIQUE INDEX `uk_og_store_code`(`store_scope` ASC, `code` ASC) USING BTREE,
   INDEX `fk_og_store`(`store_id` ASC) USING BTREE,
   CONSTRAINT `fk_og_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品规格组表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '餐品规格组表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for options
 -- ----------------------------
@@ -740,8 +740,8 @@ CREATE TABLE IF NOT EXISTS `order_item_options` (
 CREATE TABLE IF NOT EXISTS `order_items` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `order_id` bigint UNSIGNED NOT NULL COMMENT '订单 → orders.id',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id（快照时有效 ID）',
-  `product_name_snapshot` varchar(100) NOT NULL COMMENT '下单时商品名称快照',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id（快照时有效 ID）',
+  `product_name_snapshot` varchar(100) NOT NULL COMMENT '下单时餐品名称快照',
   `unit_price_snapshot` decimal(10, 2) NOT NULL COMMENT '下单时单价快照（含基础价，不含规格加价）',
   `quantity` int NOT NULL DEFAULT 1 COMMENT '购买数量',
   `subtotal` decimal(10, 2) NOT NULL COMMENT '行小计 = (单价+规格加价)×数量',
@@ -751,7 +751,7 @@ CREATE TABLE IF NOT EXISTS `order_items` (
   INDEX `fk_oi_product`(`product_id` ASC) USING BTREE,
   CONSTRAINT `fk_oi_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `fk_oi_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '订单商品明细表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '订单餐品明细表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Records of order_items
 -- ----------------------------
@@ -784,7 +784,7 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   `status` varchar(20) NOT NULL DEFAULT 'PENDING_PAYMENT' COMMENT '订单履约状态，见文件头枚举',
   `dining_type` varchar(20) NOT NULL DEFAULT 'DINE_IN' COMMENT 'DINE_IN=堂食 | TAKEAWAY=打包外带',
-  `subtotal` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '商品折前小计（含规格加价）',
+  `subtotal` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '餐品折前小计（含规格加价）',
   `discount_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '会员等级折扣减免金额',
   `customer_coupon_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '使用的优惠券 → customer_coupons.id',
   `coupon_discount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '优惠券减免金额（非代金券）',
@@ -1151,14 +1151,14 @@ CREATE TABLE IF NOT EXISTS `product_categories` (
   UNIQUE INDEX `uk_cat_store_no`(`store_id` ASC, `category_no` ASC) USING BTREE,
   INDEX `idx_cat_store`(`store_id` ASC, `sort_order` ASC, `status` ASC) USING BTREE,
   CONSTRAINT `fk_cat_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品分类表（按门店）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '餐品分类表（按门店）' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for product_feedbacks
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `product_feedbacks` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `order_id` bigint UNSIGNED NOT NULL COMMENT '订单 → orders.id',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
   `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
   `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '评价发生门店 → stores.id',
   `verdicts` json NULL COMMENT '白名单标签，如 [\"TOO_SPICY\",\"DISLIKE\"] / [\"TASTY\"]',
@@ -1178,13 +1178,13 @@ CREATE TABLE IF NOT EXISTS `product_feedbacks` (
   CONSTRAINT `fk_pf_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `fk_pf_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `fk_pf_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品轻量评价表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '餐品轻量评价表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for product_images
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `product_images` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
   `image_url` varchar(500) NOT NULL COMMENT '图片 URL',
   `image_type` varchar(20) NOT NULL DEFAULT 'DETAIL' COMMENT 'MAIN=主图 | DETAIL=详情图 | OPTION=规格示意图',
   `sort_order` int NOT NULL DEFAULT 0 COMMENT '同类型内排序',
@@ -1192,27 +1192,27 @@ CREATE TABLE IF NOT EXISTS `product_images` (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_pi_product`(`product_id` ASC, `sort_order` ASC) USING BTREE,
   CONSTRAINT `fk_pi_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品图片表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '餐品图片表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for product_option_groups
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `product_option_groups` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
   `group_id` bigint UNSIGNED NOT NULL COMMENT '规格组 → option_groups.id',
-  `sort_order` int NOT NULL DEFAULT 0 COMMENT '该商品下规格组展示顺序',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '该餐品下规格组展示顺序',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_product_group`(`product_id` ASC, `group_id` ASC) USING BTREE,
   INDEX `fk_pog_group`(`group_id` ASC) USING BTREE,
   CONSTRAINT `fk_pog_group` FOREIGN KEY (`group_id`) REFERENCES `option_groups` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_pog_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 92 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品-规格组关联表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 92 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '餐品-规格组关联表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for product_taste_profiles
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `product_taste_profiles` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
   `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   `dimensions` json NULL COMMENT '口味维度分，如 {\"spicy\":2,\"sweetness\":0,\"numbing\":0}',
   `tags` json NULL COMMENT '口味标签，如 [\"劲道\",\"酸辣\",\"牛肉\"]',
@@ -1234,9 +1234,9 @@ CREATE TABLE IF NOT EXISTS `products` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `store_id` bigint UNSIGNED NOT NULL COMMENT '所属门店 → stores.id',
   `category_id` bigint UNSIGNED NOT NULL COMMENT '分类 → product_categories.id',
-  `product_no` varchar(64) NOT NULL COMMENT '店内商品编号：{store_no|0000}-分类逻辑-商品逻辑，如 SH01-Mian-NiuRouMian',
-  `name` varchar(100) NOT NULL COMMENT '商品名称',
-  `description` text NULL COMMENT '商品描述/卖点',
+  `product_no` varchar(64) NOT NULL COMMENT '店内餐品编号：{store_no|0000}-分类逻辑-餐品逻辑，如 SH01-Mian-NiuRouMian',
+  `name` varchar(100) NOT NULL COMMENT '餐品名称',
+  `description` text NULL COMMENT '餐品描述/卖点',
   `main_image` varchar(500) NULL DEFAULT NULL COMMENT '主图相对或绝对路径',
   `price` decimal(10, 2) NOT NULL COMMENT '基础售价（不含规格加价）',
   `original_price` decimal(10, 2) NULL DEFAULT NULL COMMENT '划线原价（可选）',
@@ -1244,7 +1244,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `box_price` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '单份餐盒/打包费',
   `min_order_count` int NOT NULL DEFAULT 1 COMMENT '起售份数',
   `require_category_ids` json NULL COMMENT '须先点过的分类 id（OR）；NULL=继承所属分类默认',
-  `require_product_ids` json NULL COMMENT '须先点过的指定商品 id（OR）；与分类依赖合并 OR',
+  `require_product_ids` json NULL COMMENT '须先点过的指定餐品 id（OR）；与分类依赖合并 OR',
   `status` varchar(20) NOT NULL DEFAULT 'ON_SALE' COMMENT 'ON_SALE=在售 | OFF_SALE=停售 | SOLD_OUT=售罄',
   `is_recommended` tinyint NOT NULL DEFAULT 0 COMMENT '店长推荐：1=是 0=否（仅人工勾选，夜间批不覆盖）',
   `is_hot` tinyint NOT NULL DEFAULT 0 COMMENT '热销标签：1=是 0=否（可夜间批按销量自动刷新）',
@@ -1274,7 +1274,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   ),
   CONSTRAINT `chk_products_price_pos` CHECK (`price` > 0),
   CONSTRAINT `chk_products_stock_nonneg` CHECK (`stock` >= 0)
-) ENGINE = InnoDB AUTO_INCREMENT = 15 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品表（按门店）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 15 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '餐品表（按门店）' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for recharge_packages
 -- ----------------------------
@@ -1374,7 +1374,7 @@ CREATE TABLE IF NOT EXISTS `store_business_hours` (
 CREATE TABLE IF NOT EXISTS `store_product_stocks` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
   `stock` int NOT NULL DEFAULT 999 COMMENT '本店库存覆盖；999=不限',
   `status` tinyint NOT NULL DEFAULT 1 COMMENT '本店售卖状态：1=在售 0=本店停售',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
@@ -1385,7 +1385,7 @@ CREATE TABLE IF NOT EXISTS `store_product_stocks` (
   CONSTRAINT `fk_sps_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `fk_sps_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_sps_stock_nonneg` CHECK (`stock` >= 0)
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '分店商品库存覆盖表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '分店餐品库存覆盖表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for store_settings
 -- ----------------------------
@@ -1533,7 +1533,7 @@ CREATE TABLE IF NOT EXISTS `welcome_logs` (
 CREATE TABLE IF NOT EXISTS `customer_favorite_products` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
-  `product_id` bigint UNSIGNED NOT NULL COMMENT '商品 → products.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
   `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '收藏时间',
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
@@ -1653,9 +1653,9 @@ CREATE TABLE IF NOT EXISTS `social_benefit_rules` (
   `benefit_type` varchar(30) NOT NULL DEFAULT 'ORDER_DISCOUNT' COMMENT 'ORDER_DISCOUNT/COUPON/GIFT_ITEM/FREE_PRODUCT',
   `discount_rate` decimal(5, 2) NULL DEFAULT NULL COMMENT '折扣率 0.80=八折',
   `coupon_template_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '公益券模板',
-  `gift_product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '赠品商品',
+  `gift_product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '赠品餐品',
   `applicable_category_ids` json NULL COMMENT '适用分类；NULL=全部',
-  `applicable_product_ids` json NULL COMMENT '适用商品；NULL=全部',
+  `applicable_product_ids` json NULL COMMENT '适用餐品；NULL=全部',
   `daily_limit` int NOT NULL DEFAULT 1 COMMENT '每客每店每日限次',
   `monthly_budget` decimal(12, 2) NULL DEFAULT NULL COMMENT '月补贴预算',
   `budget_action` varchar(10) NOT NULL DEFAULT 'WARN' COMMENT '超预算 WARN/BLOCK',
@@ -1754,7 +1754,7 @@ CREATE TABLE IF NOT EXISTS `marketing_campaigns` (
   `end_at` datetime(3) NULL DEFAULT NULL COMMENT '结束',
   `budget_cap` decimal(12, 2) NULL DEFAULT NULL COMMENT '预算上限',
   `weekly_cap_override` int NULL DEFAULT NULL COMMENT '覆盖周频控',
-  `boost_product_ids` json NULL COMMENT '推荐加权商品',
+  `boost_product_ids` json NULL COMMENT '推荐加权餐品',
   `remark` varchar(500) NULL DEFAULT NULL COMMENT '备注',
   `published_at` datetime(3) NULL DEFAULT NULL COMMENT '发布时间',
   `created_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '创建人',

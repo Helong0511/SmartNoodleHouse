@@ -58,7 +58,7 @@ def menu_catalog_key(store_id: int) -> str:
 
 
 def cart_fingerprint(product_ids) -> str:
-    """购物车商品集合指纹：仅与集合内容有关，与顺序无关。"""
+    """购物车餐品集合指纹：仅与集合内容有关，与顺序无关。"""
     ids = sorted({int(pid) for pid in (product_ids or []) if pid})
     if not ids:
         return ""

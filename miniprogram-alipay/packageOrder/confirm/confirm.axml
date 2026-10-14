@@ -44,7 +44,7 @@
   </view>
 
   <view class="cart-box">
-    <view class="label">已选商品</view>
+    <view class="label">已选餐品</view>
     <view class="cart-line" a:for="{{cartPreview}}" a:key="index">
       <image a:if="{{item.imageUrl}}" class="mini" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
       <view class="mini placeholder" a:else>{{item.name[0] || '餐'}}</view>
@@ -56,7 +56,7 @@
         <text class="cart-price">¥{{item.subtotal}}</text>
       </view>
     </view>
-    <view class="special-hint" a:if="{{hasSpecialItems}}">含特价商品：不参与会员折扣、优惠券及代金券</view>
+    <view class="special-hint" a:if="{{hasSpecialItems}}">含特价餐品：不参与会员折扣、优惠券及代金券</view>
     <view class="sum-row">
       <text>小计</text>
       <text>¥{{subtotal}}</text>
@@ -110,7 +110,7 @@
       <view class="pack-opt {{!needPack ? 'on' : ''}}" data-pack="0" onTap="onPack">堂食</view>
       <view class="pack-opt {{needPack ? 'on' : ''}}" data-pack="1" onTap="onPack">打包外带</view>
     </view>
-    <view class="pack-tip" a:if="{{needPack}}">打包按商品餐盒费加收，以服务器结算为准</view>
+    <view class="pack-tip" a:if="{{needPack}}">打包按餐品餐盒费加收，以服务器结算为准</view>
   </view>
 
   <view class="schedule-box" a:if="{{needPack}}">

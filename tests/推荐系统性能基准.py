@@ -157,7 +157,7 @@ async def main() -> int:
             # 正确性自检
             bundle = await build_menu_bundle(db, sid)
             assert len(bundle["categories"]) == N_CATEGORIES, "分类数不符"
-            assert bundle["products"]["total"] == N_PRODUCTS, "商品数不符"
+            assert bundle["products"]["total"] == N_PRODUCTS, "餐品数不符"
 
             # A. 直查基线（不走任何缓存）
             baseline = await timed(lambda: build_menu_bundle(db, sid), BASELINE_RUNS)

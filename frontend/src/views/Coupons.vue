@@ -212,13 +212,13 @@
                 ? '如 0.90 表示 9 折。与会员折互斥：力度相同禁用券；力度更优则取折扣券（不折上折）'
                 : templateForm.coupon_type === 'VOUCHER'
                   ? '代金面额（元），打完折扣后再抵扣（可与优惠券叠加）'
-                  : '固定减免金额（元，按会员折后商品小计）'
+                  : '固定减免金额（元，按会员折后餐品小计）'
             }}
           </div>
         </el-form-item>
         <el-form-item label="使用门槛">
           <el-input-number v-model="templateForm.min_order_amount" :min="0" :precision="2" style="width: 100%" />
-          <div class="hint">按可参与优惠的商品小计计算（PERCENT 取优时为未打会员折基数），0 表示无门槛</div>
+          <div class="hint">按可参与优惠的餐品小计计算（PERCENT 取优时为未打会员折基数），0 表示无门槛</div>
         </el-form-item>
         <el-form-item label="有效天数">
           <el-input-number v-model="templateForm.valid_days" :min="1" :max="365" style="width: 100%" />
@@ -363,13 +363,13 @@ const issueQuantityLabel = computed(() => {
 })
 
 function statusLabel(s: string) {
-  return label(COUPON_STATUS, s, s || '—')
+  return label(COUPON_STATUS, s)
 }
 function statusTag(s: string) {
   return couponStatusTagType(s)
 }
 function couponTypeLabel(t: string) {
-  return label(COUPON_TYPE, t, t || '—')
+  return label(COUPON_TYPE, t)
 }
 
 async function loadTemplates() {

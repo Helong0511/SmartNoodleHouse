@@ -21,7 +21,7 @@ function isVoucherApplicable(payable, voucher) {
   return payable >= face
 }
 
-/** 计算代金券抵扣；eligiblePayable 为可参与代金券的基数（不含特价商品） */
+/** 计算代金券抵扣；eligiblePayable 为可参与代金券的基数（不含特价餐品） */
 function calcVoucherDiscount(payable, voucher, eligiblePayable) {
   const eligible = eligiblePayable != null ? eligiblePayable : payable
   if (!isVoucherApplicable(eligible, voucher)) return 0

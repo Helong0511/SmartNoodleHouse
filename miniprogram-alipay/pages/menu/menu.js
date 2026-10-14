@@ -296,7 +296,7 @@ Page({
       const item = cartUtil.normalizeItem({ ...raw })
       return {
         ...item,
-        // a:key 需要稳定唯一值：商品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
+        // a:key 需要稳定唯一值：餐品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
         cartKey: `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
         imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
       }
@@ -360,15 +360,15 @@ Page({
   clearInvalidCart() {
     const cart = auth.getCart().filter((i) => !i.invalid)
     auth.saveCart(cart)
-    my.showToast({ content: '已清除失效商品', type: 'success' })
+    my.showToast({ content: '已清除失效餐品', type: 'success' })
     this.refreshCartBar({ openSheet: !!(cart.length) })
   },
 
   goCheckout() {
     if (this.data.invalidCount > 0) {
       my.confirm({
-        title: '有商品不可下单',
-        content: `${this.data.invalidCount} 件商品已失效或库存不足，请先清除后再结算`,
+        title: '有餐品不可下单',
+        content: `${this.data.invalidCount} 件餐品已失效或库存不足，请先清除后再结算`,
         confirmButtonText: '清除失效',
         cancelButtonText: '返回',
         success: (res) => {

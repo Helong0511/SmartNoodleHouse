@@ -27,7 +27,7 @@
       <el-table-column prop="platform_sku_id" label="平台SKU" min-width="120" show-overflow-tooltip />
       <el-table-column prop="platform_sku_name" label="平台品名" min-width="120" show-overflow-tooltip />
       <el-table-column prop="product_id" label="本系统ID" width="90" />
-      <el-table-column prop="product_name" label="本系统商品" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="product_name" label="本系统餐品" min-width="120" show-overflow-tooltip />
       <el-table-column prop="app_food_code" label="菜品码" width="100" show-overflow-tooltip />
       <el-table-column label="状态" width="70">
         <template #default="{ row }">{{ row.status === 1 ? '启用' : '停用' }}</template>
@@ -40,7 +40,7 @@
     </div>
 
     <!-- 映射弹窗 -->
-    <el-dialog v-model="showMapDialog" title="新增/更新商品映射" width="480px">
+    <el-dialog v-model="showMapDialog" title="新增/更新餐品映射" width="480px">
       <el-form label-width="110px">
         <el-form-item v-if="auth.isSuperAdmin" label="归属门店" required>
           <el-select v-model="mapForm.store_id" placeholder="选择门店" style="width: 100%">
@@ -59,11 +59,11 @@
         <el-form-item label="平台品名">
           <el-input v-model="mapForm.platform_sku_name" />
         </el-form-item>
-        <el-form-item label="本系统商品ID" required>
+        <el-form-item label="本系统餐品ID" required>
           <el-input-number v-model="mapForm.product_id" :min="1" style="width: 100%" />
         </el-form-item>
         <el-form-item label="菜品码">
-          <el-input v-model="mapForm.app_food_code" placeholder="默认取商品编号" />
+          <el-input v-model="mapForm.app_food_code" placeholder="默认取餐品编号" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -196,7 +196,7 @@ async function saveMap() {
     return
   }
   if (!mapForm.product_id || mapForm.product_id <= 0) {
-    ElMessage.warning('请填写有效的本系统商品 ID')
+    ElMessage.warning('请填写有效的本系统餐品 ID')
     return
   }
   if (auth.isSuperAdmin && !mapForm.store_id) {
@@ -216,7 +216,7 @@ async function saveMap() {
 async function syncMenu() {
   try {
     const res = await api.post('/delivery/sync/menu', null, { params: { platform: syncPlatform.value } })
-    ElMessage.success(`同步 ${res.data.synced}/${res.data.total} 个商品`)
+    ElMessage.success(`同步 ${res.data.synced}/${res.data.total} 个餐品`)
   } catch (e: any) {
     ElMessage.error(e.message || '同步失败')
   }

@@ -173,7 +173,7 @@ async def test_favorites_add_list_delete_idempotent(db_session: AsyncSession, st
     await db_session.commit()
 
     async with api_client(db_session, customer) as ac:
-        # 收藏上架商品
+        # 收藏上架餐品
         r = await ac.post(f"/api/miniprogram/favorites/{p1.id}")
         assert r.status_code == 200, r.text
         assert r.json()["data"] == {"favorited": True}

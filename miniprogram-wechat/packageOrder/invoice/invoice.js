@@ -15,7 +15,7 @@ function decorateInvoice(it) {
         ...it,
         status,
         titleTypeText: TITLE_TYPE_TEXT[String(it.title_type || '').toUpperCase()] || '个人',
-        statusText: STATUS_TEXT[status] || status,
+        statusText: STATUS_TEXT[status] || '未知状态',
         statusClass: STATUS_CLASS[status] || 'pending',
         createdText: formatTimeLiteral(it.created_at)
     }

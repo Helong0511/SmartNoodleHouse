@@ -56,7 +56,7 @@
 | 依赖 | 类型 | 校验 |
 |---|---|---|
 | `CurrentUser` | 员工 | typ=staff + ver=token_version + 用户存在 + 启用 |
-| `OptionalStaffUser` | 可选员工 | 公开商品列表等场景 |
+| `OptionalStaffUser` | 可选员工 | 公开餐品列表等场景 |
 | `CurrentCustomer` | 顾客 | typ=customer + ver + 顾客 active |
 | `OptionalCustomer` | 可选顾客 | 冷启动浏览 |
 | `StaffOrCustomer` | 员工或顾客 | 三端共用接口，拒绝 typ=stream |

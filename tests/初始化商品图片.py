@@ -69,7 +69,7 @@ def main() -> None:
             make_image(folder / fname, bg, fg, ch, str(name)[:12])
         url = f"/uploads/products/{fname}"
         cur.execute("UPDATE products SET main_image=%s WHERE id=%s", (url, pid))
-        # 开发餐盒费示例：前两个商品 1 元，第三个 0.5
+        # 开发餐盒费示例：前两个餐品 1 元，第三个 0.5
         box = "1.00" if i < 2 else "0.50"
         cur.execute("UPDATE products SET box_price=%s WHERE id=%s AND (box_price IS NULL OR box_price=0)", (box, pid))
         print(f"product {pid} -> {url} box={box}")

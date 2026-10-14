@@ -220,7 +220,7 @@
 
 - 开发：本地 `uploads/` StaticFiles 直发。
 - 生产：`STORAGE_BACKEND=s3`（[object_storage.py](file:///e:/SmartNoodleHouse/backend/app/services/object_storage.py)），启动校验要求凭证/桶配齐，否则拒绝启动。
-- 图片：门店 Logo 上传转 WebP、拒绝外链/ GIF/过小（测试_门店Logo.py）；商品图 URL 白名单。
+- 图片：门店 Logo 上传转 WebP、拒绝外链/ GIF/过小（测试_门店Logo.py）；餐品图 URL 白名单。
 - 人脸：仅摄像头实拍，base64 大小+像素双限，decompression bomb 防护。
 
 ---

@@ -1,8 +1,8 @@
-"""小程序菜单聚合服务（Task 12）：分类 + 在售商品一次成型。
+"""小程序菜单聚合服务（Task 12）：分类 + 在售餐品一次成型。
 
 口径与 GET /categories、GET /products 公开读路径保持一致：
 - 分类 status=1、按当前时段方案重排；
-- 商品 status=ON_SALE，NOT EXISTS 本店停售覆盖；售罄商品仍展示（不按库存过滤）；
+- 餐品 status=ON_SALE，NOT EXISTS 本店停售覆盖；售罄餐品仍展示（不按库存过滤）；
 - require_category_ids / require_product_ids 经继承链解析。
 """
 from __future__ import annotations
@@ -204,7 +204,7 @@ def apply_menu_visibility(
     *,
     is_birthday_today: bool = False,
 ) -> dict[str, Any]:
-    """按今日日历/生日规则过滤菜单商品（不改缓存原文）。"""
+    """按今日日历/生日规则过滤菜单餐品（不改缓存原文）。"""
     products = (bundle.get("products") or {}) if isinstance(bundle, dict) else {}
     raw_items = products.get("items") if isinstance(products, dict) else None
     if not isinstance(raw_items, list):

@@ -94,7 +94,7 @@ def _integrity_user_message(exc: Exception) -> str:
         return "数据冲突，请检查是否重复"
     value, key = m.group(1), m.group(2)
     if "product_no" in key:
-        return f"商品编号「{value}」已存在，请换一个"
+        return f"餐品编号「{value}」已存在，请换一个"
     if "openid" in key or "alipay_user_id" in key:
         return "该账号已登录过，请重试（若反复出现请清缓存后重新编译）"
     if "order_no" in key or "idempotency" in key:

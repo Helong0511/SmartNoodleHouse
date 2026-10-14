@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>营销活动</h2>
-        <p class="sub">绑定分群 + 券模板后发布发券；可选推荐加权商品。状态流：DRAFT → 发布 → RUNNING / PAUSED → 结束。</p>
+        <p class="sub">绑定分群 + 券模板后发布发券；可选推荐加权餐品。状态流：草稿 → 发布 → 进行中 / 已暂停 → 结束。</p>
       </div>
       <div class="header-actions">
         <el-button @click="goSegments">客户分群</el-button>
@@ -20,7 +20,7 @@
       :closable="false"
       class="tip"
       title="店长怎么用"
-      description="① 客户分群估人/物化 → ② 优惠券备模板 → ③ 选活动类型（或点下方快捷模板）→ ④ 选分群与券 → ⑤ 可选推荐加权商品 → ⑥ 发布 → ⑦ 营销报表看 ROI。推荐加权仅 RUNNING 期间约 +25%。活动发券与会员折：FIXED 可叠加、PERCENT 取优互斥；与「社会贡献」身份折：不与券同享，与会员折结算时取更优（折扣更低者）。类型 SOCIAL=爱心日发券，不是身份当场折扣。"
+      description="① 客户分群估人/物化 → ② 优惠券备模板 → ③ 选活动类型（或点下方快捷模板）→ ④ 选分群与券 → ⑤ 可选推荐加权餐品 → ⑥ 发布 → ⑦ 营销报表看 ROI。推荐加权仅「进行中」期间约 +25%。活动发券与会员折：满减券可叠加、折扣券取优互斥；与「社会贡献」身份折：不与券同享，与会员折结算时取更优（折扣更低者）。类型「公益营销」=爱心日发券，不是身份当场折扣。"
     />
 
     <div class="preset-bar">
@@ -87,7 +87,9 @@
       <el-table-column label="类型" width="130">
         <template #default="{ row }">{{ typeLabel(row.campaign_type) }}</template>
       </el-table-column>
-      <el-table-column prop="status" label="状态" width="110" />
+      <el-table-column label="状态" width="110">
+        <template #default="{ row }">{{ label(MARKETING_CAMPAIGN_STATUS, row.status) }}</template>
+      </el-table-column>
       <el-table-column label="分群" width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ segmentLabel(row.segment_id) }}</template>
       </el-table-column>
@@ -187,7 +189,7 @@
           </el-select>
           <div class="hint">列表来自「优惠券」启用模板；若为空请先去创建并启用。</div>
         </el-form-item>
-        <el-form-item label="推荐加权商品">
+        <el-form-item label="推荐加权餐品">
           <el-select
             v-model="form.boost_product_ids"
             multiple
@@ -195,7 +197,7 @@
             clearable
             collapse-tags
             collapse-tags-tooltip
-            placeholder="搜索并选择商品（可多选）"
+            placeholder="搜索并选择餐品（可多选）"
             style="width:100%"
             :loading="productsLoading"
           >
@@ -206,7 +208,7 @@
               :value="p.id"
             />
           </el-select>
-          <div class="hint">RUNNING 期间这些 SKU 在推荐列表加权约 +25%；活动结束自动失效。可搜菜名。</div>
+          <div class="hint">活动进行中期间这些 SKU 在推荐列表加权约 +25%；活动结束自动失效。可搜菜名。</div>
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
@@ -222,18 +224,20 @@
         :closable="false"
         show-icon
         style="margin-bottom:12px"
-        title="发券任务按幂等键去重。FAILED 可点「重试 FAILED」重置后由 worker 再发。"
+        title="发券任务按幂等键去重。失败任务可点「重试失败任务」重置后由后台再发。"
       />
       <p v-if="taskStats">
         汇总：
-        <span v-for="(v, k) in taskStats" :key="k" style="margin-right: 12px">{{ k }}={{ v }}</span>
+        <span v-for="(v, k) in taskStats" :key="k" style="margin-right: 12px">{{ label(MARKETING_TASK_STATUS, String(k), String(k)) }}={{ v }}</span>
       </p>
-      <el-button size="small" @click="retryFailed" style="margin-bottom: 8px">重试 FAILED</el-button>
+      <el-button size="small" @click="retryFailed" style="margin-bottom: 8px">重试失败任务</el-button>
       <el-empty v-if="!tasks.length" description="暂无任务（未发布或尚未入队）" />
       <el-table v-else :data="tasks" size="small" stripe max-height="360">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="customer_id" label="顾客" width="90" />
-        <el-table-column prop="status" label="状态" width="100" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">{{ label(MARKETING_TASK_STATUS, row.status) }}</template>
+        </el-table-column>
         <el-table-column prop="idempotency_key" label="幂等键" min-width="180" />
         <el-table-column prop="last_error" label="错误" min-width="140" />
       </el-table>
@@ -248,18 +252,19 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
+import { MARKETING_CAMPAIGN_STATUS, MARKETING_TASK_STATUS, label } from '@/utils/labels'
 
 /** 活动类型（与实施方案日历节点对齐；后端存大写字符串） */
 const CAMPAIGN_TYPES = [
-  { value: 'MEMBER_DAY', label: '会员日 MEMBER_DAY', hint: '老客回访轻券，适合会员日/店庆。' },
-  { value: 'FESTIVAL', label: '节日 FESTIVAL', hint: '春节、妇女节、儿童节、重阳、教师节等节日发券。' },
-  { value: 'TIME_SLOT', label: '时段 TIME_SLOT', hint: '冬至/下午茶等时段套餐或促销券。' },
-  { value: 'SOCIAL', label: '公益营销 SOCIAL', hint: '如每月环卫爱心日发豆浆券；与「社会贡献」身份折扣不同。' },
-  { value: 'BIRTHDAY', label: '生日 BIRTHDAY', hint: '生日权益加码发券（可与门店生日参数配合）。' },
-  { value: 'NEW_MEMBER', label: '新客 NEW_MEMBER', hint: '新注册/开卡欢迎券包。' },
-  { value: 'WAKEUP', label: '唤醒 WAKEUP', hint: '沉睡/流失客召回发券。' },
-  { value: 'EXAM', label: '考生 EXAM', hint: '高考/中考加油券，可联动公益身份。' },
-  { value: 'RECO_BOOST', label: '推荐加权 RECO_BOOST', hint: '以推荐加权为主；仍可附带发券。' },
+  { value: 'MEMBER_DAY', label: '会员日', hint: '老客回访轻券，适合会员日/店庆。' },
+  { value: 'FESTIVAL', label: '节日', hint: '春节、妇女节、儿童节、重阳、教师节等节日发券。' },
+  { value: 'TIME_SLOT', label: '时段', hint: '冬至/下午茶等时段套餐或促销券。' },
+  { value: 'SOCIAL', label: '公益营销', hint: '如每月环卫爱心日发豆浆券；与「社会贡献」身份折扣不同。' },
+  { value: 'BIRTHDAY', label: '生日', hint: '生日权益加码发券（可与门店生日参数配合）。' },
+  { value: 'NEW_MEMBER', label: '新客', hint: '新注册/开卡欢迎券包。' },
+  { value: 'WAKEUP', label: '唤醒', hint: '沉睡/流失客召回发券。' },
+  { value: 'EXAM', label: '考生', hint: '高考/中考加油券，可联动公益身份。' },
+  { value: 'RECO_BOOST', label: '推荐加权', hint: '以推荐加权为主；仍可附带发券。' },
 ] as const
 
 type CampaignPreset = {
@@ -274,7 +279,7 @@ const CAMPAIGN_PRESETS: CampaignPreset[] = [
   { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '返乡券包，锚点豆浆/卤蛋' },
   { label: '妇女/母亲节', campaign_type: 'FESTIVAL', codePrefix: 'festival_mother', name: '妇女节/母亲节·有温度的甜', remark: '女性/家庭向，锚点红糖小汤圆' },
   { label: '儿童节', campaign_type: 'FESTIVAL', codePrefix: 'festival_children', name: '儿童节·小份快乐', remark: '儿童小份抄手等 SKU' },
-  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '教师券；身份折扣另走社会贡献 TEACHER' },
+  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '教师券；身份折扣另走社会贡献「教师」' },
   { label: '重阳', campaign_type: 'FESTIVAL', codePrefix: 'festival_chongyang', name: '重阳·长寿面', remark: '长者向粥/汤圆' },
   { label: '冬至时段', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '时段套餐促销' },
   { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '每月爱心日营销发券，非身份当场折扣' },
@@ -326,7 +331,7 @@ const filteredItems = computed(() => {
   return items.value.filter((x) => x.campaign_type === typeFilter.value)
 })
 
-/** 列表/商品/新建用的有效门店 */
+/** 列表/餐品/新建用的有效门店 */
 function effectiveStoreId(): number | null | undefined {
   if (auth.isSuperAdmin) return filterStoreId.value ?? undefined
   return auth.user?.store_id ?? undefined
@@ -354,7 +359,7 @@ function storeLabel(id: number | null | undefined) {
 
 function typeLabel(code: string | null | undefined) {
   const t = CAMPAIGN_TYPES.find((x) => x.value === code)
-  return t ? t.label.split(' ')[0] : (code || '—')
+  return t?.label || code || '—'
 }
 
 function typeHint(code: string | null | undefined) {
@@ -465,7 +470,7 @@ async function ensureBoostProductsInOptions(ids: number[]) {
       const res = await api.get(`/products/${id}`)
       if (res.data?.id) productOptions.value.push(res.data)
     } catch {
-      productOptions.value.push({ id, name: `商品#${id}` })
+      productOptions.value.push({ id, name: `餐品#${id}` })
     }
   }
 }

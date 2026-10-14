@@ -162,7 +162,7 @@ TASK_CATALOG: list[dict] = [
         "id": "night_data_batch",
         "title": "关店夜间数据批处理",
         "category": "推荐",
-        "description": "北京时间默认 02:10 启动：按销量刷新热销/推荐、分类时段自动排序、整店重算商品口味画像、深度学习顾客智能口味。",
+        "description": "北京时间默认 02:10 启动：按销量刷新热销/推荐、分类时段自动排序、整店重算餐品口味画像、深度学习顾客智能口味。",
         "default_schedule": {"type": "cron", "hour": 2, "minute": 10},
     },
     {
@@ -692,7 +692,7 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def night_data_batch():
-        """关店窗慢任务：销量热销/推荐、分类时段自动排序、商品口味画像、顾客智能口味深度学习。"""
+        """关店窗慢任务：销量热销/推荐、分类时段自动排序、餐品口味画像、顾客智能口味深度学习。"""
         from app.services.night_batch_service import run_night_batch
         from app.services.scheduler_admin import redis_job_lock
 

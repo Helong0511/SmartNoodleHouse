@@ -229,7 +229,7 @@ function cartProductIds(cart: any[]) {
   return ids
 }
 
-/** 检查加入商品是否满足购买依赖（分类 OR 指定商品） */
+/** 检查加入餐品是否满足购买依赖（分类 OR 指定餐品） */
 export function checkCategoryRequire(
   product: any,
   cart: any[],
@@ -246,8 +246,8 @@ export function checkCategoryRequire(
   const pmap = productMap(products || [])
   const labels: string[] = []
   requireCats.forEach((id) => labels.push(`「${cats[id]?.name || `分类#${id}`}」类`))
-  requireProds.forEach((id) => labels.push(`「${pmap[id]?.name || `商品#${id}`}」`))
-  const name = product?.name || '该商品'
+  requireProds.forEach((id) => labels.push(`「${pmap[id]?.name || `餐品#${id}`}」`))
+  const name = product?.name || '该餐品'
   return {
     ok: false,
     message: `请先点${labels.join('或')}，再点「${name}」`,

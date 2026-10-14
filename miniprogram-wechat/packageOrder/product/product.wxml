@@ -58,7 +58,7 @@ module.exports.hasId = hasId
       <text wx:elif="{{product.is_hot}}">本店热销，顾客常点</text>
       <text wx:else>店长推荐，值得一试</text>
     </view>
-    <view class="special-tip" wx:if="{{product.no_member_discount}}">特价商品不参与会员折扣、优惠券及代金券</view>
+    <view class="special-tip" wx:if="{{product.no_member_discount}}">特价餐品不参与会员折扣、优惠券及代金券</view>
     <view class="pref-hint" wx:if="{{prefHint}}">{{prefHint}}</view>
     <view class="price">
       ¥{{displayPrice}}

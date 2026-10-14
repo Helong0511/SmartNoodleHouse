@@ -48,7 +48,7 @@
       <text a:elif="{{product.is_hot}}">本店热销，顾客常点</text>
       <text a:else>店长推荐，值得一试</text>
     </view>
-    <view class="special-tip" a:if="{{product.no_member_discount}}">特价商品不参与会员折扣、优惠券及代金券</view>
+    <view class="special-tip" a:if="{{product.no_member_discount}}">特价餐品不参与会员折扣、优惠券及代金券</view>
     <view class="pref-hint" a:if="{{prefHint}}">{{prefHint}}</view>
     <view class="price">
       ¥{{displayPrice}}

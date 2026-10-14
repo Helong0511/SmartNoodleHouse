@@ -325,7 +325,7 @@ class AbService:
         )
         paid_customers = {int(r[0]) for r in (await db.execute(paid_q)).all()}
 
-        # Task 11：24h 同顾客同商品有序漏斗（EXPOSE→CLICK→CART_ADD→ORDER_PAID）与归因 GMV
+        # Task 11：24h 同顾客同餐品有序漏斗（EXPOSE→CLICK→CART_ADD→ORDER_PAID）与归因 GMV
         funnel_map = await AbService._attribution_funnel(
             db, set(stats.keys()), date_from, date_to
         )
@@ -365,9 +365,9 @@ class AbService:
             "funnel_window_hours": FUNNEL_WINDOW_HOURS,
             "scene_scope": list(RECO_SCENES),
             "attribution_note": (
-                f"漏斗按同顾客同商品有序匹配：曝光→点击→加购各步须在前一步后"
+                f"漏斗按同顾客同餐品有序匹配：曝光→点击→加购各步须在前一步后"
                 f"{FUNNEL_WINDOW_HOURS}小时内发生；支付在加购后{FUNNEL_WINDOW_HOURS}小时内完成计为转化。"
-                f"归因GMV=归因订单中该商品明细小计合计（未扣订单级优惠）。场景范围：{ '、'.join(RECO_SCENES) }。"
+                f"归因GMV=归因订单中该餐品明细小计合计（未扣订单级优惠）。场景范围：{ '、'.join(RECO_SCENES) }。"
             ),
             "buckets": result_buckets,
         }
@@ -378,7 +378,7 @@ class AbService:
     async def _attribution_funnel(
         db, bucket_codes: set[str], date_from: datetime | None, date_to: datetime | None
     ) -> dict[str, dict[str, Any]]:
-        """对每个桶按 (顾客, 商品) 维度做有序漏斗匹配并汇总归因 GMV。
+        """对每个桶按 (顾客, 餐品) 维度做有序漏斗匹配并汇总归因 GMV。
 
         起点 EXPOSE 必须落在查询窗口 [date_from, date_to] 内；后续 CLICK/CART_ADD
         允许越出窗口右端一个 24h 步长，ORDER_PAID 允许两个步长，保证边界链路可归因。

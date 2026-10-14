@@ -26,7 +26,7 @@ class OrderCreate(BaseModel):
     items: list[OrderItemCreate] = Field(..., min_length=1)
     remark: str | None = Field(default=None, max_length=500)
     channel: str | None = Field(default=None, max_length=32)
-    # 堂食默认；打包外带时计商品餐盒费 box_price
+    # 堂食默认；打包外带时计餐品餐盒费 box_price
     need_pack: bool = False
     dining_type: str | None = Field(
         default=None,
@@ -100,7 +100,7 @@ class PosBindCustomer(BaseModel):
     social_rule_id: int | None = Field(default=None, description="指定公益规则 ID（可选）")
 
 class PosAddItems(BaseModel):
-    """收银台加菜（往已有待支付订单追加商品）。"""
+    """收银台加菜（往已有待支付订单追加餐品）。"""
 
     model_config = ConfigDict(extra="forbid")
 

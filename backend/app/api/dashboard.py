@@ -1,4 +1,4 @@
-"""数据概览：今日/昨日/本月统计 + 门店分项 + 商品销量 + 支付/外卖。"""
+"""数据概览：今日/昨日/本月统计 + 门店分项 + 餐品销量 + 支付/外卖。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request

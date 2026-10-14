@@ -29,7 +29,7 @@
             <el-table-column label="状态" width="110" align="center">
                 <template #default="{ row }">
                     <el-tag size="small" :type="STATUS_TAG_TYPES[row.status] || 'info'">
-                        {{ STATUS_LABELS[row.status] || row.status }}
+                        {{ STATUS_LABELS[row.status] || '—' }}
                     </el-tag>
                 </template>
             </el-table-column>
@@ -70,6 +70,7 @@ const STATUS_LABELS: Record<string, string> = {
     CALLED: '已叫号',
     SEATED: '已入座',
     CANCELLED: '已取消',
+    EXPIRED: '已过号',
 }
 const STATUS_TAG_TYPES: Record<string, string> = {
     WAITING: 'warning',

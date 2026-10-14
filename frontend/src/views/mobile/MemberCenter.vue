@@ -69,7 +69,7 @@
       <div v-for="o in orders" :key="o.id" class="order">
         <div class="row">
           <span class="ono">{{ o.order_no }}</span>
-          <el-tag size="small" type="warning">{{ o.status_label || o.status }}</el-tag>
+          <el-tag size="small" type="warning">{{ orderStatusText(o) }}</el-tag>
         </div>
         <div class="summary">{{ o.item_summary }}</div>
         <div class="row foot">
@@ -98,6 +98,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { setCustomerToken } from '@/utils/customerAuth'
+import { ORDER_STATUS, label } from '@/utils/labels'
+
+function orderStatusText(o: any) {
+  return label(ORDER_STATUS, o?.status, o?.status_label || '—')
+}
 
 const faceEnabled = ref(false)
 const profile = ref<any>(null)
@@ -199,7 +204,7 @@ async function reorder(orderId: number) {
     const res = await api.post(`/orders/${orderId}/reorder`)
     const items = res.data.cart_items || []
     if (!items.length) {
-      ElMessage.warning('没有可复购商品')
+      ElMessage.warning('没有可复购餐品')
       return
     }
     const cart = items.map((it: any) => ({

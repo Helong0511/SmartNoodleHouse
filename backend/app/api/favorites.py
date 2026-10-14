@@ -17,7 +17,7 @@ async def list_favorites(
     customer: CurrentCustomer,
     store_id: int | None = None,
 ):
-    """我的收藏列表：按收藏时间倒序；商品已删除（行不存在）的跳过。"""
+    """我的收藏列表：按收藏时间倒序；餐品已删除（行不存在）的跳过。"""
     stmt = (
         select(CustomerFavoriteProduct, Product)
         .join(Product, Product.id == CustomerFavoriteProduct.product_id)
@@ -46,10 +46,10 @@ async def list_favorites(
 
 @router.post("/favorites/{product_id}")
 async def add_favorite(product_id: int, request: Request, db: DbSession, customer: CurrentCustomer):
-    """收藏菜品：商品须存在且上架；已收藏直接返回（幂等）。"""
+    """收藏菜品：餐品须存在且上架；已收藏直接返回（幂等）。"""
     product = await db.get(Product, product_id)
     if not product or product.status != "ON_SALE":
-        raise AppException(40404, "商品不存在或已下架")
+        raise AppException(40404, "餐品不存在或已下架")
     existing = (
         await db.execute(
             select(CustomerFavoriteProduct).where(

@@ -76,7 +76,7 @@ function bestSocialHint(codes) {
     }
   }
   if (!bestCode) return null
-  return { code: bestCode, rate: bestRate, label: SOCIAL_LABEL[bestCode] || bestCode, fromPreview: false }
+  return { code: bestCode, rate: bestRate, label: SOCIAL_LABEL[bestCode] || '公益优惠', fromPreview: false }
 }
 
 function socialSubsidyOf(hint, discountable) {
@@ -721,7 +721,7 @@ Page({
         this._socialHint = {
           code,
           rate: Number.isFinite(rate) ? rate : 1,
-          label: prev.rule_name || SOCIAL_LABEL[code] || code,
+          label: prev.rule_name || SOCIAL_LABEL[code] || '公益优惠',
           subsidy: Number.isFinite(subsidy) ? subsidy : undefined,
           fromPreview: true
         }
@@ -1374,14 +1374,14 @@ Page({
       } catch (e) {
         my.alert({
           title: '无法校验规格',
-          content: (e && e.message) || '商品信息加载失败，请检查网络后重试'
+          content: (e && e.message) || '餐品信息加载失败，请检查网络后重试'
         })
         return
       }
       if (!Array.isArray(productItems) || !productItems.length) {
         my.alert({
           title: '无法校验规格',
-          content: '未能加载商品规格，请返回菜单刷新后重试'
+          content: '未能加载餐品规格，请返回菜单刷新后重试'
         })
         return
       }
@@ -1390,13 +1390,13 @@ Page({
         const first = optionIssues[0]
         const hint = optionIssues.length === 1
           ? `「${first.name}」缺少必选规格：${first.group}`
-          : `有 ${optionIssues.length} 件商品缺少必选规格，请返回商品页重新选择`
-        my.alert({ title: '无法下单', content: `${hint}。请从菜单进入商品详情，选完面量/辣度等后再加入购物车。` })
+          : `有 ${optionIssues.length} 件餐品缺少必选规格，请返回餐品页重新选择`
+        my.alert({ title: '无法下单', content: `${hint}。请从菜单进入餐品详情，选完面量/辣度等后再加入购物车。` })
         return
       }
       const catIssues = cartUtil.validateCategoryRequires(cart, productItems)
       if (catIssues.length) {
-        my.alert({ title: '无法下单', content: catIssues[0].message || '加料类商品须先点主餐' })
+        my.alert({ title: '无法下单', content: catIssues[0].message || '加料类餐品须先点主餐' })
         return
       }
       let tableToken = await this._ensureTableTokenForSubmit()

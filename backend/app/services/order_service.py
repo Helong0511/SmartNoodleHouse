@@ -45,7 +45,7 @@ class OrderReorderService:
             (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id))).scalars()
         )
         if not items:
-            raise AppException(40040, "该订单没有可复购商品")
+            raise AppException(40040, "该订单没有可复购餐品")
 
         item_ids = [i.id for i in items]
         opts = list(
@@ -93,7 +93,7 @@ class OrderReorderService:
                     {
                         "product_id": item.product_id,
                         "name": snap_name,
-                        "reason": "商品已下架或不可用",
+                        "reason": "餐品已下架或不可用",
                     }
                 )
                 continue
@@ -185,7 +185,7 @@ class OrderReorderService:
             )
 
         if not cart_items:
-            raise AppException(40041, "没有可复购的在售商品，请重新点餐")
+            raise AppException(40041, "没有可复购的在售餐品，请重新点餐")
 
         return {
             "order_id": order.id,
@@ -211,11 +211,11 @@ class OrderPriceCalculator:
         customer_id: int | None = None,
     ) -> list[tuple[Product, Decimal, list[tuple[OptionGroup, Option, int]], int]]:
         if not items_data:
-            raise AppException(40000, "订单商品不能为空")
+            raise AppException(40000, "订单餐品不能为空")
         if len(items_data) > OrderPriceCalculator.MAX_ITEMS:
             raise AppException(40000, f"单次下单最多 {OrderPriceCalculator.MAX_ITEMS} 个品项")
         if store_id is None or int(store_id) <= 0:
-            raise AppException(40008, "计价须指定门店，禁止跨店商品")
+            raise AppException(40008, "计价须指定门店，禁止跨店餐品")
 
         store_id = int(store_id)
         product_ids = [int(i["product_id"]) for i in items_data]
@@ -241,9 +241,9 @@ class OrderPriceCalculator:
             }
             cross = [pid for pid in set(product_ids) if pid in any_products and int(any_products[pid].store_id) != store_id]
             if cross:
-                raise AppException(40002, f"商品不属于本门店，禁止跨店下单: {sorted(cross)}")
+                raise AppException(40002, f"餐品不属于本门店，禁止跨店下单: {sorted(cross)}")
             missing = set(product_ids) - set(products)
-            raise AppException(40002, f"商品不可用: {sorted(missing)}")
+            raise AppException(40002, f"餐品不可用: {sorted(missing)}")
 
         # 限时/生日专属：不可点则拒绝（防改请求偷加）
         from app.models import Customer
@@ -266,7 +266,7 @@ class OrderPriceCalculator:
                     f"「{p.name}」今日不可点（限时或生日专属）",
                 )
 
-        # 购买依赖（商品级优先，否则继承分类默认；分类 OR 指定商品）
+        # 购买依赖（餐品级优先，否则继承分类默认；分类 OR 指定餐品）
         cat_ids = list({p.category_id for p in products.values() if p.category_id})
         cats_map: dict[int, ProductCategory] = {}
         if cat_ids:
@@ -282,7 +282,7 @@ class OrderPriceCalculator:
                 ).scalars()
             }
             if len(cats_map) != len(set(cat_ids)):
-                raise AppException(40002, "商品分类不属于本门店")
+                raise AppException(40002, "餐品分类不属于本门店")
         cart_cat_ids = {int(p.category_id) for p in products.values() if p.category_id}
         cart_product_ids = set(products.keys())
 
@@ -401,7 +401,7 @@ class OrderPriceCalculator:
                     raise AppException(40004, f"规格选项无效: {oid}")
                 group = groups_map.get(opt.group_id)
                 if not group or group.id not in bound_groups:
-                    raise AppException(40005, f"规格不属于该商品: {oid}")
+                    raise AppException(40005, f"规格不属于该餐品: {oid}")
                 selected_by_group.setdefault(group.id, []).append(opt)
 
             for gid, group in bound_groups.items():
@@ -446,19 +446,19 @@ class OrderPriceCalculator:
         deduct_stock: bool = True,
         need_pack: bool = False,
     ) -> tuple[Decimal, Decimal, Decimal]:
-        """返回 (商品小计, 打包费, 可参与会员折扣的小计)。打包费 = Σ(商品 box_price × 数量)，仅 need_pack 时计。"""
+        """返回 (餐品小计, 打包费, 可参与会员折扣的小计)。打包费 = Σ(餐品 box_price × 数量)，仅 need_pack 时计。"""
         rows = await OrderPriceCalculator.calculate_items_batch(
             db,
             items_data,
             store_id=order.store_id,
             customer_id=int(order.customer_id) if order.customer_id else None,
         )
-        # P1-1 纵深防御：最终断言所有商品门店与订单门店一致（calculate_items_batch 已校验，此处为第二道防线）
+        # P1-1 纵深防御：最终断言所有餐品门店与订单门店一致（calculate_items_batch 已校验，此处为第二道防线）
         if rows and order.store_id is not None:
             order_store = int(order.store_id)
             mismatched = [int(p.id) for p, _, _, _ in rows if p.store_id is not None and int(p.store_id) != order_store]
             if mismatched:
-                raise AppException(40002, f"订单门店与商品门店不一致: product_ids={mismatched}")
+                raise AppException(40002, f"订单门店与餐品门店不一致: product_ids={mismatched}")
         if deduct_stock:
             await deduct_for_order_items(
                 db,

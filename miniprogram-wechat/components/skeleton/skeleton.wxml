@@ -31,7 +31,7 @@
     </view>
   </view>
 
-  <!-- 商品详情骨架 -->
+  <!-- 餐品详情骨架 -->
   <view class="sk-product-detail" wx:elif="{{type === 'product'}}">
     <view class="sk-block sk-hero"></view>
     <view class="sk-pd-body">

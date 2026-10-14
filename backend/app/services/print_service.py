@@ -104,9 +104,9 @@ class OrderPrintContext:
         store: 门店（取店名印票头）
         table: 桌台（堂食桌名）
         delivery: 外卖单（有则按外卖排版）
-        items: 订单商品行
-        options_by_item: 商品行 id → 口味/加料选项列表
-        no_cooking_by_product: 商品 id → 是否「无需制作」（True 则制作单可跳过该菜）
+        items: 订单餐品行
+        options_by_item: 餐品行 id → 口味/加料选项列表
+        no_cooking_by_product: 餐品 id → 是否「无需制作」（True 则制作单可跳过该菜）
     """
 
     order: Order
@@ -181,13 +181,13 @@ def _kitchen_item_name_qty_line(name: str, qty: int, *, cols: int = 24) -> str:
     cols=24：倍高倍宽时 80mm 纸大约能排这么多半角列；改字号/机型可调此参数。
     菜名过长会按显示宽度截断，保证「x1」仍能印在同一行右侧。
     """
-    left = (name or "商品").strip() or "商品"
+    left = (name or "餐品").strip() or "餐品"
     right = f"x{max(1, int(qty or 1))}"
     max_left = max(4, cols - _print_text_width(right) - 1)
     # 超长截断（按显示宽度，不是按字符个数）
     while left and _print_text_width(left) > max_left:
         left = left[:-1]
-    left = left or "商品"
+    left = left or "餐品"
     gap = max(1, cols - _print_text_width(left) - _print_text_width(right))
     body = f"{left}{' ' * gap}{right}"
     return f"<B2>{_escape_print_text(body)}</B2>"
@@ -362,7 +362,7 @@ def build_ticket_content(
     ]
 
     if ticket_type == TICKET_KITCHEN:
-        # 制作单：默认跳过「无需制作」商品；若筛完为空则退回全部（避免空白票）
+        # 制作单：默认跳过「无需制作」餐品；若筛完为空则退回全部（避免空白票）
         kitchen_items = [
             item
             for item in ctx.items
@@ -371,7 +371,7 @@ def build_ticket_content(
         if not kitchen_items:
             kitchen_items = ctx.items
         for item in kitchen_items:
-            name = item.product_name_snapshot or "商品"
+            name = item.product_name_snapshot or "餐品"
             qty = int(item.quantity or 1)
             # 菜名 x数量（加大）
             lines.append(_kitchen_item_name_qty_line(name, qty))
@@ -459,7 +459,7 @@ class PrintService:
         order = await db.get(Order, order_id)
         if not order:
             return None
-        # 商品行（按 id 稳定排序，保证补打顺序一致）
+        # 餐品行（按 id 稳定排序，保证补打顺序一致）
         items = list(
             (await db.execute(select(OrderItem).where(OrderItem.order_id == order_id).order_by(OrderItem.id))).scalars().all()
         )
@@ -471,7 +471,7 @@ class PrintService:
                 await db.execute(select(OrderItemOption).where(OrderItemOption.order_item_id.in_(item_ids)))
             ).scalars().all():
                 opts_by_item.setdefault(opt.order_item_id, []).append(opt)
-        # 商品「无需制作」标记，制作单用来过滤
+        # 餐品「无需制作」标记，制作单用来过滤
         product_ids = list({int(i.product_id) for i in items if i.product_id})
         no_cooking_by_product: dict[int, bool] = {}
         if product_ids:

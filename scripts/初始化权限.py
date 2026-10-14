@@ -19,10 +19,10 @@ from app.core.database import AsyncSessionLocal
 from app.models import Permission, Role, RolePermission
 
 PERMISSIONS = [
-    ("product:read", "查看商品", "product"),
-    ("product:create", "创建商品", "product"),
-    ("product:update", "更新商品", "product"),
-    ("product:delete", "删除商品", "product"),
+    ("product:read", "查看餐品", "product"),
+    ("product:create", "创建餐品", "product"),
+    ("product:update", "更新餐品", "product"),
+    ("product:delete", "删除餐品", "product"),
     ("order:read", "查看订单", "order"),
     ("order:update", "更新订单", "order"),
     ("customer:read", "查看顾客", "customer"),

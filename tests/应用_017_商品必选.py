@@ -25,7 +25,7 @@ async def main() -> None:
             comment = (
                 "须先点过的分类 id（OR）；NULL=继承所属分类默认"
                 if col == "require_category_ids"
-                else "须先点过的指定商品 id（OR）"
+                else "须先点过的指定餐品 id（OR）"
             )
             await conn.execute(
                 text(

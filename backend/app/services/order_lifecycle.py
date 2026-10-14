@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 async def order_all_no_cooking(db: AsyncSession, order_id: int) -> bool:
-    """订单内全部明细均为免烹饪商品（如纯卤味单）。"""
+    """订单内全部明细均为免烹饪餐品（如纯卤味单）。"""
     items = list((await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))).scalars().all())
     if not items:
         return False
@@ -88,7 +88,7 @@ async def apply_order_status(
         raise AppException(40026, tip)
     if kind == "STAFF" and target == "READY" and old in ("PAID", "CONFIRMED"):
         if not await order_all_no_cooking(db, order.id):
-            raise AppException(40027, "订单含需烹饪商品，请按「开始制作」流程操作")
+            raise AppException(40027, "订单含需烹饪餐品，请按「开始制作」流程操作")
     if kind == "STAFF":
         assert_staff_transition(old, target)
     elif kind == "PAYMENT":
@@ -215,7 +215,7 @@ async def _restore_order_stock(db: AsyncSession, order: Order) -> None:
     from app.services.stock_service import restore_stock
 
     items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
-    # 按 product_id 聚合数量，避免同商品多次调用 restore_stock 产生 N+1
+    # 按 product_id 聚合数量，避免同餐品多次调用 restore_stock 产生 N+1
     aggregated: dict[int, int] = {}
     for it in items:
         pid = int(it.product_id)

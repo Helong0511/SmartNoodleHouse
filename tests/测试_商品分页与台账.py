@@ -1,4 +1,4 @@
-"""商品列表 page_size 封顶；财务账本只读列表。"""
+"""餐品列表 page_size 封顶；财务账本只读列表。"""
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch

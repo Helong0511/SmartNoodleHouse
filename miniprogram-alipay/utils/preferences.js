@@ -1,4 +1,4 @@
-/** 智能口味：加载、展示、商品页预选 */
+/** 智能口味：加载、展示、餐品页预选 */
 
 const auth = require('./auth')
 
@@ -225,7 +225,7 @@ function productPrefMatches(product, prefs) {
   return false
 }
 
-/** 本商品可匹配的智能口味标签（菜单 + 加购确认用；多选组如加料合并为「加料·A、B、C」） */
+/** 本餐品可匹配的智能口味标签（菜单 + 加购确认用；多选组如加料合并为「加料·A、B、C」） */
 function prefLabelsForProduct(product, prefs) {
   const labels = []
   if (!product || !prefs || !prefs.length) return labels

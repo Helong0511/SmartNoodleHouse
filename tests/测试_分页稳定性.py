@@ -1,8 +1,8 @@
 """分页稳定性回归：非唯一排序键 OFFSET 翻页重复/丢行；门店停售覆盖导致 total 虚高。
 
 覆盖 P0 修复：
-1. 订单/商品在 created_at 或 sort_order 相同的情况下，翻页必须不重复、不丢行（id 兜底）。
-2. 商品列表在门店有停售覆盖时，total 必须与实际返回条数一致，每页取满，末页不留空白。
+1. 订单/餐品在 created_at 或 sort_order 相同的情况下，翻页必须不重复、不丢行（id 兜底）。
+2. 餐品列表在门店有停售覆盖时，total 必须与实际返回条数一致，每页取满，末页不留空白。
 """
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -95,7 +95,7 @@ async def test_orders_same_timestamp_pagination_no_dup_or_loss(db_session: Async
 
 @pytest.mark.asyncio
 async def test_products_same_sort_order_pagination_stable(db_session: AsyncSession, store):
-    """25 个商品 sort_order 全为默认 0：翻页不重不漏，同 sort_order 内按 id 升序。"""
+    """25 个餐品 sort_order 全为默认 0：翻页不重不漏，同 sort_order 内按 id 升序。"""
     from app.api.deps import get_db, get_optional_staff_user
     from app.main import app
 
@@ -109,7 +109,7 @@ async def test_products_same_sort_order_pagination_stable(db_session: AsyncSessi
                 store_id=store.id,
                 category_id=cat.id,
                 product_no=f"PAGE-P-{i:03d}",
-                name=f"分页商品{i}",
+                name=f"分页餐品{i}",
                 price=Decimal("12.00"),
                 status="ON_SALE",
                 stock=99,
@@ -170,14 +170,14 @@ async def test_products_store_stop_override_total_matches_rows(db_session: Async
     cat = ProductCategory(id=8020, category_no="PAGE-C2", store_id=store.id, name="停售分类", sort_order=0, status=1)
     db_session.add(cat)
     await db_session.flush()
-    for i in range(1, 31):  # 30 个商品
+    for i in range(1, 31):  # 30 个餐品
         db_session.add(
             Product(
                 id=8300 + i,
                 store_id=store.id,
                 category_id=cat.id,
                 product_no=f"PAGE-S-{i:03d}",
-                name=f"停售测试商品{i}",
+                name=f"停售测试餐品{i}",
                 price=Decimal("15.00"),
                 status="ON_SALE",
                 stock=99,

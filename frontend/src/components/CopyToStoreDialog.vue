@@ -119,7 +119,7 @@ async function submit() {
           : d.option_groups?.skipped_shared
             ? `（共享沿用${d.option_groups.skipped_shared}）`
             : ''),
-      `商品 +${d.products?.created || 0}/跳过${d.products?.skipped || 0}`,
+      `餐品 +${d.products?.created || 0}/跳过${d.products?.skipped || 0}`,
     ]
     ElMessage.success(`复制完成：${bits.join('；')}`)
     if ((d.warnings || []).length) {

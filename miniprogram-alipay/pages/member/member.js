@@ -298,7 +298,11 @@ Page({
       VOLUNTEER: '志愿者'
     }
     ;(this.data.socialApplyTypes || []).forEach((t) => {
-      if (t && t.code) map[String(t.code).toUpperCase()] = t.name || map[String(t.code).toUpperCase()] || t.code
+      if (t && t.code) {
+        const code = String(t.code).toUpperCase()
+        const name = (t.name && String(t.name).trim()) || map[code]
+        if (name) map[code] = name
+      }
     })
     return map
   },
@@ -308,8 +312,8 @@ Page({
       const res = await api.get('/social-benefits/identity-types', {}, false)
       const items = ((res && res.items) || []).map((t) => ({
         code: String((t && t.code) || '').toUpperCase(),
-        name: (t && t.name) || String((t && t.code) || '')
-      })).filter((t) => t.code)
+        name: (t && t.name) || ''
+      })).filter((t) => t.code && t.name)
       this.setData({ socialApplyTypes: items })
     } catch (_) {
       if (!(this.data.socialApplyTypes || []).length) {
@@ -350,8 +354,8 @@ Page({
         ...item,
         identity_code: code,
         status: st,
-        displayLabel: labelMap[code] || code,
-        statusLabel: statusMap[st] || st
+        displayLabel: labelMap[code] || '公益身份',
+        statusLabel: statusMap[st] || '—'
       }
     })
     const active = list.find((i) => i.status === 'ACTIVE')
@@ -434,7 +438,7 @@ Page({
       })
       const st = (row && row.status) || 'PENDING'
       my.showToast({
-        content: st === 'ACTIVE' ? `${labelMap[code] || code}已生效` : `${labelMap[code] || code}已提交，待店员审核`,
+        content: st === 'ACTIVE' ? `${labelMap[code] || '公益身份'}已生效` : `${labelMap[code] || '公益身份'}已提交，待店员审核`,
         type: 'success',
         duration: 2500
       })

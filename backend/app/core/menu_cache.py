@@ -1,6 +1,6 @@
 """门店菜单聚合读侧缓存（Task 12）。
 
-- bundle：分类 + 在售商品一次成型的 JSON，TTL 60s 兜底，写路径主动失效。
+- bundle：分类 + 在售餐品一次成型的 JSON，TTL 60s 兜底，写路径主动失效。
 - version：门店单调递增版本戳（INCR），客户端携带相同版本时返回 changed:false 小响应。
 - 缓存击穿：SET NX EX 互斥锁，避免并发重建压垮 DB。
 - 缓存雪崩：TTL 加 ±20% 随机偏移。
@@ -73,7 +73,7 @@ async def _delayed_delete(key: str, delay: float) -> None:
 
 async def get_menu_bundle(store_id: int) -> dict[str, Any] | None:
     """读取菜单缓存。缓存穿透防护：无额外空值标记，因 build_menu_bundle
-    对不存在的 store 返回空分类/空商品的合法 bundle，空 bundle 本身会被缓存。"""
+    对不存在的 store 返回空分类/空餐品的合法 bundle，空 bundle 本身会被缓存。"""
     try:
         r = await get_redis()
         raw = await r.get(menu_bundle_key(store_id))

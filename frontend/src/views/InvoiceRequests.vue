@@ -39,7 +39,7 @@
             <el-table-column label="状态" width="100">
                 <template #default="{ row }">
                     <el-tag size="small" :type="STATUS_TAG_TYPES[row.status] || 'info'">
-                        {{ STATUS_LABELS[row.status] || row.status }}
+                        {{ STATUS_LABELS[row.status] || '—' }}
                     </el-tag>
                 </template>
             </el-table-column>

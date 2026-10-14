@@ -1,4 +1,4 @@
-"""P0-1: 跨门店商品/规格校验 — 验证 calculate_items_batch 中 option group store_id 校验存在。"""
+"""P0-1: 跨门店餐品/规格校验 — 验证 calculate_items_batch 中 option group store_id 校验存在。"""
 from __future__ import annotations
 
 import inspect
@@ -24,7 +24,7 @@ def test_product_store_id_filter_exists():
     """验证 Product 查询已按 store_id 过滤（原有逻辑）。"""
     source = inspect.getsource(OrderPriceCalculator.calculate_items_batch)
     assert "Product.store_id == store_id" in source
-    assert "商品不属于本门店" in source or "禁止跨店下单" in source
+    assert "餐品不属于本门店" in source or "禁止跨店下单" in source
 
 
 def test_calculate_items_batch_requires_store_id():

@@ -19,7 +19,7 @@ export function codeHint(kind: CodeKind, prefix: string): string {
   if (kind === 'option') return `选项例：${p}-Liang-XiaoWan（可只填逻辑码）`
   if (kind === 'group') return `规格组例：${p}-Liang（总部用 0000）`
   if (kind === 'category') return `分类例：${p}-MianYangMiFen`
-  return `商品例：${p}-Mian-NiuRouMian（前缀-分类-商品）`
+  return `餐品例：${p}-Mian-NiuRouMian（前缀-分类-餐品）`
 }
 
 type SuggestParams = {
@@ -28,7 +28,7 @@ type SuggestParams = {
   store_id?: number | null
   group_id?: number | null
   category_id?: number | null
-  /** 商品不选门店时用总部前缀 0000 */
+  /** 餐品不选门店时用总部前缀 0000 */
   hq?: boolean
 }
 

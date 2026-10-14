@@ -78,7 +78,7 @@
 
 - 后端 `calculate_items_batch`：
   - 校验 OptionGroup.store_id 与订单门店一致（P1-109）。
-  - 重算商品价格、规格加价、优惠券、会员折扣、打包费。
+  - 重算餐品价格、规格加价、优惠券、会员折扣、打包费。
   - 客户端传入金额仅作展示，不参与扣款。
 - 金额统一通过 `app.core.response.money` 转 Decimal(scale=2)，避免浮点误差。
 

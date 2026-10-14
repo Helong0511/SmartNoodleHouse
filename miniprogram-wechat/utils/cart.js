@@ -162,7 +162,7 @@ function itemKey(item) {
   return `${item.product_id}:${ids}`
 }
 
-/** 合并同商品同规格，返回新数组 */
+/** 合并同餐品同规格，返回新数组 */
 function mergeCartItem(cart, entry) {
   const list = [...(cart || [])]
   const key = itemKey(entry)
@@ -251,13 +251,13 @@ function calcDiscountableSubtotal(cart) {
   return Number(fromFen(fen))
 }
 
-/** 会员折后可用于优惠券的商品小计（不含特价） */
+/** 会员折后可用于优惠券的餐品小计（不含特价） */
 function calcCouponEligibleSubtotal(cart, memberDiscount) {
   const eligibleFen = Math.max(0, toFen(calcDiscountableSubtotal(cart)) - toFen(memberDiscount))
   return Number(fromFen(eligibleFen))
 }
 
-/** 可用于代金券门槛/面额判断的基数（不含特价商品小计，可选含打包费） */
+/** 可用于代金券门槛/面额判断的基数（不含特价餐品小计，可选含打包费） */
 function calcVoucherEligiblePayable(couponEligible, couponDiscount, packingFee, needPack) {
   let fen = Math.max(0, toFen(couponEligible) - toFen(couponDiscount))
   if (needPack) fen += toFen(packingFee)
@@ -276,14 +276,14 @@ function enrichCartFromProducts(list, products) {
     if (p) {
       item.no_member_discount = !!p.no_member_discount
       if (p.main_image) item.main_image = p.main_image
-      // 优先用商品主图路径（稳定），避免购物车里过期的临时本地路径
+      // 优先用餐品主图路径（稳定），避免购物车里过期的临时本地路径
       if (p.main_image) item._productUpdatedAt = p.updated_at || ''
     }
     return item
   })
 }
 
-/** 检查购物车是否满足商品必选规格（与后端下单校验一致） */
+/** 检查购物车是否满足餐品必选规格（与后端下单校验一致） */
 function validateRequiredOptions(cart, products) {
   const map = {}
   ;(products || []).forEach((p) => {
@@ -349,7 +349,7 @@ function categoryMap(categories) {
   return map
 }
 
-/** 有效依赖：商品已带 effective 字段；若皆空则回退分类默认 */
+/** 有效依赖：餐品已带 effective 字段；若皆空则回退分类默认 */
 function resolveProductRequires(product, categories) {
   if (!product) return { cats: [], prods: [] }
   let cats = normalizeRequireCategoryIds(product.require_category_ids)
@@ -386,7 +386,7 @@ function cartProductIds(cart) {
 }
 
 /**
- * 检查加入商品是否满足购买依赖（分类 OR 指定商品）。
+ * 检查加入餐品是否满足购买依赖（分类 OR 指定餐品）。
  * @returns {{ ok: boolean, message: string }}
  */
 function checkCategoryRequire(product, cart, products, categories) {
@@ -402,9 +402,9 @@ function checkCategoryRequire(product, cart, products, categories) {
   requireCats.forEach((id) => labels.push(`「${(cmap[id] && cmap[id].name) || ('分类#' + id)}」类`))
   requireProds.forEach((id) => {
     const p = pmap[id]
-    labels.push(`「${(p && p.name) || ('商品#' + id)}」`)
+    labels.push(`「${(p && p.name) || ('餐品#' + id)}」`)
   })
-  const name = (product && product.name) || '该商品'
+  const name = (product && product.name) || '该餐品'
   return {
     ok: false,
     message: `请先点${labels.join('或')}，再点「${name}」`

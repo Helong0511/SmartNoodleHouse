@@ -204,7 +204,7 @@ async def _validate_require_product_ids(
     if not ids:
         return []
     if self_id is not None and self_id in ids:
-        raise AppException(40001, "商品不能依赖自身")
+        raise AppException(40001, "餐品不能依赖自身")
     rows = list(
         (
             await db.execute(
@@ -218,7 +218,7 @@ async def _validate_require_product_ids(
     found = {p.id for p in rows}
     missing = [i for i in ids if i not in found]
     if missing:
-        raise AppException(40001, f"依赖商品不存在或不属于本店: {missing}")
+        raise AppException(40001, f"依赖餐品不存在或不属于本店: {missing}")
     return ids
 
 
@@ -245,7 +245,7 @@ async def _clear_main_product_images(db: DbSession, product_id: int) -> None:
 
 
 def _assert_safe_product_image_url(url: str | None) -> str | None:
-    """商品主图仅允许本站 uploads 相对路径或同源 /uploads/；禁止任意外链/内网。"""
+    """餐品主图仅允许本站 uploads 相对路径或同源 /uploads/；禁止任意外链/内网。"""
     if url is None:
         return None
     s = str(url).strip()
@@ -253,7 +253,7 @@ def _assert_safe_product_image_url(url: str | None) -> str | None:
         return None
     if s.startswith("/uploads/") or s.startswith("uploads/"):
         if ".." in s or "\\" in s:
-            raise AppException(40015, "商品图片路径非法")
+            raise AppException(40015, "餐品图片路径非法")
         return s if s.startswith("/") else f"/{s}"
     parsed = urlparse(s)
     if parsed.scheme in ("http", "https") and parsed.hostname:
@@ -262,9 +262,9 @@ def _assert_safe_product_image_url(url: str | None) -> str | None:
             raise AppException(40015, "不允许使用内网图片地址")
         path = parsed.path or ""
         if not path.startswith("/uploads/"):
-            raise AppException(40015, "商品图片须为站内 uploads 地址，请先上传")
+            raise AppException(40015, "餐品图片须为站内 uploads 地址，请先上传")
         return path
-    raise AppException(40015, "商品图片地址非法，请使用上传接口")
+    raise AppException(40015, "餐品图片地址非法，请使用上传接口")
 
 
 async def _set_main_product_image(db: DbSession, product: Product, url: str | None) -> None:
@@ -283,7 +283,7 @@ async def _set_main_product_image(db: DbSession, product: Product, url: str | No
         )
 
 
-router = APIRouter(tags=["商品"])
+router = APIRouter(tags=["餐品"])
 
 
 class StoreStockUpsert(BaseModel):
@@ -307,8 +307,8 @@ async def suggest_menu_code(
     """根据中文名生成默认编码（拼音音节首字母大写 + 门店前缀）。
 
     kind: product | category | group | option
-    product 时可传 category_id，生成 {前缀}-{分类逻辑}-{商品逻辑}
-    hq=true 或不传 store_id（超管）时商品/分类前缀用 0000
+    product 时可传 category_id，生成 {前缀}-{分类逻辑}-{餐品逻辑}
+    hq=true 或不传 store_id（超管）时餐品/分类前缀用 0000
     """
     from app.services.option_code import (
         HQ_STORE_PREFIX,
@@ -386,12 +386,12 @@ async def suggest_menu_code(
 
 @router.post("/menu/copy-to-store", dependencies=[require_permission("product:create")])
 async def copy_menu_to_store(data: MenuCopyRequest, request: Request, db: DbSession, user: CurrentUser):
-    """批量将分类/规格组/商品复制到另一门店（超管跨店；店员仅本店→本店无意义时拒绝）。
+    """批量将分类/规格组/餐品复制到另一门店（超管跨店；店员仅本店→本店无意义时拒绝）。
 
-    - 总部共享规格组无需复制，商品会直接沿用原组 id
+    - 总部共享规格组无需复制，餐品会直接沿用原组 id
     - 目标店已有同名分类 / 同 code 门店规格组：复用
-    - 商品编号冲突：on_product_conflict=skip|rename
-    - 复制商品时自动带上所属分类与绑定的私有规格组
+    - 餐品编号冲突：on_product_conflict=skip|rename
+    - 复制餐品时自动带上所属分类与绑定的私有规格组
     """
     assert_store_access(user, data.target_store_id)
     # 校验源数据门店权限
@@ -930,10 +930,10 @@ async def list_products(
     store_id: int | None = None,
     sale_visible: bool = False,
 ):
-    """商品列表。传 store_id 时只看该店商品，并合并分店库存覆盖（本店停售剔除）。
+    """餐品列表。传 store_id 时只看该店餐品，并合并分店库存覆盖（本店停售剔除）。
 
     员工登录时强制门店隔离（非超管忽略越权 store_id）；小程序/H5 无员工令牌时仍可按 store_id 公开查询。
-    公开查询或 sale_visible=1（收银点餐）时按限时/生日规则过滤；后台商品管理不加过滤。
+    公开查询或 sale_visible=1（收银点餐）时按限时/生日规则过滤；后台餐品管理不加过滤。
     """
     if staff is not None:
         store_id = require_bound_store(staff, store_id)
@@ -1007,7 +1007,7 @@ async def list_products(
         kw = keyword.strip()
         q = q.where((Product.name.contains(kw)) | (Product.product_no.contains(kw)))
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
-    # sort_order 大量商品默认值相同，必须补 id 兜底保证翻页稳定
+    # sort_order 大量餐品默认值相同，必须补 id 兜底保证翻页稳定
     result = await db.execute(
         q.order_by(Product.sort_order, Product.id)
         .offset((page - 1) * page_size)
@@ -1091,7 +1091,7 @@ async def list_products(
                 "has_options": p.id in has_options,
             }
         )
-    # 公开菜单 / 收银点餐：按限时与生日过滤；后台商品管理（员工且未声明 sale_visible）不过滤
+    # 公开菜单 / 收银点餐：按限时与生日过滤；后台餐品管理（员工且未声明 sale_visible）不过滤
     apply_vis = staff is None or bool(sale_visible)
     if apply_vis:
         from app.utils.birthday import is_birthday_today, normalize_calendar, today_beijing
@@ -1129,7 +1129,7 @@ async def list_store_stocks(
     page_size: int = 100,
     keyword: str | None = None,
 ):
-    """分店库存覆盖列表（含品牌商品名）。keyword 匹配商品编号/名称。"""
+    """分店库存覆盖列表（含品牌餐品名）。keyword 匹配餐品编号/名称。"""
     sid = require_bound_store(user, store_id)
     if sid is None:
         raise AppException(40060, "请指定门店")
@@ -1193,9 +1193,9 @@ async def upsert_store_stock(
     assert_store_access(user, sid)
     product = await db.get(Product, product_id)
     if not product:
-        raise AppException(40401, "商品不存在")
+        raise AppException(40401, "餐品不存在")
     if int(product.store_id) != int(sid):
-        raise AppException(40301, "商品不属于该门店")
+        raise AppException(40301, "餐品不属于该门店")
     row = (
         await db.execute(
             select(StoreProductStock).where(
@@ -1285,8 +1285,8 @@ async def get_product(
 ):
     product = await db.get(Product, product_id)
     if not product:
-        return success(None, message="商品不存在", request=request)
-    # 点餐页无员工令牌仍可按商品 id 打开详情；员工令牌则限制在本店
+        return success(None, message="餐品不存在", request=request)
+    # 点餐页无员工令牌仍可按餐品 id 打开详情；员工令牌则限制在本店
     if staff is not None:
         assert_store_access(staff, product.store_id)
     else:
@@ -1303,7 +1303,7 @@ async def get_product(
         if not is_product_visible(
             product, today=today_beijing(), is_birthday_today=is_bday
         ):
-            raise AppException(40002, "该商品今日不可点（限时或生日专属）")
+            raise AppException(40002, "该餐品今日不可点（限时或生日专属）")
 
     pog_result = await db.execute(
         select(ProductOptionGroup, OptionGroup)
@@ -1415,14 +1415,14 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
     if not cat:
         raise AppException(40001, "分类不存在，请先创建分类")
 
-    # 超管可不选门店：编号前缀 0000；商品归属所选分类的门店
+    # 超管可不选门店：编号前缀 0000；餐品归属所选分类的门店
     use_hq_prefix = False
     sid = require_bound_store(user, data.store_id)
     if sid is None and user.store_id:
         sid = int(user.store_id)
     if sid is None:
         if getattr(user.role, "code", None) != "SUPER_ADMIN":
-            raise AppException(40020, "请指定门店后再创建商品")
+            raise AppException(40020, "请指定门店后再创建餐品")
         use_hq_prefix = True
         sid = int(cat.store_id)
     else:
@@ -1442,11 +1442,11 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         select(Product.id).where(Product.store_id == sid, Product.product_no == product_no)
     )
     if dup.scalar_one_or_none():
-        raise AppException(40002, f"本店商品编号「{product_no}」已存在，请换一个")
+        raise AppException(40002, f"本店餐品编号「{product_no}」已存在，请换一个")
     if data.option_group_ids:
         await _assert_groups_usable_for_store(db, data.option_group_ids, int(sid))
 
-    # 未传依赖字段：存 NULL，运行时继承分类默认（方案 A）；勿把分类列表写入商品
+    # 未传依赖字段：存 NULL，运行时继承分类默认（方案 A）；勿把分类列表写入餐品
     if data.require_category_ids is None and data.require_product_ids is None:
         stored_cats, stored_prods = _store_require_lists(None, None, custom=False)
     else:
@@ -1472,7 +1472,7 @@ async def create_product(data: ProductCreate, request: Request, db: DbSession, u
         await db.flush()
     except IntegrityError:
         await db.rollback()
-        raise AppException(40002, f"本店商品编号「{product_no}」已存在，请换一个")
+        raise AppException(40002, f"本店餐品编号「{product_no}」已存在，请换一个")
     await AuditService.log_staff(
         db,
         user=user,
@@ -1498,7 +1498,7 @@ async def update_product(
 ):
     product = await db.get(Product, product_id)
     if not product:
-        return success(None, message="商品不存在", request=request)
+        return success(None, message="餐品不存在", request=request)
     assert_store_access(user, product.store_id)
 
     payload = data.model_dump(
@@ -1522,12 +1522,12 @@ async def update_product(
 
     if "store_id" in payload and payload["store_id"] is not None:
         if user.role.code != "SUPER_ADMIN":
-            raise AppException(40301, "仅超管可迁移商品所属门店")
+            raise AppException(40301, "仅超管可迁移餐品所属门店")
         new_sid = int(payload["store_id"])
         assert_store_access(user, new_sid)
         product.store_id = new_sid
         del payload["store_id"]
-        # 迁店时同步改编号前缀（保留分类+商品逻辑）
+        # 迁店时同步改编号前缀（保留分类+餐品逻辑）
         if "product_no" not in payload:
             prefix = await _store_code_prefix(db, int(product.store_id))
             cat_logical = await _product_cat_logical(int(product.store_id))
@@ -1556,7 +1556,7 @@ async def update_product(
             ).limit(1)
         )
         if dup:
-            raise AppException(40002, f"本店商品编号「{new_no}」已存在，请换一个")
+            raise AppException(40002, f"本店餐品编号「{new_no}」已存在，请换一个")
         product.product_no = new_no
 
     if "category_id" in payload and payload["category_id"] is not None:
@@ -1564,7 +1564,7 @@ async def update_product(
         if not cat:
             raise AppException(40001, "分类不存在")
         if int(cat.store_id) != int(product.store_id):
-            raise AppException(40001, "分类与商品不在同一门店")
+            raise AppException(40001, "分类与餐品不在同一门店")
 
     raw = data.model_dump(exclude_unset=True)
     if "require_category_ids" in raw or "require_product_ids" in raw:
@@ -1613,7 +1613,7 @@ async def update_product(
     try:
         await recompute_product(db, int(product.id))
     except Exception:
-        logger.exception("商品更新后口味画像重算失败 product_id=%s", product.id)
+        logger.exception("餐品更新后口味画像重算失败 product_id=%s", product.id)
     await invalidate_store_caches(int(product.store_id))
     return success({"id": product.id, "store_id": product.store_id}, request=request)
 
@@ -1640,7 +1640,7 @@ async def update_product_taste_profile(
 ):
     product = await db.get(Product, product_id)
     if not product:
-        return success(None, message="商品不存在", request=request)
+        return success(None, message="餐品不存在", request=request)
     assert_store_access(user, product.store_id)
     profile = await upsert_manual(
         db,
@@ -1716,10 +1716,10 @@ async def upload_product_image(
     user: CurrentUser,
     file: UploadFile = File(...),
 ):
-    """上传商品主图（同时写入 product_images 作详情预览）。"""
+    """上传餐品主图（同时写入 product_images 作详情预览）。"""
     product = await db.get(Product, product_id)
     if not product:
-        return success(None, message="商品不存在", request=request)
+        return success(None, message="餐品不存在", request=request)
     assert_store_access(user, product.store_id)
     url = await save_upload(file, subdir="products")
     await _set_main_product_image(db, product, url)
@@ -1752,13 +1752,13 @@ async def upload_product_image(
 async def delete_product(product_id: int, request: Request, db: DbSession, user: CurrentUser):
     product = await db.get(Product, product_id)
     if not product:
-        return success(None, message="商品不存在", request=request)
+        return success(None, message="餐品不存在", request=request)
     assert_store_access(user, product.store_id)
     order_count = await db.scalar(
         select(func.count()).select_from(OrderItem).where(OrderItem.product_id == product_id)
     )
     if order_count:
-        raise AppException(40004, "该商品已有订单记录，无法删除，请改为下架")
+        raise AppException(40004, "该餐品已有订单记录，无法删除，请改为下架")
     await db.execute(delete(DeliveryProductMap).where(DeliveryProductMap.product_id == product_id))
     await db.delete(product)
     await db.flush()
@@ -1814,7 +1814,7 @@ async def _apply_option_default_flag(db: DbSession, opt: Option, want_default: b
 
 
 async def _assert_groups_usable_for_store(db: DbSession, group_ids: list[int], store_id: int | None) -> None:
-    """商品只能绑总部共享或本店规格组。"""
+    """餐品只能绑总部共享或本店规格组。"""
     if not group_ids:
         return
     rows = list(

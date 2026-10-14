@@ -1,4 +1,4 @@
-"""商品库存/价格 CHECK 约束
+"""餐品库存/价格 CHECK 约束
 
 Revision ID: 0009_product_checks
 Revises: 0008_coupon_template_store

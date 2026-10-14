@@ -51,6 +51,112 @@ export const COUPON_TYPE: Record<string, string> = {
   VOUCHER: '代金券',
 }
 
+/** 社会贡献公益身份 social_identity_types.code（兜底中文；优先用接口 name） */
+export const SOCIAL_IDENTITY: Record<string, string> = {
+  SANITATION: '环卫工',
+  RIDER: '外卖骑手',
+  ELDER: '长者',
+  TEACHER: '教师',
+  STUDENT: '学生',
+  MEDICAL: '医护人员',
+  DISABLED: '残障人士',
+  VETERAN: '退役军人',
+  VOLUNTEER: '志愿者',
+}
+
+/** 顾客生命周期 customer_lifecycle.lifecycle_code */
+export const CUSTOMER_LIFECYCLE: Record<string, string> = {
+  GUEST: '游客',
+  NEW: '新客',
+  ACTIVE: '活跃',
+  AT_RISK: '风险',
+  DORMANT: '沉睡',
+  LOST: '流失',
+}
+
+/** 顾客 RFM 分群 customer_lifecycle.rfm_segment */
+export const CUSTOMER_RFM: Record<string, string> = {
+  CHAMPIONS: '冠军',
+  LOYAL: '忠诚',
+  NEW_PROMISING: '潜力',
+  AT_RISK: '风险',
+  HIBERNATING: '休眠',
+}
+
+/** 顾客会员状态 customers.member_status */
+export const MEMBER_STATUS: Record<string, string> = {
+  MEMBER: '会员',
+  GUEST: '游客',
+}
+
+/** 营销活动 marketing_campaigns.status */
+export const MARKETING_CAMPAIGN_STATUS: Record<string, string> = {
+  DRAFT: '草稿',
+  SCHEDULED: '已排期',
+  RUNNING: '进行中',
+  PAUSED: '已暂停',
+  ENDED: '已结束',
+  CANCELLED: '已取消',
+}
+
+/** 营销发券任务 marketing_tasks.status */
+export const MARKETING_TASK_STATUS: Record<string, string> = {
+  PENDING: '待执行',
+  RUNNING: '执行中',
+  SUCCESS: '成功',
+  FAILED: '失败',
+  SKIPPED: '已跳过',
+  CANCELLED: '已取消',
+}
+
+/** 客户分群 marketing_segments.segment_type */
+export const SEGMENT_TYPE: Record<string, string> = {
+  DYNAMIC: '动态',
+  STATIC: '静态',
+}
+
+/** 外卖退款 delivery_refunds.refund_type */
+export const DELIVERY_REFUND_TYPE: Record<string, string> = {
+  FULL: '全额',
+  PARTIAL: '部分',
+}
+
+/** 操作审计 target_type（兜底中文） */
+export const AUDIT_TARGET_TYPE: Record<string, string> = {
+  customer: '顾客',
+  order: '订单',
+  payment: '支付',
+  refund: '退款',
+  refund_request: '退款申请',
+  store: '门店',
+  product: '餐品',
+  category: '分类',
+  category_schedule: '分类档期',
+  option: '规格',
+  option_group: '规格组',
+  user: '员工',
+  shift: '班次',
+  camera: '摄像头',
+  request: '请求',
+  coupon_template: '券模板',
+  customer_coupon: '顾客券',
+  member_levels: '会员等级',
+  recharge_package: '储值套餐',
+  system_settings: '系统设置',
+  scheduler_job: '定时任务',
+  customer_social_identity: '公益身份',
+  customer_segment: '客户分群',
+  marketing_campaign: '营销活动',
+  marketing_task: '营销任务',
+  delivery_order: '外卖单',
+  platform_store_binding: '外卖门店绑定',
+  delivery_product_map: '外卖餐品映射',
+  platform_category_map: '外卖分类映射',
+  store_product_stock: '门店库存',
+  dining_table: '桌台',
+  table: '桌台',
+}
+
 /** 支付流水 channel（通道形态，非渠道品牌） */
 export const PAYMENT_CHANNEL: Record<string, string> = {
   jsapi: '小程序支付',
@@ -143,14 +249,14 @@ export const AUDIT_ACTION: Record<string, string> = {
   'delivery.category_map.delete': '删除外卖分类映射',
   'delivery.order.cancel': '取消外卖单',
   'delivery.order.confirm': '确认外卖单',
-  'delivery.product_map.create': '创建外卖商品映射',
+  'delivery.product_map.create': '创建外卖餐品映射',
   'delivery.refund.action': '处理外卖退款',
   'delivery.store.close': '外卖关店',
   'delivery.store.open': '外卖开店',
   'delivery.sync.menu': '同步外卖菜单',
   'delivery.sync.menu_batch': '批量同步外卖菜单',
   'delivery.sync.prices': '同步外卖价格',
-  'delivery.sync.product': '同步外卖商品',
+  'delivery.sync.product': '同步外卖餐品',
   'delivery.sync.reconcile': '外卖对账同步',
   'delivery.sync.shelf': '同步外卖上下架',
   'delivery.sync.stock': '同步外卖库存',
@@ -189,9 +295,9 @@ export const AUDIT_ACTION: Record<string, string> = {
   'product.category_schedule.create': '创建分类时段',
   'product.category_schedule.delete': '删除分类时段',
   'product.category_schedule.update': '更新分类时段',
-  'product.create': '创建商品',
-  'product.delete': '删除商品',
-  'product.image.upload': '上传商品图',
+  'product.create': '创建餐品',
+  'product.delete': '删除餐品',
+  'product.image.upload': '上传餐品图',
   'product.menu.copy': '复制菜单到门店',
   'product.option.create': '创建规格选项',
   'product.option.delete': '删除规格选项',
@@ -204,7 +310,7 @@ export const AUDIT_ACTION: Record<string, string> = {
   'product.stock.upsert': '更新库存',
   'product.taste_profile.rebuild': '重建口味画像',
   'product.taste_profile.update': '更新口味画像',
-  'product.update': '更新商品',
+  'product.update': '更新餐品',
   'role.permissions.update': '更新角色权限',
   'settings.business.update': '更新业务参数',
   'settings.scheduler.update': '更新定时任务',
@@ -315,7 +421,7 @@ export function deliveryStatusTagType(status: string) {
   return m[status] || 'info'
 }
 
-export function label(map: Record<string, string>, key: string | null | undefined, fallback = '-') {
+export function label(map: Record<string, string>, key: string | null | undefined, fallback = '—') {
   if (key == null || key === '') return fallback
   const raw = String(key)
   if (map[raw]) return map[raw]
@@ -323,7 +429,8 @@ export function label(map: Record<string, string>, key: string | null | undefine
   if (map[upper]) return map[upper]
   const lower = raw.toLowerCase()
   if (map[lower]) return map[lower]
-  return raw
+  // 未知枚举不回显英文原值，避免后台/H5 界面泄漏码字
+  return fallback
 }
 
 export function couponStatusTagType(status: string) {

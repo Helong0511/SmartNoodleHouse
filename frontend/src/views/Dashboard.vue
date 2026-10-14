@@ -154,10 +154,10 @@
     <el-row :gutter="16" style="margin-top:16px">
       <el-col :span="isAllStores ? 24 : 12">
         <el-card>
-          <h3>{{ periodLabel }}商品销量 TOP{{ isAllStores ? '20' : '15' }}</h3>
+          <h3>{{ periodLabel }}餐品销量 TOP{{ isAllStores ? '20' : '15' }}</h3>
           <el-table :data="data?.product_sales || []" size="small" border>
             <el-table-column v-if="isAllStores" prop="store_name" label="门店" width="120" />
-            <el-table-column prop="name" label="商品" min-width="140" />
+            <el-table-column prop="name" label="餐品" min-width="140" />
             <el-table-column prop="sales" label="销量（份）" width="100" align="right" />
           </el-table>
         </el-card>
@@ -262,7 +262,7 @@ const cards = computed(() => {
       hint: s.avg_order_amount != null ? `客单价 ¥${s.avg_order_amount}` : '',
     },
     {
-      label: '商品小计',
+      label: '餐品小计',
       value: a.subtotal != null ? `¥${a.subtotal}` : '-',
       tone: '',
       hint: a.payable_amount != null ? `实付 ¥${a.payable_amount}` : '',

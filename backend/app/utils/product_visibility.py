@@ -1,4 +1,4 @@
-"""商品展示规则：常显 / 日期区间 / 每年月日（公历|农历）/ 顾客今日生日。
+"""餐品展示规则：常显 / 日期区间 / 每年月日（公历|农历）/ 顾客今日生日。
 
 「今日」一律按北京时间（Asia/Shanghai）日历日判定，不跟服务器/手机本地时区。
 """
@@ -66,7 +66,7 @@ def is_product_visible(
     today: date | None = None,
     is_birthday_today: bool = False,
 ) -> bool:
-    """判断商品今日是否应对顾客/收银可见（今日=北京时间）。"""
+    """判断餐品今日是否应对顾客/收银可见（今日=北京时间）。"""
     day = today or today_beijing()
     rule = normalize_visibility_rule(getattr(product, "visibility_rule", None))
     if rule == VIS_ALWAYS:

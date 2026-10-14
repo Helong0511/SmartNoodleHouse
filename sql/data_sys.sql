@@ -121,7 +121,7 @@ WHERE NOT EXISTS (
 INSERT INTO `roles` (`code`, `name`, `description`)
 SELECT 'OPERATOR',
     '运营',
-    '商品与数据（不可退款）'
+    '餐品与数据（不可退款）'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
@@ -131,7 +131,7 @@ WHERE NOT EXISTS (
 -- 二、权限点
 INSERT INTO `permissions` (`code`, `name`, `module`)
 SELECT 'product:read',
-    '查看商品',
+    '查看餐品',
     'product'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -141,7 +141,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `permissions` (`code`, `name`, `module`)
 SELECT 'product:create',
-    '创建商品',
+    '创建餐品',
     'product'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -151,7 +151,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `permissions` (`code`, `name`, `module`)
 SELECT 'product:update',
-    '更新商品',
+    '更新餐品',
     'product'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -161,7 +161,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `permissions` (`code`, `name`, `module`)
 SELECT 'product:delete',
-    '删除商品',
+    '删除餐品',
     'product'
 FROM DUAL
 WHERE NOT EXISTS (

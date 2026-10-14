@@ -412,7 +412,7 @@ async def upsert_manual(
 
 
 async def recompute_store(db, store_id: int) -> int:
-    """整店重算（分类/规格批量变更后使用）。返回处理商品数。"""
+    """整店重算（分类/规格批量变更后使用）。返回处理餐品数。"""
     pids = list(
         (
             await db.execute(select(Product.id).where(Product.store_id == store_id))

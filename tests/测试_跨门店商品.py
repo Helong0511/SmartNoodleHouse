@@ -1,4 +1,4 @@
-"""跨店商品：门店 A 订单不得购买门店 B 商品。"""
+"""跨店餐品：门店 A 订单不得购买门店 B 餐品。"""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,7 +14,7 @@ async def test_cross_store_product_rejected():
     store_a, store_b = 1, 2
     product_b = SimpleNamespace(id=99, store_id=store_b, status="ON_SALE", name="B店面")
 
-    # 本店查询为空，任意门店查询命中 B 店商品 → 跨店
+    # 本店查询为空，任意门店查询命中 B 店餐品 → 跨店
     empty_result = MagicMock()
     empty_result.scalars.return_value = []
     any_result = MagicMock()

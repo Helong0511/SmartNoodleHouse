@@ -33,7 +33,9 @@
       <el-table-column prop="amount" label="金额" width="88">
         <template #default="{ row }"><span class="money">¥{{ row.amount }}</span></template>
       </el-table-column>
-      <el-table-column prop="refund_type" label="类型" width="80" />
+      <el-table-column label="类型" width="80">
+        <template #default="{ row }">{{ label(DELIVERY_REFUND_TYPE, row.refund_type) }}</template>
+      </el-table-column>
       <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
@@ -79,7 +81,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
-import { REFUND_APPLY_STATUS, label } from '@/utils/labels'
+import { DELIVERY_REFUND_TYPE, REFUND_APPLY_STATUS, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const canHandleRefund = computed(() => auth.hasPermission('payment:refund'))
@@ -101,7 +103,7 @@ const refundPager = reactive({ page: 1, pageSize: 20, total: 0 })
 const hasNewHint = ref(false)
 
 const rejectVisible = ref(false)
-const rejectReason = ref('商品已制作，无法退款')
+const rejectReason = ref('餐品已制作，无法退款')
 const rejectId = ref<number | null>(null)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -181,7 +183,7 @@ async function handleRefund(id: number, action: 'approve' | 'reject', reason?: s
 
 function askRejectRefund(row: any) {
   rejectId.value = row.id
-  rejectReason.value = '商品已制作，无法退款'
+  rejectReason.value = '餐品已制作，无法退款'
   rejectVisible.value = true
 }
 

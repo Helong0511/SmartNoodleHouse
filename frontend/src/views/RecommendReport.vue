@@ -51,7 +51,7 @@
     <template v-if="report">
       <div class="section-title">
         24 小时推荐归因漏斗
-        <span class="muted">（按「同顾客 × 同商品」去重计商品人次）</span>
+        <span class="muted">（按「同顾客 × 同餐品」去重计餐品人次）</span>
       </div>
       <el-table :data="funnelRows" border class="funnel-table">
         <el-table-column prop="bucketName" label="桶" width="200" />
@@ -93,7 +93,7 @@
         </el-table-column>
       </el-table>
 
-      <div class="section-title">转化对比（以各桶曝光商品人次为基数）</div>
+      <div class="section-title">转化对比（以各桶曝光餐品人次为基数）</div>
       <div class="bars">
         <div v-for="row in funnelRows" :key="`bar-${row.code}`" class="bar-group">
           <div class="bar-head">
@@ -160,7 +160,7 @@
         统计窗口：{{ report.date_from ? report.date_from.slice(0, 10) : '不限' }}
         ～ {{ report.date_to ? report.date_to.slice(0, 10) : '不限' }}；
         归因场景：{{ (report.scene_scope || []).join('、') }}；
-        「事件」列为原始事件计数（同一顾客多次曝光/点击会重复计），漏斗列按顾客×商品去重。
+        「事件」列为原始事件计数（同一顾客多次曝光/点击会重复计），漏斗列按顾客×餐品去重。
       </p>
     </template>
   </div>

@@ -1,4 +1,4 @@
-/** 商品图片 URL 解析 + 按屏幕自适应尺寸 */
+/** 餐品图片 URL 解析 + 按屏幕自适应尺寸 */
 
 function getAppSafe() {
   try {
@@ -128,7 +128,7 @@ async function hydrateImageUrls(items, field = 'imageUrl') {
   return list
 }
 
-/** 批量转换 URL 字符串列表（商品详情轮播等） */
+/** 批量转换 URL 字符串列表（餐品详情轮播等） */
 async function hydrateUrlList(urls) {
   const list = urls || []
   return Promise.all(list.map((u) => ensureLocalImage(u)))
@@ -171,7 +171,7 @@ function layoutMetrics(sys) {
   }
 }
 
-/** 给商品列表项补 imageUrl / cover */
+/** 给餐品列表项补 imageUrl / cover */
 function decorateProduct(p, metrics) {
   const version = imageVersion(p)
   const raw = (p && (p.main_image || p.image_url)) || ''

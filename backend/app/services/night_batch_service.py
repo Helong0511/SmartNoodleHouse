@@ -1,6 +1,6 @@
 """关店时段（默认北京时间 02:00–05:00）慢任务批处理。
 
-面向销量热销/店长推荐位刷新、商品口味画像整店重算、顾客智能口味深度学习等
+面向销量热销/店长推荐位刷新、餐品口味画像整店重算、顾客智能口味深度学习等
 需要扫全量/多日数据的工作，避开营业高峰。增量学习仍由白天短周期任务兜底。
 """
 from __future__ import annotations
@@ -190,7 +190,7 @@ async def rebuild_all_product_taste_profiles(db: AsyncSession) -> dict[str, Any]
             await invalidate_store_caches(int(sid))
             per_store.append({"store_id": int(sid), "rebuilt": n})
         except Exception:
-            logger.exception("夜间商品口味画像重算失败 store_id=%s", sid)
+            logger.exception("夜间餐品口味画像重算失败 store_id=%s", sid)
             per_store.append({"store_id": int(sid), "error": True})
     return {"products": total, "stores": per_store}
 

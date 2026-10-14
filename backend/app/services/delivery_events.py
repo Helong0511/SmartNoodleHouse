@@ -117,7 +117,7 @@ def parse_meituan_foods(data: dict[str, Any]) -> list[dict]:
             {
                 "platform_sku_id": str(it.get("sku_id") or it.get("app_food_code") or ""),
                 "app_food_code": str(it.get("app_food_code") or it.get("sku_id") or ""),
-                "name": it.get("food_name") or it.get("name") or "外卖商品",
+                "name": it.get("food_name") or it.get("name") or "外卖餐品",
                 "quantity": int(it.get("quantity") or it.get("num") or 1),
                 "price": it.get("price") or it.get("food_price") or "0",
                 "box_price": it.get("box_price") or "0",

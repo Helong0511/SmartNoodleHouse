@@ -3385,13 +3385,13 @@
       "size": 73,
       "normalized_sha256": "10fd12dca6e308451b49ee8800f3e930e8e854d0fa8ee23202b790cb8a1f228f"
     },
-    "tests/初始化商品图片.py": {
+    "tests/初始化餐品图片.py": {
       "role": "observe",
       "sha256": "077dcd1f033227183e5278f19e21776b9b85e082dd1d929393fc6a7bf00902e4",
       "size": 2986,
       "normalized_sha256": "a9352eb76ee6717b2b6edc5dbb82c0b3d67161d9d98269a326b55dc5b760ed6e"
     },
-    "tests/复现_商品图片上传.py": {
+    "tests/复现_餐品图片上传.py": {
       "role": "observe",
       "sha256": "0231e2d9bf07f7cf8c49aeac6cafd3473686bf871a31b42993ffa1ba7abea08d",
       "size": 2144,
@@ -3625,13 +3625,13 @@
       "size": 957,
       "normalized_sha256": "8f3e7c1b7743f9d23ba805ba1b84c44431ea53be1c6624037699c2154eacfe87"
     },
-    "tests/应用_016_商品门店.py": {
+    "tests/应用_016_餐品门店.py": {
       "role": "observe",
       "sha256": "9e6f327777a0261821d3faa862060d4054760232c81aea1a7e428812fb1f5f7f",
       "size": 3813,
       "normalized_sha256": "43e9c606a05054cce3b47e8abddc979dedadce33016a14e5bb758e5249705163"
     },
-    "tests/应用_017_商品必选.py": {
+    "tests/应用_017_餐品必选.py": {
       "role": "observe",
       "sha256": "39f625da674f7f93b8d8e9a8e352fe906b2d10aff912dce3f62f46314464f8b4",
       "size": 1247,
@@ -3949,19 +3949,19 @@
       "size": 5758,
       "normalized_sha256": "528543d72492fc206c32bb3eb5a67773e5ff2d795899bdc37808f55dd243d923"
     },
-    "tests/测试_商品主图.py": {
+    "tests/测试_餐品主图.py": {
       "role": "observe",
       "sha256": "c3130aed756bf02ecc81c7b3abb81e5308a819f05918b645d63c352dba9c0b75",
       "size": 3169,
       "normalized_sha256": "795339d190a18701b3f365c99783b60e350cf18397854dab4ada78a84645cf41"
     },
-    "tests/测试_商品分页与台账.py": {
+    "tests/测试_餐品分页与台账.py": {
       "role": "observe",
       "sha256": "179b322b7133712916e926de8c796749c966a92a575b9bc37aa182d4c14d5225",
       "size": 4319,
       "normalized_sha256": "c285add41dd404632d83bc3cdde3ccc99c67b6355dd953b9d94ee797ec286322"
     },
-    "tests/测试_商品图片URL.py": {
+    "tests/测试_餐品图片URL.py": {
       "role": "observe",
       "sha256": "14ac535f2528cf8a21b00601f1dfaad9b5f75683efa4c24cc730aeb0dca25dc3",
       "size": 769,
@@ -4507,7 +4507,7 @@
       "size": 3991,
       "normalized_sha256": "a1f2276197a96b70f20bb2faa21caa3299b064a215e8fa233f804a4854744bac"
     },
-    "tests/测试_跨门店商品.py": {
+    "tests/测试_跨门店餐品.py": {
       "role": "observe",
       "sha256": "5b88728ec39217ad40dbb52f207f7b5a396b5fb012e96067ae1cd20d37a3d5cc",
       "size": 1563,

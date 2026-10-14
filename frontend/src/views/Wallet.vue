@@ -270,7 +270,7 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
 
 function entryTypeLabel(t?: string | null) {
   const key = String(t || '').toUpperCase()
-  return ENTRY_TYPE_LABELS[key] || t || '—'
+  return ENTRY_TYPE_LABELS[key] || '—'
 }
 
 function entryTypeTag(t?: string | null): '' | 'success' | 'warning' | 'info' | 'danger' {

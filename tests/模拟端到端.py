@@ -719,10 +719,10 @@ async def run_all_simulations() -> bool:
             )
         )
 
-        # 商品列表
+        # 餐品列表
         r = await client.get("/api/products", params={"page_size": 10, "store_id": CTX["store_id"]})
         products = r.json().get("data", {}).get("items", [])
-        results.append(ok("商品 API", len(products) >= 1, f"{len(products)} 个商品"))
+        results.append(ok("餐品 API", len(products) >= 1, f"{len(products)} 个餐品"))
 
         # ═══════════════════════════════════════
         # 流程5：外卖回调（新单/取消/催单/退款/配送）

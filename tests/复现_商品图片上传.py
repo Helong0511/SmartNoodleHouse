@@ -1,4 +1,4 @@
-"""验证商品图片上传 API（曾出现 flush 后 MissingGreenlet 500）"""
+"""验证餐品图片上传 API（曾出现 flush 后 MissingGreenlet 500）"""
 import asyncio
 import sys
 from pathlib import Path

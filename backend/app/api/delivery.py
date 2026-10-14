@@ -897,7 +897,7 @@ async def sync_menu(
 async def sync_single_product(
     data: SingleProductSyncPayload, request: Request, db: DbSession, user: CurrentUser
 ):
-    """推送单个商品到指定外卖平台。"""
+    """推送单个餐品到指定外卖平台。"""
     from app.services.store_scope import assert_store_access, require_bound_store
 
     sid = require_bound_store(user, data.store_id)
@@ -1067,9 +1067,9 @@ async def create_product_map(data: ProductMapCreate, request: Request, db: DbSes
     assert_store_access(user, sid)
     product = await db.get(Product, data.product_id)
     if not product:
-        return success(None, message="商品不存在", request=request)
+        return success(None, message="餐品不存在", request=request)
     if product.store_id is None or int(product.store_id) != int(sid):
-        raise AppException(40301, "商品不属于该门店，禁止映射", status_code=403)
+        raise AppException(40301, "餐品不属于该门店，禁止映射", status_code=403)
     existing = await db.execute(
         select(DeliveryProductMap).where(
             DeliveryProductMap.store_id == sid,

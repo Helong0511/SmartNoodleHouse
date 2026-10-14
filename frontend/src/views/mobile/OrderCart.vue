@@ -42,7 +42,7 @@ async function validateStock() {
       })
       const p = res.data
       if (!p || p.status !== 'ON_SALE') {
-        item._stockError = '商品已下架'
+        item._stockError = '餐品已下架'
         continue
       }
       if (!item.imageUrl) item.imageUrl = mediaUrl(p.main_image)

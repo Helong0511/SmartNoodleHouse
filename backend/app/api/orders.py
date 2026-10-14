@@ -563,7 +563,7 @@ async def add_items_to_order(
     db: DbSession,
     user: CurrentUser,
 ):
-    """收银台加菜：往已有待支付订单追加商品，重算金额。"""
+    """收银台加菜：往已有待支付订单追加餐品，重算金额。"""
     order = await db.get(Order, order_id)
     if not order:
         raise AppException(40404, "订单不存在")

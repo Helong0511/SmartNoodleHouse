@@ -80,7 +80,7 @@
       </el-table-column>
       <el-table-column label="目标" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">
-          <span v-if="row.target_type">{{ row.target_type }}#{{ row.target_id }}</span>
+          <span v-if="row.target_type">{{ targetLabel(row.target_type, row.target_id) }}</span>
           <span v-else>—</span>
         </template>
       </el-table-column>
@@ -116,7 +116,7 @@
           <el-descriptions-item label="操作">{{ label(AUDIT_ACTION, currentRow.action) }}</el-descriptions-item>
           <el-descriptions-item label="门店">{{ storeName(currentRow.store_id) }}</el-descriptions-item>
           <el-descriptions-item label="目标">
-            <span v-if="currentRow.target_type">{{ currentRow.target_type }}#{{ currentRow.target_id }}</span>
+            <span v-if="currentRow.target_type">{{ targetLabel(currentRow.target_type, currentRow.target_id) }}</span>
             <span v-else>—</span>
           </el-descriptions-item>
           <el-descriptions-item label="IP">{{ currentRow.ip || '—' }}</el-descriptions-item>
@@ -146,7 +146,7 @@ import {
   type AuditLogItem,
   type AuditCategoryOption,
 } from '@/api/auditLogs'
-import { AUDIT_ACTION, label } from '@/utils/labels'
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, label } from '@/utils/labels'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -190,6 +190,12 @@ async function loadCategories() {
 
 function categoryLabel(value: string) {
   return categories.value.find((c) => c.value === value)?.label || value || '—'
+}
+
+function targetLabel(type: string | null | undefined, id: number | string | null | undefined) {
+  const typeZh = label(AUDIT_TARGET_TYPE, type)
+  if (id == null || id === '') return typeZh
+  return `${typeZh}#${id}`
 }
 
 /** 分类对应标签颜色：危险/破解→红；系统→灰；顾客→绿；收银→黄；其他默认 */

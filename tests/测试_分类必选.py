@@ -1,4 +1,4 @@
-"""购买依赖：分类默认 + 商品级优先（方案 A）"""
+"""购买依赖：分类默认 + 餐品级优先（方案 A）"""
 from decimal import Decimal
 
 import pytest
@@ -43,7 +43,7 @@ def test_resolve_product_requires_inherit_and_override():
 
 
 def test_store_require_lists_inherit_vs_custom():
-    """创建商品未传依赖时应 custom=False → NULL，才能继续继承分类变更。"""
+    """创建餐品未传依赖时应 custom=False → NULL，才能继续继承分类变更。"""
     from app.api.products import _store_require_lists
 
     assert _store_require_lists([10], [], custom=False) == (None, None)
@@ -131,7 +131,7 @@ async def test_addon_inherits_category_require(db_session):
 
 @pytest.mark.asyncio
 async def test_product_require_specific_product(db_session):
-    store = Store(id=821, store_no="T-REQ-02", name="指定商品店", status=1)
+    store = Store(id=821, store_no="T-REQ-02", name="指定餐品店", status=1)
     noodle_cat = ProductCategory(id=822, category_no="C822", store_id=store.id, name="面", sort_order=0, status=1)
     addon_cat = ProductCategory(
         id=823, category_no="C823",
@@ -162,7 +162,7 @@ async def test_product_require_specific_product(db_session):
         price=Decimal("18.00"),
         status="ON_SALE",
     )
-    # 商品级覆盖：只允许牛肉面，不继承「任意面」
+    # 餐品级覆盖：只允许牛肉面，不继承「任意面」
     egg = Product(
         id=833,
         store_id=store.id,

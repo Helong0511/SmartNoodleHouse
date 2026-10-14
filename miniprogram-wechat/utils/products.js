@@ -24,7 +24,7 @@ function localVisibilityDay() {
 }
 
 /**
- * 分页拉齐门店在售商品。
+ * 分页拉齐门店在售餐品。
  * 单页最多 200；某一页失败或重复时返回已拿到的部分，并标 complete:false，
  * 调用方不得把「没拉到」当成下架。
  */
@@ -132,7 +132,7 @@ async function fetchMenuBundle(api, storeId, version) {
 /**
  * 点餐用的完整菜单。优先一次拿聚合菜单（不分页），失败再分页，再失败用本地缓存。
  * complete=false 表示这份列表不能用来判断「不在菜单」。
- * options.preferCache=true 时若本地有商品则直接返回，不打网。
+ * options.preferCache=true 时若本地有餐品则直接返回，不打网。
  */
 async function loadStoreCatalog(api, storeId, options) {
   const sid = Number(storeId)
@@ -185,7 +185,7 @@ async function loadStoreCatalog(api, storeId, options) {
     } catch (_) {}
     const items = (prod && prod.items) || []
     if (items.length) {
-      // 有商品列表即可用于规格校验；complete 仅作参考
+      // 有餐品列表即可用于规格校验；complete 仅作参考
       return { items, categories, complete: true }
     }
   } catch (_) {}

@@ -682,7 +682,7 @@ class CustomerService:
         *,
         discountable_subtotal: Decimal | None = None,
     ) -> tuple[Decimal, Decimal]:
-        """按可打折商品小计计算会员优惠（打包费、特价商品不参与折扣）。返回 (discount_amount, total_amount)。"""
+        """按可打折餐品小计计算会员优惠（打包费、特价餐品不参与折扣）。返回 (discount_amount, total_amount)。"""
         subtotal = money(subtotal)
         discountable_subtotal = money(discountable_subtotal if discountable_subtotal is not None else subtotal)
         if discountable_subtotal > subtotal:
@@ -701,7 +701,7 @@ class CustomerService:
         discountable_subtotal: Decimal,
         discount_amount: Decimal,
     ) -> Decimal:
-        """会员折后可用于优惠券的商品小计（不含特价商品）。"""
+        """会员折后可用于优惠券的餐品小计（不含特价餐品）。"""
         subtotal = money(subtotal)
         discountable_subtotal = money(discountable_subtotal)
         if discountable_subtotal > subtotal:
@@ -719,7 +719,7 @@ class CustomerService:
         *,
         need_pack: bool,
     ) -> Decimal:
-        """可用于代金券门槛/面额判断的基数（不含特价商品小计，可选含打包费）。"""
+        """可用于代金券门槛/面额判断的基数（不含特价餐品小计，可选含打包费）。"""
         base = money(coupon_eligible_subtotal) - money(coupon_discount)
         if base < Decimal("0"):
             base = Decimal("0.00")

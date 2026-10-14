@@ -20,7 +20,7 @@
           <el-menu-item index="/categories">分类管理</el-menu-item>
           <el-menu-item index="/category-schedules">分类时段排序</el-menu-item>
           <el-menu-item index="/options">规格管理</el-menu-item>
-          <el-menu-item index="/products">商品管理</el-menu-item>
+          <el-menu-item index="/products">餐品管理</el-menu-item>
           <el-menu-item index="/store-stocks">分店库存</el-menu-item>
         </el-sub-menu>
 

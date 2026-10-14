@@ -86,7 +86,7 @@
             </div>
           </button>
         </div>
-        <div v-if="!visibleProducts.length" class="empty-menu">该分类暂无商品</div>
+        <div v-if="!visibleProducts.length" class="empty-menu">该分类暂无餐品</div>
         <div v-if="totalPages > 1" class="pos-pagination">
           <el-pagination v-model:current-page="productPage" :page-size="pageSize" :total="visibleProducts.length"
             layout="prev, pager, next" size="small" background />
@@ -115,7 +115,7 @@
         </div>
         <div class="cart-foot">
           <div v-if="diningType === 'TAKEAWAY'" class="sum-row sub">
-            <span>商品小计</span><span>¥{{ cartSubtotal }}</span>
+            <span>餐品小计</span><span>¥{{ cartSubtotal }}</span>
           </div>
           <div v-if="diningType === 'TAKEAWAY'" class="sum-row sub pack-row">
             <span>打包费</span>
@@ -342,7 +342,7 @@
                 </button>
               </div>
             </template>
-            <div v-else class="opt-empty">该商品无需选择规格</div>
+            <div v-else class="opt-empty">该餐品无需选择规格</div>
           </div>
         </div>
 
@@ -366,7 +366,7 @@
       @closed="resetCheckout">
       <div class="pay-summary">
         <div v-if="checkoutSubtotal" class="pay-summary-row muted">
-          <span>商品小计</span>
+          <span>餐品小计</span>
           <span>¥{{ checkoutSubtotal }}</span>
         </div>
         <div v-if="checkoutSocialApplied && Number(checkoutMemberDiscount || 0) > 0" class="pay-summary-row muted">
@@ -408,7 +408,7 @@
 
       <div v-if="diningType === 'TAKEAWAY' && !tenders.length" class="pay-pack-row">
         <div class="pay-pack-info">
-          <span>商品 ¥{{ cartSubtotal }}</span>
+          <span>餐品 ¥{{ cartSubtotal }}</span>
           <span v-if="waivePackingFee" class="waived">打包费已免收</span>
           <span v-else>打包费 ¥{{ packingFeeDisplay }}</span>
         </div>
@@ -684,6 +684,7 @@ import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { isPosLocked, setPosLocked } from '@/utils/staffAuth'
 import { mediaUrl } from '@/utils/media'
+import { SOCIAL_IDENTITY } from '@/utils/labels'
 import {
   buildOptionLabels,
   calcUnitPrice,
@@ -774,21 +775,10 @@ const checkoutSocialCode = ref('')
 const paidAmount = ref('0.00')
 const remainingAmount = ref('0.00')
 
-const SOCIAL_CODE_LABELS: Record<string, string> = {
-  SANITATION: '环卫工',
-  RIDER: '外卖骑手',
-  ELDER: '长者',
-  TEACHER: '教师',
-  STUDENT: '学生',
-  MEDICAL: '医护人员',
-  DISABLED: '残障人士',
-  VETERAN: '退役军人',
-  VOLUNTEER: '志愿者',
-}
 const checkoutSocialLabel = computed(() => {
   const code = String(checkoutSocialCode.value || '').toUpperCase()
   const fromApi = socialIdentityTypes.value.find((t: any) => String(t.code || '').toUpperCase() === code)
-  return (fromApi && fromApi.name) || SOCIAL_CODE_LABELS[code] || code
+  return (fromApi && fromApi.name) || SOCIAL_IDENTITY[code] || '公益优惠'
 })
 
 function socialStatusZh(status: string) {
@@ -798,7 +788,7 @@ function socialStatusZh(status: string) {
   if (key === 'REVOKED') return '已取消'
   if (key === 'REJECTED') return '已拒绝'
   if (key === 'EXPIRED') return '已过期'
-  return status || '—'
+  return '—'
 }
 
 function hasActiveSocialIdentity() {
@@ -1402,7 +1392,9 @@ async function posSocialVerify() {
   }
   socialVerifying.value = true
   try {
-    const typeName = socialIdentityTypes.value.find((t: any) => t.code === code)?.name || code
+    const typeName = socialIdentityTypes.value.find((t: any) => t.code === code)?.name
+      || SOCIAL_IDENTITY[String(code || '').toUpperCase()]
+      || '公益身份'
     await api.post('/social-benefits/identities/pos-verify', {
       customer_id: selectedCustomerId.value,
       identity_code: code,
@@ -1963,12 +1955,13 @@ async function resumePendingOrder(o: any, mode: 'add' | 'pay') {
 function refundStatusLabel(status: string) {
   const map: Record<string, string> = {
     PENDING: '退款审批中',
+    PROCESSING: '退款处理中',
     REJECTED: '已拒绝',
     CANCELLED: '已撤销',
     SUCCESS: '已退款',
     FAILED: '退款失败',
   }
-  return map[status] || status
+  return map[status] || '—'
 }
 
 function refundTagClass(status: string) {
@@ -2166,7 +2159,7 @@ function enterAddItemsMode() {
   addingItems.value = true
 }
 
-/** 加菜入单：将购物车中的商品追加到已有订单 */
+/** 加菜入单：将购物车中的餐品追加到已有订单 */
 async function addItemsToOrder() {
   if (!cart.value.length) {
     ElMessage.warning('请先选择要加的菜品')

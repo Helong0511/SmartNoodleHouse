@@ -93,7 +93,7 @@
     </view>
 
     <view class="items-card" wx:if="{{orderItems.length}}">
-      <view class="card-title">商品明细</view>
+      <view class="card-title">餐品明细</view>
       <view class="item-row" wx:for="{{orderItems}}" wx:key="index">
         <text class="item-name">{{item.name}}{{item.optionText}}</text>
         <text class="item-qty">×{{item.quantity}}</text>

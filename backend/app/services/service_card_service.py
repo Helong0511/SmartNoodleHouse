@@ -62,7 +62,7 @@ class ServiceCardService:
                 level_name = lv.name
                 discount_rate = str(lv.discount_rate)
 
-        # 常点：收藏 + 近 90 天 Top 商品
+        # 常点：收藏 + 近 90 天 Top 餐品
         fav_q = (
             select(Product.id, Product.name)
             .join(CustomerFavoriteProduct, CustomerFavoriteProduct.product_id == Product.id)

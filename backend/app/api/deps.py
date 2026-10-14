@@ -51,7 +51,7 @@ async def get_optional_staff_user(
     db: DbSession,
     authorization: str | None = Header(default=None),
 ) -> User | None:
-    """可选员工身份：无 token / 非员工令牌时返回 None（供公开商品列表等）。"""
+    """可选员工身份：无 token / 非员工令牌时返回 None（供公开餐品列表等）。"""
     if not authorization or not authorization.startswith("Bearer "):
         return None
     token = authorization.split(" ", 1)[1]

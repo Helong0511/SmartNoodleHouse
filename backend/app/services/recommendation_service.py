@@ -458,7 +458,7 @@ CF_TTL = 300.0
 
 
 async def invalidate_store_caches(store_id: int) -> None:
-    """商品池/共现/菜单聚合缓存失效（产品写路径与 Task 8 主动失效调用）。
+    """餐品池/共现/菜单聚合缓存失效（产品写路径与 Task 8 主动失效调用）。
 
     注意：仅清本进程内存缓存。多 worker 部署下其他进程最多 POOL_TTL(60s)/CF_TTL(300s) 后自然过期。
     如需强一致可走 Redis pubsub 广播失效，当前 TTL 可接受。
@@ -475,7 +475,7 @@ async def invalidate_store_caches(store_id: int) -> None:
 
 
 class RecommendationService:
-    # ---------- 商品池 ----------
+    # ---------- 餐品池 ----------
 
     @staticmethod
     async def load_pool(

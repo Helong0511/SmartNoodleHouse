@@ -295,14 +295,14 @@ class DeliveryService:
         platform = parsed["platform"]
         items_data = parsed.get("items") or []
         if not items_data:
-            raise AppException(40052, "外卖订单无商品明细")
+            raise AppException(40052, "外卖订单无餐品明细")
 
         order_items_payload: list[dict] = []
         subtotal = Decimal("0.00")
 
         for it in items_data:
             product, option_ids = await cls._resolve_product(db, store_id, platform, it)
-            # 金额：以本系统商品价为准，拒绝纯信平台价造成账实不符
+            # 金额：以本系统餐品价为准，拒绝纯信平台价造成账实不符
             unit = money(product.price)
             if it.get("price") is not None and money(it["price"]) != unit:
                 logger.warning(
@@ -502,7 +502,7 @@ class DeliveryService:
         """跨平台超卖兜底：本地库存不足无法接单时，主动取消平台订单并记录告警（不落本地单）。"""
         platform_order_id = str(parsed.get("platform_order_id") or "")
         try:
-            await provider.cancel_order(platform_order_id, reason="商品售罄，商家无法接单")
+            await provider.cancel_order(platform_order_id, reason="餐品售罄，商家无法接单")
         except Exception:  # noqa: BLE001 取消失败也要留告警，不影响 ack
             logger.exception("拒单时取消平台订单失败 platform_order_id=%s", platform_order_id)
         db.add(
@@ -545,7 +545,7 @@ class DeliveryService:
         if mapping:
             product = await db.get(Product, mapping.product_id)
             if not product:
-                raise AppException(40451, f"映射商品不存在: {mapping.product_id}")
+                raise AppException(40451, f"映射餐品不存在: {mapping.product_id}")
             option_ids: list[int] = []
             if mapping.option_map_json:
                 try:
@@ -557,7 +557,7 @@ class DeliveryService:
         name = item.get("name") or ""
         raise AppException(
             40452,
-            f"外卖商品未配置映射，拒绝落单: sku={sku or '-'} name={name or '-'}",
+            f"外卖餐品未配置映射，拒绝落单: sku={sku or '-'} name={name or '-'}",
         )
 
     @classmethod
