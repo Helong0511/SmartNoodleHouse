@@ -534,7 +534,12 @@ WHERE NOT EXISTS (
         WHERE `name` = '钻石会员'
     );
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
--- 总部新客券名须与系统参数 / 总店 welcome_coupon_name 一致（「新客满30减5」）
+-- 总部新客券名须与系统参数 / 总店 welcome_coupon_name 一致（「新客满20减3」）
+-- 废弃旧模板「新客满30减5」：停用，避免误选；历史已发券仍可核销
+UPDATE `coupon_templates`
+SET `status` = 0
+WHERE `name` = '新客满30减5'
+  AND `status` <> 0;
 INSERT INTO `coupon_templates` (
         `name`,
         `coupon_type`,
@@ -977,6 +982,11 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'welcome_coupon_name'
     );
+-- 全局参数：旧「新客满30减5」改为「新客满20减3」
+UPDATE `system_settings`
+SET `setting_value` = '新客满20减3'
+WHERE `setting_key` = 'welcome_coupon_name'
+  AND `setting_value` = '新客满30减5';
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'welcome_bundle_template_ids',
     '',

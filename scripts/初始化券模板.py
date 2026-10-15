@@ -1,6 +1,6 @@
 """种子：优惠券/代金券模板（幂等，按 name 去重）。
 
-注册赠券名称须与 .env WELCOME_COUPON_NAME 一致（默认「新客满30减5」）。
+注册赠券名称须与 .env WELCOME_COUPON_NAME 一致（默认「新客满20减3」）。
 
 用法:
   python scripts/seed_coupon_templates.py
@@ -21,7 +21,7 @@ from app.models import CouponTemplate
 
 TEMPLATES = [
     # name, coupon_type, discount_value, min_order_amount, valid_days, status
-    ("新客满30减5", "FIXED", Decimal("5.00"), Decimal("30.00"), 30, 1),
+    ("新客满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
     ("满50享打9折", "PERCENT", Decimal("0.90"), Decimal("50.00"), 30, 1),
     ("10元代金券", "VOUCHER", Decimal("10.00"), Decimal("0.00"), 30, 1),
 ]
@@ -52,6 +52,12 @@ async def main() -> None:
                 )
             )
             created += 1
+        # 废弃旧新客券
+        legacy = (
+            await db.execute(select(CouponTemplate).where(CouponTemplate.name == "新客满30减5"))
+        ).scalar_one_or_none()
+        if legacy and int(legacy.status or 0) != 0:
+            legacy.status = 0
         await db.commit()
         total = len((await db.execute(select(CouponTemplate))).scalars().all())
         print(f"coupon_templates: created={created}, total={total}")

@@ -57,10 +57,10 @@ def test_template_payload_includes_store_scope():
     tmpl = MagicMock()
     tmpl.id = 1
     tmpl.store_id = None
-    tmpl.name = "新客满30减5"
+    tmpl.name = "新客满20减3"
     tmpl.coupon_type = "FIXED"
-    tmpl.discount_value = "5"
-    tmpl.min_order_amount = "30"
+    tmpl.discount_value = "3"
+    tmpl.min_order_amount = "20"
     tmpl.valid_days = 30
     tmpl.status = 1
     tmpl.created_at = None

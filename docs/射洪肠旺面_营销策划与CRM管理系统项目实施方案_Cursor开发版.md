@@ -143,7 +143,7 @@
 ## 2.5 种子数据（data_sys）
 
 - 等级：普通/银卡200/金卡500/钻石1000（折扣 1/0.98/0.95/0.90）  
-- 券：`新客满30减5`、`满50享打9折`、`10元代金券`、里程碑满 10/20/50/100/200 单减免  
+- 券：`新客满20减3`、`满50享打9折`、`10元代金券`、里程碑满 10/20/50/100/200 单减免  
 - 储值：充 50 得 55、100 得 120、200 得 250  
 - 设置：`welcome_coupon_name`、`birthday_coupon_name`
 
@@ -485,7 +485,7 @@ T-14 建活动+券+预算 → T-7 物料话术 → T-1 测试客预演 → T+0 R
 | 能力 | 位置 |
 |------|------|
 | GUEST→MEMBER | customers.member_status |
-| 欢迎券 | welcome_coupon_name →「新客满30减5」 |
+| 欢迎券 | welcome_coupon_name →「新客满20减3」 |
 | 扫码点餐全链路 | 双端小程序 |
 | POS 绑客下单 | PosOrder |
 | 支付副作用 | paid_side_effects outbox |
@@ -917,8 +917,8 @@ customers、coupon_templates、customer_coupons、member_levels、balance_*、po
 
 | 步骤 | 动作 | 验收 |
 |------|------|------|
-| 1 | 确认券模板存在：`新客满30减5` 等（data_sys） | Coupons 后台可见 |
-| 2 | 设置 `welcome_coupon_name=新客满30减5` | 新开通会员得券 |
+| 1 | 确认券模板存在：`新客满20减3` 等（data_sys） | Coupons 后台可见 |
+| 2 | 设置 `welcome_coupon_name=新客满20减3` | 新开通会员得券 |
 | 3 | 设置 `birthday_coupon_name` 为已有模板名 | 生日路径可发 |
 | 4 | 设置 `sleep_wake_coupon_name_30/90` | 次日 10:05 后日志有 issued_* |
 | 5 | 设置 `balance_low_threshold`（如 20） | 11:05 日志有提醒统计（尚推送） |

@@ -84,8 +84,11 @@
         </template>
       </el-table-column>
       <el-table-column prop="customer_no" label="编号" min-width="260" show-overflow-tooltip />
-      <el-table-column label="昵称" min-width="100">
-        <template #default="{ row }">{{ row.display_name || row.nickname || '—' }}</template>
+      <el-table-column label="展示名" min-width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.display_name || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="昵称" min-width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.nickname || '—' }}</template>
       </el-table-column>
       <el-table-column label="注册门店" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">
@@ -191,7 +194,8 @@
             :preview-src-list="[mediaUrl(detail.avatar_url)]" preview-teleported :z-index="4000" />
           <div v-else class="avatar-lg placeholder">无头像</div>
           <div class="detail-head-meta">
-            <div class="detail-name">{{ detail.display_name || detail.nickname || '—' }}</div>
+            <div class="detail-name" :title="detailHeadTitle">{{ detailHeadTitle }}</div>
+            <div v-if="detailHeadSub" class="muted detail-subname">{{ detailHeadSub }}</div>
             <div class="muted">{{ detail.customer_no }}</div>
           </div>
         </div>
@@ -662,6 +666,24 @@ const editForm = reactive({
   status: 1,
   recommend_opt_in: 1,
 })
+
+/** 详情头标题：有展示名优先；副行在两者都有且不同时显示昵称 */
+const detailHeadTitle = computed(() => {
+  const d = detail.value
+  if (!d) return '—'
+  const display = String(d.display_name || '').trim()
+  const nick = String(d.nickname || '').trim()
+  return display || nick || '—'
+})
+const detailHeadSub = computed(() => {
+  const d = detail.value
+  if (!d) return ''
+  const display = String(d.display_name || '').trim()
+  const nick = String(d.nickname || '').trim()
+  if (display && nick && display !== nick) return `昵称：${nick}`
+  return ''
+})
+
 const savingProfile = ref(false)
 const favAddProductId = ref<number | undefined>()
 const favProductOptions = ref<any[]>([])
@@ -678,8 +700,9 @@ const favoriteProductIds = computed(() => {
 })
 
 function syncEditForm(d: any) {
-  editForm.display_name = d?.display_name || ''
-  editForm.nickname = d?.nickname || ''
+  // 与接口字段一一对应，禁止用昵称填展示名
+  editForm.display_name = d?.display_name != null ? String(d.display_name) : ''
+  editForm.nickname = d?.nickname != null ? String(d.nickname) : ''
   editForm.phone = d?.phone || ''
   // 日期控件：农历用 birthday_picker（农历数字），公历用 ISO 锚点
   editForm.birthday = d?.birthday_picker || d?.birthday || null
@@ -1289,6 +1312,14 @@ onMounted(async () => {
   font-weight: 600;
   line-height: 1.3;
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.detail-subname {
+  font-size: 13px;
+  margin-top: 2px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .pref-block {

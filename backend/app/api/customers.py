@@ -381,7 +381,8 @@ async def list_customers(
         {
             "id": c.id,
             "customer_no": c.customer_no,
-            "display_name": c.display_name or c.nickname,
+            # 展示名 / 昵称原样返回，禁止互相顶替，避免详情编辑两栏串值
+            "display_name": c.display_name,
             "nickname": c.nickname,
             "avatar_url": _avatar_for(c),
             "phone": c.phone,
@@ -527,7 +528,8 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
         {
             "id": customer.id,
             "customer_no": customer.customer_no,
-            "display_name": customer.display_name or customer.nickname,
+            # 与列表一致：两字段独立，前端自行决定展示兜底
+            "display_name": customer.display_name,
             "nickname": customer.nickname,
             "phone": customer.phone,
             "status": customer.status,
