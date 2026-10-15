@@ -28,6 +28,35 @@
       </el-col>
     </el-row>
 
+    <el-row v-if="showInvoiceTodo" :gutter="16" style="margin-top:16px">
+      <el-col :span="24">
+        <el-card shadow="hover" class="todo-card" :class="{ 'todo-alert': invoicePendingCount > 0 }">
+          <div class="section-head">
+            <h3>待办事项</h3>
+            <el-button link type="primary" @click="$router.push({ path: '/invoices', query: { status: 'PENDING' } })">
+              进入发票申请
+            </el-button>
+          </div>
+          <div v-if="invoicePendingCount > 0" class="todo-list">
+            <div class="todo-summary">
+              <el-tag type="warning" effect="dark">待开票 {{ invoicePendingCount }}</el-tag>
+              <span class="scope-hint">顾客已提交，请尽快开票或驳回</span>
+            </div>
+            <el-table :data="invoicePendingItems" size="small" border>
+              <el-table-column prop="created_at" label="申请时间" width="160" />
+              <el-table-column prop="order_no" label="订单号" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="title" label="抬头" min-width="140" show-overflow-tooltip />
+              <el-table-column label="金额" width="100" align="right">
+                <template #default="{ row }">¥{{ row.amount }}</template>
+              </el-table-column>
+              <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
+            </el-table>
+          </div>
+          <div v-else class="todo-empty">暂无待开票申请</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <el-row :gutter="16" style="margin-top:16px">
       <el-col :xs="24" :md="10">
         <el-card shadow="hover" class="side-card">
@@ -219,6 +248,9 @@ const loading = ref(false)
 const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const period = ref<'today' | 'yesterday' | 'month'>('today')
+const invoicePendingCount = ref(0)
+const invoicePendingItems = ref<any[]>([])
+const showInvoiceTodo = computed(() => auth.hasPermission('invoice:manage') && !auth.isCashier)
 
 const summary = computed(() => data.value?.summary || {})
 const amounts = computed(() => summary.value.amounts || {})
@@ -333,13 +365,35 @@ function onStoreRowClick(row: any) {
   load()
 }
 
+async function loadInvoiceTodos() {
+  if (!showInvoiceTodo.value) {
+    invoicePendingCount.value = 0
+    invoicePendingItems.value = []
+    return
+  }
+  try {
+    const params: Record<string, string | number> = { limit: 5 }
+    if (storeFilter.value) params.store_id = storeFilter.value
+    const res: any = await api.get('/admin/invoices/pending-summary', { params })
+    const body = res?.data ?? res ?? {}
+    invoicePendingCount.value = Number(body.pending_count || 0) || 0
+    invoicePendingItems.value = Array.isArray(body.items) ? body.items : []
+  } catch {
+    invoicePendingCount.value = 0
+    invoicePendingItems.value = []
+  }
+}
+
 async function load() {
   loading.value = true
   try {
     const params: Record<string, string | number> = { period: period.value }
     if (storeFilter.value) params.store_id = storeFilter.value
-    const res = await api.get('/dashboard', { params })
-    data.value = res.data
+    const [dash] = await Promise.all([
+      api.get('/dashboard', { params }),
+      loadInvoiceTodos(),
+    ])
+    data.value = dash.data
   } finally {
     loading.value = false
   }
@@ -458,5 +512,22 @@ onMounted(async () => {
 
 .text-warn {
   color: #e6a23c;
+}
+
+.todo-card.todo-alert {
+  border-color: #f5dab1;
+}
+
+.todo-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.todo-empty {
+  color: #909399;
+  font-size: 13px;
+  padding: 4px 0 2px;
 }
 </style>

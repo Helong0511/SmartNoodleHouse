@@ -74,6 +74,46 @@ export const CUSTOMER_LIFECYCLE: Record<string, string> = {
   LOST: '流失',
 }
 
+/** 轻量评价情感 product_feedbacks.sentiment */
+export const FEEDBACK_SENTIMENT: Record<string, string> = {
+  POSITIVE: '正向',
+  NEGATIVE: '负向',
+  NEUTRAL: '中性',
+}
+
+/** 轻量评价标签（与 miniprogram / feedback_service.VERDICT_WHITELIST 对齐） */
+export const FEEDBACK_VERDICT: Record<string, string> = {
+  TASTY: '好吃对味',
+  WILL_REORDER: '想再点',
+  FRESH: '新鲜',
+  GOOD_PORTION: '分量足',
+  PORTION_OK: '分量合适',
+  TOO_SPICY: '太辣',
+  TOO_SWEET: '太甜',
+  TOO_SOUR: '太酸',
+  TOO_SALTY: '太咸',
+  TOO_BITTER: '太苦',
+  TOO_BLAND: '太淡',
+  TOO_SMALL: '分量少',
+  TOO_EXPENSIVE: '不太值',
+  NOT_FRESH: '不新鲜',
+  DISLIKE: '不喜欢',
+}
+
+export const FEEDBACK_VERDICT_POS = new Set(['TASTY', 'WILL_REORDER', 'FRESH', 'GOOD_PORTION'])
+export const FEEDBACK_VERDICT_NEG = new Set([
+  'TOO_SPICY',
+  'TOO_SWEET',
+  'TOO_SOUR',
+  'TOO_SALTY',
+  'TOO_BITTER',
+  'TOO_BLAND',
+  'TOO_SMALL',
+  'TOO_EXPENSIVE',
+  'NOT_FRESH',
+  'DISLIKE',
+])
+
 /** 顾客 RFM 分群 customer_lifecycle.rfm_segment */
 export const CUSTOMER_RFM: Record<string, string> = {
   CHAMPIONS: '冠军',

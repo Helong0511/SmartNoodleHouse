@@ -340,7 +340,7 @@ Page({
         // 预约取餐：返回 scheduled_pickup_at 时展示「预约取餐 HH:MM」
         scheduledPickupText: formatScheduledPickup(order.scheduled_pickup_at),
         ...orderActions.buildActionFlags(order),
-        canInvoice: String(order.payment_status || '').toUpperCase() === 'PAID',
+        canInvoice: false,
         loading: false,
         loadError: false
       })
@@ -349,6 +349,8 @@ Page({
         prefUtil.clearPrefsCache(app)
         this._maybeShowMemberBanner(order)
       }
+      // 电子发票入口：已申请/已开票不显示
+      this._refreshInvoiceButton(order)
       // 支付成功领券：config 下发券名且顾客未领取时展示卡片
       this._maybeShowCouponCard(order)
       if (FEEDBACK_PAID_STATUSES.indexOf(String(order.payment_status || '').toUpperCase()) >= 0) {
@@ -560,15 +562,39 @@ Page({
     my.switchTab({ url: '/pages/menu/menu' })
   },
 
+  // ---- 电子发票入口 ----
+  async _refreshInvoiceButton(order) {
+    const paid = !!(order && String(order.payment_status || '').toUpperCase() === 'PAID')
+    if (!paid || !this.orderId) {
+      this.setData({ canInvoice: false })
+      return
+    }
+    try {
+      const cfg = await clientConfig.loadClientConfig()
+      if (!(cfg && cfg.invoice_enabled)) {
+        this.setData({ canInvoice: false })
+        return
+      }
+      const data = await api.get('/miniprogram/invoices', {
+        order_id: Number(this.orderId),
+        page: 1,
+        page_size: 1
+      })
+      const item = ((data && data.items) || [])[0]
+      const st = item ? String(item.status || '').toUpperCase() : ''
+      // 已申请/已开票隐藏；驳回后可再申请
+      this.setData({ canInvoice: !st || st === 'REJECTED' })
+    } catch (_) {
+      this.setData({ canInvoice: false })
+    }
+  },
+
   // ---- 支付成功领券 ----
   async _maybeShowCouponCard(order) {
     if (this._couponResolved) return
     if (!order || String(order.payment_status || '').toUpperCase() !== 'PAID') return
     try {
       const cfg = await clientConfig.loadClientConfig()
-      // 电子发票开关：默认关闭，后端可在 SystemSettings 里开启
-      const invoiceEnabled = !!(cfg && cfg.invoice_enabled)
-      this.setData({ canInvoice: invoiceEnabled && String(order.payment_status || '').toUpperCase() === 'PAID' })
       const configName = String((cfg && cfg.pay_success_coupon_name) || '').trim()
       if (!configName) {
         this._couponResolved = true

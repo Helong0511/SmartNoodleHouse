@@ -129,6 +129,34 @@
               show-word-limit
               style="max-width: 520px"
             />
+            <div
+              v-else-if="item.type === 'string' && item.key === 'display_screen_token'"
+              class="token-block"
+            >
+              <div class="token-row">
+                <el-input
+                  v-model="item.strValue"
+                  :maxlength="item.max_length || 128"
+                  show-word-limit
+                  clearable
+                  placeholder="点击右侧生成，或手动粘贴"
+                  class="token-input"
+                />
+                <el-button type="primary" plain @click="generateDisplayScreenToken(item)">
+                  生成访问令牌
+                </el-button>
+              </div>
+              <div v-if="displayScreenUrl(item)" class="display-url-box">
+                <div class="display-url-label">完整调用地址</div>
+                <div class="display-url-row">
+                  <code class="display-url">{{ displayScreenUrl(item) }}</code>
+                  <el-button size="small" @click="copyDisplayUrl(item)">复制</el-button>
+                  <el-button size="small" type="primary" link @click="openDisplayUrl(item)">打开</el-button>
+                </div>
+                <p class="display-url-hint">保存本店参数后生效；叫号屏浏览器用此地址全屏打开</p>
+              </div>
+              <p v-else-if="!props.storeId" class="display-url-hint warn">请先选择门店后再生成地址</p>
+            </div>
             <el-input
               v-else-if="item.type === 'string'"
               v-model="item.strValue"
@@ -204,7 +232,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
 const props = defineProps<{
@@ -265,6 +293,78 @@ function isCouponNameSelect(key: string) {
 
 function enumLabel(key: string, value: string) {
   return ENUM_LABELS[key]?.[value] || value
+}
+
+/** 生成 URL 安全叫号屏令牌（64 位 hex，落在 max_length=128 内） */
+function buildDisplayScreenToken(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** 本店叫号屏完整地址：/display?store_id=&token= */
+function displayScreenUrl(item: any): string {
+  const sid = Number(props.storeId || 0)
+  if (!sid) return ''
+  const token = String(item?.strValue || '').trim()
+  if (!token) return ''
+  const q = new URLSearchParams({
+    store_id: String(sid),
+    token,
+  })
+  return `${window.location.origin}/display?${q.toString()}`
+}
+
+async function copyDisplayUrl(item: any) {
+  const url = displayScreenUrl(item)
+  if (!url) {
+    ElMessage.warning('请先填写访问令牌')
+    return
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = url
+      ta.style.position = 'fixed'
+      ta.style.left = '-9999px'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    ElMessage.success('已复制完整调用地址')
+  } catch {
+    ElMessage.error('复制失败，请手动选中地址复制')
+  }
+}
+
+function openDisplayUrl(item: any) {
+  const url = displayScreenUrl(item)
+  if (!url) {
+    ElMessage.warning('请先填写访问令牌')
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+async function generateDisplayScreenToken(item: any) {
+  const current = String(item.strValue || '').trim()
+  if (current) {
+    try {
+      await ElMessageBox.confirm(
+        '当前已有令牌。重新生成后，旧叫号屏链接将失效，需把新 token 写回屏端 URL。是否继续？',
+        '重新生成访问令牌',
+        { type: 'warning', confirmButtonText: '生成并填写', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  item.strValue = buildDisplayScreenToken()
+  const url = displayScreenUrl(item)
+  ElMessage.success(url ? '已生成并填入，下方已给出完整调用地址' : '已生成并填入，请点击下方保存本店参数后生效')
 }
 
 function isLongText(item: any) {
@@ -523,4 +623,56 @@ defineExpose({ reload: load })
 .field-desc { margin: 4px 0 0; font-size: 12px; color: #999; }
 .unit { margin-left: 8px; color: #666; font-size: 13px; }
 .dirty-hint { margin-left: 12px; color: #e6a23c; font-size: 12px; }
+.token-block {
+  max-width: 720px;
+  width: 100%;
+}
+.token-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.token-input { flex: 1; min-width: 220px; }
+.display-url-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+}
+.display-url-label {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.display-url-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.display-url {
+  flex: 1;
+  min-width: 200px;
+  display: block;
+  padding: 8px 10px;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #303133;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.display-url-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
+}
+.display-url-hint.warn { color: #e6a23c; }
 </style>

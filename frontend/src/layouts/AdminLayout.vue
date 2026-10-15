@@ -44,6 +44,7 @@
           <el-menu-item v-if="showQueue" index="/queue-manage">排队管理</el-menu-item>
           <el-menu-item v-if="showInvoices" index="/invoices">发票申请</el-menu-item>
           <el-menu-item v-if="showOrders" index="/recommend-report">推荐效果</el-menu-item>
+          <el-menu-item v-if="showOrders" index="/product-feedbacks">顾客评价</el-menu-item>
           <el-menu-item v-if="showPayments" index="/payments">支付记录</el-menu-item>
           <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-settlement">收银日结</el-menu-item>
@@ -104,7 +105,7 @@ const showKitchen = computed(() => auth.canAccessKitchen())
 const showDelivery = computed(() => auth.hasPermission('order:read') && notCashier.value)
 const showOrders = computed(() => auth.hasPermission('order:read') && notCashier.value)
 const showQueue = computed(() => auth.hasPermission('order:read') && notCashier.value)
-const showInvoices = computed(() => auth.hasPermission('payment:read') && notCashier.value)
+const showInvoices = computed(() => auth.hasPermission('invoice:manage') && notCashier.value)
 const showPayments = computed(() => auth.hasPermission('payment:read') && notCashier.value)
 const showSettlement = computed(() => auth.canManageSettlement)
 const showCatalog = computed(() => auth.hasPermission('product:read') && notCashier.value)
@@ -157,7 +158,7 @@ const openGroup = computed(() => {
   const p = activeMenu.value
   if (p === '/store-info') return 'g-store'
   if (p.startsWith('/delivery')) return 'g-delivery'
-  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds'].includes(p)) {
+  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds', '/recommend-report', '/product-feedbacks'].includes(p)) {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'

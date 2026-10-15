@@ -1,67 +1,93 @@
 <view class="page">
-  <!-- 开票申请表单 -->
-  <view class="card form-card">
+  <view class="card form-card" wx:if="{{featureChecked && !featureEnabled}}">
     <view class="card-title">申请开票</view>
-    <view class="order-box" wx:if="{{orderNo}}">
-      <text class="order-k">关联订单</text>
-      <text class="order-v">{{orderNo}}</text>
-    </view>
-    <view class="field">
-      <view class="field-label">抬头类型</view>
-      <view class="type-tabs">
-        <view
-          class="type-tab {{titleType === 'PERSON' ? 'on' : ''}}"
-          data-type="PERSON"
-          bindtap="switchTitleType"
-        >个人</view>
-        <view
-          class="type-tab {{titleType === 'COMPANY' ? 'on' : ''}}"
-          data-type="COMPANY"
-          bindtap="switchTitleType"
-        >单位</view>
-      </view>
-    </view>
-    <view class="field">
-      <view class="field-label">抬头名称</view>
-      <input
-        class="field-input"
-        placeholder="请填写发票抬头（1-200 字）"
-        placeholder-class="input-ph"
-        value="{{title}}"
-        bindinput="onTitleInput"
-        maxlength="200"
-      />
-    </view>
-    <view class="field" wx:if="{{titleType === 'COMPANY'}}">
-      <view class="field-label">单位税号</view>
-      <input
-        class="field-input"
-        placeholder="请填写税号"
-        placeholder-class="input-ph"
-        value="{{taxNo}}"
-        bindinput="onTaxNoInput"
-        maxlength="50"
-      />
-    </view>
-    <view class="field">
-      <view class="field-label">接收邮箱</view>
-      <input
-        class="field-input"
-        placeholder="电子发票将发送至该邮箱"
-        placeholder-class="input-ph"
-        value="{{email}}"
-        bindinput="onEmailInput"
-      />
-    </view>
-    <button
-      class="btn-primary submit-btn"
-      loading="{{submitting}}"
-      disabled="{{submitting}}"
-      bindtap="submitInvoice"
-    >提交开票申请</button>
+    <view class="gate-tip">本店尚未开通电子发票，如需开票请联系门店</view>
   </view>
 
-  <!-- 我的发票列表 -->
+  <block wx:elif="{{featureEnabled}}">
+    <view class="card form-card" wx:if="{{existingStatus === 'PENDING' || existingStatus === 'ISSUED'}}">
+      <view class="card-title">本单开票状态</view>
+      <view class="order-box" wx:if="{{orderNo}}">
+        <text class="order-k">关联订单</text>
+        <text class="order-v">{{orderNo}}</text>
+      </view>
+      <view class="status-box {{existingStatus === 'ISSUED' ? 'issued' : 'pending'}}">
+        <text class="status-text">{{existingStatusText}}</text>
+        <text class="status-hint" wx:if="{{existingStatus === 'PENDING'}}">门店处理中，开票结果将发送至您填写的邮箱</text>
+        <text class="status-hint" wx:else>已开票，请查收邮箱</text>
+      </view>
+    </view>
+
+    <view class="card form-card" wx:else>
+      <view class="card-title">申请开票</view>
+      <view class="order-box" wx:if="{{orderNo}}">
+        <text class="order-k">关联订单</text>
+        <text class="order-v">{{orderNo}}</text>
+      </view>
+      <view class="reject-tip" wx:if="{{existingStatus === 'REJECTED'}}">
+        上次申请已驳回{{existingRejectReason ? '：' + existingRejectReason : ''}}，可修改后重新提交
+      </view>
+      <view class="auto-tip" wx:if="{{autoFilled}}">已填入上次开票信息，可直接修改</view>
+      <view class="field">
+        <view class="field-label">抬头类型</view>
+        <view class="type-tabs">
+          <view
+            class="type-tab {{titleType === 'PERSON' ? 'on' : ''}}"
+            data-type="PERSON"
+            bindtap="switchTitleType"
+          >个人</view>
+          <view
+            class="type-tab {{titleType === 'COMPANY' ? 'on' : ''}}"
+            data-type="COMPANY"
+            bindtap="switchTitleType"
+          >单位</view>
+        </view>
+      </view>
+      <view class="field">
+        <view class="field-label">抬头名称</view>
+        <input
+          class="field-input"
+          placeholder="请填写发票抬头（1-200 字）"
+          placeholder-class="input-ph"
+          placeholder-style="color:#8c8c8c;"
+          value="{{title}}"
+          bindinput="onTitleInput"
+          maxlength="200"
+        />
+      </view>
+      <view class="field" wx:if="{{titleType === 'COMPANY'}}">
+        <view class="field-label">单位税号</view>
+        <input
+          class="field-input"
+          placeholder="请填写18位统一社会信用代码"
+          placeholder-class="input-ph"
+          placeholder-style="color:#8c8c8c;"
+          value="{{taxNo}}"
+          bindinput="onTaxNoInput"
+          maxlength="50"
+        />
+      </view>
+      <view class="field">
+        <view class="field-label">接收邮箱</view>
+        <input
+          class="field-input"
+          type="text"
+          placeholder="用于发票开具后发送到您的邮箱"
+          placeholder-class="input-ph"
+          placeholder-style="color:#8c8c8c;"
+          value="{{email}}"
+          bindinput="onEmailInput"
+        />
+      </view>
+      <button
+        class="btn-primary submit-btn"
+        loading="{{submitting}}"
+        disabled="{{submitting || !canSubmit}}"
+        bindtap="submitInvoice"
+      >提交开票申请</button>
+    </view>
+  </block>
+
   <view class="list-section">
     <view class="card-title list-title">我的发票</view>
     <view wx:if="{{listLoading}}" class="tip">加载中...</view>

@@ -388,7 +388,9 @@ async def miniprogram_config(
     queue_enabled = await SystemSettingsService.effective_bool(
         db, "queue_enabled", False, store_id=sid
     )
-    invoice_enabled = await SystemSettingsService.get_bool(db, "invoice_enabled", False)
+    invoice_enabled = await SystemSettingsService.effective_bool(
+        db, "invoice_enabled", False, store_id=sid
+    )
 
     config_version = await SystemSettingsService.public_config_version()
 

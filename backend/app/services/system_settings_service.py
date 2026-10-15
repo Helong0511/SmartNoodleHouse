@@ -40,7 +40,6 @@ PLATFORM_ONLY_KEYS = frozenset({
     "enable_wx_nickname",
     "enable_wx_phone_bind",
     "enable_face_welcome",
-    "invoice_enabled",
     "max_upload_size_mb",
     "jwt_expire_minutes",
     "customer_jwt_expire_minutes",
@@ -486,8 +485,8 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "bool",
         "default": False,
-        "store_override": False,
-        "description": "开启后顾客可对已支付订单申请开票（结果页入口 + 小程序 API）；平台级开关，默认关闭",
+        "store_override": True,
+        "description": "开启后本店顾客可对已支付订单申请开票（结果页入口 + 小程序 API）；可按门店覆盖，默认关闭",
     },
     "kitchen_ticket_order_no": {
         "group": "print",

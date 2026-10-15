@@ -746,7 +746,7 @@ WHERE NOT EXISTS (
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'invoice_enabled',
     'false',
-    '电子发票（小程序开票入口，默认关闭）'
+    '电子发票（小程序开票入口，默认关闭，可按门店覆盖）'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1

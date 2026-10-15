@@ -11,6 +11,7 @@ from app.api import (
     dashboard,
     delivery,
     favorites,
+    feedbacks,
     financial_ledger,
     health,
     invoices,
@@ -42,6 +43,7 @@ api_router.include_router(orders.router)
 api_router.include_router(payments.router)
 api_router.include_router(wallet.router)
 api_router.include_router(financial_ledger.router)
+api_router.include_router(feedbacks.router)
 api_router.include_router(print_jobs.router)
 api_router.include_router(pos.router)
 api_router.include_router(customers.router)

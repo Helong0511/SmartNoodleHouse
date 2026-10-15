@@ -24,6 +24,7 @@ from app.models import (
     ProductCategory,
     QueueTicket,
     Store,
+    StoreSetting,
     SystemSetting,
 )
 from app.services.system_settings_service import SystemSettingsService
@@ -158,6 +159,29 @@ async def _enable_invoice(db_session: AsyncSession):
     await _upsert_system_setting(db_session, "invoice_enabled", "1", sid=9702)
 
 
+async def _set_store_invoice(db_session: AsyncSession, store_id: int, enabled: bool, *, sid: int) -> None:
+    """按门店覆盖电子发票开关。"""
+    row = await db_session.scalar(
+        select(StoreSetting).where(
+            StoreSetting.store_id == int(store_id),
+            StoreSetting.setting_key == "invoice_enabled",
+        )
+    )
+    value = "true" if enabled else "false"
+    if row:
+        row.setting_value = value
+    else:
+        db_session.add(
+            StoreSetting(
+                id=sid,
+                store_id=int(store_id),
+                setting_key="invoice_enabled",
+                setting_value=value,
+            )
+        )
+    await db_session.flush()
+
+
 # ---------------------------------------------------------------------------
 # 收藏
 # ---------------------------------------------------------------------------
@@ -219,6 +243,33 @@ async def test_favorites_add_list_delete_idempotent(db_session: AsyncSession, st
 # 发票
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
+async def test_invoice_store_switch(db_session: AsyncSession, store: Store):
+    """电子发票可按门店开关：平台关闭时本店开启仍可开票。"""
+    cust = await _add_customer(db_session, "DAILY-CUST-INV-SW")
+    paid = _add_order(db_session, cust, store, 81)
+    await _upsert_system_setting(db_session, "invoice_enabled", "false", sid=9702)
+    await db_session.commit()
+
+    async with api_client(db_session, cust) as ac:
+        r = await ac.get("/api/miniprogram/config", params={"store_id": store.id})
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["invoice_enabled"] is False
+        r = await ac.post("/api/miniprogram/invoices", json=_body(order_id=paid.id))
+        assert r.json()["code"] == 40020
+        assert r.json()["message"] == "电子发票功能未开启"
+
+    await _set_store_invoice(db_session, store.id, True, sid=9710)
+    await db_session.commit()
+
+    async with api_client(db_session, cust) as ac:
+        r = await ac.get("/api/miniprogram/config", params={"store_id": store.id})
+        assert r.json()["data"]["invoice_enabled"] is True
+        r = await ac.post("/api/miniprogram/invoices", json=_body(order_id=paid.id))
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["status"] == "PENDING"
+
+
+@pytest.mark.asyncio
 async def test_invoice_create_validation_chain(db_session: AsyncSession, store: Store):
     cust = await _add_customer(db_session, "DAILY-CUST-2")
     other = await _add_customer(db_session, "DAILY-CUST-3")
@@ -245,6 +296,18 @@ async def test_invoice_create_validation_chain(db_session: AsyncSession, store: 
             json=_body(order_id=paid.id, title_type="COMPANY"),
         )
         assert r.json()["code"] == 40012
+        # 18 位校验位错误 → 40012（拒绝提交，不落库）
+        r = await ac.post(
+            "/api/miniprogram/invoices",
+            json=_body(
+                order_id=paid.id,
+                title_type="COMPANY",
+                tax_no="91440300MA5F1TKW3X",  # 末位应为 W
+                email="fin@corp.cn",
+            ),
+        )
+        assert r.json()["code"] == 40012
+        assert "校验" in r.json()["message"]
         # 邮箱格式错误 → 40012
         r = await ac.post(
             "/api/miniprogram/invoices",
@@ -287,6 +350,128 @@ async def test_invoice_create_validation_chain(db_session: AsyncSession, store: 
         assert item["amount"] == "88.50"
         assert item["status"] == "PENDING"
         assert item["tax_no"] == "91330100MA27X8WR0X"
+
+
+@pytest.mark.asyncio
+async def test_admin_create_invoice_for_customer(db_session: AsyncSession, store: Store):
+    """员工可为个别顾客按订单代开票，并可直接标记已开票。"""
+    cust = await _add_customer(db_session, "DAILY-CUST-INV-ADMIN")
+    paid = _add_order(db_session, cust, store, 83)
+    await _enable_invoice(db_session)
+    await db_session.commit()
+
+    async with api_client(db_session, cust) as ac:
+        # 可选顾客 / 订单列表应包含该已付订单
+        r = await ac.get("/api/admin/invoices/customer-candidates")
+        assert r.status_code == 200, r.text
+        custs = r.json()["data"]["items"]
+        assert any(x["customer_id"] == cust.id for x in custs)
+
+        r = await ac.get(
+            "/api/admin/invoices/order-candidates",
+            params={"customer_id": cust.id, "sort": "date_desc"},
+        )
+        assert r.status_code == 200, r.text
+        cands = r.json()["data"]["items"]
+        assert any(x["order_no"] == paid.order_no for x in cands)
+
+        r = await ac.post(
+            "/api/admin/invoices",
+            json={
+                "order_no": paid.order_no,
+                "title_type": "PERSON",
+                "title": "前台代开",
+                "email": "guest@shop.cn",
+                "mark_issued": True,
+            },
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["status"] == "ISSUED"
+        assert data["title"] == "前台代开"
+        assert data["order_no"] == paid.order_no
+
+        # 已开票后不再出现在可选订单；历史抬头可取出
+        r = await ac.get("/api/admin/invoices/order-candidates")
+        assert all(x["order_no"] != paid.order_no for x in r.json()["data"]["items"])
+
+        paid2 = _add_order(db_session, cust, store, 84)
+        await db_session.commit()
+        r = await ac.get("/api/admin/invoices/last-profile", params={"order_no": paid2.order_no})
+        assert r.status_code == 200, r.text
+        profile = r.json()["data"]["profile"]
+        assert profile["title"] == "前台代开"
+        assert profile["email"] == "guest@shop.cn"
+
+        r = await ac.get("/api/admin/invoices/order-candidates", params={"keyword": paid2.order_no})
+        hit = next(x for x in r.json()["data"]["items"] if x["order_no"] == paid2.order_no)
+        assert hit["has_profile"] is True
+        assert hit["last_profile"]["title"] == "前台代开"
+
+        # 已开票后顾客端不可再申请
+        r = await ac.post(
+            "/api/miniprogram/invoices",
+            json=_body(order_id=paid.id, title="重复", email="a@b.com"),
+        )
+        assert r.json()["code"] == 40011
+
+
+@pytest.mark.asyncio
+async def test_admin_invoice_pending_summary(db_session: AsyncSession, store: Store):
+    """待开票汇总供数据概览待办。"""
+    cust = await _add_customer(db_session, "DAILY-CUST-INV-TODO")
+    paid = _add_order(db_session, cust, store, 85)
+    await _enable_invoice(db_session)
+    await db_session.commit()
+
+    async with api_client(db_session, cust) as ac:
+        r = await ac.post(
+            "/api/miniprogram/invoices",
+            json=_body(order_id=paid.id, title="待办抬头", email="todo@corp.cn"),
+        )
+        assert r.status_code == 200, r.text
+        r = await ac.get("/api/admin/invoices/pending-summary")
+        assert r.status_code == 200, r.text
+        body = r.json()["data"]
+        assert body["pending_count"] >= 1
+        assert any(x["order_no"] == paid.order_no for x in body["items"])
+
+
+
+@pytest.mark.asyncio
+async def test_invoice_reject_then_reapply(db_session: AsyncSession, store: Store):
+    """驳回后允许同一订单重新提交开票。"""
+    cust = await _add_customer(db_session, "DAILY-CUST-INV-RE")
+    paid = _add_order(db_session, cust, store, 82)
+    await _enable_invoice(db_session)
+    await db_session.commit()
+
+    async with api_client(db_session, cust) as ac:
+        r = await ac.post(
+            "/api/miniprogram/invoices",
+            json=_body(order_id=paid.id, title="初版抬头", email="a@b.com"),
+        )
+        assert r.status_code == 200, r.text
+        rid = r.json()["data"]["request_id"]
+
+        r = await ac.post(f"/api/admin/invoices/{rid}/reject", json={"reason": "信息有误"})
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["status"] == "REJECTED"
+
+        r = await ac.post(
+            "/api/miniprogram/invoices",
+            json=_body(order_id=paid.id, title="更正抬头", email="fix@corp.cn"),
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["status"] == "PENDING"
+        assert r.json()["data"]["request_id"] == rid
+
+        r = await ac.get("/api/miniprogram/invoices", params={"order_id": paid.id})
+        item = r.json()["data"]["items"][0]
+        assert item["title"] == "更正抬头"
+        assert item["email"] == "fix@corp.cn"
+        assert item["status"] == "PENDING"
+        assert item["reject_reason"] is None
 
 
 @pytest.mark.asyncio
