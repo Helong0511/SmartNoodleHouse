@@ -516,7 +516,7 @@ WHERE NOT EXISTS (
 INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`)
 SELECT '金卡会员',
     500,
-    0.95
+    0.92
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
@@ -533,6 +533,10 @@ WHERE NOT EXISTS (
         FROM `member_levels`
         WHERE `name` = '钻石会员'
     );
+-- 会员折扣对齐运营表：银卡 0.98→0.95；金卡/钻石与种子一致（幂等纠偏）
+UPDATE `member_levels` SET `discount_rate` = 0.95 WHERE `name` = '银卡会员' AND `discount_rate` <> 0.95;
+UPDATE `member_levels` SET `discount_rate` = 0.92 WHERE `name` = '金卡会员' AND `discount_rate` <> 0.92;
+UPDATE `member_levels` SET `discount_rate` = 0.90 WHERE `name` = '钻石会员' AND `discount_rate` <> 0.90;
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
 -- 总部新客券名须与系统参数 / 总店 welcome_coupon_name 一致（「新客满20减3」）
 -- 废弃旧模板「新客满30减5」：停用，避免误选；历史已发券仍可核销
@@ -612,6 +616,13 @@ WHERE NOT EXISTS (
         FROM `coupon_templates`
         WHERE `name` = '满10单免2元'
     );
+-- 废弃旧「满10单免1元」：停用，并把里程碑引用切到「满10单免2元」
+UPDATE `coupon_templates` SET `status` = 0 WHERE `name` = '满10单免1元' AND `status` <> 0;
+UPDATE `order_milestone_rewards` `omr`
+INNER JOIN `coupon_templates` `old` ON `old`.`id` = `omr`.`template_id` AND `old`.`name` = '满10单免1元'
+INNER JOIN `coupon_templates` `new` ON `new`.`name` = '满10单免2元'
+SET `omr`.`template_id` = `new`.`id`
+WHERE `omr`.`threshold_orders` = 10;
 INSERT INTO `coupon_templates` (
         `name`,
         `coupon_type`,
@@ -1007,6 +1018,11 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'birthday_benefit_mode'
     );
+-- 运营表：生日由「仅双倍积分」升级为积分+赠券
+UPDATE `system_settings`
+SET `setting_value` = 'points_and_coupon'
+WHERE `setting_key` = 'birthday_benefit_mode'
+  AND `setting_value` IN ('points', 'coupon', '');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'birthday_points_multiplier',
     '2',
@@ -1027,6 +1043,10 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'birthday_coupon_name'
     );
+UPDATE `system_settings`
+SET `setting_value` = '生日免费加蛋'
+WHERE `setting_key` = 'birthday_coupon_name'
+  AND (`setting_value` IS NULL OR TRIM(`setting_value`) = '');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'sleep_wake_coupon_name_30',
     '沉睡唤醒满20减3',
@@ -1037,6 +1057,10 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'sleep_wake_coupon_name_30'
     );
+UPDATE `system_settings`
+SET `setting_value` = '沉睡唤醒满20减3'
+WHERE `setting_key` = 'sleep_wake_coupon_name_30'
+  AND (`setting_value` IS NULL OR TRIM(`setting_value`) = '');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'sleep_wake_coupon_name_90',
     '沉睡唤醒满15减5',
@@ -1047,6 +1071,10 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'sleep_wake_coupon_name_90'
     );
+UPDATE `system_settings`
+SET `setting_value` = '沉睡唤醒满15减5'
+WHERE `setting_key` = 'sleep_wake_coupon_name_90'
+  AND (`setting_value` IS NULL OR TRIM(`setting_value`) = '');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'balance_low_threshold',
     '20',
@@ -1157,6 +1185,11 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'love_day_soy_template_name'
     );
+-- 运营表：爱心日豆浆模板空值补齐
+UPDATE `system_settings`
+SET `setting_value` = '爱心日免费豆浆'
+WHERE `setting_key` = 'love_day_soy_template_name'
+  AND (`setting_value` IS NULL OR TRIM(`setting_value`) = '');
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'love_day_weekday',
     '0',

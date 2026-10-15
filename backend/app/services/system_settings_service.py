@@ -223,9 +223,9 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "unit": "",
         "type": "enum",
         "choices": ["off", "points", "coupon", "points_and_coupon"],
-        "default": "points",
+        "default": "points_and_coupon",
         "store_override": True,
-        "description": "生日当天权益：关闭 / 仅积分倍数 / 仅赠券 / 积分+赠券；可按门店覆盖",
+        "description": "生日当天权益：关闭 / 仅积分倍数 / 仅赠券 / 积分+赠券；默认积分翻倍+生日免费加蛋券；可按门店覆盖",
     },
     "birthday_points_multiplier": {
         "group": "member",
