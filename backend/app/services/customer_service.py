@@ -152,6 +152,22 @@ class CustomerService:
         return str(getattr(customer, "member_status", "") or "").upper() == "MEMBER"
 
     @staticmethod
+    def identity_name_payload(customer: Customer) -> dict:
+        """展示名 / 昵称原样返回。禁止用 nickname 顶替空 display_name，避免编辑/双栏展示串值。"""
+        return {
+            "display_name": customer.display_name,
+            "nickname": customer.nickname,
+        }
+
+    @staticmethod
+    def public_label(customer: Customer | None) -> str | None:
+        """只读展示用单字段称呼（展示名优先，否则昵称）。"""
+        if not customer:
+            return None
+        name = (customer.display_name or customer.nickname or "").strip()
+        return name or None
+
+    @staticmethod
     def member_payload(customer: Customer, level: MemberLevel | None = None) -> dict:
         """顾客会员关联摘要（列表/详情复用）。以 member_status 为准，不再用昵称/手机启发式。"""
         registered = CustomerService.is_member(customer)

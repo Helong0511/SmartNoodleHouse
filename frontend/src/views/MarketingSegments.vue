@@ -121,8 +121,13 @@
       <p>命中约 <b>{{ est.count }}</b> 人（脱敏样本最多 20）</p>
       <el-table :data="est.samples" size="small" stripe>
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="customer_no" label="编号" width="120" />
-        <el-table-column prop="display_name" label="昵称" />
+        <el-table-column prop="customer_no" label="编号" width="120" show-overflow-tooltip />
+        <el-table-column label="展示名" min-width="100" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.display_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="昵称" min-width="100" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.nickname || '—' }}</template>
+        </el-table-column>
         <el-table-column prop="phone_masked" label="手机" width="120" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">{{ label(MEMBER_STATUS, row.member_status) }}</template>

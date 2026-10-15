@@ -361,7 +361,7 @@ async def admin_ledger(
             operator_name = op_map.get(int(op_id))
         elif entry in ("TOPUP", "PAY", "REFUND_RESTORE"):
             operator_kind = "CUSTOMER"
-            cname = (cust.display_name or cust.nickname) if cust else None
+            cname = CustomerService.public_label(cust)
             operator_name = f"{cname}（顾客本人）" if cname else "顾客本人"
         else:
             operator_kind = None
@@ -380,7 +380,7 @@ async def admin_ledger(
                 "id": r.id,
                 "customer_id": r.customer_id,
                 "customer_no": cust.customer_no if cust else None,
-                "customer_name": (cust.display_name or cust.nickname) if cust else None,
+                "customer_name": CustomerService.public_label(cust),
                 "customer_nickname": cust.nickname if cust else None,
                 "customer_phone": cust.phone if cust else None,
                 "customer_avatar_url": cust.avatar_url if cust else None,
@@ -435,8 +435,7 @@ async def search_customers_for_wallet(
         {
             "id": c.id,
             "customer_no": c.customer_no,
-            "display_name": c.display_name or c.nickname,
-            "nickname": c.nickname,
+            **CustomerService.identity_name_payload(c),
             "phone": c.phone,
             "avatar_url": c.avatar_url,
             **BalanceService.snapshot(c),

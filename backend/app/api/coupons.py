@@ -212,8 +212,7 @@ async def search_customers_for_issue(
         {
             "id": c.id,
             "customer_no": c.customer_no,
-            "display_name": c.display_name or c.nickname,
-            "nickname": c.nickname,
+            **CustomerService.identity_name_payload(c),
             "phone": c.phone,
         }
         for c in rows

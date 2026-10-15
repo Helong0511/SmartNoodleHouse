@@ -62,8 +62,7 @@ async def search_pos_customers(
         {
             "id": c.id,
             "customer_no": c.customer_no,
-            "display_name": c.display_name or c.nickname,
-            "nickname": c.nickname,
+            **CustomerService.identity_name_payload(c),
             "phone": c.phone,
             "is_member": CustomerService.is_member(c),
             "phone_verified": bool(int(getattr(c, "phone_verified", 0) or 0)),
@@ -115,8 +114,7 @@ async def remember_pos_customer_phone(
         {
             "id": customer.id,
             "customer_no": customer.customer_no,
-            "display_name": customer.display_name or customer.nickname,
-            "nickname": customer.nickname,
+            **CustomerService.identity_name_payload(customer),
             "phone": customer.phone,
             "is_member": CustomerService.is_member(customer),
             "phone_verified": bool(int(getattr(customer, "phone_verified", 0) or 0)),

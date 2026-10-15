@@ -164,11 +164,13 @@ class SegmentService:
             .scalars()
             .all()
         )
+        from app.services.customer_service import CustomerService
+
         samples = [
             {
                 "id": int(c.id),
                 "customer_no": c.customer_no,
-                "display_name": (c.display_name or c.nickname or "")[:20] or None,
+                **CustomerService.identity_name_payload(c),
                 "phone_masked": cls._mask_phone(c.phone),
                 "member_status": c.member_status,
                 "balance_total": str((c.balance_principal or 0) + (c.balance_gift or 0)),
