@@ -99,6 +99,10 @@
   justify-content: center;
   color: #999;
 }
+
+.empty-tip-action {
+  color: #1677ff;
+}
 .menu-layout {
   flex: 1;
   min-height: 0;

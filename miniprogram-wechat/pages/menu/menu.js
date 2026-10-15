@@ -788,6 +788,21 @@ Page({
   },
 
   // ---- 菜品收藏 ----
+  /** 写入收藏集合；收藏数为 0 时自动退出「仅看收藏」，避免菜单被滤空且无法切回 */
+  applyFavSet(favSet, opts) {
+    const next = favSet && typeof favSet === 'object' ? favSet : {}
+    const favCount = Object.keys(next).length
+    const patch = { favSet: next, favCount }
+    // 仅收藏筛选开启且已无收藏：必须退出筛选，否则 categories 为空且筛选条因 favCount=0 被隐藏
+    if (favCount === 0 && this.data.favoritesOnly) patch.favoritesOnly = false
+    this._favSet = next
+    const rebuild = !(opts && opts.skipRebuild)
+    this.setData(patch, () => {
+      if (rebuild) this.rebuildMenuView()
+    })
+    return favCount
+  },
+
   async loadFavorites(force = false) {
     const now = Date.now()
     const sid = (app.globalData.table && app.globalData.table.store_id)
@@ -812,11 +827,10 @@ Page({
           const pid = x && typeof x === 'object' ? (x.product_id != null ? x.product_id : x.id) : x
           if (pid != null) favSet[String(pid)] = true
         })
-      this._favSet = favSet
       this._favLoadedAt = Date.now()
       this._favLoadedStoreId = sidKey
-      this.setData({ favSet, favCount: Object.keys(favSet).length })
-      if (this.data.categories.length) this.rebuildMenuView()
+      // 首屏尚未建好 categories 时也更新 favSet；有菜单时再重建视图
+      this.applyFavSet(favSet, { skipRebuild: !this.data.categories.length })
     } catch (_) {
       // 未登录 / 失败静默
     }
@@ -831,9 +845,7 @@ Page({
     if (wasFav) delete nextSet[String(id)]
     else nextSet[String(id)] = true
     this._favToggling = true
-    this._favSet = nextSet
-    this.setData({ favSet: nextSet, favCount: Object.keys(nextSet).length })
-    this.rebuildMenuView()
+    this.applyFavSet(nextSet)
     try {
       await auth.ensureLogin()
       if (wasFav) await api.delete(`/miniprogram/favorites/${id}`, {})
@@ -843,9 +855,7 @@ Page({
       const rollback = { ...(this._favSet || {}) }
       if (wasFav) rollback[String(id)] = true
       else delete rollback[String(id)]
-      this._favSet = rollback
-      this.setData({ favSet: rollback, favCount: Object.keys(rollback).length })
-      this.rebuildMenuView()
+      this.applyFavSet(rollback)
       console.warn('收藏操作失败', err)
     } finally {
       this._favToggling = false
@@ -853,7 +863,15 @@ Page({
   },
 
   toggleFavFilter() {
+    // 无收藏时不允许进入「仅看收藏」，避免空菜单死局
+    if (!this.data.favoritesOnly && !(this.data.favCount > 0)) return
     this.setData({ favoritesOnly: !this.data.favoritesOnly }, () => this.rebuildMenuView())
+  },
+
+  /** 空态点击：仅在「仅看收藏」时退出筛选 */
+  exitFavFilter() {
+    if (!this.data.favoritesOnly) return
+    this.setData({ favoritesOnly: false }, () => this.rebuildMenuView())
   },
 
   /** 基于 _catsCache/_lastProductItems 重建当前菜单视图（搜索词 + 收藏筛选） */
@@ -862,15 +880,21 @@ Page({
       this.loadMenu()
       return
     }
+    // 防御：仅收藏且已无收藏时先同步退出，保证 buildCategories 读到正确标志
+    const prevFavOnly = !!this.data.favoritesOnly
+    const favoritesOnly = prevFavOnly && (this.data.favCount > 0)
+    if (favoritesOnly !== prevFavOnly) this.data.favoritesOnly = favoritesOnly
     const { cats, metrics } = this._catsCache
     const items = this._lastProductItems
     const rebuilt = this.buildCategories(cats, items, metrics, this.data.keyword)
     const activeCat = (rebuilt[0] && rebuilt[0].id) || null
-    this.setData({
+    const patch = {
       categories: rebuilt,
       activeCat,
       scrollInto: activeCat ? `cat-${activeCat}` : ''
-    })
+    }
+    if (favoritesOnly !== prevFavOnly) patch.favoritesOnly = favoritesOnly
+    this.setData(patch)
   },
 
   goMember() {
