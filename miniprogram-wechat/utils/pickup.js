@@ -57,7 +57,7 @@ function decorate(order) {
       }
       pickupFoot = isTakeaway
         ? '完整订单号末 4 位，与大厅叫号屏一致 · 点击复制'
-        : '请在大厅叫号屏对照此桌号'
+        : '请在大厅叫号屏对照桌号、取餐号与餐品'
     } else if (isReady) {
       pickupHint = isTakeaway
         ? `取餐号 ${code} 已可取餐，请到取餐台自取`

@@ -1,7 +1,11 @@
-"""顾客叫号屏：脱敏展示字段与状态文案。"""
+"""顾客叫号屏：脱敏展示字段与状态文案。
+
+公开屏仅展示桌号/取餐号与餐品摘要，不含手机号、真实姓名等联系方式。
+"""
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +24,39 @@ CUSTOMER_STATUS_LABEL: dict[str, str] = {
     "COOKING": "制作中",
     "READY": "请取餐",
 }
+
+# 叫号屏单条最多展示的菜名条数（超出后追加「等 N 件」）
+_DISPLAY_ITEM_NAME_CAP = 3
+
+
+def summarize_order_items(items: list[Any] | None, *, max_names: int = _DISPLAY_ITEM_NAME_CAP) -> tuple[str, int]:
+    """生成叫号屏餐品摘要。
+
+    返回 ``(摘要文案, 总件数)``。同名行按名称合并数量；不含规格/备注（避免屏上过长）。
+    """
+    if not items:
+        return "", 0
+    merged: dict[str, int] = {}
+    order_names: list[str] = []
+    total_qty = 0
+    for it in items:
+        name = str(getattr(it, "product_name_snapshot", None) or "").strip() or "餐品"
+        qty = int(getattr(it, "quantity", 1) or 1)
+        if qty < 1:
+            qty = 1
+        total_qty += qty
+        if name not in merged:
+            order_names.append(name)
+            merged[name] = qty
+        else:
+            merged[name] += qty
+    cap = max(1, int(max_names or _DISPLAY_ITEM_NAME_CAP))
+    shown = order_names[:cap]
+    parts = [f"{n}×{merged[n]}" for n in shown]
+    text = "、".join(parts)
+    if len(order_names) > cap:
+        text = f"{text} 等{total_qty}件"
+    return text, total_qty
 
 
 async def is_customer_display_enabled(
@@ -52,12 +89,15 @@ def build_display_item(
     table: DiningTable | None,
     *,
     ready_at: datetime | None = None,
+    items: list[Any] | None = None,
 ) -> dict:
     is_takeaway = (order.dining_type or "").upper() == "TAKEAWAY"
     code = pickup_code_from_order_no(order.order_no)
+    items_summary, item_count = summarize_order_items(items)
     if table and not is_takeaway:
         pickup_label = (table.table_name or table.table_no or f"桌{order.table_id}").strip()
-        pickup_sub = "堂食"
+        # 同桌多单时桌号相同，副标题带取餐号便于对照小票/小程序
+        pickup_sub = f"堂食 · {code}"
         mode = "DINE_IN"
     else:
         pickup_label = code
@@ -74,6 +114,8 @@ def build_display_item(
         "status_label": CUSTOMER_STATUS_LABEL.get(status, status),
         "dining_type": order.dining_type,
         "is_takeaway": is_takeaway,
+        "items_summary": items_summary,
+        "item_count": item_count,
         "paid_at": serialize_dt(order.paid_at) if order.paid_at else None,
     }
     if status == "READY":

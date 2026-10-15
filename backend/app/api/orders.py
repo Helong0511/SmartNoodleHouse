@@ -1260,7 +1260,7 @@ async def display_active_orders(
     token: str | None = Query(default=None, description="叫号屏令牌（本店或平台 DISPLAY_SCREEN_TOKEN）"),
     limit: int = Query(default=200, ge=1, le=500, description="最多返回订单数（防止积压撑爆）"),
 ):
-    """顾客叫号屏：仅展示本店堂食/自取订单状态，不含明细与操作。"""
+    """顾客叫号屏：本店堂食/自取订单状态 + 餐品摘要（不含顾客联系方式与操作）。"""
     from app.core.config import get_settings
     from app.services.customer_display import (
         DISPLAY_ACTIVE_STATUSES,
@@ -1304,6 +1304,18 @@ async def display_active_orders(
     table_map = await _load_tables(db, [o.table_id for o in order_list if o.table_id])
     ready_ids = [o.id for o in order_list if o.status == "READY"]
     ready_at_map = await load_ready_at_map(db, ready_ids)
+    order_ids = [o.id for o in order_list]
+    items_by_order: dict[int, list[OrderItem]] = {}
+    if order_ids:
+        item_rows = list(
+            (
+                await db.execute(
+                    select(OrderItem).where(OrderItem.order_id.in_(order_ids)).order_by(OrderItem.id)
+                )
+            ).scalars()
+        )
+        for it in item_rows:
+            items_by_order.setdefault(int(it.order_id), []).append(it)
 
     preparing = []
     ready = []
@@ -1313,6 +1325,7 @@ async def display_active_orders(
             order,
             table_map.get(order.table_id) if order.table_id else None,
             ready_at=ready_at,
+            items=items_by_order.get(int(order.id), []),
         )
         if order.status in PREPARING_STATUSES:
             preparing.append(item)

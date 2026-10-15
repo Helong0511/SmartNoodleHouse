@@ -5,7 +5,7 @@
         <img src="/logo.png?v=202609080938" alt="肠旺面" class="brand-logo" />
         <div class="brand-text">
           <h1>{{ storeName || '取餐叫号' }}</h1>
-          <p class="subtitle">堂食看桌号 · 打包看取餐号 · 制作完成请自取</p>
+          <p class="subtitle">堂食看桌号与取餐号 · 打包看取餐号 · 对照餐品自取</p>
         </div>
       </div>
       <div class="meta">
@@ -45,9 +45,17 @@
         <div v-if="!preparing.length" class="empty">暂无</div>
         <ul v-else class="ticket-list">
           <li v-for="item in preparing" :key="item.id" class="ticket">
-            <span class="label">{{ item.pickup_label }}</span>
-            <span class="sub">{{ item.pickup_sub }}</span>
-            <span class="state">{{ item.status_label }}</span>
+            <div class="ticket-top">
+              <div class="ticket-title">
+                <span class="label">{{ item.pickup_label }}</span>
+                <span v-if="showPickupCodeBadge(item)" class="code-badge">取餐号 {{ item.pickup_code }}</span>
+              </div>
+              <div class="ticket-side">
+                <span class="sub">{{ item.pickup_sub }}</span>
+                <span class="state">{{ item.status_label }}</span>
+              </div>
+            </div>
+            <p v-if="item.items_summary" class="items">{{ item.items_summary }}</p>
           </li>
         </ul>
       </section>
@@ -67,19 +75,27 @@
             class="ticket ready-ticket"
             :class="{ overdue: isReadyOverdue(item.id) }"
           >
-            <span class="label">{{ item.pickup_label }}</span>
-            <span class="sub">{{ item.pickup_sub }}</span>
-            <span class="state" :class="isReadyOverdue(item.id) ? 'overdue-flash' : 'pulse'">
-              {{ isReadyOverdue(item.id) ? '请尽快取餐' : '请取餐' }}
-            </span>
+            <div class="ticket-top">
+              <div class="ticket-title">
+                <span class="label">{{ item.pickup_label }}</span>
+                <span v-if="showPickupCodeBadge(item)" class="code-badge">取餐号 {{ item.pickup_code }}</span>
+              </div>
+              <div class="ticket-side">
+                <span class="sub">{{ item.pickup_sub }}</span>
+                <span class="state" :class="isReadyOverdue(item.id) ? 'overdue-flash' : 'pulse'">
+                  {{ isReadyOverdue(item.id) ? '请尽快取餐' : '请取餐' }}
+                </span>
+              </div>
+            </div>
+            <p v-if="item.items_summary" class="items">{{ item.items_summary }}</p>
           </li>
         </ul>
       </section>
     </div>
 
     <footer v-if="storeId && !featureDisabled" class="footer">
-      <span>堂食：对照您的桌号</span>
-      <span>打包/自取：对照取餐号（订单号末 4 位）</span>
+      <span>堂食：对照桌号 + 取餐号 + 餐品</span>
+      <span>打包/自取：对照取餐号（订单号末 4 位）与餐品</span>
     </footer>
   </div>
 </template>
@@ -110,7 +126,20 @@ type DisplayItem = {
   pickup_sub: string
   pickup_code: string
   status_label: string
+  mode?: string
+  items_summary?: string
+  item_count?: number
   ready_at?: string | null
+}
+
+/** 堂食主标题是桌号，额外展示取餐号徽章；打包主标题已是取餐号则不再重复 */
+function showPickupCodeBadge(item: DisplayItem) {
+  const code = (item.pickup_code || '').trim()
+  if (!code) return false
+  if ((item.mode || '').toUpperCase() === 'TAKEAWAY' || (item.mode || '').toUpperCase() === 'PICKUP') {
+    return false
+  }
+  return item.pickup_label !== code
 }
 
 /** 首次进入请取餐后的重复播报间隔（毫秒）：2 分 → 3 分 → 5 分 → 5 分 → 10 分 */
@@ -711,18 +740,52 @@ onUnmounted(() => {
   flex: 1;
 }
 .ticket {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 12px;
   border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
 }
 .ticket:last-child { border-bottom: none; }
+.ticket-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ticket-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 14px;
+  min-width: 0;
+}
+.ticket-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
 .label {
   font-size: clamp(28px, 4vw, 44px);
   font-weight: 700;
   letter-spacing: 1px;
+  line-height: 1.15;
+}
+.code-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(250, 173, 20, 0.16);
+  border: 1px solid rgba(250, 173, 20, 0.45);
+  color: #ffe58f;
+  font-size: clamp(14px, 1.6vw, 18px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 .sub {
   font-size: 14px;
@@ -734,7 +797,20 @@ onUnmounted(() => {
   color: #faad14;
   white-space: nowrap;
 }
+.items {
+  margin: 0;
+  color: #c9d4e3;
+  font-size: clamp(16px, 2vw, 22px);
+  line-height: 1.45;
+  word-break: break-word;
+}
 .ready-ticket .label { color: #b7eb8f; }
+.ready-ticket .code-badge {
+  background: rgba(82, 196, 26, 0.14);
+  border-color: rgba(82, 196, 26, 0.45);
+  color: #b7eb8f;
+}
+.ready-ticket .items { color: #d9f7be; }
 .ready-ticket .state {
   color: #52c41a;
   font-weight: 700;
@@ -751,7 +827,13 @@ onUnmounted(() => {
   color: #fff1b8;
   text-shadow: 0 0 12px rgba(255, 214, 102, 0.45);
 }
+.ready-ticket.overdue .code-badge {
+  background: rgba(255, 214, 102, 0.18);
+  border-color: rgba(255, 214, 102, 0.55);
+  color: #fff1b8;
+}
 .ready-ticket.overdue .sub { color: #ffccc7; }
+.ready-ticket.overdue .items { color: #fff1f0; }
 .ready-ticket.overdue .state {
   color: #fff;
   font-size: clamp(18px, 2.5vw, 24px);
