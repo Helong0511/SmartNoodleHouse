@@ -180,6 +180,13 @@ TASK_CATALOG: list[dict] = [
         "default_schedule": {"type": "cron", "hour": 11, "minute": 5},
     },
     {
+        "id": "points_expire",
+        "title": "积分过期清零",
+        "category": "营销",
+        "description": "每日 02:30 对超过 points_expire_days 未消费的 ACTIVE 会员积分整体清零（0=关闭）。",
+        "default_schedule": {"type": "cron", "hour": 2, "minute": 30},
+    },
+    {
         "id": "marketing_task_worker",
         "title": "营销任务消费",
         "category": "营销",
@@ -753,6 +760,29 @@ def register_tasks(scheduler) -> None:
             except Exception:
                 await db.rollback()
                 logger.exception("储值余额提醒任务异常")
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=2,
+        minute=30,
+        timezone="Asia/Shanghai",
+        id="points_expire",
+        name="积分过期清零",
+        misfire_grace_time=3600,
+    )
+    @_leader_job
+    async def points_expire():
+        """每日 02:30 积分过期清零：超期未消费的 ACTIVE 会员积分整体清零。"""
+        from app.services import retention_service
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stats = await retention_service.run_points_expire(db)
+                if stats.get("expired_count"):
+                    logger.info("积分过期清零: %s", stats)
+            except Exception:
+                await db.rollback()
+                logger.exception("积分过期清零任务异常")
 
     @scheduler.scheduled_job(
         "interval",

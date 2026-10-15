@@ -1895,5 +1895,25 @@ CREATE TABLE IF NOT EXISTS `customer_lifecycle` (
   INDEX `idx_cl_silence`(`silence_days` ASC) USING BTREE,
   CONSTRAINT `fk_cl_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '顾客生命周期与RFM快照' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for point_exchange_options
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `point_exchange_options` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '门店 → stores.id；NULL=总部全局选项',
+  `name` varchar(100) NOT NULL COMMENT '选项名称',
+  `template_id` bigint UNSIGNED NOT NULL COMMENT '券模板 → coupon_templates.id',
+  `points_cost` int NOT NULL COMMENT '所需积分',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序（升序）',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_peo_store_name`(`store_id` ASC, `name` ASC) USING BTREE,
+  INDEX `idx_peo_store_status`(`store_id` ASC, `status` ASC, `sort_order` ASC) USING BTREE,
+  INDEX `idx_peo_template`(`template_id` ASC) USING BTREE,
+  CONSTRAINT `fk_peo_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_peo_template` FOREIGN KEY (`template_id`) REFERENCES `coupon_templates` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '积分兑换选项' ROW_FORMAT = Dynamic;
 -- END CANONICAL SCHEMA
 SET FOREIGN_KEY_CHECKS = 1;

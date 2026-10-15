@@ -63,7 +63,7 @@ def test_validate_bool_and_enum():
     with pytest.raises(ValueError):
         SystemSettingsService._validate_value("kitchen_ticket_order_no", "qrcode")
     assert SystemSettingsService._validate_value("welcome_coupon_name", "") == ""
-    assert SystemSettingsService._validate_value("welcome_coupon_name", "新客满30减5") == "新客满30减5"
+    assert SystemSettingsService._validate_value("welcome_coupon_name", "新客满20减3") == "新客满20减3"
     assert SystemSettingsService._validate_value("mini_program_env_version", "") == "auto"
     assert SystemSettingsService._validate_value("printer_mode", "local") == "local"
     assert SystemSettingsService._validate_value("app_timezone", "Asia/Shanghai") == "Asia/Shanghai"

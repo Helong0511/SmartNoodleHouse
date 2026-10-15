@@ -585,9 +585,9 @@ champions / loyal / new_hope / need_love / winback / hibernating（阈值可配�
 - **P0**：充值发 N 张早餐时段券（需券适用时段 🔧）。  
 - **P1**：`benefit_cards` + redemptions 次卡实体。
 
-## 10.3 积分 ✅ + 🔧
+## 10.3 积分 ✅
 
-实付积分、退款扣回、等级升级 ✅；小程序明细体验与积分兑豆浆/卤蛋券 🔧（扣点+发券同事务）。
+实付积分、退款扣回、等级升级 ✅；积分明细查询（EARN/REFUND_DEDUCT/EXCHANGE/EXPIRE 四类型 + 中文标签 + 真分页）✅；积分兑换优惠券（`point_exchange_options` 配置选项，`PTS:{cid}:{oid}:{YYYYMM}` 幂等键，扣点+发券同事务）✅；积分过期清零（`points_expire_days` 配置，默认 365 天，0=永不过期，每日 02:30 扫描超期 ACTIVE 会员整体清零 + 写 EXPIRE 流水）✅。
 
 ## 10.4 验收
 

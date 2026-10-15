@@ -645,6 +645,19 @@ async def update_customer(
     if "nickname" in fields:
         changes["nickname"] = {"old": customer.nickname, "new": body.nickname}
         customer.nickname = body.nickname
+    # 小程序读渠道账号昵称；后台改顾客表后须同步，否则端上仍显示旧名
+    if "display_name" in fields or "nickname" in fields:
+        # 优先用本次改动的昵称；未改昵称则用展示名
+        sync_name = None
+        if "nickname" in fields and CustomerService.is_meaningful_nickname(customer.nickname):
+            sync_name = str(customer.nickname).strip()
+        elif "display_name" in fields and CustomerService.is_meaningful_nickname(customer.display_name):
+            sync_name = str(customer.display_name).strip()
+        else:
+            sync_name = (customer.nickname or customer.display_name or "").strip() or None
+        await CustomerService.sync_display_to_channel_accounts(
+            db, customer, nickname=sync_name
+        )
     if "phone" in fields:
         new_phone = body.phone
         if new_phone:

@@ -12,6 +12,7 @@ from app.core.response import money, now_local, serialize_dt
 from app.models import (
     Customer,
     CustomerAlipayAccount,
+    CustomerCoupon,
     CustomerIdentity,
     CustomerPreference,
     CustomerWechatAccount,
@@ -20,6 +21,7 @@ from app.models import (
     Order,
     OrderItem,
     OrderItemOption,
+    PointExchangeOption,
     PointLedger,
     Store,
 )
@@ -579,6 +581,85 @@ class CustomerService:
         await CustomerService.recalculate_member_level(db, customer)
         await db.flush()
         return actual
+
+    @staticmethod
+    async def exchange_points_for_coupon(
+        db: AsyncSession,
+        customer_id: int,
+        option_id: int,
+    ) -> dict:
+        """积分换券：扣减积分 → 调 issue_by_template_id 发券 → 写 EXCHANGE 流水。
+
+        幂等靠发券侧 client_request_id（PTS:{cid}:{oid}:{YYYYMM}），
+        同月同选项重复请求不扣分、不重复发券。
+        """
+        from app.services.coupon_service import CouponService
+
+        customer = (
+            await db.execute(
+                select(Customer).where(Customer.id == int(customer_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not customer:
+            raise AppException(40404, "顾客不存在")
+        option = await db.get(PointExchangeOption, int(option_id))
+        if not option or int(option.status) != 1:
+            raise AppException(40404, "兑换选项不存在或已停用")
+        cost = int(option.points_cost)
+        if int(customer.points or 0) < cost:
+            raise AppException(40010, "积分不足")
+
+        # 幂等键：同月同选项只发一次
+        month_key = now_local().strftime("%Y%m")
+        req_key = f"PTS:{int(customer.id)}:{int(option.id)}:{month_key}"
+        # 先查是否已发过（issue_by_template_id 内部也查，但提前查可避免不必要的扣分）
+        existing_coupon = (
+            await db.execute(
+                select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+            )
+        ).scalar_one_or_none()
+        if existing_coupon:
+            return {
+                "already_exchanged": True,
+                "deducted_points": 0,
+                "coupon_id": int(existing_coupon.id),
+                "remaining_points": int(customer.points or 0),
+            }
+
+        # 发券（issue_by_template_id 内部原子扣库存 + client_request_id 幂等）
+        coupons = await CouponService.issue_by_template_id(
+            db,
+            int(customer.id),
+            int(option.template_id),
+            quantity=1,
+            client_request_id=req_key,
+            issued_at_store_id=int(customer.registered_store_id)
+            if customer.registered_store_id
+            else None,
+        )
+        coupon = coupons[0] if coupons else None
+
+        # 扣减积分（行锁已持有 customer）
+        before = int(customer.points or 0)
+        customer.points = before - cost
+        db.add(
+            PointLedger(
+                customer_id=customer.id,
+                order_id=None,
+                refund_id=None,
+                delta=-cost,
+                balance_after=int(customer.points),
+                entry_type="EXCHANGE",
+            )
+        )
+        await CustomerService.recalculate_member_level(db, customer)
+        await db.flush()
+        return {
+            "already_exchanged": False,
+            "deducted_points": cost,
+            "coupon_id": int(coupon.id) if coupon else None,
+            "remaining_points": int(customer.points),
+        }
 
     @staticmethod
     def member_progress_payload(
@@ -1151,6 +1232,20 @@ class CustomerService:
             customer.display_name = customer.display_name or n
         if avatar_url and not str(customer.avatar_url or "").strip():
             customer.avatar_url = str(avatar_url).strip()
+
+    @staticmethod
+    async def sync_display_to_channel_accounts(
+        db: AsyncSession,
+        customer: Customer,
+        *,
+        nickname: str | None = None,
+    ) -> None:
+        """后台改展示名/昵称后，同步到微信/支付宝渠道账号，供小程序立刻可见。"""
+        n = str(nickname if nickname is not None else (customer.nickname or customer.display_name) or "").strip()
+        if not CustomerService.is_meaningful_nickname(n):
+            return
+        for ch in ("wechat", "alipay"):
+            await CustomerService.save_channel_profile(db, int(customer.id), ch, nickname=n)
 
     @staticmethod
     async def resolve_channel_profile(db: AsyncSession, customer: Customer, channel: str) -> dict:

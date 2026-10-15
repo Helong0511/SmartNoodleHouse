@@ -37,7 +37,7 @@ def test_custom_seed_has_stores_not_truncate():
     assert "INSERT INTO `face_profiles`" not in DATA_CUSTOM_SQL
     assert "INSERT INTO `smart_noodle_house`.`face_profiles`" not in DATA_CUSTOM_SQL
     # 里程碑按券名关联，不硬编码 template_id 数字
-    assert "满10单免1元" in DATA_CUSTOM_SQL
+    assert "满10单免2元" in DATA_CUSTOM_SQL
     assert "JOIN `coupon_templates`" in DATA_CUSTOM_SQL
     assert "env_version=develop" not in DATA_CUSTOM_SQL
     assert "YOUR_ALIPAY_APPID" not in DATA_CUSTOM_SQL

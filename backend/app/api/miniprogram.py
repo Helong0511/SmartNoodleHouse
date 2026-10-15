@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 from jose import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, File, Request, UploadFile
@@ -39,6 +39,7 @@ from app.models import (
     CustomerAlipayAccount,
     CustomerPreference,
     CustomerWechatAccount,
+    CouponTemplate,
     DiningTable,
     FaceProfile,
     Order,
@@ -1461,6 +1462,7 @@ async def get_my_profile(request: Request, db: DbSession, customer: CurrentCusto
         {
             "customer_id": customer.id,
             "customer_no": customer.customer_no,
+            "display_name": customer.display_name,
             "nickname": disp["nickname"],
             "avatar_url": disp["avatar_url"],
             "phone": customer.phone,
@@ -1562,6 +1564,129 @@ async def clear_my_taste_profile(request: Request, db: DbSession, customer: Curr
     result = await PrivacyService.clear_taste_profile(db, customer, request=request)
     await db.commit()
     return success(result, request=request)
+
+
+# ── 积分兑换 / 明细 / 选项 ───────────────────────────────────────
+
+POINT_ENTRY_TYPE_LABELS = {
+    "EARN": "消费获得",
+    "REFUND_DEDUCT": "退款扣减",
+    "EXCHANGE": "兑换扣减",
+    "EXPIRE": "过期清零",
+}
+
+
+@router.get("/customers/me/points/exchange-options")
+async def get_my_exchange_options(
+    request: Request, db: DbSession, customer: CurrentCustomer
+):
+    """小程序：积分兑换选项列表（仅启用的，含券摘要）。"""
+    from app.models import PointExchangeOption
+    from app.services.system_settings_service import SystemSettingsService
+
+    enabled = await SystemSettingsService.effective_int(
+        db, "points_exchange_enabled", 0, store_id=getattr(customer, "registered_store_id", None)
+    )
+    if not enabled:
+        return success({"enabled": False, "items": []}, request=request)
+
+    store_id = getattr(customer, "registered_store_id", None)
+    q = (
+        select(PointExchangeOption)
+        .where(
+            PointExchangeOption.status == 1,
+            or_(PointExchangeOption.store_id.is_(None), PointExchangeOption.store_id == int(store_id))
+            if store_id
+            else PointExchangeOption.store_id.is_(None),
+        )
+        .order_by(PointExchangeOption.sort_order, PointExchangeOption.id)
+    )
+    rows = list((await db.execute(q)).scalars().all())
+    items = []
+    for opt in rows:
+        tmpl = await db.get(CouponTemplate, int(opt.template_id))
+        if not tmpl or int(tmpl.status) != 1:
+            continue
+        items.append(
+            {
+                "id": opt.id,
+                "name": opt.name,
+                "points_cost": int(opt.points_cost),
+                "store_scope": "HQ" if not opt.store_id else "STORE",
+                "coupon_summary": CouponService.summary_label(tmpl),
+                "coupon_name": tmpl.name,
+            }
+        )
+    return success({"enabled": True, "items": items}, request=request)
+
+
+class PointsExchangeBody(BaseModel):
+    option_id: int = Field(..., gt=0)
+
+
+@router.post("/customers/me/points/exchange")
+async def exchange_my_points(
+    body: PointsExchangeBody, request: Request, db: DbSession, customer: CurrentCustomer
+):
+    """小程序：用积分兑换优惠券（同月同选项幂等，不重复扣分）。"""
+    result = await CustomerService.exchange_points_for_coupon(
+        db, int(customer.id), int(body.option_id)
+    )
+    await db.commit()
+    return success(result, message="兑换成功" if not result.get("already_exchanged") else "本期已兑换", request=request)
+
+
+@router.get("/customers/me/points/ledger")
+async def get_my_points_ledger(
+    request: Request,
+    db: DbSession,
+    customer: CurrentCustomer,
+    page: int = 1,
+    page_size: int = 20,
+    entry_type: str | None = None,
+):
+    """小程序：积分明细（真分页，按 created_at DESC + id DESC 兜底）。"""
+    from app.models import PointLedger
+    from app.core.response import calc_pages
+
+    conds = [PointLedger.customer_id == int(customer.id)]
+    if entry_type:
+        conds.append(PointLedger.entry_type == entry_type)
+    q = select(PointLedger).where(*conds).order_by(PointLedger.created_at.desc(), PointLedger.id.desc())
+    total = await db.scalar(
+        select(func.count()).select_from(PointLedger).where(*conds)
+    ) or 0
+    rows = list(
+        (
+            await db.execute(
+                q.offset(max(0, (page - 1) * page_size)).limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    items = [
+        {
+            "id": r.id,
+            "delta": r.delta,
+            "balance_after": r.balance_after,
+            "entry_type": r.entry_type,
+            "entry_type_label": POINT_ENTRY_TYPE_LABELS.get(r.entry_type, r.entry_type),
+            "order_id": r.order_id,
+            "created_at": serialize_dt(r.created_at),
+        }
+        for r in rows
+    ]
+    return success(
+        {
+            "items": items,
+            "total": int(total),
+            "page": page,
+            "page_size": page_size,
+            "pages": calc_pages(int(total), page_size),
+        },
+        request=request,
+    )
 
 
 @router.post("/events")

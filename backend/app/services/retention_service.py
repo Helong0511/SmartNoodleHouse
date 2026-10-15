@@ -18,8 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import naive_local_now
 from app.core.redis_client import try_get_redis
-from app.models import Customer
+from app.models import Customer, PointLedger
 from app.services.coupon_service import CouponService
+from app.services.customer_service import CustomerService
 from app.services.system_settings_service import SystemSettingsService
 
 logger = logging.getLogger(__name__)
@@ -359,5 +360,74 @@ async def run_balance_low_remind(
             stats["sent_failed"],
             stats["logged_only"],
             threshold,
+        )
+    return stats
+
+
+SETTING_POINTS_EXPIRE_DAYS = "points_expire_days"
+
+
+async def run_points_expire(
+    db: AsyncSession, *, now: datetime | None = None, batch_size: int = DEFAULT_BATCH_SIZE
+) -> dict:
+    """积分过期清零：last_order_at 超期的 ACTIVE 会员积分整体清零，写 EXPIRE 流水。
+
+    配置 points_expire_days（0=永不过期，跳过）。
+    last_order_at IS NULL 的注册顾客（无消费记录）不处理。
+    """
+    now = now or naive_local_now()
+    days = await SystemSettingsService.get_int(db, SETTING_POINTS_EXPIRE_DAYS, 365)
+
+    stats: dict = {
+        "enabled": days > 0,
+        "expire_days": days if days > 0 else None,
+        "expired_count": 0,
+        "expired_points": 0,
+        "skipped": None,
+    }
+    if days <= 0:
+        return stats
+
+    cutoff = now - timedelta(days=days)
+    conditions = [
+        Customer.last_order_at.isnot(None),
+        Customer.last_order_at < cutoff,
+        Customer.account_status == "ACTIVE",
+        Customer.points > 0,
+    ]
+
+    async for rows in _batched_active_customers(db, *conditions, batch_size=batch_size):
+        for customer in rows:
+            # 行锁刷新当前积分（分批 query 可能已过期）
+            locked = (
+                await db.execute(
+                    select(Customer).where(Customer.id == int(customer.id)).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not locked or int(locked.points or 0) <= 0:
+                continue
+            before = int(locked.points)
+            locked.points = 0
+            db.add(
+                PointLedger(
+                    customer_id=locked.id,
+                    order_id=None,
+                    refund_id=None,
+                    delta=-before,
+                    balance_after=0,
+                    entry_type="EXPIRE",
+                )
+            )
+            await CustomerService.recalculate_member_level(db, locked)
+            stats["expired_count"] += 1
+            stats["expired_points"] += before
+        await db.commit()
+
+    if stats["expired_count"]:
+        logger.info(
+            "积分过期清零: %s 人，共 %s 积分（过期阈值 %s 天）",
+            stats["expired_count"],
+            stats["expired_points"],
+            days,
         )
     return stats

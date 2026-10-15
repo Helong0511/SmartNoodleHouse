@@ -4,6 +4,7 @@ from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success, serialize_dt
 from app.models import CouponTemplate, Customer
+from sqlalchemy import or_, select
 from app.schemas.coupon import CouponIssueRequest, CouponTemplateCreate, CouponTemplateUpdate
 from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
@@ -331,3 +332,127 @@ async def replace_milestones(
         store_id=sid,
     )
     return success({"store_id": sid, "items": items}, request=request)
+
+
+# ── 积分兑换选项管理 ──────────────────────────────────────────
+
+class PointExchangeOptionItem(BaseModel):
+    name: str = Field(..., max_length=100)
+    template_id: int = Field(..., ge=1)
+    points_cost: int = Field(..., ge=1)
+    status: int = Field(default=1, ge=0, le=1)
+    sort_order: int = Field(default=0, ge=0, le=9999)
+
+
+class PointExchangeOptionReplace(BaseModel):
+    store_id: int | None = Field(default=None, description="超管指定门店；门店账号忽略；不传=总部全局选项")
+    items: list[PointExchangeOptionItem] = Field(default_factory=list)
+
+
+@router.get("/point-exchange-options", dependencies=[require_permission("coupon:read")])
+async def list_point_exchange_options(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+):
+    """积分兑换选项列表（门店账号仅看本店+总部，超管可指定门店）。"""
+    from app.models import PointExchangeOption
+
+    bound = require_bound_store(user, None)
+    is_hq = user.role.code == "SUPER_ADMIN"
+    if is_hq:
+        sid = int(store_id) if store_id else None
+    else:
+        sid = bound
+
+    q = select(PointExchangeOption).order_by(PointExchangeOption.sort_order, PointExchangeOption.id)
+    if sid is not None:
+        q = q.where(
+            or_(PointExchangeOption.store_id.is_(None), PointExchangeOption.store_id == int(sid))
+        )
+    else:
+        q = q.where(PointExchangeOption.store_id.is_(None))
+    rows = list((await db.execute(q)).scalars().all())
+    items = []
+    for opt in rows:
+        tmpl = await db.get(CouponTemplate, int(opt.template_id))
+        items.append(
+            {
+                "id": opt.id,
+                "store_id": int(opt.store_id) if opt.store_id else None,
+                "name": opt.name,
+                "template_id": int(opt.template_id),
+                "template_name": tmpl.name if tmpl else None,
+                "points_cost": int(opt.points_cost),
+                "status": int(opt.status),
+                "sort_order": int(opt.sort_order),
+            }
+        )
+    return success({"store_id": sid, "items": items}, request=request)
+
+
+@router.put("/point-exchange-options", dependencies=[require_permission("coupon:manage")])
+async def replace_point_exchange_options(
+    data: PointExchangeOptionReplace,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """整表替换本店（或总部）积分兑换选项（空 items 表示清空）。"""
+    from app.models import PointExchangeOption
+
+    bound = require_bound_store(user, None)
+    is_hq = user.role.code == "SUPER_ADMIN"
+    if is_hq:
+        sid = int(data.store_id) if data.store_id else None
+    else:
+        sid = bound
+
+    # 校验模板有效性
+    for item in data.items:
+        tmpl = await db.get(CouponTemplate, int(item.template_id))
+        if not tmpl or int(tmpl.status) != 1:
+            raise AppException(40404, f"券模板 {item.template_id} 不存在或已停用")
+
+    # 删除旧项
+    if sid is not None:
+        await db.execute(
+            PointExchangeOption.__table__.delete().where(
+                PointExchangeOption.store_id == int(sid)
+            )
+        )
+    else:
+        await db.execute(
+            PointExchangeOption.__table__.delete().where(
+                PointExchangeOption.store_id.is_(None)
+            )
+        )
+    # 写入新项
+    for item in data.items:
+        db.add(
+            PointExchangeOption(
+                store_id=int(sid) if sid else None,
+                name=item.name,
+                template_id=int(item.template_id),
+                points_cost=int(item.points_cost),
+                status=int(item.status),
+                sort_order=int(item.sort_order),
+            )
+        )
+    await db.commit()
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="coupon.point_exchange.replace",
+        module="coupon",
+        target_type="store",
+        target_id=int(sid) if sid else 0,
+        detail={"store_id": sid, "items": [x.model_dump() for x in data.items]},
+        request=request,
+        store_id=int(sid) if sid else None,
+    )
+    return success(
+        {"store_id": sid, "items": [x.model_dump() for x in data.items]},
+        request=request,
+    )

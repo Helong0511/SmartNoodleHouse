@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     # 大厅叫号屏（种子默认关闭；运行时优先 system_settings，可按门店覆盖）
     enable_customer_display: bool = False
     # 注册会员自动赠送的券模板名称（种子默认；运行时按开卡门店 welcome_coupon_name）
-    welcome_coupon_name: str = "新客满30减5"
+    welcome_coupon_name: str = "新客满20减3"
 
     # 美团外卖开放平台（waimaiopen）
     meituan_app_id: str = ""

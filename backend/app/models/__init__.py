@@ -1650,3 +1650,26 @@ class CustomerLifecycle(Base, TimestampMixin):
     order_count_90d: Mapped[int] = mapped_column(Integer, default=0)
     pay_amount_90d: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PointExchangeOption(Base, TimestampMixin):
+    """积分兑换选项：用积分换券模板。store_id=NULL 表示总部全局选项。"""
+
+    __tablename__ = "point_exchange_options"
+    __table_args__ = (
+        UniqueConstraint("store_id", "name", name="uk_peo_store_name"),
+        Index("idx_peo_store_status", "store_id", "status", "sort_order"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    store_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("stores.id", ondelete="CASCADE"), default=None, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    template_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("coupon_templates.id"), index=True
+    )
+    points_cost: Mapped[int] = mapped_column(Integer)
+    status: Mapped[int] = mapped_column(Integer, default=1)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)

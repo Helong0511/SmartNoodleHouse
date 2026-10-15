@@ -480,9 +480,12 @@ Page({
     const memberStatus = String(profile.member_status || '').toUpperCase()
     const isMember = profile.is_member === true || memberStatus === 'MEMBER'
     const needActivate = !isMember
-    const nickname = profile.nickname || app.globalData.nickname || ''
+    const nickname = profile.nickname || profile.display_name || app.globalData.nickname || ''
     const displayName = nickname || (isMember ? '面馆会员' : '面馆访客')
-    if (profile.nickname) app.globalData.nickname = profile.nickname
+    if (nickname) {
+      app.globalData.nickname = nickname
+      try { my.setStorageSync({ key: 'nickname', data: nickname }) } catch (_) { }
+    }
     if (profile.avatar_url) app.globalData.avatarUrl = profile.avatar_url
     if (profile.customer_no) {
       app.globalData.customerNo = profile.customer_no

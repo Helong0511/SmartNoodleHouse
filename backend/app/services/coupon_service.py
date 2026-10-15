@@ -33,7 +33,7 @@ class CouponService:
                     db, "welcome_coupon_name", store_id=store_id, fallback=name
                 )
             ).strip()
-        return name or "新客满30减5"
+        return name or "新客满20减3"
 
     @staticmethod
     async def _welcome_template(

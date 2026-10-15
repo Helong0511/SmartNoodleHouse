@@ -61,6 +61,7 @@ TRUNCATE TABLE `payments`;
 TRUNCATE TABLE `permissions`;
 TRUNCATE TABLE `platform_category_maps`;
 TRUNCATE TABLE `platform_store_bindings`;
+TRUNCATE TABLE `point_exchange_options`;
 TRUNCATE TABLE `point_ledger`;
 TRUNCATE TABLE `pos_refund_requests`;
 TRUNCATE TABLE `processed_messages`;
@@ -505,7 +506,7 @@ WHERE NOT EXISTS (
 INSERT INTO `member_levels` (`name`, `min_points`, `discount_rate`)
 SELECT '银卡会员',
     200,
-    0.98
+    0.95
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
@@ -541,16 +542,16 @@ INSERT INTO `coupon_templates` (
         `min_order_amount`,
         `valid_days`
     )
-SELECT '新客满30减5',
+SELECT '新客满20减3',
     'FIXED',
-    5.00,
-    30.00,
+    3.00,
+    20.00,
     30
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
         FROM `coupon_templates`
-        WHERE `name` = '新客满30减5'
+        WHERE `name` = '新客满20减3'
     );
 INSERT INTO `coupon_templates` (
         `name`,
@@ -595,16 +596,16 @@ INSERT INTO `coupon_templates` (
         `min_order_amount`,
         `valid_days`
     )
-SELECT '满10单免1元',
+SELECT '满10单免2元',
     'FIXED',
-    1.00,
+    2.00,
     0.00,
     30
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
         FROM `coupon_templates`
-        WHERE `name` = '满10单免1元'
+        WHERE `name` = '满10单免2元'
     );
 INSERT INTO `coupon_templates` (
         `name`,
@@ -677,6 +678,79 @@ WHERE NOT EXISTS (
         SELECT 1
         FROM `coupon_templates`
         WHERE `name` = '满200单免30元'
+    );
+-- 五-A2、营销场景券模板（生日/沉睡唤醒/爱心日）
+INSERT INTO `coupon_templates` (
+        `name`,
+        `coupon_type`,
+        `discount_value`,
+        `min_order_amount`,
+        `valid_days`
+    )
+SELECT '生日免费加蛋',
+    'FIXED',
+    3.00,
+    0.00,
+    7
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `coupon_templates`
+        WHERE `name` = '生日免费加蛋'
+    );
+INSERT INTO `coupon_templates` (
+        `name`,
+        `coupon_type`,
+        `discount_value`,
+        `min_order_amount`,
+        `valid_days`
+    )
+SELECT '沉睡唤醒满20减3',
+    'FIXED',
+    3.00,
+    20.00,
+    30
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `coupon_templates`
+        WHERE `name` = '沉睡唤醒满20减3'
+    );
+INSERT INTO `coupon_templates` (
+        `name`,
+        `coupon_type`,
+        `discount_value`,
+        `min_order_amount`,
+        `valid_days`
+    )
+SELECT '沉睡唤醒满15减5',
+    'FIXED',
+    5.00,
+    15.00,
+    30
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `coupon_templates`
+        WHERE `name` = '沉睡唤醒满15减5'
+    );
+INSERT INTO `coupon_templates` (
+        `name`,
+        `coupon_type`,
+        `discount_value`,
+        `min_order_amount`,
+        `valid_days`
+    )
+SELECT '爱心日免费豆浆',
+    'VOUCHER',
+    3.00,
+    0.00,
+    1
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `coupon_templates`
+        WHERE `name` = '爱心日免费豆浆'
     );
 -- 五-B、储值档位（射洪友好：充50/100/200）
 INSERT INTO `recharge_packages` (
@@ -774,6 +848,36 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'visitor_data_retention_days'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'welcome_greeting_prefix',
+    '欢迎回来，{称呼}。',
+    '人脸迎宾语模板；占位符 {称呼}{会员等级}{店名}{口味}；可按门店覆盖'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'welcome_greeting_prefix'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'welcome_preference_template',
+    '今天还是老样子：{口味}？',
+    '有口味爱好时追加的迎宾附句；可按门店覆盖'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'welcome_preference_template'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'welcome_product_template',
+    '',
+    '有智能推荐餐品时追加的迎宾附句；默认空；可按门店覆盖'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'welcome_product_template'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'welcome_cooldown_seconds',
     '60',
     '迎宾冷却秒数'
@@ -865,7 +969,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'welcome_coupon_name',
-    '新客满30减5',
+    '新客满20减3',
     '注册赠券模板名'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -883,10 +987,9 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'welcome_bundle_template_ids'
     );
-
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'birthday_benefit_mode',
-    'points',
+    'points_and_coupon',
     '生日优惠方式：off/points/coupon/points_and_coupon'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -906,7 +1009,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'birthday_coupon_name',
-    '',
+    '生日免费加蛋',
     '生日赠券模板名（空=不发）'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -916,7 +1019,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'sleep_wake_coupon_name_30',
-    '',
+    '沉睡唤醒满20减3',
     '沉睡30-90天唤醒券模板名（空=关）'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -926,7 +1029,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'sleep_wake_coupon_name_90',
-    '',
+    '沉睡唤醒满15减5',
     '沉睡>=90天唤醒券模板名（空=关）'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -985,6 +1088,26 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'attribution_window_hours'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'points_exchange_enabled',
+    'false',
+    '积分兑换开关（开启后会员可用积分换券）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'points_exchange_enabled'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'points_expire_days',
+    '365',
+    '积分过期天数（距上次消费超期清零；0=永不过期）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'points_expire_days'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'wechat_subscribe_template_balance_low',
     '',
     '微信余额提醒订阅模板ID'
@@ -1016,7 +1139,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'love_day_soy_template_name',
-    '',
+    '爱心日免费豆浆',
     '爱心日豆浆券模板名（空=关）'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -1034,7 +1157,6 @@ WHERE NOT EXISTS (
         FROM `system_settings`
         WHERE `setting_key` = 'love_day_weekday'
     );
-
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'enable_alipay_avatar',
     'true',
@@ -1616,40 +1738,166 @@ WHERE `r`.`code` = 'SUPER_ADMIN'
     );
 -- END SYSTEM SEED
 SET FOREIGN_KEY_CHECKS = 1;
-
 -- 社会贡献身份字典（系统必要；可扩展，小程序/POS 从本表动态拉取，勿写死三种）
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'ELDER', '长者', 30, 1, JSON_ARRAY('身份证', '老年证')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'ELDER');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'TEACHER', '教师', 40, 1, JSON_ARRAY('教师证', '工牌')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'TEACHER');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'VETERAN', '退役军人', 80, 1, JSON_ARRAY('退役军人优待证', '军官证/士兵证')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'VETERAN');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'SANITATION', '环卫工', 10, 1, JSON_ARRAY('环卫工牌', '工作服')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'SANITATION');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'RIDER', '外卖骑手', 20, 1, JSON_ARRAY('工服', '平台工牌')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'RIDER');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'STUDENT', '学生', 50, 1, JSON_ARRAY('学生证')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'STUDENT');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'MEDICAL', '医护人员', 60, 1, JSON_ARRAY('执业证', '工牌')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'MEDICAL');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'VOLUNTEER', '志愿者', 90, 1, JSON_ARRAY('志愿证', '服务证明')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'VOLUNTEER');
-
-INSERT INTO `social_identity_types` (`code`, `name`, `sort_order`, `status`, `default_verify_hints`)
-SELECT 'DISABLED', '残障人士', 70, 1, JSON_ARRAY('残疾人证')
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `social_identity_types` WHERE `code` = 'DISABLED');
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'ELDER',
+    '长者',
+    30,
+    1,
+    JSON_ARRAY('身份证', '老年证')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'ELDER'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'TEACHER',
+    '教师',
+    40,
+    1,
+    JSON_ARRAY('教师证', '工牌')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'TEACHER'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'VETERAN',
+    '退役军人',
+    80,
+    1,
+    JSON_ARRAY('退役军人优待证', '军官证/士兵证')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'VETERAN'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'SANITATION',
+    '环卫工',
+    10,
+    1,
+    JSON_ARRAY('环卫工牌', '工作服')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'SANITATION'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'RIDER',
+    '外卖骑手',
+    20,
+    1,
+    JSON_ARRAY('工服', '平台工牌')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'RIDER'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'STUDENT',
+    '学生',
+    50,
+    1,
+    JSON_ARRAY('学生证')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'STUDENT'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'MEDICAL',
+    '医护人员',
+    60,
+    1,
+    JSON_ARRAY('执业证', '工牌')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'MEDICAL'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'VOLUNTEER',
+    '志愿者',
+    90,
+    1,
+    JSON_ARRAY('志愿证', '服务证明')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'VOLUNTEER'
+    );
+INSERT INTO `social_identity_types` (
+        `code`,
+        `name`,
+        `sort_order`,
+        `status`,
+        `default_verify_hints`
+    )
+SELECT 'DISABLED',
+    '残障人士',
+    70,
+    1,
+    JSON_ARRAY('残疾人证')
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `social_identity_types`
+        WHERE `code` = 'DISABLED'
+    );

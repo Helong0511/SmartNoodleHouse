@@ -15,7 +15,7 @@ from app.core.biz_no import BIZ_VI, generate_no
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
 from app.core.response import now_local
-from app.models import Camera, Customer, FaceProfile, Store, VisitorEvent, WelcomeLog
+from app.models import Camera, Customer, FaceProfile, MemberLevel, Store, VisitorEvent, WelcomeLog
 from app.services.face_extractor import EMBEDDING_DIM
 from app.services.secret_encryption import _fernet_from_material
 
@@ -571,6 +571,177 @@ class WelcomeService:
         avg = sum(scores) / len(scores) if scores else 0.0
         return length >= confirm_frames, avg
 
+    # 迎宾语模板占位符（中英均可）
+    WELCOME_PLACEHOLDERS = (
+        ("称呼", "name"),
+        ("会员等级", "level"),
+        ("店名", "store"),
+        ("口味", "taste"),
+        ("餐品", "product"),
+    )
+    DEFAULT_GREETING_TEMPLATE = "欢迎回来，{称呼}。"
+    DEFAULT_PREFERENCE_TEMPLATE = "今天还是老样子：{口味}？"
+    # 默认不自动追加餐品句，避免播报过长；需要时在主模板写 {餐品} 或配置本项
+    DEFAULT_PRODUCT_TEMPLATE = ""
+
+    @staticmethod
+    def _collapse_welcome_spaces(text: str) -> str:
+        """压缩多余空白，并清理空占位留下的尴尬标点。"""
+        import re
+
+        s = re.sub(r"[ \t\u3000]+", " ", (text or "").strip())
+        # 「尊贵的  金卡」→「尊贵的 金卡」；去掉空口味导致的「：？」
+        s = re.sub(r"[：:][？?。.！!]*$", "", s)
+        s = re.sub(r"[：:]\s*(?=[，,。.！!？?]|$)", "", s)
+        s = re.sub(r"[，,]\s*(?=[，,。.！!？?]|$)", "", s)
+        return s.strip()
+
+    @classmethod
+    def render_welcome_template(cls, template: str, values: dict[str, str]) -> str:
+        """把 {称呼}/{会员等级}/{店名}/{口味}（及英文别名）替换为实际值。"""
+        text = template or ""
+        for cn, en in cls.WELCOME_PLACEHOLDERS:
+            val = str(values.get(cn) or values.get(en) or "")
+            text = text.replace("{" + cn + "}", val)
+            text = text.replace("{" + en + "}", val)
+        return cls._collapse_welcome_spaces(text)
+
+    @classmethod
+    def template_has_placeholder(cls, template: str, *names: str) -> bool:
+        t = template or ""
+        for n in names:
+            if "{" + n + "}" in t:
+                return True
+        return False
+
+    @classmethod
+    def build_welcome_text(
+        cls,
+        *,
+        call_as: str,
+        level_name: str = "",
+        store_name: str = "",
+        greeting_template: str | None = None,
+        preference_template: str | None = None,
+        product_template: str | None = None,
+        preference_bits: list[str] | None = None,
+        product_bits: list[str] | None = None,
+    ) -> str:
+        """拼迎宾语。
+
+        - 新模板：含 `{称呼}` 等占位符时按模板渲染
+        - 旧前缀：仅「欢迎回来」这类无占位符文本时，拼成「前缀，称呼。」
+        - 有口味且主模板未写 `{口味}` 时，追加口味副句（默认可配）
+        - 有餐品且主模板未写 `{餐品}` 时，仅当配置了餐品附句才追加
+        """
+        bits = [b.strip() for b in (preference_bits or []) if (b or "").strip()]
+        products = [b.strip() for b in (product_bits or []) if (b or "").strip()]
+        taste = "、".join(bits)
+        product = "、".join(products)
+        level = (level_name or "").strip()
+        store = (store_name or "").strip()
+        raw_call = (call_as or "").strip()
+        tpl = (greeting_template or "").strip() or cls.DEFAULT_GREETING_TEMPLATE
+
+        # 称呼兜底：主模板若未单独写会员等级，无展示名/昵称时用「尊贵的{等级}」
+        has_level_ph = cls.template_has_placeholder(tpl, "会员等级", "level")
+        if raw_call:
+            name = raw_call
+        elif has_level_ph:
+            name = ""
+        elif level:
+            name = f"尊贵的{level}" if level.endswith("会员") else f"尊贵的{level}会员"
+        else:
+            name = "尊贵的会员"
+
+        values = {
+            "称呼": name,
+            "name": name,
+            "会员等级": level,
+            "level": level,
+            "店名": store,
+            "store": store,
+            "口味": taste,
+            "taste": taste,
+            "餐品": product,
+            "product": product,
+        }
+
+        ph_names = (
+            "称呼",
+            "name",
+            "会员等级",
+            "level",
+            "店名",
+            "store",
+            "口味",
+            "taste",
+            "餐品",
+            "product",
+        )
+        if cls.template_has_placeholder(tpl, *ph_names):
+            text = cls.render_welcome_template(tpl, values)
+        else:
+            # 兼容旧「仅前缀」配置
+            prefix = tpl.rstrip("，,。.！!？?、；;：: ")
+            text = f"{prefix}，{name or (level and (f'尊贵的{level}' if level.endswith('会员') else f'尊贵的{level}会员')) or '尊贵的会员'}。"
+
+        # 主模板已含 {口味}/{餐品}：无数据时清掉空占位残留；有数据已在上面填入
+        if bits and not cls.template_has_placeholder(tpl, "口味", "taste"):
+            pref_tpl = (preference_template or "").strip() or cls.DEFAULT_PREFERENCE_TEMPLATE
+            pref_sentence = cls.render_welcome_template(pref_tpl, values)
+            if pref_sentence:
+                text = f"{text.rstrip('。.!！')}。{pref_sentence}"
+        if products and not cls.template_has_placeholder(tpl, "餐品", "product"):
+            prod_tpl = (product_template if product_template is not None else cls.DEFAULT_PRODUCT_TEMPLATE) or ""
+            prod_tpl = prod_tpl.strip()
+            if prod_tpl:
+                prod_sentence = cls.render_welcome_template(prod_tpl, values)
+                if prod_sentence:
+                    text = f"{text.rstrip('。.!！')}。{prod_sentence}"
+        return cls._collapse_welcome_spaces(text)
+
+    @staticmethod
+    async def resolve_welcome_identity(
+        db: AsyncSession, customer: Customer
+    ) -> tuple[str, str]:
+        """返回 (称呼, 会员等级名)。
+
+        称呼 = 展示名 → 昵称 → 空（由模板/等级兜底决定怎么说）
+        会员等级 = member_levels.name
+        """
+        from app.services.customer_service import CustomerService
+
+        call_as = ""
+        display = (customer.display_name or "").strip()
+        if CustomerService.is_meaningful_nickname(display):
+            call_as = display
+        else:
+            nick = (customer.nickname or "").strip()
+            if CustomerService.is_meaningful_nickname(nick):
+                call_as = nick
+
+        level_name = ""
+        if customer.member_level_id:
+            level = await db.get(MemberLevel, int(customer.member_level_id))
+            if level and (level.name or "").strip():
+                level_name = str(level.name).strip()
+        return call_as, level_name
+
+    @staticmethod
+    async def resolve_welcome_name(db: AsyncSession, customer: Customer) -> str:
+        """兼容旧调用：单字段称呼（有名用名，否则尊贵的等级）。"""
+        call_as, level_name = await WelcomeService.resolve_welcome_identity(db, customer)
+        if call_as:
+            return call_as
+        if level_name:
+            return (
+                f"尊贵的{level_name}"
+                if level_name.endswith("会员")
+                else f"尊贵的{level_name}会员"
+            )
+        return "尊贵的会员"
+
     @classmethod
     async def try_welcome(
         cls,
@@ -606,27 +777,95 @@ class WelcomeService:
         if not customer:
             return False
 
-        name = customer.display_name or customer.nickname or "会员"
-        text = f"欢迎回来，{name}。"
-        try:
-            from app.services.customer_service import PreferenceService
+        call_as, level_name = await cls.resolve_welcome_identity(db, customer)
+        store_name = ""
+        if store_id:
+            store = await db.get(Store, int(store_id))
+            if store and (store.name or "").strip():
+                store_name = str(store.name).strip()
 
-            rec = await PreferenceService.get_recommendations(db, customer_id, store_id=store_id)
-            prefs = (rec or {}).get("preferences") or []
-            if prefs:
-                bits = []
-                for p in prefs[:2]:
-                    label = (p.get("label") or "").strip()
-                    if not label:
-                        cat = (p.get("category") or "").strip()
-                        name = (p.get("option_name") or p.get("option_code") or "").strip()
-                        label = f"{cat}·{name}" if cat and name else (name or cat)
-                    if label:
-                        bits.append(label)
-                if bits:
-                    text = f"欢迎回来，{name}。今天还是老样子：{'、'.join(bits)}？"
-        except Exception:
-            pass
+        greeting_template = await SystemSettingsService.effective_setting(
+            db,
+            "welcome_greeting_prefix",
+            store_id=store_id,
+            fallback=cls.DEFAULT_GREETING_TEMPLATE,
+        )
+        preference_template = await SystemSettingsService.effective_setting(
+            db,
+            "welcome_preference_template",
+            store_id=store_id,
+            fallback=cls.DEFAULT_PREFERENCE_TEMPLATE,
+        )
+        product_template = await SystemSettingsService.effective_setting(
+            db,
+            "welcome_product_template",
+            store_id=store_id,
+            fallback=cls.DEFAULT_PRODUCT_TEMPLATE,
+        )
+        need_taste = cls.template_has_placeholder(
+            greeting_template, "口味", "taste"
+        ) or bool((preference_template or "").strip() or cls.DEFAULT_PREFERENCE_TEMPLATE)
+        need_product = cls.template_has_placeholder(
+            greeting_template, "餐品", "product"
+        ) or bool((product_template or "").strip())
+
+        preference_bits: list[str] = []
+        if need_taste:
+            try:
+                from app.services.customer_service import PreferenceService
+
+                rec = await PreferenceService.get_recommendations(
+                    db, customer_id, store_id=store_id
+                )
+                prefs = (rec or {}).get("preferences") or []
+                if prefs:
+                    for p in prefs[:2]:
+                        label = (p.get("label") or "").strip()
+                        if not label:
+                            cat = (p.get("category") or "").strip()
+                            opt = (p.get("option_name") or p.get("option_code") or "").strip()
+                            label = f"{cat}·{opt}" if cat and opt else (opt or cat)
+                        if label:
+                            preference_bits.append(label)
+            except Exception:
+                preference_bits = []
+
+        product_bits: list[str] = []
+        if need_product and store_id:
+            try:
+                from app.services.recommendation_service import RecommendationService
+
+                ranked, _state, _meta = await RecommendationService.recommend(
+                    db,
+                    int(store_id),
+                    customer_id=customer_id,
+                    scene="recommend_menu",
+                    limit=2,
+                    use_cache=True,
+                )
+                for item in ranked[:2]:
+                    pname = str(getattr(getattr(item, "product", None), "name", "") or "").strip()
+                    if pname:
+                        product_bits.append(pname)
+            except Exception:
+                product_bits = []
+
+        text = cls.build_welcome_text(
+            call_as=call_as,
+            level_name=level_name,
+            store_name=store_name,
+            greeting_template=greeting_template,
+            preference_template=preference_template,
+            product_template=product_template,
+            preference_bits=preference_bits,
+            product_bits=product_bits,
+        )
+        # WebSocket / TTS 展示用简称
+        name = call_as or (
+            f"尊贵的{level_name}"
+            if level_name.endswith("会员")
+            else (f"尊贵的{level_name}会员" if level_name else "尊贵的会员")
+        )
 
         await cls.get_queue().put({"customer_id": customer_id, "text": text, "camera_id": camera_id})
 

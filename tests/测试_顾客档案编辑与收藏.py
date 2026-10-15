@@ -46,3 +46,62 @@ def test_staff_favorite_routes_registered():
         if getattr(r, "path", None) == "/customers/{customer_id}"
     }
     assert ("PATCH",) in methods or any("PATCH" in m for m in methods)
+
+
+@pytest.mark.asyncio
+async def test_admin_rename_syncs_channel_nicknames(db_session):
+    """后台改展示名/昵称后，同步到微信/支付宝渠道，小程序才能读到新名。"""
+    from sqlalchemy import select
+
+    from app.models import Customer, CustomerAlipayAccount, CustomerWechatAccount
+    from app.services.customer_service import CustomerService
+
+    customer = Customer(
+        id=9101,
+        customer_no="CU_ADMIN_RENAME",
+        status=1,
+        nickname="旧昵称",
+        display_name="旧展示名",
+    )
+    db_session.add(customer)
+    await db_session.flush()
+    db_session.add(
+        CustomerWechatAccount(
+            id=91011,
+            customer_id=customer.id,
+            openid="wx_admin_rename",
+            profile_completed=1,
+            nickname="旧昵称",
+        )
+    )
+    db_session.add(
+        CustomerAlipayAccount(
+            id=91012,
+            customer_id=customer.id,
+            alipay_user_id="ali_admin_rename",
+            profile_completed=1,
+            nickname="旧昵称",
+        )
+    )
+    await db_session.flush()
+
+    customer.nickname = "新昵称"
+    customer.display_name = "新展示名"
+    await CustomerService.sync_display_to_channel_accounts(db_session, customer, nickname="新昵称")
+    await db_session.flush()
+
+    wx = (
+        await db_session.execute(
+            select(CustomerWechatAccount).where(CustomerWechatAccount.customer_id == customer.id)
+        )
+    ).scalar_one()
+    ali = (
+        await db_session.execute(
+            select(CustomerAlipayAccount).where(CustomerAlipayAccount.customer_id == customer.id)
+        )
+    ).scalar_one()
+    assert wx.nickname == "新昵称"
+    assert ali.nickname == "新昵称"
+    assert (await CustomerService.resolve_channel_profile(db_session, customer, "wechat"))[
+        "nickname"
+    ] == "新昵称"

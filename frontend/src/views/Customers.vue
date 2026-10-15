@@ -456,7 +456,7 @@
 
         <div class="pref-block">
           <h4>智能记录的口味爱好</h4>
-          <p class="muted tip">完成订单后自动累计规格偏好；人脸迎宾会播报「今天还是老样子」。</p>
+          <p class="muted tip">支付后累计规格口味；推荐引擎出餐品。迎宾占位符：{称呼}{会员等级}{店名}{口味}{餐品}。详见 docs/人脸迎宾与智能推荐.md。</p>
           <el-alert v-if="detail.welcome_hint" :title="detail.welcome_hint" type="success" :closable="false" show-icon
             style="margin-bottom:12px" />
           <el-table v-if="detail.preferences?.length" :data="detail.preferences" size="small" border>
