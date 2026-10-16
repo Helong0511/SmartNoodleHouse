@@ -76,21 +76,21 @@
     />
 
     <el-table :data="customers" border class="customer-table">
-      <el-table-column label="头像" width="72" align="center">
+      <el-table-column label="头像" width="80" align="center">
         <template #default="{ row }">
           <el-image v-if="row.avatar_url" :src="mediaUrl(row.avatar_url)" fit="cover" class="avatar-thumb"
             :preview-src-list="[mediaUrl(row.avatar_url)]" preview-teleported :z-index="4000" />
           <span v-else class="no-avatar">无</span>
         </template>
       </el-table-column>
-      <el-table-column prop="customer_no" label="编号" min-width="260" show-overflow-tooltip />
+      <el-table-column prop="customer_no" label="编号" min-width="200" show-overflow-tooltip />
       <el-table-column label="展示名" min-width="110" show-overflow-tooltip>
         <template #default="{ row }">{{ row.display_name || '—' }}</template>
       </el-table-column>
       <el-table-column label="昵称" min-width="110" show-overflow-tooltip>
         <template #default="{ row }">{{ row.nickname || '—' }}</template>
       </el-table-column>
-      <el-table-column label="注册门店" min-width="140" show-overflow-tooltip>
+      <el-table-column label="注册门店" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.registered_store_name">
             {{ row.registered_store_name }}
@@ -1246,7 +1246,7 @@ onMounted(async () => {
 
 <style scoped>
 .muted {
-  color: #999;
+  color: #6a8fb0;
 }
 
 .bal-sub {
@@ -1286,8 +1286,8 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f2f3f5;
-  color: #909399;
+  background: rgba(16, 34, 66, 0.55);
+  color: #7a9cc4;
   font-size: 12px;
 }
 
@@ -1352,7 +1352,7 @@ onMounted(async () => {
 }
 
 .hint {
-  color: #999;
+  color: #6a8fb0;
   font-size: 12px;
   margin-top: 4px;
 }
@@ -1411,7 +1411,7 @@ onMounted(async () => {
 }
 
 .pref-count {
-  color: #909399;
+  color: #7a9cc4;
   font-size: 12px;
   white-space: nowrap;
 }

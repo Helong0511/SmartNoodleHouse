@@ -262,8 +262,8 @@ onMounted(async () => {
 .refund-page { padding: 8px 4px 24px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .amt { color: #ff6b35; }
-.tender-tip { font-size: 12px; color: #888; margin-top: 2px; line-height: 1.3; }
+.tender-tip { font-size: 12px; color: #7a9cc4; margin-top: 2px; line-height: 1.3; }
 .empty { text-align: center; color: #aaa; padding: 40px; }
 .pager { margin-top: 14px; display: flex; justify-content: flex-end; }
-.muted { color: #999; font-size: 13px; }
+.muted { color: #6a8fb0; font-size: 13px; }
 </style>

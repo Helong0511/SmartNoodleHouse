@@ -311,21 +311,44 @@ onUnmounted(() => {
 }
 
 .kpi {
-  min-width: 110px;
-  padding: 12px 14px;
-  background: #f7f8fa;
-  border-radius: 8px;
+  position: relative;
+  min-width: 120px;
+  padding: 14px 16px;
+  border: 1px solid rgba(120, 200, 255, 0.32);
+  border-radius: 12px;
+  background: rgba(26, 50, 92, 0.62);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow:
+    0 0 20px rgba(80, 165, 245, 0.18),
+    inset 0 0 28px rgba(120, 190, 255, 0.04);
+  overflow: hidden;
+}
+
+.kpi::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 18%;
+  width: 64%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #7fc8ff, transparent);
+  opacity: 0.7;
 }
 
 .kpi-val {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
+  color: #7fc8ff;
+  text-shadow: 0 0 12px rgba(127, 200, 255, 0.5);
+  font-variant-numeric: tabular-nums;
 }
 
 .kpi-label {
   font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
+  color: #7a9cc4;
+  margin-top: 6px;
+  letter-spacing: 0.5px;
 }
 
 .kpi-actions {
@@ -338,21 +361,24 @@ onUnmounted(() => {
 .new-hint {
   margin-bottom: 10px;
   padding: 8px 14px;
-  border-radius: 6px;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
+  border-radius: 8px;
+  border: 1px solid rgba(127, 200, 255, 0.35);
+  background: rgba(80, 165, 245, 0.14);
+  color: #7fc8ff;
   font-size: 13px;
   cursor: pointer;
   text-align: center;
+  box-shadow: 0 0 14px rgba(80, 165, 245, 0.18);
 }
 
 .new-hint:hover {
-  background: var(--el-color-primary-light-7);
+  background: rgba(80, 165, 245, 0.24);
+  border-color: rgba(127, 200, 255, 0.55);
 }
 
 .sub {
   font-size: 12px;
-  color: #909399;
+  color: #7a9cc4;
 }
 
 .pager {

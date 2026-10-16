@@ -2453,9 +2453,13 @@ watch(() => auth.user?.store_id, () => {
 <style scoped>
 .pos {
   min-height: 100vh;
-  background: #f4f6f8;
+  background:
+    radial-gradient(circle at 20% -10%, rgba(36, 74, 134, 0.55) 0%, transparent 50%),
+    radial-gradient(circle at 90% 110%, rgba(26, 58, 110, 0.45) 0%, transparent 55%),
+    linear-gradient(180deg, #0e1e3c 0%, #0a1730 100%);
   display: flex;
   flex-direction: column;
+  color: #dbeaff;
 }
 
 .pos.standalone {
@@ -2476,8 +2480,11 @@ watch(() => auth.user?.store_id, () => {
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 16px;
-  background: #fff;
-  border-bottom: 1px solid #e8e8e8;
+  background: rgba(16, 34, 66, 0.72);
+  border-bottom: 1px solid rgba(120, 200, 255, 0.28);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 4px 20px rgba(4, 14, 32, 0.3);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -2497,17 +2504,18 @@ watch(() => auth.user?.store_id, () => {
   object-fit: contain;
   border-radius: 8px;
   background: #fff;
+  box-shadow: 0 0 16px rgba(120, 200, 255, 0.45);
 }
 
 .head-text .title {
   font-size: 22px;
   font-weight: 700;
-  color: #222;
+  color: #e8f4ff;
 }
 
 .head-text .sub {
   font-size: 14px;
-  color: #888;
+  color: #7a9cc4;
 }
 
 .store-select {
@@ -2528,13 +2536,13 @@ watch(() => auth.user?.store_id, () => {
 .loading-tip {
   padding: 48px;
   text-align: center;
-  color: #888;
+  color: #7a9cc4;
   font-size: 20px;
 }
 
 .pending-bar {
-  background: #fff8f5;
-  border-bottom: 2px solid #ff6b35;
+  background: rgba(80, 165, 245, 0.12);
+  border-bottom: 2px solid #5ba8f5;
   padding: 10px 16px;
 }
 
@@ -2543,7 +2551,7 @@ watch(() => auth.user?.store_id, () => {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  color: #ff6b35;
+  color: #5ba8f5;
   margin-bottom: 8px;
 }
 
@@ -2565,7 +2573,7 @@ watch(() => auth.user?.store_id, () => {
 .pending-card {
   flex: 0 0 auto;
   width: 160px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   border: 1.5px solid #ffd4c2;
   border-radius: 12px;
   padding: 10px 12px;
@@ -2576,9 +2584,9 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .pending-card.active {
-  border-color: #ff6b35;
+  border-color: #5ba8f5;
   box-shadow: 0 0 0 2px rgba(255, 107, 53, .2);
-  background: #fff8f5;
+  background: rgba(80, 165, 245, 0.12);
 }
 
 .pc-head {
@@ -2590,12 +2598,12 @@ watch(() => auth.user?.store_id, () => {
 .pc-head .pc-table {
   font-weight: 700;
   font-size: 15px;
-  color: #333;
+  color: #dbeaff;
 }
 
 .pc-head .pc-time {
   font-size: 11px;
-  color: #aaa;
+  color: #5f7c9c;
 }
 
 .pc-body {
@@ -2605,13 +2613,13 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .pc-body .pc-amount {
-  color: #ff6b35;
+  color: #5ba8f5;
   font-weight: 700;
   font-size: 20px;
 }
 
 .pc-body .pc-items {
-  color: #999;
+  color: #6a8fb0;
   font-size: 12px;
 }
 
@@ -2637,21 +2645,27 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .pc-btn.add {
-  background: #e6f4ff;
-  color: #1677ff;
+  background: rgba(80, 165, 245, 0.2);
+  color: #5ba8f5;
 }
 
 .pc-btn.add:hover {
-  background: #bae0ff;
+  background: rgba(80, 165, 245, 0.35);
 }
 
 .pc-btn.pay {
-  background: #ff6b35;
-  color: #fff;
+  background: linear-gradient(100deg, #7fd4ff 0%, #4f9bf5 50%, #7fd4ff 100%);
+  background-size: 220% 100%;
+  color: #08203c;
+  font-weight: 700;
+  box-shadow: 0 0 16px rgba(100, 185, 255, 0.45);
 }
 
 .pc-btn.pay:hover {
-  background: #ff551f;
+  background: linear-gradient(100deg, #7fd4ff 0%, #4f9bf5 50%, #7fd4ff 100%);
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  box-shadow: 0 0 24px rgba(100, 185, 255, 0.7);
 }
 
 .main {
@@ -2663,7 +2677,7 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .cat-nav {
-  background: #f0f2f5;
+  background: rgba(16, 34, 66, 0.75);
   border-right: 1px solid #e0e0e0;
   padding: 10px 8px;
   overflow-y: auto;
@@ -2681,11 +2695,11 @@ watch(() => auth.user?.store_id, () => {
   min-height: 60px;
   border: 2px solid #d9dde3;
   border-radius: 12px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   padding: 14px 10px;
   font-size: 18px;
   font-weight: 600;
-  color: #444;
+  color: #cfe6ff;
   cursor: pointer;
   text-align: center;
   line-height: 1.3;
@@ -2699,10 +2713,10 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .cat-item.on {
-  color: #ff6b35;
+  color: #5ba8f5;
   font-weight: 700;
-  background: #fff8f5;
-  border-color: #ff6b35;
+  background: rgba(80, 165, 245, 0.12);
+  border-color: #5ba8f5;
   box-shadow: 0 2px 10px rgba(255, 107, 53, 0.18);
 }
 
@@ -2742,7 +2756,7 @@ watch(() => auth.user?.store_id, () => {
 
 .product-card {
   border: none;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   border-radius: 14px;
   padding: 12px;
   text-align: left;
@@ -2759,7 +2773,7 @@ watch(() => auth.user?.store_id, () => {
   aspect-ratio: 1;
   border-radius: 12px;
   overflow: hidden;
-  background: #f3f3f3;
+  background: rgba(16, 34, 66, 0.7);
   margin-bottom: 10px;
 }
 
@@ -2778,21 +2792,21 @@ watch(() => auth.user?.store_id, () => {
   justify-content: center;
   font-size: 40px;
   font-weight: 700;
-  color: #ff6b35;
+  color: #5ba8f5;
   background: linear-gradient(145deg, #ffe8df, #f5f5f5);
 }
 
 .pname {
   font-size: 17px;
   font-weight: 600;
-  color: #333;
+  color: #dbeaff;
   line-height: 1.35;
   min-height: 2.5em;
 }
 
 .pprice {
   margin-top: 8px;
-  color: #ff6b35;
+  color: #5ba8f5;
   font-size: 20px;
   font-weight: 700;
 }
@@ -2800,7 +2814,7 @@ watch(() => auth.user?.store_id, () => {
 .empty-menu {
   padding: 40px;
   text-align: center;
-  color: #aaa;
+  color: #5f7c9c;
   font-size: 17px;
 }
 
@@ -2811,8 +2825,8 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .cart-panel {
-  background: #fff;
-  border-left: 1px solid #eee;
+  background: rgba(26, 50, 92, 0.72);
+  border-left: 1px solid rgba(120, 200, 255, 0.16);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2835,7 +2849,7 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .cart-empty {
-  color: #bbb;
+  color: #5a7696;
   text-align: center;
   padding: 32px 8px;
   font-size: 16px;
@@ -2856,7 +2870,7 @@ watch(() => auth.user?.store_id, () => {
 
 .line-opt {
   font-size: 13px;
-  color: #999;
+  color: #6a8fb0;
   margin-top: 3px;
 }
 
@@ -2882,15 +2896,15 @@ watch(() => auth.user?.store_id, () => {
 .line-amt {
   grid-column: 2;
   text-align: right;
-  color: #ff6b35;
+  color: #5ba8f5;
   font-weight: 700;
   font-size: 17px;
 }
 
 .cart-foot {
   padding: 14px 16px 18px;
-  border-top: 1px solid #eee;
-  background: #fafafa;
+  border-top: 1px solid rgba(120, 200, 255, 0.16);
+  background: rgba(20, 42, 78, 0.55);
 }
 
 .sum-row {
@@ -2903,19 +2917,19 @@ watch(() => auth.user?.store_id, () => {
 
 .sum-row.sub {
   font-size: 15px;
-  color: #666;
+  color: #9bb8d8;
   margin-bottom: 6px;
 }
 
 .pack-row .waived {
-  color: #52c41a;
+  color: #6ee7a7;
   font-weight: 600;
 }
 
 .sum {
   font-size: 28px;
   font-weight: 800;
-  color: #ff6b35;
+  color: #5ba8f5;
 }
 
 .remark {
@@ -2933,7 +2947,7 @@ watch(() => auth.user?.store_id, () => {
 .member-bind label {
   display: block;
   font-size: 12px;
-  color: #666;
+  color: #9bb8d8;
   margin-bottom: 4px;
 }
 
@@ -2948,15 +2962,15 @@ watch(() => auth.user?.store_id, () => {
 .member-tip {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #666;
+  color: #9bb8d8;
 }
 
 .member-tip.muted {
-  color: #999;
+  color: #6a8fb0;
 }
 
 .member-tip.warn-tip {
-  color: #c45600;
+  color: #f5c87c;
 }
 
 .coupon-pick {
@@ -2966,7 +2980,7 @@ watch(() => auth.user?.store_id, () => {
 .coupon-pick label {
   display: block;
   font-size: 13px;
-  color: #666;
+  color: #9bb8d8;
   margin-bottom: 4px;
 }
 
@@ -2975,12 +2989,12 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .pay-summary-row.muted {
-  color: #888;
+  color: #7a9cc4;
   font-size: 13px;
 }
 
 .pay-summary-row.muted span:last-child {
-  color: #67c23a;
+  color: #6ee7a7;
 }
 
 .social-block {
@@ -2997,11 +3011,11 @@ watch(() => auth.user?.store_id, () => {
 .service-card {
   margin-top: 10px;
   padding: 10px;
-  background: #f7f8fa;
+  background: rgba(16, 34, 66, 0.7);
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.5;
-  color: #333;
+  color: #dbeaff;
 }
 
 .service-card .sc-title {
@@ -3018,7 +3032,7 @@ watch(() => auth.user?.store_id, () => {
 
 .service-card .sc-line.muted,
 .service-card .muted {
-  color: #888;
+  color: #7a9cc4;
 }
 
 .service-card .sc-block {
@@ -3026,12 +3040,12 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .service-card .sc-block.warn {
-  color: #b45309;
+  color: #f5c87c;
 }
 
 .service-card .sc-block b {
   margin-right: 4px;
-  color: #555;
+  color: #b7d3f0;
 }
 
 .pay-member {
@@ -3053,8 +3067,8 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .table-chip {
-  border: 2px solid #e8e8e8;
-  background: #fff;
+  border: 2px solid rgba(120, 200, 255, 0.2);
+  background: rgba(26, 50, 92, 0.72);
   border-radius: 12px;
   padding: 20px 10px;
   font-size: 18px;
@@ -3063,26 +3077,26 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .table-chip.on {
-  border-color: #ff6b35;
-  background: #fff8f5;
-  color: #ff6b35;
+  border-color: #5ba8f5;
+  background: rgba(80, 165, 245, 0.12);
+  color: #5ba8f5;
 }
 
 .table-chip.walk-in {
-  color: #1677ff;
-  border-color: #91caff;
-  background: #f0f9ff;
+  color: #5ba8f5;
+  border-color: rgba(127, 200, 255, 0.55);
+  background: rgba(80, 165, 245, 0.16);
 }
 
 .table-chip.walk-in.on {
-  border-color: #1677ff;
-  background: #e6f4ff;
-  color: #1677ff;
+  border-color: #5ba8f5;
+  background: rgba(80, 165, 245, 0.2);
+  color: #5ba8f5;
 }
 
 .empty-tables {
   text-align: center;
-  color: #999;
+  color: #6a8fb0;
   padding: 24px;
   font-size: 16px;
 }
@@ -3129,13 +3143,13 @@ watch(() => auth.user?.store_id, () => {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  color: #222;
+  color: #e8f4ff;
 }
 
 .drawer-summary {
   margin-top: 6px;
   font-size: 15px;
-  color: #666;
+  color: #9bb8d8;
   line-height: 1.4;
   word-break: break-all;
 }
@@ -3143,7 +3157,7 @@ watch(() => auth.user?.store_id, () => {
 .drawer-price-live {
   font-size: 30px;
   font-weight: 800;
-  color: #ff6b35;
+  color: #5ba8f5;
   flex-shrink: 0;
   line-height: 1.1;
 }
@@ -3159,8 +3173,8 @@ watch(() => auth.user?.store_id, () => {
   width: 168px;
   flex-shrink: 0;
   overflow-y: auto;
-  background: #f7f7f7;
-  border-right: 1px solid #eee;
+  background: rgba(16, 34, 66, 0.7);
+  border-right: 1px solid rgba(120, 200, 255, 0.16);
   padding: 10px 8px;
   display: flex;
   flex-direction: column;
@@ -3178,26 +3192,26 @@ watch(() => auth.user?.store_id, () => {
   padding: 12px 14px;
   border: 2px solid transparent;
   border-radius: 12px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   text-align: left;
   cursor: pointer;
-  color: #333;
+  color: #dbeaff;
 }
 
 .opt-nav-item.on {
-  border-color: #ff6b35;
-  background: #fff8f5;
-  color: #ff6b35;
+  border-color: #5ba8f5;
+  background: rgba(80, 165, 245, 0.12);
+  color: #5ba8f5;
 }
 
 .opt-nav-item.done:not(.on) {
   border-color: #d9f7be;
-  background: #f6ffed;
+  background: rgba(110, 231, 167, 0.14);
 }
 
 .opt-nav-item.missing:not(.on) {
   border-color: #ffccc7;
-  background: #fff1f0;
+  background: rgba(255, 100, 100, 0.16);
 }
 
 .nav-name {
@@ -3208,7 +3222,7 @@ watch(() => auth.user?.store_id, () => {
 
 .nav-value {
   font-size: 12px;
-  color: #666;
+  color: #9bb8d8;
   font-weight: 600;
   line-height: 1.3;
   word-break: break-all;
@@ -3219,7 +3233,7 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .opt-nav-item.on .nav-value {
-  color: #ff6b35;
+  color: #5ba8f5;
 }
 
 .nav-value.missing,
@@ -3241,7 +3255,7 @@ watch(() => auth.user?.store_id, () => {
   margin: 0 0 14px;
   font-size: 18px;
   font-weight: 700;
-  color: #333;
+  color: #dbeaff;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3249,13 +3263,13 @@ watch(() => auth.user?.store_id, () => {
 
 .opt-pane-title .req {
   font-size: 13px;
-  color: #ff6b35;
+  color: #5ba8f5;
   font-weight: 600;
 }
 
 .opt-hint {
   font-size: 13px;
-  color: #999;
+  color: #6a8fb0;
   font-weight: 500;
 }
 
@@ -3298,7 +3312,7 @@ watch(() => auth.user?.store_id, () => {
   padding: 16px 12px;
   border: 2px solid #e0e0e0;
   border-radius: 14px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   cursor: pointer;
   transition: border-color .12s, background .12s, transform .08s;
   -webkit-tap-highlight-color: transparent;
@@ -3310,10 +3324,10 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .opt-tile.on {
-  border-color: #ff6b35;
-  background: #fff8f5;
-  color: #ff6b35;
-  box-shadow: inset 0 0 0 1px #ff6b35;
+  border-color: #5ba8f5;
+  background: rgba(80, 165, 245, 0.12);
+  color: #5ba8f5;
+  box-shadow: inset 0 0 0 1px #5ba8f5;
 }
 
 .tile-name {
@@ -3331,14 +3345,14 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .tile-extra.muted {
-  color: #aaa;
+  color: #5f7c9c;
   font-weight: 500;
 }
 
 .opt-empty {
   padding: 48px 16px;
   text-align: center;
-  color: #999;
+  color: #6a8fb0;
   font-size: 16px;
 }
 
@@ -3347,8 +3361,8 @@ watch(() => auth.user?.store_id, () => {
   align-items: center;
   gap: 10px;
   padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
-  border-top: 1px solid #eee;
-  background: #fafafa;
+  border-top: 1px solid rgba(120, 200, 255, 0.16);
+  background: rgba(20, 42, 78, 0.55);
   flex-shrink: 0;
 }
 
@@ -3422,7 +3436,7 @@ watch(() => auth.user?.store_id, () => {
   justify-content: space-between;
   align-items: baseline;
   font-size: 16px;
-  color: #666;
+  color: #9bb8d8;
 }
 
 .pay-summary-row.remain {
@@ -3432,25 +3446,25 @@ watch(() => auth.user?.store_id, () => {
 .pay-total {
   font-size: 22px;
   font-weight: 800;
-  color: #333;
+  color: #dbeaff;
 }
 
 .pay-paid {
   font-size: 22px;
   font-weight: 700;
-  color: #52c41a;
+  color: #6ee7a7;
 }
 
 .pay-remain {
   font-size: 30px;
   font-weight: 800;
-  color: #ff6b35;
+  color: #5ba8f5;
 }
 
 .tender-list {
   margin-bottom: 14px;
   padding: 10px 12px;
-  background: #f7f7f7;
+  background: rgba(16, 34, 66, 0.7);
   border-radius: 10px;
 }
 
@@ -3458,7 +3472,7 @@ watch(() => auth.user?.store_id, () => {
   display: flex;
   justify-content: space-between;
   font-size: 15px;
-  color: #444;
+  color: #cfe6ff;
   padding: 4px 0;
 }
 
@@ -3469,7 +3483,7 @@ watch(() => auth.user?.store_id, () => {
 .tender-amt-wrap label {
   display: block;
   font-size: 16px;
-  color: #666;
+  color: #9bb8d8;
   margin-bottom: 8px;
 }
 
@@ -3483,7 +3497,7 @@ watch(() => auth.user?.store_id, () => {
 .tender-tip {
   margin: 8px 0 0;
   font-size: 13px;
-  color: #999;
+  color: #6a8fb0;
   line-height: 1.4;
 }
 
@@ -3495,7 +3509,7 @@ watch(() => auth.user?.store_id, () => {
   gap: 10px;
   margin-bottom: 16px;
   padding: 12px;
-  background: #fff8f5;
+  background: rgba(80, 165, 245, 0.12);
   border-radius: 10px;
   font-size: 15px;
 }
@@ -3504,11 +3518,11 @@ watch(() => auth.user?.store_id, () => {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  color: #666;
+  color: #9bb8d8;
 }
 
 .pay-pack-info .waived {
-  color: #52c41a;
+  color: #6ee7a7;
   font-weight: 600;
 }
 
@@ -3529,7 +3543,7 @@ watch(() => auth.user?.store_id, () => {
   cursor: pointer;
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: #e8f4ff;
   transition: opacity .15s, transform .1s;
 }
 
@@ -3543,11 +3557,11 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .pay-method.scan {
-  background: linear-gradient(135deg, #07c160 0%, #1677ff 100%);
+  background: linear-gradient(135deg, #07c160 0%, #5ba8f5 100%);
 }
 
 .pay-method.cash {
-  background: linear-gradient(135deg, #ff8c42, #ff6b35);
+  background: linear-gradient(135deg, #ff8c42, #5ba8f5);
 }
 
 .pm-label-wrap {
@@ -3596,13 +3610,13 @@ watch(() => auth.user?.store_id, () => {
 .cash-amt {
   font-size: 26px;
   font-weight: 800;
-  color: #ff6b35;
+  color: #5ba8f5;
 }
 
 .cash-input-wrap label {
   display: block;
   font-size: 16px;
-  color: #666;
+  color: #9bb8d8;
   margin-bottom: 8px;
 }
 
@@ -3617,22 +3631,22 @@ watch(() => auth.user?.store_id, () => {
   flex: 1;
   min-width: 72px;
   border: 2px solid #e0e0e0;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   border-radius: 10px;
   padding: 14px 8px;
   font-size: 18px;
   font-weight: 700;
-  color: #333;
+  color: #dbeaff;
   cursor: pointer;
 }
 
 .cash-quick-btn.exact {
-  border-color: #ff6b35;
-  color: #ff6b35;
+  border-color: #5ba8f5;
+  color: #5ba8f5;
 }
 
 .cash-quick-btn:active {
-  background: #fff8f5;
+  background: rgba(80, 165, 245, 0.12);
 }
 
 .cash-input :deep(.el-input__inner) {
@@ -3644,13 +3658,13 @@ watch(() => auth.user?.store_id, () => {
 .change-row {
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px dashed #eee;
+  border-top: 1px dashed rgba(120, 200, 255, 0.16);
 }
 
 .change-amt {
   font-size: 30px;
   font-weight: 800;
-  color: #52c41a;
+  color: #6ee7a7;
 }
 
 .change-amt.warn {
@@ -3683,10 +3697,10 @@ watch(() => auth.user?.store_id, () => {
   justify-content: space-between;
   margin-bottom: 12px;
   padding: 8px 12px;
-  background: #f0f9ff;
+  background: rgba(80, 165, 245, 0.16);
   border-radius: 8px;
   font-size: 14px;
-  color: #1677ff;
+  color: #5ba8f5;
 }
 
 .add-items-actions {
@@ -3720,9 +3734,9 @@ watch(() => auth.user?.store_id, () => {
 
 .checkout-actions .park-btn {
   flex: 1;
-  color: #1677ff;
-  border-color: #91caff;
-  background: #f0f9ff;
+  color: #5ba8f5;
+  border-color: rgba(127, 200, 255, 0.55);
+  background: rgba(80, 165, 245, 0.16);
 }
 
 .barcode-panel {
@@ -3737,7 +3751,7 @@ watch(() => auth.user?.store_id, () => {
 
 .scan-detected {
   font-size: 16px;
-  color: #1677ff;
+  color: #5ba8f5;
   font-weight: 600;
   margin: 0 0 12px;
 }
@@ -3758,13 +3772,13 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .scan-hint {
-  color: #888;
+  color: #7a9cc4;
   font-size: 15px;
   margin: 8px 0 16px;
 }
 
 .shift-hint {
-  color: #666;
+  color: #9bb8d8;
   margin: 0 0 12px;
   font-size: 15px;
 }
@@ -3772,29 +3786,29 @@ watch(() => auth.user?.store_id, () => {
 .shift-summary {
   font-size: 15px;
   line-height: 1.6;
-  color: #444;
+  color: #cfe6ff;
 }
 
 .shift-summary b {
-  color: #ff6b35;
+  color: #5ba8f5;
   font-size: 20px;
 }
 
 .shift-orders-head {
   margin-bottom: 16px;
   font-size: 15px;
-  color: #666;
+  color: #9bb8d8;
   line-height: 1.6;
 }
 
 .shift-orders-sum b {
-  color: #ff6b35;
+  color: #5ba8f5;
   font-size: 18px;
 }
 
 .shift-orders-tip {
   text-align: center;
-  color: #aaa;
+  color: #5f7c9c;
   padding: 32px 8px;
   font-size: 16px;
 }
@@ -3806,10 +3820,10 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .shift-order-row {
-  border: 1px solid #e8e8e8;
+  border: 1px solid rgba(120, 200, 255, 0.2);
   border-radius: 12px;
   padding: 14px;
-  background: #fafafa;
+  background: rgba(20, 42, 78, 0.55);
 }
 
 .so-top {
@@ -3823,14 +3837,14 @@ watch(() => auth.user?.store_id, () => {
 .so-no {
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: #dbeaff;
   word-break: break-all;
 }
 
 .so-amt {
   font-size: 20px;
   font-weight: 700;
-  color: #ff6b35;
+  color: #5ba8f5;
   flex-shrink: 0;
 }
 
@@ -3839,7 +3853,7 @@ watch(() => auth.user?.store_id, () => {
   flex-wrap: wrap;
   gap: 8px 14px;
   font-size: 14px;
-  color: #888;
+  color: #7a9cc4;
 }
 
 .so-actions {
@@ -3861,7 +3875,7 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .so-refund-tag.ok {
-  color: #67c23a;
+  color: #6ee7a7;
 }
 
 .so-refund-tag.bad {
@@ -3870,18 +3884,18 @@ watch(() => auth.user?.store_id, () => {
 
 .refund-hint {
   margin: 0 0 12px;
-  color: #666;
+  color: #9bb8d8;
   font-size: 15px;
 }
 
 .refund-hint b {
-  color: #ff6b35;
+  color: #5ba8f5;
 }
 
 .refund-tenders {
   margin: 0 0 14px;
   padding: 10px 12px;
-  background: #f7f7f7;
+  background: rgba(16, 34, 66, 0.7);
   border-radius: 10px;
 }
 
@@ -3890,14 +3904,14 @@ watch(() => auth.user?.store_id, () => {
   justify-content: space-between;
   gap: 8px;
   font-size: 14px;
-  color: #444;
+  color: #cfe6ff;
   padding: 4px 0;
 }
 
 .refund-alloc-tip {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #999;
+  color: #6a8fb0;
   line-height: 1.4;
 }
 
@@ -3913,7 +3927,7 @@ watch(() => auth.user?.store_id, () => {
 
 .lock-card {
   width: min(400px, 92vw);
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
   border-radius: 16px;
   padding: 32px 24px;
   text-align: center;
@@ -3925,14 +3939,14 @@ watch(() => auth.user?.store_id, () => {
   object-fit: contain;
   border-radius: 12px;
   margin-bottom: 12px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.72);
 }
 
 .lock-user {
   font-size: 20px;
   font-weight: 700;
   margin-bottom: 20px;
-  color: #333;
+  color: #dbeaff;
 }
 
 .lock-input {
@@ -3972,7 +3986,7 @@ watch(() => auth.user?.store_id, () => {
     grid-column: 1 / -1;
     max-height: 44vh;
     border-left: none;
-    border-top: 1px solid #eee;
+    border-top: 1px solid rgba(120, 200, 255, 0.16);
   }
 
   .opt-chip {

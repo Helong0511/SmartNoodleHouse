@@ -561,7 +561,10 @@ onUnmounted(() => {
 <style scoped>
 .customer-display {
   min-height: 100vh;
-  background: linear-gradient(160deg, #0f1419 0%, #1a2332 45%, #121820 100%);
+  background:
+    radial-gradient(circle at 20% -10%, rgba(36, 74, 134, 0.55) 0%, transparent 50%),
+    radial-gradient(circle at 90% 110%, rgba(26, 58, 110, 0.4) 0%, transparent 55%),
+    linear-gradient(180deg, #0e1e3c 0%, #0a1730 100%);
   color: #eef2f7;
   padding: 20px 24px 16px;
   box-sizing: border-box;
@@ -633,7 +636,8 @@ onUnmounted(() => {
   display: inline-block;
   margin: 12px 0;
   padding: 10px 16px;
-  background: #243044;
+  background: rgba(30, 58, 102, 0.85);
+  border: 1px solid rgba(120, 200, 255, 0.28);
   border-radius: 8px;
   color: #fff;
   font-size: 18px;

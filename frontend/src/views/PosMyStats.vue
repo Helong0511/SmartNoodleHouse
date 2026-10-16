@@ -49,17 +49,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.stats-page { min-height: 100dvh; background: #f4f6f8; padding: 16px; }
+.stats-page { min-height: 100dvh; background: linear-gradient(180deg, #0e1e3c 0%, #0a1730 100%); padding: 16px; color: #dbeaff; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.head h1 { margin: 0; font-size: 22px; flex: 1; text-align: center; }
-.tip { text-align: center; padding: 40px; color: #888; }
+.head h1 { margin: 0; font-size: 22px; flex: 1; text-align: center; color: #e8f4ff; text-shadow: 0 0 12px rgba(127, 200, 255, 0.45); }
+.tip { text-align: center; padding: 40px; color: #7a9cc4; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; max-width: 720px; margin: 0 auto; }
-.card { background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.card { background: rgba(26, 50, 92, 0.62); border: 1px solid rgba(120, 200, 255, 0.32); border-radius: 14px; padding: 20px; box-shadow: 0 0 24px rgba(80, 165, 245, 0.2); backdrop-filter: blur(12px); }
 .card.total { grid-column: 1 / -1; }
-.label { font-size: 15px; color: #888; margin-bottom: 8px; }
-.val { font-size: 28px; font-weight: 800; color: #ff6b35; }
-.val.cash { color: #ff8c42; }
-.val.wx { color: #07c160; }
-.val.ali { color: #1677ff; }
-.hint { text-align: center; color: #aaa; margin-top: 24px; font-size: 14px; }
+.label { font-size: 15px; color: #7a9cc4; margin-bottom: 8px; }
+.val { font-size: 28px; font-weight: 800; color: #7fc8ff; text-shadow: 0 0 12px rgba(127, 200, 255, 0.45); }
+.val.cash { color: #f5c87c; }
+.val.wx { color: #6ee7a7; }
+.val.ali { color: #5ba8f5; }
+.hint { text-align: center; color: #7a9cc4; margin-top: 24px; font-size: 14px; }
 </style>

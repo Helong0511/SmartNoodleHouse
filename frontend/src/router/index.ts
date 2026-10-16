@@ -144,4 +144,18 @@ router.beforeEach(async (to, _from, next) => {
   next()
 })
 
+/** 顾客 H5 保持浅色；其余后台 / 登录 / KDS / POS / 叫号屏启用科技风主题 */
+function isCustomerH5(path: string) {
+  return path === '/scan' || path === '/member' || path === '/order' || path.startsWith('/order/')
+}
+
+function syncTechTheme(path: string) {
+  document.documentElement.classList.toggle('snh-tech', !isCustomerH5(path))
+}
+
+syncTechTheme(typeof window !== 'undefined' ? window.location.pathname : '/')
+router.afterEach((to) => {
+  syncTechTheme(to.path)
+})
+
 export default router

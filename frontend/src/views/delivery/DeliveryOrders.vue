@@ -626,20 +626,23 @@ onUnmounted(() => {
 .kpi-card {
   min-width: 108px;
   padding: 12px 14px;
-  background: #f7f8fa;
-  border-radius: 8px;
+  background: rgba(26, 50, 92, 0.62);
+  border-radius: 12px;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: border-color 0.15s, background 0.15s;
+  border: 1px solid rgba(120, 200, 255, 0.28);
+  box-shadow: 0 0 16px rgba(80, 165, 245, 0.14);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 .kpi-card:hover {
-  border-color: #c0c4cc;
+  border-color: rgba(127, 200, 255, 0.55);
+  box-shadow: 0 0 22px rgba(80, 165, 245, 0.28);
 }
 
 .kpi-card.active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: #7fc8ff;
+  background: rgba(80, 165, 245, 0.22);
+  box-shadow: 0 0 22px rgba(91, 168, 245, 0.4);
 }
 
 .kpi-card.alert {
@@ -647,31 +650,36 @@ onUnmounted(() => {
 }
 
 .kpi-card.tone-danger {
-  background: #fef0f0;
+  background: rgba(200, 50, 50, 0.2);
+  border-color: rgba(245, 108, 108, 0.45);
 }
 
 .kpi-card.tone-warn {
-  background: #fdf6ec;
+  background: rgba(200, 120, 30, 0.18);
+  border-color: rgba(230, 162, 60, 0.45);
 }
 
 .kpi-card.tone-ok {
-  background: #f0f9eb;
+  background: rgba(52, 201, 123, 0.14);
+  border-color: rgba(110, 231, 167, 0.4);
 }
 
 .kpi-card.tone-discount {
-  background: #fef0f0;
+  background: rgba(200, 50, 50, 0.18);
+  border-color: rgba(245, 108, 108, 0.4);
 }
 
 .kpi-val {
   font-size: 22px;
   font-weight: 700;
-  color: #303133;
+  color: #7fc8ff;
+  text-shadow: 0 0 10px rgba(127, 200, 255, 0.4);
   line-height: 1.2;
 }
 
 .kpi-label {
   font-size: 12px;
-  color: #909399;
+  color: #7a9cc4;
   margin-top: 4px;
 }
 
@@ -688,24 +696,27 @@ onUnmounted(() => {
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: #f4f4f5;
-  color: #909399;
+  background: rgba(30, 58, 102, 0.7);
+  color: #7a9cc4;
+  border: 1px solid rgba(120, 200, 255, 0.22);
 }
 
 .conn.online {
-  background: #f0f9eb;
-  color: #67c23a;
+  background: rgba(52, 201, 123, 0.16);
+  border-color: rgba(110, 231, 167, 0.4);
+  color: #6ee7a7;
 }
 
 .conn.polling {
-  background: #fdf6ec;
-  color: #e6a23c;
+  background: rgba(200, 120, 30, 0.18);
+  border-color: rgba(230, 162, 60, 0.45);
+  color: #f5c87c;
 }
 
 .conn.offline,
 .conn.connecting {
-  background: #f4f4f5;
-  color: #909399;
+  background: rgba(30, 58, 102, 0.7);
+  color: #7a9cc4;
 }
 
 .new-hint {

@@ -819,9 +819,11 @@ onUnmounted(() => {
 <style scoped>
 .kitchen {
   padding: 12px 16px 24px;
-  background: #0f1220;
+  background:
+    radial-gradient(circle at 20% -10%, rgba(36, 74, 134, 0.45) 0%, transparent 50%),
+    linear-gradient(180deg, #0e1e3c 0%, #0a1730 100%);
   min-height: calc(100vh - 56px);
-  color: #eef2ff;
+  color: #e8f4ff;
 }
 
 .kitchen.standalone {
@@ -845,7 +847,7 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: rgba(15, 18, 32, 0.95);
+  background: rgba(12, 28, 57, 0.92);
   padding: 8px 0 12px;
   backdrop-filter: blur(6px);
 }
@@ -920,7 +922,7 @@ onUnmounted(() => {
   font-weight: 800;
   line-height: 1.15;
   letter-spacing: 0.5px;
-  color: #f8fafc;
+  color: #e8f4ff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -938,12 +940,12 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.5px;
-  color: #64748b;
+  color: #7a9cc4;
   text-transform: uppercase;
 }
 
 .clock {
-  color: #e2e8f0;
+  color: #dbeaff;
   font-variant-numeric: tabular-nums;
   font-size: clamp(20px, 2.6vw, 28px);
   font-weight: 700;
@@ -957,8 +959,8 @@ onUnmounted(() => {
   font-size: 12px;
   padding: 2px 10px;
   border-radius: 999px;
-  background: #1b2140;
-  color: #9aa4c7;
+  background: rgba(30, 58, 102, 0.85);
+  color: #9bb8d8;
 }
 
 .conn .dot {
@@ -996,21 +998,21 @@ onUnmounted(() => {
 }
 
 .filters :deep(.el-radio-button__inner) {
-  background: #1b2140;
-  border-color: #2a335a;
-  color: #c7d2fe;
+  background: rgba(30, 58, 102, 0.85);
+  border-color: rgba(120, 200, 255, 0.28);
+  color: #cfe6ff;
 }
 
 .filters :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  background: #334155;
-  border-color: #64748b;
+  background: rgba(91, 168, 245, 0.45);
+  border-color: #7a9cc4;
   box-shadow: none;
 }
 
 .empty {
   margin-top: 80px;
   text-align: center;
-  color: #64748b;
+  color: #7a9cc4;
   font-size: 18px;
 }
 
@@ -1064,13 +1066,13 @@ onUnmounted(() => {
 
 .order-card {
   position: relative;
-  background: #16213e;
-  border: 1px solid #243056;
-  color: #eef2ff;
+  background: rgba(26, 50, 92, 0.72);
+  border: 1px solid rgba(120, 200, 255, 0.28);
+  color: #e8f4ff;
   border-radius: 12px;
   overflow: hidden;
-  --el-card-bg-color: #16213e;
-  --el-card-border-color: #243056;
+  --el-card-bg-color: rgba(26, 50, 92, 0.72);
+  --el-card-border-color: rgba(120, 200, 255, 0.28);
 }
 
 .order-card :deep(.el-card__body) {
@@ -1119,7 +1121,7 @@ onUnmounted(() => {
 }
 
 .order-card.dine-in {
-  background: linear-gradient(160deg, #121c33 0%, #16213e 100%);
+  background: linear-gradient(160deg, #121c33 0%, rgba(26, 50, 92, 0.72) 100%);
   border-color: #2d4a6f;
   box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.18);
 }
@@ -1372,7 +1374,7 @@ onUnmounted(() => {
 .item {
   margin: 8px 0;
   padding-bottom: 6px;
-  border-bottom: 1px dashed #2a335a;
+  border-bottom: 1px dashed rgba(120, 200, 255, 0.28);
 }
 
 .item:last-child {
@@ -1407,7 +1409,7 @@ onUnmounted(() => {
 
 /* 1 份：略放大便于辨认 */
 .item.qty-one .item-qty {
-  color: #eef2ff;
+  color: #e8f4ff;
   font-size: 20px;
 }
 
@@ -1470,7 +1472,7 @@ onUnmounted(() => {
 .claim-hint {
   width: 100%;
   font-size: 13px;
-  color: #909399;
+  color: #7a9cc4;
   line-height: 1.4;
 }
 

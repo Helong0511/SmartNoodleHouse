@@ -620,8 +620,8 @@ defineExpose({ reload: load })
 .tab-label { display: inline-flex; align-items: center; gap: 4px; }
 .tab-badge { margin-left: 2px; }
 .business-form { max-width: 780px; margin-top: 8px; }
-.field-desc { margin: 4px 0 0; font-size: 12px; color: #999; }
-.unit { margin-left: 8px; color: #666; font-size: 13px; }
+.field-desc { margin: 4px 0 0; font-size: 12px; color: #6a8fb0; }
+.unit { margin-left: 8px; color: #9bb8d8; font-size: 13px; }
 .dirty-hint { margin-left: 12px; color: #e6a23c; font-size: 12px; }
 .token-block {
   max-width: 720px;
@@ -638,7 +638,7 @@ defineExpose({ reload: load })
 .display-url-box {
   margin-top: 10px;
   padding: 10px 12px;
-  background: #f5f7fa;
+  background: rgba(16, 34, 66, 0.55);
   border: 1px solid #e4e7ed;
   border-radius: 8px;
 }
@@ -659,7 +659,7 @@ defineExpose({ reload: load })
   min-width: 200px;
   display: block;
   padding: 8px 10px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.62);
   border-radius: 6px;
   border: 1px solid #ebeef5;
   font-size: 12px;
@@ -671,7 +671,7 @@ defineExpose({ reload: load })
 .display-url-hint {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #909399;
+  color: #7a9cc4;
   line-height: 1.4;
 }
 .display-url-hint.warn { color: #e6a23c; }

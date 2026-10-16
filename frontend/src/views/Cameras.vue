@@ -452,20 +452,27 @@ onUnmounted(() => {
 }
 
 .kpi {
-  min-width: 100px;
-  padding: 12px 14px;
-  background: #f7f8fa;
-  border-radius: 8px;
+  position: relative;
+  min-width: 110px;
+  padding: 14px 16px;
+  border: 1px solid rgba(120, 200, 255, 0.32);
+  border-radius: 12px;
+  background: rgba(26, 50, 92, 0.62);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 0 20px rgba(80, 165, 245, 0.18);
 }
 
 .kpi-val {
   font-size: 22px;
   font-weight: 700;
+  color: #7fc8ff;
+  text-shadow: 0 0 12px rgba(127, 200, 255, 0.5);
 }
 
 .kpi-label {
   font-size: 12px;
-  color: #909399;
+  color: #7a9cc4;
   margin-top: 4px;
 }
 

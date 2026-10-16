@@ -51,7 +51,7 @@
       </el-table-column>
       <el-table-column prop="product_no" label="编号" min-width="160" show-overflow-tooltip />
       <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
-      <el-table-column label="图片" width="72" align="center">
+      <el-table-column label="图片" width="80" align="center">
         <template #default="{ row }">
           <el-image v-if="row.main_image" :src="mediaUrl(row.main_image)" fit="cover" class="thumb"
             :preview-src-list="[mediaUrl(row.main_image)]" preview-teleported :z-index="4000" />
@@ -66,7 +66,7 @@
       <el-table-column prop="box_price" label="餐盒费" width="88" />
       <el-table-column prop="stock" label="库存" width="80" />
       <el-table-column prop="sales_count" label="销量" width="80" />
-      <el-table-column label="状态" width="110">
+      <el-table-column label="状态" width="120">
         <template #default="{ row }">
           <el-select :model-value="row.status" size="small" class="status-select"
             @change="(v: string) => changeStatus(row, v)">
@@ -1277,7 +1277,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f7fa;
+  background: rgba(16, 34, 66, 0.55);
   color: #c0c4cc;
   font-size: 12px;
 }
@@ -1289,7 +1289,7 @@ onMounted(async () => {
 .hint {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #909399;
+  color: #7a9cc4;
 }
 
 .hint.warn {
@@ -1326,7 +1326,7 @@ onMounted(async () => {
   border: 1px solid #ebeef5;
   border-radius: 8px;
   padding: 12px;
-  background: #fafbfc;
+  background: rgba(20, 42, 78, 0.45);
   margin-top: 8px;
 }
 
@@ -1377,7 +1377,7 @@ onMounted(async () => {
 
 .taste-slider :deep(.el-slider__marks-text) {
   font-size: 11px;
-  color: #909399;
+  color: #7a9cc4;
   white-space: nowrap;
   margin-top: 2px;
 }
@@ -1396,7 +1396,7 @@ onMounted(async () => {
 .taste-vocab-collapse :deep(.el-collapse-item__header) {
   background: transparent;
   border: none;
-  color: #909399;
+  color: #7a9cc4;
   font-size: 12px;
   font-weight: 400;
 }

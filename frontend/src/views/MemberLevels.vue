@@ -24,7 +24,7 @@
 
     <el-table :data="rows" border style="margin-top:16px">
       <el-table-column prop="name" label="等级" width="140" />
-      <el-table-column label="升级所需积分" min-width="180">
+      <el-table-column label="升级所需积分" min-width="150">
         <template #default="{ row }">
           <el-input-number
             v-if="canManage && row.editable_min_points"
@@ -33,7 +33,7 @@
             :max="10000000"
             :step="10"
             controls-position="right"
-            style="width: 160px"
+            style="width: 150px"
           />
           <span v-else>{{ row.min_points }}</span>
         </template>

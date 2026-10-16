@@ -1,0 +1,579 @@
+/* ============================================================
+   后台科技风主题（对齐 Login.vue / Dashboard.vue）
+   仅在 html.snh-tech 下生效，不影响 H5 顾客端 / 小程序
+   ============================================================ */
+
+html.snh-tech {
+  /* —— 品牌色板 —— */
+  --snh-bg-deep: #0a1730;
+  --snh-bg-mid: #0e1e3c;
+  --snh-bg-panel: rgba(26, 50, 92, 0.62);
+  --snh-bg-panel-solid: rgba(20, 42, 78, 0.96);
+  --snh-bg-input: rgba(16, 34, 66, 0.72);
+  --snh-bg-aside: #0c1c39;
+  --snh-border: rgba(120, 200, 255, 0.32);
+  --snh-border-strong: rgba(127, 200, 255, 0.55);
+  --snh-accent: #7fc8ff;
+  --snh-accent-soft: #5ba8f5;
+  --snh-text: #e8f4ff;
+  --snh-text-secondary: #b7d3f0;
+  --snh-text-muted: #7a9cc4;
+  --snh-glow: rgba(80, 165, 245, 0.28);
+  --snh-success: #6ee7a7;
+  --snh-danger: #ff9a9a;
+  --snh-warning: #f5c87c;
+
+  /* —— Element Plus 变量 —— */
+  --el-color-primary: #5ba8f5;
+  --el-color-primary-light-3: #7fc8ff;
+  --el-color-primary-light-5: rgba(91, 168, 245, 0.5);
+  --el-color-primary-light-7: rgba(91, 168, 245, 0.3);
+  --el-color-primary-light-8: rgba(91, 168, 245, 0.2);
+  --el-color-primary-light-9: rgba(91, 168, 245, 0.12);
+  --el-color-primary-dark-2: #3b7fe0;
+
+  --el-color-success: #34c97b;
+  --el-color-warning: #e6a23c;
+  --el-color-danger: #f56c6c;
+  --el-color-info: #7a9cc4;
+
+  --el-text-color-primary: #dbeaff;
+  --el-text-color-regular: #b7d3f0;
+  --el-text-color-secondary: #7a9cc4;
+  --el-text-color-placeholder: #61809f;
+  --el-text-color-disabled: rgba(180, 215, 245, 0.35);
+
+  --el-border-color: rgba(120, 200, 255, 0.22);
+  --el-border-color-light: rgba(120, 200, 255, 0.16);
+  --el-border-color-lighter: rgba(120, 200, 255, 0.1);
+  --el-border-color-extra-light: rgba(120, 200, 255, 0.06);
+  --el-border-color-dark: rgba(120, 200, 255, 0.35);
+  --el-border-color-hover: rgba(127, 200, 255, 0.55);
+
+  --el-fill-color: rgba(80, 165, 245, 0.08);
+  --el-fill-color-light: rgba(80, 165, 245, 0.1);
+  --el-fill-color-lighter: rgba(80, 165, 245, 0.05);
+  --el-fill-color-extra-light: rgba(80, 165, 245, 0.03);
+  --el-fill-color-dark: rgba(16, 34, 66, 0.85);
+  --el-fill-color-blank: rgba(16, 34, 66, 0.6);
+
+  --el-bg-color: rgba(20, 42, 78, 0.55);
+  --el-bg-color-page: transparent;
+  --el-bg-color-overlay: rgba(20, 42, 78, 0.98);
+  --el-mask-color: rgba(10, 23, 48, 0.72);
+
+  --el-box-shadow: 0 0 24px rgba(80, 165, 245, 0.18), 0 12px 40px rgba(4, 14, 32, 0.45);
+  --el-box-shadow-light: 0 0 16px rgba(80, 165, 245, 0.12);
+  --el-box-shadow-lighter: 0 0 8px rgba(80, 165, 245, 0.08);
+
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: rgba(30, 58, 102, 0.75);
+  --el-table-header-text-color: #8fc8ff;
+  --el-table-text-color: #cfe6ff;
+  --el-table-border-color: rgba(120, 200, 255, 0.14);
+  --el-table-row-hover-bg-color: rgba(80, 165, 245, 0.14);
+  --el-table-current-row-bg-color: rgba(80, 165, 245, 0.2);
+  --el-table-fixed-box-shadow: 8px 0 8px -8px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
+}
+
+html.snh-tech body {
+  color: var(--snh-text);
+  background:
+    radial-gradient(circle at 25% -10%, #244a86 0%, transparent 55%),
+    radial-gradient(circle at 85% 115%, #1a3a6e 0%, transparent 60%),
+    linear-gradient(180deg, var(--snh-bg-mid) 0%, var(--snh-bg-deep) 100%);
+  background-attachment: fixed;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* ---------- 卡片：半透明深蓝玻璃 ---------- */
+html.snh-tech .el-card {
+  --el-card-bg-color: var(--snh-bg-panel);
+  --el-card-border-color: var(--snh-border);
+  background: var(--snh-bg-panel);
+  border: 1px solid var(--snh-border);
+  border-radius: 14px;
+  color: var(--snh-text-secondary);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow:
+    0 0 24px var(--snh-glow),
+    0 12px 36px rgba(4, 14, 32, 0.4),
+    inset 0 0 36px rgba(120, 190, 255, 0.04);
+}
+
+html.snh-tech .el-card.is-hover-shadow:hover,
+html.snh-tech .el-card:hover {
+  border-color: var(--snh-border-strong);
+  box-shadow:
+    0 0 32px rgba(80, 165, 245, 0.35),
+    0 14px 40px rgba(4, 14, 32, 0.45);
+}
+
+/* ---------- 输入 / 选择 ---------- */
+html.snh-tech .el-input__wrapper,
+html.snh-tech .el-textarea__inner,
+html.snh-tech .el-select__wrapper {
+  background: var(--snh-bg-input);
+  box-shadow: inset 0 0 0 1px rgba(127, 200, 255, 0.32);
+  border-radius: 10px;
+}
+
+html.snh-tech .el-input__wrapper:hover,
+html.snh-tech .el-select__wrapper:hover {
+  box-shadow: inset 0 0 0 1px rgba(127, 200, 255, 0.55);
+}
+
+html.snh-tech .el-input__wrapper.is-focus,
+html.snh-tech .el-select__wrapper.is-focused {
+  background: rgba(18, 40, 76, 0.92);
+  box-shadow:
+    inset 0 0 0 1px var(--snh-accent),
+    0 0 14px rgba(127, 200, 255, 0.42);
+}
+
+html.snh-tech .el-input__inner,
+html.snh-tech .el-textarea__inner {
+  color: #e2f2ff;
+  caret-color: var(--snh-accent);
+}
+
+html.snh-tech .el-input__inner::placeholder,
+html.snh-tech .el-textarea__inner::placeholder {
+  color: rgba(160, 200, 240, 0.5);
+}
+
+html.snh-tech .el-input__inner:-webkit-autofill {
+  -webkit-text-fill-color: #e2f2ff;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+html.snh-tech .el-input-number .el-input__wrapper {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* ---------- 按钮 ---------- */
+html.snh-tech .el-button {
+  --el-button-bg-color: rgba(30, 58, 102, 0.6);
+  --el-button-border-color: rgba(120, 200, 255, 0.35);
+  --el-button-text-color: #b7d3f0;
+  --el-button-hover-bg-color: rgba(80, 165, 245, 0.22);
+  --el-button-hover-border-color: rgba(127, 200, 255, 0.75);
+  --el-button-hover-text-color: #e2f2ff;
+  --el-button-active-bg-color: rgba(80, 165, 245, 0.3);
+  --el-button-active-border-color: var(--snh-accent);
+  border-radius: 10px;
+}
+
+html.snh-tech .el-button--primary {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-text-color: #08203c;
+  --el-button-hover-text-color: #08203c;
+  --el-button-active-text-color: #08203c;
+  background: linear-gradient(100deg, #7fd4ff 0%, #4f9bf5 50%, #7fd4ff 100%);
+  background-size: 220% 100%;
+  border: none;
+  font-weight: 700;
+  letter-spacing: 1px;
+  box-shadow: 0 0 18px rgba(100, 185, 255, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  transition: background-position 0.5s ease, box-shadow 0.25s ease, transform 0.15s ease;
+}
+
+html.snh-tech .el-button--primary:hover,
+html.snh-tech .el-button--primary:focus {
+  background: linear-gradient(100deg, #7fd4ff 0%, #4f9bf5 50%, #7fd4ff 100%);
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  color: #08203c;
+  border: none;
+  box-shadow: 0 0 28px rgba(100, 185, 255, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
+}
+
+html.snh-tech .el-button--primary.is-link,
+html.snh-tech .el-button.is-link {
+  background: transparent;
+  box-shadow: none;
+  color: var(--snh-accent);
+  transform: none;
+}
+
+html.snh-tech .el-button--primary.is-link:hover,
+html.snh-tech .el-button.is-link:hover {
+  color: #a5daff;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+html.snh-tech .el-button--danger.is-link {
+  color: var(--snh-danger);
+}
+
+/* ---------- 表格 ---------- */
+html.snh-tech .el-table {
+  --el-table-bg-color: transparent;
+  background: transparent;
+  color: #cfe6ff;
+}
+
+html.snh-tech .el-table th.el-table__cell {
+  background: rgba(30, 58, 102, 0.75) !important;
+  color: #8fc8ff !important;
+  font-weight: 600;
+  border-bottom-color: rgba(120, 200, 255, 0.2) !important;
+}
+
+html.snh-tech .el-table td.el-table__cell {
+  border-bottom-color: rgba(120, 200, 255, 0.1);
+  background: transparent;
+}
+
+html.snh-tech .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: rgba(80, 165, 245, 0.05);
+}
+
+html.snh-tech .el-table__body tr:hover > td.el-table__cell {
+  background: rgba(80, 165, 245, 0.14) !important;
+}
+
+html.snh-tech .el-table--border,
+html.snh-tech .el-table--border .el-table__cell {
+  border-color: rgba(120, 200, 255, 0.12);
+}
+
+html.snh-tech .el-table__empty-text {
+  color: var(--snh-text-muted);
+}
+
+html.snh-tech .el-table td.el-table-fixed-column--left,
+html.snh-tech .el-table td.el-table-fixed-column--right,
+html.snh-tech .el-table th.el-table-fixed-column--left,
+html.snh-tech .el-table th.el-table-fixed-column--right {
+  background: rgba(22, 46, 84, 0.96) !important;
+}
+
+html.snh-tech .el-table__body tr:hover > td.el-table-fixed-column--left,
+html.snh-tech .el-table__body tr:hover > td.el-table-fixed-column--right {
+  background: rgba(40, 78, 130, 0.96) !important;
+}
+
+/* ---------- Tag / Radio / Pagination ---------- */
+html.snh-tech .el-tag {
+  background: rgba(30, 58, 102, 0.7);
+  border-color: rgba(120, 200, 255, 0.35);
+  color: #b7d3f0;
+}
+
+html.snh-tech .el-tag--success {
+  background: rgba(52, 201, 123, 0.18);
+  border-color: rgba(110, 231, 167, 0.45);
+  color: var(--snh-success);
+}
+
+html.snh-tech .el-tag--warning {
+  background: rgba(200, 120, 30, 0.22);
+  border-color: rgba(230, 162, 60, 0.5);
+  color: var(--snh-warning);
+}
+
+html.snh-tech .el-tag--danger {
+  background: rgba(200, 50, 50, 0.22);
+  border-color: rgba(245, 108, 108, 0.5);
+  color: var(--snh-danger);
+}
+
+html.snh-tech .el-tag--info {
+  background: rgba(30, 58, 102, 0.6);
+  border-color: rgba(120, 200, 255, 0.35);
+  color: #a8cdf0;
+}
+
+html.snh-tech .el-radio-button__inner {
+  background: rgba(30, 58, 102, 0.6);
+  border-color: rgba(120, 200, 255, 0.32);
+  color: #b7d3f0;
+  box-shadow: none !important;
+}
+
+html.snh-tech .el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: linear-gradient(100deg, #4f9bf5 0%, #5ba8f5 100%);
+  border-color: var(--snh-accent);
+  color: #fff;
+  box-shadow: 0 0 15px rgba(91, 168, 245, 0.55) !important;
+}
+
+html.snh-tech .el-pagination {
+  --el-pagination-bg-color: transparent;
+  --el-pagination-button-bg-color: rgba(30, 58, 102, 0.55);
+  --el-pagination-hover-color: var(--snh-accent);
+  --el-pagination-button-color: var(--snh-text-secondary);
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-pager li {
+  background: rgba(30, 58, 102, 0.55);
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-pager li.is-active {
+  background: rgba(91, 168, 245, 0.35);
+  color: #fff;
+}
+
+/* ---------- Tabs / Descriptions / Divider ---------- */
+html.snh-tech .el-tabs__item {
+  color: var(--snh-text-muted);
+}
+
+html.snh-tech .el-tabs__item.is-active,
+html.snh-tech .el-tabs__item:hover {
+  color: var(--snh-accent);
+}
+
+html.snh-tech .el-tabs__nav-wrap::after {
+  background-color: rgba(120, 200, 255, 0.12);
+}
+
+html.snh-tech .el-tabs__active-bar {
+  background-color: var(--snh-accent);
+  box-shadow: 0 0 8px rgba(127, 200, 255, 0.7);
+}
+
+html.snh-tech .el-descriptions__label,
+html.snh-tech .el-descriptions__content {
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-descriptions__body .el-descriptions__table {
+  background: transparent;
+}
+
+html.snh-tech .el-descriptions__body .el-descriptions__table.is-bordered .el-descriptions__cell {
+  border-color: rgba(120, 200, 255, 0.14);
+  background: rgba(16, 34, 66, 0.35);
+}
+
+html.snh-tech .el-divider {
+  border-color: rgba(120, 200, 255, 0.16);
+}
+
+html.snh-tech .el-divider__text {
+  background: transparent;
+  color: var(--snh-text-muted);
+}
+
+/* ---------- Dialog / Drawer / MessageBox ---------- */
+html.snh-tech .el-dialog,
+html.snh-tech .el-drawer,
+html.snh-tech .el-message-box {
+  background: var(--snh-bg-panel-solid);
+  border: 1px solid var(--snh-border);
+  border-radius: 14px;
+  box-shadow:
+    0 0 32px rgba(80, 165, 245, 0.3),
+    0 20px 55px rgba(4, 14, 32, 0.55);
+  color: var(--snh-text);
+}
+
+html.snh-tech .el-dialog__header,
+html.snh-tech .el-drawer__header,
+html.snh-tech .el-message-box__title {
+  color: var(--snh-text);
+}
+
+html.snh-tech .el-dialog__title {
+  color: var(--snh-text);
+  letter-spacing: 1px;
+}
+
+html.snh-tech .el-dialog__body,
+html.snh-tech .el-message-box__content,
+html.snh-tech .el-drawer__body {
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-overlay {
+  background-color: rgba(6, 14, 32, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+/* ---------- 浮层：Select / Date / Dropdown / Tooltip / Popover ---------- */
+html.snh-tech .el-popper,
+html.snh-tech .el-select-dropdown,
+html.snh-tech .el-dropdown-menu,
+html.snh-tech .el-picker-panel,
+html.snh-tech .el-cascader__dropdown,
+html.snh-tech .el-autocomplete-suggestion {
+  background: var(--snh-bg-panel-solid) !important;
+  border: 1px solid var(--snh-border) !important;
+  color: #cfe6ff !important;
+  box-shadow:
+    0 0 26px rgba(80, 165, 245, 0.28),
+    0 14px 40px rgba(0, 0, 0, 0.5) !important;
+}
+
+html.snh-tech .el-popper.is-light,
+html.snh-tech .el-popper.is-light .el-popper__arrow::before {
+  background: var(--snh-bg-panel-solid) !important;
+  border-color: var(--snh-border) !important;
+}
+
+html.snh-tech .el-select-dropdown__item,
+html.snh-tech .el-dropdown-menu__item {
+  color: #cfe6ff;
+}
+
+html.snh-tech .el-select-dropdown__item.is-hovering,
+html.snh-tech .el-select-dropdown__item:hover,
+html.snh-tech .el-dropdown-menu__item:not(.is-disabled):hover {
+  background: rgba(80, 165, 245, 0.18);
+}
+
+html.snh-tech .el-select-dropdown__item.is-selected {
+  color: var(--snh-accent);
+  font-weight: 600;
+}
+
+html.snh-tech .el-picker-panel__body,
+html.snh-tech .el-date-picker,
+html.snh-tech .el-date-range-picker {
+  color: #cfe6ff;
+}
+
+html.snh-tech .el-date-table th,
+html.snh-tech .el-date-table td .el-date-table-cell__text {
+  color: #cfe6ff;
+}
+
+html.snh-tech .el-date-table td.available:hover .el-date-table-cell__text,
+html.snh-tech .el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+  background: rgba(91, 168, 245, 0.45);
+  color: #fff;
+}
+
+html.snh-tech .el-picker-panel__icon-btn {
+  color: var(--snh-text-muted);
+}
+
+html.snh-tech .el-tooltip__popper.is-dark {
+  background: rgba(16, 34, 66, 0.96);
+  border: 1px solid var(--snh-border);
+}
+
+/* ---------- Form / Switch / Checkbox / Slider ---------- */
+html.snh-tech .el-form-item__label {
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-checkbox__label,
+html.snh-tech .el-radio__label {
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-switch__core {
+  background: rgba(30, 58, 102, 0.8);
+  border-color: rgba(120, 200, 255, 0.35);
+}
+
+html.snh-tech .el-switch.is-checked .el-switch__core {
+  background: var(--el-color-primary);
+  border-color: var(--snh-accent);
+}
+
+/* ---------- Alert / Empty / Loading / Skeleton ---------- */
+html.snh-tech .el-alert {
+  background: rgba(30, 58, 102, 0.55);
+  border: 1px solid var(--snh-border);
+  color: var(--snh-text-secondary);
+}
+
+html.snh-tech .el-empty__description p {
+  color: var(--snh-text-muted);
+}
+
+html.snh-tech .el-loading-mask {
+  background: rgba(10, 23, 48, 0.7);
+  backdrop-filter: blur(2px);
+}
+
+html.snh-tech .el-loading-spinner .path {
+  stroke: var(--snh-accent);
+}
+
+html.snh-tech .el-skeleton__item {
+  background: rgba(80, 165, 245, 0.12);
+}
+
+/* ---------- Message / Notification ---------- */
+html.snh-tech .el-message,
+html.snh-tech .el-notification {
+  background: var(--snh-bg-panel-solid);
+  border: 1px solid var(--snh-border);
+  box-shadow: 0 0 24px rgba(80, 165, 245, 0.25);
+}
+
+html.snh-tech .el-message .el-message__content,
+html.snh-tech .el-notification__title,
+html.snh-tech .el-notification__content {
+  color: var(--snh-text);
+}
+
+/* ---------- Scrollbar ---------- */
+html.snh-tech ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.snh-tech ::-webkit-scrollbar-track {
+  background: rgba(120, 200, 255, 0.06);
+}
+
+html.snh-tech ::-webkit-scrollbar-thumb {
+  background: rgba(127, 200, 255, 0.35);
+  border-radius: 4px;
+}
+
+html.snh-tech ::-webkit-scrollbar-thumb:hover {
+  background: rgba(127, 200, 255, 0.6);
+}
+
+html.snh-tech .el-scrollbar__thumb {
+  background: rgba(127, 200, 255, 0.4);
+}
+
+/* ---------- 通用工具文案 ---------- */
+html.snh-tech .scope-hint,
+html.snh-tech .sub,
+html.snh-tech .muted,
+html.snh-tech .hint {
+  color: var(--snh-text-muted) !important;
+}
+
+/* ---------- 常见浅色硬编码兜底（后台页内联浅底） ---------- */
+html.snh-tech .el-main {
+  background: transparent;
+  color: var(--snh-text-secondary);
+}
+
+/* KPI / 统计块：挡住遗漏的浅灰底（不强制 tone/active，留给页面自管） */
+html.snh-tech .kpi,
+html.snh-tech .kpi-card:not(.active):not([class*="tone-"]) {
+  background: rgba(26, 50, 92, 0.62);
+  border: 1px solid rgba(120, 200, 255, 0.32);
+  box-shadow: 0 0 18px rgba(80, 165, 245, 0.16);
+}
+
+html.snh-tech .kpi-val,
+html.snh-tech .kpi-value {
+  color: #7fc8ff;
+}
+
+html.snh-tech .kpi-label {
+  color: #7a9cc4;
+}

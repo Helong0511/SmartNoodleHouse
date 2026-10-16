@@ -308,13 +308,14 @@ onMounted(async () => {
 
 .kpi-label {
   font-size: 12px;
-  color: #909399;
+  color: #7a9cc4;
 }
 
 .kpi-value {
   font-size: 24px;
   font-weight: 600;
-  color: #303133;
+  color: #7fc8ff;
+  text-shadow: 0 0 12px rgba(127, 200, 255, 0.45);
   margin-top: 4px;
 }
 
@@ -325,7 +326,7 @@ onMounted(async () => {
 }
 
 .muted {
-  color: #909399;
+  color: #7a9cc4;
   font-size: 12px;
 }
 
@@ -346,7 +347,7 @@ onMounted(async () => {
 .detail-pre {
   margin: 0;
   padding: 12px;
-  background: #f5f7fa;
+  background: rgba(16, 34, 66, 0.55);
   border: 1px solid #ebeef5;
   border-radius: 4px;
   max-height: 320px;

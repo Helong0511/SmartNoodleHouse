@@ -390,18 +390,18 @@ onMounted(async () => {
 
 .hint {
   margin: 10px 0 0;
-  color: #909399;
+  color: #7a9cc4;
   font-size: 13px;
   line-height: 1.5;
 }
 
 .muted {
-  color: #909399;
+  color: #7a9cc4;
 }
 
 .form-tip {
   margin-left: 8px;
-  color: #909399;
+  color: #7a9cc4;
   font-size: 12px;
 }
 
@@ -418,7 +418,7 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-bottom: 1px solid #f2f3f5;
+  border-bottom: 1px solid rgba(16, 34, 66, 0.55);
 }
 
 .sort-row:last-child {
@@ -427,7 +427,7 @@ onMounted(async () => {
 
 .sort-idx {
   width: 22px;
-  color: #909399;
+  color: #7a9cc4;
   font-size: 12px;
 }
 
@@ -438,7 +438,7 @@ onMounted(async () => {
 .preview {
   margin-top: 16px;
   padding: 12px 16px;
-  background: #f5f7fa;
+  background: rgba(16, 34, 66, 0.55);
   border-radius: 6px;
 }
 

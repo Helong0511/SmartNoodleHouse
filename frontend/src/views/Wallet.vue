@@ -615,7 +615,7 @@ onMounted(reload)
 
 .hint {
   margin: 0;
-  color: #666;
+  color: #9bb8d8;
   font-size: 13px;
 }
 
@@ -633,7 +633,7 @@ onMounted(reload)
 }
 
 .muted {
-  color: #999;
+  color: #6a8fb0;
   font-size: 13px;
 }
 
@@ -658,8 +658,8 @@ onMounted(reload)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #f0f0f0;
-  color: #999;
+  background: rgba(120, 200, 255, 0.12);
+  color: #6a8fb0;
   font-size: 12px;
 }
 
@@ -677,7 +677,7 @@ onMounted(reload)
 
 .cust-sub {
   font-size: 12px;
-  color: #666;
+  color: #9bb8d8;
   margin-top: 2px;
 }
 
@@ -697,7 +697,7 @@ onMounted(reload)
   gap: 12px;
   width: 100%;
   padding: 10px 12px;
-  background: #f7f8fa;
+  background: rgba(16, 34, 66, 0.7);
   border-radius: 8px;
 }
 

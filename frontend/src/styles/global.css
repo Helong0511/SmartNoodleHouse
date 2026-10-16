@@ -7,6 +7,16 @@
   margin-bottom: 12px;
 }
 
+/* 科技风下：后台主内容区筛选条玻璃化（不含 POS/KDS 自管 toolbar） */
+html.snh-tech .el-main > .toolbar,
+html.snh-tech .el-main .toolbar {
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 200, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(16, 34, 66, 0.45);
+  backdrop-filter: blur(8px);
+}
+
 /* el-form-item 默认 margin-bottom 会撑开一行，归零 */
 .toolbar .el-form-item {
   margin-right: 0;

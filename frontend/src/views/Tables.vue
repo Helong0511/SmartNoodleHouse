@@ -385,7 +385,7 @@ onMounted(async () => {
   object-fit: contain;
   margin: 0 auto 12px;
   border-radius: 12px;
-  background: #fff;
+  background: rgba(26, 50, 92, 0.62);
 }
 
 .print-title {
@@ -395,7 +395,7 @@ onMounted(async () => {
 }
 
 .print-sub {
-  color: #666;
+  color: #9bb8d8;
   margin-bottom: 16px;
 }
 
@@ -408,7 +408,7 @@ onMounted(async () => {
 
 .qr-item {
   font-size: 12px;
-  color: #666;
+  color: #9bb8d8;
 }
 
 .qr-item img {
@@ -437,7 +437,7 @@ onMounted(async () => {
 
 .qr-desc {
   font-size: 12px;
-  color: #888;
+  color: #7a9cc4;
 }
 
 .qr-loading,
@@ -452,14 +452,14 @@ onMounted(async () => {
   padding: 8px;
   font-size: 12px;
   line-height: 1.4;
-  background: #f5f5f5;
+  background: rgba(16, 34, 66, 0.55);
   border-radius: 8px;
   box-sizing: border-box;
 }
 
 .qr-error {
   color: #c45656;
-  background: #fff1f0;
+  background: rgba(255, 100, 100, 0.16);
 }
 
 .hint.debug-steps {
@@ -471,7 +471,7 @@ onMounted(async () => {
   margin-top: 16px;
   text-align: left;
   font-size: 13px;
-  color: #666;
+  color: #9bb8d8;
 }
 
 .copy-scheme {
@@ -488,7 +488,7 @@ onMounted(async () => {
 }
 
 .hint {
-  color: #999;
+  color: #6a8fb0;
   font-size: 12px;
   margin: 8px 0 12px;
 }
