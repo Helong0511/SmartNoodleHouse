@@ -212,6 +212,11 @@ async def _send_balance_low_to_customer(
     tmpl_used = ""
     wx_ok = False
     alipay_ok = False
+    store_id = customer.registered_store_id
+    customer_id = int(customer.id)
+
+    # 读完身份后释放会话，再调微信/支付宝（调用方 Redis nx 已防并发双发）
+    await db.commit()
 
     if wx_tmpl and openid:
         channel = "WECHAT"
@@ -219,7 +224,7 @@ async def _send_balance_low_to_customer(
         try:
             wx_ok = await send_balance_low_subscribe(
                 openid=str(openid),
-                customer_id=int(customer.id),
+                customer_id=customer_id,
                 balance=bal_s,
                 threshold=thr_s,
             )
@@ -230,7 +235,7 @@ async def _send_balance_low_to_customer(
         try:
             alipay_ok = await send_alipay_balance_low(
                 alipay_user_id=str(alipay_uid),
-                customer_id=int(customer.id),
+                customer_id=customer_id,
                 balance=bal_s,
                 threshold=thr_s,
             )
@@ -263,9 +268,9 @@ async def _send_balance_low_to_customer(
 
     db.add(
         MarketingMessageLog(
-            store_id=customer.registered_store_id,
+            store_id=store_id,
             campaign_id=None,
-            customer_id=int(customer.id),
+            customer_id=customer_id,
             channel=channel,
             template_key="balance_low",
             template_id=tmpl_used or None,

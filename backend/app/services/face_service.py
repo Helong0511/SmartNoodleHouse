@@ -274,38 +274,60 @@ class FaceService:
 
     @staticmethod
     async def reencrypt_stale_profiles(db: AsyncSession, *, limit: int = 50) -> int:
-        """将旧密钥/旧 version 的授权人脸重加密到当前密钥（密钥轮换后批量迁移）。"""
+        """将旧密钥/旧 version 的授权人脸重加密到当前密钥（密钥轮换后批量迁移）。
+
+        先捞 id，再逐条短锁重加密，避免一次锁住多行。
+        """
         target = FaceEncryption.key_version_label()
-        result = await db.execute(
-            select(FaceProfile)
-            .where(
-                FaceProfile.consent_status == "AUTHORIZED",
-                FaceProfile.feature_data.isnot(None),
-                FaceProfile.feature_version != target,
+        ids = list(
+            (
+                await db.execute(
+                    select(FaceProfile.id)
+                    .where(
+                        FaceProfile.consent_status == "AUTHORIZED",
+                        FaceProfile.feature_data.isnot(None),
+                        FaceProfile.feature_version != target,
+                    )
+                    .order_by(FaceProfile.id.asc())
+                    .limit(max(1, min(int(limit), 200)))
+                )
             )
-            .order_by(FaceProfile.id.asc())
-            .limit(max(1, min(int(limit), 200)))
-            .with_for_update(skip_locked=True)
+            .scalars()
+            .all()
         )
-        rows = list(result.scalars().all())
-        if not rows:
+        if not ids:
             return 0
         enc = FaceEncryption()
         done = 0
-        for profile in rows:
-            raw = profile.feature_data or b""
-            if not raw:
-                continue
+        for pid in ids:
             try:
+                profile = (
+                    await db.execute(
+                        select(FaceProfile)
+                        .where(
+                            FaceProfile.id == int(pid),
+                            FaceProfile.consent_status == "AUTHORIZED",
+                            FaceProfile.feature_data.isnot(None),
+                            FaceProfile.feature_version != target,
+                        )
+                        .with_for_update(skip_locked=True)
+                    )
+                ).scalar_one_or_none()
+                if not profile:
+                    await db.commit()
+                    continue
+                raw = profile.feature_data or b""
+                if not raw:
+                    await db.commit()
+                    continue
                 plain = enc.decrypt(raw)
                 profile.feature_data = enc.encrypt(plain)
                 profile.feature_version = target
-                # 单条 commit：轮换中途崩溃时已迁移向量不回滚
                 await db.commit()
                 done += 1
             except Exception:
                 await db.rollback()
-                logger.exception("人脸重加密失败 profile_id=%s", getattr(profile, "id", None))
+                logger.exception("人脸重加密失败 profile_id=%s", pid)
         if done:
             face_embedding_cache.invalidate()
         return done

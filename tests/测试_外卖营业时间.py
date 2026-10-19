@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 from datetime import datetime, time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -188,3 +188,58 @@ async def _make_store(db, name: str) -> Store:
     db.add(store)
     await db.flush()
     return store
+
+
+@pytest.mark.asyncio
+async def test_manual_change_store_open_commits_before_platform_http():
+    """手动开店：先 commit 再调平台，避免长事务占连接。"""
+    from app.api.delivery import _change_store_open_status
+
+    binding = SimpleNamespace(
+        id=11,
+        platform="MEITUAN",
+        status=1,
+        platform_open_status=None,
+        last_sync_at=None,
+    )
+    order: list[str] = []
+
+    async def _commit():
+        order.append("commit")
+
+    async def _set_status(status, shipping=None):
+        order.append(f"http:{status}")
+        return True
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[binding])))
+        )
+    )
+    db.commit = AsyncMock(side_effect=_commit)
+    db.flush = AsyncMock()
+    db.get = AsyncMock(return_value=binding)
+
+    fake = MagicMock()
+    fake.set_store_open_status = AsyncMock(side_effect=_set_status)
+    user = SimpleNamespace(store_id=1, role=SimpleNamespace(code="STORE_ADMIN"))
+
+    with patch("app.services.store_scope.assert_store_access"), patch(
+        "app.services.store_hours_service.StoreHoursService.list_hours",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch(
+        "app.services.delivery_context.get_credentials_for_store",
+        new_callable=AsyncMock,
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.delivery_providers.get_delivery_provider",
+        return_value=fake,
+    ):
+        results = await _change_store_open_status(db, user, 1, "OPEN", None)
+
+    assert results == [{"platform": "MEITUAN", "ok": True}]
+    assert order[0] == "commit"
+    assert "http:OPEN" in order
+    assert order.index("commit") < order.index("http:OPEN")

@@ -1210,6 +1210,7 @@ async def set_business_hours(store_id: int, data: HoursPayload, request: Request
 
 
 async def _change_store_open_status(db, user, store_id: int, open_status: str, platform: str | None):
+    """手动开/关店：先组任务并 commit，再调平台，最后短事务写回（与自动开关店一致）。"""
     from app.core.response import naive_local_now
     from app.services.delivery_context import get_credentials_for_store
     from app.services.delivery_providers import get_delivery_provider
@@ -1231,18 +1232,26 @@ async def _change_store_open_status(db, user, store_id: int, open_status: str, p
     rows = await StoreHoursService.list_hours(db, store_id)
     shipping = shipping_time_for_day(rows, _python_weekday(now)) if open_status == "REST" else None
 
-    results = []
+    jobs = []
     for b in bindings:
+        creds = await get_credentials_for_store(db, b.platform, store_id)
+        jobs.append((int(b.id), b.platform, creds))
+    await db.commit()
+
+    results = []
+    for binding_id, plat, creds in jobs:
         try:
-            creds = await get_credentials_for_store(db, b.platform, store_id)
-            provider = get_delivery_provider(b.platform, creds)
+            provider = get_delivery_provider(plat, creds)
             ok = await provider.set_store_open_status(open_status, shipping)
         except Exception:  # noqa: BLE001
             ok = False
         if ok:
-            b.platform_open_status = open_status
-            b.last_sync_at = now
-        results.append({"platform": b.platform, "ok": ok})
+            row = await db.get(PlatformStoreBinding, binding_id)
+            if row:
+                row.platform_open_status = open_status
+                row.last_sync_at = now
+                await db.flush()
+        results.append({"platform": plat, "ok": ok})
     await db.commit()
     return results
 
