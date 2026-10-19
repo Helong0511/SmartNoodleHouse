@@ -150,8 +150,14 @@ class Settings(BaseSettings):
     kitchen_ticket_order_no: str = "barcode"
     allow_print_mock: bool = False
     enable_rate_limit: bool = True
+    # Redis 宕机时对这些路径前缀 fail-closed 返回 503（逗号分隔）；其余仍 fail-open
+    # 例：/api/auth/login,/api/payments/,/api/miniprogram/login
+    rate_limit_fail_closed_paths: str = "/api/auth/login,/api/auth/verify-password,/api/payments/,/api/miniprogram/login"
     # 未配置平台密钥时，同步接口是否允许返回 mock 成功（生产必须 false）
     allow_delivery_mock: bool = False
+    # JWT：默认 HS256；若配置 jwt_private_key + jwt_public_key 且 algorithm=RS256/EdDSA 则用非对称
+    jwt_private_key: str = ""
+    jwt_public_key: str = ""
 
     # 对象存储：local | s3
     storage_backend: str = "local"

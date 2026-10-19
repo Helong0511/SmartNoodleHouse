@@ -6,6 +6,7 @@
         <p class="hint">勾选后点「保存本列」生效。员工账号在「员工管理」里绑定角色；改权限后该角色员工需重新登录。</p>
       </div>
       <div class="header-actions">
+        <el-button type="primary" @click="openCreateRole">新建角色</el-button>
         <el-button @click="load">刷新</el-button>
       </div>
     </div>
@@ -163,6 +164,22 @@ async function load() {
     ElMessage.error(e?.response?.data?.message || e?.message || '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function openCreateRole() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '角色 code（大写字母/数字/下划线，如 STORE_SHIFT）',
+      '新建自定义角色',
+      { confirmButtonText: '创建', cancelButtonText: '取消', inputPattern: /^[A-Z][A-Z0-9_]{1,49}$/, inputErrorMessage: 'code 格式不正确' },
+    )
+    const name = value.replace(/_/g, ' ')
+    await api.post('/users/roles', { code: value, name, permission_codes: [] })
+    ElMessage.success('角色已创建，请在矩阵中勾选权限后保存')
+    await load()
+  } catch {
+    /* cancel */
   }
 }
 

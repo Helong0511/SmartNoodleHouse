@@ -180,18 +180,25 @@ async def get_staff_or_customer(
 StaffOrCustomer = Annotated[Tuple[Optional[User], Optional[Customer]], Depends(get_staff_or_customer)]
 
 
-async def get_user_permissions(db: AsyncSession, role_id: int) -> set[str]:
+async def get_user_permissions(
+    db: AsyncSession, role_id: int, *, user_id: int | None = None
+) -> set[str]:
     result = await db.execute(
         select(Permission.code)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
         .where(RolePermission.role_id == role_id)
     )
-    return set(result.scalars().all())
+    perms = set(result.scalars().all())
+    if user_id:
+        from app.services.role_delegation_service import RoleDelegationService
+
+        perms |= await RoleDelegationService.active_permission_codes(db, user_id)
+    return perms
 
 
 def require_permission(permission: str):
     async def checker(user: CurrentUser, db: DbSession):
-        perms = await get_user_permissions(db, user.role_id)
+        perms = await get_user_permissions(db, user.role_id, user_id=user.id)
         if permission not in perms and user.role.code != "SUPER_ADMIN":
             raise AppException(40300, f"缺少权限: {permission}", status_code=403)
         return user
@@ -201,7 +208,7 @@ def require_permission(permission: str):
 
 def require_kitchen():
     async def checker(user: CurrentUser, db: DbSession):
-        perms = await get_user_permissions(db, user.role_id)
+        perms = await get_user_permissions(db, user.role_id, user_id=user.id)
         if user.role.code in ("SUPER_ADMIN", "KITCHEN", "STORE_ADMIN") or "order:update" in perms:
             return user
         raise AppException(40300, "无权访问厨房系统", status_code=403)
@@ -213,7 +220,7 @@ def require_pos():
     """收银点餐：收银员 / 店长 / 有 order:update 权限的员工。"""
 
     async def checker(user: CurrentUser, db: DbSession):
-        perms = await get_user_permissions(db, user.role_id)
+        perms = await get_user_permissions(db, user.role_id, user_id=user.id)
         if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN", "CASHIER") or "order:update" in perms:
             return user
         raise AppException(40300, "无权使用收银点餐", status_code=403)
@@ -227,7 +234,7 @@ def require_settlement_manage(detail: str = "仅店长或超管可执行该操�
     async def checker(user: CurrentUser, db: DbSession):
         if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
             return user
-        perms = await get_user_permissions(db, user.role_id)
+        perms = await get_user_permissions(db, user.role_id, user_id=user.id)
         if "payment:refund" not in perms:
             raise AppException(40300, detail, status_code=403)
         return user
@@ -241,7 +248,7 @@ def require_social_identity_manage():
     async def checker(user: CurrentUser, db: DbSession):
         if user.role.code in ("SUPER_ADMIN", "STORE_ADMIN"):
             return user
-        perms = await get_user_permissions(db, user.role_id)
+        perms = await get_user_permissions(db, user.role_id, user_id=user.id)
         if "customer:manage" in perms or "customer:write" in perms:
             return user
         raise AppException(40300, "无权管理社会贡献认定", status_code=403)

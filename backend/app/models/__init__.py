@@ -505,6 +505,7 @@ class Product(Base, TimestampMixin):
     main_image: Mapped[str | None] = mapped_column(String(500))
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     original_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     status: Mapped[str] = mapped_column(String(20), default="ON_SALE")
     is_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
     is_hot: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1719,3 +1720,76 @@ class PointExchangeOption(Base, TimestampMixin):
     points_cost: Mapped[int] = mapped_column(Integer)
     status: Mapped[int] = mapped_column(Integer, default=1)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RoleDelegation(Base, TimestampMixin):
+    """临时授权：店长休假期间把权限集委派给被委托人，到期自动失效。"""
+
+    __tablename__ = "role_delegations"
+    __table_args__ = (
+        Index("idx_rd_delegatee_status_ends", "delegatee_user_id", "status", "ends_at"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    grantor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    delegatee_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    permission_codes: Mapped[list] = mapped_column(JSON)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    reason: Mapped[str | None] = mapped_column(String(255), default=None)
+
+
+class PaymentReconcileBatch(Base, TimestampMixin):
+    __tablename__ = "payment_reconcile_batches"
+    __table_args__ = (UniqueConstraint("channel", "bill_date", name="uk_prb_channel_bill"),)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    channel: Mapped[str] = mapped_column(String(20))
+    bill_date: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    local_count: Mapped[int] = mapped_column(Integer, default=0)
+    channel_count: Mapped[int] = mapped_column(Integer, default=0)
+    mismatch_count: Mapped[int] = mapped_column(Integer, default=0)
+    source_filename: Mapped[str | None] = mapped_column(String(255), default=None)
+    error_message: Mapped[str | None] = mapped_column(String(500), default=None)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, default=None)
+
+
+class PaymentReconcileDiff(Base, TimestampMixin):
+    __tablename__ = "payment_reconcile_diffs"
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    batch_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("payment_reconcile_batches.id", ondelete="CASCADE"), index=True
+    )
+    diff_type: Mapped[str] = mapped_column(String(32))
+    local_payment_no: Mapped[str | None] = mapped_column(String(64), default=None)
+    channel_trade_no: Mapped[str | None] = mapped_column(String(128), default=None)
+    local_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=None)
+    channel_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=None)
+    detail: Mapped[dict | None] = mapped_column(JSON, default=None)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN")
+
+
+class ArchivedOrderSnapshot(Base):
+    __tablename__ = "archived_order_snapshots"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uk_aos_order_id"),
+        UniqueConstraint("order_no", name="uk_aos_order_no"),
+        Index("idx_aos_store_created", "store_id", "original_created_at"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    order_id: Mapped[int] = mapped_column(BigInteger)
+    store_id: Mapped[int] = mapped_column(BigInteger)
+    order_no: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32))
+    payment_status: Mapped[str | None] = mapped_column(String(32), default=None)
+    original_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    payload: Mapped[dict] = mapped_column(JSON)
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

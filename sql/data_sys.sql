@@ -392,6 +392,66 @@ WHERE NOT EXISTS (
         FROM `permissions`
         WHERE `code` = 'invoice:manage'
     );
+INSERT INTO `permissions` (`code`, `name`, `module`)
+SELECT 'customer:pii',
+    '查看顾客完整手机号等 PII',
+    'customer'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `permissions`
+        WHERE `code` = 'customer:pii'
+    );
+INSERT INTO `permissions` (`code`, `name`, `module`)
+SELECT 'product:cost:read',
+    '查看餐品成本价',
+    'product'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `permissions`
+        WHERE `code` = 'product:cost:read'
+    );
+INSERT INTO `permissions` (`code`, `name`, `module`)
+SELECT 'role:delegate',
+    '临时授权/委派权限',
+    'user'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `permissions`
+        WHERE `code` = 'role:delegate'
+    );
+INSERT INTO `permissions` (`code`, `name`, `module`)
+SELECT 'reconcile:read',
+    '查看支付对账批次与差异',
+    'payment'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `permissions`
+        WHERE `code` = 'reconcile:read'
+    );
+INSERT INTO `permissions` (`code`, `name`, `module`)
+SELECT 'reconcile:manage',
+    '导入渠道账单并执行对账',
+    'payment'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `permissions`
+        WHERE `code` = 'reconcile:manage'
+    );
+INSERT INTO `permissions` (`code`, `name`, `module`)
+SELECT 'archive:manage',
+    '执行历史订单冷库归档',
+    'order'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `permissions`
+        WHERE `code` = 'archive:manage'
+    );
 -- 三、角色权限矩阵
 INSERT INTO `role_permissions` (`role_id`, `permission_id`)
 SELECT `r`.`id`,
@@ -431,7 +491,13 @@ FROM `roles` r
         'wallet:read',
         'wallet:manage',
         'settings:store',
-        'invoice:manage'
+        'invoice:manage',
+        'customer:pii',
+        'product:cost:read',
+        'role:delegate',
+        'reconcile:read',
+        'reconcile:manage',
+        'archive:manage'
     )
 WHERE `r`.`code` = 'STORE_ADMIN'
     AND NOT EXISTS (

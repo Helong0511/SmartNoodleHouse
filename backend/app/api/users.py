@@ -1,6 +1,9 @@
 """员工账号管理（多店绑店）"""
 from __future__ import annotations
 
+from datetime import datetime
+import re
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -10,8 +13,9 @@ from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success, serialize_dt
 from app.core.security import hash_password
-from app.models import Permission, Role, RolePermission, Store, User
+from app.models import Permission, Role, RoleDelegation, RolePermission, Store, User
 from app.services.audit_service import AuditService
+from app.services.role_delegation_service import RoleDelegationService
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/users", tags=["员工"])
@@ -41,6 +45,21 @@ LOCKED_ROLE_CODES = {"SUPER_ADMIN"}
 
 class RolePermissionsUpdate(BaseModel):
     permission_codes: list[str] = Field(default_factory=list)
+
+
+class RoleCreate(BaseModel):
+    code: str = Field(..., min_length=2, max_length=50)
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=255)
+    permission_codes: list[str] = Field(default_factory=list)
+
+
+class RoleDelegationCreate(BaseModel):
+    delegatee_user_id: int = Field(..., gt=0)
+    permission_codes: list[str] = Field(..., min_length=1)
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None = Field(default=None, max_length=255)
 
 
 class UserCreate(BaseModel):
@@ -175,6 +194,158 @@ async def role_permissions_matrix(request: Request, db: DbSession, user: Current
         },
         request=request,
     )
+
+
+@router.post("/roles", dependencies=[require_permission("system:manage")])
+async def create_role(data: RoleCreate, request: Request, db: DbSession, user: CurrentUser):
+    """创建可编辑自定义角色并可选写入初始权限。"""
+    code = (data.code or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,49}", code):
+        raise AppException(40012, "角色 code 须为 2–50 位大写字母/数字/下划线", status_code=400)
+    if code in LOCKED_ROLE_CODES or code in STORE_ADMIN_FORBIDDEN_ROLES:
+        raise AppException(40012, "不可创建系统保留角色", status_code=400)
+    exists = (
+        await db.execute(select(Role.id).where(Role.code == code))
+    ).scalar_one_or_none()
+    if exists:
+        raise AppException(40012, "角色 code 已存在", status_code=400)
+    role = Role(code=code, name=data.name.strip(), description=(data.description or "").strip() or None)
+    db.add(role)
+    await db.flush()
+    codes = sorted({c.strip() for c in data.permission_codes if c and c.strip()})
+    if codes:
+        perms = list(
+            (await db.execute(select(Permission).where(Permission.code.in_(codes)))).scalars().all()
+        )
+        by_code = {p.code: p for p in perms}
+        missing = [c for c in codes if c not in by_code]
+        if missing:
+            raise AppException(40012, f"未知权限: {','.join(missing[:5])}", status_code=400)
+        for c in codes:
+            db.add(RolePermission(role_id=role.id, permission_id=by_code[c].id))
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="role.create",
+        module="user",
+        target_type="role",
+        target_id=role.id,
+        detail={"code": role.code, "permission_codes": codes},
+        request=request,
+    )
+    await db.commit()
+    return success(
+        {"id": role.id, "code": role.code, "name": role.name, "permission_codes": codes},
+        request=request,
+    )
+
+
+@router.post("/delegations", dependencies=[require_permission("role:delegate")])
+async def create_delegation(
+    data: RoleDelegationCreate, request: Request, db: DbSession, user: CurrentUser
+):
+    """临时授权：把权限集委派给其他员工，到期自动失效。"""
+    if int(data.delegatee_user_id) == int(user.id):
+        raise AppException(40012, "不能给自己委派", status_code=400)
+    delegatee = await db.get(User, int(data.delegatee_user_id))
+    if not delegatee or int(delegatee.status or 0) != 1:
+        raise AppException(40401, "被委托人不存在或已停用", status_code=404)
+    if user.role.code != "SUPER_ADMIN":
+        if not user.store_id or delegatee.store_id != user.store_id:
+            raise AppException(40300, "只能委派本店员工", status_code=403)
+    try:
+        row = await RoleDelegationService.create(
+            db,
+            grantor_user_id=user.id,
+            delegatee_user_id=int(data.delegatee_user_id),
+            permission_codes=data.permission_codes,
+            starts_at=data.starts_at,
+            ends_at=data.ends_at,
+            reason=data.reason,
+        )
+    except ValueError as e:
+        raise AppException(40012, str(e), status_code=400) from e
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="role.delegation.create",
+        module="user",
+        target_type="role_delegation",
+        target_id=row.id,
+        detail={
+            "delegatee_user_id": row.delegatee_user_id,
+            "permission_codes": row.permission_codes,
+            "ends_at": serialize_dt(row.ends_at),
+        },
+        request=request,
+    )
+    await db.commit()
+    return success(
+        {
+            "id": row.id,
+            "delegatee_user_id": row.delegatee_user_id,
+            "permission_codes": row.permission_codes,
+            "starts_at": serialize_dt(row.starts_at),
+            "ends_at": serialize_dt(row.ends_at),
+            "status": row.status,
+        },
+        request=request,
+    )
+
+
+@router.get("/delegations", dependencies=[require_permission("role:delegate")])
+async def list_delegations(request: Request, db: DbSession, user: CurrentUser):
+    q = select(RoleDelegation).order_by(RoleDelegation.id.desc()).limit(100)
+    if user.role.code != "SUPER_ADMIN":
+        q = q.where(
+            or_(
+                RoleDelegation.grantor_user_id == user.id,
+                RoleDelegation.delegatee_user_id == user.id,
+            )
+        )
+    rows = list((await db.execute(q)).scalars().all())
+    return success(
+        {
+            "items": [
+                {
+                    "id": r.id,
+                    "grantor_user_id": r.grantor_user_id,
+                    "delegatee_user_id": r.delegatee_user_id,
+                    "permission_codes": r.permission_codes,
+                    "starts_at": serialize_dt(r.starts_at),
+                    "ends_at": serialize_dt(r.ends_at),
+                    "status": r.status,
+                    "reason": r.reason,
+                }
+                for r in rows
+            ]
+        },
+        request=request,
+    )
+
+
+@router.post("/delegations/{delegation_id}/revoke", dependencies=[require_permission("role:delegate")])
+async def revoke_delegation(
+    delegation_id: int, request: Request, db: DbSession, user: CurrentUser
+):
+    row = await db.get(RoleDelegation, int(delegation_id))
+    if not row:
+        raise AppException(40401, "授权记录不存在", status_code=404)
+    if user.role.code != "SUPER_ADMIN" and row.grantor_user_id != user.id:
+        raise AppException(40300, "仅委托人可撤销", status_code=403)
+    row.status = "REVOKED"
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="role.delegation.revoke",
+        module="user",
+        target_type="role_delegation",
+        target_id=row.id,
+        detail={},
+        request=request,
+    )
+    await db.commit()
+    return success({"id": row.id, "status": row.status}, request=request)
 
 
 @router.put("/roles/{role_id}/permissions", dependencies=[require_permission("system:manage")])

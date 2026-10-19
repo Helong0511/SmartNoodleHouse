@@ -1,12 +1,13 @@
 """Task 12：性能治理 —— GZip、性能指标滚动窗口、菜单版本戳 304 语义。"""
 from __future__ import annotations
 
+import gzip
 import logging
 
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
-from starlette.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from app.api.miniprogram import get_menu_bundle_api
 from app.core import menu_cache, perf_metrics
@@ -14,6 +15,41 @@ from app.core.performance_middleware import JsonGZipMiddleware, PerformanceMetri
 from app.models import StoreProductStock
 from app.services.recommendation_service import invalidate_store_caches
 from tests.reco_factories import make_category, make_product, make_store
+
+
+async def _asgi_get(app, path: str, headers: dict[str, str] | None = None):
+    """绕过 httpx 自动解压，直接读 ASGI 响应头（httpx 0.28 会剥掉 content-encoding）。"""
+    hdrs = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": hdrs,
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    messages: list[dict] = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    await app(scope, receive, send)
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    resp_headers = {k.decode().lower(): v.decode() for k, v in start.get("headers", [])}
+    body = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
+    return int(start["status"]), resp_headers, body
+
+
+def _async_client(app) -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
 class FakePipeline:
@@ -130,29 +166,41 @@ def _gzip_app():
     return app
 
 
-def test_gzip_compresses_large_json_and_roundtrip():
-    client = TestClient(_gzip_app())
-    r = client.get("/big", headers={"Accept-Encoding": "gzip"})
-    assert r.status_code == 200
-    assert r.headers.get("content-encoding") == "gzip"
-    assert "Accept-Encoding" in r.headers.get("vary", "")
-    # TestClient 自动解压，业务内容一致
-    body = r.json()
-    assert len(body["text"]) == 900
+@pytest.mark.asyncio
+async def test_gzip_compresses_large_json_and_roundtrip():
+    app = _gzip_app()
+    status, headers, raw = await _asgi_get(
+        app, "/big", headers={"accept-encoding": "gzip"}
+    )
+    assert status == 200
+    assert headers.get("content-encoding") == "gzip"
+    assert "accept-encoding" in headers.get("vary", "").lower()
+    body = gzip.decompress(raw).decode("utf-8")
+    assert '"text"' in body
+    assert body.count("面") == 900
+
+    async with _async_client(app) as client:
+        r = await client.get("/big", headers={"Accept-Encoding": "gzip"})
+        assert r.status_code == 200
+        assert len(r.json()["text"]) == 900
 
 
-def test_gzip_skips_small_json_and_non_json():
-    client = TestClient(_gzip_app())
-    small = client.get("/small", headers={"Accept-Encoding": "gzip"})
-    assert small.headers.get("content-encoding") is None
-    assert small.json() == {"a": 1}
+@pytest.mark.asyncio
+async def test_gzip_skips_small_json_and_non_json():
+    app = _gzip_app()
+    _, small_h, _ = await _asgi_get(app, "/small", headers={"accept-encoding": "gzip"})
+    assert small_h.get("content-encoding") is None
 
-    text = client.get("/text", headers={"Accept-Encoding": "gzip"})
-    assert text.headers.get("content-encoding") is None
-    assert len(text.text) == 4000
+    _, text_h, text_body = await _asgi_get(app, "/text", headers={"accept-encoding": "gzip"})
+    assert text_h.get("content-encoding") is None
+    assert len(text_body) == 4000
 
-    no_accept = client.get("/big", headers={"Accept-Encoding": "identity"})
-    assert no_accept.headers.get("content-encoding") is None
+    _, plain_h, _ = await _asgi_get(app, "/big", headers={"accept-encoding": "identity"})
+    assert plain_h.get("content-encoding") is None
+
+    async with _async_client(app) as client:
+        small = await client.get("/small", headers={"Accept-Encoding": "gzip"})
+        assert small.json() == {"a": 1}
 
 
 # ---------- 性能指标 ----------
@@ -182,36 +230,36 @@ def test_normalize_route():
     ) == "/api/orders/:id/items/:id"
 
 
-def test_slow_request_logged(fake_redis, caplog):
+@pytest.mark.asyncio
+async def test_slow_request_logged(fake_redis, caplog):
+    import asyncio
+
     app = FastAPI()
     app.add_middleware(PerformanceMetricsMiddleware)
 
     @app.get("/slow")
     async def slow():
-        import asyncio
         await asyncio.sleep(0.85)
         return {"ok": True}
 
     caplog.set_level(logging.WARNING, logger="app.core.performance_middleware")
-    client = TestClient(app)
-    r = client.get("/slow")
-    assert r.status_code == 200
+    async with _async_client(app) as client:
+        r = await client.get("/slow")
+        assert r.status_code == 200
     assert any("slow_request" in rec.message and "/slow" in rec.message for rec in caplog.records)
 
 
-def test_metrics_endpoint_reads_middleware_data(fake_redis):
+@pytest.mark.asyncio
+async def test_metrics_endpoint_reads_middleware_data(fake_redis):
     """真实中间件记录 -> 管理接口能读到数据（TR-12.2 接口有数据）。"""
     from app.main import app as real_app
     from app.api.performance import reco_metrics
 
-    client = TestClient(real_app)
-    # /health 被中间件跳过；菜单接口缺 store_id 返回 400，但计时在 finally 中仍会落桶
-    client.get("/api/miniprogram/menu")
+    async with _async_client(real_app) as client:
+        # /health 被中间件跳过；菜单接口缺 store_id 返回 400，但计时在 finally 中仍会落桶
+        await client.get("/api/miniprogram/menu")
 
-    import asyncio
-    body = asyncio.get_event_loop().run_until_complete(
-        reco_metrics(request=None, window_hours=1)
-    )
+    body = await reco_metrics(request=None, window_hours=1)
     routes = body["data"]["routes"]
     # route.path 不含 /api 外层 prefix，键为路由模板 /miniprogram/menu
     assert "/miniprogram/menu" in routes
@@ -240,9 +288,10 @@ async def test_menu_bundle_version_flow(fake_redis, db_session):
     assert [it["id"] for it in d1["products"]["items"]] == [p1.id]
     assert d1["products"]["items"][0]["has_options"] is False
 
-    # 携带相同版本：changed:false 小响应
+    # 携带相同版本：changed:false 小响应（可附带 visibility_day 等元数据）
     fresh = await get_menu_bundle_api(request=None, db=db, store_id=store.id, version=1)
-    assert fresh["data"] == {"changed": False, "version": 1}
+    assert fresh["data"]["changed"] is False
+    assert fresh["data"]["version"] == 1
 
     # 餐品写路径失效：版本递增，客户端旧版本重新拿全量
     await invalidate_store_caches(store.id)

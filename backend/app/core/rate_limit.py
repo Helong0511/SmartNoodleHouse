@@ -27,6 +27,22 @@ SENSITIVE_LIMITS = {
 }
 DEFAULT_LIMIT = (120, 60)
 
+
+def _fail_closed_prefixes(raw: str) -> list[str]:
+    out: list[str] = []
+    for part in (raw or "").split(","):
+        p = part.strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def path_requires_fail_closed(path: str, prefixes: list[str]) -> bool:
+    for prefix in prefixes:
+        if path.startswith(prefix) or path == prefix.rstrip("/"):
+            return True
+    return False
+
 # INCR+EXPIRE 原子化：避免两步间失败留下无 TTL 计数键导致该 IP+路径永久 429
 _INCR_SLIDING = """
 local c = redis.call('INCR', KEYS[1])
@@ -73,8 +89,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     content={"code": 429, "message": "请求过于频繁，请稍后再试", "data": None},
                 )
         except Exception as e:
-            # Redis 仅作限流加速；宕机时降级放行，避免全站 503（业务以 MySQL 为准）。
-            # 业务侧仍受认证 / 入侵检测 / SQL 注入检测等多层防护兜底。
+            # 默认 fail-open：Redis 仅加速层，避免全站 503。
+            # 敏感前缀可按 RATE_LIMIT_FAIL_CLOSED_PATHS 单独 fail-closed（503）。
+            raw_paths = getattr(settings, "rate_limit_fail_closed_paths", "")
+            prefixes = _fail_closed_prefixes(raw_paths if isinstance(raw_paths, str) else "")
+            if path_requires_fail_closed(path, prefixes):
+                logger.error("限流 Redis 不可用，敏感路径 fail-closed: path=%s err=%s", path, e)
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "code": 50301,
+                        "message": "限流服务暂不可用，请稍后重试",
+                        "data": None,
+                    },
+                )
             logger.error("限流 Redis 不可用，降级放行: %s", e)
 
         return await call_next(request)

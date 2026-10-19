@@ -24,6 +24,7 @@ from app.api import (
     print_jobs,
     products,
     queue,
+    reconcile,
     settings,
     social_benefits,
     tables,
@@ -66,3 +67,4 @@ api_router.include_router(invoices.router)
 api_router.include_router(queue.router)
 api_router.include_router(social_benefits.router)
 api_router.include_router(marketing.router)
+api_router.include_router(reconcile.router)

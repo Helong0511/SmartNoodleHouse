@@ -1309,6 +1309,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `main_image` varchar(500) NULL DEFAULT NULL COMMENT '主图相对或绝对路径',
   `price` decimal(10, 2) NOT NULL COMMENT '基础售价（不含规格加价）',
   `original_price` decimal(10, 2) NULL DEFAULT NULL COMMENT '划线原价（可选）',
+  `cost_price` decimal(10, 2) NULL DEFAULT NULL COMMENT '成本价（字段级权限 product:cost:read；收银默认不可见）',
   `stock` int NOT NULL DEFAULT 999 COMMENT '默认库存；999 表示不限量',
   `box_price` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '单份餐盒/打包费',
   `min_order_count` int NOT NULL DEFAULT 1 COMMENT '起售份数',
@@ -1983,5 +1984,84 @@ CREATE TABLE IF NOT EXISTS `point_exchange_options` (
   CONSTRAINT `fk_peo_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `fk_peo_template` FOREIGN KEY (`template_id`) REFERENCES `coupon_templates` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '积分兑换选项' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for role_delegations
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `role_delegations` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `grantor_user_id` bigint UNSIGNED NOT NULL COMMENT '委托人 → users.id',
+  `delegatee_user_id` bigint UNSIGNED NOT NULL COMMENT '被委托人 → users.id',
+  `permission_codes` json NOT NULL COMMENT '临时授予的权限码列表',
+  `starts_at` datetime(3) NOT NULL COMMENT '生效时间',
+  `ends_at` datetime(3) NOT NULL COMMENT '失效时间',
+  `status` varchar(20) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/REVOKED/EXPIRED',
+  `reason` varchar(255) NULL DEFAULT NULL COMMENT '授权原因',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_rd_delegatee_status_ends`(`delegatee_user_id` ASC, `status` ASC, `ends_at` ASC) USING BTREE,
+  INDEX `idx_rd_grantor`(`grantor_user_id` ASC) USING BTREE,
+  CONSTRAINT `fk_rd_grantor` FOREIGN KEY (`grantor_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_rd_delegatee` FOREIGN KEY (`delegatee_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '临时授权/委派' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for payment_reconcile_batches
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `payment_reconcile_batches` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `channel` varchar(20) NOT NULL COMMENT 'WECHAT/ALIPAY',
+  `bill_date` date NOT NULL COMMENT '对账日（渠道账单日）',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/DONE/FAILED',
+  `local_count` int NOT NULL DEFAULT 0 COMMENT '本地成功支付笔数',
+  `channel_count` int NOT NULL DEFAULT 0 COMMENT '渠道账单笔数',
+  `mismatch_count` int NOT NULL DEFAULT 0 COMMENT '差异笔数',
+  `source_filename` varchar(255) NULL DEFAULT NULL COMMENT '导入账单文件名',
+  `error_message` varchar(500) NULL DEFAULT NULL COMMENT '失败原因',
+  `created_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '操作人',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_prb_channel_bill`(`channel` ASC, `bill_date` ASC) USING BTREE,
+  INDEX `idx_prb_status_date`(`status` ASC, `bill_date` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付渠道对账批次' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for payment_reconcile_diffs
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `payment_reconcile_diffs` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `batch_id` bigint UNSIGNED NOT NULL COMMENT '批次 → payment_reconcile_batches.id',
+  `diff_type` varchar(32) NOT NULL COMMENT 'LONG/SHORT/AMOUNT_MISMATCH/FEE',
+  `local_payment_no` varchar(64) NULL DEFAULT NULL COMMENT '本地支付单号',
+  `channel_trade_no` varchar(128) NULL DEFAULT NULL COMMENT '渠道交易号',
+  `local_amount` decimal(12, 2) NULL DEFAULT NULL COMMENT '本地金额',
+  `channel_amount` decimal(12, 2) NULL DEFAULT NULL COMMENT '渠道金额',
+  `detail` json NULL COMMENT '扩展差异详情',
+  `status` varchar(20) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN/RESOLVED/IGNORED',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_prd_batch_type`(`batch_id` ASC, `diff_type` ASC) USING BTREE,
+  INDEX `idx_prd_status`(`status` ASC) USING BTREE,
+  CONSTRAINT `fk_prd_batch` FOREIGN KEY (`batch_id`) REFERENCES `payment_reconcile_batches` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付对账差异工单' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for archived_order_snapshots
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `archived_order_snapshots` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `order_id` bigint UNSIGNED NOT NULL COMMENT '原订单 id（热表删除后仍可查）',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '门店',
+  `order_no` varchar(64) NOT NULL COMMENT '订单号',
+  `status` varchar(32) NOT NULL COMMENT '归档时订单状态',
+  `payment_status` varchar(32) NULL DEFAULT NULL COMMENT '归档时支付状态',
+  `original_created_at` datetime(3) NOT NULL COMMENT '原下单时间',
+  `payload` json NOT NULL COMMENT '订单+明细+支付摘要快照',
+  `archived_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '归档时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_aos_order_id`(`order_id` ASC) USING BTREE,
+  UNIQUE INDEX `uk_aos_order_no`(`order_no` ASC) USING BTREE,
+  INDEX `idx_aos_store_created`(`store_id` ASC, `original_created_at` ASC) USING BTREE,
+  INDEX `idx_aos_archived_at`(`archived_at` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '历史订单冷库快照' ROW_FORMAT = Dynamic;
 -- END CANONICAL SCHEMA
 SET FOREIGN_KEY_CHECKS = 1;

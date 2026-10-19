@@ -77,3 +77,21 @@ sudo nginx -t && sudo systemctl reload nginx
 curl -s http://127.0.0.1:8000/health
 # 或：curl -s http://127.0.0.1:8000/api/ready
 curl -sI https://your-domain.com/
+
+# ── 8. 备份与恢复演练（P1-R2）──
+#   每日：python3 scripts/备份数据库.py --keep-days 14
+#   季度隔离库：export DRILL_DATABASE_URL=...; python3 scripts/备份恢复演练.py --restore-drill
+#   恢复（危险）：python3 scripts/恢复数据库.py backups/xxx.sql.gz --yes
+#   人工阻塞项：python3 scripts/上线前运维检查清单.py
+
+# ── 9. 大表在线 DDL（P2-R2）──
+#   小表 / MySQL 8 支持的即时 DDL：优先 alembic（information_schema 幂等）。
+#   超大表（orders/payments/operation_logs 等）变更索引或加列：
+#     - pt-online-schema-change --alter 'ADD INDEX ...' D=smart_noodle_house,t=orders --execute
+#     - 或 gh-ost --alter '...' --database=... --table=orders --execute
+#   变更前在从库演练；业务低峰执行；保留回滚 SQL。
+
+# ── 10. 扩展预案（P2-R6）──
+#   分片键评估：orders/payments 按 store_id + created_at 范围；热表保留 6–12 个月。
+#   报表只读：配置只读副本 DATABASE_URL_READONLY（应用层后续接入）；写库仍主库。
+#   JWT 多服务：JWT_ALGORITHM=RS256 并配置 JWT_PRIVATE_KEY/JWT_PUBLIC_KEY（PEM）。

@@ -1078,6 +1078,7 @@ async def list_products(
                 "updated_at": serialize_dt(p.updated_at),
                 "price": str(p.price),
                 "original_price": str(p.original_price) if p.original_price else None,
+                "cost_price": str(p.cost_price) if getattr(p, "cost_price", None) is not None else None,
                 "status": p.status,
                 "is_recommended": p.is_recommended,
                 "is_hot": p.is_hot,
@@ -1107,6 +1108,18 @@ async def list_products(
             ) or is_bday
         items = filter_visible_product_dicts(
             items, today=today_beijing(), is_birthday_today=is_bday
+        )
+    # 公开菜单不带成本价；员工列表按字段级权限裁剪
+    if staff is None:
+        for it in items:
+            it.pop("cost_price", None)
+    else:
+        from app.api.deps import get_user_permissions
+        from app.services.field_policy import apply_field_policy_list
+
+        perms = await get_user_permissions(db, staff.role_id, user_id=staff.id)
+        items = apply_field_policy_list(
+            items, perms, is_super_admin=staff.role.code == "SUPER_ADMIN"
         )
     return success(
         {
@@ -1365,39 +1378,51 @@ async def get_product(
         if product.require_product_ids is not None
         else None
     )
+    detail = {
+        "id": product.id,
+        "store_id": product.store_id,
+        "store_name": store.name if store else None,
+        "category_id": product.category_id,
+        "category_name": cat.name if cat else None,
+        "require_category_ids": eff_cats,
+        "require_product_ids": eff_prods,
+        "require_inherited": inherited,
+        "require_category_ids_stored": stored_cats,
+        "require_product_ids_stored": stored_prods,
+        "product_no": product.product_no,
+        "name": product.name,
+        "description": product.description or "",
+        "main_image": product.main_image,
+        "updated_at": serialize_dt(product.updated_at),
+        "price": str(product.price),
+        "original_price": str(product.original_price) if product.original_price else None,
+        "cost_price": str(product.cost_price) if getattr(product, "cost_price", None) is not None else None,
+        "status": product.status,
+        "is_recommended": product.is_recommended,
+        "is_hot": product.is_hot,
+        "no_member_discount": product.no_member_discount,
+        "no_cooking": product.no_cooking,
+        **_visibility_fields(product),
+        "sort_order": product.sort_order,
+        "stock": product.stock,
+        "box_price": str(product.box_price or "0.00"),
+        "option_group_ids": option_group_ids,
+        "option_groups": option_groups,
+        "images": [{"id": i.id, "url": i.image_url, "type": i.image_type} for i in imgs_result.scalars()],
+        "taste_profile": profile_payload(taste_profile_row),
+    }
+    if staff is None:
+        detail.pop("cost_price", None)
+    else:
+        from app.api.deps import get_user_permissions
+        from app.services.field_policy import apply_field_policy
+
+        perms = await get_user_permissions(db, staff.role_id, user_id=staff.id)
+        apply_field_policy(
+            detail, perms, is_super_admin=staff.role.code == "SUPER_ADMIN"
+        )
     return success(
-        {
-            "id": product.id,
-            "store_id": product.store_id,
-            "store_name": store.name if store else None,
-            "category_id": product.category_id,
-            "category_name": cat.name if cat else None,
-            "require_category_ids": eff_cats,
-            "require_product_ids": eff_prods,
-            "require_inherited": inherited,
-            "require_category_ids_stored": stored_cats,
-            "require_product_ids_stored": stored_prods,
-            "product_no": product.product_no,
-            "name": product.name,
-            "description": product.description or "",
-            "main_image": product.main_image,
-            "updated_at": serialize_dt(product.updated_at),
-            "price": str(product.price),
-            "original_price": str(product.original_price) if product.original_price else None,
-            "status": product.status,
-            "is_recommended": product.is_recommended,
-            "is_hot": product.is_hot,
-            "no_member_discount": product.no_member_discount,
-            "no_cooking": product.no_cooking,
-            **_visibility_fields(product),
-            "sort_order": product.sort_order,
-            "stock": product.stock,
-            "box_price": str(product.box_price or "0.00"),
-            "option_group_ids": option_group_ids,
-            "option_groups": option_groups,
-            "images": [{"id": i.id, "url": i.image_url, "type": i.image_type} for i in imgs_result.scalars()],
-            "taste_profile": profile_payload(taste_profile_row),
-        },
+        detail,
         request=request,
     )
 

@@ -1,11 +1,8 @@
-"""限流降级行为：Redis 宕机时 fail-open（业务以 MySQL 为准）。
+"""限流降级：普通路径 Redis 宕机 fail-open；敏感路径可 fail-closed。
 
 设计权衡：
-- fail-open 让限流失效，但 Redis 仅是性能保护层，业务侧还有认证 / 入侵检测 /
-  SQL 注入检测等多层防线，限流失效不会直接导致越权。
-- fail-closed 让全站 503，扩大 Redis 故障半径，影响正常营业。
-
-后续若决定生产环境 Redis 宕机时也 fail-closed，可在此测试改为期望 503。
+- 默认 fail-open 避免 Redis 故障扩大为全站 503。
+- RATE_LIMIT_FAIL_CLOSED_PATHS 仅对登录/支付等敏感前缀返回 503，降低撞库窗口。
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,32 +11,83 @@ import pytest
 from starlette.requests import Request
 
 
-@pytest.mark.asyncio
-async def test_prod_rate_limit_fail_closed_on_redis_error():
-    from app.core.rate_limit import RateLimitMiddleware
-
-    mw = RateLimitMiddleware(app=MagicMock())
+def _request(path: str) -> Request:
     scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
         "method": "POST",
         "scheme": "http",
-        "path": "/api/orders",
-        "raw_path": b"/api/orders",
+        "path": path,
+        "raw_path": path.encode(),
         "query_string": b"",
         "headers": [],
         "client": ("10.0.0.2", 12345),
         "server": ("test", 80),
     }
-    request = Request(scope)
+    return Request(scope)
 
-    settings = SimpleNamespace(is_production=True, is_development=False, enable_rate_limit=True)
+
+@pytest.mark.asyncio
+async def test_non_sensitive_path_fail_open_on_redis_error():
+    from app.core.rate_limit import RateLimitMiddleware
+
+    mw = RateLimitMiddleware(app=MagicMock())
+    request = _request("/api/orders")
+    settings = SimpleNamespace(
+        is_production=True,
+        is_development=False,
+        enable_rate_limit=True,
+        rate_limit_fail_closed_paths="/api/auth/login,/api/payments/",
+    )
     next_call = AsyncMock(return_value=MagicMock(status_code=200))
     with patch("app.core.rate_limit.get_settings", return_value=settings):
         with patch("app.core.rate_limit.get_redis", AsyncMock(side_effect=RuntimeError("redis down"))):
             with patch("app.core.rate_limit.client_ip", return_value="10.0.0.2"):
                 resp = await mw.dispatch(request, next_call)
-    # Redis 宕机 → 降级放行（业务侧多层防护兜底，避免全站 503 扩大故障半径）
     assert resp is next_call.return_value
     next_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sensitive_path_fail_closed_on_redis_error():
+    from app.core.rate_limit import RateLimitMiddleware
+
+    mw = RateLimitMiddleware(app=MagicMock())
+    request = _request("/api/auth/login")
+    settings = SimpleNamespace(
+        is_production=True,
+        is_development=False,
+        enable_rate_limit=True,
+        rate_limit_fail_closed_paths="/api/auth/login,/api/payments/",
+    )
+    next_call = AsyncMock(return_value=MagicMock(status_code=200))
+    with patch("app.core.rate_limit.get_settings", return_value=settings):
+        with patch("app.core.rate_limit.get_redis", AsyncMock(side_effect=RuntimeError("redis down"))):
+            with patch("app.core.rate_limit.client_ip", return_value="10.0.0.2"):
+                resp = await mw.dispatch(request, next_call)
+    assert resp.status_code == 503
+    body = resp.body.decode() if hasattr(resp, "body") else ""
+    assert "50301" in body or "限流" in body
+    next_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_payments_prefix_fail_closed_on_redis_error():
+    from app.core.rate_limit import RateLimitMiddleware
+
+    mw = RateLimitMiddleware(app=MagicMock())
+    request = _request("/api/payments/create")
+    settings = SimpleNamespace(
+        is_production=True,
+        is_development=False,
+        enable_rate_limit=True,
+        rate_limit_fail_closed_paths="/api/auth/login,/api/payments/",
+    )
+    next_call = AsyncMock(return_value=MagicMock(status_code=200))
+    with patch("app.core.rate_limit.get_settings", return_value=settings):
+        with patch("app.core.rate_limit.get_redis", AsyncMock(side_effect=RuntimeError("redis down"))):
+            with patch("app.core.rate_limit.client_ip", return_value="10.0.0.2"):
+                resp = await mw.dispatch(request, next_call)
+    assert resp.status_code == 503
+    next_call.assert_not_awaited()

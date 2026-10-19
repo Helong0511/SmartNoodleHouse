@@ -103,6 +103,20 @@ TASK_CATALOG: list[dict] = [
         "default_schedule": {"type": "cron", "hour": 4, "minute": 0},
     },
     {
+        "id": "expire_role_delegations",
+        "title": "回收过期临时授权",
+        "category": "权限",
+        "description": "将 ends_at 已过的 ACTIVE 委派标为 EXPIRED。",
+        "default_schedule": {"type": "interval", "unit": "minutes", "every": 15},
+    },
+    {
+        "id": "archive_old_orders",
+        "title": "历史订单冷库快照",
+        "category": "归档",
+        "description": "将超期终态订单写入 archived_order_snapshots（热表保留，物理删除二期）。",
+        "default_schedule": {"type": "cron", "hour": 2, "minute": 30},
+    },
+    {
         "id": "maintain_file_logs",
         "title": "维护文件日志",
         "category": "清理",
@@ -707,6 +721,48 @@ def register_tasks(scheduler) -> None:
                 n = await anonymize_expired_delivery_pii(db)
             if n:
                 logger.info("Delivery PII anonymized: %s orders", n)
+
+    @scheduler.scheduled_job(
+        "interval",
+        minutes=15,
+        id="expire_role_delegations",
+        name="回收过期临时授权",
+    )
+    @_leader_job
+    async def expire_role_delegations():
+        from app.services.role_delegation_service import RoleDelegationService
+        from app.services.scheduler_admin import exclusive_scheduler_job
+
+        async with exclusive_scheduler_job("expire_role_delegations", ttl=300):
+            async with AsyncSessionLocal() as db:
+                n = await RoleDelegationService.expire_stale(db)
+                if n:
+                    await db.commit()
+                    logger.info("Role delegations expired: %s", n)
+
+    @scheduler.scheduled_job(
+        "cron",
+        hour=2,
+        minute=30,
+        timezone="Asia/Shanghai",
+        id="archive_old_orders",
+        name="历史订单冷库快照",
+    )
+    @_leader_job
+    async def archive_old_orders():
+        from app.services.order_archive_service import OrderArchiveService
+        from app.services.scheduler_admin import exclusive_scheduler_job
+        from app.services.system_settings_service import SystemSettingsService
+
+        async with exclusive_scheduler_job("archive_old_orders", ttl=1800):
+            async with AsyncSessionLocal() as db:
+                days = await SystemSettingsService.get_int(db, "order_archive_after_days", 365)
+                result = await OrderArchiveService.archive_older_than(
+                    db, older_than_days=int(days), limit=300, dry_run=False
+                )
+                await db.commit()
+                if result.get("archived"):
+                    logger.info("Order archive snapshots: %s", result)
 
     @scheduler.scheduled_job(
         "cron", hour=3, minute=30, timezone="Asia/Shanghai", id="maintain_file_logs", name="维护文件日志"

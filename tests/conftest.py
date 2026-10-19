@@ -18,7 +18,8 @@ from app.core.response import money
 from app.main import app
 from app.services.order_service import OrderPriceCalculator
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+# 默认内存 SQLite；CI MySQL job 通过 TEST_DATABASE_URL 注入
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

@@ -103,6 +103,8 @@ async def test_rate_limit_fail_open_when_redis_down():
             s.is_development = False
             s.is_production = True
             s.enable_rate_limit = True
+            # 普通业务路径不在 fail-closed 名单；Redis 宕机仍放行
+            s.rate_limit_fail_closed_paths = "/api/auth/login,/api/payments/"
             gs.return_value = s
             await mw.dispatch(req, call_next)
     assert called["ok"] is True

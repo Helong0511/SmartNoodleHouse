@@ -42,6 +42,26 @@ def _safe_extra_claims(extra: dict[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in extra.items() if k not in _JWT_RESERVED_CLAIMS}
 
 
+def _jwt_sign_key(settings) -> str:
+    algo = (settings.jwt_algorithm or "HS256").upper()
+    if algo.startswith("RS") or algo.startswith("ES") or algo in ("EDDSA",):
+        key = (settings.jwt_private_key or "").strip()
+        if not key:
+            raise ValueError(f"JWT_ALGORITHM={algo} 需要配置 JWT_PRIVATE_KEY")
+        return key
+    return settings.jwt_secret
+
+
+def _jwt_verify_key(settings) -> str:
+    algo = (settings.jwt_algorithm or "HS256").upper()
+    if algo.startswith("RS") or algo.startswith("ES") or algo in ("EDDSA",):
+        key = (settings.jwt_public_key or "").strip()
+        if not key:
+            raise ValueError(f"JWT_ALGORITHM={algo} 需要配置 JWT_PUBLIC_KEY")
+        return key
+    return settings.jwt_secret
+
+
 def create_access_token(
     subject: str | int,
     extra: dict[str, Any] | None = None,
@@ -73,7 +93,7 @@ def create_access_token(
             "ver": token_version,
         }
     )
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _jwt_sign_key(settings), algorithm=settings.jwt_algorithm)
 
 
 def create_stream_ticket(user_id: int, camera_id: int, *, store_id: int | None = None, token_version: int = 0, ttl_seconds: int = 120) -> str:
@@ -97,7 +117,7 @@ def create_stream_ticket(user_id: int, camera_id: int, *, store_id: int | None =
     # P2-4 编码 store_id，消费端二次校验票据门店与摄像头门店一致
     if store_id is not None:
         payload["store"] = int(store_id)
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _jwt_sign_key(settings), algorithm=settings.jwt_algorithm)
 
 
 def create_customer_token(
@@ -132,7 +152,7 @@ def create_customer_token(
         "channel": ch,
         "ver": int(token_version or 0),
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _jwt_sign_key(settings), algorithm=settings.jwt_algorithm)
 
 
 def decode_customer_token(token: str, *, leeway_seconds: int = 0) -> dict[str, Any]:
@@ -148,7 +168,7 @@ def decode_token(token: str, *, leeway_seconds: int = 0) -> dict[str, Any]:
     settings = get_settings()
     return jwt.decode(
         token,
-        settings.jwt_secret,
+        _jwt_verify_key(settings),
         algorithms=[settings.jwt_algorithm],
         issuer=settings.app_name,
         audience=settings.jwt_audience,

@@ -415,6 +415,13 @@ async def list_customers(
         }
         for c in customers
     ]
+    from app.api.deps import get_user_permissions
+    from app.services.field_policy import apply_field_policy_list
+
+    perms = await get_user_permissions(db, user.role_id, user_id=user.id)
+    items = apply_field_policy_list(
+        items, perms, is_super_admin=user.role.code == "SUPER_ADMIN"
+    )
     return success(
         {
             "items": items,

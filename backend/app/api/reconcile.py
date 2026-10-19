@@ -1,0 +1,194 @@
+"""支付对账与订单冷库查询 API。"""
+from __future__ import annotations
+
+from datetime import date
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+
+from app.api.deps import CurrentUser, DbSession, require_permission
+from app.core.exceptions import AppException
+from app.core.response import serialize_dt, success
+from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReconcileDiff
+from app.services.order_archive_service import OrderArchiveService
+from app.services.payment_reconcile_service import PaymentReconcileService
+from app.services.store_scope import assert_store_access, effective_store_id
+
+router = APIRouter(prefix="/reconcile", tags=["reconcile"])
+
+
+@router.post("/payments/import", dependencies=[require_permission("reconcile:manage")])
+async def import_payment_bill(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    channel: Annotated[str, Form()],
+    bill_date: Annotated[date, Form()],
+    file: UploadFile = File(...),
+):
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("gbk", errors="replace")
+    try:
+        batch = await PaymentReconcileService.run_batch(
+            db,
+            channel=channel,
+            bill_date=bill_date,
+            bill_csv=text,
+            created_by=user.id,
+            source_filename=file.filename,
+        )
+        await db.commit()
+    except ValueError as e:
+        raise AppException(40012, str(e), status_code=400) from e
+    return success(
+        {
+            "id": batch.id,
+            "channel": batch.channel,
+            "bill_date": batch.bill_date.isoformat(),
+            "status": batch.status,
+            "local_count": batch.local_count,
+            "channel_count": batch.channel_count,
+            "mismatch_count": batch.mismatch_count,
+        }
+    )
+
+
+@router.get("/payments/batches", dependencies=[require_permission("reconcile:read")])
+async def list_batches(
+    db: DbSession,
+    user: CurrentUser,
+    limit: int = Query(50, ge=1, le=200),
+):
+    rows = list(
+        (
+            await db.execute(
+                select(PaymentReconcileBatch)
+                .order_by(PaymentReconcileBatch.bill_date.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
+    return success(
+        {
+            "items": [
+                {
+                    "id": b.id,
+                    "channel": b.channel,
+                    "bill_date": b.bill_date.isoformat(),
+                    "status": b.status,
+                    "local_count": b.local_count,
+                    "channel_count": b.channel_count,
+                    "mismatch_count": b.mismatch_count,
+                    "created_at": serialize_dt(b.created_at),
+                }
+                for b in rows
+            ]
+        }
+    )
+
+
+@router.get("/payments/batches/{batch_id}/diffs", dependencies=[require_permission("reconcile:read")])
+async def list_diffs(batch_id: int, db: DbSession, user: CurrentUser):
+    rows = list(
+        (
+            await db.execute(
+                select(PaymentReconcileDiff)
+                .where(PaymentReconcileDiff.batch_id == batch_id)
+                .order_by(PaymentReconcileDiff.id.asc())
+            )
+        ).scalars().all()
+    )
+    return success(
+        {
+            "items": [
+                {
+                    "id": d.id,
+                    "diff_type": d.diff_type,
+                    "local_payment_no": d.local_payment_no,
+                    "channel_trade_no": d.channel_trade_no,
+                    "local_amount": str(d.local_amount) if d.local_amount is not None else None,
+                    "channel_amount": str(d.channel_amount) if d.channel_amount is not None else None,
+                    "status": d.status,
+                    "detail": d.detail,
+                }
+                for d in rows
+            ]
+        }
+    )
+
+
+class ArchiveRunBody(BaseModel):
+    older_than_days: int = Field(365, ge=30, le=3650)
+    limit: int = Field(200, ge=1, le=1000)
+    dry_run: bool = False
+
+
+@router.post("/orders/archive", dependencies=[require_permission("archive:manage")])
+async def run_order_archive(body: ArchiveRunBody, db: DbSession, user: CurrentUser):
+    result = await OrderArchiveService.archive_older_than(
+        db,
+        older_than_days=body.older_than_days,
+        limit=body.limit,
+        dry_run=body.dry_run,
+    )
+    if not body.dry_run:
+        await db.commit()
+    return success(result)
+
+
+@router.get("/orders/archived", dependencies=[require_permission("order:read")])
+async def list_archived_orders(
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    sid = effective_store_id(user, store_id)
+    if sid is not None:
+        assert_store_access(user, sid)
+    q = select(ArchivedOrderSnapshot).order_by(ArchivedOrderSnapshot.original_created_at.desc())
+    if sid is not None:
+        q = q.where(ArchivedOrderSnapshot.store_id == sid)
+    rows = list((await db.execute(q.limit(limit))).scalars().all())
+    return success(
+        {
+            "items": [
+                {
+                    "id": r.id,
+                    "order_id": r.order_id,
+                    "order_no": r.order_no,
+                    "store_id": r.store_id,
+                    "status": r.status,
+                    "payment_status": r.payment_status,
+                    "original_created_at": serialize_dt(r.original_created_at),
+                    "archived_at": serialize_dt(r.archived_at),
+                }
+                for r in rows
+            ]
+        }
+    )
+
+
+@router.get("/orders/archived/{order_no}", dependencies=[require_permission("order:read")])
+async def get_archived_order(order_no: str, db: DbSession, user: CurrentUser):
+    row = (
+        await db.execute(
+            select(ArchivedOrderSnapshot).where(ArchivedOrderSnapshot.order_no == order_no)
+        )
+    ).scalar_one_or_none()
+    if not row:
+        raise AppException(40400, "归档订单不存在", status_code=404)
+    assert_store_access(user, row.store_id)
+    return success(
+        {
+            "id": row.id,
+            "order_no": row.order_no,
+            "payload": row.payload,
+            "archived_at": serialize_dt(row.archived_at),
+        }
+    )
