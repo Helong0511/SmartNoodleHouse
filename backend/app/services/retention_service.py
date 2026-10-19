@@ -88,15 +88,24 @@ async def _wake_tier(
     issued = 0
     async for rows in _batched_active_customers(db, *conditions, batch_size=batch_size):
         for customer in rows:
-            coupon = await CouponService.issue_from_template(
-                db,
-                int(customer.id),
-                template_name,
-                store_id=customer.registered_store_id,
-            )
-            if coupon is not None:
-                issued += 1
-        await db.commit()
+            try:
+                coupon = await CouponService.issue_from_template(
+                    db,
+                    int(customer.id),
+                    template_name,
+                    store_id=customer.registered_store_id,
+                )
+                # 单客 commit：长批次崩溃时已发券不回滚（模板侧 WELCOME 幂等）
+                await db.commit()
+                if coupon is not None:
+                    issued += 1
+            except Exception:
+                await db.rollback()
+                logger.exception(
+                    "沉睡唤醒单客发券失败 customer_id=%s template=%s",
+                    getattr(customer, "id", None),
+                    template_name,
+                )
     return issued
 
 
@@ -338,7 +347,16 @@ async def run_balance_low_remind(
                 return stats
             if not set_ok:
                 continue
-            result = await _send_balance_low_to_customer(db, customer, threshold=threshold)
+            try:
+                result = await _send_balance_low_to_customer(db, customer, threshold=threshold)
+                # 单客 commit：推送/写日志落库后再进入下一人
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception(
+                    "储值余额提醒单客失败 customer_id=%s", getattr(customer, "id", None)
+                )
+                continue
             stats["reminded"] += 1
             stats["customer_ids"].append(int(customer.id))
             if result == "SUCCESS":
@@ -347,7 +365,6 @@ async def run_balance_low_remind(
                 stats["sent_failed"] += 1
             else:
                 stats["logged_only"] += 1
-        await db.commit()
         last_id = int(rows[-1].id)
         if len(rows) < batch_size:
             break
@@ -398,30 +415,38 @@ async def run_points_expire(
 
     async for rows in _batched_active_customers(db, *conditions, batch_size=batch_size):
         for customer in rows:
-            # 行锁刷新当前积分（分批 query 可能已过期）
-            locked = (
-                await db.execute(
-                    select(Customer).where(Customer.id == int(customer.id)).with_for_update()
+            try:
+                # 行锁刷新当前积分（分批 query 可能已过期）
+                locked = (
+                    await db.execute(
+                        select(Customer).where(Customer.id == int(customer.id)).with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if not locked or int(locked.points or 0) <= 0:
+                    await db.rollback()
+                    continue
+                before = int(locked.points)
+                locked.points = 0
+                db.add(
+                    PointLedger(
+                        customer_id=locked.id,
+                        order_id=None,
+                        refund_id=None,
+                        delta=-before,
+                        balance_after=0,
+                        entry_type="EXPIRE",
+                    )
                 )
-            ).scalar_one_or_none()
-            if not locked or int(locked.points or 0) <= 0:
-                continue
-            before = int(locked.points)
-            locked.points = 0
-            db.add(
-                PointLedger(
-                    customer_id=locked.id,
-                    order_id=None,
-                    refund_id=None,
-                    delta=-before,
-                    balance_after=0,
-                    entry_type="EXPIRE",
+                await CustomerService.recalculate_member_level(db, locked)
+                # 单客 commit：释放行锁并落库，避免长事务与整批回滚
+                await db.commit()
+                stats["expired_count"] += 1
+                stats["expired_points"] += before
+            except Exception:
+                await db.rollback()
+                logger.exception(
+                    "积分过期单客清零失败 customer_id=%s", getattr(customer, "id", None)
                 )
-            )
-            await CustomerService.recalculate_member_level(db, locked)
-            stats["expired_count"] += 1
-            stats["expired_points"] += before
-        await db.commit()
 
     if stats["expired_count"]:
         logger.info(

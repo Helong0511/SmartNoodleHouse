@@ -18,7 +18,11 @@ from app.models import (
     Store,
     SystemSetting,
 )
-from app.services.marketing_service import MarketingService
+from app.services.marketing_service import (
+    MAX_TASK_TRY,
+    STALE_RUNNING_SEC,
+    MarketingService,
+)
 from app.services.segment_service import SegmentService
 from app.services.system_settings_service import SystemSettingsService
 
@@ -349,3 +353,123 @@ async def test_weekly_cap_skipped(db_session):
     # c0 应 SKIPPED，另外 2 人 SUCCESS
     assert stats["skipped"] >= 1
     assert stats["success"] == 2
+
+
+@pytest.mark.asyncio
+async def test_marketing_claim_and_stale_reclaim(db_session):
+    """PENDING→RUNNING 原子 claim；超时 RUNNING 复位；超次 FAILED。"""
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="reclaim_seg",
+        name="回收测分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="reclaim_camp",
+        name="回收测活动",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+    )
+    await MarketingService.publish(db_session, int(camp.id))
+    await db_session.commit()
+
+    tid = await db_session.scalar(
+        select(MarketingTask.id)
+        .where(MarketingTask.campaign_id == camp.id)
+        .order_by(MarketingTask.id)
+        .limit(1)
+    )
+    assert tid
+
+    claimed = await MarketingService._claim_pending_task(db_session, int(tid))
+    await db_session.commit()
+    assert claimed is not None
+    assert claimed.status == "RUNNING"
+    assert int(claimed.try_count) == 1
+
+    # 第二次 claim 失败
+    again = await MarketingService._claim_pending_task(db_session, int(tid))
+    assert again is None
+
+    # 人为把 updated_at 打旧，触发回收 → PENDING
+    stale_at = naive_local_now() - timedelta(seconds=STALE_RUNNING_SEC + 60)
+    task = await db_session.get(MarketingTask, int(tid))
+    task.updated_at = stale_at
+    await db_session.commit()
+
+    stats = await MarketingService.reclaim_stale_running(db_session, stale_after=60)
+    await db_session.commit()
+    assert stats["requeued"] >= 1
+    task = await db_session.get(MarketingTask, int(tid))
+    assert task.status == "PENDING"
+    assert task.last_error == "reclaimed_stale_running"
+
+    # 超次：RUNNING + try_count 触顶 → FAILED
+    task.status = "RUNNING"
+    task.try_count = MAX_TASK_TRY
+    task.updated_at = stale_at
+    await db_session.commit()
+    stats2 = await MarketingService.reclaim_stale_running(db_session, stale_after=60)
+    await db_session.commit()
+    assert stats2["failed"] >= 1
+    task = await db_session.get(MarketingTask, int(tid))
+    assert task.status == "FAILED"
+    assert task.last_error == "stale_running_max_try"
+
+
+@pytest.mark.asyncio
+async def test_marketing_claim_committed_before_issue(db_session, monkeypatch):
+    """claim 后立即 commit：发券中途失败时 RUNNING 已落库，可被 stale 回收。"""
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="claim_commit_seg",
+        name="claim落库分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="claim_commit_camp",
+        name="claim落库活动",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+    )
+    await MarketingService.publish(db_session, int(camp.id))
+    await db_session.commit()
+
+    from app.services.coupon_service import CouponService
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("issue_boom")
+
+    monkeypatch.setattr(CouponService, "issue_by_template_id", staticmethod(_boom))
+
+    stats = await MarketingService.process_pending_tasks(db_session, limit=50)
+    await db_session.commit()
+    assert stats["failed"] >= 1
+
+    failed_n = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(MarketingTask)
+            .where(MarketingTask.campaign_id == camp.id, MarketingTask.status == "FAILED")
+        )
+        or 0
+    )
+    assert failed_n >= 1
+    # 不应残留 RUNNING（异常路径已写 FAILED）
+    running_n = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(MarketingTask)
+            .where(MarketingTask.campaign_id == camp.id, MarketingTask.status == "RUNNING")
+        )
+        or 0
+    )
+    assert running_n == 0

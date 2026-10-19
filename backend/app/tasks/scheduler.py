@@ -194,6 +194,13 @@ TASK_CATALOG: list[dict] = [
         "default_schedule": {"type": "interval", "unit": "seconds", "every": 30},
     },
     {
+        "id": "reclaim_stale_marketing_tasks",
+        "title": "回收卡住的营销任务",
+        "category": "营销",
+        "description": "回收超时仍为 RUNNING 的 marketing_tasks（复位 PENDING；超次 FAILED）。",
+        "default_schedule": {"type": "interval", "unit": "minutes", "every": 5},
+    },
+    {
         "id": "social_love_day_issue",
         "title": "爱心日公益发券",
         "category": "营销",
@@ -313,6 +320,7 @@ def register_tasks(scheduler) -> None:
 
             from app.core.leader_lock import confirm_leader_owned, is_leader_held
             from app.services.scheduler_admin import (
+                JobSkipped,
                 format_scheduler_wall_time,
                 is_job_enabled,
                 record_job_run,
@@ -351,6 +359,17 @@ def register_tasks(scheduler) -> None:
                     )
                     await _refresh_next_run()
                 return result
+            except JobSkipped as skip:
+                # 跨进程锁未拿到等主动跳过：勿记 ok
+                if job_name:
+                    await record_job_run(
+                        job_name,
+                        status="skipped",
+                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        error=skip.reason,
+                    )
+                    await _refresh_next_run()
+                return None
             except Exception as exc:
                 if job_name:
                     await record_job_run(
@@ -388,11 +407,9 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def refresh_platform_tokens():
-        from app.services.scheduler_admin import redis_job_lock
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with redis_job_lock("refresh_platform_tokens", ttl=600) as ok:
-            if not ok:
-                return
+        async with exclusive_scheduler_job("refresh_platform_tokens", ttl=600):
             count = await PlatformTokenService.refresh_expiring_tokens(within_hours=24)
             if count:
                 logger.info("Refreshed %s platform tokens", count)
@@ -406,11 +423,9 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def auto_open_close_delivery_stores():
         # 外卖门店按本地营业时间自动开/关店（仅 auto_sync_open=true 的绑定）
-        from app.services.scheduler_admin import redis_job_lock
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with redis_job_lock("auto_open_close_delivery_stores", ttl=90) as ok:
-            if not ok:
-                return
+        async with exclusive_scheduler_job("auto_open_close_delivery_stores", ttl=90):
             async with AsyncSessionLocal() as db:
                 from app.services.store_hours_service import StoreHoursService
 
@@ -424,11 +439,9 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def delivery_stock_reconcile():
         # 外卖库存定时对账：以本地门店库存覆盖推送各平台，纠正任何漂移（最终一致）
-        from app.services.scheduler_admin import redis_job_lock
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with redis_job_lock("delivery_stock_reconcile", ttl=240) as ok:
-            if not ok:
-                return
+        async with exclusive_scheduler_job("delivery_stock_reconcile", ttl=240):
             async with AsyncSessionLocal() as db:
                 from app.services.product_sync_service import ProductSyncService
 
@@ -605,29 +618,33 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def cleanup_visitor_data():
         from app.services.face_service import VisitorService
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with AsyncSessionLocal() as db:
-            stats = await VisitorService.cleanup_expired(db)
-            logger.info(
-                "Expired visitor data cleaned rows=%s files=%s dirs=%s",
-                stats.get("deleted_rows"),
-                stats.get("deleted_files"),
-                stats.get("pruned_dirs"),
-            )
+        async with exclusive_scheduler_job("cleanup_visitor_data", ttl=600):
+            async with AsyncSessionLocal() as db:
+                stats = await VisitorService.cleanup_expired(db)
+                logger.info(
+                    "Expired visitor data cleaned rows=%s files=%s dirs=%s",
+                    stats.get("deleted_rows"),
+                    stats.get("deleted_files"),
+                    stats.get("pruned_dirs"),
+                )
 
     @scheduler.scheduled_job(
         "cron", hour=3, minute=0, timezone="Asia/Shanghai", id="cleanup_operation_logs", name="清理操作日志"
     )
     @_leader_job
     async def cleanup_operation_logs():
-        async with AsyncSessionLocal() as db:
-            from app.services.system_settings_service import SystemSettingsService
+        from app.services.scheduler_admin import exclusive_scheduler_job
+        from app.services.system_settings_service import SystemSettingsService
 
-            days = await SystemSettingsService.get_int(db, "operation_log_retention_days", 90)
-            cutoff = naive_local_now() - timedelta(days=days)
-            await db.execute(delete(OperationLog).where(OperationLog.created_at < cutoff))
-            await db.commit()
-            logger.info("Operation logs cleaned before %s", cutoff)
+        async with exclusive_scheduler_job("cleanup_operation_logs", ttl=600):
+            async with AsyncSessionLocal() as db:
+                days = await SystemSettingsService.get_int(db, "operation_log_retention_days", 90)
+                cutoff = naive_local_now() - timedelta(days=days)
+                await db.execute(delete(OperationLog).where(OperationLog.created_at < cutoff))
+                await db.commit()
+                logger.info("Operation logs cleaned before %s", cutoff)
 
     @scheduler.scheduled_job(
         "cron", hour=4, minute=0, timezone="Asia/Shanghai", id="cleanup_delivery_pii", name="外卖 PII 脱敏"
@@ -635,10 +652,13 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def cleanup_delivery_pii():
         """P1: 外卖订单 PII 脱敏 — 已完结超 30 天的 recipient/rider 字段置 NULL。"""
-        async with AsyncSessionLocal() as db:
-            n = await anonymize_expired_delivery_pii(db)
-        if n:
-            logger.info("Delivery PII anonymized: %s orders", n)
+        from app.services.scheduler_admin import exclusive_scheduler_job
+
+        async with exclusive_scheduler_job("cleanup_delivery_pii", ttl=600):
+            async with AsyncSessionLocal() as db:
+                n = await anonymize_expired_delivery_pii(db)
+            if n:
+                logger.info("Delivery PII anonymized: %s orders", n)
 
     @scheduler.scheduled_job(
         "cron", hour=3, minute=30, timezone="Asia/Shanghai", id="maintain_file_logs", name="维护文件日志"
@@ -647,11 +667,9 @@ def register_tasks(scheduler) -> None:
     async def maintain_file_logs():
         """文件日志：7 天明文→gzip，满月打包，超过 90 天删除。"""
         from app.services.file_log_service import maintain_logs
-        from app.services.scheduler_admin import redis_job_lock
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with redis_job_lock("maintain_file_logs", ttl=600) as ok:
-            if not ok:
-                return
+        async with exclusive_scheduler_job("maintain_file_logs", ttl=600):
             stats = maintain_logs()
             if any(stats.values()):
                 logger.info("File logs maintained: %s", stats)
@@ -692,6 +710,23 @@ def register_tasks(scheduler) -> None:
             logger.info("Stale webhook inbox PROCESSING reclaimed: %s", n)
 
     @scheduler.scheduled_job(
+        "interval",
+        minutes=5,
+        id="reclaim_stale_marketing_tasks",
+        name="回收卡住的营销任务",
+    )
+    @_leader_job
+    async def reclaim_stale_marketing_tasks():
+        """回收崩溃残留的 RUNNING marketing_tasks。"""
+        from app.services.marketing_service import MarketingService
+
+        async with AsyncSessionLocal() as db:
+            stats = await MarketingService.reclaim_stale_running(db)
+            await db.commit()
+        if stats.get("requeued") or stats.get("failed"):
+            logger.info("Stale marketing RUNNING reclaimed: %s", stats)
+
+    @scheduler.scheduled_job(
         "cron", minute="*/2", id="reclaim_stale_printing_jobs", name="回收卡住的打印任务"
     )
     @_leader_job
@@ -708,17 +743,21 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def learn_taste_profiles():
         """智能推荐：增量消费最近 15 分钟行为事件，保证画像 5 分钟内更新（支付链路另有即时学习）。"""
-        async with AsyncSessionLocal() as db:
-            from app.services.taste_learning_service import TasteLearningService
+        from app.services.scheduler_admin import exclusive_scheduler_job
+        from app.services.taste_learning_service import TasteLearningService
 
-            since = naive_local_now() - timedelta(minutes=15)
-            try:
-                stats = await TasteLearningService.learn_recent_customers(db, since=since, limit=200)
-                await db.commit()
-                if stats["events"]:
-                    logger.info("口味画像兜底学习: %s", stats)
-            except Exception:
-                logger.exception("口味画像兜底学习任务异常")
+        async with exclusive_scheduler_job("learn_taste_profiles", ttl=240):
+            async with AsyncSessionLocal() as db:
+                since = naive_local_now() - timedelta(minutes=15)
+                try:
+                    stats = await TasteLearningService.learn_recent_customers(
+                        db, since=since, limit=200
+                    )
+                    await db.commit()
+                    if stats["events"]:
+                        logger.info("口味画像兜底学习: %s", stats)
+                except Exception:
+                    logger.exception("口味画像兜底学习任务异常")
 
     @scheduler.scheduled_job(
         "interval", minutes=30, id="reencrypt_face_profiles", name="人脸向量密钥轮换"
@@ -727,12 +766,14 @@ def register_tasks(scheduler) -> None:
     async def reencrypt_face_profiles():
         """密钥轮换后：把旧 version 人脸向量重加密到当前密钥。"""
         from app.services.face_service import FaceService
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with AsyncSessionLocal() as db:
-            n = await FaceService.reencrypt_stale_profiles(db, limit=50)
-            if n:
-                await db.commit()
-                logger.info("Face profiles re-encrypted: %s", n)
+        async with exclusive_scheduler_job("reencrypt_face_profiles", ttl=600):
+            async with AsyncSessionLocal() as db:
+                n = await FaceService.reencrypt_stale_profiles(db, limit=50)
+                if n:
+                    await db.commit()
+                    logger.info("Face profiles re-encrypted: %s", n)
 
     @scheduler.scheduled_job(
         "cron",
@@ -746,15 +787,19 @@ def register_tasks(scheduler) -> None:
     async def cleanup_expired_behavior_events():
         """隐私合规：清理超期顾客行为事件（默认 90 天，system_settings 可调）。"""
         from app.services.privacy_service import PrivacyService
+        from app.services.scheduler_admin import exclusive_scheduler_job
         from app.services.system_settings_service import SystemSettingsService
 
-        async with AsyncSessionLocal() as db:
-            days = await SystemSettingsService.get_int(
-                db, "behavior_event_retention_days", 90
-            )
-            n = await PrivacyService.cleanup_expired_events(db, retention_days=days)
-        if n:
-            logger.info("Expired behavior events cleaned: %s rows (retention=%sd)", n, days)
+        async with exclusive_scheduler_job("cleanup_expired_behavior_events", ttl=600):
+            async with AsyncSessionLocal() as db:
+                days = await SystemSettingsService.get_int(
+                    db, "behavior_event_retention_days", 90
+                )
+                n = await PrivacyService.cleanup_expired_events(db, retention_days=days)
+            if n:
+                logger.info(
+                    "Expired behavior events cleaned: %s rows (retention=%sd)", n, days
+                )
 
     @scheduler.scheduled_job(
         "cron",
@@ -769,23 +814,24 @@ def register_tasks(scheduler) -> None:
     async def night_data_batch():
         """关店窗慢任务：销量热销/推荐、分类时段自动排序、餐品口味画像、顾客智能口味深度学习。"""
         from app.services.night_batch_service import run_night_batch
-        from app.services.scheduler_admin import redis_job_lock
+        from app.services.scheduler_admin import JobSkipped, exclusive_scheduler_job
 
-        async with redis_job_lock("night_data_batch", ttl=10_800) as acquired:
-            if not acquired:
-                logger.info("夜间批处理跳过：已有实例在跑")
-                return
-            async with AsyncSessionLocal() as db:
-                try:
-                    stats = await run_night_batch(db)
-                    await db.commit()
-                    if stats.get("ran"):
-                        logger.info("夜间批处理完成: %s", stats)
-                    else:
-                        logger.info("夜间批处理未执行: %s", stats.get("skipped"))
-                except Exception:
-                    await db.rollback()
-                    logger.exception("夜间批处理异常")
+        try:
+            async with exclusive_scheduler_job("night_data_batch", ttl=10_800):
+                async with AsyncSessionLocal() as db:
+                    try:
+                        stats = await run_night_batch(db)
+                        await db.commit()
+                        if stats.get("ran"):
+                            logger.info("夜间批处理完成: %s", stats)
+                        else:
+                            logger.info("夜间批处理未执行: %s", stats.get("skipped"))
+                    except Exception:
+                        await db.rollback()
+                        logger.exception("夜间批处理异常")
+        except JobSkipped:
+            logger.info("夜间批处理跳过：已有实例在跑")
+            raise
 
     @scheduler.scheduled_job(
         "cron",
@@ -800,13 +846,15 @@ def register_tasks(scheduler) -> None:
     async def sleep_member_wake():
         """每日 10:05 沉睡会员唤醒：按 30/90 天档给活跃会员发唤醒券（模板名空=关闭）。"""
         from app.services import retention_service
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with AsyncSessionLocal() as db:
-            try:
-                await retention_service.run_sleep_wake(db)
-            except Exception:
-                await db.rollback()
-                logger.exception("沉睡会员唤醒任务异常")
+        async with exclusive_scheduler_job("sleep_member_wake", ttl=3600):
+            async with AsyncSessionLocal() as db:
+                try:
+                    await retention_service.run_sleep_wake(db)
+                except Exception:
+                    await db.rollback()
+                    logger.exception("沉睡会员唤醒任务异常")
 
     @scheduler.scheduled_job(
         "cron",
@@ -821,13 +869,15 @@ def register_tasks(scheduler) -> None:
     async def balance_low_remind():
         """每日 11:05 储值余额提醒：余额偏低（>0 且低于阈值）的活跃会员 30 天提醒一次。"""
         from app.services import retention_service
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with AsyncSessionLocal() as db:
-            try:
-                await retention_service.run_balance_low_remind(db)
-            except Exception:
-                await db.rollback()
-                logger.exception("储值余额提醒任务异常")
+        async with exclusive_scheduler_job("balance_low_remind", ttl=3600):
+            async with AsyncSessionLocal() as db:
+                try:
+                    await retention_service.run_balance_low_remind(db)
+                except Exception:
+                    await db.rollback()
+                    logger.exception("储值余额提醒任务异常")
 
     @scheduler.scheduled_job(
         "cron",
@@ -842,15 +892,17 @@ def register_tasks(scheduler) -> None:
     async def points_expire():
         """每日 02:30 积分过期清零：超期未消费的 ACTIVE 会员积分整体清零。"""
         from app.services import retention_service
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with AsyncSessionLocal() as db:
-            try:
-                stats = await retention_service.run_points_expire(db)
-                if stats.get("expired_count"):
-                    logger.info("积分过期清零: %s", stats)
-            except Exception:
-                await db.rollback()
-                logger.exception("积分过期清零任务异常")
+        async with exclusive_scheduler_job("points_expire", ttl=3600):
+            async with AsyncSessionLocal() as db:
+                try:
+                    stats = await retention_service.run_points_expire(db)
+                    if stats.get("expired_count"):
+                        logger.info("积分过期清零: %s", stats)
+                except Exception:
+                    await db.rollback()
+                    logger.exception("积分过期清零任务异常")
 
     @scheduler.scheduled_job(
         "interval",
@@ -863,16 +915,20 @@ def register_tasks(scheduler) -> None:
     async def marketing_task_worker():
         """消费营销 PENDING 任务：只调 CouponService；活动生命周期推进。"""
         from app.services.marketing_service import MarketingService
+        from app.services.scheduler_admin import exclusive_scheduler_job
 
-        async with AsyncSessionLocal() as db:
-            try:
-                stats = await MarketingService.process_pending_tasks(db, limit=50)
-                await db.commit()
-                if stats.get("processed"):
-                    logger.info("营销任务消费: %s", stats)
-            except Exception:
-                await db.rollback()
-                logger.exception("营销任务消费异常")
+        # 任务锁 + 行级 claim；process 内单条 commit，崩溃不回滚已成功条目
+        async with exclusive_scheduler_job("marketing_task_worker", ttl=90):
+            async with AsyncSessionLocal() as db:
+                try:
+                    stats = await MarketingService.process_pending_tasks(db, limit=50)
+                    # 各条已自行 commit；此处兜底提交生命周期等残留
+                    await db.commit()
+                    if stats.get("processed"):
+                        logger.info("营销任务消费: %s", stats)
+                except Exception:
+                    await db.rollback()
+                    logger.exception("营销任务消费异常")
 
     @scheduler.scheduled_job(
         "cron",
@@ -885,17 +941,19 @@ def register_tasks(scheduler) -> None:
     @_leader_job
     async def social_love_day_issue():
         """爱心日：ACTIVE 公益身份发豆浆券（模板名配置后生效）。"""
+        from app.services.scheduler_admin import exclusive_scheduler_job
         from app.services.social_benefit_service import SocialBenefitService
 
-        async with AsyncSessionLocal() as db:
-            try:
-                stats = await SocialBenefitService.run_love_day_issue(db)
-                await db.commit()
-                if not stats.get("skipped"):
-                    logger.info("爱心日发券: %s", stats)
-            except Exception:
-                await db.rollback()
-                logger.exception("爱心日发券异常")
+        async with exclusive_scheduler_job("social_love_day_issue", ttl=3600):
+            async with AsyncSessionLocal() as db:
+                try:
+                    stats = await SocialBenefitService.run_love_day_issue(db)
+                    await db.commit()
+                    if not stats.get("skipped"):
+                        logger.info("爱心日发券: %s", stats)
+                except Exception:
+                    await db.rollback()
+                    logger.exception("爱心日发券异常")
 
 
 async def apply_scheduler_overrides(scheduler) -> None:

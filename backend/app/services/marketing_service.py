@@ -28,6 +28,10 @@ DEFAULT_WEEKLY_CAP = 3
 EDITABLE_STATUSES = frozenset({"DRAFT"})
 PUBLISHABLE_STATUSES = frozenset({"DRAFT", "SCHEDULED"})
 WORKER_BATCH = 50
+# claim 后进程崩溃且事务已提交时，RUNNING 超过此时长视为残留
+STALE_RUNNING_SEC = 300
+# 同一任务 claim/回收超过该次数后标 FAILED，避免无限重试
+MAX_TASK_TRY = 8
 
 
 class MarketingService:
@@ -399,14 +403,214 @@ class MarketingService:
         return {"started": started, "ended": ended}
 
     @classmethod
-    async def process_pending_tasks(cls, db: AsyncSession, *, limit: int = WORKER_BATCH) -> dict:
-        """消费 PENDING ISSUE_COUPON；只调 CouponService；超频控 SKIPPED。"""
-        await cls.advance_campaign_lifecycle(db)
+    async def _claim_pending_task(cls, db: AsyncSession, task_id: int) -> MarketingTask | None:
+        """原子 claim：仅 PENDING → RUNNING；双 worker 时仅一行成功。"""
         now = naive_local_now()
-        tasks = list(
+        result = await db.execute(
+            update(MarketingTask)
+            .where(MarketingTask.id == int(task_id), MarketingTask.status == "PENDING")
+            .values(
+                status="RUNNING",
+                try_count=MarketingTask.try_count + 1,
+                # Core UPDATE 不触发 onupdate，须显式写，供 stale 回收判断
+                updated_at=now,
+            )
+        )
+        if not result.rowcount:
+            return None
+        await db.flush()
+        return await db.get(MarketingTask, int(task_id))
+
+    @classmethod
+    async def reclaim_stale_running(
+        cls,
+        db: AsyncSession,
+        *,
+        stale_after: int = STALE_RUNNING_SEC,
+        max_try: int = MAX_TASK_TRY,
+    ) -> dict[str, int]:
+        """回收崩溃残留的 RUNNING：超时未完成则复位 PENDING；超次则 FAILED。"""
+        now = naive_local_now()
+        cutoff = now - timedelta(seconds=max(30, int(stale_after)))
+        max_try = max(1, int(max_try))
+        # updated_at 为空（历史脏数据）也视为可回收
+        stale_cond = or_(
+            MarketingTask.updated_at.is_(None),
+            MarketingTask.updated_at < cutoff,
+        )
+        reset = await db.execute(
+            update(MarketingTask)
+            .where(
+                MarketingTask.status == "RUNNING",
+                stale_cond,
+                MarketingTask.try_count < max_try,
+            )
+            .values(
+                status="PENDING",
+                last_error="reclaimed_stale_running",
+                updated_at=now,
+            )
+        )
+        failed = await db.execute(
+            update(MarketingTask)
+            .where(
+                MarketingTask.status == "RUNNING",
+                stale_cond,
+                MarketingTask.try_count >= max_try,
+            )
+            .values(
+                status="FAILED",
+                last_error="stale_running_max_try",
+                executed_at=now,
+                updated_at=now,
+            )
+        )
+        await db.flush()
+        stats = {
+            "requeued": int(reset.rowcount or 0),
+            "failed": int(failed.rowcount or 0),
+        }
+        if stats["requeued"] or stats["failed"]:
+            logger.warning("营销 RUNNING 残留回收: %s", stats)
+        return stats
+
+    @classmethod
+    async def _consume_one_pending_task(
+        cls,
+        db: AsyncSession,
+        task_id: int,
+        stats: dict[str, int],
+        *,
+        now,
+    ) -> None:
+        """处理单条 PENDING：取消/跳过/claim+发券。claim 成功后立即 commit（RUNNING 落库）。"""
+        tid = int(task_id)
+        task = await db.get(MarketingTask, tid)
+        if not task or task.status != "PENDING":
+            return
+        camp = await db.get(MarketingCampaign, int(task.campaign_id))
+        if not camp or camp.status in ("ENDED", "CANCELLED"):
+            cancelled = await db.execute(
+                update(MarketingTask)
+                .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
+                .values(status="CANCELLED", executed_at=now, updated_at=now)
+            )
+            if cancelled.rowcount:
+                stats["cancelled"] += 1
+                stats["processed"] += 1
+            return
+        if camp.status == "PAUSED":
+            return
+        if camp.status == "SCHEDULED":
+            return
+        if camp.status != "RUNNING":
+            skipped = await db.execute(
+                update(MarketingTask)
+                .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
+                .values(
+                    status="SKIPPED",
+                    last_error=f"活动状态 {camp.status}",
+                    executed_at=now,
+                    updated_at=now,
+                )
+            )
+            if skipped.rowcount:
+                stats["skipped"] += 1
+                stats["processed"] += 1
+            return
+
+        task = await cls._claim_pending_task(db, tid)
+        if task is None:
+            return
+        # claim 先落库：崩溃后由 reclaim_stale_running 回收，已成功条目不回滚
+        await db.commit()
+        task = await db.get(MarketingTask, tid)
+        camp = await db.get(MarketingCampaign, int(task.campaign_id)) if task else None
+        if task is None or camp is None:
+            return
+
+        try:
+            if (task.action_type or "").upper() != "ISSUE_COUPON":
+                task.status = "SKIPPED"
+                task.last_error = f"未实现动作 {task.action_type}"
+                task.executed_at = now
+                task.updated_at = now
+                stats["skipped"] += 1
+                stats["processed"] += 1
+                return
+
+            payload = task.payload_json or {}
+            template_id = int(payload.get("template_id") or camp.coupon_template_id or 0)
+            if not template_id:
+                raise AppException(40001, "缺少 template_id")
+
+            cap = await cls.weekly_cap(db, camp)
+            if cap > 0:
+                used = await cls.count_weekly_issues(db, int(task.customer_id))
+                if used >= cap:
+                    task.status = "SKIPPED"
+                    task.last_error = f"周频控超限 {used}/{cap}"
+                    task.executed_at = now
+                    task.updated_at = now
+                    task.result_json = {"reason": "weekly_cap", "used": used, "cap": cap}
+                    stats["skipped"] += 1
+                    stats["processed"] += 1
+                    return
+
+            issued = await CouponService.issue_by_template_id(
+                db,
+                customer_id=int(task.customer_id),
+                template_id=template_id,
+                quantity=1,
+                client_request_id=task.idempotency_key,
+                issued_at_store_id=int(task.store_id) if task.store_id else None,
+            )
+            task.status = "SUCCESS"
+            task.executed_at = now
+            task.updated_at = now
+            task.result_json = {
+                "coupon_ids": [int(c.id) for c in issued],
+                "count": len(issued),
+            }
+            task.last_error = None
+            stats["success"] += 1
+        except AppException as exc:
+            task.status = "FAILED"
+            task.last_error = str(getattr(exc, "message", exc))[:500]
+            task.executed_at = now
+            task.updated_at = now
+            stats["failed"] += 1
+            logger.warning(
+                "营销任务失败 id=%s customer=%s: %s",
+                task.id,
+                task.customer_id,
+                task.last_error,
+            )
+        except Exception as exc:
+            task.status = "FAILED"
+            task.last_error = str(exc)[:500]
+            task.executed_at = now
+            task.updated_at = now
+            stats["failed"] += 1
+            logger.exception("营销任务异常 id=%s", task.id)
+        stats["processed"] += 1
+
+    @classmethod
+    async def process_pending_tasks(cls, db: AsyncSession, *, limit: int = WORKER_BATCH) -> dict:
+        """消费 PENDING ISSUE_COUPON；只调 CouponService；超频控 SKIPPED。
+
+        单条：原子 claim → 立即 commit（RUNNING 落库）→ 发券/终态 → commit。
+        长批次中途崩溃时，已成功条目保留；卡住的 RUNNING 由 stale 回收。
+        """
+        await cls.reclaim_stale_running(db)
+        await cls.advance_campaign_lifecycle(db)
+        await db.commit()
+
+        now = naive_local_now()
+        task_ids = list(
             (
                 await db.execute(
-                    select(MarketingTask)
+                    select(MarketingTask.id)
                     .where(
                         MarketingTask.status == "PENDING",
                         or_(MarketingTask.scheduled_at.is_(None), MarketingTask.scheduled_at <= now),
@@ -419,92 +623,27 @@ class MarketingService:
             .all()
         )
         stats = {"processed": 0, "success": 0, "skipped": 0, "failed": 0, "cancelled": 0}
-        for task in tasks:
-            camp = await db.get(MarketingCampaign, int(task.campaign_id))
-            if not camp or camp.status in ("ENDED", "CANCELLED"):
-                task.status = "CANCELLED"
-                task.executed_at = now
-                stats["cancelled"] += 1
-                stats["processed"] += 1
-                continue
-            if camp.status == "PAUSED":
-                # 暂停期间不消费，留给恢复后
-                continue
-            if camp.status == "SCHEDULED":
-                continue
-            if camp.status != "RUNNING":
-                task.status = "SKIPPED"
-                task.last_error = f"活动状态 {camp.status}"
-                task.executed_at = now
-                stats["skipped"] += 1
-                stats["processed"] += 1
-                continue
-
-            task.status = "RUNNING"
-            task.try_count = int(task.try_count or 0) + 1
-            await db.flush()
-
+        for tid in task_ids:
             try:
-                if (task.action_type or "").upper() != "ISSUE_COUPON":
-                    task.status = "SKIPPED"
-                    task.last_error = f"未实现动作 {task.action_type}"
-                    task.executed_at = now
-                    stats["skipped"] += 1
-                    stats["processed"] += 1
-                    continue
-
-                payload = task.payload_json or {}
-                template_id = int(payload.get("template_id") or camp.coupon_template_id or 0)
-                if not template_id:
-                    raise AppException(40001, "缺少 template_id")
-
-                cap = await cls.weekly_cap(db, camp)
-                if cap > 0:
-                    used = await cls.count_weekly_issues(db, int(task.customer_id))
-                    if used >= cap:
-                        task.status = "SKIPPED"
-                        task.last_error = f"周频控超限 {used}/{cap}"
-                        task.executed_at = now
-                        task.result_json = {"reason": "weekly_cap", "used": used, "cap": cap}
-                        stats["skipped"] += 1
+                await cls._consume_one_pending_task(db, int(tid), stats, now=now)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception("营销任务单条事务失败 id=%s", tid)
+                # 若已 claim 为 RUNNING 且本条未写终态，留给 reclaim；尽量标失败避免空等
+                try:
+                    stuck = await db.get(MarketingTask, int(tid))
+                    if stuck and stuck.status == "RUNNING":
+                        stuck.status = "FAILED"
+                        stuck.last_error = "worker_tx_error"
+                        stuck.executed_at = naive_local_now()
+                        stuck.updated_at = stuck.executed_at
+                        stats["failed"] += 1
                         stats["processed"] += 1
-                        continue
-
-                issued = await CouponService.issue_by_template_id(
-                    db,
-                    customer_id=int(task.customer_id),
-                    template_id=template_id,
-                    quantity=1,
-                    client_request_id=task.idempotency_key,
-                    issued_at_store_id=int(task.store_id) if task.store_id else None,
-                )
-                task.status = "SUCCESS"
-                task.executed_at = now
-                task.result_json = {
-                    "coupon_ids": [int(c.id) for c in issued],
-                    "count": len(issued),
-                }
-                task.last_error = None
-                stats["success"] += 1
-            except AppException as exc:
-                task.status = "FAILED"
-                task.last_error = str(getattr(exc, "message", exc))[:500]
-                task.executed_at = now
-                stats["failed"] += 1
-                logger.warning(
-                    "营销任务失败 id=%s customer=%s: %s",
-                    task.id,
-                    task.customer_id,
-                    task.last_error,
-                )
-            except Exception as exc:
-                task.status = "FAILED"
-                task.last_error = str(exc)[:500]
-                task.executed_at = now
-                stats["failed"] += 1
-                logger.exception("营销任务异常 id=%s", task.id)
-            stats["processed"] += 1
-        await db.flush()
+                        await db.commit()
+                except Exception:
+                    await db.rollback()
+                    logger.exception("营销任务失败兜底写入异常 id=%s", tid)
         return stats
 
     @classmethod

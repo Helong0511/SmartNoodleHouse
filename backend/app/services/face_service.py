@@ -300,12 +300,14 @@ class FaceService:
                 plain = enc.decrypt(raw)
                 profile.feature_data = enc.encrypt(plain)
                 profile.feature_version = target
+                # 单条 commit：轮换中途崩溃时已迁移向量不回滚
+                await db.commit()
                 done += 1
             except Exception:
+                await db.rollback()
                 logger.exception("人脸重加密失败 profile_id=%s", getattr(profile, "id", None))
         if done:
             face_embedding_cache.invalidate()
-            await db.flush()
         return done
 
     @staticmethod

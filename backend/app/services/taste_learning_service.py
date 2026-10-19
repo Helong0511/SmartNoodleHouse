@@ -385,9 +385,12 @@ class TasteLearningService:
         for cid in customer_ids:
             try:
                 n = await TasteLearningService.learn_from_events(db, cid)
+                # 单客 commit：长名单崩溃时已学习画像不回滚
+                await db.commit()
                 if n:
                     learned += 1
                     events += n
             except Exception:
+                await db.rollback()
                 logger.exception("兜底口味学习失败 customer_id=%s", cid)
         return {"customers": learned, "events": events}

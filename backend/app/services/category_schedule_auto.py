@@ -308,7 +308,10 @@ async def refresh_all_category_schedule_auto_sort(
                     only_auto=True,
                 )
             )
+            # 按店 commit：单店失败不拖垮已完成门店
+            await db.commit()
         except Exception:
+            await db.rollback()
             logger.exception("分类时段自动排序门店失败 store_id=%s", sid)
             stores_out.append({"store_id": int(sid), "error": True})
     return {

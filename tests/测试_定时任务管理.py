@@ -88,3 +88,25 @@ def test_normalize_scheduler_wall_time_timezone():
     assert wall == "2026-10-19 14:00:00"
     assert sa.normalize_scheduler_wall_time("2026-10-19 14:00:00") == "2026-10-19 14:00:00"
     assert sa.format_scheduler_wall_time(None) is None
+
+
+@pytest.mark.asyncio
+async def test_record_job_run_serialized_per_job(monkeypatch):
+    """同 job 并发 record 时计数不丢（进程内锁）。"""
+    import asyncio
+
+    sa._job_stats_mem.clear()
+    sa._job_stats_locks.clear()
+
+    async def _no_redis():
+        return None
+
+    monkeypatch.setattr("app.core.redis_client.try_get_redis", _no_redis)
+
+    async def _one():
+        await sa.record_job_run("job_x", status="ok", duration_ms=1)
+
+    await asyncio.gather(*[_one() for _ in range(20)])
+    st = await sa.get_job_stat("job_x")
+    assert st is not None
+    assert int(st["ok_count"]) == 20

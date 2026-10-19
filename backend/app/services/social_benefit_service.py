@@ -1,6 +1,7 @@
 """社会贡献营销：身份认定、规则命中、限次、台账。"""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -18,6 +19,8 @@ from app.models import (
     SocialIdentityType,
 )
 from app.services.system_settings_service import SystemSettingsService
+
+logger = logging.getLogger(__name__)
 
 
 class SocialBenefitService:
@@ -970,27 +973,33 @@ class SocialBenefitService:
         skipped = 0
         errors = 0
         day_key = today.isoformat()
+        tmpl_id = int(tmpl.id)
         for cid in identities:
-            key = f"love_day:{day_key}:{int(cid)}:{int(tmpl.id)}"
+            key = f"love_day:{day_key}:{int(cid)}:{tmpl_id}"
             try:
                 rows = await CouponService.issue_by_template_id(
                     db,
                     int(cid),
-                    int(tmpl.id),
+                    tmpl_id,
                     quantity=1,
                     client_request_id=key,
                 )
+                # 单客 commit：长名单中途崩溃时已发券不整批回滚（幂等键 love_day:…）
+                await db.commit()
                 if rows:
                     issued += 1
                 else:
                     skipped += 1
             except AppException:
+                await db.rollback()
                 skipped += 1
             except Exception:
+                await db.rollback()
                 errors += 1
+                logger.exception("爱心日发券失败 customer_id=%s", cid)
         return {
             "date": day_key,
-            "template_id": int(tmpl.id),
+            "template_id": tmpl_id,
             "targets": len(identities),
             "issued": issued,
             "skipped": skipped,

@@ -295,5 +295,6 @@ class LifecycleService:
                 row.pay_amount_90d = snap["pay_amount_90d"]
                 row.computed_at = snap["computed_at"]
                 updated += 1
-            await db.flush()
+            # 按批 commit：夜批中途崩溃时已算完的顾客快照保留
+            await db.commit()
         return {"updated": updated, "at": now.isoformat(sep=" ", timespec="seconds")}

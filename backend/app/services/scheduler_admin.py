@@ -80,10 +80,58 @@ else
 end
 """
 
+# Lua：原子更新任务执行统计，避免 HGET→改计数→HSET 的丢更新
+_LUA_RECORD_JOB_RUN = """
+local prev = redis.call('hget', KEYS[1], ARGV[1])
+local ok_c, err_c, skip_c = 0, 0, 0
+if prev then
+  local ok, obj = pcall(cjson.decode, prev)
+  if ok and type(obj) == 'table' then
+    ok_c = tonumber(obj['ok_count'] or 0) or 0
+    err_c = tonumber(obj['error_count'] or 0) or 0
+    skip_c = tonumber(obj['skip_count'] or 0) or 0
+  end
+end
+local st = ARGV[2]
+if st == 'ok' then
+  ok_c = ok_c + 1
+elseif st == 'error' then
+  err_c = err_c + 1
+else
+  skip_c = skip_c + 1
+end
+local payload = cjson.encode({
+  last_run_at = ARGV[3],
+  last_status = st,
+  last_duration_ms = tonumber(ARGV[4]) or 0,
+  last_error = (ARGV[5] ~= '' and ARGV[5] or nil),
+  ok_count = ok_c,
+  error_count = err_c,
+  skip_count = skip_c
+})
+redis.call('hset', KEYS[1], ARGV[1], payload)
+return payload
+"""
+
 # 内存缓存：供 _leader_job 快速判断 enabled（与 DB 覆盖同步）
 _enabled_cache: dict[str, bool] = {}
 _overrides_watch_task: asyncio.Task | None = None
 _local_overrides_ver: int = 0
+# 同进程内串行化同 job 的统计写入（跨 await 防交错）
+_job_stats_locks: dict[str, asyncio.Lock] = {}
+
+
+class JobSkipped(Exception):
+    """任务主动跳过（如跨进程锁未拿到）。_leader_job 记为 skipped，勿记 ok。"""
+
+    def __init__(self, reason: str = "skipped") -> None:
+        self.reason = (reason or "skipped").strip()[:240] or "skipped"
+        super().__init__(self.reason)
+
+
+def _job_stats_lock(job_id: str) -> asyncio.Lock:
+    # setdefault 避免 get→create→assign 竞态下同 job 多把锁
+    return _job_stats_locks.setdefault(job_id, asyncio.Lock())
 
 
 def is_job_enabled(job_id: str) -> bool:
@@ -107,7 +155,10 @@ async def record_job_run(
     duration_ms: int,
     error: str | None = None,
 ) -> None:
-    """记录一次任务执行结果（供后台「执行情况」展示）。status: ok|error|skipped。"""
+    """记录一次任务执行结果（供后台「执行情况」展示）。status: ok|error|skipped。
+
+    Redis 用 Lua 原子递增计数；同进程再用 asyncio.Lock 串行化，避免跨 await 交错。
+    """
     from app.core.response import now_local
 
     jid = str(job_id or "").strip()
@@ -118,34 +169,65 @@ async def record_job_run(
         st = "ok"
     dur = max(0, int(duration_ms or 0))
     err = (error or "").strip()[:240] or None
-    prev = await get_job_stat(jid) or {}
-    ok_count = int(prev.get("ok_count") or 0)
-    error_count = int(prev.get("error_count") or 0)
-    skip_count = int(prev.get("skip_count") or 0)
-    if st == "ok":
-        ok_count += 1
-    elif st == "error":
-        error_count += 1
-    else:
-        skip_count += 1
-    payload = {
-        "last_run_at": format_scheduler_wall_time(now_local()),
-        "last_status": st,
-        "last_duration_ms": dur,
-        "last_error": err,
-        "ok_count": ok_count,
-        "error_count": error_count,
-        "skip_count": skip_count,
-    }
-    _job_stats_mem[jid] = payload
-    try:
-        from app.core.redis_client import try_get_redis
+    wall = format_scheduler_wall_time(now_local()) or ""
 
-        r = await try_get_redis()
-        if r is not None:
-            await r.hset(JOB_STATS_KEY, jid, json.dumps(payload, ensure_ascii=False))
-    except Exception as e:
-        logger.debug("写入任务执行统计失败 job_id=%s: %s", jid, e)
+    async with _job_stats_lock(jid):
+        # 优先 Redis Lua（跨进程原子）
+        try:
+            from app.core.redis_client import try_get_redis
+
+            r = await try_get_redis()
+            if r is not None:
+                raw = await r.eval(
+                    _LUA_RECORD_JOB_RUN,
+                    1,
+                    JOB_STATS_KEY,
+                    jid,
+                    st,
+                    wall,
+                    str(dur),
+                    err or "",
+                )
+                if raw:
+                    data = json.loads(raw if isinstance(raw, str) else raw.decode())
+                    if isinstance(data, dict):
+                        # cjson 可能把 null 编成缺失；统一字段
+                        data["last_error"] = data.get("last_error") or None
+                        if not data.get("last_error"):
+                            data["last_error"] = None
+                        _job_stats_mem[jid] = data
+                        return
+        except Exception as e:
+            logger.debug("原子写入任务统计失败，降级内存 job_id=%s: %s", jid, e)
+
+        prev = _job_stats_mem.get(jid) or {}
+        ok_count = int(prev.get("ok_count") or 0)
+        error_count = int(prev.get("error_count") or 0)
+        skip_count = int(prev.get("skip_count") or 0)
+        if st == "ok":
+            ok_count += 1
+        elif st == "error":
+            error_count += 1
+        else:
+            skip_count += 1
+        payload = {
+            "last_run_at": wall,
+            "last_status": st,
+            "last_duration_ms": dur,
+            "last_error": err,
+            "ok_count": ok_count,
+            "error_count": error_count,
+            "skip_count": skip_count,
+        }
+        _job_stats_mem[jid] = payload
+        try:
+            from app.core.redis_client import try_get_redis
+
+            r = await try_get_redis()
+            if r is not None:
+                await r.hset(JOB_STATS_KEY, jid, json.dumps(payload, ensure_ascii=False))
+        except Exception as e:
+            logger.debug("写入任务执行统计失败 job_id=%s: %s", jid, e)
 
 
 async def get_job_stat(job_id: str) -> dict[str, Any] | None:
@@ -195,7 +277,10 @@ async def load_all_job_stats() -> dict[str, dict[str, Any]]:
 
 
 async def save_next_runs(mapping: dict[str, str | None]) -> None:
-    """Leader 全量刷新各任务下次执行墙钟到 Redis（覆盖写）。"""
+    """Leader 全量刷新各任务下次执行墙钟到 Redis。
+
+    不用 DELETE 再 HSET（中间窗口读空）；改为 HSET 全量后删除多余 field。
+    """
     clean: dict[str, str] = {}
     for jid, wall in (mapping or {}).items():
         w = normalize_scheduler_wall_time(wall) if wall else None
@@ -209,10 +294,15 @@ async def save_next_runs(mapping: dict[str, str | None]) -> None:
         r = await try_get_redis()
         if r is None:
             return
+        existing = await r.hkeys(NEXT_RUNS_KEY)
         pipe = r.pipeline()
-        await pipe.delete(NEXT_RUNS_KEY)
         if clean:
-            await pipe.hset(NEXT_RUNS_KEY, mapping=clean)
+            pipe.hset(NEXT_RUNS_KEY, mapping=clean)
+        stale = [k for k in (existing or []) if str(k) not in clean]
+        if stale:
+            pipe.hdel(NEXT_RUNS_KEY, *stale)
+        if not clean and existing:
+            pipe.delete(NEXT_RUNS_KEY)
         await pipe.execute()
     except Exception as e:
         logger.debug("写入下次执行缓存失败: %s", e)
@@ -559,3 +649,12 @@ async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
             await r.eval(_LUA_COMPARE_DELETE, 1, key, token)
         except Exception:
             logger.warning("任务锁释放失败 job_id=%s", job_id)
+
+
+@asynccontextmanager
+async def exclusive_scheduler_job(job_id: str, *, ttl: int = 180) -> AsyncIterator[None]:
+    """拿到跨进程任务锁后执行；拿不到则抛 JobSkipped（供 _leader_job 记 skipped）。"""
+    async with redis_job_lock(job_id, ttl=ttl) as ok:
+        if not ok:
+            raise JobSkipped("job_lock_busy")
+        yield

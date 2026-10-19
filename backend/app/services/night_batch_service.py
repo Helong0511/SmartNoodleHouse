@@ -169,7 +169,10 @@ async def refresh_all_sales_flags(db: AsyncSession, cfg: dict[str, Any] | None =
                     recommend_top_n=cfg["recommend_top_n"],
                 )
             )
+            # 按店 commit：一店失败/崩溃不拖垮已完成门店
+            await db.commit()
         except Exception:
+            await db.rollback()
             logger.exception("夜间销量标记刷新失败 store_id=%s", sid)
             results.append({"store_id": int(sid), "error": True})
     return {
@@ -187,9 +190,11 @@ async def rebuild_all_product_taste_profiles(db: AsyncSession) -> dict[str, Any]
         try:
             n = await recompute_store(db, int(sid))
             total += n
+            await db.commit()
             await invalidate_store_caches(int(sid))
             per_store.append({"store_id": int(sid), "rebuilt": n})
         except Exception:
+            await db.rollback()
             logger.exception("夜间餐品口味画像重算失败 store_id=%s", sid)
             per_store.append({"store_id": int(sid), "error": True})
     return {"products": total, "stores": per_store}
@@ -240,23 +245,37 @@ async def run_night_batch(
     if cfg.get("category_sort_enabled", True):
         from app.services.category_schedule_auto import refresh_all_category_schedule_auto_sort
 
-        result["category_sort"] = await refresh_all_category_schedule_auto_sort(
-            db,
-            {
-                "enabled": True,
-                "lookback_days": cfg["category_sort_lookback_days"],
-                "soft_qty": cfg["category_sort_soft_qty"],
-            },
-        )
+        try:
+            result["category_sort"] = await refresh_all_category_schedule_auto_sort(
+                db,
+                {
+                    "enabled": True,
+                    "lookback_days": cfg["category_sort_lookback_days"],
+                    "soft_qty": cfg["category_sort_soft_qty"],
+                },
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("夜间分类时段排序失败")
+            result["category_sort"] = {"error": True}
     else:
         result["category_sort"] = {"skipped": "disabled"}
     result["product_taste"] = await rebuild_all_product_taste_profiles(db)
-    result["customer_taste"] = await deep_learn_customer_tastes(db, cfg)
+    try:
+        result["customer_taste"] = await deep_learn_customer_tastes(db, cfg)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("夜间顾客口味深度学习失败")
+        result["customer_taste"] = {"error": True}
     try:
         from app.services.lifecycle_service import LifecycleService
 
         result["lifecycle"] = await LifecycleService.refresh_all(db)
+        await db.commit()
     except Exception:
+        await db.rollback()
         logger.exception("夜间 lifecycle/RFM 刷新失败")
         result["lifecycle"] = {"error": True}
     return result
