@@ -275,7 +275,12 @@
           </el-table-column>
           <el-table-column label="累计" width="100">
             <template #default="{ row }">
-              <span class="muted">成 {{ row.ok_count || 0 }} / 败 {{ row.error_count || 0 }}</span>
+              <span class="muted">
+                成 {{ row.ok_count || 0 }} / 败
+                <span :class="{ 'scheduler-fail-n': Number(row.error_count || 0) > 0 }">
+                  {{ row.error_count || 0 }}
+                </span>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="调度" width="100">
@@ -739,5 +744,6 @@ onMounted(load)
 .env-group h4 { margin: 0 0 8px; }
 .muted { color: #999; }
 .scheduler-dur { margin-top: 2px; font-size: 12px; line-height: 1.2; }
+.scheduler-fail-n { color: #f56c6c; font-weight: 600; }
 code { background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 </style>
