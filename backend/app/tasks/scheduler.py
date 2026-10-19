@@ -454,12 +454,13 @@ def register_tasks(scheduler) -> None:
     )
     @_leader_job
     async def close_expired_orders():
-        async with AsyncSessionLocal() as db:
-            from app.services.order_lifecycle import apply_order_status
-            from app.services.payment_service import PaymentService
-            from app.services.system_settings_service import SystemSettingsService
-            from app.services.websocket_manager import ws_manager
+        """支付超时关单：逐单短事务，避免一次锁住多单再串行调微信/支付宝。"""
+        from app.services.order_lifecycle import apply_order_status
+        from app.services.payment_service import PaymentService
+        from app.services.system_settings_service import SystemSettingsService
+        from app.services.websocket_manager import ws_manager
 
+        async with AsyncSessionLocal() as db:
             global_timeout = await SystemSettingsService.effective_int(
                 db, "order_payment_timeout_minutes", settings.order_payment_timeout_minutes
             )
@@ -477,87 +478,124 @@ def register_tasks(scheduler) -> None:
                 return
             min_timeout = min(positive)
             timeout = naive_local_now() - timedelta(minutes=min_timeout)
-            # FOR UPDATE 与支付回调行锁互斥，避免关单/入账竞态
-            result = await db.execute(
-                select(Order)
-                .where(
-                    Order.status == "PENDING_PAYMENT",
-                    Order.payment_status == "UNPAID",
-                    Order.created_at <= timeout,
+            # 只捞 id，不加长锁（高并发多顾客互不拖累）
+            order_ids = list(
+                (
+                    await db.execute(
+                        select(Order.id)
+                        .where(
+                            Order.status == "PENDING_PAYMENT",
+                            Order.payment_status == "UNPAID",
+                            Order.created_at <= timeout,
+                        )
+                        .order_by(Order.id.asc())
+                        .limit(80)
+                    )
                 )
-                .with_for_update(skip_locked=True)
+                .scalars()
+                .all()
             )
-            expired = list(result.scalars().all())
-            closed = 0
-            rescued = 0
-            now = naive_local_now()
-            for order in expired:
-                # 二次确认：锁内状态可能已被回调改写
-                if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
-                    continue
-                minutes = store_timeouts.get(int(order.store_id), global_timeout)
-                if minutes <= 0:
-                    continue
-                if order.created_at and order.created_at > now - timedelta(minutes=minutes):
-                    continue
-                # 关单前先向渠道查单，避免回调丢失误关已付款订单
-                try:
-                    if await PaymentService.sync_before_close_order(db, order):
-                        rescued += 1
-                        try:
-                            await ws_manager.notify_order_event(
-                                "ORDER_PAID",
-                                {
-                                    "order_id": order.id,
-                                    "order_no": order.order_no,
-                                    "store_id": order.store_id,
-                                    "source": "CLOSE_PRE_SYNC",
-                                },
+
+        closed = 0
+        rescued = 0
+        now = naive_local_now()
+        for oid in order_ids:
+            try:
+                async with AsyncSessionLocal() as db:
+                    order = (
+                        await db.execute(
+                            select(Order)
+                            .where(
+                                Order.id == int(oid),
+                                Order.status == "PENDING_PAYMENT",
+                                Order.payment_status == "UNPAID",
                             )
-                        except Exception:
-                            logger.exception("关单前入账 WS 通知失败 order_id=%s", order.id)
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalar_one_or_none()
+                    if not order:
                         continue
-                except Exception:
-                    logger.exception("关单前查单异常 order_id=%s", order.id)
-                if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
-                    continue
-                # P1 修复：关单前同步撤销渠道交易，避免渠道侧交易悬挂；
-                # 若发现迟到成功支付（已自动入账），保留订单不关单。
-                try:
-                    if await PaymentService.close_channel_payments(db, order):
-                        rescued += 1
-                        try:
-                            await ws_manager.notify_order_event(
-                                "ORDER_PAID",
-                                {
-                                    "order_id": order.id,
-                                    "order_no": order.order_no,
-                                    "store_id": order.store_id,
-                                    "source": "CLOSE_CHANNEL_LATE_PAID",
-                                },
-                            )
-                        except Exception:
-                            logger.exception("关单迟到入账 WS 通知失败 order_id=%s", order.id)
+                    minutes = store_timeouts.get(int(order.store_id), global_timeout)
+                    if minutes <= 0:
+                        await db.commit()
                         continue
-                except Exception:
-                    logger.exception("关单撤销渠道交易异常 order_id=%s", order.id)
-                if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
-                    continue
-                await apply_order_status(
-                    db,
-                    order,
-                    "CANCELLED",
-                    source="TIMEOUT",
-                    payment_status="CANCELLED",
-                    assert_kind="SYSTEM",
-                    remark="支付超时自动关单",
-                )
-                closed += 1
-            await db.commit()
-            if closed:
-                logger.info("Expired orders closed: %s", closed)
-            if rescued:
-                logger.info("Expired orders rescued via payment query: %s", rescued)
+                    if order.created_at and order.created_at > now - timedelta(minutes=minutes):
+                        await db.commit()
+                        continue
+
+                    # 关单前查单 / 撤销渠道：仍持本单行锁（单行，非整批）
+                    try:
+                        if await PaymentService.sync_before_close_order(db, order):
+                            rescued += 1
+                            await db.commit()
+                            try:
+                                await ws_manager.notify_order_event(
+                                    "ORDER_PAID",
+                                    {
+                                        "order_id": order.id,
+                                        "order_no": order.order_no,
+                                        "store_id": order.store_id,
+                                        "source": "CLOSE_PRE_SYNC",
+                                    },
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "关单前入账 WS 通知失败 order_id=%s", order.id
+                                )
+                            continue
+                    except Exception:
+                        logger.exception("关单前查单异常 order_id=%s", order.id)
+
+                    await db.refresh(order)
+                    if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
+                        await db.commit()
+                        continue
+
+                    try:
+                        if await PaymentService.close_channel_payments(db, order):
+                            rescued += 1
+                            await db.commit()
+                            try:
+                                await ws_manager.notify_order_event(
+                                    "ORDER_PAID",
+                                    {
+                                        "order_id": order.id,
+                                        "order_no": order.order_no,
+                                        "store_id": order.store_id,
+                                        "source": "CLOSE_CHANNEL_LATE_PAID",
+                                    },
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "关单迟到入账 WS 通知失败 order_id=%s", order.id
+                                )
+                            continue
+                    except Exception:
+                        logger.exception("关单撤销渠道交易异常 order_id=%s", order.id)
+
+                    await db.refresh(order)
+                    if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
+                        await db.commit()
+                        continue
+
+                    await apply_order_status(
+                        db,
+                        order,
+                        "CANCELLED",
+                        source="TIMEOUT",
+                        payment_status="CANCELLED",
+                        assert_kind="SYSTEM",
+                        remark="支付超时自动关单",
+                    )
+                    await db.commit()
+                    closed += 1
+            except Exception:
+                logger.exception("超时关单处理异常 order_id=%s", oid)
+
+        if closed:
+            logger.info("Expired orders closed: %s", closed)
+        if rescued:
+            logger.info("Expired orders rescued via payment query: %s", rescued)
 
     @scheduler.scheduled_job(
         "interval", minutes=1, id="auto_complete_kitchen_orders", name="厨房超时自动完成"
