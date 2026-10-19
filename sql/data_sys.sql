@@ -865,7 +865,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'welcome_greeting_prefix',
-    '欢迎回来，{称呼}。',
+    '尊贵的 {称呼} {会员等级}，欢迎您再次光临{店名}',
     '人脸迎宾语模板；占位符 {称呼}{会员等级}{店名}{口味}；可按门店覆盖'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -875,7 +875,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'welcome_preference_template',
-    '今天还是老样子：{口味}？',
+    '',
     '有口味爱好时追加的迎宾附句；可按门店覆盖'
 FROM DUAL
 WHERE NOT EXISTS (

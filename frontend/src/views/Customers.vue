@@ -718,7 +718,7 @@ const canManageSocial = computed(
 const socialIdentities = ref<any[]>([])
 const socialLoading = ref(false)
 const lifecycleInfo = ref<any>(null)
-const lifecycleLoading = ref(false)
+const lifecycleLoading = ref(false) // 生命周期卡片加载态
 const socialBusyId = ref<number | null>(null)
 
 const SOCIAL_STATUS_LABELS: Record<string, string> = {
