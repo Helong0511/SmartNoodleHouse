@@ -104,11 +104,14 @@ async def test_sync_payment_status_wechat_success():
         total_amount=Decimal("10.00"),
     )
 
-    exec_result_order = MagicMock()
-    exec_result_order.scalar_one_or_none.return_value = order
-
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=exec_result_order)
+    # 1) peek Payment  2) settle 内再锁 Order
+    db.execute = AsyncMock(
+        side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        ]
+    )
     db.flush = AsyncMock()
 
     with patch.object(
@@ -155,14 +158,11 @@ async def test_sync_payment_status_already_paid():
         amount=Decimal("1.00"),
         order_id=1,
     )
-    with patch.object(
-        PaymentService,
-        "_lock_order_then_payment",
-        new_callable=AsyncMock,
-        return_value=payment,
-    ):
-        db = AsyncMock()
-        row, meta = await PaymentService.sync_payment_status(db, payment)
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=payment))
+    )
+    row, meta = await PaymentService.sync_payment_status(db, payment)
     assert meta["already_paid"] is True
     assert row.status == "PAID"
 
@@ -190,10 +190,13 @@ async def test_sync_closed_payment_resurrects_on_channel_success():
         payment_status="CANCELLED",
         total_amount=Decimal("10.00"),
     )
-    exec_result_order = MagicMock()
-    exec_result_order.scalar_one_or_none.return_value = order
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=exec_result_order)
+    db.execute = AsyncMock(
+        side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        ]
+    )
     db.flush = AsyncMock()
 
     with patch.object(

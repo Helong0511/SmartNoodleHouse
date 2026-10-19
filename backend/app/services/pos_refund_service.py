@@ -296,6 +296,14 @@ class PosRefundService:
         return row
 
     @classmethod
+    async def _lock_request(cls, db: AsyncSession, request_id: int) -> PosRefundRequest | None:
+        return (
+            await db.execute(
+                select(PosRefundRequest).where(PosRefundRequest.id == int(request_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+
+    @classmethod
     async def approve_and_execute(
         cls,
         db: AsyncSession,
@@ -304,18 +312,19 @@ class PosRefundService:
         request_id: int,
         remark: str | None = None,
     ) -> PosRefundRequest:
-        """审批通过并执行退款。组合支付按「现金优先 → 扫码」分摊到多笔支付单。"""
+        """审批通过并执行退款。组合支付按「现金优先 → 扫码」分摊到多笔支付单。
+
+        先短锁认领 PROCESSING 并 commit，再调 PaymentService.refund（其内部会再 commit 后调渠道）。
+        避免申请单仍为 PENDING 时被并发撤销，也避免在 PosRefundRequest 行锁内等待微信/支付宝。
+        """
         if not await _can_approve(db, user):
             raise AppException(40301, "仅店长或管理员可审批退款")
-        row = (
-            await db.execute(
-                select(PosRefundRequest).where(PosRefundRequest.id == int(request_id)).with_for_update()
-            )
-        ).scalar_one_or_none()
+        row = await cls._lock_request(db, request_id)
         if not row:
             raise AppException(40404, "退款申请不存在")
         assert_store_access(user, row.store_id)
-        if row.status not in ("PENDING", "FAILED"):
+        # PROCESSING：渠道处理中可重试收尾；PENDING/FAILED：首次或失败重试
+        if row.status not in ("PENDING", "FAILED", "PROCESSING"):
             raise AppException(40014, "当前状态不可执行退款")
 
         row.reviewed_by = user.id
@@ -349,29 +358,47 @@ class PosRefundService:
             await db.refresh(row)
             raise
 
+        reason = row.reason
+        amount_total = money(row.amount)
+        alloc_snapshot = [(int(p.id), money(amt), (p.provider or "").upper()) for p, amt in alloc]
+        # 认领后立刻释放申请单行锁（PaymentService.refund 也会 commit）
+        row.status = "PROCESSING"
+        row.fail_reason = None
+        await db.flush()
+        await db.commit()
+
         last_refund = None
         try:
-            for payment, amt in alloc:
+            for payment_id, amt, _prov in alloc_snapshot:
+                payment = await db.get(Payment, payment_id)
+                if not payment:
+                    raise AppException(40401, "支付记录不存在")
                 last_refund = await PaymentService.refund(
                     db,
                     payment,
                     amt,
-                    row.reason,
+                    reason,
                     operator_id=user.id,
                 )
+                row = await cls._lock_request(db, request_id)
+                if not row:
+                    raise AppException(40404, "退款申请不存在")
                 if last_refund.status == "SUCCESS":
                     executed = money(executed + amt)
                     row.executed_amount = executed
-                    row.payment_id = payment.id
+                    row.payment_id = payment_id
                     row.refund_id = last_refund.id
-                    await db.flush()
-                elif last_refund.status in ("PENDING", "PROCESSING", "UNKNOWN"):
-                    # 渠道仅受理/处理中：申请单保持 PROCESSING，不得记入 executed 或标 SUCCESS
                     row.status = "PROCESSING"
-                    row.payment_id = payment.id
+                    await db.flush()
+                    await db.commit()
+                elif last_refund.status in ("PENDING", "PROCESSING", "UNKNOWN"):
+                    # 渠道仅受理/处理中：保持 PROCESSING，不得记入 executed 或标 SUCCESS
+                    row.status = "PROCESSING"
+                    row.payment_id = payment_id
                     row.refund_id = last_refund.id
                     row.fail_reason = None
                     await db.flush()
+                    await db.commit()
                     await db.refresh(row)
                     return row
                 else:
@@ -381,26 +408,43 @@ class PosRefundService:
                         f"{last_refund.fail_reason or last_refund.status}"
                     )[:255]
                     await db.flush()
+                    await db.commit()
                     raise AppException(50030, row.fail_reason)
-        except AppException:
-            if executed > 0 and money(row.amount) - executed > 0:
+        except AppException as e:
+            row = await cls._lock_request(db, request_id)
+            if row and row.status not in ("SUCCESS", "REJECTED", "CANCELLED"):
                 row.status = "FAILED"
-                if not row.fail_reason:
-                    row.fail_reason = f"部分退款成功 ¥{executed}，剩余请重试"[:255]
+                if executed > 0 and amount_total - executed > 0:
+                    if not row.fail_reason:
+                        row.fail_reason = f"部分退款成功 ¥{executed}，剩余请重试"[:255]
+                elif not row.fail_reason:
+                    row.fail_reason = (getattr(e, "message", None) or str(e))[:255]
                 await db.flush()
+                await db.commit()
             raise
         except Exception as e:
-            row.status = "FAILED"
-            row.fail_reason = (
-                f"退款失败（已退 ¥{executed}）: {e}" if executed > 0 else f"退款执行失败: {e}"
-            )[:255]
-            await db.flush()
-            raise AppException(50030, row.fail_reason) from e
+            row = await cls._lock_request(db, request_id)
+            if row and row.status not in ("SUCCESS", "REJECTED", "CANCELLED"):
+                row.status = "FAILED"
+                row.fail_reason = (
+                    f"退款失败（已退 ¥{executed}）: {e}" if executed > 0 else f"退款执行失败: {e}"
+                )[:255]
+                await db.flush()
+                await db.commit()
+                raise AppException(50030, row.fail_reason) from e
+            raise AppException(50030, f"退款执行失败: {e}") from e
 
-        if executed + money(0) >= money(row.amount):
+        row = await cls._lock_request(db, request_id)
+        if not row:
+            raise AppException(40404, "退款申请不存在")
+        if executed + money(0) >= amount_total:
             row.status = "SUCCESS"
             row.fail_reason = None
-            summary = cls._alloc_summary(alloc)
+            from types import SimpleNamespace
+
+            summary = cls._alloc_summary(
+                [(SimpleNamespace(provider=prov), amt) for _pid, amt, prov in alloc_snapshot]
+            )
             if summary and not (row.review_remark or "").strip():
                 row.review_remark = f"分摊：{summary}"[:500]
         else:

@@ -919,29 +919,39 @@ class DeliveryService:
             raise AppException(40054, "订单已结束，无法取消")
 
         store_id = int(order.store_id)
-        credentials = await get_credentials_for_store(db, d_order.platform, store_id)
+        platform = d_order.platform
+        platform_order_id = d_order.platform_order_id
+        order_id = int(order.id)
+        credentials = await get_credentials_for_store(db, platform, store_id)
         if not credentials:
-            raise AppException(40061, f"门店 {store_id} 未配置 {d_order.platform} 外卖凭证")
-        provider = get_delivery_provider(d_order.platform, credentials)
-        ok = await provider.cancel_order(d_order.platform_order_id, reason)
-        if ok and order:
+            raise AppException(40061, f"门店 {store_id} 未配置 {platform} 外卖凭证")
+        # 平台取消 HTTP 与本地落库分离，避免长事务拖住连接
+        await db.commit()
+        provider = get_delivery_provider(platform, credentials)
+        ok = await provider.cancel_order(platform_order_id, reason)
+        if ok:
             from app.services.order_lifecycle import apply_order_status
 
-            await apply_order_status(
-                db,
-                order,
-                "CANCELLED",
-                source="DELIVERY",
-                assert_kind="SYSTEM",
-                remark=reason or "商家取消",
-            )
-            d_order.delivery_status = "CANCELLED"
-            d_order.last_sync_at = now_local()
+            order = await db.get(Order, order_id)
+            d_order = await db.get(DeliveryOrder, delivery_order_id)
+            if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark=reason or "商家取消",
+                )
+            if d_order:
+                d_order.delivery_status = "CANCELLED"
+                d_order.last_sync_at = now_local()
             await db.flush()
-        return {"ok": ok, "order_id": order.id if order else None}
+        return {"ok": ok, "order_id": order_id}
 
     @classmethod
     async def sync_kitchen_status(cls, db: AsyncSession, order: Order) -> None:
+        """厨房状态同步到外卖平台。调用方应已 commit 释放 Order 行锁。"""
         if order.channel not in ("MEITUAN", "ELEME"):
             return
         result = await db.execute(select(DeliveryOrder).where(DeliveryOrder.order_id == order.id))
@@ -951,11 +961,22 @@ class DeliveryService:
         sync_status = STATUS_SYNC_MAP.get(order.status)
         if not sync_status:
             return
-        _, credentials = await resolve_store_and_credentials(db, d_order.platform, {}, {"store_id": order.store_id})
+        platform = d_order.platform
+        platform_order_id = d_order.platform_order_id
+        store_id = order.store_id
+        delivery_order_id = int(d_order.id)
+        _, credentials = await resolve_store_and_credentials(
+            db, platform, {}, {"store_id": store_id}
+        )
         if not credentials or not credentials.platform_shop_id:
-            credentials = await get_credentials_for_store(db, d_order.platform, order.store_id)
-        provider = get_delivery_provider(d_order.platform, credentials)
-        await provider.sync_status(d_order.platform_order_id, sync_status)
+            credentials = await get_credentials_for_store(db, platform, store_id)
+        # 平台 HTTP：不持有订单/外卖扩展单行锁
+        provider = get_delivery_provider(platform, credentials)
+        await provider.sync_status(platform_order_id, sync_status)
+
+        d_order = await db.get(DeliveryOrder, delivery_order_id)
+        if not d_order:
+            return
         d_order.delivery_status = sync_status
         d_order.last_sync_at = now_local()
         if sync_status == "DONE":

@@ -207,3 +207,68 @@ async def test_reject_request_uses_row_lock_and_blocks_when_approved():
     assert exc.value.code == 40014
     stmt = db.execute.call_args.args[0]
     assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_approve_claims_processing_before_channel_refund():
+    """审批：先 PROCESSING+commit，再调渠道退款，避免 PENDING 被并发撤销。"""
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.core.response import money
+
+    payment = SimpleNamespace(
+        id=3,
+        provider="WECHAT",
+        status="PAID",
+        amount=money("10.00"),
+        order_id=9,
+    )
+    row = SimpleNamespace(
+        id=12,
+        store_id=1,
+        order_id=9,
+        amount=money("10.00"),
+        executed_amount=money("0"),
+        reason="测",
+        status="PENDING",
+        reviewed_by=None,
+        reviewed_at=None,
+        review_remark=None,
+        payment_id=3,
+        refund_id=None,
+        fail_reason=None,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_lock_result(row))
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.get = AsyncMock(return_value=payment)
+
+    refund_row = SimpleNamespace(id=99, status="SUCCESS", fail_reason=None)
+    refund_mock = AsyncMock(return_value=refund_row)
+
+    with patch(
+        "app.services.pos_refund_service._can_approve",
+        new_callable=AsyncMock,
+        return_value=True,
+    ), patch(
+        "app.services.pos_refund_service.assert_store_access"
+    ), patch.object(
+        PosRefundService,
+        "_refundable_pairs",
+        new_callable=AsyncMock,
+        return_value=(money("10.00"), [(payment, money("10.00"))]),
+    ), patch(
+        "app.services.pos_refund_service.PaymentService.refund",
+        refund_mock,
+    ):
+        out = await PosRefundService.approve_and_execute(
+            db, user=_user("STORE_ADMIN"), request_id=12
+        )
+
+    assert db.commit.await_count >= 1
+    # 首次 commit 时已认领 PROCESSING（refund 之前）
+    assert refund_mock.await_count == 1
+    assert out.status == "SUCCESS"

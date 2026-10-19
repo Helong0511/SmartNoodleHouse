@@ -1155,7 +1155,7 @@ CREATE TABLE IF NOT EXISTS `pos_refund_requests` (
   `amount` decimal(10, 2) NOT NULL COMMENT '申请退款金额（元）',
   `executed_amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '已成功执行退款合计（组合分摊）',
   `reason` varchar(255) NOT NULL COMMENT '申请原因',
-  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/REJECTED/CANCELLED/SUCCESS/FAILED',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/REJECTED/CANCELLED/SUCCESS/FAILED',
   `requested_by` bigint UNSIGNED NOT NULL COMMENT '申请人（收银员）→ users.id',
   `reviewed_by` bigint UNSIGNED NULL DEFAULT NULL COMMENT '审批人 → users.id',
   `reviewed_at` datetime(3) NULL DEFAULT NULL COMMENT '审批时间',

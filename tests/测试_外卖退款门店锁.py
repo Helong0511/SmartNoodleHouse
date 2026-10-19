@@ -61,6 +61,40 @@ async def test_cancel_by_merchant_requires_order():
     d_order = SimpleNamespace(id=2, order_id=9, platform="MEITUAN", platform_order_id="po")
     db = MagicMock()
     db.get = AsyncMock(side_effect=[d_order, None])
+    db.commit = AsyncMock()
     with pytest.raises(AppException) as ei:
         await DeliveryService.cancel_by_merchant(db, 2, "库存不足")
     assert ei.value.code == 40454
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_by_merchant_http_after_commit():
+    """商家取消：先 commit 再调平台，避免长事务。"""
+    d_order = SimpleNamespace(
+        id=2, order_id=9, platform="MEITUAN", platform_order_id="po", delivery_status="ACCEPTED"
+    )
+    order = SimpleNamespace(id=9, store_id=7, status="COOKING")
+    db = MagicMock()
+    db.get = AsyncMock(side_effect=[d_order, order, order, d_order])
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    mock_provider = MagicMock()
+    mock_provider.cancel_order = AsyncMock(return_value=True)
+
+    with patch(
+        "app.services.delivery_service.get_credentials_for_store",
+        AsyncMock(return_value=MagicMock()),
+    ), patch(
+        "app.services.delivery_service.get_delivery_provider",
+        return_value=mock_provider,
+    ), patch(
+        "app.services.order_lifecycle.apply_order_status",
+        new_callable=AsyncMock,
+    ) as apply:
+        out = await DeliveryService.cancel_by_merchant(db, 2, "售罄")
+
+    assert out["ok"] is True
+    db.commit.assert_awaited()
+    mock_provider.cancel_order.assert_awaited_once()
+    apply.assert_awaited()

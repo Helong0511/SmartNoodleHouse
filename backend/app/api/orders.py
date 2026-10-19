@@ -1639,8 +1639,6 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
         force_takeover=bool(data.force_takeover),
     )
 
-    await DeliveryService.sync_kitchen_status(db, order)
-
     target = (data.status or "").strip().upper()
     if target == "PREPARING" and old_status in ("PAID", "CONFIRMED"):
         from app.services.order_lifecycle import order_all_no_cooking
@@ -1649,6 +1647,9 @@ async def update_order_status(order_id: int, data: OrderStatusUpdate, request: R
         if not await order_all_no_cooking(db, order.id):
             schedule_print(order.id)
 
+    # 先提交释放 Order 行锁，再调美团/饿了么同步，避免持锁等平台 HTTP
+    await db.commit()
+    await DeliveryService.sync_kitchen_status(db, order)
     await db.commit()
     await ws_manager.notify_order_event(
         f"ORDER_{data.status}",
