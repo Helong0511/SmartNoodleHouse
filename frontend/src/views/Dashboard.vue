@@ -106,7 +106,9 @@
                     <template #default="{ row }">{{ row.identity_name || row.identity_code || '—' }}</template>
                   </el-table-column>
                   <el-table-column prop="credential_note" label="凭证备注" min-width="140" show-overflow-tooltip />
-                  <el-table-column prop="verify_method" label="来源" width="90" />
+                  <el-table-column label="来源" width="90">
+                    <template #default="{ row }">{{ socialVerifyLabel(row.verify_method) }}</template>
+                  </el-table-column>
                 </el-table>
               </div>
               <div v-else class="todo-empty" :class="{ 'todo-list-gap': showInvoiceTodo }">暂无待审公益认定</div>
@@ -303,6 +305,19 @@ import { useAuthStore } from '@/stores/auth'
 
 /** 待办静默轮询间隔（毫秒）；切回标签页会立即再拉一次 */
 const TODO_POLL_MS = 15_000
+
+const SOCIAL_VERIFY_LABELS: Record<string, string> = {
+  WECHAT: '微信',
+  ALIPAY: '支付宝',
+  MINI: '小程序',
+  POS: '收银核验',
+  MANUAL: '手工认定',
+}
+
+function socialVerifyLabel(method: string | undefined) {
+  const key = String(method || '').toUpperCase()
+  return SOCIAL_VERIFY_LABELS[key] || (key ? key : '—')
+}
 
 const auth = useAuthStore()
 const data = ref<any>(null)
