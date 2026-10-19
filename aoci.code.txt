@@ -328,7 +328,7 @@ DATABASE_MIGRATION.md[SP5S]: F:Audit report on SQLAlchemy models Alembic and sql
 DEPLOYMENT_AND_OPERATIONS.md[SO5M]: F:Audit of nginx systemd leader election scheduler logging and rollback | R:code:nginx/smart-noodle.conf | A:- | S:-
 MULTI_STORE_AUTH.md[SI5S]: F:Audit of staff roles store isolation and customer ownership controls | R:code:backend/app/services/store_scope.py | A:- | S:-
 PAYMENT_AND_LEDGER.md[SB6M]: F:Audit of WeChat/Alipay POS refunds and financial_ledger money paths | R:code:backend/app/services/payment_service.py | A:- | S:-
-REMAINING_ISSUES.md[SQ5S]: F:Audit leftover tracker marking code-closed items versus ops blockers | R:code:docs/audit/REPAIR_TRACKER.md,code:scripts/上线前运维检查清单.py | A:- | S:Only unfinished real issues remain open; BLK items need external credentials or human ops
+REMAINING_ISSUES.md[SQ5S]: F:Audit leftover tracker marking code-closed items versus ops blockers | R:code:docs/audit/REPAIR_TRACKER.md,code:scripts/上线前运维检查清单.py | A:- | S:Only unfinished real issues remain open; local alembic reached 0036 but production schema drill stays BLK-003
 REPAIR_TRACKER.md[SQ6S]: F:P0-P2 issue ledger with file paths status and linked tests | R:code:docs/audit/REMAINING_ISSUES.md | A:- | S:Never mark pass without tests; update status after each fix
 SECURITY_REVIEW.md[SS6M]: F:Security audit concluding no remaining unrepaired P0 vulnerabilities | R:- | A:- | S:Contains no secret values; claims based on 2026-09-29 code+pytest
 TEST_REPORT.md[SQ5S]: F:Pytest run report for tests/ on Windows Python 3.11 SQLite memory | R:- | A:- | S:All tests must live under tests/; report dated 2026-09-29

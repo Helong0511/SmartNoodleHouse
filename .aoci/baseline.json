@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-19T08:51:44Z",
+  "updated_at": "2026-10-19T08:52:49Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "515a49a75bf7b04929171b3ddc086b9d2fe98ee93e4fbefd9a66a6691b151be0",
-      "size": 155066,
-      "normalized_sha256": "515a49a75bf7b04929171b3ddc086b9d2fe98ee93e4fbefd9a66a6691b151be0"
+      "sha256": "55becbcb3bc377c68f86dbe01d8e0f5d293aa2324fb7a4d796c568ab82462072",
+      "size": 155086,
+      "normalized_sha256": "55becbcb3bc377c68f86dbe01d8e0f5d293aa2324fb7a4d796c568ab82462072"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1655,9 +1655,9 @@
     },
     "docs/audit/REMAINING_ISSUES.md": {
       "role": "index",
-      "sha256": "4a83b2edff22363af93ec78f899ec0d4f92487b2299fcb362d93c53de319f393",
-      "size": 5133,
-      "normalized_sha256": "a2fd4a9dd394cc10988c778c4c6ca7e9540a75358f11d14bf540aab7f6d0c4e2"
+      "sha256": "03662affb834412af0c7ecea65b4ce976f767aef3e58dc239d08e531e0f3d564",
+      "size": 5147,
+      "normalized_sha256": "1f627b2ff184191b27ffec32b867fc474dc530925cc7be909b4e9f4eab841a5c"
     },
     "docs/audit/REPAIR_TRACKER.md": {
       "role": "index",
