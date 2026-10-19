@@ -104,32 +104,19 @@ async def test_sync_payment_status_wechat_success():
         total_amount=Decimal("10.00"),
     )
 
-    exec_result_payment = MagicMock()
-    exec_result_payment.scalar_one_or_none.return_value = payment
     exec_result_order = MagicMock()
     exec_result_order.scalar_one_or_none.return_value = order
 
     db = AsyncMock()
-
-    async def execute_side_effect(stmt):
-        sql = str(stmt)
-        if "payments" in sql.lower() or "Payment" in type(stmt).__name__:
-            return exec_result_payment
-        return exec_result_order
-
-    # 简化：两次 with_for_update 分别返回 payment / order
-    calls = {"n": 0}
-
-    async def execute(_stmt):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return exec_result_payment
-        return exec_result_order
-
-    db.execute = execute
+    db.execute = AsyncMock(return_value=exec_result_order)
     db.flush = AsyncMock()
 
-    with patch(
+    with patch.object(
+        PaymentService,
+        "_lock_order_then_payment",
+        new_callable=AsyncMock,
+        return_value=payment,
+    ), patch(
         "app.services.payment_service._wechat_pay_configured", return_value=True
     ), patch(
         "app.services.payment_service._wechat_micropay_configured", return_value=True
@@ -168,13 +155,78 @@ async def test_sync_payment_status_already_paid():
         amount=Decimal("1.00"),
         order_id=1,
     )
-    locked = MagicMock()
-    locked.scalar_one_or_none.return_value = payment
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=locked)
-    row, meta = await PaymentService.sync_payment_status(db, payment)
+    with patch.object(
+        PaymentService,
+        "_lock_order_then_payment",
+        new_callable=AsyncMock,
+        return_value=payment,
+    ):
+        db = AsyncMock()
+        row, meta = await PaymentService.sync_payment_status(db, payment)
     assert meta["already_paid"] is True
     assert row.status == "PAID"
+
+
+@pytest.mark.asyncio
+async def test_sync_closed_payment_resurrects_on_channel_success():
+    """本地 CLOSED 仍查渠道；SUCCESS 时可 CLOSED→PAID。"""
+    payment = SimpleNamespace(
+        id=3,
+        payment_no="PAY_CLOSED",
+        status="CLOSED",
+        provider="WECHAT",
+        channel="WECHAT_MINIPROGRAM",
+        amount=Decimal("10.00"),
+        order_id=9,
+        recharge_order_id=None,
+        provider_trade_no=None,
+        paid_at=None,
+        callback_raw=None,
+    )
+    order = SimpleNamespace(
+        id=9,
+        order_no="O_CLOSED",
+        status="CANCELLED",
+        payment_status="CANCELLED",
+        total_amount=Decimal("10.00"),
+    )
+    exec_result_order = MagicMock()
+    exec_result_order.scalar_one_or_none.return_value = order
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=exec_result_order)
+    db.flush = AsyncMock()
+
+    with patch.object(
+        PaymentService,
+        "_lock_order_then_payment",
+        new_callable=AsyncMock,
+        return_value=payment,
+    ), patch(
+        "app.services.payment_service._wechat_pay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service._wechat_micropay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service.wechat_pay_client.query_by_out_trade_no",
+        new_callable=AsyncMock,
+        return_value={
+            "trade_state": "SUCCESS",
+            "transaction_id": "wx_late_1",
+            "amount_total_fen": 1000,
+            "raw": {},
+        },
+    ), patch(
+        "app.services.payment_service.record_payment_status", new_callable=AsyncMock
+    ), patch.object(
+        PaymentService,
+        "_finalize_tender",
+        new_callable=AsyncMock,
+        return_value={"fully_paid": True},
+    ):
+        row, meta = await PaymentService.sync_payment_status(db, payment)
+
+    assert row.status == "PAID"
+    assert meta["synced"] is True
+    assert row.provider_trade_no == "wx_late_1"
 
 
 @pytest.mark.asyncio

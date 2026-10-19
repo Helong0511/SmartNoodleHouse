@@ -142,13 +142,24 @@ async def apply_order_status(
             await notify_order_ready_subscribe(db, order)
         except Exception:
             logger.exception("出餐订阅消息推送失败 order_id=%s", order.id)
-    elif target == "PAID" and old != "PAID" and order.customer_id:
-        # 支付成功副作用：与 PAID 同事务写入 DB outbox（积分/券/口味）。
-        # outbox 写入失败 → 整事务回滚（含 PAID），provider 回调重试，fail-closed。
-        # 副作用实际执行由 outbox worker 异步驱动，各 handler 按 order_id 幂等。
-        from app.services.paid_side_effects import enqueue_paid_side_effects
+    elif target == "PAID" and old != "PAID":
+        if old == "CANCELLED":
+            # 关单后渠道迟到成功：取消时已回补库存，复活须重新扣库
+            order.cancelled_at = None
+            try:
+                await _deduct_order_stock(db, order)
+            except Exception:
+                logger.exception(
+                    "迟到支付复活扣库失败 order_id=%s，拒绝入账以免超卖", order.id
+                )
+                raise
+        if order.customer_id:
+            # 支付成功副作用：与 PAID 同事务写入 DB outbox（积分/券/口味）。
+            # outbox 写入失败 → 整事务回滚（含 PAID），provider 回调重试，fail-closed。
+            # 副作用实际执行由 outbox worker 异步驱动，各 handler 按 order_id 幂等。
+            from app.services.paid_side_effects import enqueue_paid_side_effects
 
-        await enqueue_paid_side_effects(db, order)
+            await enqueue_paid_side_effects(db, order)
 
     await record_order_status(
         db,
@@ -222,3 +233,16 @@ async def _restore_order_stock(db: AsyncSession, order: Order) -> None:
         aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
     for product_id, qty in aggregated.items():
         await restore_stock(db, product_id, qty, store_id=order.store_id)
+
+
+async def _deduct_order_stock(db: AsyncSession, order: Order) -> None:
+    """CANCELLED→PAID 复活时重新扣库存（与建单扣库口径一致）。"""
+    from app.services.stock_service import deduct_stock
+
+    items = (await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))).scalars().all()
+    aggregated: dict[int, int] = {}
+    for it in items:
+        pid = int(it.product_id)
+        aggregated[pid] = aggregated.get(pid, 0) + int(it.quantity)
+    for product_id, qty in aggregated.items():
+        await deduct_stock(db, product_id, qty, store_id=order.store_id)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1124,20 +1124,45 @@ class PaymentService:
         await db.flush()
 
     @classmethod
+    async def _lock_order_then_payment(
+        cls, db: AsyncSession, payment_id: int
+    ) -> Payment | None:
+        """统一锁序：先 Order（若有）再 Payment，降低与关单路径的死锁概率。"""
+        peek = (
+            await db.execute(
+                select(Payment.order_id, Payment.recharge_order_id).where(Payment.id == int(payment_id))
+            )
+        ).first()
+        if peek is None:
+            return None
+        order_id, recharge_id = peek[0], peek[1]
+        if order_id:
+            await db.execute(select(Order).where(Order.id == int(order_id)).with_for_update())
+        elif recharge_id:
+            await db.execute(
+                select(RechargeOrder).where(RechargeOrder.id == int(recharge_id)).with_for_update()
+            )
+        return (
+            await db.execute(select(Payment).where(Payment.id == int(payment_id)).with_for_update())
+        ).scalar_one_or_none()
+
+    @classmethod
     async def sync_payment_status(
         cls, db: AsyncSession, payment: Payment
     ) -> tuple[Payment, dict]:
-        """主动向微信/支付宝查单并幂等入账（补偿回调丢失、支付结果不明）。"""
-        locked = (
-            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
-        ).scalar_one_or_none()
+        """主动向微信/支付宝查单并幂等入账（补偿回调丢失、支付结果不明）。
+
+        CLOSED 仍查渠道：关单失败盲置 CLOSED 后，迟到成功可受控复活入账。
+        """
+        locked = await cls._lock_order_then_payment(db, int(payment.id))
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
         if payment.status == "PAID":
             return payment, {"synced": False, "trade_state": "SUCCESS", "already_paid": True}
-        if payment.status in ("CLOSED", "REFUNDED", "PARTIAL_REFUND"):
+        if payment.status in ("REFUNDED", "PARTIAL_REFUND"):
             return payment, {"synced": False, "trade_state": payment.status}
+        # CLOSED：继续查单；渠道未成功则保持 CLOSED
 
         provider_u = (payment.provider or "").upper()
         if provider_u in ("CASH", "BALANCE"):
@@ -1240,24 +1265,27 @@ class PaymentService:
             await db.flush()
             return
 
+        # 锁序已在 sync 入口持有 Order；此处再锁一次同事务无害
         order = (
             await db.execute(select(Order).where(Order.id == payment.order_id).with_for_update())
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "订单不存在")
-        if order.status == "CANCELLED" or order.payment_status == "CANCELLED":
-            raise AppException(40901, "订单已关闭，拒绝支付入账")
-        if order.payment_status == "PAID" and payment.status == "PENDING":
+        # CANCELLED 允许受控复活（PAYMENT: CANCELLED→PAID）；其它终态拒绝
+        if order.status == "REFUNDED" or order.payment_status == "REFUNDED":
+            raise AppException(40901, "订单已退款，拒绝支付入账")
+        if order.payment_status == "PAID" and payment.status in ("PENDING", "CLOSED"):
             old_p = payment.status
-            payment.status = "CLOSED"
-            await record_payment_status(
-                db,
-                payment_id=payment.id,
-                from_status=old_p,
-                to_status="CLOSED",
-                source="QUERY",
-                remark="订单已支付，查单入账拒绝",
-            )
+            if payment.status != "CLOSED":
+                payment.status = "CLOSED"
+                await record_payment_status(
+                    db,
+                    payment_id=payment.id,
+                    from_status=old_p,
+                    to_status="CLOSED",
+                    source="QUERY",
+                    remark="订单已支付，查单入账拒绝",
+                )
             await db.flush()
             return
 
@@ -1269,6 +1297,12 @@ class PaymentService:
         await record_payment_status(
             db, payment_id=payment.id, from_status=old_p, to_status="PAID", source="QUERY"
         )
+        if old_p == "CLOSED":
+            logger.warning(
+                "CLOSED 支付查单复活入账 payment=%s order=%s",
+                payment.payment_no,
+                order.order_no,
+            )
         await cls._finalize_tender(
             db, payment=payment, order=order, provider=provider, source="PAYMENT_QUERY"
         )
@@ -1668,10 +1702,15 @@ class PaymentService:
         receipt: str,
     ) -> Payment | None:
         parsed = await provider_inst.handle_callback(data)
-        result = await db.execute(
-            select(Payment).where(Payment.payment_no == parsed["payment_no"]).with_for_update()
-        )
-        payment = result.scalar_one_or_none()
+        # 先取 id，再 Order→Payment 统一锁序
+        peek = (
+            await db.execute(
+                select(Payment.id).where(Payment.payment_no == parsed["payment_no"])
+            )
+        ).scalar_one_or_none()
+        if not peek:
+            raise AppException(40401, "支付记录不存在")
+        payment = await cls._lock_order_then_payment(db, int(peek))
         if not payment:
             raise AppException(40401, "支付记录不存在")
 
@@ -1689,21 +1728,27 @@ class PaymentService:
         ).scalar_one_or_none()
         if not order:
             raise AppException(40402, "订单不存在")
-        if order.status == "CANCELLED" or order.payment_status == "CANCELLED":
-            raise AppException(40901, "订单已关闭，拒绝支付入账")
-        if order.payment_status == "PAID":
+        if order.status == "REFUNDED" or order.payment_status == "REFUNDED":
+            raise AppException(40901, "订单已退款，拒绝支付入账")
+        # CANCELLED：允许迟到回调复活（与查单路径一致）
+        if order.payment_status == "PAID" and order.status != "CANCELLED":
             logger.warning(
                 "重复支付回调已拒绝 order=%s payment=%s",
                 order.order_no,
                 payment.payment_no,
             )
-            if payment.status == "PENDING":
+            if payment.status in ("PENDING", "CLOSED"):
                 old_p = payment.status
-                payment.status = "CLOSED"
-                payment.fail_reason = "订单已支付，重复入账拒绝"
-                await record_payment_status(
-                    db, payment_id=payment.id, from_status=old_p, to_status="CLOSED", source="CALLBACK"
-                )
+                if payment.status != "CLOSED":
+                    payment.status = "CLOSED"
+                    payment.fail_reason = "订单已支付，重复入账拒绝"
+                    await record_payment_status(
+                        db,
+                        payment_id=payment.id,
+                        from_status=old_p,
+                        to_status="CLOSED",
+                        source="CALLBACK",
+                    )
             await db.flush()
             return payment
 
@@ -2352,24 +2397,35 @@ class PaymentService:
 
     @classmethod
     async def poll_pending_payments(cls, limit: int = 30, *, min_age_seconds: int = 30) -> int:
-        """定时补偿：扫描 PENDING 的微信/支付宝支付单并主动查单入账。
+        """定时补偿：扫描 PENDING/近期 CLOSED 的微信/支付宝支付单并主动查单入账。
 
         min_age_seconds：跳过刚创建的单，避免与用户正在收银台付款竞态。
+        CLOSED：覆盖关单盲置后渠道迟到成功（默认回溯 48 小时）。
         """
         from datetime import timedelta
 
         from app.core.response import naive_local_now
 
-        cutoff = naive_local_now() - timedelta(seconds=max(0, int(min_age_seconds)))
+        now = naive_local_now()
+        cutoff = now - timedelta(seconds=max(0, int(min_age_seconds)))
+        closed_since = now - timedelta(hours=48)
         async with AsyncSessionLocal() as db:
             rows = list(
                 (
                     await db.execute(
                         select(Payment)
                         .where(
-                            Payment.status == "PENDING",
                             Payment.provider.in_(("WECHAT", "ALIPAY")),
-                            Payment.created_at <= cutoff,
+                            or_(
+                                and_(
+                                    Payment.status == "PENDING",
+                                    Payment.created_at <= cutoff,
+                                ),
+                                and_(
+                                    Payment.status == "CLOSED",
+                                    Payment.updated_at >= closed_since,
+                                ),
+                            ),
                         )
                         .order_by(Payment.id.asc())
                         .limit(limit)

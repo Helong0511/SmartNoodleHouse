@@ -452,9 +452,32 @@ class CustomerService:
 
     @staticmethod
     async def award_points_for_paid_order(db: AsyncSession, order: Order) -> int:
-        """支付成功：实付 1 元 = 1 积分，并尝试升级等级。行锁 + point_ledger。"""
-        if not order.customer_id:
+        """支付成功：实付 1 元 = 1 积分，并尝试升级等级。行锁 + point_ledger。
+
+        outbox 可能晚于退款：全额退/取消不再发分；若已有成功退款则发分后按 refund 补扣。
+        """
+        if not order or not getattr(order, "id", None):
             return 0
+        # 锁订单再判态，避免与退款状态机竞态
+        locked_order = (
+            await db.execute(select(Order).where(Order.id == int(order.id)).with_for_update())
+        ).scalar_one_or_none()
+        if not locked_order or not locked_order.customer_id:
+            return 0
+        order = locked_order
+        st = (order.status or "").upper()
+        pay = (order.payment_status or "").upper()
+        if st in ("CANCELLED", "REFUNDED") or pay in ("REFUNDED", "CANCELLED", "UNPAID"):
+            return 0
+        if pay not in ("PAID", "PARTIAL_REFUND") and st not in (
+            "PAID",
+            "PREPARING",
+            "READY",
+            "COMPLETED",
+            "PARTIAL_REFUND",
+        ):
+            return 0
+
         customer = (
             await db.execute(
                 select(Customer).where(Customer.id == int(order.customer_id)).with_for_update()
@@ -462,7 +485,7 @@ class CustomerService:
         ).scalar_one_or_none()
         if not customer:
             return 0
-        # 同订单幂等：已有 EARN 流水则跳过
+        # 同订单幂等：已有 EARN 流水则仍尝试补扣已成功退款（幂等）
         existed = (
             await db.execute(
                 select(PointLedger.id)
@@ -474,52 +497,72 @@ class CustomerService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if existed:
-            return 0
-        earned = CustomerService.points_from_amount(order.total_amount)
-        if earned <= 0:
-            return 0
-        # 生日权益：按门店业务参数 + 顾客公历/农历匹配
-        from app.services.coupon_service import CouponService
-        from app.services.system_settings_service import SystemSettingsService
-        from app.utils.birthday import (
-            MODE_BOTH,
-            MODE_COUPON,
-            MODE_POINTS,
-            is_birthday_today,
-            normalize_calendar,
-        )
+        earned = 0
+        if not existed:
+            earned = CustomerService.points_from_amount(order.total_amount)
+            if earned <= 0:
+                return 0
+            # 生日权益：按门店业务参数 + 顾客公历/农历匹配
+            from app.services.coupon_service import CouponService
+            from app.services.system_settings_service import SystemSettingsService
+            from app.utils.birthday import (
+                MODE_BOTH,
+                MODE_COUPON,
+                MODE_POINTS,
+                is_birthday_today,
+                normalize_calendar,
+            )
 
-        store_id = int(order.store_id) if order.store_id else None
-        mode = await CustomerService.resolve_birthday_benefit_mode(db, store_id)
-        multiplier = await SystemSettingsService.effective_int(
-            db, "birthday_points_multiplier", 2, store_id=store_id
-        )
-        today = now_local().date()
-        is_bday = is_birthday_today(
-            customer.birthday,
-            normalize_calendar(getattr(customer, "birthday_calendar", None)),
-            today=today,
-        )
-        if is_bday and mode in (MODE_POINTS, MODE_BOTH) and multiplier > 1:
-            earned *= max(1, int(multiplier))
-        if is_bday and mode in (MODE_COUPON, MODE_BOTH):
-            await CouponService.issue_birthday_coupon(
-                db, int(customer.id), store_id=store_id, year=today.year
+            store_id = int(order.store_id) if order.store_id else None
+            mode = await CustomerService.resolve_birthday_benefit_mode(db, store_id)
+            multiplier = await SystemSettingsService.effective_int(
+                db, "birthday_points_multiplier", 2, store_id=store_id
             )
-        customer.points = int(customer.points or 0) + earned
-        db.add(
-            PointLedger(
-                customer_id=customer.id,
-                order_id=order.id,
-                refund_id=None,
-                delta=earned,
-                balance_after=int(customer.points),
-                entry_type="EARN",
+            today = now_local().date()
+            is_bday = is_birthday_today(
+                customer.birthday,
+                normalize_calendar(getattr(customer, "birthday_calendar", None)),
+                today=today,
             )
+            if is_bday and mode in (MODE_POINTS, MODE_BOTH) and multiplier > 1:
+                earned *= max(1, int(multiplier))
+            if is_bday and mode in (MODE_COUPON, MODE_BOTH):
+                await CouponService.issue_birthday_coupon(
+                    db, int(customer.id), store_id=store_id, year=today.year
+                )
+            customer.points = int(customer.points or 0) + earned
+            db.add(
+                PointLedger(
+                    customer_id=customer.id,
+                    order_id=order.id,
+                    refund_id=None,
+                    delta=earned,
+                    balance_after=int(customer.points),
+                    entry_type="EARN",
+                )
+            )
+            await CustomerService.recalculate_member_level(db, customer)
+            await db.flush()
+
+        # 迟到 award：对已 SUCCESS 的退款补扣（按 refund_id 幂等）
+        from app.models import PaymentRefund
+
+        refunds = list(
+            (
+                await db.execute(
+                    select(PaymentRefund).where(
+                        PaymentRefund.order_id == int(order.id),
+                        PaymentRefund.status == "SUCCESS",
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-        await CustomerService.recalculate_member_level(db, customer)
-        await db.flush()
+        for rf in refunds:
+            await CustomerService.deduct_points_for_refund(
+                db, order, rf.amount, refund_id=int(rf.id)
+            )
         return earned
 
     @staticmethod

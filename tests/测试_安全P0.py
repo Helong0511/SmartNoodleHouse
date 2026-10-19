@@ -28,8 +28,10 @@ def test_payment_only_from_pending():
     assert_payment_transition("PENDING_PAYMENT", "PAID")
     # P0 修复：CONFIRMED → PAID 兜底，避免订单被异常推进到 CONFIRMED 后回调无法入账死锁
     assert_payment_transition("CONFIRMED", "PAID")
-    # 其他终态/未支付态不允许支付回调再写入 PAID
-    for forbidden in ("COMPLETED", "CANCELLED", "REFUNDED"):
+    # 关单后渠道迟到成功：允许 CANCELLED → PAID 受控复活
+    assert_payment_transition("CANCELLED", "PAID")
+    # 其他终态不允许支付回调再写入 PAID
+    for forbidden in ("COMPLETED", "REFUNDED", "PAID"):
         with pytest.raises(AppException):
             assert_payment_transition(forbidden, "PAID")
 

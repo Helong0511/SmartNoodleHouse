@@ -481,3 +481,50 @@ async def test_normal_points_without_birthday(db_session):
     assert earned == 30
     await db_session.refresh(cust)
     assert cust.points == 30
+
+
+async def test_award_points_skips_fully_refunded_order(db_session):
+    """全额退后迟到的 points_award outbox 不得再发分。"""
+    cust = await _seed_customer(db_session, birthday=None)
+    store = await _seed_store(db_session)
+    order = await _seed_order(
+        db_session, store, cust, status="REFUNDED", payment_status="REFUNDED"
+    )
+    await db_session.commit()
+
+    earned = await CustomerService.award_points_for_paid_order(db_session, order)
+    assert earned == 0
+    await db_session.refresh(cust)
+    assert int(cust.points or 0) == 0
+
+
+async def test_late_award_then_catchup_refund_deduct(db_session):
+    """先退款（尚无 EARN）再迟到发分：须发分后按 SUCCESS 退款补扣。"""
+    from app.models import PaymentRefund
+
+    cust = await _seed_customer(db_session, birthday=None)
+    store = await _seed_store(db_session)
+    order = await _seed_order(
+        db_session, store, cust, status="PARTIAL_REFUND", payment_status="PARTIAL_REFUND"
+    )
+    pay = await _seed_payment(db_session, order, cust)
+    rf = PaymentRefund(
+        id=next(_seq) + 9000,
+        refund_no=f"R{next(_seq)}",
+        payment_id=pay.id,
+        order_id=order.id,
+        amount=Decimal("10.00"),
+        status="SUCCESS",
+    )
+    db_session.add(rf)
+    await db_session.commit()
+
+    # 退款时无 EARN，扣分为 0；迟到 award 发 30 后应补扣 10
+    deducted0 = await CustomerService.deduct_points_for_refund(
+        db_session, order, Decimal("10.00"), refund_id=int(rf.id)
+    )
+    assert deducted0 == 0
+    earned = await CustomerService.award_points_for_paid_order(db_session, order)
+    assert earned == 30
+    await db_session.refresh(cust)
+    assert int(cust.points or 0) == 20

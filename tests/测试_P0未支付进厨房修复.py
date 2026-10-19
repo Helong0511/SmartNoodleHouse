@@ -107,18 +107,11 @@ def test_abnormal_confirmed_then_payment_callback_converges():
     assert_staff_transition(cur, "PREPARING")
 
 
-def test_timeout_cancel_then_late_payment_must_not_resurrect():
-    """超时关单后，迟到支付回调不应把 CANCELLED 复活成 PAID。"""
-    # 超时关单
+def test_timeout_cancel_then_late_payment_can_resurrect():
+    """超时关单后渠道迟到成功：允许 CANCELLED→PAID 受控复活（lifecycle 会重新扣库）。"""
     assert_system_transition("PENDING_PAYMENT", "CANCELLED")
-
-    # 迟到支付回调：CANCELLED 不在 PAYMENT_TRANSITIONS 中
-    assert "CANCELLED" not in PAYMENT_TRANSITIONS
-    assert "PAID" not in PAYMENT_TRANSITIONS.get("CANCELLED", set())
-
-    with pytest.raises(AppException) as exc:
-        assert_payment_transition("CANCELLED", "PAID")
-    assert exc.value.code == 40024
+    assert "PAID" in PAYMENT_TRANSITIONS.get("CANCELLED", set())
+    assert_payment_transition("CANCELLED", "PAID")
 
 
 @pytest.mark.asyncio

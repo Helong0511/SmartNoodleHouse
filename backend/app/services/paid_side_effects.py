@@ -56,11 +56,12 @@ async def enqueue_paid_side_effects(db: AsyncSession, order) -> None:
 
 @register_outbox_handler("paid_side_effect", "points_award")
 async def _handle_points_award(db: AsyncSession, row) -> None:
-    """发放积分。幂等：point_ledger 已有 EARN 则跳过。"""
+    """发放积分。幂等：point_ledger 已有 EARN 则跳过；全额退/取消不再发。"""
     from app.models import Order
     from app.services.customer_service import CustomerService
 
-    order = (await db.execute(select(Order).where(Order.id == int(row.aggregate_id)).with_for_update())).scalar_one_or_none()
+    # award 内部会再锁订单并校验状态（含迟到 outbox vs 退款）
+    order = await db.get(Order, int(row.aggregate_id))
     if not order or not order.customer_id:
         return
     await CustomerService.award_points_for_paid_order(db, order)
@@ -105,8 +106,14 @@ async def _handle_milestone_coupon(db: AsyncSession, row) -> None:
     from app.models import Order
     from app.services.coupon_service import CouponService
 
-    order = await db.get(Order, int(row.aggregate_id))
+    order = (
+        await db.execute(select(Order).where(Order.id == int(row.aggregate_id)).with_for_update())
+    ).scalar_one_or_none()
     if not order or not order.customer_id:
+        return
+    st = (order.status or "").upper()
+    pay = (order.payment_status or "").upper()
+    if st in ("CANCELLED", "REFUNDED") or pay in ("REFUNDED", "CANCELLED", "UNPAID"):
         return
     await CouponService.issue_milestones_after_paid(db, order)
 

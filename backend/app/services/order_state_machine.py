@@ -23,9 +23,11 @@ STAFF_TRANSITIONS: dict[str, set[str]] = {
 
 # 支付成功回调允许的迁移
 # P0 安全收敛：CONFIRMED → PAID 兜底，避免订单被异常推进到 CONFIRMED 后回调无法入账。
+# CANCELLED → PAID：超时关单后渠道迟到成功（本地 payment CLOSED、订单已取消）受控复活。
 PAYMENT_TRANSITIONS: dict[str, set[str]] = {
     "PENDING_PAYMENT": {"PAID"},
     "CONFIRMED": {"PAID"},
+    "CANCELLED": {"PAID"},
 }
 
 # 系统/外卖/超时/退款写入（含厨房同步后的平台回写）
