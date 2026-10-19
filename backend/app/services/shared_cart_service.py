@@ -58,6 +58,65 @@ def _opt_key(option_ids) -> str:
     return ",".join(str(i) for i in ids)
 
 
+async def _validate_product_options(
+    db: AsyncSession,
+    *,
+    product_id: int,
+    option_ids: list[int],
+    store_id: int,
+) -> Decimal:
+    """服务端再校验必选规格；返回规格加价合计（不含餐品基价）。"""
+    from app.models import Option, OptionGroup, ProductOptionGroup
+
+    pog_rows = (
+        await db.execute(
+            select(ProductOptionGroup, OptionGroup)
+            .join(OptionGroup, OptionGroup.id == ProductOptionGroup.group_id)
+            .where(
+                ProductOptionGroup.product_id == int(product_id),
+                OptionGroup.status == 1,
+            )
+        )
+    ).all()
+    bound = {int(g.id): g for _, g in pog_rows}
+    if not bound:
+        return Decimal("0.00")
+
+    opts = [int(x) for x in (option_ids or []) if x is not None]
+    options_map = {}
+    if opts:
+        options_map = {
+            int(o.id): o
+            for o in (
+                await db.execute(
+                    select(Option).where(Option.id.in_(opts), Option.status == 1)
+                )
+            ).scalars()
+        }
+
+    selected_by_group: dict[int, list] = {}
+    extra = Decimal("0.00")
+    for oid in opts:
+        opt = options_map.get(int(oid))
+        if not opt:
+            raise AppException(40004, f"规格选项无效: {oid}")
+        group = bound.get(int(opt.group_id))
+        if not group:
+            raise AppException(40005, f"规格不属于该餐品: {oid}")
+        if group.store_id is not None and int(group.store_id) != int(store_id):
+            raise AppException(40002, f"规格组不属于本门店: {group.name}")
+        selected_by_group.setdefault(int(group.id), []).append(opt)
+        extra += _money(getattr(opt, "extra_price", 0))
+
+    for gid, group in bound.items():
+        selected = selected_by_group.get(int(gid), [])
+        if group.is_required and not selected:
+            raise AppException(40006, f"缺少必选规格组: {group.name}")
+        if str(getattr(group, "selection_type", "") or "") == "SINGLE" and len(selected) > 1:
+            raise AppException(40007, f"规格组 {group.name} 只能单选")
+    return extra
+
+
 class SharedCartService:
     @staticmethod
     def rules_payload() -> dict:
@@ -357,6 +416,16 @@ class SharedCartService:
         key = _opt_key(opts)
         cid = int(customer.id)
 
+        # 服务端再校验必选规格，并以服务端基价+规格加价为准（不信任前端金额）
+        opt_extra = await _validate_product_options(
+            db,
+            product_id=int(product_id),
+            option_ids=opts,
+            store_id=int(table.store_id),
+        )
+        price = _money(getattr(product, "price", 0)) + opt_extra
+        _ = unit_price  # 草稿行金额以服务端为准
+
         existing = None
         for row in (
             await db.execute(
@@ -370,11 +439,6 @@ class SharedCartService:
             if _opt_key(row.option_ids) == key:
                 existing = row
                 break
-
-        if unit_price is not None:
-            price = _money(unit_price)
-        else:
-            price = _money(getattr(product, "price", 0))
 
         if existing:
             existing.quantity = min(MAX_QTY, int(existing.quantity or 0) + qty)

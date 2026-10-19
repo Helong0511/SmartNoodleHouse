@@ -719,7 +719,6 @@ const socialIdentities = ref<any[]>([])
 const socialLoading = ref(false)
 const lifecycleInfo = ref<any>(null)
 const lifecycleLoading = ref(false)
-const lifecycleLoading = ref(false)
 const socialBusyId = ref<number | null>(null)
 
 const SOCIAL_STATUS_LABELS: Record<string, string> = {

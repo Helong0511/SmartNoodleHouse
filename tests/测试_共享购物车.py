@@ -38,3 +38,43 @@ def test_revision_conflict_raises_409():
         SharedCartService._check_revision(party, 2)
     assert ei.value.code == 40920
     assert getattr(ei.value, "status_code", None) == 409
+
+
+@pytest.mark.asyncio
+async def test_validate_product_options_requires_group():
+    """无规格绑定时直接通过；有必选组且未选时拒绝。"""
+    from decimal import Decimal
+
+    from app.services import shared_cart_service as scs
+
+    class _EmptyResult:
+        def all(self):
+            return []
+
+    class _Db:
+        async def execute(self, *_a, **_k):
+            return _EmptyResult()
+
+    extra = await scs._validate_product_options(
+        _Db(), product_id=1, option_ids=[], store_id=1
+    )
+    assert extra == Decimal("0.00")
+
+    group = SimpleNamespace(
+        id=10, name="辣度", is_required=True, selection_type="SINGLE", store_id=1, status=1
+    )
+    pog = SimpleNamespace(product_id=1, group_id=10)
+
+    class _BoundResult:
+        def all(self):
+            return [(pog, group)]
+
+    class _DbBound:
+        async def execute(self, *_a, **_k):
+            return _BoundResult()
+
+    with pytest.raises(AppException) as ei:
+        await scs._validate_product_options(
+            _DbBound(), product_id=1, option_ids=[], store_id=1
+        )
+    assert ei.value.code == 40006
