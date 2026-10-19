@@ -424,32 +424,73 @@ Page({
     this.setData({ cartSheetOpen: !this.data.cartSheetOpen })
   },
 
-  changeCartQty(e) {
+  async changeCartQty(e) {
     const { index, delta } = e.currentTarget.dataset
-    const cart = auth.getCart()
-    const item = cart[index]
+    const list = this.data.cart || []
+    const item = list[index]
     if (!item || item.invalid) return
-    const qty = (item.quantity || 1) + parseInt(delta, 10)
+    if (sharedCart.isActive()) {
+      if (!item.can_edit) {
+        wx.showToast({ title: '只能修改自己加的菜', icon: 'none' })
+        return
+      }
+      const qty = (item.quantity || 1) + parseInt(delta, 10)
+      if (qty > 999) {
+        wx.showToast({ title: '单品最多 999 份', icon: 'none' })
+        return
+      }
+      try {
+        await sharedCart.setQuantity(item.shared_item_id || item.id, Math.max(0, qty))
+        if (qty <= 0) {
+          try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) { }
+        }
+        this.refreshCartBar({ openSheet: true })
+      } catch (err) {
+        wx.showToast({ title: (err && err.message) || '更新失败', icon: 'none' })
+        this.refreshCartBar({ openSheet: true, pullShared: true })
+      }
+      return
+    }
+    const cart = auth.getCart()
+    const local = cart[index]
+    if (!local || local.invalid) return
+    const qty = (local.quantity || 1) + parseInt(delta, 10)
     if (qty <= 0) {
       cart.splice(index, 1)
-      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) { }
+      try { tracker.cartRemove(Number(local.product_id), { scene: 'menu', category_id: local.category_id || null }) } catch (_) { }
     } else if (qty > 999) {
       wx.showToast({ title: '单品最多 999 份', icon: 'none' })
       return
     } else {
-      cartUtil.normalizeItem(item)
-      item.quantity = qty
-      item.subtotal = (parseFloat(item.unit_price) * qty).toFixed(2)
+      cartUtil.normalizeItem(local)
+      local.quantity = qty
+      local.subtotal = (parseFloat(local.unit_price) * qty).toFixed(2)
     }
     auth.saveCart(cart)
     this.refreshCartBar({ openSheet: !!(this.data.cartSheetOpen && cart.length) })
   },
 
-  removeCartItem(e) {
+  async removeCartItem(e) {
     const index = e.currentTarget.dataset.index
-    const cart = auth.getCart()
-    const removed = cart[index]
+    const list = this.data.cart || []
+    const removed = list[index]
     if (removed == null) return
+    if (sharedCart.isActive()) {
+      if (!removed.can_edit) {
+        wx.showToast({ title: '只能删除自己加的菜', icon: 'none' })
+        return
+      }
+      try {
+        await sharedCart.removeItem(removed.shared_item_id || removed.id)
+        try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) { }
+        this.refreshCartBar({ openSheet: true })
+      } catch (err) {
+        wx.showToast({ title: (err && err.message) || '删除失败', icon: 'none' })
+      }
+      return
+    }
+    const cart = auth.getCart()
+    if (cart[index] == null) return
     cart.splice(index, 1)
     auth.saveCart(cart)
     try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) { }
@@ -457,10 +498,43 @@ Page({
   },
 
   clearInvalidCart() {
+    if (sharedCart.isActive()) {
+      const mineInvalid = (this.data.cart || []).filter((i) => i.invalid && i.can_edit)
+      Promise.all(mineInvalid.map((i) => sharedCart.removeItem(i.shared_item_id || i.id)))
+        .then(() => {
+          wx.showToast({ title: '已清除失效餐品', icon: 'success' })
+          this.refreshCartBar({ openSheet: true, pullShared: true })
+        })
+        .catch((err) => {
+          wx.showToast({ title: (err && err.message) || '清除失败', icon: 'none' })
+        })
+      return
+    }
     const cart = auth.getCart().filter((i) => !i.invalid)
     auth.saveCart(cart)
     wx.showToast({ title: '已清除失效餐品', icon: 'success' })
     this.refreshCartBar({ openSheet: !!(cart.length) })
+  },
+
+  clearSharedCart() {
+    if (!sharedCart.isActive() || !this.data.sharedIsHost) {
+      wx.showToast({ title: '仅桌主可清空共享车', icon: 'none' })
+      return
+    }
+    wx.showModal({
+      title: '清空共享车',
+      content: '将清空本桌所有人的未下单菜品，是否继续？',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          await sharedCart.clear()
+          this.refreshCartBar({ openSheet: false })
+          wx.showToast({ title: '已清空', icon: 'success' })
+        } catch (err) {
+          wx.showToast({ title: (err && err.message) || '清空失败', icon: 'none' })
+        }
+      }
+    })
   },
 
   goCheckout() {
@@ -858,9 +932,7 @@ Page({
     })
   },
 
-  addSimpleToCart(entry) {
-    const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
-    auth.saveCart(cart)
+  async addSimpleToCart(entry) {
     try {
       tracker.cartAdd(Number(entry.product_id), {
         scene: entry._trackScene || 'menu',
@@ -868,13 +940,27 @@ Page({
         payload: { qty: Number(entry.quantity) || 1 }
       })
     } catch (_) { }
+    if (sharedCart.isActive() || sharedCart.shouldUseShared()) {
+      try {
+        if (!sharedCart.isActive()) await sharedCart.joinAndPull()
+        await sharedCart.addItem(entry)
+        this.refreshCartBar({ openSheet: true })
+        return
+      } catch (err) {
+        wx.showToast({ title: (err && err.message) || '加入共享车失败', icon: 'none' })
+        return
+      }
+    }
+    const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
+    auth.saveCart(cart)
     this.refreshCartBar({ openSheet: true })
   },
 
   assertCanAddProduct(productLike) {
     const cats = (this._catsCache && this._catsCache.cats) || this.data.categories || []
     const products = this._lastProductItems || []
-    const check = cartUtil.checkCategoryRequire(productLike, auth.getCart(), products, cats)
+    const base = sharedCart.isActive() ? sharedCart.getMirror() : auth.getCart()
+    const check = cartUtil.checkCategoryRequire(productLike, base, products, cats)
     if (!check.ok) {
       wx.showToast({ title: check.message, icon: 'none', duration: 2500 })
       return false
