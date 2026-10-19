@@ -181,6 +181,7 @@ class StoreHoursService:
 
         for bid in binding_ids:
             try:
+                # 1) 短锁：算目标状态、取凭证后立刻释放，避免持绑定行锁调平台 API
                 async with AsyncSessionLocal() as sdb:
                     binding = (
                         await sdb.execute(
@@ -194,26 +195,46 @@ class StoreHoursService:
                         continue
                     rows = await StoreHoursService.list_hours(sdb, binding.store_id)
                     desired = desired_open_status(rows, now)
-                    if desired is None:
+                    if desired is None or binding.platform_open_status == desired:
                         stats["skipped"] += 1
-                        continue
-                    if binding.platform_open_status == desired:
-                        stats["skipped"] += 1
+                        await sdb.commit()
                         continue
                     shipping = (
                         shipping_time_for_day(rows, _python_weekday(now)) if desired == "REST" else None
                     )
                     creds = await get_credentials_for_store(sdb, binding.platform, binding.store_id)
-                    provider = get_delivery_provider(binding.platform, creds)
-                    ok = await provider.set_store_open_status(desired, shipping)
-                    if not ok:
-                        logger.warning(
-                            "自动开关店失败 store=%s platform=%s desired=%s",
-                            binding.store_id,
-                            binding.platform,
-                            desired,
+                    platform = binding.platform
+                    store_id = int(binding.store_id)
+                    await sdb.commit()
+
+                # 2) 平台 API：无 DB 行锁
+                provider = get_delivery_provider(platform, creds)
+                ok = await provider.set_store_open_status(desired, shipping)
+                if not ok:
+                    logger.warning(
+                        "自动开关店失败 store=%s platform=%s desired=%s",
+                        store_id,
+                        platform,
+                        desired,
+                    )
+                    stats["skipped"] += 1
+                    continue
+
+                # 3) 短锁写回状态
+                async with AsyncSessionLocal() as sdb:
+                    binding = (
+                        await sdb.execute(
+                            select(PlatformStoreBinding)
+                            .where(PlatformStoreBinding.id == int(bid))
+                            .with_for_update(skip_locked=True)
                         )
+                    ).scalar_one_or_none()
+                    if not binding:
                         stats["skipped"] += 1
+                        continue
+                    if binding.platform_open_status == desired:
+                        stats["skipped"] += 1
+                        await sdb.commit()
                         continue
                     binding.platform_open_status = desired
                     binding.last_sync_at = now

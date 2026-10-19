@@ -172,3 +172,173 @@ async def test_poll_queries_channel_outside_row_lock():
     query_mock.assert_awaited()
     settle_mock.assert_awaited()
     assert query_mock.await_args.args[0].payment_no == "PAY7"
+
+
+@pytest.mark.asyncio
+async def test_poll_refunds_queries_channel_outside_row_lock():
+    """退款 poll：渠道查单在行锁外，入账短事务。"""
+    refund = SimpleNamespace(
+        id=11,
+        refund_no="RF11",
+        payment_id=3,
+        order_id=9,
+        status="PROCESSING",
+    )
+    payment = SimpleNamespace(
+        id=3,
+        payment_no="PAY3",
+        provider="WECHAT",
+    )
+
+    class _CM:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *a):
+            return False
+
+    id_scalars = MagicMock()
+    id_scalars.all.return_value = [11]
+    id_db = AsyncMock()
+    id_db.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=id_scalars))
+    )
+
+    claim_db = AsyncMock()
+    claim_db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
+    )
+    claim_db.get = AsyncMock(return_value=payment)
+    claim_db.commit = AsyncMock()
+
+    settle_row = SimpleNamespace(
+        id=11,
+        refund_no="RF11",
+        payment_id=3,
+        order_id=9,
+        status="PROCESSING",
+    )
+
+    async def _finalize(_db, row, status, **_kw):
+        row.status = "SUCCESS"
+
+    settle_db = AsyncMock()
+    settle_db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=settle_row))
+    )
+    settle_db.commit = AsyncMock()
+    settle_db.get = AsyncMock(
+        return_value=SimpleNamespace(
+            order_no="O9", status="REFUNDED", payment_status="REFUNDED", store_id=1
+        )
+    )
+
+    dbs = [id_db, claim_db, settle_db]
+    n = {"i": 0}
+
+    def _session():
+        db = dbs[min(n["i"], len(dbs) - 1)]
+        n["i"] += 1
+        return _CM(db)
+
+    with patch(
+        "app.services.payment_service.AsyncSessionLocal", side_effect=_session
+    ), patch.object(
+        PaymentService,
+        "_query_channel_refund",
+        new_callable=AsyncMock,
+        return_value={
+            "status": "SUCCESS",
+            "provider_refund_no": "wxr1",
+            "raw": {},
+        },
+    ) as q, patch.object(
+        PaymentService, "_finalize_refund", new_callable=AsyncMock, side_effect=_finalize
+    ), patch(
+        "app.services.websocket_manager.ws_manager.notify_order_event",
+        new_callable=AsyncMock,
+    ):
+        got = await PaymentService.poll_pending_refunds(limit=10)
+
+    assert got == 1
+    claim_db.commit.assert_awaited()
+    q.assert_awaited()
+    assert q.await_args.kwargs["refund_no"] == "RF11"
+
+
+@pytest.mark.asyncio
+async def test_platform_token_refresh_http_outside_lock(monkeypatch):
+    """Token 刷新：到期判断后释放行锁再 HTTP，再短锁写回。"""
+    from datetime import datetime, timedelta
+
+    from app.services.platform_token_service import PlatformTokenService
+
+    binding = SimpleNamespace(
+        id=1,
+        platform="MEITUAN",
+        status=1,
+        refresh_token="enc_rt",
+        access_token="enc_at",
+        token_expires_at=datetime.now() - timedelta(hours=1),
+    )
+    sessions: list = []
+
+    class _CM:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *a):
+            return False
+
+    id_scalars = MagicMock()
+    id_scalars.all.return_value = [1]
+    id_db = AsyncMock()
+    id_db.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=id_scalars))
+    )
+
+    claim_db = AsyncMock()
+    claim_db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=binding))
+    )
+    claim_db.commit = AsyncMock()
+
+    write_db = AsyncMock()
+    write_db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=binding))
+    )
+    write_db.commit = AsyncMock()
+
+    dbs = [id_db, claim_db, write_db]
+    n = {"i": 0}
+
+    def _session():
+        db = dbs[min(n["i"], len(dbs) - 1)]
+        n["i"] += 1
+        sessions.append(db)
+        return _CM(db)
+
+    fetch = AsyncMock(
+        return_value={"access_token": "new", "refresh_token": "nr", "expires_in": 3600}
+    )
+    apply = MagicMock()
+
+    with patch(
+        "app.services.platform_token_service.AsyncSessionLocal", side_effect=_session
+    ), patch.object(
+        PlatformTokenService, "_fetch_token_payload", fetch
+    ), patch.object(
+        PlatformTokenService, "_apply_token_payload", apply
+    ):
+        got = await PlatformTokenService.refresh_expiring_tokens(within_hours=24)
+    assert got == 1
+    claim_db.commit.assert_awaited()
+    fetch.assert_awaited()
+    apply.assert_called_once()
+    write_db.commit.assert_awaited()

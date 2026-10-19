@@ -9,6 +9,7 @@ import json
 import logging
 import time
 import uuid
+from types import SimpleNamespace
 
 import httpx
 from sqlalchemy import select
@@ -30,7 +31,8 @@ class PlatformTokenService:
 
         美团按 30 天 access_token + 35 天 refresh_token 设计：到期前 24 小时刷新，
         剩余 1 天容错窗口足够定时任务每 6 小时重试一次。
-        逐条 FOR UPDATE SKIP LOCKED，避免双 Leader / 并发刷新互相踩踏。
+
+        高并发：短锁判断是否到期 → 锁外 HTTP → 短锁写回，避免持绑定行锁调外网。
         """
         from datetime import timedelta
 
@@ -48,50 +50,94 @@ class PlatformTokenService:
             binding_ids = [int(i) for i in result.scalars().all()]
 
         for bid in binding_ids:
-            async with AsyncSessionLocal() as db:
-                locked = (
-                    await db.execute(
-                        select(PlatformStoreBinding)
-                        .where(PlatformStoreBinding.id == bid)
-                        .with_for_update(skip_locked=True)
+            try:
+                async with AsyncSessionLocal() as db:
+                    locked = (
+                        await db.execute(
+                            select(PlatformStoreBinding)
+                            .where(PlatformStoreBinding.id == bid)
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalar_one_or_none()
+                    if not locked:
+                        continue
+                    expires = ensure_local_aware(locked.token_expires_at)
+                    if expires and expires > deadline:
+                        await db.commit()
+                        continue
+                    snap = SimpleNamespace(
+                        id=int(locked.id),
+                        platform=str(locked.platform or ""),
+                        refresh_token=locked.refresh_token,
+                        access_token=locked.access_token,
                     )
-                ).scalar_one_or_none()
-                if not locked:
+                    await db.commit()
+
+                payload = await cls._fetch_token_payload(snap)
+                if not payload:
                     continue
-                expires = ensure_local_aware(locked.token_expires_at)
-                if expires and expires > deadline:
-                    continue
-                ok = await cls.refresh_single_binding(locked)
-                if ok:
+
+                async with AsyncSessionLocal() as db:
+                    locked = (
+                        await db.execute(
+                            select(PlatformStoreBinding)
+                            .where(PlatformStoreBinding.id == bid)
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalar_one_or_none()
+                    if not locked:
+                        continue
+                    cls._apply_token_payload(locked, payload)
                     await db.commit()
                     refreshed += 1
-                else:
-                    await db.rollback()
+            except Exception:
+                logger.exception("平台 Token 刷新异常 binding_id=%s", bid)
         if refreshed:
             logger.info("已刷新 %s 个平台门店 Token", refreshed)
         return refreshed
 
     @classmethod
     async def refresh_single_binding(cls, binding: PlatformStoreBinding) -> bool:
-        """手动/自动刷新入口：根据 platform 分发到具体实现。"""
-        if binding.platform.upper() == "MEITUAN":
-            return await cls._refresh_meituan_binding(binding)
-        if binding.platform.upper() == "ELEME":
-            return await cls._refresh_eleme_binding(binding)
-        logger.warning("未知 platform=%s，跳过刷新", binding.platform)
-        return False
+        """手动/自动刷新入口：根据 platform 分发到具体实现（可在已有会话内写回 binding）。"""
+        snap = SimpleNamespace(
+            id=int(getattr(binding, "id", 0) or 0),
+            platform=str(binding.platform or ""),
+            refresh_token=binding.refresh_token,
+            access_token=binding.access_token,
+        )
+        payload = await cls._fetch_token_payload(snap)
+        if not payload:
+            return False
+        cls._apply_token_payload(binding, payload)
+        return True
 
     @classmethod
-    async def _refresh_meituan_binding(cls, binding: PlatformStoreBinding) -> bool:
-        """美团 Token 刷新：POST /api/v1/token/refresh，form 编码 + MD5 签名。
+    async def _fetch_token_payload(cls, snap: SimpleNamespace) -> dict | None:
+        platform = (snap.platform or "").upper()
+        if platform == "MEITUAN":
+            return await cls._fetch_meituan_token_payload(snap)
+        if platform == "ELEME":
+            return await cls._fetch_eleme_token_payload(snap)
+        logger.warning("未知 platform=%s，跳过刷新", snap.platform)
+        return None
 
-        参数：app_id, refresh_token, timestamp, sign
-        返回：access_token, refresh_token, expires_in（秒）
-        """
+    @classmethod
+    def _apply_token_payload(cls, binding: PlatformStoreBinding, payload: dict) -> None:
+        from datetime import timedelta
+
+        binding.access_token = SecretEncryptionService.encrypt(payload["access_token"])
+        if payload.get("refresh_token"):
+            binding.refresh_token = SecretEncryptionService.encrypt(payload["refresh_token"])
+        expires_in = int(payload.get("expires_in") or 86400 * 30)
+        binding.token_expires_at = now_local() + timedelta(seconds=expires_in)
+
+    @classmethod
+    async def _fetch_meituan_token_payload(cls, snap: SimpleNamespace) -> dict | None:
+        """美团 Token 刷新 HTTP（无写库）。"""
         settings = get_settings()
-        refresh_plain = SecretEncryptionService.decrypt(binding.refresh_token)
+        refresh_plain = SecretEncryptionService.decrypt(snap.refresh_token)
         if not settings.meituan_app_id or not settings.meituan_app_secret or not refresh_plain:
-            return False
+            return None
 
         url = f"{settings.meituan_api_base.rstrip('/')}/api/v1/token/refresh"
         params = {
@@ -104,35 +150,34 @@ class PlatformTokenService:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.post(url, data=params)
                 data = resp.json()
-            # 美团成功返回 code==0 或 status==success；不同版本略有差异
             code = data.get("code")
             if code not in (0, "0", None) and data.get("status") not in ("success", "ok", "SUCCESS"):
-                logger.warning("美团 Token 刷新失败 binding=%s: %s", binding.id, data)
-                return False
+                logger.warning("美团 Token 刷新失败 binding=%s: %s", snap.id, data)
+                return None
             new_token = data.get("access_token") or (data.get("data") or {}).get("access_token")
             if not new_token:
-                logger.warning("美团 Token 刷新返回无 access_token binding=%s: %s", binding.id, data)
-                return False
-            binding.access_token = SecretEncryptionService.encrypt(new_token)
+                logger.warning("美团 Token 刷新返回无 access_token binding=%s: %s", snap.id, data)
+                return None
             new_refresh = data.get("refresh_token") or (data.get("data") or {}).get("refresh_token")
-            if new_refresh:
-                binding.refresh_token = SecretEncryptionService.encrypt(new_refresh)
-            expires_in = int(data.get("expires_in") or (data.get("data") or {}).get("expires_in") or 86400 * 30)
-            from datetime import timedelta
-
-            binding.token_expires_at = now_local() + timedelta(seconds=expires_in)
-            return True
+            expires_in = int(
+                data.get("expires_in") or (data.get("data") or {}).get("expires_in") or 86400 * 30
+            )
+            return {
+                "access_token": new_token,
+                "refresh_token": new_refresh,
+                "expires_in": expires_in,
+            }
         except Exception as e:
-            logger.exception("美团 Token 刷新异常 binding=%s: %s", binding.id, e)
-            return False
+            logger.exception("美团 Token 刷新异常 binding=%s: %s", snap.id, e)
+            return None
 
     @classmethod
-    async def _refresh_eleme_binding(cls, binding: PlatformStoreBinding) -> bool:
+    async def _fetch_eleme_token_payload(cls, snap: SimpleNamespace) -> dict | None:
         settings = get_settings()
-        refresh_plain = SecretEncryptionService.decrypt(binding.refresh_token)
-        access_plain = SecretEncryptionService.decrypt(binding.access_token)
+        refresh_plain = SecretEncryptionService.decrypt(snap.refresh_token)
+        access_plain = SecretEncryptionService.decrypt(snap.access_token)
         if not settings.eleme_app_id or not settings.eleme_app_secret or not refresh_plain:
-            return False
+            return None
         action = "eleme.oauth.refreshToken"
         metas = {"app_key": settings.eleme_app_id, "timestamp": int(time.time())}
         params = {"refreshToken": refresh_plain}
@@ -157,17 +202,15 @@ class PlatformTokenService:
                 result = json.loads(result)
             new_token = result.get("access_token") or result.get("accessToken")
             if not new_token:
-                logger.warning("饿了么 Token 刷新失败 binding=%s: %s", binding.id, data)
-                return False
-            binding.access_token = SecretEncryptionService.encrypt(new_token)
+                logger.warning("饿了么 Token 刷新失败 binding=%s: %s", snap.id, data)
+                return None
             new_refresh = result.get("refresh_token") or result.get("refreshToken")
-            if new_refresh:
-                binding.refresh_token = SecretEncryptionService.encrypt(new_refresh)
             expires_in = result.get("expires_in") or result.get("expiresIn") or 86400 * 30
-            from datetime import timedelta
-
-            binding.token_expires_at = now_local() + timedelta(seconds=int(expires_in))
-            return True
+            return {
+                "access_token": new_token,
+                "refresh_token": new_refresh,
+                "expires_in": int(expires_in),
+            }
         except Exception as e:
-            logger.exception("饿了么 Token 刷新异常 binding=%s: %s", binding.id, e)
-            return False
+            logger.exception("饿了么 Token 刷新异常 binding=%s: %s", snap.id, e)
+            return None
