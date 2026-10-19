@@ -231,6 +231,10 @@ async def test_sync_closed_payment_resurrects_on_channel_success():
 
 @pytest.mark.asyncio
 async def test_poll_pending_payments_settles():
+    """poll：锁外查渠道 + 短事务入账（适配多顾客并发）。"""
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 10, 19, 12, 0, 0)
     payment = SimpleNamespace(
         id=3,
         payment_no="PAY_POLL",
@@ -239,40 +243,76 @@ async def test_poll_pending_payments_settles():
         channel="WECHAT_MINIPROGRAM",
         amount=Decimal("5.00"),
         order_id=7,
-        created_at=None,
+        recharge_order_id=None,
+        created_at=now - timedelta(minutes=5),
+        updated_at=now - timedelta(minutes=5),
     )
-    order = SimpleNamespace(id=7, order_no="O7", store_id=1)
 
-    scalars_result = MagicMock()
-    # poll 使用 list(result.scalars())，需可迭代
-    scalars_result.__iter__ = lambda self: iter([payment])
-    result = MagicMock()
-    result.scalars.return_value = scalars_result
+    class _CM:
+        def __init__(self, db):
+            self.db = db
 
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=result)
-    db.get = AsyncMock(return_value=order)
-    db.commit = AsyncMock()
-    db.__aenter__ = AsyncMock(return_value=db)
-    db.__aexit__ = AsyncMock(return_value=None)
+        async def __aenter__(self):
+            return self.db
 
-    settled = SimpleNamespace(
+        async def __aexit__(self, *a):
+            return False
+
+    id_scalars = MagicMock()
+    id_scalars.all.return_value = [3]
+    id_db = AsyncMock()
+    id_db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=id_scalars)))
+
+    claim_db = AsyncMock()
+    claim_db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=payment))
+    )
+    claim_db.commit = AsyncMock()
+
+    settle_payment = SimpleNamespace(
         id=3,
         payment_no="PAY_POLL",
-        status="PAID",
-        provider="WECHAT",
-        channel="WECHAT_MINIPROGRAM",
-        amount=Decimal("5.00"),
+        status="PENDING",
         order_id=7,
     )
 
+    async def _settle(_db, pay, **_kw):
+        pay.status = "PAID"
+
+    settle_db = AsyncMock()
+    settle_db.commit = AsyncMock()
+    settle_db.get = AsyncMock(return_value=SimpleNamespace(order_no="O7", store_id=1))
+
+    dbs = [id_db, claim_db, settle_db]
+    n_sess = {"i": 0}
+
+    def _session():
+        db = dbs[min(n_sess["i"], len(dbs) - 1)]
+        n_sess["i"] += 1
+        return _CM(db)
+
     with patch(
-        "app.services.payment_service.AsyncSessionLocal", return_value=db
+        "app.services.payment_service.AsyncSessionLocal", side_effect=_session
+    ), patch(
+        "app.core.response.naive_local_now", return_value=now
     ), patch.object(
         PaymentService,
-        "sync_payment_status",
+        "_query_channel_trade",
         new_callable=AsyncMock,
-        return_value=(settled, {"synced": True, "trade_state": "SUCCESS"}),
+        return_value={
+            "paid": True,
+            "provider": "WECHAT",
+            "provider_trade_no": "tx",
+            "trade_state": "SUCCESS",
+            "query_raw": {},
+        },
+    ), patch.object(
+        PaymentService,
+        "_lock_order_then_payment",
+        new_callable=AsyncMock,
+        return_value=settle_payment,
+    ), patch.object(
+        PaymentService, "_settle_from_query", new_callable=AsyncMock, side_effect=_settle
     ), patch(
         "app.services.websocket_manager.ws_manager.notify_order_event",
         new_callable=AsyncMock,
@@ -280,4 +320,5 @@ async def test_poll_pending_payments_settles():
         n = await PaymentService.poll_pending_payments(limit=10, min_age_seconds=0)
 
     assert n == 1
-    db.commit.assert_awaited()
+    claim_db.commit.assert_awaited()
+    settle_db.commit.assert_awaited()

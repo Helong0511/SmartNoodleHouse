@@ -1163,13 +1163,36 @@ class PaymentService:
         if payment.status in ("REFUNDED", "PARTIAL_REFUND"):
             return payment, {"synced": False, "trade_state": payment.status}
         # CLOSED：继续查单；渠道未成功则保持 CLOSED
+        channel = await cls._query_channel_trade(payment)
+        if channel.get("error"):
+            return payment, {"synced": False, "trade_state": channel["error"]}
+        if not channel.get("paid"):
+            return payment, {
+                "synced": False,
+                "trade_state": channel.get("trade_state") or "UNKNOWN",
+            }
+        await cls._settle_from_query(
+            db,
+            payment,
+            provider=str(channel["provider"]),
+            provider_trade_no=str(channel.get("provider_trade_no") or ""),
+            query_raw=channel.get("query_raw"),
+        )
+        return payment, {
+            "synced": True,
+            "trade_state": channel.get("trade_state") or "SUCCESS",
+            "status": "PAID",
+        }
 
+    @classmethod
+    async def _query_channel_trade(cls, payment: Payment) -> dict:
+        """向微信/支付宝查单（无 DB 锁）。供 sync 与 poll 锁外查询复用。"""
         provider_u = (payment.provider or "").upper()
         if provider_u in ("CASH", "BALANCE"):
-            return payment, {"synced": False, "trade_state": payment.status}
+            return {"error": payment.status, "paid": False}
         if provider_u == "WECHAT":
             if not (_wechat_pay_configured() or _wechat_micropay_configured()):
-                return payment, {"synced": False, "trade_state": "NOT_CONFIGURED"}
+                return {"error": "NOT_CONFIGURED", "paid": False}
             channel = (payment.channel or "").upper()
             if "MICROPAY" in channel:
                 from app.services import wechat_pay_v2_client
@@ -1178,16 +1201,14 @@ class PaymentService:
                 trade_state = str(q.get("trade_state") or "").upper()
                 trade_no = q.get("transaction_id")
                 amount_ok = True
-                raw_amount = None
                 if isinstance(q.get("raw"), dict) and q["raw"].get("total_fee"):
                     raw_amount = money(Decimal(str(q["raw"]["total_fee"])) / 100)
                     amount_ok = raw_amount == money(payment.amount)
                 elif trade_state == "SUCCESS":
-                    # SUCCESS 必须有金额，禁止缺字段入账
                     amount_ok = False
             else:
                 if not _wechat_pay_configured():
-                    return payment, {"synced": False, "trade_state": "NOT_CONFIGURED"}
+                    return {"error": "NOT_CONFIGURED", "paid": False}
                 q = await wechat_pay_client.query_by_out_trade_no(payment_no=payment.payment_no)
                 trade_state = str(q.get("trade_state") or "").upper()
                 trade_no = q.get("transaction_id")
@@ -1199,19 +1220,18 @@ class PaymentService:
             if trade_state == "SUCCESS":
                 if not amount_ok:
                     raise AppException(40302, "支付金额不匹配")
-                await cls._settle_from_query(
-                    db,
-                    payment,
-                    provider="WECHAT",
-                    provider_trade_no=str(trade_no or ""),
-                    query_raw=q.get("raw") if isinstance(q, dict) else q,
-                )
-                return payment, {"synced": True, "trade_state": "SUCCESS", "status": "PAID"}
-            return payment, {"synced": False, "trade_state": trade_state or "UNKNOWN"}
+                return {
+                    "paid": True,
+                    "provider": "WECHAT",
+                    "provider_trade_no": str(trade_no or ""),
+                    "trade_state": "SUCCESS",
+                    "query_raw": q.get("raw") if isinstance(q, dict) else q,
+                }
+            return {"paid": False, "trade_state": trade_state or "UNKNOWN"}
 
         if provider_u == "ALIPAY":
             if not _alipay_pay_configured():
-                return payment, {"synced": False, "trade_state": "NOT_CONFIGURED"}
+                return {"error": "NOT_CONFIGURED", "paid": False}
             q = await alipay_client.trade_query(payment_no=payment.payment_no)
             trade_status = str(q.get("trade_status") or "").upper()
             if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED"):
@@ -1220,17 +1240,16 @@ class PaymentService:
                     raise AppException(40302, "查单成功但缺少金额，拒绝入账")
                 if money(Decimal(str(total))) != money(payment.amount):
                     raise AppException(40302, "支付金额不匹配")
-                await cls._settle_from_query(
-                    db,
-                    payment,
-                    provider="ALIPAY",
-                    provider_trade_no=str(q.get("trade_no") or ""),
-                    query_raw=q.get("raw") if isinstance(q, dict) else q,
-                )
-                return payment, {"synced": True, "trade_state": trade_status, "status": "PAID"}
-            return payment, {"synced": False, "trade_state": trade_status or "UNKNOWN"}
+                return {
+                    "paid": True,
+                    "provider": "ALIPAY",
+                    "provider_trade_no": str(q.get("trade_no") or ""),
+                    "trade_state": trade_status,
+                    "query_raw": q.get("raw") if isinstance(q, dict) else q,
+                }
+            return {"paid": False, "trade_state": trade_status or "UNKNOWN"}
 
-        return payment, {"synced": False, "trade_state": "UNSUPPORTED"}
+        return {"error": "UNSUPPORTED", "paid": False}
 
     @classmethod
     async def _settle_from_query(
@@ -2401,6 +2420,9 @@ class PaymentService:
 
         min_age_seconds：跳过刚创建的单，避免与用户正在收银台付款竞态。
         CLOSED：覆盖关单盲置后渠道迟到成功（默认回溯 48 小时）。
+
+        高并发要点：只捞 id（不加长锁）→ 渠道 HTTP 在锁外 → 入账短事务加锁。
+        避免一次 FOR UPDATE 锁住多行再串行调微信/支付宝，拖慢其它顾客。
         """
         from datetime import timedelta
 
@@ -2410,10 +2432,10 @@ class PaymentService:
         cutoff = now - timedelta(seconds=max(0, int(min_age_seconds)))
         closed_since = now - timedelta(hours=48)
         async with AsyncSessionLocal() as db:
-            rows = list(
+            ids = list(
                 (
                     await db.execute(
-                        select(Payment)
+                        select(Payment.id)
                         .where(
                             Payment.provider.in_(("WECHAT", "ALIPAY")),
                             or_(
@@ -2429,15 +2451,89 @@ class PaymentService:
                         )
                         .order_by(Payment.id.asc())
                         .limit(limit)
-                        .with_for_update(skip_locked=True)
                     )
-                ).scalars()
+                )
+                .scalars()
+                .all()
             )
-            done = 0
-            for row in rows:
-                try:
+
+        done = 0
+        for pid in ids:
+            try:
+                # 1) 短锁：跳过已终态 / 被其它 worker 占用的行，拷贝查单字段后立刻释放
+                async with AsyncSessionLocal() as db:
+                    row = (
+                        await db.execute(
+                            select(Payment)
+                            .where(
+                                Payment.id == int(pid),
+                                Payment.status.in_(("PENDING", "CLOSED")),
+                            )
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalar_one_or_none()
+                    if row is None:
+                        continue
                     before = row.status
-                    payment, meta = await cls.sync_payment_status(db, row)
+                    from types import SimpleNamespace
+
+                    snap = SimpleNamespace(
+                        id=row.id,
+                        payment_no=row.payment_no,
+                        status=row.status,
+                        provider=row.provider,
+                        channel=row.channel,
+                        amount=row.amount,
+                        order_id=row.order_id,
+                        recharge_order_id=row.recharge_order_id,
+                    )
+                    await db.commit()
+
+                # 2) 渠道查单：无持有 DB 行锁
+                try:
+                    channel = await cls._query_channel_trade(snap)
+                except Exception as e:
+                    logger.warning("支付查单失败 payment_no=%s: %s", snap.payment_no, e)
+                    continue
+
+                if channel.get("error"):
+                    continue
+                if not channel.get("paid"):
+                    state = channel.get("trade_state")
+                    if state not in (
+                        None,
+                        "NOTPAY",
+                        "USERPAYING",
+                        "WAIT_BUYER_PAY",
+                        "NOT_CONFIGURED",
+                        "QUERY_FAILED",
+                        "UNKNOWN",
+                        "CLOSED",
+                    ):
+                        logger.info(
+                            "支付查单未入账 payment=%s state=%s",
+                            snap.payment_no,
+                            state,
+                        )
+                    continue
+
+                # 3) 短锁入账
+                async with AsyncSessionLocal() as db:
+                    payment = await cls._lock_order_then_payment(db, int(pid))
+                    if payment is None or payment.status == "PAID":
+                        await db.commit()
+                        continue
+                    if payment.status not in ("PENDING", "CLOSED"):
+                        await db.commit()
+                        continue
+                    await cls._settle_from_query(
+                        db,
+                        payment,
+                        provider=str(channel["provider"]),
+                        provider_trade_no=str(channel.get("provider_trade_no") or ""),
+                        query_raw=channel.get("query_raw"),
+                    )
+                    await db.commit()
                     if before != "PAID" and payment.status == "PAID":
                         done += 1
                         try:
@@ -2455,27 +2551,9 @@ class PaymentService:
                             )
                         except Exception as ws_err:
                             logger.warning("支付查单成功 WS 通知失败: %s", ws_err)
-                    elif meta.get("trade_state") not in (
-                        None,
-                        "NOTPAY",
-                        "USERPAYING",
-                        "WAIT_BUYER_PAY",
-                        "NOT_CONFIGURED",
-                        "QUERY_FAILED",
-                        "UNKNOWN",
-                    ):
-                        logger.info(
-                            "支付查单未入账 payment=%s state=%s",
-                            payment.payment_no,
-                            meta.get("trade_state"),
-                        )
-                except Exception as e:
-                    # 回滚本单半程变更，避免脏提交到下一单并防止会话失败态
-                    await db.rollback()
-                    logger.warning("支付查单失败 payment_no=%s: %s", row.payment_no, e)
-                else:
-                    await db.commit()
-            return done
+            except Exception as e:
+                logger.warning("支付查单补偿异常 payment_id=%s: %s", pid, e)
+        return done
 
     @classmethod
     async def sync_before_close_order(cls, db: AsyncSession, order: Order) -> bool:
