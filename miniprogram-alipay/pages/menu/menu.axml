@@ -9,14 +9,15 @@
 
   <view
     class="table-order-bar"
-    a:if="{{hasTable && !isTakeawayChannel && tableOrderCount}}"
+    a:if="{{hasTable && !isTakeawayChannel && (tableOrderCount || sharedCartOn)}}"
     onTap="goOrders"
   >
     <view class="table-order-main">
-      <text class="table-order-title">本桌已下单</text>
-      <text class="table-order-brief">{{tableOrdersBrief}}</text>
+      <text class="table-order-title">{{sharedCartOn ? '本桌共享车' : '本桌已下单'}}</text>
+      <text class="table-order-brief" a:if="{{sharedCartOn}}">{{sharedMemberCount || 1}} 人协同{{tableOrderCount ? ' · ' + tableOrdersBrief : ''}}</text>
+      <text class="table-order-brief" a:elif="{{tableOrdersBrief}}">{{tableOrdersBrief}}</text>
     </view>
-    <text class="table-order-link">查看 ›</text>
+    <text class="table-order-link">{{tableOrderCount ? '订单 ›' : '点餐中'}}</text>
   </view>
 
   <view class="search-wrap" a:if="{{showMenuSearch}}">
@@ -146,11 +147,14 @@
   <view class="cart-mask" a:if="{{cartSheetOpen && cart.length}}" catchTap="closeCartSheet"></view>
   <view class="cart-sheet {{cartSheetOpen ? 'open' : ''}}" a:if="{{cart.length}}">
     <view class="cart-sheet-head" enable-flex>
-      <text class="cart-sheet-title">点餐明细</text>
-      <text class="cart-sheet-clear" a:if="{{invalidCount > 0}}" catchTap="clearInvalidCart">清除失效</text>
+      <text class="cart-sheet-title">{{sharedCartOn ? '本桌共享明细' : '点餐明细'}}</text>
+      <view class="cart-sheet-ops">
+        <text class="cart-sheet-clear" a:if="{{invalidCount > 0}}" catchTap="clearInvalidCart">清除失效</text>
+        <text class="cart-sheet-clear" a:if="{{sharedCartOn && sharedIsHost}}" catchTap="clearSharedCart">清空共享车</text>
+      </view>
     </view>
     <scroll-view class="cart-sheet-body" scroll-y="{{true}}">
-      <view class="cart-item {{item.invalid ? 'invalid' : ''}}" enable-flex a:for="{{cart}}" a:key="cartKey">
+      <view class="cart-item {{item.invalid ? 'invalid' : ''}} {{sharedCartOn && !item.can_edit ? 'readonly' : ''}}" enable-flex a:for="{{cart}}" a:key="cartKey">
         <view class="cart-thumb-wrap" style="{{cartThumbStyle}}">
           <image a:if="{{item.imageUrl}}" class="cart-thumb" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" />
           <view a:else class="cart-thumb placeholder">{{item.name[0] || '餐'}}</view>
@@ -160,20 +164,24 @@
             <view class="cart-name">{{item.name}}</view>
             <text class="special-tag" a:if="{{item.no_member_discount}}">特价</text>
           </view>
+          <view class="cart-adder" a:if="{{sharedCartOn && item.added_by_label}}">{{item.mine ? '我' : item.added_by_label}}</view>
           <view class="cart-invalid" a:if="{{item.invalid}}">{{item.invalidReason}}</view>
           <view class="cart-opts" a:elif="{{item.option_text}}">{{item.option_text}}</view>
           <view class="cart-unit" a:if="{{!item.invalid}}">单价 ¥{{item.unit_price}}</view>
         </view>
         <view class="cart-actions" enable-flex>
           <view class="actions-top">
-            <view class="qty" enable-flex a:if="{{!item.invalid}}">
+            <view class="qty" enable-flex a:if="{{!item.invalid && (!sharedCartOn || item.can_edit)}}">
               <view class="qty-btn" data-index="{{index}}" data-delta="-1" catchTap="changeCartQty">−</view>
               <text class="qty-num">{{item.quantity}}</text>
               <view class="qty-btn" data-index="{{index}}" data-delta="1" catchTap="changeCartQty">+</view>
             </view>
+            <view class="qty" enable-flex a:elif="{{!item.invalid}}">
+              <text class="qty-num">×{{item.quantity}}</text>
+            </view>
             <view class="line-total" a:if="{{!item.invalid}}">¥{{item.subtotal}}</view>
           </view>
-          <view class="del-wrap" enable-flex>
+          <view class="del-wrap" enable-flex a:if="{{!sharedCartOn || item.can_edit}}">
             <view class="del" data-index="{{index}}" catchTap="removeCartItem">删除</view>
           </view>
         </view>

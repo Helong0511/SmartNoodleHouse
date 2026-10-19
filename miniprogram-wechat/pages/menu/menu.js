@@ -132,6 +132,11 @@ Page({
 
   onUnload() {
     if (this._searchTimer) clearTimeout(this._searchTimer)
+    sharedCart.stopPolling()
+    if (typeof this._unsubShared === 'function') {
+      this._unsubShared()
+      this._unsubShared = null
+    }
     if (typeof this._unsubDine === 'function') {
       this._unsubDine()
       this._unsubDine = null
@@ -177,6 +182,10 @@ Page({
 
   /** 堂食绑桌：加入共享车并轮询；外带/未绑桌停用 */
   async syncSharedCartMode() {
+    if (typeof this._unsubShared === 'function') {
+      this._unsubShared()
+      this._unsubShared = null
+    }
     if (!sharedCart.shouldUseShared()) {
       sharedCart.stopPolling()
       this.setData({ sharedCartOn: false, sharedIsHost: false, sharedMemberCount: 0 })
@@ -189,6 +198,14 @@ Page({
         sharedCartOn: !!meta.enabled,
         sharedIsHost: !!meta.is_host,
         sharedMemberCount: meta.member_count || 0
+      })
+      this._unsubShared = sharedCart.subscribe((_cart, m) => {
+        this.setData({
+          sharedCartOn: !!(m && m.enabled),
+          sharedIsHost: !!(m && m.is_host),
+          sharedMemberCount: (m && m.member_count) || 0
+        })
+        this.refreshCartBar({ openSheet: !!this.data.cartSheetOpen, pullShared: false })
       })
       sharedCart.startPolling(2800)
       await this.refreshCartBar({ openSheet: false })

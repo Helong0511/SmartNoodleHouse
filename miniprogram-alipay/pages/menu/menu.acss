@@ -36,6 +36,9 @@
 .table-order-title { font-size: 26rpx; font-weight: 600; color: #333; }
 .table-order-brief { font-size: 22rpx; color: #999; }
 .table-order-link { flex-shrink: 0; font-size: 24rpx; color: #1677ff; }
+.cart-sheet-ops { display: flex; gap: 20rpx; align-items: center; }
+.cart-adder { margin-top: 4rpx; font-size: 20rpx; color: #999; }
+.cart-item.readonly { opacity: 0.92; }
 .search {
   background: #fff;
   border-radius: 32rpx;
