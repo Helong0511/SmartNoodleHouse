@@ -533,7 +533,7 @@ CREATE TABLE IF NOT EXISTS `delivery_refunds` (
   `refund_type` varchar(30) NOT NULL DEFAULT 'FULL' COMMENT 'FULL=全额 | PARTIAL=部分',
   `amount` decimal(10, 2) NOT NULL DEFAULT 0.00 COMMENT '退款金额',
   `reason` varchar(500) NULL DEFAULT NULL COMMENT '退款原因',
-  `status` varchar(30) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/APPROVED/REJECTED',
+  `status` varchar(30) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/APPROVED/REJECTED',
   `raw_payload` json NULL COMMENT '平台退款报文',
   `handled_at` datetime(3) NULL DEFAULT NULL COMMENT '处理完成时间',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',

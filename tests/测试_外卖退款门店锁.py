@@ -15,11 +15,14 @@ async def test_process_refund_requires_order_store():
     locked = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
     db.execute = AsyncMock(return_value=locked)
     db.get = AsyncMock(side_effect=[SimpleNamespace(id=2), None])  # d_order, order missing
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
 
     with pytest.raises(AppException) as ei:
         await DeliveryService.process_refund(db, 1, approve=True)
     assert ei.value.code == 40454
     db.execute.assert_awaited()  # with_for_update path
+    db.commit.assert_not_awaited()  # 缺订单时不得认领
 
 
 @pytest.mark.asyncio
@@ -39,6 +42,8 @@ async def test_process_refund_fail_closed_without_credentials():
     db = MagicMock()
     db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
     db.get = AsyncMock(side_effect=[d_order, order])
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
 
     with patch(
         "app.services.delivery_service.get_credentials_for_store",
@@ -48,6 +53,7 @@ async def test_process_refund_fail_closed_without_credentials():
             await DeliveryService.process_refund(db, 1, approve=True)
     assert ei.value.code == 40061
     assert "7" in ei.value.message
+    db.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

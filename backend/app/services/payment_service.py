@@ -1153,8 +1153,31 @@ class PaymentService:
         """主动向微信/支付宝查单并幂等入账（补偿回调丢失、支付结果不明）。
 
         CLOSED 仍查渠道：关单失败盲置 CLOSED 后，迟到成功可受控复活入账。
+        查单在加行锁之前完成，避免把微信/支付宝 RTT 算进 Order/Payment 锁持有时间。
+        （若调用方已在同一事务持有订单锁，仍须由调用方先释放；关单任务见 *_by_id。）
         """
-        locked = await cls._lock_order_then_payment(db, int(payment.id))
+        pid = int(payment.id)
+        peek = (
+            await db.execute(select(Payment).where(Payment.id == pid))
+        ).scalar_one_or_none()
+        if not peek:
+            raise AppException(40401, "支付记录不存在")
+        if peek.status == "PAID":
+            return peek, {"synced": False, "trade_state": "SUCCESS", "already_paid": True}
+        if peek.status in ("REFUNDED", "PARTIAL_REFUND"):
+            return peek, {"synced": False, "trade_state": peek.status}
+
+        # 渠道查单：不加 FOR UPDATE
+        channel = await cls._query_channel_trade(peek)
+        if channel.get("error"):
+            return peek, {"synced": False, "trade_state": channel["error"]}
+        if not channel.get("paid"):
+            return peek, {
+                "synced": False,
+                "trade_state": channel.get("trade_state") or "UNKNOWN",
+            }
+
+        locked = await cls._lock_order_then_payment(db, pid)
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
@@ -1162,14 +1185,10 @@ class PaymentService:
             return payment, {"synced": False, "trade_state": "SUCCESS", "already_paid": True}
         if payment.status in ("REFUNDED", "PARTIAL_REFUND"):
             return payment, {"synced": False, "trade_state": payment.status}
-        # CLOSED：继续查单；渠道未成功则保持 CLOSED
-        channel = await cls._query_channel_trade(payment)
-        if channel.get("error"):
-            return payment, {"synced": False, "trade_state": channel["error"]}
-        if not channel.get("paid"):
+        if payment.status not in ("PENDING", "CLOSED"):
             return payment, {
                 "synced": False,
-                "trade_state": channel.get("trade_state") or "UNKNOWN",
+                "trade_state": channel.get("trade_state") or payment.status,
             }
         await cls._settle_from_query(
             db,
@@ -2574,7 +2593,11 @@ class PaymentService:
 
     @classmethod
     async def sync_before_close_order(cls, db: AsyncSession, order: Order) -> bool:
-        """关单前对订单下 PENDING 渠道支付单查单；若已付返回 True（不应再关单）。"""
+        """关单前对订单下 PENDING 渠道支付单查单；若已付返回 True（不应再关单）。
+
+        注意：若调用方已持有 order 行锁，查单期间该锁仍会被占用。
+        定时关单请用 sync_before_close_order_by_id（独立短事务）。
+        """
         await db.refresh(order)
         if order.payment_status == "PAID" or order.status != "PENDING_PAYMENT":
             return order.payment_status == "PAID"
@@ -2605,6 +2628,56 @@ class PaymentService:
         return order.payment_status == "PAID"
 
     @classmethod
+    async def sync_before_close_order_by_id(cls, order_id: int) -> bool:
+        """关单前查单（独立会话）：不持有订单长锁做渠道 HTTP。"""
+        async with AsyncSessionLocal() as db:
+            order = await db.get(Order, int(order_id))
+            if not order:
+                return False
+            if order.payment_status == "PAID":
+                return True
+            if order.status != "PENDING_PAYMENT":
+                return order.payment_status == "PAID"
+            payment_ids = list(
+                (
+                    await db.execute(
+                        select(Payment.id).where(
+                            Payment.order_id == int(order_id),
+                            Payment.status == "PENDING",
+                            Payment.provider.in_(("WECHAT", "ALIPAY")),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            order_no = order.order_no
+            await db.commit()
+
+        for pid in payment_ids:
+            try:
+                async with AsyncSessionLocal() as db:
+                    payment = await db.get(Payment, int(pid))
+                    if not payment or payment.status != "PENDING":
+                        await db.commit()
+                        continue
+                    payment, _meta = await cls.sync_payment_status(db, payment)
+                    await db.commit()
+                    if payment.status == "PAID":
+                        return True
+            except Exception as e:
+                logger.warning(
+                    "关单前查单失败 order=%s payment_id=%s: %s",
+                    order_no,
+                    pid,
+                    e,
+                )
+
+        async with AsyncSessionLocal() as db:
+            order = await db.get(Order, int(order_id))
+            return bool(order and order.payment_status == "PAID")
+
+    @classmethod
     async def close_channel_payments(cls, db: AsyncSession, order: Order) -> bool:
         """超时关单时同步撤销渠道交易，并把本地 PENDING 支付单置 CLOSED。
 
@@ -2617,6 +2690,7 @@ class PaymentService:
            返回 True，由上层保留订单不关单
 
         返回 True 表示检测到迟到成功支付（订单已入账，不应关单）。
+        定时关单请用 close_channel_payments_by_id（渠道 HTTP 在订单锁外）。
         """
         await db.refresh(order)
         if order.payment_status == "PAID":
@@ -2666,6 +2740,98 @@ class PaymentService:
                 await cls._close_pending_payment(
                     db, payment, reason=f"关单撤销失败: {e}"[:200]
                 )
+        return late_paid
+
+    @classmethod
+    async def close_channel_payments_by_id(cls, order_id: int) -> bool:
+        """撤销渠道交易（独立会话）：HTTP 不持订单行锁。"""
+        from types import SimpleNamespace
+
+        async with AsyncSessionLocal() as db:
+            order = await db.get(Order, int(order_id))
+            if not order:
+                return False
+            if order.payment_status == "PAID":
+                return True
+            rows = list(
+                (
+                    await db.execute(
+                        select(Payment).where(
+                            Payment.order_id == int(order_id),
+                            Payment.status == "PENDING",
+                            Payment.provider.in_(("WECHAT", "ALIPAY")),
+                        )
+                    )
+                ).scalars()
+            )
+            snaps = [
+                SimpleNamespace(
+                    id=int(p.id),
+                    payment_no=p.payment_no,
+                    provider=(p.provider or "").upper(),
+                )
+                for p in rows
+            ]
+            order_no = order.order_no
+            await db.commit()
+
+        late_paid = False
+        for snap in snaps:
+            try:
+                if snap.provider == "WECHAT" and _wechat_pay_configured():
+                    await wechat_pay_client.close_order(payment_no=snap.payment_no)
+                elif snap.provider == "ALIPAY" and _alipay_pay_configured():
+                    await alipay_client.trade_cancel(payment_no=snap.payment_no)
+            except Exception as e:
+                logger.warning(
+                    "关单撤销渠道交易失败 order=%s payment=%s: %s",
+                    order_no,
+                    snap.payment_no,
+                    e,
+                )
+
+            try:
+                async with AsyncSessionLocal() as db:
+                    payment = await db.get(Payment, int(snap.id))
+                    if not payment:
+                        await db.commit()
+                        continue
+                    synced, _meta = await cls.sync_payment_status(db, payment)
+                    await db.commit()
+                    if synced.status == "PAID":
+                        late_paid = True
+                        logger.warning(
+                            "渠道关单后发现迟到成功支付 order=%s payment=%s，已自动入账",
+                            order_no,
+                            snap.payment_no,
+                        )
+                        continue
+            except Exception as e:
+                logger.warning(
+                    "关单后查单失败 order=%s payment=%s: %s",
+                    order_no,
+                    snap.payment_no,
+                    e,
+                )
+
+            try:
+                async with AsyncSessionLocal() as db:
+                    payment = await cls._lock_order_then_payment(db, int(snap.id))
+                    if payment is not None and payment.status == "PENDING":
+                        await cls._close_pending_payment(
+                            db,
+                            payment,
+                            reason="超时关单同步撤销渠道交易",
+                        )
+                    await db.commit()
+            except Exception as e:
+                logger.warning(
+                    "本地置 CLOSED 失败 order=%s payment=%s: %s",
+                    order_no,
+                    snap.payment_no,
+                    e,
+                )
+
         return late_paid
 
     @classmethod

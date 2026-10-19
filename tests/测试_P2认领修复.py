@@ -98,8 +98,9 @@ async def test_process_refund_approve_platform_rejects_keeps_pending():
     db = MagicMock()
     locked_result = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
     db.execute = AsyncMock(return_value=locked_result)
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.get = AsyncMock(side_effect=[d_order, order, d_order, order])
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     mock_provider = MagicMock()
     mock_provider.agree_refund = AsyncMock(return_value=False)
@@ -115,8 +116,9 @@ async def test_process_refund_approve_platform_rejects_keeps_pending():
             await DeliveryService.process_refund(db, 1, approve=True)
 
     assert exc.value.code == 40062
-    # 退款状态不应被修改
+    # 平台拒绝后回 PENDING，供商家重试
     assert refund.status == "PENDING"
+    db.commit.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -133,8 +135,9 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
     db = MagicMock()
     locked_result = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
     db.execute = AsyncMock(return_value=locked_result)
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.get = AsyncMock(side_effect=[d_order, order, d_order, order])
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     mock_provider = MagicMock()
     mock_provider.disagree_refund = AsyncMock(return_value=False)
@@ -151,6 +154,7 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
 
     assert exc.value.code == 40062
     assert refund.status == "PENDING"
+    db.commit.assert_awaited()
 
 
 # ─── 3. 手动补打幂等 ───

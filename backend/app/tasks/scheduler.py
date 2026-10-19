@@ -501,6 +501,9 @@ def register_tasks(scheduler) -> None:
         now = naive_local_now()
         for oid in order_ids:
             try:
+                # 1) 短锁确认仍超时未付，立刻释放（渠道 HTTP 不得持订单锁）
+                order_no = None
+                store_id = None
                 async with AsyncSessionLocal() as db:
                     order = (
                         await db.execute(
@@ -522,62 +525,69 @@ def register_tasks(scheduler) -> None:
                     if order.created_at and order.created_at > now - timedelta(minutes=minutes):
                         await db.commit()
                         continue
+                    order_no = order.order_no
+                    store_id = order.store_id
+                    await db.commit()
 
-                    # 关单前查单 / 撤销渠道：仍持本单行锁（单行，非整批）
-                    try:
-                        if await PaymentService.sync_before_close_order(db, order):
-                            rescued += 1
-                            await db.commit()
-                            try:
-                                await ws_manager.notify_order_event(
-                                    "ORDER_PAID",
-                                    {
-                                        "order_id": order.id,
-                                        "order_no": order.order_no,
-                                        "store_id": order.store_id,
-                                        "source": "CLOSE_PRE_SYNC",
-                                    },
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "关单前入账 WS 通知失败 order_id=%s", order.id
-                                )
-                            continue
-                    except Exception:
-                        logger.exception("关单前查单异常 order_id=%s", order.id)
-
-                    await db.refresh(order)
-                    if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
-                        await db.commit()
+                # 2) 锁外查单
+                try:
+                    if await PaymentService.sync_before_close_order_by_id(int(oid)):
+                        rescued += 1
+                        try:
+                            await ws_manager.notify_order_event(
+                                "ORDER_PAID",
+                                {
+                                    "order_id": int(oid),
+                                    "order_no": order_no,
+                                    "store_id": store_id,
+                                    "source": "CLOSE_PRE_SYNC",
+                                },
+                            )
+                        except Exception:
+                            logger.exception(
+                                "关单前入账 WS 通知失败 order_id=%s", oid
+                            )
                         continue
+                except Exception:
+                    logger.exception("关单前查单异常 order_id=%s", oid)
 
-                    try:
-                        if await PaymentService.close_channel_payments(db, order):
-                            rescued += 1
-                            await db.commit()
-                            try:
-                                await ws_manager.notify_order_event(
-                                    "ORDER_PAID",
-                                    {
-                                        "order_id": order.id,
-                                        "order_no": order.order_no,
-                                        "store_id": order.store_id,
-                                        "source": "CLOSE_CHANNEL_LATE_PAID",
-                                    },
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "关单迟到入账 WS 通知失败 order_id=%s", order.id
-                                )
-                            continue
-                    except Exception:
-                        logger.exception("关单撤销渠道交易异常 order_id=%s", order.id)
-
-                    await db.refresh(order)
-                    if order.status != "PENDING_PAYMENT" or order.payment_status != "UNPAID":
-                        await db.commit()
+                # 3) 锁外撤销渠道 + 再查单
+                try:
+                    if await PaymentService.close_channel_payments_by_id(int(oid)):
+                        rescued += 1
+                        try:
+                            await ws_manager.notify_order_event(
+                                "ORDER_PAID",
+                                {
+                                    "order_id": int(oid),
+                                    "order_no": order_no,
+                                    "store_id": store_id,
+                                    "source": "CLOSE_CHANNEL_LATE_PAID",
+                                },
+                            )
+                        except Exception:
+                            logger.exception(
+                                "关单迟到入账 WS 通知失败 order_id=%s", oid
+                            )
                         continue
+                except Exception:
+                    logger.exception("关单撤销渠道交易异常 order_id=%s", oid)
 
+                # 4) 短锁关单（仍未付才取消）
+                async with AsyncSessionLocal() as db:
+                    order = (
+                        await db.execute(
+                            select(Order)
+                            .where(
+                                Order.id == int(oid),
+                                Order.status == "PENDING_PAYMENT",
+                                Order.payment_status == "UNPAID",
+                            )
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalar_one_or_none()
+                    if not order:
+                        continue
                     await apply_order_status(
                         db,
                         order,

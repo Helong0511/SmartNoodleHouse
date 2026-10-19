@@ -787,6 +787,10 @@ class DeliveryService:
         approve: bool,
         reason: str | None = None,
     ) -> dict:
+        """处理外卖退款：短锁认领 PROCESSING → 锁外调平台 → 短锁落终态。
+
+        避免在 DeliveryRefund 行锁内等待美团/饿了么 HTTP。
+        """
         refund = (
             await db.execute(
                 select(DeliveryRefund).where(DeliveryRefund.id == int(refund_id)).with_for_update()
@@ -794,7 +798,9 @@ class DeliveryService:
         ).scalar_one_or_none()
         if not refund:
             raise AppException(40453, "退款记录不存在")
-        if refund.status != "PENDING":
+        if refund.status in ("APPROVED", "REJECTED"):
+            raise AppException(40053, f"退款已处理: {refund.status}")
+        if refund.status not in ("PENDING", "PROCESSING"):
             raise AppException(40053, f"退款已处理: {refund.status}")
 
         d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
@@ -805,18 +811,58 @@ class DeliveryService:
         credentials = await get_credentials_for_store(db, refund.platform, store_id)
         if not credentials:
             raise AppException(40061, f"门店 {store_id} 未配置 {refund.platform} 外卖凭证")
-        provider = get_delivery_provider(refund.platform, credentials)
+
+        platform = refund.platform
+        platform_refund_id = refund.platform_refund_id or ""
+        platform_order_id = d_order.platform_order_id if d_order else ""
+        refund_type = refund.refund_type
+        refund_amount = refund.amount
+        delivery_order_id = refund.delivery_order_id
+        order_channel = getattr(order, "channel", None)
+
+        # 认领后立刻释放行锁，再调平台
+        if refund.status == "PENDING":
+            refund.status = "PROCESSING"
+            await db.flush()
+        await db.commit()
+
+        provider = get_delivery_provider(platform, credentials)
+        if approve:
+            ok = await provider.agree_refund(platform_refund_id, platform_order_id)
+        else:
+            ok = await provider.disagree_refund(
+                platform_refund_id,
+                platform_order_id,
+                reason or "商家拒绝退款",
+            )
+
+        refund = (
+            await db.execute(
+                select(DeliveryRefund).where(DeliveryRefund.id == int(refund_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not refund:
+            raise AppException(40453, "退款记录不存在")
+        if refund.status in ("APPROVED", "REJECTED"):
+            return {"ok": True, "status": refund.status, "refund_type": refund.refund_type}
+        if refund.status != "PROCESSING":
+            raise AppException(40053, f"退款已处理: {refund.status}")
+
+        if not ok:
+            # 平台拒绝：回 PENDING 供商家重试
+            refund.status = "PENDING"
+            await db.flush()
+            raise AppException(40062, "平台拒绝同意退款，请稍后重试或联系平台" if approve else "平台拒绝退款拒绝操作，请稍后重试或联系平台")
+
+        d_order = await db.get(DeliveryOrder, delivery_order_id)
+        order = await db.get(Order, refund.order_id) if refund.order_id else None
 
         if approve:
-            ok = await provider.agree_refund(refund.platform_refund_id or "", d_order.platform_order_id if d_order else "")
-            # 平台拒绝同意（ok=False）：不得标记 APPROVED，保持 PENDING 让商家重试
-            if not ok:
-                raise AppException(40062, "平台拒绝同意退款，请稍后重试或联系平台")
             refund.status = "APPROVED"
             if d_order:
                 d_order.refund_status = "APPROVED"
                 order = await db.get(Order, d_order.order_id)
-                if order and refund.refund_type == "FULL" and order.status not in ("CANCELLED", "REFUNDED"):
+                if order and refund_type == "FULL" and order.status not in ("CANCELLED", "REFUNDED"):
                     from app.services.order_lifecycle import apply_order_status
 
                     await apply_order_status(
@@ -836,13 +882,13 @@ class DeliveryService:
                     await FinancialLedgerService.record_refund(
                         db,
                         store_id=int(order.store_id),
-                        amount=refund.amount,
-                        channel=refund.platform or order.channel,
-                        provider=refund.platform,
+                        amount=refund_amount,
+                        channel=platform or order_channel,
+                        provider=platform,
                         order_id=order.id,
-                        delivery_order_id=refund.delivery_order_id,
+                        delivery_order_id=delivery_order_id,
                         delivery_refund_id=refund.id,
-                        remark=f"delivery_refund:{refund.platform}:{refund.platform_refund_id or refund.id}",
+                        remark=f"delivery_refund:{platform}:{platform_refund_id or refund.id}",
                     )
                 except Exception as exc:
                     logger.exception(
@@ -853,14 +899,6 @@ class DeliveryService:
                     if get_settings().is_production:
                         raise AppException(50010, "外卖退款分录写入失败，请重试") from exc
         else:
-            ok = await provider.disagree_refund(
-                refund.platform_refund_id or "",
-                d_order.platform_order_id if d_order else "",
-                reason or "商家拒绝退款",
-            )
-            # 平台拒绝拒绝（ok=False）：不得标记 REJECTED，保持 PENDING
-            if not ok:
-                raise AppException(40062, "平台拒绝退款拒绝操作，请稍后重试或联系平台")
             refund.status = "REJECTED"
             if d_order:
                 d_order.refund_status = "REJECTED"

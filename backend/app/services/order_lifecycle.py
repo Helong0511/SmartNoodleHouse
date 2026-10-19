@@ -178,9 +178,12 @@ async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
     """订单进入 READY 时尝试推送订阅消息（失败不阻断主流程）。
 
     微信 / 支付宝各自模板与身份；能发则都尝试（用户可能双端都订过）。
+    仅在锁内解析 openid/桌台，HTTP 投递用 create_task，避免拉长 Order 行锁。
     """
     if not order.customer_id:
         return
+    import asyncio
+
     from app.models import DiningTable
     from app.services.alipay_mini_client import (
         send_order_ready_subscribe as send_alipay_order_ready,
@@ -194,23 +197,38 @@ async def notify_order_ready_subscribe(db: AsyncSession, order: Order) -> None:
         if t:
             table_label = t.table_name or t.table_no
 
-    openid = await CustomerService.resolve_wechat_openid(db, order.customer_id)
-    if openid:
-        await send_order_ready_subscribe(
-            openid=openid,
-            order_no=order.order_no,
-            order_id=order.id,
-            table_label=table_label,
-        )
+    order_no = order.order_no
+    order_id = int(order.id)
 
+    openid = await CustomerService.resolve_wechat_openid(db, order.customer_id)
     alipay_uid = await CustomerService.resolve_alipay_user_id(db, order.customer_id)
+
+    async def _send_wechat() -> None:
+        try:
+            await send_order_ready_subscribe(
+                openid=openid,
+                order_no=order_no,
+                order_id=order_id,
+                table_label=table_label,
+            )
+        except Exception:
+            logger.exception("微信出餐订阅推送失败 order_id=%s", order_id)
+
+    async def _send_alipay() -> None:
+        try:
+            await send_alipay_order_ready(
+                alipay_user_id=alipay_uid,
+                order_no=order_no,
+                order_id=order_id,
+                table_label=table_label,
+            )
+        except Exception:
+            logger.exception("支付宝出餐订阅推送失败 order_id=%s", order_id)
+
+    if openid:
+        asyncio.create_task(_send_wechat())
     if alipay_uid:
-        await send_alipay_order_ready(
-            alipay_user_id=alipay_uid,
-            order_no=order.order_no,
-            order_id=order.id,
-            table_label=table_label,
-        )
+        asyncio.create_task(_send_alipay())
 
 
 def _infer_assert_kind(source: str) -> str:
