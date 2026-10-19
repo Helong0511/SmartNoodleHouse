@@ -65,8 +65,15 @@ def _drop_index(conn, table: str, name: str) -> None:
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
         conn.exec_driver_sql(f"DROP INDEX IF EXISTS {name}")
-    else:
+        return
+    # MySQL：若索引仍被外键引用（errno 1553）则跳过，避免阻断后续 revision。
+    try:
         conn.execute(text(f"ALTER TABLE {table} DROP INDEX {name}"))
+    except Exception as exc:  # noqa: BLE001 — dialect 包装层不一致，按文案识别
+        msg = str(exc).lower()
+        if "1553" in msg or "needed in a foreign key" in msg:
+            return
+        raise
 
 
 def _add_unique_index(conn, table: str, name: str, cols: str) -> None:

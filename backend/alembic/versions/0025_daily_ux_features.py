@@ -256,10 +256,11 @@ def upgrade() -> None:
             )
         ).scalar()
         if row == "NO":
+            # 必须与 users.id 同为 bigint UNSIGNED，否则 MySQL 3780 拒绝改列
             conn.execute(
                 text(
                     "ALTER TABLE `pos_refund_requests` "
-                    "MODIFY COLUMN `requested_by` bigint NULL DEFAULT NULL "
+                    "MODIFY COLUMN `requested_by` bigint UNSIGNED NULL DEFAULT NULL "
                     "COMMENT '申请人（顾客自助申请时为 NULL）'"
                 )
             )

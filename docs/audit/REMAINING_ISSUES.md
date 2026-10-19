@@ -12,7 +12,7 @@
 |---|---|---|---|---|---|
 | BLK-001 | 微信/支付宝/美团/饿了么真实沙箱联调 | 中 | 运维 + 业务 | 官方真实凭证沙箱跑通 | 契约测试已通过 |
 | BLK-002 | git 历史曾出现真实密钥 | **高** | 运维/安全 | 全量轮换密钥与库口令 | `python scripts/上线前运维检查清单.py` |
-| BLK-003 | 生产 MySQL schema 与本地迁移差异 | 中 | DBA | `alembic upgrade head --sql` 预生产演练 | 见 `scripts/生产部署-ubuntu.txt` 在线 DDL 节 |
+| BLK-003 | 生产 MySQL schema 与本地迁移差异 | 中 | DBA | `alembic upgrade head --sql` 预生产演练 | 本地已修 0019/0025 阻断并升到 `0036`；生产仍须预演 |
 | BLK-004 | 监控告警接入 | 中 | 运维 | Prometheus/Grafana 配告警 | `/api` 性能指标端点已就绪 |
 | BLK-005 | 小程序上架审核 | 低 | 业务 | 按上架检查清单提交 | — |
 

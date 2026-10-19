@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-19T08:36:29Z",
+  "updated_at": "2026-10-19T08:51:44Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,15 +113,15 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "8033565245698864b875d33327732f1960c11eef286bb3f82bbb1020974ca7d1",
-      "size": 154936,
-      "normalized_sha256": "8033565245698864b875d33327732f1960c11eef286bb3f82bbb1020974ca7d1"
+      "sha256": "515a49a75bf7b04929171b3ddc086b9d2fe98ee93e4fbefd9a66a6691b151be0",
+      "size": 155066,
+      "normalized_sha256": "515a49a75bf7b04929171b3ddc086b9d2fe98ee93e4fbefd9a66a6691b151be0"
     },
     "aoci.database.txt": {
       "role": "index",
-      "sha256": "57817b69c4c1387bee870eb757bd5b93bebb074864bc16035d03e38880dfec4e",
-      "size": 13412,
-      "normalized_sha256": "57817b69c4c1387bee870eb757bd5b93bebb074864bc16035d03e38880dfec4e"
+      "sha256": "ac8a7893360bbc3df75b20e98b55c26479663701fb9a8f46bbcba304af4fc78f",
+      "size": 20521,
+      "normalized_sha256": "ac8a7893360bbc3df75b20e98b55c26479663701fb9a8f46bbcba304af4fc78f"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -263,9 +263,9 @@
     },
     "backend/alembic/versions/0019_three_way_alignment.py": {
       "role": "index",
-      "sha256": "090539762f0e97a6a1e73098336bd8038be941c1be20cbff9fa35e76c2afa955",
-      "size": 7762,
-      "normalized_sha256": "090539762f0e97a6a1e73098336bd8038be941c1be20cbff9fa35e76c2afa955"
+      "sha256": "5beea12fa52b789aba3dfe65436bcb7e929c245a2e25cee225a8fb71de15a8b6",
+      "size": 8096,
+      "normalized_sha256": "5beea12fa52b789aba3dfe65436bcb7e929c245a2e25cee225a8fb71de15a8b6"
     },
     "backend/alembic/versions/0020_option_group_store_scope_not_null.py": {
       "role": "index",
@@ -299,9 +299,9 @@
     },
     "backend/alembic/versions/0025_daily_ux_features.py": {
       "role": "index",
-      "sha256": "147f053cec4d933d1374bd634f3fa9256a08489d8daffcb6d760c4a0ffe86cc0",
-      "size": 13672,
-      "normalized_sha256": "147f053cec4d933d1374bd634f3fa9256a08489d8daffcb6d760c4a0ffe86cc0"
+      "sha256": "465f5cb65e6bd63042702b7731b09c6032105eb462c72b58a9977129b78b7309",
+      "size": 13770,
+      "normalized_sha256": "465f5cb65e6bd63042702b7731b09c6032105eb462c72b58a9977129b78b7309"
     },
     "backend/alembic/versions/0026_birthday_calendar.py": {
       "role": "index",
@@ -3983,9 +3983,9 @@
     },
     "sql/struct.sql": {
       "role": "index",
-      "sha256": "da2490b484299d6f81d14ce7672ab008b6814f2f220835b5332438ee981d45c0",
-      "size": 154665,
-      "normalized_sha256": "da2490b484299d6f81d14ce7672ab008b6814f2f220835b5332438ee981d45c0"
+      "sha256": "e6febbaf161118301de9ecd5a43b7b88a1eaa4a878397ca2fcc1f2ff0a130018",
+      "size": 154706,
+      "normalized_sha256": "e6febbaf161118301de9ecd5a43b7b88a1eaa4a878397ca2fcc1f2ff0a130018"
     },
     "sql/人脸数据.sql": {
       "role": "index",
@@ -5501,6 +5501,20 @@
         "entry_sha256": "23727ecbf50fcc31073053606b166cb117188d456db5a49ecd789cb9f221dacc"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/alembic_version",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "7a57426d1e09934698c84eab2b61870eb7d4e3dc5d76e93890c2cb1ab9799d6e",
+        "entry_sha256": "78a03d9195393bdbb72b21c4e73b1acb87c7babcadb61fff9a032b7606575e5b"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/archived_order_snapshots",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "527bbcfa9fc7aee1c66415e6042f12e06b35dce29cd947f5e6f6c98bf681eeee",
+        "entry_sha256": "df07f731da0d3e3397818a8749b49114ad046d5ba3a54c5229719a8da5f49afd"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/balance_ledger",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
@@ -5513,6 +5527,13 @@
         "evidence_version": "database-evidence/v1",
         "table_evidence_sha256": "d7a854642808c70c964f0c15e5bb9846a55beaabd639a3465ef54c2bdc0ea2ab",
         "entry_sha256": "f68ab3c10abdc11b478fa487447474331e1553dc650f24e7dfd6f9b5a819bb6a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/campaign_attributions",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "daa17991e1a752377bfeb72371091e1e64b95c76fe6615d083c67e2de0faed29",
+        "entry_sha256": "6e33abb14ec86c79f71d6133395d8685c4d341d186511e8700ce9ffc73326556"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/cashier_shifts",
@@ -5564,6 +5585,13 @@
         "entry_sha256": "ff4bf6b368bc5838c6b96e059d22f54d66531404a570d909b0f0eef1fd0cd89a"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_favorite_products",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "2808f9ebc1736b859fbc68dc38a0c34015a1cdb60dd1517a18be89a1ec0e4ea9",
+        "entry_sha256": "97ec1064d4abe66729a66d0545408a7532f49bad55237c8994edd9818284c2d7"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_identities",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
@@ -5571,11 +5599,39 @@
         "entry_sha256": "bc1c39b255915eac6f7abafc0bd30d8640d278259bc934bfcd066bcaca619c40"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_lifecycle",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "76172849927462ed7a15f20a7bffe6d800e6070f70742e47c04aaf4bfda053d8",
+        "entry_sha256": "8035e17707ac8bae1844b3ee92e0d47536fa3e1eb800ae929b18bca890b3379c"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_preferences",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
         "table_evidence_sha256": "0608009c5716d979384b4b060cfd5ed2a77e62555cbfa642f8f1f3545c98cde1",
         "entry_sha256": "6a72e7adb3006fec79eb76bf22db0c142c4c3dfa354e08117447f637f75a95f5"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_segment_members",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "36f09a4c70e9cb268b7c6f66d370bb6722823ed276a9b6ac4cbf29bfc243c928",
+        "entry_sha256": "c388640951dcb09ccc94ca2f1f83cb21b15765f0ec039920e4ee76b8f5f9ee54"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_segments",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "664ba345b6824821bd860c10af32fae13c77b4119d3c5ed44e1288011bb73628",
+        "entry_sha256": "eacbe0f5d76d07396db75c37d12d5bcaae084ec22409a6030e398be2eb67deb2"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_social_identities",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "e35415578b9bd285b1e6410b6e28be7045c2021f75ad252ede16e42de0466338",
+        "entry_sha256": "8b6cb814101548c488162abeadf59b3dc3be43f16954f1dfa503e702f27932ce"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/customer_taste_profiles",
@@ -5595,8 +5651,8 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/customers",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "b530c89b8d3d882fc35695c5271b27a5005b1d7917bad08d4042644b78db5686",
-        "entry_sha256": "c2f6711d40d0156541095a36bda44101e9f4b6cb36590b4814625f392cd849f5"
+        "table_evidence_sha256": "969028a4882a1cbe2a6708aef54aa71ed2ddae7e2f9a669eb6d3c26beaf28543",
+        "entry_sha256": "10d38b4df4d5c18a539e64de63de14fb42f3b1baac385cca1625d23de1e13026"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_callback_logs",
@@ -5609,8 +5665,8 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_orders",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "0939b939cf1fdc4f8db2027d2e96997270646a784c369af957f1c9199723a870",
-        "entry_sha256": "2646f8ac468af1fb4c895a401ec6d2cd7cc335f786556f693ed5102bb4b24cc6"
+        "table_evidence_sha256": "f5b960ee6345b170490c46c2286fbf2744864fbeee7898381a790d7415bc14fe",
+        "entry_sha256": "049d38a2eda77913a07e6868376c33352a99f9709825278fc0ce21388f648da1"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_product_maps",
@@ -5623,8 +5679,8 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_refunds",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "50a55452a34a14911120e637e943f46cad661a802c153dfb7eea82a8246fa21c",
-        "entry_sha256": "28912cca89f4356d014189104bf7863fd96ce18056b96e554d12f27876679f48"
+        "table_evidence_sha256": "93c28b33dfeac66a0bee858514d1445eb38a3b75b3a93002fda0754cb99a8543",
+        "entry_sha256": "0af09cbd0a2b2949a8987595ead65f21e79bbbd1abd2667bdf31da75769df014"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/delivery_sync_alerts",
@@ -5655,6 +5711,41 @@
         "entry_sha256": "cbf62719eb8204b7a2d3205db839a7872017732ad4c818df14ab52bfd49b9ae6"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/invoice_requests",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "b413bfde9a4b3dbb65439e5b701d3116cf1242e6ec8494546a490623bea728fd",
+        "entry_sha256": "61455017a5e12bf8e0d873ff513e331412c38c5304095a0eca9fe8f49caccc76"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/marketing_campaigns",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "0ec06cd947a763631f87c4823eef258a48a8984ef059ed83931de767bc56e237",
+        "entry_sha256": "a66b295aff5679c957ab6783c30f0225f493acf18212fc29b49cb35aee2267de"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/marketing_message_logs",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "a9ddaa4f37c47d15627def3fae956d12d159fc5c8132da3177637a68a3224b85",
+        "entry_sha256": "7fd3de852e32b65fba683921295940d171c390e8adf7b56533f5f6173dd078b7"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/marketing_rules",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "08132267c55d5dce2e89f23f673dd1c83d1df10060bcc6fb41941851c9894313",
+        "entry_sha256": "ac6d882b2db195862c42818593c13c3a1b0cec6e71ceeda2d1a30f8c5511da2e"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/marketing_tasks",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "841d96df96a046ec5ec9589fd534f02ec1067cf4f84cdcb165d86e7c8e75cca6",
+        "entry_sha256": "8e78e6f66ba1646158dcc8338170540b4f225359b7d5adbf0111de90d3ed9fad"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/member_levels",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
@@ -5665,15 +5756,15 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/operation_logs",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "246cd5545a21c243c67f3085e23c3600d650cd0a2af4debfbcf93b9e3e4e6e59",
-        "entry_sha256": "d148750e21666e4e6d4aaac4dabb55327349fe285f0d8099ba3e7052200f940c"
+        "table_evidence_sha256": "b1651cf174d7987a7c8bdcb80a9567445f6f7567c232816bc6e853a0ff0b347d",
+        "entry_sha256": "a0dbf8a0671ccbefcc20b7c7803e2229ab4309c9fe48e81e05ad6375b314e286"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/option_groups",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "192b39853d3b09bc4a45ff0e05468bf117e05d995ba174de6b459a0ecd7fef82",
-        "entry_sha256": "ad9229d7d724fe05a6f5ed36b02a796bf26e77ca1476bccfcb4b012977874552"
+        "table_evidence_sha256": "84076a363de28b97239eeff18371705da01b5f8612e9d0988c3a3d45da6d34c2",
+        "entry_sha256": "44c20debe4a1b93cdbe3c58493e4cf119384e6339046365884e0c279b7dfd1a0"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/options",
@@ -5714,8 +5805,8 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/orders",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "36d3dcc8a84bd324befe900b1ae71b3f1ab006ce1f16b7ead97b794920d006fa",
-        "entry_sha256": "819e20c43e4d02aced82251e0cd6f961170d78c11178c721504f86aebde9d9d0"
+        "table_evidence_sha256": "da0c54761d5fbd0dc3efff59f31f396182b1edeffa3092a771094b66259f1626",
+        "entry_sha256": "293989b111ab285aa46bbc911a4d6f9540599af7927d1f898b94619f8244cad8"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/outbox_events",
@@ -5730,6 +5821,20 @@
         "evidence_version": "database-evidence/v1",
         "table_evidence_sha256": "1979158bb3d861270259399f561286f9aeda047ef10b8b0635a91837ec8081e1",
         "entry_sha256": "42cffa76e89d655cbbf75bbba699d29e48278eae02d1781ae3dd8db59b6b612c"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/payment_reconcile_batches",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "c1f951877dacd7bec7f89ec5909c2ac0668e41ff684fcef389839e3a2b17ae03",
+        "entry_sha256": "20f601640502a64235c43349780a7cb3262c1e1ec12a198776c1497e6c49afc7"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/payment_reconcile_diffs",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "1f05fdee08b0ab8b8074b2b0b6935abd95916d1332055f1710de031ce1332ce9",
+        "entry_sha256": "1900860bed30e3a733dcbd520e6bc9e193517c26a219e59b1e458bf56cbf6e66"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/payment_refunds",
@@ -5774,6 +5879,13 @@
         "entry_sha256": "83d93df263ad6c2d0c3951d002bc61f193f8d57264f013f7e9c15c06a69fbc40"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/point_exchange_options",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "7b98c073130eee64a267e12e0c35006fd0b5efb10c3c10d71f8967212f2c5cb5",
+        "entry_sha256": "7414fec7339ff9195f0640347cd05295b32026a77d7347a019d6b5b9d71fae43"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/point_ledger",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
@@ -5784,8 +5896,8 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/pos_refund_requests",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "7f340051c91583e8041730d0b0a3c1e230055358b64265e643ddd56cb39cd9c4",
-        "entry_sha256": "2be43f5bebef20eddff21a6f04e2efe50ef7bbcb1cda483df96bd9fbc4c25a8e"
+        "table_evidence_sha256": "dbaace27931880b611f13abb7631f8cfd50b7dcb6f034d705eb54ffe87d8bc71",
+        "entry_sha256": "20a192c133ff95fc31cf2475bf5111cf83f6598014d920730a7f514a4aaf76f5"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/print_jobs",
@@ -5840,8 +5952,15 @@
         "object_ref": "database://smart_noodle_house/smart_noodle_house/products",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "da8baf2537e4c340b0c6077aa1ee535283e885db789de8d6d41cf867508c3467",
-        "entry_sha256": "c130870f0ceace153c8171e2365facd73e963616bc5f716945b5a54f451698c7"
+        "table_evidence_sha256": "5512b4bc4303ea8e40cd35a35b0635f424f50e6cc6b84f39699f54c374d6c3b4",
+        "entry_sha256": "602e368992d0de4fd5b69b03a43e8cb9459937ea04ce65baa8c8fd8bee0f840f"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/queue_tickets",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "0309055a178eff5e0c1865eeee42e6f67c9a36199596173b5f01611746e8e5c2",
+        "entry_sha256": "01b8fe4720f2e627f9217277fbb9fcda75978c047e56f1e0084eeeef88bd0d51"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/recharge_orders",
@@ -5858,6 +5977,13 @@
         "entry_sha256": "b1cdc5f47aa576caee9b432f87103f17c57a9feeba9b371b38b9293962f8f73b"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/role_delegations",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "5c1c51168265737bbbdad94191b817f8c4c1cf801fe4db6c961192f140e93275",
+        "entry_sha256": "a941eb547b9639947db838dc495c3377f0d30f3065074c9da68717d2669c9f88"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/role_permissions",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
@@ -5870,6 +5996,34 @@
         "evidence_version": "database-evidence/v1",
         "table_evidence_sha256": "9a6017a99ac8fe51ecfe0a641fc91800e705f3ce256235b25c51bf6852b448aa",
         "entry_sha256": "a4d91b855fb74d698923ccfb07906fc5564e198bc2aedf5199967945b7f4d622"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/shared_cart_items",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "4d1b36da865373b707517812af81ce051a2dd669afa43560c8d906f96cda2770",
+        "entry_sha256": "46ea163320a0919aa200e8a5b92c5695844b31bf29bd14d9047238b3a68ff9a1"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/social_benefit_redemptions",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "a43c90415e3fcaf41810f7a5a96230b15823bc005dc9f7cf6a9b2312f177cb0a",
+        "entry_sha256": "25c7c2dfb6ab3f97cab82efb527693d45795e8f29986cc988176a7f61e676c7a"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/social_benefit_rules",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "7ecbb357974f81bc6f90036ec4c118a93e9fdc06e7f02d773963cd14f6b076ff",
+        "entry_sha256": "7c29d001ad5065585cd8c15c72bc0c1585987b45f70af121cf0ed475b3a86983"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/social_identity_types",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "225942956347d8960d79ed1546d67bbc9bf0f014b87b33b3a84078a813378278",
+        "entry_sha256": "7a3e3bfa1a8e7327bf9a20eaebda26c1d80a6cfcdbfec41f1ba800663a4f15e2"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/store_business_hours",
@@ -5907,11 +6061,25 @@
         "entry_sha256": "cc7290450a6399a9ace27311199f1c12fdbf25aea800739f897ac4877128449a"
       },
       {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/table_parties",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "873ec180e35c6559a7440e120fb0b7aa0939e4c26d8dc3f0eea69640518da30c",
+        "entry_sha256": "d7a93d05ff10f949efb0c0cbd6c96e51bcbec1ad2b27ed4ae7ca4a2e77f82f05"
+      },
+      {
+        "object_ref": "database://smart_noodle_house/smart_noodle_house/table_party_members",
+        "source_id": "smart_noodle_house",
+        "evidence_version": "database-evidence/v1",
+        "table_evidence_sha256": "870f30c5424a178bbe0fa10a82d214678fe0863f237f4d3e0295bd1678710d28",
+        "entry_sha256": "5ee27b804e081adc9492e0c335a519755160dbe215b29b703e4465d8055d1043"
+      },
+      {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/tables",
         "source_id": "smart_noodle_house",
         "evidence_version": "database-evidence/v1",
-        "table_evidence_sha256": "70ce9966d7f3788a83927b0a6b03f82fb263d9cf16e66d01bedd2282dfd39cab",
-        "entry_sha256": "c50300f727da552fbc1cdecb43afbd5b873b2c56aa604871ca4605b48f95b7a4"
+        "table_evidence_sha256": "f7411ed92edc9d6c4b8969b6c4da0d56f87905e9998cf4d186a8b3c26fd03936",
+        "entry_sha256": "ff1717a4a82216a3d6395c33e924c65e493ca19ea7ad43f07b6880b438aa7bf5"
       },
       {
         "object_ref": "database://smart_noodle_house/smart_noodle_house/users",
