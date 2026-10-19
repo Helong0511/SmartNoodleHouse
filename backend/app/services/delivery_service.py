@@ -196,7 +196,10 @@ class DeliveryService:
         if order is None:
             # 库存不足已拒单（无本地单），正常结束以 ack 平台消息，避免 Inbox 无限重试
             return DeliveryNotifyResult(
-                event=DeliveryEvent.ORDER_NEW, order=None, extra={"rejected": True}
+                event=DeliveryEvent.ORDER_NEW,
+                order=None,
+                deferred_tasks=tasks or [],
+                extra={"rejected": True},
             )
         return DeliveryNotifyResult(event=DeliveryEvent.ORDER_NEW, order=order, deferred_tasks=tasks)
 
@@ -343,17 +346,25 @@ class DeliveryService:
         from app.services.stock_service import deduct_for_order_items
 
         try:
-            await deduct_for_order_items(
-                db,
-                [{"product_id": row["product"].id, "quantity": row["quantity"]} for row in order_items_payload],
-                store_id=store_id,
-            )
+            # SAVEPOINT：扣库失败回滚嵌套事务，释放库存行锁后再写告警/投递取消任务
+            async with db.begin_nested():
+                await deduct_for_order_items(
+                    db,
+                    [
+                        {"product_id": row["product"].id, "quantity": row["quantity"]}
+                        for row in order_items_payload
+                    ],
+                    store_id=store_id,
+                )
         except AppException as e:
             if getattr(e, "code", None) != 40031:
                 raise
-            await cls._reject_order_soldout(db, provider, parsed, str(e))
-            # 返回 (None, []) 告知上层该单已拒；Inbox/回调据此正常 ack，不再重试
-            return None, []
+            # 平台取消走 deferred，避免持库存锁或长事务等外网
+            deferred = cls._reject_order_soldout_tasks(
+                parsed, credentials, reason=str(e)
+            )
+            await cls._write_reject_alert(db, parsed, str(e))
+            return None, deferred
 
         store = await db.get(Store, int(store_id)) if store_id else None
         order = Order(
@@ -498,13 +509,31 @@ class DeliveryService:
         return order, deferred
 
     @classmethod
-    async def _reject_order_soldout(cls, db, provider, parsed: dict, reason: str) -> None:
-        """跨平台超卖兜底：本地库存不足无法接单时，主动取消平台订单并记录告警（不落本地单）。"""
+    def _reject_order_soldout_tasks(
+        cls,
+        parsed: dict,
+        credentials: PlatformCredentials | None,
+        *,
+        reason: str,
+    ) -> list[dict]:
+        """库存不足拒单：平台取消放入 deferred，由 run_deferred_tasks 锁外执行。"""
         platform_order_id = str(parsed.get("platform_order_id") or "")
-        try:
-            await provider.cancel_order(platform_order_id, reason="餐品售罄，商家无法接单")
-        except Exception:  # noqa: BLE001 取消失败也要留告警，不影响 ack
-            logger.exception("拒单时取消平台订单失败 platform_order_id=%s", platform_order_id)
+        if not platform_order_id:
+            return []
+        return [
+            {
+                "action": "cancel_order",
+                "platform": str(parsed.get("platform") or "").upper(),
+                "platform_order_id": platform_order_id,
+                "credentials": cls._creds_dict(credentials) if credentials else {},
+                "reason": "餐品售罄，商家无法接单",
+                "detail": reason[:500] if reason else None,
+            }
+        ]
+
+    @classmethod
+    async def _write_reject_alert(cls, db: AsyncSession, parsed: dict, reason: str) -> None:
+        platform_order_id = str(parsed.get("platform_order_id") or "")
         db.add(
             DeliverySyncAlert(
                 store_id=parsed.get("store_id"),
@@ -515,6 +544,7 @@ class DeliveryService:
                 platform_order_id=platform_order_id or None,
             )
         )
+        await db.flush()
 
     @classmethod
     async def _resolve_product(

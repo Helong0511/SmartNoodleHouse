@@ -39,6 +39,10 @@ async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
                     await _rollback_confirm(task.get("order_id"), platform, platform_order_id)
             elif action == "reply_urge":
                 await provider.reply_urge(platform_order_id, task.get("raw") or {})
+            elif action == "cancel_order":
+                # 库存不足拒单等：平台取消在 DB 事务外执行
+                reason = task.get("reason") or "商家取消"
+                await provider.cancel_order(platform_order_id, reason)
             else:
                 logger.warning("未知 deferred task: %s", action)
         except Exception as e:

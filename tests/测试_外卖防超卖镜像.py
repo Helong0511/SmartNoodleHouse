@@ -337,11 +337,19 @@ async def test_库存不足落单被拒_不建本地单且写告警(db_session):
         db_session, provider, parsed, {}, None
     )
 
-    # 返回 (None, [])：不建本地单
-    assert order is None and side == []
-    # 已主动取消平台订单
+    # 返回 (None, deferred)：不建本地单；平台取消锁外异步执行
+    assert order is None
+    assert side and side[0].get("action") == "cancel_order"
+    assert side[0].get("platform_order_id") == "MT-SOLD-001"
+    # 落库阶段尚未调平台
+    assert provider.cancel_order.await_count == 0
+
+    from app.services.delivery_tasks import run_deferred_tasks
+
+    await run_deferred_tasks(side)
     assert provider.cancel_order.await_count == 1
     assert provider.cancel_order.await_args.args[0] == "MT-SOLD-001"
+
     # 写入 REJECT_ORDER 告警
     alerts = (
         await db_session.execute(select(DeliverySyncAlert))

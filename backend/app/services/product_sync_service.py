@@ -53,23 +53,45 @@ class ProductSyncService:
         if not creds:
             raise AppException(40063, "缺少平台凭证")
         provider = get_delivery_provider(platform, creds)
+        # 先组 payload 再释放连接占用；平台 HTTP 不拖着整菜单事务
+        jobs = [
+            (
+                int(p.id),
+                p.name,
+                p.product_no,
+                cls._build_product_payload_cached(p, cats.get(p.category_id), binding.platform_shop_id),
+            )
+            for p in products
+        ]
+        await db.commit()
+
         synced = 0
         errors: list[str] = []
-
-        for p in products:
+        for product_id, name, product_no, payload in jobs:
             try:
-                payload = cls._build_product_payload_cached(p, cats.get(p.category_id), binding.platform_shop_id)
                 result = await provider.sync_product(payload)
                 if result.get("ok"):
                     synced += 1
-                    # 保存平台返回的真实 ID（饿了么 itemId），美团用 app_food_code
                     platform_id = result.get("platform_id") or payload["app_food_code"]
-                    await cls._ensure_default_map(db, store_id, platform, p, platform_id)
+                    product = await db.get(Product, product_id)
+                    if product is None:
+                        # 会话已 commit，用轻量对象写映射
+                        from types import SimpleNamespace
+
+                        product = SimpleNamespace(
+                            id=product_id, name=name, product_no=product_no
+                        )
+                    await cls._ensure_default_map(db, store_id, platform, product, platform_id)
+                    await db.commit()
                 else:
-                    errors.append(f"{p.name}:{result.get('error') or '平台返回失败'}")
+                    errors.append(f"{name}:{result.get('error') or '平台返回失败'}")
             except Exception as e:
-                logger.exception("同步餐品失败 %s: %s", p.name, e)
-                errors.append(f"{p.name}:{e}")
+                logger.exception("同步餐品失败 %s: %s", name, e)
+                errors.append(f"{name}:{e}")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
 
         return {"ok": len(errors) == 0, "synced": synced, "total": len(products), "errors": errors}
 
@@ -99,17 +121,26 @@ class ProductSyncService:
         provider = get_delivery_provider(platform, creds)
 
         payload = cls._build_product_payload_cached(product, cat, binding.platform_shop_id)
+        product_name = product.name
+        await db.commit()
         result = await provider.sync_product(payload)
         if result.get("ok"):
             platform_id = result.get("platform_id") or payload["app_food_code"]
+            product = await db.get(Product, product_id)
+            if product is None:
+                from types import SimpleNamespace
+
+                product = SimpleNamespace(
+                    id=product_id, name=product_name, product_no=payload["app_food_code"]
+                )
             await cls._ensure_default_map(db, store_id, platform, product, platform_id)
-            return {"ok": True, "product": product.name, "platform": platform}
-        return {"ok": False, "product": product.name, "error": result.get("error") or "平台返回失败"}
+            return {"ok": True, "product": product_name, "platform": platform}
+        return {"ok": False, "product": product_name, "error": result.get("error") or "平台返回失败"}
 
     @classmethod
     async def sync_prices(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         maps, products = await cls._load_maps_products(db, store_id, platform)
-        provider = get_delivery_provider(platform, await get_credentials_for_store(db, platform, store_id))
+        creds = await get_credentials_for_store(db, platform, store_id)
         items = [
             {
                 "app_food_code": m.app_food_code or products[m.product_id].product_no,
@@ -119,13 +150,15 @@ class ProductSyncService:
             for m in maps
             if m.product_id in products
         ]
+        await db.commit()
+        provider = get_delivery_provider(platform, creds)
         count = await provider.sync_prices(items)
         return {"ok": count == len(items), "updated": count, "total": len(items)}
 
     @classmethod
     async def sync_stock(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         maps, products = await cls._load_maps_products(db, store_id, platform)
-        provider = get_delivery_provider(platform, await get_credentials_for_store(db, platform, store_id))
+        creds = await get_credentials_for_store(db, platform, store_id)
         items = [
             {
                 "app_food_code": m.app_food_code or products[m.product_id].product_no,
@@ -135,6 +168,8 @@ class ProductSyncService:
             for m in maps
             if m.product_id in products
         ]
+        await db.commit()
+        provider = get_delivery_provider(platform, creds)
         # 修复：原先可能把本地 stock 原样推平台导致 999=不限被当成 999 份
         count = await provider.sync_stock(items)
         return {"ok": count == len(items), "updated": count, "total": len(items)}
@@ -260,7 +295,9 @@ class ProductSyncService:
             {"app_food_code": m.app_food_code or m.platform_sku_id, "platform_sku_id": m.platform_sku_id}
             for m in maps
         ]
-        provider = get_delivery_provider(platform, await get_credentials_for_store(db, platform, store_id))
+        creds = await get_credentials_for_store(db, platform, store_id)
+        await db.commit()
+        provider = get_delivery_provider(platform, creds)
         done = await provider.set_sell_status(items, on_shelf)
         return {"ok": done == len(items), "updated": done, "total": len(items), "on_shelf": on_shelf}
 
