@@ -165,6 +165,7 @@ class ServiceCardService:
                     "kind": "VOUCHER" if is_voucher else "COUPON",
                     "summary": CouponService.summary_label(tmpl),
                     "discount_label": CouponService.discount_label(tmpl),
+                    "discount_value": str(tmpl.discount_value or "0"),
                     "min_order_amount": str(tmpl.min_order_amount or "0.00"),
                     "expires_at": serialize_dt(cc.expires_at),
                 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-19T08:52:49Z",
+  "updated_at": "2026-10-19T09:26:18Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "55becbcb3bc377c68f86dbe01d8e0f5d293aa2324fb7a4d796c568ab82462072",
-      "size": 155086,
-      "normalized_sha256": "55becbcb3bc377c68f86dbe01d8e0f5d293aa2324fb7a4d796c568ab82462072"
+      "sha256": "49a0bc88a579b544f31b1feee0b23713ab5322c1045261fc9001925a45c5a5ff",
+      "size": 155929,
+      "normalized_sha256": "49a0bc88a579b544f31b1feee0b23713ab5322c1045261fc9001925a45c5a5ff"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -545,9 +545,9 @@
     },
     "backend/app/api/social_benefits.py": {
       "role": "index",
-      "sha256": "e81b65991c8a9a13454151757447144e5a06c095a4f286d77b91c2e860881d95",
-      "size": 9909,
-      "normalized_sha256": "e81b65991c8a9a13454151757447144e5a06c095a4f286d77b91c2e860881d95"
+      "sha256": "934ac75322abb7ef62c984f2c0e123f2ceda84ec545a096804b020654830a07c",
+      "size": 10574,
+      "normalized_sha256": "934ac75322abb7ef62c984f2c0e123f2ceda84ec545a096804b020654830a07c"
     },
     "backend/app/api/tables.py": {
       "role": "index",
@@ -1397,9 +1397,9 @@
     },
     "backend/app/services/service_card_service.py": {
       "role": "index",
-      "sha256": "b27cdcab87a716dafdd7896034325f2d33e2dce5761d2c3a84e0a191ec5789fc",
-      "size": 9588,
-      "normalized_sha256": "b27cdcab87a716dafdd7896034325f2d33e2dce5761d2c3a84e0a191ec5789fc"
+      "sha256": "fc058cfbee35e4cf6ff733479e01f40423788dd8a74ad01f5e714151da336691",
+      "size": 9659,
+      "normalized_sha256": "fc058cfbee35e4cf6ff733479e01f40423788dd8a74ad01f5e714151da336691"
     },
     "backend/app/services/shared_cart_service.py": {
       "role": "index",
@@ -1409,9 +1409,9 @@
     },
     "backend/app/services/social_benefit_service.py": {
       "role": "index",
-      "sha256": "4130022b40712b7b73d170da3980cae94f6685daf882f6e2460d474dccb6a134",
-      "size": 40582,
-      "normalized_sha256": "4130022b40712b7b73d170da3980cae94f6685daf882f6e2460d474dccb6a134"
+      "sha256": "a2a40aeba82bdbdf0555cccb664ce7d557f732f237120f684a1c36a81dc67563",
+      "size": 43468,
+      "normalized_sha256": "a2a40aeba82bdbdf0555cccb664ce7d557f732f237120f684a1c36a81dc67563"
     },
     "backend/app/services/status_history.py": {
       "role": "index",
@@ -1925,6 +1925,18 @@
       "size": 16622,
       "normalized_sha256": "cc09d8ad9972d77778c3317979338a55928e41f95044efafe9e0841616260456"
     },
+    "frontend/src/utils/bestPromo.spec.ts": {
+      "role": "observe",
+      "sha256": "cd7548eef61ba7d02d46c3b56ecd18591411f612bcb70232dd1ccea8e86ea526",
+      "size": 2783,
+      "normalized_sha256": "cd7548eef61ba7d02d46c3b56ecd18591411f612bcb70232dd1ccea8e86ea526"
+    },
+    "frontend/src/utils/bestPromo.ts": {
+      "role": "index",
+      "sha256": "491b633a0a405bf7dbea1bf3ec965e36c0dc863105a730fead4802c5e19b5b47",
+      "size": 7339,
+      "normalized_sha256": "491b633a0a405bf7dbea1bf3ec965e36c0dc863105a730fead4802c5e19b5b47"
+    },
     "frontend/src/utils/bizCode.spec.ts": {
       "role": "observe",
       "sha256": "f1498473a5bbfe6dee9fee154594416288e84e1be12939719c5a2e76d5476be6",
@@ -2071,9 +2083,9 @@
     },
     "frontend/src/views/Dashboard.vue": {
       "role": "index",
-      "sha256": "25e55f70c201c9a7756553758faaae5c3fefe706e48b884747902b8e7b5bc6ad",
-      "size": 35344,
-      "normalized_sha256": "25e55f70c201c9a7756553758faaae5c3fefe706e48b884747902b8e7b5bc6ad"
+      "sha256": "f0dbc116473f845976dc90d7816926e9a1521b262d9b8b836ea07173bdc07e26",
+      "size": 40080,
+      "normalized_sha256": "f0dbc116473f845976dc90d7816926e9a1521b262d9b8b836ea07173bdc07e26"
     },
     "frontend/src/views/FinancialLedger.vue": {
       "role": "index",
@@ -2155,9 +2167,9 @@
     },
     "frontend/src/views/PosOrder.vue": {
       "role": "index",
-      "sha256": "93614ffdb6aa92f9650b3f31ef6291b6f5d62c48c4f17ef30248f4d20867b0fb",
-      "size": 115604,
-      "normalized_sha256": "93614ffdb6aa92f9650b3f31ef6291b6f5d62c48c4f17ef30248f4d20867b0fb"
+      "sha256": "7313bcbff1b0ad186d13299f6bc274bfcd3dd9fc19e42bc72ad729282598a077",
+      "size": 119653,
+      "normalized_sha256": "7313bcbff1b0ad186d13299f6bc274bfcd3dd9fc19e42bc72ad729282598a077"
     },
     "frontend/src/views/PosRefundApprove.vue": {
       "role": "index",
@@ -2209,9 +2221,9 @@
     },
     "frontend/src/views/SocialBenefits.vue": {
       "role": "index",
-      "sha256": "acc2f66e5cbc71de5ec145ffe67a211531cbd5605eaf380f8d0363e9063c82ec",
-      "size": 11982,
-      "normalized_sha256": "acc2f66e5cbc71de5ec145ffe67a211531cbd5605eaf380f8d0363e9063c82ec"
+      "sha256": "f9f1b96cc845cbc1f7b7efde206f0b6103ca0fc9474b22f369b7ece98ae746d7",
+      "size": 12220,
+      "normalized_sha256": "f9f1b96cc845cbc1f7b7efde206f0b6103ca0fc9474b22f369b7ece98ae746d7"
     },
     "frontend/src/views/StoreInfo.vue": {
       "role": "index",

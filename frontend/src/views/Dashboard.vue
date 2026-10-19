@@ -43,31 +43,74 @@
         </el-col>
       </el-row>
 
-      <el-row v-if="showInvoiceTodo" :gutter="16" style="margin-top:16px">
+      <el-row v-if="showTodoPanel" :gutter="16" style="margin-top:16px">
         <el-col :span="24">
-          <el-card shadow="hover" class="todo-card" :class="{ 'todo-alert': invoicePendingCount > 0 }">
+          <el-card shadow="hover" class="todo-card" :class="{ 'todo-alert': todoAlert }">
             <div class="section-head">
               <h3 class="sec-title">待办事项</h3>
-              <el-button link type="primary" @click="$router.push({ path: '/invoices', query: { status: 'PENDING' } })">
-                进入发票申请
-              </el-button>
-            </div>
-            <div v-if="invoicePendingCount > 0" class="todo-list">
-              <div class="todo-summary">
-                <el-tag type="warning" effect="dark">待开票 {{ invoicePendingCount }}</el-tag>
-                <span class="scope-hint">顾客已提交，请尽快开票或驳回</span>
+              <div class="todo-links">
+                <span class="todo-poll-hint">约每 15 秒自动刷新</span>
+                <el-button
+                  v-if="showInvoiceTodo"
+                  link
+                  type="primary"
+                  @click="$router.push({ path: '/invoices', query: { status: 'PENDING' } })"
+                >
+                  发票申请
+                </el-button>
+                <el-button
+                  v-if="showSocialTodo"
+                  link
+                  type="primary"
+                  @click="$router.push({ path: '/social-benefits', query: { tab: 'pending' } })"
+                >
+                  社会贡献审核
+                </el-button>
               </div>
-              <el-table :data="invoicePendingItems" size="small" border>
-                <el-table-column prop="created_at" label="申请时间" width="160" />
-                <el-table-column prop="order_no" label="订单号" min-width="180" show-overflow-tooltip />
-                <el-table-column prop="title" label="抬头" min-width="140" show-overflow-tooltip />
-                <el-table-column label="金额" width="100" align="right">
-                  <template #default="{ row }">¥{{ row.amount }}</template>
-                </el-table-column>
-                <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
-              </el-table>
             </div>
-            <div v-else class="todo-empty">暂无待开票申请</div>
+
+            <template v-if="showInvoiceTodo">
+              <div v-if="invoicePendingCount > 0" class="todo-list">
+                <div class="todo-summary">
+                  <el-tag type="warning" effect="dark">待开票 {{ invoicePendingCount }}</el-tag>
+                  <span class="scope-hint">顾客已提交，请尽快开票或驳回</span>
+                </div>
+                <el-table :data="invoicePendingItems" size="small" border>
+                  <el-table-column prop="created_at" label="申请时间" width="160" />
+                  <el-table-column prop="order_no" label="订单号" min-width="180" show-overflow-tooltip />
+                  <el-table-column prop="title" label="抬头" min-width="140" show-overflow-tooltip />
+                  <el-table-column label="金额" width="100" align="right">
+                    <template #default="{ row }">¥{{ row.amount }}</template>
+                  </el-table-column>
+                  <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
+                </el-table>
+              </div>
+              <div v-else class="todo-empty">暂无待开票申请</div>
+            </template>
+
+            <template v-if="showSocialTodo">
+              <div v-if="socialPendingCount > 0" class="todo-list" :class="{ 'todo-list-gap': showInvoiceTodo }">
+                <div class="todo-summary">
+                  <el-tag type="warning" effect="dark">待审公益认定 {{ socialPendingCount }}</el-tag>
+                  <span class="scope-hint">小程序已提交，请尽快通过或驳回</span>
+                </div>
+                <el-table :data="socialPendingItems" size="small" border>
+                  <el-table-column prop="created_at" label="申请时间" width="160" />
+                  <el-table-column label="顾客" min-width="140" show-overflow-tooltip>
+                    <template #default="{ row }">
+                      {{ row.customer_nickname || row.customer_no || `顾客#${row.customer_id}` }}
+                      <span v-if="row.customer_phone" class="todo-sub">{{ row.customer_phone }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="身份" min-width="120" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.identity_name || row.identity_code || '—' }}</template>
+                  </el-table-column>
+                  <el-table-column prop="credential_note" label="凭证备注" min-width="140" show-overflow-tooltip />
+                  <el-table-column prop="verify_method" label="来源" width="90" />
+                </el-table>
+              </div>
+              <div v-else class="todo-empty" :class="{ 'todo-list-gap': showInvoiceTodo }">暂无待审公益认定</div>
+            </template>
           </el-card>
         </el-col>
       </el-row>
@@ -253,10 +296,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
+
+/** 待办静默轮询间隔（毫秒）；切回标签页会立即再拉一次 */
+const TODO_POLL_MS = 15_000
 
 const auth = useAuthStore()
 const data = ref<any>(null)
@@ -266,7 +312,16 @@ const storeFilter = ref<number | undefined>()
 const period = ref<'today' | 'yesterday' | 'month'>('today')
 const invoicePendingCount = ref(0)
 const invoicePendingItems = ref<any[]>([])
+const socialPendingCount = ref(0)
+const socialPendingItems = ref<any[]>([])
 const showInvoiceTodo = computed(() => auth.hasPermission('invoice:manage') && !auth.isCashier)
+const showSocialTodo = computed(() => auth.hasPermission('customer:read') && !auth.isCashier)
+const showTodoPanel = computed(() => showInvoiceTodo.value || showSocialTodo.value)
+const todoAlert = computed(
+  () =>
+    (showInvoiceTodo.value && invoicePendingCount.value > 0) ||
+    (showSocialTodo.value && socialPendingCount.value > 0),
+)
 
 const summary = computed(() => data.value?.summary || {})
 const amounts = computed(() => summary.value.amounts || {})
@@ -400,6 +455,55 @@ async function loadInvoiceTodos() {
   }
 }
 
+async function loadSocialTodos() {
+  if (!showSocialTodo.value) {
+    socialPendingCount.value = 0
+    socialPendingItems.value = []
+    return
+  }
+  try {
+    const params: Record<string, string | number> = { limit: 5 }
+    if (storeFilter.value) params.store_id = storeFilter.value
+    const res: any = await api.get('/social-benefits/identities/pending-summary', { params })
+    const body = res?.data ?? res ?? {}
+    socialPendingCount.value = Number(body.pending_count || 0) || 0
+    socialPendingItems.value = Array.isArray(body.items) ? body.items : []
+  } catch {
+    socialPendingCount.value = 0
+    socialPendingItems.value = []
+  }
+}
+
+/** 仅刷新待办（发票 + 公益），不触发整页 loading */
+async function loadTodos() {
+  if (!showTodoPanel.value) return
+  await Promise.all([loadInvoiceTodos(), loadSocialTodos()])
+}
+
+let todoPollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopTodoPoll() {
+  if (todoPollTimer) {
+    clearInterval(todoPollTimer)
+    todoPollTimer = null
+  }
+}
+
+function startTodoPoll() {
+  stopTodoPoll()
+  if (!showTodoPanel.value) return
+  todoPollTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    void loadTodos()
+  }, TODO_POLL_MS)
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible' && showTodoPanel.value) {
+    void loadTodos()
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -407,7 +511,7 @@ async function load() {
     if (storeFilter.value) params.store_id = storeFilter.value
     const [dash] = await Promise.all([
       api.get('/dashboard', { params }),
-      loadInvoiceTodos(),
+      loadTodos(),
     ])
     data.value = dash.data
   } finally {
@@ -418,6 +522,13 @@ async function load() {
 onMounted(async () => {
   await loadStores()
   await load()
+  startTodoPoll()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onUnmounted(() => {
+  stopTodoPoll()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
@@ -899,11 +1010,36 @@ onMounted(async () => {
   opacity: 1;
 }
 
+.todo-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.todo-poll-hint {
+  font-size: 12px;
+  color: #7a9cc4;
+  margin-right: 6px;
+}
+
 .todo-summary {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.todo-sub {
+  display: block;
+  font-size: 12px;
+  color: #7a9cc4;
+}
+
+.todo-list-gap {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(120, 200, 255, 0.12);
 }
 
 .todo-empty {

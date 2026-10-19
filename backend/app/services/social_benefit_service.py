@@ -397,7 +397,72 @@ class SocialBenefitService:
                 it["customer_nickname"] = c.nickname or c.display_name
                 it["customer_phone"] = c.phone
                 it["customer_no"] = getattr(c, "customer_no", None)
+        await SocialBenefitService._enrich_identity_type_names(db, items)
         return items, total
+
+    @staticmethod
+    async def _enrich_identity_type_names(db: AsyncSession, items: list[dict]) -> None:
+        codes = sorted({str(it.get("identity_code") or "") for it in items if it.get("identity_code")})
+        if not codes:
+            return
+        rows = (
+            await db.execute(
+                select(SocialIdentityType.code, SocialIdentityType.name).where(
+                    SocialIdentityType.code.in_(codes)
+                )
+            )
+        ).all()
+        name_map = {str(code): name for code, name in rows}
+        for it in items:
+            code = str(it.get("identity_code") or "")
+            it["identity_name"] = name_map.get(code) or code
+
+    @staticmethod
+    async def pending_review_summary(
+        db: AsyncSession,
+        *,
+        store_id: int | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """数据概览待办：待审公益身份数量 + 最近几条。"""
+        limit = min(20, max(1, int(limit)))
+        base = select(CustomerSocialIdentity).where(
+            CustomerSocialIdentity.status == SocialBenefitService.PENDING
+        )
+        count_q = select(func.count()).select_from(CustomerSocialIdentity).where(
+            CustomerSocialIdentity.status == SocialBenefitService.PENDING
+        )
+        if store_id is not None:
+            cond = or_(
+                CustomerSocialIdentity.store_id == int(store_id),
+                CustomerSocialIdentity.store_id.is_(None),
+            )
+            base = base.where(cond)
+            count_q = count_q.where(cond)
+        total = int((await db.execute(count_q)).scalar() or 0)
+        rows = list(
+            (
+                await db.execute(
+                    base.order_by(CustomerSocialIdentity.id.desc()).limit(limit)
+                )
+            ).scalars().all()
+        )
+        items = [SocialBenefitService._identity_payload(r, staff=True) for r in rows]
+        cids = sorted({int(r.customer_id) for r in rows if r.customer_id})
+        if cids:
+            custs = (
+                await db.execute(select(Customer).where(Customer.id.in_(cids)))
+            ).scalars().all()
+            cmap = {int(c.id): c for c in custs}
+            for it in items:
+                c = cmap.get(int(it["customer_id"]))
+                if not c:
+                    continue
+                it["customer_nickname"] = c.nickname or c.display_name
+                it["customer_phone"] = c.phone
+                it["customer_no"] = getattr(c, "customer_no", None)
+        await SocialBenefitService._enrich_identity_type_names(db, items)
+        return {"pending_count": total, "items": items}
 
     @staticmethod
     async def mine_identities(db: AsyncSession, customer_id: int) -> list[dict]:
@@ -914,16 +979,17 @@ class SocialBenefitService:
             by_identity.append(
                 {"identity_code": code, "redemptions": c, "subsidy_amount": str(s)}
             )
-        pending = int(
-            (
-                await db.execute(
-                    select(func.count())
-                    .select_from(CustomerSocialIdentity)
-                    .where(CustomerSocialIdentity.status == SocialBenefitService.PENDING)
-                )
-            ).scalar()
-            or 0
+        pending_q = select(func.count()).select_from(CustomerSocialIdentity).where(
+            CustomerSocialIdentity.status == SocialBenefitService.PENDING
         )
+        if store_id is not None:
+            pending_q = pending_q.where(
+                or_(
+                    CustomerSocialIdentity.store_id == int(store_id),
+                    CustomerSocialIdentity.store_id.is_(None),
+                )
+            )
+        pending = int((await db.execute(pending_q)).scalar() or 0)
         return {
             "year": y,
             "month": m,

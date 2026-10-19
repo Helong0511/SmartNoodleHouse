@@ -146,11 +146,15 @@
 
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { SOCIAL_IDENTITY } from '@/utils/labels'
 
-const tab = ref('pending')
+const route = useRoute()
+const allowedTabs = new Set(['pending', 'rules', 'redemptions', 'stats'])
+const initialTab = String(route.query.tab || 'pending')
+const tab = ref(allowedTabs.has(initialTab) ? initialTab : 'pending')
 const loading = ref(false)
 const identities = ref<any[]>([])
 const rules = ref<any[]>([])
@@ -289,7 +293,7 @@ watch(tab, (t) => {
 
 onMounted(() => {
   loadIdentityTypes()
-  loadPending()
+  reloadCurrent()
 })
 </script>
 

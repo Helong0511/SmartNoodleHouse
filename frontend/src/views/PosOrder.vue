@@ -206,8 +206,9 @@
                   :value="c.id"
                 />
               </el-select>
-              <p v-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
-                该会员有可用券，请选择后点「去收款」才会按券重算应收
+              <p v-if="couponAutoHint" class="member-tip">{{ couponAutoHint }}</p>
+              <p v-else-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
+                该会员有可用券但当前购物车未达门槛，可改选或继续点餐
               </p>
             </div>
             <div v-if="selectedCustomerId && serviceCard" class="service-card" v-loading="serviceCardLoading">
@@ -455,7 +456,7 @@
               placeholder="不使用优惠券"
               style="width: 100%"
               :disabled="!availableCoupons.length"
-              @change="bindCustomerOnCheckoutOrder"
+              @change="onCouponSelectionChange"
             >
               <el-option
                 v-for="c in availableCoupons"
@@ -471,7 +472,7 @@
               placeholder="不使用代金券"
               style="width: 100%"
               :disabled="!availableVouchers.length"
-              @change="bindCustomerOnCheckoutOrder"
+              @change="onCouponSelectionChange"
             >
               <el-option
                 v-for="c in availableVouchers"
@@ -480,8 +481,9 @@
                 :value="c.id"
               />
             </el-select>
-            <p v-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
-              有可用券未选用，切换券后会立即重算应收
+            <p v-if="couponAutoHint" class="member-tip">{{ couponAutoHint }}</p>
+            <p v-else-if="(serviceCard?.coupon_count || 0) > 0 && !selectedCouponId && !selectedVoucherId" class="member-tip warn-tip">
+              有可用券但当前未达门槛，切换券后会立即重算应收
             </p>
           </div>
         </div>
@@ -693,6 +695,11 @@ import {
   mergeCartItem,
   validateCategoryRequires,
 } from '@/utils/cart'
+import {
+  calcDiscountableSubtotal,
+  pickBestPromoPair,
+  type CartPromoLine,
+} from '@/utils/bestPromo'
 
 const route = useRoute()
 const router = useRouter()
@@ -737,6 +744,10 @@ const serviceCardLoading = ref(false)
 const selectedCouponId = ref<number | undefined>()
 /** 代金券 */
 const selectedVoucherId = ref<number | undefined>()
+/** 收银员手动改过券/代金券后，在换会员或改购物车前不再自动覆盖 */
+const couponManualPick = ref(false)
+const couponAutoHint = ref('')
+let cartPromoAutoTimer: ReturnType<typeof setTimeout> | null = null
 const checkoutSubtotal = ref('')
 const checkoutMemberDiscount = ref('')
 const checkoutCouponDiscount = ref('')
@@ -913,6 +924,15 @@ const pagedProducts = computed(() => {
   return visibleProducts.value.slice(start, start + pageSize)
 })
 watch([activeCat], () => { productPage.value = 1 })
+
+watch(
+  [cart, diningType, waivePackingFee],
+  () => {
+    if (!selectedCustomerId.value || useSocialBenefit.value) return
+    scheduleAutoSelectBestPromo()
+  },
+  { deep: true },
+)
 
 const cartSubtotal = computed(() => {
   const n = cart.value.reduce((s, i) => s + parseFloat(i.subtotal || 0), 0)
@@ -1314,6 +1334,7 @@ function addToCart() {
     category_id: p.category_id,
     require_category_ids: p.require_category_ids || [],
     require_product_ids: p.require_product_ids || [],
+    no_member_discount: !!p.no_member_discount,
   })
   productVisible.value = false
 }
@@ -1447,6 +1468,76 @@ function applyOrderPromoSnapshot(data: any) {
 function clearCouponSelection() {
   selectedCouponId.value = undefined
   selectedVoucherId.value = undefined
+  couponAutoHint.value = ''
+}
+
+/** 购物车行：缺省时从 products 补 no_member_discount */
+function cartLinesForPromo(): CartPromoLine[] {
+  const byId = new Map(products.value.map((p: any) => [Number(p.id), p]))
+  return cart.value.map((item: any) => {
+    const p = byId.get(Number(item.product_id))
+    const flagged =
+      item.no_member_discount != null
+        ? !!item.no_member_discount
+        : !!(p && p.no_member_discount)
+    return {
+      subtotal: item.subtotal,
+      quantity: item.quantity,
+      no_member_discount: flagged,
+    }
+  })
+}
+
+async function autoSelectBestPromo(opts?: { force?: boolean; bindIfOrder?: boolean }) {
+  if (!selectedCustomerId.value || useSocialBenefit.value) {
+    if (useSocialBenefit.value) clearCouponSelection()
+    couponAutoHint.value = ''
+    return
+  }
+  if (couponManualPick.value && !opts?.force) return
+  if (!serviceCard.value) return
+
+  const discountable = calcDiscountableSubtotal(cartLinesForPromo())
+  if (discountable <= 0 && !cart.value.length) {
+    clearCouponSelection()
+    return
+  }
+  const memberRate = serviceCard.value.discount_rate ?? 1
+  const { coupon, voucher } = pickBestPromoPair({
+    coupons: availableCoupons.value,
+    vouchers: availableVouchers.value,
+    discountable,
+    memberRate,
+    packingFee: packingFeeNum.value,
+    needPack: diningType.value === 'TAKEAWAY' && !waivePackingFee.value,
+  })
+  const nextCoupon = coupon?.id != null ? Number(coupon.id) : undefined
+  const nextVoucher = voucher?.id != null ? Number(voucher.id) : undefined
+  const changed =
+    selectedCouponId.value !== nextCoupon || selectedVoucherId.value !== nextVoucher
+  selectedCouponId.value = nextCoupon
+  selectedVoucherId.value = nextVoucher
+  couponManualPick.value = false
+  if (nextCoupon || nextVoucher) {
+    couponAutoHint.value = '已自动选最优优惠，可改选'
+  } else if ((serviceCard.value.coupon_count || 0) > 0) {
+    couponAutoHint.value = ''
+  } else {
+    couponAutoHint.value = ''
+  }
+  if ((opts?.bindIfOrder !== false) && checkoutOrderId.value && changed) {
+    await bindCustomerOnCheckoutOrder()
+  }
+}
+
+function scheduleAutoSelectBestPromo() {
+  if (cartPromoAutoTimer) clearTimeout(cartPromoAutoTimer)
+  cartPromoAutoTimer = setTimeout(() => {
+    cartPromoAutoTimer = null
+    if (!selectedCustomerId.value || useSocialBenefit.value) return
+    couponManualPick.value = false
+    void autoSelectBestPromo({ force: true })
+  }, 280)
 }
 
 /** 本单已预占的券不会出现在 AVAILABLE 列表，补一条选项避免下拉空白 */
@@ -1483,6 +1574,7 @@ function ensureSelectedCouponOptions(extra?: { couponId?: number | null; voucher
 function onSocialBenefitToggle() {
   if (useSocialBenefit.value) {
     clearCouponSelection()
+    couponManualPick.value = false
     if (!hasActiveSocialIdentity()) {
       ElMessage.warning('该会员尚无已生效公益身份，请先「当场核验」后再勾选公益折扣')
       useSocialBenefit.value = false
@@ -1491,6 +1583,8 @@ function onSocialBenefitToggle() {
   } else {
     checkoutSocialApplied.value = false
     checkoutSocialCode.value = ''
+    couponManualPick.value = false
+    void autoSelectBestPromo({ force: true })
   }
   if (checkoutOrderId.value) bindCustomerOnCheckoutOrder()
 }
@@ -1501,6 +1595,10 @@ async function onCouponSelectionChange() {
     ElMessage.warning('已勾选公益折扣，不可同时用券')
     return
   }
+  couponManualPick.value = true
+  couponAutoHint.value = selectedCouponId.value || selectedVoucherId.value
+    ? '已按手动选择用券'
+    : ''
   // 已建单则立即重算；未建单则等「去收款」建单时带上所选券
   if (checkoutOrderId.value) {
     await bindCustomerOnCheckoutOrder()
@@ -1510,6 +1608,9 @@ async function onCouponSelectionChange() {
 async function createPosOrder() {
   const sid = effectiveStoreId()
   const useSocial = !!(useSocialBenefit.value && selectedCustomerId.value)
+  if (!useSocial && selectedCustomerId.value && !couponManualPick.value) {
+    await autoSelectBestPromo({ force: true, bindIfOrder: false })
+  }
   try {
     const orderRes = await api.post('/orders/pos', {
       store_id: sid,
@@ -1635,7 +1736,7 @@ async function rememberPosPhone() {
   }
 }
 
-async function loadServiceCard(customerId?: number, opts?: { keepSelection?: boolean }) {
+async function loadServiceCard(customerId?: number, opts?: { keepSelection?: boolean; autoPromo?: boolean }) {
   if (!customerId) {
     serviceCard.value = null
     if (!opts?.keepSelection) clearCouponSelection()
@@ -1656,6 +1757,10 @@ async function loadServiceCard(customerId?: number, opts?: { keepSelection?: boo
         selectedVoucherId.value = undefined
       }
     }
+    if (opts?.autoPromo !== false && !opts?.keepSelection && !useSocialBenefit.value) {
+      couponManualPick.value = false
+      await autoSelectBestPromo({ force: true })
+    }
   } catch {
     serviceCard.value = null
   } finally {
@@ -1665,20 +1770,23 @@ async function loadServiceCard(customerId?: number, opts?: { keepSelection?: boo
 
 async function onPosCustomerChange() {
   clearCouponSelection()
+  couponManualPick.value = false
   useSocialBenefit.value = false
-  await loadServiceCard(selectedCustomerId.value)
+  await loadServiceCard(selectedCustomerId.value, { autoPromo: true })
 }
 
 async function onCheckoutMemberChange() {
   clearCouponSelection()
+  couponManualPick.value = false
   useSocialBenefit.value = false
-  await loadServiceCard(selectedCustomerId.value)
+  await loadServiceCard(selectedCustomerId.value, { autoPromo: true })
   await bindCustomerOnCheckoutOrder()
 }
 
 async function onPaySocialToggle() {
   if (useSocialBenefit.value) {
     clearCouponSelection()
+    couponManualPick.value = false
     if (!hasActiveSocialIdentity()) {
       ElMessage.warning('该会员尚无已生效公益身份，请先返回点餐区「当场核验」')
       useSocialBenefit.value = false
@@ -1687,6 +1795,8 @@ async function onPaySocialToggle() {
   } else {
     checkoutSocialApplied.value = false
     checkoutSocialCode.value = ''
+    couponManualPick.value = false
+    await autoSelectBestPromo({ force: true, bindIfOrder: false })
   }
   await bindCustomerOnCheckoutOrder()
 }

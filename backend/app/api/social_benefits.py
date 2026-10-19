@@ -122,6 +122,24 @@ async def list_identities(
     )
 
 
+@router.get("/identities/pending-summary", dependencies=[require_permission("customer:read")])
+async def identities_pending_summary(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    store_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=5, ge=1, le=20),
+):
+    """数据概览待办：小程序提交、待后台审批的公益身份申请。"""
+    sid = require_bound_store(user, store_id)
+    if store_id is not None:
+        assert_store_access(user, int(store_id))
+    data = await SocialBenefitService.pending_review_summary(
+        db, store_id=sid, limit=limit
+    )
+    return success(data, request=request)
+
+
 @router.post("/identities/{identity_id}/review", dependencies=[require_social_identity_manage()])
 async def review_identity(
     identity_id: int,
