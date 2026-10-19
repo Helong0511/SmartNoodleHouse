@@ -83,6 +83,22 @@
                     <template #default="{ row }">¥{{ row.amount }}</template>
                   </el-table-column>
                   <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
+                  <el-table-column v-if="showInvoiceTodo" label="操作" width="160" fixed="right">
+                    <template #default="{ row }">
+                      <el-button
+                        link
+                        type="primary"
+                        :loading="todoBusyKey === `inv-issue-${row.id}`"
+                        @click="issueInvoiceTodo(row)"
+                      >开票</el-button>
+                      <el-button
+                        link
+                        type="danger"
+                        :loading="todoBusyKey === `inv-reject-${row.id}`"
+                        @click="rejectInvoiceTodo(row)"
+                      >驳回</el-button>
+                    </template>
+                  </el-table-column>
                 </el-table>
               </div>
               <div v-else class="todo-empty">暂无待开票申请</div>
@@ -108,6 +124,22 @@
                   <el-table-column prop="credential_note" label="凭证备注" min-width="140" show-overflow-tooltip />
                   <el-table-column label="来源" width="90">
                     <template #default="{ row }">{{ socialVerifyLabel(row.verify_method) }}</template>
+                  </el-table-column>
+                  <el-table-column v-if="canReviewSocial" label="操作" width="160" fixed="right">
+                    <template #default="{ row }">
+                      <el-button
+                        link
+                        type="primary"
+                        :loading="todoBusyKey === `soc-ok-${row.id}`"
+                        @click="reviewSocialTodo(row, true)"
+                      >通过</el-button>
+                      <el-button
+                        link
+                        type="danger"
+                        :loading="todoBusyKey === `soc-no-${row.id}`"
+                        @click="reviewSocialTodo(row, false)"
+                      >拒绝</el-button>
+                    </template>
                   </el-table-column>
                 </el-table>
               </div>
@@ -299,6 +331,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
@@ -329,8 +362,18 @@ const invoicePendingCount = ref(0)
 const invoicePendingItems = ref<any[]>([])
 const socialPendingCount = ref(0)
 const socialPendingItems = ref<any[]>([])
+const todoBusyKey = ref<string | null>(null)
 const showInvoiceTodo = computed(() => auth.hasPermission('invoice:manage') && !auth.isCashier)
 const showSocialTodo = computed(() => auth.hasPermission('customer:read') && !auth.isCashier)
+/** 与后端 require_social_identity_manage 对齐 */
+const canReviewSocial = computed(
+  () =>
+    !auth.isCashier &&
+    (auth.isSuperAdmin ||
+      auth.isStoreAdmin ||
+      auth.hasPermission('customer:manage') ||
+      auth.hasPermission('customer:write')),
+)
 const showTodoPanel = computed(() => showInvoiceTodo.value || showSocialTodo.value)
 const todoAlert = computed(
   () =>
@@ -493,6 +536,94 @@ async function loadSocialTodos() {
 async function loadTodos() {
   if (!showTodoPanel.value) return
   await Promise.all([loadInvoiceTodos(), loadSocialTodos()])
+}
+
+async function reviewSocialTodo(row: any, approve: boolean) {
+  if (!canReviewSocial.value || !row?.id) return
+  let reject_reason: string | undefined
+  if (!approve) {
+    try {
+      const { value } = await ElMessageBox.prompt('拒绝原因', '审核公益认定', {
+        confirmButtonText: '确认拒绝',
+        cancelButtonText: '取消',
+        inputPlaceholder: '请输入原因',
+        inputValidator: (v: string) => (v && v.trim() ? true : '拒绝原因不能为空'),
+      })
+      reject_reason = (value || '').trim()
+    } catch {
+      return
+    }
+  } else {
+    try {
+      await ElMessageBox.confirm(
+        `确认通过「${row.identity_name || row.identity_code || '公益身份'}」认定？`,
+        '审核公益认定',
+        { confirmButtonText: '通过', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return
+    }
+  }
+  const key = approve ? `soc-ok-${row.id}` : `soc-no-${row.id}`
+  todoBusyKey.value = key
+  try {
+    await api.post(`/social-benefits/identities/${row.id}/review`, { approve, reject_reason })
+    ElMessage.success(approve ? '已通过' : '已拒绝')
+    await loadTodos()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '审核失败')
+  } finally {
+    todoBusyKey.value = null
+  }
+}
+
+async function issueInvoiceTodo(row: any) {
+  if (!showInvoiceTodo.value || !row?.id) return
+  try {
+    await ElMessageBox.confirm(
+      `确认为订单 ${row.order_no || `#${row.order_id}`} 标记已开票？开票结果请自行发送至 ${row.email || '顾客邮箱'}`,
+      '标记已开票',
+      { confirmButtonText: '确认开票', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  todoBusyKey.value = `inv-issue-${row.id}`
+  try {
+    await api.post(`/admin/invoices/${row.id}/issue`)
+    ElMessage.success('已标记开票')
+    await loadTodos()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '操作失败')
+  } finally {
+    todoBusyKey.value = null
+  }
+}
+
+async function rejectInvoiceTodo(row: any) {
+  if (!showInvoiceTodo.value || !row?.id) return
+  let reason = ''
+  try {
+    const res = await ElMessageBox.prompt('请填写驳回原因（必填）', '驳回开票申请', {
+      confirmButtonText: '确认驳回',
+      cancelButtonText: '取消',
+      inputPlaceholder: '如：订单已退款，无法开票',
+      inputValidator: (v: string) => (v && v.trim() ? true : '驳回原因不能为空'),
+    })
+    reason = (res.value || '').trim()
+  } catch {
+    return
+  }
+  todoBusyKey.value = `inv-reject-${row.id}`
+  try {
+    await api.post(`/admin/invoices/${row.id}/reject`, { reason })
+    ElMessage.success('已驳回')
+    await loadTodos()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '操作失败')
+  } finally {
+    todoBusyKey.value = null
+  }
 }
 
 let todoPollTimer: ReturnType<typeof setInterval> | null = null
