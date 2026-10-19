@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-19T09:30:21Z",
+  "updated_at": "2026-10-19T09:32:47Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "9c8a96f76cd0c47f0760b5fd6f0ff3d029e72963249167c71c0e6858dd56f05b",
-      "size": 155948,
-      "normalized_sha256": "9c8a96f76cd0c47f0760b5fd6f0ff3d029e72963249167c71c0e6858dd56f05b"
+      "sha256": "676250aa033e21303eb1ebc4c2ee3efcf3600e491f0d6494feab59ecf278e2f4",
+      "size": 156024,
+      "normalized_sha256": "676250aa033e21303eb1ebc4c2ee3efcf3600e491f0d6494feab59ecf278e2f4"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -2083,9 +2083,9 @@
     },
     "frontend/src/views/Dashboard.vue": {
       "role": "index",
-      "sha256": "dcd022ca3a8530e11a78ed868d75f5234cd3e5939cd48540018664d66bac149d",
-      "size": 40535,
-      "normalized_sha256": "dcd022ca3a8530e11a78ed868d75f5234cd3e5939cd48540018664d66bac149d"
+      "sha256": "945f783cf21f554194b1ba6061504e9bdfdfdaca00192f2b984752fc8fbb0eb4",
+      "size": 45246,
+      "normalized_sha256": "945f783cf21f554194b1ba6061504e9bdfdfdaca00192f2b984752fc8fbb0eb4"
     },
     "frontend/src/views/FinancialLedger.vue": {
       "role": "index",
