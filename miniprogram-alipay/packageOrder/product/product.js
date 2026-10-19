@@ -18,7 +18,10 @@ Page({
     lineTotal: '0.00',
     gallery: [],
     heroStyle: '',
-    prefHint: ''
+    prefHint: '',
+    canAdd: true,
+    addBtnLabel: '加入点餐',
+    unavailableLabel: ''
   },
 
   async onLoad(query) {
@@ -32,6 +35,7 @@ Page({
       // 先出餐品与规格，图库/登录并行，不挡首屏
       this.setData({ product, selected, multi, loading: false })
       this.updateDisplayPrice()
+      this.refreshAddState()
       const galleryP = media.hydrateUrlList(media.galleryUrls(product)).then((gallery) => {
         this.setData({ gallery })
       }).catch(() => {})
@@ -60,6 +64,7 @@ Page({
         prefHint: applied.prefHint
       })
       this.updateDisplayPrice()
+      this.refreshAddState()
     }
   },
 
@@ -74,6 +79,33 @@ Page({
     })
   },
 
+  refreshAddState() {
+    const p = this.data.product
+    if (!p) {
+      this.setData({ canAdd: false, addBtnLabel: '加入点餐', unavailableLabel: '' })
+      return
+    }
+    const avail = cartUtil.productAvailability(p)
+    if (!avail.available) {
+      this.setData({
+        canAdd: false,
+        unavailableLabel: avail.label || '暂不可售',
+        addBtnLabel: avail.label || '暂不可售'
+      })
+      return
+    }
+    const missing = cartUtil.missingRequiredOptionGroups(p, this.data.selected, this.data.multi)
+    if (missing.length) {
+      this.setData({
+        canAdd: false,
+        unavailableLabel: '',
+        addBtnLabel: `请选择${missing[0]}`
+      })
+      return
+    }
+    this.setData({ canAdd: true, unavailableLabel: '', addBtnLabel: '加入点餐' })
+  },
+
   changeQty(e) {
     const delta = parseInt(e.currentTarget.dataset.delta, 10)
     let qty = (this.data.quantity || 1) + delta
@@ -84,7 +116,10 @@ Page({
 
   selectSingle(e) {
     const { gid, oid } = e.currentTarget.dataset
-    this.setData({ [`selected.${gid}`]: oid }, () => this.updateDisplayPrice())
+    this.setData({ [`selected.${gid}`]: oid }, () => {
+      this.updateDisplayPrice()
+      this.refreshAddState()
+    })
   },
 
   selectMulti(e) {
@@ -93,7 +128,20 @@ Page({
     const idx = list.findIndex((x) => String(x) === String(oid))
     if (idx >= 0) list.splice(idx, 1)
     else list.push(oid)
-    this.setData({ [`multi.${gid}`]: list }, () => this.updateDisplayPrice())
+    this.setData({ [`multi.${gid}`]: list }, () => {
+      this.updateDisplayPrice()
+      this.refreshAddState()
+    })
+  },
+
+  resetOptions() {
+    const p = this.data.product
+    if (!p) return
+    const { selected, multi } = prefUtil.defaultSelections(p)
+    this.setData({ selected, multi, quantity: 1, prefHint: '' }, () => {
+      this.updateDisplayPrice()
+      this.refreshAddState()
+    })
   },
 
   previewImage(e) {
@@ -106,6 +154,16 @@ Page({
   async addCart() {
     const p = this.data.product
     if (!p) return
+    const avail = cartUtil.productAvailability(p)
+    if (!avail.available) {
+      my.showToast({ content: avail.label || '暂不可售', type: 'none' })
+      return
+    }
+    const missing = cartUtil.missingRequiredOptionGroups(p, this.data.selected, this.data.multi)
+    if (missing.length) {
+      my.showToast({ content: `请选择${missing[0]}`, type: 'none' })
+      return
+    }
     let categories = []
     let products = [p]
     if ((p.require_category_ids || []).length || (p.require_product_ids || []).length) {

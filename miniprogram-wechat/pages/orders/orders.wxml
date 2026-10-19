@@ -85,6 +85,14 @@
         <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}<text wx:if="{{item.discount_amount > 0}}" class="discount">（已优惠¥{{item.discount_amount}}）</text> · {{item.payLabel}}</text>
         <view class="order-ops">
           <view
+            class="op-btn add-dish"
+            wx:if="{{item.canAddDish}}"
+            catchtap="addDishOrder"
+            data-id="{{item.id}}"
+          >
+            <text>加菜</text>
+          </view>
+          <view
             class="op-btn urge {{item.urgeOnCooldown || urgingId == item.id ? 'is-disabled' : ''}}"
             wx:if="{{item.canUrge}}"
             catchtap="urgeOrder"

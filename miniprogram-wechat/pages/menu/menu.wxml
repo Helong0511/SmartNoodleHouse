@@ -7,6 +7,18 @@
     <text>未绑定桌台，点击扫描桌台二维码</text>
   </view>
 
+  <view
+    class="table-order-bar"
+    wx:if="{{hasTable && !isTakeawayChannel && tableOrderCount}}"
+    bindtap="goOrders"
+  >
+    <view class="table-order-main">
+      <text class="table-order-title">本桌已下单</text>
+      <text class="table-order-brief">{{tableOrdersBrief}}</text>
+    </view>
+    <text class="table-order-link">查看 ›</text>
+  </view>
+
   <view class="search-wrap" wx:if="{{showMenuSearch}}">
     <input
       class="search"
@@ -22,22 +34,30 @@
     <view class="fav-chip {{favoritesOnly ? 'on' : ''}}" catchtap="toggleFavFilter">♥ 收藏 · {{favCount}}</view>
   </view>
 
-  <view class="pref-bar" wx:if="{{showMenuSmartTaste && prefCount}}">
+  <view class="pref-bar compact" wx:if="{{showMenuSmartTaste && prefCount}}">
     <view class="pref-main" bindtap="togglePrefExpand">
-      <text class="pref-title">智能口味</text>
+      <text class="pref-title">智能口味 · {{prefCount}}</text>
       <view class="pref-tags" wx:if="{{prefExpanded}}">
         <text class="pref-tag" wx:for="{{prefItems}}" wx:key="*this">{{item}}</text>
       </view>
       <text class="pref-brief" wx:else>{{prefSummary}}</text>
     </view>
     <view class="pref-actions">
-      <text class="pref-toggle" wx:if="{{prefCount > 3}}" catchtap="togglePrefExpand">{{prefExpanded ? '收起' : '展开'}}</text>
+      <text class="pref-toggle" catchtap="togglePrefExpand">{{prefExpanded ? '收起' : '展开'}}</text>
       <text class="pref-link" catchtap="goMember">会员</text>
     </view>
   </view>
 
-  <recommend-strip
+  <view
+    class="reco-fold"
     wx:if="{{showMenuGuessYouLike && recoReady && recoStoreId}}"
+    bindtap="toggleRecoExpand"
+  >
+    <text class="reco-fold-title">猜你喜欢</text>
+    <text class="reco-fold-chevron">{{recoExpanded ? '▾' : '›'}}</text>
+  </view>
+  <recommend-strip
+    wx:if="{{showMenuGuessYouLike && recoReady && recoStoreId && recoExpanded}}"
     store-id="{{recoStoreId}}"
     scene="recommend_menu"
     track-scene="recommend"
@@ -65,12 +85,14 @@
       scroll-with-animation
       enhanced
       show-scrollbar="{{false}}"
+      bindscroll="onMenuBodyScroll"
+      bindscrolltoupper="onMenuBodyScrollTop"
     >
       <block wx:for="{{categories}}" wx:key="id">
         <view id="cat-{{item.id}}" class="cat-section">
           <view class="cat-title">{{item.name}}</view>
           <view
-            class="product {{isWide ? 'wide' : ''}}"
+            class="product {{isWide ? 'wide' : ''}} {{p.unavailable ? 'is-unavailable' : ''}}"
             wx:for="{{item.products}}"
             wx:for-item="p"
             wx:key="id"
@@ -81,22 +103,25 @@
                 <view wx:else class="thumb placeholder">
                   <text class="ph-text">{{p.name[0] || '餐'}}</text>
                 </view>
+                <view class="sold-mask" wx:if="{{p.unavailable}}">{{p.unavailableLabel || '已售罄'}}</view>
                 <view class="fav-btn {{p.fav ? 'on' : ''}}" catchtap="toggleFav" data-id="{{p.id}}">♥</view>
               </view>
               <view class="info">
                 <view class="name-row">
                   <view class="name">{{p.name}}</view>
                   <view class="tag-row">
-                    <text class="flag-tag hot" wx:if="{{p.is_hot}}">热销</text>
-                    <text class="flag-tag reco" wx:if="{{p.is_recommended}}">推荐</text>
-                    <text class="special-tag" wx:if="{{p.no_member_discount}}">特价</text>
+                    <text class="flag-tag sold" wx:if="{{p.unavailable}}">{{p.unavailableLabel || '已售罄'}}</text>
+                    <text class="flag-tag hot" wx:elif="{{p.is_hot}}">热销</text>
+                    <text class="flag-tag reco" wx:if="{{!p.unavailable && p.is_recommended}}">推荐</text>
+                    <text class="special-tag" wx:if="{{!p.unavailable && p.no_member_discount}}">特价</text>
                   </view>
                 </view>
-                <view class="desc" wx:if="{{p.description}}">{{p.description}}</view>
+                <view class="desc" wx:if="{{p.description && !p.unavailable}}">{{p.description}}</view>
                 <view class="price">¥{{p.price}}</view>
               </view>
             </view>
             <view
+              wx:if="{{!p.unavailable}}"
               class="quick-add"
               catchtap="quickAdd"
               data-id="{{p.id}}"
@@ -106,6 +131,7 @@
               data-has-options="{{p.has_options}}"
               data-no-member-discount="{{p.no_member_discount}}"
             >+</view>
+            <view wx:else class="quick-add is-disabled">+</view>
           </view>
         </view>
       </block>

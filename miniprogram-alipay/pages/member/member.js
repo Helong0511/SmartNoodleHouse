@@ -10,6 +10,7 @@ const avatarUtil = require('../../utils/avatar')
 const { shouldShowDevTips } = require('../../config/env')
 const navBar = require('../../utils/navBar')
 const faceUtil = require('../../utils/face')
+const subscribe = require('../../utils/subscribe')
 const { formatDate, normalizePickerDate } = require('../../utils/date')
 const app = getApp()
 
@@ -24,6 +25,21 @@ function discountText(rate) {
 function formatExpire(iso) {
   const date = formatDate(iso)
   return date ? `至 ${date}` : ''
+}
+
+/** 券/代金券到期：3 天内标临期 */
+function enrichExpireFields(iso) {
+  const expireText = formatExpire(iso)
+  let daysLeft = null
+  let expiringSoon = false
+  if (iso) {
+    const t = new Date(iso).getTime()
+    if (Number.isFinite(t)) {
+      daysLeft = Math.ceil((t - Date.now()) / 86400000)
+      expiringSoon = daysLeft >= 0 && daysLeft <= 3
+    }
+  }
+  return { expireText, daysLeft, expiringSoon }
 }
 
 /** 等级列表 → 横向阶梯节点 + 进度填充比例 */
@@ -116,6 +132,9 @@ Page({
     memberDiscountText: '',
     memberPoints: 0,
     balanceTotal: '0.00',
+    balanceDisplay: '--',
+    balanceLabel: '开通后储值',
+    walletAssetCount: 0,
     nextLevelName: '',
     pointsToNext: 0,
     levelProgress: 0,
@@ -125,6 +144,10 @@ Page({
     coupons: [],
     vouchers: [],
     walletLoading: false,
+    pointsExchangeEnabled: false,
+    exchangeOptions: [],
+    exchangingId: null,
+    moreServicesExpanded: false,
     showSocialBenefit: true,
     socialIdentities: [],
     socialApplyTypes: [],
@@ -222,7 +245,12 @@ Page({
         this._profileLoadedAt = 0
         const snap = app.globalData.walletSnapshot
         if (snap && snap.balance_total != null) {
-          this.setData({ balanceTotal: snap.balance_total || '0.00' })
+          const bal = snap.balance_total || '0.00'
+          this.setData({
+            balanceTotal: bal,
+            balanceDisplay: `¥${bal}`,
+            balanceLabel: '储值'
+          })
           app.globalData.walletSnapshot = null
         }
       }
@@ -462,14 +490,19 @@ Page({
     const coupons = ((couponRes && couponRes.items) || []).map((c) => ({
       ...c,
       displayName: voucherUtil.holdDisplayName(c),
-      expireText: formatExpire(c.expires_at)
+      ...enrichExpireFields(c.expires_at)
     }))
     const vouchers = ((voucherRes && voucherRes.items) || []).map((v) => ({
       ...v,
       displayName: voucherUtil.holdDisplayName(v),
-      expireText: formatExpire(v.expires_at)
+      ...enrichExpireFields(v.expires_at)
     }))
-    this.setData({ coupons, vouchers, walletLoading: false })
+    this.setData({
+      coupons,
+      vouchers,
+      walletAssetCount: coupons.length + vouchers.length,
+      walletLoading: false
+    })
   },
 
   applyProfile(profile, prefView) {
@@ -516,10 +549,12 @@ Page({
       memberDiscountText: isMember ? discountText(profile.member_discount_rate) : '',
       memberPoints: isMember ? (profile.member_points || 0) : 0,
       balanceTotal: isMember ? (profile.balance_total || '0.00') : '0.00',
+      balanceDisplay: isMember ? `¥${profile.balance_total || '0.00'}` : '--',
+      balanceLabel: isMember ? '储值' : '开通后储值',
       nextLevelName: isMember ? (profile.next_level_name || '') : '',
       pointsToNext: isMember ? (profile.points_to_next_level || 0) : 0,
       levelProgress: isMember ? (profile.level_progress_percent || 0) : 0,
-      pointsRule: profile.points_rule || '实付1元=1积分，积分达标自动升级',
+      pointsRule: profile.points_rule || '实付1元=1积分；积分用于等级升级与兑券，不可在结算页直接抵现',
       ...buildLevelLadder(profile.member_levels || []),
       phone: profile.phone || '',
       // birthday 仅作日期控件 value：农历时为农历年-月-日数字，不是公历锚点
@@ -577,7 +612,9 @@ Page({
         }
         this.applyProfile(profile, prefView)
         this.applyWallet(couponRes, voucherRes)
+        this.loadExchangeOptions()
         this._profileLoadedAt = Date.now()
+        this.maybeAskBalanceSubscribe()
       } catch (e) {
         this.setData({ loading: false, walletLoading: false })
         if (!hasCache) my.showToast({ content: e.message || '加载失败', type: 'fail' })
@@ -590,6 +627,64 @@ Page({
       }
     })()
     return this._profileInflight
+  },
+
+  /** 会员页一次引导余额偏低订阅（模板未配置则静默跳过） */
+  maybeAskBalanceSubscribe() {
+    if (!this.data.isMember || this._balanceSubAsked) return
+    this._balanceSubAsked = true
+    try {
+      subscribe.requestBalanceLowSubscribe()
+    } catch (_) { /* ignore */ }
+  },
+
+  async loadExchangeOptions() {
+    if (!this.data.isMember) {
+      this.setData({ pointsExchangeEnabled: false, exchangeOptions: [] })
+      return
+    }
+    try {
+      const res = await api.get('/miniprogram/customers/me/points/exchange-options')
+      this.setData({
+        pointsExchangeEnabled: !!(res && res.enabled),
+        exchangeOptions: Array.isArray(res && res.items) ? res.items : []
+      })
+    } catch (_) {
+      this.setData({ pointsExchangeEnabled: false, exchangeOptions: [] })
+    }
+  },
+
+  async exchangePoints(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    if (!id || this.data.exchangingId) return
+    const opt = (this.data.exchangeOptions || []).find((x) => Number(x.id) === id)
+    const cost = opt ? opt.points_cost : 0
+    if (cost > 0 && Number(this.data.memberPoints) < cost) {
+      my.showToast({ content: '积分不足', type: 'fail' })
+      return
+    }
+    const name = (opt && (opt.coupon_name || opt.name)) || '优惠券'
+    const confirmed = await new Promise((resolve) => {
+      my.confirm({
+        title: '确认兑换',
+        content: `使用 ${cost} 积分兑换「${name}」？`,
+        success: (r) => resolve(!!(r && r.confirm)),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+    this.setData({ exchangingId: id })
+    try {
+      const res = await api.post('/miniprogram/customers/me/points/exchange', { option_id: id })
+      const tip = (res && res.already_exchanged) ? '本期已兑换' : '兑换成功'
+      my.showToast({ content: tip, type: 'success' })
+      this._profileLoadedAt = 0
+      await this.loadProfile(true)
+    } catch (err) {
+      my.showToast({ content: (err && err.message) || '兑换失败', type: 'fail' })
+    } finally {
+      this.setData({ exchangingId: null })
+    }
   },
 
   async loadWallet() {
@@ -692,6 +787,31 @@ Page({
 
   goRecharge() {
     my.navigateTo({ url: '/pages/recharge/recharge' })
+  },
+
+  goOrders() {
+    my.switchTab({ url: '/pages/orders/orders' })
+  },
+
+  toggleMoreServices() {
+    this.setData({ moreServicesExpanded: !this.data.moreServicesExpanded })
+  },
+
+  onAssetBalanceTap() {
+    if (this.data.isMember) this.goRecharge()
+    else this.activateSmartMember()
+  },
+
+  onAssetPointsTap() {
+    if (!this.data.isMember) {
+      this.activateSmartMember()
+      return
+    }
+    if (this.data.pointsExchangeEnabled) {
+      my.pageScrollTo({ selector: '#points-exchange', duration: 280 })
+    } else {
+      my.showToast({ content: '积分用于升级与兑券（门店未开启兑换）', type: 'none' })
+    }
   },
 
   async activateSmartMember() {

@@ -178,6 +178,8 @@ Page({
     couponPickerLabels: ['不使用优惠券'],
     selectedCouponId: 0,
     selectedCouponLabel: '不使用优惠券',
+    couponAutoHint: '',
+    voucherAutoHint: '',
     couponDiscountAmount: '0.00',
     hasCouponDiscount: false,
     vouchers: [],
@@ -1203,10 +1205,16 @@ Page({
       selectedCouponLabel: useBalance
         ? '余额支付不可用券'
         : (this._selectedCoupon ? voucherUtil.holdDisplayName(this._selectedCoupon) : '不使用优惠券'),
+      couponAutoHint: (!useBalance && !this._couponManualPick && this._selectedCoupon)
+        ? '已为您优选优惠力度最大的券，可手动更改'
+        : '',
       selectedVoucherId: useBalance ? 0 : (this._selectedVoucher ? this._selectedVoucher.id : 0),
       selectedVoucherLabel: useBalance
         ? '余额支付不可用券'
-        : (this._selectedVoucher ? voucherUtil.holdDisplayName(this._selectedVoucher) : '不使用代金券')
+        : (this._selectedVoucher ? voucherUtil.holdDisplayName(this._selectedVoucher) : '不使用代金券'),
+      voucherAutoHint: (!useBalance && !this._voucherManualPick && this._selectedVoucher)
+        ? '已为您优选可用代金券，可手动更改'
+        : ''
     })
   },
 

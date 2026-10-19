@@ -56,7 +56,11 @@
     </view>
 
     <view class="group" a:for="{{product.option_groups}}" a:key="id">
-      <view class="gname">{{item.name}}</view>
+      <view class="gname">
+        {{item.name}}
+        <text class="req-tag" a:if="{{item.is_required}}">必选</text>
+        <text class="opt-tag" a:else>可选</text>
+      </view>
       <block a:if="{{item.selection_type === 'SINGLE'}}">
         <view
           class="opt {{selected[item.id] == o.id ? 'on' : ''}}"
@@ -93,10 +97,17 @@
         <text class="qty-btn" data-delta="1" onTap="changeQty">+</text>
       </view>
     </view>
+    <view class="reset-row" a:if="{{product.option_groups.length}}">
+      <text class="reset-link" onTap="resetOptions">重置规格</text>
+    </view>
   </view>
 
   <view class="footer-bar">
     <view class="footer-sum">合计 ¥{{lineTotal}}</view>
-    <button class="btn-primary footer-btn" onTap="addCart">加入点餐</button>
+    <button
+      class="btn-primary footer-btn {{canAdd ? '' : 'is-disabled'}}"
+      disabled="{{!canAdd}}"
+      onTap="addCart"
+    >{{addBtnLabel}}</button>
   </view>
 </view>

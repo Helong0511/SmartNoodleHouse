@@ -91,6 +91,7 @@ Page({
     prefItems: [],
     prefCount: 0,
     prefExpanded: false,
+    recoExpanded: false,
     activeCat: null,
     scrollInto: '',
     keyword: '',
@@ -117,7 +118,10 @@ Page({
     cartThumbStyle: '',
     favoritesOnly: false,
     favSet: {},
-    favCount: 0
+    favCount: 0,
+    isTakeawayChannel: false,
+    tableOrderCount: 0,
+    tableOrdersBrief: ''
   },
 
   onLoad() {
@@ -166,6 +170,53 @@ Page({
       if (app && app.globalData) app.globalData._openCartSheet = false
     } catch (_) { }
     this.refreshCartBar({ openSheet })
+    this.loadTableOrdersBrief()
+  },
+
+  /** 轻量「本桌已下单」：仅当前顾客在本桌进行中的订单（非同桌共享车） */
+  async loadTableOrdersBrief() {
+    const ctx = dineCtx.currentDisplay() || {}
+    const table = ctx.table || {}
+    const tid = table.id
+    if (!ctx.hasTable || !tid || ctx.isTakeawayChannel) {
+      if (this.data.tableOrderCount || this.data.tableOrdersBrief) {
+        this.setData({ tableOrderCount: 0, tableOrdersBrief: '' })
+      }
+      return
+    }
+    const now = Date.now()
+    if (this._tableOrdersAt && now - this._tableOrdersAt < 12000 && this._tableOrdersTid === tid) {
+      return
+    }
+    try {
+      await auth.ensureLogin()
+      const params = { page: 1, page_size: 20 }
+      if (ctx.storeId) params.store_id = ctx.storeId
+      const res = await api.get('/orders/mine', params)
+      const active = { PAID: 1, CONFIRMED: 1, PREPARING: 1, COOKING: 1, READY: 1 }
+      const items = ((res && res.items) || []).filter((o) => {
+        const st = String((o && o.status) || '').toUpperCase()
+        if (!active[st]) return false
+        const ot = (o && o.table) || {}
+        return Number(ot.id || o.table_id) === Number(tid)
+      })
+      const count = items.length
+      let brief = ''
+      if (count === 1) {
+        brief = items[0].status_label || items[0].status || '进行中'
+      } else if (count > 1) {
+        brief = `${count} 笔进行中`
+      }
+      this._tableOrdersAt = Date.now()
+      this._tableOrdersTid = tid
+      this.setData({ tableOrderCount: count, tableOrdersBrief: brief })
+    } catch (_) {
+      /* 静默：不影响点餐 */
+    }
+  },
+
+  goOrders() {
+    my.switchTab({ url: '/pages/orders/orders' })
   },
 
   applyMenuFlags(storeId) {
@@ -212,9 +263,11 @@ Page({
     this._menuAuthFinger = null
     this._favLoadedAt = 0
     this.applyMenuFlags(ctx.storeId)
+    this._tableOrdersAt = 0
     this.loadMenu(true)
     this.loadFavorites(true)
     this.refreshCartBar({ openSheet: false, forceCatalog: true })
+    this.loadTableOrdersBrief()
   },
 
   onPullDownRefresh() {
@@ -456,7 +509,17 @@ Page({
             )
           })
           .filter((p) => !favOnly || !!favSet[String(p.id)])
-          .map((p) => ({ ...media.decorateProduct(p, m), fav: !!favSet[String(p.id)] }))
+          .map((p) => {
+            const avail = cartUtil.productAvailability(p)
+            return {
+              ...media.decorateProduct(p, m),
+              fav: !!favSet[String(p.id)],
+              unavailable: !avail.available,
+              soldOut: !!avail.soldOut,
+              unavailableLabel: avail.label || ''
+            }
+          })
+          .sort((a, b) => Number(!!a.unavailable) - Number(!!b.unavailable))
         return { ...c, products }
       })
       .filter(Boolean)
@@ -595,12 +658,12 @@ Page({
       activeCat,
       scrollInto: activeCat ? `cat-${activeCat}` : '',
       loading: false
-    })
+    }, () => this.scheduleMeasureCats())
     const gen = (this._imgGen = (this._imgGen || 0) + 1)
     if (first !== all) {
       setTimeout(() => {
         if (this._imgGen !== gen) return
-        this.setData({ categories: all })
+        this.setData({ categories: all }, () => this.scheduleMeasureCats())
       }, 60)
     }
     const flat = []
@@ -611,9 +674,9 @@ Page({
       if (this._imgGen !== gen) return
       const patch = buildImageUrlPatch(this.data.categories, all)
       if (patch) {
-        this.setData(patch)
+        this.setData(patch, () => this.scheduleMeasureCats())
       } else {
-        this.setData({ categories: all })
+        this.setData({ categories: all }, () => this.scheduleMeasureCats())
       }
     }).catch(() => { })
   },
@@ -636,17 +699,82 @@ Page({
         categories: rebuilt,
         activeCat,
         scrollInto: activeCat ? `cat-${activeCat}` : ''
-      })
+      }, () => this.scheduleMeasureCats())
     }, 300)
   },
 
   onCatTap(e) {
     const id = e.currentTarget.dataset.id
+    this._catScrollLockUntil = Date.now() + 450
     this.setData({ activeCat: id, scrollInto: `cat-${id}` })
+    setTimeout(() => this.measureCatOffsets(), 480)
+  },
+
+  toggleRecoExpand() {
+    this.setData({ recoExpanded: !this.data.recoExpanded }, () => {
+      setTimeout(() => this.measureCatOffsets(), 80)
+    })
+  },
+
+  onMenuBodyScrollTop() {
+    const first = this.data.categories && this.data.categories[0]
+    if (first && first.id !== this.data.activeCat) {
+      this.setData({ activeCat: first.id })
+    }
+  },
+
+  onMenuBodyScroll(e) {
+    if (this._catScrollLockUntil && Date.now() < this._catScrollLockUntil) return
+    const scrollTop = (e && e.detail && e.detail.scrollTop) || 0
+    const offsets = this._catOffsets
+    if (!offsets || !offsets.length) return
+    let active = offsets[0].id
+    for (let i = 0; i < offsets.length; i += 1) {
+      if (scrollTop + 24 >= offsets[i].top) active = offsets[i].id
+      else break
+    }
+    if (active != null && active !== this.data.activeCat) {
+      this.setData({ activeCat: active })
+    }
+  },
+
+  measureCatOffsets() {
+    const cats = this.data.categories || []
+    if (!cats.length) {
+      this._catOffsets = []
+      return
+    }
+    const query = my.createSelectorQuery()
+    query.select('.menu-body').boundingClientRect()
+    query.select('.menu-body').scrollOffset()
+    cats.forEach((c) => {
+      query.select(`#cat-${c.id}`).boundingClientRect()
+    })
+    query.exec((res) => {
+      if (!res || !res[0] || !res[1]) return
+      const bodyTop = res[0].top || 0
+      const scrollTop = (res[1] && res[1].scrollTop) || 0
+      const offsets = []
+      for (let i = 0; i < cats.length; i += 1) {
+        const rect = res[2 + i]
+        if (!rect) continue
+        offsets.push({
+          id: cats[i].id,
+          top: Math.max(0, (rect.top - bodyTop) + scrollTop)
+        })
+      }
+      this._catOffsets = offsets
+    })
   },
 
   openProduct(e) {
     const pid = Number(e.currentTarget.dataset.id)
+    const found = (this._lastProductItems || []).find((p) => String(p.id) === String(pid))
+    const avail = cartUtil.productAvailability(found || { id: pid, status: 'ON_SALE' })
+    if (found && !avail.available) {
+      my.showToast({ content: avail.label || '暂不可售', type: 'none' })
+      return
+    }
     try { tracker.click(pid, { scene: 'menu' }) } catch (_) { }
     my.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
   },
@@ -720,6 +848,11 @@ Page({
       name: ds.name,
       category_id: ds.categoryId != null ? Number(ds.categoryId) : undefined,
       require_category_ids: []
+    }
+    const avail = cartUtil.productAvailability(listItem)
+    if (!avail.available) {
+      my.showToast({ content: avail.label || '暂不可售', type: 'none' })
+      return
     }
     if (!this.assertCanAddProduct(listItem)) return
 
@@ -912,7 +1045,15 @@ Page({
       scrollInto: activeCat ? `cat-${activeCat}` : ''
     }
     if (favoritesOnly !== prevFavOnly) patch.favoritesOnly = favoritesOnly
-    this.setData(patch)
+    this.setData(patch, () => this.scheduleMeasureCats())
+  },
+
+  scheduleMeasureCats() {
+    if (this._measureCatsTimer) clearTimeout(this._measureCatsTimer)
+    this._measureCatsTimer = setTimeout(() => {
+      this._measureCatsTimer = null
+      this.measureCatOffsets()
+    }, 60)
   },
 
   goMember() {

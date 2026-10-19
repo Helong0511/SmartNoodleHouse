@@ -7,6 +7,18 @@
     <text>未绑定桌台，点击扫描桌台二维码</text>
   </view>
 
+  <view
+    class="table-order-bar"
+    a:if="{{hasTable && !isTakeawayChannel && tableOrderCount}}"
+    onTap="goOrders"
+  >
+    <view class="table-order-main">
+      <text class="table-order-title">本桌已下单</text>
+      <text class="table-order-brief">{{tableOrdersBrief}}</text>
+    </view>
+    <text class="table-order-link">查看 ›</text>
+  </view>
+
   <view class="search-wrap" a:if="{{showMenuSearch}}">
     <input
       class="search"
@@ -22,22 +34,30 @@
     <view class="fav-chip {{favoritesOnly ? 'on' : ''}}" catchTap="toggleFavFilter">♥ 收藏 · {{favCount}}</view>
   </view>
 
-  <view class="pref-bar" a:if="{{showMenuSmartTaste && prefCount}}">
+  <view class="pref-bar compact" a:if="{{showMenuSmartTaste && prefCount}}">
     <view class="pref-main" onTap="togglePrefExpand">
-      <text class="pref-title">智能口味</text>
+      <text class="pref-title">智能口味 · {{prefCount}}</text>
       <view class="pref-tags" a:if="{{prefExpanded}}">
         <text class="pref-tag" a:for="{{prefItems}}" a:key="{{item}}">{{item}}</text>
       </view>
       <text class="pref-brief" a:else>{{prefSummary}}</text>
     </view>
     <view class="pref-actions">
-      <text class="pref-toggle" a:if="{{prefCount > 3}}" catchTap="togglePrefExpand">{{prefExpanded ? '收起' : '展开'}}</text>
+      <text class="pref-toggle" catchTap="togglePrefExpand">{{prefExpanded ? '收起' : '展开'}}</text>
       <text class="pref-link" catchTap="goMember">会员</text>
     </view>
   </view>
 
-  <recommend-strip
+  <view
+    class="reco-fold"
     a:if="{{showMenuGuessYouLike && recoReady && recoStoreId}}"
+    onTap="toggleRecoExpand"
+  >
+    <text class="reco-fold-title">猜你喜欢</text>
+    <text class="reco-fold-chevron">{{recoExpanded ? '▾' : '›'}}</text>
+  </view>
+  <recommend-strip
+    a:if="{{showMenuGuessYouLike && recoReady && recoStoreId && recoExpanded}}"
     storeId="{{recoStoreId}}"
     scene="recommend_menu"
     trackScene="recommend"
@@ -63,12 +83,14 @@
       scroll-y="{{true}}"
       scroll-into-view="{{scrollInto}}"
       scroll-with-animation="{{true}}"
+      onScroll="onMenuBodyScroll"
+      onScrollToUpper="onMenuBodyScrollTop"
     >
       <block a:for="{{categories}}" a:key="id">
         <view id="cat-{{item.id}}" class="cat-section">
           <view class="cat-title">{{item.name}}</view>
           <view
-            class="product {{isWide ? 'wide' : ''}}"
+            class="product {{isWide ? 'wide' : ''}} {{p.unavailable ? 'is-unavailable' : ''}}"
             a:for="{{item.products}}"
             a:for-item="p"
             a:key="id"
@@ -79,22 +101,25 @@
                 <view a:else class="thumb placeholder">
                   <text class="ph-text">{{p.name[0] || '餐'}}</text>
                 </view>
+                <view class="sold-mask" a:if="{{p.unavailable}}">{{p.unavailableLabel || '已售罄'}}</view>
                 <view class="fav-btn {{p.fav ? 'on' : ''}}" catchTap="toggleFav" data-id="{{p.id}}">♥</view>
               </view>
               <view class="info">
                 <view class="name-row">
                   <view class="name">{{p.name}}</view>
                   <view class="tag-row" enable-flex>
-                    <text class="flag-tag hot" a:if="{{p.is_hot}}">热销</text>
-                    <text class="flag-tag reco" a:if="{{p.is_recommended}}">推荐</text>
-                    <text class="special-tag" a:if="{{p.no_member_discount}}">特价</text>
+                    <text class="flag-tag sold" a:if="{{p.unavailable}}">{{p.unavailableLabel || '已售罄'}}</text>
+                    <text class="flag-tag hot" a:elif="{{p.is_hot}}">热销</text>
+                    <text class="flag-tag reco" a:if="{{!p.unavailable && p.is_recommended}}">推荐</text>
+                    <text class="special-tag" a:if="{{!p.unavailable && p.no_member_discount}}">特价</text>
                   </view>
                 </view>
-                <view class="desc" a:if="{{p.description}}">{{p.description}}</view>
+                <view class="desc" a:if="{{p.description && !p.unavailable}}">{{p.description}}</view>
                 <view class="price">¥{{p.price}}</view>
               </view>
             </view>
             <view
+              a:if="{{!p.unavailable}}"
               class="quick-add"
               catchTap="quickAdd"
               data-id="{{p.id}}"
@@ -104,6 +129,7 @@
               data-has-options="{{p.has_options}}"
               data-no-member-discount="{{p.no_member_discount}}"
             >+</view>
+            <view a:else class="quick-add is-disabled">+</view>
           </view>
         </view>
       </block>

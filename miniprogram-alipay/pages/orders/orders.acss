@@ -117,6 +117,11 @@
   flex: 0 0 auto;
   line-height: 1;
 }
+.op-btn.add-dish {
+  background: #1677ff;
+  color: #fff;
+  border: 1rpx solid #1677ff;
+}
 .op-btn.urge {
   background: #fff;
   color: #1677ff;

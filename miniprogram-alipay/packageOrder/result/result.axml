@@ -140,7 +140,8 @@
       </view>
     </view>
 
-    <view class="order-actions" a:if="{{canUrge || canSelfRefund || canInvoice}}">
+    <view class="order-actions" a:if="{{canAddDish || canUrge || canSelfRefund || canInvoice}}">
+      <button class="btn-primary mini add-dish-btn" a:if="{{canAddDish}}" onTap="addDishNow">加菜</button>
       <button class="btn-ghost mini invoice-btn" a:if="{{canInvoice}}" onTap="goInvoice">申请开票</button>
       <button class="btn-ghost mini urge-btn {{urgeOnCooldown ? 'is-disabled' : ''}}" a:if="{{canUrge}}" disabled="{{urgeOnCooldown}}" onTap="urgeOrderNow">催单</button>
       <button class="btn-ghost mini refund-btn" a:if="{{canSelfRefund}}" loading="{{refunding}}" onTap="selfRefundOrder">申请退款</button>

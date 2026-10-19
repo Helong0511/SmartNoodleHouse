@@ -86,6 +86,31 @@
   flex-wrap: nowrap;
   gap: 16rpx;
 }
+.activate-block {
+  margin-top: 12rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12rpx;
+}
+.activate-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #333;
+}
+.benefit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.benefit-chip {
+  padding: 4rpx 14rpx;
+  font-size: 22rpx;
+  color: #ff6b35;
+  background: #fff5f0;
+  border-radius: 8rpx;
+  border: 1rpx solid #ffe0d0;
+}
 .activate-btn {
   width: auto !important;
   min-width: 0 !important;
@@ -121,6 +146,60 @@
   white-space: nowrap;
 }
 .hint { color: #999; font-size: 24rpx; line-height: 1.45; }
+.asset-strip {
+  display: flex;
+  margin-top: 20rpx;
+  padding: 8rpx 0 4rpx;
+  border-top: 1px solid #f2f2f2;
+}
+.asset-cell {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  padding: 16rpx 8rpx;
+}
+.asset-cell + .asset-cell {
+  border-left: 1px solid #f2f2f2;
+}
+.asset-val {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #333;
+  line-height: 1.3;
+}
+.asset-label {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #999;
+}
+.quick-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 8rpx;
+  margin-bottom: 8rpx;
+}
+.quick-btn {
+  flex: 1;
+  text-align: center;
+  height: 64rpx;
+  line-height: 64rpx;
+  border-radius: 32rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #ff6b35;
+  background: #fff3ee;
+}
+.quick-btn.primary {
+  color: #fff;
+  background: #ff6b35;
+}
+.birthday-box {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1px solid #f2f2f2;
+}
 .points-line { color: #666; font-size: 24rpx; margin-top: 10rpx; text-align: left; }
 .balance-line {
   display: flex;
@@ -373,12 +452,57 @@
   border-radius: 12rpx;
   border: 1px solid #f0f0f0;
 }
-.wallet-item.coupon { background: linear-gradient(90deg, #fff5f5 0%, #fff 50%); border-color: #fde2e2; }
-.wallet-item.voucher { background: linear-gradient(90deg, #fff8f0 0%, #fff 50%); border-color: #ffe7ba; }
+.wallet-item.coupon { background: #fff8f6; border-color: #fde2e2; }
+.wallet-item.voucher { background: #fffaf3; border-color: #ffe7ba; }
+.wallet-item.expiring { border-color: #ff6b35; background: #fff5f0; }
 .wallet-main { flex: 1; min-width: 0; }
 .wallet-name { font-size: 28rpx; font-weight: 600; color: #333; }
+.expire-tag {
+  margin-left: 10rpx;
+  padding: 0 10rpx;
+  font-size: 20rpx;
+  font-weight: 500;
+  color: #ff6b35;
+  border: 1rpx solid #ff6b35;
+  border-radius: 6rpx;
+  vertical-align: middle;
+}
 .wallet-rule { margin-top: 6rpx; font-size: 24rpx; color: #666; line-height: 1.4; }
-.wallet-expire { flex-shrink: 0; font-size: 22rpx; color: #999; white-space: nowrap; }
+.wallet-expire { margin-top: 6rpx; font-size: 22rpx; color: #999; }
+.wallet-expire.warn { color: #ff6b35; font-weight: 500; }
+.exchange-box {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1px solid #f2f2f2;
+}
+.exchange-title { font-size: 28rpx; font-weight: 600; color: #333; margin-bottom: 8rpx; }
+.exchange-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-top: 12rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  border: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+.wallet-use.is-disabled { opacity: 0.5; }
+.more-block { margin-top: 16rpx; padding-top: 12rpx; border-top: 1px solid #f5f5f5; }
+.more-block:first-of-type { border-top: none; padding-top: 0; }
+.wallet-use {
+  flex-shrink: 0;
+  align-self: center;
+  height: 52rpx;
+  line-height: 52rpx;
+  padding: 0 20rpx;
+  border-radius: 26rpx;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #ff6b35;
+  background: #fff;
+  border: 1rpx solid #ffb899;
+}
 
 /* TR-13 个性化推荐与隐私 */
 .privacy-row { display: flex; align-items: center; justify-content: space-between; padding: 18rpx 0; border-bottom: 1px solid #f2f2f2; }

@@ -100,6 +100,7 @@
     <picker mode="selector" range="{{couponPickerLabels}}" bindchange="onPickCoupon">
       <view class="coupon-pick">{{selectedCouponLabel}}</view>
     </picker>
+    <view class="auto-hint" wx:if="{{couponAutoHint}}">{{couponAutoHint}}</view>
   </view>
 
   <view class="coupon-box" wx:if="{{vouchers.length && !useSocialBenefit}}">
@@ -107,6 +108,7 @@
     <picker mode="selector" range="{{voucherPickerLabels}}" bindchange="onPickVoucher">
       <view class="coupon-pick">{{selectedVoucherLabel}}</view>
     </picker>
+    <view class="auto-hint" wx:if="{{voucherAutoHint}}">{{voucherAutoHint}}</view>
   </view>
 
   <view class="pack-box">

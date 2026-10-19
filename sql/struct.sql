@@ -591,6 +591,74 @@ CREATE TABLE IF NOT EXISTS `dining_sessions` (
   CONSTRAINT `fk_ds_table` FOREIGN KEY (`table_id`) REFERENCES `tables` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '就餐会话（扫码绑桌，非永久桌台归属）' ROW_FORMAT = Dynamic;
 -- ----------------------------
+-- Table structure for table_parties
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `table_parties` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `store_id` bigint UNSIGNED NOT NULL COMMENT '门店 → stores.id',
+  `table_id` bigint UNSIGNED NOT NULL COMMENT '桌台 → tables.id',
+  `host_customer_id` bigint UNSIGNED NOT NULL COMMENT '桌主（先扫码加入者）→ customers.id',
+  `status` varchar(20) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN/CLOSED',
+  `revision` int NOT NULL DEFAULT 1 COMMENT '共享车乐观锁版本，写操作自增',
+  `expires_at` datetime(3) NOT NULL COMMENT '过期时间（超时未活动关闭）',
+  `closed_at` datetime(3) NULL DEFAULT NULL COMMENT '关闭时间',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_tp_store_table_status`(`store_id` ASC, `table_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_tp_host`(`host_customer_id` ASC) USING BTREE,
+  INDEX `fk_tp_table`(`table_id` ASC) USING BTREE,
+  CONSTRAINT `fk_tp_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_tp_table` FOREIGN KEY (`table_id`) REFERENCES `tables` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_tp_host` FOREIGN KEY (`host_customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '同桌就餐局（共享车容器）' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for table_party_members
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `table_party_members` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `party_id` bigint UNSIGNED NOT NULL COMMENT '就餐局 → table_parties.id',
+  `customer_id` bigint UNSIGNED NOT NULL COMMENT '顾客 → customers.id',
+  `role` varchar(20) NOT NULL DEFAULT 'MEMBER' COMMENT 'HOST/MEMBER',
+  `nickname_snap` varchar(100) NULL DEFAULT NULL COMMENT '加入时昵称快照',
+  `joined_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '加入时间',
+  `left_at` datetime(3) NULL DEFAULT NULL COMMENT '离席时间',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_tpm_party_customer`(`party_id` ASC, `customer_id` ASC) USING BTREE,
+  INDEX `idx_tpm_customer`(`customer_id` ASC) USING BTREE,
+  CONSTRAINT `fk_tpm_party` FOREIGN KEY (`party_id`) REFERENCES `table_parties` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_tpm_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '同桌就餐局成员' ROW_FORMAT = Dynamic;
+-- ----------------------------
+-- Table structure for shared_cart_items
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `shared_cart_items` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `party_id` bigint UNSIGNED NOT NULL COMMENT '就餐局 → table_parties.id',
+  `added_by_customer_id` bigint UNSIGNED NOT NULL COMMENT '加菜人 → customers.id',
+  `product_id` bigint UNSIGNED NOT NULL COMMENT '餐品 → products.id',
+  `product_name` varchar(100) NOT NULL COMMENT '加购时餐品名快照',
+  `quantity` int NOT NULL DEFAULT 1 COMMENT '数量',
+  `unit_price` decimal(10, 2) NOT NULL COMMENT '单价（含规格加价）',
+  `option_ids` json NULL COMMENT '规格选项 id 列表',
+  `option_text` varchar(255) NULL DEFAULT NULL COMMENT '规格文案',
+  `remark` varchar(200) NULL DEFAULT NULL COMMENT '行备注',
+  `category_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '分类 id 快照',
+  `main_image` varchar(500) NULL DEFAULT NULL COMMENT '主图路径快照',
+  `no_member_discount` tinyint NOT NULL DEFAULT 0 COMMENT '是否不计会员折',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_sci_party`(`party_id` ASC) USING BTREE,
+  INDEX `idx_sci_adder`(`added_by_customer_id` ASC) USING BTREE,
+  INDEX `idx_sci_product`(`product_id` ASC) USING BTREE,
+  CONSTRAINT `fk_sci_party` FOREIGN KEY (`party_id`) REFERENCES `table_parties` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sci_adder` FOREIGN KEY (`added_by_customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sci_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '同桌共享购物车行（下单前草稿）' ROW_FORMAT = Dynamic;
+-- ----------------------------
 -- Table structure for face_profiles
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `face_profiles` (

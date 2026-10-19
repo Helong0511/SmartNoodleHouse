@@ -283,6 +283,36 @@ function enrichCartFromProducts(list, products) {
   })
 }
 
+/** 列表/详情：是否可售（下架或库存 0 为不可售；999 等正库存视为可售） */
+function productAvailability(p) {
+  if (!p) return { available: false, soldOut: false, label: '暂不可售' }
+  if (p.status && String(p.status) !== 'ON_SALE') {
+    return { available: false, soldOut: false, label: '暂不可售' }
+  }
+  const stock = parseInt(p.stock, 10)
+  if (Number.isFinite(stock) && stock === 0) {
+    return { available: false, soldOut: true, label: '已售罄' }
+  }
+  return { available: true, soldOut: false, label: '' }
+}
+
+/** 详情页选规格：返回尚未选齐的必选规格组名称 */
+function missingRequiredOptionGroups(product, selected, multi) {
+  const missing = []
+  const groups = (product && product.option_groups) || []
+  groups.forEach((g) => {
+    if (!g || !g.is_required) return
+    if (g.selection_type === 'SINGLE') {
+      const sid = pickSelected(selected, g.id)
+      if (sid == null || sid === '') missing.push(g.name || '规格')
+      return
+    }
+    const ids = pickSelected(multi, g.id) || []
+    if (!ids.length) missing.push(g.name || '规格')
+  })
+  return missing
+}
+
 /** 检查购物车是否满足餐品必选规格（与后端下单校验一致） */
 function validateRequiredOptions(cart, products) {
   const map = {}
@@ -447,6 +477,8 @@ module.exports = {
   calcCouponEligibleSubtotal,
   calcVoucherEligiblePayable,
   enrichCartFromProducts,
+  productAvailability,
+  missingRequiredOptionGroups,
   validateRequiredOptions,
   checkCategoryRequire,
   validateCategoryRequires

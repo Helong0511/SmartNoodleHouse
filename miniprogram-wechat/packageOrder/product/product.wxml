@@ -66,7 +66,11 @@ module.exports.hasId = hasId
     </view>
 
     <view class="group" wx:for="{{product.option_groups}}" wx:key="id">
-      <view class="gname">{{item.name}}</view>
+      <view class="gname">
+        {{item.name}}
+        <text class="req-tag" wx:if="{{item.is_required}}">必选</text>
+        <text class="opt-tag" wx:else>可选</text>
+      </view>
       <block wx:if="{{item.selection_type === 'SINGLE'}}">
         <view
           class="opt {{selected[item.id] === o.id || selected[item.id] == o.id ? 'on' : ''}}"
@@ -103,10 +107,17 @@ module.exports.hasId = hasId
         <text class="qty-btn" data-delta="1" bindtap="changeQty">+</text>
       </view>
     </view>
+    <view class="reset-row" wx:if="{{product.option_groups.length}}">
+      <text class="reset-link" bindtap="resetOptions">重置规格</text>
+    </view>
   </view>
 
   <view class="footer-bar safe-bottom">
     <view class="footer-sum">合计 ¥{{lineTotal}}</view>
-    <button class="btn-primary footer-btn" bindtap="addCart">加入点餐</button>
+    <button
+      class="btn-primary footer-btn {{canAdd ? '' : 'is-disabled'}}"
+      disabled="{{!canAdd}}"
+      bindtap="addCart"
+    >{{addBtnLabel}}</button>
   </view>
 </view>

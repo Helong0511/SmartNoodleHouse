@@ -13,3 +13,6 @@
 .btn-primary { margin-top: 20px; background: #ff6b35; color: #fff; border-radius: 24px; }
 .btn-primary[disabled] { opacity: 0.5; }
 .tip { margin-top: 12px; color: #999; font-size: 12px; line-height: 1.5; }
+.rules { margin-top: 20px; padding-top: 12px; border-top: 1px solid #f0f0f0; }
+.rules-title { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 4px; }
+.rules .tip { margin-top: 6px; }

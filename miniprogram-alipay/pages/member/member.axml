@@ -61,33 +61,38 @@
             <text class="discount" a:if="{{memberDiscountText}}">享 {{memberDiscountText}}</text>
             <text class="discount muted-disc" a:else>当前等级无额外折扣</text>
           </view>
-          <view class="level-row activate-row" a:elif="{{!isMember}}">
-            <text class="hint">开启智能会员享积分升级与专属折扣（不影响点餐）</text>
-            <button class="btn-primary activate-btn" size="mini" loading="{{activatingMember}}" onTap="activateSmartMember">开启智能会员</button>
-          </view>
-          <view class="points-line">当前积分 <text class="pts">{{memberPoints}}</text></view>
-          <view class="points-line balance-line" a:if="{{isMember}}">
-            <view class="balance-text">储值余额 <text class="pts">¥{{balanceTotal}}</text></view>
-            <view class="recharge-btn" onTap="goRecharge">去充值</view>
+          <view class="activate-block" a:elif="{{!isMember}}">
+            <text class="activate-title">开通智能会员</text>
+            <view class="benefit-row">
+              <text class="benefit-chip">会员折扣</text>
+              <text class="benefit-chip">积分升级</text>
+              <text class="benefit-chip">新客券</text>
+              <text class="benefit-chip">储值权益</text>
+            </view>
+            <text class="hint">不影响点餐；开通后即可享等级折扣与积分，资料仅用于会员服务</text>
+            <button class="btn-primary activate-btn" size="mini" loading="{{activatingMember}}" onTap="activateSmartMember">立即开通</button>
           </view>
           <view class="phone" a:if="{{phone}}">手机 {{phone}}</view>
-          <view class="phone birthday-line">
-            <text>生日历法</text>
-            <radio-group class="cal-group" onChange="onBirthdayCalendarChange">
-              <label class="cal-opt"><radio value="SOLAR" checked="{{birthdayCalendar === 'SOLAR'}}" color="#e67e22" disabled="{{birthdayLocked}}"/>公历</label>
-              <label class="cal-opt"><radio value="LUNAR" checked="{{birthdayCalendar === 'LUNAR'}}" color="#e67e22" disabled="{{birthdayLocked}}"/>农历</label>
-            </radio-group>
-          </view>
-          <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange" disabled="{{birthdayLocked}}">
-            <view class="phone birthday-line {{birthdayLocked ? 'birthday-locked' : ''}}" onTap="onBirthdayTap">
-              生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}
-            </view>
-          </picker>
-          <view class="phone birthday-hint" a:if="{{birthdayLocked}}">生日已确认，不可自行修改；如需更正请联系门店</view>
-          <view class="phone birthday-hint" a:elif="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）；确认后不可自行修改，更正请联系门店</view>
-          <view class="phone birthday-hint" a:else>设置后需确认；确认后不可自行修改，如需更正请联系门店</view>
-          <view class="phone birthday-benefit" a:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
         </view>
+      </view>
+      <view class="asset-strip">
+        <view class="asset-cell" onTap="onAssetBalanceTap">
+          <text class="asset-val">{{balanceDisplay}}</text>
+          <text class="asset-label">{{balanceLabel}}</text>
+        </view>
+        <view class="asset-cell" onTap="onAssetPointsTap">
+          <text class="asset-val">{{memberPoints}}</text>
+          <text class="asset-label">积分</text>
+        </view>
+        <view class="asset-cell" onTap="goMenu">
+          <text class="asset-val">{{walletAssetCount}}</text>
+          <text class="asset-label">可用券</text>
+        </view>
+      </view>
+      <view class="quick-actions">
+        <view class="quick-btn primary" onTap="goMenu">去点餐</view>
+        <view class="quick-btn" a:if="{{isMember}}" onTap="goRecharge">去充值</view>
+        <view class="quick-btn" onTap="goOrders">我的订单</view>
       </view>
       <view class="progress-box" a:if="{{nextLevelName}}">
         <view class="progress-head">
@@ -98,12 +103,46 @@
         <view class="progress-tip">{{pointsRule}}</view>
       </view>
       <view class="progress-box done" a:elif="{{isMember}}">
-        <view class="progress-tip">已达最高等级，继续消费可累积积分</view>
+        <view class="progress-tip">已达最高等级；积分可用于兑券（不可结算抵现）</view>
+      </view>
+      <view class="exchange-box" id="points-exchange" a:if="{{isMember && pointsExchangeEnabled}}">
+        <view class="exchange-title">积分兑券</view>
+        <view class="tip" a:if="{{!exchangeOptions.length}}">暂无兑换档位，请稍后再来</view>
+        <view class="exchange-item" a:for="{{exchangeOptions}}" a:key="id">
+          <view class="exchange-main">
+            <view class="wallet-name">{{item.name || item.coupon_name}}</view>
+            <view class="wallet-rule">{{item.coupon_summary || item.coupon_name}}</view>
+            <view class="wallet-expire">需 {{item.points_cost}} 积分</view>
+          </view>
+          <view
+            class="wallet-use {{exchangingId == item.id ? 'is-disabled' : ''}}"
+            data-id="{{item.id}}"
+            catchTap="exchangePoints"
+          >{{exchangingId == item.id ? '兑换中' : '兑换'}}</view>
+        </view>
+      </view>
+      <view class="birthday-box">
+        <view class="phone birthday-line">
+          <text>生日历法</text>
+          <radio-group class="cal-group" onChange="onBirthdayCalendarChange">
+            <label class="cal-opt"><radio value="SOLAR" checked="{{birthdayCalendar === 'SOLAR'}}" color="#e67e22" disabled="{{birthdayLocked}}"/>公历</label>
+            <label class="cal-opt"><radio value="LUNAR" checked="{{birthdayCalendar === 'LUNAR'}}" color="#e67e22" disabled="{{birthdayLocked}}"/>农历</label>
+          </radio-group>
+        </view>
+        <picker mode="date" end="{{birthdayEnd}}" value="{{birthday}}" onChange="onBirthdayChange" disabled="{{birthdayLocked}}">
+          <view class="phone birthday-line {{birthdayLocked ? 'birthday-locked' : ''}}" onTap="onBirthdayTap">
+            生日 {{birthdayDisplay || birthday || '未填写 · 点击设置'}}
+          </view>
+        </picker>
+        <view class="phone birthday-hint" a:if="{{birthdayLocked}}">生日已确认，不可自行修改；如需更正请联系门店</view>
+        <view class="phone birthday-hint" a:elif="{{birthdayCalendar === 'LUNAR'}}">农历：所选月日即为农历月日（如五月初一）；确认后不可自行修改，更正请联系门店</view>
+        <view class="phone birthday-hint" a:else>设置后需确认；确认后不可自行修改，如需更正请联系门店</view>
+        <view class="phone birthday-benefit" a:if="{{birthdayBenefitText}}">{{birthdayBenefitText}}</view>
       </view>
     </view>
 
     <view class="card" a:if="{{memberLevels.length}}">
-      <view class="title">会员等级与权益</view>
+      <view class="title">{{isMember ? '会员等级与权益' : '开通后可享等级权益'}}</view>
       <view class="level-ladder">
         <view class="ladder-rail">
           <view class="ladder-fill" style="width:{{levelLadderFill}}%"></view>
@@ -169,12 +208,13 @@
       </view>
       <view class="tip" a:if="{{walletLoading}}">加载中...</view>
       <view class="tip" a:elif="{{!coupons.length}}">暂无可用优惠券</view>
-      <view class="wallet-item coupon" a:for="{{coupons}}" a:key="id">
+      <view class="wallet-item coupon {{item.expiringSoon ? 'expiring' : ''}}" a:for="{{coupons}}" a:key="id">
         <view class="wallet-main">
-          <view class="wallet-name">{{item.displayName}}</view>
+          <view class="wallet-name">{{item.displayName}}<text class="expire-tag" a:if="{{item.expiringSoon}}">即将到期</text></view>
           <view class="wallet-rule">{{item.summary}}</view>
+          <view class="wallet-expire {{item.expiringSoon ? 'warn' : ''}}">{{item.expireText}}<text a:if="{{item.expiringSoon && item.daysLeft != null}}"> · 剩{{item.daysLeft}}天</text></view>
         </view>
-        <view class="wallet-expire">{{item.expireText}}</view>
+        <view class="wallet-use" catchTap="goMenu">去使用</view>
       </view>
     </view>
 
@@ -182,12 +222,13 @@
       <view class="title">我的代金券</view>
       <view class="tip" a:if="{{walletLoading}}">加载中...</view>
       <view class="tip" a:elif="{{!vouchers.length}}">暂无可用代金券</view>
-      <view class="wallet-item voucher" a:for="{{vouchers}}" a:key="id">
+      <view class="wallet-item voucher {{item.expiringSoon ? 'expiring' : ''}}" a:for="{{vouchers}}" a:key="id">
         <view class="wallet-main">
-          <view class="wallet-name">{{item.displayName}}</view>
+          <view class="wallet-name">{{item.displayName}}<text class="expire-tag" a:if="{{item.expiringSoon}}">即将到期</text></view>
           <view class="wallet-rule">{{item.summary}}</view>
+          <view class="wallet-expire {{item.expiringSoon ? 'warn' : ''}}">{{item.expireText}}<text a:if="{{item.expiringSoon && item.daysLeft != null}}"> · 剩{{item.daysLeft}}天</text></view>
         </view>
-        <view class="wallet-expire">{{item.expireText}}</view>
+        <view class="wallet-use" catchTap="goMenu">去使用</view>
       </view>
     </view>
 
@@ -228,73 +269,80 @@
     </view>
 
     <view class="card">
-      <view class="title">智能记录的口味爱好</view>
-      <view class="tip" a:if="{{prefsEmpty}}">支付成功后，系统会自动累计您常点的规格口味（辣度、面量、加料等），点餐时智能预选。</view>
-      <block a:else>
-        <view class="tip">根据历史订单自动学习；支付成功后更新画像，点餐时会智能预选常点规格。</view>
-        <view class="pref-section" a:if="{{prefsConfirmed.length}}">
-          <view class="pref-section-title">已确认偏好</view>
-          <view class="pref-item" a:for="{{prefsConfirmed}}" a:key="key">
-            <view class="pref-main">
-              <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
-              <text class="pref-meta">{{item.freqText}}</text>
-            </view>
-            <text class="pref-badge confirmed">{{item.statusText}}</text>
-          </view>
+      <view class="title-row social-toggle" onTap="toggleMoreServices">
+        <view class="social-title-wrap">
+          <view class="title">更多服务</view>
+          <view class="social-summary">口味偏好 · 隐私设置{{showQueueEntry ? ' · 排队' : ''}}</view>
         </view>
-        <view class="pref-section" a:if="{{prefsLearning.length}}">
-          <view class="pref-section-title">学习中</view>
-          <view class="pref-item" a:for="{{prefsLearning}}" a:key="key">
-            <view class="pref-main">
-              <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
-              <text class="pref-meta">{{item.freqText}}</text>
+        <text class="social-chevron">{{moreServicesExpanded ? '▾' : '›'}}</text>
+      </view>
+      <block a:if="{{moreServicesExpanded}}">
+        <view class="more-block">
+          <view class="pref-section-title">智能口味爱好</view>
+          <view class="tip" a:if="{{prefsEmpty}}">支付成功后，系统会自动累计您常点的规格口味，点餐时智能预选。</view>
+          <block a:else>
+            <view class="tip">支付成功后更新画像，点餐时智能预选。</view>
+            <view class="pref-section" a:if="{{prefsConfirmed.length}}">
+              <view class="pref-item" a:for="{{prefsConfirmed}}" a:key="key">
+                <view class="pref-main">
+                  <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+                  <text class="pref-meta">{{item.freqText}}</text>
+                </view>
+                <text class="pref-badge confirmed">{{item.statusText}}</text>
+              </view>
             </view>
-            <text class="pref-badge learning">{{item.statusText}}</text>
-          </view>
+            <view class="pref-section" a:if="{{prefsLearning.length}}">
+              <view class="pref-item" a:for="{{prefsLearning}}" a:key="key">
+                <view class="pref-main">
+                  <text class="pref-name">{{item.category}} · {{item.option_name || item.option_code}}</text>
+                  <text class="pref-meta">{{item.freqText}}</text>
+                </view>
+                <text class="pref-badge learning">{{item.statusText}}</text>
+              </view>
+            </view>
+            <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
+          </block>
         </view>
-        <button class="btn-primary" onTap="goMenu">按爱好去点餐</button>
+        <view class="more-block" a:if="{{showQueueEntry}}">
+          <view class="privacy-row link-row" onTap="goQueue">
+            <text>排队取号</text>
+            <text class="arrow">›</text>
+          </view>
+          <view class="tip">高峰可先取号，叫号前提醒就近等位。</view>
+        </view>
+        <view class="more-block">
+          <view class="pref-section-title">个性化推荐与隐私</view>
+          <view class="tip">仅在同意时收集点餐行为以优化推荐；可随时关闭或清除画像。行为事件保留不超过 90 天。</view>
+          <view class="privacy-row">
+            <text class="privacy-label">个性化推荐</text>
+            <switch
+              checked="{{recommendOptIn === 1}}"
+              onChange="onToggleRecommend"
+              color="#ff6b35"
+              disabled="{{updatingOptIn}}"
+            />
+          </view>
+          <view class="privacy-row" a:if="{{showFaceWelcome}}">
+            <text class="privacy-label">人脸迎宾</text>
+            <switch
+              checked="{{faceEnabled}}"
+              onChange="onToggleFace"
+              color="#ff6b35"
+              disabled="{{updatingFace}}"
+            />
+          </view>
+          <view class="tip" a:if="{{showFaceWelcome}}">开启后需动作挑战并用前置摄像头实拍；仅用于到店迎宾。</view>
+          <view class="privacy-row link-row" onTap="onViewTasteProfile">
+            <text>查看我的口味画像</text>
+            <text class="arrow">›</text>
+          </view>
+          <view class="privacy-row link-row danger" onTap="onClearTasteProfile">
+            <text>清除口味画像</text>
+            <text class="arrow">›</text>
+          </view>
+          <view class="tip consent-tip" a:if="{{consentVersion}}">同意版本 {{consentVersion}}<text a:if="{{consentAt}}"> · {{consentAt}}</text></view>
+        </view>
       </block>
-    </view>
-
-    <view class="card" a:if="{{showQueueEntry}}">
-      <view class="privacy-row link-row" onTap="goQueue">
-        <text>排队取号</text>
-        <text class="arrow">›</text>
-      </view>
-      <view class="tip">到店高峰可先取号排队，叫号前会提醒你就近等位。</view>
-    </view>
-
-    <view class="card">
-      <view class="title">个性化推荐与隐私</view>
-      <view class="tip">我们仅在你同意时收集点餐行为以优化推荐。可随时关闭、查看或清除你的口味画像。行为事件保留不超过 90 天。</view>
-      <view class="privacy-row">
-        <text class="privacy-label">个性化推荐</text>
-        <switch
-          checked="{{recommendOptIn === 1}}"
-          onChange="onToggleRecommend"
-          color="#ff6b35"
-          disabled="{{updatingOptIn}}"
-        />
-      </view>
-      <view class="privacy-row" a:if="{{showFaceWelcome}}">
-        <text class="privacy-label">人脸迎宾</text>
-        <switch
-          checked="{{faceEnabled}}"
-          onChange="onToggleFace"
-          color="#ff6b35"
-          disabled="{{updatingFace}}"
-        />
-      </view>
-      <view class="tip" a:if="{{showFaceWelcome}}">开启后需完成动作挑战并用前置摄像头实拍；仅用于到店迎宾，可随时关闭。</view>
-      <view class="privacy-row link-row" onTap="onViewTasteProfile">
-        <text>查看我的口味画像</text>
-        <text class="arrow">›</text>
-      </view>
-      <view class="privacy-row link-row danger" onTap="onClearTasteProfile">
-        <text>清除口味画像</text>
-        <text class="arrow">›</text>
-      </view>
-      <view class="tip consent-tip" a:if="{{consentVersion}}">同意版本 {{consentVersion}}<text a:if="{{consentAt}}"> · {{consentAt}}</text></view>
     </view>
   </block>
 

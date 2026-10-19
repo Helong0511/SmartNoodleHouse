@@ -84,6 +84,14 @@
         <text class="meta-t">{{item.timeText}} · ¥{{item.total_amount}}<text a:if="{{item.discount_amount > 0}}" class="discount">（已优惠¥{{item.discount_amount}}）</text> · {{item.payLabel}}</text>
         <view class="order-ops">
           <view
+            class="op-btn add-dish"
+            a:if="{{item.canAddDish}}"
+            catchTap="addDishOrder"
+            data-id="{{item.id}}"
+          >
+            <text>加菜</text>
+          </view>
+          <view
             class="op-btn urge {{item.urgeOnCooldown || urgingId == item.id ? 'is-disabled' : ''}}"
             a:if="{{item.canUrge}}"
             catchTap="urgeOrder"

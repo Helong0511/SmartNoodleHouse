@@ -154,6 +154,7 @@ Page({
     canUrge: false,
     urgeOnCooldown: false,
     canSelfRefund: false,
+    canAddDish: false,
     canInvoice: false,
     refunding: false
   },
@@ -588,6 +589,12 @@ Page({
   },
 
   goMenu() {
+    wx.switchTab({ url: '/pages/menu/menu' })
+  },
+
+  /** 进行中堂食：回点餐页加购（沿用本机桌台上下文） */
+  addDishNow() {
+    if (!this.data.canAddDish) return
     wx.switchTab({ url: '/pages/menu/menu' })
   },
 

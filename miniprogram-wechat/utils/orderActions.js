@@ -2,6 +2,7 @@
 const api = require('./api')
 
 const URGE_STATUSES = ['CONFIRMED', 'PREPARING', 'COOKING']
+const ADD_DISH_STATUSES = ['PAID', 'CONFIRMED', 'PREPARING', 'COOKING', 'READY']
 const URGE_COOLDOWN_MS = 5 * 60 * 1000
 const ONLINE_CHANNELS = ['WECHAT', 'ALIPAY']
 
@@ -24,17 +25,21 @@ function isUrgeOnCooldown(orderId) {
     }
 }
 
-/** 按钮可见性：{ canUrge, urgeOnCooldown, canSelfRefund } */
+/** 按钮可见性：{ canUrge, urgeOnCooldown, canSelfRefund, canAddDish } */
 function buildActionFlags(order) {
     const o = order || {}
     const status = String(o.status || '').toUpperCase()
     const payStatus = String(o.payment_status || '').toUpperCase()
     const channel = String(o.channel || '').toUpperCase()
+    const diningType = String(o.dining_type || '').toUpperCase()
     const isOnline = ONLINE_CHANNELS.indexOf(channel) >= 0
+    const isDineIn = diningType !== 'TAKEAWAY' && diningType !== 'DELIVERY'
     return {
         canUrge: URGE_STATUSES.indexOf(status) >= 0,
         urgeOnCooldown: isUrgeOnCooldown(o.id),
-        canSelfRefund: payStatus === 'PAID' && status === 'CONFIRMED' && isOnline
+        canSelfRefund: payStatus === 'PAID' && status === 'CONFIRMED' && isOnline,
+        // 进行中堂食：回菜单继续加购（同桌共享车另立项，此处保留桌台上下文）
+        canAddDish: isDineIn && ADD_DISH_STATUSES.indexOf(status) >= 0
     }
 }
 

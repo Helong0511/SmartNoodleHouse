@@ -417,6 +417,14 @@ Page({
     wx.navigateTo({ url: '/pages/recharge/recharge' })
   },
 
+  /** 进行中堂食：回点餐页继续加购（沿用本机桌台上下文；未绑桌时由菜单页引导扫码） */
+  addDishOrder(e) {
+    const id = e.currentTarget.dataset.id
+    const item = (this.data.list || []).find((o) => String(o.id) === String(id))
+    if (!item || !item.canAddDish) return
+    wx.switchTab({ url: '/pages/menu/menu' })
+  },
+
   // ---- 催单 / 自助退款（列表内操作，catchtap 阻止冒泡进入详情） ----
   async urgeOrder(e) {
     const id = e.currentTarget.dataset.id

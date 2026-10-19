@@ -96,12 +96,14 @@
     <picker mode="selector" range="{{couponPickerLabels}}" onChange="onPickCoupon">
       <view class="coupon-pick">{{selectedCouponLabel}}</view>
     </picker>
+    <view class="auto-hint" a:if="{{couponAutoHint}}">{{couponAutoHint}}</view>
   </view>
   <view class="coupon-box" a:if="{{vouchers.length && !useSocialBenefit}}">
     <view class="label">代金券</view>
     <picker mode="selector" range="{{voucherPickerLabels}}" onChange="onPickVoucher">
       <view class="coupon-pick">{{selectedVoucherLabel}}</view>
     </picker>
+    <view class="auto-hint" a:if="{{voucherAutoHint}}">{{voucherAutoHint}}</view>
   </view>
 
   <view class="pack-box">

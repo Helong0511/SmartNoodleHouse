@@ -361,6 +361,52 @@ class DiningSession(Base, TimestampMixin):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
+class TableParty(Base, TimestampMixin):
+    """同桌就餐局：共享购物车容器（一人结全桌草稿）。"""
+
+    __tablename__ = "table_parties"
+    __table_args__ = (
+        Index("ix_tp_store_table_status", "store_id", "table_id", "status"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id"))
+    table_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tables.id"), index=True)
+    host_customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN")
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class TablePartyMember(Base, TimestampMixin):
+    __tablename__ = "table_party_members"
+    __table_args__ = (UniqueConstraint("party_id", "customer_id", name="uk_tpm_party_customer"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    party_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("table_parties.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="MEMBER")
+    nickname_snap: Mapped[str | None] = mapped_column(String(100), default=None)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class SharedCartItem(Base, TimestampMixin):
+    __tablename__ = "shared_cart_items"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    party_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("table_parties.id", ondelete="CASCADE"), index=True)
+    added_by_customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id"), index=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"), index=True)
+    product_name: Mapped[str] = mapped_column(String(100))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    option_ids: Mapped[list | None] = mapped_column(JSON, default=None)
+    option_text: Mapped[str | None] = mapped_column(String(255), default=None)
+    remark: Mapped[str | None] = mapped_column(String(200), default=None)
+    category_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    main_image: Mapped[str | None] = mapped_column(String(500), default=None)
+    no_member_discount: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class CustomerWechatAccount(Base, TimestampMixin):
     __tablename__ = "customer_wechat_accounts"
     id: Mapped[int] = mapped_column(

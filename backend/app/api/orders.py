@@ -99,6 +99,18 @@ async def create_order(
         social_rule_id=data.social_rule_id,
     )
     table = await db.get(DiningTable, order.table_id) if order.table_id else None
+    # 一人结全桌：正式下单成功后清空本桌共享草稿
+    try:
+        from app.services.shared_cart_service import SharedCartService
+
+        await SharedCartService.clear_after_order(
+            db,
+            store_id=int(order.store_id),
+            table_id=int(order.table_id) if order.table_id else None,
+            customer_id=int(customer.id),
+        )
+    except Exception:
+        pass
     await db.commit()
     try:
         await ws_manager.notify_order_event(

@@ -8,6 +8,7 @@ const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
 const navBar = require('../../utils/navBar')
+const sharedCart = require('../../utils/sharedCart')
 const app = getApp()
 
 const PREFS_SKIP_LOGIN_MS = 60 * 1000
@@ -83,6 +84,7 @@ Page({
     prefItems: [],
     prefCount: 0,
     prefExpanded: false,
+    recoExpanded: false,
     activeCat: null,
     scrollInto: '',
     keyword: '',
@@ -109,7 +111,13 @@ Page({
     cartThumbStyle: '',
     favoritesOnly: false,
     favSet: {},
-    favCount: 0
+    favCount: 0,
+    isTakeawayChannel: false,
+    tableOrderCount: 0,
+    tableOrdersBrief: '',
+    sharedCartOn: false,
+    sharedIsHost: false,
+    sharedMemberCount: 0
   },
 
   onLoad() {
@@ -154,11 +162,100 @@ Page({
     const openSheet = !!(app.globalData && app.globalData._openCartSheet)
     if (app.globalData) app.globalData._openCartSheet = false
     this.refreshCartBar({ openSheet })
+    this.syncSharedCartMode()
+    this.loadTableOrdersBrief()
+  },
+
+  onHide() {
+    sharedCart.stopPolling()
   },
 
   applyDineContext(ctx) {
     if (!ctx) return
     dineCtx.applyPageDineFields(this, ctx)
+  },
+
+  /** 堂食绑桌：加入共享车并轮询；外带/未绑桌停用 */
+  async syncSharedCartMode() {
+    if (!sharedCart.shouldUseShared()) {
+      sharedCart.stopPolling()
+      this.setData({ sharedCartOn: false, sharedIsHost: false, sharedMemberCount: 0 })
+      return
+    }
+    try {
+      await sharedCart.joinAndPull()
+      const meta = sharedCart.getMeta()
+      this.setData({
+        sharedCartOn: !!meta.enabled,
+        sharedIsHost: !!meta.is_host,
+        sharedMemberCount: meta.member_count || 0
+      })
+      sharedCart.startPolling(2800)
+      await this.refreshCartBar({ openSheet: false })
+    } catch (_) {
+      this.setData({ sharedCartOn: false })
+    }
+  },
+
+  /** 本桌已下单：优先全桌聚合；失败则回退本人订单 */
+  async loadTableOrdersBrief() {
+    const ctx = dineCtx.currentDisplay() || {}
+    const table = ctx.table || {}
+    const tid = table.id
+    if (!ctx.hasTable || !tid || ctx.isTakeawayChannel) {
+      if (this.data.tableOrderCount || this.data.tableOrdersBrief) {
+        this.setData({ tableOrderCount: 0, tableOrdersBrief: '' })
+      }
+      return
+    }
+    const now = Date.now()
+    if (this._tableOrdersAt && now - this._tableOrdersAt < 12000 && this._tableOrdersTid === tid) {
+      return
+    }
+    try {
+      if (sharedCart.shouldUseShared()) {
+        const res = await sharedCart.fetchTableOrders()
+        const count = (res && res.count) || ((res && res.items) || []).length
+        let brief = ''
+        if (count === 1) {
+          const o = (res.items || [])[0] || {}
+          brief = o.status_label || o.status || '进行中'
+        } else if (count > 1) {
+          brief = `${count} 笔进行中（全桌）`
+        }
+        this._tableOrdersAt = Date.now()
+        this._tableOrdersTid = tid
+        this.setData({ tableOrderCount: count, tableOrdersBrief: brief })
+        return
+      }
+      await auth.ensureLogin()
+      const params = { page: 1, page_size: 20 }
+      if (ctx.storeId) params.store_id = ctx.storeId
+      const res = await api.get('/orders/mine', params)
+      const active = { PAID: 1, CONFIRMED: 1, PREPARING: 1, COOKING: 1, READY: 1 }
+      const items = ((res && res.items) || []).filter((o) => {
+        const st = String((o && o.status) || '').toUpperCase()
+        if (!active[st]) return false
+        const ot = (o && o.table) || {}
+        return Number(ot.id || o.table_id) === Number(tid)
+      })
+      const count = items.length
+      let brief = ''
+      if (count === 1) {
+        brief = items[0].status_label || items[0].status || '进行中'
+      } else if (count > 1) {
+        brief = `${count} 笔进行中`
+      }
+      this._tableOrdersAt = Date.now()
+      this._tableOrdersTid = tid
+      this.setData({ tableOrderCount: count, tableOrdersBrief: brief })
+    } catch (_) {
+      /* 静默：不影响点餐 */
+    }
+  },
+
+  goOrders() {
+    wx.switchTab({ url: '/pages/orders/orders' })
   },
 
   applyMenuFlags(storeId) {
@@ -201,9 +298,11 @@ Page({
     this._menuAuthFinger = null
     this._favLoadedAt = 0
     this.applyMenuFlags(ctx.storeId)
+    this._tableOrdersAt = 0
     this.loadMenu(true)
     this.loadFavorites(true)
     this.refreshCartBar({ openSheet: false, forceCatalog: true })
+    this.loadTableOrdersBrief()
   },
 
   onPullDownRefresh() {
@@ -442,7 +541,17 @@ Page({
             )
           })
           .filter((p) => !favOnly || !!favSet[String(p.id)])
-          .map((p) => ({ ...media.decorateProduct(p, m), fav: !!favSet[String(p.id)] }))
+          .map((p) => {
+            const avail = cartUtil.productAvailability(p)
+            return {
+              ...media.decorateProduct(p, m),
+              fav: !!favSet[String(p.id)],
+              unavailable: !avail.available,
+              soldOut: !!avail.soldOut,
+              unavailableLabel: avail.label || ''
+            }
+          })
+          .sort((a, b) => Number(!!a.unavailable) - Number(!!b.unavailable))
         return { ...c, products }
       })
       .filter(Boolean)
@@ -577,12 +686,12 @@ Page({
       activeCat,
       scrollInto: activeCat ? `cat-${activeCat}` : '',
       loading: false
-    })
+    }, () => this.scheduleMeasureCats())
     const gen = (this._imgGen = (this._imgGen || 0) + 1)
     if (first !== all) {
       setTimeout(() => {
         if (this._imgGen !== gen) return
-        this.setData({ categories: all })
+        this.setData({ categories: all }, () => this.scheduleMeasureCats())
       }, 60)
     }
     const flat = []
@@ -594,9 +703,9 @@ Page({
       if (this._imgGen !== gen) return
       const patch = buildImageUrlPatch(this.data.categories, all)
       if (patch) {
-        this.setData(patch)
+        this.setData(patch, () => this.scheduleMeasureCats())
       } else {
-        this.setData({ categories: all })
+        this.setData({ categories: all }, () => this.scheduleMeasureCats())
       }
     }).catch(() => { })
   },
@@ -619,17 +728,83 @@ Page({
         categories: rebuilt,
         activeCat,
         scrollInto: activeCat ? `cat-${activeCat}` : ''
-      })
+      }, () => this.scheduleMeasureCats())
     }, 300)
   },
 
   onCatTap(e) {
     const id = e.currentTarget.dataset.id
+    this._catScrollLockUntil = Date.now() + 450
     this.setData({ activeCat: id, scrollInto: `cat-${id}` })
+    // 点击跳转后重测分区偏移，避免首屏高度变化导致联动漂移
+    setTimeout(() => this.measureCatOffsets(), 480)
+  },
+
+  toggleRecoExpand() {
+    this.setData({ recoExpanded: !this.data.recoExpanded }, () => {
+      setTimeout(() => this.measureCatOffsets(), 80)
+    })
+  },
+
+  onMenuBodyScrollTop() {
+    const first = this.data.categories && this.data.categories[0]
+    if (first && first.id !== this.data.activeCat) {
+      this.setData({ activeCat: first.id })
+    }
+  },
+
+  onMenuBodyScroll(e) {
+    if (this._catScrollLockUntil && Date.now() < this._catScrollLockUntil) return
+    const scrollTop = (e && e.detail && e.detail.scrollTop) || 0
+    const offsets = this._catOffsets
+    if (!offsets || !offsets.length) return
+    let active = offsets[0].id
+    for (let i = 0; i < offsets.length; i += 1) {
+      if (scrollTop + 24 >= offsets[i].top) active = offsets[i].id
+      else break
+    }
+    if (active != null && active !== this.data.activeCat) {
+      this.setData({ activeCat: active })
+    }
+  },
+
+  measureCatOffsets() {
+    const cats = this.data.categories || []
+    if (!cats.length) {
+      this._catOffsets = []
+      return
+    }
+    const query = wx.createSelectorQuery().in(this)
+    query.select('.menu-body').boundingClientRect()
+    query.select('.menu-body').scrollOffset()
+    cats.forEach((c) => {
+      query.select(`#cat-${c.id}`).boundingClientRect()
+    })
+    query.exec((res) => {
+      if (!res || !res[0] || !res[1]) return
+      const bodyTop = res[0].top || 0
+      const scrollTop = (res[1] && res[1].scrollTop) || 0
+      const offsets = []
+      for (let i = 0; i < cats.length; i += 1) {
+        const rect = res[2 + i]
+        if (!rect) continue
+        offsets.push({
+          id: cats[i].id,
+          top: Math.max(0, (rect.top - bodyTop) + scrollTop)
+        })
+      }
+      this._catOffsets = offsets
+    })
   },
 
   openProduct(e) {
     const pid = Number(e.currentTarget.dataset.id)
+    const found = (this._lastProductItems || []).find((p) => String(p.id) === String(pid))
+    const avail = cartUtil.productAvailability(found || { id: pid, status: 'ON_SALE' })
+    if (found && !avail.available) {
+      wx.showToast({ title: avail.label || '暂不可售', icon: 'none' })
+      return
+    }
     try { tracker.click(pid, { scene: 'menu' }) } catch (_) { }
     wx.navigateTo({ url: `/packageOrder/product/product?id=${pid}` })
   },
@@ -704,6 +879,11 @@ Page({
       name: ds.name,
       category_id: ds.categoryId != null ? Number(ds.categoryId) : undefined,
       require_category_ids: []
+    }
+    const avail = cartUtil.productAvailability(listItem)
+    if (!avail.available) {
+      wx.showToast({ title: avail.label || '暂不可售', icon: 'none' })
+      return
     }
     if (!this.assertCanAddProduct(listItem)) return
 
@@ -894,7 +1074,15 @@ Page({
       scrollInto: activeCat ? `cat-${activeCat}` : ''
     }
     if (favoritesOnly !== prevFavOnly) patch.favoritesOnly = favoritesOnly
-    this.setData(patch)
+    this.setData(patch, () => this.scheduleMeasureCats())
+  },
+
+  scheduleMeasureCats() {
+    if (this._measureCatsTimer) clearTimeout(this._measureCatsTimer)
+    this._measureCatsTimer = setTimeout(() => {
+      this._measureCatsTimer = null
+      this.measureCatOffsets()
+    }, 60)
   },
 
   goMember() {
