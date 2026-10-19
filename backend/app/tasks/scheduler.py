@@ -204,12 +204,13 @@ TASK_CATALOG: list[dict] = [
 
 
 async def describe_scheduler_status(scheduler=None, db=None) -> dict:
-    """供管理后台：目录 + 覆盖启停/周期 + 运行时 next_run。"""
+    """供管理后台：目录 + 覆盖启停/周期 + 运行时 next_run + 最近执行情况。"""
     from app.core.config import get_settings
     from app.core.leader_lock import is_leader_held
     from app.services.scheduler_admin import (
         effective_schedule,
         format_trigger_label,
+        load_all_job_stats,
         load_overrides,
     )
 
@@ -233,6 +234,8 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
         except Exception:
             logger.exception("读取 scheduler jobs 失败")
 
+    run_stats = await load_all_job_stats()
+
     items = []
     for meta in TASK_CATALOG:
         jid = meta["id"]
@@ -246,6 +249,7 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
             paused = scheduler_running and rt.get("next_run_at") is None and not enabled
             if scheduler_running and not enabled:
                 paused = True
+        st = run_stats.get(jid) or {}
         items.append(
             {
                 "id": jid,
@@ -262,13 +266,19 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
                 "pending": rt.get("pending"),
                 "registered": jid in runtime,
                 "paused": paused or (jid in runtime and not enabled),
+                "last_run_at": st.get("last_run_at"),
+                "last_status": st.get("last_status"),
+                "last_duration_ms": st.get("last_duration_ms"),
+                "last_error": st.get("last_error"),
+                "ok_count": int(st.get("ok_count") or 0),
+                "error_count": int(st.get("error_count") or 0),
             }
         )
     return {
         "process_role": settings.process_role,
         "leader_held": bool(is_leader_held()),
         "scheduler_running": scheduler_running,
-        "note": "可启停并修改周期；任意进程写入后经 Redis 通知，仅 Leader 热生效；非 Leader 进程 standby 争抢可在宕机后自动接管。",
+        "note": "可启停并修改周期；「上次执行」由 Leader 写入 Redis，任意进程刷新可见；非 Leader 进程 standby 争抢可在宕机后自动接管。",
         "total": len(items),
         "items": items,
     }
@@ -281,8 +291,10 @@ def register_tasks(scheduler) -> None:
         """调度任务 fence：内存旗标 + Redis 持锁校验，缩小双 Leader 窗口。"""
 
         async def _wrapped(*args, **kwargs):
+            import time
+
             from app.core.leader_lock import confirm_leader_owned, is_leader_held
-            from app.services.scheduler_admin import is_job_enabled
+            from app.services.scheduler_admin import is_job_enabled, record_job_run
 
             if not is_leader_held():
                 return None
@@ -292,7 +304,25 @@ def register_tasks(scheduler) -> None:
             job_name = getattr(fn, "__name__", "")
             if job_name and not is_job_enabled(job_name):
                 return None
-            return await fn(*args, **kwargs)
+            started = time.perf_counter()
+            try:
+                result = await fn(*args, **kwargs)
+                if job_name:
+                    await record_job_run(
+                        job_name,
+                        status="ok",
+                        duration_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                return result
+            except Exception as exc:
+                if job_name:
+                    await record_job_run(
+                        job_name,
+                        status="error",
+                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        error=str(exc) or exc.__class__.__name__,
+                    )
+                raise
 
         _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
         return _wrapped

@@ -225,7 +225,7 @@
         </div>
         <el-table v-loading="schedulerLoading" :data="filteredSchedulerJobs" border size="small">
           <el-table-column prop="category" label="分类" width="90" />
-          <el-table-column prop="title" label="任务" min-width="150" />
+          <el-table-column prop="title" label="任务" min-width="110" />
           <el-table-column label="启用" width="90" align="center">
             <template #default="{ row }">
               <el-switch
@@ -236,27 +236,56 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="周期" width="140">
+          <el-table-column label="周期" width="150">
             <template #default="{ row }">
               <div>{{ row.trigger }}</div>
               <div v-if="row.overridden" class="muted">默认 {{ row.default_trigger }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="下次执行" width="170">
+          <el-table-column label="下次执行" width="180">
             <template #default="{ row }">
               <span v-if="!row.enabled" class="muted">已停用</span>
-              <span v-else-if="row.next_run_at">{{ row.next_run_at }}</span>
+              <span v-else-if="row.next_run_at">{{ formatSchedulerTime(row.next_run_at) }}</span>
               <span v-else class="muted">{{ row.registered ? '—' : '本进程未调度' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="100">
+          <el-table-column label="上次执行" width="180">
+            <template #default="{ row }">
+              <span v-if="row.last_run_at">{{ formatSchedulerTime(row.last_run_at) }}</span>
+              <span v-else class="muted">暂无记录</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="最近结果" width="130">
+            <template #default="{ row }">
+              <el-tooltip
+                v-if="row.last_status === 'error' && row.last_error"
+                :content="row.last_error"
+                placement="top"
+              >
+                <el-tag size="small" type="danger">失败</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.last_status === 'error'" size="small" type="danger">失败</el-tag>
+              <el-tag v-else-if="row.last_status === 'ok'" size="small" type="success">成功</el-tag>
+              <el-tag v-else-if="row.last_status === 'skipped'" size="small" type="info">跳过</el-tag>
+              <span v-else class="muted">—</span>
+              <div v-if="row.last_duration_ms != null" class="muted scheduler-dur">
+                {{ formatSchedulerDuration(row.last_duration_ms) }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="累计" width="100">
+            <template #default="{ row }">
+              <span class="muted">成 {{ row.ok_count || 0 }} / 败 {{ row.error_count || 0 }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="调度" width="100">
             <template #default="{ row }">
               <el-tag v-if="!row.enabled" size="small" type="info">停用</el-tag>
-              <el-tag v-else-if="row.registered" size="small" type="success">运行中</el-tag>
+              <el-tag v-else-if="row.registered" size="small" type="success">已注册</el-tag>
               <el-tag v-else size="small" type="warning">仅目录</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />
           <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" :disabled="!canEditScheduler" @click="openSchedulerEdit(row)">
@@ -455,14 +484,34 @@ const filteredSchedulerJobs = computed(() => {
 const schedulerSummary = computed(() => {
   const s = schedulerJobs.value
   if (!s) return '定时任务'
+  const items = s.items || []
+  const ran = items.filter((i: any) => i.last_run_at).length
+  const failed = items.filter((i: any) => i.last_status === 'error').length
   const parts = [
     `共 ${s.total ?? 0} 个`,
+    `有记录 ${ran}`,
+    failed ? `最近失败 ${failed}` : '最近无失败',
     `角色 ${s.process_role || '-'}`,
     s.leader_held ? '持有 Leader 锁' : '未持有 Leader 锁',
     s.scheduler_running ? '调度器运行中' : '调度器未运行',
   ]
   return parts.join(' · ')
 })
+
+function formatSchedulerTime(raw: string | null | undefined) {
+  if (!raw) return '—'
+  const s = String(raw).trim()
+  // 2026-10-19T14:00:00+08:00 → 2026-10-19 14:00:00
+  return s.replace('T', ' ').replace(/\+\d{2}:\d{2}$/, '').replace(/Z$/, '')
+}
+
+function formatSchedulerDuration(ms: number | null | undefined) {
+  const n = Number(ms)
+  if (!Number.isFinite(n) || n < 0) return ''
+  if (n < 1000) return `${Math.round(n)} ms`
+  if (n < 60_000) return `${(n / 1000).toFixed(1)} s`
+  return `${(n / 60_000).toFixed(1)} min`
+}
 
 const schedulerEveryMax = computed(() => {
   const unit = schedulerForm.value?.unit
@@ -689,5 +738,6 @@ onMounted(load)
 .env-group { margin-bottom: 24px; }
 .env-group h4 { margin: 0 0 8px; }
 .muted { color: #999; }
+.scheduler-dur { margin-top: 2px; font-size: 12px; line-height: 1.2; }
 code { background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 </style>

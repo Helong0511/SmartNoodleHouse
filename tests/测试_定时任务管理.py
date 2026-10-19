@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services import scheduler_admin as sa
 from app.services.scheduler_admin import validate_schedule
 
 
@@ -54,3 +55,25 @@ def test_scheduler_audit_must_not_use_string_target_id():
                 "scheduler 审计 target_id 必须为 None（job_id 放 detail）"
             )
     assert found, "未找到 scheduler_job 审计写入"
+
+
+@pytest.mark.asyncio
+async def test_record_job_run_memory_fallback(monkeypatch):
+    """Redis 不可用时仍应写入进程内统计，供后台展示。"""
+    sa._job_stats_mem.clear()
+
+    async def _no_redis():
+        return None
+
+    monkeypatch.setattr("app.core.redis_client.try_get_redis", _no_redis)
+    await sa.record_job_run("drain_webhook_inbox", status="ok", duration_ms=12)
+    await sa.record_job_run("drain_webhook_inbox", status="error", duration_ms=30, error="boom")
+    st = await sa.get_job_stat("drain_webhook_inbox")
+    assert st is not None
+    assert st["last_status"] == "error"
+    assert st["last_error"] == "boom"
+    assert st["ok_count"] == 1
+    assert st["error_count"] == 1
+    assert st["last_duration_ms"] == 30
+    all_stats = await sa.load_all_job_stats()
+    assert "drain_webhook_inbox" in all_stats

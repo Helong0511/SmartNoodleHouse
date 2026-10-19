@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 OVERRIDES_KEY = "scheduler_job_overrides"
 OVERRIDES_VER_KEY = "snh:scheduler:overrides:ver"
 OVERRIDES_CHANNEL = "snh:scheduler:overrides"
+JOB_STATS_KEY = "snh:scheduler:job_stats"
+
+# Redis 不可用时的进程内兜底（仅本进程可见）
+_job_stats_mem: dict[str, dict[str, Any]] = {}
 
 # Lua：仅当值仍为本 token 时删除，避免误删他人锁
 _LUA_COMPARE_DELETE = """
@@ -49,6 +53,94 @@ def set_enabled_cache(overrides: dict[str, Any] | None) -> None:
         if isinstance(ov, dict) and "enabled" in ov:
             cache[str(jid)] = bool(ov.get("enabled"))
     _enabled_cache = cache
+
+
+async def record_job_run(
+    job_id: str,
+    *,
+    status: str,
+    duration_ms: int,
+    error: str | None = None,
+) -> None:
+    """记录一次任务执行结果（供后台「执行情况」展示）。status: ok|error|skipped。"""
+    from app.core.response import now_local, serialize_dt
+
+    jid = str(job_id or "").strip()
+    if not jid:
+        return
+    st = str(status or "ok").strip().lower()
+    if st not in ("ok", "error", "skipped"):
+        st = "ok"
+    dur = max(0, int(duration_ms or 0))
+    err = (error or "").strip()[:240] or None
+    prev = await get_job_stat(jid) or {}
+    ok_count = int(prev.get("ok_count") or 0)
+    error_count = int(prev.get("error_count") or 0)
+    skip_count = int(prev.get("skip_count") or 0)
+    if st == "ok":
+        ok_count += 1
+    elif st == "error":
+        error_count += 1
+    else:
+        skip_count += 1
+    payload = {
+        "last_run_at": serialize_dt(now_local()),
+        "last_status": st,
+        "last_duration_ms": dur,
+        "last_error": err,
+        "ok_count": ok_count,
+        "error_count": error_count,
+        "skip_count": skip_count,
+    }
+    _job_stats_mem[jid] = payload
+    try:
+        from app.core.redis_client import try_get_redis
+
+        r = await try_get_redis()
+        if r is not None:
+            await r.hset(JOB_STATS_KEY, jid, json.dumps(payload, ensure_ascii=False))
+    except Exception as e:
+        logger.debug("写入任务执行统计失败 job_id=%s: %s", jid, e)
+
+
+async def get_job_stat(job_id: str) -> dict[str, Any] | None:
+    jid = str(job_id or "").strip()
+    if not jid:
+        return None
+    try:
+        from app.core.redis_client import try_get_redis
+
+        r = await try_get_redis()
+        if r is not None:
+            raw = await r.hget(JOB_STATS_KEY, jid)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        pass
+    return _job_stats_mem.get(jid)
+
+
+async def load_all_job_stats() -> dict[str, dict[str, Any]]:
+    """读取全部任务最近执行情况（Redis 优先，并合并本进程内存）。"""
+    out: dict[str, dict[str, Any]] = dict(_job_stats_mem)
+    try:
+        from app.core.redis_client import try_get_redis
+
+        r = await try_get_redis()
+        if r is not None:
+            raw_map = await r.hgetall(JOB_STATS_KEY)
+            for jid, raw in (raw_map or {}).items():
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, dict):
+                        out[str(jid)] = data
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.debug("读取任务执行统计失败: %s", e)
+    return out
 
 
 def format_trigger_label(schedule: dict[str, Any] | None) -> str:
