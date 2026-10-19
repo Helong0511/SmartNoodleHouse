@@ -243,6 +243,41 @@ async def test_handler平台返回失败时抛错等待重试(db_session, monkey
         )
 
 
+@pytest.mark.asyncio
+async def test_handler_commits_before_platform_http():
+    """outbox 库存镜像：collect 后 commit，再调平台。"""
+    order: list[str] = []
+    db = AsyncMock()
+
+    async def _commit():
+        order.append("commit")
+
+    db.commit = AsyncMock(side_effect=_commit)
+
+    with patch.object(
+        hmod,
+        "_collect_stock_push_jobs",
+        new_callable=AsyncMock,
+        return_value=[("MEITUAN", MagicMock(), [{"stock": 0}])],
+    ), patch.object(
+        hmod,
+        "_execute_stock_push_jobs",
+        new_callable=AsyncMock,
+        side_effect=lambda jobs, store_id, product_id: (
+            order.append("http") or 0
+        ),
+    ):
+        await delivery_stock_mirror_handler(
+            db,
+            SimpleNamespace(
+                id=1,
+                payload=json.dumps({"store_id": 1, "product_id": 2}),
+            ),
+        )
+
+    assert order == ["commit", "http"]
+
+
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
 
 @pytest.mark.asyncio

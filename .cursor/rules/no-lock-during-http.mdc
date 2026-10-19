@@ -1,0 +1,40 @@
+---
+description: 禁止在 DB 行锁/未提交长事务内调用外网 HTTP（支付、外卖、订阅消息等）
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# 禁止持锁 / 长事务调外网
+
+改 `backend/` 支付、外卖、调度、outbox、打印、订阅消息时遵守：
+
+## 原则
+
+1. **`SELECT … FOR UPDATE` 持有期间禁止** `await` 微信/支付宝/美团/饿了么/云打印等外网 HTTP。
+2. **未 `commit` 的长事务**里也不要串行调外网（占连接池、拖垮并发）。
+3. 推荐模式：**短锁读/认领 → `commit` 释放 → 锁外 HTTP → 短锁写回**。
+4. 可用 **SAVEPOINT**（`begin_nested`）包住扣库等，失败回滚嵌套事务后再投递 deferred HTTP。
+5. 定时/补偿任务优先：**只捞 id → 逐条独立短会话**，勿一次锁住一批再循环 HTTP。
+
+## 已落地参考
+
+| 场景 | 模式 |
+|---|---|
+| 支付查单 poll / sync | 锁外 `_query_channel_trade`，再短锁入账 |
+| 超时关单 | `*_by_id`：查单/关渠道在订单锁外 |
+| POS / 外卖退款 | 认领 `PROCESSING` 后 commit，再调渠道 |
+| 厨房改状态同步外卖 | API 先 `commit` 再 `sync_kitchen_status` |
+| 库存不足拒单 | SAVEPOINT 扣库 + deferred `cancel_order` |
+| 菜单同步 / 手动开店 | 组 payload 后 commit，再平台 API |
+| outbox 库存镜像 | collect → commit → HTTP |
+| 出餐/余额订阅 | 解析身份后异步或 commit 后再发 |
+
+## 反例
+
+- 一批 `Order.with_for_update` 后循环 `sync_payment_status` / 关渠道
+- `DeliveryRefund` / `PosRefundRequest` 行锁内 `agree_refund` / `PaymentService.refund`（refund 内部会 commit，申请单须先 PROCESSING）
+- 扣库存失败后仍持锁调 `provider.cancel_order`
+
+## 测试
+
+新增锁外 HTTP 时，用调用序断言：`commit`（或释放锁）出现在渠道 mock `await` 之前。
