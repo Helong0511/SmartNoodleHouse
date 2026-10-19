@@ -5,7 +5,7 @@ import itertools
 import json
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select, text
@@ -341,12 +341,16 @@ async def test_库存不足落单被拒_不建本地单且写告警(db_session):
     assert order is None
     assert side and side[0].get("action") == "cancel_order"
     assert side[0].get("platform_order_id") == "MT-SOLD-001"
-    # 落库阶段尚未调平台
+    # 落库阶段尚未调平台（HTTP 在 deferred）
     assert provider.cancel_order.await_count == 0
 
     from app.services.delivery_tasks import run_deferred_tasks
 
-    await run_deferred_tasks(side)
+    with patch(
+        "app.services.delivery_tasks.get_delivery_provider",
+        return_value=provider,
+    ):
+        await run_deferred_tasks(side)
     assert provider.cancel_order.await_count == 1
     assert provider.cancel_order.await_args.args[0] == "MT-SOLD-001"
 

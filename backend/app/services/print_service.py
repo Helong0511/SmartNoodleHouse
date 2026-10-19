@@ -734,23 +734,33 @@ class PrintService:
             print_job_id=print_job_id,
         )
         await cls._begin_printing(db, job)
+        job_id = int(job.id)
+        store_id = int(ctx.order.store_id)
+        order_no = ctx.order.order_no or ""
+        body = job.content or content
+        # 落 PRINTING 后提交，再调云打印/局域网，避免长事务占连接
+        await db.commit()
 
         try:
             data = await cls._send_content(
                 db,
-                store_id=ctx.order.store_id,
-                order_no=ctx.order.order_no or "",
-                content=job.content or content,
+                store_id=store_id,
+                order_no=order_no,
+                content=body,
                 ticket_type=ticket_type,
             )
-            cls._mark_job_success(job)
-            await db.flush()
+            job = await db.get(PrintJob, job_id)
+            if job:
+                cls._mark_job_success(job)
+                await db.flush()
             if isinstance(data, dict):
-                data = {**data, "print_job_id": job.id}
+                data = {**data, "print_job_id": job_id}
             return data
         except Exception as exc:
-            cls._mark_job_failed(job, exc)
-            await db.flush()
+            job = await db.get(PrintJob, job_id)
+            if job:
+                cls._mark_job_failed(job, exc)
+                await db.flush()
             raise
 
     @classmethod
