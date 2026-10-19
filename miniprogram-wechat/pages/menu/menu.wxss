@@ -398,11 +398,14 @@
   color: #333;
 }
 
+.cart-sheet-ops { display: flex; gap: 20rpx; align-items: center; }
 .cart-sheet-clear {
   font-size: 24rpx;
   color: #ff6b35;
   font-weight: 600;
 }
+.cart-adder { margin-top: 4rpx; font-size: 20rpx; color: #999; }
+.cart-item.readonly { opacity: 0.92; }
 
 .cart-sheet-body {
   max-height: calc(62vh - 80rpx);

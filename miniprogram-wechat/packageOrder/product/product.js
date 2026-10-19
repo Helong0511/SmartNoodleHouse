@@ -179,7 +179,9 @@ Page({
         products = (catalog && catalog.items && catalog.items.length) ? catalog.items : [p]
       } catch (_) {}
     }
-    const check = cartUtil.checkCategoryRequire(p, auth.getCart(), products, categories)
+    const sharedCart = require('../../utils/sharedCart')
+    const baseCart = sharedCart.isActive() ? sharedCart.getMirror() : auth.getCart()
+    const check = cartUtil.checkCategoryRequire(p, baseCart, products, categories)
     if (!check.ok) {
       wx.showToast({ title: check.message, icon: 'none', duration: 2500 })
       return
@@ -189,7 +191,7 @@ Page({
     const unitPrice = cartUtil.calcUnitPrice(p, this.data.selected, this.data.multi)
     const optionLabels = cartUtil.buildOptionLabels(p, this.data.selected, this.data.multi)
     const imageUrl = media.resolveUrl(p.main_image, media.imageVersion(p))
-    const cart = cartUtil.mergeCartItem(auth.getCart(), {
+    const entry = {
       product_id: p.id,
       name: p.name,
       quantity: qty,
@@ -204,8 +206,7 @@ Page({
       category_id: p.category_id,
       require_category_ids: p.require_category_ids || [],
       require_product_ids: p.require_product_ids || []
-    })
-    auth.saveCart(cart)
+    }
     try {
       tracker.cartAdd(Number(p.id), {
         scene: 'product_detail',
@@ -217,6 +218,20 @@ Page({
         }
       })
     } catch (_) {}
+    if (sharedCart.shouldUseShared()) {
+      try {
+        if (!sharedCart.isActive()) await sharedCart.joinAndPull()
+        await sharedCart.addItem(entry)
+        wx.showToast({ title: '已加入共享车', icon: 'success' })
+        setTimeout(() => { wx.navigateBack() }, 500)
+        return
+      } catch (err) {
+        wx.showToast({ title: (err && err.message) || '加入失败', icon: 'none' })
+        return
+      }
+    }
+    const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
+    auth.saveCart(cart)
     wx.showToast({ title: '已加入', icon: 'success' })
     setTimeout(() => {
       wx.navigateBack()

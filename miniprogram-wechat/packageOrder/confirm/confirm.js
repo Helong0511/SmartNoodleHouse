@@ -311,6 +311,12 @@ Page({
       wx.showToast({ title: (e && e.message) || '登录失败', icon: 'none' })
     }
     await this.loadDineContext()
+    try {
+      const sharedCart = require('../../utils/sharedCart')
+      if (sharedCart.shouldUseShared()) {
+        await sharedCart.joinAndPull()
+      }
+    } catch (_) { /* 本地 cart 兜底 */ }
     await Promise.all([
       this.loadMember(),
       this.loadSocialBenefit(),

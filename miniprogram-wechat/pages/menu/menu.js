@@ -301,6 +301,7 @@ Page({
     this._tableOrdersAt = 0
     this.loadMenu(true)
     this.loadFavorites(true)
+    this.syncSharedCartMode()
     this.refreshCartBar({ openSheet: false, forceCatalog: true })
     this.loadTableOrdersBrief()
   },
