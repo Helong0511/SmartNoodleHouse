@@ -342,3 +342,122 @@ async def test_platform_token_refresh_http_outside_lock(monkeypatch):
     fetch.assert_awaited()
     apply.assert_called_once()
     write_db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_payment_status_queries_before_row_lock():
+    """sync_payment_status：先渠道查单，再 Order/Payment 行锁入账。"""
+    payment = SimpleNamespace(
+        id=5,
+        payment_no="P5",
+        status="PENDING",
+        provider="WECHAT",
+        channel="WECHAT_MINIPROGRAM",
+        amount=Decimal("8.00"),
+    )
+    locked = SimpleNamespace(
+        id=5,
+        payment_no="P5",
+        status="PENDING",
+        provider="WECHAT",
+        channel="WECHAT_MINIPROGRAM",
+        amount=Decimal("8.00"),
+    )
+    order_calls: list[str] = []
+
+    async def _query(p):
+        order_calls.append("query")
+        return {
+            "paid": True,
+            "provider": "WECHAT",
+            "provider_trade_no": "tx5",
+            "trade_state": "SUCCESS",
+            "query_raw": {},
+        }
+
+    async def _lock(_db, _pid):
+        order_calls.append("lock")
+        return locked
+
+    async def _settle(_db, pay, **_kw):
+        order_calls.append("settle")
+        pay.status = "PAID"
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=payment))
+    )
+
+    with patch.object(PaymentService, "_query_channel_trade", side_effect=_query), patch.object(
+        PaymentService, "_lock_order_then_payment", side_effect=_lock
+    ), patch.object(PaymentService, "_settle_from_query", side_effect=_settle):
+        row, meta = await PaymentService.sync_payment_status(db, payment)
+
+    assert row.status == "PAID"
+    assert meta.get("synced") is True
+    assert order_calls == ["query", "lock", "settle"]
+
+
+@pytest.mark.asyncio
+async def test_close_channel_payments_by_id_http_outside_order_lock():
+    """关单撤销渠道：HTTP 在独立会话外，不拖住订单行锁。"""
+    order = SimpleNamespace(id=9, order_no="O9", payment_status="UNPAID")
+    pay = SimpleNamespace(id=3, payment_no="PAY3", provider="WECHAT", status="PENDING")
+
+    class _CM:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *a):
+            return False
+
+    peek_db = AsyncMock()
+    peek_db.get = AsyncMock(return_value=order)
+    peek_db.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=iter([pay])))
+    )
+    peek_db.commit = AsyncMock()
+
+    sync_db = AsyncMock()
+    sync_db.get = AsyncMock(return_value=pay)
+    sync_db.commit = AsyncMock()
+
+    close_db = AsyncMock()
+    close_db.commit = AsyncMock()
+
+    dbs = [peek_db, sync_db, close_db]
+    n = {"i": 0}
+
+    def _session():
+        db = dbs[min(n["i"], len(dbs) - 1)]
+        n["i"] += 1
+        return _CM(db)
+
+    close_http = AsyncMock()
+    sync_mock = AsyncMock(return_value=(pay, {"synced": False}))
+    lock_mock = AsyncMock(return_value=pay)
+    close_local = AsyncMock()
+
+    with patch(
+        "app.services.payment_service.AsyncSessionLocal", side_effect=_session
+    ), patch(
+        "app.services.payment_service._wechat_pay_configured", return_value=True
+    ), patch(
+        "app.services.payment_service.wechat_pay_client.close_order", close_http
+    ), patch.object(
+        PaymentService, "sync_payment_status", sync_mock
+    ), patch.object(
+        PaymentService, "_lock_order_then_payment", lock_mock
+    ), patch.object(
+        PaymentService, "_close_pending_payment", close_local
+    ):
+        late = await PaymentService.close_channel_payments_by_id(9)
+
+    assert late is False
+    peek_db.commit.assert_awaited()
+    close_http.assert_awaited_once()
+    assert close_http.await_args.kwargs["payment_no"] == "PAY3"
+    close_local.assert_awaited()
