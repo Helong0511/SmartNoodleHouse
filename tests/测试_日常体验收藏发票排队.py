@@ -745,6 +745,7 @@ async def test_config_exposes_three_daily_keys(db_session: AsyncSession):
         data = r.json()["data"]
         assert data["queue_enabled"] is False
         assert data["invoice_enabled"] is False
+        assert data["shared_cart_enabled"] is False
         assert data["enable_social_benefit"] is True
         assert data["enable_marketing_campaigns"] is True
         assert data["pay_success_coupon_name"] == ""

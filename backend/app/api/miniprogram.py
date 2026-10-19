@@ -398,6 +398,9 @@ async def miniprogram_config(
     invoice_enabled = await SystemSettingsService.effective_bool(
         db, "invoice_enabled", False, store_id=sid
     )
+    shared_cart_enabled = await SystemSettingsService.effective_bool(
+        db, "shared_cart_enabled", False, store_id=sid
+    )
 
     config_version = await SystemSettingsService.public_config_version()
 
@@ -444,6 +447,7 @@ async def miniprogram_config(
             "pay_success_coupon_name": pay_success_coupon_name,
             "queue_enabled": queue_enabled,
             "invoice_enabled": invoice_enabled,
+            "shared_cart_enabled": shared_cart_enabled,
         },
         request=request,
     )
@@ -2199,6 +2203,17 @@ async def list_table_party_orders(
     table = await _resolve_table_for_shared_cart(
         db, customer, table_token=table_token, table_id=table_id
     )
+    if not await SharedCartService.is_enabled(db, int(table.store_id)):
+        return success(
+            {
+                "table_id": int(table.id),
+                "party_id": None,
+                "items": [],
+                "count": 0,
+                "enabled": False,
+            },
+            request=request,
+        )
     party = await SharedCartService.get_open_party(
         db, store_id=int(table.store_id), table_id=int(table.id)
     )

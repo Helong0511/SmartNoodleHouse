@@ -41,6 +41,31 @@ def test_revision_conflict_raises_409():
 
 
 @pytest.mark.asyncio
+async def test_shared_cart_default_disabled(monkeypatch):
+    """门店开关默认关闭：join_party 不建局。"""
+
+    async def _off(_db, _key, _default=False, store_id=None):
+        return False
+
+    monkeypatch.setattr(
+        "app.services.system_settings_service.SystemSettingsService.effective_bool",
+        _off,
+    )
+
+    class _Db:
+        pass
+
+    table = SimpleNamespace(id=1, store_id=1, status=1, table_no="A01", table_name="1号桌")
+    customer = SimpleNamespace(id=9, nickname="测")
+    assert await SharedCartService.is_enabled(_Db(), 1) is False
+    with pytest.raises(AppException) as ei:
+        await SharedCartService.ensure_enabled(_Db(), 1)
+    assert ei.value.code == 40020
+    out = await SharedCartService.join_party(_Db(), customer=customer, table=table)
+    assert out is None
+
+
+@pytest.mark.asyncio
 async def test_validate_product_options_requires_group():
     """无规格绑定时直接通过；有必选组且未选时拒绝。"""
     from decimal import Decimal

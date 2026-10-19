@@ -1,11 +1,12 @@
 /**
  * 同桌共享购物车客户端。
  * 规则：一人结全桌；只能改自己的行；桌主可清车；revision 乐观锁。
- * 堂食绑桌后启用；外带/未绑桌仍走 auth 本地 cart。
+ * 需门店开启 shared_cart_enabled；堂食绑桌后启用；外带/未绑桌仍走 auth 本地 cart。
  */
 const api = require('./api')
 const auth = require('./auth')
 const dineCtx = require('./context')
+const clientConfig = require('./clientConfig')
 
 let _mirror = []
 let _meta = {
@@ -28,9 +29,13 @@ function tableParams() {
   return params
 }
 
+function featureEnabled() {
+  return !!clientConfig.boolFlag('shared_cart_enabled', false)
+}
+
 function shouldUseShared() {
   const ctx = dineCtx.currentDisplay() || {}
-  return !!(ctx.hasTable && !ctx.isTakeawayChannel)
+  return !!(ctx.hasTable && !ctx.isTakeawayChannel && featureEnabled())
 }
 
 function isActive() {
@@ -110,6 +115,9 @@ function applyPayload(payload) {
 }
 
 async function joinAndPull() {
+  try {
+    await clientConfig.loadClientConfig(false)
+  } catch (_) { /* ignore */ }
   if (!shouldUseShared()) {
     applyPayload({ enabled: false })
     return getMeta()
@@ -129,6 +137,9 @@ async function joinAndPull() {
 }
 
 async function pull() {
+  try {
+    await clientConfig.loadClientConfig(false)
+  } catch (_) { /* ignore */ }
   if (!shouldUseShared()) {
     applyPayload({ enabled: false })
     return getMeta()

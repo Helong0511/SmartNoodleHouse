@@ -33,6 +33,7 @@ const DEFAULTS = {
   enable_marketing_campaigns: true,
   enable_customer_display: false,
   invoice_enabled: false,
+  shared_cart_enabled: false,
   config_version: 0
 }
 

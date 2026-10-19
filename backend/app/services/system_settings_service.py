@@ -538,6 +538,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "store_override": True,
         "description": "开启后本店顾客可对已支付订单申请开票（结果页入口 + 小程序 API）；可按门店覆盖，默认关闭",
     },
+    "shared_cart_enabled": {
+        "group": "miniprogram",
+        "label": "同桌共享购物车",
+        "unit": "",
+        "type": "bool",
+        "default": False,
+        "store_override": True,
+        "description": "开启后堂食同桌多人共用一份服务端购物车草稿；关闭则每人仍用本机购物车；可按门店覆盖，默认关闭",
+    },
     "kitchen_ticket_order_no": {
         "group": "print",
         "label": "厨房票订单号样式",

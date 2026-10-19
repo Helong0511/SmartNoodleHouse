@@ -844,6 +844,16 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'invoice_enabled'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'shared_cart_enabled',
+    'false',
+    '同桌共享购物车（堂食多人同一份草稿车，默认关闭，可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'shared_cart_enabled'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'order_payment_timeout_minutes',
     '15',
     '订单支付超时分钟数'
