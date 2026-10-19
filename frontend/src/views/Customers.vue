@@ -40,13 +40,33 @@
           end-placeholder="注册止" style="width:240px" @change="reload" />
       </el-form-item>
       <el-form-item>
-        <el-select v-model="lifecycleFilter" placeholder="生命周期" clearable style="width: 130px" @change="reload">
-          <el-option v-for="(lbl, key) in CUSTOMER_LIFECYCLE" :key="key" :label="lbl" :value="key" />
+        <el-select v-model="lifecycleFilter" placeholder="生命周期" clearable style="width: 150px" @change="reload">
+          <el-option
+            v-for="(lbl, key) in CUSTOMER_LIFECYCLE"
+            :key="key"
+            :label="lbl"
+            :value="key"
+          >
+            <div class="opt-with-tip">
+              <span>{{ lbl }}</span>
+              <span class="opt-tip">{{ LIFECYCLE_CODE_HELP[key]?.split('：')[0] || key }}</span>
+            </div>
+          </el-option>
         </el-select>
       </el-form-item>
       <el-form-item>
-        <el-select v-model="rfmFilter" placeholder="RFM 分群" clearable style="width: 140px" @change="reload">
-          <el-option v-for="(lbl, key) in CUSTOMER_RFM" :key="key" :label="lbl" :value="key" />
+        <el-select v-model="rfmFilter" placeholder="RFM 分群" clearable style="width: 150px" @change="reload">
+          <el-option
+            v-for="(lbl, key) in CUSTOMER_RFM"
+            :key="key"
+            :label="lbl"
+            :value="key"
+          >
+            <div class="opt-with-tip">
+              <span>{{ lbl }}</span>
+              <span class="opt-tip">{{ RFM_SEGMENT_HELP[key]?.split('：')[0] || key }}</span>
+            </div>
+          </el-option>
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -56,15 +76,34 @@
       <el-button @click="resetFilters">重置</el-button>
       <el-button @click="goMemberLevels">会员等级设置</el-button>
       <el-button link type="primary" @click="goBirthdayBenefitSettings">生日优惠怎么改</el-button>
+      <el-button link type="primary" @click="crmHelpOpen = !crmHelpOpen">
+        {{ crmHelpOpen ? '收起说明' : '生命周期/RFM 是什么？' }}
+      </el-button>
     </el-form>
-    <el-alert
-      type="info"
-      show-icon
-      :closable="false"
-      class="birthday-alert"
-      title="生命周期 / RFM"
-      description="生命周期与 RFM 由夜间批处理刷新（新客/活跃/风险/沉睡/流失等）。筛选用作运营排查；圈人发券请到「客户分群 → 营销活动」。社会贡献身份审核在「社会贡献」。"
-    />
+    <el-collapse v-if="crmHelpOpen" v-model="crmHelpActive" class="crm-help">
+      <el-collapse-item title="生命周期是什么？" name="lc">
+        <p class="help-p" style="white-space: pre-line">{{ LIFECYCLE_OVERVIEW }}</p>
+        <ul class="help-ul">
+          <li v-for="(txt, code) in LIFECYCLE_CODE_HELP" :key="code">
+            <b>{{ label(CUSTOMER_LIFECYCLE, code) }}（{{ code }}）</b>：{{ txt.replace(/^[^：]+：/, '') }}
+          </li>
+        </ul>
+      </el-collapse-item>
+      <el-collapse-item title="RFM 是什么？" name="rfm">
+        <p class="help-p" style="white-space: pre-line">{{ RFM_OVERVIEW }}</p>
+        <ul class="help-ul">
+          <li v-for="(txt, code) in RFM_SEGMENT_HELP" :key="code">
+            <b>{{ label(CUSTOMER_RFM, code) }}（{{ code }}）</b>：{{ txt.replace(/^[^：]+：/, '') }}
+          </li>
+        </ul>
+      </el-collapse-item>
+      <el-collapse-item title="怎么用到发券？" name="use">
+        <p class="help-p">
+          本页筛选用作运营排查。批量按人群发券请：会员 → 客户分群（用 lifecycle_code / rfm_segment 建规则或选预置）→ 营销活动（选分群+券模板发布）→ 营销报表看核销与 ROI。
+          社会贡献身份审核在「社会贡献」，与 RFM/生命周期无关。
+        </p>
+      </el-collapse-item>
+    </el-collapse>
     <el-alert
       v-if="listBirthdayBenefit?.text"
       type="info"
@@ -109,11 +148,29 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="生命周期" width="100">
-        <template #default="{ row }">{{ label(CUSTOMER_LIFECYCLE, row.lifecycle_code) }}</template>
+      <el-table-column width="110" show-overflow-tooltip>
+        <template #header>
+          <span title="夜批刷新：按多久没下单划分游客/新客/活跃/风险/沉睡/流失。点上方「生命周期/RFM 是什么？」看详解。">
+            生命周期
+          </span>
+        </template>
+        <template #default="{ row }">
+          <span :title="LIFECYCLE_CODE_HELP[row.lifecycle_code] || ''">
+            {{ label(CUSTOMER_LIFECYCLE, row.lifecycle_code) || '—' }}
+          </span>
+        </template>
       </el-table-column>
-      <el-table-column label="RFM" width="110" show-overflow-tooltip>
-        <template #default="{ row }">{{ label(CUSTOMER_RFM, row.rfm_segment) }}</template>
+      <el-table-column width="110" show-overflow-tooltip>
+        <template #header>
+          <span title="RFM=近度R+频次F+金额M 合成标签（冠军/忠诚/休眠等）。点上方说明看详解。">
+            RFM
+          </span>
+        </template>
+        <template #default="{ row }">
+          <span :title="RFM_SEGMENT_HELP[row.rfm_segment] || ''">
+            {{ label(CUSTOMER_RFM, row.rfm_segment) || '—' }}
+          </span>
+        </template>
       </el-table-column>
       <el-table-column label="会员等级" width="110">
         <template #default="{ row }">{{ row.member_level_name || '—' }}</template>
@@ -566,6 +623,12 @@ import { useStoreOptions } from '@/composables/useStoreOptions'
 import { mediaUrl } from '@/utils/media'
 import { useAuthStore } from '@/stores/auth'
 import {
+  LIFECYCLE_CODE_HELP,
+  LIFECYCLE_OVERVIEW,
+  RFM_OVERVIEW,
+  RFM_SEGMENT_HELP,
+} from '@/utils/marketingHelp'
+import {
   COUPON_STATUS,
   CUSTOMER_LIFECYCLE,
   CUSTOMER_RFM,
@@ -589,6 +652,8 @@ const channel = ref<string | undefined>()
 const memberStatusFilter = ref<string | undefined>()
 const lifecycleFilter = ref<string | undefined>()
 const rfmFilter = ref<string | undefined>()
+const crmHelpOpen = ref(false)
+const crmHelpActive = ref(['lc', 'rfm'])
 const levelFilter = ref<number | undefined>()
 const statusFilter = ref<number | undefined>(1)
 const registeredRange = ref<string[] | null>(null)
@@ -1365,6 +1430,38 @@ onMounted(async () => {
 
 .birthday-alert {
   margin: 0 0 12px;
+}
+
+.crm-help {
+  margin: 0 0 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: #fafcff;
+}
+.help-p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #555;
+  white-space: pre-line;
+}
+.help-ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #444;
+}
+.opt-with-tip {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.opt-tip {
+  color: #99a;
+  font-size: 12px;
 }
 .birthday-live {
   margin-top: 8px;

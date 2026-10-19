@@ -225,6 +225,84 @@ async def test_draft_publish_idempotent_pause(db_session):
 
 
 @pytest.mark.asyncio
+async def test_lifecycle_field_and_store_scoped_hq_publish(db_session):
+    """lifecycle_code 可估人；门店活动引用总部分群按本店动态圈人且不覆盖总部快照。"""
+    from app.models import CustomerLifecycle, CustomerSegmentMember
+
+    seed = await _seed(db_session)
+    store = seed["store"]
+    # 仅给第一位会员打上 AT_RISK
+    c0 = seed["members"][0]
+    db_session.add(
+        CustomerLifecycle(
+            customer_id=int(c0.id),
+            lifecycle_code="AT_RISK",
+            silence_days=40,
+        )
+    )
+    await db_session.flush()
+
+    rules = {
+        "all": [
+            {"field": "member_status", "op": "eq", "value": "MEMBER"},
+            {"field": "lifecycle_code", "op": "eq", "value": "AT_RISK"},
+        ]
+    }
+    est = await SegmentService.estimate(db_session, rules_json=rules, store_id=int(store.id))
+    assert est["count"] == 1
+
+    # 总部预置分群（store_id=None）
+    hq_seg = await SegmentService.upsert(
+        db_session,
+        store_id=None,
+        code="hq_sleep_test",
+        name="总部沉睡测",
+        rules_json={
+            "all": [
+                {"field": "member_status", "op": "eq", "value": "MEMBER"},
+                {"field": "days_since_order", "op": "gte", "value": 30},
+            ]
+        },
+    )
+    # 先物化总部快照（应含 3 人）
+    mat_hq = await SegmentService.materialize(db_session, int(hq_seg.id))
+    await db_session.commit()
+    assert mat_hq["count"] == 3
+    hq_members_before = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(CustomerSegmentMember)
+            .where(CustomerSegmentMember.segment_id == hq_seg.id)
+        )
+        or 0
+    )
+    assert hq_members_before == 3
+
+    # 门店活动引用总部分群发布：按本店圈人，不改总部快照
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=int(store.id),
+        code="store_use_hq",
+        name="门店用总部群",
+        segment_id=int(hq_seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+    )
+    pub = await MarketingService.publish(db_session, int(camp.id))
+    await db_session.commit()
+    assert pub["materialized"]["mode"] == "dynamic_store"
+    assert pub["enqueued"] == 3
+    hq_members_after = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(CustomerSegmentMember)
+            .where(CustomerSegmentMember.segment_id == hq_seg.id)
+        )
+        or 0
+    )
+    assert hq_members_after == hq_members_before  # 快照未被覆盖
+
+
+@pytest.mark.asyncio
 async def test_weekly_cap_skipped(db_session):
     seed = await _seed(db_session)
     # 把周上限设为 0 → 不限制；设为 1 后第二张 SKIPPED

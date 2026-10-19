@@ -174,10 +174,16 @@ class MarketingService:
         name = (name or "").strip()
         if not code or not name:
             raise AppException(40001, "活动 code/name 必填")
+        # 新建前先校验开关，避免未填 name 的草稿对象被 autoflush
+        if campaign_id is None:
+            await cls.assert_enabled(db, store_id)
+
         if campaign_id:
             row = await cls.get_campaign(db, campaign_id)
             if row.status not in EDITABLE_STATUSES:
                 raise AppException(40001, f"仅 DRAFT 可编辑，当前 {row.status}")
+            if row.store_id is None and store_id is not None:
+                raise AppException(40301, "总部活动仅超管可修改")
             if store_id is not None and row.store_id not in (None, store_id):
                 raise AppException(40301, "无权修改该活动")
         else:
@@ -189,12 +195,14 @@ class MarketingService:
             )
             if exists:
                 raise AppException(40002, "活动 code 已存在")
-            row = MarketingCampaign(store_id=store_id, code=code, status="DRAFT", created_by=created_by)
+            row = MarketingCampaign(
+                store_id=store_id,
+                code=code,
+                name=name,
+                status="DRAFT",
+                created_by=created_by,
+            )
             db.add(row)
-
-        # 新建时校验门店营销开关；编辑草稿仍允许改内容，发布时再校验
-        if campaign_id is None:
-            await cls.assert_enabled(db, store_id)
 
         if segment_id:
             await SegmentService.get_segment(db, segment_id)
@@ -233,12 +241,35 @@ class MarketingService:
         if camp.end_at and camp.end_at <= now:
             raise AppException(40001, "活动已过结束时间")
 
-        # 动态分群先物化快照，保证本轮发券人群稳定
-        mat = await SegmentService.materialize(db, int(camp.segment_id))
+        seg = await SegmentService.get_segment(db, int(camp.segment_id))
+        # 门店活动引用总部分群：按本店动态圈人，禁止覆盖总部物化快照（避免串店）
+        store_scoped_hq = camp.store_id is not None and seg.store_id is None
+        if store_scoped_hq:
+            est = await SegmentService.estimate(
+                db,
+                rules_json=seg.rules_json,
+                store_id=int(camp.store_id),
+                sample_limit=0,
+            )
+            mat = {
+                "segment_id": int(seg.id),
+                "count": int(est.get("count") or 0),
+                "mode": "dynamic_store",
+            }
+        else:
+            # 同范围分群：物化快照，保证本轮发券人群稳定
+            mat = await SegmentService.materialize(db, int(camp.segment_id))
+            mat = {**mat, "mode": "snapshot"}
+
         enqueued = 0
         skipped_dup = 0
         if enqueue:
-            async for batch in SegmentService.iter_member_ids(db, int(camp.segment_id), prefer_snapshot=True):
+            async for batch in SegmentService.iter_member_ids(
+                db,
+                int(camp.segment_id),
+                prefer_snapshot=not store_scoped_hq,
+                store_id=int(camp.store_id) if store_scoped_hq else None,
+            ):
                 for cid in batch:
                     key = cls.idem_key(int(camp.id), cid, int(camp.coupon_template_id))
                     exists = await db.scalar(

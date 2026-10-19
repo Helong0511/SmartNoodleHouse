@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.core.response import naive_local_now
-from app.models import Customer, CustomerSegment, CustomerSegmentMember
+from app.models import Customer, CustomerLifecycle, CustomerSegment, CustomerSegmentMember
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,10 @@ SUPPORTED_FIELDS = frozenset(
         "days_since_order",
         "days_since_member",
         "has_order",
+        # 来自 customer_lifecycle 夜批快照
+        "lifecycle_code",
+        "rfm_segment",
+        "silence_days",
     }
 )
 SUPPORTED_OPS = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"})
@@ -125,6 +129,24 @@ class SegmentService:
                     cls._cmp(Customer.member_activated_at, cmp_op, boundary),
                 )
             raise AppException(40001, "days_since_member 仅支持 gt/gte/lt/lte")
+        if field == "lifecycle_code":
+            return Customer.id.in_(
+                select(CustomerLifecycle.customer_id).where(
+                    cls._cmp(CustomerLifecycle.lifecycle_code, op, value)
+                )
+            )
+        if field == "rfm_segment":
+            return Customer.id.in_(
+                select(CustomerLifecycle.customer_id).where(
+                    cls._cmp(CustomerLifecycle.rfm_segment, op, value)
+                )
+            )
+        if field == "silence_days":
+            return Customer.id.in_(
+                select(CustomerLifecycle.customer_id).where(
+                    cls._cmp(CustomerLifecycle.silence_days, op, int(value))
+                )
+            )
         raise AppException(40001, f"未实现字段: {field}")
 
     @classmethod
@@ -250,6 +272,9 @@ class SegmentService:
 
         if segment_id:
             row = await cls.get_segment(db, segment_id)
+            # 总部预置分群仅超管（store_id=None 调用方）可改，避免门店改坏共用规则
+            if row.store_id is None and store_id is not None:
+                raise AppException(40301, "总部预置分群仅超管可修改")
             if store_id is not None and row.store_id not in (None, store_id):
                 raise AppException(40301, "无权修改该分群")
             row.code = code
@@ -328,11 +353,22 @@ class SegmentService:
         *,
         batch_size: int = DEFAULT_BATCH_SIZE,
         prefer_snapshot: bool = True,
+        store_id: int | None = None,
     ):
-        """分批产出顾客 id。STATIC 或已物化优先用快照；否则动态扫描。"""
+        """分批产出顾客 id。
+
+        STATIC 或已物化优先用快照；否则动态扫描。
+        store_id：门店活动引用总部分群时传入本店 id，按本店过滤且不读总部快照（避免串店/覆盖）。
+        """
         seg = await cls.get_segment(db, segment_id)
-        use_snap = prefer_snapshot and (
-            (seg.segment_type or "").upper() == "STATIC" or seg.materialized_at is not None
+        # 门店活动 + 总部分群：强制动态按本店圈人
+        force_store_dynamic = store_id is not None and seg.store_id is None
+        use_snap = (
+            prefer_snapshot
+            and not force_store_dynamic
+            and (
+                (seg.segment_type or "").upper() == "STATIC" or seg.materialized_at is not None
+            )
         )
         if use_snap:
             last_id = 0
@@ -358,7 +394,10 @@ class SegmentService:
                 last_id = int(rows[-1])
                 if len(rows) < batch_size:
                     return
-        filt = cls.build_filter(seg.rules_json, store_id=seg.store_id)
+        filt_store = int(store_id) if force_store_dynamic else (
+            int(seg.store_id) if seg.store_id is not None else None
+        )
+        filt = cls.build_filter(seg.rules_json, store_id=filt_store)
         last_id = 0
         while True:
             rows = list(

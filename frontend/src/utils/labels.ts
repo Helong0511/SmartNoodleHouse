@@ -114,13 +114,15 @@ export const FEEDBACK_VERDICT_NEG = new Set([
   'DISLIKE',
 ])
 
-/** 顾客 RFM 分群 customer_lifecycle.rfm_segment */
+/** 顾客 RFM 分群 customer_lifecycle.rfm_segment（与 lifecycle_service.compute_rfm_segment 对齐） */
 export const CUSTOMER_RFM: Record<string, string> = {
   CHAMPIONS: '冠军',
   LOYAL: '忠诚',
-  NEW_PROMISING: '潜力',
+  NEW_PROMISING: '潜力新客',
   AT_RISK: '风险',
   HIBERNATING: '休眠',
+  POTENTIAL: '综合潜力',
+  OTHER: '其他',
 }
 
 /** 顾客会员状态 customers.member_status */

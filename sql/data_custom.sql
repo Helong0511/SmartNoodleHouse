@@ -432,3 +432,46 @@ SELECT NULL, 'champions', '高积分活跃', 'DYNAMIC',
        )), 1
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'champions');
+
+
+
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'lifecycle_at_risk', '生命周期·风险客', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'lifecycle_code', 'op', 'eq', 'value', 'AT_RISK')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'lifecycle_at_risk');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'lifecycle_dormant', '生命周期·沉睡客', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'lifecycle_code', 'op', 'eq', 'value', 'DORMANT')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'lifecycle_dormant');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'rfm_hibernating', 'RFM·休眠', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'rfm_segment', 'op', 'eq', 'value', 'HIBERNATING')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'rfm_hibernating');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'lifecycle_lost', '生命周期·流失客', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'lifecycle_code', 'op', 'eq', 'value', 'LOST')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'lifecycle_lost');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'rfm_champions', 'RFM·冠军', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'rfm_segment', 'op', 'eq', 'value', 'CHAMPIONS')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'rfm_champions');

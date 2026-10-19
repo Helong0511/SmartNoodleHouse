@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, DbSession, require_permission
+from app.core.exceptions import AppException
 from app.core.response import calc_pages, success
 from app.services.audit_service import AuditService
 from app.services.marketing_service import MarketingService
@@ -152,6 +153,12 @@ async def materialize_segment(
 ):
     seg = await SegmentService.get_segment(db, segment_id)
     require_bound_store(user, seg.store_id)
+    # 总部快照全局共用；门店账号物化会覆盖他店发布依赖，禁止
+    if seg.store_id is None and getattr(getattr(user, "role", None), "code", None) != "SUPER_ADMIN":
+        raise AppException(
+            40301,
+            "总部预置分群仅超管可物化；门店发布营销活动时会按本店自动圈人，无需本地物化",
+        )
     result = await SegmentService.materialize(db, segment_id)
     await AuditService.log_staff(
         db,

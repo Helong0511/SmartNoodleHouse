@@ -3,7 +3,9 @@
     <div class="page-header">
       <div>
         <h2>客户分群</h2>
-        <p class="sub">圈选目标顾客，供「营销活动」发券与触达。预置分群：沉睡30天 / 沉睡90天+ / 新会员7日 / 低余额 / 高积分活跃。</p>
+        <p class="sub">
+          圈选目标顾客，供「营销活动」发券与触达。预置：沉睡30/90天、新会员7日、低余额、高积分活跃、生命周期风险/沉睡、RFM休眠。
+        </p>
       </div>
       <div class="header-actions">
         <el-button @click="goCampaigns">去营销活动</el-button>
@@ -18,16 +20,51 @@
       :closable="false"
       class="tip"
       title="店长怎么用"
-      description="① 新建或选用预置分群 → ②「估人数」看规模（脱敏样本）→ ③「物化」生成成员快照 → ④ 到「营销活动」选该分群发布发券。动态分群按规则实时算；物化后快照供本轮活动稳定圈人。"
+      description="① 选用预置或新建分群 → ②「估人数」看规模（脱敏）→ ③ 本店自建分群可「物化」；总部预置由超管物化，门店发布活动时会按本店自动圈人 → ④ 到「营销活动」选该分群发布。"
     />
-    <el-alert
-      type="warning"
-      show-icon
-      :closable="false"
-      class="tip"
-      title="规则字段（JSON）"
-      description="支持 field：member_status / days_since_order / days_since_member / points / balance_total / has_order / status / account_status / registered_store_id。运算符：eq / gt / gte / lt / lte。结构示例：{&quot;all&quot;:[{&quot;field&quot;:&quot;member_status&quot;,&quot;op&quot;:&quot;eq&quot;,&quot;value&quot;:&quot;MEMBER&quot;}]}。导出与估人数均无明文手机。"
-    />
+    <el-button link type="primary" class="help-toggle" @click="helpOpen = !helpOpen">
+      {{ helpOpen ? '收起名词说明' : '生命周期 / RFM / 字段说明（点开）' }}
+    </el-button>
+    <el-collapse v-if="helpOpen" v-model="helpActive" class="help-box">
+      <el-collapse-item title="生命周期是什么？" name="lc">
+        <p class="help-p">{{ LIFECYCLE_OVERVIEW }}</p>
+        <ul class="help-ul">
+          <li v-for="(txt, code) in LIFECYCLE_CODE_HELP" :key="code">
+            <b>{{ label(CUSTOMER_LIFECYCLE, code) }}（{{ code }}）</b> — {{ txt.replace(/^[^：]+：/, '') }}
+          </li>
+        </ul>
+      </el-collapse-item>
+      <el-collapse-item title="RFM 是什么？" name="rfm">
+        <p class="help-p">{{ RFM_OVERVIEW }}</p>
+        <ul class="help-ul">
+          <li v-for="(txt, code) in RFM_SEGMENT_HELP" :key="code">
+            <b>{{ label(CUSTOMER_RFM, code) }}（{{ code }}）</b> — {{ txt.replace(/^[^：]+：/, '') }}
+          </li>
+        </ul>
+      </el-collapse-item>
+      <el-collapse-item title="动态 / 静态 / 物化" name="mat">
+        <p class="help-p">{{ SEGMENT_TYPE_HELP }}</p>
+        <p class="help-p">{{ MATERIALIZE_HELP }}</p>
+      </el-collapse-item>
+      <el-collapse-item title="规则字段一览" name="fields">
+        <ul class="help-ul">
+          <li v-for="f in RULE_FIELDS" :key="f.value">
+            <b>{{ f.label }}（{{ f.value }}）</b> — {{ RULE_FIELD_HELP[f.value] || '' }}
+          </li>
+        </ul>
+      </el-collapse-item>
+    </el-collapse>
+
+    <div class="preset-bar">
+      <span class="preset-label">快捷规则</span>
+      <el-button
+        v-for="p in RULE_PRESETS"
+        :key="p.code"
+        size="small"
+        plain
+        @click="openEditFromPreset(p)"
+      >{{ p.label }}</el-button>
+    </div>
 
     <div class="filter-bar">
       <el-select
@@ -49,31 +86,43 @@
       <el-table-column label="门店" width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ storeLabel(row.store_id) }}</template>
       </el-table-column>
-      <el-table-column prop="code" label="编码" width="140" />
-      <el-table-column prop="name" label="名称" min-width="140" />
-      <el-table-column label="类型" width="100">
+      <el-table-column prop="code" label="编码" width="150" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+      <el-table-column label="类型" width="90">
         <template #default="{ row }">{{ label(SEGMENT_TYPE, row.segment_type) }}</template>
       </el-table-column>
       <el-table-column prop="estimated_count" label="估人数" width="90" />
-      <el-table-column prop="status" label="状态" width="80">
-        <template #default="{ row }">{{ row.status === 1 ? '启用' : '停用' }}</template>
+      <el-table-column label="物化时间" width="160">
+        <template #default="{ row }">{{ row.materialized_at || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="状态" width="80">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.status === 1 ? 'success' : 'info'">
+            {{ row.status === 1 ? '启用' : '停用' }}
+          </el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button size="small" :disabled="!canEditRow(row)" @click="openEdit(row)">编辑</el-button>
           <el-button size="small" @click="estimate(row)">估人数</el-button>
-          <el-button size="small" type="primary" @click="materialize(row)">物化</el-button>
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="!canMaterializeRow(row)"
+            @click="materialize(row)"
+          >物化</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dlg" :title="form.id ? '编辑分群' : '新建分群'" width="600px" destroy-on-close>
+    <el-dialog v-model="dlg" :title="form.id ? '编辑分群' : '新建分群'" width="720px" destroy-on-close>
       <el-alert
         type="info"
         :closable="false"
         show-icon
         style="margin-bottom:12px"
-        title="编码建议用英文业务键（如 sleep30）。保存后可估人数；发券前建议先物化。"
+        title="编码建议用英文业务键（如 sleep30）。可视化条件默认「且」关系；高级 JSON 支持 all/any 嵌套。"
       />
       <el-form label-width="100px">
         <el-form-item v-if="auth.isSuperAdmin" label="归属门店">
@@ -91,12 +140,70 @@
             <el-option label="动态（按规则实时算）" value="DYNAMIC" />
             <el-option label="静态（依赖物化快照）" value="STATIC" />
           </el-select>
+          <div class="hint">{{ SEGMENT_TYPE_HELP }}</div>
         </el-form-item>
-        <el-form-item label="规则 JSON">
+        <el-form-item label="规则编辑">
+          <el-radio-group v-model="ruleMode" size="small">
+            <el-radio-button value="visual">可视化</el-radio-button>
+            <el-radio-button value="json">高级 JSON</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="ruleMode === 'visual'" label="条件（且）">
+          <div class="rule-list">
+            <div v-for="(c, idx) in visualRules" :key="idx" class="rule-block">
+              <div class="rule-row">
+                <el-select
+                  v-model="c.field"
+                  placeholder="字段"
+                  style="width: 160px"
+                  filterable
+                  @change="onFieldChange(c)"
+                >
+                  <el-option
+                    v-for="f in RULE_FIELDS"
+                    :key="f.value"
+                    :label="f.label"
+                    :value="f.value"
+                  >
+                    <span>{{ f.label }}</span>
+                    <span class="opt-code">{{ f.value }}</span>
+                  </el-option>
+                </el-select>
+                <el-select v-model="c.op" placeholder="运算" style="width: 100px">
+                  <el-option v-for="o in RULE_OPS" :key="o.value" :label="o.label" :value="o.value" />
+                </el-select>
+                <el-select
+                  v-if="valueOptions(c.field)"
+                  v-model="c.value"
+                  placeholder="取值"
+                  style="flex: 1"
+                  filterable
+                >
+                  <el-option
+                    v-for="opt in valueOptions(c.field)"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+                <el-input
+                  v-else
+                  v-model="c.value"
+                  :placeholder="valuePlaceholder(c.field)"
+                  style="flex: 1"
+                />
+                <el-button link type="danger" @click="removeRule(idx)">删</el-button>
+              </div>
+              <div v-if="RULE_FIELD_HELP[c.field]" class="hint">{{ RULE_FIELD_HELP[c.field] }}</div>
+            </div>
+            <el-button size="small" @click="addRule">添加条件</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item v-else label="规则 JSON">
           <el-input
             v-model="rulesText"
             type="textarea"
-            :rows="8"
+            :rows="10"
             placeholder='{"all":[{"field":"member_status","op":"eq","value":"MEMBER"}]}'
           />
         </el-form-item>
@@ -138,13 +245,204 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
-import { MEMBER_STATUS, SEGMENT_TYPE, label } from '@/utils/labels'
+import {
+  CUSTOMER_LIFECYCLE,
+  CUSTOMER_RFM,
+  MEMBER_STATUS,
+  SEGMENT_TYPE,
+  label,
+} from '@/utils/labels'
+import {
+  LIFECYCLE_CODE_HELP,
+  LIFECYCLE_OVERVIEW,
+  MATERIALIZE_HELP,
+  RFM_OVERVIEW,
+  RFM_SEGMENT_HELP,
+  RULE_FIELD_HELP,
+  SEGMENT_TYPE_HELP,
+} from '@/utils/marketingHelp'
+
+type RuleCond = { field: string; op: string; value: string }
+
+type RulePreset = {
+  label: string
+  code: string
+  name: string
+  rules: RuleCond[]
+}
+
+const RULE_FIELDS = [
+  { value: 'member_status', label: '会员身份' },
+  { value: 'days_since_order', label: '距上次下单(天)' },
+  { value: 'days_since_member', label: '入会天数' },
+  { value: 'points', label: '积分' },
+  { value: 'balance_total', label: '储值余额' },
+  { value: 'has_order', label: '是否下过单' },
+  { value: 'lifecycle_code', label: '生命周期' },
+  { value: 'rfm_segment', label: 'RFM分群' },
+  { value: 'silence_days', label: '沉默天数(夜批)' },
+  { value: 'account_status', label: '账号状态' },
+  { value: 'status', label: '启用状态' },
+  { value: 'registered_store_id', label: '注册门店ID' },
+]
+
+const helpOpen = ref(false)
+const helpActive = ref(['lc', 'rfm'])
+
+function valueOptions(field: string): { value: string; label: string }[] | null {
+  if (field === 'member_status') {
+    return Object.entries(MEMBER_STATUS).map(([value, lab]) => ({ value, label: `${lab}（${value}）` }))
+  }
+  if (field === 'lifecycle_code') {
+    return Object.entries(CUSTOMER_LIFECYCLE).map(([value, lab]) => ({ value, label: `${lab}（${value}）` }))
+  }
+  if (field === 'rfm_segment') {
+    return Object.entries(CUSTOMER_RFM).map(([value, lab]) => ({ value, label: `${lab}（${value}）` }))
+  }
+  if (field === 'has_order') {
+    return [
+      { value: 'true', label: '是（下过单）' },
+      { value: 'false', label: '否（从未下单）' },
+    ]
+  }
+  if (field === 'status') {
+    return [
+      { value: '1', label: '启用（1）' },
+      { value: '0', label: '停用（0）' },
+    ]
+  }
+  if (field === 'account_status') {
+    return [
+      { value: 'ACTIVE', label: '正常 ACTIVE' },
+      { value: 'DISABLED', label: '禁用 DISABLED' },
+    ]
+  }
+  return null
+}
+
+function valuePlaceholder(field: string) {
+  if (field === 'days_since_order' || field === 'days_since_member' || field === 'silence_days') return '天数，如 30'
+  if (field === 'points') return '积分，如 500'
+  if (field === 'balance_total') return '余额元，如 20'
+  if (field === 'registered_store_id') return '门店数字 ID'
+  return '值'
+}
+
+function onFieldChange(c: RuleCond) {
+  const opts = valueOptions(c.field)
+  if (opts?.length) {
+    c.value = opts[0].value
+    if (c.field === 'lifecycle_code' || c.field === 'rfm_segment' || c.field === 'member_status') {
+      c.op = 'eq'
+    }
+  } else if (['days_since_order', 'silence_days'].includes(c.field)) {
+    c.op = 'gte'
+    c.value = '30'
+  } else {
+    c.value = ''
+  }
+}
+
+const RULE_OPS = [
+  { value: 'eq', label: '=' },
+  { value: 'ne', label: '≠' },
+  { value: 'gt', label: '>' },
+  { value: 'gte', label: '≥' },
+  { value: 'lt', label: '<' },
+  { value: 'lte', label: '≤' },
+]
+
+const RULE_PRESETS: RulePreset[] = [
+  {
+    label: '沉睡30天',
+    code: 'sleep30',
+    name: '沉睡30天',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'days_since_order', op: 'gte', value: '30' },
+      { field: 'days_since_order', op: 'lt', value: '90' },
+    ],
+  },
+  {
+    label: '沉睡90天+',
+    code: 'sleep90',
+    name: '沉睡90天+',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'days_since_order', op: 'gte', value: '90' },
+    ],
+  },
+  {
+    label: '新会员7日',
+    code: 'new_member',
+    name: '新会员7日',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'days_since_member', op: 'lte', value: '7' },
+    ],
+  },
+  {
+    label: '低余额',
+    code: 'low_balance',
+    name: '低余额会员',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'balance_total', op: 'gt', value: '0' },
+      { field: 'balance_total', op: 'lt', value: '20' },
+    ],
+  },
+  {
+    label: '风险客',
+    code: 'lifecycle_at_risk',
+    name: '生命周期·风险客',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'lifecycle_code', op: 'eq', value: 'AT_RISK' },
+    ],
+  },
+  {
+    label: '沉睡客',
+    code: 'lifecycle_dormant',
+    name: '生命周期·沉睡客',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'lifecycle_code', op: 'eq', value: 'DORMANT' },
+    ],
+  },
+  {
+    label: '流失客',
+    code: 'lifecycle_lost',
+    name: '生命周期·流失客',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'lifecycle_code', op: 'eq', value: 'LOST' },
+    ],
+  },
+  {
+    label: 'RFM休眠',
+    code: 'rfm_hibernating',
+    name: 'RFM·休眠',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'rfm_segment', op: 'eq', value: 'HIBERNATING' },
+    ],
+  },
+  {
+    label: 'RFM冠军',
+    code: 'rfm_champions',
+    name: 'RFM·冠军',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'rfm_segment', op: 'eq', value: 'CHAMPIONS' },
+    ],
+  },
+]
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -155,7 +453,9 @@ const items = ref<any[]>([])
 const filterStoreId = ref<number | undefined>()
 const dlg = ref(false)
 const estDlg = ref(false)
+const ruleMode = ref<'visual' | 'json'>('visual')
 const rulesText = ref('{"all":[{"field":"member_status","op":"eq","value":"MEMBER"}]}')
+const visualRules = ref<RuleCond[]>([{ field: 'member_status', op: 'eq', value: 'MEMBER' }])
 const form = reactive<any>({
   id: null,
   store_id: null as number | null,
@@ -179,9 +479,86 @@ function storeLabel(id: number | null | undefined) {
   return s?.name || `#${id}`
 }
 
+function canEditRow(row: any) {
+  if (auth.isSuperAdmin) return true
+  return row.store_id != null && row.store_id === auth.user?.store_id
+}
+
+function canMaterializeRow(row: any) {
+  if (row.status !== 1) return false
+  if (auth.isSuperAdmin) return true
+  return row.store_id != null && row.store_id === auth.user?.store_id
+}
+
 function goCampaigns() {
   router.push('/marketing/campaigns')
 }
+
+function addRule() {
+  visualRules.value.push({ field: 'member_status', op: 'eq', value: 'MEMBER' })
+}
+
+function removeRule(idx: number) {
+  visualRules.value.splice(idx, 1)
+  if (!visualRules.value.length) addRule()
+}
+
+function parseValue(raw: string, field: string): any {
+  const t = (raw ?? '').trim()
+  if (field === 'has_order') {
+    return ['1', 'true', 'yes', '是'].includes(t.toLowerCase())
+  }
+  if (
+    ['points', 'balance_total', 'days_since_order', 'days_since_member', 'silence_days', 'status', 'registered_store_id'].includes(
+      field,
+    )
+  ) {
+    if (t === '') return 0
+    const n = Number(t)
+    return Number.isFinite(n) ? n : t
+  }
+  return t
+}
+
+function rulesFromVisual(): Record<string, any> {
+  const all = visualRules.value
+    .filter((c) => c.field && c.op)
+    .map((c) => ({
+      field: c.field,
+      op: c.op,
+      value: parseValue(c.value, c.field),
+    }))
+  return { all }
+}
+
+function visualFromRules(rules: any): RuleCond[] {
+  const list = Array.isArray(rules?.all)
+    ? rules.all
+    : Array.isArray(rules)
+      ? rules
+      : []
+  const rows = list
+    .filter((c: any) => c && typeof c === 'object' && c.field)
+    .map((c: any) => ({
+      field: String(c.field),
+      op: String(c.op || 'eq'),
+      value: c.value == null ? '' : String(c.value),
+    }))
+  return rows.length ? rows : [{ field: 'member_status', op: 'eq', value: 'MEMBER' }]
+}
+
+watch(ruleMode, (mode, prev) => {
+  if (mode === 'json' && prev === 'visual') {
+    rulesText.value = JSON.stringify(rulesFromVisual(), null, 2)
+  } else if (mode === 'visual' && prev === 'json') {
+    try {
+      visualRules.value = visualFromRules(JSON.parse(rulesText.value || '{}'))
+    } catch {
+      ElMessage.warning('JSON 无法解析，已保留原可视化条件')
+      ruleMode.value = 'json'
+    }
+  }
+})
 
 async function load() {
   loading.value = true
@@ -190,15 +567,22 @@ async function load() {
     if (!auth.isSuperAdmin && auth.user?.store_id) filterStoreId.value = auth.user.store_id
     const sid = auth.isSuperAdmin ? filterStoreId.value : auth.user?.store_id
     const res = await api.get('/marketing/segments', {
-      params: { page_size: 50, ...(sid ? { store_id: sid } : {}) },
+      params: { page_size: 100, ...(sid ? { store_id: sid } : {}) },
     })
     items.value = res.data?.items || []
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载分群失败')
   } finally {
     loading.value = false
   }
 }
 
 function openEdit(row?: any) {
+  if (row && !canEditRow(row)) {
+    ElMessage.warning('总部预置分群仅超管可编辑；可估人数，发布活动时按本店自动圈人')
+    return
+  }
+  ruleMode.value = 'visual'
   if (row) {
     form.id = row.id
     form.store_id = row.store_id ?? null
@@ -206,7 +590,9 @@ function openEdit(row?: any) {
     form.name = row.name
     form.segment_type = row.segment_type || 'DYNAMIC'
     form.status = row.status
-    rulesText.value = JSON.stringify(row.rules_json || { all: [] }, null, 2)
+    const rules = row.rules_json || { all: [] }
+    rulesText.value = JSON.stringify(rules, null, 2)
+    visualRules.value = visualFromRules(rules)
   } else {
     form.id = null
     form.store_id = auth.isSuperAdmin
@@ -216,24 +602,52 @@ function openEdit(row?: any) {
     form.name = ''
     form.segment_type = 'DYNAMIC'
     form.status = 1
-    rulesText.value = '{"all":[{"field":"member_status","op":"eq","value":"MEMBER"}]}'
+    visualRules.value = [{ field: 'member_status', op: 'eq', value: 'MEMBER' }]
+    rulesText.value = JSON.stringify(rulesFromVisual(), null, 2)
   }
+  dlg.value = true
+}
+
+function openEditFromPreset(p: RulePreset) {
+  form.id = null
+  form.store_id = auth.isSuperAdmin
+    ? (filterStoreId.value ?? null)
+    : (auth.user?.store_id ?? null)
+  form.code = `${p.code}_${Date.now().toString(36).slice(-4)}`
+  form.name = p.name
+  form.segment_type = 'DYNAMIC'
+  form.status = 1
+  visualRules.value = p.rules.map((r) => ({ ...r }))
+  ruleMode.value = 'visual'
+  rulesText.value = JSON.stringify(rulesFromVisual(), null, 2)
   dlg.value = true
 }
 
 async function save() {
   let rules: any
   try {
-    rules = JSON.parse(rulesText.value || '{}')
+    if (ruleMode.value === 'visual') {
+      rules = rulesFromVisual()
+      if (!rules.all?.length) {
+        ElMessage.error('请至少添加一条条件')
+        return
+      }
+    } else {
+      rules = JSON.parse(rulesText.value || '{}')
+    }
   } catch {
     ElMessage.error('规则 JSON 无效')
+    return
+  }
+  if (!form.code?.trim() || !form.name?.trim()) {
+    ElMessage.warning('请填写编码与名称')
     return
   }
   saving.value = true
   try {
     const body = {
-      code: form.code,
-      name: form.name,
+      code: form.code.trim(),
+      name: form.name.trim(),
       segment_type: form.segment_type,
       rules_json: rules,
       status: form.status,
@@ -244,27 +658,41 @@ async function save() {
     ElMessage.success('已保存')
     dlg.value = false
     await load()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
   } finally {
     saving.value = false
   }
 }
 
 async function estimate(row: any) {
-  const sid = row.store_id || filterStoreId.value || auth.user?.store_id
-  const res = await api.post('/marketing/segments/estimate', {
-    rules_json: row.rules_json,
-    sample_limit: 20,
-    store_id: sid || null,
-  })
-  est.count = res.data?.count || 0
-  est.samples = res.data?.samples || []
-  estDlg.value = true
+  try {
+    const sid = row.store_id || filterStoreId.value || auth.user?.store_id
+    const res = await api.post('/marketing/segments/estimate', {
+      rules_json: row.rules_json,
+      sample_limit: 20,
+      store_id: sid || null,
+    })
+    est.count = res.data?.count || 0
+    est.samples = res.data?.samples || []
+    estDlg.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.message || '估人数失败')
+  }
 }
 
 async function materialize(row: any) {
-  const res = await api.post(`/marketing/segments/${row.id}/materialize`)
-  ElMessage.success(`已物化 ${res.data?.count ?? 0} 人；可去营销活动选用该分群`)
-  await load()
+  if (!canMaterializeRow(row)) {
+    ElMessage.warning('总部预置分群仅超管可物化；门店发布活动时会按本店自动圈人')
+    return
+  }
+  try {
+    const res = await api.post(`/marketing/segments/${row.id}/materialize`)
+    ElMessage.success(`已物化 ${res.data?.count ?? 0} 人；可去营销活动选用该分群`)
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '物化失败')
+  }
 }
 
 onMounted(load)
@@ -280,8 +708,62 @@ onMounted(load)
   margin-bottom: 12px;
 }
 .page-header h2 { margin: 0 0 4px; font-size: 18px; }
-.sub { margin: 0; font-size: 13px; color: #888; line-height: 1.5; max-width: 720px; }
-.header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.sub { margin: 0; font-size: 13px; color: #888; line-height: 1.5; max-width: 760px; }
+.header-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 .tip { margin-bottom: 10px; }
+.help-toggle { margin: 0 0 8px; padding: 0; }
+.help-box {
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: #fafcff;
+}
+.help-p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #555;
+  white-space: pre-line;
+}
+.help-ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #444;
+}
 .filter-bar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+.preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.preset-label {
+  font-size: 13px;
+  color: #666;
+  margin-right: 4px;
+}
+.rule-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rule-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.rule-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.hint { margin-top: 2px; font-size: 12px; color: #888; line-height: 1.45; }
+.opt-code { float: right; color: #99a; font-size: 12px; margin-left: 8px; }
 </style>

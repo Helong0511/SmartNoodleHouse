@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>营销活动</h2>
-        <p class="sub">绑定分群 + 券模板后发布发券；可选推荐加权餐品。状态流：草稿 → 发布 → 进行中 / 已暂停 → 结束。</p>
+        <p class="sub">绑定分群 + 券模板后发布发券；可选推荐加权餐品与排期。状态流：草稿 → 发布 → 进行中 / 已排期 / 已暂停 → 结束。</p>
       </div>
       <div class="header-actions">
         <el-button @click="goSegments">客户分群</el-button>
@@ -20,7 +20,15 @@
       :closable="false"
       class="tip"
       title="店长怎么用"
-      description="① 客户分群估人/物化 → ② 优惠券备模板 → ③ 选活动类型（或点下方快捷模板）→ ④ 选分群与券 → ⑤ 可选推荐加权餐品 → ⑥ 发布 → ⑦ 营销报表看 ROI。推荐加权仅「进行中」期间约 +25%。活动发券与会员折：满减券可叠加、折扣券取优互斥；与「社会贡献」身份折：不与券同享，与会员折结算时取更优（折扣更低者）。类型「公益营销」=爱心日发券，不是身份当场折扣。"
+      description="① 客户分群估人 → ② 优惠券备模板 → ③ 选活动类型（或快捷模板）→ ④ 选分群与券 → ⑤ 可选排期 / 推荐加权 / 周频控 → ⑥ 发布 → ⑦ 营销报表看 ROI。门店引用总部预置分群时，发布会按本店自动圈人。推荐加权仅「进行中」约 +25%。"
+    />
+    <el-alert
+      type="success"
+      show-icon
+      :closable="false"
+      class="tip"
+      title="分群里的「生命周期 / RFM」怎么理解？"
+      description="生命周期=顾客阶段（新客/活跃/风险/沉睡/流失），主要看多久没来；RFM=近度+频次+金额三维标签（冠军/忠诚/休眠等）。两者都由夜批刷新。详细释义与取值请到「客户分群」页点开「生命周期 / RFM / 字段说明」，或「顾客管理」点「生命周期/RFM 是什么？」。"
     />
 
     <div class="preset-bar">
@@ -51,8 +59,16 @@
         />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
-      <el-select v-model="typeFilter" clearable placeholder="按类型筛选" style="width: 200px">
+      <el-select v-model="typeFilter" clearable placeholder="按类型筛选" style="width: 160px">
         <el-option v-for="t in CAMPAIGN_TYPES" :key="t.value" :label="t.label" :value="t.value" />
+      </el-select>
+      <el-select v-model="statusFilter" clearable placeholder="按状态筛选" style="width: 140px" @change="load">
+        <el-option
+          v-for="(lab, code) in MARKETING_CAMPAIGN_STATUS"
+          :key="code"
+          :label="lab"
+          :value="code"
+        />
       </el-select>
       <el-button link type="primary" @click="goStoreBiz">门店营销开关</el-button>
     </div>
@@ -79,29 +95,39 @@
     <el-empty v-if="!loading && !filteredItems.length" description="暂无活动；点「新建活动」或上方快捷模板开始" />
     <el-table v-else :data="filteredItems" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column label="门店" width="120" show-overflow-tooltip>
+      <el-table-column label="门店" width="110" show-overflow-tooltip>
         <template #default="{ row }">{{ storeLabel(row.store_id) }}</template>
       </el-table-column>
-      <el-table-column prop="code" label="编码" width="140" />
-      <el-table-column prop="name" label="名称" min-width="140" />
-      <el-table-column label="类型" width="130">
+      <el-table-column prop="code" label="编码" width="140" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
+      <el-table-column label="类型" width="100">
         <template #default="{ row }">{{ typeLabel(row.campaign_type) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">{{ label(MARKETING_CAMPAIGN_STATUS, row.status) }}</template>
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag size="small" :type="statusTag(row.status)">
+            {{ label(MARKETING_CAMPAIGN_STATUS, row.status) }}
+          </el-tag>
+        </template>
       </el-table-column>
-      <el-table-column label="分群" width="140" show-overflow-tooltip>
+      <el-table-column label="排期" width="160" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.start_at || row.end_at">{{ row.start_at || '—' }} ~ {{ row.end_at || '—' }}</span>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="分群" width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ segmentLabel(row.segment_id) }}</template>
       </el-table-column>
-      <el-table-column label="券模板" min-width="140" show-overflow-tooltip>
+      <el-table-column label="券模板" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ couponLabel(row.coupon_template_id) }}</template>
       </el-table-column>
-      <el-table-column label="推荐加权" min-width="160" show-overflow-tooltip>
+      <el-table-column label="推荐加权" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ boostProductsLabel(row.boost_product_ids) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="320" fixed="right">
+      <el-table-column label="操作" width="360" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="row.status === 'DRAFT'" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button v-if="row.status === 'DRAFT' && canEditRow(row)" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button
             v-if="row.status === 'DRAFT' || row.status === 'SCHEDULED'"
             size="small"
@@ -119,12 +145,25 @@
             type="success"
             @click="setStatus(row, 'RUNNING')"
           >恢复</el-button>
+          <el-button
+            v-if="row.status === 'RUNNING' || row.status === 'PAUSED' || row.status === 'SCHEDULED'"
+            size="small"
+            type="warning"
+            @click="setStatus(row, 'ENDED')"
+          >结束</el-button>
+          <el-button
+            v-if="['DRAFT', 'SCHEDULED', 'RUNNING', 'PAUSED'].includes(row.status)"
+            size="small"
+            type="danger"
+            plain
+            @click="setStatus(row, 'CANCELLED')"
+          >取消</el-button>
           <el-button size="small" @click="showTasks(row)">任务</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dlg" :title="form.id ? '编辑活动' : '新建活动'" width="640px" destroy-on-close>
+    <el-dialog v-model="dlg" :title="form.id ? '编辑活动' : '新建活动'" width="680px" destroy-on-close>
       <el-alert
         type="info"
         :closable="false"
@@ -142,7 +181,7 @@
               :value="s.id"
             />
           </el-select>
-          <div class="hint">空=总部活动（各开启营销的门店可见）；指定门店则仅该店。创建后不可改归属。</div>
+          <div class="hint">空=总部活动；指定门店则仅该店。创建后不可改归属。</div>
         </el-form-item>
         <el-form-item v-else label="归属门店">
           <el-tag type="info">{{ boundStoreName || '本店' }}</el-tag>
@@ -166,11 +205,11 @@
             <el-option
               v-for="s in segments"
               :key="s.id"
-              :label="`${s.name} (#${s.id}${s.estimated_count != null ? ' · 约' + s.estimated_count + '人' : ''})`"
+              :label="`${s.name} (#${s.id}${s.estimated_count != null ? ' · 约' + s.estimated_count + '人' : ''}${s.store_id == null ? ' · 总部' : ''})`"
               :value="s.id"
             />
           </el-select>
-          <div class="hint">建议选用已物化的分群，保证本轮圈人稳定。</div>
+          <div class="hint">总部预置分群可选；本店发布时按本店自动圈人，无需本地物化。</div>
         </el-form-item>
         <el-form-item label="券模板">
           <el-select
@@ -188,6 +227,28 @@
             />
           </el-select>
           <div class="hint">列表来自「优惠券」启用模板；若为空请先去创建并启用。</div>
+        </el-form-item>
+        <el-form-item label="开始时间">
+          <el-date-picker
+            v-model="form.start_at"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            placeholder="空=发布后立即进行"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item label="结束时间">
+          <el-date-picker
+            v-model="form.end_at"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            placeholder="空=不自动结束"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item label="周发券上限">
+          <el-input-number v-model="form.weekly_cap_override" :min="0" :max="100" :controls="true" />
+          <div class="hint">覆盖全局营销周频控；0=不限制；空=用系统默认。</div>
         </el-form-item>
         <el-form-item label="推荐加权餐品">
           <el-select
@@ -208,7 +269,7 @@
               :value="p.id"
             />
           </el-select>
-          <div class="hint">活动进行中期间这些 SKU 在推荐列表加权约 +25%；活动结束自动失效。可搜菜名。</div>
+          <div class="hint">活动进行中期间这些 SKU 在推荐列表加权约 +25%；活动结束自动失效。</div>
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
@@ -218,7 +279,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="taskDlg" :title="`任务监控 #${taskCampaignId}`" width="720px">
+    <el-dialog v-model="taskDlg" :title="`任务监控 #${taskCampaignId}`" width="760px">
       <el-alert
         type="info"
         :closable="false"
@@ -238,8 +299,9 @@
         <el-table-column label="状态" width="100">
           <template #default="{ row }">{{ label(MARKETING_TASK_STATUS, row.status) }}</template>
         </el-table-column>
-        <el-table-column prop="idempotency_key" label="幂等键" min-width="180" />
-        <el-table-column prop="last_error" label="错误" min-width="140" />
+        <el-table-column prop="try_count" label="尝试" width="70" />
+        <el-table-column prop="idempotency_key" label="幂等键" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="last_error" label="错误" min-width="140" show-overflow-tooltip />
       </el-table>
     </el-dialog>
   </div>
@@ -299,6 +361,7 @@ const segments = ref<any[]>([])
 const couponTemplates = ref<any[]>([])
 const productOptions = ref<any[]>([])
 const typeFilter = ref<string | undefined>()
+const statusFilter = ref<string | undefined>()
 /** 超管筛选门店；本店账号固定为本店 */
 const filterStoreId = ref<number | undefined>()
 const marketingEnabled = ref<boolean | null>(null)
@@ -315,6 +378,9 @@ const form = reactive<any>({
   campaign_type: 'MEMBER_DAY',
   segment_id: null,
   coupon_template_id: null,
+  start_at: null as string | null,
+  end_at: null as string | null,
+  weekly_cap_override: null as number | null,
   boost_product_ids: [] as number[],
   remark: '',
 })
@@ -331,10 +397,14 @@ const filteredItems = computed(() => {
   return items.value.filter((x) => x.campaign_type === typeFilter.value)
 })
 
-/** 列表/餐品/新建用的有效门店 */
 function effectiveStoreId(): number | null | undefined {
   if (auth.isSuperAdmin) return filterStoreId.value ?? undefined
   return auth.user?.store_id ?? undefined
+}
+
+function canEditRow(row: any) {
+  if (auth.isSuperAdmin) return true
+  return row.store_id != null && row.store_id === auth.user?.store_id
 }
 
 function goSegments() {
@@ -364,7 +434,14 @@ function typeLabel(code: string | null | undefined) {
 
 function typeHint(code: string | null | undefined) {
   const t = CAMPAIGN_TYPES.find((x) => x.value === code)
-  return t?.hint || '草稿可反复改；发布后按分群快照批量发券。'
+  return t?.hint || '草稿可反复改；发布后按分群圈人批量发券。'
+}
+
+function statusTag(status: string) {
+  if (status === 'RUNNING') return 'success'
+  if (status === 'PAUSED' || status === 'SCHEDULED') return 'warning'
+  if (status === 'ENDED' || status === 'CANCELLED') return 'info'
+  return ''
 }
 
 function segmentLabel(id: number | null | undefined) {
@@ -444,7 +521,11 @@ async function load() {
     const sid = effectiveStoreId()
     const [c, s, t] = await Promise.all([
       api.get('/marketing/campaigns', {
-        params: { page_size: 50, ...(sid ? { store_id: sid } : {}) },
+        params: {
+          page_size: 100,
+          ...(sid ? { store_id: sid } : {}),
+          ...(statusFilter.value ? { status: statusFilter.value } : {}),
+        },
       }),
       api.get('/marketing/segments', {
         params: { page_size: 100, ...(sid ? { store_id: sid } : {}) },
@@ -458,6 +539,8 @@ async function load() {
     segments.value = s.data?.items || []
     const raw = t.data?.items || t.data || []
     couponTemplates.value = Array.isArray(raw) ? raw : []
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载活动失败')
   } finally {
     loading.value = false
   }
@@ -480,6 +563,10 @@ async function openEdit(row?: any) {
     ElMessage.warning('当前门店已关闭营销活动，请先到门店业务参数开启')
     return
   }
+  if (row && !canEditRow(row)) {
+    ElMessage.warning('总部活动仅超管可编辑')
+    return
+  }
   if (row) {
     const boost = normalizeBoostIds(row.boost_product_ids)
     Object.assign(form, {
@@ -490,6 +577,9 @@ async function openEdit(row?: any) {
       campaign_type: row.campaign_type || 'MEMBER_DAY',
       segment_id: row.segment_id,
       coupon_template_id: row.coupon_template_id,
+      start_at: row.start_at || null,
+      end_at: row.end_at || null,
+      weekly_cap_override: row.weekly_cap_override ?? null,
       boost_product_ids: boost,
       remark: row.remark || '',
     })
@@ -507,6 +597,9 @@ async function openEdit(row?: any) {
       campaign_type: 'MEMBER_DAY',
       segment_id: null,
       coupon_template_id: null,
+      start_at: null,
+      end_at: null,
+      weekly_cap_override: null,
       boost_product_ids: [],
       remark: '',
     })
@@ -531,6 +624,9 @@ async function openEditFromPreset(p: CampaignPreset) {
     campaign_type: p.campaign_type,
     segment_id: null,
     coupon_template_id: null,
+    start_at: null,
+    end_at: null,
+    weekly_cap_override: null,
     boost_product_ids: [],
     remark: p.remark,
   })
@@ -547,15 +643,25 @@ async function save() {
     ElMessage.warning('账号未绑定门店')
     return
   }
+  if (form.start_at && form.end_at && form.start_at >= form.end_at) {
+    ElMessage.warning('结束时间须晚于开始时间')
+    return
+  }
   const boost = normalizeBoostIds(form.boost_product_ids)
   saving.value = true
   try {
     const body = {
-      code: form.code,
-      name: form.name,
+      code: form.code.trim(),
+      name: form.name.trim(),
       campaign_type: form.campaign_type,
       segment_id: form.segment_id,
       coupon_template_id: form.coupon_template_id,
+      start_at: form.start_at || null,
+      end_at: form.end_at || null,
+      weekly_cap_override:
+        form.weekly_cap_override === null || form.weekly_cap_override === undefined
+          ? null
+          : Number(form.weekly_cap_override),
       boost_product_ids: boost.length ? boost : null,
       remark: form.remark || null,
       store_id: auth.isSuperAdmin ? (form.store_id || null) : (auth.user?.store_id || null),
@@ -565,40 +671,72 @@ async function save() {
     ElMessage.success('已保存')
     dlg.value = false
     await load()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
   } finally {
     saving.value = false
   }
 }
 
 async function publish(row: any) {
-  await ElMessageBox.confirm(
-    `发布活动「${row.name}」并按分群生成发券任务？请确认分群已物化、券模板可用。`,
-    '确认发布',
-  )
-  const res = await api.post(`/marketing/campaigns/${row.id}/publish`)
-  ElMessage.success(`已入队 ${res.data?.enqueued ?? 0} 条任务`)
-  await load()
+  try {
+    await ElMessageBox.confirm(
+      `发布活动「${row.name}」并按分群生成发券任务？请确认分群与券模板可用。门店引用总部预置分群时将按本店自动圈人。`,
+      '确认发布',
+    )
+    const res = await api.post(`/marketing/campaigns/${row.id}/publish`)
+    const mode = res.data?.materialized?.mode
+    const tip = mode === 'dynamic_store' ? '（按本店动态圈人）' : ''
+    ElMessage.success(`已入队 ${res.data?.enqueued ?? 0} 条任务${tip}`)
+    await load()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.message || '发布失败')
+  }
 }
 
 async function setStatus(row: any, status: string) {
-  await api.post(`/marketing/campaigns/${row.id}/status`, { status })
-  ElMessage.success(`已切换为 ${status}`)
-  await load()
+  const lab = label(MARKETING_CAMPAIGN_STATUS, status, status)
+  try {
+    if (status === 'ENDED' || status === 'CANCELLED') {
+      await ElMessageBox.confirm(
+        status === 'ENDED'
+          ? `结束活动「${row.name}」？未发完的待执行任务将被取消。`
+          : `取消活动「${row.name}」？未发完的待执行任务将被取消。`,
+        '确认',
+        { type: 'warning' },
+      )
+    }
+    await api.post(`/marketing/campaigns/${row.id}/status`, { status })
+    ElMessage.success(`已切换为「${lab}」`)
+    await load()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.message || '状态切换失败')
+  }
 }
 
 async function showTasks(row: any) {
-  taskCampaignId.value = row.id
-  const res = await api.get(`/marketing/campaigns/${row.id}/tasks`, { params: { page_size: 50 } })
-  tasks.value = res.data?.items || []
-  taskStats.value = res.data?.task_stats || null
-  taskDlg.value = true
+  try {
+    taskCampaignId.value = row.id
+    const res = await api.get(`/marketing/campaigns/${row.id}/tasks`, { params: { page_size: 50 } })
+    tasks.value = res.data?.items || []
+    taskStats.value = res.data?.task_stats || null
+    taskDlg.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载任务失败')
+  }
 }
 
 async function retryFailed() {
   if (!taskCampaignId.value) return
-  const res = await api.post(`/marketing/campaigns/${taskCampaignId.value}/tasks/retry-failed`)
-  ElMessage.success(`已重置 ${res.data?.reset ?? 0} 条`)
-  await showTasks({ id: taskCampaignId.value })
+  try {
+    const res = await api.post(`/marketing/campaigns/${taskCampaignId.value}/tasks/retry-failed`)
+    ElMessage.success(`已重置 ${res.data?.reset ?? 0} 条`)
+    await showTasks({ id: taskCampaignId.value })
+  } catch (e: any) {
+    ElMessage.error(e?.message || '重试失败')
+  }
 }
 
 onMounted(load)
@@ -629,6 +767,12 @@ onMounted(load)
   color: #666;
   margin-right: 4px;
 }
-.filter-bar { margin-bottom: 12px; }
+.filter-bar {
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
 .hint { margin-top: 4px; font-size: 12px; color: #888; line-height: 1.4; }
 </style>
