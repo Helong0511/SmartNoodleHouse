@@ -246,7 +246,7 @@
             <template #default="{ row }">
               <span v-if="!row.enabled" class="muted">已停用</span>
               <span v-else-if="row.next_run_at">{{ formatSchedulerTime(row.next_run_at) }}</span>
-              <span v-else class="muted">{{ row.registered ? '—' : '本进程未调度' }}</span>
+              <span v-else class="muted">{{ row.registered ? '—' : '等待 Leader 同步' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="上次执行" width="180">
@@ -506,8 +506,28 @@ const schedulerSummary = computed(() => {
 function formatSchedulerTime(raw: string | null | undefined) {
   if (!raw) return '—'
   const s = String(raw).trim()
-  // 2026-10-19T14:00:00+08:00 → 2026-10-19 14:00:00
-  return s.replace('T', ' ').replace(/\+\d{2}:\d{2}$/, '').replace(/Z$/, '')
+  // 后端已规范为业务时区墙钟：2026-10-19 14:00:00
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s
+  // 兼容旧版 ISO（按 Asia/Shanghai 转墙钟，禁止直接砍掉时区导致差 8 小时）
+  const d = new Date(s.includes(' ') && !s.includes('T') ? s.replace(' ', 'T') : s)
+  if (Number.isNaN(d.getTime())) return s
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(d)
+    const get = (t: string) => parts.find((p) => p.type === t)?.value || ''
+    const hour = get('hour') === '24' ? '00' : get('hour')
+    return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`
+  } catch {
+    return s.replace('T', ' ').slice(0, 19)
+  }
 }
 
 function formatSchedulerDuration(ms: number | null | undefined) {

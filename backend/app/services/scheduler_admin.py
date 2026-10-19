@@ -22,9 +22,54 @@ OVERRIDES_KEY = "scheduler_job_overrides"
 OVERRIDES_VER_KEY = "snh:scheduler:overrides:ver"
 OVERRIDES_CHANNEL = "snh:scheduler:overrides"
 JOB_STATS_KEY = "snh:scheduler:job_stats"
+NEXT_RUNS_KEY = "snh:scheduler:next_runs"
 
 # Redis 不可用时的进程内兜底（仅本进程可见）
 _job_stats_mem: dict[str, dict[str, Any]] = {}
+_next_runs_mem: dict[str, str] = {}
+
+
+def format_scheduler_wall_time(dt: Any) -> str | None:
+    """统一为业务时区墙钟：YYYY-MM-DD HH:mm:ss（供后台表格直接展示）。"""
+    if dt is None:
+        return None
+    from datetime import datetime
+
+    from app.core.response import ensure_local_aware
+
+    if not isinstance(dt, datetime):
+        return None
+    aware = ensure_local_aware(dt)
+    if aware is None:
+        return None
+    return aware.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def normalize_scheduler_wall_time(raw: Any) -> str | None:
+    """把 ISO / 墙钟字符串规范成 YYYY-MM-DD HH:mm:ss（业务时区）。"""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if len(s) >= 19 and s[4] == "-" and s[10] in (" ", "T") and s[13] == ":":
+        # 已是墙钟且无偏移：直接截断到秒
+        head = s[:19].replace("T", " ")
+        if len(s) == 19 or (len(s) > 19 and s[19] in (".", " ")):
+            # 无时区：按业务本地墙钟信任
+            if "+" not in s and not s.endswith("Z") and "z" not in s.lower():
+                return head
+    from datetime import datetime
+
+    from app.core.response import ensure_local_aware
+
+    try:
+        # 兼容 2026-10-19 14:00:00+08:00 / ISO
+        iso = s.replace(" ", "T", 1) if " " in s[:11] and "T" not in s[:11] else s
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except Exception:
+        return s[:19].replace("T", " ") if len(s) >= 19 else s
+    return format_scheduler_wall_time(ensure_local_aware(dt))
 
 # Lua：仅当值仍为本 token 时删除，避免误删他人锁
 _LUA_COMPARE_DELETE = """
@@ -63,7 +108,7 @@ async def record_job_run(
     error: str | None = None,
 ) -> None:
     """记录一次任务执行结果（供后台「执行情况」展示）。status: ok|error|skipped。"""
-    from app.core.response import now_local, serialize_dt
+    from app.core.response import now_local
 
     jid = str(job_id or "").strip()
     if not jid:
@@ -84,7 +129,7 @@ async def record_job_run(
     else:
         skip_count += 1
     payload = {
-        "last_run_at": serialize_dt(now_local()),
+        "last_run_at": format_scheduler_wall_time(now_local()),
         "last_status": st,
         "last_duration_ms": dur,
         "last_error": err,
@@ -135,11 +180,86 @@ async def load_all_job_stats() -> dict[str, dict[str, Any]]:
                 try:
                     data = json.loads(raw)
                     if isinstance(data, dict):
+                        # 兼容旧版 ISO 字符串
+                        if data.get("last_run_at"):
+                            data["last_run_at"] = normalize_scheduler_wall_time(data.get("last_run_at"))
                         out[str(jid)] = data
                 except Exception:
                     continue
     except Exception as e:
         logger.debug("读取任务执行统计失败: %s", e)
+    for jid, data in list(out.items()):
+        if isinstance(data, dict) and data.get("last_run_at"):
+            data["last_run_at"] = normalize_scheduler_wall_time(data.get("last_run_at"))
+    return out
+
+
+async def save_next_runs(mapping: dict[str, str | None]) -> None:
+    """Leader 全量刷新各任务下次执行墙钟到 Redis（覆盖写）。"""
+    clean: dict[str, str] = {}
+    for jid, wall in (mapping or {}).items():
+        w = normalize_scheduler_wall_time(wall) if wall else None
+        if jid and w:
+            clean[str(jid)] = w
+    _next_runs_mem.clear()
+    _next_runs_mem.update(clean)
+    try:
+        from app.core.redis_client import try_get_redis
+
+        r = await try_get_redis()
+        if r is None:
+            return
+        pipe = r.pipeline()
+        await pipe.delete(NEXT_RUNS_KEY)
+        if clean:
+            await pipe.hset(NEXT_RUNS_KEY, mapping=clean)
+        await pipe.execute()
+    except Exception as e:
+        logger.debug("写入下次执行缓存失败: %s", e)
+
+
+async def upsert_next_run(job_id: str, wall: str | None) -> None:
+    """单任务更新下次执行（任务跑完后调用，不覆盖其它任务）。"""
+    jid = str(job_id or "").strip()
+    if not jid:
+        return
+    w = normalize_scheduler_wall_time(wall) if wall else None
+    if not w:
+        _next_runs_mem.pop(jid, None)
+        try:
+            from app.core.redis_client import try_get_redis
+
+            r = await try_get_redis()
+            if r is not None:
+                await r.hdel(NEXT_RUNS_KEY, jid)
+        except Exception:
+            pass
+        return
+    _next_runs_mem[jid] = w
+    try:
+        from app.core.redis_client import try_get_redis
+
+        r = await try_get_redis()
+        if r is not None:
+            await r.hset(NEXT_RUNS_KEY, jid, w)
+    except Exception as e:
+        logger.debug("更新下次执行失败 job_id=%s: %s", jid, e)
+
+
+async def load_next_runs() -> dict[str, str]:
+    out: dict[str, str] = dict(_next_runs_mem)
+    try:
+        from app.core.redis_client import try_get_redis
+
+        r = await try_get_redis()
+        if r is not None:
+            raw_map = await r.hgetall(NEXT_RUNS_KEY)
+            for jid, wall in (raw_map or {}).items():
+                w = normalize_scheduler_wall_time(wall)
+                if w:
+                    out[str(jid)] = w
+    except Exception as e:
+        logger.debug("读取下次执行缓存失败: %s", e)
     return out
 
 

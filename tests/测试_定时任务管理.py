@@ -75,5 +75,16 @@ async def test_record_job_run_memory_fallback(monkeypatch):
     assert st["ok_count"] == 1
     assert st["error_count"] == 1
     assert st["last_duration_ms"] == 30
+    # 墙钟格式，无 T / 无时区偏移
+    assert st["last_run_at"] and "T" not in st["last_run_at"] and "+" not in st["last_run_at"]
     all_stats = await sa.load_all_job_stats()
     assert "drain_webhook_inbox" in all_stats
+
+
+def test_normalize_scheduler_wall_time_timezone():
+    """UTC ISO 须换算成业务时区墙钟，不能直接砍掉 +00:00。"""
+    # 2026-10-19 06:00:00 UTC = 14:00:00 Asia/Shanghai
+    wall = sa.normalize_scheduler_wall_time("2026-10-19T06:00:00+00:00")
+    assert wall == "2026-10-19 14:00:00"
+    assert sa.normalize_scheduler_wall_time("2026-10-19 14:00:00") == "2026-10-19 14:00:00"
+    assert sa.format_scheduler_wall_time(None) is None

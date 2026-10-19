@@ -209,9 +209,13 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
     from app.core.leader_lock import is_leader_held
     from app.services.scheduler_admin import (
         effective_schedule,
+        format_scheduler_wall_time,
         format_trigger_label,
         load_all_job_stats,
+        load_next_runs,
         load_overrides,
+        normalize_scheduler_wall_time,
+        save_next_runs,
     )
 
     settings = get_settings()
@@ -220,20 +224,30 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
         overrides = await load_overrides(db)
 
     runtime: dict[str, dict] = {}
+    live_next: dict[str, str] = {}
     scheduler_running = False
+    leader_held = bool(is_leader_held())
     if scheduler is not None:
         try:
             scheduler_running = bool(getattr(scheduler, "running", False))
             for job in scheduler.get_jobs():
                 nxt = getattr(job, "next_run_time", None)
-                runtime[str(job.id)] = {
-                    "next_run_at": nxt.isoformat(sep=" ", timespec="seconds") if nxt else None,
+                wall = format_scheduler_wall_time(nxt)
+                jid = str(job.id)
+                if wall:
+                    live_next[jid] = wall
+                runtime[jid] = {
+                    "next_run_at": wall,
                     "pending": bool(getattr(job, "pending", False)),
-                    "paused": bool(getattr(job, "next_run_time", True) is None and scheduler_running),
+                    "paused": bool(nxt is None and scheduler_running),
                 }
+            # Leader 刷新时把下次执行写入 Redis，非 Leader 刷新也能看见
+            if leader_held and scheduler_running and live_next:
+                await save_next_runs(live_next)
         except Exception:
             logger.exception("读取 scheduler jobs 失败")
 
+    cached_next = await load_next_runs() if not live_next else {}
     run_stats = await load_all_job_stats()
 
     items = []
@@ -250,6 +264,9 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
             if scheduler_running and not enabled:
                 paused = True
         st = run_stats.get(jid) or {}
+        next_run_at = rt.get("next_run_at") or cached_next.get(jid)
+        next_run_at = normalize_scheduler_wall_time(next_run_at) if next_run_at else None
+        last_run_at = normalize_scheduler_wall_time(st.get("last_run_at")) if st.get("last_run_at") else None
         items.append(
             {
                 "id": jid,
@@ -262,11 +279,12 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
                 "default_trigger": format_trigger_label(meta.get("default_schedule")),
                 "enabled": enabled,
                 "overridden": bool(ov),
-                "next_run_at": rt.get("next_run_at"),
+                "next_run_at": next_run_at,
+                "next_run_source": "live" if jid in live_next else ("cache" if next_run_at else None),
                 "pending": rt.get("pending"),
-                "registered": jid in runtime,
+                "registered": jid in runtime or bool(cached_next.get(jid)),
                 "paused": paused or (jid in runtime and not enabled),
-                "last_run_at": st.get("last_run_at"),
+                "last_run_at": last_run_at,
                 "last_status": st.get("last_status"),
                 "last_duration_ms": st.get("last_duration_ms"),
                 "last_error": st.get("last_error"),
@@ -276,9 +294,9 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
         )
     return {
         "process_role": settings.process_role,
-        "leader_held": bool(is_leader_held()),
+        "leader_held": leader_held,
         "scheduler_running": scheduler_running,
-        "note": "可启停并修改周期；「上次执行」由 Leader 写入 Redis，任意进程刷新可见；非 Leader 进程 standby 争抢可在宕机后自动接管。",
+        "note": "时间均为业务时区墙钟（默认 Asia/Shanghai）。下次/上次执行由 Leader 写入 Redis，任意进程刷新可见。",
         "total": len(items),
         "items": items,
     }
@@ -294,7 +312,12 @@ def register_tasks(scheduler) -> None:
             import time
 
             from app.core.leader_lock import confirm_leader_owned, is_leader_held
-            from app.services.scheduler_admin import is_job_enabled, record_job_run
+            from app.services.scheduler_admin import (
+                format_scheduler_wall_time,
+                is_job_enabled,
+                record_job_run,
+                upsert_next_run,
+            )
 
             if not is_leader_held():
                 return None
@@ -305,6 +328,19 @@ def register_tasks(scheduler) -> None:
             if job_name and not is_job_enabled(job_name):
                 return None
             started = time.perf_counter()
+
+            async def _refresh_next_run() -> None:
+                if not job_name:
+                    return
+                try:
+                    from app.main import scheduler as sched
+
+                    job = sched.get_job(job_name) if sched is not None else None
+                    nxt = getattr(job, "next_run_time", None) if job else None
+                    await upsert_next_run(job_name, format_scheduler_wall_time(nxt))
+                except Exception:
+                    pass
+
             try:
                 result = await fn(*args, **kwargs)
                 if job_name:
@@ -313,6 +349,7 @@ def register_tasks(scheduler) -> None:
                         status="ok",
                         duration_ms=int((time.perf_counter() - started) * 1000),
                     )
+                    await _refresh_next_run()
                 return result
             except Exception as exc:
                 if job_name:
@@ -322,6 +359,7 @@ def register_tasks(scheduler) -> None:
                         duration_ms=int((time.perf_counter() - started) * 1000),
                         error=str(exc) or exc.__class__.__name__,
                     )
+                    await _refresh_next_run()
                 raise
 
         _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
