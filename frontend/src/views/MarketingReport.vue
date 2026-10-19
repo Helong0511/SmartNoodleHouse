@@ -44,6 +44,17 @@
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
     </div>
 
+    <el-button link type="primary" class="help-toggle" @click="kpiHelpOpen = !kpiHelpOpen">
+      {{ kpiHelpOpen ? '收起指标说明' : '发券 / 核销 / ROI 各列是什么？（点开）' }}
+    </el-button>
+    <el-collapse v-if="kpiHelpOpen" v-model="kpiHelpActive" class="help-box">
+      <el-collapse-item title="各列含义" name="kpi">
+        <ul class="help-ul">
+          <li v-for="(txt, key) in REPORT_KPI_HELP" :key="key"><b>{{ kpiLabel(key) }}</b> — {{ txt }}</li>
+        </ul>
+      </el-collapse-item>
+    </el-collapse>
+
     <el-empty v-if="!loading && !items.length" description="暂无活动数据；发布并产生发券/核销后才会出现在此" />
     <el-table v-else :data="items" v-loading="loading" stripe>
       <el-table-column prop="campaign_id" label="ID" width="70" />
@@ -55,21 +66,38 @@
       <el-table-column label="状态" width="100">
         <template #default="{ row }">{{ label(MARKETING_CAMPAIGN_STATUS, row.status) }}</template>
       </el-table-column>
-      <el-table-column prop="coupons_issued" label="发券" width="80" />
-      <el-table-column prop="coupons_used" label="核销" width="80" />
-      <el-table-column label="核销率" width="90">
+      <el-table-column width="80">
+        <template #header><span :title="REPORT_KPI_HELP.coupons_issued">发券</span></template>
+        <template #default="{ row }">{{ row.coupons_issued }}</template>
+      </el-table-column>
+      <el-table-column width="80">
+        <template #header><span :title="REPORT_KPI_HELP.coupons_used">核销</span></template>
+        <template #default="{ row }">{{ row.coupons_used }}</template>
+      </el-table-column>
+      <el-table-column width="90">
+        <template #header><span :title="REPORT_KPI_HELP.redeem_rate">核销率</span></template>
         <template #default="{ row }">
           {{ row.redeem_rate == null ? '—' : `${(row.redeem_rate * 100).toFixed(1)}%` }}
         </template>
       </el-table-column>
-      <el-table-column prop="attributed_gross" label="归因实收" width="110" />
-      <el-table-column prop="attributed_subsidy" label="补贴" width="90" />
-      <el-table-column label="ROI" width="90">
+      <el-table-column width="110">
+        <template #header><span :title="REPORT_KPI_HELP.attributed_gross">归因实收</span></template>
+        <template #default="{ row }">{{ row.attributed_gross }}</template>
+      </el-table-column>
+      <el-table-column width="90">
+        <template #header><span :title="REPORT_KPI_HELP.attributed_subsidy">补贴</span></template>
+        <template #default="{ row }">{{ row.attributed_subsidy }}</template>
+      </el-table-column>
+      <el-table-column width="90">
+        <template #header><span :title="REPORT_KPI_HELP.roi">ROI</span></template>
         <template #default="{ row }">
           {{ row.roi == null ? '—' : row.roi }}
         </template>
       </el-table-column>
-      <el-table-column prop="tasks_success" label="任务成功" width="90" />
+      <el-table-column width="90">
+        <template #header><span :title="REPORT_KPI_HELP.tasks_success">任务成功</span></template>
+        <template #default="{ row }">{{ row.tasks_success }}</template>
+      </el-table-column>
     </el-table>
   </div>
 </template>
@@ -81,6 +109,7 @@ import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { MARKETING_CAMPAIGN_STATUS, label } from '@/utils/labels'
+import { REPORT_KPI_HELP } from '@/utils/marketingHelp'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -88,6 +117,21 @@ const { storeOptions, loadStores } = useStoreOptions()
 const loading = ref(false)
 const items = ref<any[]>([])
 const filterStoreId = ref<number | undefined>()
+const kpiHelpOpen = ref(false)
+const kpiHelpActive = ref(['kpi'])
+
+const KPI_LABELS: Record<string, string> = {
+  coupons_issued: '发券',
+  coupons_used: '核销',
+  redeem_rate: '核销率',
+  attributed_gross: '归因实收',
+  attributed_subsidy: '补贴',
+  roi: 'ROI',
+  tasks_success: '任务成功',
+}
+function kpiLabel(key: string) {
+  return KPI_LABELS[key] || key
+}
 
 const boundStoreName = computed(() => {
   if (auth.isSuperAdmin) return ''
@@ -181,5 +225,20 @@ onMounted(load)
 .sub { margin: 0; font-size: 13px; color: #888; line-height: 1.5; max-width: 640px; }
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
 .tip { margin-bottom: 10px; }
+.help-toggle { margin: 0 0 8px; padding: 0; }
+.help-box {
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: #fafcff;
+}
+.help-ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #444;
+}
 .filter-bar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
 </style>

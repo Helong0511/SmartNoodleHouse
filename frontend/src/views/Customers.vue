@@ -395,6 +395,42 @@
 
         <div class="pref-block">
           <div class="section-head">
+            <h4>生命周期 / RFM</h4>
+            <el-button size="small" :loading="lifecycleLoading" @click="loadCustomerLifecycle(detail.id)">刷新</el-button>
+          </div>
+          <p class="muted tip">
+            夜批写入快照；无快照时会即时估算（近 90 天单量可能为 0）。释义见列表上方「生命周期/RFM 是什么？」。
+          </p>
+          <p v-if="lifecycleLoading" class="muted">加载中…</p>
+          <el-descriptions v-else-if="lifecycleInfo" :column="1" border size="small">
+            <el-descriptions-item label="生命周期">
+              <el-tag size="small">{{ label(CUSTOMER_LIFECYCLE, lifecycleInfo.lifecycle_code) || lifecycleInfo.lifecycle_code || '—' }}</el-tag>
+              <span class="muted tip-inline">{{ LIFECYCLE_CODE_HELP[lifecycleInfo.lifecycle_code] || '' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="RFM 标签">
+              <el-tag size="small" type="success">{{ label(CUSTOMER_RFM, lifecycleInfo.rfm_segment) || lifecycleInfo.rfm_segment || '—' }}</el-tag>
+              <span class="muted tip-inline">{{ RFM_SEGMENT_HELP[lifecycleInfo.rfm_segment] || '' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="R / F / M 分">
+              {{ lifecycleInfo.r_score ?? '—' }} / {{ lifecycleInfo.f_score ?? '—' }} / {{ lifecycleInfo.m_score ?? '—' }}
+              <span class="muted tip-inline">各 1–5 分；R=近度 F=频次 M=金额</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="沉默天数">
+              {{ lifecycleInfo.silence_days == null ? '—' : lifecycleInfo.silence_days }}
+            </el-descriptions-item>
+            <el-descriptions-item label="近90天">
+              {{ lifecycleInfo.order_count_90d ?? 0 }} 单 · ¥{{ lifecycleInfo.pay_amount_90d || '0.00' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="数据来源">
+              {{ lifecycleInfo.source === 'snapshot' ? '夜批快照' : (lifecycleInfo.source === 'live' ? '即时估算' : '—') }}
+              <span v-if="lifecycleInfo.computed_at" class="muted tip-inline">计算于 {{ lifecycleInfo.computed_at }}</span>
+            </el-descriptions-item>
+          </el-descriptions>
+          <p v-else class="muted">暂无生命周期数据</p>
+        </div>
+
+        <div class="pref-block">
+          <div class="section-head">
             <h4>社会贡献公益</h4>
             <el-button size="small" :loading="socialLoading" @click="loadCustomerSocial(detail.id)">刷新</el-button>
           </div>
@@ -681,6 +717,9 @@ const canManageSocial = computed(
 
 const socialIdentities = ref<any[]>([])
 const socialLoading = ref(false)
+const lifecycleInfo = ref<any>(null)
+const lifecycleLoading = ref(false)
+const lifecycleLoading = ref(false)
 const socialBusyId = ref<number | null>(null)
 
 const SOCIAL_STATUS_LABELS: Record<string, string> = {
@@ -1074,6 +1113,19 @@ async function loadCustomerSocial(customerId: number) {
   }
 }
 
+async function loadCustomerLifecycle(customerId: number) {
+  lifecycleLoading.value = true
+  lifecycleInfo.value = null
+  try {
+    const res = await api.get(`/customers/${customerId}/lifecycle`)
+    lifecycleInfo.value = res.data || null
+  } catch {
+    lifecycleInfo.value = null
+  } finally {
+    lifecycleLoading.value = false
+  }
+}
+
 async function revokeSocialIdentity(row: any) {
   if (!row?.id || !canManageSocial.value) return
   const name = socialIdentityLabel(row.identity_code)
@@ -1109,12 +1161,14 @@ async function showDetail(id: number) {
   customerCoupons.value = []
   customerVouchers.value = []
   socialIdentities.value = []
+  lifecycleInfo.value = null
   favAddProductId.value = undefined
   favProductOptions.value = []
   const [detailRes] = await Promise.all([
     api.get(`/customers/${id}`),
     loadCustomerCoupons(id),
     loadCustomerSocial(id),
+    loadCustomerLifecycle(id),
   ])
   applyDetailPayload(detailRes.data)
 }
@@ -1461,6 +1515,11 @@ onMounted(async () => {
 }
 .opt-tip {
   color: #99a;
+  font-size: 12px;
+}
+.tip-inline {
+  display: inline;
+  margin-left: 8px;
   font-size: 12px;
 }
 .birthday-live {

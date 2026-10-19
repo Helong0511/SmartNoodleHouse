@@ -61,6 +61,31 @@ export const SEGMENT_TYPE_HELP =
 export const MATERIALIZE_HELP =
   '「物化」= 按当前规则把命中顾客写入分群成员快照，估人数也会更新。本轮营销想圈人稳定时，对本店自建分群先物化再发布；总部预置由超管物化，门店直接发布即可。'
 
+/** 营销活动表单字段说明 */
+export const CAMPAIGN_FIELD_HELP = {
+  code: '业务键，同门店唯一。建议英文+日期，如 wakeup_sleep_20260419。',
+  name: '店长可见的活动名称，会出现在列表与报表。',
+  campaign_type: '仅作分类标签（会员日/节日/唤醒等），不影响发券引擎；发券仍靠「分群+券模板」。',
+  segment_id: '圈人来源。总部预置分群可直接选；门店发布时按本店自动圈人。建议先在客户分群估人数。',
+  coupon_template_id: '发布后按分群批量发放的券模板，须为启用状态。与手动发券共用同一套模板。',
+  start_at: '开始时间。空=发布后立即「进行中」；若晚于当前时间则先「已排期」，到点自动开始。',
+  end_at: '结束时间。到点活动变「已结束」，未发出的待执行任务会取消。空=不自动结束，需手动结束。',
+  weekly_cap_override: '每人每周通过营销任务(mkt:)发券上限。空=用系统默认（常见为 3）；0=不限制。防止同一人被多活动刷券。',
+  boost_product_ids: '活动「进行中」期间，这些餐品在小程序推荐里额外加权约 +25%，结束后自动失效。',
+  remark: '内部备注，不对顾客展示。',
+}
+
+/** 营销报表 KPI 列说明 */
+export const REPORT_KPI_HELP = {
+  coupons_issued: '本活动幂等键发到顾客账户的券张数（含未用）。',
+  coupons_used: '其中已核销（USED）张数。',
+  redeem_rate: '核销率 = 核销 / 发券；发券为 0 时显示 —。',
+  attributed_gross: '归因实收：用本活动券下单后记入营销归因台账的支付实收合计。',
+  attributed_subsidy: '补贴：归因订单上的券面额/减免合计，近似营销成本。',
+  roi: 'ROI = (归因实收 − 补贴) / 补贴；补贴为 0 时无法算，显示 —。正数表示收回成本有余。',
+  tasks_success: '发券任务 SUCCESS 条数（与发券张数接近，但按任务计）。',
+}
+
 /** 折叠面板用条目 */
 export function lifecycleHelpItems() {
   return Object.entries(LIFECYCLE_CODE_HELP).map(([code, text]) => ({ code, text }))

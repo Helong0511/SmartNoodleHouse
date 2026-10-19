@@ -188,8 +188,12 @@
         </el-form-item>
         <el-form-item label="编码">
           <el-input v-model="form.code" placeholder="如 festival_spring_2026" />
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.code }}</div>
         </el-form-item>
-        <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
+        <el-form-item label="名称">
+          <el-input v-model="form.name" />
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.name }}</div>
+        </el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.campaign_type" style="width:100%" filterable>
             <el-option
@@ -199,6 +203,7 @@
               :value="t.value"
             />
           </el-select>
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.campaign_type }}</div>
         </el-form-item>
         <el-form-item label="分群">
           <el-select v-model="form.segment_id" filterable clearable placeholder="选择分群" style="width:100%">
@@ -209,7 +214,7 @@
               :value="s.id"
             />
           </el-select>
-          <div class="hint">总部预置分群可选；本店发布时按本店自动圈人，无需本地物化。</div>
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.segment_id }}</div>
         </el-form-item>
         <el-form-item label="券模板">
           <el-select
@@ -226,7 +231,7 @@
               :value="t.id"
             />
           </el-select>
-          <div class="hint">列表来自「优惠券」启用模板；若为空请先去创建并启用。</div>
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.coupon_template_id }}</div>
         </el-form-item>
         <el-form-item label="开始时间">
           <el-date-picker
@@ -236,6 +241,7 @@
             placeholder="空=发布后立即进行"
             style="width:100%"
           />
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.start_at }}</div>
         </el-form-item>
         <el-form-item label="结束时间">
           <el-date-picker
@@ -245,10 +251,11 @@
             placeholder="空=不自动结束"
             style="width:100%"
           />
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.end_at }}</div>
         </el-form-item>
         <el-form-item label="周发券上限">
           <el-input-number v-model="form.weekly_cap_override" :min="0" :max="100" :controls="true" />
-          <div class="hint">覆盖全局营销周频控；0=不限制；空=用系统默认。</div>
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.weekly_cap_override }}</div>
         </el-form-item>
         <el-form-item label="推荐加权餐品">
           <el-select
@@ -269,9 +276,12 @@
               :value="p.id"
             />
           </el-select>
-          <div class="hint">活动进行中期间这些 SKU 在推荐列表加权约 +25%；活动结束自动失效。</div>
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.boost_product_ids }}</div>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" />
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.remark }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dlg = false">取消</el-button>
@@ -315,6 +325,7 @@ import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { MARKETING_CAMPAIGN_STATUS, MARKETING_TASK_STATUS, label } from '@/utils/labels'
+import { CAMPAIGN_FIELD_HELP } from '@/utils/marketingHelp'
 
 /** 活动类型（与实施方案日历节点对齐；后端存大写字符串） */
 const CAMPAIGN_TYPES = [
