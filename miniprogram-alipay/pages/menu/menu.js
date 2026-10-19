@@ -8,6 +8,7 @@ const tracker = require('../../utils/tracker')
 const productApi = require('../../utils/products')
 const clientConfig = require('../../utils/clientConfig')
 const navBar = require('../../utils/navBar')
+const sharedCart = require('../../utils/sharedCart')
 
 const PREFS_SKIP_LOGIN_MS = 60 * 1000
 
@@ -121,7 +122,10 @@ Page({
     favCount: 0,
     isTakeawayChannel: false,
     tableOrderCount: 0,
-    tableOrdersBrief: ''
+    tableOrdersBrief: '',
+    sharedCartOn: false,
+    sharedIsHost: false,
+    sharedMemberCount: 0
   },
 
   onLoad() {
@@ -170,10 +174,35 @@ Page({
       if (app && app.globalData) app.globalData._openCartSheet = false
     } catch (_) { }
     this.refreshCartBar({ openSheet })
+    this.syncSharedCartMode()
     this.loadTableOrdersBrief()
   },
 
-  /** 轻量「本桌已下单」：仅当前顾客在本桌进行中的订单（非同桌共享车） */
+  onHide() {
+    sharedCart.stopPolling()
+  },
+
+  async syncSharedCartMode() {
+    if (!sharedCart.shouldUseShared()) {
+      sharedCart.stopPolling()
+      this.setData({ sharedCartOn: false, sharedIsHost: false, sharedMemberCount: 0 })
+      return
+    }
+    try {
+      await sharedCart.joinAndPull()
+      const meta = sharedCart.getMeta()
+      this.setData({
+        sharedCartOn: !!meta.enabled,
+        sharedIsHost: !!meta.is_host,
+        sharedMemberCount: meta.member_count || 0
+      })
+      sharedCart.startPolling(2800)
+      await this.refreshCartBar({ openSheet: false })
+    } catch (_) {
+      this.setData({ sharedCartOn: false })
+    }
+  },
+
   async loadTableOrdersBrief() {
     const ctx = dineCtx.currentDisplay() || {}
     const table = ctx.table || {}
@@ -189,6 +218,21 @@ Page({
       return
     }
     try {
+      if (sharedCart.shouldUseShared()) {
+        const res = await sharedCart.fetchTableOrders()
+        const count = (res && res.count) || ((res && res.items) || []).length
+        let brief = ''
+        if (count === 1) {
+          const o = (res.items || [])[0] || {}
+          brief = o.status_label || o.status || '进行中'
+        } else if (count > 1) {
+          brief = `${count} 笔进行中（全桌）`
+        }
+        this._tableOrdersAt = Date.now()
+        this._tableOrdersTid = tid
+        this.setData({ tableOrderCount: count, tableOrdersBrief: brief })
+        return
+      }
       await auth.ensureLogin()
       const params = { page: 1, page_size: 20 }
       if (ctx.storeId) params.store_id = ctx.storeId
@@ -211,7 +255,7 @@ Page({
       this._tableOrdersTid = tid
       this.setData({ tableOrderCount: count, tableOrdersBrief: brief })
     } catch (_) {
-      /* 静默：不影响点餐 */
+      /* 静默 */
     }
   },
 
@@ -266,6 +310,7 @@ Page({
     this._tableOrdersAt = 0
     this.loadMenu(true)
     this.loadFavorites(true)
+    this.syncSharedCartMode()
     this.refreshCartBar({ openSheet: false, forceCatalog: true })
     this.loadTableOrdersBrief()
   },
@@ -315,7 +360,11 @@ Page({
   async refreshCartBar(opts) {
     const openSheet = !!(opts && opts.openSheet)
     const forceCatalog = !!(opts && opts.forceCatalog)
-    const rawCart = auth.getCart()
+    const useShared = sharedCart.isActive()
+    if (useShared && opts && opts.pullShared) {
+      try { await sharedCart.pull() } catch (_) { /* ignore */ }
+    }
+    const rawCart = useShared ? sharedCart.getMirror() : auth.getCart()
     let products = this._lastProductItems || []
     let categories = (this._catsCache && this._catsCache.cats) || this.data.categories || []
     let complete = !!(products && products.length)
@@ -329,17 +378,14 @@ Page({
         complete = !!(catalog && catalog.complete)
         if (catalog && catalog.items) {
           this._lastProductItems = catalog.items
-          try {
-            const app = getApp()
-            if (app && app.globalData) {
-              app.globalData._sharedCatalog = {
-                storeId: sid,
-                items: catalog.items,
-                categories: (catalog && catalog.categories) || categories,
-                at: Date.now()
-              }
+          if (app.globalData) {
+            app.globalData._sharedCatalog = {
+              storeId: sid,
+              items: catalog.items,
+              categories: (catalog && catalog.categories) || categories,
+              at: Date.now()
             }
-          } catch (_) { }
+          }
         }
       }
     } catch (_) { }
@@ -347,21 +393,30 @@ Page({
     const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories, { complete })
     const cart = list.map((raw) => {
       const item = cartUtil.normalizeItem({ ...raw })
+      const sid = item.shared_item_id || item.id
       return {
         ...item,
-        // a:key 需要稳定唯一值：餐品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
-        cartKey: `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
-        imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
+        cartKey: sid
+          ? `s${sid}`
+          : `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
+        imageUrl: media.resolveUrl(item.main_image || item.imageUrl || ''),
+        added_by_label: raw.added_by_label || item.added_by_label || '',
+        mine: raw.mine !== false,
+        can_edit: useShared ? !!raw.can_edit : true
       }
     })
     const validItems = cart.filter((i) => !i.invalid)
     const { total, count } = cartUtil.cartSummary(validItems)
-    auth.saveCart(cart)
+    if (!useShared) auth.saveCart(cart)
+    const meta = sharedCart.getMeta()
     const patch = {
       cart,
       cartTotal: total,
       cartCount: count,
-      invalidCount
+      invalidCount,
+      sharedCartOn: useShared,
+      sharedIsHost: !!meta.is_host,
+      sharedMemberCount: meta.member_count || 0
     }
     if (!cart.length) patch.cartSheetOpen = false
     else if (openSheet) patch.cartSheetOpen = true
@@ -378,32 +433,73 @@ Page({
     this.setData({ cartSheetOpen: !this.data.cartSheetOpen })
   },
 
-  changeCartQty(e) {
+  async changeCartQty(e) {
     const { index, delta } = e.currentTarget.dataset
-    const cart = auth.getCart()
-    const item = cart[index]
+    const list = this.data.cart || []
+    const item = list[index]
     if (!item || item.invalid) return
-    const qty = (item.quantity || 1) + parseInt(delta, 10)
+    if (sharedCart.isActive()) {
+      if (!item.can_edit) {
+        my.showToast({ content: '只能修改自己加的菜', type: 'none' })
+        return
+      }
+      const qty = (item.quantity || 1) + parseInt(delta, 10)
+      if (qty > 999) {
+        my.showToast({ content: '单品最多 999 份', type: 'none' })
+        return
+      }
+      try {
+        await sharedCart.setQuantity(item.shared_item_id || item.id, Math.max(0, qty))
+        if (qty <= 0) {
+          try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) { }
+        }
+        this.refreshCartBar({ openSheet: true })
+      } catch (err) {
+        my.showToast({ content: (err && err.message) || '更新失败', type: 'none' })
+        this.refreshCartBar({ openSheet: true, pullShared: true })
+      }
+      return
+    }
+    const cart = auth.getCart()
+    const local = cart[index]
+    if (!local || local.invalid) return
+    const qty = (local.quantity || 1) + parseInt(delta, 10)
     if (qty <= 0) {
       cart.splice(index, 1)
-      try { tracker.cartRemove(Number(item.product_id), { scene: 'menu', category_id: item.category_id || null }) } catch (_) { }
+      try { tracker.cartRemove(Number(local.product_id), { scene: 'menu', category_id: local.category_id || null }) } catch (_) { }
     } else if (qty > 999) {
       my.showToast({ content: '单品最多 999 份', type: 'none' })
       return
     } else {
-      cartUtil.normalizeItem(item)
-      item.quantity = qty
-      item.subtotal = (parseFloat(item.unit_price) * qty).toFixed(2)
+      cartUtil.normalizeItem(local)
+      local.quantity = qty
+      local.subtotal = (parseFloat(local.unit_price) * qty).toFixed(2)
     }
     auth.saveCart(cart)
     this.refreshCartBar({ openSheet: !!(this.data.cartSheetOpen && cart.length) })
   },
 
-  removeCartItem(e) {
+  async removeCartItem(e) {
     const index = e.currentTarget.dataset.index
-    const cart = auth.getCart()
-    const removed = cart[index]
+    const list = this.data.cart || []
+    const removed = list[index]
     if (removed == null) return
+    if (sharedCart.isActive()) {
+      if (!removed.can_edit) {
+        my.showToast({ content: '只能删除自己加的菜', type: 'none' })
+        return
+      }
+      try {
+        await sharedCart.removeItem(removed.shared_item_id || removed.id)
+        try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) { }
+        this.refreshCartBar({ openSheet: true })
+      } catch (err) {
+        my.showToast({ content: (err && err.message) || '删除失败', type: 'none' })
+      }
+      return
+    }
+    const cart = auth.getCart()
+    if (cart[index] == null) return
     cart.splice(index, 1)
     auth.saveCart(cart)
     try { tracker.cartRemove(Number(removed.product_id), { scene: 'menu', category_id: removed.category_id || null }) } catch (_) { }
@@ -411,10 +507,43 @@ Page({
   },
 
   clearInvalidCart() {
+    if (sharedCart.isActive()) {
+      const mineInvalid = (this.data.cart || []).filter((i) => i.invalid && i.can_edit)
+      Promise.all(mineInvalid.map((i) => sharedCart.removeItem(i.shared_item_id || i.id)))
+        .then(() => {
+          my.showToast({ content: '已清除失效餐品', type: 'success' })
+          this.refreshCartBar({ openSheet: true, pullShared: true })
+        })
+        .catch((err) => {
+          my.showToast({ content: (err && err.message) || '清除失败', type: 'none' })
+        })
+      return
+    }
     const cart = auth.getCart().filter((i) => !i.invalid)
     auth.saveCart(cart)
     my.showToast({ content: '已清除失效餐品', type: 'success' })
     this.refreshCartBar({ openSheet: !!(cart.length) })
+  },
+
+  clearSharedCart() {
+    if (!sharedCart.isActive() || !this.data.sharedIsHost) {
+      my.showToast({ content: '仅桌主可清空共享车', type: 'none' })
+      return
+    }
+    my.confirm({
+      title: '清空共享车',
+      content: '将清空本桌所有人的未下单菜品，是否继续？',
+      success: async (res) => {
+        if (!(res && res.confirm)) return
+        try {
+          await sharedCart.clear()
+          this.refreshCartBar({ openSheet: false })
+          my.showToast({ content: '已清空', type: 'success' })
+        } catch (err) {
+          my.showToast({ content: (err && err.message) || '清空失败', type: 'none' })
+        }
+      }
+    })
   },
 
   goCheckout() {
@@ -814,9 +943,7 @@ Page({
     })
   },
 
-  addSimpleToCart(entry) {
-    const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
-    auth.saveCart(cart)
+  async addSimpleToCart(entry) {
     try {
       tracker.cartAdd(Number(entry.product_id), {
         scene: entry._trackScene || 'menu',
@@ -824,15 +951,29 @@ Page({
         payload: { qty: Number(entry.quantity) || 1 }
       })
     } catch (_) { }
+    if (sharedCart.isActive() || sharedCart.shouldUseShared()) {
+      try {
+        if (!sharedCart.isActive()) await sharedCart.joinAndPull()
+        await sharedCart.addItem(entry)
+        this.refreshCartBar({ openSheet: true })
+        return
+      } catch (err) {
+        my.showToast({ content: (err && err.message) || '加入共享车失败', type: 'none' })
+        return
+      }
+    }
+    const cart = cartUtil.mergeCartItem(auth.getCart(), entry)
+    auth.saveCart(cart)
     this.refreshCartBar({ openSheet: true })
   },
 
   assertCanAddProduct(productLike) {
     const cats = (this._catsCache && this._catsCache.cats) || this.data.categories || []
     const products = this._lastProductItems || []
-    const check = cartUtil.checkCategoryRequire(productLike, auth.getCart(), products, cats)
+    const base = sharedCart.isActive() ? sharedCart.getMirror() : auth.getCart()
+    const check = cartUtil.checkCategoryRequire(productLike, base, products, cats)
     if (!check.ok) {
-      my.showToast({ content: check.message, type: 'none', duration: 2500 })
+      my.showToast({ content: check.message, type: 'fail', duration: 2500 })
       return false
     }
     return true
