@@ -351,7 +351,11 @@ Page({
   async refreshCartBar(opts) {
     const openSheet = !!(opts && opts.openSheet)
     const forceCatalog = !!(opts && opts.forceCatalog)
-    const rawCart = auth.getCart()
+    const useShared = sharedCart.isActive()
+    if (useShared && opts && opts.pullShared) {
+      try { await sharedCart.pull() } catch (_) { /* ignore */ }
+    }
+    const rawCart = useShared ? sharedCart.getMirror() : auth.getCart()
     let products = this._lastProductItems || []
     let categories = (this._catsCache && this._catsCache.cats) || this.data.categories || []
     let complete = !!(products && products.length)
@@ -380,21 +384,30 @@ Page({
     const { list, invalidCount } = cartUtil.reconcileWithProducts(rawCart, products, categories, { complete })
     const cart = list.map((raw) => {
       const item = cartUtil.normalizeItem({ ...raw })
+      const sid = item.shared_item_id || item.id
       return {
         ...item,
-        // wx:key 需要稳定唯一值：餐品 ID + 排序后的规格 ID（与 cartUtil.itemKey 同源；mergeCartItem 保证同键只有一条）
-        cartKey: `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
-        imageUrl: media.resolveUrl(item.main_image || item.imageUrl || '')
+        cartKey: sid
+          ? `s${sid}`
+          : `${item.product_id}:${(item.option_ids || []).slice().sort((a, b) => a - b).join(',')}`,
+        imageUrl: media.resolveUrl(item.main_image || item.imageUrl || ''),
+        added_by_label: raw.added_by_label || item.added_by_label || '',
+        mine: raw.mine !== false,
+        can_edit: useShared ? !!raw.can_edit : true
       }
     })
     const validItems = cart.filter((i) => !i.invalid)
     const { total, count } = cartUtil.cartSummary(validItems)
-    auth.saveCart(cart)
+    if (!useShared) auth.saveCart(cart)
+    const meta = sharedCart.getMeta()
     const patch = {
       cart,
       cartTotal: total,
       cartCount: count,
-      invalidCount
+      invalidCount,
+      sharedCartOn: useShared,
+      sharedIsHost: !!meta.is_host,
+      sharedMemberCount: meta.member_count || 0
     }
     if (!cart.length) patch.cartSheetOpen = false
     else if (openSheet) patch.cartSheetOpen = true
