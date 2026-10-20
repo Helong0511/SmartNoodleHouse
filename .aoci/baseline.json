@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T05:29:40Z",
+  "updated_at": "2026-10-20T05:42:16Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "6a249ddcae71ced81b98138732298de4ade3494c15d49c33aea1893345cede31",
-      "size": 166302,
-      "normalized_sha256": "6a249ddcae71ced81b98138732298de4ade3494c15d49c33aea1893345cede31"
+      "sha256": "9bcb1347d5cd46e873c99e200c5f9eba3c182772caeedb66810d3725caae92a4",
+      "size": 166938,
+      "normalized_sha256": "9bcb1347d5cd46e873c99e200c5f9eba3c182772caeedb66810d3725caae92a4"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -377,9 +377,9 @@
     },
     "backend/app/api/__init__.py": {
       "role": "index",
-      "sha256": "ff2dd512738e9a85202573df47e64deb777819314a4d1ea2b21906f3c9c0ea61",
-      "size": 2544,
-      "normalized_sha256": "ff2dd512738e9a85202573df47e64deb777819314a4d1ea2b21906f3c9c0ea61"
+      "sha256": "d5333f04c9259338f66e24187263dbf32034cf13631e377d341525c2601de70f",
+      "size": 2621,
+      "normalized_sha256": "d5333f04c9259338f66e24187263dbf32034cf13631e377d341525c2601de70f"
     },
     "backend/app/api/ab_experiments.py": {
       "role": "index",
@@ -575,9 +575,9 @@
     },
     "backend/app/api/products.py": {
       "role": "index",
-      "sha256": "05977b9847199e42cab68592309e3dc7244a7df97d3e7162e07a28c69d7363c9",
-      "size": 68716,
-      "normalized_sha256": "05977b9847199e42cab68592309e3dc7244a7df97d3e7162e07a28c69d7363c9"
+      "sha256": "c2a06d607ad8ea09ba567c40af579ce218ed18332a7bc303d9f29448b848b0cd",
+      "size": 56800,
+      "normalized_sha256": "c2a06d607ad8ea09ba567c40af579ce218ed18332a7bc303d9f29448b848b0cd"
     },
     "backend/app/api/products_common.py": {
       "role": "index",
@@ -590,6 +590,12 @@
       "sha256": "8db9ae359b9430f02200240c7034e2383913442fd922639ed3d73662f4740436",
       "size": 16082,
       "normalized_sha256": "8db9ae359b9430f02200240c7034e2383913442fd922639ed3d73662f4740436"
+    },
+    "backend/app/api/products_schedules.py": {
+      "role": "index",
+      "sha256": "716881042ccf7cf7ba7adf68abbcadae10ce36c5222fbee14b902cf553c6cd5c",
+      "size": 12538,
+      "normalized_sha256": "716881042ccf7cf7ba7adf68abbcadae10ce36c5222fbee14b902cf553c6cd5c"
     },
     "backend/app/api/queue.py": {
       "role": "index",
@@ -4756,9 +4762,9 @@
     },
     "tests/测试_分类时段自动排序.py": {
       "role": "observe",
-      "sha256": "9cc3b045580cfa51616b03fbcd6f46c3dbdd3447e0814dfae1e224ae30652742",
-      "size": 4702,
-      "normalized_sha256": "07b77ea54eba227af0bbeb2d2cb7a15b00d5069748ba7834c3df4009fb3bab08"
+      "sha256": "b3db2c457afafc296a742c1e92523d31025ae2f1e40ad3a828163d70676a8b76",
+      "size": 4966,
+      "normalized_sha256": "21f8504efa33d2867b16972b21c6e795efe4b11cb4f006d6ce604895fdc77b77"
     },
     "tests/测试_分页稳定性.py": {
       "role": "observe",

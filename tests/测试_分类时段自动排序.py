@@ -114,6 +114,12 @@ async def test_refresh_schedule_auto_sort_by_slot_sales(db_session, monkeypatch)
     await db.flush()
 
     # 午市：面 20 + 早点 2；早餐订单大量豆浆不应计入午市
+    # paid_at 相对「本地现在」锚定，避免写死日历日随 lookback 窗口漂移
+    from app.core.response import naive_local_now
+
+    day = (naive_local_now() - timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     lunch = await make_paid_order(
         db,
         customer.id,
@@ -121,7 +127,7 @@ async def test_refresh_schedule_auto_sort_by_slot_sales(db_session, monkeypatch)
         [(p_n, 20, []), (p_b, 2, [])],
         days_ago=2,
     )
-    lunch.paid_at = datetime(2026, 9, 20, 12, 30, 0)
+    lunch.paid_at = day.replace(hour=12, minute=30)
     breakfast = await make_paid_order(
         db,
         customer.id,
@@ -129,7 +135,7 @@ async def test_refresh_schedule_auto_sort_by_slot_sales(db_session, monkeypatch)
         [(p_b, 100, [])],
         days_ago=2,
     )
-    breakfast.paid_at = datetime(2026, 9, 20, 8, 0, 0)
+    breakfast.paid_at = day.replace(hour=8, minute=0)
     await db.flush()
 
     out = await refresh_schedule_auto_sort(db, sched, lookback_days=30, soft_qty=10)
