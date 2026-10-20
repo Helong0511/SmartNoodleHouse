@@ -5,10 +5,10 @@ import ipaddress
 import logging
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
+from app.core.response import json_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -113,17 +113,21 @@ class WebhookAllowlistMiddleware(BaseHTTPMiddleware):
                 bool(getattr(settings, "webhook_require_allowlist", False)),
             )
             if settings.is_production and require:
-                return JSONResponse(
+                return json_error_response(
+                    request,
                     status_code=403,
-                    content={"code": 403, "message": "Webhook IP 白名单未配置", "data": None},
+                    code=403,
+                    message="Webhook IP 白名单未配置",
                 )
             return await call_next(request)
 
         ip = client_ip(request)
         if not ip_allowed(ip, allowlist):
             logger.warning("Webhook IP 拒绝 path=%s ip=%s", path, ip)
-            return JSONResponse(
+            return json_error_response(
+                request,
                 status_code=403,
-                content={"code": 403, "message": "来源 IP 不在白名单", "data": None},
+                code=403,
+                message="来源 IP 不在白名单",
             )
         return await call_next(request)

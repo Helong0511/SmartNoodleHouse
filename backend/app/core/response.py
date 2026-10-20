@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 import json
 import logging
 from typing import Any, Generic, Optional, TypeVar
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import Request
@@ -38,6 +38,29 @@ def success(data: Any = None, message: str = "success", request: Request | None 
 def error(code: int, message: str, request: Request | None = None) -> dict:
     rid = getattr(request.state, "request_id", None) if request else None
     return {"code": code, "message": message, "data": None, "request_id": rid}
+
+
+def bind_request_id(request: Request) -> str:
+    """中间件短路返回时 RequestID 尚未执行，这里补上同一枚举。"""
+    existing = getattr(request.state, "request_id", None)
+    if isinstance(existing, str) and existing:
+        return existing
+    raw = (request.headers.get("X-Request-ID") or "").strip()
+    rid = raw[:64] if raw else uuid4().hex
+    request.state.request_id = rid
+    return rid
+
+
+def json_error_response(request: Request, *, status_code: int, code: int, message: str):
+    """限流 / 白名单等未进入路由的拒绝：信封含 data 与 request_id，并回写响应头。"""
+    from fastapi.responses import JSONResponse
+
+    rid = bind_request_id(request)
+    return JSONResponse(
+        status_code=status_code,
+        content=error(code, message, request),
+        headers={"X-Request-ID": rid},
+    )
 
 
 def success_no_store(

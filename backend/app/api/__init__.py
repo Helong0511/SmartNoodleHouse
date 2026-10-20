@@ -10,6 +10,7 @@ from app.api import (
     customers,
     dashboard,
     delivery,
+    delivery_sync,
     favorites,
     feedbacks,
     financial_ledger,
@@ -18,11 +19,17 @@ from app.api import (
     marketing,
     member_levels,
     miniprogram,
+    miniprogram_member,
+    miniprogram_face,
+    miniprogram_menu,
+    miniprogram_party,
     orders,
+    orders_kitchen,
     payments,
     performance,
     print_jobs,
     products,
+    products_options,
     queue,
     reconcile,
     settings,
@@ -40,7 +47,9 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(products.router)
+api_router.include_router(products_options.router)
 api_router.include_router(orders.router)
+api_router.include_router(orders_kitchen.router)
 api_router.include_router(payments.router)
 api_router.include_router(wallet.router)
 api_router.include_router(financial_ledger.router)
@@ -55,7 +64,12 @@ api_router.include_router(cameras.router)
 api_router.include_router(welcome.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(miniprogram.router)
+api_router.include_router(miniprogram_member.router)
+api_router.include_router(miniprogram_face.router)
+api_router.include_router(miniprogram_menu.router)
+api_router.include_router(miniprogram_party.router)
 api_router.include_router(delivery.router)
+api_router.include_router(delivery_sync.router)
 api_router.include_router(settings.router)
 api_router.include_router(client_logs.router)
 api_router.include_router(websocket.router)

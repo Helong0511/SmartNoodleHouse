@@ -50,10 +50,10 @@ async def test_verify_rejects_customer_mismatch():
 
 @pytest.mark.asyncio
 async def test_enforce_liveness_required_in_challenge_mode():
-    from app.api import miniprogram as mp
+    from app.api import miniprogram_face as face
 
     with patch(
-        "app.api.miniprogram.get_settings",
+        "app.api.miniprogram_face.get_settings",
         return_value=SimpleNamespace(face_liveness_mode="challenge"),
     ), patch(
         "app.services.face_liveness_service.verify_liveness_challenge",
@@ -61,26 +61,26 @@ async def test_enforce_liveness_required_in_challenge_mode():
         return_value=False,
     ):
         with pytest.raises(AppException) as ei:
-            await mp._enforce_liveness_challenge(1, liveness_token="", action_completed=True)
+            await face._enforce_liveness_challenge(1, liveness_token="", action_completed=True)
     assert ei.value.code == 40037
 
 
 @pytest.mark.asyncio
 async def test_enforce_liveness_skipped_when_mode_none():
-    from app.api import miniprogram as mp
+    from app.api import miniprogram_face as face
 
     with patch(
-        "app.api.miniprogram.get_settings",
+        "app.api.miniprogram_face.get_settings",
         return_value=SimpleNamespace(face_liveness_mode="none"),
     ):
-        mode = await mp._enforce_liveness_challenge(1, liveness_token=None, action_completed=False)
+        mode = await face._enforce_liveness_challenge(1, liveness_token=None, action_completed=False)
     assert mode == "none"
 
 
 @pytest.mark.asyncio
 async def test_consent_base64_requires_liveness_before_decode():
     """缺 token 时在解码图片前即拒绝，避免无挑战也能注册。"""
-    from app.api.miniprogram import FaceConsentBase64Request, consent_face_base64
+    from app.api.miniprogram_face import FaceConsentBase64Request, consent_face_base64
 
     customer = SimpleNamespace(id=7)
     req = MagicMock()
@@ -92,11 +92,11 @@ async def test_consent_base64_requires_liveness_before_decode():
     )
     body = FaceConsentBase64Request(image_base64="a" * 900)
     with patch(
-        "app.api.miniprogram._require_face_welcome_enabled",
+        "app.api.miniprogram_face._require_face_welcome_enabled",
         new_callable=AsyncMock,
         return_value=None,
     ), patch(
-        "app.api.miniprogram._enforce_liveness_challenge",
+        "app.api.miniprogram_face._enforce_liveness_challenge",
         new_callable=AsyncMock,
         side_effect=AppException(40037, "活体校验未通过"),
     ):

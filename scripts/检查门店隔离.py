@@ -1,6 +1,6 @@
 """门店隔离覆盖率静态检查（P3-2）。
 
-扫描 backend/app/api/v1/*.py，统计：
+扫描 backend/app/api/*.py（统一 /api 前缀，无 api/v1 子目录），统计：
 - DB_QUERY：数据库查询点（select( / db.get( / db.execute( / db.scalar(）
 - GUARD   ：隔离守卫调用（require_bound_store / assert_store_access /
             assert_order_store_access / assert_customer_owns_order /
@@ -11,8 +11,8 @@
 （该文件可能遗漏门店/顾客隔离）。
 
 用法：
-    python scripts/check_store_isolation.py            # CI，有疑似遗漏则失败
-    python scripts/check_store_isolation.py --warn      # 仅告警不失败
+    python scripts/检查门店隔离.py            # CI，有疑似遗漏则失败
+    python scripts/检查门店隔离.py --warn      # 仅告警不失败
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import re
 import sys
 from pathlib import Path
 
-API_DIR = Path(__file__).resolve().parent.parent / "backend" / "app" / "api" / "v1"
+API_DIR = Path(__file__).resolve().parent.parent / "backend" / "app" / "api"
 
 QUERY_PATTERNS = [
     r"\bselect\s*\(",
@@ -52,6 +52,9 @@ EXEMPT: dict[str, str] = {
     "health.py": "健康检查：无业务数据查询",
     "__init__.py": "路由聚合文件，无查询",
     "client_logs.py": "前端日志上报：只写不读，按来源 IP 限流",
+    "deps.py": "依赖注入模块，非路由处理器",
+    "orders_common.py": "订单路由共享辅助，无独立 HTTP 入口",
+    "products_common.py": "菜品路由共享辅助，无独立 HTTP 入口",
 }
 
 

@@ -2,7 +2,13 @@
   <div v-loading="loading">
     <el-form inline class="toolbar">
       <el-form-item v-if="auth.isSuperAdmin">
-        <el-select v-model="storeFilter" placeholder="本店相关顾客" clearable style="width:160px" @change="reload">
+        <el-select
+          v-model="storeFilter"
+          placeholder="按注册/首访/有单门店"
+          clearable
+          style="width:200px"
+          @change="reload"
+        >
           <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
       </el-form-item>

@@ -11,7 +11,7 @@ function getAppSafe() {
 function apiOrigin() {
   const app = getAppSafe()
   const base = (app && app.globalData && app.globalData.apiBase) || ''
-  // apiBase 形如 http://host:8000/api 或 .../api/v1；uploads 挂在站点根，须去掉 /api 前缀
+  // apiBase 形如 http://host:8000/api；uploads 挂在站点根，须去掉末尾 /api（兼容历史 /api/vN）
   return String(base).replace(/\/api(?:\/v\d+)?\/?$/i, '')
 }
 

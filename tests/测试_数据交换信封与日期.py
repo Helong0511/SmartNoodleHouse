@@ -198,3 +198,80 @@ def test_apply_date_range_china_offset_normalized():
         )
         ids = [r[0] for r in s.execute(q).all()]
         assert ids == [1, 2]
+
+
+def _http_request(path: str, request_id: str = "rid-envelope"):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(b"x-request-id", request_id.encode())],
+        "client": ("10.0.0.8", 12345),
+        "server": ("test", 80),
+    }
+    return Request(scope)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_reject_envelope_has_request_id():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.core.rate_limit import RateLimitMiddleware
+
+    mw = RateLimitMiddleware(app=MagicMock())
+    request = _http_request("/api/orders")
+    redis = AsyncMock()
+    redis.eval = AsyncMock(return_value=999)
+    settings = SimpleNamespace(
+        is_production=False,
+        is_development=False,
+        enable_rate_limit=True,
+        rate_limit_fail_closed_paths="",
+    )
+    with patch("app.core.rate_limit.get_settings", return_value=settings):
+        with patch("app.core.rate_limit.get_redis", AsyncMock(return_value=redis)):
+            with patch("app.core.rate_limit.client_ip", return_value="10.0.0.8"):
+                resp = await mw.dispatch(request, AsyncMock())
+    body = json.loads(resp.body)
+    assert resp.status_code == 429
+    assert body["code"] == 429
+    assert body["data"] is None
+    assert body["request_id"] == "rid-envelope"
+    assert resp.headers["x-request-id"] == "rid-envelope"
+
+
+@pytest.mark.asyncio
+async def test_webhook_allowlist_reject_envelope_has_request_id():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.core.ip_allowlist import WebhookAllowlistMiddleware
+
+    mw = WebhookAllowlistMiddleware(app=MagicMock())
+    request = _http_request("/api/payments/wechat/notify")
+    settings = SimpleNamespace(is_production=True, webhook_ip_allowlist="203.0.113.0/24")
+    with patch("app.services.system_settings_service.SystemSettingsService.touch_cache", AsyncMock()):
+        with patch("app.core.ip_allowlist.get_settings", return_value=settings):
+            with patch(
+                "app.services.system_settings_service.SystemSettingsService.resolved_str_sync",
+                return_value="203.0.113.0/24",
+            ):
+                with patch("app.core.ip_allowlist.client_ip", return_value="198.51.100.9"):
+                    resp = await mw.dispatch(request, AsyncMock())
+    body = json.loads(resp.body)
+    assert resp.status_code == 403
+    assert body["code"] == 403
+    assert body["data"] is None
+    assert body["message"]
+    assert body["request_id"] == "rid-envelope"
+    assert resp.headers["x-request-id"] == "rid-envelope"

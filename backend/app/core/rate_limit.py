@@ -4,12 +4,12 @@ from __future__ import annotations
 import logging
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import get_settings
 from app.core.ip_allowlist import client_ip
 from app.core.redis_client import get_redis
+from app.core.response import json_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             r = await get_redis()
             count = int(await r.eval(_INCR_SLIDING, 1, key, window))
             if count > limit:
-                return JSONResponse(
+                return json_error_response(
+                    request,
                     status_code=429,
-                    content={"code": 429, "message": "请求过于频繁，请稍后再试", "data": None},
+                    code=429,
+                    message="请求过于频繁，请稍后再试",
                 )
         except Exception as e:
             # 默认 fail-open：Redis 仅加速层，避免全站 503。
@@ -95,13 +97,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             prefixes = _fail_closed_prefixes(raw_paths if isinstance(raw_paths, str) else "")
             if path_requires_fail_closed(path, prefixes):
                 logger.error("限流 Redis 不可用，敏感路径 fail-closed: path=%s err=%s", path, e)
-                return JSONResponse(
+                return json_error_response(
+                    request,
                     status_code=503,
-                    content={
-                        "code": 50301,
-                        "message": "限流服务暂不可用，请稍后重试",
-                        "data": None,
-                    },
+                    code=50301,
+                    message="限流服务暂不可用，请稍后重试",
                 )
             logger.error("限流 Redis 不可用，降级放行: %s", e)
 
