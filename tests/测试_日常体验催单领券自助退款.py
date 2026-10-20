@@ -170,7 +170,7 @@ def customer_dep():
 @pytest.fixture
 def no_redis():
     """催单限频放行（模拟 Redis NX 首次成功）。"""
-    with patch("app.api.orders.get_redis", new_callable=AsyncMock) as mock_get:
+    with patch("app.api.orders_customer.get_redis", new_callable=AsyncMock) as mock_get:
         redis = AsyncMock()
         redis.set = AsyncMock(return_value=True)
         mock_get.return_value = redis
@@ -179,7 +179,7 @@ def no_redis():
 
 @pytest.fixture
 def mute_ws():
-    with patch("app.api.orders.ws_manager") as mock_ws:
+    with patch("app.api.orders_customer.ws_manager") as mock_ws:
         mock_ws.notify_order_event = AsyncMock()
         yield mock_ws
 
@@ -225,7 +225,7 @@ async def test_urge_rate_limited_returns_success_without_increment(api, customer
     order = await _seed_order(db, store, cust, status="COOKING")
     await db.commit()
     customer_dep.install(cust)
-    with patch("app.api.orders.get_redis", new_callable=AsyncMock) as mock_get:
+    with patch("app.api.orders_customer.get_redis", new_callable=AsyncMock) as mock_get:
         redis = AsyncMock()
         redis.set = AsyncMock(return_value=None)  # NX 失败：5 分钟内已催过
         mock_get.return_value = redis
