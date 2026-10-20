@@ -1707,10 +1707,10 @@ async function rememberPosPhone() {
   }
   rememberPhoneLoading.value = true
   try {
-    const res = await api.post('/pos/customers/remember-phone', {
+    const res = (await api.post('/pos/customers/remember-phone', {
       phone,
       store_id: sid,
-    })
+    })) as { message?: string; data?: any }
     const row = res.data || {}
     const option = {
       id: row.id,

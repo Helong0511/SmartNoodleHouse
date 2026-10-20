@@ -11,6 +11,7 @@ from app.api import (
     customers_favorites,
     dashboard,
     delivery,
+    delivery_bindings,
     delivery_sync,
     favorites,
     feedbacks,
@@ -91,6 +92,7 @@ api_router.include_router(miniprogram_face.router)
 api_router.include_router(miniprogram_menu.router)
 api_router.include_router(miniprogram_party.router)
 api_router.include_router(delivery.router)
+api_router.include_router(delivery_bindings.router)
 api_router.include_router(delivery_sync.router)
 api_router.include_router(settings.router)
 api_router.include_router(settings_stores.router)

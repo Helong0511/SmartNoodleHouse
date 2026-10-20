@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T06:27:39Z",
+  "updated_at": "2026-10-20T06:40:18Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ac20e59da76d5ce52c9b6a0d79f88e219a9ba088f311409482bcf44717a720da",
-      "size": 171294,
-      "normalized_sha256": "ac20e59da76d5ce52c9b6a0d79f88e219a9ba088f311409482bcf44717a720da"
+      "sha256": "babaad605f54064e9205bdf22452d9e37dc2716d3bd8fa611a0af2ae18e62e40",
+      "size": 171841,
+      "normalized_sha256": "babaad605f54064e9205bdf22452d9e37dc2716d3bd8fa611a0af2ae18e62e40"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -377,9 +377,9 @@
     },
     "backend/app/api/__init__.py": {
       "role": "index",
-      "sha256": "39365341ff5a36d5cecca961edfccbcdfe590454813f583e0e2b4a0fb3e5852e",
-      "size": 3332,
-      "normalized_sha256": "39365341ff5a36d5cecca961edfccbcdfe590454813f583e0e2b4a0fb3e5852e"
+      "sha256": "0a6a16fac1c8e6b3026275071f40eda1ec75889ea97a17fddda2148ba872d736",
+      "size": 3407,
+      "normalized_sha256": "0a6a16fac1c8e6b3026275071f40eda1ec75889ea97a17fddda2148ba872d736"
     },
     "backend/app/api/ab_experiments.py": {
       "role": "index",
@@ -447,11 +447,17 @@
       "size": 23396,
       "normalized_sha256": "f3d2939dac4f45797d571e6a63646cb92c4029f8d7163f931f0d48591684ce3b"
     },
+    "backend/app/api/delivery_bindings.py": {
+      "role": "index",
+      "sha256": "9382b785271f412057c56646ec3338e682bf3273e3ce67a382687f532ff94268",
+      "size": 17109,
+      "normalized_sha256": "9382b785271f412057c56646ec3338e682bf3273e3ce67a382687f532ff94268"
+    },
     "backend/app/api/delivery_sync.py": {
       "role": "index",
-      "sha256": "6733b9dab82be0112403f7ad68c07ed327a98024d09785bdd770da909b8176f7",
-      "size": 40531,
-      "normalized_sha256": "6733b9dab82be0112403f7ad68c07ed327a98024d09785bdd770da909b8176f7"
+      "sha256": "2ca9c6ff1dcd56a05c1784b7e798f5fc88cc93e1e8777cc38d34cf736a86a3f7",
+      "size": 24107,
+      "normalized_sha256": "2ca9c6ff1dcd56a05c1784b7e798f5fc88cc93e1e8777cc38d34cf736a86a3f7"
     },
     "backend/app/api/deps.py": {
       "role": "index",
