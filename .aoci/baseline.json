@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T07:54:27Z",
+  "updated_at": "2026-10-20T08:03:55Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "df97b2da496d009c260021dd36b4d6d985e05911bfc1e97bb781ac2b8821b217",
-      "size": 174062,
-      "normalized_sha256": "df97b2da496d009c260021dd36b4d6d985e05911bfc1e97bb781ac2b8821b217"
+      "sha256": "a48216eb12a9529f5ce6724e14fdf689d430807cd127bad2684960fc975d6203",
+      "size": 174149,
+      "normalized_sha256": "a48216eb12a9529f5ce6724e14fdf689d430807cd127bad2684960fc975d6203"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1649,9 +1649,9 @@
     },
     "backend/app/services/social_benefit_service.py": {
       "role": "index",
-      "sha256": "a2a40aeba82bdbdf0555cccb664ce7d557f732f237120f684a1c36a81dc67563",
-      "size": 43468,
-      "normalized_sha256": "a2a40aeba82bdbdf0555cccb664ce7d557f732f237120f684a1c36a81dc67563"
+      "sha256": "69a13ab718d3e7645f4c0d08672b99fb9a3c81f2ddb2ee8e5a371d39f5e85984",
+      "size": 48849,
+      "normalized_sha256": "69a13ab718d3e7645f4c0d08672b99fb9a3c81f2ddb2ee8e5a371d39f5e85984"
     },
     "backend/app/services/status_history.py": {
       "role": "index",
@@ -5410,9 +5410,9 @@
     },
     "tests/测试_社会贡献.py": {
       "role": "observe",
-      "sha256": "70fe7a0138258382db62e6fdedef9a284437548e38c22d35f0932e4cf3dca843",
-      "size": 21157,
-      "normalized_sha256": "da9735dec7aa54374d50b1b5b3748685d08444f0beb15876cd4fc894b0db1339"
+      "sha256": "adb739c2f87e8f7b11ec788b5a5ccf171551f5e7d33b2fb8ce0f6e512d458ccb",
+      "size": 21543,
+      "normalized_sha256": "3ab21ba9dc32da81dc7a10f6db5a6176e52ba475da088b535b3840facdb1665c"
     },
     "tests/测试_积分兑换过期明细.py": {
       "role": "observe",

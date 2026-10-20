@@ -170,6 +170,14 @@ async def test_同店同日限次(db_session, sb):
         db_session, customer_id=sb["c1"].id, store_id=sb["store1"].id
     )
     assert hit is None
+    with pytest.raises(AppException) as ei:
+        await SocialBenefitService.require_best_rule(
+            db_session, customer_id=sb["c1"].id, store_id=sb["store1"].id
+        )
+    assert ei.value.code == 40008
+    assert "今日公益折扣次数已用完" in ei.value.message
+    assert "每日限 1 次" in ei.value.message
+    assert "已用 1 次" in ei.value.message
 
 
 @pytest.mark.asyncio

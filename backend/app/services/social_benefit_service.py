@@ -528,6 +528,86 @@ class SocialBenefitService:
         except (TypeError, ValueError):
             return True
 
+    _WEEKDAY_ZH = ("", "周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+    @staticmethod
+    def _fmt_rule_label(rule: SocialBenefitRule) -> str:
+        name = (getattr(rule, "name", None) or "").strip()
+        return f"「{name}」" if name else f"#{getattr(rule, 'id', '?')}"
+
+    @staticmethod
+    def _fmt_time_windows(windows: list | None) -> str:
+        parts: list[str] = []
+        for w in windows or []:
+            if isinstance(w, (list, tuple)) and len(w) >= 2:
+                parts.append(f"{w[0]}-{w[1]}")
+        return "、".join(parts)
+
+    @staticmethod
+    def _fmt_weekdays(weekdays: list | None) -> str:
+        labels: list[str] = []
+        for x in weekdays or []:
+            try:
+                i = int(x)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= i <= 7:
+                labels.append(SocialBenefitService._WEEKDAY_ZH[i])
+        return "、".join(labels) if labels else "指定星期"
+
+    @staticmethod
+    def _rule_reject(
+        rule: SocialBenefitRule,
+        *,
+        day: date,
+        weekday: int,
+        now_t: time,
+        used: int,
+        product_ids: list[int],
+        category_ids: list[int],
+    ) -> tuple[int, str] | None:
+        """规则不可用时返回 (优先级, 文案)，数字越小越优先展示；可用则返回 None。"""
+        label = SocialBenefitService._fmt_rule_label(rule)
+        if rule.date_from and day < rule.date_from:
+            return (
+                50,
+                f"公益规则{label}尚未生效（生效日 {rule.date_from.isoformat()}）",
+            )
+        if rule.date_to and day > rule.date_to:
+            return (
+                50,
+                f"公益规则{label}已过期（截止日期 {rule.date_to.isoformat()}）",
+            )
+        if not SocialBenefitService._weekday_ok(rule.weekdays, weekday):
+            today = SocialBenefitService._WEEKDAY_ZH[weekday]
+            avail = SocialBenefitService._fmt_weekdays(rule.weekdays)
+            return (40, f"今日是{today}，公益规则{label}仅限{avail}可用")
+        if not SocialBenefitService._in_time_windows(rule.time_windows, now_t):
+            tw = SocialBenefitService._fmt_time_windows(rule.time_windows)
+            now_s = now_t.strftime("%H:%M")
+            detail = tw or "已配置时段"
+            return (30, f"当前时间 {now_s} 不在公益可用时段（规则{label}：{detail}）")
+        if rule.daily_limit is not None and used >= int(rule.daily_limit):
+            return (
+                10,
+                f"今日公益折扣次数已用完（规则{label}每日限 {int(rule.daily_limit)} 次，"
+                f"本店今日已用 {used} 次）",
+            )
+        app_prods = rule.applicable_product_ids
+        app_cats = rule.applicable_category_ids
+        if app_prods and product_ids:
+            if not set(int(x) for x in app_prods) & set(product_ids):
+                return (20, f"当前购物车餐品不适用公益折扣（规则{label}仅限指定餐品）")
+        if app_cats and category_ids:
+            if not set(int(x) for x in app_cats) & set(category_ids):
+                return (20, f"当前购物车餐品不适用公益折扣（规则{label}仅限指定分类）")
+        if rule.discount_rate is None:
+            return (60, f"公益规则{label}折扣率未配置，请联系店长检查")
+        rate = money(rule.discount_rate)
+        if rate <= 0 or rate >= 1:
+            return (60, f"公益规则{label}折扣率配置无效，请联系店长检查")
+        return None
+
     @staticmethod
     async def _today_redeem_count(
         db: AsyncSession, *, customer_id: int, store_id: int, day: date
@@ -552,6 +632,34 @@ class SocialBenefitService:
         return int(cnt or 0)
 
     @staticmethod
+    async def _candidate_rules(
+        db: AsyncSession, *, codes: list[str], store_id: int
+    ) -> list[SocialBenefitRule]:
+        if not codes:
+            return []
+        return list(
+            (
+                await db.execute(
+                    select(SocialBenefitRule)
+                    .where(
+                        SocialBenefitRule.status == 1,
+                        SocialBenefitRule.identity_code.in_(codes),
+                        or_(
+                            SocialBenefitRule.store_id.is_(None),
+                            SocialBenefitRule.store_id == int(store_id),
+                        ),
+                        SocialBenefitRule.benefit_type == "ORDER_DISCOUNT",
+                    )
+                    .order_by(
+                        SocialBenefitRule.store_id.is_(None).asc(),  # 门店规则优先于总部
+                        SocialBenefitRule.priority.asc(),
+                        SocialBenefitRule.id.asc(),
+                    )
+                )
+            ).scalars().all()
+        )
+
+    @staticmethod
     async def find_best_rule(
         db: AsyncSession,
         *,
@@ -573,26 +681,9 @@ class SocialBenefitService:
         weekday = day.isoweekday()  # 1=Mon..7=Sun
         now_t = now.time().replace(microsecond=0)
 
-        rules = (
-            await db.execute(
-                select(SocialBenefitRule)
-                .where(
-                    SocialBenefitRule.status == 1,
-                    SocialBenefitRule.identity_code.in_(codes),
-                    or_(
-                        SocialBenefitRule.store_id.is_(None),
-                        SocialBenefitRule.store_id == int(store_id),
-                    ),
-                    SocialBenefitRule.benefit_type == "ORDER_DISCOUNT",
-                )
-                .order_by(
-                    SocialBenefitRule.store_id.is_(None).asc(),  # 门店规则优先于总部
-                    SocialBenefitRule.priority.asc(),
-                    SocialBenefitRule.id.asc(),
-                )
-            )
-        ).scalars().all()
-
+        rules = await SocialBenefitService._candidate_rules(
+            db, codes=codes, store_id=store_id
+        )
         used = await SocialBenefitService._today_redeem_count(
             db, customer_id=customer_id, store_id=store_id, day=day
         )
@@ -600,31 +691,68 @@ class SocialBenefitService:
         category_ids = [int(x) for x in (category_ids or [])]
 
         for rule in rules:
-            if rule.date_from and day < rule.date_from:
-                continue
-            if rule.date_to and day > rule.date_to:
-                continue
-            if not SocialBenefitService._weekday_ok(rule.weekdays, weekday):
-                continue
-            if not SocialBenefitService._in_time_windows(rule.time_windows, now_t):
-                continue
-            if rule.daily_limit is not None and used >= int(rule.daily_limit):
-                continue
-            app_prods = rule.applicable_product_ids
-            app_cats = rule.applicable_category_ids
-            if app_prods and product_ids:
-                if not set(int(x) for x in app_prods) & set(product_ids):
-                    continue
-            if app_cats and category_ids:
-                if not set(int(x) for x in app_cats) & set(category_ids):
-                    continue
-            if rule.discount_rate is None:
-                continue
-            rate = money(rule.discount_rate)
-            if rate <= 0 or rate >= 1:
-                continue
-            return rule, rule.identity_code
+            if SocialBenefitService._rule_reject(
+                rule,
+                day=day,
+                weekday=weekday,
+                now_t=now_t,
+                used=used,
+                product_ids=product_ids,
+                category_ids=category_ids,
+            ) is None:
+                return rule, rule.identity_code
         return None
+
+    @staticmethod
+    async def explain_ineligible(
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        store_id: int,
+        product_ids: list[int] | None = None,
+        category_ids: list[int] | None = None,
+        at: datetime | None = None,
+    ) -> str:
+        """收银可读：为何当前无法享用公益折扣（保证返回具体原因）。"""
+        if not await SocialBenefitService.is_enabled(db, store_id):
+            return "本店暂未开启社会贡献公益"
+        codes = await SocialBenefitService.active_codes(db, customer_id)
+        if not codes:
+            return "该会员尚无已生效的公益身份，请先在收银台「当场核验」或完成小程序申请审核"
+        now = at or now_local()
+        if now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        day = now.date()
+        weekday = day.isoweekday()
+        now_t = now.time().replace(microsecond=0)
+        rules = await SocialBenefitService._candidate_rules(
+            db, codes=codes, store_id=store_id
+        )
+        if not rules:
+            codes_txt = "、".join(codes)
+            return f"当前公益身份（{codes_txt}）暂无启用的折扣规则，请联系店长在「社会贡献」中配置"
+        used = await SocialBenefitService._today_redeem_count(
+            db, customer_id=customer_id, store_id=store_id, day=day
+        )
+        pids = [int(x) for x in (product_ids or [])]
+        cids = [int(x) for x in (category_ids or [])]
+        best: tuple[int, str] | None = None
+        for rule in rules:
+            reject = SocialBenefitService._rule_reject(
+                rule,
+                day=day,
+                weekday=weekday,
+                now_t=now_t,
+                used=used,
+                product_ids=pids,
+                category_ids=cids,
+            )
+            if reject is None:
+                # 与 find_best_rule 竞态/不一致时的兜底
+                return "当前暂无法享用公益折扣，请稍后重试或联系店长"
+            if best is None or reject[0] < best[0]:
+                best = reject
+        return best[1] if best else "当前暂无法享用公益折扣"
 
     @staticmethod
     async def require_best_rule(
@@ -637,14 +765,6 @@ class SocialBenefitService:
         at: datetime | None = None,
     ) -> tuple[SocialBenefitRule, str]:
         """显式勾选公益折扣时：必须命中规则，否则抛清晰错误（禁止静默回落会员折）。"""
-        if not await SocialBenefitService.is_enabled(db, store_id):
-            raise AppException(40008, "本店暂未开启社会贡献公益")
-        codes = await SocialBenefitService.active_codes(db, customer_id)
-        if not codes:
-            raise AppException(
-                40008,
-                "该会员尚无已生效的公益身份，请先在收银台「当场核验」或完成小程序申请审核",
-            )
         hit = await SocialBenefitService.find_best_rule(
             db,
             customer_id=customer_id,
@@ -653,12 +773,17 @@ class SocialBenefitService:
             category_ids=category_ids,
             at=at,
         )
-        if not hit:
-            raise AppException(
-                40008,
-                "当前无法享用公益折扣：可能不在规则时段、今日次数已用完，或餐品不适用",
-            )
-        return hit
+        if hit:
+            return hit
+        msg = await SocialBenefitService.explain_ineligible(
+            db,
+            customer_id=customer_id,
+            store_id=store_id,
+            product_ids=product_ids,
+            category_ids=category_ids,
+            at=at,
+        )
+        raise AppException(40008, msg)
 
     @staticmethod
     def _empty_social_snapshot() -> dict[str, Any]:
@@ -777,7 +902,14 @@ class SocialBenefitService:
             category_ids=category_ids,
         )
         if not hit:
-            return {"eligible": False, "reason": "无可用公益权益"}
+            reason = await SocialBenefitService.explain_ineligible(
+                db,
+                customer_id=customer_id,
+                store_id=store_id,
+                product_ids=product_ids,
+                category_ids=category_ids,
+            )
+            return {"eligible": False, "reason": reason}
         rule, identity_code = hit
         rate = money(rule.discount_rate)
         # 补贴仅作用于可打折部分；特价/不可打折餐品与打包费原价
