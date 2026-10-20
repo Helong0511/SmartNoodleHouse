@@ -89,7 +89,10 @@
       </el-table-column>
       <el-table-column label="已退/可退" width="130">
         <template #default="{ row }">
-          ¥{{ row.refunded_amount || '0.00' }} / ¥{{ row.refundable_amount ?? row.amount }}
+          <span :class="{ 'refunded-amt': Number(row.refunded_amount) > 0 }">
+            ¥{{ row.refunded_amount || '0.00' }}
+          </span>
+          / ¥{{ row.refundable_amount ?? row.amount }}
           <el-tag v-if="parseFloat(row.refund_inflight || '0') > 0" size="small" type="warning" style="margin-left:4px">
             处理中
           </el-tag>
@@ -102,7 +105,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="paid_at" label="支付时间" width="160" />
+      <el-table-column prop="paid_at" label="支付时间" width="280" />
       <el-table-column label="收银员" width="100" show-overflow-tooltip>
         <template #default="{ row }">{{ row.operator_name || '—' }}</template>
       </el-table-column>
@@ -522,5 +525,10 @@ watch(
 
 .fee-tip.discount {
   color: #f56c6c;
+}
+
+.refunded-amt {
+  color: #f56c6c;
+  font-weight: 600;
 }
 </style>

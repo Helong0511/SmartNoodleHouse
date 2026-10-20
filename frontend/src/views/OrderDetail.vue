@@ -118,7 +118,10 @@
         </el-table-column>
         <el-table-column label="已退/可退" width="140">
           <template #default="{ row }">
-            ¥{{ row.refunded_amount || '0.00' }} / ¥{{ row.refundable_amount ?? row.amount }}
+            <span :class="{ 'refunded-amt': Number(row.refunded_amount) > 0 }">
+              ¥{{ row.refunded_amount || '0.00' }}
+            </span>
+            / ¥{{ row.refundable_amount ?? row.amount }}
             <el-tag v-if="parseFloat(row.refund_inflight || '0') > 0" size="small" type="warning" style="margin-left:4px">
               处理中
             </el-tag>
@@ -132,7 +135,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="payment_no" label="支付单号" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="paid_at" label="收款时间" width="170" />
+        <el-table-column prop="paid_at" label="收款时间" width="280" />
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openRefundDrawer(row)">明细</el-button>
@@ -449,6 +452,7 @@ onMounted(load)
 .actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
 .muted { color: #999; }
 .discount { color: #f56c6c; font-weight: 600; }
+.refunded-amt { color: #f56c6c; font-weight: 600; }
 .pay-title { margin: 20px 0 10px; font-size: 15px; font-weight: 600; }
 .empty-hint { margin-top: 16px; color: #909399; text-align: center; }
 </style>
