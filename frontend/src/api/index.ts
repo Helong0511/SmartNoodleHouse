@@ -17,17 +17,64 @@ export class ApiError extends Error {
   }
 }
 
-function parseApiError(err: unknown): string {
-  if (!err || typeof err !== 'object') return '网络错误'
-  const ax = err as { response?: { data?: any; status?: number }; message?: string }
-  const data = ax.response?.data
-  if (data?.message && typeof data.message === 'string') return data.message
-  if (Array.isArray(data?.detail)) {
-    return data.detail.map((d: any) => d.msg || JSON.stringify(d)).join('；')
+/** 将 Axios / 浏览器常见英文网络错误转成中文提示 */
+function localizeNetworkMessage(raw: string, code?: string): string | null {
+  const msg = (raw || '').trim()
+  const lower = msg.toLowerCase()
+  if (code === 'ECONNABORTED' || /timeout of \d+ms exceeded/i.test(msg) || lower.includes('timeout')) {
+    return '请求超时，请检查网络或稍后重试'
   }
-  if (typeof data?.detail === 'string') return data.detail
+  if (code === 'ERR_NETWORK' || lower === 'network error') {
+    return '网络连接失败，请检查服务是否已启动'
+  }
+  if (code === 'ERR_CANCELED' || lower === 'request aborted' || lower.includes('aborted')) {
+    return '请求已取消'
+  }
+  if (/failed to fetch|load failed|networkerror/i.test(msg)) {
+    return '网络连接失败，请检查服务是否已启动'
+  }
+  // 纯英文 Axios 兜底，避免把英文直接抛给用户
+  if (msg && /^[A-Za-z0-9][\w\s.,:;'"()/-]*$/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) {
+    return '网络错误，请稍后重试'
+  }
+  return null
+}
+
+function localizeValidationMsg(raw: string): string {
+  const msg = (raw || '').trim()
+  if (!msg) return '请求参数有误'
+  if (/field required/i.test(msg)) return '请填写必填项'
+  if (/value is not a valid/i.test(msg)) return '参数格式不正确'
+  if (/input should be/i.test(msg)) return '参数类型不正确'
+  if (/string should have at least|ensure this value has at least/i.test(msg)) return '内容过短'
+  if (/string should have at most|ensure this value has at most/i.test(msg)) return '内容过长'
+  if (/none is not an allowed value/i.test(msg)) return '该项不能为空'
+  const localized = localizeNetworkMessage(msg)
+  return localized || msg
+}
+
+export function parseApiError(err: unknown): string {
+  if (!err || typeof err !== 'object') return '网络错误'
+  const ax = err as {
+    response?: { data?: any; status?: number }
+    message?: string
+    code?: string
+  }
+  const data = ax.response?.data
+  if (data?.message && typeof data.message === 'string') {
+    return localizeNetworkMessage(data.message) || data.message
+  }
+  if (Array.isArray(data?.detail)) {
+    return data.detail.map((d: any) => localizeValidationMsg(String(d.msg || JSON.stringify(d)))).join('；')
+  }
+  if (typeof data?.detail === 'string') return localizeValidationMsg(data.detail)
   if (ax.response?.status === 422) return '请求参数有误，请检查表单'
-  if (ax.message) return ax.message
+  if (ax.response?.status === 502 || ax.response?.status === 503 || ax.response?.status === 504) {
+    return '服务暂时不可用，请稍后重试'
+  }
+  const localized = localizeNetworkMessage(ax.message || '', ax.code)
+  if (localized) return localized
+  if (ax.message) return localizeNetworkMessage(ax.message) || ax.message
   return '网络错误'
 }
 

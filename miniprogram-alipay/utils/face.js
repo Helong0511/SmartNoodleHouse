@@ -51,13 +51,18 @@ function takeFrontCameraBase64() {
           filePath: path,
           encoding: 'base64',
           success: (r) => resolve(r.data),
-          fail: (e) => reject(new Error((e && e.errorMessage) || '读取照片失败')),
+          fail: (e) => {
+            const { localizeNativeErrMsg } = require('./errMsg')
+            const raw = (e && e.errorMessage) || '读取照片失败'
+            reject(new Error(localizeNativeErrMsg(raw) || raw))
+          },
         })
       },
       fail: (e) => {
+        const { localizeNativeErrMsg } = require('./errMsg')
         const msg = (e && (e.errorMessage || e.error)) || ''
         if (/cancel|取消|11/i.test(String(msg))) reject(new Error('已取消拍照'))
-        else reject(new Error(msg || '打开摄像头失败'))
+        else reject(new Error(localizeNativeErrMsg(msg) || msg || '打开摄像头失败'))
       },
     })
   })

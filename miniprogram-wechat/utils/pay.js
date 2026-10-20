@@ -87,7 +87,7 @@ function requestWechatPay(payData) {
     // 且错误信息不会指向根因。宁可在这里明确报错，也不猜。
     // 当前后端 wechat_pay_client.build_jsapi_pay_params 固定下发 signType=RSA。
     if (!signType) {
-      reject(new Error('支付参数缺少 signType（signType 须由后端下发，不可省略）'))
+      reject(new Error('支付参数缺少签名类型（须由后端下发，不可省略）'))
       return
     }
     wx.requestPayment({
@@ -98,8 +98,10 @@ function requestWechatPay(payData) {
       paySign,
       success: (res) => resolve({ ok: true, res, payData }),
       fail: (err) => {
-        const msg = (err && err.errMsg) || '支付已取消'
-        const cancel = /cancel/i.test(msg)
+        const { localizeNativeErrMsg } = require('./errMsg')
+        const raw = (err && err.errMsg) || '支付已取消'
+        const msg = localizeNativeErrMsg(raw) || raw
+        const cancel = /cancel|取消/i.test(raw + msg)
         const e = new Error(cancel ? '您已取消支付' : msg)
         e.payCancel = cancel
         e.payUncertain = !cancel

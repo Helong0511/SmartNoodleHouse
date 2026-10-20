@@ -1,4 +1,5 @@
 const { resolveApiBase } = require('../config/env')
+const { localizeNativeErrMsg } = require('./errMsg')
 
 const DEFAULT_API_BASE = resolveApiBase()
 
@@ -74,19 +75,24 @@ function formatValidationDetail(detail) {
     const max = first.ctx && first.ctx.le != null ? first.ctx.le : null
     return max != null ? `单品数量不能超过 ${max}` : '单品数量超出限制'
   }
-  if (typeof first.msg === 'string' && first.msg) return first.msg
+  if (typeof first.msg === 'string' && first.msg) {
+    return localizeNativeErrMsg(first.msg) || first.msg
+  }
   return '请求参数有误'
 }
 
 function pickErrorMessage(resOrErr, fallback) {
   if (!resOrErr) return fallback
-  if (typeof resOrErr === 'string') return resOrErr
+  if (typeof resOrErr === 'string') return localizeNativeErrMsg(resOrErr) || resOrErr
   // 与微信对齐：网关/代理返回纯文本 data 时直接展示
-  if (typeof resOrErr.data === 'string' && resOrErr.data.trim()) return resOrErr.data.trim()
+  if (typeof resOrErr.data === 'string' && resOrErr.data.trim()) {
+    const t = resOrErr.data.trim()
+    return localizeNativeErrMsg(t) || t
+  }
   const body = parseResponseBody(resOrErr.data)
-  if (body.message) return body.message
+  if (body.message) return localizeNativeErrMsg(body.message) || body.message
   if (body.detail) {
-    if (typeof body.detail === 'string') return body.detail
+    if (typeof body.detail === 'string') return localizeNativeErrMsg(body.detail) || body.detail
     const friendly = formatValidationDetail(body.detail)
     if (friendly) return friendly
     return JSON.stringify(body.detail)
@@ -96,26 +102,30 @@ function pickErrorMessage(resOrErr, fallback) {
     return fallback || `请求失败(${status})`
   }
   const errMsg = resOrErr.errorMessage || resOrErr.errMsg || resOrErr.message
-  if (errMsg && errMsg !== 'request:ok') return errMsg
+  if (errMsg && errMsg !== 'request:ok') return localizeNativeErrMsg(errMsg) || errMsg
   return fallback
 }
 
 function networkHint(base, msg) {
-  const m = String(msg || '')
+  const raw = String(msg || '')
+  const m = localizeNativeErrMsg(raw) || raw
   // 支付宝 IDE：未勾选「忽略 httpRequest 域名合法性检查」时常见 error 81
-  if (/域名白名单|无权访问域名|error:\s*81|错误码\s*81|域名合法性/i.test(m)) {
+  if (/域名白名单|无权访问域名|未放行请求域名|error:\s*81|错误码\s*81|域名合法性/i.test(m)) {
     return (
       '未放行请求域名：支付宝开发者工具 → 右上角「详情」→「域名信息」→ 勾选' +
       '「忽略 httpRequest 域名合法性检查」（仅模拟器/预览/真机调试生效；正式版须配置 HTTPS 白名单）'
     )
   }
-  if (/CONNECTION_RESET|ERR_CONNECTION_RESET|reset by peer/i.test(m)) {
+  if (/连接被重置/i.test(m)) {
     return '连接被重置：请确认后端已启动且未崩溃重启。开发：cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'
   }
-  if (/CONNECTION_REFUSED|connect fail|无法连接|ECONNREFUSED/i.test(m)) {
+  if (/无法连接服务器|无法连接后端/i.test(m)) {
     return '无法连接后端，请先启动：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000'
   }
-  if (/127\.0\.0\.1|localhost/.test(base || '') && /fail|timeout|CONNECTION|reset/i.test(m)) {
+  if (
+    /127\.0\.0\.1|localhost/.test(base || '') &&
+    /请求超时|网络|连接|失败|timeout|CONNECTION|reset|fail/i.test(raw + m)
+  ) {
     return `${m}；真机请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP（如 192.168.x.x），后端须 --host 0.0.0.0`
   }
   return m || '网络请求失败'

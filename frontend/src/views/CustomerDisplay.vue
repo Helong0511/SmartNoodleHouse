@@ -105,6 +105,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { parseApiError } from '@/api'
 import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openPublicWebSocket } from '@/utils/publicWs'
 import {
@@ -230,13 +231,16 @@ const publicApi = axios.create({
   timeout: 30000,
 })
 
-publicApi.interceptors.response.use((res) => {
-  const data = res.data
-  if (data && data.code !== 0 && data.code !== undefined) {
-    return Promise.reject(new Error(data.message || '请求失败'))
-  }
-  return data
-})
+publicApi.interceptors.response.use(
+  (res) => {
+    const data = res.data
+    if (data && data.code !== 0 && data.code !== undefined) {
+      return Promise.reject(new Error(data.message || '请求失败'))
+    }
+    return data
+  },
+  (err) => Promise.reject(new Error(parseApiError(err))),
+)
 
 function displayParams() {
   const params: Record<string, string | number> = { store_id: storeId.value }

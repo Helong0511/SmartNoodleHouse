@@ -114,8 +114,10 @@ function requestAlipayPay(payData) {
         reject(e)
       },
       fail: (err) => {
-        const msg = (err && err.errorMessage) || (err && err.memo) || '支付已取消'
-        const cancel = /cancel|6001/i.test(msg)
+        const { localizeNativeErrMsg } = require('./errMsg')
+        const raw = (err && err.errorMessage) || (err && err.memo) || '支付已取消'
+        const msg = localizeNativeErrMsg(raw) || raw
+        const cancel = /cancel|6001|取消/i.test(String(raw) + msg)
         const e = new Error(cancel ? '您已取消支付' : msg)
         e.payCancel = cancel
         e.payUncertain = !cancel

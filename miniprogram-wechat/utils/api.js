@@ -1,4 +1,5 @@
 const { resolveApiBase } = require('../config/env')
+const { localizeNativeErrMsg } = require('./errMsg')
 
 const DEFAULT_API_BASE = resolveApiBase()
 
@@ -52,18 +53,23 @@ function formatValidationDetail(detail) {
     const max = first.ctx && first.ctx.le != null ? first.ctx.le : null
     return max != null ? `单品数量不能超过 ${max}` : '单品数量超出限制'
   }
-  if (typeof first.msg === 'string' && first.msg) return first.msg
+  if (typeof first.msg === 'string' && first.msg) {
+    return localizeNativeErrMsg(first.msg) || first.msg
+  }
   return '请求参数有误'
 }
 
 function pickErrorMessage(resOrErr, fallback) {
   if (!resOrErr) return fallback
-  if (typeof resOrErr === 'string') return resOrErr
+  if (typeof resOrErr === 'string') return localizeNativeErrMsg(resOrErr) || resOrErr
   const body = parseResponseBody(resOrErr.data)
-  if (typeof resOrErr.data === 'string' && resOrErr.data.trim()) return resOrErr.data.trim()
-  if (body.message) return body.message
+  if (typeof resOrErr.data === 'string' && resOrErr.data.trim()) {
+    const t = resOrErr.data.trim()
+    return localizeNativeErrMsg(t) || t
+  }
+  if (body.message) return localizeNativeErrMsg(body.message) || body.message
   if (body.detail) {
-    if (typeof body.detail === 'string') return body.detail
+    if (typeof body.detail === 'string') return localizeNativeErrMsg(body.detail) || body.detail
     const friendly = formatValidationDetail(body.detail)
     if (friendly) return friendly
     return JSON.stringify(body.detail)
@@ -73,26 +79,25 @@ function pickErrorMessage(resOrErr, fallback) {
     return fallback || `请求失败(${status})`
   }
   const errMsg = resOrErr.errMsg
-  if (errMsg && errMsg !== 'request:ok') return errMsg
-  if (resOrErr.message) return resOrErr.message
+  if (errMsg && errMsg !== 'request:ok') return localizeNativeErrMsg(errMsg) || errMsg
+  if (resOrErr.message) return localizeNativeErrMsg(resOrErr.message) || resOrErr.message
   return fallback
 }
 
 function networkHint(base, msg) {
-  const m = String(msg || '')
-  if (/合法域名|不在以下 request 合法域名|url not in domain list|urlCheck/i.test(m)) {
-    return (
-      '未放行请求域名：微信开发者工具 → 右上角「详情」→「本地设置」→ 勾选「不校验合法域名…」；' +
-      '正式版须在 mp.weixin.qq.com 配置 HTTPS request 合法域名'
-    )
-  }
-  if (/CONNECTION_RESET|ERR_CONNECTION_RESET|reset by peer/i.test(m)) {
+  const raw = String(msg || '')
+  const m = localizeNativeErrMsg(raw) || raw
+  if (/合法域名|未放行请求域名/i.test(m)) return m
+  if (/连接被重置/i.test(m)) {
     return '连接被重置：请确认后端已启动且未崩溃重启。开发：cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000'
   }
-  if (/CONNECTION_REFUSED|connect fail|无法连接|ECONNREFUSED/i.test(m)) {
+  if (/无法连接服务器|无法连接后端/i.test(m)) {
     return '无法连接后端，请先启动：cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000'
   }
-  if (/127\.0\.0\.1|localhost/.test(base || '') && /fail|timeout|CONNECTION|reset/i.test(m)) {
+  if (
+    /127\.0\.0\.1|localhost/.test(base || '') &&
+    /请求超时|网络|连接|失败|timeout|CONNECTION|reset|fail/i.test(raw + m)
+  ) {
     return `${m}；真机请把 config/env.js 的 DEV_LAN_HOST 改为电脑局域网 IP（如 192.168.x.x），后端须 --host 0.0.0.0，并勾选「不校验合法域名」`
   }
   return m || '网络请求失败'

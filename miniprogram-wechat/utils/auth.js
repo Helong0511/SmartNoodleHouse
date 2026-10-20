@@ -96,10 +96,12 @@ function resolveNeedMemberPrompt(data) {
 }
 
 function formatError(err, fallback) {
+  const { localizeNativeErrMsg } = require('./errMsg')
   if (!err) return fallback || '未知错误'
-  if (typeof err === 'string') return err
-  if (err.message) return err.message
-  return err.errorMessage || err.errMsg || err.memo || fallback || '未知错误'
+  if (typeof err === 'string') return localizeNativeErrMsg(err) || err
+  const raw = err.message || err.errorMessage || err.errMsg || err.memo || ''
+  if (raw) return localizeNativeErrMsg(raw) || raw
+  return fallback || '未知错误'
 }
 
 function wxLogin() {

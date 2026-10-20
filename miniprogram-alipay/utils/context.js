@@ -430,7 +430,9 @@ async function bindParsedScanRaw(raw, resolve) {
     resolve(null)
   } catch (e) {
     my.hideLoading()
-    const msg = (e && e.message) || '识别失败'
+    const { localizeNativeErrMsg } = require('./errMsg')
+    const raw = (e && e.message) || '识别失败'
+    const msg = localizeNativeErrMsg(raw) || raw
     my.showToast({ content: msg, type: 'none', duration: 3500 })
     if (devtools) {
       showScanDebug('绑桌失败', `${msg}\ntoken=${token}\n原文=${text.slice(0, 160)}`)

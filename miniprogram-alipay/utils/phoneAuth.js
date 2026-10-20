@@ -50,8 +50,9 @@ function handleGetAuthorizeSuccess(page, e, onEncrypted) {
       if (typeof onEncrypted === 'function') onEncrypted(encrypted)
     },
     fail: (err) => {
-      const msg = String((err && (err.errorMessage || err.error)) || '获取手机号失败')
-      my.showToast({ content: msg, type: 'none' })
+      const { localizeNativeErrMsg } = require('./errMsg')
+      const raw = String((err && (err.errorMessage || err.error)) || '获取手机号失败')
+      my.showToast({ content: localizeNativeErrMsg(raw) || raw, type: 'none' })
     }
   })
 }
@@ -71,7 +72,11 @@ function handleAuthError(page, err) {
     })
     return
   }
-  my.showToast({ content: /拒绝|cancel|deny/i.test(msg) ? '已取消手机号授权' : msg, type: 'none' })
+  const { localizeNativeErrMsg } = require('./errMsg')
+  my.showToast({
+    content: /拒绝|cancel|deny/i.test(msg) ? '已取消手机号授权' : (localizeNativeErrMsg(msg) || msg),
+    type: 'none'
+  })
 }
 
 /** @deprecated 请用 handleGetAuthorizeSuccess / handleAuthError */

@@ -103,8 +103,10 @@ async function uploadLocalAvatar(filePath) {
         resolve(avatarUrl)
       },
       fail(err) {
+        const { localizeNativeErrMsg } = require('./errMsg')
+        const raw = (err && (err.errorMessage || err.errMsg || err.message)) || '头像上传失败'
         reject({
-          message: (err && (err.errorMessage || err.errMsg || err.message)) || '头像上传失败'
+          message: localizeNativeErrMsg(raw) || raw
         })
       }
     })

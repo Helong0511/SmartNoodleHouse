@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.requests import Request
 
-from app.api import miniprogram as miniprogram_api
+from app.api import miniprogram_auth as auth_api
 
 
 def _request() -> Request:
@@ -66,16 +66,16 @@ async def test_alipay_login_passes_table_record_to_dining_session(monkeypatch):
         assert kwargs["dining_session"] is session
         return {"table": table_payload}
 
-    monkeypatch.setattr(miniprogram_api.AlipayMiniAuth, "auth_code2user", fake_auth_code2user)
-    monkeypatch.setattr(miniprogram_api.CustomerService, "get_or_create_by_alipay", fake_get_or_create)
-    monkeypatch.setattr(miniprogram_api.CustomerService, "remember_first_seen", remember)
-    monkeypatch.setattr(miniprogram_api, "_resolve_table_record", AsyncMock(return_value=table_record))
-    monkeypatch.setattr(miniprogram_api, "_table_payload", AsyncMock(return_value=table_payload))
-    monkeypatch.setattr(miniprogram_api.DiningSessionService, "start_or_refresh", start_session)
-    monkeypatch.setattr(miniprogram_api, "_channel_login_payload", fake_payload)
+    monkeypatch.setattr(auth_api.AlipayMiniAuth, "auth_code2user", fake_auth_code2user)
+    monkeypatch.setattr(auth_api.CustomerService, "get_or_create_by_alipay", fake_get_or_create)
+    monkeypatch.setattr(auth_api.CustomerService, "remember_first_seen", remember)
+    monkeypatch.setattr(auth_api, "_resolve_table_record", AsyncMock(return_value=table_record))
+    monkeypatch.setattr(auth_api, "_table_payload", AsyncMock(return_value=table_payload))
+    monkeypatch.setattr(auth_api.DiningSessionService, "start_or_refresh", start_session)
+    monkeypatch.setattr(auth_api, "_channel_login_payload", fake_payload)
 
-    response = await miniprogram_api.alipay_mini_login(
-        miniprogram_api.AlipayMiniLoginRequest(
+    response = await auth_api.alipay_mini_login(
+        auth_api.AlipayMiniLoginRequest(
             auth_code="mock:test",
             table_token="table-token",
         ),

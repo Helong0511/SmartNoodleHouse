@@ -12,6 +12,7 @@ from app.api import (
     dashboard,
     delivery,
     delivery_bindings,
+    delivery_maps,
     delivery_sync,
     favorites,
     feedbacks,
@@ -22,6 +23,7 @@ from app.api import (
     member_levels,
     miniprogram,
     miniprogram_auth,
+    miniprogram_customer,
     miniprogram_dine,
     miniprogram_member,
     miniprogram_face,
@@ -86,6 +88,7 @@ api_router.include_router(welcome.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(miniprogram.router)
 api_router.include_router(miniprogram_auth.router)
+api_router.include_router(miniprogram_customer.router)
 api_router.include_router(miniprogram_dine.router)
 api_router.include_router(miniprogram_member.router)
 api_router.include_router(miniprogram_face.router)
@@ -93,6 +96,7 @@ api_router.include_router(miniprogram_menu.router)
 api_router.include_router(miniprogram_party.router)
 api_router.include_router(delivery.router)
 api_router.include_router(delivery_bindings.router)
+api_router.include_router(delivery_maps.router)
 api_router.include_router(delivery_sync.router)
 api_router.include_router(settings.router)
 api_router.include_router(settings_stores.router)

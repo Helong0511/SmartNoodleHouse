@@ -98,10 +98,12 @@ function resolveNeedMemberPrompt(data) {
 }
 
 function formatError(err, fallback) {
+  const { localizeNativeErrMsg } = require('./errMsg')
   if (!err) return fallback || '未知错误'
-  if (typeof err === 'string') return err
-  if (err.message) return err.message
-  return err.errorMessage || err.errMsg || err.memo || fallback || '未知错误'
+  if (typeof err === 'string') return localizeNativeErrMsg(err) || err
+  const raw = err.message || err.errorMessage || err.errMsg || err.memo || ''
+  if (raw) return localizeNativeErrMsg(raw) || raw
+  return fallback || '未知错误'
 }
 
 function getAuthCode() {
@@ -125,7 +127,7 @@ function getAuthCode() {
           resolve({ authCode: 'mock:simulator' })
           return
         }
-        reject(new Error(formatError(err, 'getAuthCode 失败，请确认已登录支付宝并授权')))
+        reject(new Error(formatError(err, '授权失败，请确认已登录支付宝并授权')))
       }
     })
   })

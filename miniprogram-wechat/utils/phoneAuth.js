@@ -51,7 +51,8 @@ function handleGetPhoneNumber(page, detail, onCode) {
         showCancel: false
       })
     } else if (errMsg) {
-      wx.showToast({ title: errMsg.replace(/^getPhoneNumber:fail\s*/i, ''), icon: 'none' })
+      const { localizeNativeErrMsg } = require('./errMsg')
+      wx.showToast({ title: localizeNativeErrMsg(errMsg) || '手机号授权失败', icon: 'none' })
     } else {
       wx.showModal({
         title: '手机号授权无响应',
