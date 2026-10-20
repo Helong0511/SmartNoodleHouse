@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T06:18:46Z",
+  "updated_at": "2026-10-20T06:27:39Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "5f50511d7b52b1d103f80af94cc89dcef54d9006153c85f161002cac4d46038b",
-      "size": 170754,
-      "normalized_sha256": "5f50511d7b52b1d103f80af94cc89dcef54d9006153c85f161002cac4d46038b"
+      "sha256": "ac20e59da76d5ce52c9b6a0d79f88e219a9ba088f311409482bcf44717a720da",
+      "size": 171294,
+      "normalized_sha256": "ac20e59da76d5ce52c9b6a0d79f88e219a9ba088f311409482bcf44717a720da"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -377,9 +377,9 @@
     },
     "backend/app/api/__init__.py": {
       "role": "index",
-      "sha256": "bc6d23a2247172e174e723984ee4cafc2a93507c759b157c06520c2d8cdf570b",
-      "size": 3259,
-      "normalized_sha256": "bc6d23a2247172e174e723984ee4cafc2a93507c759b157c06520c2d8cdf570b"
+      "sha256": "39365341ff5a36d5cecca961edfccbcdfe590454813f583e0e2b4a0fb3e5852e",
+      "size": 3332,
+      "normalized_sha256": "39365341ff5a36d5cecca961edfccbcdfe590454813f583e0e2b4a0fb3e5852e"
     },
     "backend/app/api/ab_experiments.py": {
       "role": "index",
@@ -503,9 +503,15 @@
     },
     "backend/app/api/miniprogram.py": {
       "role": "index",
-      "sha256": "3adc7c048b8e5c4f81ff753ab9b89bd6b90b5bf1fae59db00255ff498a608d76",
-      "size": 26066,
-      "normalized_sha256": "3adc7c048b8e5c4f81ff753ab9b89bd6b90b5bf1fae59db00255ff498a608d76"
+      "sha256": "178249c0b6687fc3fb2cbc4bdcc1f734def2afa02887d3f0b3729e6772956393",
+      "size": 12251,
+      "normalized_sha256": "178249c0b6687fc3fb2cbc4bdcc1f734def2afa02887d3f0b3729e6772956393"
+    },
+    "backend/app/api/miniprogram_auth.py": {
+      "role": "index",
+      "sha256": "31fe3fff92dceab003d4a784ab14a5e70e81fe0b0ab029427689640415563467",
+      "size": 14146,
+      "normalized_sha256": "31fe3fff92dceab003d4a784ab14a5e70e81fe0b0ab029427689640415563467"
     },
     "backend/app/api/miniprogram_dine.py": {
       "role": "index",
@@ -5584,9 +5590,9 @@
     },
     "tests/测试_顾客令牌刷新与防重放.py": {
       "role": "observe",
-      "sha256": "b818b08ed28b90514357043acb8d925fe2019db146959dddf01598fc07a2f714",
-      "size": 11015,
-      "normalized_sha256": "9a6f0caebc0071b45232305c756f23103f82a666d37897008f27bdedcd702939"
+      "sha256": "87ac3c38ea18e2f7c6a9e03ef034bcf37a39d7fa844033b065ebc3b8130247e1",
+      "size": 11065,
+      "normalized_sha256": "01aeda3177ade6573733f891f19b94650b55320b849534d9aca69caea8fea536"
     },
     "tests/测试_顾客叫号屏.py": {
       "role": "observe",

@@ -20,6 +20,7 @@ from app.api import (
     marketing,
     member_levels,
     miniprogram,
+    miniprogram_auth,
     miniprogram_dine,
     miniprogram_member,
     miniprogram_face,
@@ -83,6 +84,7 @@ api_router.include_router(cameras.router)
 api_router.include_router(welcome.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(miniprogram.router)
+api_router.include_router(miniprogram_auth.router)
 api_router.include_router(miniprogram_dine.router)
 api_router.include_router(miniprogram_member.router)
 api_router.include_router(miniprogram_face.router)
