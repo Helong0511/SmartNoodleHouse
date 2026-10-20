@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T05:22:27Z",
+  "updated_at": "2026-10-20T05:29:40Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "23757f0687357ddbd7fd6963e23406d89a26208626a9cb324757831e3cd6a0b9",
-      "size": 165394,
-      "normalized_sha256": "23757f0687357ddbd7fd6963e23406d89a26208626a9cb324757831e3cd6a0b9"
+      "sha256": "6a249ddcae71ced81b98138732298de4ade3494c15d49c33aea1893345cede31",
+      "size": 166302,
+      "normalized_sha256": "6a249ddcae71ced81b98138732298de4ade3494c15d49c33aea1893345cede31"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -377,9 +377,9 @@
     },
     "backend/app/api/__init__.py": {
       "role": "index",
-      "sha256": "6e55b7a386c97ce71ea3069ec3108508ddfcae4956e26f21e4cf50ad52a2c4c0",
-      "size": 2465,
-      "normalized_sha256": "6e55b7a386c97ce71ea3069ec3108508ddfcae4956e26f21e4cf50ad52a2c4c0"
+      "sha256": "ff2dd512738e9a85202573df47e64deb777819314a4d1ea2b21906f3c9c0ea61",
+      "size": 2544,
+      "normalized_sha256": "ff2dd512738e9a85202573df47e64deb777819314a4d1ea2b21906f3c9c0ea61"
     },
     "backend/app/api/ab_experiments.py": {
       "role": "index",
@@ -419,9 +419,21 @@
     },
     "backend/app/api/customers.py": {
       "role": "index",
-      "sha256": "05b1c5eb39ddc103762f73e694a9070f9aa00e5dc339da4772ca38e27b64e0d7",
-      "size": 38001,
-      "normalized_sha256": "05b1c5eb39ddc103762f73e694a9070f9aa00e5dc339da4772ca38e27b64e0d7"
+      "sha256": "847b09b65737704c5c85db17174222fec6745e6518a1575ace3a80202a863271",
+      "size": 32489,
+      "normalized_sha256": "847b09b65737704c5c85db17174222fec6745e6518a1575ace3a80202a863271"
+    },
+    "backend/app/api/customers_common.py": {
+      "role": "index",
+      "sha256": "32d971f5aca8ee37aa9e5581bd23289f2d65074bce66ef74a4963c93dda8f60d",
+      "size": 2218,
+      "normalized_sha256": "32d971f5aca8ee37aa9e5581bd23289f2d65074bce66ef74a4963c93dda8f60d"
+    },
+    "backend/app/api/customers_favorites.py": {
+      "role": "index",
+      "sha256": "1463018c1f9b7f60db2708a2c58007b48b958d1ccd6755d3e9c62bd37c4b4576",
+      "size": 4330,
+      "normalized_sha256": "1463018c1f9b7f60db2708a2c58007b48b958d1ccd6755d3e9c62bd37c4b4576"
     },
     "backend/app/api/dashboard.py": {
       "role": "index",
@@ -2694,9 +2706,9 @@
     },
     "miniprogram-alipay/packageOrder/confirm/confirm.js": {
       "role": "index",
-      "sha256": "787003a0931d143e84ab84f04185c7cb404c768bc9e7409ac65be936251941f5",
-      "size": 52561,
-      "normalized_sha256": "787003a0931d143e84ab84f04185c7cb404c768bc9e7409ac65be936251941f5"
+      "sha256": "2fd586142027475da2d3c517ecada0c5c4512237276f02ca7d3dc46641cdda6b",
+      "size": 51377,
+      "normalized_sha256": "2fd586142027475da2d3c517ecada0c5c4512237276f02ca7d3dc46641cdda6b"
     },
     "miniprogram-alipay/packageOrder/confirm/confirm.json": {
       "role": "index",
@@ -3078,9 +3090,9 @@
     },
     "miniprogram-alipay/utils/checkoutPricing.js": {
       "role": "index",
-      "sha256": "fa373c790f6adaebd981e95b96caa63079a5a0bb9e2ecffa09e8df226b7d5326",
-      "size": 4061,
-      "normalized_sha256": "fa373c790f6adaebd981e95b96caa63079a5a0bb9e2ecffa09e8df226b7d5326"
+      "sha256": "b871f261051b6469089ae346b3b58a2b921b589ea134cb9e3b3e8eeb98edaa7d",
+      "size": 5615,
+      "normalized_sha256": "b871f261051b6469089ae346b3b58a2b921b589ea134cb9e3b3e8eeb98edaa7d"
     },
     "miniprogram-alipay/utils/clientConfig.js": {
       "role": "index",
@@ -3401,9 +3413,9 @@
     },
     "miniprogram-wechat/packageOrder/confirm/confirm.js": {
       "role": "index",
-      "sha256": "67328fa21c2dd94be6a454e705ad2a7783c35a0bbba847f47adb09a65506f0b7",
-      "size": 55067,
-      "normalized_sha256": "67328fa21c2dd94be6a454e705ad2a7783c35a0bbba847f47adb09a65506f0b7"
+      "sha256": "93faf886c070fd286841c45751e8ac9c75dddfd0eb0ca40116e55f4dde87834b",
+      "size": 53883,
+      "normalized_sha256": "93faf886c070fd286841c45751e8ac9c75dddfd0eb0ca40116e55f4dde87834b"
     },
     "miniprogram-wechat/packageOrder/confirm/confirm.json": {
       "role": "index",
@@ -3809,9 +3821,9 @@
     },
     "miniprogram-wechat/utils/checkoutPricing.js": {
       "role": "index",
-      "sha256": "fa373c790f6adaebd981e95b96caa63079a5a0bb9e2ecffa09e8df226b7d5326",
-      "size": 4061,
-      "normalized_sha256": "fa373c790f6adaebd981e95b96caa63079a5a0bb9e2ecffa09e8df226b7d5326"
+      "sha256": "b871f261051b6469089ae346b3b58a2b921b589ea134cb9e3b3e8eeb98edaa7d",
+      "size": 5615,
+      "normalized_sha256": "b871f261051b6469089ae346b3b58a2b921b589ea134cb9e3b3e8eeb98edaa7d"
     },
     "miniprogram-wechat/utils/clientConfig.js": {
       "role": "index",
@@ -4085,9 +4097,9 @@
     },
     "scripts/检查门店隔离.py": {
       "role": "index",
-      "sha256": "32ac6f430d1162fecb4616c1be2ed7851684c5501ebdb63083e1ddabf1941bbf",
-      "size": 4062,
-      "normalized_sha256": "32ac6f430d1162fecb4616c1be2ed7851684c5501ebdb63083e1ddabf1941bbf"
+      "sha256": "708a594b04c604ffe61448ac42a31dc59a1f3dbd313d0ae3184949f435326333",
+      "size": 4141,
+      "normalized_sha256": "708a594b04c604ffe61448ac42a31dc59a1f3dbd313d0ae3184949f435326333"
     },
     "scripts/生产部署-ubuntu.txt": {
       "role": "index",
@@ -5536,9 +5548,9 @@
     },
     "tests/测试_顾客档案编辑与收藏.py": {
       "role": "observe",
-      "sha256": "183442b31c6392656d67f48cfe9fceef5a0d4aa6fac5182d5fcd896d22391c84",
-      "size": 3376,
-      "normalized_sha256": "183442b31c6392656d67f48cfe9fceef5a0d4aa6fac5182d5fcd896d22391c84"
+      "sha256": "6091c10f1c7253bffaf02522bae9751f167e7b138cc357506dd9f84d4ae9bf31",
+      "size": 3595,
+      "normalized_sha256": "6091c10f1c7253bffaf02522bae9751f167e7b138cc357506dd9f84d4ae9bf31"
     },
     "tests/测试_餐品主图.py": {
       "role": "observe",

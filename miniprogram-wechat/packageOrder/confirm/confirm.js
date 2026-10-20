@@ -14,6 +14,8 @@ const {
   SOCIAL_LABEL,
   bestSocialHint,
   buildPickupSlots,
+  calcCouponDiscount: pricingCouponDiscount,
+  calcCouponTotalSavings: pricingCouponTotalSavings,
   memberDiscountText,
   memberOnlySave,
   percentBeatsMember,
@@ -845,37 +847,11 @@ Page({
   },
 
   calcCouponDiscount(couponEligible, coupon, memberRate) {
-    if (!coupon || !coupon.id) return 0
-    const eligible = couponEligible
-    const minAmt = parseFloat(coupon.min_order_amount || 0)
-    if (eligible < minAmt) return 0
-    if (coupon.coupon_type === 'PERCENT') {
-      const rate = parseFloat(coupon.discount_value)
-      if (!percentBeatsMember(rate, memberRate == null ? 1 : memberRate)) return 0
-      return Math.round(eligible * (1 - rate) * 100) / 100
-    }
-    const fixed = parseFloat(coupon.discount_value) || 0
-    return Math.min(fixed, eligible)
+    return pricingCouponDiscount(couponEligible, coupon, memberRate)
   },
 
-  /** 比较总优惠：PERCENT 与会员折互斥取优；FIXED 叠在会员折后 */
   calcCouponTotalSavings(discountable, memberRate, coupon) {
-    if (!coupon || !coupon.id) return 0
-    const base = Math.max(0, parseFloat(discountable) || 0)
-    const mr = parseFloat(memberRate)
-    const memberR = Number.isFinite(mr) && mr > 0 && mr < 1 ? mr : 1
-    const memberDisc = memberR < 1 ? Math.round(base * (1 - memberR) * 100) / 100 : 0
-    const minAmt = parseFloat(coupon.min_order_amount || 0)
-    if (coupon.coupon_type === 'PERCENT') {
-      const cr = parseFloat(coupon.discount_value)
-      if (!percentBeatsMember(cr, memberR)) return 0
-      if (base < minAmt) return 0
-      return Math.round(base * (1 - cr) * 100) / 100
-    }
-    const afterMember = Math.max(0, base - memberDisc)
-    if (afterMember < minAmt) return 0
-    const fixed = Math.min(parseFloat(coupon.discount_value) || 0, afterMember)
-    return Math.round((memberDisc + fixed) * 100) / 100
+    return pricingCouponTotalSavings(discountable, memberRate, coupon)
   },
 
   async refreshSummary() {

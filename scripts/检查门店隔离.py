@@ -55,6 +55,7 @@ EXEMPT: dict[str, str] = {
     "deps.py": "依赖注入模块，非路由处理器",
     "orders_common.py": "订单路由共享辅助，无独立 HTTP 入口",
     "products_common.py": "菜品路由共享辅助，无独立 HTTP 入口",
+    "customers_common.py": "顾客路由共享辅助，无独立 HTTP 入口",
 }
 
 

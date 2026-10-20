@@ -35,14 +35,16 @@ def test_customer_update_phone_and_patch_semantics():
 
 
 def test_staff_favorite_routes_registered():
-    from app.api.customers import router
+    from app.api.customers import router as customers_router
+    from app.api.customers_favorites import router as favorites_router
 
-    paths = {getattr(r, "path", None) for r in router.routes}
-    assert "/customers/{customer_id}" in paths
-    assert "/customers/{customer_id}/favorites/{product_id}" in paths
+    customer_paths = {getattr(r, "path", None) for r in customers_router.routes}
+    favorite_paths = {getattr(r, "path", None) for r in favorites_router.routes}
+    assert "/customers/{customer_id}" in customer_paths
+    assert "/customers/{customer_id}/favorites/{product_id}" in favorite_paths
     methods = {
         tuple(sorted(getattr(r, "methods", []) or []))
-        for r in router.routes
+        for r in customers_router.routes
         if getattr(r, "path", None) == "/customers/{customer_id}"
     }
     assert ("PATCH",) in methods or any("PATCH" in m for m in methods)

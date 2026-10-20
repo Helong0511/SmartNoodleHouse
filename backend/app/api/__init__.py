@@ -8,6 +8,7 @@ from app.api import (
     client_logs,
     coupons,
     customers,
+    customers_favorites,
     dashboard,
     delivery,
     delivery_sync,
@@ -30,6 +31,7 @@ from app.api import (
     print_jobs,
     products,
     products_options,
+    products_schedules,
     queue,
     reconcile,
     settings,
@@ -48,6 +50,7 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(products.router)
 api_router.include_router(products_options.router)
+api_router.include_router(products_schedules.router)
 api_router.include_router(orders.router)
 api_router.include_router(orders_kitchen.router)
 api_router.include_router(payments.router)
@@ -57,6 +60,7 @@ api_router.include_router(feedbacks.router)
 api_router.include_router(print_jobs.router)
 api_router.include_router(pos.router)
 api_router.include_router(customers.router)
+api_router.include_router(customers_favorites.router)
 api_router.include_router(member_levels.router)
 api_router.include_router(coupons.router)
 api_router.include_router(tables.router)
