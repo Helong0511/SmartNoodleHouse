@@ -328,15 +328,16 @@
                 <span v-else class="opt-hint">可多选或不选</span>
               </h4>
               <div class="opt-tiles" :class="{
-                'few': (activeOptGroup.options || []).length <= 4,
-                'many': (activeOptGroup.options || []).length > 6,
+                'few': activePaneOptions.length <= 4,
+                'many': activePaneOptions.length > 6,
               }">
-                <button v-for="o in activeOptGroup.options" :key="o.id" type="button" class="opt-tile" :class="{
+                <button v-for="(o, oi) in activePaneOptions" :key="o.id" type="button" class="opt-tile" :class="{
                   on:
                     activeOptGroup.selection_type === 'SINGLE'
                       ? selectedOptions[activeOptGroup.id] === o.id
                       : isMultiSelected(activeOptGroup.id, o.id),
                 }" @click="onPickOption(activeOptGroup, o)">
+                  <span v-if="oi < 9" class="tile-num">{{ oi + 1 }}</span>
                   <span class="tile-name">{{ o.name }}</span>
                   <span v-if="+o.extra_price" class="tile-extra">+¥{{ o.extra_price }}</span>
                   <span v-else class="tile-extra muted">不加价</span>
@@ -358,6 +359,7 @@
           <el-button type="primary" class="add-cart-btn" @click="addToCart">
             加入购物车 ¥{{ drawerUnitPrice }}
           </el-button>
+          <span class="enter-hint">小键盘 1-9 选规格 · 回车确认默认 · 末组选完即加购</span>
         </div>
       </div>
     </el-drawer>
@@ -896,6 +898,9 @@ const activeOptGroup = computed(() => {
   return list.find((g: any) => g.id === activeOptGroupId.value) || list[0]
 })
 
+/** 当前规格组可见选项（与触控瓦片、小键盘序号一致） */
+const activePaneOptions = computed(() => activeOptionsOf(activeOptGroup.value))
+
 const drawerSelectedSummary = computed(() => {
   if (!currentProduct.value) return ''
   return buildOptionLabels(currentProduct.value, selectedOptions, multiOptions).join(' · ')
@@ -1113,11 +1118,86 @@ function goPrevOptGroup() {
   if (idx > 0) activeOptGroupId.value = list[idx - 1].id
 }
 
-/** 单选后自动跳下一组，加快触控点餐 */
+/** 当前组未选时补默认（单选补一项，多选补默认项） */
+function ensureActiveGroupSelection() {
+  const g = activeOptGroup.value
+  if (!g) return
+  const defs = defaultOptionsOf(g)
+  if (g.selection_type === 'SINGLE') {
+    if (!findOptionById(g, selectedOptions[g.id]) && defs[0]) {
+      selectedOptions[g.id] = defs[0].id
+    }
+  } else if (!(multiOptions[g.id] || []).length && defs.length) {
+    multiOptions[g.id] = defs.map((o: any) => o.id)
+  }
+}
+
+/** 单选/确认后：有下一组则跳转，末组直接加入购物车 */
+function advanceAfterSinglePick() {
+  const idx = activeOptGroupIndex.value
+  const count = optGroupCount.value
+  if (count === 0 || idx < 0 || idx >= count - 1) {
+    addToCart()
+    return
+  }
+  goNextOptGroup()
+}
+
+/** 回车：确认当前（默认）规格；有下一组则跳转，否则加入购物车 */
+function confirmCurrentOptGroupAndAdvance() {
+  if (!productVisible.value || !currentProduct.value) return
+  ensureActiveGroupSelection()
+  advanceAfterSinglePick()
+}
+
+/** 小键盘 1-9：按当前组选项顺序选中（1=第一项） */
+function pickOptionByNumpadIndex(oneBased: number) {
+  const g = activeOptGroup.value
+  if (!g || oneBased < 1 || oneBased > 9) return
+  const opts = activePaneOptions.value
+  const o = opts[oneBased - 1]
+  if (!o) return
+  onPickOption(g, o)
+}
+
+function numpadDigitFromEvent(e: KeyboardEvent): number | null {
+  // 仅数字小键盘，避免与主键盘冲突
+  if (e.code >= 'Numpad1' && e.code <= 'Numpad9') {
+    return Number(e.code.slice('Numpad'.length))
+  }
+  if (e.location === 3 && e.key >= '1' && e.key <= '9') {
+    return Number(e.key)
+  }
+  return null
+}
+
+function onSpecDrawerKeydown(e: KeyboardEvent) {
+  if (!productVisible.value) return
+  if (e.isComposing) return
+  if (payDialogVisible.value || locked.value) return
+  const el = e.target as HTMLElement | null
+  const tag = (el?.tagName || '').toUpperCase()
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+
+  const digit = numpadDigitFromEvent(e)
+  if (digit != null) {
+    e.preventDefault()
+    e.stopPropagation()
+    pickOptionByNumpadIndex(digit)
+    return
+  }
+
+  if (e.key !== 'Enter') return
+  e.preventDefault()
+  e.stopPropagation()
+  confirmCurrentOptGroupAndAdvance()
+}
+
+/** 单选后自动跳下一组；末组选完直接加购 */
 function onPickOption(g: any, o: any) {
   if (g.selection_type === 'SINGLE') {
     selectedOptions[g.id] = o.id
-    goNextOptGroup()
+    advanceAfterSinglePick()
   } else {
     toggleMultiOption(g.id, o.id)
   }
@@ -2535,6 +2615,14 @@ function onFsChange() {
   fullscreen.value = !!document.fullscreenElement
 }
 
+watch(productVisible, (open) => {
+  if (open) {
+    document.addEventListener('keydown', onSpecDrawerKeydown, true)
+  } else {
+    document.removeEventListener('keydown', onSpecDrawerKeydown, true)
+  }
+})
+
 onMounted(async () => {
   if (!auth.user) await auth.fetchMe()
   auth.assertSessionNotStale()
@@ -2550,6 +2638,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', onFsChange)
+  document.removeEventListener('keydown', onSpecDrawerKeydown, true)
 })
 
 watch(() => auth.user?.store_id, () => {
@@ -3414,6 +3503,7 @@ watch(() => auth.user?.store_id, () => {
 }
 
 .opt-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3427,6 +3517,28 @@ watch(() => auth.user?.store_id, () => {
   transition: border-color .12s, background .12s, transform .08s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+
+.tile-num {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: rgba(91, 168, 245, 0.22);
+  color: #9fd0ff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.opt-tile.on .tile-num {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
 }
 
 .opt-tile:active {
@@ -3468,12 +3580,24 @@ watch(() => auth.user?.store_id, () => {
 
 .drawer-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
   border-top: 1px solid rgba(120, 200, 255, 0.16);
   background: rgba(20, 42, 78, 0.55);
   flex-shrink: 0;
+}
+
+.enter-hint {
+  flex: 0 0 100%;
+  order: -1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: rgba(180, 210, 240, 0.7);
+  text-align: center;
+  letter-spacing: 0.02em;
 }
 
 .nav-step-btn {
@@ -3522,6 +3646,10 @@ watch(() => auth.user?.store_id, () => {
   }
 
   .nav-step-btn {
+    display: none;
+  }
+
+  .enter-hint {
     display: none;
   }
 }

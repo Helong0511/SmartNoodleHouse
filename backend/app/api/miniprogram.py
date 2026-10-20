@@ -63,7 +63,7 @@ from app.api.miniprogram_customer import (  # noqa: E402
     update_my_privacy_settings,
 )
 from app.core.cache_keys import LOGIN_CREDENTIAL_TTL_SECONDS  # noqa: F401,E402
-from app.services.miniprogram_auth import WechatMiniAuth  # noqa: F401,E402
+from app.services.miniprogram_auth import AlipayMiniAuth, WechatMiniAuth  # noqa: F401,E402
 
 
 @router.get("/stores/{store_id}")

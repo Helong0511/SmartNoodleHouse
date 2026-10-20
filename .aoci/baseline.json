@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T07:06:00Z",
+  "updated_at": "2026-10-20T07:54:27Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "2d45966b42f3208ef42962586e7265f5b3c310f5d59d232b52f33e4f7fe58bba",
-      "size": 173847,
-      "normalized_sha256": "2d45966b42f3208ef42962586e7265f5b3c310f5d59d232b52f33e4f7fe58bba"
+      "sha256": "df97b2da496d009c260021dd36b4d6d985e05911bfc1e97bb781ac2b8821b217",
+      "size": 174062,
+      "normalized_sha256": "df97b2da496d009c260021dd36b4d6d985e05911bfc1e97bb781ac2b8821b217"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -515,9 +515,9 @@
     },
     "backend/app/api/miniprogram.py": {
       "role": "index",
-      "sha256": "be0cf3de0444f22839b2c82a124e70bf15b7adb732a343628f04c701e1e24113",
-      "size": 2341,
-      "normalized_sha256": "be0cf3de0444f22839b2c82a124e70bf15b7adb732a343628f04c701e1e24113"
+      "sha256": "6dac11eeb3e6fbff7f5572e16d10f864ff2be813857cb3c763e1969ea2d375f6",
+      "size": 2357,
+      "normalized_sha256": "6dac11eeb3e6fbff7f5572e16d10f864ff2be813857cb3c763e1969ea2d375f6"
     },
     "backend/app/api/miniprogram_auth.py": {
       "role": "index",
@@ -2407,9 +2407,9 @@
     },
     "frontend/src/views/PosOrder.vue": {
       "role": "index",
-      "sha256": "e0743c28c128aa85d0801d9bc9089b9d3b0f963f00ac54100e5412dc80f4ea2d",
-      "size": 119691,
-      "normalized_sha256": "e0743c28c128aa85d0801d9bc9089b9d3b0f963f00ac54100e5412dc80f4ea2d"
+      "sha256": "8b21f58d6effb2250ecc8c39928d8760e43bc58564e77ca2060169257f42d67b",
+      "size": 123277,
+      "normalized_sha256": "8b21f58d6effb2250ecc8c39928d8760e43bc58564e77ca2060169257f42d67b"
     },
     "frontend/src/views/PosRefundApprove.vue": {
       "role": "index",
@@ -4630,9 +4630,9 @@
     },
     "tests/模拟端到端.py": {
       "role": "observe",
-      "sha256": "9cf0e3865c7ed204e1dd0c715d1cb606c4eb82d6ea8f31e70f8c61d9c3711242",
-      "size": 31988,
-      "normalized_sha256": "9cf0e3865c7ed204e1dd0c715d1cb606c4eb82d6ea8f31e70f8c61d9c3711242"
+      "sha256": "f39d06ed5e61d96a9b304debe112ccb6732adbf4110a5477e893757276e2cffa",
+      "size": 32087,
+      "normalized_sha256": "f39d06ed5e61d96a9b304debe112ccb6732adbf4110a5477e893757276e2cffa"
     },
     "tests/测试_Leader锁原子性.py": {
       "role": "observe",

@@ -334,7 +334,7 @@ async def run_all_simulations() -> bool:
     dp._dev_mode_allowed = lambda: True
 
     import app.services.face_extractor as fe
-    import app.api.miniprogram as mp
+    import app.api.miniprogram_face as face_api
 
     def _fake_extract_with_quality(_image_bytes: bytes):
         return mock_feature("sim_face"), {
@@ -344,8 +344,9 @@ async def run_all_simulations() -> bool:
             "liveness": 0.9,
         }
 
+    # consent-base64 使用 miniprogram_face 内的绑定名，须同时打补丁
     fe.extract_face_embedding_with_quality = _fake_extract_with_quality
-    mp.extract_face_embedding_with_quality = _fake_extract_with_quality
+    face_api.extract_face_embedding_with_quality = _fake_extract_with_quality
 
     await seed_database()
     results: list[bool] = []
