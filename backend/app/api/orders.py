@@ -277,11 +277,12 @@ async def list_orders(
             for u in (await db.execute(select(User).where(User.id.in_(op_ids)))).scalars().all()
         }
 
+    from app.services.payment_service import PaymentService
     from app.services.social_benefit_service import SocialBenefitService
 
-    social_map = await SocialBenefitService.orders_social_map(
-        db, [int(o.id) for o in order_rows]
-    )
+    order_ids = [int(o.id) for o in order_rows]
+    social_map = await SocialBenefitService.orders_social_map(db, order_ids)
+    tenders_map = await PaymentService.list_paid_tenders_map(db, order_ids)
 
     items = []
     for o in order_rows:
@@ -298,6 +299,7 @@ async def list_orders(
             "member_min_points": None,
         }
         social_snap = social_map.get(int(o.id)) or SocialBenefitService._empty_social_snapshot()
+        tenders = tenders_map.get(int(o.id)) or []
         items.append(
             {
                 "id": o.id,
@@ -323,6 +325,11 @@ async def list_orders(
                 "channel": o.channel,
                 "total_amount": str(o.total_amount),
                 "payment_status": o.payment_status,
+                "payment_method": o.payment_method,
+                "payment_tenders": [
+                    {"provider": x.get("provider"), "amount": x.get("amount")} for x in tenders
+                ],
+                "paid_at": serialize_dt(o.paid_at) if o.paid_at else None,
                 "operator_id": o.operator_id,
                 "operator_name": (op.display_name or op.username) if op else None,
                 "created_at": serialize_dt(o.created_at),
@@ -426,9 +433,12 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "member_min_points": None,
         }
     )
+    from app.services.payment_service import PaymentService
     from app.services.social_benefit_service import SocialBenefitService
 
     social_snap = await SocialBenefitService.order_social_snapshot(db, int(order.id))
+    # 详情需可退/已退字段，供后台订单页直接退款（列表页仍用轻量 tenders）
+    payments = await PaymentService.list_paid_tenders_with_refund(db, int(order.id))
     return success_no_store(
         {
             "id": order.id,
@@ -440,6 +450,8 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             "status_label": ORDER_STATUS_LABEL.get(order.status or "", order.status or ""),
             "payment_status": order.payment_status,
             "payment_status_label": PAYMENT_STATUS_LABEL.get(order.payment_status or "", order.payment_status or ""),
+            "payment_method": order.payment_method,
+            "paid_at": serialize_dt(order.paid_at) if order.paid_at else None,
             "channel": order.channel,
             "subtotal": str(order.subtotal),
             "discount_amount": str(order.discount_amount),
@@ -461,6 +473,7 @@ async def get_order(order_id: int, request: Request, db: DbSession, auth: StaffO
             **member,
             "created_at": serialize_dt(order.created_at),
             "items": items,
+            "payments": payments,
             "can_reorder": bool(items) and order.status not in ("PENDING_PAYMENT",),
             **pickup,
             **social_snap,

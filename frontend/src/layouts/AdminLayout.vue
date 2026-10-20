@@ -43,12 +43,11 @@
           <template #title>营业</template>
           <el-menu-item v-if="showPos" index="/pos">收银点餐</el-menu-item>
           <el-menu-item v-if="showKitchen" index="/kitchen">厨房 KDS</el-menu-item>
-          <el-menu-item v-if="showOrders" index="/orders">订单管理</el-menu-item>
+          <el-menu-item v-if="showOrders || showPayments" index="/orders">订单管理</el-menu-item>
           <el-menu-item v-if="showQueue" index="/queue-manage">排队管理</el-menu-item>
           <el-menu-item v-if="showInvoices" index="/invoices">发票申请</el-menu-item>
           <el-menu-item v-if="showOrders" index="/recommend-report">推荐效果</el-menu-item>
           <el-menu-item v-if="showOrders" index="/product-feedbacks">顾客评价</el-menu-item>
-          <el-menu-item v-if="showPayments" index="/payments">支付记录</el-menu-item>
           <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-settlement">收银日结</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-refunds">退款审批</el-menu-item>
@@ -164,7 +163,7 @@ const openGroup = computed(() => {
   const p = activeMenu.value
   if (p === '/store-info') return 'g-store'
   if (p.startsWith('/delivery')) return 'g-delivery'
-  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/payments', '/financial-ledger', '/pos-settlement', '/pos-refunds', '/recommend-report', '/product-feedbacks'].includes(p)) {
+  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/financial-ledger', '/pos-settlement', '/pos-refunds', '/recommend-report', '/product-feedbacks'].includes(p)) {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'

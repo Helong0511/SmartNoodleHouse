@@ -617,7 +617,7 @@
             <span class="so-amt">¥{{ o.total_amount }}</span>
           </div>
           <div class="so-meta">
-            <span>{{ payMethodLabel(o.payment_method) }}</span>
+            <span>{{ formatShiftPayMethod(o) }}</span>
             <span>{{ diningLabel(o.dining_type, o.table_no, o.table_name) }}</span>
             <span>{{ formatShiftTime(o.paid_at) }}</span>
           </div>
@@ -2045,6 +2045,28 @@ function payMethodLabel(method: string | null | undefined) {
   return method || '—'
 }
 
+/** 本班订单：组合支付拆开各渠道金额 */
+function formatShiftPayMethod(o: any): string {
+  const tenders = Array.isArray(o?.payment_tenders) ? o.payment_tenders : []
+  if (tenders.length > 1) {
+    return tenders
+      .map((t: any) => `${tenderLabel(t.provider)}¥${t.amount}`)
+      .join(' + ')
+  }
+  if (tenders.length === 1) return `${tenderLabel(tenders[0].provider)}¥${tenders[0].amount}`
+  return payMethodLabel(o?.payment_method)
+}
+
+/** 收款完成提示：汇总已收支付方式 */
+function formatPaidMethodHint(data: any): string {
+  const tenders = Array.isArray(data?.tenders) ? data.tenders : []
+  if (tenders.length) {
+    return tenders.map((t: any) => `${tenderLabel(t.provider)}¥${t.amount}`).join(' + ')
+  }
+  const method = data?.payment_method || data?.provider
+  return method ? payMethodLabel(method) : ''
+}
+
 function diningLabel(dtype: string | null | undefined, tableNo?: string | null, tableName?: string | null) {
   if ((dtype || '').toUpperCase() === 'TAKEAWAY') return '外带'
   const label = (tableName || tableNo || '').trim()
@@ -2477,9 +2499,12 @@ async function confirmCashPay() {
     const remLeft = parseFloat(String(payRes.data?.remaining_amount ?? '0'))
     const done = payRes.data?.fully_paid === true || (Number.isFinite(remLeft) && remLeft <= 0.001)
     if (done) {
+      const payHint = formatPaidMethodHint(payRes.data)
+      const base = `收款完成 · ${payRes.data?.order_no || checkoutOrderNo.value}`
+      const withPay = payHint ? `${base} · ${payHint}` : base
       const msg = change != null && Number(change) > 0
-        ? `收款完成 · ${payRes.data?.order_no} · 找零 ¥${change}`
-        : `收款完成 · ${payRes.data?.order_no || checkoutOrderNo.value}`
+        ? `${withPay} · 找零 ¥${change}`
+        : withPay
       finishCheckout(msg)
       return
     }
@@ -2560,7 +2585,9 @@ async function submitBarcodePay() {
     // 必须待收归零才关窗；禁止把「本笔 PAID」当成整单成功
     const done = payRes.data?.fully_paid === true || (Number.isFinite(remLeft) && remLeft <= 0.001)
     if (done) {
-      finishCheckout(`收款完成 · ${payRes.data?.order_no || checkoutOrderNo.value}`)
+      const payHint = formatPaidMethodHint(payRes.data)
+      const base = `收款完成 · ${payRes.data?.order_no || checkoutOrderNo.value}`
+      finishCheckout(payHint ? `${base} · ${payHint}` : base)
       return
     }
     if (

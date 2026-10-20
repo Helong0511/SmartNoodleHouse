@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-20T08:03:55Z",
+  "updated_at": "2026-10-20T08:29:11Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "a48216eb12a9529f5ce6724e14fdf689d430807cd127bad2684960fc975d6203",
-      "size": 174149,
-      "normalized_sha256": "a48216eb12a9529f5ce6724e14fdf689d430807cd127bad2684960fc975d6203"
+      "sha256": "a105b9a0b8d675a4e6d689d8a4a189f3a44d28caad020777fce53524bfc89218",
+      "size": 174349,
+      "normalized_sha256": "a105b9a0b8d675a4e6d689d8a4a189f3a44d28caad020777fce53524bfc89218"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -563,9 +563,9 @@
     },
     "backend/app/api/orders.py": {
       "role": "index",
-      "sha256": "a53e30a80c29fc99d71a7444502117feffc189203682e75bbb8ece8127b17705",
-      "size": 19139,
-      "normalized_sha256": "a53e30a80c29fc99d71a7444502117feffc189203682e75bbb8ece8127b17705"
+      "sha256": "84029a1341c403f3fb7da6d4c1ba40e83b5ec09232e1097844a0271764be601f",
+      "size": 20030,
+      "normalized_sha256": "84029a1341c403f3fb7da6d4c1ba40e83b5ec09232e1097844a0271764be601f"
     },
     "backend/app/api/orders_common.py": {
       "role": "index",
@@ -1511,9 +1511,9 @@
     },
     "backend/app/services/payment_service.py": {
       "role": "index",
-      "sha256": "42970102cb26d42c480a6824d909d83565b696a55cb424f4cced82ba7ca6da0b",
-      "size": 130093,
-      "normalized_sha256": "42970102cb26d42c480a6824d909d83565b696a55cb424f4cced82ba7ca6da0b"
+      "sha256": "a52497940b6e7e3225ee03ba4354528e8cc6bf4d0fbac514106c4306e84d0303",
+      "size": 133452,
+      "normalized_sha256": "a52497940b6e7e3225ee03ba4354528e8cc6bf4d0fbac514106c4306e84d0303"
     },
     "backend/app/services/payment_verify.py": {
       "role": "index",
@@ -2131,9 +2131,9 @@
     },
     "frontend/src/layouts/AdminLayout.vue": {
       "role": "index",
-      "sha256": "90e5d2fcb14117db8b014a81ba2a3855e035790f78c89de99a1b4ef76bfd834e",
-      "size": 13000,
-      "normalized_sha256": "90e5d2fcb14117db8b014a81ba2a3855e035790f78c89de99a1b4ef76bfd834e"
+      "sha256": "5ca3c0f6747d86cd76eac10acfbfaac5ba1086d130d440c4e3060aafca904694",
+      "size": 12913,
+      "normalized_sha256": "5ca3c0f6747d86cd76eac10acfbfaac5ba1086d130d440c4e3060aafca904694"
     },
     "frontend/src/main.ts": {
       "role": "index",
@@ -2143,9 +2143,9 @@
     },
     "frontend/src/router/index.ts": {
       "role": "index",
-      "sha256": "757af76f7e08af2be5d15116cfd29389e794a190f97c29ab1de784990e62cbd0",
-      "size": 11099,
-      "normalized_sha256": "757af76f7e08af2be5d15116cfd29389e794a190f97c29ab1de784990e62cbd0"
+      "sha256": "00e64299809450369ef480f8102537fdcadaf8953435a5994a01ce1e40085889",
+      "size": 11123,
+      "normalized_sha256": "00e64299809450369ef480f8102537fdcadaf8953435a5994a01ce1e40085889"
     },
     "frontend/src/stores/auth.ts": {
       "role": "index",
@@ -2383,21 +2383,21 @@
     },
     "frontend/src/views/OrderDetail.vue": {
       "role": "index",
-      "sha256": "113698dad9d38c58bdd9ee1469b58fe8847ad511884bd6298b002a2a733a3a31",
-      "size": 7211,
-      "normalized_sha256": "113698dad9d38c58bdd9ee1469b58fe8847ad511884bd6298b002a2a733a3a31"
+      "sha256": "5d01aa38f1d1caae79f217fc8b05b14810d727963d9b98eb7aec52f53383982b",
+      "size": 18697,
+      "normalized_sha256": "5d01aa38f1d1caae79f217fc8b05b14810d727963d9b98eb7aec52f53383982b"
     },
     "frontend/src/views/Orders.vue": {
       "role": "index",
-      "sha256": "6871674244c8dda1ed262cbf25e8452628871d626b030079c58979cf93fd167a",
-      "size": 10418,
-      "normalized_sha256": "6871674244c8dda1ed262cbf25e8452628871d626b030079c58979cf93fd167a"
+      "sha256": "3671008a994b9a5bb1b43031a413fc30624d8d63948e4318b7b3928979e158da",
+      "size": 15750,
+      "normalized_sha256": "3671008a994b9a5bb1b43031a413fc30624d8d63948e4318b7b3928979e158da"
     },
     "frontend/src/views/Payments.vue": {
       "role": "index",
-      "sha256": "e73bca13707dbd552d23a5a5ab096959aa9fa02a6ea75e86681002954d9a2ba0",
-      "size": 19144,
-      "normalized_sha256": "e73bca13707dbd552d23a5a5ab096959aa9fa02a6ea75e86681002954d9a2ba0"
+      "sha256": "a00e85910e74afa20fd2743d5b8a5f7a4110e18075e2826916d9430389c7347c",
+      "size": 19758,
+      "normalized_sha256": "a00e85910e74afa20fd2743d5b8a5f7a4110e18075e2826916d9430389c7347c"
     },
     "frontend/src/views/PosMyStats.vue": {
       "role": "index",
@@ -2407,9 +2407,9 @@
     },
     "frontend/src/views/PosOrder.vue": {
       "role": "index",
-      "sha256": "8b21f58d6effb2250ecc8c39928d8760e43bc58564e77ca2060169257f42d67b",
-      "size": 123277,
-      "normalized_sha256": "8b21f58d6effb2250ecc8c39928d8760e43bc58564e77ca2060169257f42d67b"
+      "sha256": "f1836db5dbb97abac1e2cdfc37a6fafb2bef2a7d0f5c71610ec9f17816b990ed",
+      "size": 124352,
+      "normalized_sha256": "f1836db5dbb97abac1e2cdfc37a6fafb2bef2a7d0f5c71610ec9f17816b990ed"
     },
     "frontend/src/views/PosRefundApprove.vue": {
       "role": "index",

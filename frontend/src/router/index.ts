@@ -22,7 +22,7 @@ const router = createRouter({
         { path: 'category-schedules', component: () => import('@/views/CategorySchedules.vue'), meta: { title: '分类时段排序', permission: 'product:read', denyCashier: true } },
         { path: 'options', component: () => import('@/views/Options.vue'), meta: { title: '规格管理', permission: 'product:read', denyCashier: true } },
         { path: 'products', component: () => import('@/views/Products.vue'), meta: { title: '餐品管理', permission: 'product:read', denyCashier: true } },
-        { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理', permission: 'order:read', denyCashier: true } },
+        { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理', anyPermission: ['order:read', 'payment:read'], denyCashier: true } },
         { path: 'queue-manage', component: () => import('@/views/QueueManage.vue'), meta: { title: '排队管理', permission: 'order:read', denyCashier: true } },
         { path: 'invoices', component: () => import('@/views/InvoiceRequests.vue'), meta: { title: '发票申请', permission: 'invoice:manage', denyCashier: true } },
         { path: 'orders/:id', component: () => import('@/views/OrderDetail.vue'), meta: { title: '订单详情', permission: 'order:read', denyCashier: true } },
@@ -38,7 +38,8 @@ const router = createRouter({
         { path: 'users', component: () => import('@/views/Users.vue'), meta: { title: '员工管理', permission: 'user:read', denyCashier: true } },
         { path: 'role-permissions', component: () => import('@/views/RolePermissions.vue'), meta: { title: '角色权限', permission: 'system:manage', denyCashier: true } },
         { path: 'store-stocks', component: () => import('@/views/StoreStocks.vue'), meta: { title: '分店库存', permission: 'product:read', denyCashier: true } },
-        { path: 'payments', component: () => import('@/views/Payments.vue'), meta: { title: '支付记录', permission: 'payment:read', denyCashier: true } },
+        // 支付记录已并入订单管理 Tab；旧链接保留跳转
+        { path: 'payments', redirect: { path: '/orders', query: { tab: 'payments' } } },
         { path: 'financial-ledger', component: () => import('@/views/FinancialLedger.vue'), meta: { title: '财务账本', permission: 'payment:read', denyCashier: true } },
         { path: 'recommend-report', component: () => import('@/views/RecommendReport.vue'), meta: { title: '推荐效果', permission: 'order:read', denyCashier: true } },
         { path: 'product-feedbacks', component: () => import('@/views/ProductFeedbacks.vue'), meta: { title: '顾客评价', permission: 'order:read', denyCashier: true } },

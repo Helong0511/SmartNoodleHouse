@@ -429,6 +429,17 @@ class PaymentService:
         return rem if rem > 0 else money(0)
 
     @classmethod
+    def _tender_dict(cls, p: Payment) -> dict:
+        return {
+            "payment_no": p.payment_no,
+            "provider": p.provider,
+            "channel": p.channel,
+            "amount": str(money(p.amount)),
+            "status": p.status,
+            "paid_at": serialize_dt(p.paid_at) if p.paid_at else None,
+        }
+
+    @classmethod
     async def list_paid_tenders(cls, db: AsyncSession, order_id: int) -> list[dict]:
         rows = (
             await db.execute(
@@ -440,24 +451,94 @@ class PaymentService:
                 .order_by(Payment.id.asc())
             )
         ).scalars().all()
-        out = []
+        return [cls._tender_dict(p) for p in rows]
+
+    @classmethod
+    async def list_paid_tenders_with_refund(cls, db: AsyncSession, order_id: int) -> list[dict]:
+        """订单详情用：收款行附带已退/可退/处理中，供后台直接退款。"""
+        rows = (
+            await db.execute(
+                select(Payment)
+                .where(
+                    Payment.order_id == int(order_id),
+                    Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
+                )
+                .order_by(Payment.id.asc())
+            )
+        ).scalars().all()
+        if not rows:
+            return []
+        ids = [int(p.id) for p in rows]
+        refunded_map: dict[int, Decimal] = {}
+        inflight_map: dict[int, Decimal] = {}
+        success_rows = await db.execute(
+            select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
+            .where(
+                PaymentRefund.payment_id.in_(ids),
+                PaymentRefund.status == "SUCCESS",
+            )
+            .group_by(PaymentRefund.payment_id)
+        )
+        for pid, amt in success_rows.all():
+            refunded_map[int(pid)] = Decimal(str(amt))
+        inflight_rows = await db.execute(
+            select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
+            .where(
+                PaymentRefund.payment_id.in_(ids),
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
+            )
+            .group_by(PaymentRefund.payment_id)
+        )
+        for pid, amt in inflight_rows.all():
+            inflight_map[int(pid)] = Decimal(str(amt))
+        out: list[dict] = []
         for p in rows:
-            out.append(
+            refunded = refunded_map.get(int(p.id), Decimal("0"))
+            inflight = inflight_map.get(int(p.id), Decimal("0"))
+            remain = money(p.amount) - money(refunded) - money(inflight)
+            if remain < 0:
+                remain = money(Decimal("0"))
+            item = cls._tender_dict(p)
+            item.update(
                 {
-                    "payment_no": p.payment_no,
-                    "provider": p.provider,
-                    "channel": p.channel,
-                    "amount": str(money(p.amount)),
-                    "status": p.status,
-                    "paid_at": serialize_dt(p.paid_at) if p.paid_at else None,
+                    "id": int(p.id),
+                    "order_id": int(p.order_id) if p.order_id else None,
+                    "refunded_amount": str(money(refunded)),
+                    "refundable_amount": str(remain),
+                    "refund_inflight": str(money(inflight)),
                 }
             )
+            out.append(item)
+        return out
+
+    @classmethod
+    async def list_paid_tenders_map(
+        cls, db: AsyncSession, order_ids: list[int]
+    ) -> dict[int, list[dict]]:
+        """批量：order_id → 已收款项（列表页展示组合支付明细）。"""
+        ids = sorted({int(x) for x in order_ids if x})
+        if not ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(Payment)
+                .where(
+                    Payment.order_id.in_(ids),
+                    Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
+                )
+                .order_by(Payment.order_id.asc(), Payment.id.asc())
+            )
+        ).scalars().all()
+        out: dict[int, list[dict]] = {i: [] for i in ids}
+        for p in rows:
+            out.setdefault(int(p.order_id), []).append(cls._tender_dict(p))
         return out
 
     @classmethod
     async def payment_progress(cls, db: AsyncSession, order: Order) -> dict:
         paid = await cls.paid_amount(db, order.id)
         remaining = await cls.remaining_amount(db, order)
+        method = (order.payment_method or "").strip() or await cls._resolve_payment_method(db, order.id)
         return {
             "order_id": order.id,
             "order_no": order.order_no,
@@ -465,6 +546,7 @@ class PaymentService:
             "paid_amount": str(paid),
             "remaining_amount": str(remaining),
             "payment_status": order.payment_status,
+            "payment_method": method or None,
             "order_status": order.status,
             "fully_paid": remaining <= 0 and order.payment_status == "PAID",
             "tenders": await cls.list_paid_tenders(db, order.id),
@@ -485,7 +567,7 @@ class PaymentService:
             return "MIXED"
         if len(providers) == 1:
             return next(iter(providers))
-        return "MIXED"
+        return ""
 
     @classmethod
     async def _finalize_tender(

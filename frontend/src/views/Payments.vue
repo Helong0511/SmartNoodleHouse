@@ -102,8 +102,8 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="paid_at" label="支付时间" width="170" />
-      <el-table-column label="收银员" width="90">
+      <el-table-column prop="paid_at" label="支付时间" width="160" />
+      <el-table-column label="收银员" width="100" show-overflow-tooltip>
         <template #default="{ row }">{{ row.operator_name || '—' }}</template>
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
@@ -195,7 +195,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
@@ -211,7 +212,13 @@ import {
 } from '@/utils/labels'
 import { todayDateRange } from '@/utils/date'
 
+const props = defineProps<{
+  /** 从订单管理带入的支付号/订单号预填 */
+  initialKeyword?: string
+}>()
+
 const auth = useAuthStore()
+const route = useRoute()
 const loading = ref(false)
 const payments = ref<any[]>([])
 const { storeOptions: stores, loadStores } = useStoreOptions()
@@ -227,6 +234,14 @@ const amountMin = ref<number | undefined>()
 const amountMax = ref<number | undefined>()
 const keyword = ref('')
 const dateRange = ref<string[] | null>(todayDateRange())
+
+function applyIncomingKeyword(raw?: string) {
+  const kw = String(raw || '').trim()
+  if (!kw) return false
+  if (keyword.value === kw) return false
+  keyword.value = kw
+  return true
+}
 const refundDialog = ref(false)
 const refundRow = ref<any>(null)
 const refundAmount = ref(0)
@@ -469,9 +484,19 @@ async function syncRefund(row: any) {
 }
 
 onMounted(async () => {
+  const fromProp = props.initialKeyword
+  const fromQuery = String(route.query.keyword || '')
+  applyIncomingKeyword(fromProp || fromQuery)
   await loadStores()
   await Promise.all([loadOperators(), load()])
 })
+
+watch(
+  () => props.initialKeyword,
+  (v) => {
+    if (applyIncomingKeyword(v)) reload()
+  },
+)
 </script>
 
 <style scoped>
