@@ -238,7 +238,7 @@ async def create_campaign(
     )
     await db.commit()
     await db.refresh(row)
-    return success(MarketingService._payload(row), request=request)
+    return success(await MarketingService.payload_for(db, row), request=request)
 
 
 @router.put("/campaigns/{campaign_id}", dependencies=[require_permission("coupon:manage")])
@@ -274,7 +274,7 @@ async def update_campaign(
     )
     await db.commit()
     await db.refresh(row)
-    return success(MarketingService._payload(row), request=request)
+    return success(await MarketingService.payload_for(db, row), request=request)
 
 
 @router.post("/campaigns/{campaign_id}/publish", dependencies=[require_permission("coupon:manage")])
@@ -315,7 +315,7 @@ async def set_campaign_status(
     )
     await db.commit()
     await db.refresh(row)
-    return success(MarketingService._payload(row), request=request)
+    return success(await MarketingService.payload_for(db, row), request=request)
 
 
 @router.get("/campaigns/{campaign_id}/tasks", dependencies=[require_permission("coupon:read")])

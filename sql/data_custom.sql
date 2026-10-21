@@ -475,3 +475,297 @@ SELECT NULL, 'rfm_champions', 'RFM·冠军', 'DYNAMIC',
        )), 1
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'rfm_champions');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'all_members', '全体会员', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'all_members');
+
+-- 预置营销活动（总部 DRAFT；按分群 code / 券模板 name / admin 关联，不硬编码 id）
+-- 状态一律 DRAFT：导入后不自动发券，需后台发布
+-- 发布引擎强制要求 segment_id + coupon_template_id，节日/生日类也绑定 all_members（可编辑改窄）
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'wakeup_sleep30', '沉睡唤醒·30天', 'WAKEUP', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       500.00, NULL, NULL, '配合 sleep30 分群；发布后入队发券',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '沉睡唤醒满20减3'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'sleep30'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'wakeup_sleep30'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'wakeup_sleep90', '沉睡唤醒·90天+', 'WAKEUP', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       800.00, NULL, NULL, '配合 sleep90 分群；力度高于30天唤醒',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '沉睡唤醒满15减5'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'sleep90'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'wakeup_sleep90'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'wakeup_lifecycle_dormant', '生命周期·沉睡召回', 'WAKEUP', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       600.00, NULL, NULL, '配合 lifecycle_dormant 分群',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '沉睡唤醒满20减3'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'lifecycle_dormant'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'wakeup_lifecycle_dormant'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'new_member_welcome', '新客欢迎券', 'NEW_MEMBER', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       1000.00, NULL, NULL, '开卡/注册欢迎；配合 new_member 分群',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'new_member'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'new_member_welcome'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'member_day', '会员日·老客回访', 'MEMBER_DAY', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       1500.00, NULL, NULL, '轻券回访；配合 champions 高积分活跃分群',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'champions'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'member_day'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'low_balance_boost', '低余额催充', 'MEMBER_DAY', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       400.00, NULL, NULL, '配合 low_balance 分群；可配储值活动',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '满50享打9折'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'low_balance'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'low_balance_boost'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'birthday_egg', '生日·免费加蛋', 'BIRTHDAY', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       300.00, NULL, NULL, '生日权益加码；默认全体会员，可改窄分群',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '生日免费加蛋'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'birthday_egg'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'social_sanitation_day', '环卫爱心日·豆浆券', 'SOCIAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       200.00, NULL, NULL, '每月爱心日营销发券；非身份当场折扣',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '爱心日免费豆浆'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'social_sanitation_day'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'festival_spring', '春节·回家吃碗家乡面', 'FESTIVAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       2000.00, NULL, NULL, '返乡券包；排期与预算发布前再定',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_spring'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'festival_mother', '妇女节/母亲节·有温度的甜', 'FESTIVAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       800.00, NULL, NULL, '女性/家庭向；锚点红糖小汤圆等 SKU',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '满50享打9折'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_mother'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'festival_children', '儿童节·小份快乐', 'FESTIVAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       500.00, NULL, NULL, '儿童小份抄手等 SKU',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_children'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'festival_teacher', '教师节·感念师恩', 'FESTIVAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       600.00, NULL, NULL, '教师券；身份折扣另走社会贡献「教师」',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_teacher'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'festival_chongyang', '重阳·长寿面', 'FESTIVAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       500.00, NULL, NULL, '长者向粥/汤圆',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '满50享打9折'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_chongyang'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'timeslot_dongzhi', '冬至·饺/抄手节', 'TIME_SLOT', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       700.00, NULL, NULL, '时段套餐促销；排期按节气再定',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'timeslot_dongzhi'
+    );
+
+-- 回填：历史种子缺分群导致「发布→请先选择分群」
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+SET `mc`.`segment_id` = `seg`.`id`
+WHERE `mc`.`store_id` IS NULL
+  AND `mc`.`segment_id` IS NULL
+  AND `mc`.`code` IN (
+        'birthday_egg',
+        'social_sanitation_day',
+        'festival_spring',
+        'festival_mother',
+        'festival_children',
+        'festival_teacher',
+        'festival_chongyang',
+        'timeslot_dongzhi'
+      );

@@ -116,6 +116,11 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
+      <el-table-column label="预算" width="90" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.budget_cap != null && row.budget_cap !== '' ? row.budget_cap : '—' }}
+        </template>
+      </el-table-column>
       <el-table-column label="分群" width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ segmentLabel(row.segment_id) }}</template>
       </el-table-column>
@@ -125,6 +130,9 @@
       <el-table-column label="推荐加权" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ boostProductsLabel(row.boost_product_ids) }}</template>
       </el-table-column>
+      <el-table-column label="创建人" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ creatorLabel(row) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="420" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="showDetail(row)">详情</el-button>
@@ -133,6 +141,8 @@
             v-if="row.status === 'DRAFT' || row.status === 'SCHEDULED'"
             size="small"
             type="primary"
+            :disabled="!canPublish(row)"
+            :title="publishBlockReason(row) || '发布并按分群入队发券'"
             @click="publish(row)"
           >发布</el-button>
           <el-button
@@ -380,7 +390,7 @@
 
         <h4 class="detail-section">元数据</h4>
         <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="创建人">{{ detailRow.created_by != null ? `#${detailRow.created_by}` : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="创建人">{{ creatorLabel(detailRow) }}</el-descriptions-item>
           <el-descriptions-item label="发布时间">{{ detailRow.published_at || '—' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ detailRow.created_at || '—' }}</el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ detailRow.updated_at || '—' }}</el-descriptions-item>
@@ -572,6 +582,15 @@ function boostProductsLabel(ids: unknown) {
       return p ? p.name : `#${id}`
     })
     .join('、')
+}
+
+function creatorLabel(row: any) {
+  if (!row) return '—'
+  const name = (row.created_by_name || '').trim()
+  if (name && row.created_by != null) return `${name} (#${row.created_by})`
+  if (name) return name
+  if (row.created_by != null) return `#${row.created_by}`
+  return '—'
 }
 
 function normalizeBoostIds(ids: unknown): number[] {
@@ -791,7 +810,23 @@ async function save() {
   }
 }
 
+function publishBlockReason(row: any): string {
+  if (!row) return '活动无效'
+  if (!row.segment_id) return '请先编辑并选择分群'
+  if (!row.coupon_template_id) return '请先编辑并选择发券模板'
+  return ''
+}
+
+function canPublish(row: any) {
+  return !publishBlockReason(row)
+}
+
 async function publish(row: any) {
+  const block = publishBlockReason(row)
+  if (block) {
+    ElMessage.warning(block)
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `发布活动「${row.name}」并按分群生成发券任务？请确认分群与券模板可用。门店引用总部预置分群时将按本店自动圈人。`,

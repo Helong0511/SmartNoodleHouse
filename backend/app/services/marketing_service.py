@@ -16,6 +16,7 @@ from app.models import (
     MarketingCampaign,
     MarketingRule,
     MarketingTask,
+    User,
 )
 from app.services.coupon_service import CouponService
 from app.services.segment_service import SegmentService
@@ -87,7 +88,13 @@ class MarketingService:
         return int(cnt or 0)
 
     @classmethod
-    def _payload(cls, row: MarketingCampaign, *, task_stats: dict | None = None) -> dict:
+    def _payload(
+        cls,
+        row: MarketingCampaign,
+        *,
+        task_stats: dict | None = None,
+        created_by_name: str | None = None,
+    ) -> dict:
         data = {
             "id": int(row.id),
             "store_id": int(row.store_id) if row.store_id else None,
@@ -107,6 +114,7 @@ class MarketingService:
             if row.published_at
             else None,
             "created_by": int(row.created_by) if row.created_by else None,
+            "created_by_name": created_by_name,
             "created_at": row.created_at.isoformat(sep=" ", timespec="seconds")
             if row.created_at
             else None,
@@ -117,6 +125,26 @@ class MarketingService:
         if task_stats is not None:
             data["task_stats"] = task_stats
         return data
+
+    @classmethod
+    async def _creator_names(cls, db: AsyncSession, rows: list[MarketingCampaign]) -> dict[int, str]:
+        ids = {int(r.created_by) for r in rows if getattr(r, "created_by", None)}
+        if not ids:
+            return {}
+        result = await db.execute(
+            select(User.id, User.display_name, User.username).where(User.id.in_(ids))
+        )
+        out: dict[int, str] = {}
+        for uid, display_name, username in result.all():
+            label = (display_name or "").strip() or (username or "").strip() or f"#{int(uid)}"
+            out[int(uid)] = label
+        return out
+
+    @classmethod
+    async def payload_for(cls, db: AsyncSession, row: MarketingCampaign, **kwargs: Any) -> dict:
+        names = await cls._creator_names(db, [row])
+        cid = int(row.created_by) if row.created_by else None
+        return cls._payload(row, created_by_name=names.get(cid) if cid else None, **kwargs)
 
     @classmethod
     async def get_campaign(cls, db: AsyncSession, campaign_id: int) -> MarketingCampaign:
@@ -152,7 +180,14 @@ class MarketingService:
             .scalars()
             .all()
         )
-        return [cls._payload(r) for r in rows], total
+        names = await cls._creator_names(db, rows)
+        return [
+            cls._payload(
+                r,
+                created_by_name=names.get(int(r.created_by)) if r.created_by else None,
+            )
+            for r in rows
+        ], total
 
     @classmethod
     async def upsert_campaign(
@@ -324,7 +359,7 @@ class MarketingService:
         await db.flush()
         await db.refresh(camp)
         return {
-            "campaign": cls._payload(camp),
+            "campaign": await cls.payload_for(db, camp),
             "materialized": mat,
             "enqueued": enqueued,
             "skipped_dup": skipped_dup,

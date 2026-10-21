@@ -514,3 +514,51 @@ async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     await db_session.refresh(camp)
     again = MarketingService._payload(camp)
     assert again["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_campaign_payload_for_includes_created_by_name(db_session):
+    """列表/单条序列化应带 created_by_name（display_name 优先，否则 username）。"""
+    from app.models import User
+
+    seed = await _seed(db_session)
+    user = User(
+        username="mkt_creator",
+        password_hash="x",
+        display_name="营销创建人",
+        role_id=1,
+        status=1,
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="creator_seg",
+        name="创建人分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="creator_camp",
+        name="创建人活动",
+        campaign_type="MEMBER_DAY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        created_by=int(user.id),
+    )
+    await db_session.commit()
+    await db_session.refresh(camp)
+
+    one = await MarketingService.payload_for(db_session, camp)
+    assert one["created_by"] == int(user.id)
+    assert one["created_by_name"] == "营销创建人"
+
+    items, total = await MarketingService.list_campaigns(
+        db_session, store_id=seed["store"].id, page=1, page_size=50
+    )
+    assert total >= 1
+    hit = next(i for i in items if i["id"] == int(camp.id))
+    assert hit["created_by_name"] == "营销创建人"

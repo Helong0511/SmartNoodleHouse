@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T08:18:21Z",
+  "updated_at": "2026-10-21T08:49:12Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "256ebc87d331ac4b69d35812377b17d52adeadf0443ae11ecdd4476c7cba7562",
-      "size": 179052,
-      "normalized_sha256": "256ebc87d331ac4b69d35812377b17d52adeadf0443ae11ecdd4476c7cba7562"
+      "sha256": "6053561ddbbddf8587573ac7a626b17cb01149f7fd1283328e17543917bfc30a",
+      "size": 179411,
+      "normalized_sha256": "6053561ddbbddf8587573ac7a626b17cb01149f7fd1283328e17543917bfc30a"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -503,9 +503,9 @@
     },
     "backend/app/api/marketing.py": {
       "role": "index",
-      "sha256": "217062b329b83fff6794a519477187f9d510cd84c2ebf3736294c66b9f657d78",
-      "size": 12675,
-      "normalized_sha256": "217062b329b83fff6794a519477187f9d510cd84c2ebf3736294c66b9f657d78"
+      "sha256": "0a2275ea1632010399159fd894047ec3fc0573f0995a79f1524946599435450d",
+      "size": 12714,
+      "normalized_sha256": "0a2275ea1632010399159fd894047ec3fc0573f0995a79f1524946599435450d"
     },
     "backend/app/api/member_levels.py": {
       "role": "index",
@@ -611,9 +611,9 @@
     },
     "backend/app/api/print_jobs.py": {
       "role": "index",
-      "sha256": "8d077695def131c0ad38d389fe6e11698c5dbcd4ebacb35338c40a19501f170a",
-      "size": 4200,
-      "normalized_sha256": "8d077695def131c0ad38d389fe6e11698c5dbcd4ebacb35338c40a19501f170a"
+      "sha256": "aea09c6cbfa011e78c69654206d201cf50bf0b33399373f4da1c9507c94d5837",
+      "size": 4294,
+      "normalized_sha256": "aea09c6cbfa011e78c69654206d201cf50bf0b33399373f4da1c9507c94d5837"
     },
     "backend/app/api/products.py": {
       "role": "index",
@@ -1271,15 +1271,15 @@
     },
     "backend/app/services/coupon_service.py": {
       "role": "index",
-      "sha256": "f61ae8e64f60f3e4b3389a565da481fea019254837e54cb9064e52a8399fc7be",
-      "size": 57516,
-      "normalized_sha256": "f61ae8e64f60f3e4b3389a565da481fea019254837e54cb9064e52a8399fc7be"
+      "sha256": "bd4fc03e7b6cefa47b33b4663d30db77d83696ee9f47da2bae6ea6f3e2bd1efa",
+      "size": 57641,
+      "normalized_sha256": "bd4fc03e7b6cefa47b33b4663d30db77d83696ee9f47da2bae6ea6f3e2bd1efa"
     },
     "backend/app/services/customer_display.py": {
       "role": "index",
-      "sha256": "c597dae4943c9b2fe5299fa097f3b653e36f0f337fda64edad2e7f896e444c6f",
-      "size": 5878,
-      "normalized_sha256": "c597dae4943c9b2fe5299fa097f3b653e36f0f337fda64edad2e7f896e444c6f"
+      "sha256": "5414f3f374fca5867af2ff2fc17e592dba56a1da4f2e2d10c57c80a4ac5e4c10",
+      "size": 5984,
+      "normalized_sha256": "5414f3f374fca5867af2ff2fc17e592dba56a1da4f2e2d10c57c80a4ac5e4c10"
     },
     "backend/app/services/customer_merge_service.py": {
       "role": "index",
@@ -1421,9 +1421,9 @@
     },
     "backend/app/services/marketing_service.py": {
       "role": "index",
-      "sha256": "f2ec7a3675439c204d18a9f47107dd00bd8b1c7fe16d66f9110de3891ca97aab",
-      "size": 31455,
-      "normalized_sha256": "f2ec7a3675439c204d18a9f47107dd00bd8b1c7fe16d66f9110de3891ca97aab"
+      "sha256": "6f57e035fa7a6cdce2f333c1b5567f4372d5edf1c74dc126abb15f9499daf86f",
+      "size": 32747,
+      "normalized_sha256": "6f57e035fa7a6cdce2f333c1b5567f4372d5edf1c74dc126abb15f9499daf86f"
     },
     "backend/app/services/menu_copy_service.py": {
       "role": "index",
@@ -1547,9 +1547,9 @@
     },
     "backend/app/services/pos_refund_service.py": {
       "role": "index",
-      "sha256": "591b9e5c605604c6e0d25fc9330258db65dfa4a117b19c4a561c043e7037f897",
-      "size": 25172,
-      "normalized_sha256": "591b9e5c605604c6e0d25fc9330258db65dfa4a117b19c4a561c043e7037f897"
+      "sha256": "b71a43c34c83301863499538f880b4ff54494a1d2569b0685d2997fe107e9e6f",
+      "size": 25176,
+      "normalized_sha256": "b71a43c34c83301863499538f880b4ff54494a1d2569b0685d2997fe107e9e6f"
     },
     "backend/app/services/pos_shift_service.py": {
       "role": "index",
@@ -2407,9 +2407,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "a57f907407c948859b2375ae3323b10a16befdbadc7781d17327989b624a3f0e",
-      "size": 35880,
-      "normalized_sha256": "a57f907407c948859b2375ae3323b10a16befdbadc7781d17327989b624a3f0e"
+      "sha256": "9751164505d6973be5bb4d4b7599992df2e50d7544b8f18cd0f7f04ac0f7696a",
+      "size": 37061,
+      "normalized_sha256": "9751164505d6973be5bb4d4b7599992df2e50d7544b8f18cd0f7f04ac0f7696a"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -4295,9 +4295,9 @@
     },
     "sql/data_custom.sql": {
       "role": "index",
-      "sha256": "1272d0dc155e5e06c02560ec6e3e336d3f7c8ae592bdecee36bef9acf3036cdd",
-      "size": 102747,
-      "normalized_sha256": "1272d0dc155e5e06c02560ec6e3e336d3f7c8ae592bdecee36bef9acf3036cdd"
+      "sha256": "e0ed1cff0a453ed57edf78f04804cc310a85d72b5d8377d1780bc07adfedc992",
+      "size": 115794,
+      "normalized_sha256": "e0ed1cff0a453ed57edf78f04804cc310a85d72b5d8377d1780bc07adfedc992"
     },
     "sql/data_sys.sql": {
       "role": "index",
@@ -4334,11 +4334,6 @@
       "sha256": "2446fca59a60f8937eb73bb08e8ad407b2f161da83e0f600417475f388ea266e",
       "size": 2887,
       "normalized_sha256": "ae27f6eea0288fb281a65e7b21ad93983e208f08bcd6f9760f18ebb3923a8439"
-    },
-    "tests/_aoci_scope_ack.json": {
-      "role": "observe",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "normalized_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "tests/_e2e_last_run.txt": {
       "role": "observe",
@@ -5511,9 +5506,9 @@
     },
     "tests/测试_营销分群活动.py": {
       "role": "observe",
-      "sha256": "623f96d4418b1e7c3eb21f16c146f38bbf52c0f60982b210b35ca5ed508e38a9",
-      "size": 17421,
-      "normalized_sha256": "6ccaeb4a6beec8abc9f002095a2450f8f11bc1047ce15d64c09e10c3587d41f8"
+      "sha256": "c23c9f5a9162b6cbfd11087239caa1f6158dea875adc4b0ba848f9c009904b35",
+      "size": 19020,
+      "normalized_sha256": "260a18a6a50e65096065825dfb10cb69623318a95c062354073e9db95058cc4c"
     },
     "tests/测试_营销归因与报表.py": {
       "role": "observe",
