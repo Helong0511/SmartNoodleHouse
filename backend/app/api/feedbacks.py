@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.response import apply_date_range, calc_pages, serialize_dt, success
 from app.models import Customer, Order, Product, ProductFeedback
+from app.services.customer_service import CustomerService
 from app.services.feedback_service import VERDICT_WHITELIST
 from app.services.store_scope import require_bound_store
 
@@ -97,7 +98,7 @@ async def list_product_feedbacks(
                 "product_id": fb.product_id,
                 "product_name": product_name,
                 "customer_id": fb.customer_id,
-                "customer_name": (cust.display_name or cust.nickname) if cust else None,
+                **CustomerService.staff_customer_name_fields(cust),
                 "customer_no": cust.customer_no if cust else None,
                 "verdicts": list(fb.verdicts or []),
                 "sentiment": fb.sentiment,

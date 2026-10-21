@@ -126,7 +126,7 @@
           <div class="member-bind">
             <label>会员（可选）</label>
             <el-select v-model="selectedCustomerId" filterable remote clearable reserve-keyword
-              placeholder="手机号 / 会员号 / 昵称" :remote-method="searchPosCustomers" :loading="customerSearching"
+              placeholder="手机号 / 会员号 / 展示名 / 昵称" :remote-method="searchPosCustomers" :loading="customerSearching"
               style="width: 100%" @change="onPosCustomerChange">
               <el-option v-for="c in customerOptions" :key="c.id" :label="posCustomerLabel(c)" :value="c.id" />
             </el-select>
@@ -147,13 +147,22 @@
             <p v-else class="member-tip muted">不选则按散客收款，不计会员权益</p>
             <div v-if="selectedCustomerId" class="social-block">
               <div class="social-row">
-                <el-checkbox v-model="useSocialBenefit" @change="onSocialBenefitToggle">公益折扣</el-checkbox>
+                <el-checkbox
+                  v-model="useSocialBenefit"
+                  :disabled="serviceCardLoading || socialVerifying"
+                  @change="onSocialBenefitToggle"
+                >公益折扣</el-checkbox>
+                <span v-if="activeSocialIdentityLabel" class="member-tip social-id-chip">
+                  已认定：{{ activeSocialIdentityLabel }}
+                </span>
+              </div>
+              <div v-if="needPosSocialVerify" class="social-row">
                 <el-select
                   v-model="verifyIdentityCode"
                   placeholder="核验身份"
                   size="small"
                   style="width: 120px"
-                  :disabled="!socialIdentityTypes.length"
+                  :disabled="!socialIdentityTypes.length || socialVerifying"
                 >
                   <el-option
                     v-for="t in socialIdentityTypes"
@@ -162,15 +171,18 @@
                     :value="t.code"
                   />
                 </el-select>
-                <el-button size="small" :loading="socialVerifying" :disabled="!verifyIdentityCode" @click="posSocialVerify">
+                <el-button size="small" type="primary" plain :loading="socialVerifying" :disabled="!verifyIdentityCode" @click="posSocialVerify">
                   当场核验
                 </el-button>
               </div>
               <p v-if="!socialIdentityTypes.length" class="member-tip warn-tip">
                 未加载到公益身份类型（库缺 social_identity_types）。请导入 sql/data_sys.sql 后再核验。
               </p>
+              <p v-else-if="needPosSocialVerify" class="member-tip warn-tip">
+                该顾客暂无已生效公益身份，勾选公益折扣前请先「当场核验」或等小程序审核通过。
+              </p>
               <p v-else class="member-tip muted">
-                身份类型来自字典（环卫/骑手/长者/教师/学生/医护等）。按「已认定身份 + 规则时段」生效；节日营销发券与当场身份折扣不同。
+                已读取顾客公益身份；勾选后按「已认定身份 + 规则时段」重算，无需重复核验。
               </p>
             </div>
             <div v-if="selectedCustomerId && !useSocialBenefit" class="coupon-pick">
@@ -241,8 +253,8 @@
                 <span v-if="serviceCard.social_today_used"> · 今日已享</span>
                 <span v-else> · 今日未用</span>
               </div>
-              <p v-else-if="selectedCustomerId" class="member-tip warn-tip">
-                暂无已生效公益身份：勾选公益前请先「当场核验」或完成小程序审核
+              <p v-else-if="selectedCustomerId && !serviceCardLoading" class="member-tip warn-tip">
+                暂无公益身份记录：勾选公益折扣时将提示「当场核验」
               </p>
             </div>
           </div>
@@ -430,7 +442,7 @@
         <div v-if="checkoutOrderId" class="member-bind pay-member">
           <label>本单会员</label>
           <el-select v-model="selectedCustomerId" filterable remote clearable reserve-keyword
-            placeholder="手机号 / 会员号 / 昵称" :remote-method="searchPosCustomers" :loading="customerSearching"
+            placeholder="手机号 / 会员号 / 展示名 / 昵称" :remote-method="searchPosCustomers" :loading="customerSearching"
             style="width: 100%" @change="onCheckoutMemberChange">
             <el-option v-for="c in customerOptions" :key="c.id" :label="posCustomerLabel(c)" :value="c.id" />
           </el-select>
@@ -448,7 +460,15 @@
             <template v-if="selectedIsPhoneShell"> · 收银预留待扫码合并</template>
           </p>
           <div v-if="selectedCustomerId" class="social-row">
-            <el-checkbox v-model="useSocialBenefit" @change="onPaySocialToggle">公益折扣</el-checkbox>
+            <el-checkbox
+              v-model="useSocialBenefit"
+              :disabled="serviceCardLoading || socialVerifying"
+              @change="onPaySocialToggle"
+            >公益折扣</el-checkbox>
+            <span v-if="activeSocialIdentityLabel" class="member-tip social-id-chip">
+              已认定：{{ activeSocialIdentityLabel }}
+            </span>
+            <span v-else class="member-tip warn-tip">无已生效身份，请返回点餐区核验</span>
           </div>
           <div v-if="selectedCustomerId && !useSocialBenefit" class="coupon-pick">
             <label>优惠券</label>
@@ -804,10 +824,37 @@ function socialStatusZh(status: string) {
   return '—'
 }
 
-function hasActiveSocialIdentity() {
-  return (serviceCard.value?.social_identities || []).some(
+function activeSocialIdentities() {
+  return (serviceCard.value?.social_identities || []).filter(
     (s: any) => String(s.status || '').toUpperCase() === 'ACTIVE',
   )
+}
+
+function hasActiveSocialIdentity() {
+  return activeSocialIdentities().length > 0
+}
+
+const activeSocialIdentityLabel = computed(() => {
+  const rows = activeSocialIdentities()
+  if (!rows.length) return ''
+  return rows
+    .map((s: any) => s.identity_name || SOCIAL_IDENTITY[String(s.identity_code || '').toUpperCase()] || s.identity_code)
+    .filter(Boolean)
+    .join('、')
+})
+
+/** 无已生效身份时才展示「当场核验」 */
+const needPosSocialVerify = computed(() => {
+  if (!selectedCustomerId.value) return false
+  if (serviceCardLoading.value) return false
+  return !hasActiveSocialIdentity()
+})
+
+/** 勾选公益前强制刷新服务卡，读取顾客当前公益身份 */
+async function ensureCustomerSocialIdentities(): Promise<boolean> {
+  if (!selectedCustomerId.value) return false
+  await loadServiceCard(selectedCustomerId.value, { keepSelection: true, autoPromo: false })
+  return hasActiveSocialIdentity()
 }
 const tenders = ref<any[]>([])
 const tenderAmount = ref('')
@@ -1651,22 +1698,25 @@ function ensureSelectedCouponOptions(extra?: { couponId?: number | null; voucher
   }
 }
 
-function onSocialBenefitToggle() {
+async function onSocialBenefitToggle() {
   if (useSocialBenefit.value) {
     clearCouponSelection()
     couponManualPick.value = false
-    if (!hasActiveSocialIdentity()) {
-      ElMessage.warning('该会员尚无已生效公益身份，请先「当场核验」后再勾选公益折扣')
+    const ok = await ensureCustomerSocialIdentities()
+    if (!ok) {
+      ElMessage.warning('该顾客暂无已生效公益身份，请先「当场核验」后再勾选公益折扣')
       useSocialBenefit.value = false
       return
     }
+    const label = activeSocialIdentityLabel.value
+    ElMessage.success(label ? `已读取公益身份「${label}」，去收款后按规则重算` : '已读取公益身份，去收款后按规则重算')
   } else {
     checkoutSocialApplied.value = false
     checkoutSocialCode.value = ''
     couponManualPick.value = false
     void autoSelectBestPromo({ force: true })
   }
-  if (checkoutOrderId.value) bindCustomerOnCheckoutOrder()
+  if (checkoutOrderId.value) await bindCustomerOnCheckoutOrder()
 }
 
 async function onCouponSelectionChange() {
@@ -1732,11 +1782,15 @@ async function createPosOrder() {
 }
 
 function posCustomerLabel(c: any) {
-  const name = c.display_name || c.nickname || '会员'
+  // 展示名优先；无展示名才用昵称。禁止把合成名写回 display_name。
+  const display = String(c?.display_name || '').trim()
+  const nick = String(c?.nickname || '').trim()
+  const name = display || nick || '会员'
+  const nickHint = display && nick && display !== nick ? `（昵称 ${nick}）` : ''
   const phone = c.phone ? ` ${c.phone}` : ''
   const no = c.customer_no ? ` · ${c.customer_no}` : ''
   const shell = c.is_phone_shell ? ' · 预留' : ''
-  return `${name}${phone}${no}${shell}`
+  return `${name}${nickHint}${phone}${no}${shell}`
 }
 
 function isMobilePhone(kw: string) {
@@ -1867,8 +1921,9 @@ async function onPaySocialToggle() {
   if (useSocialBenefit.value) {
     clearCouponSelection()
     couponManualPick.value = false
-    if (!hasActiveSocialIdentity()) {
-      ElMessage.warning('该会员尚无已生效公益身份，请先返回点餐区「当场核验」')
+    const ok = await ensureCustomerSocialIdentities()
+    if (!ok) {
+      ElMessage.warning('该顾客暂无已生效公益身份，请先返回点餐区「当场核验」')
       useSocialBenefit.value = false
       return
     }
@@ -1904,13 +1959,14 @@ async function bindCustomerOnCheckoutOrder() {
         tenderAmount.value = remainingAmount.value
       }
     }
-    if (res.data?.customer_id && res.data?.customer_name) {
+    if (res.data?.customer_id) {
       const exists = customerOptions.value.some((x) => x.id === res.data.customer_id)
       if (!exists) {
         customerOptions.value = [
           {
             id: res.data.customer_id,
-            display_name: res.data.customer_name,
+            display_name: res.data.customer_display_name || null,
+            nickname: res.data.customer_nickname || null,
             phone: res.data.customer_phone,
           },
           ...customerOptions.value,
@@ -2138,7 +2194,8 @@ async function resumePendingOrder(o: any, mode: 'add' | 'pay') {
     customerOptions.value = [
       {
         id: o.customer_id,
-        display_name: o.customer_name,
+        display_name: o.customer_display_name || null,
+        nickname: o.customer_nickname || null,
         phone: o.customer_phone,
       },
     ]
@@ -3232,6 +3289,12 @@ watch(() => auth.user?.store_id, () => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.social-id-chip {
+  margin: 0 !important;
+  color: #6ee7a7 !important;
 }
 
 .service-card {

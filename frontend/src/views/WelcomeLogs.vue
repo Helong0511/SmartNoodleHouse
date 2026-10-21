@@ -48,9 +48,10 @@
       <el-table-column label="时间" width="170">
         <template #default="{ row }">{{ fmt(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="顾客" min-width="140">
+      <el-table-column label="顾客" min-width="160">
         <template #default="{ row }">
-          <div>{{ row.customer_name || '—' }}</div>
+          <div>{{ formatCustomerNameLines(row).primary }}</div>
+          <div v-if="formatCustomerNameLines(row).secondary" class="sub">{{ formatCustomerNameLines(row).secondary }}</div>
           <div class="sub">ID {{ row.customer_id }} · {{ row.customer_no || '-' }}</div>
         </template>
       </el-table-column>
@@ -76,6 +77,7 @@ import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { openStaffWebSocket } from '@/utils/ws'
 import { useAuthStore } from '@/stores/auth'
+import { formatCustomerNameLines } from '@/utils/customerName'
 
 const auth = useAuthStore()
 const loading = ref(false)

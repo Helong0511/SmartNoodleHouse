@@ -221,6 +221,8 @@ type CustomerCandidate = {
   customer_id: number
   customer_no?: string | null
   customer_name?: string | null
+  customer_display_name?: string | null
+  customer_nickname?: string | null
   customer_phone?: string | null
   eligible_order_count?: number
   has_profile?: boolean
@@ -234,6 +236,8 @@ type OrderCandidate = {
   created_at?: string
   customer_id?: number | null
   customer_name?: string | null
+  customer_display_name?: string | null
+  customer_nickname?: string | null
   customer_phone?: string | null
   store_name?: string | null
   has_profile?: boolean
@@ -323,11 +327,14 @@ function formatOrderTime(v?: string) {
 
 function customerOptionLabel(c: CustomerCandidate) {
   if (c.customer_id === 0) return `未绑定顾客（${c.eligible_order_count || 0} 单可开票）`
-  const name = c.customer_name || '顾客'
+  const display = String(c.customer_display_name || '').trim()
+  const nick = String(c.customer_nickname || '').trim()
+  const name = display || nick || c.customer_name || '顾客'
+  const nickHint = display && nick && display !== nick ? `（昵称 ${nick}）` : ''
   const phone = c.customer_phone ? ` ${c.customer_phone}` : ''
   const cnt = c.eligible_order_count != null ? ` · ${c.eligible_order_count} 单可开票` : ''
   const tag = c.has_profile ? ' · 有历史抬头' : ''
-  return `${name}${phone}${cnt}${tag}`
+  return `${name}${nickHint}${phone}${cnt}${tag}`
 }
 
 function orderOptionLabel(o: OrderCandidate) {

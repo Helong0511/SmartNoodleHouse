@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T04:07:41Z",
+  "updated_at": "2026-10-21T04:37:18Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "471a8af250893b2e40c72d694ecf3dd622ceecd272e41bc9f7dd41c8a33add86",
-      "size": 176858,
-      "normalized_sha256": "471a8af250893b2e40c72d694ecf3dd622ceecd272e41bc9f7dd41c8a33add86"
+      "sha256": "3f0ba9410815df17745ce8c8a3d873896f3c0be78c9c6d25300fd664e17a65b1",
+      "size": 178521,
+      "normalized_sha256": "3f0ba9410815df17745ce8c8a3d873896f3c0be78c9c6d25300fd664e17a65b1"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -419,9 +419,9 @@
     },
     "backend/app/api/customers.py": {
       "role": "index",
-      "sha256": "847b09b65737704c5c85db17174222fec6745e6518a1575ace3a80202a863271",
-      "size": 32489,
-      "normalized_sha256": "847b09b65737704c5c85db17174222fec6745e6518a1575ace3a80202a863271"
+      "sha256": "656539b3789dae70700d9a58df8d3b7921d76834c3976e99557b640402f3819b",
+      "size": 32855,
+      "normalized_sha256": "656539b3789dae70700d9a58df8d3b7921d76834c3976e99557b640402f3819b"
     },
     "backend/app/api/customers_common.py": {
       "role": "index",
@@ -479,9 +479,9 @@
     },
     "backend/app/api/feedbacks.py": {
       "role": "index",
-      "sha256": "36eb94be462b468ec0c8053d1d5525a53a313ee85e3e5a3f40ccebc15a050491",
-      "size": 4193,
-      "normalized_sha256": "36eb94be462b468ec0c8053d1d5525a53a313ee85e3e5a3f40ccebc15a050491"
+      "sha256": "4de7750d92799006028e9587a4a61fb5d8b83d11550065769424f372b2ff18c2",
+      "size": 4230,
+      "normalized_sha256": "4de7750d92799006028e9587a4a61fb5d8b83d11550065769424f372b2ff18c2"
     },
     "backend/app/api/financial_ledger.py": {
       "role": "index",
@@ -497,9 +497,9 @@
     },
     "backend/app/api/invoices.py": {
       "role": "index",
-      "sha256": "501bdc2c2470ada3973be302408c5899408cfbbfbcea2b1dabcd1d57917c2f1c",
-      "size": 26444,
-      "normalized_sha256": "501bdc2c2470ada3973be302408c5899408cfbbfbcea2b1dabcd1d57917c2f1c"
+      "sha256": "be4f3b929cf6c17fc168b58998236a4483a0943a8991e05f9c22b9700bfdb9ac",
+      "size": 26589,
+      "normalized_sha256": "be4f3b929cf6c17fc168b58998236a4483a0943a8991e05f9c22b9700bfdb9ac"
     },
     "backend/app/api/marketing.py": {
       "role": "index",
@@ -545,9 +545,9 @@
     },
     "backend/app/api/miniprogram_member.py": {
       "role": "index",
-      "sha256": "2ce10660a50c8150d9e48b82d3f4f0a906fd8f6411ba2d6283536d60d31d4bfa",
-      "size": 24125,
-      "normalized_sha256": "2ce10660a50c8150d9e48b82d3f4f0a906fd8f6411ba2d6283536d60d31d4bfa"
+      "sha256": "ba083e88888e37d74ab9cb2ed2191be9b646e5820261c8cd187be3de901d23c8",
+      "size": 24126,
+      "normalized_sha256": "ba083e88888e37d74ab9cb2ed2191be9b646e5820261c8cd187be3de901d23c8"
     },
     "backend/app/api/miniprogram_menu.py": {
       "role": "index",
@@ -563,9 +563,9 @@
     },
     "backend/app/api/orders.py": {
       "role": "index",
-      "sha256": "84029a1341c403f3fb7da6d4c1ba40e83b5ec09232e1097844a0271764be601f",
-      "size": 20030,
-      "normalized_sha256": "84029a1341c403f3fb7da6d4c1ba40e83b5ec09232e1097844a0271764be601f"
+      "sha256": "cb7bb52ddbab4003b52cfd7682a78701701d08d09cce12e409f90e09a4911da8",
+      "size": 19988,
+      "normalized_sha256": "cb7bb52ddbab4003b52cfd7682a78701701d08d09cce12e409f90e09a4911da8"
     },
     "backend/app/api/orders_common.py": {
       "role": "index",
@@ -587,9 +587,9 @@
     },
     "backend/app/api/orders_pos.py": {
       "role": "index",
-      "sha256": "5a163ff9a7497afa1bc0a5bbd665d7c8df1341e76e36ab4df1ec51620c397d11",
-      "size": 28737,
-      "normalized_sha256": "5a163ff9a7497afa1bc0a5bbd665d7c8df1341e76e36ab4df1ec51620c397d11"
+      "sha256": "0aba46845373a85afdf234a2ceac1483c0027795c5796921f4026d4787c2772a",
+      "size": 28695,
+      "normalized_sha256": "0aba46845373a85afdf234a2ceac1483c0027795c5796921f4026d4787c2772a"
     },
     "backend/app/api/payments.py": {
       "role": "index",
@@ -869,9 +869,9 @@
     },
     "backend/app/api/wallet.py": {
       "role": "index",
-      "sha256": "4b69e04c2ed4b051501015b1fff05cc4a08610da6460309121e802959f582a9d",
-      "size": 26711,
-      "normalized_sha256": "4aa9318a202d55d0139aadeb01ab018a32e68c993058cdb66202ab1e0ab656fd"
+      "sha256": "ab1f8a454b180acc17b9f3b27e19ebb1026d5f96cbfd08c2da18e76fa894909e",
+      "size": 26639,
+      "normalized_sha256": "eae4cdc87e930ff2b1e01fd30612b6d366d226df67b28da1975bcd88f712a894"
     },
     "backend/app/api/websocket.py": {
       "role": "index",
@@ -881,9 +881,9 @@
     },
     "backend/app/api/welcome.py": {
       "role": "index",
-      "sha256": "ddb9f139d48d3f473dd7453dae7b98dc32244b172c67bbaa788931f35524d299",
-      "size": 4834,
-      "normalized_sha256": "ddb9f139d48d3f473dd7453dae7b98dc32244b172c67bbaa788931f35524d299"
+      "sha256": "5c386a14bff4b1e9f484158551c126c9dd6780ccb279ec3fba0a3e562cbd369b",
+      "size": 5265,
+      "normalized_sha256": "5c386a14bff4b1e9f484158551c126c9dd6780ccb279ec3fba0a3e562cbd369b"
     },
     "backend/app/bootstrap_path.py": {
       "role": "index",
@@ -1265,9 +1265,9 @@
     },
     "backend/app/services/coupon_service.py": {
       "role": "index",
-      "sha256": "38ca3205996d48dfd6128a173234d586424ef9dd1caa03929ebee4448e43fc2a",
-      "size": 57459,
-      "normalized_sha256": "38ca3205996d48dfd6128a173234d586424ef9dd1caa03929ebee4448e43fc2a"
+      "sha256": "f61ae8e64f60f3e4b3389a565da481fea019254837e54cb9064e52a8399fc7be",
+      "size": 57516,
+      "normalized_sha256": "f61ae8e64f60f3e4b3389a565da481fea019254837e54cb9064e52a8399fc7be"
     },
     "backend/app/services/customer_display.py": {
       "role": "index",
@@ -1283,9 +1283,9 @@
     },
     "backend/app/services/customer_service.py": {
       "role": "index",
-      "sha256": "ffcc17298b77522290d0eb08b0539ce9f442e70ef7127be9dbbe773bfeb21ce3",
-      "size": 67087,
-      "normalized_sha256": "ffcc17298b77522290d0eb08b0539ce9f442e70ef7127be9dbbe773bfeb21ce3"
+      "sha256": "cca0e505ed6cdf35c9b771abbc87b064926f7f8218effd9abc10cad5e954a272",
+      "size": 70045,
+      "normalized_sha256": "cca0e505ed6cdf35c9b771abbc87b064926f7f8218effd9abc10cad5e954a272"
     },
     "backend/app/services/delivery_context.py": {
       "role": "index",
@@ -1643,21 +1643,21 @@
     },
     "backend/app/services/service_card_service.py": {
       "role": "index",
-      "sha256": "fc058cfbee35e4cf6ff733479e01f40423788dd8a74ad01f5e714151da336691",
-      "size": 9659,
-      "normalized_sha256": "fc058cfbee35e4cf6ff733479e01f40423788dd8a74ad01f5e714151da336691"
+      "sha256": "89211131994aadcc4d937bfb6bfdaafd2b24de817b90e30a807f27e6f7d7d363",
+      "size": 9827,
+      "normalized_sha256": "89211131994aadcc4d937bfb6bfdaafd2b24de817b90e30a807f27e6f7d7d363"
     },
     "backend/app/services/shared_cart_service.py": {
       "role": "index",
-      "sha256": "075cc488d96ebca874eb9546f66e25e7bf558a72dbc751667733a9c0cb470450",
-      "size": 23076,
-      "normalized_sha256": "075cc488d96ebca874eb9546f66e25e7bf558a72dbc751667733a9c0cb470450"
+      "sha256": "09acd733c8f7ef0b21b2e33c8c4e9403c13bc23eca4b54f78a829342cababcb1",
+      "size": 23957,
+      "normalized_sha256": "09acd733c8f7ef0b21b2e33c8c4e9403c13bc23eca4b54f78a829342cababcb1"
     },
     "backend/app/services/social_benefit_service.py": {
       "role": "index",
-      "sha256": "69a13ab718d3e7645f4c0d08672b99fb9a3c81f2ddb2ee8e5a371d39f5e85984",
-      "size": 48849,
-      "normalized_sha256": "69a13ab718d3e7645f4c0d08672b99fb9a3c81f2ddb2ee8e5a371d39f5e85984"
+      "sha256": "ed9864c0df02091ca89c67e43b44b0dd08f15014dc01e80d23d7c4ac2837b9d9",
+      "size": 49003,
+      "normalized_sha256": "ed9864c0df02091ca89c67e43b44b0dd08f15014dc01e80d23d7c4ac2837b9d9"
     },
     "backend/app/services/status_history.py": {
       "role": "index",
@@ -2249,6 +2249,12 @@
       "size": 2366,
       "normalized_sha256": "421e9141d61f12500991c55e417d7e30275dbc397145577913329848213b316b"
     },
+    "frontend/src/utils/customerName.ts": {
+      "role": "index",
+      "sha256": "b5411a6f250744c3485599659208cc38e8e201d460cf1a3be863a3e0a5a32d25",
+      "size": 1991,
+      "normalized_sha256": "b5411a6f250744c3485599659208cc38e8e201d460cf1a3be863a3e0a5a32d25"
+    },
     "frontend/src/utils/date.ts": {
       "role": "index",
       "sha256": "2c65ce8a35234a86f2864c0343928efdde44d40d6b15ac1e9c454b115905dc68",
@@ -2347,9 +2353,9 @@
     },
     "frontend/src/views/Coupons.vue": {
       "role": "index",
-      "sha256": "f54140ed4af0bc24e3ce49a7741bf896af5abc535b7033df1d7e9c310255ec0e",
-      "size": 26221,
-      "normalized_sha256": "f54140ed4af0bc24e3ce49a7741bf896af5abc535b7033df1d7e9c310255ec0e"
+      "sha256": "188b60de7b7e449a7a72a30c1f588221adbf5a1c496478ab4da7fc651236f7ca",
+      "size": 26509,
+      "normalized_sha256": "188b60de7b7e449a7a72a30c1f588221adbf5a1c496478ab4da7fc651236f7ca"
     },
     "frontend/src/views/CustomerDisplay.vue": {
       "role": "index",
@@ -2359,15 +2365,15 @@
     },
     "frontend/src/views/Customers.vue": {
       "role": "index",
-      "sha256": "000dffdfec82408c7f6f06c27100e5b6d063963d8c4ca7f4639a2619dba82b04",
-      "size": 59923,
-      "normalized_sha256": "000dffdfec82408c7f6f06c27100e5b6d063963d8c4ca7f4639a2619dba82b04"
+      "sha256": "24142a1241927f264ba79b20cad78dffb9fa4e33651c687f264b193eac0fd913",
+      "size": 61210,
+      "normalized_sha256": "24142a1241927f264ba79b20cad78dffb9fa4e33651c687f264b193eac0fd913"
     },
     "frontend/src/views/Dashboard.vue": {
       "role": "index",
-      "sha256": "945f783cf21f554194b1ba6061504e9bdfdfdaca00192f2b984752fc8fbb0eb4",
-      "size": 45246,
-      "normalized_sha256": "945f783cf21f554194b1ba6061504e9bdfdfdaca00192f2b984752fc8fbb0eb4"
+      "sha256": "ee504289f52ef4a7cd3b9aeef1c05dc4310f2c024cb1001d470b245489724d3d",
+      "size": 45417,
+      "normalized_sha256": "ee504289f52ef4a7cd3b9aeef1c05dc4310f2c024cb1001d470b245489724d3d"
     },
     "frontend/src/views/FinancialLedger.vue": {
       "role": "index",
@@ -2377,9 +2383,9 @@
     },
     "frontend/src/views/InvoiceRequests.vue": {
       "role": "index",
-      "sha256": "783d28c6fc061d3461e345c7ae5291423d3ac34bbc7818764b36f469d2a329c9",
-      "size": 20731,
-      "normalized_sha256": "ef3dc17bf681f3e752452b06839e6151f6c02ae76e7b015fd4b2399acaa19773"
+      "sha256": "a6257aa0eb46d7668e52f49925ad6f7a0e614825bf2e61975dd21c1198a0c4b1",
+      "size": 21124,
+      "normalized_sha256": "c2da7480501b393363c37c026c0607c0fe6d71d2991f8a21d60d1818169ce3d5"
     },
     "frontend/src/views/Kitchen.vue": {
       "role": "index",
@@ -2425,15 +2431,15 @@
     },
     "frontend/src/views/OrderDetail.vue": {
       "role": "index",
-      "sha256": "e5ee0d922d623e4eb911cc52fe8979570e35cd5dc3926a49f7eb004a242cf8c1",
-      "size": 18863,
-      "normalized_sha256": "e5ee0d922d623e4eb911cc52fe8979570e35cd5dc3926a49f7eb004a242cf8c1"
+      "sha256": "a207be87c0ac7fdcac8837449f66bdb71752209965bacfc199e15caff553cbf4",
+      "size": 18934,
+      "normalized_sha256": "a207be87c0ac7fdcac8837449f66bdb71752209965bacfc199e15caff553cbf4"
     },
     "frontend/src/views/Orders.vue": {
       "role": "index",
-      "sha256": "c27bcf791db14ad5c8d0b94ff962ed00cd4e24f0bf6eaff118142d1aee0e1d62",
-      "size": 15765,
-      "normalized_sha256": "c27bcf791db14ad5c8d0b94ff962ed00cd4e24f0bf6eaff118142d1aee0e1d62"
+      "sha256": "ba4c150ada11464b1184b726bb27390f32becaba24eae6c1993fbfe2daf3259e",
+      "size": 16064,
+      "normalized_sha256": "ba4c150ada11464b1184b726bb27390f32becaba24eae6c1993fbfe2daf3259e"
     },
     "frontend/src/views/Payments.vue": {
       "role": "index",
@@ -2449,9 +2455,9 @@
     },
     "frontend/src/views/PosOrder.vue": {
       "role": "index",
-      "sha256": "f1836db5dbb97abac1e2cdfc37a6fafb2bef2a7d0f5c71610ec9f17816b990ed",
-      "size": 124352,
-      "normalized_sha256": "f1836db5dbb97abac1e2cdfc37a6fafb2bef2a7d0f5c71610ec9f17816b990ed"
+      "sha256": "1c46c39568c1dab66336ec7d7480d8093c3e833369c5f9706e593966f4b1f0bf",
+      "size": 127040,
+      "normalized_sha256": "1c46c39568c1dab66336ec7d7480d8093c3e833369c5f9706e593966f4b1f0bf"
     },
     "frontend/src/views/PosRefundApprove.vue": {
       "role": "index",
@@ -2467,9 +2473,9 @@
     },
     "frontend/src/views/ProductFeedbacks.vue": {
       "role": "index",
-      "sha256": "c6cde37de510ae03be91312ead38d0bb5b2f6faea384a5c661a41fca9c509ec4",
-      "size": 6881,
-      "normalized_sha256": "c6cde37de510ae03be91312ead38d0bb5b2f6faea384a5c661a41fca9c509ec4"
+      "sha256": "d687d02be03c418a1120acf44a1cd7d308a3a67c30dd6a42f8d67b1f2a5c7995",
+      "size": 7078,
+      "normalized_sha256": "d687d02be03c418a1120acf44a1cd7d308a3a67c30dd6a42f8d67b1f2a5c7995"
     },
     "frontend/src/views/Products.vue": {
       "role": "index",
@@ -2503,9 +2509,9 @@
     },
     "frontend/src/views/SocialBenefits.vue": {
       "role": "index",
-      "sha256": "f9f1b96cc845cbc1f7b7efde206f0b6103ca0fc9474b22f369b7ece98ae746d7",
-      "size": 12220,
-      "normalized_sha256": "f9f1b96cc845cbc1f7b7efde206f0b6103ca0fc9474b22f369b7ece98ae746d7"
+      "sha256": "c586ded1a2945406cb07aa119fc39bd32f312e4de4ab1df3a9f3cadd325728ad",
+      "size": 12476,
+      "normalized_sha256": "c586ded1a2945406cb07aa119fc39bd32f312e4de4ab1df3a9f3cadd325728ad"
     },
     "frontend/src/views/StoreInfo.vue": {
       "role": "index",
@@ -2533,15 +2539,15 @@
     },
     "frontend/src/views/Wallet.vue": {
       "role": "index",
-      "sha256": "6e392119939020318ca0f5672aef402ab93f9a8e11a030450a4aa4c6bf720af4",
-      "size": 25731,
-      "normalized_sha256": "6e392119939020318ca0f5672aef402ab93f9a8e11a030450a4aa4c6bf720af4"
+      "sha256": "284b781ad7e2f6b8514432335fdfaddc6388baf7de584e7762c81a7b36ea9a73",
+      "size": 26508,
+      "normalized_sha256": "284b781ad7e2f6b8514432335fdfaddc6388baf7de584e7762c81a7b36ea9a73"
     },
     "frontend/src/views/WelcomeLogs.vue": {
       "role": "index",
-      "sha256": "e99f2114a423c907720e81260172f9c72067e2bd314e16087a75d4bcd7628ebc",
-      "size": 10669,
-      "normalized_sha256": "e99f2114a423c907720e81260172f9c72067e2bd314e16087a75d4bcd7628ebc"
+      "sha256": "21cd1292c17052ba7d9316d9befb9ed014e426c63a3c4bc1895ca76cc3f66cb4",
+      "size": 10866,
+      "normalized_sha256": "21cd1292c17052ba7d9316d9befb9ed014e426c63a3c4bc1895ca76cc3f66cb4"
     },
     "frontend/src/views/delivery/DeliveryBindings.vue": {
       "role": "index",
@@ -5683,6 +5689,12 @@
       "sha256": "b0ddccf36fd8cc3c29f692e1054d2a2ead3102df88b222455bbd36ae8b8c2c78",
       "size": 6653,
       "normalized_sha256": "0ce38ac3cdd5454ce8454ce3fea716e1ca349552ef87f65d2d3afc22c957b3b7"
+    },
+    "tests/测试_顾客展示名与昵称区分.py": {
+      "role": "observe",
+      "sha256": "d8e3385d6f0f75b4fbf6fdb25ddc9ea8e6788a4a097ee8e2e531cc4a47d6c79d",
+      "size": 5578,
+      "normalized_sha256": "d8e3385d6f0f75b4fbf6fdb25ddc9ea8e6788a4a097ee8e2e531cc4a47d6c79d"
     },
     "tests/测试_顾客微信OpenID.py": {
       "role": "observe",

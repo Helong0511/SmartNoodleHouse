@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import ensure_local_aware, money, now_local, naive_local_now, serialize_dt
 from app.models import CouponTemplate, CustomerCoupon, Order
+from app.services.customer_service import CustomerService
 
 logger = logging.getLogger(__name__)
 
@@ -492,7 +493,7 @@ class CouponService:
                     "coupon_no": cc.coupon_no,
                     "customer_id": cust.id,
                     "customer_no": cust.customer_no,
-                    "customer_name": cust.display_name or cust.nickname,
+                    **CustomerService.staff_customer_name_fields(cust),
                     "customer_phone": cust.phone,
                     "template_id": tmpl.id,
                     "template_name": tmpl.name,

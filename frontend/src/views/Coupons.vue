@@ -12,7 +12,7 @@
       <el-tab-pane label="持券记录" name="issued">
         <el-form inline class="toolbar">
           <el-form-item>
-            <el-input v-model="issuedKeyword" placeholder="券号 / 顾客编号 / 手机 / 昵称" clearable style="width: 240px"
+            <el-input v-model="issuedKeyword" placeholder="券号 / 顾客编号 / 手机 / 展示名 / 昵称" clearable style="width: 280px"
               @keyup.enter="reloadIssued" />
           </el-form-item>
           <el-form-item>
@@ -53,7 +53,8 @@
           <el-table-column prop="summary" label="规则" min-width="140" />
           <el-table-column label="顾客" min-width="160">
             <template #default="{ row }">
-              {{ row.customer_name || '—' }}
+              <div>{{ formatCustomerNameLines(row).primary }}</div>
+              <div v-if="formatCustomerNameLines(row).secondary" class="muted">{{ formatCustomerNameLines(row).secondary }}</div>
               <div class="muted">{{ row.customer_no }}</div>
             </template>
           </el-table-column>
@@ -236,10 +237,10 @@
     <el-dialog v-model="issueDialog" title="手动发券" width="480px" destroy-on-close>
       <el-form :model="issueForm" label-width="90px">
         <el-form-item label="顾客" required>
-          <el-select v-model="issueForm.customer_id" filterable remote reserve-keyword placeholder="输入编号/手机/昵称搜索"
+          <el-select v-model="issueForm.customer_id" filterable remote reserve-keyword placeholder="输入编号/手机/展示名/昵称搜索"
             :remote-method="searchCustomers" :loading="customerSearching" style="width: 100%">
             <el-option v-for="c in customerOptions" :key="c.id"
-              :label="`${c.display_name || c.nickname || '顾客'}（${c.customer_no}）`" :value="c.id" />
+              :label="`${formatCustomerNameLines(c).primary === '—' ? '顾客' : formatCustomerNameLines(c).primary}（${c.customer_no}）`" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="券模板" required>
@@ -268,6 +269,7 @@ import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { COUPON_STATUS, COUPON_TYPE, couponStatusTagType, label } from '@/utils/labels'
+import { formatCustomerNameLines } from '@/utils/customerName'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('coupon:manage'))

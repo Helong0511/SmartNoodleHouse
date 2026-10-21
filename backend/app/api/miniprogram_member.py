@@ -290,11 +290,9 @@ async def patch_member_profile(
     # 主动更新头像时同步顾客表（后台顾客管理看的是 customers.avatar_url）
     if avatar:
         customer.avatar_url = avatar
-    if data.nickname and CustomerService.is_meaningful_nickname(data.nickname):
-        n = str(data.nickname).strip()
-        customer.nickname = n
-        if not customer.display_name:
-            customer.display_name = n
+    # 昵称归渠道/小程序；展示名仅在空或仍等于旧昵称时跟随，不覆盖员工定制展示名
+    if data.nickname is not None:
+        CustomerService.apply_miniprogram_nickname(customer, data.nickname)
     CustomerService.refresh_profile_status(customer)
     await db.flush()
     disp = await CustomerService.resolve_channel_profile(db, customer, channel)

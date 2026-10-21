@@ -195,7 +195,8 @@ class SharedCartService:
             return None
         table_id = int(table.id)
         cid = int(customer.id)
-        nick = (getattr(customer, "nickname", None) or getattr(customer, "display_name", None) or "").strip() or None
+        # 共享车标签只用渠道昵称，不用员工展示名
+        nick = (getattr(customer, "nickname", None) or "").strip() or None
 
         party = await SharedCartService.get_open_party(db, store_id=store_id, table_id=table_id)
         now = now_local()
@@ -325,7 +326,26 @@ class SharedCartService:
             .scalars()
             .all()
         )
-        nick_map = {int(m.customer_id): (m.nickname_snap or f"顾客{m.customer_id}") for m in members}
+        # 展示优先读实时顾客昵称（渠道侧）；无则回落加入时 snap。展示名不参与共享车标签。
+        live_ids = [int(m.customer_id) for m in members]
+        live_map: dict[int, Customer] = {}
+        if live_ids:
+            live_map = {
+                int(c.id): c
+                for c in (
+                    await db.execute(select(Customer).where(Customer.id.in_(live_ids)))
+                ).scalars().all()
+            }
+        nick_map: dict[int, str] = {}
+        for m in members:
+            cid = int(m.customer_id)
+            live = live_map.get(cid)
+            live_nick = (live.nickname or "").strip() if live else ""
+            snap = (m.nickname_snap or "").strip()
+            nick_map[cid] = live_nick or snap or f"顾客{cid}"
+            # 回写 snap，使同桌期间改昵称后同伴也能尽快看到
+            if live_nick and live_nick != snap:
+                m.nickname_snap = live_nick
         is_host = int(party.host_customer_id) == int(viewer_id)
         items = []
         for r in rows:

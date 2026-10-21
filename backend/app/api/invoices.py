@@ -11,6 +11,7 @@ from app.core.exceptions import AppException
 from app.core.response import calc_pages, money, naive_local_now, success, serialize_dt
 from app.models import Customer, InvoiceRequest, Order, Store
 from app.services.audit_service import AuditService
+from app.services.customer_service import CustomerService
 from app.services.store_scope import assert_store_access, require_bound_store
 from app.utils.tax_no import normalize_tax_no, tax_no_error_message
 
@@ -309,7 +310,7 @@ async def admin_invoice_customer_candidates(
             {
                 "customer_id": int(cust.id),
                 "customer_no": cust.customer_no,
-                "customer_name": cust.display_name or cust.nickname,
+                **CustomerService.staff_customer_name_fields(cust),
                 "customer_phone": cust.phone,
                 "eligible_order_count": int(order_count or 0),
                 "last_order_at": serialize_dt(last_order_at),
@@ -329,6 +330,8 @@ async def admin_invoice_customer_candidates(
                 {
                     "customer_id": 0,
                     "customer_no": None,
+                    "customer_display_name": "未绑定顾客",
+                    "customer_nickname": None,
                     "customer_name": "未绑定顾客",
                     "customer_phone": None,
                     "eligible_order_count": guest_count,
@@ -430,7 +433,7 @@ async def admin_invoice_order_candidates(
                 "store_id": int(o.store_id) if o.store_id else None,
                 "store_name": store.name if store else None,
                 "customer_id": int(o.customer_id) if o.customer_id else None,
-                "customer_name": ((cust.display_name or cust.nickname) if cust else None),
+                **CustomerService.staff_customer_name_fields(cust),
                 "customer_phone": cust.phone if cust else None,
                 "amount": str(money(o.total_amount)),
                 "created_at": serialize_dt(o.created_at),

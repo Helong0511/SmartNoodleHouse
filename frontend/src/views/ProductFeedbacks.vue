@@ -50,9 +50,10 @@
           <div class="sub">ID {{ row.product_id }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="顾客" min-width="140">
+      <el-table-column label="顾客" min-width="160">
         <template #default="{ row }">
-          <div>{{ row.customer_name || '—' }}</div>
+          <div>{{ formatCustomerNameLines(row).primary }}</div>
+          <div v-if="formatCustomerNameLines(row).secondary" class="sub">{{ formatCustomerNameLines(row).secondary }}</div>
           <div class="sub">{{ row.customer_no || `ID ${row.customer_id}` }}</div>
         </template>
       </el-table-column>
@@ -108,6 +109,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
+import { formatCustomerNameLines } from '@/utils/customerName'
 import {
   FEEDBACK_SENTIMENT,
   FEEDBACK_VERDICT,

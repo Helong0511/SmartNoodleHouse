@@ -213,8 +213,11 @@ class ServiceCardService:
         today_social_used = int(await db.scalar(redeemed_q) or 0) > 0
 
         bal = (customer.balance_principal or Decimal("0")) + (customer.balance_gift or Decimal("0"))
-        display = (customer.display_name or customer.nickname or "").strip() or None
-        address = f"{display or '顾客'}您好" if customer.member_status == "MEMBER" else "您好"
+        # 展示名与昵称分字段；称呼优先展示名，否则昵称
+        disp = (customer.display_name or "").strip() or None
+        nick = (customer.nickname or "").strip() or None
+        call_as = disp or nick
+        address = f"{call_as or '顾客'}您好" if customer.member_status == "MEMBER" else "您好"
 
         lc_row = (
             await db.execute(
@@ -232,7 +235,8 @@ class ServiceCardService:
         return {
             "customer_id": int(customer.id),
             "customer_no": customer.customer_no,
-            "display_name": display,
+            "display_name": disp,
+            "nickname": nick,
             "greeting": address,
             "phone_masked": cls._mask_phone(customer.phone),
             "member_status": customer.member_status,

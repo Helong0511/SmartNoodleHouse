@@ -50,13 +50,16 @@
         <el-descriptions-item label="应付金额">
           <strong>¥{{ order.total_amount }}</strong>
         </el-descriptions-item>
-        <el-descriptions-item label="顾客">
-          <template v-if="order.customer_name || order.customer_no || order.customer_id">
-            {{ order.customer_name || '—' }}
+        <el-descriptions-item label="展示名">
+          <template v-if="order.customer_id">
+            {{ order.customer_display_name || '—' }}
             <span v-if="order.customer_no" class="muted">（{{ order.customer_no }}）</span>
-            <span v-else-if="order.customer_id" class="muted">（#{{ order.customer_id }}）</span>
+            <span v-else class="muted">（#{{ order.customer_id }}）</span>
           </template>
           <template v-else>—</template>
+        </el-descriptions-item>
+        <el-descriptions-item label="昵称">
+          {{ order.customer_nickname || '—' }}
         </el-descriptions-item>
         <el-descriptions-item label="手机">{{ order.customer_phone || '—' }}</el-descriptions-item>
         <el-descriptions-item label="是否会员">

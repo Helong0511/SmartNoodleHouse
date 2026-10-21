@@ -114,7 +114,8 @@
                   <el-table-column prop="created_at" label="申请时间" width="160" />
                   <el-table-column label="顾客" min-width="140" show-overflow-tooltip>
                     <template #default="{ row }">
-                      {{ row.customer_nickname || row.customer_no || `顾客#${row.customer_id}` }}
+                      {{ formatCustomerNameLines(row).primary }}
+                      <span v-if="formatCustomerNameLines(row).secondary" class="todo-sub">{{ formatCustomerNameLines(row).secondary }}</span>
                       <span v-if="row.customer_phone" class="todo-sub">{{ row.customer_phone }}</span>
                     </template>
                   </el-table-column>
@@ -335,6 +336,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
+import { formatCustomerNameLines } from '@/utils/customerName'
 
 /** 待办静默轮询间隔（毫秒）；切回标签页会立即再拉一次 */
 const TODO_POLL_MS = 15_000

@@ -596,52 +596,57 @@ async def update_customer(
         raise AppException(40001, "未提交任何可修改字段")
 
     changes: dict = {}
+    # 展示名 = 员工侧；昵称 = 渠道/小程序侧。仅真实变更才记审计；仅昵称变更才同步渠道。
+    nickname_changed = False
     if "display_name" in fields:
-        changes["display_name"] = {"old": customer.display_name, "new": body.display_name}
-        customer.display_name = body.display_name
+        old_display = customer.display_name
+        new_display = body.display_name
+        if not CustomerService.names_equal(old_display, new_display):
+            changes["display_name"] = {"old": old_display, "new": new_display}
+            customer.display_name = new_display
     if "nickname" in fields:
-        changes["nickname"] = {"old": customer.nickname, "new": body.nickname}
-        customer.nickname = body.nickname
-    # 小程序读渠道账号昵称；后台改顾客表后须同步，否则端上仍显示旧名
-    if "display_name" in fields or "nickname" in fields:
-        # 优先用本次改动的昵称；未改昵称则用展示名
-        sync_name = None
-        if "nickname" in fields and CustomerService.is_meaningful_nickname(customer.nickname):
-            sync_name = str(customer.nickname).strip()
-        elif "display_name" in fields and CustomerService.is_meaningful_nickname(customer.display_name):
-            sync_name = str(customer.display_name).strip()
-        else:
-            sync_name = (customer.nickname or customer.display_name or "").strip() or None
-        await CustomerService.sync_display_to_channel_accounts(
-            db, customer, nickname=sync_name
+        old_nick = customer.nickname
+        new_nick = body.nickname
+        if not CustomerService.names_equal(old_nick, new_nick):
+            changes["nickname"] = {"old": old_nick, "new": new_nick}
+            customer.nickname = new_nick
+            nickname_changed = True
+    if nickname_changed and CustomerService.is_meaningful_nickname(customer.nickname):
+        await CustomerService.sync_nickname_to_channel_accounts(
+            db, customer, nickname=str(customer.nickname).strip()
         )
     if "phone" in fields:
         new_phone = body.phone
-        if new_phone:
-            dup = await db.scalar(
-                select(Customer.id).where(
-                    Customer.phone == new_phone,
-                    Customer.id != int(customer_id),
-                    Customer.status == 1,
-                ).limit(1)
-            )
-            if dup:
-                raise AppException(40002, "该手机号已被其他顾客使用")
-        changes["phone"] = {"old": customer.phone, "new": new_phone}
-        customer.phone = new_phone
-        if new_phone:
-            customer.phone_verified = int(customer.phone_verified or 0)
-        else:
-            customer.phone_verified = 0
+        old_phone = customer.phone
+        if not CustomerService.names_equal(old_phone, new_phone):
+            if new_phone:
+                dup = await db.scalar(
+                    select(Customer.id).where(
+                        Customer.phone == new_phone,
+                        Customer.id != int(customer_id),
+                        Customer.status == 1,
+                    ).limit(1)
+                )
+                if dup:
+                    raise AppException(40002, "该手机号已被其他顾客使用")
+            changes["phone"] = {"old": old_phone, "new": new_phone}
+            customer.phone = new_phone
+            if new_phone:
+                customer.phone_verified = int(customer.phone_verified or 0)
+            else:
+                customer.phone_verified = 0
     if "status" in fields and body.status is not None:
-        changes["status"] = {"old": int(customer.status or 0), "new": int(body.status)}
-        customer.status = int(body.status)
-        if int(body.status) == 0:
-            # 禁用时抬升 token_version，使既有顾客 JWT 失效
-            customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
-            customer.account_status = "DISABLED"
-        elif str(getattr(customer, "account_status", "") or "").upper() == "DISABLED":
-            customer.account_status = "ACTIVE"
+        old_status = int(customer.status or 0)
+        new_status = int(body.status)
+        if old_status != new_status:
+            changes["status"] = {"old": old_status, "new": new_status}
+            customer.status = new_status
+            if new_status == 0:
+                # 禁用时抬升 token_version，使既有顾客 JWT 失效
+                customer.token_version = int(getattr(customer, "token_version", 0) or 0) + 1
+                customer.account_status = "DISABLED"
+            elif str(getattr(customer, "account_status", "") or "").upper() == "DISABLED":
+                customer.account_status = "ACTIVE"
     if "birthday_calendar" in fields and body.birthday_calendar is not None:
         from app.utils.birthday import convert_birthday_calendar, normalize_calendar
 
@@ -698,11 +703,15 @@ async def update_customer(
                 changes["birthday_locked"] = {"old": 0, "new": 1}
             customer.birthday_locked = 1
     if "recommend_opt_in" in fields and body.recommend_opt_in is not None:
-        changes["recommend_opt_in"] = {
-            "old": int(customer.recommend_opt_in or 0),
-            "new": int(body.recommend_opt_in),
-        }
-        customer.recommend_opt_in = int(body.recommend_opt_in)
+        old_opt = int(customer.recommend_opt_in or 0)
+        new_opt = int(body.recommend_opt_in)
+        if old_opt != new_opt:
+            changes["recommend_opt_in"] = {"old": old_opt, "new": new_opt}
+            customer.recommend_opt_in = new_opt
+
+    if not changes:
+        # 提交字段与现值相同：不写审计、不空刷渠道
+        return await get_customer(customer_id, request, db, user)
 
     await db.flush()
     await AuditService.log_staff(

@@ -14,7 +14,7 @@
       </el-form-item>
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">门店：{{ boundStoreName }}</el-tag>
       <el-form-item>
-        <el-input v-model="keyword" placeholder="昵称 / 手机 / 编号" clearable style="width: 200px" @keyup.enter="reload"
+        <el-input v-model="keyword" placeholder="展示名 / 昵称 / 手机 / 编号" clearable style="width: 240px" @keyup.enter="reload"
           @clear="reload" />
       </el-form-item>
       <el-form-item>
@@ -274,10 +274,10 @@
             <span>{{ detail.customer_no }}</span>
           </el-form-item>
           <el-form-item label="展示名">
-            <el-input v-model="editForm.display_name" maxlength="100" clearable placeholder="顾客展示名" />
+            <el-input v-model="editForm.display_name" maxlength="100" clearable placeholder="后台/收银台展示（员工维护）" />
           </el-form-item>
           <el-form-item label="昵称">
-            <el-input v-model="editForm.nickname" maxlength="100" clearable placeholder="昵称" />
+            <el-input v-model="editForm.nickname" maxlength="100" clearable placeholder="小程序/渠道昵称（改后同步微信与支付宝）" />
           </el-form-item>
           <el-form-item label="手机">
             <el-input v-model="editForm.phone" maxlength="11" clearable placeholder="11 位手机号，可清空" />
@@ -775,6 +775,16 @@ const editForm = reactive({
   status: 1,
   recommend_opt_in: 1,
 })
+/** 打开详情时的基线，保存时只提交相对基线有变化的字段 */
+const editBaseline = reactive({
+  display_name: '',
+  nickname: '',
+  phone: '',
+  birthday: '' as string | null,
+  birthday_calendar: 'SOLAR' as 'SOLAR' | 'LUNAR',
+  status: 1,
+  recommend_opt_in: 1,
+})
 
 /** 详情头标题：有展示名优先；副行在两者都有且不同时显示昵称 */
 const detailHeadTitle = computed(() => {
@@ -818,6 +828,7 @@ function syncEditForm(d: any) {
   editForm.birthday_calendar = d?.birthday_calendar === 'LUNAR' ? 'LUNAR' : 'SOLAR'
   editForm.status = d?.status === 0 ? 0 : 1
   editForm.recommend_opt_in = d?.recommend_opt_in ? 1 : 0
+  Object.assign(editBaseline, { ...editForm })
 }
 
 /** 历法切换后的展示文案（顶层优先，与权益说明内文案一致） */
@@ -1186,17 +1197,32 @@ async function saveProfile() {
     ElMessage.warning('手机号须为 11 位中国大陆号段')
     return
   }
+  const nextDisplay = editForm.display_name?.trim() || null
+  const nextNick = editForm.nickname?.trim() || null
+  const nextBirthday = editForm.birthday || null
+  const nextCal = editForm.birthday_calendar || 'SOLAR'
+  const body: Record<string, unknown> = {}
+  const basDisplay = String(editBaseline.display_name || '').trim() || null
+  const basNick = String(editBaseline.nickname || '').trim() || null
+  const basPhone = String(editBaseline.phone || '').trim() || null
+  const basBirthday = editBaseline.birthday || null
+  const basCal = editBaseline.birthday_calendar || 'SOLAR'
+  if (nextDisplay !== basDisplay) body.display_name = nextDisplay
+  if (nextNick !== basNick) body.nickname = nextNick
+  if ((phone || null) !== basPhone) body.phone = phone || null
+  if (nextBirthday !== basBirthday) body.birthday = nextBirthday
+  if (nextCal !== basCal) body.birthday_calendar = nextCal
+  if (editForm.status !== editBaseline.status) body.status = editForm.status
+  if (editForm.recommend_opt_in !== editBaseline.recommend_opt_in) {
+    body.recommend_opt_in = editForm.recommend_opt_in
+  }
+  if (!Object.keys(body).length) {
+    ElMessage.info('没有需要保存的修改')
+    return
+  }
   savingProfile.value = true
   try {
-    const res = await api.patch(`/customers/${id}`, {
-      display_name: editForm.display_name?.trim() || null,
-      nickname: editForm.nickname?.trim() || null,
-      phone: phone || null,
-      birthday: editForm.birthday || null,
-      birthday_calendar: editForm.birthday_calendar || 'SOLAR',
-      status: editForm.status,
-      recommend_opt_in: editForm.recommend_opt_in,
-    })
+    const res = await api.patch(`/customers/${id}`, body)
     applyDetailPayload(res.data)
     ElMessage.success('顾客信息已保存')
     await load()

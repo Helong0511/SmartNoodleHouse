@@ -394,7 +394,9 @@ class SocialBenefitService:
                 c = cmap.get(int(it["customer_id"]))
                 if not c:
                     continue
-                it["customer_nickname"] = c.nickname or c.display_name
+                from app.services.customer_service import CustomerService
+
+                it.update(CustomerService.staff_customer_name_fields(c))
                 it["customer_phone"] = c.phone
                 it["customer_no"] = getattr(c, "customer_no", None)
         await SocialBenefitService._enrich_identity_type_names(db, items)
@@ -458,7 +460,9 @@ class SocialBenefitService:
                 c = cmap.get(int(it["customer_id"]))
                 if not c:
                     continue
-                it["customer_nickname"] = c.nickname or c.display_name
+                from app.services.customer_service import CustomerService
+
+                it.update(CustomerService.staff_customer_name_fields(c))
                 it["customer_phone"] = c.phone
                 it["customer_no"] = getattr(c, "customer_no", None)
         await SocialBenefitService._enrich_identity_type_names(db, items)

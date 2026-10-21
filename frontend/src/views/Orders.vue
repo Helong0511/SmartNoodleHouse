@@ -58,14 +58,18 @@
             </el-table-column>
             <el-table-column label="顾客" width="200" show-overflow-tooltip>
               <template #default="{ row }">
-                <div>{{ row.customer_name || (row.customer_id ? `#${row.customer_id}` : '—') }}</div>
-                <div class="fee-tip">
-                  <template v-if="row.is_member">
-                    {{ row.member_level_name || '会员' }}
-                    <span v-if="row.customer_phone"> · {{ row.customer_phone }}</span>
-                  </template>
-                  <template v-else-if="row.customer_no">{{ row.customer_no }}</template>
-                </div>
+                <template v-if="row.customer_id">
+                  <div>{{ formatCustomerNameLines(row).primary }}</div>
+                  <div v-if="formatCustomerNameLines(row).secondary" class="fee-tip">{{ formatCustomerNameLines(row).secondary }}</div>
+                  <div class="fee-tip">
+                    <template v-if="row.is_member">
+                      {{ row.member_level_name || '会员' }}
+                      <span v-if="row.customer_phone"> · {{ row.customer_phone }}</span>
+                    </template>
+                    <template v-else-if="row.customer_no">{{ row.customer_no }}</template>
+                  </div>
+                </template>
+                <span v-else>—</span>
               </template>
             </el-table-column>
             <el-table-column label="桌号" width="100">
@@ -177,6 +181,7 @@ import {
   paymentStatusTagType,
 } from '@/utils/labels'
 import { todayDateRange } from '@/utils/date'
+import { formatCustomerNameLines } from '@/utils/customerName'
 
 const auth = useAuthStore()
 const route = useRoute()

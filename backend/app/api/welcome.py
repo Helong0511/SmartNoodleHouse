@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.response import calc_pages, now_local, success, serialize_dt
+from app.services.customer_service import CustomerService
 from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/welcome", tags=["欢迎"])
@@ -71,8 +72,18 @@ async def welcome_logs(
     if camera_id:
         q = q.where(WelcomeLog.camera_id == camera_id)
     if keyword:
+        from sqlalchemy import or_
+
         kw = f"%{keyword.strip()}%"
-        q = q.where(WelcomeLog.welcome_text.like(kw))
+        # 既搜历史欢迎语快照，也搜当前顾客展示名/昵称（区分两字段）
+        q = q.outerjoin(Customer, Customer.id == WelcomeLog.customer_id).where(
+            or_(
+                WelcomeLog.welcome_text.like(kw),
+                Customer.display_name.like(kw),
+                Customer.nickname.like(kw),
+                Customer.customer_no.like(kw),
+            )
+        )
     from app.core.response import apply_date_range
 
     q = apply_date_range(q, WelcomeLog.created_at, date_from, date_to)
@@ -104,7 +115,7 @@ async def welcome_logs(
             {
                 "id": w.id,
                 "customer_id": w.customer_id,
-                "customer_name": (c.display_name or c.nickname) if c else None,
+                **CustomerService.staff_customer_name_fields(c),
                 "customer_no": c.customer_no if c else None,
                 "camera_id": w.camera_id,
                 "camera_name": cam.name if cam else None,

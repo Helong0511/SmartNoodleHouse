@@ -31,7 +31,9 @@
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column label="顾客" min-width="140">
             <template #default="{ row }">
-              <div>{{ row.customer_nickname || row.customer_no || ('#' + row.customer_id) }}</div>
+              <div>{{ formatCustomerNameLines(row).primary }}</div>
+              <div v-if="formatCustomerNameLines(row).secondary" class="todo-sub">{{ formatCustomerNameLines(row).secondary }}</div>
+              <div class="todo-sub">{{ row.customer_no || ('#' + row.customer_id) }}</div>
               <div style="color:#888;font-size:12px">{{ row.customer_phone || '无手机' }} · ID {{ row.customer_id }}</div>
             </template>
           </el-table-column>
@@ -150,6 +152,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { SOCIAL_IDENTITY } from '@/utils/labels'
+import { formatCustomerNameLines } from '@/utils/customerName'
 
 const route = useRoute()
 const allowedTabs = new Set(['pending', 'rules', 'redemptions', 'stats'])

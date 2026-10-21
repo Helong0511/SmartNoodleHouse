@@ -154,8 +154,63 @@ class CustomerService:
         }
 
     @staticmethod
+    def names_equal(left: str | None, right: str | None) -> bool:
+        return str(left or "").strip() == str(right or "").strip()
+
+    @staticmethod
+    def staff_customer_name_fields(customer: Customer | None) -> dict:
+        """后台列表/详情统一拆分顾客名，禁止把昵称塞进展示名。
+
+        - customer_display_name：员工维护的展示名（可空）
+        - customer_nickname：渠道/小程序镜像昵称（可空）
+        - customer_name：兼容旧前端的单字段称呼，仅作「展示名优先、否则昵称」兜底
+        """
+        if not customer:
+            return {
+                "customer_display_name": None,
+                "customer_nickname": None,
+                "customer_name": None,
+            }
+        display = (customer.display_name or "").strip() or None
+        nick = (customer.nickname or "").strip() or None
+        return {
+            "customer_display_name": display,
+            "customer_nickname": nick,
+            "customer_name": display or nick,
+        }
+
+    @staticmethod
+    def apply_miniprogram_nickname(customer: Customer, nickname: str | None) -> bool:
+        """小程序改昵称：写 customers.nickname；不覆盖员工已定制的展示名。
+
+        展示名仅在以下情况跟随昵称更新：
+        1) 展示名为空；或
+        2) 展示名仍等于改名前的昵称（当初由昵称自动拷贝而来）。
+
+        返回是否实际改动了 nickname / display_name。
+        """
+        if not CustomerService.is_meaningful_nickname(nickname):
+            return False
+        n = str(nickname).strip()
+        old_nick = (customer.nickname or "").strip() or None
+        old_display = (customer.display_name or "").strip() or None
+        changed = False
+        if not CustomerService.names_equal(old_nick, n):
+            customer.nickname = n
+            changed = True
+        if not CustomerService.is_meaningful_nickname(old_display):
+            if not CustomerService.names_equal(customer.display_name, n):
+                customer.display_name = n
+                changed = True
+        elif old_nick and CustomerService.names_equal(old_display, old_nick):
+            if not CustomerService.names_equal(old_display, n):
+                customer.display_name = n
+                changed = True
+        return changed
+
+    @staticmethod
     def public_label(customer: Customer | None) -> str | None:
-        """只读展示用单字段称呼（展示名优先，否则昵称）。"""
+        """单字段称呼兜底：展示名优先，否则昵称。新接口请用 staff_customer_name_fields。"""
         if not customer:
             return None
         name = (customer.display_name or customer.nickname or "").strip()
@@ -1276,15 +1331,32 @@ class CustomerService:
         nickname: str | None = None,
         avatar_url: str | None = None,
     ) -> None:
-        """收银台/后台只有一份展示名：仅在顾客表为空时用本渠道资料补上，不覆盖已有值。"""
-        if CustomerService.is_meaningful_nickname(nickname) and not CustomerService.is_meaningful_nickname(
-            customer.nickname or customer.display_name
-        ):
+        """用渠道资料补空字段：昵称与展示名各自判断，互不顶替已有值。"""
+        if CustomerService.is_meaningful_nickname(nickname):
             n = str(nickname).strip()
-            customer.nickname = n
-            customer.display_name = customer.display_name or n
+            if not CustomerService.is_meaningful_nickname(customer.nickname):
+                customer.nickname = n
+            if not CustomerService.is_meaningful_nickname(customer.display_name):
+                customer.display_name = n
         if avatar_url and not str(customer.avatar_url or "").strip():
             customer.avatar_url = str(avatar_url).strip()
+
+    @staticmethod
+    async def sync_nickname_to_channel_accounts(
+        db: AsyncSession,
+        customer: Customer,
+        *,
+        nickname: str | None = None,
+    ) -> None:
+        """仅当后台改了「昵称」时同步到微信/支付宝渠道账号。
+
+        展示名是员工侧字段，不推送到小程序渠道，避免覆盖两端各自昵称。
+        """
+        n = str(nickname if nickname is not None else (customer.nickname or "") or "").strip()
+        if not CustomerService.is_meaningful_nickname(n):
+            return
+        for ch in ("wechat", "alipay"):
+            await CustomerService.save_channel_profile(db, int(customer.id), ch, nickname=n)
 
     @staticmethod
     async def sync_display_to_channel_accounts(
@@ -1293,12 +1365,10 @@ class CustomerService:
         *,
         nickname: str | None = None,
     ) -> None:
-        """后台改展示名/昵称后，同步到微信/支付宝渠道账号，供小程序立刻可见。"""
-        n = str(nickname if nickname is not None else (customer.nickname or customer.display_name) or "").strip()
-        if not CustomerService.is_meaningful_nickname(n):
-            return
-        for ch in ("wechat", "alipay"):
-            await CustomerService.save_channel_profile(db, int(customer.id), ch, nickname=n)
+        """兼容旧名：语义等同 sync_nickname_to_channel_accounts（只同步昵称）。"""
+        await CustomerService.sync_nickname_to_channel_accounts(
+            db, customer, nickname=nickname
+        )
 
     @staticmethod
     async def resolve_channel_profile(db: AsyncSession, customer: Customer, channel: str) -> dict:
@@ -1316,7 +1386,8 @@ class CustomerService:
         other_rows = await CustomerService._channel_accounts(db, customer.id, other)
         other_done = any(int(getattr(r, "profile_completed", 0) or 0) == 1 for r in other_rows)
         if not other_done:
-            fallback_nick = str(customer.nickname or customer.display_name or "").strip()
+            # 渠道昵称只回落顾客表 nickname，禁止把员工展示名抄进小程序渠道
+            fallback_nick = str(customer.nickname or "").strip()
             fallback_avatar = str(customer.avatar_url or "").strip()
             dirty = False
             if not nick and CustomerService.is_meaningful_nickname(fallback_nick):

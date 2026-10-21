@@ -11,13 +11,14 @@
       <el-tab-pane label="流水" name="ledger">
         <div class="toolbar">
           <el-select v-model="ledgerQ.customer_id" filterable remote clearable reserve-keyword
-            placeholder="搜索顾客（昵称/手机/编号）" :remote-method="searchLedgerCustomers" :loading="ledgerCustomerSearching"
-            style="width: 260px" @change="loadLedger(1)" @clear="loadLedger(1)">
+            placeholder="搜索顾客（展示名/昵称/手机/编号）" :remote-method="searchLedgerCustomers" :loading="ledgerCustomerSearching"
+            style="width: 280px" @change="loadLedger(1)" @clear="loadLedger(1)">
             <el-option v-for="c in ledgerCustomerOptions" :key="c.id" :label="customerOptionLabel(c)" :value="c.id">
               <div class="opt-row">
                 <el-avatar :size="28" :src="mediaUrl(c.avatar_url) || undefined">客</el-avatar>
                 <div class="opt-meta">
-                  <div>{{ c.display_name || c.nickname || '顾客' }}</div>
+                  <div>{{ formatCustomerNameLines(c).primary }}</div>
+                  <div v-if="formatCustomerNameLines(c).secondary" class="muted">{{ formatCustomerNameLines(c).secondary }}</div>
                   <div class="muted">{{ c.phone || '无手机号' }} · {{ c.customer_no }}</div>
                 </div>
               </div>
@@ -46,7 +47,8 @@
                   class="avatar-thumb" :preview-src-list="[mediaUrl(row.customer_avatar_url)]" preview-teleported :z-index="4000" />
                 <span v-else class="no-avatar">无</span>
                 <div class="cust-meta">
-                  <div class="cust-name">{{ row.customer_name || row.customer_nickname || '—' }}</div>
+                  <div class="cust-name">{{ formatCustomerNameLines(row).primary }}</div>
+                  <div v-if="formatCustomerNameLines(row).secondary" class="cust-sub">{{ formatCustomerNameLines(row).secondary }}</div>
                   <div class="cust-sub">
                     <span v-if="row.customer_phone">{{ row.customer_phone }}</span>
                     <span v-else class="muted">无手机号</span>
@@ -111,13 +113,14 @@
           </el-form-item>
           <el-form-item label="顾客" required>
             <el-select v-model="adjust.customer_id" filterable remote clearable reserve-keyword
-              placeholder="输入昵称 / 手机 / 编号搜索" :remote-method="searchAdjustCustomers" :loading="adjustCustomerSearching"
+              placeholder="输入展示名 / 昵称 / 手机 / 编号搜索" :remote-method="searchAdjustCustomers" :loading="adjustCustomerSearching"
               style="width: 100%" @change="onAdjustCustomerChange">
               <el-option v-for="c in adjustCustomerOptions" :key="c.id" :label="customerOptionLabel(c)" :value="c.id">
                 <div class="opt-row">
                   <el-avatar :size="28" :src="mediaUrl(c.avatar_url) || undefined">客</el-avatar>
                   <div class="opt-meta">
-                    <div>{{ c.display_name || c.nickname || '顾客' }}</div>
+                    <div>{{ formatCustomerNameLines(c).primary }}</div>
+                    <div v-if="formatCustomerNameLines(c).secondary" class="muted">{{ formatCustomerNameLines(c).secondary }}</div>
                     <div class="muted">
                       {{ c.phone || '无手机号' }} · 余额 ¥{{ c.balance_total || '0.00' }}
                     </div>
@@ -131,8 +134,11 @@
               <el-avatar :size="44" :src="mediaUrl(selectedAdjustCustomer.avatar_url) || undefined">客</el-avatar>
               <div class="selected-meta">
                 <div class="cust-name">
-                  {{ selectedAdjustCustomer.display_name || selectedAdjustCustomer.nickname || '顾客' }}
+                  {{ formatCustomerNameLines(selectedAdjustCustomer).primary }}
                   <span class="muted"> · #{{ selectedAdjustCustomer.id }}</span>
+                </div>
+                <div v-if="formatCustomerNameLines(selectedAdjustCustomer).secondary" class="cust-sub">
+                  {{ formatCustomerNameLines(selectedAdjustCustomer).secondary }}
                 </div>
                 <div class="cust-sub">
                   {{ selectedAdjustCustomer.phone || '无手机号' }}
@@ -260,6 +266,7 @@ import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { mediaUrl } from '@/utils/media'
+import { formatCustomerNameLines } from '@/utils/customerName'
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
   TOPUP: '充值',
@@ -324,9 +331,11 @@ const adjust = reactive({
 })
 
 function customerOptionLabel(c: any) {
-  const name = c?.display_name || c?.nickname || '顾客'
+  const lines = formatCustomerNameLines(c)
+  const name = lines.primary === '—' ? '顾客' : lines.primary
+  const nickHint = lines.secondary ? ` ${lines.secondary}` : ''
   const phone = c?.phone ? ` ${c.phone}` : ''
-  return `${name}${phone}（${c?.customer_no || c?.id}）`
+  return `${name}${nickHint}${phone}（${c?.customer_no || c?.id}）`
 }
 
 async function searchWalletCustomers(keyword: string): Promise<any[]> {
@@ -551,10 +560,8 @@ async function submitAdjust() {
     ElMessage.warning('本金/赠送至少填一项')
     return
   }
-  const name =
-    selectedAdjustCustomer.value?.display_name ||
-    selectedAdjustCustomer.value?.nickname ||
-    `#${adjust.customer_id}`
+  const lines = formatCustomerNameLines(selectedAdjustCustomer.value)
+  const name = lines.primary !== '—' ? lines.primary : `#${adjust.customer_id}`
   await ElMessageBox.confirm(
     `确认对「${name}」调账？本金 ${adjust.delta_principal}，赠送 ${adjust.delta_gift}`,
     '调账确认',
