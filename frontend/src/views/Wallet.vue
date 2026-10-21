@@ -96,7 +96,7 @@
           <el-table-column prop="principal_after" label="本金余额" width="110" />
           <el-table-column prop="gift_after" label="赠送余额" width="110" />
           <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="created_at" label="时间" min-width="170" />
+          <el-table-column prop="created_at" label="时间" width="280" />
         </el-table>
         <div class="pager">
           <el-pagination background layout="total, prev, pager, next" :total="ledger.total"

@@ -73,11 +73,11 @@
               <el-tag size="small" :type="statusTag(row.status)">{{ statusLabel(row.status) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="obtained_at" label="发券时间" width="170">
+          <el-table-column prop="obtained_at" label="发券时间" width="280">
             <template #default="{ row }">{{ row.obtained_at || '—' }}</template>
           </el-table-column>
-          <el-table-column prop="expires_at" label="过期时间" width="170" />
-          <el-table-column prop="used_at" label="使用时间" width="170">
+          <el-table-column prop="expires_at" label="过期时间" width="280" />
+          <el-table-column prop="used_at" label="使用时间" width="280">
             <template #default="{ row }">{{ row.used_at || '—' }}</template>
           </el-table-column>
         </el-table>
