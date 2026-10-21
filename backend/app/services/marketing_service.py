@@ -227,6 +227,8 @@ class MarketingService:
         row.boost_product_ids = boost_product_ids
         row.remark = remark
         await db.flush()
+        # TimestampMixin server_default：flush 后未加载 created_at/updated_at，同步 _payload 会 MissingGreenlet
+        await db.refresh(row)
         return row
 
     @classmethod

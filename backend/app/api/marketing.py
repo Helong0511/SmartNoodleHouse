@@ -104,6 +104,7 @@ async def create_segment(
         detail={"code": row.code},
     )
     await db.commit()
+    await db.refresh(row)
     return success(SegmentService._payload(row), request=request)
 
 
@@ -132,6 +133,7 @@ async def update_segment(
         detail={"code": row.code},
     )
     await db.commit()
+    await db.refresh(row)
     return success(SegmentService._payload(row), request=request)
 
 
@@ -235,6 +237,7 @@ async def create_campaign(
         detail={"code": row.code},
     )
     await db.commit()
+    await db.refresh(row)
     return success(MarketingService._payload(row), request=request)
 
 
@@ -270,6 +273,7 @@ async def update_campaign(
         detail={"code": row.code},
     )
     await db.commit()
+    await db.refresh(row)
     return success(MarketingService._payload(row), request=request)
 
 
@@ -310,6 +314,7 @@ async def set_campaign_status(
         detail={"status": row.status},
     )
     await db.commit()
+    await db.refresh(row)
     return success(MarketingService._payload(row), request=request)
 
 

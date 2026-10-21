@@ -125,8 +125,9 @@
       <el-table-column label="推荐加权" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ boostProductsLabel(row.boost_product_ids) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="360" fixed="right">
+      <el-table-column label="操作" width="420" fixed="right">
         <template #default="{ row }">
+          <el-button size="small" @click="showDetail(row)">详情</el-button>
           <el-button v-if="row.status === 'DRAFT' && canEditRow(row)" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button
             v-if="row.status === 'DRAFT' || row.status === 'SCHEDULED'"
@@ -257,6 +258,17 @@
           <el-input-number v-model="form.weekly_cap_override" :min="0" :max="100" :controls="true" />
           <div class="hint">{{ CAMPAIGN_FIELD_HELP.weekly_cap_override }}</div>
         </el-form-item>
+        <el-form-item label="预算上限">
+          <el-input-number
+            v-model="form.budget_cap"
+            :min="0"
+            :precision="2"
+            :step="100"
+            :controls="true"
+            placeholder="空=不限制"
+          />
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.budget_cap }}</div>
+        </el-form-item>
         <el-form-item label="推荐加权餐品">
           <el-select
             v-model="form.boost_product_ids"
@@ -314,6 +326,81 @@
         <el-table-column prop="last_error" label="错误" min-width="140" show-overflow-tooltip />
       </el-table>
     </el-dialog>
+
+    <el-drawer
+      v-model="detailDlg"
+      :title="detailRow ? `活动详情 · ${detailRow.name}` : '活动详情'"
+      size="560px"
+      destroy-on-close
+    >
+      <template v-if="detailRow">
+        <h4 class="detail-section">基础</h4>
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="ID">{{ detailRow.id }}</el-descriptions-item>
+          <el-descriptions-item label="编码">{{ detailRow.code || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="名称">{{ detailRow.name || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ typeLabel(detailRow.campaign_type) }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag size="small" :type="statusTag(detailRow.status)">
+              {{ label(MARKETING_CAMPAIGN_STATUS, detailRow.status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="门店">{{ storeLabel(detailRow.store_id) }}</el-descriptions-item>
+        </el-descriptions>
+
+        <h4 class="detail-section">投放</h4>
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="分群">{{ segmentLabel(detailRow.segment_id) }}</el-descriptions-item>
+          <el-descriptions-item label="券模板">{{ couponLabel(detailRow.coupon_template_id) }}</el-descriptions-item>
+          <el-descriptions-item label="排期">
+            <span v-if="detailRow.start_at || detailRow.end_at">
+              {{ detailRow.start_at || '—' }} ~ {{ detailRow.end_at || '—' }}
+            </span>
+            <span v-else>—</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <h4 class="detail-section">规则</h4>
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="预算上限">
+            {{ detailRow.budget_cap != null && detailRow.budget_cap !== '' ? `${detailRow.budget_cap} 元` : '不限制' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="周发券上限">
+            {{
+              detailRow.weekly_cap_override == null
+                ? '系统默认'
+                : detailRow.weekly_cap_override === 0
+                  ? '不限制'
+                  : detailRow.weekly_cap_override
+            }}
+          </el-descriptions-item>
+          <el-descriptions-item label="推荐加权">{{ boostProductsLabel(detailRow.boost_product_ids) }}</el-descriptions-item>
+          <el-descriptions-item label="备注">{{ detailRow.remark || '—' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <h4 class="detail-section">元数据</h4>
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="创建人">{{ detailRow.created_by != null ? `#${detailRow.created_by}` : '—' }}</el-descriptions-item>
+          <el-descriptions-item label="发布时间">{{ detailRow.published_at || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间">{{ detailRow.created_at || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="更新时间">{{ detailRow.updated_at || '—' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <h4 class="detail-section">任务汇总</h4>
+        <div v-loading="detailStatsLoading" class="detail-stats">
+          <template v-if="detailTaskStats && Object.keys(detailTaskStats).length">
+            <el-tag
+              v-for="(v, k) in detailTaskStats"
+              :key="k"
+              size="small"
+              class="detail-stat-tag"
+            >{{ label(MARKETING_TASK_STATUS, String(k), String(k)) }}={{ v }}</el-tag>
+          </template>
+          <span v-else-if="!detailStatsLoading" class="hint">暂无任务（未发布或尚未入队）</span>
+        </div>
+        <el-button type="primary" plain style="margin-top: 12px" @click="openTasksFromDetail">打开任务监控</el-button>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -378,6 +465,10 @@ const filterStoreId = ref<number | undefined>()
 const marketingEnabled = ref<boolean | null>(null)
 const dlg = ref(false)
 const taskDlg = ref(false)
+const detailDlg = ref(false)
+const detailRow = ref<any | null>(null)
+const detailTaskStats = ref<Record<string, number> | null>(null)
+const detailStatsLoading = ref(false)
 const tasks = ref<any[]>([])
 const taskStats = ref<Record<string, number> | null>(null)
 const taskCampaignId = ref<number | null>(null)
@@ -392,6 +483,7 @@ const form = reactive<any>({
   start_at: null as string | null,
   end_at: null as string | null,
   weekly_cap_override: null as number | null,
+  budget_cap: null as number | null,
   boost_product_ids: [] as number[],
   remark: '',
 })
@@ -485,6 +577,12 @@ function boostProductsLabel(ids: unknown) {
 function normalizeBoostIds(ids: unknown): number[] {
   if (!Array.isArray(ids)) return []
   return ids.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+}
+
+function normalizeBudgetCap(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
 }
 
 function todayTag() {
@@ -591,6 +689,7 @@ async function openEdit(row?: any) {
       start_at: row.start_at || null,
       end_at: row.end_at || null,
       weekly_cap_override: row.weekly_cap_override ?? null,
+      budget_cap: normalizeBudgetCap(row.budget_cap),
       boost_product_ids: boost,
       remark: row.remark || '',
     })
@@ -611,6 +710,7 @@ async function openEdit(row?: any) {
       start_at: null,
       end_at: null,
       weekly_cap_override: null,
+      budget_cap: null,
       boost_product_ids: [],
       remark: '',
     })
@@ -638,6 +738,7 @@ async function openEditFromPreset(p: CampaignPreset) {
     start_at: null,
     end_at: null,
     weekly_cap_override: null,
+    budget_cap: null,
     boost_product_ids: [],
     remark: p.remark,
   })
@@ -673,6 +774,7 @@ async function save() {
         form.weekly_cap_override === null || form.weekly_cap_override === undefined
           ? null
           : Number(form.weekly_cap_override),
+      budget_cap: normalizeBudgetCap(form.budget_cap),
       boost_product_ids: boost.length ? boost : null,
       remark: form.remark || null,
       store_id: auth.isSuperAdmin ? (form.store_id || null) : (auth.user?.store_id || null),
@@ -725,6 +827,32 @@ async function setStatus(row: any, status: string) {
     if (e === 'cancel' || e?.message === 'cancel') return
     ElMessage.error(e?.message || '状态切换失败')
   }
+}
+
+async function showDetail(row: any) {
+  detailRow.value = row
+  detailTaskStats.value = null
+  detailDlg.value = true
+  const boost = normalizeBoostIds(row.boost_product_ids)
+  if (boost.length) await ensureBoostProductsInOptions(boost)
+  detailStatsLoading.value = true
+  try {
+    const res = await api.get(`/marketing/campaigns/${row.id}/tasks`, {
+      params: { page: 1, page_size: 1 },
+    })
+    detailTaskStats.value = res.data?.task_stats || null
+  } catch (e: any) {
+    detailTaskStats.value = null
+    ElMessage.error(e?.message || '加载任务汇总失败')
+  } finally {
+    detailStatsLoading.value = false
+  }
+}
+
+function openTasksFromDetail() {
+  if (!detailRow.value) return
+  detailDlg.value = false
+  showTasks(detailRow.value)
 }
 
 async function showTasks(row: any) {
@@ -786,4 +914,13 @@ onMounted(load)
   align-items: center;
 }
 .hint { margin-top: 4px; font-size: 12px; color: #888; line-height: 1.4; }
+.detail-section {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+.detail-section:first-child { margin-top: 0; }
+.detail-stats { min-height: 28px; }
+.detail-stat-tag { margin: 0 8px 8px 0; }
 </style>

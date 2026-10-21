@@ -247,6 +247,8 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
     )
     db.add(camera)
     await db.flush()
+    # server_default 的 created_at 须 refresh，否则同步 _serialize 会 MissingGreenlet
+    await db.refresh(camera)
     await AuditService.log(
         db,
         user_id=user.id,

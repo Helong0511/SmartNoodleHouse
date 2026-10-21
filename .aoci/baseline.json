@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T04:37:18Z",
+  "updated_at": "2026-10-21T08:04:29Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "3f0ba9410815df17745ce8c8a3d873896f3c0be78c9c6d25300fd664e17a65b1",
-      "size": 178521,
-      "normalized_sha256": "3f0ba9410815df17745ce8c8a3d873896f3c0be78c9c6d25300fd664e17a65b1"
+      "sha256": "a335f4a3a0736037c15522b8a1d9a11b36cff1e09f40c2306bed806a07d60ff5",
+      "size": 178716,
+      "normalized_sha256": "a335f4a3a0736037c15522b8a1d9a11b36cff1e09f40c2306bed806a07d60ff5"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -503,9 +503,9 @@
     },
     "backend/app/api/marketing.py": {
       "role": "index",
-      "sha256": "12eb8214d095082ba8a4cd373c8844b189202d2c2461bff14397ddd99c2a293b",
-      "size": 12545,
-      "normalized_sha256": "12eb8214d095082ba8a4cd373c8844b189202d2c2461bff14397ddd99c2a293b"
+      "sha256": "217062b329b83fff6794a519477187f9d510cd84c2ebf3736294c66b9f657d78",
+      "size": 12675,
+      "normalized_sha256": "217062b329b83fff6794a519477187f9d510cd84c2ebf3736294c66b9f657d78"
     },
     "backend/app/api/member_levels.py": {
       "role": "index",
@@ -2275,9 +2275,9 @@
     },
     "frontend/src/utils/marketingHelp.ts": {
       "role": "index",
-      "sha256": "d74c601c4afccb9bc27a9043b6d0a568f482b8e056c4c4f9131b553e66fe9657",
-      "size": 7569,
-      "normalized_sha256": "d74c601c4afccb9bc27a9043b6d0a568f482b8e056c4c4f9131b553e66fe9657"
+      "sha256": "ffd07c9d5854cafd2c47a615d96349e48a7c20409022f46d223cbce99b1e6803",
+      "size": 7699,
+      "normalized_sha256": "ffd07c9d5854cafd2c47a615d96349e48a7c20409022f46d223cbce99b1e6803"
     },
     "frontend/src/utils/media.ts": {
       "role": "index",
@@ -2353,9 +2353,9 @@
     },
     "frontend/src/views/Coupons.vue": {
       "role": "index",
-      "sha256": "188b60de7b7e449a7a72a30c1f588221adbf5a1c496478ab4da7fc651236f7ca",
+      "sha256": "e4b7bac8c4806052666ef38bfedfd43457e38375a05068c77d108f60d5704b42",
       "size": 26509,
-      "normalized_sha256": "188b60de7b7e449a7a72a30c1f588221adbf5a1c496478ab4da7fc651236f7ca"
+      "normalized_sha256": "e4b7bac8c4806052666ef38bfedfd43457e38375a05068c77d108f60d5704b42"
     },
     "frontend/src/views/CustomerDisplay.vue": {
       "role": "index",
@@ -2401,9 +2401,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "b75ae281a31ef2958b11a1448c88cf42766ddb167a255ba27e311cf3a288e6e4",
-      "size": 29896,
-      "normalized_sha256": "b75ae281a31ef2958b11a1448c88cf42766ddb167a255ba27e311cf3a288e6e4"
+      "sha256": "a57f907407c948859b2375ae3323b10a16befdbadc7781d17327989b624a3f0e",
+      "size": 35880,
+      "normalized_sha256": "a57f907407c948859b2375ae3323b10a16befdbadc7781d17327989b624a3f0e"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -2539,9 +2539,9 @@
     },
     "frontend/src/views/Wallet.vue": {
       "role": "index",
-      "sha256": "284b781ad7e2f6b8514432335fdfaddc6388baf7de584e7762c81a7b36ea9a73",
-      "size": 26508,
-      "normalized_sha256": "284b781ad7e2f6b8514432335fdfaddc6388baf7de584e7762c81a7b36ea9a73"
+      "sha256": "72c26d75632c250c1aa536464320f3653fcddb146d29de66facaaa290f001546",
+      "size": 26504,
+      "normalized_sha256": "72c26d75632c250c1aa536464320f3653fcddb146d29de66facaaa290f001546"
     },
     "frontend/src/views/WelcomeLogs.vue": {
       "role": "index",
