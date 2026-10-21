@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import CurrentCustomer, DbSession
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
 from app.models import DiningTable, Store
