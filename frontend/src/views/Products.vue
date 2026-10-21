@@ -32,11 +32,17 @@
       <el-form-item>
         <el-checkbox v-model="lowStockFilter" @change="reload">仅看低库存（≤{{ lowStockThreshold }}）</el-checkbox>
       </el-form-item>
-      <el-button type="primary" @click="openForm()">新增餐品</el-button>
-      <el-button v-if="auth.isSuperAdmin" type="success" plain :disabled="!selectedIds.length"
+      <el-button v-if="canCreateProduct" type="primary" @click="openForm()">新增餐品</el-button>
+      <el-button v-if="auth.isSuperAdmin && canCreateProduct" type="success" plain :disabled="!selectedIds.length"
         @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
-      <el-button type="warning" plain :loading="rebuilding" @click="rebuildStoreTaste">
+      <el-button
+        v-if="canUpdateProduct"
+        type="warning"
+        plain
+        :loading="rebuilding"
+        @click="rebuildStoreTaste"
+      >
         重算本店口味标签
       </el-button>
     </el-form>
@@ -68,8 +74,13 @@
       <el-table-column prop="sales_count" label="销量" width="80" />
       <el-table-column label="状态" width="120">
         <template #default="{ row }">
-          <el-select :model-value="row.status" size="small" class="status-select"
-            @change="(v: string) => changeStatus(row, v)">
+          <el-select
+            :model-value="row.status"
+            size="small"
+            class="status-select"
+            :disabled="!canUpdateProduct"
+            @change="(v: string) => changeStatus(row, v)"
+          >
             <el-option label="在售" value="ON_SALE" />
             <el-option label="下架" value="OFF_SALE" />
           </el-select>
@@ -95,9 +106,9 @@
       <el-table-column prop="sort_order" label="排序" width="70" />
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openForm(row)">编辑</el-button>
-          <el-button link type="success" @click="openPushDialog(row)">推送外卖</el-button>
-          <el-button link type="danger" @click="remove(row)">删除</el-button>
+          <el-button v-if="canUpdateProduct" link type="primary" @click="openForm(row)">编辑</el-button>
+          <el-button v-if="canUpdateProduct" link type="success" @click="openPushDialog(row)">推送外卖</el-button>
+          <el-button v-if="canDeleteProduct" link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -381,6 +392,15 @@ import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
 import { storePrefixFromNo, suggestCodeFromName } from '@/utils/bizCode'
 
 const auth = useAuthStore()
+const canCreateProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:create'),
+)
+const canUpdateProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:update'),
+)
+const canDeleteProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:delete'),
+)
 const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)

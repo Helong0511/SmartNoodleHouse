@@ -20,7 +20,7 @@
         <el-option label="禁用" :value="0" />
       </el-select>
       <el-button type="primary" @click="reload">搜索</el-button>
-      <el-button type="primary" @click="openForm()">新增员工</el-button>
+      <el-button v-if="canManageUsers" type="primary" @click="openForm()">新增员工</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
 
@@ -44,7 +44,7 @@
       <el-table-column prop="created_at" label="创建时间" width="170">
         <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column v-if="canManageUsers" label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openForm(row)">编辑</el-button>
           <el-button link type="warning" @click="openReset(row)">重置密码</el-button>
@@ -117,12 +117,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const canManageUsers = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('user:manage'),
+)
 const loading = ref(false)
 const saving = ref(false)
 const users = ref<any[]>([])

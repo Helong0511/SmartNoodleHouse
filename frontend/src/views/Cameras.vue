@@ -13,7 +13,7 @@
         <el-tag v-else-if="boundStoreName" type="info" style="margin-right: 8px">
           门店：{{ boundStoreName }}
         </el-tag>
-        <el-button type="primary" @click="openForm()">新增摄像头</el-button>
+        <el-button v-if="canManageCameras" type="primary" @click="openForm()">新增摄像头</el-button>
         <el-button @click="refreshAll">刷新</el-button>
       </div>
     </div>
@@ -41,11 +41,13 @@
       <el-table-column label="操作" width="320" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openPreview(row)">预览</el-button>
-          <el-button link size="small" @click="openForm(row)">编辑</el-button>
-          <el-button link type="success" size="small" @click="startCam(row.id)">启动</el-button>
-          <el-button link type="warning" size="small" @click="restartCam(row.id)">重启</el-button>
-          <el-button link size="small" @click="stopCam(row.id)">停止</el-button>
-          <el-button link type="danger" size="small" @click="removeCam(row)">删除</el-button>
+          <template v-if="canManageCameras">
+            <el-button link size="small" @click="openForm(row)">编辑</el-button>
+            <el-button link type="success" size="small" @click="startCam(row.id)">启动</el-button>
+            <el-button link type="warning" size="small" @click="restartCam(row.id)">重启</el-button>
+            <el-button link size="small" @click="stopCam(row.id)">停止</el-button>
+            <el-button link type="danger" size="small" @click="removeCam(row)">删除</el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -149,6 +151,9 @@ import {
 } from '@/utils/labels'
 
 const auth = useAuthStore()
+const canManageCameras = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('camera:manage'),
+)
 const loading = ref(false)
 const saving = ref(false)
 const cameras = ref<any[]>([])

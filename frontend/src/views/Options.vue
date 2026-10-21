@@ -1,8 +1,8 @@
 <template>
   <div v-loading="loading">
     <div class="toolbar">
-      <el-button type="primary" @click="openGroupForm()">新增规格组</el-button>
-      <el-button v-if="isSuper" type="success" plain :disabled="!selectedIds.length" @click="openCopy">复制到门店</el-button>
+      <el-button v-if="canCreateProduct" type="primary" @click="openGroupForm()">新增规格组</el-button>
+      <el-button v-if="isSuper && canCreateProduct" type="success" plain :disabled="!selectedIds.length" @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
       <el-select v-if="isSuper" v-model="filterStoreId" clearable placeholder="门店筛选（空=全部可见）"
         style="width:220px;margin-left:12px" @change="load">

@@ -6,8 +6,8 @@
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
-      <el-button type="primary" @click="openForm()">新增分类</el-button>
-      <el-button v-if="auth.isSuperAdmin" type="success" plain :disabled="!selectedIds.length"
+      <el-button v-if="canCreateProduct" type="primary" @click="openForm()">新增分类</el-button>
+      <el-button v-if="auth.isSuperAdmin && canCreateProduct" type="success" plain :disabled="!selectedIds.length"
         @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
@@ -34,7 +34,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140">
+      <el-table-column v-if="canUpdateProduct" label="操作" width="140">
         <template #default="{ row }">
           <el-button link type="primary" @click="openForm(row)">编辑</el-button>
           <el-button link type="danger" @click="toggleStatus(row)">
@@ -104,6 +104,12 @@ import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
 import { codeHint, storePrefixFromNo, suggestCodeFromName } from '@/utils/bizCode'
 
 const auth = useAuthStore()
+const canCreateProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:create'),
+)
+const canUpdateProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:update'),
+)
 const loading = ref(false)
 const saving = ref(false)
 const categories = ref<any[]>([])
