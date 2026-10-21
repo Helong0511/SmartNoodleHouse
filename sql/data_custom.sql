@@ -483,9 +483,53 @@ SELECT NULL, 'all_members', '全体会员', 'DYNAMIC',
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'all_members');
 
+-- 社会贡献公益身份分群（仅 ACTIVE 且在有效期内的认定；教师节/重阳/八一等节日发券用）
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'social_teacher', '公益身份·教师', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'social_identity_code', 'op', 'eq', 'value', 'TEACHER')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'social_teacher');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'social_elder', '公益身份·长者', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'social_identity_code', 'op', 'eq', 'value', 'ELDER')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'social_elder');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'social_veteran', '公益身份·退役军人', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'social_identity_code', 'op', 'eq', 'value', 'VETERAN')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'social_veteran');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'social_sanitation', '公益身份·环卫工', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'social_identity_code', 'op', 'eq', 'value', 'SANITATION')
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'social_sanitation');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'birthday_today', '今日生日会员', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'is_birthday_today', 'op', 'eq', 'value', true)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'birthday_today');
+
 -- 预置营销活动（总部 DRAFT；按分群 code / 券模板 name / admin 关联，不硬编码 id）
 -- 状态一律 DRAFT：导入后不自动发券，需后台发布
--- 发布引擎强制要求 segment_id + coupon_template_id，节日/生日类也绑定 all_members（可编辑改窄）
+-- 射洪肠旺面客单约 8～15 元：轻券优先满15/20减3，忌无排期对全体发 10 元代金
+-- 身份节日绑公益分群；生日绑 birthday_today（勿绑 all_members，否则一发布即普发）
+-- boost_product_ids 按 product_no 聚合 SH01 招牌/抄手/汤圆，供推荐加权
 INSERT INTO `marketing_campaigns` (
     `store_id`, `code`, `name`, `campaign_type`, `status`,
     `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
@@ -570,10 +614,13 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'member_day', '会员日·老客回访', 'MEMBER_DAY', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       1500.00, NULL, NULL, '轻券回访；配合 champions 高积分活跃分群',
+       800.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian','SH01-ZhaoPaiMian-ZaJiangMian')),
+       '射洪会员日：高积分活跃轻券满20减3；加权招牌肠旺/杂酱',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'champions'
   AND NOT EXISTS (
@@ -589,7 +636,7 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'low_balance_boost', '低余额催充', 'MEMBER_DAY', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       400.00, NULL, NULL, '配合 low_balance 分群；可配储值活动',
+       400.00, 1, NULL, '余额不足20催充；券门槛50偏高，宜配储值档，勿高频发布',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '满50享打9折'
@@ -608,12 +655,15 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'birthday_egg', '生日·免费加蛋', 'BIRTHDAY', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       300.00, NULL, NULL, '生日权益加码；默认全体会员，可改窄分群',
+       300.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-TangYuan-TangYuanHeBaoDan','SH01-ZhaoPaiMian-ChangWangMian')),
+       '仅今日生日会员；勿绑全体。系统设置亦可自动发生日券，营销作加码/补发',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '生日免费加蛋'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
-WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'birthday_today'
   AND NOT EXISTS (
         SELECT 1 FROM `marketing_campaigns` `x`
         WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'birthday_egg'
@@ -627,12 +677,15 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'social_sanitation_day', '环卫爱心日·豆浆券', 'SOCIAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       200.00, NULL, NULL, '每月爱心日营销发券；非身份当场折扣',
+       200.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-BaoZiDianXin-XiangCongBao','SH01-TangYuan-HongTangXiaoTangYuan')),
+       '仅环卫身份；菜单暂无豆浆SKU，3元代金可当面兑饮/抵餐；加权早餐包子汤圆。与POS公益折互斥',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '爱心日免费豆浆'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
-WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_sanitation'
   AND NOT EXISTS (
         SELECT 1 FROM `marketing_campaigns` `x`
         WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'social_sanitation_day'
@@ -646,7 +699,10 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'festival_spring', '春节·回家吃碗家乡面', 'FESTIVAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       2000.00, NULL, NULL, '返乡券包；排期与预算发布前再定',
+       2000.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian','SH01-ZhaoPaiMian-WanZaMian')),
+       '射洪返乡：仅春节窗口发布；10元代金力度大须控周频与预算；加权肠旺/豌杂',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
@@ -665,10 +721,13 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'festival_mother', '妇女节/母亲节·有温度的甜', 'FESTIVAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       800.00, NULL, NULL, '女性/家庭向；锚点红糖小汤圆等 SKU',
+       600.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-TangYuan-HongTangXiaoTangYuan','SH01-TangYuan-TangYuanHeBaoDan')),
+       '客单友好满20减3（勿用满50折）；加权红糖小汤圆/汤圆荷包蛋；排期妇女节或母亲节',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '满50享打9折'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -684,7 +743,10 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'festival_children', '儿童节·小份快乐', 'FESTIVAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       500.00, NULL, NULL, '儿童小份抄手等 SKU',
+       400.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ChaoShouShuiJiao-ChaoShou','SH01-BaoZiDianXin-XiangCongBao')),
+       '无儿童身份字段故可全体轻券；加权抄手/香葱包；勿用大额代金',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
@@ -703,12 +765,15 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'festival_teacher', '教师节·感念师恩', 'FESTIVAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       600.00, NULL, NULL, '教师券；身份折扣另走社会贡献「教师」',
+       600.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')),
+       '仅已认定教师；加权招牌肠旺面；POS公益折与券互斥',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
-WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_teacher'
   AND NOT EXISTS (
         SELECT 1 FROM `marketing_campaigns` `x`
         WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_teacher'
@@ -722,12 +787,15 @@ INSERT INTO `marketing_campaigns` (
 )
 SELECT NULL, 'festival_chongyang', '重阳·长寿面', 'FESTIVAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       500.00, NULL, NULL, '长者向粥/汤圆',
+       500.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-TiHuaMian','SH01-TangYuan-TangYuanHeBaoDan')),
+       '仅已认定长者；满20减3贴合客单（勿满50折）；加权蹄花面/汤圆荷包蛋',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '满50享打9折'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
-WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_elder'
   AND NOT EXISTS (
         SELECT 1 FROM `marketing_campaigns` `x`
         WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_chongyang'
@@ -739,12 +807,59 @@ INSERT INTO `marketing_campaigns` (
     `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
     `published_at`, `created_by`
 )
-SELECT NULL, 'timeslot_dongzhi', '冬至·饺/抄手节', 'TIME_SLOT', 'DRAFT',
+SELECT NULL, 'festival_army_day', '八一建军节·致敬军人', 'FESTIVAL', 'DRAFT',
        `seg`.`id`, `ct`.`id`, NULL, NULL,
-       700.00, NULL, NULL, '时段套餐促销；排期按节气再定',
+       600.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')),
+       '仅已认定退役军人；加权招牌肠旺面；与POS公益折互斥',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '10元代金券'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_veteran'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_army_day'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'festival_mid_autumn', '中秋·团圆甜一口', 'FESTIVAL', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       500.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-TangYuan-HongTangXiaoTangYuan','SH01-TangYuan-TangYuanHeBaoDan')),
+       '川味中秋偏甜品汤圆；轻券满20减3；仅中秋窗口发布',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'festival_mid_autumn'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'timeslot_dongzhi', '冬至·饺/抄手节', 'TIME_SLOT', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       500.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ChaoShouShuiJiao-ChaoShou')),
+       '川北冬至吃饺/抄手；轻券满20减3（勿10元普发）；加权抄手',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -752,7 +867,7 @@ WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
         WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'timeslot_dongzhi'
     );
 
--- 回填：历史种子缺分群导致「发布→请先选择分群」
+-- 回填：泛节日缺分群 → all_members
 UPDATE `marketing_campaigns` `mc`
 INNER JOIN `customer_segments` `seg`
         ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
@@ -760,12 +875,138 @@ SET `mc`.`segment_id` = `seg`.`id`
 WHERE `mc`.`store_id` IS NULL
   AND `mc`.`segment_id` IS NULL
   AND `mc`.`code` IN (
-        'birthday_egg',
-        'social_sanitation_day',
         'festival_spring',
         'festival_mother',
         'festival_children',
-        'festival_teacher',
-        'festival_chongyang',
+        'festival_mid_autumn',
         'timeslot_dongzhi'
       );
+
+-- 生日：必须今日生日分群（覆盖误绑 all_members）
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'birthday_today'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '生日免费加蛋'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-TangYuan-TangYuanHeBaoDan','SH01-ZhaoPaiMian-ChangWangMian')
+    ),
+    `mc`.`remark` = '仅今日生日会员；勿绑全体。系统设置亦可自动发生日券，营销作加码/补发'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'birthday_egg';
+
+-- 身份节日分群 + 文案/周频
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_teacher'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')
+    ),
+    `mc`.`remark` = '仅已认定教师；加权招牌肠旺面；POS公益折与券互斥'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_teacher';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_elder'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-TiHuaMian','SH01-TangYuan-TangYuanHeBaoDan')
+    ),
+    `mc`.`remark` = '仅已认定长者；满20减3贴合客单（勿满50折）；加权蹄花面/汤圆荷包蛋'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_chongyang';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_veteran'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')
+    ),
+    `mc`.`remark` = '仅已认定退役军人；加权招牌肠旺面；与POS公益折互斥'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_army_day';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_sanitation'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-BaoZiDianXin-XiangCongBao','SH01-TangYuan-HongTangXiaoTangYuan')
+    ),
+    `mc`.`remark` = '仅环卫身份；菜单暂无豆浆SKU，3元代金可当面兑饮/抵餐；加权早餐包子汤圆。与POS公益折互斥'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'social_sanitation_day';
+
+-- 射洪客单优化：会员日/妇女节/儿童节/冬至 → 轻券满20减3 + 周频1 + 菜单加权
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+SET `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`budget_cap` = 800.00,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian','SH01-ZhaoPaiMian-ZaJiangMian')
+    ),
+    `mc`.`remark` = '射洪会员日：高积分活跃轻券满20减3；加权招牌肠旺/杂酱'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'member_day';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+SET `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`budget_cap` = 600.00,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-TangYuan-HongTangXiaoTangYuan','SH01-TangYuan-TangYuanHeBaoDan')
+    ),
+    `mc`.`remark` = '客单友好满20减3（勿用满50折）；加权红糖小汤圆/汤圆荷包蛋；排期妇女节或母亲节'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_mother';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+SET `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`budget_cap` = 400.00,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ChaoShouShuiJiao-ChaoShou','SH01-BaoZiDianXin-XiangCongBao')
+    ),
+    `mc`.`remark` = '无儿童身份字段故可全体轻券；加权抄手/香葱包；勿用大额代金'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_children';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+SET `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`budget_cap` = 500.00,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ChaoShouShuiJiao-ChaoShou')
+    ),
+    `mc`.`remark` = '川北冬至吃饺/抄手；轻券满20减3（勿10元普发）；加权抄手'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'timeslot_dongzhi';
+
+UPDATE `marketing_campaigns` `mc`
+SET `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian','SH01-ZhaoPaiMian-WanZaMian')
+    ),
+    `mc`.`remark` = '射洪返乡：仅春节窗口发布；10元代金力度大须控周频与预算；加权肠旺/豌杂'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_spring';
+
+UPDATE `marketing_campaigns` `mc`
+SET `mc`.`weekly_cap_override` = 1,
+    `mc`.`remark` = '余额不足20催充；券门槛50偏高，宜配储值档，勿高频发布'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'low_balance_boost';

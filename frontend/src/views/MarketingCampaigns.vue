@@ -446,14 +446,17 @@ type CampaignPreset = {
 }
 
 const CAMPAIGN_PRESETS: CampaignPreset[] = [
-  { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '返乡券包，锚点豆浆/卤蛋' },
-  { label: '妇女/母亲节', campaign_type: 'FESTIVAL', codePrefix: 'festival_mother', name: '妇女节/母亲节·有温度的甜', remark: '女性/家庭向，锚点红糖小汤圆' },
-  { label: '儿童节', campaign_type: 'FESTIVAL', codePrefix: 'festival_children', name: '儿童节·小份快乐', remark: '儿童小份抄手等 SKU' },
-  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '教师券；身份折扣另走社会贡献「教师」' },
-  { label: '重阳', campaign_type: 'FESTIVAL', codePrefix: 'festival_chongyang', name: '重阳·长寿面', remark: '长者向粥/汤圆' },
-  { label: '冬至时段', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '时段套餐促销' },
-  { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '每月爱心日营销发券，非身份当场折扣' },
-  { label: '会员日', campaign_type: 'MEMBER_DAY', codePrefix: 'member_day', name: '会员日·老客回访', remark: '轻券回访，锚点卤蛋' },
+  { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '射洪返乡；仅春节窗口；10元控周频；加权肠旺/豌杂' },
+  { label: '妇女/母亲节', campaign_type: 'FESTIVAL', codePrefix: 'festival_mother', name: '妇女节/母亲节·有温度的甜', remark: '满20减3+汤圆加权；勿满50折' },
+  { label: '儿童节', campaign_type: 'FESTIVAL', codePrefix: 'festival_children', name: '儿童节·小份快乐', remark: '轻券+抄手/香葱包加权' },
+  { label: '中秋', campaign_type: 'FESTIVAL', codePrefix: 'festival_mid_autumn', name: '中秋·团圆甜一口', remark: '汤圆甜品向；轻券；仅中秋窗口' },
+  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '分群 social_teacher；仅教师身份' },
+  { label: '重阳', campaign_type: 'FESTIVAL', codePrefix: 'festival_chongyang', name: '重阳·长寿面', remark: '分群 social_elder；满20减3+蹄花/汤圆' },
+  { label: '八一建军节', campaign_type: 'FESTIVAL', codePrefix: 'festival_army_day', name: '八一建军节·致敬军人', remark: '分群 social_veteran；仅退役军人' },
+  { label: '冬至抄手', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '轻券满20减3+抄手加权；勿10元普发' },
+  { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '分群 social_sanitation；3元代金兑饮/抵餐' },
+  { label: '会员日', campaign_type: 'MEMBER_DAY', codePrefix: 'member_day', name: '会员日·老客回访', remark: 'champions+满20减3；加权肠旺' },
+  { label: '生日加蛋', campaign_type: 'BIRTHDAY', codePrefix: 'birthday_egg', name: '生日·免费加蛋', remark: '必须 birthday_today；勿绑全体会员' },
   { label: '沉睡唤醒', campaign_type: 'WAKEUP', codePrefix: 'wakeup_sleep', name: '沉睡唤醒', remark: '配合 sleep30/sleep90 分群' },
   { label: '新客欢迎', campaign_type: 'NEW_MEMBER', codePrefix: 'new_member', name: '新客欢迎券', remark: '开卡/注册欢迎' },
 ]

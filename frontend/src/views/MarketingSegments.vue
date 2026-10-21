@@ -4,7 +4,7 @@
       <div>
         <h2>客户分群</h2>
         <p class="sub">
-          圈选目标顾客，供「营销活动」发券与触达。预置：沉睡30/90天、新会员7日、低余额、高积分活跃、生命周期风险/沉睡、RFM休眠。
+          圈选目标顾客，供「营销活动」发券与触达。预置：沉睡/新客/低余额、生命周期/RFM、今日生日、公益身份（教师/长者/退役军人/环卫）。
         </p>
       </div>
       <div class="header-actions">
@@ -256,6 +256,7 @@ import {
   CUSTOMER_RFM,
   MEMBER_STATUS,
   SEGMENT_TYPE,
+  SOCIAL_IDENTITY,
   label,
 } from '@/utils/labels'
 import {
@@ -290,6 +291,8 @@ const RULE_FIELDS = [
   { value: 'account_status', label: '账号状态' },
   { value: 'status', label: '启用状态' },
   { value: 'registered_store_id', label: '注册门店ID' },
+  { value: 'social_identity_code', label: '公益身份码' },
+  { value: 'is_birthday_today', label: '今日是否生日' },
 ]
 
 const helpOpen = ref(false)
@@ -323,6 +326,15 @@ function valueOptions(field: string): { value: string; label: string }[] | null 
       { value: 'DISABLED', label: '禁用 DISABLED' },
     ]
   }
+  if (field === 'social_identity_code') {
+    return Object.entries(SOCIAL_IDENTITY).map(([value, lab]) => ({ value, label: `${lab}（${value}）` }))
+  }
+  if (field === 'is_birthday_today') {
+    return [
+      { value: 'true', label: '是（今日生日）' },
+      { value: 'false', label: '否' },
+    ]
+  }
   return null
 }
 
@@ -338,7 +350,13 @@ function onFieldChange(c: RuleCond) {
   const opts = valueOptions(c.field)
   if (opts?.length) {
     c.value = opts[0].value
-    if (c.field === 'lifecycle_code' || c.field === 'rfm_segment' || c.field === 'member_status') {
+    if (
+      c.field === 'lifecycle_code' ||
+      c.field === 'rfm_segment' ||
+      c.field === 'member_status' ||
+      c.field === 'social_identity_code' ||
+      c.field === 'is_birthday_today'
+    ) {
       c.op = 'eq'
     }
   } else if (['days_since_order', 'silence_days'].includes(c.field)) {
@@ -440,6 +458,51 @@ const RULE_PRESETS: RulePreset[] = [
     rules: [
       { field: 'member_status', op: 'eq', value: 'MEMBER' },
       { field: 'rfm_segment', op: 'eq', value: 'CHAMPIONS' },
+    ],
+  },
+  {
+    label: '教师身份',
+    code: 'social_teacher',
+    name: '公益身份·教师',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'social_identity_code', op: 'eq', value: 'TEACHER' },
+    ],
+  },
+  {
+    label: '长者身份',
+    code: 'social_elder',
+    name: '公益身份·长者',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'social_identity_code', op: 'eq', value: 'ELDER' },
+    ],
+  },
+  {
+    label: '退役军人',
+    code: 'social_veteran',
+    name: '公益身份·退役军人',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'social_identity_code', op: 'eq', value: 'VETERAN' },
+    ],
+  },
+  {
+    label: '环卫工',
+    code: 'social_sanitation',
+    name: '公益身份·环卫工',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'social_identity_code', op: 'eq', value: 'SANITATION' },
+    ],
+  },
+  {
+    label: '今日生日',
+    code: 'birthday_today',
+    name: '今日生日会员',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'is_birthday_today', op: 'eq', value: 'true' },
     ],
   },
 ]

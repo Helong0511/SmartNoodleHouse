@@ -53,6 +53,10 @@ export const RULE_FIELD_HELP: Record<string, string> = {
   account_status: '账号状态：一般为 ACTIVE / DISABLED 等。',
   status: '启用标记：1=启用，0=停用。系统估人默认只算启用且 ACTIVE。',
   registered_store_id: '注册门店 ID。门店活动引用总部分群时，发布会按本店再过滤，通常不必手填。',
+  social_identity_code:
+    '社会贡献公益身份码（customer_social_identities）：仅统计 status=ACTIVE 且在 valid_from/valid_to 有效期内的认定。取值如 TEACHER、ELDER、VETERAN、SANITATION。教师节/重阳/八一等应与 MEMBER 组合圈人，避免无身份普发。',
+  is_birthday_today:
+    '今日是否生日（北京时间；支持公历/农历）。生日营销必须用此字段，切勿绑「全体会员」——否则一发布就会给无关人发券。',
 }
 
 export const SEGMENT_TYPE_HELP =

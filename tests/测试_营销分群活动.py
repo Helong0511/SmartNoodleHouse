@@ -12,6 +12,7 @@ from app.models import (
     Customer,
     CustomerCoupon,
     CustomerSegment,
+    CustomerSocialIdentity,
     MarketingCampaign,
     MarketingTask,
     MemberLevel,
@@ -102,6 +103,81 @@ async def test_segment_estimate_and_materialize(db_session):
     mat = await SegmentService.materialize(db_session, int(seg.id))
     await db_session.commit()
     assert mat["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_segment_social_identity_code(db_session):
+    """公益身份分群：仅 ACTIVE 且有效期内命中；PENDING/过期不进圈。"""
+    seed = await _seed(db_session)
+    teacher, elder, plain = seed["members"]
+    db_session.add(
+        CustomerSocialIdentity(
+            customer_id=int(teacher.id),
+            identity_code="TEACHER",
+            status="ACTIVE",
+        )
+    )
+    db_session.add(
+        CustomerSocialIdentity(
+            customer_id=int(elder.id),
+            identity_code="TEACHER",
+            status="PENDING",
+        )
+    )
+    db_session.add(
+        CustomerSocialIdentity(
+            customer_id=int(plain.id),
+            identity_code="TEACHER",
+            status="ACTIVE",
+            valid_to=naive_local_now() - timedelta(days=1),
+        )
+    )
+    await db_session.commit()
+
+    rules = {
+        "all": [
+            {"field": "member_status", "op": "eq", "value": "MEMBER"},
+            {"field": "social_identity_code", "op": "eq", "value": "TEACHER"},
+        ]
+    }
+    est = await SegmentService.estimate(db_session, rules_json=rules, store_id=seed["store"].id)
+    assert est["count"] == 1
+    assert est["samples"][0]["id"] == int(teacher.id)
+
+
+@pytest.mark.asyncio
+async def test_segment_is_birthday_today(db_session):
+    """今日生日分群：仅命中当日生日会员，勿把全体会员圈进生日活动。"""
+    from app.utils.birthday import today_beijing
+
+    seed = await _seed(db_session)
+    today = today_beijing()
+    bday_member, other_member, no_bday = seed["members"]
+    bday_member.birthday = today.replace(year=1990)
+    bday_member.birthday_calendar = "SOLAR"
+    other_member.birthday = today.replace(year=1991, month=((today.month % 12) + 1), day=1)
+    other_member.birthday_calendar = "SOLAR"
+    no_bday.birthday = None
+    await db_session.commit()
+
+    rules = {
+        "all": [
+            {"field": "member_status", "op": "eq", "value": "MEMBER"},
+            {"field": "is_birthday_today", "op": "eq", "value": True},
+        ]
+    }
+    est = await SegmentService.estimate(db_session, rules_json=rules, store_id=seed["store"].id)
+    assert est["count"] == 1
+    assert est["samples"][0]["id"] == int(bday_member.id)
+
+    # 绑 all_members 会圈到全部会员；生日活动必须用 is_birthday_today
+    all_est = await SegmentService.estimate(
+        db_session,
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+        store_id=seed["store"].id,
+    )
+    assert all_est["count"] == 3
+    assert all_est["count"] > est["count"]
 
 
 @pytest.mark.asyncio

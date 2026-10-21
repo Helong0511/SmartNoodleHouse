@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T08:49:12Z",
+  "updated_at": "2026-10-21T09:34:38Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "6053561ddbbddf8587573ac7a626b17cb01149f7fd1283328e17543917bfc30a",
-      "size": 179411,
-      "normalized_sha256": "6053561ddbbddf8587573ac7a626b17cb01149f7fd1283328e17543917bfc30a"
+      "sha256": "43333e48c6157747c13c76d5acdad6967094addc89bee8cfcf22c9d860a22318",
+      "size": 179956,
+      "normalized_sha256": "43333e48c6157747c13c76d5acdad6967094addc89bee8cfcf22c9d860a22318"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1643,9 +1643,9 @@
     },
     "backend/app/services/segment_service.py": {
       "role": "index",
-      "sha256": "bab2a61641848a4cc9d50c085b3c198cad6e6f3eaed99097bd9fd7150bb7592a",
-      "size": 16652,
-      "normalized_sha256": "bab2a61641848a4cc9d50c085b3c198cad6e6f3eaed99097bd9fd7150bb7592a"
+      "sha256": "55ec37bf56961fdd8577a4e89f3d6eacabdde8c62912128ab6e7f80f453f53ec",
+      "size": 23112,
+      "normalized_sha256": "55ec37bf56961fdd8577a4e89f3d6eacabdde8c62912128ab6e7f80f453f53ec"
     },
     "backend/app/services/service_card_service.py": {
       "role": "index",
@@ -2281,9 +2281,9 @@
     },
     "frontend/src/utils/marketingHelp.ts": {
       "role": "index",
-      "sha256": "ffd07c9d5854cafd2c47a615d96349e48a7c20409022f46d223cbce99b1e6803",
-      "size": 7699,
-      "normalized_sha256": "ffd07c9d5854cafd2c47a615d96349e48a7c20409022f46d223cbce99b1e6803"
+      "sha256": "4afba08c915120e239866c4b685a3f582deb2ed56c746c06257fe488e2efc5bf",
+      "size": 8196,
+      "normalized_sha256": "4afba08c915120e239866c4b685a3f582deb2ed56c746c06257fe488e2efc5bf"
     },
     "frontend/src/utils/media.ts": {
       "role": "index",
@@ -2407,9 +2407,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "9751164505d6973be5bb4d4b7599992df2e50d7544b8f18cd0f7f04ac0f7696a",
-      "size": 37061,
-      "normalized_sha256": "9751164505d6973be5bb4d4b7599992df2e50d7544b8f18cd0f7f04ac0f7696a"
+      "sha256": "19addc424c368e763a469be18996890c6845715e6bdc8ca76ab6222fd991758e",
+      "size": 37662,
+      "normalized_sha256": "19addc424c368e763a469be18996890c6845715e6bdc8ca76ab6222fd991758e"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -2419,9 +2419,9 @@
     },
     "frontend/src/views/MarketingSegments.vue": {
       "role": "index",
-      "sha256": "d979e47bb5713589efe84ad8ab2dbf24cdc2122e88a148f9b528f945bec27a10",
-      "size": 25593,
-      "normalized_sha256": "d979e47bb5713589efe84ad8ab2dbf24cdc2122e88a148f9b528f945bec27a10"
+      "sha256": "ad7ce6699bdc72d68434069b17ae18c8c3d08d2538946e5a640155255fce0a19",
+      "size": 27412,
+      "normalized_sha256": "ad7ce6699bdc72d68434069b17ae18c8c3d08d2538946e5a640155255fce0a19"
     },
     "frontend/src/views/MemberLevels.vue": {
       "role": "index",
@@ -4295,9 +4295,9 @@
     },
     "sql/data_custom.sql": {
       "role": "index",
-      "sha256": "e0ed1cff0a453ed57edf78f04804cc310a85d72b5d8377d1780bc07adfedc992",
-      "size": 115794,
-      "normalized_sha256": "e0ed1cff0a453ed57edf78f04804cc310a85d72b5d8377d1780bc07adfedc992"
+      "sha256": "218ce82caa61681d0833c3886aec42d121c144683654470e4da870a642f1745f",
+      "size": 128855,
+      "normalized_sha256": "218ce82caa61681d0833c3886aec42d121c144683654470e4da870a642f1745f"
     },
     "sql/data_sys.sql": {
       "role": "index",
@@ -5506,9 +5506,9 @@
     },
     "tests/测试_营销分群活动.py": {
       "role": "observe",
-      "sha256": "c23c9f5a9162b6cbfd11087239caa1f6158dea875adc4b0ba848f9c009904b35",
-      "size": 19020,
-      "normalized_sha256": "260a18a6a50e65096065825dfb10cb69623318a95c062354073e9db95058cc4c"
+      "sha256": "094287dd26bf5a3436ccea8ebbceb756c0e15174c1742dd78d86524868d823f1",
+      "size": 21737,
+      "normalized_sha256": "bba9e29e848116170d9055ca14c892db1c754340c571e82dbe3d09827449941a"
     },
     "tests/测试_营销归因与报表.py": {
       "role": "observe",

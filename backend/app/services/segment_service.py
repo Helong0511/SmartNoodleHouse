@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
 from app.core.response import naive_local_now
-from app.models import Customer, CustomerLifecycle, CustomerSegment, CustomerSegmentMember
+from app.models import (
+    Customer,
+    CustomerLifecycle,
+    CustomerSegment,
+    CustomerSegmentMember,
+    CustomerSocialIdentity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +37,57 @@ SUPPORTED_FIELDS = frozenset(
         "lifecycle_code",
         "rfm_segment",
         "silence_days",
+        # 社会贡献公益身份（customer_social_identities，仅 ACTIVE 且在有效期内）
+        "social_identity_code",
+        # 今日是否生日（公历/农历；SQL 仅预筛有生日，精确判定见 post-filter）
+        "is_birthday_today",
     }
 )
 SUPPORTED_OPS = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"})
 
 
 class SegmentService:
+    @classmethod
+    def _rules_need_birthday_today(cls, rules_json: dict | list | None) -> bool | None:
+        """若规则含 is_birthday_today：True=只要今日生日，False=只要非今日生日；无则 None。"""
+        if not rules_json:
+            return None
+        if isinstance(rules_json, list):
+            rules_json = {"all": rules_json}
+
+        def walk(node) -> bool | None:
+            if not isinstance(node, dict):
+                return None
+            if "all" in node or "any" in node:
+                found = None
+                for c in node.get("all") or node.get("any") or []:
+                    r = walk(c)
+                    if r is not None:
+                        found = r
+                return found
+            if str(node.get("field") or "").strip() != "is_birthday_today":
+                return None
+            op = str(node.get("op") or "eq").strip().lower()
+            raw = node.get("value")
+            want = raw in (True, 1, "1", "true", "True", "yes", "YES")
+            if op == "eq":
+                return want
+            if op == "ne":
+                return not want
+            raise AppException(40001, "is_birthday_today 仅支持 eq/ne")
+
+        return walk(rules_json)
+
+    @classmethod
+    def _is_birthday_today_customer(cls, c: Customer) -> bool:
+        from app.utils.birthday import is_birthday_today
+
+        return bool(
+            is_birthday_today(
+                getattr(c, "birthday", None),
+                getattr(c, "birthday_calendar", None),
+            )
+        )
     @staticmethod
     def _balance_expr():
         return Customer.balance_principal + Customer.balance_gift
@@ -147,6 +198,47 @@ class SegmentService:
                     cls._cmp(CustomerLifecycle.silence_days, op, int(value))
                 )
             )
+        if field == "social_identity_code":
+            if op not in ("eq", "ne", "in", "not_in"):
+                raise AppException(40001, "social_identity_code 仅支持 eq/ne/in/not_in")
+            now_cmp = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
+            window_ok = and_(
+                CustomerSocialIdentity.status == "ACTIVE",
+                or_(
+                    CustomerSocialIdentity.valid_from.is_(None),
+                    CustomerSocialIdentity.valid_from <= now_cmp,
+                ),
+                or_(
+                    CustomerSocialIdentity.valid_to.is_(None),
+                    CustomerSocialIdentity.valid_to >= now_cmp,
+                ),
+            )
+            # ne/not_in：排除「持有该 ACTIVE 身份」的顾客
+            if op in ("ne", "not_in"):
+                pos_op = "eq" if op == "ne" else "in"
+                hit = (
+                    select(CustomerSocialIdentity.customer_id)
+                    .where(
+                        window_ok,
+                        cls._cmp(CustomerSocialIdentity.identity_code, pos_op, value),
+                    )
+                    .distinct()
+                )
+                return ~Customer.id.in_(hit)
+            hit = (
+                select(CustomerSocialIdentity.customer_id)
+                .where(
+                    window_ok,
+                    cls._cmp(CustomerSocialIdentity.identity_code, op, value),
+                )
+                .distinct()
+            )
+            return Customer.id.in_(hit)
+        if field == "is_birthday_today":
+            if op not in ("eq", "ne"):
+                raise AppException(40001, "is_birthday_today 仅支持 eq/ne")
+            # SQL 仅预筛「填过生日」；公历/农历精确匹配在 estimate/materialize/iter 后置过滤
+            return Customer.birthday.isnot(None)
         raise AppException(40001, f"未实现字段: {field}")
 
     @classmethod
@@ -173,20 +265,33 @@ class SegmentService:
         sample_limit: int = 20,
     ) -> dict:
         filt = cls.build_filter(rules_json, store_id=store_id)
-        total = int(await db.scalar(select(func.count()).select_from(Customer).where(filt)) or 0)
-        rows = list(
-            (
-                await db.execute(
-                    select(Customer)
-                    .where(filt)
-                    .order_by(Customer.id.desc())
-                    .limit(max(0, min(int(sample_limit), 50)))
-                )
-            )
-            .scalars()
-            .all()
-        )
+        want_bday = cls._rules_need_birthday_today(rules_json)
         from app.services.customer_service import CustomerService
+
+        if want_bday is None:
+            total = int(await db.scalar(select(func.count()).select_from(Customer).where(filt)) or 0)
+            rows = list(
+                (
+                    await db.execute(
+                        select(Customer)
+                        .where(filt)
+                        .order_by(Customer.id.desc())
+                        .limit(max(0, min(int(sample_limit), 50)))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        else:
+            # 生日精确匹配需拉候选后内存过滤（支持农历）
+            candidates = list(
+                (await db.execute(select(Customer).where(filt).order_by(Customer.id.desc())))
+                .scalars()
+                .all()
+            )
+            matched = [c for c in candidates if cls._is_birthday_today_customer(c) is want_bday]
+            total = len(matched)
+            rows = matched[: max(0, min(int(sample_limit), 50))]
 
         samples = [
             {
@@ -317,31 +422,56 @@ class SegmentService:
         if int(seg.status) != 1:
             raise AppException(40001, "分群已停用")
         filt = cls.build_filter(seg.rules_json, store_id=seg.store_id)
+        want_bday = cls._rules_need_birthday_today(seg.rules_json)
         await db.execute(delete(CustomerSegmentMember).where(CustomerSegmentMember.segment_id == seg.id))
         inserted = 0
         last_id = 0
         while True:
-            rows = list(
-                (
-                    await db.execute(
-                        select(Customer.id)
-                        .where(filt, Customer.id > last_id)
-                        .order_by(Customer.id)
-                        .limit(batch_size)
+            if want_bday is None:
+                rows = list(
+                    (
+                        await db.execute(
+                            select(Customer.id)
+                            .where(filt, Customer.id > last_id)
+                            .order_by(Customer.id)
+                            .limit(batch_size)
+                        )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            if not rows:
-                break
-            for cid in rows:
-                db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(cid)))
-                inserted += 1
-            last_id = int(rows[-1])
-            await db.flush()
-            if len(rows) < batch_size:
-                break
+                if not rows:
+                    break
+                for cid in rows:
+                    db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(cid)))
+                    inserted += 1
+                last_id = int(rows[-1])
+                await db.flush()
+                if len(rows) < batch_size:
+                    break
+            else:
+                batch = list(
+                    (
+                        await db.execute(
+                            select(Customer)
+                            .where(filt, Customer.id > last_id)
+                            .order_by(Customer.id)
+                            .limit(batch_size)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if not batch:
+                    break
+                for c in batch:
+                    if cls._is_birthday_today_customer(c) is want_bday:
+                        db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(c.id)))
+                        inserted += 1
+                last_id = int(batch[-1].id)
+                await db.flush()
+                if len(batch) < batch_size:
+                    break
         seg.estimated_count = inserted
         seg.materialized_at = naive_local_now()
         await db.flush()
@@ -400,26 +530,53 @@ class SegmentService:
             int(seg.store_id) if seg.store_id is not None else None
         )
         filt = cls.build_filter(seg.rules_json, store_id=filt_store)
+        want_bday = cls._rules_need_birthday_today(seg.rules_json)
         last_id = 0
         while True:
-            rows = list(
-                (
-                    await db.execute(
-                        select(Customer.id)
-                        .where(filt, Customer.id > last_id)
-                        .order_by(Customer.id)
-                        .limit(batch_size)
+            if want_bday is None:
+                rows = list(
+                    (
+                        await db.execute(
+                            select(Customer.id)
+                            .where(filt, Customer.id > last_id)
+                            .order_by(Customer.id)
+                            .limit(batch_size)
+                        )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            if not rows:
-                return
-            yield [int(x) for x in rows]
-            last_id = int(rows[-1])
-            if len(rows) < batch_size:
-                return
+                if not rows:
+                    return
+                yield [int(x) for x in rows]
+                last_id = int(rows[-1])
+                if len(rows) < batch_size:
+                    return
+            else:
+                batch = list(
+                    (
+                        await db.execute(
+                            select(Customer)
+                            .where(filt, Customer.id > last_id)
+                            .order_by(Customer.id)
+                            .limit(batch_size)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if not batch:
+                    return
+                ids = [
+                    int(c.id)
+                    for c in batch
+                    if cls._is_birthday_today_customer(c) is want_bday
+                ]
+                if ids:
+                    yield ids
+                last_id = int(batch[-1].id)
+                if len(batch) < batch_size:
+                    return
 
     @staticmethod
     def _payload(row: CustomerSegment) -> dict:
