@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
     {"id": "order", "label": "订单与厨房", "description": "写入当前门店：支付超时、厨房自动出餐、大厅叫号屏"},
-    {"id": "welcome", "label": "迎宾与人脸", "description": "迎宾语模板/口味附句（可按店，支持占位符）、冷却、人脸匹配、迎宾入口；访客保留天数为平台级"},
+    {"id": "welcome", "label": "迎宾与人脸", "description": "迎宾语模板/口味附句（可按店）、摄像头播报开关、冷却、人脸匹配、迎宾入口；访客抓拍/保留天数为平台级"},
     {"id": "member", "label": "会员与优惠", "description": "写入当前门店：新客赠券、生日积分倍数等会员权益"},
     {"id": "miniprogram", "label": "小程序与 H5", "description": "点餐页展示写入当前门店；小程序主体隐私、域名与版本为平台级（系统设置）"},
     {"id": "delivery", "label": "外卖", "description": "自动接单写入当前门店；.env 兜底门店为平台级"},
@@ -190,6 +190,15 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "default": True,
         "store_override": False,
         "description": "店内摄像头识别到未登记人脸时抓拍存图；路径 visitors/年/月/日/，按访客保留天数自动清理",
+    },
+    "camera_speaker_tts_enabled": {
+        "group": "welcome",
+        "label": "摄像头播放迎宾语音",
+        "unit": "",
+        "type": "bool",
+        "default": False,
+        "store_override": True,
+        "description": "后台开关，改完即时生效（不写 .env）。开启后迎宾 TTS 经海康对讲推到触发识别的摄像头扬声器（须对讲型机）；关闭则本机播报；推流失败自动回退本机。可按门店覆盖",
     },
     "delivery_auto_confirm": {
         "group": "delivery",

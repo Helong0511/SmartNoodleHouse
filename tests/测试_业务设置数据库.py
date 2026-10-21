@@ -43,9 +43,20 @@ def test_store_scope_split():
     assert SystemSettingsService.allows_store_override("display_screen_token") is True
     assert SystemSettingsService.allows_store_override("invoice_enabled") is True
     assert SystemSettingsService.allows_store_override("shared_cart_enabled") is True
+    assert SystemSettingsService.allows_store_override("camera_speaker_tts_enabled") is True
     assert SystemSettingsService.allows_store_override("jwt_expire_minutes") is False
     assert SystemSettingsService.allows_store_override("enable_wx_phone_bind") is False
     assert SystemSettingsService.allows_store_override("h5_public_base_url") is False
+    assert SystemSettingsService.allows_store_override("unknown_visitor_capture_enabled") is False
+
+
+def test_camera_speaker_tts_meta():
+    meta = BUSINESS_SETTING_META["camera_speaker_tts_enabled"]
+    assert meta["group"] == "welcome"
+    assert meta["type"] == "bool"
+    assert meta.get("default") is False
+    assert SystemSettingsService._validate_value("camera_speaker_tts_enabled", "1") == "true"
+    assert SystemSettingsService._validate_value("camera_speaker_tts_enabled", "off") == "false"
 
 
 def test_business_groups_cover_meta():

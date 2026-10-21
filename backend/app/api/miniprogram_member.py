@@ -13,6 +13,7 @@ from app.api.miniprogram import (
     _persistable_avatar_url,
 )
 from app.api.miniprogram_face import _face_status
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.response import success
 from app.models import Customer

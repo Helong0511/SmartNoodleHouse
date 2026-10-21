@@ -1010,6 +1010,16 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'unknown_visitor_capture_enabled'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'camera_speaker_tts_enabled',
+    'false',
+    '摄像头播放迎宾语音（默认关闭；海康对讲扬声器）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'camera_speaker_tts_enabled'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'operation_log_retention_days',
     '60',
     '操作日志保留天数'
