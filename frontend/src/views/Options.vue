@@ -21,8 +21,13 @@
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="opts-panel">
-            <el-button size="small" type="primary" :disabled="!canEditGroup(row)"
-              @click="openOptionForm(row)">新增选项</el-button>
+            <el-button
+              v-if="canCreateProduct"
+              size="small"
+              type="primary"
+              :disabled="!canEditGroup(row)"
+              @click="openOptionForm(row)"
+            >新增选项</el-button>
             <el-table :data="row.options" size="small" border style="margin-top:8px">
               <el-table-column prop="name" label="选项名" width="180" />
               <el-table-column prop="code" label="编码" width="250" />
@@ -78,8 +83,20 @@
       </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
-          <el-button link type="primary" :disabled="!canEditGroup(row)" @click="openGroupForm(row)">编辑</el-button>
-          <el-button link type="danger" :disabled="!canEditGroup(row)" @click="removeGroup(row)">删除</el-button>
+          <el-button
+            v-if="canUpdateProduct"
+            link
+            type="primary"
+            :disabled="!canEditGroup(row)"
+            @click="openGroupForm(row)"
+          >编辑</el-button>
+          <el-button
+            v-if="canDeleteProduct"
+            link
+            type="danger"
+            :disabled="!canEditGroup(row)"
+            @click="removeGroup(row)"
+          >删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -164,6 +181,15 @@ import { suggestCodeFromName } from '@/utils/bizCode'
 const auth = useAuthStore()
 const isSuper = computed(() => !!auth.isSuperAdmin)
 const boundStoreId = computed(() => auth.user?.store_id || null)
+const canCreateProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:create'),
+)
+const canUpdateProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:update'),
+)
+const canDeleteProduct = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:delete'),
+)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -284,6 +310,7 @@ function storeName(sid: number) {
 }
 
 function canEditGroup(row: any) {
+  if (!canUpdateProduct.value && !canDeleteProduct.value) return false
   if (isSuper.value) return true
   if (row.store_id == null) return false
   return boundStoreId.value != null && Number(row.store_id) === Number(boundStoreId.value)
