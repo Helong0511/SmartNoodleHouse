@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T10:30:00Z",
+  "updated_at": "2026-10-21T10:31:49Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "dd3a3d8e0df0032b9cf65ee17e56f1f48597540983a6a6353368454c0d150461",
-      "size": 180217,
-      "normalized_sha256": "dd3a3d8e0df0032b9cf65ee17e56f1f48597540983a6a6353368454c0d150461"
+      "sha256": "ecc5293ecda6ebae7cd6561e5853f9d2cc89bef5bd65af54fc902c9a40506ede",
+      "size": 180702,
+      "normalized_sha256": "ecc5293ecda6ebae7cd6561e5853f9d2cc89bef5bd65af54fc902c9a40506ede"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -425,9 +425,9 @@
     },
     "backend/app/api/customers.py": {
       "role": "index",
-      "sha256": "656539b3789dae70700d9a58df8d3b7921d76834c3976e99557b640402f3819b",
-      "size": 32855,
-      "normalized_sha256": "656539b3789dae70700d9a58df8d3b7921d76834c3976e99557b640402f3819b"
+      "sha256": "948c0a3b9bf5c60918e69c9502de80f57174d61f68ecc7743af17209828b7972",
+      "size": 32977,
+      "normalized_sha256": "948c0a3b9bf5c60918e69c9502de80f57174d61f68ecc7743af17209828b7972"
     },
     "backend/app/api/customers_common.py": {
       "role": "index",
@@ -1565,15 +1565,15 @@
     },
     "backend/app/services/preference_scene.py": {
       "role": "index",
-      "sha256": "de7aa4ec558a0e490586b8ec87f558da783ca7b9943ee5b90d3b0d8a9ad496d2",
-      "size": 5247,
-      "normalized_sha256": "0593747e7cc6d999109ad919111060418afe491b339e5ca745e14fee92149249"
+      "sha256": "2d9682a34465f783c00c1b6deccb63aa0df540595268c9feda3d13fb4a46ce20",
+      "size": 12113,
+      "normalized_sha256": "2d9682a34465f783c00c1b6deccb63aa0df540595268c9feda3d13fb4a46ce20"
     },
     "backend/app/services/preference_service.py": {
       "role": "index",
-      "sha256": "6e57f045a764f78c6dca57fc8bc7c448aff1e37649b95db1a7fbb52778dc7902",
-      "size": 11619,
-      "normalized_sha256": "6e57f045a764f78c6dca57fc8bc7c448aff1e37649b95db1a7fbb52778dc7902"
+      "sha256": "2e3f465d6de4df3b28de202a7702138be1186440757eeffbab67d081bf2a3b1e",
+      "size": 12500,
+      "normalized_sha256": "2e3f465d6de4df3b28de202a7702138be1186440757eeffbab67d081bf2a3b1e"
     },
     "backend/app/services/print_service.py": {
       "role": "index",
@@ -1613,9 +1613,9 @@
     },
     "backend/app/services/recommendation_service.py": {
       "role": "index",
-      "sha256": "aa538894ee23194df5713827314e9f840fd5bb38caecf122d1169ced0b0ff118",
-      "size": 29683,
-      "normalized_sha256": "aa538894ee23194df5713827314e9f840fd5bb38caecf122d1169ced0b0ff118"
+      "sha256": "b8633aa882193d7aa948ee46458fdc550b9cd27409e85932ee7b2c5f2c3ee37f",
+      "size": 31478,
+      "normalized_sha256": "b8633aa882193d7aa948ee46458fdc550b9cd27409e85932ee7b2c5f2c3ee37f"
     },
     "backend/app/services/retention_service.py": {
       "role": "index",
@@ -2383,9 +2383,9 @@
     },
     "frontend/src/views/Customers.vue": {
       "role": "index",
-      "sha256": "24142a1241927f264ba79b20cad78dffb9fa4e33651c687f264b193eac0fd913",
-      "size": 61210,
-      "normalized_sha256": "24142a1241927f264ba79b20cad78dffb9fa4e33651c687f264b193eac0fd913"
+      "sha256": "443d6354d87410406b0d76f0e2bb1abf391303ea7b42856e5f3c60f678a98961",
+      "size": 62387,
+      "normalized_sha256": "443d6354d87410406b0d76f0e2bb1abf391303ea7b42856e5f3c60f678a98961"
     },
     "frontend/src/views/Dashboard.vue": {
       "role": "index",
@@ -2533,9 +2533,9 @@
     },
     "frontend/src/views/StoreInfo.vue": {
       "role": "index",
-      "sha256": "d3fbc9e06047a1a1e90b0a8d1d8f764376d94cd2f1af8ea5c9fa353dd2b6186c",
-      "size": 29453,
-      "normalized_sha256": "d3fbc9e06047a1a1e90b0a8d1d8f764376d94cd2f1af8ea5c9fa353dd2b6186c"
+      "sha256": "b179de46f74b49aefcf10e3a8a67b6a715e1537cb7ab1c0350bb0ec9e0832f67",
+      "size": 29684,
+      "normalized_sha256": "b179de46f74b49aefcf10e3a8a67b6a715e1537cb7ab1c0350bb0ec9e0832f67"
     },
     "frontend/src/views/StoreStocks.vue": {
       "role": "index",
@@ -2766,9 +2766,9 @@
     },
     "miniprogram-alipay/components/recommend-strip/recommend-strip.js": {
       "role": "index",
-      "sha256": "d4117f79123ef447fd61ffd08ca7ad4f30186a67dd2b7b577af49f3363c084f8",
-      "size": 6222,
-      "normalized_sha256": "d4117f79123ef447fd61ffd08ca7ad4f30186a67dd2b7b577af49f3363c084f8"
+      "sha256": "7720884f803df235fee9b77e8fdcaf76e3ff95eed393bdcd620f185ff71cfbd8",
+      "size": 6641,
+      "normalized_sha256": "7720884f803df235fee9b77e8fdcaf76e3ff95eed393bdcd620f185ff71cfbd8"
     },
     "miniprogram-alipay/components/recommend-strip/recommend-strip.json": {
       "role": "index",
@@ -3461,9 +3461,9 @@
     },
     "miniprogram-wechat/components/recommend-strip/recommend-strip.js": {
       "role": "index",
-      "sha256": "efa864390c5173ad49db8d412355eb0c65d65d9a36830ef3a224d463aa181350",
-      "size": 6413,
-      "normalized_sha256": "efa864390c5173ad49db8d412355eb0c65d65d9a36830ef3a224d463aa181350"
+      "sha256": "c2d23fc0005f5604d7432b173b426affd7e95a249816f596b0bcceaee3fb1267",
+      "size": 6830,
+      "normalized_sha256": "c2d23fc0005f5604d7432b173b426affd7e95a249816f596b0bcceaee3fb1267"
     },
     "miniprogram-wechat/components/recommend-strip/recommend-strip.json": {
       "role": "index",
@@ -4307,9 +4307,9 @@
     },
     "sql/data_custom.sql": {
       "role": "index",
-      "sha256": "98bb9431b98996d823f2b083b9b89052eed49442cc7211dc74030f68547b0799",
-      "size": 141770,
-      "normalized_sha256": "98bb9431b98996d823f2b083b9b89052eed49442cc7211dc74030f68547b0799"
+      "sha256": "8244dc2c4b9a14eab4504ef8944b81aaf27c45e35e55ccf699e0ffc0e067cf9b",
+      "size": 142049,
+      "normalized_sha256": "8244dc2c4b9a14eab4504ef8944b81aaf27c45e35e55ccf699e0ffc0e067cf9b"
     },
     "sql/data_sys.sql": {
       "role": "index",
