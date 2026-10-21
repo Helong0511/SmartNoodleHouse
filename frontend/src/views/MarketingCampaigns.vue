@@ -446,19 +446,23 @@ type CampaignPreset = {
 }
 
 const CAMPAIGN_PRESETS: CampaignPreset[] = [
-  { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '射洪返乡；仅春节窗口；10元控周频；加权肠旺/豌杂' },
+  { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '射洪返乡；满20减3；勿10元普发；加权肠旺/豌杂' },
+  { label: '元宵', campaign_type: 'FESTIVAL', codePrefix: 'festival_lantern', name: '元宵·汤圆团圆', remark: '汤圆加权；满20减3；短窗' },
   { label: '妇女/母亲节', campaign_type: 'FESTIVAL', codePrefix: 'festival_mother', name: '妇女节/母亲节·有温度的甜', remark: '满20减3+汤圆加权；勿满50折' },
   { label: '儿童节', campaign_type: 'FESTIVAL', codePrefix: 'festival_children', name: '儿童节·小份快乐', remark: '轻券+抄手/香葱包加权' },
+  { label: '端午', campaign_type: 'FESTIVAL', codePrefix: 'festival_duanwu', name: '端午·咸鲜一碗', remark: '肠旺/抄手加权；满20减3；无粽SKU勿硬推' },
   { label: '中秋', campaign_type: 'FESTIVAL', codePrefix: 'festival_mid_autumn', name: '中秋·团圆甜一口', remark: '汤圆甜品向；轻券；仅中秋窗口' },
-  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '分群 social_teacher；仅教师身份' },
+  { label: '国庆', campaign_type: 'FESTIVAL', codePrefix: 'festival_national', name: '国庆·家乡面畅吃', remark: '返乡轻券满20减3；加权肠旺/豌杂/杂酱' },
+  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '分群 social_teacher；满20减3；仅教师身份' },
   { label: '重阳', campaign_type: 'FESTIVAL', codePrefix: 'festival_chongyang', name: '重阳·长寿面', remark: '分群 social_elder；满20减3+蹄花/汤圆' },
-  { label: '八一建军节', campaign_type: 'FESTIVAL', codePrefix: 'festival_army_day', name: '八一建军节·致敬军人', remark: '分群 social_veteran；仅退役军人' },
+  { label: '八一建军节', campaign_type: 'FESTIVAL', codePrefix: 'festival_army_day', name: '八一建军节·致敬军人', remark: '分群 social_veteran；满20减3；仅退役军人' },
   { label: '冬至抄手', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '轻券满20减3+抄手加权；勿10元普发' },
   { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '分群 social_sanitation；3元代金兑饮/抵餐' },
   { label: '会员日', campaign_type: 'MEMBER_DAY', codePrefix: 'member_day', name: '会员日·老客回访', remark: 'champions+满20减3；加权肠旺' },
   { label: '生日加蛋', campaign_type: 'BIRTHDAY', codePrefix: 'birthday_egg', name: '生日·免费加蛋', remark: '必须 birthday_today；勿绑全体会员' },
-  { label: '沉睡唤醒', campaign_type: 'WAKEUP', codePrefix: 'wakeup_sleep', name: '沉睡唤醒', remark: '配合 sleep30/sleep90 分群' },
-  { label: '新客欢迎', campaign_type: 'NEW_MEMBER', codePrefix: 'new_member', name: '新客欢迎券', remark: '开卡/注册欢迎' },
+  { label: '沉睡唤醒', campaign_type: 'WAKEUP', codePrefix: 'wakeup_sleep', name: '沉睡唤醒', remark: 'sleep30/90；周频1；勿与节日同周叠发' },
+  { label: '新客欢迎', campaign_type: 'NEW_MEMBER', codePrefix: 'new_member', name: '新客欢迎券', remark: '开卡欢迎；周频1；勿与系统欢迎券叠发' },
+  { label: '低余额催充', campaign_type: 'MEMBER_DAY', codePrefix: 'low_balance', name: '低余额催充', remark: '满20减3催回店；勿满50折' },
 ]
 
 const router = useRouter()
@@ -813,10 +817,27 @@ async function save() {
   }
 }
 
+function segmentCodeOf(row: any): string {
+  const id = row?.segment_id
+  if (id != null) {
+    const s = segments.value.find((x) => Number(x.id) === Number(id))
+    if (s?.code) return String(s.code).trim()
+  }
+  return String(row?.segment_code || '').trim()
+}
+
 function publishBlockReason(row: any): string {
   if (!row) return '活动无效'
   if (!row.segment_id) return '请先编辑并选择分群'
   if (!row.coupon_template_id) return '请先编辑并选择发券模板'
+  const segCode = segmentCodeOf(row)
+  const ctype = String(row.campaign_type || '').toUpperCase()
+  if (ctype === 'BIRTHDAY' && segCode === 'all_members') {
+    return '生日活动禁止绑全体会员，请改用 birthday_today'
+  }
+  if (segCode === 'all_members' && (!row.start_at || !row.end_at)) {
+    return '全体会员活动必须设置开始与结束时间，避免非节日误发'
+  }
   return ''
 }
 

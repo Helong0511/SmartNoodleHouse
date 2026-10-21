@@ -13,6 +13,7 @@ from app.core.response import naive_local_now
 from app.models import (
     CouponTemplate,
     CustomerCoupon,
+    CustomerSegment,
     MarketingCampaign,
     MarketingRule,
     MarketingTask,
@@ -181,13 +182,29 @@ class MarketingService:
             .all()
         )
         names = await cls._creator_names(db, rows)
-        return [
-            cls._payload(
+        seg_ids = {int(r.segment_id) for r in rows if r.segment_id}
+        seg_codes: dict[int, str] = {}
+        if seg_ids:
+            for sid, scode in (
+                await db.execute(
+                    select(CustomerSegment.id, CustomerSegment.code).where(
+                        CustomerSegment.id.in_(seg_ids)
+                    )
+                )
+            ).all():
+                seg_codes[int(sid)] = str(scode or "")
+        out: list[dict] = []
+        for r in rows:
+            data = cls._payload(
                 r,
                 created_by_name=names.get(int(r.created_by)) if r.created_by else None,
             )
-            for r in rows
-        ], total
+            if r.segment_id:
+                data["segment_code"] = seg_codes.get(int(r.segment_id)) or None
+            else:
+                data["segment_code"] = None
+            out.append(data)
+        return out, total
 
     @classmethod
     async def upsert_campaign(
@@ -281,8 +298,23 @@ class MarketingService:
         now = naive_local_now()
         if camp.end_at and camp.end_at <= now:
             raise AppException(40001, "活动已过结束时间")
+        if camp.start_at and camp.end_at and camp.start_at >= camp.end_at:
+            raise AppException(40001, "开始时间必须早于结束时间")
 
         seg = await SegmentService.get_segment(db, int(camp.segment_id))
+        seg_code = (seg.code or "").strip()
+        # 生日禁止绑全体：一发布即对无关人发券
+        if (camp.campaign_type or "").upper() == "BIRTHDAY" and seg_code == "all_members":
+            raise AppException(
+                40001,
+                "生日活动禁止绑定「全体会员」，请改用 birthday_today（今日生日）分群",
+            )
+        # 全体会员活动必须排期短窗，防止非节日误点发布普发
+        if seg_code == "all_members" and (not camp.start_at or not camp.end_at):
+            raise AppException(
+                40001,
+                "全体会员活动必须设置开始与结束时间，避免非节日窗口误发",
+            )
         # 门店活动引用总部分群：按本店动态圈人，禁止覆盖总部物化快照（避免串店）
         store_scoped_hq = camp.store_id is not None and seg.store_id is None
         if store_scoped_hq:
@@ -590,6 +622,24 @@ class MarketingService:
                     task.executed_at = now
                     task.updated_at = now
                     task.result_json = {"reason": "weekly_cap", "used": used, "cap": cap}
+                    stats["skipped"] += 1
+                    stats["processed"] += 1
+                    return
+
+            # 与定时沉睡唤醒/欢迎券共用模板时：已有 WELCOME 幂等券则跳过，避免双发
+            if (camp.campaign_type or "").upper() in ("WAKEUP", "NEW_MEMBER"):
+                welcome_key = f"WELCOME:{int(task.customer_id)}:{int(template_id)}"
+                has_welcome = await db.scalar(
+                    select(CustomerCoupon.id).where(
+                        CustomerCoupon.client_request_id == welcome_key
+                    )
+                )
+                if has_welcome:
+                    task.status = "SKIPPED"
+                    task.last_error = "已有系统定时/欢迎同模板券，跳过双发"
+                    task.executed_at = now
+                    task.updated_at = now
+                    task.result_json = {"reason": "welcome_dup", "key": welcome_key}
                     stats["skipped"] += 1
                     stats["processed"] += 1
                     return

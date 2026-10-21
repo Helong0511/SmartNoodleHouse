@@ -181,6 +181,76 @@ async def test_segment_is_birthday_today(db_session):
 
 
 @pytest.mark.asyncio
+async def test_publish_all_members_requires_window(db_session):
+    """全体会员活动无排期不可发布，防止非节日误发。"""
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=None,
+        code="all_members",
+        name="全体会员",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=None,
+        code="fest_need_window",
+        name="节日测",
+        campaign_type="FESTIVAL",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+    )
+    await db_session.commit()
+    with pytest.raises(AppException) as ei:
+        await MarketingService.publish(db_session, int(camp.id))
+    assert "开始与结束时间" in str(ei.value.message)
+
+    now = naive_local_now()
+    camp2 = await MarketingService.upsert_campaign(
+        db_session,
+        campaign_id=int(camp.id),
+        store_id=None,
+        code="fest_need_window",
+        name="节日测",
+        campaign_type="FESTIVAL",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        start_at=now - timedelta(hours=1),
+        end_at=now + timedelta(days=2),
+    )
+    await db_session.commit()
+    pub = await MarketingService.publish(db_session, int(camp2.id))
+    assert pub["campaign"]["status"] == "RUNNING"
+
+
+@pytest.mark.asyncio
+async def test_publish_birthday_forbids_all_members(db_session):
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=None,
+        code="all_members",
+        name="全体会员",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=None,
+        code="bday_bad",
+        name="生日误绑",
+        campaign_type="BIRTHDAY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        start_at=naive_local_now(),
+        end_at=naive_local_now() + timedelta(days=1),
+    )
+    await db_session.commit()
+    with pytest.raises(AppException) as ei:
+        await MarketingService.publish(db_session, int(camp.id))
+    assert "生日" in str(ei.value.message)
+
+
+@pytest.mark.asyncio
 async def test_draft_publish_idempotent_pause(db_session):
     seed = await _seed(db_session)
     rules = {"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]}
@@ -198,6 +268,8 @@ async def test_draft_publish_idempotent_pause(db_session):
         name="会员日测",
         segment_id=int(seg.id),
         coupon_template_id=int(seed["tmpl"].id),
+        start_at=naive_local_now() - timedelta(hours=1),
+        end_at=naive_local_now() + timedelta(days=7),
     )
     await db_session.commit()
     assert camp.status == "DRAFT"
@@ -269,6 +341,8 @@ async def test_draft_publish_idempotent_pause(db_session):
         name="暂停测",
         segment_id=int(seg.id),
         coupon_template_id=int(seed["tmpl"].id),
+        start_at=naive_local_now() - timedelta(hours=1),
+        end_at=naive_local_now() + timedelta(days=7),
     )
     await MarketingService.publish(db_session, int(camp2.id))
     await MarketingService.set_status(db_session, int(camp2.id), "PAUSED")
