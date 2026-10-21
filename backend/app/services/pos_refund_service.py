@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
+from app.core.orm_safe import orm_attr_loaded
 from app.core.response import ensure_local_aware, now_local, serialize_dt
 from app.models import DiningTable, Order, Payment, PosRefundRequest, User
 from app.services.payment_service import PaymentService, money
@@ -583,9 +584,7 @@ class PosRefundService:
             "table_no": table.table_no if table else None,
             "table_name": table.table_name if table else None,
             "created_at": (
-                serialize_dt(row.created_at)
-                if getattr(row, "created_at", None) is not None
-                else None
+                serialize_dt(row.created_at) if orm_attr_loaded(row, "created_at") else None
             ),
         }
 

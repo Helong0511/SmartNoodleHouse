@@ -473,3 +473,44 @@ async def test_marketing_claim_committed_before_issue(db_session, monkeypatch):
         or 0
     )
     assert running_n == 0
+
+
+@pytest.mark.asyncio
+async def test_campaign_payload_after_commit_reads_timestamps(db_session):
+    """回归：upsert+commit 后同步 _payload 读 created_at 不得 MissingGreenlet。"""
+    from sqlalchemy.exc import MissingGreenlet
+
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="payload_seg",
+        name="payload分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="payload_camp",
+        name="payload活动",
+        campaign_type="MEMBER_DAY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        budget_cap=Decimal("100.00"),
+    )
+    await db_session.commit()
+
+    payload = MarketingService._payload(camp)
+    assert payload["id"] == int(camp.id)
+    assert payload["created_at"]
+    assert payload["updated_at"]
+    assert payload["budget_cap"] == "100.00"
+
+    # 显式 expire 后未 refresh 再同步读时间戳 → MissingGreenlet（契约说明）
+    db_session.expire(camp, ["created_at", "updated_at"])
+    with pytest.raises(MissingGreenlet):
+        _ = MarketingService._payload(camp)
+
+    await db_session.refresh(camp)
+    again = MarketingService._payload(camp)
+    assert again["created_at"]

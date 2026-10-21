@@ -11,8 +11,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import parse_biz_no
-from app.models import DiningTable, Order, OrderStatusHistory
+from app.core.orm_safe import orm_attr_loaded
 from app.core.response import serialize_dt
+from app.models import DiningTable, Order, OrderStatusHistory
 
 DISPLAY_ACTIVE_STATUSES = ("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY")
 PREPARING_STATUSES = ("PAID", "CONFIRMED", "PREPARING", "COOKING")
@@ -119,7 +120,9 @@ def build_display_item(
         "paid_at": serialize_dt(order.paid_at) if order.paid_at else None,
     }
     if status == "READY":
-        at = ready_at or getattr(order, "updated_at", None)
+        at = ready_at
+        if at is None and orm_attr_loaded(order, "updated_at"):
+            at = order.updated_at
         item["ready_at"] = serialize_dt(at) if at else None
     return item
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
+from app.core.orm_safe import orm_attr_loaded
 from app.core.response import calc_pages, success, serialize_dt
 from app.core.security import hash_password
 from app.models import Permission, Role, RoleDelegation, RolePermission, Store, User
@@ -95,7 +96,8 @@ def _ser(u: User, stores: dict[int, str] | None = None) -> dict:
         "store_name": (stores or {}).get(u.store_id) if u.store_id else None,
         "status": u.status,
         "last_login_at": serialize_dt(u.last_login_at),
-        "created_at": serialize_dt(u.created_at) if getattr(u, "created_at", None) else None,
+        # mapped 列勿用 getattr 兜底；创建后须 refresh / 重载后再序列化
+        "created_at": serialize_dt(u.created_at) if orm_attr_loaded(u, "created_at") else None,
     }
 
 

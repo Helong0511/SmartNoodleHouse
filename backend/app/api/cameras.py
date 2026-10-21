@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
+from app.core.orm_safe import orm_attr_loaded
 from app.core.response import now_local, success, serialize_dt
 from app.models import Camera, VisitorEvent
 from app.services.audit_service import AuditService
@@ -76,7 +77,8 @@ def _serialize(c: Camera, mgr) -> dict:
         "has_password": bool(c.password_encrypted),
         "last_online_at": serialize_dt(c.last_online_at),
         "runtime": runtime,
-        "created_at": serialize_dt(c.created_at) if getattr(c, "created_at", None) else None,
+        # getattr 对 mapped 列仍会懒加载；未 refresh 时用 orm_attr_loaded 避免 MissingGreenlet
+        "created_at": serialize_dt(c.created_at) if orm_attr_loaded(c, "created_at") else None,
     }
 
 

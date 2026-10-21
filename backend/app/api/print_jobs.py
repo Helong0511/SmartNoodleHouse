@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_kitchen
 from app.core.exceptions import AppException
+from app.core.orm_safe import orm_attr_loaded
 from app.core.response import calc_pages, success, serialize_dt
 from app.models import PrintJob
 from app.services.audit_service import AuditService
@@ -57,8 +58,8 @@ async def list_print_jobs(
             "next_retry_at": serialize_dt(j.next_retry_at),
             "last_error": j.last_error,
             "succeeded_at": serialize_dt(j.succeeded_at),
-            "created_at": serialize_dt(j.created_at),
-            "updated_at": serialize_dt(j.updated_at) if getattr(j, "updated_at", None) else None,
+            "created_at": serialize_dt(j.created_at) if orm_attr_loaded(j, "created_at") else None,
+            "updated_at": serialize_dt(j.updated_at) if orm_attr_loaded(j, "updated_at") else None,
         }
         for j in rows
     ]

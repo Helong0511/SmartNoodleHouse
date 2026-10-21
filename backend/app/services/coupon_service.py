@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import generate_no
 from app.core.config import get_settings
 from app.core.exceptions import AppException
+from app.core.orm_safe import orm_attr_loaded
 from app.core.response import ensure_local_aware, money, now_local, naive_local_now, serialize_dt
 from app.models import CouponTemplate, CustomerCoupon, Order
 from app.services.customer_service import CustomerService
@@ -158,7 +159,8 @@ class CouponService:
             "store_whitelist": getattr(tmpl, "store_whitelist", None),
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
-            "created_at": serialize_dt(tmpl.created_at) if getattr(tmpl, "created_at", None) else None,
+            # CouponTemplate 无 created_at 列；勿 getattr 读 mapped 时间戳
+            "created_at": None,
         }
 
     @staticmethod
@@ -1126,8 +1128,12 @@ class CouponService:
             "threshold_orders": int(row.threshold_orders),
             "template_id": int(row.template_id),
             "status": int(row.status or 0),
-            "created_at": serialize_dt(row.created_at) if getattr(row, "created_at", None) else None,
-            "updated_at": serialize_dt(row.updated_at) if getattr(row, "updated_at", None) else None,
+            "created_at": (
+                serialize_dt(row.created_at) if orm_attr_loaded(row, "created_at") else None
+            ),
+            "updated_at": (
+                serialize_dt(row.updated_at) if orm_attr_loaded(row, "updated_at") else None
+            ),
         }
         if tmpl is not None:
             out["template_name"] = tmpl.name

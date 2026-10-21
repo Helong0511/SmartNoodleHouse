@@ -43,6 +43,8 @@ engine = create_async_engine(
     isolation_level="REPEATABLE READ",
 )
 
+# expire_on_commit=False：commit 后已加载字段可继续读（订单通知等依赖此行为）。
+# 注意：server_default / onupdate 时间戳在 flush 后常未加载，sync 序列化前须 await refresh。
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
