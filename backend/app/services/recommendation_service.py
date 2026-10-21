@@ -76,15 +76,23 @@ TAG_REASON_MAP = {
 }
 
 # 场景（季节/天气）对标签/温度的小幅乘子，作用于最终分，克制在 ±8%
+# 天气 condition 与 weather_client / preference_scene 一致：hot/cold/rainy/mild
 _SCENE_TAG_MULT = {
     "summer": {"ice": 1.08, "cool": 1.05, "hot_drink": 0.96},
     "winter": {"ice": 0.95, "cool": 0.97, "hot_drink": 1.08, "soup": 1.05},
+    "spring": {"cool": 1.03},
+    "autumn": {"soup": 1.03, "hot_drink": 1.03},
 }
 _WEATHER_TAG_MULT = {
-    "RAIN": {"soup": 1.05, "hot_drink": 1.05},
-    "SNOW": {"hot_drink": 1.08, "soup": 1.05},
-    "HOT": {"ice": 1.06},
-    "CLEAR": {},
+    "rainy": {"soup": 1.06, "hot_drink": 1.05},
+    "cold": {"hot_drink": 1.08, "soup": 1.06, "ice": 0.94},
+    "hot": {"ice": 1.08, "cool": 1.05, "hot_drink": 0.95},
+    "mild": {},
+}
+_WEATHER_REASON = {
+    "rainy": "雨天暖胃更合适",
+    "cold": "天冷来点热的",
+    "hot": "天气炎热更清爽",
 }
 
 
@@ -257,24 +265,44 @@ def _tag_reason(key: str, target_name: str | None) -> str | None:
     return None
 
 
-def _scene_multiplier(p: PoolProduct, scene_ctx: dict[str, Any]) -> float:
-    mult = 1.0
+def _product_scene_flags(p: PoolProduct) -> dict[str, bool]:
     temp = p.dimensions.get("temperature")
     is_ice = temp is not None and temp <= 0
     is_cool = temp == 1
     is_hot_drink = temp == 3
-    flags = {
+    return {
         "ice": is_ice,
         "cool": is_cool,
         "hot_drink": is_hot_drink,
         "soup": any(t in p.tags for t in ("汤", "浓汤", "汤面")) or "汤" in p.name,
     }
+
+
+def _scene_multiplier(p: PoolProduct, scene_ctx: dict[str, Any]) -> float:
+    mult = 1.0
+    flags = _product_scene_flags(p)
     season = scene_ctx.get("season")
+    cond = str(scene_ctx.get("condition") or "").strip().lower()
     for flag, active in flags.items():
         if active:
             mult *= _SCENE_TAG_MULT.get(season, {}).get(flag, 1.0)
-            mult *= _WEATHER_TAG_MULT.get(scene_ctx.get("condition") or "", {}).get(flag, 1.0)
+            mult *= _WEATHER_TAG_MULT.get(cond, {}).get(flag, 1.0)
     return max(0.9, min(1.12, mult))
+
+
+def _weather_reason_for(p: PoolProduct, scene_ctx: dict[str, Any]) -> str | None:
+    """天气乘子真正生效时返回可读理由，否则 None。"""
+    cond = str(scene_ctx.get("condition") or "").strip().lower()
+    if not cond or cond not in _WEATHER_REASON:
+        return None
+    weather_map = _WEATHER_TAG_MULT.get(cond) or {}
+    if not weather_map:
+        return None
+    flags = _product_scene_flags(p)
+    for flag, active in flags.items():
+        if active and weather_map.get(flag, 1.0) != 1.0:
+            return _WEATHER_REASON[cond]
+    return None
 
 
 def _pick_reason(
@@ -284,6 +312,7 @@ def _pick_reason(
     scores: dict[str, float],
     profiles: dict[tuple[str, str], ProfilePoint],
     scene: str,
+    scene_ctx: dict[str, Any] | None = None,
 ) -> str:
     cat_s, _tag_s, _prod_s, _penalty, best_tag = comps
     cat_pt = profiles.get(("CATEGORY", str(p.category_id)))
@@ -297,7 +326,11 @@ def _pick_reason(
                 return txt
         return "搭配加点"
 
+    weather_txt = _weather_reason_for(p, scene_ctx or {})
+
     if state == "COLD":
+        if weather_txt:
+            return weather_txt
         if scores["novel"] >= 0.6:
             return "店长推荐" if p.is_recommended else "新品上市"
         if p.is_hot or scores["popular"] >= 0.6:
@@ -313,6 +346,8 @@ def _pick_reason(
         txt = _tag_reason(best_tag[0], pt.target_name if pt else None)
         if txt:
             candidates.append((0.9, txt))
+    if weather_txt:
+        candidates.append((0.85, weather_txt))
     if cat_pt and cat_pt.score >= 0.6:
         candidates.append((0.8, f"您常点的{cat_pt.target_name or p.category_name}"))
     if scores["cf"] >= 0.4:
@@ -396,7 +431,7 @@ def rank_candidates(
             "popular": round(s_popular, 4),
             "novel": round(s_novel, 4),
         }
-        reason = _pick_reason(p, state, comps, scores, profiles, scene)
+        reason = _pick_reason(p, state, comps, scores, profiles, scene, scene_ctx)
         scored.append(RankedItem(p, round(total, 6), reason, state, scores))
 
     scored.sort(key=lambda r: r.total, reverse=True)
@@ -782,8 +817,20 @@ class RecommendationService:
             weight_override=weight_override,
             boost_product_ids=boost_ids,
         )
+        from app.services.preference_scene import scene_summary_label
+
+        scene_view = {
+            "season": scene_ctx.get("season"),
+            "condition": scene_ctx.get("condition"),
+            "temp_c": scene_ctx.get("temp_c"),
+            "weather_active": bool(scene_ctx.get("weather_active")),
+            "weather_reason": scene_ctx.get("weather_reason"),
+            "enabled": True,
+        }
+        scene_view["label"] = scene_summary_label(scene_view)
         return ranked, state, {
             "pool_size": len(pool),
             "total_events": total_events,
             "boost_product_ids": sorted(boost_ids),
+            "scene": scene_view,
         }

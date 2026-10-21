@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T09:48:01Z",
+  "updated_at": "2026-10-21T10:30:00Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "dcbbabdaa6539eec3a9deceb38065d7f48c7d52dada8cbd319f8cee601fe5f8e",
-      "size": 179876,
-      "normalized_sha256": "dcbbabdaa6539eec3a9deceb38065d7f48c7d52dada8cbd319f8cee601fe5f8e"
+      "sha256": "dd3a3d8e0df0032b9cf65ee17e56f1f48597540983a6a6353368454c0d150461",
+      "size": 180217,
+      "normalized_sha256": "dd3a3d8e0df0032b9cf65ee17e56f1f48597540983a6a6353368454c0d150461"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -369,6 +369,12 @@
       "size": 10526,
       "normalized_sha256": "91af216c439da1675c2721a72cc3278656235719336a6f9c0927ece19b6ddb17"
     },
+    "backend/alembic/versions/0037_campaign_annual_schedule.py": {
+      "role": "index",
+      "sha256": "dcfa24b7e33f74b5b08afa78c82bdb9941da744a945bc8ecb41c4f68df6ddfe8",
+      "size": 4722,
+      "normalized_sha256": "dcfa24b7e33f74b5b08afa78c82bdb9941da744a945bc8ecb41c4f68df6ddfe8"
+    },
     "backend/app/__init__.py": {
       "role": "index",
       "sha256": "18ca7478b6e46447b188a5e2cf1edd5a3ed320216e67492b448d01a25d739558",
@@ -503,9 +509,9 @@
     },
     "backend/app/api/marketing.py": {
       "role": "index",
-      "sha256": "0a2275ea1632010399159fd894047ec3fc0573f0995a79f1524946599435450d",
-      "size": 12714,
-      "normalized_sha256": "0a2275ea1632010399159fd894047ec3fc0573f0995a79f1524946599435450d"
+      "sha256": "bf2d5271f50c890109adec70b06f884700ba4c6ccc550d9d56da9838be151382",
+      "size": 13748,
+      "normalized_sha256": "bf2d5271f50c890109adec70b06f884700ba4c6ccc550d9d56da9838be151382"
     },
     "backend/app/api/member_levels.py": {
       "role": "index",
@@ -1097,9 +1103,9 @@
     },
     "backend/app/models/marketing.py": {
       "role": "index",
-      "sha256": "0550bf65d89e9e86f9c75bc39ececb6dad591d68e739dc4d4b669402f8819391",
-      "size": 9176,
-      "normalized_sha256": "0550bf65d89e9e86f9c75bc39ececb6dad591d68e739dc4d4b669402f8819391"
+      "sha256": "c50f3b830dfb59dc409710f326df0bacdd3fc51c4feac451911cbb53d2fd151e",
+      "size": 9805,
+      "normalized_sha256": "c50f3b830dfb59dc409710f326df0bacdd3fc51c4feac451911cbb53d2fd151e"
     },
     "backend/app/models/member.py": {
       "role": "index",
@@ -1421,9 +1427,9 @@
     },
     "backend/app/services/marketing_service.py": {
       "role": "index",
-      "sha256": "f25e7253a664187c964f5be968c290596c93ccd5ead250e8a641ff29a736651d",
-      "size": 35243,
-      "normalized_sha256": "f25e7253a664187c964f5be968c290596c93ccd5ead250e8a641ff29a736651d"
+      "sha256": "582487791eb9676c3680a40df39c2df776bdd0e7b3f7da01b0059d782d952def",
+      "size": 44768,
+      "normalized_sha256": "582487791eb9676c3680a40df39c2df776bdd0e7b3f7da01b0059d782d952def"
     },
     "backend/app/services/menu_copy_service.py": {
       "role": "index",
@@ -1796,6 +1802,12 @@
       "sha256": "850017a91893ef27fd3ccff47affc09cf8a69554c70c5e6c82c0c11d71a30ec2",
       "size": 7448,
       "normalized_sha256": "850017a91893ef27fd3ccff47affc09cf8a69554c70c5e6c82c0c11d71a30ec2"
+    },
+    "backend/app/utils/campaign_schedule.py": {
+      "role": "index",
+      "sha256": "0696f1ffb903bdc76c80e41125ed558763815de84e24d16d75e7c50eaca90b33",
+      "size": 4898,
+      "normalized_sha256": "0696f1ffb903bdc76c80e41125ed558763815de84e24d16d75e7c50eaca90b33"
     },
     "backend/app/utils/logo_overlay.py": {
       "role": "index",
@@ -2281,9 +2293,9 @@
     },
     "frontend/src/utils/marketingHelp.ts": {
       "role": "index",
-      "sha256": "8b4ce177391eae6705adfdbd571f31b86d87fe1643c272b68d5ad60f7cc24a76",
-      "size": 8289,
-      "normalized_sha256": "8b4ce177391eae6705adfdbd571f31b86d87fe1643c272b68d5ad60f7cc24a76"
+      "sha256": "fb9dac0de60d9a6a28f4fa2e11f1290cc32e6902aacf10e32b6eaac963a88de6",
+      "size": 8799,
+      "normalized_sha256": "fb9dac0de60d9a6a28f4fa2e11f1290cc32e6902aacf10e32b6eaac963a88de6"
     },
     "frontend/src/utils/media.ts": {
       "role": "index",
@@ -2407,9 +2419,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "630efc8bf46d45f8a04feaba1128b31af502b35b8b3fa4f9f68ea205900cc0c5",
-      "size": 38531,
-      "normalized_sha256": "630efc8bf46d45f8a04feaba1128b31af502b35b8b3fa4f9f68ea205900cc0c5"
+      "sha256": "b2c8a43f70f976b9b36b177acb54368612b0bda77034cfb25e679635874fcc0b",
+      "size": 45443,
+      "normalized_sha256": "b2c8a43f70f976b9b36b177acb54368612b0bda77034cfb25e679635874fcc0b"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -4295,9 +4307,9 @@
     },
     "sql/data_custom.sql": {
       "role": "index",
-      "sha256": "397d498541ea5998d2bbcfce1be6f530db3aa062731c7f07f87be7dc94cee9a5",
-      "size": 133767,
-      "normalized_sha256": "397d498541ea5998d2bbcfce1be6f530db3aa062731c7f07f87be7dc94cee9a5"
+      "sha256": "98bb9431b98996d823f2b083b9b89052eed49442cc7211dc74030f68547b0799",
+      "size": 141770,
+      "normalized_sha256": "98bb9431b98996d823f2b083b9b89052eed49442cc7211dc74030f68547b0799"
     },
     "sql/data_sys.sql": {
       "role": "index",
@@ -4313,9 +4325,9 @@
     },
     "sql/struct.sql": {
       "role": "index",
-      "sha256": "e6febbaf161118301de9ecd5a43b7b88a1eaa4a878397ca2fcc1f2ff0a130018",
-      "size": 154706,
-      "normalized_sha256": "e6febbaf161118301de9ecd5a43b7b88a1eaa4a878397ca2fcc1f2ff0a130018"
+      "sha256": "9a4151eaeb62f0199e8fa6806d6c1452b4fed6d153747d116c2ffebaa65212f8",
+      "size": 155491,
+      "normalized_sha256": "9a4151eaeb62f0199e8fa6806d6c1452b4fed6d153747d116c2ffebaa65212f8"
     },
     "sql/人脸数据.sql": {
       "role": "index",
@@ -4864,9 +4876,9 @@
     },
     "tests/测试_偏好场景与规格范围.py": {
       "role": "observe",
-      "sha256": "f1276266cc6832b38cf372160d450d10656b7127a38a88f95042a9e186faa675",
-      "size": 2894,
-      "normalized_sha256": "1fcea2faddcc4310f1f7b56286e762be1e2e0f4a593a2a96c72408201acedfab"
+      "sha256": "c0228e9615ce886285fc0a6b109c13aa8526a3f73e20ab2118f9e5255e8a2d1d",
+      "size": 5474,
+      "normalized_sha256": "a6f1a6a55225dae2c6605d0409dfeba4e2086292390040186ef0695d9c65fd25"
     },
     "tests/测试_偏好评分.py": {
       "role": "observe",
@@ -5506,9 +5518,9 @@
     },
     "tests/测试_营销分群活动.py": {
       "role": "observe",
-      "sha256": "baec0940f6e8286c4b923c0cebff5eafdcfe5dfe28e59355fc7318e20e8f1ed8",
-      "size": 24408,
-      "normalized_sha256": "09d355139ae14e253b752e4df0ed271b144d00ad3d8fec81cfc82fbc20487f9f"
+      "sha256": "2d2ebc15b1629f63fa22c6e4440107adb4defc26e780a0bf77d5532b58cb9824",
+      "size": 28437,
+      "normalized_sha256": "38135d6b483112c7f8bccf8712c2a4c32eaa9b27f6e72d54c0a60ee63016cb14"
     },
     "tests/测试_营销归因与报表.py": {
       "role": "observe",

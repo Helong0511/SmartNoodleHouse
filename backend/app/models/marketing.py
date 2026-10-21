@@ -62,6 +62,7 @@ class MarketingCampaign(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("store_id", "code", name="uk_mc_store_code"),
         Index("idx_mc_status_time", "status", "start_at", "end_at"),
+        Index("idx_mc_schedule_mode", "schedule_mode", "status"),
     )
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
@@ -77,6 +78,13 @@ class MarketingCampaign(Base, TimestampMixin):
     coupon_template_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("coupon_templates.id"), default=None
     )
+    # ABSOLUTE=绝对起止；ANNUAL_MD=每年月日自动启停（公历/农历）
+    schedule_mode: Mapped[str] = mapped_column(String(20), default="ABSOLUTE")
+    schedule_calendar: Mapped[str] = mapped_column(String(10), default="SOLAR")
+    annual_start_month: Mapped[int | None] = mapped_column(Integer, default=None)
+    annual_start_day: Mapped[int | None] = mapped_column(Integer, default=None)
+    annual_end_month: Mapped[int | None] = mapped_column(Integer, default=None)
+    annual_end_day: Mapped[int | None] = mapped_column(Integer, default=None)
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     budget_cap: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=None)

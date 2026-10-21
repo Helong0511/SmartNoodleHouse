@@ -203,7 +203,7 @@ async def test_publish_all_members_requires_window(db_session):
     await db_session.commit()
     with pytest.raises(AppException) as ei:
         await MarketingService.publish(db_session, int(camp.id))
-    assert "开始与结束时间" in str(ei.value.message)
+    assert "绝对起止" in str(ei.value.message) or "每年月日" in str(ei.value.message)
 
     now = naive_local_now()
     camp2 = await MarketingService.upsert_campaign(
@@ -712,3 +712,131 @@ async def test_campaign_payload_for_includes_created_by_name(db_session):
     assert total >= 1
     hit = next(i for i in items if i["id"] == int(camp.id))
     assert hit["created_by_name"] == "营销创建人"
+
+
+@pytest.mark.asyncio
+async def test_annual_md_publish_and_lifecycle(db_session, monkeypatch):
+    """每年月日：窗外启用为 PAUSED；进入窗口自动 RUNNING 并按季入队；窗外再 PAUSED。"""
+    from datetime import date
+
+    from app.utils import campaign_schedule as cs
+
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="ann_all",
+        name="年度测分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="festival_ann_test",
+        name="年度节日测",
+        campaign_type="FESTIVAL",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        schedule_mode="ANNUAL_MD",
+        schedule_calendar="SOLAR",
+        annual_start_month=6,
+        annual_start_day=1,
+        annual_end_month=6,
+        annual_end_day=3,
+    )
+    await db_session.commit()
+
+    # 窗外发布 → PAUSED，不入队
+    monkeypatch.setattr(cs, "today_beijing", lambda: date(2026, 5, 31))
+    monkeypatch.setattr(
+        "app.services.marketing_service.today_beijing", lambda: date(2026, 5, 31)
+    )
+    pub = await MarketingService.publish(db_session, int(camp.id))
+    assert pub["campaign"]["status"] == "PAUSED"
+    assert pub["enqueued"] == 0
+    await db_session.commit()
+
+    # 进入窗口 → RUNNING + 入队
+    monkeypatch.setattr(cs, "today_beijing", lambda: date(2026, 6, 1))
+    monkeypatch.setattr(
+        "app.services.marketing_service.today_beijing", lambda: date(2026, 6, 1)
+    )
+    adv = await MarketingService.advance_campaign_lifecycle(db_session)
+    await db_session.commit()
+    await db_session.refresh(camp)
+    assert camp.status == "RUNNING"
+    assert adv["started"] >= 1
+    assert adv["enqueued"] >= 1
+    pending = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(MarketingTask)
+            .where(
+                MarketingTask.campaign_id == int(camp.id),
+                MarketingTask.status == "PENDING",
+            )
+        )
+        or 0
+    )
+    assert pending >= 1
+    # 幂等键带季标识
+    key = await db_session.scalar(
+        select(MarketingTask.idempotency_key).where(
+            MarketingTask.campaign_id == int(camp.id)
+        ).limit(1)
+    )
+    assert key and ":S2026" in str(key)
+
+    # 窗外 → PAUSED（不 ENDED）
+    monkeypatch.setattr(cs, "today_beijing", lambda: date(2026, 6, 4))
+    monkeypatch.setattr(
+        "app.services.marketing_service.today_beijing", lambda: date(2026, 6, 4)
+    )
+    adv2 = await MarketingService.advance_campaign_lifecycle(db_session)
+    await db_session.commit()
+    await db_session.refresh(camp)
+    assert camp.status == "PAUSED"
+    assert adv2["paused"] >= 1
+
+
+def test_annual_md_window_helpers():
+    from datetime import date
+
+    from app.utils.campaign_schedule import (
+        annual_season_token,
+        is_in_annual_window,
+    )
+
+    assert is_in_annual_window(
+        calendar="SOLAR",
+        start_month=10,
+        start_day=1,
+        end_month=10,
+        end_day=7,
+        today=date(2026, 10, 3),
+    )
+    assert not is_in_annual_window(
+        calendar="SOLAR",
+        start_month=10,
+        start_day=1,
+        end_month=10,
+        end_day=7,
+        today=date(2026, 10, 8),
+    )
+    # 跨年
+    assert is_in_annual_window(
+        calendar="SOLAR",
+        start_month=12,
+        start_day=21,
+        end_month=1,
+        end_day=5,
+        today=date(2027, 1, 2),
+    )
+    assert annual_season_token(
+        calendar="SOLAR",
+        start_month=12,
+        start_day=21,
+        end_month=1,
+        end_day=5,
+        today=date(2027, 1, 2),
+    ) == "S2026"

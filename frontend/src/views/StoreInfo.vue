@@ -73,10 +73,13 @@
                 <el-input v-model="form.phone" maxlength="20" :disabled="!canEditBasic" />
               </el-form-item>
               <el-form-item label="纬度">
-                <el-input v-model="form.latitude" placeholder="可选，天气口味用" :disabled="!canEditBasic" />
+                <el-input v-model="form.latitude" placeholder="如 30.8719" :disabled="!canEditBasic" />
               </el-form-item>
               <el-form-item label="经度">
-                <el-input v-model="form.longitude" placeholder="可选，天气口味用" :disabled="!canEditBasic" />
+                <el-input v-model="form.longitude" placeholder="如 105.3884" :disabled="!canEditBasic" />
+              </el-form-item>
+              <el-form-item>
+                <p class="hint">填写经纬度后，业务参数中的「天气口味加权」才会按实时气温/雨天微调规格与餐品推荐；射洪城区可参考 30.87 / 105.39。</p>
               </el-form-item>
               <el-form-item label="状态">
                 <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="营业" inactive-text="停用" :disabled="!canEditBasic" />

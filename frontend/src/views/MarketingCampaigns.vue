@@ -110,9 +110,14 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="排期" width="160" show-overflow-tooltip>
+      <el-table-column label="排期" width="200" show-overflow-tooltip>
         <template #default="{ row }">
-          <span v-if="row.start_at || row.end_at">{{ row.start_at || '—' }} ~ {{ row.end_at || '—' }}</span>
+          <span v-if="row.schedule_mode === 'ANNUAL_MD'">
+            每年 {{ row.annual_label || '—' }}
+            <el-tag v-if="row.in_schedule_window" size="small" type="success" style="margin-left:4px">窗内</el-tag>
+            <el-tag v-else size="small" type="info" style="margin-left:4px">窗外</el-tag>
+          </span>
+          <span v-else-if="row.start_at || row.end_at">{{ row.start_at || '—' }} ~ {{ row.end_at || '—' }}</span>
           <span v-else>—</span>
         </template>
       </el-table-column>
@@ -244,26 +249,62 @@
           </el-select>
           <div class="hint">{{ CAMPAIGN_FIELD_HELP.coupon_template_id }}</div>
         </el-form-item>
-        <el-form-item label="开始时间">
-          <el-date-picker
-            v-model="form.start_at"
-            type="datetime"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            placeholder="空=发布后立即进行"
-            style="width:100%"
-          />
-          <div class="hint">{{ CAMPAIGN_FIELD_HELP.start_at }}</div>
+        <el-form-item label="排期方式">
+          <el-radio-group v-model="form.schedule_mode">
+            <el-radio-button value="ANNUAL_MD">每年月日（推荐节日）</el-radio-button>
+            <el-radio-button value="ABSOLUTE">绝对起止时间</el-radio-button>
+          </el-radio-group>
+          <div class="hint">{{ CAMPAIGN_FIELD_HELP.schedule_mode }}</div>
         </el-form-item>
-        <el-form-item label="结束时间">
-          <el-date-picker
-            v-model="form.end_at"
-            type="datetime"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            placeholder="空=不自动结束"
-            style="width:100%"
-          />
-          <div class="hint">{{ CAMPAIGN_FIELD_HELP.end_at }}</div>
-        </el-form-item>
+        <template v-if="form.schedule_mode === 'ANNUAL_MD'">
+          <el-form-item label="历法">
+            <el-radio-group v-model="form.schedule_calendar">
+              <el-radio-button value="SOLAR">公历</el-radio-button>
+              <el-radio-button value="LUNAR">农历</el-radio-button>
+            </el-radio-group>
+            <div class="hint">{{ CAMPAIGN_FIELD_HELP.schedule_calendar }}</div>
+          </el-form-item>
+          <el-form-item label="起始月日">
+            <div style="display:flex;gap:8px;align-items:center;width:100%">
+              <el-input-number v-model="form.annual_start_month" :min="1" :max="12" controls-position="right" />
+              <span>月</span>
+              <el-input-number v-model="form.annual_start_day" :min="1" :max="31" controls-position="right" />
+              <span>日</span>
+            </div>
+            <div class="hint">{{ CAMPAIGN_FIELD_HELP.annual_md }}</div>
+          </el-form-item>
+          <el-form-item label="结束月日">
+            <div style="display:flex;gap:8px;align-items:center;width:100%">
+              <el-input-number v-model="form.annual_end_month" :min="1" :max="12" controls-position="right" />
+              <span>月</span>
+              <el-input-number v-model="form.annual_end_day" :min="1" :max="31" controls-position="right" />
+              <span>日</span>
+            </div>
+            <div class="hint">可跨年（如腊月廿四～正月初七）；空结束=仅起始当天。</div>
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="开始时间">
+            <el-date-picker
+              v-model="form.start_at"
+              type="datetime"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              placeholder="空=发布后立即进行"
+              style="width:100%"
+            />
+            <div class="hint">{{ CAMPAIGN_FIELD_HELP.start_at }}</div>
+          </el-form-item>
+          <el-form-item label="结束时间">
+            <el-date-picker
+              v-model="form.end_at"
+              type="datetime"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              placeholder="空=不自动结束"
+              style="width:100%"
+            />
+            <div class="hint">{{ CAMPAIGN_FIELD_HELP.end_at }}</div>
+          </el-form-item>
+        </template>
         <el-form-item label="周发券上限">
           <el-input-number v-model="form.weekly_cap_override" :min="0" :max="100" :controls="true" />
           <div class="hint">{{ CAMPAIGN_FIELD_HELP.weekly_cap_override }}</div>
@@ -443,26 +484,32 @@ type CampaignPreset = {
   codePrefix: string
   name: string
   remark: string
+  schedule_mode?: 'ABSOLUTE' | 'ANNUAL_MD'
+  schedule_calendar?: 'SOLAR' | 'LUNAR'
+  annual_start_month?: number
+  annual_start_day?: number
+  annual_end_month?: number
+  annual_end_day?: number
 }
 
 const CAMPAIGN_PRESETS: CampaignPreset[] = [
-  { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '射洪返乡；满20减3；勿10元普发；加权肠旺/豌杂' },
-  { label: '元宵', campaign_type: 'FESTIVAL', codePrefix: 'festival_lantern', name: '元宵·汤圆团圆', remark: '汤圆加权；满20减3；短窗' },
-  { label: '妇女/母亲节', campaign_type: 'FESTIVAL', codePrefix: 'festival_mother', name: '妇女节/母亲节·有温度的甜', remark: '满20减3+汤圆加权；勿满50折' },
-  { label: '儿童节', campaign_type: 'FESTIVAL', codePrefix: 'festival_children', name: '儿童节·小份快乐', remark: '轻券+抄手/香葱包加权' },
-  { label: '端午', campaign_type: 'FESTIVAL', codePrefix: 'festival_duanwu', name: '端午·咸鲜一碗', remark: '肠旺/抄手加权；满20减3；无粽SKU勿硬推' },
-  { label: '中秋', campaign_type: 'FESTIVAL', codePrefix: 'festival_mid_autumn', name: '中秋·团圆甜一口', remark: '汤圆甜品向；轻券；仅中秋窗口' },
-  { label: '国庆', campaign_type: 'FESTIVAL', codePrefix: 'festival_national', name: '国庆·家乡面畅吃', remark: '返乡轻券满20减3；加权肠旺/豌杂/杂酱' },
-  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '分群 social_teacher；满20减3；仅教师身份' },
-  { label: '重阳', campaign_type: 'FESTIVAL', codePrefix: 'festival_chongyang', name: '重阳·长寿面', remark: '分群 social_elder；满20减3+蹄花/汤圆' },
-  { label: '八一建军节', campaign_type: 'FESTIVAL', codePrefix: 'festival_army_day', name: '八一建军节·致敬军人', remark: '分群 social_veteran；满20减3；仅退役军人' },
-  { label: '冬至抄手', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '轻券满20减3+抄手加权；勿10元普发' },
-  { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '分群 social_sanitation；3元代金兑饮/抵餐' },
-  { label: '会员日', campaign_type: 'MEMBER_DAY', codePrefix: 'member_day', name: '会员日·老客回访', remark: 'champions+满20减3；加权肠旺' },
-  { label: '生日加蛋', campaign_type: 'BIRTHDAY', codePrefix: 'birthday_egg', name: '生日·免费加蛋', remark: '必须 birthday_today；勿绑全体会员' },
-  { label: '沉睡唤醒', campaign_type: 'WAKEUP', codePrefix: 'wakeup_sleep', name: '沉睡唤醒', remark: 'sleep30/90；周频1；勿与节日同周叠发' },
-  { label: '新客欢迎', campaign_type: 'NEW_MEMBER', codePrefix: 'new_member', name: '新客欢迎券', remark: '开卡欢迎；周频1；勿与系统欢迎券叠发' },
-  { label: '低余额催充', campaign_type: 'MEMBER_DAY', codePrefix: 'low_balance', name: '低余额催充', remark: '满20减3催回店；勿满50折' },
+  { label: '春节返乡', campaign_type: 'FESTIVAL', codePrefix: 'festival_spring', name: '春节·回家吃碗家乡面', remark: '农历每年自动启停；满20减3；加权肠旺/豌杂', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'LUNAR', annual_start_month: 12, annual_start_day: 24, annual_end_month: 1, annual_end_day: 7 },
+  { label: '元宵', campaign_type: 'FESTIVAL', codePrefix: 'festival_lantern', name: '元宵·汤圆团圆', remark: '农历正月十五前后；汤圆加权', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'LUNAR', annual_start_month: 1, annual_start_day: 14, annual_end_month: 1, annual_end_day: 16 },
+  { label: '妇女节', campaign_type: 'FESTIVAL', codePrefix: 'festival_mother', name: '妇女节·有温度的甜', remark: '公历3/8前后；满20减3+汤圆', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 3, annual_start_day: 6, annual_end_month: 3, annual_end_day: 9 },
+  { label: '儿童节', campaign_type: 'FESTIVAL', codePrefix: 'festival_children', name: '儿童节·小份快乐', remark: '公历6/1前后；抄手/香葱包', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 5, annual_start_day: 30, annual_end_month: 6, annual_end_day: 2 },
+  { label: '端午', campaign_type: 'FESTIVAL', codePrefix: 'festival_duanwu', name: '端午·咸鲜一碗', remark: '农历五月初五前后；肠旺/抄手', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'LUNAR', annual_start_month: 5, annual_start_day: 4, annual_end_month: 5, annual_end_day: 6 },
+  { label: '中秋', campaign_type: 'FESTIVAL', codePrefix: 'festival_mid_autumn', name: '中秋·团圆甜一口', remark: '农历八月十五前后；汤圆', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'LUNAR', annual_start_month: 8, annual_start_day: 14, annual_end_month: 8, annual_end_day: 16 },
+  { label: '国庆', campaign_type: 'FESTIVAL', codePrefix: 'festival_national', name: '国庆·家乡面畅吃', remark: '公历10/1～7；满20减3', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 10, annual_start_day: 1, annual_end_month: 10, annual_end_day: 7 },
+  { label: '教师节', campaign_type: 'FESTIVAL', codePrefix: 'festival_teacher', name: '教师节·感念师恩', remark: '公历9/10；social_teacher', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 9, annual_start_day: 9, annual_end_month: 9, annual_end_day: 11 },
+  { label: '重阳', campaign_type: 'FESTIVAL', codePrefix: 'festival_chongyang', name: '重阳·长寿面', remark: '农历九月初九；social_elder', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'LUNAR', annual_start_month: 9, annual_start_day: 8, annual_end_month: 9, annual_end_day: 10 },
+  { label: '八一建军节', campaign_type: 'FESTIVAL', codePrefix: 'festival_army_day', name: '八一建军节·致敬军人', remark: '公历8/1；social_veteran', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 7, annual_start_day: 31, annual_end_month: 8, annual_end_day: 2 },
+  { label: '冬至抄手', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '公历约12/21～23；抄手加权', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 12, annual_start_day: 21, annual_end_month: 12, annual_end_day: 23 },
+  { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '公历10/26；social_sanitation', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 10, annual_start_day: 25, annual_end_month: 10, annual_end_day: 27 },
+  { label: '会员日', campaign_type: 'MEMBER_DAY', codePrefix: 'member_day', name: '会员日·老客回访', remark: 'champions+满20减3；可用绝对时间', schedule_mode: 'ABSOLUTE' },
+  { label: '生日加蛋', campaign_type: 'BIRTHDAY', codePrefix: 'birthday_egg', name: '生日·免费加蛋', remark: '必须 birthday_today；勿绑全体会员', schedule_mode: 'ABSOLUTE' },
+  { label: '沉睡唤醒', campaign_type: 'WAKEUP', codePrefix: 'wakeup_sleep', name: '沉睡唤醒', remark: 'sleep30/90；周频1', schedule_mode: 'ABSOLUTE' },
+  { label: '新客欢迎', campaign_type: 'NEW_MEMBER', codePrefix: 'new_member', name: '新客欢迎券', remark: '开卡欢迎；周频1', schedule_mode: 'ABSOLUTE' },
+  { label: '低余额催充', campaign_type: 'MEMBER_DAY', codePrefix: 'low_balance', name: '低余额催充', remark: '满20减3催回店', schedule_mode: 'ABSOLUTE' },
 ]
 
 const router = useRouter()
@@ -497,6 +544,12 @@ const form = reactive<any>({
   campaign_type: 'MEMBER_DAY',
   segment_id: null,
   coupon_template_id: null,
+  schedule_mode: 'ANNUAL_MD' as string,
+  schedule_calendar: 'SOLAR' as string,
+  annual_start_month: null as number | null,
+  annual_start_day: null as number | null,
+  annual_end_month: null as number | null,
+  annual_end_day: null as number | null,
   start_at: null as string | null,
   end_at: null as string | null,
   weekly_cap_override: null as number | null,
@@ -504,6 +557,19 @@ const form = reactive<any>({
   boost_product_ids: [] as number[],
   remark: '',
 })
+
+function blankScheduleFields() {
+  return {
+    schedule_mode: 'ANNUAL_MD',
+    schedule_calendar: 'SOLAR',
+    annual_start_month: null as number | null,
+    annual_start_day: null as number | null,
+    annual_end_month: null as number | null,
+    annual_end_day: null as number | null,
+    start_at: null as string | null,
+    end_at: null as string | null,
+  }
+}
 
 const boundStoreName = computed(() => {
   if (auth.isSuperAdmin) return ''
@@ -712,6 +778,12 @@ async function openEdit(row?: any) {
       campaign_type: row.campaign_type || 'MEMBER_DAY',
       segment_id: row.segment_id,
       coupon_template_id: row.coupon_template_id,
+      schedule_mode: row.schedule_mode || 'ABSOLUTE',
+      schedule_calendar: row.schedule_calendar || 'SOLAR',
+      annual_start_month: row.annual_start_month ?? null,
+      annual_start_day: row.annual_start_day ?? null,
+      annual_end_month: row.annual_end_month ?? null,
+      annual_end_day: row.annual_end_day ?? null,
       start_at: row.start_at || null,
       end_at: row.end_at || null,
       weekly_cap_override: row.weekly_cap_override ?? null,
@@ -733,8 +805,7 @@ async function openEdit(row?: any) {
       campaign_type: 'MEMBER_DAY',
       segment_id: null,
       coupon_template_id: null,
-      start_at: null,
-      end_at: null,
+      ...blankScheduleFields(),
       weekly_cap_override: null,
       budget_cap: null,
       boost_product_ids: [],
@@ -753,14 +824,21 @@ async function openEditFromPreset(p: CampaignPreset) {
   const defaultStore = auth.isSuperAdmin
     ? (filterStoreId.value ?? null)
     : (auth.user?.store_id ?? null)
+  const mode = p.schedule_mode || 'ANNUAL_MD'
   Object.assign(form, {
     id: null,
     store_id: defaultStore,
-    code: `${p.codePrefix}_${todayTag()}`,
+    code: mode === 'ANNUAL_MD' ? p.codePrefix : `${p.codePrefix}_${todayTag()}`,
     name: p.name,
     campaign_type: p.campaign_type,
     segment_id: null,
     coupon_template_id: null,
+    schedule_mode: mode,
+    schedule_calendar: p.schedule_calendar || 'SOLAR',
+    annual_start_month: p.annual_start_month ?? null,
+    annual_start_day: p.annual_start_day ?? null,
+    annual_end_month: p.annual_end_month ?? null,
+    annual_end_day: p.annual_end_day ?? null,
     start_at: null,
     end_at: null,
     weekly_cap_override: null,
@@ -781,21 +859,33 @@ async function save() {
     ElMessage.warning('账号未绑定门店')
     return
   }
-  if (form.start_at && form.end_at && form.start_at >= form.end_at) {
+  if (form.schedule_mode === 'ANNUAL_MD') {
+    if (!form.annual_start_month || !form.annual_start_day) {
+      ElMessage.warning('每年月日排期请填写起始月日')
+      return
+    }
+  } else if (form.start_at && form.end_at && form.start_at >= form.end_at) {
     ElMessage.warning('结束时间须晚于开始时间')
     return
   }
   const boost = normalizeBoostIds(form.boost_product_ids)
   saving.value = true
   try {
+    const annual = form.schedule_mode === 'ANNUAL_MD'
     const body = {
       code: form.code.trim(),
       name: form.name.trim(),
       campaign_type: form.campaign_type,
       segment_id: form.segment_id,
       coupon_template_id: form.coupon_template_id,
-      start_at: form.start_at || null,
-      end_at: form.end_at || null,
+      schedule_mode: form.schedule_mode || 'ABSOLUTE',
+      schedule_calendar: form.schedule_calendar || 'SOLAR',
+      annual_start_month: annual ? form.annual_start_month : null,
+      annual_start_day: annual ? form.annual_start_day : null,
+      annual_end_month: annual ? form.annual_end_month : null,
+      annual_end_day: annual ? form.annual_end_day : null,
+      start_at: annual ? null : (form.start_at || null),
+      end_at: annual ? null : (form.end_at || null),
       weekly_cap_override:
         form.weekly_cap_override === null || form.weekly_cap_override === undefined
           ? null
@@ -832,11 +922,18 @@ function publishBlockReason(row: any): string {
   if (!row.coupon_template_id) return '请先编辑并选择发券模板'
   const segCode = segmentCodeOf(row)
   const ctype = String(row.campaign_type || '').toUpperCase()
+  const mode = String(row.schedule_mode || 'ABSOLUTE').toUpperCase()
   if (ctype === 'BIRTHDAY' && segCode === 'all_members') {
     return '生日活动禁止绑全体会员，请改用 birthday_today'
   }
+  if (mode === 'ANNUAL_MD') {
+    if (!row.annual_start_month || !row.annual_start_day) {
+      return '每年月日排期须填写起始月日'
+    }
+    return ''
+  }
   if (segCode === 'all_members' && (!row.start_at || !row.end_at)) {
-    return '全体会员活动必须设置开始与结束时间，避免非节日误发'
+    return '全体会员须设绝对起止，或改为「每年月日」排期'
   }
   return ''
 }

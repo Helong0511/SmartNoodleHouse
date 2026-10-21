@@ -1,8 +1,12 @@
-"""营销活动：发布入队 ISSUE_COUPON、频控、任务消费。"""
+"""营销活动：发布入队 ISSUE_COUPON、频控、任务消费。
+
+年度节日（schedule_mode=ANNUAL_MD）按公历/农历月日自动 RUNNING↔PAUSED，
+无需每年重录起止日期；发券幂等键带季标识，次年可再发。
+"""
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import func, or_, select, update
@@ -22,6 +26,16 @@ from app.models import (
 from app.services.coupon_service import CouponService
 from app.services.segment_service import SegmentService
 from app.services.system_settings_service import SystemSettingsService
+from app.utils.birthday import today_beijing
+from app.utils.campaign_schedule import (
+    SCHEDULE_ABSOLUTE,
+    SCHEDULE_ANNUAL_MD,
+    annual_season_token,
+    campaign_in_schedule_window,
+    format_annual_label,
+    normalize_schedule_calendar,
+    normalize_schedule_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +43,8 @@ SETTING_WEEKLY_CAP = "marketing_weekly_cap"
 DEFAULT_WEEKLY_CAP = 3
 EDITABLE_STATUSES = frozenset({"DRAFT"})
 PUBLISHABLE_STATUSES = frozenset({"DRAFT", "SCHEDULED"})
+# 年度活动启用后在 PAUSED 也可被调度重新拉起（不必每年重新发布）
+ANNUAL_ACTIVE_STATUSES = frozenset({"SCHEDULED", "RUNNING", "PAUSED"})
 WORKER_BATCH = 50
 # claim 后进程崩溃且事务已提交时，RUNNING 超过此时长视为残留
 STALE_RUNNING_SEC = 300
@@ -38,8 +54,41 @@ MAX_TASK_TRY = 8
 
 class MarketingService:
     @staticmethod
-    def idem_key(campaign_id: int, customer_id: int, template_id: int) -> str:
-        return f"mkt:{int(campaign_id)}:{int(customer_id)}:{int(template_id)}"
+    def idem_key(
+        campaign_id: int,
+        customer_id: int,
+        template_id: int,
+        *,
+        season: str | None = None,
+    ) -> str:
+        base = f"mkt:{int(campaign_id)}:{int(customer_id)}:{int(template_id)}"
+        if season:
+            return f"{base}:{season}"
+        return base
+
+    @classmethod
+    def season_for_campaign(cls, camp: MarketingCampaign) -> str | None:
+        if normalize_schedule_mode(getattr(camp, "schedule_mode", None)) != SCHEDULE_ANNUAL_MD:
+            return None
+        return annual_season_token(
+            calendar=getattr(camp, "schedule_calendar", None),
+            start_month=getattr(camp, "annual_start_month", None),
+            start_day=getattr(camp, "annual_start_day", None),
+            end_month=getattr(camp, "annual_end_month", None),
+            end_day=getattr(camp, "annual_end_day", None),
+        )
+
+    @classmethod
+    def _normalize_annual_md(cls, month: int | None, day: int | None) -> tuple[int | None, int | None]:
+        if month is None or day is None:
+            return None, None
+        try:
+            m, d = int(month), int(day)
+        except (TypeError, ValueError):
+            raise AppException(40001, "年度月日须为整数") from None
+        if m < 1 or m > 12 or d < 1 or d > 31:
+            raise AppException(40001, "年度月日超出范围（月1-12，日1-31）")
+        return m, d
 
     @classmethod
     async def weekly_cap(cls, db: AsyncSession, campaign: MarketingCampaign | None = None) -> int:
@@ -96,6 +145,8 @@ class MarketingService:
         task_stats: dict | None = None,
         created_by_name: str | None = None,
     ) -> dict:
+        mode = normalize_schedule_mode(getattr(row, "schedule_mode", None))
+        cal = normalize_schedule_calendar(getattr(row, "schedule_calendar", None))
         data = {
             "id": int(row.id),
             "store_id": int(row.store_id) if row.store_id else None,
@@ -105,6 +156,22 @@ class MarketingService:
             "status": row.status,
             "segment_id": int(row.segment_id) if row.segment_id else None,
             "coupon_template_id": int(row.coupon_template_id) if row.coupon_template_id else None,
+            "schedule_mode": mode,
+            "schedule_calendar": cal,
+            "annual_start_month": getattr(row, "annual_start_month", None),
+            "annual_start_day": getattr(row, "annual_start_day", None),
+            "annual_end_month": getattr(row, "annual_end_month", None),
+            "annual_end_day": getattr(row, "annual_end_day", None),
+            "annual_label": format_annual_label(
+                calendar=cal,
+                start_month=getattr(row, "annual_start_month", None),
+                start_day=getattr(row, "annual_start_day", None),
+                end_month=getattr(row, "annual_end_month", None),
+                end_day=getattr(row, "annual_end_day", None),
+            )
+            if mode == SCHEDULE_ANNUAL_MD
+            else None,
+            "in_schedule_window": campaign_in_schedule_window(row),
             "start_at": row.start_at.isoformat(sep=" ", timespec="seconds") if row.start_at else None,
             "end_at": row.end_at.isoformat(sep=" ", timespec="seconds") if row.end_at else None,
             "budget_cap": str(row.budget_cap) if row.budget_cap is not None else None,
@@ -218,6 +285,12 @@ class MarketingService:
         campaign_type: str = "MEMBER_DAY",
         segment_id: int | None = None,
         coupon_template_id: int | None = None,
+        schedule_mode: str | None = None,
+        schedule_calendar: str | None = None,
+        annual_start_month: int | None = None,
+        annual_start_day: int | None = None,
+        annual_end_month: int | None = None,
+        annual_end_day: int | None = None,
         start_at=None,
         end_at=None,
         budget_cap=None,
@@ -267,13 +340,32 @@ class MarketingService:
             if not tmpl or int(tmpl.status) != 1:
                 raise AppException(40407, "优惠券模板不存在或已停用")
 
+        mode = normalize_schedule_mode(schedule_mode)
+        cal = normalize_schedule_calendar(schedule_calendar)
+        sm, sd = cls._normalize_annual_md(annual_start_month, annual_start_day)
+        em, ed = cls._normalize_annual_md(annual_end_month, annual_end_day)
+        if mode == SCHEDULE_ANNUAL_MD:
+            if sm is None or sd is None:
+                raise AppException(40001, "每年月日排期须填写起始月日")
+            if (em is None) != (ed is None):
+                raise AppException(40001, "结束月日须成对填写，或全部留空表示仅当天")
+        else:
+            sm = sd = em = ed = None
+            cal = "SOLAR"
+
         row.code = code
         row.name = name
         row.campaign_type = (campaign_type or "MEMBER_DAY").upper()
         row.segment_id = int(segment_id) if segment_id else None
         row.coupon_template_id = int(coupon_template_id) if coupon_template_id else None
-        row.start_at = start_at
-        row.end_at = end_at
+        row.schedule_mode = mode
+        row.schedule_calendar = cal
+        row.annual_start_month = sm
+        row.annual_start_day = sd
+        row.annual_end_month = em
+        row.annual_end_day = ed
+        row.start_at = start_at if mode == SCHEDULE_ABSOLUTE else None
+        row.end_at = end_at if mode == SCHEDULE_ABSOLUTE else None
         row.budget_cap = budget_cap
         row.weekly_cap_override = weekly_cap_override
         row.boost_product_ids = boost_product_ids
@@ -284,38 +376,10 @@ class MarketingService:
         return row
 
     @classmethod
-    async def publish(cls, db: AsyncSession, campaign_id: int, *, enqueue: bool = True) -> dict:
-        """发布：DRAFT/SCHEDULED → SCHEDULED|RUNNING，并入队 ISSUE_COUPON。"""
-        camp = await cls.get_campaign(db, campaign_id)
-        await cls.assert_enabled(db, camp.store_id)
-        if camp.status not in PUBLISHABLE_STATUSES:
-            raise AppException(40001, f"当前状态不可发布: {camp.status}")
-        if not camp.segment_id:
-            raise AppException(40001, "请先选择分群")
-        if not camp.coupon_template_id:
-            raise AppException(40001, "请先选择发券模板")
-
-        now = naive_local_now()
-        if camp.end_at and camp.end_at <= now:
-            raise AppException(40001, "活动已过结束时间")
-        if camp.start_at and camp.end_at and camp.start_at >= camp.end_at:
-            raise AppException(40001, "开始时间必须早于结束时间")
-
+    async def _resolve_publish_audience(
+        cls, db: AsyncSession, camp: MarketingCampaign
+    ) -> tuple[Any, dict, bool]:
         seg = await SegmentService.get_segment(db, int(camp.segment_id))
-        seg_code = (seg.code or "").strip()
-        # 生日禁止绑全体：一发布即对无关人发券
-        if (camp.campaign_type or "").upper() == "BIRTHDAY" and seg_code == "all_members":
-            raise AppException(
-                40001,
-                "生日活动禁止绑定「全体会员」，请改用 birthday_today（今日生日）分群",
-            )
-        # 全体会员活动必须排期短窗，防止非节日误点发布普发
-        if seg_code == "all_members" and (not camp.start_at or not camp.end_at):
-            raise AppException(
-                40001,
-                "全体会员活动必须设置开始与结束时间，避免非节日窗口误发",
-            )
-        # 门店活动引用总部分群：按本店动态圈人，禁止覆盖总部物化快照（避免串店）
         store_scoped_hq = camp.store_id is not None and seg.store_id is None
         if store_scoped_hq:
             est = await SegmentService.estimate(
@@ -330,49 +394,140 @@ class MarketingService:
                 "mode": "dynamic_store",
             }
         else:
-            # 同范围分群：物化快照，保证本轮发券人群稳定
             mat = await SegmentService.materialize(db, int(camp.segment_id))
             mat = {**mat, "mode": "snapshot"}
+        return seg, mat, store_scoped_hq
 
+    @classmethod
+    async def _enqueue_issue_tasks(
+        cls,
+        db: AsyncSession,
+        camp: MarketingCampaign,
+        *,
+        store_scoped_hq: bool,
+        scheduled_at=None,
+    ) -> tuple[int, int]:
+        """按分群入队 ISSUE_COUPON；年度活动幂等键带季标识。"""
+        if not camp.segment_id or not camp.coupon_template_id:
+            return 0, 0
+        now = naive_local_now()
+        season = cls.season_for_campaign(camp)
         enqueued = 0
         skipped_dup = 0
-        if enqueue:
-            async for batch in SegmentService.iter_member_ids(
-                db,
-                int(camp.segment_id),
-                prefer_snapshot=not store_scoped_hq,
-                store_id=int(camp.store_id) if store_scoped_hq else None,
-            ):
-                for cid in batch:
-                    key = cls.idem_key(int(camp.id), cid, int(camp.coupon_template_id))
-                    exists = await db.scalar(
-                        select(MarketingTask.id).where(MarketingTask.idempotency_key == key)
+        async for batch in SegmentService.iter_member_ids(
+            db,
+            int(camp.segment_id),
+            prefer_snapshot=not store_scoped_hq,
+            store_id=int(camp.store_id) if store_scoped_hq else None,
+        ):
+            for cid in batch:
+                key = cls.idem_key(
+                    int(camp.id),
+                    cid,
+                    int(camp.coupon_template_id),
+                    season=season,
+                )
+                exists = await db.scalar(
+                    select(MarketingTask.id).where(MarketingTask.idempotency_key == key)
+                )
+                if exists:
+                    skipped_dup += 1
+                    continue
+                db.add(
+                    MarketingTask(
+                        campaign_id=int(camp.id),
+                        customer_id=int(cid),
+                        store_id=camp.store_id,
+                        action_type="ISSUE_COUPON",
+                        payload_json={
+                            "template_id": int(camp.coupon_template_id),
+                            "campaign_code": camp.code,
+                            "season": season,
+                        },
+                        idempotency_key=key,
+                        status="PENDING",
+                        scheduled_at=scheduled_at or now,
                     )
-                    if exists:
-                        skipped_dup += 1
-                        continue
-                    db.add(
-                        MarketingTask(
-                            campaign_id=int(camp.id),
-                            customer_id=int(cid),
-                            store_id=camp.store_id,
-                            action_type="ISSUE_COUPON",
-                            payload_json={
-                                "template_id": int(camp.coupon_template_id),
-                                "campaign_code": camp.code,
-                            },
-                            idempotency_key=key,
-                            status="PENDING",
-                            scheduled_at=camp.start_at or now,
-                        )
-                    )
-                    enqueued += 1
-                await db.flush()
+                )
+                enqueued += 1
+            await db.flush()
+        return enqueued, skipped_dup
 
-        if camp.start_at and camp.start_at > now:
+    @classmethod
+    async def publish(cls, db: AsyncSession, campaign_id: int, *, enqueue: bool = True) -> dict:
+        """发布/启用：DRAFT/SCHEDULED → SCHEDULED|RUNNING|PAUSED，并按需入队 ISSUE_COUPON。
+
+        年度月日活动启用后，窗口外为 PAUSED，到点由调度自动 RUNNING 并发券，无需每年重录。
+        """
+        camp = await cls.get_campaign(db, campaign_id)
+        await cls.assert_enabled(db, camp.store_id)
+        if camp.status not in PUBLISHABLE_STATUSES:
+            raise AppException(40001, f"当前状态不可发布: {camp.status}")
+        if not camp.segment_id:
+            raise AppException(40001, "请先选择分群")
+        if not camp.coupon_template_id:
+            raise AppException(40001, "请先选择发券模板")
+
+        now = naive_local_now()
+        mode = normalize_schedule_mode(getattr(camp, "schedule_mode", None))
+        if mode == SCHEDULE_ABSOLUTE:
+            if camp.end_at and camp.end_at <= now:
+                raise AppException(40001, "活动已过结束时间")
+            if camp.start_at and camp.end_at and camp.start_at >= camp.end_at:
+                raise AppException(40001, "开始时间必须早于结束时间")
+        elif mode == SCHEDULE_ANNUAL_MD:
+            if not getattr(camp, "annual_start_month", None) or not getattr(
+                camp, "annual_start_day", None
+            ):
+                raise AppException(40001, "每年月日排期须填写起始月日")
+
+        seg, mat, store_scoped_hq = await cls._resolve_publish_audience(db, camp)
+        seg_code = (seg.code or "").strip()
+        # 生日禁止绑全体：一发布即对无关人发券
+        if (camp.campaign_type or "").upper() == "BIRTHDAY" and seg_code == "all_members":
+            raise AppException(
+                40001,
+                "生日活动禁止绑定「全体会员」，请改用 birthday_today（今日生日）分群",
+            )
+        # 全体会员须有排期：绝对短窗 或 每年月日，防止无窗口误点普发
+        if seg_code == "all_members":
+            if mode == SCHEDULE_ANNUAL_MD:
+                pass
+            elif not camp.start_at or not camp.end_at:
+                raise AppException(
+                    40001,
+                    "全体会员活动须设置绝对起止时间，或改为「每年月日」排期，避免非节日窗口误发",
+                )
+
+        in_window = campaign_in_schedule_window(camp, now=now)
+        enqueued = 0
+        skipped_dup = 0
+        if mode == SCHEDULE_ANNUAL_MD:
+            # 启用年度排期：窗内 RUNNING 并发券；窗外 PAUSED，到点由 advance 拉起
+            if in_window:
+                camp.status = "RUNNING"
+                if enqueue:
+                    enqueued, skipped_dup = await cls._enqueue_issue_tasks(
+                        db, camp, store_scoped_hq=store_scoped_hq, scheduled_at=now
+                    )
+            else:
+                camp.status = "PAUSED"
+        elif camp.start_at and camp.start_at > now:
             camp.status = "SCHEDULED"
+            if enqueue:
+                enqueued, skipped_dup = await cls._enqueue_issue_tasks(
+                    db,
+                    camp,
+                    store_scoped_hq=store_scoped_hq,
+                    scheduled_at=camp.start_at,
+                )
         else:
             camp.status = "RUNNING"
+            if enqueue:
+                enqueued, skipped_dup = await cls._enqueue_issue_tasks(
+                    db, camp, store_scoped_hq=store_scoped_hq, scheduled_at=now
+                )
+
         camp.published_at = now
         # 默认 SEGMENT 规则
         has_rule = await db.scalar(
@@ -434,10 +589,14 @@ class MarketingService:
 
     @classmethod
     async def advance_campaign_lifecycle(cls, db: AsyncSession) -> dict:
-        """到点 SCHEDULED→RUNNING；过期 RUNNING/PAUSED→ENDED。"""
+        """推进排期：绝对窗 SCHEDULED→RUNNING / 过期→ENDED；
+        年度月日：窗内 PAUSED→RUNNING（并按本季入队），窗外 RUNNING→PAUSED（不 ENDED）。
+        """
         now = naive_local_now()
         started = 0
         ended = 0
+        paused = 0
+        enqueued = 0
         rows = list(
             (
                 await db.execute(
@@ -450,6 +609,63 @@ class MarketingService:
             .all()
         )
         for c in rows:
+            mode = normalize_schedule_mode(getattr(c, "schedule_mode", None))
+            if mode == SCHEDULE_ANNUAL_MD:
+                if c.status not in ANNUAL_ACTIVE_STATUSES:
+                    continue
+                if not c.published_at:
+                    # 未启用过的草稿/误标状态不自动拉起
+                    continue
+                today = today_beijing()
+                yesterday: date = today - timedelta(days=1)
+                in_window = campaign_in_schedule_window(c, today=today, now=now)
+                was_in = campaign_in_schedule_window(c, today=yesterday, now=now)
+                entering = in_window and not was_in
+                should_start = False
+                if in_window and c.status == "SCHEDULED":
+                    should_start = True
+                elif in_window and c.status == "PAUSED":
+                    if entering:
+                        should_start = True
+                    else:
+                        # 本季尚未入队（漏跑/宕机）则补开；已入队后人工暂停不自动恢复
+                        season = cls.season_for_campaign(c)
+                        if season:
+                            has_season = await db.scalar(
+                                select(MarketingTask.id)
+                                .where(
+                                    MarketingTask.campaign_id == int(c.id),
+                                    MarketingTask.idempotency_key.like(
+                                        f"mkt:{int(c.id)}:%:{season}"
+                                    ),
+                                )
+                                .limit(1)
+                            )
+                            should_start = not bool(has_season)
+                if should_start:
+                    c.status = "RUNNING"
+                    started += 1
+                    if c.segment_id and c.coupon_template_id:
+                        seg = await SegmentService.get_segment(db, int(c.segment_id))
+                        store_scoped_hq = c.store_id is not None and seg.store_id is None
+                        n, _dup = await cls._enqueue_issue_tasks(
+                            db, c, store_scoped_hq=store_scoped_hq, scheduled_at=now
+                        )
+                        enqueued += n
+                elif (not in_window) and c.status == "RUNNING":
+                    c.status = "PAUSED"
+                    paused += 1
+                    await db.execute(
+                        update(MarketingTask)
+                        .where(
+                            MarketingTask.campaign_id == c.id,
+                            MarketingTask.status == "PENDING",
+                        )
+                        .values(status="CANCELLED")
+                    )
+                continue
+
+            # ABSOLUTE
             if c.status == "SCHEDULED" and c.start_at and c.start_at <= now:
                 if c.end_at and c.end_at <= now:
                     c.status = "ENDED"
@@ -469,7 +685,12 @@ class MarketingService:
                     .values(status="CANCELLED")
                 )
         await db.flush()
-        return {"started": started, "ended": ended}
+        return {
+            "started": started,
+            "ended": ended,
+            "paused": paused,
+            "enqueued": enqueued,
+        }
 
     @classmethod
     async def _claim_pending_task(cls, db: AsyncSession, task_id: int) -> MarketingTask | None:

@@ -107,7 +107,13 @@ Component({
     _applyResult(payload) {
       const items = (payload && payload.items) || []
       if (payload && payload.ab) tracker.setAbContext(payload.ab)
-      this.setData({ items, loading: false, failed: false })
+      const sceneLabel = payload && payload.meta && payload.meta.scene && payload.meta.scene.label
+      const defaultSub = this.data.scene === 'settle_addon' ? '搭配点单更满足' : '根据口味为你挑选'
+      const patch = { items, loading: false, failed: false }
+      if (this.data.scene !== 'settle_addon') {
+        patch.subtitle = sceneLabel || defaultSub
+      }
+      this.setData(patch)
       this.reportExpose(items)
     },
 
@@ -155,7 +161,12 @@ Component({
           ...it,
           imageUrl: media.resolveUrl(it.main_image, '') || ''
         }))
-        const payload = { items, ab: res && res.ab, at: Date.now() }
+        const payload = {
+          items,
+          ab: res && res.ab,
+          meta: res && res.meta,
+          at: Date.now()
+        }
         if (scene === 'recommend_menu') {
           _menuCache[menuCacheKey(sid, scene, limit)] = payload
         }

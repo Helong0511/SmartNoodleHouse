@@ -536,6 +536,8 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
                     "option_code": p.get("option_code"),
                     "option_name": p.get("option_name") or p.get("option_code"),
                     "score": p.get("score"),
+                    "base_score": p.get("base_score"),
+                    "scene_boosted": bool(p.get("scene_boosted")),
                     "order_count": p.get("order_count"),
                     "label": p.get("label")
                     or f"{p.get('category')}·{p.get('option_name') or p.get('option_code')}",

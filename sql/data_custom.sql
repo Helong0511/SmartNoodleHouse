@@ -12,6 +12,9 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- 六、门店
 INSERT INTO `stores` (`store_no`, `name`, `logo`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) SELECT 'SH01', '肠旺面(总店)', '/uploads/stores/SH01.webp', '城南红砖路88号', '151-9691-4600', 30.8719000, 105.3884000, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `stores` WHERE `store_no` = 'SH01');
 INSERT INTO `stores` (`store_no`, `name`, `logo`, `address`, `phone`, `latitude`, `longitude`, `status`, `created_at`, `updated_at`) SELECT 'SH02', '肠旺面(二店)', '/uploads/stores/SH02.webp', '城南红砖路188号', '151-9691-4600', 30.8719000, 105.3884000, 1, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `stores` WHERE `store_no` = 'SH02');
+-- 已有门店若缺经纬度，补射洪城区坐标（天气口味加权依赖）
+UPDATE `stores` SET `latitude` = 30.8719000, `longitude` = 105.3884000, `updated_at` = CURRENT_TIMESTAMP(3)
+WHERE `store_no` IN ('SH01', 'SH02') AND (`latitude` IS NULL OR `longitude` IS NULL);
 
 -- 营业时段（按 store_no + weekday + slot_index）
 INSERT INTO `store_business_hours` (`weekday`, `slot_index`, `open_time`, `close_time`, `cross_day`, `is_open`, `store_id`, `created_at`, `updated_at`) SELECT 1, 0, '06:00:00', '11:00:00', 0, 1, `s`.`id`, '2026-08-18 18:58:58.888', '2026-08-18 18:58:58.888' FROM `stores` s WHERE `s`.`store_no` = 'SH01' AND NOT EXISTS (SELECT 1 FROM `store_business_hours` h WHERE `h`.`store_id` = `s`.`id` AND `h`.`weekday` = 1 AND `h`.`slot_index` = 0);
@@ -529,6 +532,7 @@ WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND
 -- 状态一律 DRAFT：导入后不自动发券，需后台发布
 -- 射洪肠旺面客单约 8～15 元：轻券优先满15/20减3，忌无排期对全体发 10 元代金
 -- 身份节日绑公益分群；生日绑 birthday_today（勿绑 all_members，否则一发布即普发）
+-- 固定节日用 schedule_mode=ANNUAL_MD（公历/农历月日）每年自动启停，勿逐年改绝对日期
 -- boost_product_ids 按 product_no 聚合 SH01 招牌/抄手/汤圆，供推荐加权
 INSERT INTO `marketing_campaigns` (
     `store_id`, `code`, `name`, `campaign_type`, `status`,
@@ -1182,33 +1186,81 @@ SET `mc`.`weekly_cap_override` = 1,
     `mc`.`remark` = '开卡欢迎；周频1；系统欢迎券与营销勿重复高频发'
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'new_member_welcome';
 
--- 2026 射洪节日短窗（全体会员/身份节日均建议排期；跨年后请改年份）
--- 春节 2/17、元宵 3/3、妇女节 3/8、儿童节 6/1、端午 6/19、八一 8/1、
--- 教师节 9/10、中秋 9/25、国庆 10/1～7、重阳约 10/18、环卫节 10/26、冬至 12/22
-UPDATE `marketing_campaigns` SET `start_at` = '2026-02-10 00:00:00', `end_at` = '2026-02-24 23:59:59'
+-- 节日/时段：每年月日排期（公历/农历），启用一次后按日历自动启停，不必逐年改 start_at/end_at
+-- 农历：春节腊廿四～正初七、元宵正十四～十六、端午五初四～六、中秋八十四～十六、重阳九初八～十
+-- 公历：妇女节 3/6～9、儿童节 5/30～6/2、八一 7/31～8/2、教师节 9/9～11、国庆 10/1～7、环卫 10/25～27、冬至 12/21～23
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'LUNAR',
+    `annual_start_month` = 12, `annual_start_day` = 24,
+    `annual_end_month` = 1, `annual_end_day` = 7,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_spring';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-03-02 00:00:00', `end_at` = '2026-03-04 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'LUNAR',
+    `annual_start_month` = 1, `annual_start_day` = 14,
+    `annual_end_month` = 1, `annual_end_day` = 16,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_lantern';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-03-06 00:00:00', `end_at` = '2026-03-09 23:59:59',
-    `remark` = '客单友好满20减3；加权汤圆；本窗为妇女节，母亲节请另改排期后发布'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 3, `annual_start_day` = 6,
+    `annual_end_month` = 3, `annual_end_day` = 9,
+    `start_at` = NULL, `end_at` = NULL,
+    `remark` = '公历妇女节每年自动启停；满20减3+汤圆；母亲节请另建活动或改月日'
 WHERE `store_id` IS NULL AND `code` = 'festival_mother';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-05-30 00:00:00', `end_at` = '2026-06-02 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 5, `annual_start_day` = 30,
+    `annual_end_month` = 6, `annual_end_day` = 2,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_children';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-06-18 00:00:00', `end_at` = '2026-06-21 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'LUNAR',
+    `annual_start_month` = 5, `annual_start_day` = 4,
+    `annual_end_month` = 5, `annual_end_day` = 6,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_duanwu';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-07-31 00:00:00', `end_at` = '2026-08-02 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 7, `annual_start_day` = 31,
+    `annual_end_month` = 8, `annual_end_day` = 2,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_army_day';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-09-09 00:00:00', `end_at` = '2026-09-11 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 9, `annual_start_day` = 9,
+    `annual_end_month` = 9, `annual_end_day` = 11,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_teacher';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-09-24 00:00:00', `end_at` = '2026-09-26 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'LUNAR',
+    `annual_start_month` = 8, `annual_start_day` = 14,
+    `annual_end_month` = 8, `annual_end_day` = 16,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_mid_autumn';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-10-01 00:00:00', `end_at` = '2026-10-07 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 10, `annual_start_day` = 1,
+    `annual_end_month` = 10, `annual_end_day` = 7,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_national';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-10-17 00:00:00', `end_at` = '2026-10-19 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'LUNAR',
+    `annual_start_month` = 9, `annual_start_day` = 8,
+    `annual_end_month` = 9, `annual_end_day` = 10,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'festival_chongyang';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-10-25 00:00:00', `end_at` = '2026-10-27 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 10, `annual_start_day` = 25,
+    `annual_end_month` = 10, `annual_end_day` = 27,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'social_sanitation_day';
-UPDATE `marketing_campaigns` SET `start_at` = '2026-12-21 00:00:00', `end_at` = '2026-12-23 23:59:59'
+UPDATE `marketing_campaigns`
+SET `schedule_mode` = 'ANNUAL_MD', `schedule_calendar` = 'SOLAR',
+    `annual_start_month` = 12, `annual_start_day` = 21,
+    `annual_end_month` = 12, `annual_end_day` = 23,
+    `start_at` = NULL, `end_at` = NULL
 WHERE `store_id` IS NULL AND `code` = 'timeslot_dongzhi';
 
 UPDATE `marketing_campaigns` `mc`

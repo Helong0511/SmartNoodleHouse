@@ -39,6 +39,12 @@ class CampaignUpsertIn(BaseModel):
     campaign_type: str = Field(default="MEMBER_DAY", max_length=30)
     segment_id: int | None = None
     coupon_template_id: int | None = None
+    schedule_mode: str = Field(default="ABSOLUTE", max_length=20, description="ABSOLUTE|ANNUAL_MD")
+    schedule_calendar: str = Field(default="SOLAR", max_length=10, description="SOLAR|LUNAR")
+    annual_start_month: int | None = Field(default=None, ge=1, le=12)
+    annual_start_day: int | None = Field(default=None, ge=1, le=31)
+    annual_end_month: int | None = Field(default=None, ge=1, le=12)
+    annual_end_day: int | None = Field(default=None, ge=1, le=31)
     start_at: datetime | None = None
     end_at: datetime | None = None
     budget_cap: Decimal | None = None
@@ -219,6 +225,12 @@ async def create_campaign(
         campaign_type=data.campaign_type,
         segment_id=data.segment_id,
         coupon_template_id=data.coupon_template_id,
+        schedule_mode=data.schedule_mode,
+        schedule_calendar=data.schedule_calendar,
+        annual_start_month=data.annual_start_month,
+        annual_start_day=data.annual_start_day,
+        annual_end_month=data.annual_end_month,
+        annual_end_day=data.annual_end_day,
         start_at=data.start_at,
         end_at=data.end_at,
         budget_cap=data.budget_cap,
@@ -255,6 +267,12 @@ async def update_campaign(
         campaign_type=data.campaign_type,
         segment_id=data.segment_id,
         coupon_template_id=data.coupon_template_id,
+        schedule_mode=data.schedule_mode,
+        schedule_calendar=data.schedule_calendar,
+        annual_start_month=data.annual_start_month,
+        annual_start_day=data.annual_start_day,
+        annual_end_month=data.annual_end_month,
+        annual_end_day=data.annual_end_day,
         start_at=data.start_at,
         end_at=data.end_at,
         budget_cap=data.budget_cap,

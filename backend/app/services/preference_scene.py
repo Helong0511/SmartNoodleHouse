@@ -1,4 +1,9 @@
-"""口味场景加权：季节 / 天气 / 同星期同餐段（读侧微调，不改历史重算）。"""
+"""口味场景加权：季节 / 天气 / 同星期同餐段（读侧微调，不改历史重算）。
+
+规格编码已改为门店前缀拼音（如 SH01-La-BuLa），不能再只认 NONE/MILD/HOT。
+亲和匹配同时看 option_code 与 option_name，与 taste_profile_service 词表对齐。
+天气 condition 与 weather_client 一致：hot / cold / rainy / mild。
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,65 +12,137 @@ from typing import Any
 
 from app.core.response import now_local
 
-# 按 option_code 的季节亲和（面馆常见编码；未命中不加权）
-_SEASON_CODE_BOOST: dict[str, dict[str, Decimal]] = {
+# 亲和键 → 同义词（英文码片段 / 拼音码尾 / 中文名）；最长匹配优先
+_AFFINITY_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "no_spicy": (
+        "NONE", "NO_SPICY", "BULA", "不辣", "无辣", "免辣", "清汤", "QINGTANG",
+    ),
+    "mild_spicy": (
+        "MILD", "LIGHT_SPICY", "WEILA", "微辣", "小辣", "一点点辣",
+    ),
+    "medium_spicy": (
+        "MEDIUM", "NORMAL", "ZHENGCHANGLA", "正常辣", "中辣",
+    ),
+    "hot_spicy": (
+        "HOT", "SPICY", "JIALA", "加辣", "重辣", "香辣",
+    ),
+    "extra_hot": (
+        "EXTRA_HOT", "EXTRASPICY", "EXTRA", "特辣", "变态辣", "爆辣", "魔鬼辣",
+    ),
+    "less_amt": (
+        "LESS", "SMALL", "XIAOWAN", "SHAOTANG", "小碗", "少汤", "少糖",
+    ),
+    "more_amt": (
+        "MORE", "LARGE", "DAWAN", "DUOTANG", "JIALIANG", "大碗", "多汤", "加量",
+    ),
+    "clear_soup": (
+        "CLEAR", "QINGTANG", "清汤",
+    ),
+    "cold_item": (
+        "COLD", "ICE", "ICED", "冰", "冷饮", "冰镇",
+    ),
+    "bone_soup": (
+        "BONE", "浓汤", "蹄花", "大骨", "TIHUA", "NONG",
+    ),
+    "thick": (
+        "THICK", "浓", "NONG",
+    ),
+    "normal": (
+        "NORMAL", "REGULAR", "STANDARD", "BIAOZHUN", "ZHENGCHANG", "标准", "正常",
+    ),
+}
+
+# 季节亲和（键为亲和键，未命中不加权）
+_SEASON_AFFINITY_BOOST: dict[str, dict[str, Decimal]] = {
     "spring": {
-        "MILD": Decimal("1.06"),
-        "MEDIUM": Decimal("1.05"),
-        "NORMAL": Decimal("1.04"),
+        "mild_spicy": Decimal("1.06"),
+        "medium_spicy": Decimal("1.05"),
+        "normal": Decimal("1.04"),
     },
     "summer": {
-        "NONE": Decimal("1.12"),
-        "MILD": Decimal("1.08"),
-        "LESS": Decimal("1.10"),
-        "SMALL": Decimal("1.06"),
-        "CLEAR": Decimal("1.10"),
-        "COLD": Decimal("1.12"),
+        "no_spicy": Decimal("1.12"),
+        "mild_spicy": Decimal("1.08"),
+        "less_amt": Decimal("1.08"),
+        "clear_soup": Decimal("1.10"),
+        "cold_item": Decimal("1.12"),
     },
     "autumn": {
-        "MEDIUM": Decimal("1.06"),
-        "HOT": Decimal("1.08"),
-        "NORMAL": Decimal("1.04"),
+        "medium_spicy": Decimal("1.06"),
+        "hot_spicy": Decimal("1.08"),
+        "normal": Decimal("1.04"),
     },
     "winter": {
-        "HOT": Decimal("1.12"),
-        "EXTRA": Decimal("1.15"),
-        "EXTRA_HOT": Decimal("1.18"),
-        "MORE": Decimal("1.10"),
-        "LARGE": Decimal("1.08"),
-        "BONE": Decimal("1.10"),
-        "THICK": Decimal("1.08"),
+        "hot_spicy": Decimal("1.12"),
+        "extra_hot": Decimal("1.15"),
+        "more_amt": Decimal("1.10"),
+        "bone_soup": Decimal("1.10"),
+        "thick": Decimal("1.08"),
     },
 }
 
-_WEATHER_CODE_BOOST: dict[str, dict[str, Decimal]] = {
+_WEATHER_AFFINITY_BOOST: dict[str, dict[str, Decimal]] = {
     "hot": {
-        "NONE": Decimal("1.10"),
-        "MILD": Decimal("1.08"),
-        "LESS": Decimal("1.08"),
-        "SMALL": Decimal("1.05"),
-        "CLEAR": Decimal("1.08"),
+        "no_spicy": Decimal("1.10"),
+        "mild_spicy": Decimal("1.08"),
+        "less_amt": Decimal("1.06"),
+        "clear_soup": Decimal("1.08"),
+        "cold_item": Decimal("1.10"),
     },
     "cold": {
-        "HOT": Decimal("1.10"),
-        "EXTRA": Decimal("1.12"),
-        "EXTRA_HOT": Decimal("1.14"),
-        "MORE": Decimal("1.08"),
-        "LARGE": Decimal("1.06"),
-        "BONE": Decimal("1.10"),
+        "hot_spicy": Decimal("1.10"),
+        "extra_hot": Decimal("1.14"),
+        "more_amt": Decimal("1.08"),
+        "bone_soup": Decimal("1.10"),
+        "thick": Decimal("1.06"),
     },
     "rainy": {
-        "HOT": Decimal("1.06"),
-        "BONE": Decimal("1.08"),
-        "THICK": Decimal("1.06"),
-        "MORE": Decimal("1.05"),
+        "hot_spicy": Decimal("1.06"),
+        "bone_soup": Decimal("1.08"),
+        "thick": Decimal("1.06"),
+        "more_amt": Decimal("1.05"),
     },
     "mild": {},
+}
+
+# 兼容旧测试 / 外部调用：英文码 → 亲和键
+_LEGACY_CODE_TO_AFFINITY: dict[str, str] = {
+    "NONE": "no_spicy",
+    "NO_SPICY": "no_spicy",
+    "MILD": "mild_spicy",
+    "LIGHT_SPICY": "mild_spicy",
+    "MEDIUM": "medium_spicy",
+    "NORMAL": "normal",
+    "HOT": "hot_spicy",
+    "SPICY": "hot_spicy",
+    "EXTRA": "extra_hot",
+    "EXTRA_HOT": "extra_hot",
+    "EXTRASPICY": "extra_hot",
+    "LESS": "less_amt",
+    "SMALL": "less_amt",
+    "MORE": "more_amt",
+    "LARGE": "more_amt",
+    "CLEAR": "clear_soup",
+    "COLD": "cold_item",
+    "BONE": "bone_soup",
+    "THICK": "thick",
 }
 
 _SAME_WEEKDAY_BOOST = Decimal("1.05")
 _SAME_MEAL_BOOST = Decimal("1.05")
 _MAX_SCENE_MULT = Decimal("1.35")
+
+_CONDITION_LABELS = {
+    "hot": "炎热",
+    "cold": "寒冷",
+    "rainy": "雨天",
+    "mild": "舒适",
+}
+_SEASON_LABELS = {
+    "spring": "春季",
+    "summer": "夏季",
+    "autumn": "秋季",
+    "winter": "冬季",
+}
 
 
 def calendar_season(when: datetime | None = None) -> str:
@@ -84,23 +161,98 @@ def _in_meal_hours(hour: int) -> bool:
     return hour in range(11, 15) or hour in range(17, 22)
 
 
-def code_boost(option_code: str, mapping: dict[str, Decimal]) -> Decimal:
-    code = (option_code or "").strip().upper()
-    if not code:
+def _norm_blob(option_code: str, option_name: str | None = None) -> tuple[str, str]:
+    """返回 (compact_upper_ascii, raw_text) 供同义词匹配。"""
+    code = (option_code or "").strip()
+    name = (option_name or "").strip()
+    raw = f"{code} {name}".strip()
+    compact = raw.upper().replace(" ", "").replace("-", "").replace("_", "")
+    return compact, raw
+
+
+def resolve_affinities(option_code: str, option_name: str | None = None) -> list[str]:
+    """解析规格命中的亲和键（最长同义词优先，可多键）。"""
+    compact, raw = _norm_blob(option_code, option_name)
+    if not compact and not raw:
+        return []
+    hits: list[tuple[int, str]] = []  # (词长, affinity)
+    for aff, words in _AFFINITY_SYNONYMS.items():
+        for w in words:
+            if not w:
+                continue
+            if w.isascii():
+                wu = w.upper().replace(" ", "").replace("-", "").replace("_", "")
+                hit = (len(wu) >= 3 and wu in compact) or (wu == compact)
+            else:
+                hit = w in raw
+            if hit:
+                hits.append((len(w), aff))
+    if not hits:
+        # 纯英文码遗留：整码等于映射表
+        code_u = (option_code or "").strip().upper().replace("-", "_")
+        if code_u in _LEGACY_CODE_TO_AFFINITY:
+            return [_LEGACY_CODE_TO_AFFINITY[code_u]]
+        # EXTRA_HOT 含 HOT 等：按最长遗留键
+        best: tuple[int, str] | None = None
+        for key, aff in _LEGACY_CODE_TO_AFFINITY.items():
+            if key in code_u or code_u in key:
+                if best is None or len(key) > best[0]:
+                    best = (len(key), aff)
+        if best:
+            return [best[1]]
+        return []
+    # 同亲和取最长词；多亲和都保留
+    by_aff: dict[str, int] = {}
+    for length, aff in hits:
+        if aff not in by_aff or length > by_aff[aff]:
+            by_aff[aff] = length
+    return sorted(by_aff.keys(), key=lambda a: -by_aff[a])
+
+
+def code_boost(option_code: str, mapping: dict[str, Decimal], option_name: str | None = None) -> Decimal:
+    """对 mapping 求最大乘子。
+
+    mapping 既可传亲和键（新），也可传旧英文码（兼容测试与遗留调用）。
+    """
+    if not mapping:
         return Decimal("1")
-    if code in mapping:
-        return mapping[code]
-    # 模糊：EXTRA_SPICY 等含 HOT
-    for key, mult in mapping.items():
-        if key in code or code in key:
-            return mult
-    return Decimal("1")
+    # 若 mapping 仍是旧英文码表，先归一到亲和键
+    norm_map: dict[str, Decimal] = {}
+    for k, mult in mapping.items():
+        key = str(k or "").strip()
+        if not key:
+            continue
+        if key in _AFFINITY_SYNONYMS:
+            aff = key
+        else:
+            aff = _LEGACY_CODE_TO_AFFINITY.get(key.upper(), key)
+        prev = norm_map.get(aff)
+        if prev is None or Decimal(str(mult)) > prev:
+            norm_map[aff] = Decimal(str(mult))
+
+    affinities = resolve_affinities(option_code, option_name)
+    best = Decimal("1")
+    for aff in affinities:
+        m = norm_map.get(aff)
+        if m is not None and m > best:
+            best = m
+    # 旧模糊：option_code 直接含子串键
+    if best == Decimal("1"):
+        code_u = (option_code or "").strip().upper()
+        for key, mult in mapping.items():
+            ku = str(key or "").strip().upper()
+            if ku and (ku in code_u or code_u in ku):
+                dm = Decimal(str(mult))
+                if dm > best:
+                    best = dm
+    return best
 
 
 def apply_scene_multiplier(
     base_score: float | Decimal,
     *,
     option_code: str,
+    option_name: str | None = None,
     last_used_at: datetime | None = None,
     season: str,
     weather_condition: str | None = None,
@@ -109,9 +261,18 @@ def apply_scene_multiplier(
     """读侧乘子，夹在合理范围后量化。"""
     score = Decimal(str(base_score or 0))
     mult = Decimal("1")
-    mult *= code_boost(option_code, _SEASON_CODE_BOOST.get(season, {}))
-    if weather_condition:
-        mult *= code_boost(option_code, _WEATHER_CODE_BOOST.get(weather_condition, {}))
+    mult *= code_boost(
+        option_code,
+        _SEASON_AFFINITY_BOOST.get(season, {}),
+        option_name=option_name,
+    )
+    cond = (weather_condition or "").strip().lower() or None
+    if cond:
+        mult *= code_boost(
+            option_code,
+            _WEATHER_AFFINITY_BOOST.get(cond, {}),
+            option_name=option_name,
+        )
     now_dt = now or now_local()
     if last_used_at is not None:
         try:
@@ -131,8 +292,32 @@ def apply_scene_multiplier(
     return float(out.quantize(Decimal("0.0001")))
 
 
+def scene_summary_label(scene: dict[str, Any] | None) -> str | None:
+    """后台/迎宾可读的场景摘要。"""
+    if not scene or not scene.get("enabled"):
+        return None
+    parts: list[str] = []
+    season = scene.get("season")
+    if season:
+        parts.append(_SEASON_LABELS.get(str(season), str(season)))
+    cond = scene.get("condition")
+    temp = scene.get("temp_c")
+    if cond:
+        label = _CONDITION_LABELS.get(str(cond), str(cond))
+        if temp is not None:
+            try:
+                parts.append(f"{label} {float(temp):.0f}℃")
+            except (TypeError, ValueError):
+                parts.append(label)
+        else:
+            parts.append(label)
+    elif scene.get("weather_active") is False and scene.get("weather_reason"):
+        parts.append(str(scene["weather_reason"]))
+    return " · ".join(parts) if parts else None
+
+
 async def build_scene_context(db, store_id: int | None = None) -> dict[str, Any]:
-    """组装当前场景；天气依赖门店经纬度。"""
+    """组装当前场景；天气依赖门店经纬度与 weather_pref_enabled。"""
     now = now_local()
     season = calendar_season(now)
     ctx: dict[str, Any] = {
@@ -143,8 +328,11 @@ async def build_scene_context(db, store_id: int | None = None) -> dict[str, Any]
         "temp_c": None,
         "condition": None,
         "store_id": int(store_id) if store_id else None,
+        "weather_active": False,
+        "weather_reason": None,
     }
     if not store_id:
+        ctx["weather_reason"] = "未指定门店"
         return ctx
 
     enabled = True
@@ -157,6 +345,7 @@ async def build_scene_context(db, store_id: int | None = None) -> dict[str, Any]
     except Exception:
         enabled = True
     if not enabled:
+        ctx["weather_reason"] = "天气口味加权已关闭"
         return ctx
 
     try:
@@ -166,15 +355,19 @@ async def build_scene_context(db, store_id: int | None = None) -> dict[str, Any]
         lat = getattr(store, "latitude", None) if store else None
         lng = getattr(store, "longitude", None) if store else None
         if lat is None or lng is None:
+            ctx["weather_reason"] = "门店未配置经纬度"
             return ctx
         from app.services.weather_client import fetch_current_weather
 
         w = await fetch_current_weather(float(lat), float(lng))
         if not w:
+            ctx["weather_reason"] = "天气服务暂不可用"
             return ctx
         ctx["weather"] = w
         ctx["temp_c"] = w.get("temp_c")
         ctx["condition"] = w.get("condition")
+        ctx["weather_active"] = True
+        ctx["weather_reason"] = None
     except Exception:
-        pass
+        ctx["weather_reason"] = "天气查询失败"
     return ctx

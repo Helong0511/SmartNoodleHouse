@@ -257,6 +257,7 @@ class PreferenceService:
                 score = apply_scene_multiplier(
                     base,
                     option_code=str(p.option_code or ""),
+                    option_name=str(getattr(p, "option_name", None) or ""),
                     last_used_at=getattr(p, "last_used_at", None),
                     season=str(scene.get("season") or "spring"),
                     weather_condition=scene.get("condition"),
@@ -269,20 +270,38 @@ class PreferenceService:
                     "score": score,
                     "base_score": base,
                     "order_count": p.order_count,
+                    "scene_boosted": abs(float(score) - float(base)) > 1e-6,
                     "label": f"{p.category}·{(p.option_name or p.option_code)}"
                     if p.category
                     else str(p.option_name or p.option_code),
                 }
             )
         items.sort(key=lambda x: (-float(x["score"]), -int(x.get("order_count") or 0)))
-        return {
-            "preferences": items,
-            "scene": {
+        from app.services.preference_scene import scene_summary_label
+
+        scene_payload = (
+            {
                 "season": scene.get("season"),
                 "condition": scene.get("condition"),
                 "temp_c": scene.get("temp_c"),
                 "enabled": scene_on,
+                "weather_active": bool(scene.get("weather_active")),
+                "weather_reason": scene.get("weather_reason"),
+                "label": scene_summary_label(
+                    {
+                        "enabled": True,
+                        "season": scene.get("season"),
+                        "condition": scene.get("condition"),
+                        "temp_c": scene.get("temp_c"),
+                        "weather_active": scene.get("weather_active"),
+                        "weather_reason": scene.get("weather_reason"),
+                    }
+                ),
             }
             if scene_on
-            else {"enabled": False},
+            else {"enabled": False}
+        )
+        return {
+            "preferences": items,
+            "scene": scene_payload,
         }

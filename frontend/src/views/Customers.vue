@@ -559,10 +559,18 @@
 
         <div class="pref-block">
           <h4>智能记录的口味爱好</h4>
-          <p class="muted tip">支付后累计规格口味；推荐引擎出餐品。迎宾占位符：{称呼}{会员等级}{店名}{口味}{餐品}。详见 docs/人脸迎宾与智能推荐.md。</p>
+          <p class="muted tip">支付后累计规格口味；推荐读侧叠加季节/天气加权。迎宾占位符：{称呼}{会员等级}{店名}{口味}{餐品}。</p>
           <el-alert v-if="detail.welcome_hint" :title="detail.welcome_hint" type="success" :closable="false" show-icon
             style="margin-bottom:12px" />
-          <el-table v-if="detail.preferences?.length" :data="detail.preferences" size="small" border>
+          <el-alert
+            v-if="detail.preference_scene?.enabled"
+            :title="preferenceSceneTitle"
+            :type="detail.preference_scene?.weather_active ? 'success' : 'warning'"
+            :closable="false"
+            show-icon
+            style="margin-bottom:12px"
+          />
+          <el-table v-if="(detail.recommendations?.length || detail.preferences?.length)" :data="detail.recommendations?.length ? detail.recommendations : detail.preferences" size="small" border>
             <el-table-column prop="category" label="类别" width="100" />
             <el-table-column label="口味" min-width="120">
               <template #default="{ row }">{{ row.option_name || row.option_code }}</template>
@@ -572,6 +580,12 @@
             </el-table-column>
             <el-table-column label="偏好度" width="90">
               <template #default="{ row }">{{ formatScore(row.score) }}</template>
+            </el-table-column>
+            <el-table-column label="场景" width="72">
+              <template #default="{ row }">
+                <el-tag v-if="row.scene_boosted" size="small" type="warning">已加权</el-tag>
+                <span v-else class="muted">—</span>
+              </template>
             </el-table-column>
           </el-table>
           <p v-else class="muted">暂无偏好（需顾客完成至少 1 笔带规格的订单）</p>
@@ -787,6 +801,20 @@ const editBaseline = reactive({
 })
 
 /** 详情头标题：有展示名优先；副行在两者都有且不同时显示昵称 */
+const preferenceSceneTitle = computed(() => {
+  const sc = detail.value?.preference_scene
+  if (!sc?.enabled) return ''
+  if (sc.label) {
+    return sc.weather_active
+      ? `场景加权生效：${sc.label}`
+      : `场景加权已开（天气未接入：${sc.weather_reason || sc.label}）`
+  }
+  const parts = [sc.season, sc.condition, sc.temp_c != null ? `${sc.temp_c}℃` : '']
+    .filter(Boolean)
+    .join(' · ')
+  return parts ? `场景加权：${parts}` : '口味场景加权已开启'
+})
+
 const detailHeadTitle = computed(() => {
   const d = detail.value
   if (!d) return '—'
