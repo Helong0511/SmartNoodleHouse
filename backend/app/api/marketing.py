@@ -86,7 +86,7 @@ async def list_segments(
     )
 
 
-@router.post("/segments", dependencies=[require_permission("customer:manage")])
+@router.post("/segments", dependencies=[require_permission("coupon:manage")])
 async def create_segment(
     data: SegmentUpsertIn, request: Request, db: DbSession, user: CurrentUser
 ):
@@ -114,7 +114,7 @@ async def create_segment(
     return success(SegmentService._payload(row), request=request)
 
 
-@router.put("/segments/{segment_id}", dependencies=[require_permission("customer:manage")])
+@router.put("/segments/{segment_id}", dependencies=[require_permission("coupon:manage")])
 async def update_segment(
     segment_id: int, data: SegmentUpsertIn, request: Request, db: DbSession, user: CurrentUser
 ):
@@ -155,7 +155,7 @@ async def estimate_segment(data: EstimateIn, request: Request, db: DbSession, us
     return success(result, request=request)
 
 
-@router.post("/segments/{segment_id}/materialize", dependencies=[require_permission("customer:manage")])
+@router.post("/segments/{segment_id}/materialize", dependencies=[require_permission("coupon:manage")])
 async def materialize_segment(
     segment_id: int, request: Request, db: DbSession, user: CurrentUser
 ):

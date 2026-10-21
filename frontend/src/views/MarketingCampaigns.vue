@@ -10,7 +10,7 @@
         <el-button @click="goReport">营销报表</el-button>
         <el-button @click="goCoupons">优惠券模板</el-button>
         <el-button @click="load">刷新</el-button>
-        <el-button type="primary" @click="openEdit()">新建活动</el-button>
+        <el-button v-if="canManageCampaigns" type="primary" @click="openEdit()">新建活动</el-button>
       </div>
     </div>
 
@@ -31,7 +31,7 @@
       description="生命周期=顾客阶段（新客/活跃/风险/沉睡/流失），主要看多久没来；RFM=近度+频次+金额三维标签（冠军/忠诚/休眠等）。两者都由夜批刷新。详细释义与取值请到「客户分群」页点开「生命周期 / RFM / 字段说明」，或「顾客管理」点「生命周期/RFM 是什么？」。"
     />
 
-    <div class="preset-bar">
+    <div v-if="canManageCampaigns" class="preset-bar">
       <span class="preset-label">快捷模板</span>
       <el-button
         v-for="p in CAMPAIGN_PRESETS"
@@ -151,18 +151,18 @@
             @click="publish(row)"
           >发布</el-button>
           <el-button
-            v-if="row.status === 'RUNNING'"
+            v-if="row.status === 'RUNNING' && canEditRow(row)"
             size="small"
             @click="setStatus(row, 'PAUSED')"
           >暂停</el-button>
           <el-button
-            v-if="row.status === 'PAUSED'"
+            v-if="row.status === 'PAUSED' && canEditRow(row)"
             size="small"
             type="success"
             @click="setStatus(row, 'RUNNING')"
           >恢复</el-button>
           <el-button
-            v-if="row.status === 'RUNNING' || row.status === 'PAUSED' || row.status === 'SCHEDULED'"
+            v-if="(row.status === 'RUNNING' || row.status === 'PAUSED' || row.status === 'SCHEDULED') && canEditRow(row)"
             size="small"
             type="warning"
             @click="setStatus(row, 'ENDED')"
@@ -588,7 +588,12 @@ function effectiveStoreId(): number | null | undefined {
   return auth.user?.store_id ?? undefined
 }
 
+const canManageCampaigns = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('coupon:manage'),
+)
+
 function canEditRow(row: any) {
+  if (!canManageCampaigns.value) return false
   if (auth.isSuperAdmin) return true
   return row.store_id != null && row.store_id === auth.user?.store_id
 }
@@ -760,6 +765,10 @@ async function ensureBoostProductsInOptions(ids: number[]) {
 }
 
 async function openEdit(row?: any) {
+  if (!canManageCampaigns.value) {
+    ElMessage.warning('缺少权限：coupon:manage（仅可查看）')
+    return
+  }
   if (marketingEnabled.value === false && !row) {
     ElMessage.warning('当前门店已关闭营销活动，请先到门店业务参数开启')
     return
@@ -817,6 +826,10 @@ async function openEdit(row?: any) {
 }
 
 async function openEditFromPreset(p: CampaignPreset) {
+  if (!canManageCampaigns.value) {
+    ElMessage.warning('缺少权限：coupon:manage')
+    return
+  }
   if (marketingEnabled.value === false) {
     ElMessage.warning('当前门店已关闭营销活动，请先到门店业务参数开启')
     return
@@ -918,6 +931,8 @@ function segmentCodeOf(row: any): string {
 
 function publishBlockReason(row: any): string {
   if (!row) return '活动无效'
+  if (!canManageCampaigns.value) return '缺少权限：coupon:manage'
+  if (!canEditRow(row)) return '仅可管理本店活动'
   if (!row.segment_id) return '请先编辑并选择分群'
   if (!row.coupon_template_id) return '请先编辑并选择发券模板'
   const segCode = segmentCodeOf(row)

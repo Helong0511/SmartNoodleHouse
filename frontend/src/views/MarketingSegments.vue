@@ -10,7 +10,7 @@
       <div class="header-actions">
         <el-button @click="goCampaigns">去营销活动</el-button>
         <el-button @click="load">刷新</el-button>
-        <el-button type="primary" @click="openEdit()">新建分群</el-button>
+        <el-button v-if="canManageSegments" type="primary" @click="openEdit()">新建分群</el-button>
       </div>
     </div>
 
@@ -55,7 +55,7 @@
       </el-collapse-item>
     </el-collapse>
 
-    <div class="preset-bar">
+    <div v-if="canManageSegments" class="preset-bar">
       <span class="preset-label">快捷规则</span>
       <el-button
         v-for="p in RULE_PRESETS"
@@ -542,12 +542,18 @@ function storeLabel(id: number | null | undefined) {
   return s?.name || `#${id}`
 }
 
+const canManageSegments = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('coupon:manage'),
+)
+
 function canEditRow(row: any) {
+  if (!canManageSegments.value) return false
   if (auth.isSuperAdmin) return true
   return row.store_id != null && row.store_id === auth.user?.store_id
 }
 
 function canMaterializeRow(row: any) {
+  if (!canManageSegments.value) return false
   if (row.status !== 1) return false
   if (auth.isSuperAdmin) return true
   return row.store_id != null && row.store_id === auth.user?.store_id
@@ -641,6 +647,10 @@ async function load() {
 }
 
 function openEdit(row?: any) {
+  if (!canManageSegments.value) {
+    ElMessage.warning('缺少权限：coupon:manage（仅可查看与估人数）')
+    return
+  }
   if (row && !canEditRow(row)) {
     ElMessage.warning('总部预置分群仅超管可编辑；可估人数，发布活动时按本店自动圈人')
     return
@@ -672,6 +682,10 @@ function openEdit(row?: any) {
 }
 
 function openEditFromPreset(p: RulePreset) {
+  if (!canManageSegments.value) {
+    ElMessage.warning('缺少权限：coupon:manage')
+    return
+  }
   form.id = null
   form.store_id = auth.isSuperAdmin
     ? (filterStoreId.value ?? null)

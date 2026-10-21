@@ -112,11 +112,23 @@
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click.stop="openDetail(row)">详情</el-button>
-          <el-button v-if="row.delivery_status === 'PENDING'" link type="success" size="small"
-            :loading="actingId === row.order_id" @click.stop="confirmOrder(row)">
+          <el-button
+            v-if="canOperateDelivery && row.delivery_status === 'PENDING'"
+            link
+            type="success"
+            size="small"
+            :loading="actingId === row.order_id"
+            @click.stop="confirmOrder(row)"
+          >
             接单
           </el-button>
-          <el-button v-if="canCancel(row)" link type="danger" size="small" @click.stop="askCancel(row)">
+          <el-button
+            v-if="canOperateDelivery && canCancel(row)"
+            link
+            type="danger"
+            size="small"
+            @click.stop="askCancel(row)"
+          >
             取消
           </el-button>
         </template>
@@ -195,11 +207,20 @@
           <div v-if="!(detail.items || []).length" class="muted">暂无明细</div>
 
           <div class="detail-actions mt">
-            <el-button v-if="detail.delivery_status === 'PENDING'" type="success"
-              :loading="actingId === detail.order_id" @click="confirmOrder(detail)">
+            <el-button
+              v-if="canOperateDelivery && detail.delivery_status === 'PENDING'"
+              type="success"
+              :loading="actingId === detail.order_id"
+              @click="confirmOrder(detail)"
+            >
               接单
             </el-button>
-            <el-button v-if="canCancel(detail)" type="danger" plain @click="askCancel(detail)">商家取消</el-button>
+            <el-button
+              v-if="canOperateDelivery && canCancel(detail)"
+              type="danger"
+              plain
+              @click="askCancel(detail)"
+            >商家取消</el-button>
           </div>
         </template>
       </div>
@@ -240,6 +261,9 @@ import {
 
 const router = useRouter()
 const auth = useAuthStore()
+const canOperateDelivery = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('order:update'),
+)
 const { storeOptions: stores, loadStores } = useStoreOptions()
 const storeFilter = ref<number | undefined>()
 const boundStoreName = computed(() => {

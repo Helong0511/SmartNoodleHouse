@@ -55,12 +55,12 @@
 
         <el-sub-menu v-if="showDelivery" index="g-delivery">
           <template #title>外卖</template>
-          <el-menu-item index="/delivery/orders">外卖订单</el-menu-item>
-          <el-menu-item index="/delivery/refunds">退款处理</el-menu-item>
-          <el-menu-item index="/delivery/stores">门店外卖设置</el-menu-item>
-          <el-menu-item index="/delivery/menu">外卖餐品</el-menu-item>
-          <el-menu-item index="/delivery/sync">同步监控</el-menu-item>
-          <el-menu-item index="/delivery/logs">回调日志</el-menu-item>
+          <el-menu-item v-if="showDeliveryOrders" index="/delivery/orders">外卖订单</el-menu-item>
+          <el-menu-item v-if="showDeliveryOrders" index="/delivery/refunds">退款处理</el-menu-item>
+          <el-menu-item v-if="showStoreInfo" index="/delivery/stores">门店外卖设置</el-menu-item>
+          <el-menu-item v-if="showDeliveryMenu" index="/delivery/menu">外卖餐品</el-menu-item>
+          <el-menu-item v-if="showDeliveryMenu" index="/delivery/sync">同步监控</el-menu-item>
+          <el-menu-item v-if="showDeliveryOrders" index="/delivery/logs">回调日志</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showSmart" index="g-smart">
@@ -107,9 +107,10 @@ const notCashier = computed(() => !auth.isCashier)
 const showDashboard = computed(() => auth.hasPermission('order:read') && notCashier.value)
 const showPos = computed(() => auth.canAccessPos() && notCashier.value)
 const showKitchen = computed(() => auth.canAccessKitchen())
-const showDelivery = computed(() => auth.hasPermission('order:read') && notCashier.value)
+const showDeliveryOrders = computed(() => auth.hasPermission('order:read') && notCashier.value)
+const showDeliveryMenu = computed(() => auth.hasPermission('product:read') && notCashier.value)
 const showOrders = computed(() => auth.hasPermission('order:read') && notCashier.value)
-const showQueue = computed(() => auth.hasPermission('order:read') && notCashier.value)
+const showQueue = computed(() => auth.hasPermission('table:manage') && notCashier.value)
 const showInvoices = computed(() => auth.hasPermission('invoice:manage') && notCashier.value)
 const showPayments = computed(() => auth.hasPermission('payment:read') && notCashier.value)
 const showSettlement = computed(() => auth.canManageSettlement)
@@ -120,11 +121,6 @@ const showWallet = computed(() => auth.hasPermission('wallet:read') && notCashie
 const showMember = computed(() => showCustomers.value || showCoupons.value || showWallet.value)
 const showTables = computed(() => auth.hasPermission('table:manage'))
 const showUsers = computed(() => auth.hasPermission('user:read'))
-const showStore = computed(() =>
-  showTables.value
-  || showUsers.value
-  || showStoreInfo.value
-)
 const showStoreInfo = computed(
   () =>
     auth.isSuperAdmin
@@ -134,6 +130,14 @@ const showStoreInfo = computed(
     || auth.hasPermission('table:manage')
     || auth.hasPermission('order:read')
     || auth.hasPermission('product:read'),
+)
+const showStore = computed(() =>
+  showTables.value
+  || showUsers.value
+  || showStoreInfo.value,
+)
+const showDelivery = computed(
+  () => showDeliveryOrders.value || showDeliveryMenu.value || showStoreInfo.value,
 )
 const showCameras = computed(() => auth.hasPermission('camera:read'))
 const showWelcome = computed(() => auth.hasPermission('welcome:manage'))
@@ -146,7 +150,6 @@ const showOps = computed(
   () =>
     showPos.value
     || showKitchen.value
-    || showDelivery.value
     || showOrders.value
     || showQueue.value
     || showInvoices.value

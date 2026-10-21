@@ -10,15 +10,18 @@
       </el-select>
       <el-input v-model="mapKeyword" placeholder="平台SKU / 品名 / 菜品码" clearable style="width: 210px"
         @keyup.enter="reloadMaps" @clear="reloadMaps" />
-      <el-button type="primary" @click="syncMenuBatch">批量推送菜单</el-button>
-      <el-button type="success" @click="setPlatformShelf(true)">平台上架</el-button>
-      <el-button type="warning" @click="setPlatformShelf(false)">平台下架</el-button>
-      <el-button @click="openCategoryDialog">平台分类映射</el-button>
-      <el-divider direction="vertical" />
-      <el-button @click="syncMenu">同步菜单</el-button>
-      <el-button @click="syncPrices">同步价格</el-button>
-      <el-button @click="syncStock">同步库存</el-button>
-      <el-button @click="openMapDialog">新增映射</el-button>
+      <template v-if="canSyncDelivery">
+        <el-button type="primary" @click="syncMenuBatch">批量推送菜单</el-button>
+        <el-button type="success" @click="setPlatformShelf(true)">平台上架</el-button>
+        <el-button type="warning" @click="setPlatformShelf(false)">平台下架</el-button>
+        <el-button @click="openCategoryDialog">平台分类映射</el-button>
+        <el-divider direction="vertical" />
+        <el-button @click="syncMenu">同步菜单</el-button>
+        <el-button @click="syncPrices">同步价格</el-button>
+        <el-button @click="syncStock">同步库存</el-button>
+        <el-button @click="openMapDialog">新增映射</el-button>
+      </template>
+      <el-tag v-else type="info" effect="plain">只读（需 product:update 才能同步）</el-tag>
     </div>
     <el-table :data="maps" size="small" stripe>
       <el-table-column prop="platform" label="平台" width="80">
@@ -109,13 +112,16 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const canSyncDelivery = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:update'),
+)
 const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 const maps = ref<any[]>([])
 const syncStoreId = ref<number | undefined>()

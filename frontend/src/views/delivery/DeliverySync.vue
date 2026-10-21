@@ -1,7 +1,12 @@
 <template>
   <div class="sync-page">
     <div class="toolbar">
-      <el-button type="primary" :loading="reconciling" @click="reconcileNow">立即库存对账</el-button>
+      <el-button
+        v-if="canSyncDelivery"
+        type="primary"
+        :loading="reconciling"
+        @click="reconcileNow"
+      >立即库存对账</el-button>
       <el-button @click="loadOverview(); loadAlerts()">刷新</el-button>
       <el-tag v-if="unresolvedAlerts" type="danger" effect="light">未处理告警 {{ unresolvedAlerts }}</el-tag>
       <span class="muted" style="font-size: 12px">系统每 5 分钟自动对账一次；库存售罄/补货为实时镜像。</span>
@@ -84,7 +89,13 @@
       </el-table-column>
       <el-table-column label="操作" width="90" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="!row.resolved" size="small" type="primary" link @click="resolveAlert(row)">
+          <el-button
+            v-if="!row.resolved && canSyncDelivery"
+            size="small"
+            type="primary"
+            link
+            @click="resolveAlert(row)"
+          >
             标记处理
           </el-button>
         </template>
@@ -107,9 +118,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const canSyncDelivery = computed(
+  () => auth.isSuperAdmin || auth.hasPermission('product:update'),
+)
 
 const overview = ref<any[]>([])
 const unresolvedAlerts = ref(0)

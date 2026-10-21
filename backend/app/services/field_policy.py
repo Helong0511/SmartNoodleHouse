@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 # 字段名 → 所需权限（任一命中即可保留；超管绕过）
 FIELD_PERMISSION_GATES: dict[str, frozenset[str]] = {
-    "cost_price": frozenset({"product:cost:read", "financial:read"}),
+    "cost_price": frozenset({"product:cost:read"}),
     "phone": frozenset({"customer:pii", "customer:manage"}),
     "id_card_no": frozenset({"customer:pii", "customer:manage"}),
 }

@@ -224,7 +224,7 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `permissions` (`code`, `name`, `module`)
 SELECT 'customer:write',
-    '合并顾客',
+    '改顾客档案与合并',
     'customer'
 FROM DUAL
 WHERE NOT EXISTS (
@@ -477,6 +477,7 @@ FROM `roles` r
         'order:read',
         'order:update',
         'customer:read',
+        'customer:write',
         'camera:read',
         'camera:manage',
         'welcome:manage',
@@ -1798,14 +1799,15 @@ UPDATE `permissions`
 SET `name` = '管理全品牌会员等级'
 WHERE `code` = 'customer:manage';
 UPDATE `permissions`
-SET `name` = '合并顾客'
+SET `name` = '改顾客档案与合并'
 WHERE `code` = 'customer:write';
+-- 超管与店长可改本店相关顾客档案/合并（店长范围由 API store 约束）
 INSERT INTO `role_permissions` (`role_id`, `permission_id`)
 SELECT `r`.`id`,
     `p`.`id`
 FROM `roles` r
     JOIN `permissions` p ON `p`.`code` = 'customer:write'
-WHERE `r`.`code` = 'SUPER_ADMIN'
+WHERE `r`.`code` IN ('SUPER_ADMIN', 'STORE_ADMIN')
     AND NOT EXISTS (
         SELECT 1
         FROM `role_permissions` rp
