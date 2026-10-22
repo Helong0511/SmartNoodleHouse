@@ -104,8 +104,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import { attachNetworkRetry, parseApiError } from '@/api'
 import { ElMessage } from 'element-plus'
-import { parseApiError } from '@/api'
 import VoiceSwitch from '@/components/VoiceSwitch.vue'
 import { openPublicWebSocket } from '@/utils/publicWs'
 import {
@@ -230,6 +230,7 @@ const publicApi = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 30000,
 })
+attachNetworkRetry(publicApi)
 
 publicApi.interceptors.response.use(
   (res) => {

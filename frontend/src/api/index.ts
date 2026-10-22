@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { clearStaffToken, getStaffToken } from '@/utils/staffAuth'
 import { clearCustomerToken, getCustomerToken, setCustomerToken } from '@/utils/customerAuth'
@@ -17,6 +17,71 @@ export class ApiError extends Error {
   }
 }
 
+type RetryableConfig = InternalAxiosRequestConfig & {
+  __retryCount?: number
+  /** 显式允许对非 GET 在瞬态失败时重试（须保证调用幂等） */
+  __retrySafe?: boolean
+}
+
+const MAX_NETWORK_RETRIES = 2
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** uvicorn --reload / Vite 代理 ECONNRESET 等瞬时失败 */
+export function isTransientNetworkError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const ax = err as AxiosError
+  const status = ax.response?.status
+  if (status === 502 || status === 503 || status === 504) return true
+  const biz = (ax.response?.data as { code?: number } | undefined)?.code
+  if (biz === 50200) return true
+  if (ax.response) return false
+  const code = String(ax.code || '')
+  const msg = String(ax.message || '').toLowerCase()
+  return (
+    code === 'ERR_NETWORK' ||
+    code === 'ECONNABORTED' ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    msg === 'network error' ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up')
+  )
+}
+
+function canRetryConfig(cfg: RetryableConfig | undefined, err: unknown): boolean {
+  if (!cfg) return false
+  const count = cfg.__retryCount || 0
+  if (count >= MAX_NETWORK_RETRIES) return false
+  if (!isTransientNetworkError(err)) return false
+  const method = String(cfg.method || 'get').toLowerCase()
+  if (method === 'get' || method === 'head' || method === 'options') return true
+  return !!cfg.__retrySafe
+}
+
+async function maybeRetryRequest(client: AxiosInstance, err: AxiosError): Promise<unknown | null> {
+  const cfg = err.config as RetryableConfig | undefined
+  if (!canRetryConfig(cfg, err) || !cfg) return null
+  cfg.__retryCount = (cfg.__retryCount || 0) + 1
+  await sleep(280 * cfg.__retryCount)
+  return client.request(cfg)
+}
+
+/** 挂到任意 axios 实例：瞬态网络/502 自动重试（默认仅安全方法） */
+export function attachNetworkRetry(client: AxiosInstance): void {
+  client.interceptors.response.use(
+    (res) => res,
+    async (err: AxiosError) => {
+      const retried = await maybeRetryRequest(client, err)
+      if (retried !== null) return retried
+      return Promise.reject(err)
+    },
+  )
+}
+
 /** 将 Axios / 浏览器常见英文网络错误转成中文提示 */
 function localizeNetworkMessage(raw: string, code?: string): string | null {
   const msg = (raw || '').trim()
@@ -27,11 +92,17 @@ function localizeNetworkMessage(raw: string, code?: string): string | null {
   if (code === 'ERR_NETWORK' || lower === 'network error') {
     return '网络连接失败，请检查服务是否已启动'
   }
+  if (code === 'ECONNRESET' || lower.includes('econnreset') || lower.includes('socket hang up')) {
+    return '服务连接已重置（可能正在热重载），请稍后重试'
+  }
   if (code === 'ERR_CANCELED' || lower === 'request aborted' || lower.includes('aborted')) {
     return '请求已取消'
   }
   if (/failed to fetch|load failed|networkerror/i.test(msg)) {
     return '网络连接失败，请检查服务是否已启动'
+  }
+  if (/后端暂时不可用|热重载/.test(msg)) {
+    return msg
   }
   // 纯英文 Axios 兜底，避免把英文直接抛给用户
   if (msg && /^[A-Za-z0-9][\w\s.,:;'"()/-]*$/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) {
@@ -70,6 +141,10 @@ export function parseApiError(err: unknown): string {
   if (typeof data?.detail === 'string') return localizeValidationMsg(data.detail)
   if (ax.response?.status === 422) return '请求参数有误，请检查表单'
   if (ax.response?.status === 502 || ax.response?.status === 503 || ax.response?.status === 504) {
+    const bodyMsg = ax.response?.data?.message
+    if (typeof bodyMsg === 'string' && bodyMsg.trim()) {
+      return localizeNetworkMessage(bodyMsg) || bodyMsg
+    }
     return '服务暂时不可用，请稍后重试'
   }
   const localized = localizeNetworkMessage(ax.message || '', ax.code)
@@ -101,6 +176,8 @@ const api = axios.create({
   timeout: 30000,
   headers: { 'Content-Type': 'application/json; charset=utf-8' },
 })
+
+attachNetworkRetry(api)
 
 api.interceptors.request.use((config) => {
   const url = config.url || ''

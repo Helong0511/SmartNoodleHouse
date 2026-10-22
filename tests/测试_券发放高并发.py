@@ -206,6 +206,47 @@ async def test_welcome_serial_idempotent(mem_db: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_birthday_key_replay_idempotent(mem_db: AsyncSession):
+    """生日券 BIRTHDAY:{cid}:{year}:{tid}：重放不叠发，走 issue_from_template。"""
+    db = mem_db
+    db.add_all(
+        [
+            _customer(506, "CU_CONC_506"),
+            _template(506, remaining=10, total_quota=10, name="生日赠券"),
+        ]
+    )
+    await db.flush()
+    _patch_sqlite_ids(db, 82_000)
+    nos = itertools.count(1)
+    year = 2026
+    key = CouponService.birthday_client_request_id(506, year, 506)
+    with patch(
+        "app.services.coupon_service.generate_no",
+        side_effect=lambda p: f"{p}D{next(nos):04d}",
+    ), patch(
+        "app.services.coupon_service.CouponService.birthday_coupon_template_name",
+        return_value="生日赠券",
+    ):
+        first = await CouponService.issue_birthday_coupon(db, 506, store_id=None, year=year)
+        again = await CouponService.issue_birthday_coupon(db, 506, store_id=None, year=year)
+        await db.commit()
+    assert first is not None
+    assert again is None
+    assert str(first.client_request_id) == key
+    cnt = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(CustomerCoupon)
+            .where(CustomerCoupon.customer_id == 506)
+        )
+        or 0
+    )
+    tmpl = await db.get(CouponTemplate, 506)
+    assert cnt == 1
+    assert int(tmpl.remaining) == 9
+
+
+@pytest.mark.asyncio
 async def test_welcome_and_pay_success_keys_isolated(mem_db: AsyncSession):
     """WELCOME 与 pay_success 幂等键隔离：同客同模板可各发一张。"""
     db = mem_db
