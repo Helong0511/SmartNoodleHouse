@@ -278,8 +278,8 @@ class CouponService:
 
     @staticmethod
     async def create_template(db: AsyncSession, data: dict) -> CouponTemplate:
-        CouponService._validate_template_data(data)
-        payload = dict(data)
+        payload = CouponService._normalize_template_schedule_fields(dict(data))
+        CouponService._validate_template_data(payload)
         if payload.get("discount_value") is not None:
             payload["discount_value"] = money(payload["discount_value"])
         if payload.get("min_order_amount") is not None:
@@ -312,16 +312,46 @@ class CouponService:
 
     @staticmethod
     async def update_template(db: AsyncSession, tmpl: CouponTemplate, data: dict) -> CouponTemplate:
+        patch = dict(data)
+        schedule_keys = (
+            "schedule_mode",
+            "schedule_calendar",
+            "annual_start_month",
+            "annual_start_day",
+            "annual_end_month",
+            "annual_end_day",
+        )
+        if any(k in patch for k in schedule_keys):
+            for k in schedule_keys:
+                if k not in patch:
+                    patch[k] = getattr(tmpl, k, None)
+            patch = CouponService._normalize_template_schedule_fields(patch)
         merged = {
-            "name": data.get("name", tmpl.name),
-            "coupon_type": data.get("coupon_type", tmpl.coupon_type),
-            "discount_value": data.get("discount_value", tmpl.discount_value),
-            "min_order_amount": data.get("min_order_amount", tmpl.min_order_amount),
-            "valid_days": data.get("valid_days", tmpl.valid_days),
-            "status": data.get("status", tmpl.status),
+            "name": patch.get("name", tmpl.name),
+            "coupon_type": patch.get("coupon_type", tmpl.coupon_type),
+            "discount_value": patch.get("discount_value", tmpl.discount_value),
+            "min_order_amount": patch.get("min_order_amount", tmpl.min_order_amount),
+            "valid_days": patch.get("valid_days", tmpl.valid_days),
+            "status": patch.get("status", tmpl.status),
+            "schedule_mode": patch.get("schedule_mode", getattr(tmpl, "schedule_mode", None)),
+            "schedule_calendar": patch.get(
+                "schedule_calendar", getattr(tmpl, "schedule_calendar", None)
+            ),
+            "annual_start_month": patch.get(
+                "annual_start_month", getattr(tmpl, "annual_start_month", None)
+            ),
+            "annual_start_day": patch.get(
+                "annual_start_day", getattr(tmpl, "annual_start_day", None)
+            ),
+            "annual_end_month": patch.get(
+                "annual_end_month", getattr(tmpl, "annual_end_month", None)
+            ),
+            "annual_end_day": patch.get(
+                "annual_end_day", getattr(tmpl, "annual_end_day", None)
+            ),
         }
         CouponService._validate_template_data(merged)
-        for key, val in data.items():
+        for key, val in patch.items():
             if key == "store_id":
                 tmpl.store_id = int(val) if val is not None else None
                 # P2-4 模板改为门店归属后白名单失效，改回总部后需重新配置
@@ -344,6 +374,8 @@ class CouponService:
                 tmpl.discount_value = money(val)
             elif key == "min_order_amount" and val is not None:
                 tmpl.min_order_amount = money(val)
+            elif key in schedule_keys:
+                setattr(tmpl, key, val)
             elif val is not None:
                 setattr(tmpl, key, val)
         await db.flush()
@@ -369,6 +401,48 @@ class CouponService:
                 raise AppException(40067, "折扣券比例须在 0~1 之间（如 0.9 表示 9 折）")
         elif val <= Decimal("0"):
             raise AppException(40068, "满减/代金券面额须大于 0")
+        from app.utils.campaign_schedule import normalize_template_schedule_mode
+
+        mode = normalize_template_schedule_mode(data.get("schedule_mode"))
+        if mode == "ANNUAL_MD":
+            sm = data.get("annual_start_month")
+            sd = data.get("annual_start_day")
+            if not sm or not sd:
+                raise AppException(40001, "年度发放窗须填写起始月日")
+            em = data.get("annual_end_month")
+            ed = data.get("annual_end_day")
+            if (em is None) != (ed is None):
+                raise AppException(40001, "结束月日须成对填写或同时留空")
+
+    @staticmethod
+    def _normalize_template_schedule_fields(payload: dict) -> dict:
+        """ALWAYS 清空月日；ANNUAL_MD 规范化历法与月日。"""
+        from app.utils.campaign_schedule import (
+            normalize_schedule_calendar,
+            normalize_template_schedule_mode,
+        )
+
+        mode = normalize_template_schedule_mode(payload.get("schedule_mode"))
+        payload["schedule_mode"] = mode
+        if mode != "ANNUAL_MD":
+            payload["schedule_calendar"] = "SOLAR"
+            payload["annual_start_month"] = None
+            payload["annual_start_day"] = None
+            payload["annual_end_month"] = None
+            payload["annual_end_day"] = None
+            return payload
+        payload["schedule_calendar"] = normalize_schedule_calendar(
+            payload.get("schedule_calendar")
+        )
+        for key in (
+            "annual_start_month",
+            "annual_start_day",
+            "annual_end_month",
+            "annual_end_day",
+        ):
+            v = payload.get(key)
+            payload[key] = int(v) if v is not None else None
+        return payload
 
     @staticmethod
     async def issue_by_template_id(

@@ -359,7 +359,7 @@
         :closable="false"
         show-icon
         style="margin-bottom:12px"
-        title="发券任务按幂等键去重。失败任务可点「重试失败任务」重置后由后台再发。"
+        title="发券任务按幂等键去重；同顾客同模板若已有未用券或本季已发过会自动跳过。失败任务可点「重试失败任务」重置后由后台再发。"
       />
       <p v-if="taskStats">
         汇总：

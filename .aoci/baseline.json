@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T04:38:00Z",
+  "updated_at": "2026-10-22T09:25:50Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "3050a1cebd9d019af9d311c5801c559f0004198e01d4191e6e4d1ec7bcf62bcf",
-      "size": 185603,
-      "normalized_sha256": "3050a1cebd9d019af9d311c5801c559f0004198e01d4191e6e4d1ec7bcf62bcf"
+      "sha256": "b12a0e09401c24c96ba9d98d48bb616b20c57fabbfe3af9b7f6651f398e0b2d4",
+      "size": 186203,
+      "normalized_sha256": "b12a0e09401c24c96ba9d98d48bb616b20c57fabbfe3af9b7f6651f398e0b2d4"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -374,6 +374,12 @@
       "sha256": "dcfa24b7e33f74b5b08afa78c82bdb9941da744a945bc8ecb41c4f68df6ddfe8",
       "size": 4722,
       "normalized_sha256": "dcfa24b7e33f74b5b08afa78c82bdb9941da744a945bc8ecb41c4f68df6ddfe8"
+    },
+    "backend/alembic/versions/0038_coupon_tmpl_annual_md.py": {
+      "role": "index",
+      "sha256": "511c6f2676d677aec9938499230ea392af22193ee3a3533c9a8561f0abfc8c3f",
+      "size": 4853,
+      "normalized_sha256": "511c6f2676d677aec9938499230ea392af22193ee3a3533c9a8561f0abfc8c3f"
     },
     "backend/app/__init__.py": {
       "role": "index",
@@ -1109,9 +1115,9 @@
     },
     "backend/app/models/member.py": {
       "role": "index",
-      "sha256": "dde5895ed3cf98c0d469377ead99ffaf7e21361057bd4f03bf625ce45457a823",
-      "size": 12693,
-      "normalized_sha256": "dde5895ed3cf98c0d469377ead99ffaf7e21361057bd4f03bf625ce45457a823"
+      "sha256": "98accdfe69ed9f727d8a4a1b682444a3a4c4f3f98a723957458ab158cc586a19",
+      "size": 13261,
+      "normalized_sha256": "98accdfe69ed9f727d8a4a1b682444a3a4c4f3f98a723957458ab158cc586a19"
     },
     "backend/app/models/messaging.py": {
       "role": "index",
@@ -1163,9 +1169,9 @@
     },
     "backend/app/schemas/coupon.py": {
       "role": "index",
-      "sha256": "a58aba3a62c692154add52b482760df18c4cc088872a7528cd0348d8f47e03a9",
-      "size": 2255,
-      "normalized_sha256": "69e771a5ae80e3e89794be6e289880c2d51f2e38dfebcaab41d6ce2843c53163"
+      "sha256": "733758c9ec95ab7bc10835b3a7e874d822131ce3e57a3654f6a7c89c13e91394",
+      "size": 3138,
+      "normalized_sha256": "6cf2689adeb809fb314e1779cc2e0b90b3f44435d0fd2cdbc93531a40944b074"
     },
     "backend/app/schemas/member_level.py": {
       "role": "index",
@@ -1277,9 +1283,9 @@
     },
     "backend/app/services/coupon_service.py": {
       "role": "index",
-      "sha256": "5f46446a8f9b0cb9f4358ae27daf1f4fbba2a8def9bbc955fbe0f6e567c4167f",
-      "size": 58629,
-      "normalized_sha256": "5f46446a8f9b0cb9f4358ae27daf1f4fbba2a8def9bbc955fbe0f6e567c4167f"
+      "sha256": "ca66c709d98b45fc2dc07a0198b53d220b60152835703232ca29ac3e56363761",
+      "size": 63340,
+      "normalized_sha256": "ca66c709d98b45fc2dc07a0198b53d220b60152835703232ca29ac3e56363761"
     },
     "backend/app/services/customer_display.py": {
       "role": "index",
@@ -1427,9 +1433,9 @@
     },
     "backend/app/services/marketing_service.py": {
       "role": "index",
-      "sha256": "16497009061a4540fec06b99f8f7278c1664b5d2a104ea785e21fedf23f6ddcd",
-      "size": 58643,
-      "normalized_sha256": "16497009061a4540fec06b99f8f7278c1664b5d2a104ea785e21fedf23f6ddcd"
+      "sha256": "ca6455fad25a9fff85437807b9ec08d400eb5fde857c0d4bd487939a5c7175c4",
+      "size": 64521,
+      "normalized_sha256": "ca6455fad25a9fff85437807b9ec08d400eb5fde857c0d4bd487939a5c7175c4"
     },
     "backend/app/services/menu_copy_service.py": {
       "role": "index",
@@ -1811,9 +1817,9 @@
     },
     "backend/app/utils/campaign_schedule.py": {
       "role": "index",
-      "sha256": "0696f1ffb903bdc76c80e41125ed558763815de84e24d16d75e7c50eaca90b33",
-      "size": 4898,
-      "normalized_sha256": "0696f1ffb903bdc76c80e41125ed558763815de84e24d16d75e7c50eaca90b33"
+      "sha256": "d98ffac189826c9dd2a847f041ee1b82d205fbc3c0460a687e63b02a88046ed4",
+      "size": 5863,
+      "normalized_sha256": "d98ffac189826c9dd2a847f041ee1b82d205fbc3c0460a687e63b02a88046ed4"
     },
     "backend/app/utils/logo_overlay.py": {
       "role": "index",
@@ -2299,9 +2305,9 @@
     },
     "frontend/src/utils/marketingHelp.ts": {
       "role": "index",
-      "sha256": "7d332ffb7987ff8c86f49b440cc7f7d6973c1f71eb164fbc424c91fae0f392e9",
-      "size": 9456,
-      "normalized_sha256": "7d332ffb7987ff8c86f49b440cc7f7d6973c1f71eb164fbc424c91fae0f392e9"
+      "sha256": "4650fe40532beb4beeab652f9ae41a687f165249d76d11d494dbff921e3e7e0a",
+      "size": 9665,
+      "normalized_sha256": "4650fe40532beb4beeab652f9ae41a687f165249d76d11d494dbff921e3e7e0a"
     },
     "frontend/src/utils/media.ts": {
       "role": "index",
@@ -2389,9 +2395,9 @@
     },
     "frontend/src/views/Coupons.vue": {
       "role": "index",
-      "sha256": "ec88cb7af6f2339a05c7b3af984d433b55a38c3dd253220c8abf83201e9b28ef",
-      "size": 34701,
-      "normalized_sha256": "ec88cb7af6f2339a05c7b3af984d433b55a38c3dd253220c8abf83201e9b28ef"
+      "sha256": "80627126138bfb7a751153abf40f3168b1e057160218d1e6dad71aef7cb3c424",
+      "size": 39027,
+      "normalized_sha256": "80627126138bfb7a751153abf40f3168b1e057160218d1e6dad71aef7cb3c424"
     },
     "frontend/src/views/CustomerDisplay.vue": {
       "role": "index",
@@ -2437,9 +2443,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "4a45efa31c284ee20bcd28dec931dac40441be79fcae58642fba129fd99fcdb6",
-      "size": 47471,
-      "normalized_sha256": "4a45efa31c284ee20bcd28dec931dac40441be79fcae58642fba129fd99fcdb6"
+      "sha256": "9616bf061db1ba70dc9709f0bd1416915410cb08c7d465feede9a9a0c91c00ad",
+      "size": 48013,
+      "normalized_sha256": "9616bf061db1ba70dc9709f0bd1416915410cb08c7d465feede9a9a0c91c00ad"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -4349,9 +4355,9 @@
     },
     "sql/data_sys.sql": {
       "role": "index",
-      "sha256": "8e3d2c31a59bf3093c0420386efbe489b29df19caecdab5b5d880e8125088872",
-      "size": 60910,
-      "normalized_sha256": "8e3d2c31a59bf3093c0420386efbe489b29df19caecdab5b5d880e8125088872"
+      "sha256": "6a007c0c351df50c4908ce1d15d82b7d17b4c1bf1f2d115c18ba7c3cd453ca61",
+      "size": 63861,
+      "normalized_sha256": "6a007c0c351df50c4908ce1d15d82b7d17b4c1bf1f2d115c18ba7c3cd453ca61"
     },
     "sql/data_test.sql": {
       "role": "index",
@@ -4361,9 +4367,9 @@
     },
     "sql/struct.sql": {
       "role": "index",
-      "sha256": "9a4151eaeb62f0199e8fa6806d6c1452b4fed6d153747d116c2ffebaa65212f8",
-      "size": 155491,
-      "normalized_sha256": "9a4151eaeb62f0199e8fa6806d6c1452b4fed6d153747d116c2ffebaa65212f8"
+      "sha256": "0623a0f6392a9d0818fbe016e1a6e1e99879821a8748669981ddc656ca1c6fe0",
+      "size": 156183,
+      "normalized_sha256": "0623a0f6392a9d0818fbe016e1a6e1e99879821a8748669981ddc656ca1c6fe0"
     },
     "sql/人脸数据.sql": {
       "role": "index",
@@ -5545,6 +5551,12 @@
       "sha256": "832fab8130ae340fcc8b5c5fd50adafd60c7eca019326778cc6461d3f0fb85f2",
       "size": 12247,
       "normalized_sha256": "eab30f7ef2bb82c54e27aa7f1095831b346be276e37fe4d77fe16ac9188d2f68"
+    },
+    "tests/测试_节日券时效.py": {
+      "role": "observe",
+      "sha256": "d58d8c13f309d494fbc230ef1b7721a80adcd45f476ab9d9f41884de532f2b90",
+      "size": 8934,
+      "normalized_sha256": "d58d8c13f309d494fbc230ef1b7721a80adcd45f476ab9d9f41884de532f2b90"
     },
     "tests/测试_菜单复制.py": {
       "role": "observe",

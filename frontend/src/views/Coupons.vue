@@ -262,7 +262,7 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-dialog v-model="templateDialog" :title="templateForm.id ? '编辑模板' : '新增模板'" width="480px" destroy-on-close>
+    <el-dialog v-model="templateDialog" :title="templateForm.id ? '编辑模板' : '新增模板'" width="560px" destroy-on-close>
       <el-form :model="templateForm" label-width="100px">
         <el-form-item v-if="!templateForm.id && auth.isSuperAdmin" label="归属" required>
           <el-radio-group v-model="templateForm.scope">
@@ -310,7 +310,40 @@
         </el-form-item>
         <el-form-item label="有效天数">
           <el-input-number v-model="templateForm.valid_days" :min="1" :max="365" style="width: 100%" />
+          <div class="hint">节日券建议 3～7 天，避免节后仍可核销</div>
         </el-form-item>
+        <el-form-item label="发放窗">
+          <el-radio-group v-model="templateForm.schedule_mode">
+            <el-radio-button value="ALWAYS">全年可发</el-radio-button>
+            <el-radio-button value="ANNUAL_MD">每年月日</el-radio-button>
+          </el-radio-group>
+          <div class="hint">节日模板选「每年月日」，窗外不可新发；与营销活动排期对齐</div>
+        </el-form-item>
+        <template v-if="templateForm.schedule_mode === 'ANNUAL_MD'">
+          <el-form-item label="历法">
+            <el-radio-group v-model="templateForm.schedule_calendar">
+              <el-radio-button value="SOLAR">公历</el-radio-button>
+              <el-radio-button value="LUNAR">农历</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="起始月日" required>
+            <div style="display:flex;gap:8px;align-items:center;width:100%">
+              <el-input-number v-model="templateForm.annual_start_month" :min="1" :max="12" controls-position="right" />
+              <span>月</span>
+              <el-input-number v-model="templateForm.annual_start_day" :min="1" :max="31" controls-position="right" />
+              <span>日</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="结束月日">
+            <div style="display:flex;gap:8px;align-items:center;width:100%">
+              <el-input-number v-model="templateForm.annual_end_month" :min="1" :max="12" controls-position="right" />
+              <span>月</span>
+              <el-input-number v-model="templateForm.annual_end_day" :min="1" :max="31" controls-position="right" />
+              <span>日</span>
+            </div>
+            <div class="hint">可跨年；空结束=仅起始当天</div>
+          </el-form-item>
+        </template>
         <el-form-item label="状态">
           <el-switch v-model="templateForm.status" :active-value="1" :inactive-value="0" />
         </el-form-item>
@@ -415,6 +448,12 @@ const templateForm = reactive({
   status: 1,
   scope: 'HQ' as 'HQ' | 'STORE',
   store_id: undefined as number | undefined,
+  schedule_mode: 'ALWAYS' as 'ALWAYS' | 'ANNUAL_MD',
+  schedule_calendar: 'SOLAR' as 'SOLAR' | 'LUNAR',
+  annual_start_month: null as number | null,
+  annual_start_day: null as number | null,
+  annual_end_month: null as number | null,
+  annual_end_day: null as number | null,
 })
 
 function scopeLabel(row: any) {
@@ -746,6 +785,12 @@ function openTemplateForm(row?: any) {
       status: row.status,
       scope: row.store_id ? 'STORE' : 'HQ',
       store_id: row.store_id || undefined,
+      schedule_mode: (row.schedule_mode || 'ALWAYS') as 'ALWAYS' | 'ANNUAL_MD',
+      schedule_calendar: (row.schedule_calendar || 'SOLAR') as 'SOLAR' | 'LUNAR',
+      annual_start_month: row.annual_start_month ?? null,
+      annual_start_day: row.annual_start_day ?? null,
+      annual_end_month: row.annual_end_month ?? null,
+      annual_end_day: row.annual_end_day ?? null,
     })
   } else {
     Object.assign(templateForm, {
@@ -758,6 +803,12 @@ function openTemplateForm(row?: any) {
       status: 1,
       scope: auth.isSuperAdmin ? 'HQ' : 'STORE',
       store_id: auth.isSuperAdmin ? stores.value[0]?.id : auth.user?.store_id || undefined,
+      schedule_mode: 'ALWAYS',
+      schedule_calendar: 'SOLAR',
+      annual_start_month: null,
+      annual_start_day: null,
+      annual_end_month: null,
+      annual_end_day: null,
     })
   }
   templateDialog.value = true
@@ -777,8 +828,15 @@ async function saveTemplate() {
     ElMessage.warning('请选择门店')
     return
   }
+  if (templateForm.schedule_mode === 'ANNUAL_MD') {
+    if (!templateForm.annual_start_month || !templateForm.annual_start_day) {
+      ElMessage.warning('年度发放窗须填写起始月日')
+      return
+    }
+  }
   saving.value = true
   try {
+    const annual = templateForm.schedule_mode === 'ANNUAL_MD'
     const payload: Record<string, unknown> = {
       name: templateForm.name.trim(),
       coupon_type: templateForm.coupon_type,
@@ -786,6 +844,12 @@ async function saveTemplate() {
       min_order_amount: templateForm.min_order_amount,
       valid_days: templateForm.valid_days,
       status: templateForm.status,
+      schedule_mode: templateForm.schedule_mode || 'ALWAYS',
+      schedule_calendar: annual ? templateForm.schedule_calendar || 'SOLAR' : 'SOLAR',
+      annual_start_month: annual ? templateForm.annual_start_month : null,
+      annual_start_day: annual ? templateForm.annual_start_day : null,
+      annual_end_month: annual ? templateForm.annual_end_month : null,
+      annual_end_day: annual ? templateForm.annual_end_day : null,
     }
     if (!templateForm.id && auth.isSuperAdmin) {
       payload.store_id = templateForm.scope === 'STORE' ? templateForm.store_id : null

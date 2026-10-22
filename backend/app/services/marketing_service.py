@@ -253,6 +253,72 @@ class MarketingService:
         )
         return int(cnt or 0)
 
+    @classmethod
+    async def find_duplicate_issue_reason(
+        cls,
+        db: AsyncSession,
+        *,
+        customer_id: int,
+        template_id: int,
+        season: str | None = None,
+        now=None,
+    ) -> dict[str, Any] | None:
+        """营销自动发券防重：同顾客同模板不叠发。
+
+        优先级：
+        1. 账上仍有未用/占用中的同模板券 → 跳过（避免多活动叠未用券）
+        2. 带季标识时：任意活动本季已发过同模板（含已核销）→ 跳过
+        3. 已有欢迎券/欢迎礼包同模板幂等键 → 跳过（不限活动类型）
+        """
+        now = now or naive_local_now()
+        cid, tid = int(customer_id), int(template_id)
+
+        held_id = await db.scalar(
+            select(CustomerCoupon.id)
+            .where(
+                CustomerCoupon.customer_id == cid,
+                CustomerCoupon.template_id == tid,
+                CustomerCoupon.status.in_(("AVAILABLE", "RESERVED")),
+                CustomerCoupon.expires_at > now,
+            )
+            .limit(1)
+        )
+        if held_id:
+            return {"reason": "template_held", "coupon_id": int(held_id)}
+
+        season_tok = (season or "").strip()
+        if season_tok:
+            # idem_key = mkt:{campaign_id}:{customer_id}:{template_id}:{season}
+            pattern = f"mkt:%:{cid}:{tid}:{season_tok}"
+            season_id = await db.scalar(
+                select(CustomerCoupon.id)
+                .where(
+                    CustomerCoupon.customer_id == cid,
+                    CustomerCoupon.template_id == tid,
+                    CustomerCoupon.client_request_id.like(pattern),
+                )
+                .limit(1)
+            )
+            if season_id:
+                return {
+                    "reason": "season_already_issued",
+                    "coupon_id": int(season_id),
+                    "season": season_tok,
+                }
+
+        for key in (
+            f"WELCOME:{cid}:{tid}",
+            f"welcome_pack:{cid}:{tid}:v1",
+        ):
+            wid = await db.scalar(
+                select(CustomerCoupon.id)
+                .where(CustomerCoupon.client_request_id == key)
+                .limit(1)
+            )
+            if wid:
+                return {"reason": "welcome_dup", "key": key, "coupon_id": int(wid)}
+        return None
+
     @staticmethod
     def template_budget_unit(tmpl: CouponTemplate | None) -> Decimal:
         """单张券计入活动预算的成本（元）。FIXED/VOUCHER=面额；PERCENT=按门槛最大折扣额。"""
@@ -324,12 +390,14 @@ class MarketingService:
         season: str | None,
         reason: str = "campaign_window_end",
     ) -> int:
-        """活动出窗：作废本季营销幂等键发出的未使用券，避免节后仍可核销。"""
-        if not season:
-            return 0
+        """活动出窗：作废本活动 `mkt:{camp}:%` 未用券，避免节后仍可核销。
+
+        season 参数保留供调用方传本季标识（日志/扩展）；作废按活动宽匹配，
+        避免季边界漏作废。
+        """
+        _ = season  # 保留签名；宽匹配已覆盖各季未用券
         now = naive_local_now()
-        # mkt:{campaign_id}:{customer}:{template}:{season}
-        pattern = f"mkt:{int(camp.id)}:%:{season}"
+        pattern = f"mkt:{int(camp.id)}:%"
         result = await db.execute(
             update(CustomerCoupon)
             .where(
@@ -1242,23 +1310,32 @@ class MarketingService:
                             stats["cancelled"] = int(stats.get("cancelled") or 0) + cancelled
                         return
 
-            # 与定时沉睡唤醒/欢迎券共用模板时：已有 WELCOME 幂等券则跳过，避免双发
-            if (camp.campaign_type or "").upper() in ("WAKEUP", "NEW_MEMBER"):
-                welcome_key = f"WELCOME:{int(task.customer_id)}:{int(template_id)}"
-                has_welcome = await db.scalar(
-                    select(CustomerCoupon.id).where(
-                        CustomerCoupon.client_request_id == welcome_key
-                    )
-                )
-                if has_welcome:
-                    task.status = "SKIPPED"
-                    task.last_error = "已有系统定时/欢迎同模板券，跳过双发"
-                    task.executed_at = now
-                    task.updated_at = now
-                    task.result_json = {"reason": "welcome_dup", "key": welcome_key}
-                    stats["skipped"] += 1
-                    stats["processed"] += 1
-                    return
+            # 同顾客同模板防重：未用叠券 / 同季已发 / 欢迎礼包同模板
+            season = (payload.get("season") or cls.season_for_campaign(camp) or None)
+            if isinstance(season, str):
+                season = season.strip() or None
+            dup = await cls.find_duplicate_issue_reason(
+                db,
+                customer_id=int(task.customer_id),
+                template_id=int(template_id),
+                season=season,
+                now=now,
+            )
+            if dup:
+                reason = str(dup.get("reason") or "duplicate")
+                msg_map = {
+                    "template_held": "顾客已有同模板未用券，跳过重复发放",
+                    "season_already_issued": "本季已发过同模板券，跳过重复发放",
+                    "welcome_dup": "已有欢迎/礼包同模板券，跳过双发",
+                }
+                task.status = "SKIPPED"
+                task.last_error = msg_map.get(reason, "跳过重复发放")
+                task.executed_at = now
+                task.updated_at = now
+                task.result_json = {**dup, "reason": reason}
+                stats["skipped"] += 1
+                stats["processed"] += 1
+                return
 
             issued = await CouponService.issue_by_template_id(
                 db,
