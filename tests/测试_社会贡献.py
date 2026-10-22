@@ -146,6 +146,42 @@ async def test_环卫8折命中(db_session, sb):
 
 
 @pytest.mark.asyncio
+async def test_门店规则覆盖总部同身份(db_session, sb):
+    """同 identity_code 并存时：结算优先门店规则（非 HQ∪店双开）。"""
+    store_rule = SocialBenefitRule(
+        store_id=sb["store1"].id,
+        identity_code="SANITATION",
+        name="本店环卫9折",
+        benefit_type="ORDER_DISCOUNT",
+        discount_rate=Decimal("0.90"),
+        daily_limit=1,
+        stack_policy="EXCLUSIVE",
+        max_subsidy_amount=Decimal("20.00"),
+        priority=10,
+        status=1,
+        time_windows=[["00:00", "23:59"]],
+    )
+    db_session.add(store_rule)
+    await db_session.flush()
+    await SocialBenefitService.pos_verify(
+        db_session,
+        customer_id=sb["c1"].id,
+        identity_code="SANITATION",
+        store_id=sb["store1"].id,
+        operator_user_id=1,
+    )
+    await db_session.commit()
+    hit = await SocialBenefitService.find_best_rule(
+        db_session, customer_id=sb["c1"].id, store_id=sb["store1"].id
+    )
+    assert hit is not None
+    rule, code = hit
+    assert code == "SANITATION"
+    assert int(rule.id) == int(store_rule.id)
+    assert money(rule.discount_rate) == money("0.90")
+
+
+@pytest.mark.asyncio
 async def test_同店同日限次(db_session, sb):
     await SocialBenefitService.pos_verify(
         db_session,

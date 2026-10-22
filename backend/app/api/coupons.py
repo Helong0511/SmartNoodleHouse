@@ -440,6 +440,26 @@ async def replace_point_exchange_options(
             )
         )
     await db.commit()
+
+    override_warnings: list[str] = []
+    if sid is not None and data.items:
+        hq_rows = list(
+            (
+                await db.execute(
+                    select(PointExchangeOption).where(PointExchangeOption.store_id.is_(None))
+                )
+            ).scalars().all()
+        )
+        hq_keys = {(int(o.template_id), int(o.points_cost)): o for o in hq_rows}
+        for item in data.items:
+            key = (int(item.template_id), int(item.points_cost))
+            hq = hq_keys.get(key)
+            if hq:
+                override_warnings.append(
+                    f"将覆盖顾客端总部同档展示（模板#{item.template_id} / {item.points_cost}积分"
+                    f" / 总部「{hq.name}」）"
+                )
+
     await AuditService.log_staff(
         db,
         user=user,
@@ -451,7 +471,8 @@ async def replace_point_exchange_options(
         request=request,
         store_id=int(sid) if sid else None,
     )
-    return success(
-        {"store_id": sid, "items": [x.model_dump() for x in data.items]},
-        request=request,
-    )
+    payload: dict = {"store_id": sid, "items": [x.model_dump() for x in data.items]}
+    if override_warnings:
+        payload["override_warnings"] = override_warnings
+        payload["override_warning"] = override_warnings[0]
+    return success(payload, request=request)

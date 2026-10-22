@@ -522,15 +522,21 @@ async function savePackage() {
       sort_order: editing.sort_order,
       status: editing.statusOn ? 1 : 0,
     }
+    let saved: any
     if (editing.id) {
-      await api.put(`/wallet/packages/${editing.id}`, body)
+      saved = await api.put(`/wallet/packages/${editing.id}`, body)
     } else {
       if (auth.isSuperAdmin) {
         body.store_id = editing.scope === 'STORE' ? editing.store_id : null
       }
-      await api.post('/wallet/packages', body)
+      saved = await api.post('/wallet/packages', body)
     }
-    ElMessage.success('已保存')
+    const warn = saved?.data?.override_warning || saved?.override_warning
+    if (warn) {
+      ElMessage.warning(String(warn))
+    } else {
+      ElMessage.success('已保存')
+    }
     dlgVisible.value = false
     await loadPackages()
   } catch (e: any) {

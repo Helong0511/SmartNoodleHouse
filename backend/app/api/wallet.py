@@ -16,6 +16,7 @@ from app.models import BalanceLedger, Customer, Order, RechargeOrder, RechargePa
 from app.services.audit_service import AuditService
 from app.services.balance_service import BalanceService
 from app.services.customer_service import CustomerService
+from app.services.scope_override import merge_store_over_hq
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/wallet", tags=["储值"])
@@ -91,14 +92,28 @@ def _merge_packages_for_customer(rows: list[RechargePackage]) -> list[RechargePa
 
     后台员工列表不调用本函数，仍展示「总部 ∪ 门店」便于分别维护。
     """
-    by_pay: dict[Decimal, RechargePackage] = {}
-    for p in rows:
-        if p.store_id is None:
-            by_pay[money(p.pay_amount)] = p
-    for p in rows:
-        if p.store_id is not None:
-            by_pay[money(p.pay_amount)] = p
-    return sorted(by_pay.values(), key=lambda p: (int(p.sort_order or 0), int(p.id)))
+    return merge_store_over_hq(
+        rows,
+        key_fn=lambda p: money(p.pay_amount),
+        sort_key=lambda p: (int(p.sort_order or 0), int(p.id)),
+    )
+
+
+async def _hq_pay_override_warning(db, *, store_id: int | None, pay_amount) -> str | None:
+    """门店档与总部同实付时，提示将覆盖顾客端总部同档（不阻断保存）。"""
+    if store_id is None:
+        return None
+    pay = money(pay_amount)
+    hq = (
+        await db.execute(
+            select(RechargePackage)
+            .where(RechargePackage.store_id.is_(None), RechargePackage.pay_amount == pay)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if not hq:
+        return None
+    return f"将覆盖顾客端总部同档展示（实付 ¥{pay} / 总部「{hq.name}」）"
 
 
 async def _assert_package_unique(
@@ -239,7 +254,11 @@ async def create_package(data: PackageCreate, request: Request, db: DbSession, u
         detail=_pkg_ser(pkg),
         request=request,
     )
-    return success(_pkg_ser(pkg), request=request)
+    payload = _pkg_ser(pkg)
+    warn = await _hq_pay_override_warning(db, store_id=sid, pay_amount=pkg.pay_amount)
+    if warn:
+        payload["override_warning"] = warn
+    return success(payload, request=request)
 
 
 @router.put("/packages/{package_id}", dependencies=[require_permission("wallet:manage")])
@@ -287,7 +306,11 @@ async def update_package(
         detail=_pkg_ser(pkg),
         request=request,
     )
-    return success(_pkg_ser(pkg), request=request)
+    payload = _pkg_ser(pkg)
+    warn = await _hq_pay_override_warning(db, store_id=pkg.store_id, pay_amount=pkg.pay_amount)
+    if warn:
+        payload["override_warning"] = warn
+    return success(payload, request=request)
 
 
 @router.get("/me")

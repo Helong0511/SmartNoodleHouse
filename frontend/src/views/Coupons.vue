@@ -173,6 +173,82 @@
         </el-table>
         <p class="hint" style="margin-top:8px">建议档位：20 / 50 / 100。留空并保存即清空本店规则。</p>
       </el-tab-pane>
+
+      <el-tab-pane label="积分兑换选项" name="pointExchange">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="小程序会员中心积分兑券"
+          description="后台可同时维护总部与门店选项；顾客端按「券模板+积分成本」合并，门店覆盖总部，避免重复卡片。保存门店覆盖档时会提示。"
+          class="milestone-alert"
+        />
+        <div class="toolbar" style="margin-top:12px">
+          <el-select
+            v-if="auth.isSuperAdmin"
+            v-model="exchangeScope"
+            placeholder="维护范围"
+            style="width: 220px"
+            @change="loadPointExchange"
+          >
+            <el-option label="总部（全店）" value="HQ" />
+            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="String(s.id)" />
+          </el-select>
+          <el-button @click="loadPointExchange">刷新</el-button>
+          <el-button v-if="canManage" @click="addExchangeRow">添加</el-button>
+          <el-button v-if="canManage" type="primary" :loading="exchangeSaving" @click="savePointExchange">保存</el-button>
+        </div>
+        <el-alert
+          v-if="exchangeHqHint.length"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="milestone-alert"
+          style="margin-top:8px"
+          :title="`总部另有 ${exchangeHqHint.length} 项（只读），同模板同积分成本将被本店覆盖`"
+          :description="exchangeHqHint.map((x) => `${x.name} / ${x.points_cost}积分 / ${x.template_name || '模板#' + x.template_id}`).join('；')"
+        />
+        <el-table :data="exchangeRows" border style="margin-top:12px">
+          <el-table-column label="选项名称" min-width="160">
+            <template #default="{ row }">
+              <el-input v-model="row.name" maxlength="100" :disabled="!canManage" placeholder="如：兑10元券" />
+            </template>
+          </el-table-column>
+          <el-table-column label="券模板" min-width="220">
+            <template #default="{ row }">
+              <el-select v-model="row.template_id" filterable placeholder="选择模板" :disabled="!canManage" style="width: 100%">
+                <el-option
+                  v-for="t in enabledTemplates"
+                  :key="t.id"
+                  :label="`${t.name}（${t.summary || couponTypeLabel(t.coupon_type)}）`"
+                  :value="t.id"
+                />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="所需积分" width="140">
+            <template #default="{ row }">
+              <el-input-number v-model="row.points_cost" :min="1" :max="999999" :disabled="!canManage" />
+            </template>
+          </el-table-column>
+          <el-table-column label="排序" width="120">
+            <template #default="{ row }">
+              <el-input-number v-model="row.sort_order" :min="0" :max="9999" :disabled="!canManage" />
+            </template>
+          </el-table-column>
+          <el-table-column label="启用" width="90">
+            <template #default="{ row }">
+              <el-switch v-model="row.status" :active-value="1" :inactive-value="0" :disabled="!canManage" />
+            </template>
+          </el-table-column>
+          <el-table-column v-if="canManage" label="操作" width="90">
+            <template #default="{ $index }">
+              <el-button link type="danger" @click="exchangeRows.splice($index, 1)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="hint" style="margin-top:8px">整表替换：清空后保存即删除当前范围（总部或本店）全部兑换选项。</p>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="templateDialog" :title="templateForm.id ? '编辑模板' : '新增模板'" width="480px" destroy-on-close>
@@ -283,6 +359,14 @@ const milestoneRows = ref<
   { threshold_orders: number; template_id?: number; status: number }[]
 >([])
 const milestoneSaving = ref(false)
+
+/** 超管：HQ 或门店 id 字符串；门店账号固定本店 */
+const exchangeScope = ref<string>('HQ')
+const exchangeRows = ref<
+  { name: string; template_id?: number; points_cost: number; sort_order: number; status: number }[]
+>([])
+const exchangeHqHint = ref<any[]>([])
+const exchangeSaving = ref(false)
 
 const templates = ref<any[]>([])
 const templateScope = ref<string | undefined>()
@@ -421,6 +505,135 @@ async function loadIssued() {
 function onTabChange(name: string | number) {
   if (name === 'issued' && !issued.value.length) loadIssued()
   if (name === 'milestones') loadMilestones()
+  if (name === 'pointExchange') loadPointExchange()
+}
+
+/** null=总部；number=门店；门店账号恒为本店 */
+function exchangeTargetStoreId(): number | null {
+  if (!auth.isSuperAdmin) {
+    const sid = Number(auth.user?.store_id)
+    return Number.isFinite(sid) && sid > 0 ? sid : null
+  }
+  if (exchangeScope.value === 'HQ') return null
+  const sid = Number(exchangeScope.value)
+  return Number.isFinite(sid) && sid > 0 ? sid : null
+}
+
+function mapExchangeRows(items: any[]) {
+  return items.map((x: any) => ({
+    name: x.name || '',
+    template_id: Number(x.template_id),
+    points_cost: Number(x.points_cost) || 1,
+    sort_order: Number(x.sort_order || 0),
+    status: Number(x.status ?? 1),
+  }))
+}
+
+async function loadPointExchange() {
+  if (auth.isSuperAdmin && !stores.value.length) await loadStores()
+  if (auth.isSuperAdmin && exchangeScope.value !== 'HQ' && !exchangeScope.value) {
+    exchangeScope.value = 'HQ'
+  }
+  loading.value = true
+  try {
+    const target = exchangeTargetStoreId()
+    const params: Record<string, number> = {}
+    // 超管指定门店时传 store_id；门店账号后端按绑定店返回 HQ∪本店
+    if (auth.isSuperAdmin && target != null) params.store_id = target
+    const res = await api.get('/coupons/point-exchange-options', { params })
+    const items = res.data?.items || []
+    if (target != null) {
+      exchangeHqHint.value = items.filter((x: any) => !x.store_id)
+      exchangeRows.value = mapExchangeRows(
+        items.filter((x: any) => Number(x.store_id) === Number(target)),
+      )
+    } else {
+      exchangeHqHint.value = []
+      exchangeRows.value = mapExchangeRows(items.filter((x: any) => !x.store_id))
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载积分兑换选项失败')
+    exchangeRows.value = []
+    exchangeHqHint.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+function addExchangeRow() {
+  exchangeRows.value.push({
+    name: '',
+    template_id: enabledTemplates.value[0]?.id,
+    points_cost: 100,
+    sort_order: exchangeRows.value.length,
+    status: 1,
+  })
+}
+
+async function savePointExchange() {
+  const target = exchangeTargetStoreId()
+  if (auth.isSuperAdmin && exchangeScope.value !== 'HQ' && target == null) {
+    ElMessage.warning('请选择门店')
+    return
+  }
+  if (!auth.isSuperAdmin && target == null) {
+    ElMessage.warning('账号未绑定门店，无法保存')
+    return
+  }
+  for (const row of exchangeRows.value) {
+    if (!row.name.trim()) {
+      ElMessage.warning('请填写选项名称')
+      return
+    }
+    if (!row.template_id) {
+      ElMessage.warning('请为每个选项选择券模板')
+      return
+    }
+  }
+  if (!exchangeRows.value.length) {
+    try {
+      await ElMessageBox.confirm(
+        target == null
+          ? '当前无任何选项，保存后将清空总部全部积分兑换选项。是否继续？'
+          : '当前无任何选项，保存后将清空本店全部积分兑换选项（总部项保留）。是否继续？',
+        '清空确认',
+        { type: 'warning', confirmButtonText: '清空并保存', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  exchangeSaving.value = true
+  try {
+    const body: Record<string, unknown> = {
+      items: exchangeRows.value.map((r) => ({
+        name: r.name.trim(),
+        template_id: r.template_id,
+        points_cost: r.points_cost,
+        status: r.status,
+        sort_order: r.sort_order,
+      })),
+    }
+    // 超管显式传 store_id（null=总部）；门店账号由后端按绑定店写入
+    if (auth.isSuperAdmin) {
+      body.store_id = target
+    }
+    const res: any = await api.put('/coupons/point-exchange-options', body)
+    const warn =
+      res?.data?.override_warning ||
+      res?.override_warning ||
+      (Array.isArray(res?.data?.override_warnings) ? res.data.override_warnings[0] : '')
+    if (warn) {
+      ElMessage.warning(String(warn))
+    } else {
+      ElMessage.success(exchangeRows.value.length ? '积分兑换选项已保存' : '已清空兑换选项')
+    }
+    await loadPointExchange()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    exchangeSaving.value = false
+  }
 }
 
 async function loadMilestones() {

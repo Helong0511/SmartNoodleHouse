@@ -13,23 +13,18 @@ from app.core.response import serialize_dt, success
 from app.models import CouponTemplate, CustomerPreference
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService, PreferenceService
+from app.services.scope_override import merge_store_over_hq
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
 
 def _merge_point_exchange_for_customer(rows: list) -> list:
     """顾客端：同券模板+同积分成本优先门店选项，覆盖总部选项。"""
-    by_key: dict[tuple[int, int], object] = {}
-    for opt in rows:
-        key = (int(opt.template_id), int(opt.points_cost))
-        if opt.store_id is None:
-            by_key[key] = opt
-    for opt in rows:
-        key = (int(opt.template_id), int(opt.points_cost))
-        if opt.store_id is not None:
-            by_key[key] = opt
-    return sorted(by_key.values(), key=lambda o: (int(o.sort_order or 0), int(o.id)))
-
+    return merge_store_over_hq(
+        rows,
+        key_fn=lambda opt: (int(opt.template_id), int(opt.points_cost)),
+        sort_key=lambda o: (int(o.sort_order or 0), int(o.id)),
+    )
 
 @router.get("/coupons/mine")
 async def list_my_coupons(request: Request, db: DbSession, customer: CurrentCustomer, store_id: int | None = None):

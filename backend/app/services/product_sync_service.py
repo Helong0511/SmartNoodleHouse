@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.services.delivery_context import get_credentials_for_store
 from app.services.delivery_providers import get_delivery_provider
+from app.services.scope_override import resolve_map_by_key
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,19 @@ class ProductSyncService:
         if not creds:
             raise AppException(40063, "缺少平台凭证")
         provider = get_delivery_provider(platform, creds)
+        cat_maps = await cls.resolve_category_maps(db, store_id=store_id, platform=platform)
         # 先组 payload 再释放连接占用；平台 HTTP 不拖着整菜单事务
         jobs = [
             (
                 int(p.id),
                 p.name,
                 p.product_no,
-                cls._build_product_payload_cached(p, cats.get(p.category_id), binding.platform_shop_id),
+                cls._build_product_payload_cached(
+                    p,
+                    cats.get(p.category_id),
+                    binding.platform_shop_id,
+                    cat_maps.get(int(p.category_id)) if p.category_id else None,
+                ),
             )
             for p in products
         ]
@@ -119,8 +126,12 @@ class ProductSyncService:
         if not creds:
             raise AppException(40063, "缺少平台凭证")
         provider = get_delivery_provider(platform, creds)
+        cat_map = None
+        if product.category_id:
+            cat_maps = await cls.resolve_category_maps(db, store_id=store_id, platform=platform)
+            cat_map = cat_maps.get(int(product.category_id))
 
-        payload = cls._build_product_payload_cached(product, cat, binding.platform_shop_id)
+        payload = cls._build_product_payload_cached(product, cat, binding.platform_shop_id, cat_map)
         product_name = product.name
         await db.commit()
         result = await provider.sync_product(payload)
@@ -197,15 +208,27 @@ class ProductSyncService:
         return maps, products
 
     @classmethod
-    def _build_product_payload_cached(cls, product: Product, cat: ProductCategory | None, shop_id: str) -> dict:
+    def _build_product_payload_cached(
+        cls,
+        product: Product,
+        cat: ProductCategory | None,
+        shop_id: str,
+        cat_map: PlatformCategoryMap | None = None,
+    ) -> dict:
         skus = [{"sku_id": product.product_no, "price": str(product.price), "spec": "默认"}]
         stock = 9999 if product.stock >= 999 else product.stock
-        return {
+        # 分类名：门店覆盖总部映射优先，否则本地分类名
+        category_name = (
+            (cat_map.platform_category_name if cat_map and cat_map.platform_category_name else None)
+            or (cat.name if cat else None)
+            or "默认分类"
+        )
+        payload = {
             "shop_id": shop_id,
             "app_food_code": product.product_no,
             "name": product.name,
             "description": product.description or "",
-            "category_name": cat.name if cat else "默认分类",
+            "category_name": category_name,
             "price": str(product.price),
             "box_price": str(getattr(product, "box_price", 0) or 0),
             "min_order_count": getattr(product, "min_order_count", 1) or 1,
@@ -213,11 +236,26 @@ class ProductSyncService:
             "picture": product.main_image or "",
             "skus": skus,
         }
+        if cat_map and cat_map.platform_category_code:
+            payload["platform_category_code"] = cat_map.platform_category_code
+        return payload
 
     @classmethod
-    async def _build_product_payload(cls, db: AsyncSession, product: Product, shop_id: str) -> dict:
+    async def _build_product_payload(
+        cls,
+        db: AsyncSession,
+        product: Product,
+        shop_id: str,
+        *,
+        store_id: int | None = None,
+        platform: str | None = None,
+    ) -> dict:
         cat = await db.get(ProductCategory, product.category_id)
-        return cls._build_product_payload_cached(product, cat, shop_id)
+        cat_map = None
+        if store_id and platform and product.category_id:
+            resolved = await cls.resolve_category_maps(db, store_id=store_id, platform=platform)
+            cat_map = resolved.get(int(product.category_id))
+        return cls._build_product_payload_cached(product, cat, shop_id, cat_map)
 
     @classmethod
     async def _ensure_default_map(
@@ -333,6 +371,7 @@ class ProductSyncService:
         store_id: int | None = None,
         platform: str | None = None,
     ) -> list[PlatformCategoryMap]:
+        """管理列表：返回 HQ∪店全量，不去重（便于分别维护）。"""
         stmt = select(PlatformCategoryMap)
         if store_id is not None:
             stmt = stmt.where(
@@ -342,6 +381,33 @@ class ProductSyncService:
             stmt = stmt.where(PlatformCategoryMap.platform == platform.upper())
         stmt = stmt.order_by(PlatformCategoryMap.store_id.is_(None), PlatformCategoryMap.platform)
         return list((await db.execute(stmt)).scalars().all())
+
+    @classmethod
+    async def resolve_category_maps(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int,
+        platform: str,
+    ) -> dict[int, PlatformCategoryMap]:
+        """同步消费：按 local_category_id 解析，门店覆盖总部。"""
+        rows = await cls.list_category_maps(db, store_id=store_id, platform=platform)
+        active = [r for r in rows if int(getattr(r, "status", 1) or 0) == 1]
+        resolved = resolve_map_by_key(active, key_fn=lambda r: int(r.local_category_id))
+        return {int(k): v for k, v in resolved.items()}
+
+    @classmethod
+    async def resolve_category_map(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int,
+        platform: str,
+        local_category_id: int,
+    ) -> PlatformCategoryMap | None:
+        """单键解析：有门店行用门店，否则总部。"""
+        maps = await cls.resolve_category_maps(db, store_id=store_id, platform=platform)
+        return maps.get(int(local_category_id))
 
     @staticmethod
     async def upsert_category_map(

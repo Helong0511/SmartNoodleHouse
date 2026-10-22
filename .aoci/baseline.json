@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T02:06:24Z",
+  "updated_at": "2026-10-22T02:31:06Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "71b74ed486df936642440c022a0aba15d8dcba37f93cf06d5cc427d4f0fc4048",
-      "size": 183307,
-      "normalized_sha256": "71b74ed486df936642440c022a0aba15d8dcba37f93cf06d5cc427d4f0fc4048"
+      "sha256": "b02be5d00124fa84ed23ae310c04173e49e92bdaaf7a276c23ca9aa0233bba39",
+      "size": 184593,
+      "normalized_sha256": "b02be5d00124fa84ed23ae310c04173e49e92bdaaf7a276c23ca9aa0233bba39"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -419,9 +419,9 @@
     },
     "backend/app/api/coupons.py": {
       "role": "index",
-      "sha256": "c1e846267b499051191b13b14ad2ad74defd9c97078bedfe88b92f598c134faa",
-      "size": 17101,
-      "normalized_sha256": "b95f998169eed2d37400333492f2897e649924d95b5072aa619e213dbb65ad8e"
+      "sha256": "8f9df775da4396eefab8c7123a5ed4d607762665102e73277e940986168bb249",
+      "size": 18029,
+      "normalized_sha256": "f012868fb43da0567051eb97b5760d668e336fdb62441772167e0389f2a91cf9"
     },
     "backend/app/api/customers.py": {
       "role": "index",
@@ -533,9 +533,9 @@
     },
     "backend/app/api/miniprogram_customer.py": {
       "role": "index",
-      "sha256": "1077a6d85cbd44c2e58133f09b43b7ba3a65cda397a26bd75e8b7fbddf3b6dbf",
-      "size": 11442,
-      "normalized_sha256": "1077a6d85cbd44c2e58133f09b43b7ba3a65cda397a26bd75e8b7fbddf3b6dbf"
+      "sha256": "e3395036997d6ff3517bb26f4fa1c3fcc2b7917f188dde19aa1d02a0538669ea",
+      "size": 11267,
+      "normalized_sha256": "e3395036997d6ff3517bb26f4fa1c3fcc2b7917f188dde19aa1d02a0538669ea"
     },
     "backend/app/api/miniprogram_dine.py": {
       "role": "index",
@@ -875,9 +875,9 @@
     },
     "backend/app/api/wallet.py": {
       "role": "index",
-      "sha256": "59b912119f4567eec796681031aa4230a73d69ab88a52fcc38455bf80a166146",
-      "size": 27690,
-      "normalized_sha256": "926f6a5249fd28a382c56fc3918a51dfc8f0d2b5fbcc3a89dc0a3c943a60e1e2"
+      "sha256": "1e450a84ab8c10de36f647f06ab11785243d9d99a4f7e27a9e6f315c1c9679f1",
+      "size": 28570,
+      "normalized_sha256": "fed0b6ae19c3816ee4f121672e5fe5bb1ee1ac07afac5d725fefcf94e6af55e9"
     },
     "backend/app/api/websocket.py": {
       "role": "index",
@@ -1595,9 +1595,9 @@
     },
     "backend/app/services/product_sync_service.py": {
       "role": "index",
-      "sha256": "d8d8a8c5519221a8fbc2f5142233086c0541f0d746ab9c23c3e78a9f52da78a8",
-      "size": 15872,
-      "normalized_sha256": "d8d8a8c5519221a8fbc2f5142233086c0541f0d746ab9c23c3e78a9f52da78a8"
+      "sha256": "51bea82d5352025e7e91810c32d38461a330600eaf0348122ea059cd5bca8ada",
+      "size": 18391,
+      "normalized_sha256": "51bea82d5352025e7e91810c32d38461a330600eaf0348122ea059cd5bca8ada"
     },
     "backend/app/services/qr_links.py": {
       "role": "index",
@@ -1640,6 +1640,12 @@
       "sha256": "2f095c44f7371f41c80834fc7b6dbdd15b0602255d455b510a52a8bbd2cf503b",
       "size": 24041,
       "normalized_sha256": "54819a36aa104d7709b6798a234d9646ee458e3f55993643e4330ed8ac4b4c45"
+    },
+    "backend/app/services/scope_override.py": {
+      "role": "index",
+      "sha256": "c3df0cbac72bc74e51f5cc4e970a5f51ed7f7e3ca7d21d7292e929af4c9cfd4d",
+      "size": 1528,
+      "normalized_sha256": "c3df0cbac72bc74e51f5cc4e970a5f51ed7f7e3ca7d21d7292e929af4c9cfd4d"
     },
     "backend/app/services/secret_encryption.py": {
       "role": "index",
@@ -1979,9 +1985,9 @@
     },
     "docs/多门店管理.md": {
       "role": "index",
-      "sha256": "cc2e3b0485a5ec947d857261114079a0dd13bdf7500651398f0eb98fd9afe6c8",
-      "size": 1963,
-      "normalized_sha256": "fe58a58bffda09943c1fb1f59dbb361498fea85d77155f0d4b224abcf4555c69"
+      "sha256": "40e46738446fc3887ed95b8abc1baf17dc27e448228377b148f94d89cd0b9f7c",
+      "size": 3047,
+      "normalized_sha256": "3018c9333429a4d6f7d295691aecf79372a0441098fd5c343ab9f5ecbfef2bd8"
     },
     "docs/安全说明.md": {
       "role": "index",
@@ -2371,9 +2377,9 @@
     },
     "frontend/src/views/Coupons.vue": {
       "role": "index",
-      "sha256": "e4b7bac8c4806052666ef38bfedfd43457e38375a05068c77d108f60d5704b42",
-      "size": 26509,
-      "normalized_sha256": "e4b7bac8c4806052666ef38bfedfd43457e38375a05068c77d108f60d5704b42"
+      "sha256": "4cf243b56b6ad16a4ee019c85b5fc0de45c07053f71b57e1f14190d655206536",
+      "size": 34856,
+      "normalized_sha256": "4cf243b56b6ad16a4ee019c85b5fc0de45c07053f71b57e1f14190d655206536"
     },
     "frontend/src/views/CustomerDisplay.vue": {
       "role": "index",
@@ -2575,9 +2581,9 @@
     },
     "frontend/src/views/Wallet.vue": {
       "role": "index",
-      "sha256": "eeb51884a2c114a43afb879ad3add6ce5eb8976198fab2bfc1157b08b0f3b27c",
-      "size": 26618,
-      "normalized_sha256": "eeb51884a2c114a43afb879ad3add6ce5eb8976198fab2bfc1157b08b0f3b27c"
+      "sha256": "112d0ded1f2df2340e9c0cf8fa49c09e051bb8ec092a13d0caf8c5d04d9ae957",
+      "size": 26802,
+      "normalized_sha256": "112d0ded1f2df2340e9c0cf8fa49c09e051bb8ec092a13d0caf8c5d04d9ae957"
     },
     "frontend/src/views/WelcomeLogs.vue": {
       "role": "index",
@@ -4912,9 +4918,9 @@
     },
     "tests/测试_储值档位总部门店.py": {
       "role": "observe",
-      "sha256": "73866829a280076731c4783af066a45ce8b5d5da99e1fc495c72e01f69bd72e8",
-      "size": 2454,
-      "normalized_sha256": "73866829a280076731c4783af066a45ce8b5d5da99e1fc495c72e01f69bd72e8"
+      "sha256": "fc0b6ed91e5f4bb08ea5edf40010372f61bcae55f6cf2dba6152aa4374b31038",
+      "size": 4748,
+      "normalized_sha256": "fc0b6ed91e5f4bb08ea5edf40010372f61bcae55f6cf2dba6152aa4374b31038"
     },
     "tests/测试_免烹饪订单.py": {
       "role": "observe",
@@ -5506,9 +5512,9 @@
     },
     "tests/测试_社会贡献.py": {
       "role": "observe",
-      "sha256": "adb739c2f87e8f7b11ec788b5a5ccf171551f5e7d33b2fb8ce0f6e512d458ccb",
-      "size": 21543,
-      "normalized_sha256": "3ab21ba9dc32da81dc7a10f6db5a6176e52ba475da088b535b3840facdb1665c"
+      "sha256": "bdc227ca681c038900ca805b82cb7a05297c9ae90f831973de16cfb417af53ee",
+      "size": 22766,
+      "normalized_sha256": "92cc47f7f03e13f0dc4bed5b614516cef5a9b9f10bda4b538e8682f20caa7b3f"
     },
     "tests/测试_积分兑换过期明细.py": {
       "role": "observe",
@@ -5776,9 +5782,9 @@
     },
     "后台操作手册.md": {
       "role": "index",
-      "sha256": "5db97064af28bb1e8c3c5254d6d3082c6e198c610b7f5077a70ab0a40912ec05",
-      "size": 43606,
-      "normalized_sha256": "5db97064af28bb1e8c3c5254d6d3082c6e198c610b7f5077a70ab0a40912ec05"
+      "sha256": "d16649b0f0738cd6fc8d07b7af0a3b5a3ab8fb102ea0266c69327ec5cc9bfb09",
+      "size": 44147,
+      "normalized_sha256": "d16649b0f0738cd6fc8d07b7af0a3b5a3ab8fb102ea0266c69327ec5cc9bfb09"
     },
     "配置检查清单.md": {
       "role": "index",

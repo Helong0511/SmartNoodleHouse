@@ -16,6 +16,7 @@ from app.core.exceptions import AppException
 from app.core.response import naive_local_now
 from app.models import (
     CouponTemplate,
+    Customer,
     CustomerCoupon,
     CustomerSegment,
     MarketingCampaign,
@@ -24,6 +25,7 @@ from app.models import (
     User,
 )
 from app.services.coupon_service import CouponService
+from app.services.scope_override import hq_override_warning, merge_store_over_hq
 from app.services.segment_service import SegmentService
 from app.services.system_settings_service import SystemSettingsService
 from app.utils.birthday import today_beijing
@@ -122,6 +124,83 @@ class MarketingService:
             40008,
             f"{scope}已关闭「营销活动」。请到门店信息 → 业务参数 → 会员与优惠中开启 enable_marketing_campaigns",
         )
+
+    @staticmethod
+    def campaign_code_key(code: str | None) -> str:
+        return (code or "").strip().upper()
+
+    @classmethod
+    async def resolve_running_campaigns(
+        cls, db: AsyncSession, store_id: int, *, now=None
+    ) -> list[MarketingCampaign]:
+        """本店 RUNNING 活动按 code 门店覆盖总部（推荐加权等运行时解析）。"""
+        from datetime import datetime
+
+        at = now or datetime.utcnow()
+        rows = list(
+            (
+                await db.execute(
+                    select(MarketingCampaign).where(
+                        MarketingCampaign.status == "RUNNING",
+                        or_(
+                            MarketingCampaign.store_id.is_(None),
+                            MarketingCampaign.store_id == int(store_id),
+                        ),
+                        or_(MarketingCampaign.start_at.is_(None), MarketingCampaign.start_at <= at),
+                        or_(MarketingCampaign.end_at.is_(None), MarketingCampaign.end_at >= at),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return merge_store_over_hq(rows, key_fn=lambda c: cls.campaign_code_key(c.code))
+
+    @classmethod
+    async def find_hq_same_code(
+        cls, db: AsyncSession, *, code: str, exclude_id: int | None = None
+    ) -> MarketingCampaign | None:
+        key = cls.campaign_code_key(code)
+        if not key:
+            return None
+        q = select(MarketingCampaign).where(
+            MarketingCampaign.store_id.is_(None),
+            func.upper(MarketingCampaign.code) == key,
+        )
+        if exclude_id is not None:
+            q = q.where(MarketingCampaign.id != int(exclude_id))
+        return (
+            await db.execute(q.order_by(MarketingCampaign.id.asc()).limit(1))
+        ).scalar_one_or_none()
+
+    @classmethod
+    async def store_has_code_override(
+        cls, db: AsyncSession, *, store_id: int, code: str
+    ) -> MarketingCampaign | None:
+        """门店是否存在同 code 的生效/待生效活动（挡住总部发券）。"""
+        key = cls.campaign_code_key(code)
+        if not key:
+            return None
+        return (
+            await db.execute(
+                select(MarketingCampaign)
+                .where(
+                    MarketingCampaign.store_id == int(store_id),
+                    func.upper(MarketingCampaign.code) == key,
+                    MarketingCampaign.status.in_(("SCHEDULED", "RUNNING", "PAUSED")),
+                )
+                .order_by(MarketingCampaign.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    @classmethod
+    async def customer_home_store_id(cls, db: AsyncSession, customer_id: int) -> int | None:
+        cust = await db.get(Customer, int(customer_id))
+        if not cust:
+            return None
+        sid = getattr(cust, "registered_store_id", None) or getattr(cust, "first_seen_store_id", None)
+        return int(sid) if sid else None
 
     @classmethod
     async def count_weekly_issues(cls, db: AsyncSession, customer_id: int) -> int:
@@ -545,12 +624,22 @@ class MarketingService:
             )
         await db.flush()
         await db.refresh(camp)
-        return {
+        result: dict[str, Any] = {
             "campaign": await cls.payload_for(db, camp),
             "materialized": mat,
             "enqueued": enqueued,
             "skipped_dup": skipped_dup,
         }
+        # 门店活动与总部同 code：提示将覆盖本店推荐加权并挡住总部发券
+        if camp.store_id is not None:
+            hq = await cls.find_hq_same_code(db, code=camp.code or "", exclude_id=int(camp.id))
+            if hq:
+                result["override_warning"] = hq_override_warning(
+                    key_label="营销编码",
+                    key_desc=f"code={camp.code}",
+                    hq_name=hq.name or str(hq.id),
+                )
+        return result
 
     @classmethod
     async def set_status(cls, db: AsyncSession, campaign_id: int, status: str) -> MarketingCampaign:
@@ -808,6 +897,35 @@ class MarketingService:
                 stats["skipped"] += 1
                 stats["processed"] += 1
             return
+
+        # 总部活动：顾客归属门店已有同 code 覆盖活动时跳过总部发券
+        if camp.store_id is None:
+            home_sid = await cls.customer_home_store_id(db, int(task.customer_id))
+            if home_sid is not None:
+                override = await cls.store_has_code_override(
+                    db, store_id=home_sid, code=camp.code or ""
+                )
+                if override is not None:
+                    skipped = await db.execute(
+                        update(MarketingTask)
+                        .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
+                        .values(
+                            status="SKIPPED",
+                            last_error=f"门店覆盖总部同编码活动#{int(override.id)}",
+                            executed_at=now,
+                            updated_at=now,
+                            result_json={
+                                "reason": "store_override",
+                                "store_id": home_sid,
+                                "override_campaign_id": int(override.id),
+                                "code": camp.code,
+                            },
+                        )
+                    )
+                    if skipped.rowcount:
+                        stats["skipped"] += 1
+                        stats["processed"] += 1
+                    return
 
         task = await cls._claim_pending_task(db, tid)
         if task is None:

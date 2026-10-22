@@ -697,29 +697,16 @@ class RecommendationService:
 
     @staticmethod
     async def load_campaign_boost_ids(db: AsyncSession, store_id: int) -> set[int]:
-        """合并本店+总部 RUNNING 活动的 boost_product_ids。"""
+        """本店 RUNNING 活动按 code 门店覆盖总部后，合并 boost_product_ids。"""
         from app.services.marketing_service import MarketingService
 
         # 本店关闭营销活动时，不应用任何推荐加权（含总部活动）
         if not await MarketingService.is_enabled(db, int(store_id)):
             return set()
-        now = datetime.utcnow()
-        rows = (
-            await db.execute(
-                select(MarketingCampaign.boost_product_ids).where(
-                    MarketingCampaign.status == "RUNNING",
-                    MarketingCampaign.boost_product_ids.is_not(None),
-                    or_(
-                        MarketingCampaign.store_id.is_(None),
-                        MarketingCampaign.store_id == int(store_id),
-                    ),
-                    or_(MarketingCampaign.start_at.is_(None), MarketingCampaign.start_at <= now),
-                    or_(MarketingCampaign.end_at.is_(None), MarketingCampaign.end_at >= now),
-                )
-            )
-        ).scalars().all()
+        camps = await MarketingService.resolve_running_campaigns(db, int(store_id))
         out: set[int] = set()
-        for raw in rows:
+        for camp in camps:
+            raw = getattr(camp, "boost_product_ids", None)
             if not raw:
                 continue
             items = raw if isinstance(raw, list) else []
