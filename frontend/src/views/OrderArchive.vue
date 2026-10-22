@@ -36,6 +36,16 @@
       <el-tag v-else-if="boundStoreName" type="info" style="margin-right:12px">
         门店：{{ boundStoreName }}
       </el-tag>
+      <el-form-item>
+        <el-input
+          v-model="keyword"
+          placeholder="订单号"
+          clearable
+          style="width:180px"
+          @keyup.enter="reload"
+          @clear="reload"
+        />
+      </el-form-item>
       <el-button type="primary" @click="reload">查询</el-button>
     </el-form>
 
@@ -59,6 +69,19 @@
       </el-table-column>
     </el-table>
 
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.pageSize"
+        :total="pager.total"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="loadList"
+        @size-change="reload"
+      />
+    </div>
+
     <el-drawer v-model="detailVisible" :title="detailTitle" size="560px">
       <pre v-loading="detailLoading" class="payload">{{ detailText }}</pre>
     </el-drawer>
@@ -80,6 +103,8 @@ const running = ref(false)
 const rows = ref<any[]>([])
 const lastResult = ref<any>(null)
 const storeFilter = ref<number | null>(null)
+const keyword = ref('')
+const pager = reactive({ page: 1, pageSize: 20, total: 0 })
 const boundStoreName = ref('')
 const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions()
 
@@ -123,10 +148,20 @@ async function loadStores() {
 async function loadList() {
   loading.value = true
   try {
-    const params: Record<string, any> = { limit: 50 }
+    const params: Record<string, any> = {
+      page: pager.page,
+      page_size: pager.pageSize,
+    }
     if (auth.isSuperAdmin && storeFilter.value) params.store_id = storeFilter.value
+    if (keyword.value.trim()) params.keyword = keyword.value.trim()
     const res = await api.get('/reconcile/orders/archived', { params })
     rows.value = res.data?.items || []
+    pager.total = Number(res.data?.total || 0)
+    const maxPage = Math.max(1, Number(res.data?.total_pages || 1))
+    if (pager.page > maxPage) {
+      pager.page = maxPage
+      if (rows.value.length === 0 && pager.total > 0) await loadList()
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '加载归档列表失败')
   } finally {
@@ -135,6 +170,7 @@ async function loadList() {
 }
 
 function reload() {
+  pager.page = 1
   return loadList()
 }
 
@@ -199,6 +235,11 @@ onMounted(async () => {
 }
 .toolbar {
   margin-bottom: 12px;
+}
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 .result-line {
   margin: 0;

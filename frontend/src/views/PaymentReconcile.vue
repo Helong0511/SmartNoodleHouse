@@ -35,12 +35,12 @@
             <el-button type="primary" :loading="importing">导入账单并对账</el-button>
           </el-upload>
         </el-form-item>
-        <el-button @click="loadBatches">刷新批次</el-button>
+        <el-button @click="reloadBatches">刷新批次</el-button>
       </el-form>
     </el-card>
 
     <div v-else class="toolbar">
-      <el-button type="primary" @click="loadBatches">刷新批次</el-button>
+      <el-button type="primary" @click="reloadBatches">刷新批次</el-button>
     </div>
 
     <el-table :data="batches" border highlight-current-row @current-change="onSelectBatch">
@@ -62,6 +62,19 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.pageSize"
+        :total="pager.total"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="loadBatches"
+        @size-change="reloadBatches"
+      />
+    </div>
 
     <el-drawer v-model="diffVisible" :title="diffTitle" size="640px">
       <el-table :data="diffs" border v-loading="diffLoading" max-height="70vh">
@@ -95,6 +108,7 @@ const diffs = ref<any[]>([])
 const diffLoading = ref(false)
 const diffVisible = ref(false)
 const selectedBatch = ref<any>(null)
+const pager = reactive({ page: 1, pageSize: 20, total: 0 })
 
 const importForm = reactive({
   channel: 'WECHAT',
@@ -132,13 +146,26 @@ function formatDateTime(iso?: string | null) {
 async function loadBatches() {
   loading.value = true
   try {
-    const res = await api.get('/reconcile/payments/batches', { params: { limit: 50 } })
+    const res = await api.get('/reconcile/payments/batches', {
+      params: { page: pager.page, page_size: pager.pageSize },
+    })
     batches.value = res.data?.items || []
+    pager.total = Number(res.data?.total || 0)
+    const maxPage = Math.max(1, Number(res.data?.total_pages || 1))
+    if (pager.page > maxPage) {
+      pager.page = maxPage
+      if (batches.value.length === 0 && pager.total > 0) await loadBatches()
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '加载对账批次失败')
   } finally {
     loading.value = false
   }
+}
+
+function reloadBatches() {
+  pager.page = 1
+  return loadBatches()
 }
 
 async function loadDiffs(row: any) {
@@ -176,7 +203,7 @@ async function doImport(option: { file: File }) {
     ElMessage.success(
       `对账完成：本地 ${b.local_count ?? 0} / 渠道 ${b.channel_count ?? 0}，差异 ${b.mismatch_count ?? 0}`,
     )
-    await loadBatches()
+    await reloadBatches()
     if (b.id) {
       const row = batches.value.find((x) => x.id === b.id) || b
       await loadDiffs(row)
@@ -200,5 +227,10 @@ onMounted(loadBatches)
 }
 .toolbar {
   margin-bottom: 12px;
+}
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

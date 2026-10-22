@@ -6,12 +6,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
-from app.core.response import serialize_dt, success
+from app.core.response import calc_pages, serialize_dt, success
 from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReconcileDiff
+from app.schemas.pagination import clamp_page
 from app.services.order_archive_service import OrderArchiveService
 from app.services.payment_reconcile_service import PaymentReconcileService
 from app.services.store_scope import assert_store_access, effective_store_id
@@ -62,14 +63,22 @@ async def import_payment_bill(
 async def list_batches(
     db: DbSession,
     user: CurrentUser,
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=200),
 ):
+    # limit 兼容旧前端；有 page 时以分页为准
+    if limit is not None and page == 1 and page_size == 20:
+        page_size = min(limit, 100)
+    page, page_size = clamp_page(page, page_size)
+    q = select(PaymentReconcileBatch)
+    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = list(
         (
             await db.execute(
-                select(PaymentReconcileBatch)
-                .order_by(PaymentReconcileBatch.bill_date.desc())
-                .limit(limit)
+                q.order_by(PaymentReconcileBatch.bill_date.desc(), PaymentReconcileBatch.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
         ).scalars().all()
     )
@@ -87,7 +96,11 @@ async def list_batches(
                     "created_at": serialize_dt(b.created_at),
                 }
                 for b in rows
-            ]
+            ],
+            "total": int(total),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(int(total), page_size),
         }
     )
 
@@ -146,15 +159,36 @@ async def list_archived_orders(
     db: DbSession,
     user: CurrentUser,
     store_id: int | None = None,
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    keyword: str | None = None,
+    limit: int | None = Query(None, ge=1, le=200),
 ):
     sid = effective_store_id(user, store_id)
     if sid is not None:
         assert_store_access(user, sid)
-    q = select(ArchivedOrderSnapshot).order_by(ArchivedOrderSnapshot.original_created_at.desc())
+    if limit is not None and page == 1 and page_size == 20:
+        page_size = min(limit, 100)
+    page, page_size = clamp_page(page, page_size)
+    q = select(ArchivedOrderSnapshot)
     if sid is not None:
         q = q.where(ArchivedOrderSnapshot.store_id == sid)
-    rows = list((await db.execute(q.limit(limit))).scalars().all())
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.where(ArchivedOrderSnapshot.order_no.like(kw))
+    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    rows = list(
+        (
+            await db.execute(
+                q.order_by(
+                    ArchivedOrderSnapshot.original_created_at.desc(),
+                    ArchivedOrderSnapshot.id.desc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+    )
     return success(
         {
             "items": [
@@ -169,7 +203,11 @@ async def list_archived_orders(
                     "archived_at": serialize_dt(r.archived_at),
                 }
                 for r in rows
-            ]
+            ],
+            "total": int(total),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": calc_pages(int(total), page_size),
         }
     )
 

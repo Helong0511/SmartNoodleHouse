@@ -2,17 +2,29 @@
   <div v-loading="loading">
     <div class="toolbar">
       <el-select v-if="auth.isSuperAdmin" v-model="filterStoreId" clearable placeholder="全部门店" style="width: 180px"
-        @change="load">
+        @change="onStoreFilterChange">
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
+      <el-input
+        v-model="keyword"
+        placeholder="编号 / 分类名"
+        clearable
+        style="width: 180px"
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-select v-model="filterStatus" clearable placeholder="全部状态" style="width: 120px" @change="reload">
+        <el-option label="启用" :value="1" />
+        <el-option label="禁用" :value="0" />
+      </el-select>
       <el-button v-if="canCreateProduct" type="primary" @click="openForm()">新增分类</el-button>
       <el-button v-if="auth.isSuperAdmin && canCreateProduct" type="success" plain :disabled="!selectedIds.length"
         @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
 
-    <el-table :data="categories" style="margin-top:12px" border row-key="id" @selection-change="onSelectionChange">
+    <el-table :data="pagedCategories" style="margin-top:12px" border row-key="id" @selection-change="onSelectionChange">
       <el-table-column v-if="auth.isSuperAdmin" type="selection" width="48" />
       <el-table-column v-if="auth.isSuperAdmin" prop="store_name" label="门店" min-width="80">
         <template #default="{ row }">{{ row.store_name || (row.store_id ? `门店#${row.store_id}` : '—') }}</template>
@@ -43,6 +55,19 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.pageSize"
+        :total="filteredCategories.length"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="onPageChange"
+        @size-change="reload"
+      />
+    </div>
 
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑分类' : '新增分类'" width="520px">
       <el-form :model="form" label-width="100px">
@@ -115,6 +140,9 @@ const saving = ref(false)
 const categories = ref<any[]>([])
 const { storeOptions: stores, loadStores } = useStoreOptions()
 const filterStoreId = ref<number | undefined>()
+const keyword = ref('')
+const filterStatus = ref<number | undefined>()
+const pager = reactive({ page: 1, pageSize: 20 })
 const dialogVisible = ref(false)
 const copyVisible = ref(false)
 const selectedRows = ref<any[]>([])
@@ -170,6 +198,25 @@ const boundStoreName = computed(() => {
   return stores.value.find((s) => s.id === sid)?.name || `门店#${sid}`
 })
 
+const filteredCategories = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  return categories.value.filter((c) => {
+    if (filterStatus.value !== undefined && filterStatus.value !== null && Number(c.status) !== Number(filterStatus.value)) {
+      return false
+    }
+    if (!kw) return true
+    const no = String(c.category_no || '').toLowerCase()
+    const name = String(c.name || '').toLowerCase()
+    const desc = String(c.description || '').toLowerCase()
+    return no.includes(kw) || name.includes(kw) || desc.includes(kw)
+  })
+})
+
+const pagedCategories = computed(() => {
+  const start = (pager.page - 1) * pager.pageSize
+  return filteredCategories.value.slice(start, start + pager.pageSize)
+})
+
 const requireOptions = computed(() => {
   const sid = form.store_id || (form.id ? categories.value.find((c) => c.id === form.id)?.store_id : undefined)
   if (!sid) return categories.value.filter((c) => c.status === 1 || c.id === form.id)
@@ -188,6 +235,20 @@ function formatRequireNames(row: any) {
 
 function onSelectionChange(rows: any[]) {
   selectedRows.value = rows
+}
+
+function onPageChange() {
+  selectedRows.value = []
+}
+
+function reload() {
+  pager.page = 1
+  selectedRows.value = []
+}
+
+async function onStoreFilterChange() {
+  reload()
+  await load()
 }
 
 function openCopy() {
@@ -312,6 +373,12 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .form-tip {

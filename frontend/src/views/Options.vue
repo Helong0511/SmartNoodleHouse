@@ -5,17 +5,25 @@
       <el-button v-if="isSuper && canCreateProduct" type="success" plain :disabled="!selectedIds.length" @click="openCopy">复制到门店</el-button>
       <el-button @click="load">刷新</el-button>
       <el-select v-if="isSuper" v-model="filterStoreId" clearable placeholder="门店筛选（空=全部可见）"
-        style="width:220px;margin-left:12px" @change="load">
+        style="width:220px;margin-left:12px" @change="onStoreFilterChange">
         <el-option label="仅总部共享" :value="0" />
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
-      <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="load">显示已禁用</el-checkbox>
+      <el-input
+        v-model="keyword"
+        placeholder="组名 / 编码"
+        clearable
+        style="width:180px;margin-left:12px"
+        @keyup.enter="resetPage"
+        @clear="resetPage"
+      />
+      <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="onStoreFilterChange">显示已禁用</el-checkbox>
     </div>
     <p class="hint">编码规则：总部 <code>0000-Liang</code>；分店 <code>SH01-Liang</code>；选项
       <code>SH01-Liang-XiaoWan</code>。可填逻辑码（如 Liang），保存时自动加前缀。复制到门店会按目标店 store_no 重写编码。
     </p>
 
-    <el-table :key="tableKey" :data="groups" style="margin-top:12px" border row-key="id"
+    <el-table :key="tableKey" :data="pagedGroups" style="margin-top:12px" border row-key="id"
       @selection-change="onSelectionChange">
       <el-table-column v-if="isSuper" type="selection" width="48" />
       <el-table-column type="expand">
@@ -100,6 +108,19 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="pager.page"
+        v-model:page-size="pager.pageSize"
+        :total="filteredGroups.length"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="onPageChange"
+        @size-change="resetPage"
+      />
+    </div>
 
     <el-dialog v-model="groupDialog" :title="groupForm.id ? '编辑规格组' : '新增规格组'" width="480px">
       <el-form :model="groupForm" label-width="90px">
@@ -196,6 +217,8 @@ const saving = ref(false)
 const groups = ref<any[]>([])
 const { storeOptions: stores, loadStores } = useStoreOptions()
 const filterStoreId = ref<number | null>(null)
+const keyword = ref('')
+const pager = reactive({ page: 1, pageSize: 20 })
 const tableKey = ref(0)
 const showDisabled = ref(false)
 const groupDialog = ref(false)
@@ -215,6 +238,41 @@ const copySourceStoreId = computed(() => {
   const storesSet = new Set(privateRows.map((r) => Number(r.store_id)))
   return storesSet.size === 1 ? [...storesSet][0] : null
 })
+
+const filteredGroups = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return groups.value
+  return groups.value.filter((g) => {
+    const name = String(g.name || '').toLowerCase()
+    const code = String(g.code || '').toLowerCase()
+    if (name.includes(kw) || code.includes(kw)) return true
+    const opts = Array.isArray(g.options) ? g.options : []
+    return opts.some((o: any) => {
+      const on = String(o.name || '').toLowerCase()
+      const oc = String(o.code || '').toLowerCase()
+      return on.includes(kw) || oc.includes(kw)
+    })
+  })
+})
+
+const pagedGroups = computed(() => {
+  const start = (pager.page - 1) * pager.pageSize
+  return filteredGroups.value.slice(start, start + pager.pageSize)
+})
+
+function resetPage() {
+  pager.page = 1
+  selectedRows.value = []
+}
+
+function onPageChange() {
+  selectedRows.value = []
+}
+
+async function onStoreFilterChange() {
+  resetPage()
+  await load()
+}
 
 function storePrefix(storeId: number | null | undefined) {
   if (storeId == null) return '0000'
@@ -523,6 +581,12 @@ onMounted(async () => {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .hint {
