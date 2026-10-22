@@ -459,9 +459,9 @@ async function reloadPackages() {
 async function reload() {
   loading.value = true
   try {
-    await loadStores()
-    await loadPackages()
-    if (tab.value === 'ledger') await loadLedger(ledger.page)
+    const jobs: Promise<unknown>[] = [loadStores(), loadPackages()]
+    if (tab.value === 'ledger') jobs.push(loadLedger(ledger.page))
+    await Promise.all(jobs)
   } catch (e: any) {
     ElMessage.error(e?.message || '加载失败')
   } finally {

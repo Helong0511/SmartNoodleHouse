@@ -615,8 +615,8 @@ watch(
 onMounted(async () => {
   pageLoading.value = true
   try {
-    await loadStores()
-    await Promise.all([loadStats(), loadOrders()])
+    // 门店下拉与列表/统计无强依赖，并行缩短首屏
+    await Promise.all([loadStores(), loadStats(), loadOrders()])
   } finally {
     pageLoading.value = false
   }

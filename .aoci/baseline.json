@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T10:20:37Z",
+  "updated_at": "2026-10-22T10:36:04Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "8c8348400d6c5217b3c1a8eede2e8ce408eef73a7607d840548b8be41d87073c",
-      "size": 186490,
-      "normalized_sha256": "8c8348400d6c5217b3c1a8eede2e8ce408eef73a7607d840548b8be41d87073c"
+      "sha256": "11a4049a479268703881949a5527f04b001b010b357e8742f321b13334d23b44",
+      "size": 186753,
+      "normalized_sha256": "11a4049a479268703881949a5527f04b001b010b357e8742f321b13334d23b44"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -2173,9 +2173,9 @@
     },
     "frontend/src/api/index.ts": {
       "role": "index",
-      "sha256": "5ca1bc795a9423de2059c11cda88e7b64b8c2e17fda86fa2b43378ee015fc848",
-      "size": 9710,
-      "normalized_sha256": "5ca1bc795a9423de2059c11cda88e7b64b8c2e17fda86fa2b43378ee015fc848"
+      "sha256": "868d0004f22c24ea776d1bb8fee74289459d0eac61978a30066f8b2eb8f76368",
+      "size": 12598,
+      "normalized_sha256": "868d0004f22c24ea776d1bb8fee74289459d0eac61978a30066f8b2eb8f76368"
     },
     "frontend/src/components/CopyToStoreDialog.vue": {
       "role": "index",
@@ -2395,15 +2395,15 @@
     },
     "frontend/src/views/Coupons.vue": {
       "role": "index",
-      "sha256": "80627126138bfb7a751153abf40f3168b1e057160218d1e6dad71aef7cb3c424",
-      "size": 39027,
-      "normalized_sha256": "80627126138bfb7a751153abf40f3168b1e057160218d1e6dad71aef7cb3c424"
+      "sha256": "e3f29534352dbd0be3fae977b71009c39f4cc0b81cfca1397d39bf00bdc18a23",
+      "size": 39229,
+      "normalized_sha256": "e3f29534352dbd0be3fae977b71009c39f4cc0b81cfca1397d39bf00bdc18a23"
     },
     "frontend/src/views/CustomerDisplay.vue": {
       "role": "index",
-      "sha256": "9b96e0d9ad7b7a19a9d5a6ccabfad46da63882fa0eb5e164fe7bbcb48c43fd8b",
-      "size": 24797,
-      "normalized_sha256": "9b96e0d9ad7b7a19a9d5a6ccabfad46da63882fa0eb5e164fe7bbcb48c43fd8b"
+      "sha256": "9b1a8abb6cd782946ecb9c87f270c8df392c243c0e078fa0b03cb5f08941169e",
+      "size": 24893,
+      "normalized_sha256": "9b1a8abb6cd782946ecb9c87f270c8df392c243c0e078fa0b03cb5f08941169e"
     },
     "frontend/src/views/Customers.vue": {
       "role": "index",
@@ -2443,9 +2443,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "9616bf061db1ba70dc9709f0bd1416915410cb08c7d465feede9a9a0c91c00ad",
-      "size": 48013,
-      "normalized_sha256": "9616bf061db1ba70dc9709f0bd1416915410cb08c7d465feede9a9a0c91c00ad"
+      "sha256": "c1384d7d8e8c49efb747175e07419bc603d05cf203d89d4ad46992de1b4bfd4a",
+      "size": 48085,
+      "normalized_sha256": "c1384d7d8e8c49efb747175e07419bc603d05cf203d89d4ad46992de1b4bfd4a"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -2575,9 +2575,9 @@
     },
     "frontend/src/views/StoreInfo.vue": {
       "role": "index",
-      "sha256": "b179de46f74b49aefcf10e3a8a67b6a715e1537cb7ab1c0350bb0ec9e0832f67",
-      "size": 29684,
-      "normalized_sha256": "b179de46f74b49aefcf10e3a8a67b6a715e1537cb7ab1c0350bb0ec9e0832f67"
+      "sha256": "56ff79e9f099ee4ff92b3690c31d7cdeb61f9e5bd60afcc5737261b3075407c2",
+      "size": 29828,
+      "normalized_sha256": "56ff79e9f099ee4ff92b3690c31d7cdeb61f9e5bd60afcc5737261b3075407c2"
     },
     "frontend/src/views/StoreStocks.vue": {
       "role": "index",
@@ -2599,9 +2599,9 @@
     },
     "frontend/src/views/Wallet.vue": {
       "role": "index",
-      "sha256": "6aa06b3593f65e2241efc42ec144c81a3e1e94077d7d5c01918ebd88f7d4204d",
-      "size": 26717,
-      "normalized_sha256": "6aa06b3593f65e2241efc42ec144c81a3e1e94077d7d5c01918ebd88f7d4204d"
+      "sha256": "d228fba1522e8e516c7561b2109d06c330e6726f27231976c87b418a4fc7a7e4",
+      "size": 26770,
+      "normalized_sha256": "d228fba1522e8e516c7561b2109d06c330e6726f27231976c87b418a4fc7a7e4"
     },
     "frontend/src/views/WelcomeLogs.vue": {
       "role": "index",
@@ -2629,9 +2629,9 @@
     },
     "frontend/src/views/delivery/DeliveryOrders.vue": {
       "role": "index",
-      "sha256": "cba739af824b2f648450c8b285dfbc7c3c0404a204f4f00aeb2b7705dc9fcce4",
-      "size": 27093,
-      "normalized_sha256": "cba739af824b2f648450c8b285dfbc7c3c0404a204f4f00aeb2b7705dc9fcce4"
+      "sha256": "b87e59f31e6d1aa8e9e06ce1de173bd35dbd514c467d8d541b623983d40c56bf",
+      "size": 27153,
+      "normalized_sha256": "b87e59f31e6d1aa8e9e06ce1de173bd35dbd514c467d8d541b623983d40c56bf"
     },
     "frontend/src/views/delivery/DeliveryRefunds.vue": {
       "role": "index",
@@ -2701,9 +2701,9 @@
     },
     "frontend/vite.config.ts": {
       "role": "index",
-      "sha256": "31b3852bb2fd10cd7f9dbc7c89a6782c9856dd982cd75f8146fa6049ec4a6307",
-      "size": 1048,
-      "normalized_sha256": "23efd3f773fc8de72996c80aa8edc35709e444762428f1ba6477ac8fd76186ad"
+      "sha256": "62b819481133d4f4c69a59a48101669bcc7b3cad6a64e694b7418604b6ea0979",
+      "size": 3203,
+      "normalized_sha256": "2104d4c2e43f3042a8c862788eb7fbe630096b80c07b2854190f53a26d6479d3"
     },
     "frontend/vitest.config.ts": {
       "role": "index",
@@ -4978,9 +4978,9 @@
     },
     "tests/测试_券发放高并发.py": {
       "role": "observe",
-      "sha256": "98e340222135d14c148aa20240f033ce78c2a2a8bab36e45aaa2c8663b9cb985",
-      "size": 13469,
-      "normalized_sha256": "98e340222135d14c148aa20240f033ce78c2a2a8bab36e45aaa2c8663b9cb985"
+      "sha256": "f7a46e6b22673039a9aafd33ab9177b9c298aef55dfc095a39af5010da28dfa6",
+      "size": 14876,
+      "normalized_sha256": "f7a46e6b22673039a9aafd33ab9177b9c298aef55dfc095a39af5010da28dfa6"
     },
     "tests/测试_券并发.py": {
       "role": "observe",

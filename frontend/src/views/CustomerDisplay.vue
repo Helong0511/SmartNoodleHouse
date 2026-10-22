@@ -230,6 +230,7 @@ const publicApi = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 30000,
 })
+// 先挂重试，再挂业务错误转中文
 attachNetworkRetry(publicApi)
 
 publicApi.interceptors.response.use(

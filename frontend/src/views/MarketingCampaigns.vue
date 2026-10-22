@@ -758,6 +758,7 @@ async function load() {
       filterStoreId.value = auth.user.store_id
     }
     const sid = effectiveStoreId()
+    // 餐品加权选项在打开编辑弹窗时再拉，避免首屏分页扫全店 ON_SALE
     const [c, s, t] = await Promise.all([
       api.get('/marketing/campaigns', {
         params: {
@@ -770,7 +771,6 @@ async function load() {
         params: { page_size: 100, ...(sid ? { store_id: sid } : {}) },
       }),
       api.get('/coupons/templates', { params: { include_disabled: false } }),
-      loadProducts(),
     ])
     items.value = c.data?.items || []
     marketingEnabled.value =

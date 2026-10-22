@@ -246,7 +246,7 @@
           </el-card>
         </el-tab-pane>
 
-        <el-tab-pane v-if="canManageBiz" label="业务参数" name="biz">
+        <el-tab-pane v-if="canManageBiz" label="业务参数" name="biz" lazy>
           <StoreBusinessSettings
             ref="bizRef"
             :store-id="activeStoreId"
@@ -707,13 +707,16 @@ async function reloadAll() {
   try {
     await loadStores()
     fillFormFromStore(activeStore.value)
-    await Promise.all([loadHours(), loadBindings()])
-    if (canManageBiz.value && activeTab.value === 'biz') {
-      await bizRef.value?.reload()
-    }
   } finally {
     loading.value = false
   }
+  await Promise.all([
+    loadHours(),
+    loadBindings(),
+    canManageBiz.value && activeTab.value === 'biz'
+      ? Promise.resolve(bizRef.value?.reload())
+      : Promise.resolve(),
+  ])
 }
 
 function onBizGroupChange(groupId: string) {
@@ -756,10 +759,11 @@ onMounted(async () => {
   try {
     await loadStores()
     fillFormFromStore(activeStore.value)
-    await Promise.all([loadHours(), loadBindings()])
   } finally {
+    // 先放开整页 loading，营业时段/外卖绑定后台并行拉取，缩短菜单切入体感
     loading.value = false
   }
+  void Promise.all([loadHours(), loadBindings()])
 })
 </script>
 

@@ -515,11 +515,15 @@ function couponTypeLabel(t: string) {
   return label(COUPON_TYPE, t)
 }
 
+async function fetchTemplates() {
+  const res = await api.get('/coupons/templates', { params: { include_disabled: true } })
+  templates.value = res.data?.items || []
+}
+
 async function loadTemplates() {
   loading.value = true
   try {
-    const res = await api.get('/coupons/templates', { params: { include_disabled: true } })
-    templates.value = res.data?.items || []
+    await fetchTemplates()
   } finally {
     loading.value = false
   }
@@ -530,30 +534,33 @@ function issuedStoreName(storeId?: number | null) {
   return stores.value.find((s) => s.id === storeId)?.name || `门店#${storeId}`
 }
 
+async function fetchIssued() {
+  const res = await api.get('/coupons/issued', {
+    params: {
+      page: issuedPage.value,
+      page_size: issuedPageSize.value,
+      keyword: issuedKeyword.value || undefined,
+      status: issuedStatus.value || undefined,
+      template_id: issuedTemplateId.value || undefined,
+      coupon_type: issuedCouponType.value || undefined,
+      issued_store_id: auth.isSuperAdmin ? issuedStoreId.value || undefined : undefined,
+    },
+  })
+  const list = res.data?.items || []
+  // 券核销后离开"可用"集合，末页可能变空，自动回退避免空白页
+  if (list.length === 0 && issuedPage.value > 1) {
+    issuedPage.value -= 1
+    await fetchIssued()
+    return
+  }
+  issued.value = list
+  issuedTotal.value = res.data?.total || 0
+}
+
 async function loadIssued() {
   loading.value = true
   try {
-    const res = await api.get('/coupons/issued', {
-      params: {
-        page: issuedPage.value,
-        page_size: issuedPageSize.value,
-        keyword: issuedKeyword.value || undefined,
-        status: issuedStatus.value || undefined,
-        template_id: issuedTemplateId.value || undefined,
-        coupon_type: issuedCouponType.value || undefined,
-        issued_store_id: auth.isSuperAdmin ? issuedStoreId.value || undefined : undefined,
-      },
-    })
-    const list = res.data?.items || []
-    // 券核销后离开"可用"集合，末页可能变空，自动回退避免空白页
-    if (list.length === 0 && issuedPage.value > 1) {
-      issuedPage.value -= 1
-      loading.value = false
-      await loadIssued()
-      return
-    }
-    issued.value = list
-    issuedTotal.value = res.data?.total || 0
+    await fetchIssued()
   } finally {
     loading.value = false
   }
@@ -921,9 +928,14 @@ async function submitIssue() {
 }
 
 onMounted(async () => {
-  await loadStores()
-  await loadTemplates()
-  await loadIssued()
+  loading.value = true
+  try {
+    await Promise.all([loadStores(), fetchTemplates(), fetchIssued()])
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载失败')
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 

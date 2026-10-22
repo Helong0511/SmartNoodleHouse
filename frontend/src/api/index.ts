@@ -177,6 +177,7 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json; charset=utf-8' },
 })
 
+// 先挂重试：axios 响应错误 FIFO，须在业务拦截器之前吃掉瞬态断连
 attachNetworkRetry(api)
 
 api.interceptors.request.use((config) => {
