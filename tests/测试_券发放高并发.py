@@ -205,6 +205,50 @@ async def test_welcome_serial_idempotent(mem_db: AsyncSession):
     assert int(tmpl.remaining) == 19
 
 
+@pytest.mark.asyncio
+async def test_welcome_and_pay_success_keys_isolated(mem_db: AsyncSession):
+    """WELCOME 与 pay_success 幂等键隔离：同客同模板可各发一张。"""
+    db = mem_db
+    db.add_all(
+        [
+            _customer(505, "CU_CONC_505"),
+            _template(505, remaining=10, total_quota=10, name="满20减3"),
+        ]
+    )
+    await db.flush()
+    _patch_sqlite_ids(db, 81_000)
+    nos = itertools.count(1)
+    welcome_key = CouponService.welcome_client_request_id(505, 505)
+    pay_key = CouponService.pay_success_client_request_id(505, 505)
+    assert welcome_key != pay_key
+    with patch(
+        "app.services.coupon_service.generate_no",
+        side_effect=lambda p: f"{p}I{next(nos):04d}",
+    ):
+        w = await CouponService.issue_by_template_id(
+            db, 505, 505, quantity=1, client_request_id=welcome_key
+        )
+        p = await CouponService.issue_by_template_id(
+            db, 505, 505, quantity=1, client_request_id=pay_key
+        )
+        await db.commit()
+    assert len(w) == 1 and len(p) == 1
+    assert int(w[0].id) != int(p[0].id)
+    rows = list(
+        (
+            await db.execute(
+                select(CustomerCoupon).where(CustomerCoupon.customer_id == 505)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    keys = {str(r.client_request_id) for r in rows}
+    assert keys == {welcome_key, pay_key}
+    tmpl = await db.get(CouponTemplate, 505)
+    assert int(tmpl.remaining) == 8
+
+
 # ---------------------------------------------------------------------------
 # MySQL 多会话真实并发（Ubuntu 22.04.5 / CI backend-mysql）
 # ---------------------------------------------------------------------------

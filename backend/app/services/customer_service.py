@@ -734,7 +734,7 @@ class CustomerService:
                 "remaining_points": int(customer.points or 0),
             }
 
-        # 发券（issue_by_template_id 内部原子扣库存 + client_request_id 幂等）
+        # 发券（原子扣库存 + PTS 幂等键）；顾客行 FOR UPDATE 保证同客串行，防重扣分
         coupons = await CouponService.issue_by_template_id(
             db,
             int(customer.id),
@@ -745,7 +745,9 @@ class CustomerService:
             if customer.registered_store_id
             else None,
         )
-        coupon = coupons[0] if coupons else None
+        if not coupons:
+            raise AppException(50020, "发券失败，请重试")
+        coupon = coupons[0]
 
         # 扣减积分（行锁已持有 customer）
         before = int(customer.points or 0)
@@ -765,7 +767,7 @@ class CustomerService:
         return {
             "already_exchanged": False,
             "deducted_points": cost,
-            "coupon_id": int(coupon.id) if coupon else None,
+            "coupon_id": int(coupon.id),
             "remaining_points": int(customer.points),
         }
 

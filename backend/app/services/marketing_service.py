@@ -1268,6 +1268,13 @@ class MarketingService:
             if not template_id:
                 raise AppException(40001, "缺少 template_id")
 
+            # 同客串行：任务锁 fail-open 时多 worker 仍可能并行；FOR UPDATE 收紧周频控 TOCTOU
+            await db.execute(
+                select(Customer.id)
+                .where(Customer.id == int(task.customer_id))
+                .with_for_update()
+            )
+
             cap = await cls.weekly_cap(db, camp)
             if cap > 0:
                 used = await cls.count_weekly_issues(db, int(task.customer_id))
