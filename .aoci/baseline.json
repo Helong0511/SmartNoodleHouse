@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T10:02:50Z",
+  "updated_at": "2026-10-22T10:03:47Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "b12a0e09401c24c96ba9d98d48bb616b20c57fabbfe3af9b7f6651f398e0b2d4",
-      "size": 186203,
-      "normalized_sha256": "b12a0e09401c24c96ba9d98d48bb616b20c57fabbfe3af9b7f6651f398e0b2d4"
+      "sha256": "b758c74225dfbdcaee019de3ed83ad7f3c38df3276ace155d3b199e9f745a531",
+      "size": 186406,
+      "normalized_sha256": "b758c74225dfbdcaee019de3ed83ad7f3c38df3276ace155d3b199e9f745a531"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -587,9 +587,9 @@
     },
     "backend/app/api/orders_customer.py": {
       "role": "index",
-      "sha256": "5280aea92e20791c7e778cbc07b71365f8e3491d577874d556ce96b557e606aa",
-      "size": 13572,
-      "normalized_sha256": "5280aea92e20791c7e778cbc07b71365f8e3491d577874d556ce96b557e606aa"
+      "sha256": "c57b52b9b9cc402f90c117d9c6938a76f25b557ad0a1beab1bf77dbfa29257ee",
+      "size": 13889,
+      "normalized_sha256": "c57b52b9b9cc402f90c117d9c6938a76f25b557ad0a1beab1bf77dbfa29257ee"
     },
     "backend/app/api/orders_kitchen.py": {
       "role": "index",
@@ -1283,9 +1283,9 @@
     },
     "backend/app/services/coupon_service.py": {
       "role": "index",
-      "sha256": "ca66c709d98b45fc2dc07a0198b53d220b60152835703232ca29ac3e56363761",
-      "size": 63340,
-      "normalized_sha256": "ca66c709d98b45fc2dc07a0198b53d220b60152835703232ca29ac3e56363761"
+      "sha256": "15b800302bb3042a284804aebf609850f26c9f2bc0e5eeac3d133da5278e686e",
+      "size": 64948,
+      "normalized_sha256": "15b800302bb3042a284804aebf609850f26c9f2bc0e5eeac3d133da5278e686e"
     },
     "backend/app/services/customer_display.py": {
       "role": "index",
@@ -1625,9 +1625,9 @@
     },
     "backend/app/services/retention_service.py": {
       "role": "index",
-      "sha256": "fc07e258d938e33d531fb132788d867b21dba2ed87c132c87b7f925b9695dd93",
-      "size": 15859,
-      "normalized_sha256": "fc07e258d938e33d531fb132788d867b21dba2ed87c132c87b7f925b9695dd93"
+      "sha256": "c328cbcabfa05c46e717ba294dd1f2b8c0ebba910d6795d3c7a916ec1fc697c2",
+      "size": 16279,
+      "normalized_sha256": "c328cbcabfa05c46e717ba294dd1f2b8c0ebba910d6795d3c7a916ec1fc697c2"
     },
     "backend/app/services/revenue_stats.py": {
       "role": "index",
