@@ -86,6 +86,21 @@ def _pkg_ser(p: RechargePackage, store_name: str | None = None) -> dict:
     }
 
 
+def _merge_packages_for_customer(rows: list[RechargePackage]) -> list[RechargePackage]:
+    """顾客端展示：同实付金额优先门店档，覆盖总部档，避免重复卡片。
+
+    后台员工列表不调用本函数，仍展示「总部 ∪ 门店」便于分别维护。
+    """
+    by_pay: dict[Decimal, RechargePackage] = {}
+    for p in rows:
+        if p.store_id is None:
+            by_pay[money(p.pay_amount)] = p
+    for p in rows:
+        if p.store_id is not None:
+            by_pay[money(p.pay_amount)] = p
+    return sorted(by_pay.values(), key=lambda p: (int(p.sort_order or 0), int(p.id)))
+
+
 async def _assert_package_unique(
     db,
     *,
@@ -144,7 +159,11 @@ async def list_packages(
     store_id: int | None = None,
     include_disabled: bool = False,
 ):
-    """公开可读启用档位；员工后台可看全部/停用档位。"""
+    """公开可读启用档位；员工后台可看全部/停用档位。
+
+    顾客端传 store_id 时返回「总部 ∪ 本店」并按实付金额去重（门店覆盖总部）。
+    员工后台不去重，便于同时维护总部档与门店覆盖档。
+    """
     q = select(RechargePackage)
     if staff:
         # 后台：超管看全部；门店账号看总部+本店
@@ -167,6 +186,9 @@ async def list_packages(
     else:
         q = q.where(RechargePackage.status == 1)
     rows = list((await db.execute(q.order_by(RechargePackage.sort_order, RechargePackage.id))).scalars())
+    # 顾客端（无员工身份）在指定门店下合并同实付档位，避免图上「充50得55」出现两次
+    if staff is None and store_id is not None:
+        rows = _merge_packages_for_customer(rows)
     store_ids = [int(p.store_id) for p in rows if p.store_id]
     name_map: dict[int, str] = {}
     if store_ids:

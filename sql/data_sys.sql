@@ -835,7 +835,23 @@ WHERE NOT EXISTS (
         FROM `coupon_templates`
         WHERE `name` = '爱心日免费豆浆'
     );
--- 五-B、储值档位（射洪友好：充50/100/200）
+-- 五-B、储值档位（平台总部档，store_id=NULL；射洪友好：充50/100/200）
+-- 纠偏：历史种子曾误写 store_id=1。若总部档尚缺且全库仅有一条同名门店档，则升为总部。
+UPDATE `recharge_packages` AS `rp`
+INNER JOIN (
+        SELECT MIN(`id`) AS `id`
+        FROM `recharge_packages`
+        WHERE `store_id` IS NOT NULL
+            AND `name` IN ('充50得55', '充100得120', '充200得250')
+            AND `name` NOT IN (
+                SELECT `name`
+                FROM `recharge_packages`
+                WHERE `store_id` IS NULL
+            )
+        GROUP BY `name`
+        HAVING COUNT(*) = 1
+    ) AS `t` ON `t`.`id` = `rp`.`id`
+SET `rp`.`store_id` = NULL;
 INSERT INTO `recharge_packages` (
         `store_id`,
         `name`,

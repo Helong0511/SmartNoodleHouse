@@ -17,6 +17,20 @@ from app.services.customer_service import CustomerService, PreferenceService
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
 
+def _merge_point_exchange_for_customer(rows: list) -> list:
+    """顾客端：同券模板+同积分成本优先门店选项，覆盖总部选项。"""
+    by_key: dict[tuple[int, int], object] = {}
+    for opt in rows:
+        key = (int(opt.template_id), int(opt.points_cost))
+        if opt.store_id is None:
+            by_key[key] = opt
+    for opt in rows:
+        key = (int(opt.template_id), int(opt.points_cost))
+        if opt.store_id is not None:
+            by_key[key] = opt
+    return sorted(by_key.values(), key=lambda o: (int(o.sort_order or 0), int(o.id)))
+
+
 @router.get("/coupons/mine")
 async def list_my_coupons(request: Request, db: DbSession, customer: CurrentCustomer, store_id: int | None = None):
     """我的可用优惠券（满减/折扣，不含代金券）。传 store_id 时仅返回该门店可用券。"""
@@ -195,6 +209,8 @@ async def get_my_exchange_options(
         .order_by(PointExchangeOption.sort_order, PointExchangeOption.id)
     )
     rows = list((await db.execute(q)).scalars().all())
+    if store_id is not None:
+        rows = _merge_point_exchange_for_customer(rows)
     items = []
     for opt in rows:
         tmpl = await db.get(CouponTemplate, int(opt.template_id))
