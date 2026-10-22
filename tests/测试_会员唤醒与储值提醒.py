@@ -3,7 +3,7 @@
 直接调用 retention_service 的服务函数验证：
 - 30/90 天档命中与不命中、档位互斥；
 - last_order_at NULL / 非活跃 / 模板名空 不发；
-- 发券幂等（依赖 issue_from_template 的 client_request_id 幂等键）；
+- 发券幂等（sleep_wake:{30|90}:{cid}:{tid}，与 WELCOME 键隔离）；
 - 余额阈值边界（=阈值、>阈值、=0 不提醒）；
 - Redis 防重键 SET NX EX 行为（FakeRedis 模拟）与 Redis 不可用 fail-open。
 """
@@ -236,16 +236,23 @@ async def test_sleep_wake_disabled_when_names_missing_or_empty(db_session):
 
 @pytest.mark.asyncio
 async def test_sleep_wake_idempotent_on_second_run(db_session):
-    """每顾客每模板仅发一次（issue_from_template 幂等键保证），重跑不重复。"""
+    """每顾客每档仅发一次（sleep_wake:30:{cid}:{tid}），重跑不重复。"""
+    from app.services.coupon_service import CouponService
+
     await _mk_template(db_session, tid=8014, name="唤醒券30")
     await _mk_setting(db_session, key="sleep_wake_coupon_name_30", value="唤醒券30")
-    await _mk_customer(db_session, no="CU_IDEM", last_order_at=NOW - timedelta(days=45))
+    c = await _mk_customer(db_session, no="CU_IDEM", last_order_at=NOW - timedelta(days=45))
     await db_session.commit()
     _invalidate_settings_cache()
 
     first = await retention_service.run_sleep_wake(db_session, now=NOW)
     assert first["issued_30"] == 1
-    assert len(await _count_coupons(db_session)) == 1
+    coupons = await _count_coupons(db_session)
+    assert len(coupons) == 1
+    assert coupons[0].client_request_id == CouponService.sleep_wake_client_request_id(
+        "30", int(c.id), 8014
+    )
+    assert not str(coupons[0].client_request_id).startswith("WELCOME:")
 
     second = await retention_service.run_sleep_wake(db_session, now=NOW)
     assert second["issued_30"] == 0

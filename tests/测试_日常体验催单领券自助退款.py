@@ -293,6 +293,8 @@ async def test_claimable_and_claim_flow(api, customer_dep):
 
     rows = list((await db.execute(__import__("sqlalchemy").select(CustomerCoupon))).scalars())
     assert len(rows) == 1
+    assert str(rows[0].client_request_id).startswith("pay_success:")
+    assert not str(rows[0].client_request_id).startswith("WELCOME:")
 
 
 async def test_claim_rejected_when_unpaid(api, customer_dep):

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T09:25:50Z",
+  "updated_at": "2026-10-22T10:02:50Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -4888,9 +4888,9 @@
     },
     "tests/测试_会员唤醒与储值提醒.py": {
       "role": "observe",
-      "sha256": "665efc47858df86c138ba96396717ce114b0a9c236b41a0c5a32470ecc2cb6da",
-      "size": 16426,
-      "normalized_sha256": "665efc47858df86c138ba96396717ce114b0a9c236b41a0c5a32470ecc2cb6da"
+      "sha256": "71785b9ed52ff3daceab70c81087b172fea8620368028a171b771eafe7316ec9",
+      "size": 16689,
+      "normalized_sha256": "71785b9ed52ff3daceab70c81087b172fea8620368028a171b771eafe7316ec9"
     },
     "tests/测试_会员头像上传.py": {
       "role": "observe",
@@ -4976,11 +4976,17 @@
       "size": 9145,
       "normalized_sha256": "c9410e374e825215ed9ad85483c2bd04f811f11c22bcae69be35b50c9c191dec"
     },
+    "tests/测试_券发放高并发.py": {
+      "role": "observe",
+      "sha256": "3f68f584ff8f4dfccec6d84acde10588ed54eda97623dd747c9160e1f2153691",
+      "size": 11984,
+      "normalized_sha256": "3f68f584ff8f4dfccec6d84acde10588ed54eda97623dd747c9160e1f2153691"
+    },
     "tests/测试_券并发.py": {
       "role": "observe",
-      "sha256": "1e21e4e9a95ecefa6525865a5919857aed15f1a7a56c58ae7c5bc0eec90efeee",
-      "size": 8643,
-      "normalized_sha256": "1e21e4e9a95ecefa6525865a5919857aed15f1a7a56c58ae7c5bc0eec90efeee"
+      "sha256": "2126e992b8a36edcc23a1239c34a926d75be571f4d125acd4ec7c1840a58d385",
+      "size": 8744,
+      "normalized_sha256": "2126e992b8a36edcc23a1239c34a926d75be571f4d125acd4ec7c1840a58d385"
     },
     "tests/测试_券批量发放.py": {
       "role": "observe",
@@ -5362,9 +5368,9 @@
     },
     "tests/测试_日常体验催单领券自助退款.py": {
       "role": "observe",
-      "sha256": "768d289dd2b11fe726e3c355988e6765ba7428bda9362c15e2fae7ab6fd83855",
-      "size": 18882,
-      "normalized_sha256": "13a19c80fdb3de5b17d6c95607bfb190084e965dfa30f45de5db4dcfa1de7255"
+      "sha256": "44aced34e8be85dbc0fdbe8d71bdc90e0dd7d13c0f8a70f259d43f8c1bde9ef6",
+      "size": 19022,
+      "normalized_sha256": "977511fd69cca9e8dc14f6c1b3935ca9e03425f0fa4797b278e98b67c454c252"
     },
     "tests/测试_日常体验收藏发票排队.py": {
       "role": "observe",

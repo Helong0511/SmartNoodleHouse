@@ -1,8 +1,7 @@
 """会员留存营销定时任务：沉睡会员唤醒发券 + 储值余额偏低提醒。
 
 设计要点：
-- 发券幂等由 CouponService.issue_from_template 的 client_request_id 保证
-  （WELCOME:{customer}:{template_id}，每顾客每模板至多一张），无需额外防重；
+- 发券幂等键 sleep_wake:{30|90}:{customer_id}:{template_id}，与欢迎券 WELCOME 键隔离；
 - 每批默认 500 人、按 id 分批提交，避免超大事务；
 - 余额提醒防重走 Redis SET NX EX（30 天一次），Redis 异常 fail-open 跳过本轮；
 - 本期提醒动作仅记录日志，订阅消息发送留待后续接入。
@@ -67,6 +66,7 @@ async def _wake_tier(
     db: AsyncSession,
     template_name: str,
     *,
+    tier: str,
     upper_exclusive: datetime,
     lower_inclusive: datetime | None,
     batch_size: int,
@@ -89,22 +89,32 @@ async def _wake_tier(
     async for rows in _batched_active_customers(db, *conditions, batch_size=batch_size):
         for customer in rows:
             try:
+                tmpl = await CouponService._welcome_template(
+                    db, template_name, store_id=customer.registered_store_id
+                )
+                if not tmpl:
+                    continue
+                req_key = CouponService.sleep_wake_client_request_id(
+                    tier, int(customer.id), int(tmpl.id)
+                )
                 coupon = await CouponService.issue_from_template(
                     db,
                     int(customer.id),
                     template_name,
                     store_id=customer.registered_store_id,
+                    client_request_id=req_key,
                 )
-                # 单客 commit：长批次崩溃时已发券不回滚（模板侧 WELCOME 幂等）
+                # 单客 commit：长批次崩溃时已发券不回滚（sleep_wake 幂等键）
                 await db.commit()
                 if coupon is not None:
                     issued += 1
             except Exception:
                 await db.rollback()
                 logger.exception(
-                    "沉睡唤醒单客发券失败 customer_id=%s template=%s",
+                    "沉睡唤醒单客发券失败 customer_id=%s template=%s tier=%s",
                     getattr(customer, "id", None),
                     template_name,
+                    tier,
                 )
     return issued
 
@@ -136,6 +146,7 @@ async def run_sleep_wake(
         stats["issued_30"] = await _wake_tier(
             db,
             name_30,
+            tier="30",
             upper_exclusive=now - timedelta(days=30),
             lower_inclusive=now - timedelta(days=90),
             batch_size=batch_size,
@@ -144,6 +155,7 @@ async def run_sleep_wake(
         stats["issued_90"] = await _wake_tier(
             db,
             name_90,
+            tier="90",
             upper_exclusive=now - timedelta(days=90),
             lower_inclusive=None,
             batch_size=batch_size,

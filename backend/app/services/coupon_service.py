@@ -463,6 +463,21 @@ class CouponService:
         return keys
 
     @staticmethod
+    def welcome_client_request_id(customer_id: int, template_id: int) -> str:
+        return f"WELCOME:{int(customer_id)}:{int(template_id)}"
+
+    @staticmethod
+    def sleep_wake_client_request_id(tier: str, customer_id: int, template_id: int) -> str:
+        """沉睡唤醒幂等键：与欢迎券 WELCOME 键空间隔离；档位 30/90 互不覆盖。"""
+        t = (tier or "").strip().lower() or "x"
+        return f"sleep_wake:{t}:{int(customer_id)}:{int(template_id)}"[:128]
+
+    @staticmethod
+    def pay_success_client_request_id(customer_id: int, template_id: int) -> str:
+        """支付成功领券幂等键：与欢迎券隔离，避免同名模板互相挡领。"""
+        return f"pay_success:{int(customer_id)}:{int(template_id)}"[:128]
+
+    @staticmethod
     async def issue_by_template_id(
         db: AsyncSession,
         customer_id: int,
@@ -770,71 +785,44 @@ class CouponService:
         customer_id: int,
         template_name: str,
         store_id: int | None = None,
+        *,
+        client_request_id: str | None = None,
     ) -> CustomerCoupon | None:
-        from sqlalchemy.exc import IntegrityError
+        """按模板名发一张券。默认幂等键 WELCOME:{cid}:{tid}（欢迎礼包）。
 
+        已存在同键时返回 None（调用方按「未新发」统计）。
+        沉睡唤醒 / 支付成功领券须传入专用 client_request_id，避免与欢迎券互挡。
+        """
         tmpl = await CouponService._welcome_template(db, template_name, store_id=store_id)
         if not tmpl:
             return None
 
-        # P0-6: 用 client_request_id 做 DB UNIQUE 幂等，取代 TOCTOU SELECT-then-INSERT
-        req_key = f"WELCOME:{int(customer_id)}:{int(tmpl.id)}"
-        existing = (
+        req_key = (
+            (client_request_id or "").strip()[:128]
+            or CouponService.welcome_client_request_id(int(customer_id), int(tmpl.id))
+        )
+        existing_id = (
             await db.execute(
-                select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+                select(CustomerCoupon.id).where(CustomerCoupon.client_request_id == req_key)
             )
         ).scalar_one_or_none()
-        if existing:
+        if existing_id:
             return None
-
-        # P0-6: 原子扣减库存（remaining IS NULL = 不限量）
-        remaining = getattr(tmpl, "remaining", None)
-        if remaining is not None:
-            from sqlalchemy import update as sa_update
-
-            result = await db.execute(
-                sa_update(CouponTemplate)
-                .where(
-                    CouponTemplate.id == tmpl.id,
-                    CouponTemplate.remaining.isnot(None),
-                    CouponTemplate.remaining >= 1,
-                )
-                .values(remaining=CouponTemplate.remaining - 1)
-            )
-            if not result.rowcount:
-                return None
-
-        # 发券门店粘性：扫码开卡店；无则继承模板门店
-        effective_store_id = int(store_id) if store_id else None
-        if effective_store_id is None and getattr(tmpl, "store_id", None) is not None:
-            effective_store_id = int(tmpl.store_id)
 
         try:
-            async with db.begin_nested():
-                cc = CustomerCoupon(
-                    customer_id=customer_id,
-                    template_id=tmpl.id,
-                    coupon_no=generate_no("CP"),
-                    status="AVAILABLE",
-                    expires_at=now_local() + timedelta(days=int(tmpl.valid_days or 30)),
-                    client_request_id=req_key,
-                    issued_by_user_id=None,  # 系统发放
-                    issued_at_store_id=effective_store_id,
-                )
-                db.add(cc)
-                await db.flush()
-                return cc
-        except IntegrityError:
-            # 幂等键冲突：另一并发请求已成功发券
-            if remaining is not None:
-                from sqlalchemy import update as sa_update
-
-                await db.execute(
-                    sa_update(CouponTemplate)
-                    .where(CouponTemplate.id == tmpl.id)
-                    .values(remaining=CouponTemplate.remaining + 1)
-                )
-            return None
+            issued = await CouponService.issue_by_template_id(
+                db,
+                int(customer_id),
+                int(tmpl.id),
+                quantity=1,
+                client_request_id=req_key,
+                issued_at_store_id=int(store_id) if store_id else None,
+            )
+        except AppException as exc:
+            if int(getattr(exc, "code", 0) or 0) in (40001, 40070, 40406, 40407, 50020):
+                return None
+            raise
+        return issued[0] if issued else None
 
     @staticmethod
     async def _welcome_bundle_template_ids(

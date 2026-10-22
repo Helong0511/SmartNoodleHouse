@@ -233,7 +233,8 @@ async def get_claimable_coupon(
     order_id: int, request: Request, db: DbSession, customer: CurrentCustomer
 ):
     """支付成功领券：返回该订单是否可领（pay_success_coupon_name 配置驱动）。"""
-    from app.models import CouponTemplate, CustomerCoupon
+    from app.models import CustomerCoupon
+    from app.services.coupon_service import CouponService
 
     order = await get_customer_order_or_404(db, order_id, customer.id)
     if order.payment_status != "PAID":
@@ -243,22 +244,18 @@ async def get_claimable_coupon(
     name = (await SystemSettingsService.get_value(db, "pay_success_coupon_name", "") or "").strip()
     if not name:
         return success({"available": False, "coupon_name": None, "claimed": False}, request=request)
-    tmpl = (
-        await db.execute(
-            select(CouponTemplate).where(
-                CouponTemplate.name == name,
-                CouponTemplate.status == 1,
-            ).order_by(CouponTemplate.id.desc()).limit(1)
-        )
-    ).scalars().first()
+    store_id = int(order.store_id) if order.store_id else None
+    tmpl = await CouponService._welcome_template(db, name, store_id=store_id)
     if not tmpl:
         return success({"available": False, "coupon_name": name, "claimed": False}, request=request)
+
+    pay_key = CouponService.pay_success_client_request_id(int(customer.id), int(tmpl.id))
     claimed = (
         await db.execute(
             select(CustomerCoupon.id).where(
                 CustomerCoupon.customer_id == customer.id,
                 CustomerCoupon.template_id == tmpl.id,
-                CustomerCoupon.client_request_id == f"WELCOME:{int(customer.id)}:{int(tmpl.id)}",
+                CustomerCoupon.client_request_id == pay_key,
             ).limit(1)
         )
     ).scalar_one_or_none()
@@ -278,7 +275,7 @@ async def get_claimable_coupon(
 async def claim_order_coupon(
     order_id: int, request: Request, db: DbSession, customer: CurrentCustomer
 ):
-    """支付成功后领取活动券（幂等：issue_from_template 内部按顾客+模板去重）。"""
+    """支付成功后领取活动券（幂等键 pay_success:{cid}:{tid}，与欢迎券隔离）。"""
     from app.services.coupon_service import CouponService
 
     order = await get_customer_order_or_404(db, order_id, customer.id)
@@ -289,8 +286,17 @@ async def claim_order_coupon(
     name = (await SystemSettingsService.get_value(db, "pay_success_coupon_name", "") or "").strip()
     if not name:
         raise AppException(40060, "领券活动未开启")
+    store_id = int(order.store_id) if order.store_id else None
+    tmpl = await CouponService._welcome_template(db, name, store_id=store_id)
+    if not tmpl:
+        return success({"claimed": False, "coupon": None}, request=request)
+    req_key = CouponService.pay_success_client_request_id(int(customer.id), int(tmpl.id))
     issued = await CouponService.issue_from_template(
-        db, int(customer.id), name, store_id=int(order.store_id) if order.store_id else None
+        db,
+        int(customer.id),
+        name,
+        store_id=store_id,
+        client_request_id=req_key,
     )
     await db.commit()
     if not issued:
