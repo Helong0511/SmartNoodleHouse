@@ -117,6 +117,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
+import { notifySaveWithOverride } from '@/utils/overrideWarning'
 
 const auth = useAuthStore()
 const canSyncDelivery = computed(
@@ -301,11 +302,11 @@ async function saveCategoryMap() {
     return
   }
   try {
-    await api.post('/delivery/category-maps', {
+    const res = await api.post('/delivery/category-maps', {
       ...categoryForm,
       store_id: syncStoreId.value || null,
     })
-    ElMessage.success('映射已保存')
+    notifySaveWithOverride(res, '映射已保存')
     await loadCategoryMaps()
     categoryForm.local_category_id = undefined
     categoryForm.platform_category_name = ''

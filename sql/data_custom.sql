@@ -527,11 +527,19 @@ SELECT NULL, 'birthday_today', '今日生日会员', 'DYNAMIC',
        )), 1
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'birthday_today');
+INSERT INTO `customer_segments` (`store_id`, `code`, `name`, `segment_type`, `rules_json`, `status`)
+SELECT NULL, 'member_anniversary_today', '今日入会周年（未填生日）', 'DYNAMIC',
+       JSON_OBJECT('all', JSON_ARRAY(
+         JSON_OBJECT('field', 'member_status', 'op', 'eq', 'value', 'MEMBER'),
+         JSON_OBJECT('field', 'is_member_anniversary_today', 'op', 'eq', 'value', true)
+       )), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'member_anniversary_today');
 
 -- 预置营销活动（总部 DRAFT；按分群 code / 券模板 name / admin 关联，不硬编码 id）
 -- 状态一律 DRAFT：导入后不自动发券，需后台发布
 -- 射洪肠旺面客单约 8～15 元：轻券优先满15/20减3，忌无排期对全体发 10 元代金
--- 身份节日绑公益分群；生日绑 birthday_today（勿绑 all_members，否则一发布即普发）
+-- 身份节日绑公益分群；生日绑 birthday_today；无生日绑 member_anniversary_today（勿绑 all_members，否则一发布即普发）
 -- 固定节日用 schedule_mode=ANNUAL_MD（公历/农历月日）每年自动启停，勿逐年改绝对日期
 -- boost_product_ids 按 product_no 聚合 SH01 招牌/抄手/汤圆，供推荐加权
 INSERT INTO `marketing_campaigns` (
@@ -677,7 +685,7 @@ SELECT NULL, 'birthday_egg', '生日·免费加蛋', 'BIRTHDAY', 'DRAFT',
        300.00, 1,
        (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
          WHERE `p`.`product_no` IN ('SH01-TangYuan-TangYuanHeBaoDan','SH01-ZhaoPaiMian-ChangWangMian')),
-       '仅今日生日会员；勿绑全体。系统设置亦可自动发生日券，营销作加码/补发',
+       '仅今日生日会员；勿绑全体。发布后保持 RUNNING，调度每日补圈（幂等 Y年）；系统生日券可并存',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
 JOIN `coupon_templates` `ct` ON `ct`.`name` = '生日免费加蛋'
@@ -686,6 +694,28 @@ WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'birthday_today'
   AND NOT EXISTS (
         SELECT 1 FROM `marketing_campaigns` `x`
         WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'birthday_egg'
+    );
+
+INSERT INTO `marketing_campaigns` (
+    `store_id`, `code`, `name`, `campaign_type`, `status`,
+    `segment_id`, `coupon_template_id`, `start_at`, `end_at`,
+    `budget_cap`, `weekly_cap_override`, `boost_product_ids`, `remark`,
+    `published_at`, `created_by`
+)
+SELECT NULL, 'member_anniversary_gift', '入会周年·感谢陪伴', 'MEMBER_ANNIVERSARY', 'DRAFT',
+       `seg`.`id`, `ct`.`id`, NULL, NULL,
+       300.00, 1,
+       (SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')),
+       '仅未填生日且今日为入会周年；勿绑全体。发布后保持 RUNNING，调度每日补圈（幂等 Y年）；有生日走 birthday_today',
+       NULL, `u`.`id`
+FROM `customer_segments` `seg`
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
+WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'member_anniversary_today'
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_campaigns` `x`
+        WHERE `x`.`store_id` IS NULL AND `x`.`code` = 'member_anniversary_gift'
     );
 
 INSERT INTO `marketing_campaigns` (

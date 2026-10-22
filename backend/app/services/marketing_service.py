@@ -68,8 +68,19 @@ class MarketingService:
             return f"{base}:{season}"
         return base
 
+    # 按「今日命中顾客」每日补圈的活动类型（生日 / 入会周年）
+    DAILY_AUDIENCE_TYPES = frozenset({"BIRTHDAY", "MEMBER_ANNIVERSARY"})
+
     @classmethod
     def season_for_campaign(cls, camp: MarketingCampaign) -> str | None:
+        """发券幂等季标识。
+
+        - ANNUAL_MD：公历/农历节日季（如 S2026）
+        - BIRTHDAY / MEMBER_ANNIVERSARY：按北京时间自然年 ``Y{年}``，同年不重复、次年可再发
+        """
+        ctype = (camp.campaign_type or "").upper()
+        if ctype in cls.DAILY_AUDIENCE_TYPES:
+            return f"Y{today_beijing().year}"
         if normalize_schedule_mode(getattr(camp, "schedule_mode", None)) != SCHEDULE_ANNUAL_MD:
             return None
         return annual_season_token(
@@ -154,7 +165,11 @@ class MarketingService:
             .scalars()
             .all()
         )
-        return merge_store_over_hq(rows, key_fn=lambda c: cls.campaign_code_key(c.code))
+        # 空 code 不参与同键覆盖（避免多条无 code 活动被错误压成一条）；正常创建 API 要求 code 非空
+        return merge_store_over_hq(
+            rows,
+            key_fn=lambda c: cls.campaign_code_key(c.code) or f"__id__:{int(c.id)}",
+        )
 
     @classmethod
     async def find_hq_same_code(
@@ -201,6 +216,27 @@ class MarketingService:
             return None
         sid = getattr(cust, "registered_store_id", None) or getattr(cust, "first_seen_store_id", None)
         return int(sid) if sid else None
+
+    @classmethod
+    async def store_code_override_warning(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int | None,
+        code: str | None,
+        exclude_id: int | None = None,
+    ) -> str | None:
+        """门店活动与总部同 code 时的保存/发布提示（不阻断）。"""
+        if store_id is None:
+            return None
+        hq = await cls.find_hq_same_code(db, code=code or "", exclude_id=exclude_id)
+        if not hq:
+            return None
+        return hq_override_warning(
+            key_label="营销编码",
+            key_desc=f"code={code}",
+            hq_name=hq.name or str(hq.id),
+        )
 
     @classmethod
     async def count_weekly_issues(cls, db: AsyncSession, customer_id: int) -> int:
@@ -562,12 +598,32 @@ class MarketingService:
 
         seg, mat, store_scoped_hq = await cls._resolve_publish_audience(db, camp)
         seg_code = (seg.code or "").strip()
-        # 生日禁止绑全体：一发布即对无关人发券
-        if (camp.campaign_type or "").upper() == "BIRTHDAY" and seg_code == "all_members":
-            raise AppException(
-                40001,
-                "生日活动禁止绑定「全体会员」，请改用 birthday_today（今日生日）分群",
-            )
+        # 生日/入会周年：禁止全体；须绑含对应日判定字段的分群（如 birthday_today / member_anniversary_today）
+        ctype_u = (camp.campaign_type or "").upper()
+        if ctype_u == "BIRTHDAY":
+            if seg_code == "all_members":
+                raise AppException(
+                    40001,
+                    "生日活动禁止绑定「全体会员」，请改用 birthday_today（今日生日）分群",
+                )
+            if not SegmentService.rules_contain_field(seg.rules_json, "is_birthday_today"):
+                raise AppException(
+                    40001,
+                    "生日活动须绑定含 is_birthday_today 的分群（预置 birthday_today）",
+                )
+        if ctype_u == "MEMBER_ANNIVERSARY":
+            if seg_code == "all_members":
+                raise AppException(
+                    40001,
+                    "入会周年活动禁止绑定「全体会员」，请改用 member_anniversary_today（今日入会周年）分群",
+                )
+            if not SegmentService.rules_contain_field(
+                seg.rules_json, "is_member_anniversary_today"
+            ):
+                raise AppException(
+                    40001,
+                    "入会周年活动须绑定含 is_member_anniversary_today 的分群（预置 member_anniversary_today）",
+                )
         # 全体会员须有排期：绝对短窗 或 每年月日，防止无窗口误点普发
         if seg_code == "all_members":
             if mode == SCHEDULE_ANNUAL_MD:
@@ -630,15 +686,11 @@ class MarketingService:
             "enqueued": enqueued,
             "skipped_dup": skipped_dup,
         }
-        # 门店活动与总部同 code：提示将覆盖本店推荐加权并挡住总部发券
-        if camp.store_id is not None:
-            hq = await cls.find_hq_same_code(db, code=camp.code or "", exclude_id=int(camp.id))
-            if hq:
-                result["override_warning"] = hq_override_warning(
-                    key_label="营销编码",
-                    key_desc=f"code={camp.code}",
-                    hq_name=hq.name or str(hq.id),
-                )
+        warn = await cls.store_code_override_warning(
+            db, store_id=camp.store_id, code=camp.code, exclude_id=int(camp.id)
+        )
+        if warn:
+            result["override_warning"] = warn
         return result
 
     @classmethod
@@ -762,6 +814,15 @@ class MarketingService:
                 else:
                     c.status = "RUNNING"
                     started += 1
+                    # 生日/入会周年：刚进入 RUNNING 时立即按今日分群补圈
+                    if (c.campaign_type or "").upper() in cls.DAILY_AUDIENCE_TYPES:
+                        if c.segment_id and c.coupon_template_id:
+                            seg = await SegmentService.get_segment(db, int(c.segment_id))
+                            store_scoped_hq = c.store_id is not None and seg.store_id is None
+                            n, _dup = await cls._enqueue_issue_tasks(
+                                db, c, store_scoped_hq=store_scoped_hq, scheduled_at=now
+                            )
+                            enqueued += n
             elif c.status in ("RUNNING", "PAUSED") and c.end_at and c.end_at <= now:
                 c.status = "ENDED"
                 ended += 1
@@ -773,6 +834,19 @@ class MarketingService:
                     )
                     .values(status="CANCELLED")
                 )
+            elif (
+                c.status == "RUNNING"
+                and (c.campaign_type or "").upper() in cls.DAILY_AUDIENCE_TYPES
+                and c.segment_id
+                and c.coupon_template_id
+            ):
+                # 生日/入会周年：RUNNING 期间每日补圈今日命中顾客（幂等键带 Y{年}）
+                seg = await SegmentService.get_segment(db, int(c.segment_id))
+                store_scoped_hq = c.store_id is not None and seg.store_id is None
+                n, _dup = await cls._enqueue_issue_tasks(
+                    db, c, store_scoped_hq=store_scoped_hq, scheduled_at=now
+                )
+                enqueued += n
         await db.flush()
         return {
             "started": started,

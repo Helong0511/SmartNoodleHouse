@@ -111,7 +111,13 @@ async def create_segment(
     )
     await db.commit()
     await db.refresh(row)
-    return success(SegmentService._payload(row), request=request)
+    payload = SegmentService._payload(row)
+    warn = await SegmentService.hq_same_code_parallel_warning(
+        db, store_id=row.store_id, code=row.code, exclude_id=int(row.id)
+    )
+    if warn:
+        payload["override_warning"] = warn
+    return success(payload, request=request)
 
 
 @router.put("/segments/{segment_id}", dependencies=[require_permission("coupon:manage")])
@@ -140,7 +146,13 @@ async def update_segment(
     )
     await db.commit()
     await db.refresh(row)
-    return success(SegmentService._payload(row), request=request)
+    payload = SegmentService._payload(row)
+    warn = await SegmentService.hq_same_code_parallel_warning(
+        db, store_id=row.store_id, code=row.code, exclude_id=int(row.id)
+    )
+    if warn:
+        payload["override_warning"] = warn
+    return success(payload, request=request)
 
 
 @router.post("/segments/estimate", dependencies=[require_permission("customer:read")])
@@ -250,7 +262,13 @@ async def create_campaign(
     )
     await db.commit()
     await db.refresh(row)
-    return success(await MarketingService.payload_for(db, row), request=request)
+    payload = await MarketingService.payload_for(db, row)
+    warn = await MarketingService.store_code_override_warning(
+        db, store_id=row.store_id, code=row.code, exclude_id=int(row.id)
+    )
+    if warn:
+        payload["override_warning"] = warn
+    return success(payload, request=request)
 
 
 @router.put("/campaigns/{campaign_id}", dependencies=[require_permission("coupon:manage")])
@@ -292,7 +310,13 @@ async def update_campaign(
     )
     await db.commit()
     await db.refresh(row)
-    return success(await MarketingService.payload_for(db, row), request=request)
+    payload = await MarketingService.payload_for(db, row)
+    warn = await MarketingService.store_code_override_warning(
+        db, store_id=row.store_id, code=row.code, exclude_id=int(row.id)
+    )
+    if warn:
+        payload["override_warning"] = warn
+    return success(payload, request=request)
 
 
 @router.post("/campaigns/{campaign_id}/publish", dependencies=[require_permission("coupon:manage")])

@@ -189,6 +189,21 @@ async def create_option_group(data: OptionGroupCreate, request: Request, db: DbS
     group = OptionGroup(**payload)
     db.add(group)
     await db.flush()
+    # 类型 C：规格组不去重；门店与总部同名时仅提示（编码前缀不同，不会自动覆盖）
+    conflict_note: str | None = None
+    if store_id is not None:
+        hq_same_name = (
+            await db.execute(
+                select(OptionGroup)
+                .where(OptionGroup.store_id.is_(None), OptionGroup.name == data.name)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if hq_same_name:
+            conflict_note = (
+                f"总部已有同名规格组「{hq_same_name.name}」（编码 {hq_same_name.code}）；"
+                "规格组为并行资源，不会自动覆盖，请确认是否需要本店独立组"
+            )
     await AuditService.log_staff(
         db,
         user=user,
@@ -200,7 +215,10 @@ async def create_option_group(data: OptionGroupCreate, request: Request, db: DbS
         request=request,
         store_id=int(group.store_id) if group.store_id else None,
     )
-    return success({"id": group.id, "store_id": group.store_id, "code": group.code}, request=request)
+    body: dict = {"id": group.id, "store_id": group.store_id, "code": group.code}
+    if conflict_note:
+        body["override_warning"] = conflict_note
+    return success(body, request=request)
 
 
 @router.post("/options", dependencies=[require_permission("product:create")])
@@ -262,6 +280,21 @@ async def update_option_group(
     for k, v in raw.items():
         setattr(group, k, v)
     await db.flush()
+    # 类型 C：改名后与总部同名仅提示，不自动覆盖
+    conflict_note: str | None = None
+    if group.store_id is not None and group.name:
+        hq_same_name = (
+            await db.execute(
+                select(OptionGroup)
+                .where(OptionGroup.store_id.is_(None), OptionGroup.name == group.name)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if hq_same_name:
+            conflict_note = (
+                f"总部已有同名规格组「{hq_same_name.name}」（编码 {hq_same_name.code}）；"
+                "规格组为并行资源，不会自动覆盖，请确认是否需要本店独立组"
+            )
     await AuditService.log_staff(
         db,
         user=user,
@@ -273,7 +306,10 @@ async def update_option_group(
         request=request,
         store_id=int(group.store_id) if group.store_id else None,
     )
-    return success({"id": group.id, "store_id": group.store_id, "code": group.code}, request=request)
+    body: dict = {"id": group.id, "store_id": group.store_id, "code": group.code}
+    if conflict_note:
+        body["override_warning"] = conflict_note
+    return success(body, request=request)
 
 
 @router.delete("/options/groups/{group_id}", dependencies=[require_permission("product:delete")])

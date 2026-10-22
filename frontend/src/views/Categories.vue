@@ -21,6 +21,13 @@
       <el-button v-if="canCreateProduct" type="primary" @click="openForm()">新增分类</el-button>
       <el-button v-if="auth.isSuperAdmin && canCreateProduct" type="success" plain :disabled="!selectedIds.length"
         @click="openCopy">复制到门店</el-button>
+      <el-tooltip
+        v-if="auth.isSuperAdmin"
+        content="分类按门店独立，无「总部分类覆盖本店」；跨店请用复制到门店"
+        placement="bottom"
+      >
+        <el-tag type="info" effect="plain" style="margin-left:4px">门店独立分类</el-tag>
+      </el-tooltip>
       <el-button @click="load">刷新</el-button>
     </div>
 

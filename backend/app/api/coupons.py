@@ -9,6 +9,7 @@ from app.schemas.coupon import CouponIssueRequest, CouponTemplateCreate, CouponT
 from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
+from app.services.scope_override import hq_override_warning
 from app.services.store_scope import require_bound_store
 
 router = APIRouter(prefix="/coupons", tags=["优惠券"])
@@ -76,6 +77,9 @@ async def create_template(data: CouponTemplateCreate, request: Request, db: DbSe
         # P2-4 门店白名单仅总部可配置
         payload.pop("store_whitelist", None)
     tmpl = await CouponService.create_template(db, payload)
+    warn = await CouponService.hq_name_override_warning(
+        db, store_id=tmpl.store_id, name=tmpl.name
+    )
     await db.commit()
     await AuditService.log(
         db,
@@ -87,7 +91,10 @@ async def create_template(data: CouponTemplateCreate, request: Request, db: DbSe
         detail={"name": tmpl.name, "coupon_type": tmpl.coupon_type, "store_id": tmpl.store_id},
         request=request,
     )
-    return success(CouponService.template_payload(tmpl), request=request)
+    body = CouponService.template_payload(tmpl)
+    if warn:
+        body["override_warning"] = warn
+    return success(body, request=request)
 
 
 @router.put("/templates/{template_id}", dependencies=[require_permission("coupon:manage")])
@@ -107,6 +114,9 @@ async def update_template(
         raw.pop("store_id", None)  # 门店不可改归属
         raw.pop("store_whitelist", None)  # P2-4 门店白名单仅总部可配置
     tmpl = await CouponService.update_template(db, tmpl, raw)
+    warn = await CouponService.hq_name_override_warning(
+        db, store_id=tmpl.store_id, name=tmpl.name
+    )
     await db.commit()
     await AuditService.log(
         db,
@@ -118,7 +128,10 @@ async def update_template(
         detail={"changes": raw},
         request=request,
     )
-    return success(CouponService.template_payload(tmpl), request=request)
+    body = CouponService.template_payload(tmpl)
+    if warn:
+        body["override_warning"] = warn
+    return success(body, request=request)
 
 
 @router.patch("/templates/{template_id}/status", dependencies=[require_permission("coupon:manage")])
@@ -456,8 +469,11 @@ async def replace_point_exchange_options(
             hq = hq_keys.get(key)
             if hq:
                 override_warnings.append(
-                    f"将覆盖顾客端总部同档展示（模板#{item.template_id} / {item.points_cost}积分"
-                    f" / 总部「{hq.name}」）"
+                    hq_override_warning(
+                        key_label="积分兑券档",
+                        key_desc=f"模板#{item.template_id} / {item.points_cost}积分",
+                        hq_name=hq.name,
+                    )
                 )
 
     await AuditService.log_staff(

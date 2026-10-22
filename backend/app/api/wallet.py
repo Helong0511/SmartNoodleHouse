@@ -16,7 +16,7 @@ from app.models import BalanceLedger, Customer, Order, RechargeOrder, RechargePa
 from app.services.audit_service import AuditService
 from app.services.balance_service import BalanceService
 from app.services.customer_service import CustomerService
-from app.services.scope_override import merge_store_over_hq
+from app.services.scope_override import hq_override_warning, merge_store_over_hq
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/wallet", tags=["储值"])
@@ -113,7 +113,11 @@ async def _hq_pay_override_warning(db, *, store_id: int | None, pay_amount) -> s
     ).scalar_one_or_none()
     if not hq:
         return None
-    return f"将覆盖顾客端总部同档展示（实付 ¥{pay} / 总部「{hq.name}」）"
+    return hq_override_warning(
+        key_label="储值档",
+        key_desc=f"实付 ¥{pay}",
+        hq_name=hq.name,
+    )
 
 
 async def _assert_package_unique(

@@ -75,7 +75,7 @@
           :closable="false"
           show-icon
           class="tab-tip"
-          title="规则由系统种子 / 运维配置。「与券互斥」：与会员折取更优（折扣更低者）。「可叠加」暂未接线结算。门店列为空=总部通用。"
+          title="规则由系统种子 / 运维配置。「与券互斥」：与会员折取更优（折扣更低者）。「可叠加」暂未接线结算。门店列为空=总部通用；结算时同身份码门店规则优先于总部（类型 B）。"
         />
         <el-empty v-if="!loading && !rules.length" description="暂无启用规则，请检查系统种子或是否开启社会贡献公益" />
         <el-table v-else :data="rules" v-loading="loading" stripe>

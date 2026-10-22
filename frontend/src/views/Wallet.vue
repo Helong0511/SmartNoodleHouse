@@ -267,6 +267,7 @@ import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { mediaUrl } from '@/utils/media'
 import { formatCustomerNameLines } from '@/utils/customerName'
+import { notifySaveWithOverride } from '@/utils/overrideWarning'
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
   TOPUP: '充值',
@@ -531,12 +532,7 @@ async function savePackage() {
       }
       saved = await api.post('/wallet/packages', body)
     }
-    const warn = saved?.data?.override_warning || saved?.override_warning
-    if (warn) {
-      ElMessage.warning(String(warn))
-    } else {
-      ElMessage.success('已保存')
-    }
+    notifySaveWithOverride(saved)
     dlgVisible.value = false
     await loadPackages()
   } catch (e: any) {

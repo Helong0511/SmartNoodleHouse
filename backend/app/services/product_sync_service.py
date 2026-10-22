@@ -410,6 +410,40 @@ class ProductSyncService:
         return maps.get(int(local_category_id))
 
     @staticmethod
+    async def hq_category_map_override_warning(
+        db: AsyncSession,
+        *,
+        store_id: int | None,
+        platform: str,
+        local_category_id: int,
+    ) -> str | None:
+        """门店分类映射与总部同键时提示同步将覆盖总部（不阻断）。"""
+        if store_id is None:
+            return None
+        from app.services.scope_override import hq_override_warning
+
+        hq = (
+            await db.execute(
+                select(PlatformCategoryMap)
+                .where(
+                    PlatformCategoryMap.store_id.is_(None),
+                    PlatformCategoryMap.platform == platform.upper(),
+                    PlatformCategoryMap.local_category_id == int(local_category_id),
+                    PlatformCategoryMap.status == 1,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if not hq:
+            return None
+        label = hq.platform_category_name or hq.platform_category_code or str(hq.id)
+        return hq_override_warning(
+            key_label="外卖分类映射",
+            key_desc=f"{platform.upper()} / 本地分类#{int(local_category_id)}",
+            hq_name=str(label),
+        )
+
+    @staticmethod
     async def upsert_category_map(
         db: AsyncSession,
         *,

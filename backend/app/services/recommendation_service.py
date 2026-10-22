@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     Customer,
     CustomerTasteProfile,
-    MarketingCampaign,
     Order,
     OrderItem,
     Product,

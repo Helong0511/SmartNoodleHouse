@@ -57,6 +57,8 @@ export const RULE_FIELD_HELP: Record<string, string> = {
     '社会贡献公益身份码（customer_social_identities）：仅统计 status=ACTIVE 且在 valid_from/valid_to 有效期内的认定。取值如 TEACHER、ELDER、VETERAN、SANITATION。教师节/重阳/八一等应与 MEMBER 组合圈人，避免无身份普发。',
   is_birthday_today:
     '今日是否生日（北京时间；支持公历/农历）。生日营销必须用此字段，切勿绑「全体会员」——否则一发布就会给无关人发券。',
+  is_member_anniversary_today:
+    '今日是否入会周年：仅未填生日的会员；按入会日（member_activated_at，缺省用注册时间）公历月日匹配，且满 1 年。有生日的人走 is_birthday_today，勿混用；切勿绑「全体会员」。对应活动类型 MEMBER_ANNIVERSARY 发布后保持 RUNNING，调度会每日补圈今日命中顾客（同年幂等、次年可再发）。',
 }
 
 export const SEGMENT_TYPE_HELP =

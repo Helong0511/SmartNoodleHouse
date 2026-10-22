@@ -4,7 +4,7 @@
       <div>
         <h2>客户分群</h2>
         <p class="sub">
-          圈选目标顾客，供「营销活动」发券与触达。预置：沉睡/新客/低余额、生命周期/RFM、今日生日、公益身份（教师/长者/退役军人/环卫）。
+          圈选目标顾客，供「营销活动」发券与触达。预置：沉睡/新客/低余额、生命周期/RFM、今日生日、今日入会周年（无生日）、公益身份（教师/长者/退役军人/环卫）。
         </p>
       </div>
       <div class="header-actions">
@@ -20,8 +20,9 @@
       :closable="false"
       class="tip"
       title="店长怎么用"
-      description="① 选用预置或新建分群 → ②「估人数」看规模（脱敏）→ ③ 本店自建分群可「物化」；总部预置由超管物化，门店发布活动时会按本店自动圈人 → ④ 到「营销活动」选该分群发布。"
+      description="① 选用预置或新建分群 → ②「估人数」看规模（脱敏）→ ③ 本店自建分群可「物化」；总部预置由超管物化，门店发布活动时会按本店自动圈人 → ④ 到「营销活动」选该分群发布。门店与总部可同编码并存（并行资源，互不覆盖）。"
     />
+
     <el-button link type="primary" class="help-toggle" @click="helpOpen = !helpOpen">
       {{ helpOpen ? '收起名词说明' : '生命周期 / RFM / 字段说明（点开）' }}
     </el-button>
@@ -251,6 +252,7 @@ import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
+import { notifySaveWithOverride } from '@/utils/overrideWarning'
 import {
   CUSTOMER_LIFECYCLE,
   CUSTOMER_RFM,
@@ -293,6 +295,7 @@ const RULE_FIELDS = [
   { value: 'registered_store_id', label: '注册门店ID' },
   { value: 'social_identity_code', label: '公益身份码' },
   { value: 'is_birthday_today', label: '今日是否生日' },
+  { value: 'is_member_anniversary_today', label: '今日是否入会周年（无生日）' },
 ]
 
 const helpOpen = ref(false)
@@ -335,6 +338,12 @@ function valueOptions(field: string): { value: string; label: string }[] | null 
       { value: 'false', label: '否' },
     ]
   }
+  if (field === 'is_member_anniversary_today') {
+    return [
+      { value: 'true', label: '是（今日入会周年，且未填生日）' },
+      { value: 'false', label: '否' },
+    ]
+  }
   return null
 }
 
@@ -355,7 +364,8 @@ function onFieldChange(c: RuleCond) {
       c.field === 'rfm_segment' ||
       c.field === 'member_status' ||
       c.field === 'social_identity_code' ||
-      c.field === 'is_birthday_today'
+      c.field === 'is_birthday_today' ||
+      c.field === 'is_member_anniversary_today'
     ) {
       c.op = 'eq'
     }
@@ -505,6 +515,15 @@ const RULE_PRESETS: RulePreset[] = [
       { field: 'is_birthday_today', op: 'eq', value: 'true' },
     ],
   },
+  {
+    label: '入会周年',
+    code: 'member_anniversary_today',
+    name: '今日入会周年（未填生日）',
+    rules: [
+      { field: 'member_status', op: 'eq', value: 'MEMBER' },
+      { field: 'is_member_anniversary_today', op: 'eq', value: 'true' },
+    ],
+  },
 ]
 
 const router = useRouter()
@@ -574,7 +593,7 @@ function removeRule(idx: number) {
 
 function parseValue(raw: string, field: string): any {
   const t = (raw ?? '').trim()
-  if (field === 'has_order') {
+  if (field === 'has_order' || field === 'is_birthday_today' || field === 'is_member_anniversary_today') {
     return ['1', 'true', 'yes', '是'].includes(t.toLowerCase())
   }
   if (
@@ -730,9 +749,10 @@ async function save() {
       status: form.status,
       store_id: auth.isSuperAdmin ? (form.store_id || null) : (auth.user?.store_id || null),
     }
-    if (form.id) await api.put(`/marketing/segments/${form.id}`, body)
-    else await api.post('/marketing/segments', body)
-    ElMessage.success('已保存')
+    const res = form.id
+      ? await api.put(`/marketing/segments/${form.id}`, body)
+      : await api.post('/marketing/segments', body)
+    notifySaveWithOverride(res)
     dlg.value = false
     await load()
   } catch (e: any) {

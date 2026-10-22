@@ -19,7 +19,7 @@
       />
       <el-checkbox v-model="showDisabled" style="margin-left:12px" @change="onStoreFilterChange">显示已禁用</el-checkbox>
     </div>
-    <p class="hint">编码规则：总部 <code>0000-Liang</code>；分店 <code>SH01-Liang</code>；选项
+    <p class="hint">规格组为并行资源（类型 C）：门店与总部可同名并存，互不覆盖；编码规则：总部 <code>0000-Liang</code>；分店 <code>SH01-Liang</code>；选项
       <code>SH01-Liang-XiaoWan</code>。可填逻辑码（如 Liang），保存时自动加前缀。复制到门店会按目标店 store_no 重写编码。
     </p>
 
@@ -198,6 +198,7 @@ import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import CopyToStoreDialog from '@/components/CopyToStoreDialog.vue'
 import { suggestCodeFromName } from '@/utils/bizCode'
+import { notifySaveWithOverride } from '@/utils/overrideWarning'
 
 const auth = useAuthStore()
 const isSuper = computed(() => !!auth.isSuperAdmin)
@@ -441,12 +442,13 @@ async function saveGroup() {
     if (!groupForm.id && isSuper.value) {
       payload.store_id = groupForm.store_id
     }
+    let res: any
     if (groupForm.id) {
-      await api.put(`/options/groups/${groupForm.id}`, { ...payload, status: groupForm.status })
+      res = await api.put(`/options/groups/${groupForm.id}`, { ...payload, status: groupForm.status })
     } else {
-      await api.post('/options/groups', payload)
+      res = await api.post('/options/groups', payload)
     }
-    ElMessage.success('保存成功')
+    notifySaveWithOverride(res, '保存成功')
     groupDialog.value = false
     load()
   } catch (e: any) {

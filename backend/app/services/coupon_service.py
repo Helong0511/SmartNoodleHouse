@@ -64,6 +64,37 @@ class CouponService:
         if hq:
             return hq[0]
         return rows[0]
+
+    @staticmethod
+    async def hq_name_override_warning(
+        db: AsyncSession, *, store_id: int | None, name: str
+    ) -> str | None:
+        """门店模板与总部启用同名时提示将覆盖欢迎/同名解析（不阻断）。"""
+        if store_id is None:
+            return None
+        nm = (name or "").strip()
+        if not nm:
+            return None
+        from app.services.scope_override import hq_override_warning
+
+        hq = (
+            await db.execute(
+                select(CouponTemplate)
+                .where(
+                    CouponTemplate.store_id.is_(None),
+                    CouponTemplate.name == nm,
+                    CouponTemplate.status == 1,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if not hq:
+            return None
+        return hq_override_warning(
+            key_label="券模板名",
+            key_desc=f"名称「{nm}」",
+            hq_name=hq.name,
+        )
     @staticmethod
     def discount_label(tmpl: CouponTemplate) -> str:
         if tmpl.coupon_type == "PERCENT":

@@ -464,6 +464,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { MARKETING_CAMPAIGN_STATUS, MARKETING_TASK_STATUS, label } from '@/utils/labels'
 import { CAMPAIGN_FIELD_HELP } from '@/utils/marketingHelp'
+import { notifySaveWithOverride, pickOverrideWarning } from '@/utils/overrideWarning'
 
 /** 活动类型（与实施方案日历节点对齐；后端存大写字符串） */
 const CAMPAIGN_TYPES = [
@@ -472,6 +473,7 @@ const CAMPAIGN_TYPES = [
   { value: 'TIME_SLOT', label: '时段', hint: '冬至/下午茶等时段套餐或促销券。' },
   { value: 'SOCIAL', label: '公益营销', hint: '如每月环卫爱心日发豆浆券；与「社会贡献」身份折扣不同。' },
   { value: 'BIRTHDAY', label: '生日', hint: '生日权益加码发券（可与门店生日参数配合）。' },
+  { value: 'MEMBER_ANNIVERSARY', label: '入会周年', hint: '未填生日的会员，按入会日公历月日发周年礼；勿与生日混用。' },
   { value: 'NEW_MEMBER', label: '新客', hint: '新注册/开卡欢迎券包。' },
   { value: 'WAKEUP', label: '唤醒', hint: '沉睡/流失客召回发券。' },
   { value: 'EXAM', label: '考生', hint: '高考/中考加油券，可联动公益身份。' },
@@ -506,7 +508,8 @@ const CAMPAIGN_PRESETS: CampaignPreset[] = [
   { label: '冬至抄手', campaign_type: 'TIME_SLOT', codePrefix: 'timeslot_dongzhi', name: '冬至·饺/抄手节', remark: '公历约12/21～23；抄手加权', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 12, annual_start_day: 21, annual_end_month: 12, annual_end_day: 23 },
   { label: '环卫爱心日', campaign_type: 'SOCIAL', codePrefix: 'social_sanitation_day', name: '环卫爱心日·豆浆券', remark: '公历10/26；social_sanitation', schedule_mode: 'ANNUAL_MD', schedule_calendar: 'SOLAR', annual_start_month: 10, annual_start_day: 25, annual_end_month: 10, annual_end_day: 27 },
   { label: '会员日', campaign_type: 'MEMBER_DAY', codePrefix: 'member_day', name: '会员日·老客回访', remark: 'champions+满20减3；可用绝对时间', schedule_mode: 'ABSOLUTE' },
-  { label: '生日加蛋', campaign_type: 'BIRTHDAY', codePrefix: 'birthday_egg', name: '生日·免费加蛋', remark: '必须 birthday_today；勿绑全体会员', schedule_mode: 'ABSOLUTE' },
+  { label: '生日加蛋', campaign_type: 'BIRTHDAY', codePrefix: 'birthday_egg', name: '生日·免费加蛋', remark: '必须 birthday_today；保持 RUNNING，调度每日补圈；同年不重复次年可发', schedule_mode: 'ABSOLUTE' },
+  { label: '入会周年礼', campaign_type: 'MEMBER_ANNIVERSARY', codePrefix: 'member_anniversary', name: '入会周年·感谢陪伴', remark: '必须 member_anniversary_today（无生日）；保持 RUNNING，调度每日补圈；同年不重复', schedule_mode: 'ABSOLUTE' },
   { label: '沉睡唤醒', campaign_type: 'WAKEUP', codePrefix: 'wakeup_sleep', name: '沉睡唤醒', remark: 'sleep30/90；周频1', schedule_mode: 'ABSOLUTE' },
   { label: '新客欢迎', campaign_type: 'NEW_MEMBER', codePrefix: 'new_member', name: '新客欢迎券', remark: '开卡欢迎；周频1', schedule_mode: 'ABSOLUTE' },
   { label: '低余额催充', campaign_type: 'MEMBER_DAY', codePrefix: 'low_balance', name: '低余额催充', remark: '满20减3催回店', schedule_mode: 'ABSOLUTE' },
@@ -908,9 +911,10 @@ async function save() {
       remark: form.remark || null,
       store_id: auth.isSuperAdmin ? (form.store_id || null) : (auth.user?.store_id || null),
     }
-    if (form.id) await api.put(`/marketing/campaigns/${form.id}`, body)
-    else await api.post('/marketing/campaigns', body)
-    ElMessage.success('已保存')
+    const res = form.id
+      ? await api.put(`/marketing/campaigns/${form.id}`, body)
+      : await api.post('/marketing/campaigns', body)
+    notifySaveWithOverride(res)
     dlg.value = false
     await load()
   } catch (e: any) {
@@ -940,6 +944,9 @@ function publishBlockReason(row: any): string {
   const mode = String(row.schedule_mode || 'ABSOLUTE').toUpperCase()
   if (ctype === 'BIRTHDAY' && segCode === 'all_members') {
     return '生日活动禁止绑全体会员，请改用 birthday_today'
+  }
+  if (ctype === 'MEMBER_ANNIVERSARY' && segCode === 'all_members') {
+    return '入会周年活动禁止绑全体会员，请改用 member_anniversary_today'
   }
   if (mode === 'ANNUAL_MD') {
     if (!row.annual_start_month || !row.annual_start_day) {
@@ -972,6 +979,8 @@ async function publish(row: any) {
     const mode = res.data?.materialized?.mode
     const tip = mode === 'dynamic_store' ? '（按本店动态圈人）' : ''
     ElMessage.success(`已入队 ${res.data?.enqueued ?? 0} 条任务${tip}`)
+    const warn = pickOverrideWarning(res)
+    if (warn) ElMessage.warning(warn)
     await load()
   } catch (e: any) {
     if (e === 'cancel' || e?.message === 'cancel') return

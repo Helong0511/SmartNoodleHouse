@@ -254,6 +254,12 @@ async def create_category_map(data: CategoryMapPayload, request: Request, db: Db
         platform_category_name=data.platform_category_name,
         store_id=data.store_id,
     )
+    warn = await ProductSyncService.hq_category_map_override_warning(
+        db,
+        store_id=data.store_id,
+        platform=data.platform,
+        local_category_id=int(data.local_category_id),
+    )
     await db.commit()
     await AuditService.log_staff(
         db,
@@ -266,7 +272,10 @@ async def create_category_map(data: CategoryMapPayload, request: Request, db: Db
         request=request,
         store_id=int(data.store_id) if data.store_id else None,
     )
-    return success({"id": row.id}, request=request)
+    body: dict = {"id": row.id}
+    if warn:
+        body["override_warning"] = warn
+    return success(body, request=request)
 
 
 @router.delete("/category-maps/{map_id}", dependencies=[require_permission("product:update")])

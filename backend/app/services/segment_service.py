@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, extract, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -41,15 +41,40 @@ SUPPORTED_FIELDS = frozenset(
         "social_identity_code",
         # 今日是否生日（公历/农历；SQL 仅预筛有生日，精确判定见 post-filter）
         "is_birthday_today",
+        # 今日是否入会周年（仅无生日；锚点 member_activated_at/created_at；精确判定见 post-filter）
+        "is_member_anniversary_today",
     }
 )
 SUPPORTED_OPS = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"})
+_DAY_BOOL_FIELDS = frozenset({"is_birthday_today", "is_member_anniversary_today"})
 
 
 class SegmentService:
     @classmethod
-    def _rules_need_birthday_today(cls, rules_json: dict | list | None) -> bool | None:
-        """若规则含 is_birthday_today：True=只要今日生日，False=只要非今日生日；无则 None。"""
+    def rules_contain_field(cls, rules_json: dict | list | None, field: str) -> bool:
+        """规则树是否包含指定 field（不看 op/value）。"""
+        if not rules_json or not field:
+            return False
+        if isinstance(rules_json, list):
+            rules_json = {"all": rules_json}
+        want = str(field).strip()
+
+        def walk(node) -> bool:
+            if not isinstance(node, dict):
+                return False
+            if "all" in node or "any" in node:
+                return any(walk(c) for c in (node.get("all") or node.get("any") or []))
+            return str(node.get("field") or "").strip() == want
+
+        return walk(rules_json)
+
+    @classmethod
+    def _rules_need_day_bool(
+        cls, rules_json: dict | list | None, field: str
+    ) -> bool | None:
+        """若规则含指定日布尔字段：True=只要是，False=只要否；无则 None。"""
+        if field not in _DAY_BOOL_FIELDS:
+            raise AppException(40001, f"不支持的日判定字段: {field}")
         if not rules_json:
             return None
         if isinstance(rules_json, list):
@@ -65,7 +90,7 @@ class SegmentService:
                     if r is not None:
                         found = r
                 return found
-            if str(node.get("field") or "").strip() != "is_birthday_today":
+            if str(node.get("field") or "").strip() != field:
                 return None
             op = str(node.get("op") or "eq").strip().lower()
             raw = node.get("value")
@@ -74,9 +99,29 @@ class SegmentService:
                 return want
             if op == "ne":
                 return not want
-            raise AppException(40001, "is_birthday_today 仅支持 eq/ne")
+            raise AppException(40001, f"{field} 仅支持 eq/ne")
 
         return walk(rules_json)
+
+    @classmethod
+    def _rules_need_birthday_today(cls, rules_json: dict | list | None) -> bool | None:
+        return cls._rules_need_day_bool(rules_json, "is_birthday_today")
+
+    @classmethod
+    def _rules_need_member_anniversary_today(
+        cls, rules_json: dict | list | None
+    ) -> bool | None:
+        return cls._rules_need_day_bool(rules_json, "is_member_anniversary_today")
+
+    @classmethod
+    def _day_post_filter_wants(
+        cls, rules_json: dict | list | None
+    ) -> tuple[bool | None, bool | None]:
+        """(want_birthday, want_anniversary)；任一非 None 则需拉候选后置过滤。"""
+        return (
+            cls._rules_need_birthday_today(rules_json),
+            cls._rules_need_member_anniversary_today(rules_json),
+        )
 
     @classmethod
     def _is_birthday_today_customer(cls, c: Customer) -> bool:
@@ -88,6 +133,35 @@ class SegmentService:
                 getattr(c, "birthday_calendar", None),
             )
         )
+
+    @classmethod
+    def _is_member_anniversary_today_customer(cls, c: Customer) -> bool:
+        from app.utils.birthday import is_member_anniversary_today
+
+        return bool(
+            is_member_anniversary_today(
+                getattr(c, "birthday", None),
+                getattr(c, "member_activated_at", None),
+                created_at=getattr(c, "created_at", None),
+            )
+        )
+
+    @classmethod
+    def _customer_matches_day_post_filters(
+        cls,
+        c: Customer,
+        *,
+        want_bday: bool | None,
+        want_anniv: bool | None,
+    ) -> bool:
+        if want_bday is not None and cls._is_birthday_today_customer(c) is not want_bday:
+            return False
+        if (
+            want_anniv is not None
+            and cls._is_member_anniversary_today_customer(c) is not want_anniv
+        ):
+            return False
+        return True
     @staticmethod
     def _balance_expr():
         return Customer.balance_principal + Customer.balance_gift
@@ -239,6 +313,32 @@ class SegmentService:
                 raise AppException(40001, "is_birthday_today 仅支持 eq/ne")
             # SQL 仅预筛「填过生日」；公历/农历精确匹配在 estimate/materialize/iter 后置过滤
             return Customer.birthday.isnot(None)
+        if field == "is_member_anniversary_today":
+            if op not in ("eq", "ne"):
+                raise AppException(40001, "is_member_anniversary_today 仅支持 eq/ne")
+            # SQL 预筛：无生日 + 入会锚点月日≈今日（满1年）；2/29→非闰年2/28 与精确判定在后置过滤
+            from app.utils.birthday import today_beijing
+
+            day = today_beijing()
+            anchor = func.coalesce(Customer.member_activated_at, Customer.created_at)
+            md_match = or_(
+                and_(
+                    extract("month", anchor) == day.month,
+                    extract("day", anchor) == day.day,
+                ),
+                and_(
+                    day.month == 2,
+                    day.day == 28,
+                    extract("month", anchor) == 2,
+                    extract("day", anchor) == 29,
+                ),
+            )
+            return and_(
+                Customer.birthday.is_(None),
+                anchor.isnot(None),
+                extract("year", anchor) <= (day.year - 1),
+                md_match,
+            )
         raise AppException(40001, f"未实现字段: {field}")
 
     @classmethod
@@ -265,10 +365,10 @@ class SegmentService:
         sample_limit: int = 20,
     ) -> dict:
         filt = cls.build_filter(rules_json, store_id=store_id)
-        want_bday = cls._rules_need_birthday_today(rules_json)
+        want_bday, want_anniv = cls._day_post_filter_wants(rules_json)
         from app.services.customer_service import CustomerService
 
-        if want_bday is None:
+        if want_bday is None and want_anniv is None:
             total = int(await db.scalar(select(func.count()).select_from(Customer).where(filt)) or 0)
             rows = list(
                 (
@@ -283,13 +383,19 @@ class SegmentService:
                 .all()
             )
         else:
-            # 生日精确匹配需拉候选后内存过滤（支持农历）
+            # 生日/入会周年精确匹配需拉候选后内存过滤（生日支持农历）
             candidates = list(
                 (await db.execute(select(Customer).where(filt).order_by(Customer.id.desc())))
                 .scalars()
                 .all()
             )
-            matched = [c for c in candidates if cls._is_birthday_today_customer(c) is want_bday]
+            matched = [
+                c
+                for c in candidates
+                if cls._customer_matches_day_post_filters(
+                    c, want_bday=want_bday, want_anniv=want_anniv
+                )
+            ]
             total = len(matched)
             rows = matched[: max(0, min(int(sample_limit), 50))]
 
@@ -350,6 +456,35 @@ class SegmentService:
             .all()
         )
         return [cls._payload(r) for r in rows], total
+
+    @classmethod
+    async def hq_same_code_parallel_warning(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int | None,
+        code: str,
+        exclude_id: int | None = None,
+    ) -> str | None:
+        """门店分群与总部同 code：类型 C 并行提示（不覆盖、不阻断）。"""
+        if store_id is None:
+            return None
+        key = (code or "").strip()
+        if not key:
+            return None
+        q = select(CustomerSegment).where(
+            CustomerSegment.store_id.is_(None),
+            CustomerSegment.code == key,
+        )
+        if exclude_id is not None:
+            q = q.where(CustomerSegment.id != int(exclude_id))
+        hq = (await db.execute(q.order_by(CustomerSegment.id.asc()).limit(1))).scalar_one_or_none()
+        if not hq:
+            return None
+        return (
+            f"总部已有同编码分群「{hq.name}」（code={key}）；"
+            "分群为并行资源，本店与总部互不覆盖，发布活动请选对本店生效的分群"
+        )
 
     @classmethod
     async def upsert(
@@ -422,12 +557,13 @@ class SegmentService:
         if int(seg.status) != 1:
             raise AppException(40001, "分群已停用")
         filt = cls.build_filter(seg.rules_json, store_id=seg.store_id)
-        want_bday = cls._rules_need_birthday_today(seg.rules_json)
+        want_bday, want_anniv = cls._day_post_filter_wants(seg.rules_json)
+        need_day_post = want_bday is not None or want_anniv is not None
         await db.execute(delete(CustomerSegmentMember).where(CustomerSegmentMember.segment_id == seg.id))
         inserted = 0
         last_id = 0
         while True:
-            if want_bday is None:
+            if not need_day_post:
                 rows = list(
                     (
                         await db.execute(
@@ -465,7 +601,9 @@ class SegmentService:
                 if not batch:
                     break
                 for c in batch:
-                    if cls._is_birthday_today_customer(c) is want_bday:
+                    if cls._customer_matches_day_post_filters(
+                        c, want_bday=want_bday, want_anniv=want_anniv
+                    ):
                         db.add(CustomerSegmentMember(segment_id=int(seg.id), customer_id=int(c.id)))
                         inserted += 1
                 last_id = int(batch[-1].id)
@@ -530,10 +668,11 @@ class SegmentService:
             int(seg.store_id) if seg.store_id is not None else None
         )
         filt = cls.build_filter(seg.rules_json, store_id=filt_store)
-        want_bday = cls._rules_need_birthday_today(seg.rules_json)
+        want_bday, want_anniv = cls._day_post_filter_wants(seg.rules_json)
+        need_day_post = want_bday is not None or want_anniv is not None
         last_id = 0
         while True:
-            if want_bday is None:
+            if not need_day_post:
                 rows = list(
                     (
                         await db.execute(
@@ -570,7 +709,9 @@ class SegmentService:
                 ids = [
                     int(c.id)
                     for c in batch
-                    if cls._is_birthday_today_customer(c) is want_bday
+                    if cls._customer_matches_day_post_filters(
+                        c, want_bday=want_bday, want_anniv=want_anniv
+                    )
                 ]
                 if ids:
                     yield ids

@@ -11,6 +11,8 @@ from app.utils.birthday import (
     birthday_for_picker,
     convert_birthday_calendar,
     is_birthday_today,
+    is_member_anniversary_today,
+    anniversary_md_matches,
     lunar_ymd_to_solar,
     normalize_calendar,
     resolve_birthday_input,
@@ -95,3 +97,23 @@ def test_lunar_input_means_lunar_ymd_not_solar_convert():
     # 控件回填应为农历数字
     assert birthday_for_picker(solar, CAL_LUNAR) == "1990-05-01"
     assert birthday_for_picker(date(1990, 5, 1), CAL_SOLAR) == "1990-05-01"
+
+
+def test_member_anniversary_requires_no_birthday():
+    activated = date(2024, 10, 22)
+    today = date(2026, 10, 22)
+    assert is_member_anniversary_today(None, activated, today=today)
+    assert not is_member_anniversary_today(date(1990, 1, 1), activated, today=today)
+
+
+def test_member_anniversary_min_one_year():
+    activated = date(2026, 10, 22)
+    today = date(2026, 10, 22)
+    assert not is_member_anniversary_today(None, activated, today=today)
+    assert is_member_anniversary_today(None, date(2025, 10, 22), today=today)
+
+
+def test_anniversary_feb29_non_leap():
+    assert anniversary_md_matches(date(2020, 2, 29), date(2026, 2, 28))
+    assert not anniversary_md_matches(date(2020, 2, 29), date(2026, 2, 27))
+    assert anniversary_md_matches(date(2020, 2, 29), date(2024, 2, 29))

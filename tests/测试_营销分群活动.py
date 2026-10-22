@@ -181,6 +181,208 @@ async def test_segment_is_birthday_today(db_session):
 
 
 @pytest.mark.asyncio
+async def test_segment_is_member_anniversary_today(db_session):
+    """入会周年：仅无生日且入会月日=今日（满1年）；有生日的不进此圈。"""
+    from datetime import datetime
+    from app.utils.birthday import today_beijing
+
+    seed = await _seed(db_session)
+    today = today_beijing()
+    anniv_member, has_bday, other_md = seed["members"]
+    # 今日入会周年、无生日
+    anniv_member.birthday = None
+    anniv_member.member_activated_at = datetime(
+        today.year - 2, today.month, today.day, 12, 0, 0
+    )
+    # 有生日：即使入会月日相同也不算入会周年
+    has_bday.birthday = today.replace(year=1990)
+    has_bday.birthday_calendar = "SOLAR"
+    has_bday.member_activated_at = datetime(
+        today.year - 3, today.month, today.day, 12, 0, 0
+    )
+    # 无生日但入会月日不同
+    other_md.birthday = None
+    other_month = (today.month % 12) + 1
+    other_md.member_activated_at = datetime(today.year - 2, other_month, 1, 12, 0, 0)
+    await db_session.commit()
+
+    rules = {
+        "all": [
+            {"field": "member_status", "op": "eq", "value": "MEMBER"},
+            {"field": "is_member_anniversary_today", "op": "eq", "value": True},
+        ]
+    }
+    est = await SegmentService.estimate(db_session, rules_json=rules, store_id=seed["store"].id)
+    assert est["count"] == 1
+    assert est["samples"][0]["id"] == int(anniv_member.id)
+
+
+@pytest.mark.asyncio
+async def test_publish_member_anniversary_blocks_all_members(db_session):
+    """入会周年活动禁止绑全体会员。"""
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=None,
+        code="all_members",
+        name="全体会员",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=None,
+        code="anniv_bad_seg",
+        name="入会周年误绑",
+        campaign_type="MEMBER_ANNIVERSARY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        start_at=naive_local_now() - timedelta(hours=1),
+        end_at=naive_local_now() + timedelta(days=1),
+    )
+    await db_session.commit()
+    with pytest.raises(AppException) as ei:
+        await MarketingService.publish(db_session, int(camp.id))
+    assert "入会周年" in str(ei.value.message)
+
+
+@pytest.mark.asyncio
+async def test_publish_member_anniversary_requires_field(db_session):
+    """入会周年须绑含 is_member_anniversary_today 的分群，不能随便绑沉睡分群。"""
+    seed = await _seed(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=None,
+        code="sleep30_fake",
+        name="沉睡误绑",
+        rules_json={
+            "all": [
+                {"field": "member_status", "op": "eq", "value": "MEMBER"},
+                {"field": "days_since_order", "op": "gte", "value": 30},
+            ]
+        },
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=None,
+        code="anniv_need_field",
+        name="入会周年缺字段",
+        campaign_type="MEMBER_ANNIVERSARY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        start_at=naive_local_now() - timedelta(hours=1),
+        end_at=naive_local_now() + timedelta(days=1),
+    )
+    await db_session.commit()
+    with pytest.raises(AppException) as ei:
+        await MarketingService.publish(db_session, int(camp.id))
+    assert "is_member_anniversary_today" in str(ei.value.message)
+
+
+@pytest.mark.asyncio
+async def test_member_anniversary_season_and_daily_enqueue(db_session, monkeypatch):
+    """入会周年：幂等键带 Y{年}；RUNNING 时 advance 可按今日分群补圈。"""
+    from datetime import date, datetime
+
+    from app.utils import campaign_schedule as cs
+
+    seed = await _seed(db_session)
+    today = date(2026, 10, 22)
+    monkeypatch.setattr(cs, "today_beijing", lambda: today)
+    monkeypatch.setattr(
+        "app.services.marketing_service.today_beijing", lambda: today
+    )
+    monkeypatch.setattr("app.utils.birthday.today_beijing", lambda: today)
+
+    hit, miss, with_bday = seed["members"]
+    hit.birthday = None
+    hit.member_activated_at = datetime(2024, 10, 22, 12, 0, 0)
+    miss.birthday = None
+    miss.member_activated_at = datetime(2024, 3, 1, 12, 0, 0)
+    with_bday.birthday = today.replace(year=1990)
+    with_bday.birthday_calendar = "SOLAR"
+    with_bday.member_activated_at = datetime(2024, 10, 22, 12, 0, 0)
+
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="member_anniversary_today",
+        name="今日入会周年",
+        rules_json={
+            "all": [
+                {"field": "member_status", "op": "eq", "value": "MEMBER"},
+                {"field": "is_member_anniversary_today", "op": "eq", "value": True},
+            ]
+        },
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="anniv_daily",
+        name="入会周年日发",
+        campaign_type="MEMBER_ANNIVERSARY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        start_at=naive_local_now() - timedelta(hours=1),
+        end_at=None,
+    )
+    await db_session.commit()
+
+    season = MarketingService.season_for_campaign(camp)
+    assert season == "Y2026"
+
+    pub = await MarketingService.publish(db_session, int(camp.id))
+    await db_session.commit()
+    assert pub["campaign"]["status"] == "RUNNING"
+    assert pub["enqueued"] == 1
+
+    key = await db_session.scalar(
+        select(MarketingTask.idempotency_key).where(
+            MarketingTask.campaign_id == int(camp.id)
+        )
+    )
+    assert key and str(key).endswith(":Y2026")
+
+    # 同日再 advance：幂等跳过，不新增任务
+    await MarketingService.advance_campaign_lifecycle(db_session)
+    await db_session.commit()
+    pending = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(MarketingTask)
+            .where(MarketingTask.campaign_id == int(camp.id))
+        )
+        or 0
+    )
+    assert pending == 1
+
+    # 次年季标识变化，可再发
+    monkeypatch.setattr(cs, "today_beijing", lambda: date(2027, 10, 22))
+    monkeypatch.setattr(
+        "app.services.marketing_service.today_beijing", lambda: date(2027, 10, 22)
+    )
+    monkeypatch.setattr(
+        "app.utils.birthday.today_beijing", lambda: date(2027, 10, 22)
+    )
+    await db_session.refresh(camp)
+    assert MarketingService.season_for_campaign(camp) == "Y2027"
+    adv2 = await MarketingService.advance_campaign_lifecycle(db_session)
+    await db_session.commit()
+    assert adv2["enqueued"] >= 1
+    keys = list(
+        (
+            await db_session.execute(
+                select(MarketingTask.idempotency_key).where(
+                    MarketingTask.campaign_id == int(camp.id)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert any(str(k).endswith(":Y2027") for k in keys)
+
+
+@pytest.mark.asyncio
 async def test_publish_all_members_requires_window(db_session):
     """全体会员活动无排期不可发布，防止非节日误发。"""
     seed = await _seed(db_session)

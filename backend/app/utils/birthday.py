@@ -109,6 +109,58 @@ def is_birthday_today(
     return b_m == t_m and b_d == t_d and b_leap == t_leap
 
 
+def _as_beijing_date(value: date | datetime | None) -> date | None:
+    """入会锚点统一成北京时间日历日。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(_BEIJING).date()
+        return value.date()
+    return value
+
+
+def anniversary_md_matches(anchor: date, today: date) -> bool:
+    """公历月日是否与今日同庆（2/29 非闰年落到 2/28）。"""
+    if anchor.month == 2 and anchor.day == 29:
+        if today.month == 2 and today.day == 29:
+            return True
+        # 非闰年：2/28 视为周年日
+        try:
+            date(today.year, 2, 29)
+            return False
+        except ValueError:
+            return today.month == 2 and today.day == 28
+    return anchor.month == today.month and anchor.day == today.day
+
+
+def is_member_anniversary_today(
+    birthday: date | None,
+    member_activated_at: date | datetime | None,
+    *,
+    created_at: date | datetime | None = None,
+    today: date | None = None,
+    min_years: int = 1,
+) -> bool:
+    """无真实生日时，是否处于入会周年日。
+
+    - 已填 ``birthday``：不算入会周年（应走生日权益）
+    - 锚点优先 ``member_activated_at``，否则 ``created_at``
+    - 默认须满 ``min_years`` 年（排除入会当天）
+    - 今日按北京时间公历日
+    """
+    if birthday is not None:
+        return False
+    anchor = _as_beijing_date(member_activated_at) or _as_beijing_date(created_at)
+    if anchor is None:
+        return False
+    day = today or today_beijing()
+    years = day.year - anchor.year
+    if years < max(0, int(min_years)):
+        return False
+    return anniversary_md_matches(anchor, day)
+
+
 def calendar_label(calendar: str | None) -> str:
     return "农历" if normalize_calendar(calendar) == CAL_LUNAR else "公历"
 

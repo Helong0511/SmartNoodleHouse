@@ -346,6 +346,7 @@ import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 import { COUPON_STATUS, COUPON_TYPE, couponStatusTagType, label } from '@/utils/labels'
 import { formatCustomerNameLines } from '@/utils/customerName'
+import { notifySaveWithOverride } from '@/utils/overrideWarning'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.hasPermission('coupon:manage'))
@@ -619,15 +620,10 @@ async function savePointExchange() {
       body.store_id = target
     }
     const res: any = await api.put('/coupons/point-exchange-options', body)
-    const warn =
-      res?.data?.override_warning ||
-      res?.override_warning ||
-      (Array.isArray(res?.data?.override_warnings) ? res.data.override_warnings[0] : '')
-    if (warn) {
-      ElMessage.warning(String(warn))
-    } else {
-      ElMessage.success(exchangeRows.value.length ? '积分兑换选项已保存' : '已清空兑换选项')
-    }
+    notifySaveWithOverride(
+      res,
+      exchangeRows.value.length ? '积分兑换选项已保存' : '已清空兑换选项',
+    )
     await loadPointExchange()
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
@@ -777,12 +773,10 @@ async function saveTemplate() {
     if (!templateForm.id && auth.isSuperAdmin) {
       payload.store_id = templateForm.scope === 'STORE' ? templateForm.store_id : null
     }
-    if (templateForm.id) {
-      await api.put(`/coupons/templates/${templateForm.id}`, payload)
-    } else {
-      await api.post('/coupons/templates', payload)
-    }
-    ElMessage.success('保存成功')
+    const res = templateForm.id
+      ? await api.put(`/coupons/templates/${templateForm.id}`, payload)
+      : await api.post('/coupons/templates', payload)
+    notifySaveWithOverride(res, '保存成功')
     templateDialog.value = false
     loadTemplates()
   } catch (e: any) {
