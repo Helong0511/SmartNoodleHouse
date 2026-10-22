@@ -837,6 +837,7 @@ WHERE NOT EXISTS (
         WHERE `name` = '爱心日免费豆浆'
     );
 -- 五-A3、营销场景轻券（面额同「满20减3」，名称按活动区分，避免顾客看到「新客」误导）
+-- 会员日/催充/周年：全年可发，valid_days=30；节日券：ANNUAL_MD + 短有效期，窗外不可新发
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
 SELECT '会员日满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '会员日满20减3');
@@ -847,38 +848,75 @@ INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_or
 SELECT '入会周年满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '入会周年满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '春节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '春节满20减3', 'FIXED', 3.00, 20.00, 7 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '春节满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '妇女节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '妇女节满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '妇女节满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '儿童节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '儿童节满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '儿童节满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '教师节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '教师节满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '教师节满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '重阳满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '重阳满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '重阳满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '建军节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '建军节满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '建军节满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '中秋满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '中秋满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '中秋满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '元宵满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '元宵满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '元宵满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '端午满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '端午满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '端午满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '国庆满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '国庆满20减3', 'FIXED', 3.00, 20.00, 7 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '国庆满20减3');
 INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
-SELECT '冬至满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+SELECT '冬至满20减3', 'FIXED', 3.00, 20.00, 5 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '冬至满20减3');
+-- 节日/时段券：绑定与营销活动一致的年度发放窗；窗外不可新发；短 valid_days
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='LUNAR',
+  `annual_start_month`=12, `annual_start_day`=24, `annual_end_month`=1, `annual_end_day`=7, `valid_days`=7
+WHERE `name`='春节满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='LUNAR',
+  `annual_start_month`=1, `annual_start_day`=14, `annual_end_month`=1, `annual_end_day`=16, `valid_days`=5
+WHERE `name`='元宵满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=3, `annual_start_day`=6, `annual_end_month`=3, `annual_end_day`=9, `valid_days`=5
+WHERE `name`='妇女节满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=5, `annual_start_day`=30, `annual_end_month`=6, `annual_end_day`=2, `valid_days`=5
+WHERE `name`='儿童节满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='LUNAR',
+  `annual_start_month`=5, `annual_start_day`=4, `annual_end_month`=5, `annual_end_day`=6, `valid_days`=5
+WHERE `name`='端午满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=7, `annual_start_day`=31, `annual_end_month`=8, `annual_end_day`=2, `valid_days`=5
+WHERE `name`='建军节满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=9, `annual_start_day`=9, `annual_end_month`=9, `annual_end_day`=11, `valid_days`=5
+WHERE `name`='教师节满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='LUNAR',
+  `annual_start_month`=8, `annual_start_day`=14, `annual_end_month`=8, `annual_end_day`=16, `valid_days`=5
+WHERE `name`='中秋满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=10, `annual_start_day`=1, `annual_end_month`=10, `annual_end_day`=7, `valid_days`=7
+WHERE `name`='国庆满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='LUNAR',
+  `annual_start_month`=9, `annual_start_day`=8, `annual_end_month`=9, `annual_end_day`=10, `valid_days`=5
+WHERE `name`='重阳满20减3';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=10, `annual_start_day`=25, `annual_end_month`=10, `annual_end_day`=27, `valid_days`=3
+WHERE `name`='爱心日免费豆浆';
+UPDATE `coupon_templates` SET `schedule_mode`='ANNUAL_MD', `schedule_calendar`='SOLAR',
+  `annual_start_month`=12, `annual_start_day`=21, `annual_end_month`=12, `annual_end_day`=23, `valid_days`=5
+WHERE `name`='冬至满20减3';
 -- 五-B、储值档位（平台总部档，store_id=NULL；射洪友好：充50/100/200）
 -- 纠偏：历史种子曾误写 store_id=1。若总部档尚缺且全库仅有一条同名门店档，则升为总部。
 UPDATE `recharge_packages` AS `rp`

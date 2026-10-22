@@ -20,12 +20,19 @@ from app.utils.product_visibility import _md_in_range
 
 SCHEDULE_ABSOLUTE = "ABSOLUTE"
 SCHEDULE_ANNUAL_MD = "ANNUAL_MD"
+SCHEDULE_ALWAYS = "ALWAYS"
 VALID_SCHEDULE_MODES = frozenset({SCHEDULE_ABSOLUTE, SCHEDULE_ANNUAL_MD})
+VALID_TEMPLATE_SCHEDULE_MODES = frozenset({SCHEDULE_ALWAYS, SCHEDULE_ANNUAL_MD})
 
 
 def normalize_schedule_mode(raw: str | None) -> str:
     v = str(raw or SCHEDULE_ABSOLUTE).strip().upper()
     return v if v in VALID_SCHEDULE_MODES else SCHEDULE_ABSOLUTE
+
+
+def normalize_template_schedule_mode(raw: str | None) -> str:
+    v = str(raw or SCHEDULE_ALWAYS).strip().upper()
+    return v if v in VALID_TEMPLATE_SCHEDULE_MODES else SCHEDULE_ALWAYS
 
 
 def normalize_schedule_calendar(raw: str | None) -> str:
@@ -100,6 +107,21 @@ def annual_season_token(
     if md >= start:
         return f"S{day.year}"
     return f"S{day.year - 1}"
+
+
+def template_in_issue_window(tmpl: Any, *, today: date | None = None) -> bool:
+    """券模板当前是否允许新发。ALWAYS=始终可发；ANNUAL_MD=仅月日窗内。"""
+    mode = normalize_template_schedule_mode(getattr(tmpl, "schedule_mode", None))
+    if mode != SCHEDULE_ANNUAL_MD:
+        return True
+    return is_in_annual_window(
+        calendar=getattr(tmpl, "schedule_calendar", None),
+        start_month=getattr(tmpl, "annual_start_month", None),
+        start_day=getattr(tmpl, "annual_start_day", None),
+        end_month=getattr(tmpl, "annual_end_month", None),
+        end_day=getattr(tmpl, "annual_end_day", None),
+        today=today,
+    )
 
 
 def campaign_in_schedule_window(camp: Any, *, today: date | None = None, now=None) -> bool:

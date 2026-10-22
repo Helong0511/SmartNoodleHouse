@@ -243,9 +243,9 @@
             <el-option
               v-for="t in couponTemplates"
               :key="t.id"
-              :label="`${t.name} (#${t.id} · ${t.coupon_type || ''})`"
+              :label="couponOptionLabel(t)"
               :value="t.id"
-              :disabled="isWelcomeOnlyCoupon(t) && form.campaign_type !== 'NEW_MEMBER'"
+              :disabled="isCouponOptionDisabled(t)"
             />
           </el-select>
           <div class="hint">{{ CAMPAIGN_FIELD_HELP.coupon_template_id }}</div>
@@ -654,6 +654,21 @@ function couponLabel(id: number | null | undefined) {
 /** 名称以「新客」开头的欢迎券，仅允许活动类型 NEW_MEMBER */
 function isWelcomeOnlyCoupon(t: { name?: string } | null | undefined) {
   return Boolean((t?.name || '').trim().startsWith('新客'))
+}
+
+function couponOptionLabel(t: any) {
+  const base = `${t.name} (#${t.id} · ${t.coupon_type || ''})`
+  if (t.schedule_mode === 'ANNUAL_MD' && t.in_issue_window === false) {
+    return `${base} · 窗外停发`
+  }
+  if (t.annual_label) return `${base} · ${t.annual_label}`
+  return base
+}
+
+function isCouponOptionDisabled(t: any) {
+  if (isWelcomeOnlyCoupon(t) && form.campaign_type !== 'NEW_MEMBER') return true
+  // 绑节日券到活动仍允许（来年可发）；仅提示窗外。手动发券侧已禁用。
+  return false
 }
 
 watch(

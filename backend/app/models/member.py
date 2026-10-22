@@ -50,6 +50,13 @@ class CouponTemplate(Base):
     store_whitelist: Mapped[list | None] = mapped_column(
         JSON, default=None, nullable=True, comment="总部模板可见门店白名单；NULL=全部门店"
     )
+    # ALWAYS=全年可发；ANNUAL_MD=仅公历/农历月日窗口内可发（节日券）
+    schedule_mode: Mapped[str] = mapped_column(String(20), default="ALWAYS")
+    schedule_calendar: Mapped[str] = mapped_column(String(10), default="SOLAR")
+    annual_start_month: Mapped[int | None] = mapped_column(Integer, default=None)
+    annual_start_day: Mapped[int | None] = mapped_column(Integer, default=None)
+    annual_end_month: Mapped[int | None] = mapped_column(Integer, default=None)
+    annual_end_day: Mapped[int | None] = mapped_column(Integer, default=None)
 
 
 class CustomerCoupon(Base):

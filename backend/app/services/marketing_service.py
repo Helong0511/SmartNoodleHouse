@@ -316,6 +316,35 @@ class MarketingService:
         return int(result.rowcount or 0)
 
     @classmethod
+    async def _expire_season_issued_coupons(
+        cls,
+        db: AsyncSession,
+        camp: MarketingCampaign,
+        *,
+        season: str | None,
+        reason: str = "campaign_window_end",
+    ) -> int:
+        """活动出窗：作废本季营销幂等键发出的未使用券，避免节后仍可核销。"""
+        if not season:
+            return 0
+        now = naive_local_now()
+        # mkt:{campaign_id}:{customer}:{template}:{season}
+        pattern = f"mkt:{int(camp.id)}:%:{season}"
+        result = await db.execute(
+            update(CustomerCoupon)
+            .where(
+                CustomerCoupon.client_request_id.like(pattern),
+                CustomerCoupon.status == "AVAILABLE",
+            )
+            .values(
+                status="EXPIRED",
+                status_reason=reason[:40],
+                expires_at=now,
+            )
+        )
+        return int(result.rowcount or 0)
+
+    @classmethod
     def _payload(
         cls,
         row: MarketingCampaign,
@@ -904,6 +933,18 @@ class MarketingService:
                         )
                         .values(status="CANCELLED")
                     )
+                    # 出窗作废本季已发未用券（季标识按昨日，避免跨日边界错季）
+                    season = annual_season_token(
+                        calendar=getattr(c, "schedule_calendar", None),
+                        start_month=getattr(c, "annual_start_month", None),
+                        start_day=getattr(c, "annual_start_day", None),
+                        end_month=getattr(c, "annual_end_month", None),
+                        end_day=getattr(c, "annual_end_day", None),
+                        today=yesterday,
+                    )
+                    await cls._expire_season_issued_coupons(
+                        db, c, season=season, reason="campaign_window_end"
+                    )
                 continue
 
             # ABSOLUTE
@@ -1053,6 +1094,21 @@ class MarketingService:
                 stats["processed"] += 1
             return
         if camp.status == "PAUSED":
+            # 窗外暂停：取消残留 PENDING，避免队列空转
+            cancelled = await db.execute(
+                update(MarketingTask)
+                .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
+                .values(
+                    status="CANCELLED",
+                    last_error="活动已暂停（排期窗外）",
+                    executed_at=now,
+                    updated_at=now,
+                    result_json={"reason": "paused_out_of_window"},
+                )
+            )
+            if cancelled.rowcount:
+                stats["cancelled"] += 1
+                stats["processed"] += 1
             return
         if camp.status == "SCHEDULED":
             return
@@ -1069,6 +1125,24 @@ class MarketingService:
             )
             if skipped.rowcount:
                 stats["skipped"] += 1
+                stats["processed"] += 1
+            return
+
+        # 防御：RUNNING 但已出窗（调度延迟）→ 取消本条，不发券
+        if not campaign_in_schedule_window(camp, now=now):
+            cancelled = await db.execute(
+                update(MarketingTask)
+                .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
+                .values(
+                    status="CANCELLED",
+                    last_error="活动不在排期窗口内",
+                    executed_at=now,
+                    updated_at=now,
+                    result_json={"reason": "out_of_schedule_window"},
+                )
+            )
+            if cancelled.rowcount:
+                stats["cancelled"] += 1
                 stats["processed"] += 1
             return
 

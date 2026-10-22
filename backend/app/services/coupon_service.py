@@ -174,7 +174,17 @@ class CouponService:
 
     @staticmethod
     def template_payload(tmpl: CouponTemplate) -> dict:
+        from app.utils.campaign_schedule import (
+            format_annual_label,
+            normalize_schedule_calendar,
+            normalize_template_schedule_mode,
+            template_in_issue_window,
+        )
+
         sid = getattr(tmpl, "store_id", None)
+        mode = normalize_template_schedule_mode(getattr(tmpl, "schedule_mode", None))
+        cal = normalize_schedule_calendar(getattr(tmpl, "schedule_calendar", None))
+        in_window = template_in_issue_window(tmpl)
         return {
             "id": tmpl.id,
             "store_id": int(sid) if sid else None,
@@ -188,6 +198,22 @@ class CouponService:
             "total_quota": getattr(tmpl, "total_quota", None),
             "remaining": getattr(tmpl, "remaining", None),
             "store_whitelist": getattr(tmpl, "store_whitelist", None),
+            "schedule_mode": mode,
+            "schedule_calendar": cal,
+            "annual_start_month": getattr(tmpl, "annual_start_month", None),
+            "annual_start_day": getattr(tmpl, "annual_start_day", None),
+            "annual_end_month": getattr(tmpl, "annual_end_month", None),
+            "annual_end_day": getattr(tmpl, "annual_end_day", None),
+            "annual_label": format_annual_label(
+                calendar=cal,
+                start_month=getattr(tmpl, "annual_start_month", None),
+                start_day=getattr(tmpl, "annual_start_day", None),
+                end_month=getattr(tmpl, "annual_end_month", None),
+                end_day=getattr(tmpl, "annual_end_day", None),
+            )
+            if mode == "ANNUAL_MD"
+            else None,
+            "in_issue_window": in_window,
             "discount_label": CouponService.discount_label(tmpl),
             "summary": CouponService.summary_label(tmpl),
             # CouponTemplate 无 created_at 列；勿 getattr 读 mapped 时间戳
@@ -366,6 +392,13 @@ class CouponService:
         tmpl = await db.get(CouponTemplate, int(template_id))
         if not tmpl or int(tmpl.status) != 1:
             raise AppException(40407, "优惠券模板不存在或已停用")
+        from app.utils.campaign_schedule import template_in_issue_window
+
+        if not template_in_issue_window(tmpl):
+            raise AppException(
+                40001,
+                f"「{tmpl.name}」仅限节日发放窗口内领取，当前不在有效期",
+            )
 
         is_voucher = CouponService.is_voucher_type(tmpl.coupon_type)
         qty = max(1, min(int(quantity or 1), 50))

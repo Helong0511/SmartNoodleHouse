@@ -211,9 +211,16 @@ CREATE TABLE IF NOT EXISTS `coupon_templates` (
   `total_quota` int NULL DEFAULT NULL COMMENT 'P0-6: 发放总量上限；NULL=不限',
   `remaining` int NULL DEFAULT NULL COMMENT 'P0-6: 剩余可发量；NULL=不限',
   `store_whitelist` json NULL COMMENT 'P2-4: 总部模板可见门店白名单；NULL/空数组=全部门店',
+  `schedule_mode` varchar(20) NOT NULL DEFAULT 'ALWAYS' COMMENT 'ALWAYS=全年可发；ANNUAL_MD=仅每年月日窗口内可发',
+  `schedule_calendar` varchar(10) NOT NULL DEFAULT 'SOLAR' COMMENT 'SOLAR=公历 LUNAR=农历（仅 ANNUAL_MD）',
+  `annual_start_month` tinyint UNSIGNED NULL DEFAULT NULL COMMENT '发放窗起月 1-12',
+  `annual_start_day` tinyint UNSIGNED NULL DEFAULT NULL COMMENT '发放窗起日 1-31',
+  `annual_end_month` tinyint UNSIGNED NULL DEFAULT NULL COMMENT '发放窗止月；空=仅起日当天',
+  `annual_end_day` tinyint UNSIGNED NULL DEFAULT NULL COMMENT '发放窗止日',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_coupon_tmpl_store`(`store_id` ASC) USING BTREE,
+  INDEX `idx_coupon_tmpl_schedule`(`schedule_mode` ASC, `status` ASC) USING BTREE,
   CONSTRAINT `fk_coupon_tmpl_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '优惠券/代金券模板表' ROW_FORMAT = Dynamic;
 -- ----------------------------

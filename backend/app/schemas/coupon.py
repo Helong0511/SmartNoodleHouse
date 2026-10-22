@@ -15,6 +15,12 @@ class CouponTemplateCreate(BaseModel):
     total_quota: int | None = Field(default=None, ge=0, description="发放总量上限；NULL=不限；0=禁止发放")
     # P2-4 仅对总部模板生效：NULL=全部门店可见；非空=仅列出门店可见
     store_whitelist: list[int] | None = Field(default=None, description="总部模板可见门店白名单；NULL=全部门店")
+    schedule_mode: str = Field(default="ALWAYS", pattern="^(ALWAYS|ANNUAL_MD)$")
+    schedule_calendar: str = Field(default="SOLAR", pattern="^(SOLAR|LUNAR)$")
+    annual_start_month: int | None = Field(default=None, ge=1, le=12)
+    annual_start_day: int | None = Field(default=None, ge=1, le=31)
+    annual_end_month: int | None = Field(default=None, ge=1, le=12)
+    annual_end_day: int | None = Field(default=None, ge=1, le=31)
 
 
 class CouponTemplateUpdate(BaseModel):
@@ -27,6 +33,12 @@ class CouponTemplateUpdate(BaseModel):
     store_id: int | None = Field(default=None, description="仅超管可改；显式 null=改回总部")
     total_quota: int | None = Field(default=None, ge=0, description="发放总量上限；0=禁止发放；NULL=不限；修改不影响 remaining")
     store_whitelist: list[int] | None = Field(default=None, description="总部模板门店白名单；显式 null=恢复全部门店可见")
+    schedule_mode: str | None = Field(default=None, pattern="^(ALWAYS|ANNUAL_MD)$")
+    schedule_calendar: str | None = Field(default=None, pattern="^(SOLAR|LUNAR)$")
+    annual_start_month: int | None = Field(default=None, ge=1, le=12)
+    annual_start_day: int | None = Field(default=None, ge=1, le=31)
+    annual_end_month: int | None = Field(default=None, ge=1, le=12)
+    annual_end_day: int | None = Field(default=None, ge=1, le=31)
 
 
 class CouponIssueRequest(BaseModel):

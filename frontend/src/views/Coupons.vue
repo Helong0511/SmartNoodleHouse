@@ -111,7 +111,18 @@
             </template>
           </el-table-column>
           <el-table-column prop="summary" label="规则" min-width="160" />
-          <el-table-column prop="valid_days" label="有效天数" width="100" />
+          <el-table-column prop="valid_days" label="有效天数" width="90" />
+          <el-table-column label="发放窗" min-width="140">
+            <template #default="{ row }">
+              <template v-if="row.schedule_mode === 'ANNUAL_MD'">
+                <el-tag size="small" :type="row.in_issue_window ? 'success' : 'warning'">
+                  {{ row.in_issue_window ? '窗内可发' : '窗外停发' }}
+                </el-tag>
+                <div class="muted" style="margin-top:2px">{{ row.annual_label || '年度月日' }}</div>
+              </template>
+              <span v-else class="muted">全年</span>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
@@ -321,7 +332,13 @@
         </el-form-item>
         <el-form-item label="券模板" required>
           <el-select v-model="issueForm.template_id" placeholder="选择模板" style="width: 100%">
-            <el-option v-for="t in enabledTemplates" :key="t.id" :label="`${t.name} — ${t.summary}`" :value="t.id" />
+            <el-option
+              v-for="t in enabledTemplates"
+              :key="t.id"
+              :label="`${t.name} — ${t.summary}${t.schedule_mode === 'ANNUAL_MD' && !t.in_issue_window ? '（窗外不可发）' : ''}`"
+              :value="t.id"
+              :disabled="t.schedule_mode === 'ANNUAL_MD' && t.in_issue_window === false"
+            />
           </el-select>
         </el-form-item>
         <el-form-item :label="issueQuantityLabel" required>
