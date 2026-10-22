@@ -128,6 +128,7 @@ api.interceptors.request.use((config) => {
       url.startsWith('/coupons') ||
       url.startsWith('/dashboard') ||
       url.startsWith('/audit') ||
+      url.startsWith('/reconcile') ||
       url.startsWith('/auth'))
   let token: string | null | undefined
   if (forceCustomer) {

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-21T10:49:55Z",
+  "updated_at": "2026-10-21T11:21:43Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ac36cbcab8958f59251487cb48d3081482b4e9afa4bb61d7537fdfaf501ff358",
-      "size": 181266,
-      "normalized_sha256": "ac36cbcab8958f59251487cb48d3081482b4e9afa4bb61d7537fdfaf501ff358"
+      "sha256": "708ef2e69a414ce9de1bc49630a9a586c0856fac5ea05d7349bd7fa98b86a081",
+      "size": 183043,
+      "normalized_sha256": "708ef2e69a414ce9de1bc49630a9a586c0856fac5ea05d7349bd7fa98b86a081"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -491,9 +491,9 @@
     },
     "backend/app/api/financial_ledger.py": {
       "role": "index",
-      "sha256": "d15a92f131ee352da3f467c12138f343c72ee9d34ff1e9f9abc4423d57ba8f64",
-      "size": 3015,
-      "normalized_sha256": "d15a92f131ee352da3f467c12138f343c72ee9d34ff1e9f9abc4423d57ba8f64"
+      "sha256": "9a54d38e87c914a8d53deaab035e178a2c44d8869b991d44886cc3c81a1cac1d",
+      "size": 3061,
+      "normalized_sha256": "9a54d38e87c914a8d53deaab035e178a2c44d8869b991d44886cc3c81a1cac1d"
     },
     "backend/app/api/health.py": {
       "role": "index",
@@ -623,9 +623,9 @@
     },
     "backend/app/api/products.py": {
       "role": "index",
-      "sha256": "91e24becf4946274f991cb088ae8cbce31e7e0e53a4cb29555d3dc6891c40706",
-      "size": 32121,
-      "normalized_sha256": "91e24becf4946274f991cb088ae8cbce31e7e0e53a4cb29555d3dc6891c40706"
+      "sha256": "4bff2397ebcf13e79ffd4865fd5eb67dd5e6cec208b0082431bc0c5ab9fc2527",
+      "size": 32159,
+      "normalized_sha256": "4bff2397ebcf13e79ffd4865fd5eb67dd5e6cec208b0082431bc0c5ab9fc2527"
     },
     "backend/app/api/products_categories.py": {
       "role": "index",
@@ -2161,9 +2161,9 @@
     },
     "frontend/src/api/index.ts": {
       "role": "index",
-      "sha256": "eda25089fc4862efeaa29fea6ad0f8b8ea6aeceecb7a8dc859e7a29f92a83825",
-      "size": 9672,
-      "normalized_sha256": "eda25089fc4862efeaa29fea6ad0f8b8ea6aeceecb7a8dc859e7a29f92a83825"
+      "sha256": "5ca1bc795a9423de2059c11cda88e7b64b8c2e17fda86fa2b43378ee015fc848",
+      "size": 9710,
+      "normalized_sha256": "5ca1bc795a9423de2059c11cda88e7b64b8c2e17fda86fa2b43378ee015fc848"
     },
     "frontend/src/components/CopyToStoreDialog.vue": {
       "role": "index",
@@ -2191,9 +2191,9 @@
     },
     "frontend/src/layouts/AdminLayout.vue": {
       "role": "index",
-      "sha256": "f8baee88a6759a18a1ed7952b276e1bcfbd6de4bf1d2b3fe266a1d89198aeb39",
-      "size": 13255,
-      "normalized_sha256": "f8baee88a6759a18a1ed7952b276e1bcfbd6de4bf1d2b3fe266a1d89198aeb39"
+      "sha256": "5592bd524dd039f0227af50b06815464ea18af4ccda50b9457c2eb4dde582964",
+      "size": 14031,
+      "normalized_sha256": "5592bd524dd039f0227af50b06815464ea18af4ccda50b9457c2eb4dde582964"
     },
     "frontend/src/main.ts": {
       "role": "index",
@@ -2203,9 +2203,9 @@
     },
     "frontend/src/router/index.ts": {
       "role": "index",
-      "sha256": "45438de3ad6f6a331a1d4894a34755b8c656921c7dda508db49987a73ac86ec3",
-      "size": 11129,
-      "normalized_sha256": "45438de3ad6f6a331a1d4894a34755b8c656921c7dda508db49987a73ac86ec3"
+      "sha256": "ec7704d8046a4e46bb9a4713c80c3c4d2a0b8927ecbeff56a1320fe3b606c493",
+      "size": 11677,
+      "normalized_sha256": "ec7704d8046a4e46bb9a4713c80c3c4d2a0b8927ecbeff56a1320fe3b606c493"
     },
     "frontend/src/stores/auth.ts": {
       "role": "index",
@@ -2353,21 +2353,21 @@
     },
     "frontend/src/views/Cameras.vue": {
       "role": "index",
-      "sha256": "bb218e174766b52072d6b7aea8d8e5ae1ba1ab17622f7e9a54462e82dbf5e383",
-      "size": 17019,
-      "normalized_sha256": "bb218e174766b52072d6b7aea8d8e5ae1ba1ab17622f7e9a54462e82dbf5e383"
+      "sha256": "d71cb3974288714a51b88f5bcdb903da6fdb013df845c1901f566a25bcf7008c",
+      "size": 17223,
+      "normalized_sha256": "d71cb3974288714a51b88f5bcdb903da6fdb013df845c1901f566a25bcf7008c"
     },
     "frontend/src/views/Categories.vue": {
       "role": "index",
-      "sha256": "00ff4a78c524166832fff3fc44e3a62adb0498f12edf5048267361a5445f0fa1",
-      "size": 11165,
-      "normalized_sha256": "00ff4a78c524166832fff3fc44e3a62adb0498f12edf5048267361a5445f0fa1"
+      "sha256": "c61600b8af026741077bb146650918316d3873d1f3ecf33bd466f9aba05dc61f",
+      "size": 11441,
+      "normalized_sha256": "c61600b8af026741077bb146650918316d3873d1f3ecf33bd466f9aba05dc61f"
     },
     "frontend/src/views/CategorySchedules.vue": {
       "role": "index",
-      "sha256": "4ffe5e417ce895789de5c5e8e7456a1273e3c7e724bbef6f023c23a281b9057e",
-      "size": 15335,
-      "normalized_sha256": "4ffe5e417ce895789de5c5e8e7456a1273e3c7e724bbef6f023c23a281b9057e"
+      "sha256": "343afbdbc0cf55ac27e8e1bbe266aff9634425e0e3b4d969db21248ed563eb4e",
+      "size": 16339,
+      "normalized_sha256": "343afbdbc0cf55ac27e8e1bbe266aff9634425e0e3b4d969db21248ed563eb4e"
     },
     "frontend/src/views/Coupons.vue": {
       "role": "index",
@@ -2443,9 +2443,15 @@
     },
     "frontend/src/views/Options.vue": {
       "role": "index",
-      "sha256": "1b5c2e52106df7e56fd352a761274a549fc609c53b8ccdf297a84266789d2ccd",
-      "size": 18894,
-      "normalized_sha256": "1b5c2e52106df7e56fd352a761274a549fc609c53b8ccdf297a84266789d2ccd"
+      "sha256": "4dfcfc5b20c93c3080674038f926606b2eb02728834007288934fe63e335fdfb",
+      "size": 19604,
+      "normalized_sha256": "4dfcfc5b20c93c3080674038f926606b2eb02728834007288934fe63e335fdfb"
+    },
+    "frontend/src/views/OrderArchive.vue": {
+      "role": "index",
+      "sha256": "0332b772b3c4633e86996a64f8ad5534a1bd933831c487f5f761ef3f34ba9f9d",
+      "size": 6978,
+      "normalized_sha256": "0332b772b3c4633e86996a64f8ad5534a1bd933831c487f5f761ef3f34ba9f9d"
     },
     "frontend/src/views/OrderDetail.vue": {
       "role": "index",
@@ -2458,6 +2464,12 @@
       "sha256": "ba4c150ada11464b1184b726bb27390f32becaba24eae6c1993fbfe2daf3259e",
       "size": 16064,
       "normalized_sha256": "ba4c150ada11464b1184b726bb27390f32becaba24eae6c1993fbfe2daf3259e"
+    },
+    "frontend/src/views/PaymentReconcile.vue": {
+      "role": "index",
+      "sha256": "c103002886d94f9c3a5e4c6846f65e51cf16a745a2237890b077a35685311267",
+      "size": 6511,
+      "normalized_sha256": "c103002886d94f9c3a5e4c6846f65e51cf16a745a2237890b077a35685311267"
     },
     "frontend/src/views/Payments.vue": {
       "role": "index",
@@ -2497,9 +2509,9 @@
     },
     "frontend/src/views/Products.vue": {
       "role": "index",
-      "sha256": "b7499c2f5b7712fbed549aaa86be11c1174824492c4713fb8f99c8e51cc224cc",
-      "size": 51186,
-      "normalized_sha256": "b7499c2f5b7712fbed549aaa86be11c1174824492c4713fb8f99c8e51cc224cc"
+      "sha256": "781fb89d362e723a200be65b39ab5744a338e5b305623ca844dd1a3ff58b6234",
+      "size": 51774,
+      "normalized_sha256": "781fb89d362e723a200be65b39ab5744a338e5b305623ca844dd1a3ff58b6234"
     },
     "frontend/src/views/QueueManage.vue": {
       "role": "index",
@@ -2512,6 +2524,12 @@
       "sha256": "b2253387186d7d361e23e6c69a3d2db02191146a305f55416d243092cea5042c",
       "size": 12070,
       "normalized_sha256": "b2253387186d7d361e23e6c69a3d2db02191146a305f55416d243092cea5042c"
+    },
+    "frontend/src/views/RoleDelegations.vue": {
+      "role": "index",
+      "sha256": "a3a83d6bd49982899eea8e44e515a1359395e48346d9078564b3469169d5a5c9",
+      "size": 9028,
+      "normalized_sha256": "a3a83d6bd49982899eea8e44e515a1359395e48346d9078564b3469169d5a5c9"
     },
     "frontend/src/views/RolePermissions.vue": {
       "role": "index",
@@ -2527,9 +2545,9 @@
     },
     "frontend/src/views/SocialBenefits.vue": {
       "role": "index",
-      "sha256": "c586ded1a2945406cb07aa119fc39bd32f312e4de4ab1df3a9f3cadd325728ad",
-      "size": 12476,
-      "normalized_sha256": "c586ded1a2945406cb07aa119fc39bd32f312e4de4ab1df3a9f3cadd325728ad"
+      "sha256": "0fd2ff807400ffc58bcf0817fc770489ab082041c8af281ab3274142079befd5",
+      "size": 12950,
+      "normalized_sha256": "0fd2ff807400ffc58bcf0817fc770489ab082041c8af281ab3274142079befd5"
     },
     "frontend/src/views/StoreInfo.vue": {
       "role": "index",
@@ -2539,9 +2557,9 @@
     },
     "frontend/src/views/StoreStocks.vue": {
       "role": "index",
-      "sha256": "d7ec68e87cd52347b5bf15a88a461cdfc0e4792318310136fa3ca4368fee2d11",
-      "size": 4966,
-      "normalized_sha256": "d7ec68e87cd52347b5bf15a88a461cdfc0e4792318310136fa3ca4368fee2d11"
+      "sha256": "eb99a5c42d66fcb35ad82a59a5e722df05fdda8ce80dad4bc48bf4d425b50466",
+      "size": 5323,
+      "normalized_sha256": "eb99a5c42d66fcb35ad82a59a5e722df05fdda8ce80dad4bc48bf4d425b50466"
     },
     "frontend/src/views/Tables.vue": {
       "role": "index",
@@ -2551,9 +2569,9 @@
     },
     "frontend/src/views/Users.vue": {
       "role": "index",
-      "sha256": "3234f418db61b8d13f14680a577eb32bee0b68f82aced6ebf9bfcf5acb158854",
-      "size": 10825,
-      "normalized_sha256": "cc3df2f9edc8781f80b2a8020543590fd70dfc7e6b5b8cd338380f557c09265d"
+      "sha256": "6d0ae80f2f7b94ee100e1bff973af68578d59b72015965ad6fbdb09e9d2d399d",
+      "size": 10981,
+      "normalized_sha256": "e4880ee539f4a97291483da23b77bf8cb9ddc6f2c9af71b7d7e6759a95e5e091"
     },
     "frontend/src/views/Wallet.vue": {
       "role": "index",
@@ -5398,9 +5416,9 @@
     },
     "tests/测试_权限.py": {
       "role": "observe",
-      "sha256": "c1f6c6a1f2ea745ee722efe5660b3f62b4e4380b259c03dab052e9ec27639840",
-      "size": 6912,
-      "normalized_sha256": "504a2d690d15b53b4deee000fd38fc49c6d3d0a6d07e2a381b16de37f6190a0e"
+      "sha256": "b6904e305060d6e0c85081a2a64bb59a9954c4e1216ba733ee7badab4e85b894",
+      "size": 10049,
+      "normalized_sha256": "ed7e22d5235a34ff5c019a2914f84266c5294ac5d439b768b5a2dd6c0090d627"
     },
     "tests/测试_桌台.py": {
       "role": "observe",
@@ -5752,9 +5770,9 @@
     },
     "后台操作手册.md": {
       "role": "index",
-      "sha256": "c5714d4d4b063670ecb9e05ea345f9a33584bf40f6189da45a55bb5aa7b4b0d2",
-      "size": 39876,
-      "normalized_sha256": "c5714d4d4b063670ecb9e05ea345f9a33584bf40f6189da45a55bb5aa7b4b0d2"
+      "sha256": "6d29449f2ed03ed2912aac76a9d2f8ef761a0ad1c8618bf45bfeddac1ec98bcf",
+      "size": 43329,
+      "normalized_sha256": "6d29449f2ed03ed2912aac76a9d2f8ef761a0ad1c8618bf45bfeddac1ec98bcf"
     },
     "配置检查清单.md": {
       "role": "index",

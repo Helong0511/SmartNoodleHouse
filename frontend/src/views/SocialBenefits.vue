@@ -51,7 +51,7 @@
           <el-table-column label="状态" width="90">
             <template #default="{ row }">{{ identityStatusLabel(row.status) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
+          <el-table-column v-if="canReviewSocial" label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <el-button
                 v-if="row.status === 'PENDING'"
@@ -147,12 +147,23 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import { useAuthStore } from '@/stores/auth'
 import { SOCIAL_IDENTITY } from '@/utils/labels'
 import { formatCustomerNameLines } from '@/utils/customerName'
+
+const auth = useAuthStore()
+/** 与后端 require_social_identity_manage / Dashboard.canReviewSocial 对齐 */
+const canReviewSocial = computed(
+  () =>
+    auth.isSuperAdmin
+    || auth.isStoreAdmin
+    || auth.hasPermission('customer:manage')
+    || auth.hasPermission('customer:write'),
+)
 
 const route = useRoute()
 const allowedTabs = new Set(['pending', 'rules', 'redemptions', 'stats'])
@@ -277,6 +288,10 @@ function reloadCurrent() {
 }
 
 async function review(row: any, approve: boolean) {
+  if (!canReviewSocial.value) {
+    ElMessage.warning('无权审核社会贡献认定')
+    return
+  }
   let reject_reason: string | undefined
   if (!approve) {
     const { value } = await ElMessageBox.prompt('拒绝原因', '审核', { inputPlaceholder: '请输入原因' })

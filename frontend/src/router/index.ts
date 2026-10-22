@@ -41,6 +41,9 @@ const router = createRouter({
         // 支付记录已并入订单管理 Tab；旧链接保留跳转
         { path: 'payments', redirect: { path: '/orders', query: { tab: 'payments' } } },
         { path: 'financial-ledger', component: () => import('@/views/FinancialLedger.vue'), meta: { title: '财务账本', permission: 'payment:read', denyCashier: true } },
+        { path: 'payment-reconcile', component: () => import('@/views/PaymentReconcile.vue'), meta: { title: '支付对账', anyPermission: ['reconcile:read', 'reconcile:manage'], denyCashier: true } },
+        { path: 'order-archive', component: () => import('@/views/OrderArchive.vue'), meta: { title: '订单归档', permission: 'archive:manage', denyCashier: true } },
+        { path: 'role-delegations', component: () => import('@/views/RoleDelegations.vue'), meta: { title: '临时授权', permission: 'role:delegate', denyCashier: true } },
         { path: 'recommend-report', component: () => import('@/views/RecommendReport.vue'), meta: { title: '推荐效果', permission: 'order:read', denyCashier: true } },
         { path: 'product-feedbacks', component: () => import('@/views/ProductFeedbacks.vue'), meta: { title: '顾客评价', permission: 'order:read', denyCashier: true } },
         { path: 'cameras', component: () => import('@/views/Cameras.vue'), meta: { title: '摄像头', permission: 'camera:read', denyCashier: true } },

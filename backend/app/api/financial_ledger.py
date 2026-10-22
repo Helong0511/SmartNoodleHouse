@@ -1,4 +1,4 @@
-"""财务账本只读查询（对账明细）。"""
+"""财务账本只读查询（对账明细；权限码 payment:read，无 financial:read）。"""
 from __future__ import annotations
 
 from datetime import datetime

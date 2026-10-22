@@ -16,6 +16,7 @@
           <el-menu-item v-if="showStoreInfo" index="/store-info">门店信息</el-menu-item>
           <el-menu-item v-if="showTables" index="/tables">桌台管理</el-menu-item>
           <el-menu-item v-if="showUsers" index="/users">员工管理</el-menu-item>
+          <el-menu-item v-if="showDelegations" index="/role-delegations">临时授权</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showCatalog" index="g-catalog">
@@ -49,6 +50,8 @@
           <el-menu-item v-if="showOrders" index="/recommend-report">推荐效果</el-menu-item>
           <el-menu-item v-if="showOrders" index="/product-feedbacks">顾客评价</el-menu-item>
           <el-menu-item v-if="showPayments" index="/financial-ledger">财务账本</el-menu-item>
+          <el-menu-item v-if="showReconcile" index="/payment-reconcile">支付对账</el-menu-item>
+          <el-menu-item v-if="showArchive" index="/order-archive">订单归档</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-settlement">收银日结</el-menu-item>
           <el-menu-item v-if="showSettlement" index="/pos-refunds">退款审批</el-menu-item>
         </el-sub-menu>
@@ -113,6 +116,13 @@ const showOrders = computed(() => auth.hasPermission('order:read') && notCashier
 const showQueue = computed(() => auth.hasPermission('table:manage') && notCashier.value)
 const showInvoices = computed(() => auth.hasPermission('invoice:manage') && notCashier.value)
 const showPayments = computed(() => auth.hasPermission('payment:read') && notCashier.value)
+const showReconcile = computed(
+  () =>
+    (auth.hasPermission('reconcile:read') || auth.hasPermission('reconcile:manage'))
+    && notCashier.value,
+)
+const showArchive = computed(() => auth.hasPermission('archive:manage') && notCashier.value)
+const showDelegations = computed(() => auth.hasPermission('role:delegate') && notCashier.value)
 const showSettlement = computed(() => auth.canManageSettlement)
 const showCatalog = computed(() => auth.hasPermission('product:read') && notCashier.value)
 const showCustomers = computed(() => auth.hasPermission('customer:read') && notCashier.value)
@@ -134,6 +144,7 @@ const showStoreInfo = computed(
 const showStore = computed(() =>
   showTables.value
   || showUsers.value
+  || showDelegations.value
   || showStoreInfo.value,
 )
 const showDelivery = computed(
@@ -154,6 +165,8 @@ const showOps = computed(
     || showQueue.value
     || showInvoices.value
     || showPayments.value
+    || showReconcile.value
+    || showArchive.value
     || showSettlement.value,
 )
 
@@ -166,7 +179,7 @@ const openGroup = computed(() => {
   const p = activeMenu.value
   if (p === '/store-info') return 'g-store'
   if (p.startsWith('/delivery')) return 'g-delivery'
-  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/financial-ledger', '/pos-settlement', '/pos-refunds', '/recommend-report', '/product-feedbacks'].includes(p)) {
+  if (['/pos', '/kitchen', '/orders', '/queue-manage', '/invoices', '/financial-ledger', '/payment-reconcile', '/order-archive', '/pos-settlement', '/pos-refunds', '/recommend-report', '/product-feedbacks'].includes(p)) {
     return 'g-ops'
   }
   if (['/products', '/categories', '/category-schedules', '/options', '/store-stocks'].includes(p)) return 'g-catalog'
@@ -174,7 +187,7 @@ const openGroup = computed(() => {
     ['/customers', '/member-levels', '/coupons', '/wallet', '/social-benefits'].includes(p)
     || p.startsWith('/marketing/')
   ) return 'g-member'
-  if (['/tables', '/users', '/store-info'].includes(p)) return 'g-store'
+  if (['/tables', '/users', '/role-delegations', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
   if (['/settings', '/audit-logs', '/role-permissions'].includes(p)) return 'g-system'
   return ''

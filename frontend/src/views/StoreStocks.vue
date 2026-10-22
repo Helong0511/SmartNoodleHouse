@@ -20,12 +20,12 @@
       <el-table-column prop="brand_stock" label="默认库存" width="100" />
       <el-table-column label="本店库存" width="140">
         <template #default="{ row }">
-          <el-input-number v-model="row.stock" :min="0" :max="999999" size="small" />
+          <el-input-number v-model="row.stock" :min="0" :max="999999" size="small" :disabled="!canUpdate" />
         </template>
       </el-table-column>
       <el-table-column label="本店在售" width="100">
         <template #default="{ row }">
-          <el-switch v-model="row.status" :active-value="1" :inactive-value="0" />
+          <el-switch v-model="row.status" :active-value="1" :inactive-value="0" :disabled="!canUpdate" />
         </template>
       </el-table-column>
       <el-table-column label="覆盖" width="80">
@@ -35,7 +35,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column v-if="canUpdate" label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="saveRow(row)">保存</el-button>
           <el-button link type="danger" :disabled="!row.has_override" @click="clearRow(row)">清除</el-button>
@@ -46,13 +46,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const canUpdate = computed(() => auth.isSuperAdmin || auth.hasPermission('product:update'))
 const loading = ref(false)
 const { storeOptions: stores, loadStores: fetchStores } = useStoreOptions({ rethrow: true, clearOnError: false })
 const storeId = ref<number | undefined>()
@@ -104,6 +105,10 @@ async function load() {
 }
 
 async function saveRow(row: any) {
+  if (!canUpdate.value) {
+    ElMessage.warning('缺少权限：product:update')
+    return
+  }
   try {
     await api.put(`/store-stocks/${row.product_id}`, {
       store_id: storeId.value,
@@ -118,6 +123,10 @@ async function saveRow(row: any) {
 }
 
 async function clearRow(row: any) {
+  if (!canUpdate.value) {
+    ElMessage.warning('缺少权限：product:update')
+    return
+  }
   try {
     await api.delete(`/store-stocks/${row.product_id}`, { params: { store_id: storeId.value } })
     ElMessage.success('已清除覆盖')

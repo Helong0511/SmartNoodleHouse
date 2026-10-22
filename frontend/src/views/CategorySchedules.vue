@@ -6,8 +6,15 @@
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
-      <el-button type="primary" :disabled="!effectiveStoreId" @click="openForm()">新增方案</el-button>
-      <el-button type="success" plain :disabled="!effectiveStoreId" :loading="autoRefreshing" @click="autoRefreshStore">
+      <el-button v-if="canCreate" type="primary" :disabled="!effectiveStoreId" @click="openForm()">新增方案</el-button>
+      <el-button
+        v-if="canUpdate"
+        type="success"
+        plain
+        :disabled="!effectiveStoreId"
+        :loading="autoRefreshing"
+        @click="autoRefreshStore"
+      >
         按销量刷新自动方案
       </el-button>
       <el-button @click="load">刷新</el-button>
@@ -49,7 +56,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="260">
+      <el-table-column v-if="canUpdate" label="操作" width="260">
         <template #default="{ row }">
           <el-button link type="primary" @click="openForm(row)">编辑</el-button>
           <el-button link type="success" :loading="autoRefreshingId === row.id" @click="autoRefreshOne(row)">
@@ -135,6 +142,8 @@ import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const canCreate = computed(() => auth.isSuperAdmin || auth.hasPermission('product:create'))
+const canUpdate = computed(() => auth.isSuperAdmin || auth.hasPermission('product:update'))
 const loading = ref(false)
 const saving = ref(false)
 const autoRefreshing = ref(false)
@@ -253,6 +262,10 @@ async function loadPreview() {
 }
 
 function openForm(row?: any) {
+  if (row ? !canUpdate.value : !canCreate.value) {
+    ElMessage.warning(row ? '缺少权限：product:update' : '缺少权限：product:create')
+    return
+  }
   const sid = row?.store_id || effectiveStoreId.value || auth.user?.store_id
   if (!sid) {
     ElMessage.warning('请先选择门店')
@@ -284,6 +297,10 @@ function onFormStoreChange() {
 }
 
 async function save() {
+  if (form.id ? !canUpdate.value : !canCreate.value) {
+    ElMessage.warning(form.id ? '缺少权限：product:update' : '缺少权限：product:create')
+    return
+  }
   if (!form.name.trim()) {
     ElMessage.warning('请填写方案名称')
     return
@@ -323,12 +340,20 @@ async function save() {
 }
 
 async function toggleStatus(row: any) {
+  if (!canUpdate.value) {
+    ElMessage.warning('缺少权限：product:update')
+    return
+  }
   await api.put(`/category-schedules/${row.id}`, { status: row.status === 1 ? 0 : 1 })
   ElMessage.success('已更新')
   await load()
 }
 
 async function autoRefreshOne(row: any) {
+  if (!canUpdate.value) {
+    ElMessage.warning('缺少权限：product:update')
+    return
+  }
   autoRefreshingId.value = row.id
   try {
     const res: any = await api.post(`/category-schedules/${row.id}/auto-refresh`)
@@ -345,6 +370,10 @@ async function autoRefreshOne(row: any) {
 }
 
 async function autoRefreshStore() {
+  if (!canUpdate.value) {
+    ElMessage.warning('缺少权限：product:update')
+    return
+  }
   const sid = effectiveStoreId.value
   if (!sid) {
     ElMessage.warning('请先选择门店')
@@ -365,6 +394,10 @@ async function autoRefreshStore() {
 }
 
 async function remove(row: any) {
+  if (!canUpdate.value) {
+    ElMessage.warning('缺少权限：product:update')
+    return
+  }
   await ElMessageBox.confirm(`确定删除方案「${row.name}」？`, '删除确认', { type: 'warning' })
   await api.delete(`/category-schedules/${row.id}`)
   ElMessage.success('已删除')

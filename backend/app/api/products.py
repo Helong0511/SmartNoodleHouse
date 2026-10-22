@@ -347,7 +347,7 @@ async def list_products(
         items = filter_visible_product_dicts(
             items, today=today_beijing(), is_birthday_today=is_bday
         )
-    # 公开菜单不带成本价；员工列表按字段级权限裁剪
+    # 公开菜单不带成本价；员工列表按字段级权限裁剪（cost_price 仅 product:cost:read）
     if staff is None:
         for it in items:
             it.pop("cost_price", None)

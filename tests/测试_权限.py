@@ -148,6 +148,12 @@ def test_store_admin_must_not_have_platform_only_perms():
     assert not (EXPECTED_ROLE_PERMS["STORE_ADMIN"] & forbidden)
 
 
+def test_store_admin_can_social_review_via_customer_write():
+    """社会贡献审核旁路：店长角色或 customer:write（与 require_social_identity_manage 对齐）。"""
+    assert "customer:write" in EXPECTED_ROLE_PERMS["STORE_ADMIN"]
+    assert "customer:manage" not in EXPECTED_ROLE_PERMS["STORE_ADMIN"]
+
+
 def test_cashier_kitchen_operator_no_refund():
     for role in ("CASHIER", "KITCHEN", "OPERATOR"):
         assert "payment:refund" not in EXPECTED_ROLE_PERMS[role]
@@ -207,7 +213,68 @@ async def test_require_permission_rejects_missing_code(db_session):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 # 排队管理 API 要 table:manage；运营角色没有
                 res = await ac.get("/api/admin/queue/today", params={"store_id": 1})
+                assert res.status_code == 403, f"运营访问排队应 403，实际 {res.status_code}: {res.text}"
+
+                # 支付对账批次要 reconcile:read
+                res_rec = await ac.get("/api/reconcile/payments/batches")
+                assert res_rec.status_code == 403, f"运营访问对账批次应 403，实际 {res_rec.status_code}"
+
+                # 冷归档执行要 archive:manage
+                res_arc = await ac.post(
+                    "/api/reconcile/orders/archive",
+                    json={"older_than_days": 365, "limit": 10, "dry_run": True},
+                )
+                assert res_arc.status_code == 403, f"运营执行归档应 403，实际 {res_arc.status_code}"
+
+                # 临时授权列表要 role:delegate
+                res_del = await ac.get("/api/users/delegations")
+                assert res_del.status_code == 403, f"运营访问临时授权应 403，实际 {res_del.status_code}"
+
+                # 运营有 order:read，可查归档列表（只读）
+                res_list = await ac.get("/api/reconcile/orders/archived", params={"limit": 5})
+                assert res_list.status_code == 200, f"运营只读归档列表应 200，实际 {res_list.status_code}"
     finally:
         app.dependency_overrides.clear()
 
-    assert res.status_code == 403, f"运营访问排队应 403，实际 {res.status_code}: {res.text}"
+
+@pytest.mark.asyncio
+async def test_store_admin_can_access_reconcile_archive_delegate(db_session):
+    """店长种子权限可访问对账/归档/临时授权只读接口。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.api.deps import get_current_user, get_db
+    from app.main import app
+
+    role = SimpleNamespace(code="STORE_ADMIN")
+    user = SimpleNamespace(id=91002, role_id=2, role=role, store_id=1, status=1, token_version=0)
+
+    async def override_db():
+        yield db_session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        with patch(
+            "app.api.deps.get_user_permissions",
+            AsyncMock(return_value=set(EXPECTED_ROLE_PERMS["STORE_ADMIN"])),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                res_rec = await ac.get("/api/reconcile/payments/batches")
+                assert res_rec.status_code == 200, res_rec.text
+
+                res_arc = await ac.post(
+                    "/api/reconcile/orders/archive",
+                    json={"older_than_days": 365, "limit": 10, "dry_run": True},
+                )
+                assert res_arc.status_code == 200, res_arc.text
+
+                res_del = await ac.get("/api/users/delegations")
+                assert res_del.status_code == 200, res_del.text
+    finally:
+        app.dependency_overrides.clear()
