@@ -134,7 +134,8 @@ async def test_issue_quota_ok_atomic_decrement():
         db, 10, 1, quantity=2, client_request_id="REQ-001"
     )
     assert len(issued) == 2
-    assert all(cc.client_request_id == "REQ-001" for cc in issued)
+    # quantity>1 时 UNIQUE 要求分键 REQ-001:1 / REQ-001:2，禁止共用同一键
+    assert [cc.client_request_id for cc in issued] == ["REQ-001:1", "REQ-001:2"]
 
 
 @pytest.mark.asyncio

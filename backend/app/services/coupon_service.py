@@ -445,6 +445,24 @@ class CouponService:
         return payload
 
     @staticmethod
+    def _unit_client_request_ids(req_key: str, qty: int) -> list[str]:
+        """为每张券生成互不冲突的幂等键。
+
+        customer_coupons.client_request_id 有 UNIQUE 约束：quantity>1 时不能共用同一键。
+        qty==1 保持裸键（兼容营销任务 / 欢迎礼包 / 里程碑既有键）；
+        qty>1 使用 ``{req_key}:{1..n}``，截断保证 ≤128。
+        """
+        q = max(1, int(qty))
+        base = (req_key or "").strip()[:128]
+        if q == 1:
+            return [base]
+        keys: list[str] = []
+        for i in range(1, q + 1):
+            suffix = f":{i}"
+            keys.append((base[: max(1, 128 - len(suffix))] + suffix)[:128])
+        return keys
+
+    @staticmethod
     async def issue_by_template_id(
         db: AsyncSession,
         customer_id: int,
@@ -479,16 +497,26 @@ class CouponService:
         prefix = "VP" if is_voucher else "CP"
         expires = now_local() + timedelta(days=int(tmpl.valid_days or 30))
 
-        # P0-6: 客户端幂等键 — 同 key 重复请求返回已有行
+        # P0-6: 客户端幂等键 — 同 key 重复请求返回已有行（多张用 :1..n 分键）
         req_key = (client_request_id or "").strip()[:128] if client_request_id else None
+        unit_keys: list[str | None] = (
+            CouponService._unit_client_request_ids(req_key, qty) if req_key else [None] * qty
+        )
         if req_key:
             existing = (
                 await db.execute(
-                    select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
+                    select(CustomerCoupon).where(
+                        CustomerCoupon.client_request_id.in_([k for k in unit_keys if k])
+                    )
                 )
             ).scalars().all()
             if existing:
-                return list(existing)
+                by_key = {str(c.client_request_id): c for c in existing if c.client_request_id}
+                ordered = [by_key[k] for k in unit_keys if k and k in by_key]
+                if len(ordered) >= qty:
+                    return ordered[:qty]
+                # 半成品（崩溃残留）：不继续扣库存，避免超发；调用方重试即可
+                raise AppException(50020, "发券进行中或不完整，请稍后重试")
 
         # P0-6: 原子扣减库存（remaining IS NULL = 不限量，跳过扣减）
         remaining = getattr(tmpl, "remaining", None)
@@ -510,17 +538,39 @@ class CouponService:
         if effective_store_id is None and getattr(tmpl, "store_id", None) is not None:
             effective_store_id = int(tmpl.store_id)
 
+        async def _refund_quota() -> None:
+            if remaining is not None:
+                await db.execute(
+                    sa_update(CouponTemplate)
+                    .where(CouponTemplate.id == tmpl.id)
+                    .values(remaining=CouponTemplate.remaining + qty)
+                )
+
+        async def _reload_by_keys() -> list[CustomerCoupon]:
+            if not req_key:
+                return []
+            rows = (
+                await db.execute(
+                    select(CustomerCoupon).where(
+                        CustomerCoupon.client_request_id.in_([k for k in unit_keys if k])
+                    )
+                )
+            ).scalars().all()
+            by_key = {str(c.client_request_id): c for c in rows if c.client_request_id}
+            return [by_key[k] for k in unit_keys if k and k in by_key]
+
         issued: list[CustomerCoupon] = []
         try:
+            # SAVEPOINT：UNIQUE 冲突只回滚发券插入，不整事务 rollback（避免抹掉调用方其它写入）
             async with db.begin_nested():
-                for _ in range(qty):
+                for uk in unit_keys:
                     cc = CustomerCoupon(
                         customer_id=customer.id,
                         template_id=tmpl.id,
                         coupon_no=generate_no(prefix),
                         status="AVAILABLE",
                         expires_at=expires,
-                        client_request_id=req_key if req_key else None,
+                        client_request_id=uk,
                         issued_by_user_id=int(issued_by_user_id) if issued_by_user_id else None,
                         issued_at_store_id=int(effective_store_id) if effective_store_id else None,
                     )
@@ -530,24 +580,15 @@ class CouponService:
         except IntegrityError as exc:
             msg = str(getattr(exc, "orig", exc)).upper()
             if "CLIENT_REQUEST_ID" in msg or ("UNIQUE" in msg and req_key):
-                # 幂等键冲突：回查已发行记录
-                await db.rollback()
-                existing = (
-                    await db.execute(
-                        select(CustomerCoupon).where(CustomerCoupon.client_request_id == req_key)
-                    )
-                ).scalars().all()
-                if existing:
-                    return list(existing)
+                # 并发赢家已写入：回补本请求扣减的库存，再返回已有行
+                await _refund_quota()
+                existing = await _reload_by_keys()
+                if len(existing) >= qty:
+                    return existing[:qty]
                 raise AppException(50020, "发券冲突，请重试") from exc
             if "UNIQUE" in msg or "DUPLICATE" in msg:
-                # coupon_no 冲突：若已扣库存则需回补
-                if remaining is not None:
-                    await db.execute(
-                        sa_update(CouponTemplate)
-                        .where(CouponTemplate.id == tmpl.id)
-                        .values(remaining=CouponTemplate.remaining + qty)
-                    )
+                # coupon_no 冲突：回补库存后让调用方重试
+                await _refund_quota()
                 raise AppException(50020, "发券冲突，请重试") from exc
             raise
         return issued
