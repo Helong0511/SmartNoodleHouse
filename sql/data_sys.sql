@@ -606,6 +606,7 @@ UPDATE `member_levels` SET `discount_rate` = 0.92 WHERE `name` = '金卡会员' 
 UPDATE `member_levels` SET `discount_rate` = 0.90 WHERE `name` = '钻石会员' AND `discount_rate` <> 0.90;
 -- 五、券模板（VOUCHER 一次性核销；应付须≥面额）
 -- 总部新客券名须与系统参数 / 总店 welcome_coupon_name 一致（「新客满20减3」）
+-- 「新客满20减3」仅用于注册欢迎 / NEW_MEMBER 活动；其它营销活动须用下方场景专属模板，勿复用本名称
 -- 废弃旧模板「新客满30减5」：停用，避免误选；历史已发券仍可核销
 UPDATE `coupon_templates`
 SET `status` = 0
@@ -835,6 +836,49 @@ WHERE NOT EXISTS (
         FROM `coupon_templates`
         WHERE `name` = '爱心日免费豆浆'
     );
+-- 五-A3、营销场景轻券（面额同「满20减3」，名称按活动区分，避免顾客看到「新客」误导）
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '会员日满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '会员日满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '催充回店满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '催充回店满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '入会周年满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '入会周年满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '春节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '春节满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '妇女节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '妇女节满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '儿童节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '儿童节满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '教师节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '教师节满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '重阳满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '重阳满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '建军节满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '建军节满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '中秋满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '中秋满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '元宵满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '元宵满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '端午满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '端午满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '国庆满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '国庆满20减3');
+INSERT INTO `coupon_templates` (`name`, `coupon_type`, `discount_value`, `min_order_amount`, `valid_days`)
+SELECT '冬至满20减3', 'FIXED', 3.00, 20.00, 30 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `coupon_templates` WHERE `name` = '冬至满20减3');
 -- 五-B、储值档位（平台总部档，store_id=NULL；射洪友好：充50/100/200）
 -- 纠偏：历史种子曾误写 store_id=1。若总部档尚缺且全库仅有一条同名门店档，则升为总部。
 UPDATE `recharge_packages` AS `rp`

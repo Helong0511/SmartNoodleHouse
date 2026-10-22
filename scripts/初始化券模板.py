@@ -21,9 +21,28 @@ from app.models import CouponTemplate
 
 TEMPLATES = [
     # name, coupon_type, discount_value, min_order_amount, valid_days, status
+    # 「新客满20减3」仅注册欢迎 / NEW_MEMBER；其它营销场景用专属名称
     ("新客满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
     ("满50享打9折", "PERCENT", Decimal("0.90"), Decimal("50.00"), 30, 1),
     ("10元代金券", "VOUCHER", Decimal("10.00"), Decimal("0.00"), 30, 1),
+    ("沉睡唤醒满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("沉睡唤醒满15减5", "FIXED", Decimal("5.00"), Decimal("15.00"), 30, 1),
+    ("生日免费加蛋", "FIXED", Decimal("3.00"), Decimal("0.00"), 7, 1),
+    ("爱心日免费豆浆", "VOUCHER", Decimal("3.00"), Decimal("0.00"), 1, 1),
+    ("会员日满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("催充回店满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("入会周年满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("春节满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("妇女节满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("儿童节满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("教师节满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("重阳满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("建军节满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("中秋满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("元宵满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("端午满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("国庆满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
+    ("冬至满20减3", "FIXED", Decimal("3.00"), Decimal("20.00"), 30, 1),
 ]
 
 

@@ -644,7 +644,7 @@ SELECT NULL, 'member_day', '会员日·老客回访', 'MEMBER_DAY', 'DRAFT',
        '射洪会员日：高积分活跃轻券满20减3；加权招牌肠旺/杂酱',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '会员日满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'champions'
   AND NOT EXISTS (
@@ -666,7 +666,7 @@ SELECT NULL, 'low_balance_boost', '低余额催充', 'MEMBER_DAY', 'DRAFT',
        '余额不足20：轻券满20减3催回店；配储值档；勿用满50折',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '催充回店满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'low_balance'
   AND NOT EXISTS (
@@ -710,7 +710,7 @@ SELECT NULL, 'member_anniversary_gift', '入会周年·感谢陪伴', 'MEMBER_AN
        '仅未填生日且今日为入会周年；勿绑全体。发布后保持 RUNNING，调度每日补圈（幂等 Y年）；有生日走 birthday_today',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '入会周年满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'member_anniversary_today'
   AND NOT EXISTS (
@@ -754,7 +754,7 @@ SELECT NULL, 'festival_spring', '春节·回家吃碗家乡面', 'FESTIVAL', 'DR
        '射洪返乡：仅春节窗口发布；客单约8～15用满20减3（勿10元普发）；加权肠旺/豌杂',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '春节满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -776,7 +776,7 @@ SELECT NULL, 'festival_mother', '妇女节/母亲节·有温度的甜', 'FESTIVA
        '客单友好满20减3（勿用满50折）；加权红糖小汤圆/汤圆荷包蛋；排期妇女节或母亲节',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '妇女节满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -798,7 +798,7 @@ SELECT NULL, 'festival_children', '儿童节·小份快乐', 'FESTIVAL', 'DRAFT'
        '无儿童身份字段故可全体轻券；加权抄手/香葱包；勿用大额代金',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '儿童节满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -820,7 +820,7 @@ SELECT NULL, 'festival_teacher', '教师节·感念师恩', 'FESTIVAL', 'DRAFT',
        '仅已认定教师；满20减3贴合客单；加权招牌肠旺面；POS公益折与券互斥',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '教师节满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_teacher'
   AND NOT EXISTS (
@@ -842,7 +842,7 @@ SELECT NULL, 'festival_chongyang', '重阳·长寿面', 'FESTIVAL', 'DRAFT',
        '仅已认定长者；满20减3贴合客单（勿满50折）；加权蹄花面/汤圆荷包蛋',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '重阳满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_elder'
   AND NOT EXISTS (
@@ -864,7 +864,7 @@ SELECT NULL, 'festival_army_day', '八一建军节·致敬军人', 'FESTIVAL', '
        '仅已认定退役军人；满20减3贴合客单；加权招牌肠旺面；与POS公益折互斥',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '建军节满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_veteran'
   AND NOT EXISTS (
@@ -886,7 +886,7 @@ SELECT NULL, 'festival_mid_autumn', '中秋·团圆甜一口', 'FESTIVAL', 'DRAF
        '川味中秋偏甜品汤圆；轻券满20减3；仅中秋窗口发布',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '中秋满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -908,7 +908,7 @@ SELECT NULL, 'festival_lantern', '元宵·汤圆团圆', 'FESTIVAL', 'DRAFT',
        '川味元宵吃汤圆；轻券满20减3；短窗；加权红糖小汤圆/汤圆荷包蛋',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '元宵满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -930,7 +930,7 @@ SELECT NULL, 'festival_duanwu', '端午·咸鲜一碗', 'FESTIVAL', 'DRAFT',
        '川北端午偏咸鲜面食；轻券满20减3；加权肠旺/抄手（无粽SKU勿硬推）',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '端午满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -952,7 +952,7 @@ SELECT NULL, 'festival_national', '国庆·家乡面畅吃', 'FESTIVAL', 'DRAFT'
        '国庆返乡轻券满20减3（勿10元普发）；加权招牌肠旺/豌杂/杂酱；控周频',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '国庆满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -974,7 +974,7 @@ SELECT NULL, 'timeslot_dongzhi', '冬至·饺/抄手节', 'TIME_SLOT', 'DRAFT',
        '川北冬至吃饺/抄手；轻券满20减3（勿10元普发）；加权抄手',
        NULL, `u`.`id`
 FROM `customer_segments` `seg`
-JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+JOIN `coupon_templates` `ct` ON `ct`.`name` = '冬至满20减3'
 LEFT JOIN `users` `u` ON `u`.`username` = 'admin'
 WHERE `seg`.`store_id` IS NULL AND `seg`.`code` = 'all_members'
   AND NOT EXISTS (
@@ -1019,7 +1019,7 @@ WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'birthday_egg';
 UPDATE `marketing_campaigns` `mc`
 INNER JOIN `customer_segments` `seg`
         ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_teacher'
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '教师节满20减3'
 SET `mc`.`segment_id` = `seg`.`id`,
     `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
@@ -1033,7 +1033,7 @@ WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_teacher';
 UPDATE `marketing_campaigns` `mc`
 INNER JOIN `customer_segments` `seg`
         ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_elder'
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '重阳满20减3'
 SET `mc`.`segment_id` = `seg`.`id`,
     `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
@@ -1047,7 +1047,7 @@ WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_chongyang';
 UPDATE `marketing_campaigns` `mc`
 INNER JOIN `customer_segments` `seg`
         ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'social_veteran'
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '建军节满20减3'
 SET `mc`.`segment_id` = `seg`.`id`,
     `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
@@ -1070,9 +1070,9 @@ SET `mc`.`segment_id` = `seg`.`id`,
     `mc`.`remark` = '仅环卫身份；菜单暂无豆浆SKU，3元代金可当面兑饮/抵餐；加权早餐包子汤圆。与POS公益折互斥'
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'social_sanitation_day';
 
--- 射洪客单优化：会员日/妇女节/儿童节/冬至 → 轻券满20减3 + 周频1 + 菜单加权
+-- 射洪客单优化：各活动绑场景专属「满20减3」模板（勿复用「新客满20减3」）+ 周频1 + 菜单加权
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '会员日满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 800.00,
@@ -1084,7 +1084,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'member_day';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '妇女节满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 600.00,
@@ -1096,7 +1096,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_mother';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '儿童节满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 400.00,
@@ -1108,7 +1108,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_children';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '冬至满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 500.00,
@@ -1120,7 +1120,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'timeslot_dongzhi';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '春节满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 1500.00,
@@ -1132,7 +1132,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_spring';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '元宵满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 500.00,
@@ -1144,7 +1144,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_lantern';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '端午满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 500.00,
@@ -1156,7 +1156,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_duanwu';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '国庆满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 1200.00,
@@ -1168,7 +1168,7 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_national';
 
 UPDATE `marketing_campaigns` `mc`
-INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '催充回店满20减3'
 SET `mc`.`coupon_template_id` = `ct`.`id`,
     `mc`.`weekly_cap_override` = 1,
     `mc`.`budget_cap` = 400.00,
@@ -1178,6 +1178,47 @@ SET `mc`.`coupon_template_id` = `ct`.`id`,
     ),
     `mc`.`remark` = '余额不足20：轻券满20减3催回店；配储值档；勿用满50折'
 WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'low_balance_boost';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '中秋满20减3'
+SET `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`budget_cap` = 500.00,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-TangYuan-HongTangXiaoTangYuan','SH01-TangYuan-TangYuanHeBaoDan')
+    ),
+    `mc`.`remark` = '川味中秋偏甜品汤圆；轻券满20减3；仅中秋窗口发布'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'festival_mid_autumn';
+
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'member_anniversary_today'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '入会周年满20减3'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')
+    ),
+    `mc`.`remark` = '仅未填生日且今日为入会周年；勿绑全体。发布后保持 RUNNING，调度每日补圈（幂等 Y年）；有生日走 birthday_today'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'member_anniversary_gift';
+
+-- 新客欢迎：仅绑「新客满20减3」（勿被其它活动模板覆盖）
+UPDATE `marketing_campaigns` `mc`
+INNER JOIN `customer_segments` `seg`
+        ON `seg`.`store_id` IS NULL AND `seg`.`code` = 'new_member'
+INNER JOIN `coupon_templates` `ct` ON `ct`.`name` = '新客满20减3'
+SET `mc`.`segment_id` = `seg`.`id`,
+    `mc`.`coupon_template_id` = `ct`.`id`,
+    `mc`.`weekly_cap_override` = 1,
+    `mc`.`boost_product_ids` = (
+        SELECT JSON_ARRAYAGG(`p`.`id`) FROM `products` `p`
+         WHERE `p`.`product_no` IN ('SH01-ZhaoPaiMian-ChangWangMian')
+    ),
+    `mc`.`remark` = '开卡欢迎；周频1；系统欢迎券与营销勿重复高频发；券名仅新客可见'
+WHERE `mc`.`store_id` IS NULL AND `mc`.`code` = 'new_member_welcome';
 
 -- 唤醒/新客：周频1 + 招牌加权，避免与节日同周叠发
 UPDATE `marketing_campaigns` `mc`

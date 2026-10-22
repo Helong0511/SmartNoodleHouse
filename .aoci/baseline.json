@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T03:23:44Z",
+  "updated_at": "2026-10-22T04:38:00Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "31d97259d0a46e151b9bd5a41c034691c455eb6c5942bfa2b27e358eb8e92e94",
-      "size": 185345,
-      "normalized_sha256": "31d97259d0a46e151b9bd5a41c034691c455eb6c5942bfa2b27e358eb8e92e94"
+      "sha256": "3050a1cebd9d019af9d311c5801c559f0004198e01d4191e6e4d1ec7bcf62bcf",
+      "size": 185603,
+      "normalized_sha256": "3050a1cebd9d019af9d311c5801c559f0004198e01d4191e6e4d1ec7bcf62bcf"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1427,9 +1427,9 @@
     },
     "backend/app/services/marketing_service.py": {
       "role": "index",
-      "sha256": "0d90d5a0154a936d7f3ce0ee718c5680b75feeb4f7b0ab30ac360c855fbb17ec",
-      "size": 53291,
-      "normalized_sha256": "0d90d5a0154a936d7f3ce0ee718c5680b75feeb4f7b0ab30ac360c855fbb17ec"
+      "sha256": "16497009061a4540fec06b99f8f7278c1664b5d2a104ea785e21fedf23f6ddcd",
+      "size": 58643,
+      "normalized_sha256": "16497009061a4540fec06b99f8f7278c1664b5d2a104ea785e21fedf23f6ddcd"
     },
     "backend/app/services/menu_copy_service.py": {
       "role": "index",
@@ -1997,9 +1997,9 @@
     },
     "docs/射洪肠旺面_营销策划与CRM管理系统项目实施方案_Cursor开发版.md": {
       "role": "index",
-      "sha256": "6d1a639b8a0bc86e5ab4a3117684efa629f97bf86e28ba0575c7c818491dc972",
-      "size": 46429,
-      "normalized_sha256": "6d1a639b8a0bc86e5ab4a3117684efa629f97bf86e28ba0575c7c818491dc972"
+      "sha256": "871288c54dfe37159733e5da053b556775b6e29173406ed97288d5d67497d3db",
+      "size": 46534,
+      "normalized_sha256": "871288c54dfe37159733e5da053b556775b6e29173406ed97288d5d67497d3db"
     },
     "docs/小程序上架检查清单.md": {
       "role": "index",
@@ -2299,9 +2299,9 @@
     },
     "frontend/src/utils/marketingHelp.ts": {
       "role": "index",
-      "sha256": "374b39033da8c9ef8f1313c1383d86e1261f4af7c9717163aa88131d686eae95",
-      "size": 9212,
-      "normalized_sha256": "374b39033da8c9ef8f1313c1383d86e1261f4af7c9717163aa88131d686eae95"
+      "sha256": "7d332ffb7987ff8c86f49b440cc7f7d6973c1f71eb164fbc424c91fae0f392e9",
+      "size": 9456,
+      "normalized_sha256": "7d332ffb7987ff8c86f49b440cc7f7d6973c1f71eb164fbc424c91fae0f392e9"
     },
     "frontend/src/utils/media.ts": {
       "role": "index",
@@ -2437,9 +2437,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "215cff27a92399710c1d26784ad8f2000666dad6b064616e7d966ced6f9d5fa4",
-      "size": 46880,
-      "normalized_sha256": "215cff27a92399710c1d26784ad8f2000666dad6b064616e7d966ced6f9d5fa4"
+      "sha256": "4a45efa31c284ee20bcd28dec931dac40441be79fcae58642fba129fd99fcdb6",
+      "size": 47471,
+      "normalized_sha256": "4a45efa31c284ee20bcd28dec931dac40441be79fcae58642fba129fd99fcdb6"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",
@@ -4217,9 +4217,9 @@
     },
     "scripts/初始化券模板.py": {
       "role": "index",
-      "sha256": "86263d3e77742261529165b561e22f54fc459ef8395a131213c7c3435757c0da",
-      "size": 2382,
-      "normalized_sha256": "2c4f3ceb9aa9547c2b7bace01dd9be93bd889ec2607ad7d18d54db8ee12a54e9"
+      "sha256": "a30bfaaee815cc5dbf0c85ee0233cec15fa24d09664b946c35668e34e8cd659a",
+      "size": 3907,
+      "normalized_sha256": "ead077e1d2b995c6d276fbf1370f3780dd657672ce71321cb08eeef07693186c"
     },
     "scripts/初始化权限.py": {
       "role": "index",
@@ -4343,15 +4343,15 @@
     },
     "sql/data_custom.sql": {
       "role": "index",
-      "sha256": "363c7ac4d9bff3f59989fefa6f9c98c20f541223ec4707424023a5bce29de190",
-      "size": 143770,
-      "normalized_sha256": "363c7ac4d9bff3f59989fefa6f9c98c20f541223ec4707424023a5bce29de190"
+      "sha256": "c71964e50c921cd2150c619e458dd3bcb93addefd58fa5d081901bc371c4457c",
+      "size": 145947,
+      "normalized_sha256": "c71964e50c921cd2150c619e458dd3bcb93addefd58fa5d081901bc371c4457c"
     },
     "sql/data_sys.sql": {
       "role": "index",
-      "sha256": "73e1e87685dc756e22a3678effdea50407e4b96d663fd712bc35b507d936424d",
-      "size": 57038,
-      "normalized_sha256": "73e1e87685dc756e22a3678effdea50407e4b96d663fd712bc35b507d936424d"
+      "sha256": "8e3d2c31a59bf3093c0420386efbe489b29df19caecdab5b5d880e8125088872",
+      "size": 60910,
+      "normalized_sha256": "8e3d2c31a59bf3093c0420386efbe489b29df19caecdab5b5d880e8125088872"
     },
     "sql/data_test.sql": {
       "role": "index",
@@ -5566,9 +5566,9 @@
     },
     "tests/测试_营销分群活动.py": {
       "role": "observe",
-      "sha256": "19524d7a13b4fe522d8c39fab63a42899cbe7810a87e42cb146618624a157d33",
-      "size": 35843,
-      "normalized_sha256": "c53a7a532b24add13743799c3652f9e60bd0db9b14a63f0f2a8489f2ad9712ba"
+      "sha256": "c9a3f6cf16bff5cc243072003c6b2a27de72e39269295425e5e560668718a1e9",
+      "size": 39778,
+      "normalized_sha256": "5394551a31568ad2d6163f97c0f27005adf1d239a12ec7d284902ea32a71b3c5"
     },
     "tests/测试_营销归因与报表.py": {
       "role": "observe",

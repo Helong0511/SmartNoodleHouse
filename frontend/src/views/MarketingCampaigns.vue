@@ -245,6 +245,7 @@
               :key="t.id"
               :label="`${t.name} (#${t.id} · ${t.coupon_type || ''})`"
               :value="t.id"
+              :disabled="isWelcomeOnlyCoupon(t) && form.campaign_type !== 'NEW_MEMBER'"
             />
           </el-select>
           <div class="hint">{{ CAMPAIGN_FIELD_HELP.coupon_template_id }}</div>
@@ -456,7 +457,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
@@ -649,6 +650,20 @@ function couponLabel(id: number | null | undefined) {
   const t = couponTemplates.value.find((x) => x.id === id)
   return t ? `${t.name} (#${id})` : `#${id}`
 }
+
+/** 名称以「新客」开头的欢迎券，仅允许活动类型 NEW_MEMBER */
+function isWelcomeOnlyCoupon(t: { name?: string } | null | undefined) {
+  return Boolean((t?.name || '').trim().startsWith('新客'))
+}
+
+watch(
+  () => form.campaign_type,
+  (ctype) => {
+    if (ctype === 'NEW_MEMBER' || form.coupon_template_id == null) return
+    const t = couponTemplates.value.find((x) => x.id === form.coupon_template_id)
+    if (isWelcomeOnlyCoupon(t)) form.coupon_template_id = null
+  },
+)
 
 function productOptionLabel(p: any) {
   const price = p.price != null ? ` ¥${p.price}` : ''

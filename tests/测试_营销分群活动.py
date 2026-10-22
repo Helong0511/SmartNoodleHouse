@@ -828,6 +828,118 @@ async def test_marketing_claim_committed_before_issue(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_campaign_budget_cap_stops_issue(db_session):
+    """budget_cap 按 SUCCESS×面额累计；超限 SKIPPED 并取消剩余 PENDING。"""
+    seed = await _seed(db_session)
+    # 面额 5 元，预算 10 → 最多成功 2 张
+    seed["tmpl"].discount_value = Decimal("5.00")
+    await db_session.flush()
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="budget_seg",
+        name="预算测分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    camp = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="budget_camp",
+        name="预算截停活动",
+        campaign_type="MEMBER_DAY",
+        segment_id=int(seg.id),
+        coupon_template_id=int(seed["tmpl"].id),
+        budget_cap=Decimal("10.00"),
+        weekly_cap_override=10,
+    )
+    pub = await MarketingService.publish(db_session, int(camp.id))
+    assert pub["enqueued"] == 3
+    await db_session.commit()
+
+    stats = await MarketingService.process_pending_tasks(db_session, limit=20)
+    await db_session.commit()
+    assert stats["success"] == 2
+    assert stats["skipped"] >= 1
+    pending = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(MarketingTask)
+            .where(
+                MarketingTask.campaign_id == camp.id,
+                MarketingTask.status == "PENDING",
+            )
+        )
+        or 0
+    )
+    assert pending == 0
+    cancelled = int(
+        await db_session.scalar(
+            select(func.count())
+            .select_from(MarketingTask)
+            .where(
+                MarketingTask.campaign_id == camp.id,
+                MarketingTask.status == "CANCELLED",
+            )
+        )
+        or 0
+    )
+    # 第 3 条 SKIPPED，无更多 PENDING 可取消；若批内先 SKIP 再 cancel 则 cancelled≥0
+    assert stats["success"] + stats["skipped"] + cancelled >= 3
+
+
+@pytest.mark.asyncio
+async def test_welcome_coupon_only_for_new_member_campaign(db_session):
+    """「新客满20减3」类欢迎券不可绑到非 NEW_MEMBER 活动。"""
+    seed = await _seed(db_session)
+    welcome = CouponTemplate(
+        store_id=None,
+        name="新客满20减3",
+        coupon_type="FIXED",
+        discount_value=Decimal("3.00"),
+        min_order_amount=Decimal("20.00"),
+        valid_days=30,
+        status=1,
+    )
+    db_session.add(welcome)
+    db_session.add(
+        SystemSetting(setting_key="welcome_coupon_name", setting_value="新客满20减3")
+    )
+    await db_session.flush()
+    SystemSettingsService.invalidate_cache_local()
+    await SystemSettingsService._load_raw(db_session)
+    seg = await SegmentService.upsert(
+        db_session,
+        store_id=seed["store"].id,
+        code="welcome_only_seg",
+        name="欢迎测分群",
+        rules_json={"all": [{"field": "member_status", "op": "eq", "value": "MEMBER"}]},
+    )
+    with pytest.raises(AppException) as ei:
+        await MarketingService.upsert_campaign(
+            db_session,
+            store_id=seed["store"].id,
+            code="member_day_bad_welcome",
+            name="误绑新客券",
+            campaign_type="MEMBER_DAY",
+            segment_id=int(seg.id),
+            coupon_template_id=int(welcome.id),
+        )
+    assert ei.value.code == 40001
+    assert "新客" in str(ei.value.message)
+
+    ok = await MarketingService.upsert_campaign(
+        db_session,
+        store_id=seed["store"].id,
+        code="new_member_ok_welcome",
+        name="新客欢迎合法",
+        campaign_type="NEW_MEMBER",
+        segment_id=int(seg.id),
+        coupon_template_id=int(welcome.id),
+    )
+    assert int(ok.coupon_template_id) == int(welcome.id)
+
+
+@pytest.mark.asyncio
 async def test_campaign_payload_after_commit_reads_timestamps(db_session):
     """回归：upsert+commit 后同步 _payload 读 created_at 不得 MissingGreenlet。"""
     from sqlalchemy.exc import MissingGreenlet

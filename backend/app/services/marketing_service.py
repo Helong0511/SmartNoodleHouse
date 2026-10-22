@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.core.response import naive_local_now
+from app.core.response import money, naive_local_now
 from app.models import (
     CouponTemplate,
     Customer,
@@ -252,6 +253,68 @@ class MarketingService:
         )
         return int(cnt or 0)
 
+    @staticmethod
+    def template_budget_unit(tmpl: CouponTemplate | None) -> Decimal:
+        """单张券计入活动预算的成本（元）。FIXED/VOUCHER=面额；PERCENT=按门槛最大折扣额。"""
+        if tmpl is None:
+            return Decimal("0.00")
+        ctype = (tmpl.coupon_type or "").upper()
+        val = money(tmpl.discount_value or 0)
+        if ctype in ("FIXED", "VOUCHER"):
+            return money(val)
+        if ctype == "PERCENT":
+            # 0.90=九折 → 满 min_order 时最大减免
+            rate = val
+            if rate <= 0 or rate >= 1:
+                return Decimal("0.00")
+            return money(money(tmpl.min_order_amount or 0) * (Decimal("1") - rate))
+        return Decimal("0.00")
+
+    @classmethod
+    async def campaign_success_issue_count(cls, db: AsyncSession, campaign_id: int) -> int:
+        return int(
+            await db.scalar(
+                select(func.count())
+                .select_from(MarketingTask)
+                .where(
+                    MarketingTask.campaign_id == int(campaign_id),
+                    MarketingTask.status == "SUCCESS",
+                    MarketingTask.action_type == "ISSUE_COUPON",
+                )
+            )
+            or 0
+        )
+
+    @classmethod
+    async def campaign_budget_spent(
+        cls, db: AsyncSession, campaign_id: int, *, unit: Decimal
+    ) -> Decimal:
+        """已成功发券占用预算 ≈ SUCCESS 条数 × 单券成本（活动通常固定单模板）。"""
+        n = await cls.campaign_success_issue_count(db, int(campaign_id))
+        return money(Decimal(n) * money(unit))
+
+    @classmethod
+    async def _cancel_pending_for_budget(
+        cls, db: AsyncSession, campaign_id: int, *, reason: str
+    ) -> int:
+        """预算耗尽后取消同活动剩余 PENDING，避免 worker 空转。"""
+        now = naive_local_now()
+        result = await db.execute(
+            update(MarketingTask)
+            .where(
+                MarketingTask.campaign_id == int(campaign_id),
+                MarketingTask.status == "PENDING",
+            )
+            .values(
+                status="CANCELLED",
+                last_error=reason[:500],
+                executed_at=now,
+                updated_at=now,
+                result_json={"reason": "budget_cap"},
+            )
+        )
+        return int(result.rowcount or 0)
+
     @classmethod
     def _payload(
         cls,
@@ -389,6 +452,30 @@ class MarketingService:
         return out, total
 
     @classmethod
+    async def _assert_welcome_coupon_for_new_member(
+        cls,
+        db: AsyncSession,
+        *,
+        coupon_template_id: int | None,
+        campaign_type: str,
+        store_id: int | None,
+    ) -> None:
+        """欢迎券模板（welcome_coupon_name，如「新客满20减3」）仅允许 NEW_MEMBER 活动绑定。"""
+        if not coupon_template_id:
+            return
+        tmpl = await db.get(CouponTemplate, int(coupon_template_id))
+        if not tmpl:
+            return
+        welcome = (await CouponService.welcome_template_name(db, store_id=store_id)).strip()
+        if not welcome or (tmpl.name or "").strip() != welcome:
+            return
+        if (campaign_type or "").upper() != "NEW_MEMBER":
+            raise AppException(
+                40001,
+                f"「{welcome}」仅可用于活动类型「新客」(NEW_MEMBER)，请改选场景专属券模板或将类型改为新客",
+            )
+
+    @classmethod
     async def upsert_campaign(
         cls,
         db: AsyncSession,
@@ -454,6 +541,13 @@ class MarketingService:
             tmpl = await db.get(CouponTemplate, int(coupon_template_id))
             if not tmpl or int(tmpl.status) != 1:
                 raise AppException(40407, "优惠券模板不存在或已停用")
+        ctype = (campaign_type or "MEMBER_DAY").upper()
+        await cls._assert_welcome_coupon_for_new_member(
+            db,
+            coupon_template_id=coupon_template_id,
+            campaign_type=ctype,
+            store_id=store_id if campaign_id is None else row.store_id,
+        )
 
         mode = normalize_schedule_mode(schedule_mode)
         cal = normalize_schedule_calendar(schedule_calendar)
@@ -470,7 +564,7 @@ class MarketingService:
 
         row.code = code
         row.name = name
-        row.campaign_type = (campaign_type or "MEMBER_DAY").upper()
+        row.campaign_type = ctype
         row.segment_id = int(segment_id) if segment_id else None
         row.coupon_template_id = int(coupon_template_id) if coupon_template_id else None
         row.schedule_mode = mode
@@ -582,6 +676,12 @@ class MarketingService:
             raise AppException(40001, "请先选择分群")
         if not camp.coupon_template_id:
             raise AppException(40001, "请先选择发券模板")
+        await cls._assert_welcome_coupon_for_new_member(
+            db,
+            coupon_template_id=int(camp.coupon_template_id),
+            campaign_type=camp.campaign_type or "",
+            store_id=camp.store_id,
+        )
 
         now = naive_local_now()
         mode = normalize_schedule_mode(getattr(camp, "schedule_mode", None))
@@ -1038,6 +1138,35 @@ class MarketingService:
                     stats["skipped"] += 1
                     stats["processed"] += 1
                     return
+
+            # 活动预算：按已 SUCCESS 发券成本累计；超限本条 SKIPPED 并取消剩余 PENDING
+            if camp.budget_cap is not None:
+                tmpl = await db.get(CouponTemplate, int(template_id))
+                unit = cls.template_budget_unit(tmpl)
+                if unit > 0:
+                    spent = await cls.campaign_budget_spent(db, int(camp.id), unit=unit)
+                    limit = money(camp.budget_cap)
+                    if spent + unit > limit:
+                        task.status = "SKIPPED"
+                        task.last_error = f"活动预算已满 {spent}/{limit}"
+                        task.executed_at = now
+                        task.updated_at = now
+                        task.result_json = {
+                            "reason": "budget_cap",
+                            "spent": str(spent),
+                            "unit": str(unit),
+                            "cap": str(limit),
+                        }
+                        stats["skipped"] += 1
+                        stats["processed"] += 1
+                        cancelled = await cls._cancel_pending_for_budget(
+                            db,
+                            int(camp.id),
+                            reason=f"活动预算已满 {spent}/{limit}",
+                        )
+                        if cancelled:
+                            stats["cancelled"] = int(stats.get("cancelled") or 0) + cancelled
+                        return
 
             # 与定时沉睡唤醒/欢迎券共用模板时：已有 WELCOME 幂等券则跳过，避免双发
             if (camp.campaign_type or "").upper() in ("WAKEUP", "NEW_MEMBER"):
