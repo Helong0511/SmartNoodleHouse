@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-22T10:36:04Z",
+  "updated_at": "2026-10-23T02:47:35Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "11a4049a479268703881949a5527f04b001b010b357e8742f321b13334d23b44",
-      "size": 186753,
-      "normalized_sha256": "11a4049a479268703881949a5527f04b001b010b357e8742f321b13334d23b44"
+      "sha256": "61a4ca72189032a84d5ca3524f81192f49db69182a057acaaa94d33efa823ca1",
+      "size": 186811,
+      "normalized_sha256": "61a4ca72189032a84d5ca3524f81192f49db69182a057acaaa94d33efa823ca1"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -2443,9 +2443,9 @@
     },
     "frontend/src/views/MarketingCampaigns.vue": {
       "role": "index",
-      "sha256": "c1384d7d8e8c49efb747175e07419bc603d05cf203d89d4ad46992de1b4bfd4a",
-      "size": 48085,
-      "normalized_sha256": "c1384d7d8e8c49efb747175e07419bc603d05cf203d89d4ad46992de1b4bfd4a"
+      "sha256": "8db0b6195285a2c501a3ea3a9057ff598f9ae6a604164965cfd314e6331f9c46",
+      "size": 48590,
+      "normalized_sha256": "8db0b6195285a2c501a3ea3a9057ff598f9ae6a604164965cfd314e6331f9c46"
     },
     "frontend/src/views/MarketingReport.vue": {
       "role": "index",

@@ -758,7 +758,7 @@ async function load() {
       filterStoreId.value = auth.user.store_id
     }
     const sid = effectiveStoreId()
-    // 餐品加权选项在打开编辑弹窗时再拉，避免首屏分页扫全店 ON_SALE
+    // 全量 ON_SALE 仍在打开编辑时再拉；列表列只需按加权 ID 补名称，避免首屏显示 #1、#2
     const [c, s, t] = await Promise.all([
       api.get('/marketing/campaigns', {
         params: {
@@ -778,6 +778,10 @@ async function load() {
     segments.value = s.data?.items || []
     const raw = t.data?.items || t.data || []
     couponTemplates.value = Array.isArray(raw) ? raw : []
+    const boostIds = [
+      ...new Set(items.value.flatMap((row: any) => normalizeBoostIds(row.boost_product_ids))),
+    ]
+    if (boostIds.length) await ensureBoostProductsInOptions(boostIds)
   } catch (e: any) {
     ElMessage.error(e?.message || '加载活动失败')
   } finally {
@@ -786,13 +790,24 @@ async function load() {
 }
 
 async function ensureBoostProductsInOptions(ids: number[]) {
-  for (const id of ids) {
-    if (productOptions.value.some((p) => p.id === id)) continue
-    try {
-      const res = await api.get(`/products/${id}`)
-      if (res.data?.id) productOptions.value.push(res.data)
-    } catch {
-      productOptions.value.push({ id, name: `餐品#${id}` })
+  const missing = ids.filter((id) => !productOptions.value.some((p) => p.id === id))
+  if (!missing.length) return
+  const fetched = await Promise.all(
+    missing.map(async (id) => {
+      try {
+        const res = await api.get(`/products/${id}`)
+        if (res.data?.id) return res.data
+      } catch {
+        /* fall through */
+      }
+      return { id, name: `餐品#${id}` }
+    }),
+  )
+  const known = new Set(productOptions.value.map((p) => p.id))
+  for (const p of fetched) {
+    if (!known.has(p.id)) {
+      productOptions.value.push(p)
+      known.add(p.id)
     }
   }
 }
