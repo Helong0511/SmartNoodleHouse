@@ -315,6 +315,35 @@ def group_store_items(items: list[dict]) -> list[dict]:
     return groups
 
 
+@router.get("/stores/{store_id}/weather-scene", dependencies=[Depends(require_store_settings)])
+async def get_store_weather_scene(
+    store_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """探测本店当前天气口味场景（运维用，不改写任何偏好）。
+
+    返回季节、气温、condition、开关状态、亲和说明与阈值；天气不可用时带 reason 降级说明。
+    """
+    assert_store_access(user, store_id)
+    store = await db.get(Store, store_id)
+    if not store:
+        raise AppException(40011, "门店不存在")
+    from app.services.preference_scene import build_scene_context, scene_ops_payload
+
+    ctx = await build_scene_context(db, store_id)
+    payload = scene_ops_payload(ctx)
+    payload["store"] = {
+        "id": store.id,
+        "store_no": store.store_no,
+        "name": store.name,
+        "latitude": float(store.latitude) if store.latitude is not None else None,
+        "longitude": float(store.longitude) if store.longitude is not None else None,
+    }
+    return success(payload, request=request)
+
+
 @router.get("/stores/{store_id}/business", dependencies=[Depends(require_store_settings)])
 async def get_store_business(
     store_id: int,

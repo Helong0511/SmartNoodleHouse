@@ -559,7 +559,10 @@
 
         <div class="pref-block">
           <h4>智能记录的口味爱好</h4>
-          <p class="muted tip">支付后累计规格口味；推荐读侧叠加季节/天气加权。迎宾占位符：{称呼}{会员等级}{店名}{口味}{餐品}。</p>
+          <p class="muted tip">
+            支付后累计规格口味；读侧叠加季节/同星期同餐段，以及天气口味加权（需门店经纬度：炎热偏清淡、寒冷偏加辣浓汤、雨天偏暖胃）。
+            「已加权」表示相对历史偏好分有场景抬升。迎宾占位符：{称呼}{会员等级}{店名}{口味}{餐品}。
+          </p>
           <el-alert v-if="detail.welcome_hint" :title="detail.welcome_hint" type="success" :closable="false" show-icon
             style="margin-bottom:12px" />
           <el-alert
@@ -804,15 +807,21 @@ const editBaseline = reactive({
 const preferenceSceneTitle = computed(() => {
   const sc = detail.value?.preference_scene
   if (!sc?.enabled) return ''
+  let head = ''
   if (sc.label) {
-    return sc.weather_active
+    head = sc.weather_active
       ? `场景加权生效：${sc.label}`
       : `场景加权已开（天气未接入：${sc.weather_reason || sc.label}）`
+  } else {
+    const parts = [sc.season, sc.condition_label || sc.condition, sc.temp_c != null ? `${sc.temp_c}℃` : '']
+      .filter(Boolean)
+      .join(' · ')
+    head = parts ? `场景加权：${parts}` : '口味场景加权已开启'
   }
-  const parts = [sc.season, sc.condition, sc.temp_c != null ? `${sc.temp_c}℃` : '']
-    .filter(Boolean)
-    .join(' · ')
-  return parts ? `场景加权：${parts}` : '口味场景加权已开启'
+  if (sc.weather_affinity_hint) {
+    return `${head}；${sc.weather_affinity_hint}`
+  }
+  return head
 })
 
 const detailHeadTitle = computed(() => {

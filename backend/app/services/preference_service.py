@@ -284,12 +284,18 @@ class PreferenceService:
                 "season": scene.get("season"),
                 "condition": scene.get("condition"),
                 "temp_c": scene.get("temp_c"),
+                "condition_label": scene.get("condition_label"),
                 "enabled": scene_on,
+                "scene_enabled": bool(scene.get("scene_enabled", scene_on)),
+                "weather_pref_enabled": bool(scene.get("weather_pref_enabled", True)),
                 "weather_active": bool(scene.get("weather_active")),
                 "weather_reason": scene.get("weather_reason"),
-                "label": scene_summary_label(
+                "weather_affinity_hint": scene.get("weather_affinity_hint"),
+                "label": scene.get("label")
+                or scene_summary_label(
                     {
                         "enabled": True,
+                        "scene_enabled": True,
                         "season": scene.get("season"),
                         "condition": scene.get("condition"),
                         "temp_c": scene.get("temp_c"),
@@ -299,7 +305,14 @@ class PreferenceService:
                 ),
             }
             if scene_on
-            else {"enabled": False}
+            else {
+                "enabled": False,
+                "scene_enabled": False,
+                "weather_pref_enabled": bool(scene.get("weather_pref_enabled", True)) if scene else True,
+                "weather_active": False,
+                "weather_reason": (scene or {}).get("weather_reason") or "口味场景加权已关闭",
+                "label": None,
+            }
         )
         return {
             "preferences": items,

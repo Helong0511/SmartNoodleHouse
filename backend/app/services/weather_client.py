@@ -1,5 +1,8 @@
 """门店天气：Open-Meteo（免 Key），失败静默降级。
 
+供「天气口味加权」读侧使用：condition 为 hot / cold / rainy / mild。
+阈值与 preference_scene / recommendation_service 约定一致，改动须三处对齐。
+
 缓存策略：
 - 正常结果 TTL 1800s ±20% jitter（防雪崩）；
 - 查询失败时写空值标记 60s（防穿透）；
@@ -20,19 +23,52 @@ _CACHE_TTL = 1800
 _EMPTY_TTL = 60  # 空值标记 60s，防止 API 持续不可用时反复请求
 _CACHE_PREFIX = "snh:weather:"
 
+# 气温阈值（℃）：≥热 / ≤冷；雨天优先于气温（WMO 降水码）
+HOT_TEMP_C = 28.0
+COLD_TEMP_C = 10.0
 
-def _condition_from_wmo(code: int, temp_c: float) -> str:
-    """粗分：hot / cold / rainy / mild。"""
-    rainy_codes = {
+CONDITION_LABELS: dict[str, str] = {
+    "hot": "炎热",
+    "cold": "寒冷",
+    "rainy": "雨天",
+    "mild": "舒适",
+}
+
+# WMO Weather interpretation codes（降水/雷暴等）
+_RAINY_WMO_CODES = frozenset(
+    {
         51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99,
     }
-    if code in rainy_codes:
+)
+
+
+def condition_from_wmo(code: int, temp_c: float) -> str:
+    """粗分：hot / cold / rainy / mild。雨天优先于气温。"""
+    if int(code) in _RAINY_WMO_CODES:
         return "rainy"
-    if temp_c >= 28:
+    t = float(temp_c)
+    if t >= HOT_TEMP_C:
         return "hot"
-    if temp_c <= 10:
+    if t <= COLD_TEMP_C:
         return "cold"
     return "mild"
+
+
+# 兼容旧内部名
+_condition_from_wmo = condition_from_wmo
+
+
+def weather_thresholds() -> dict[str, Any]:
+    """运维探测 / 文档用的阈值摘要。"""
+    return {
+        "hot_temp_c": HOT_TEMP_C,
+        "cold_temp_c": COLD_TEMP_C,
+        "rainy_priority": True,
+        "provider": "open-meteo",
+        "cache_ttl_seconds": _CACHE_TTL,
+        "empty_ttl_seconds": _EMPTY_TTL,
+        "condition_labels": dict(CONDITION_LABELS),
+    }
 
 
 async def fetch_current_weather(lat: float, lng: float) -> dict[str, Any] | None:
@@ -82,10 +118,12 @@ async def fetch_current_weather(lat: float, lng: float) -> dict[str, Any] | None
             # API 返回但无温度数据：写空值标记防穿透
             _set_empty_marker(empty_key)
             return None
+        cond = condition_from_wmo(code, float(temp))
         payload = {
             "temp_c": float(temp),
             "weather_code": code,
-            "condition": _condition_from_wmo(code, float(temp)),
+            "condition": cond,
+            "condition_label": CONDITION_LABELS.get(cond, cond),
         }
     except Exception:
         logger.debug("天气查询失败 lat=%s lng=%s", lat_f, lng_f, exc_info=True)

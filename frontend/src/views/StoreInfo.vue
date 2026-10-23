@@ -79,7 +79,23 @@
                 <el-input v-model="form.longitude" placeholder="如 105.3884" :disabled="!canEditBasic" />
               </el-form-item>
               <el-form-item>
-                <p class="hint">填写经纬度后，业务参数中的「天气口味加权」才会按实时气温/雨天微调规格与餐品推荐；射洪城区可参考 30.87 / 105.39。</p>
+                <div class="weather-probe">
+                  <p class="hint">
+                    填写经纬度后，业务参数「口味场景加权」+「天气口味加权」才会按实时气温/雨天微调规格与餐品推荐（读侧，不改历史偏好）。
+                    射洪城区可参考 30.87 / 105.39。≥28℃ 偏清淡/冰品，≤10℃ 偏加辣/浓汤，雨天偏暖胃。
+                  </p>
+                  <div class="probe-row">
+                    <el-button :loading="weatherProbing" @click="probeWeatherScene">探测天气口味</el-button>
+                    <el-tag v-if="weatherScene?.weather_active" type="success" effect="plain">
+                      {{ weatherScene.label || '天气已接入' }}
+                    </el-tag>
+                    <el-tag v-else-if="weatherScene" type="warning" effect="plain">
+                      {{ weatherScene.weather_reason || weatherScene.label || '天气未接入' }}
+                    </el-tag>
+                  </div>
+                  <p v-if="weatherScene?.weather_affinity_hint" class="muted tip">{{ weatherScene.weather_affinity_hint }}</p>
+                  <p v-else-if="weatherScene?.howto" class="muted tip">{{ weatherScene.howto }}</p>
+                </div>
               </el-form-item>
               <el-form-item label="状态">
                 <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="营业" inactive-text="停用" :disabled="!canEditBasic" />
@@ -308,6 +324,8 @@ const bizRef = ref<{ reload: () => Promise<void> } | null>(null)
 const savingBasic = ref(false)
 const logoUploading = ref(false)
 const hoursSaving = ref(false)
+const weatherProbing = ref(false)
+const weatherScene = ref<any>(null)
 const createStoreVisible = ref(false)
 const creatingStore = ref(false)
 const refreshingId = ref<number | null>(null)
@@ -454,6 +472,25 @@ async function loadBindings() {
   }
 }
 
+async function probeWeatherScene() {
+  if (!activeStoreId.value) return
+  weatherProbing.value = true
+  try {
+    const res = await api.get(`/settings/stores/${activeStoreId.value}/weather-scene`)
+    weatherScene.value = res.data || null
+    if (weatherScene.value?.weather_active) {
+      ElMessage.success(weatherScene.value.label || '天气已接入')
+    } else {
+      ElMessage.warning(weatherScene.value?.weather_reason || '天气未接入，请检查开关与经纬度')
+    }
+  } catch (e: any) {
+    weatherScene.value = null
+    ElMessage.error(e.message || '探测失败')
+  } finally {
+    weatherProbing.value = false
+  }
+}
+
 async function saveBasic() {
   if (!activeStoreId.value) return
   if (!form.name.trim()) {
@@ -476,6 +513,7 @@ async function saveBasic() {
     ElMessage.success('门店已更新')
     await loadStores()
     fillFormFromStore(activeStore.value)
+    weatherScene.value = null
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
   } finally {
@@ -694,6 +732,7 @@ async function createStore() {
 }
 
 async function onStoreChange() {
+  weatherScene.value = null
   fillFormFromStore(activeStore.value)
   await Promise.all([loadHours(), loadBindings()])
   if (canManageBiz.value && activeTab.value === 'biz') {
@@ -811,4 +850,16 @@ onMounted(async () => {
 .bind-form { margin-bottom: 8px; }
 .muted { color: #c0c4cc; }
 .tip { margin: 8px 0 0; font-size: 12px; color: #909399; line-height: 1.5; }
+.weather-probe .hint {
+  margin: 0 0 8px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.weather-probe .probe-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
 </style>

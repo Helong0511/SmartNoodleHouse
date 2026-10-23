@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.core.response import now_local
+from app.services.weather_client import CONDITION_LABELS as _CONDITION_LABELS
 
 # 亲和键 → 同义词（英文码片段 / 拼音码尾 / 中文名）；最长匹配优先
 _AFFINITY_SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -131,17 +132,19 @@ _SAME_WEEKDAY_BOOST = Decimal("1.05")
 _SAME_MEAL_BOOST = Decimal("1.05")
 _MAX_SCENE_MULT = Decimal("1.35")
 
-_CONDITION_LABELS = {
-    "hot": "炎热",
-    "cold": "寒冷",
-    "rainy": "雨天",
-    "mild": "舒适",
-}
 _SEASON_LABELS = {
     "spring": "春季",
     "summer": "夏季",
     "autumn": "秋季",
     "winter": "冬季",
+}
+
+# 运维/探测文案：各天气 condition 对规格亲和的抬升方向（与 _WEATHER_AFFINITY_BOOST 同步）
+_WEATHER_AFFINITY_HINT: dict[str, str] = {
+    "hot": "炎热：抬升不辣/微辣/小碗/清汤/冰品",
+    "cold": "寒冷：抬升加辣/特辣/大碗/浓汤/浓口",
+    "rainy": "雨天：抬升加辣/浓汤/浓口/大碗",
+    "mild": "舒适：天气不对规格额外加权（仍可有季节/同星期同餐段）",
 }
 
 
@@ -292,9 +295,20 @@ def apply_scene_multiplier(
     return float(out.quantize(Decimal("0.0001")))
 
 
+def weather_affinity_hint(condition: str | None) -> str | None:
+    """当前天气对规格偏好的抬升说明；无 condition 返回 None。"""
+    cond = (condition or "").strip().lower()
+    if not cond:
+        return None
+    return _WEATHER_AFFINITY_HINT.get(cond)
+
+
 def scene_summary_label(scene: dict[str, Any] | None) -> str | None:
-    """后台/迎宾可读的场景摘要。"""
-    if not scene or not scene.get("enabled"):
+    """后台/迎宾/小程序可读的场景摘要。"""
+    if not scene:
+        return None
+    # enabled / scene_enabled 任一显式 False 则视为关闭
+    if scene.get("enabled") is False or scene.get("scene_enabled") is False:
         return None
     parts: list[str] = []
     season = scene.get("season")
@@ -316,10 +330,31 @@ def scene_summary_label(scene: dict[str, Any] | None) -> str | None:
     return " · ".join(parts) if parts else None
 
 
+def _finalize_scene_label(ctx: dict[str, Any]) -> dict[str, Any]:
+    ctx["label"] = scene_summary_label(
+        {
+            "enabled": bool(ctx.get("scene_enabled", True)),
+            "scene_enabled": ctx.get("scene_enabled"),
+            "season": ctx.get("season"),
+            "condition": ctx.get("condition"),
+            "temp_c": ctx.get("temp_c"),
+            "weather_active": ctx.get("weather_active"),
+            "weather_reason": ctx.get("weather_reason"),
+        }
+    )
+    ctx["weather_affinity_hint"] = weather_affinity_hint(ctx.get("condition"))
+    return ctx
+
+
 async def build_scene_context(db, store_id: int | None = None) -> dict[str, Any]:
-    """组装当前场景；天气依赖门店经纬度与 weather_pref_enabled。"""
+    """组装当前场景。
+
+    - preference_scene_enabled：总开关（季节/同星期同餐段/天气乘子）
+    - weather_pref_enabled：天气子开关（需门店经纬度；关则仅季节等仍可生效）
+    """
     now = now_local()
     season = calendar_season(now)
+    sid = int(store_id) if store_id else None
     ctx: dict[str, Any] = {
         "season": season,
         "weekday": int(now.weekday()),
@@ -327,47 +362,86 @@ async def build_scene_context(db, store_id: int | None = None) -> dict[str, Any]
         "weather": None,
         "temp_c": None,
         "condition": None,
-        "store_id": int(store_id) if store_id else None,
+        "condition_label": None,
+        "store_id": sid,
+        "scene_enabled": True,
+        "weather_pref_enabled": True,
         "weather_active": False,
         "weather_reason": None,
+        "label": None,
+        "weather_affinity_hint": None,
     }
-    if not store_id:
-        ctx["weather_reason"] = "未指定门店"
-        return ctx
 
-    enabled = True
+    scene_on = True
+    weather_on = True
     try:
         from app.services.system_settings_service import SystemSettingsService
 
-        enabled = await SystemSettingsService.effective_bool(
-            db, "weather_pref_enabled", True, store_id=int(store_id)
+        scene_on = await SystemSettingsService.effective_bool(
+            db, "preference_scene_enabled", True, store_id=sid
+        )
+        weather_on = await SystemSettingsService.effective_bool(
+            db, "weather_pref_enabled", True, store_id=sid
         )
     except Exception:
-        enabled = True
-    if not enabled:
+        scene_on = True
+        weather_on = True
+
+    ctx["scene_enabled"] = bool(scene_on)
+    ctx["weather_pref_enabled"] = bool(weather_on)
+
+    if not scene_on:
+        ctx["weather_reason"] = "口味场景加权已关闭"
+        return _finalize_scene_label(ctx)
+
+    if not sid:
+        ctx["weather_reason"] = "未指定门店"
+        return _finalize_scene_label(ctx)
+
+    if not weather_on:
         ctx["weather_reason"] = "天气口味加权已关闭"
-        return ctx
+        return _finalize_scene_label(ctx)
 
     try:
         from app.models import Store
 
-        store = await db.get(Store, int(store_id))
+        store = await db.get(Store, sid)
         lat = getattr(store, "latitude", None) if store else None
         lng = getattr(store, "longitude", None) if store else None
         if lat is None or lng is None:
             ctx["weather_reason"] = "门店未配置经纬度"
-            return ctx
+            return _finalize_scene_label(ctx)
         from app.services.weather_client import fetch_current_weather
 
         w = await fetch_current_weather(float(lat), float(lng))
         if not w:
             ctx["weather_reason"] = "天气服务暂不可用"
-            return ctx
+            return _finalize_scene_label(ctx)
+        cond = str(w.get("condition") or "").strip().lower() or None
         ctx["weather"] = w
         ctx["temp_c"] = w.get("temp_c")
-        ctx["condition"] = w.get("condition")
+        ctx["condition"] = cond
+        ctx["condition_label"] = w.get("condition_label") or (
+            _CONDITION_LABELS.get(cond) if cond else None
+        )
         ctx["weather_active"] = True
         ctx["weather_reason"] = None
     except Exception:
         ctx["weather_reason"] = "天气查询失败"
-    return ctx
+    return _finalize_scene_label(ctx)
+
+
+def scene_ops_payload(ctx: dict[str, Any] | None) -> dict[str, Any]:
+    """门店信息「探测天气口味」接口用的完整运维视图。"""
+    from app.services.weather_client import weather_thresholds
+
+    c = dict(ctx or {})
+    return {
+        **c,
+        "thresholds": weather_thresholds(),
+        "howto": (
+            "1) 门店信息填写经纬度；2) 业务参数开启「口味场景加权」与「天气口味加权」；"
+            "3) 规格偏好（迎宾/智能口味）与餐品推荐（猜你喜欢）读侧按季节+天气微调，不改写历史偏好。"
+        ),
+        "affinity_hints": dict(_WEATHER_AFFINITY_HINT),
+    }

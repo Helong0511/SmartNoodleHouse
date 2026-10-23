@@ -25,7 +25,11 @@ BUSINESS_SETTING_GROUPS: list[dict[str, str]] = [
     {"id": "delivery", "label": "外卖", "description": "自动接单写入当前门店；.env 兜底门店为平台级"},
     {"id": "print", "label": "厨房打印", "description": "写入当前门店：开关、模式、打印机地址、份数与票面"},
     {"id": "security", "label": "安全与网络", "description": "平台级：Token 有效期、Webhook 白名单、可信反代"},
-    {"id": "system", "label": "系统通用", "description": "口味加权按门店；时区、夜间批处理、上传限制与日志保留为平台级"},
+    {
+        "id": "system",
+        "label": "系统通用",
+        "description": "口味场景/天气加权按门店（需经纬度）；时区、夜间批处理、上传限制与日志保留为平台级",
+    },
 ]
 
 # 全部门店共用，只能由系统管理权限改 system_settings
@@ -736,7 +740,10 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "bool",
         "default": True,
         "store_override": True,
-        "description": "推荐时按季节/同星期同餐段微调口味排序；可按门店覆盖",
+        "description": (
+            "读侧总开关：规格偏好（迎宾/智能口味）与餐品推荐（猜你喜欢）按季节、同星期同餐段微调；"
+            "开启后才生效「天气口味加权」。不改写历史偏好分。可按门店覆盖"
+        ),
     },
     "weather_pref_enabled": {
         "group": "system",
@@ -745,7 +752,11 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "bool",
         "default": True,
         "store_override": True,
-        "description": "门店配置经纬度后，按实时气温/雨天微调口味推荐；可按门店覆盖",
+        "description": (
+            "依赖「口味场景加权」+ 门店经纬度；Open-Meteo 免 Key。"
+            "≥28℃ 炎热抬升清淡/冰品，≤10℃ 寒冷抬升加辣/浓汤，雨天抬升暖胃汤面；"
+            "失败静默降级。门店信息页可「探测天气」。可按门店覆盖"
+        ),
     },
     "night_batch_enabled": {
         "group": "system",

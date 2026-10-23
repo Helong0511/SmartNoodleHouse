@@ -1,8 +1,8 @@
-"""口味场景加权 + 规格组门店隔离。"""
+"""口味场景加权 + 规格组门店隔离 + 天气口味加权。"""
 from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,11 +11,21 @@ from app.services.preference_scene import (
     calendar_season,
     code_boost,
     resolve_affinities,
+    scene_ops_payload,
+    scene_summary_label,
+    weather_affinity_hint,
 )
 from app.services.recommendation_service import (
     PoolProduct,
+    _product_scene_flags,
     _scene_multiplier,
     _weather_reason_for,
+)
+from app.services.weather_client import (
+    COLD_TEMP_C,
+    HOT_TEMP_C,
+    condition_from_wmo,
+    weather_thresholds,
 )
 from app.api.products import _assert_option_group_manage, _assert_groups_usable_for_store
 from app.core.exceptions import AppException
@@ -97,6 +107,37 @@ def test_code_boost_fuzzy():
     assert code_boost("SH01-La-JiaLa", {"hot_spicy": D("1.1")}, option_name="加辣") == D("1.1")
 
 
+def test_condition_from_wmo_thresholds():
+    """雨天优先于气温；热/冷阈值与 weather_client 常量一致。"""
+    assert condition_from_wmo(61, 20) == "rainy"
+    assert condition_from_wmo(0, HOT_TEMP_C) == "hot"
+    assert condition_from_wmo(0, HOT_TEMP_C - 0.1) == "mild"
+    assert condition_from_wmo(0, COLD_TEMP_C) == "cold"
+    assert condition_from_wmo(0, COLD_TEMP_C + 0.1) == "mild"
+    th = weather_thresholds()
+    assert th["hot_temp_c"] == HOT_TEMP_C
+    assert th["cold_temp_c"] == COLD_TEMP_C
+
+
+def test_weather_affinity_hint_and_label():
+    assert "不辣" in (weather_affinity_hint("hot") or "") or "清汤" in (weather_affinity_hint("hot") or "")
+    assert "加辣" in (weather_affinity_hint("cold") or "")
+    label = scene_summary_label(
+        {
+            "enabled": True,
+            "season": "summer",
+            "condition": "hot",
+            "temp_c": 32,
+            "weather_active": True,
+        }
+    )
+    assert label and "夏季" in label and "炎热" in label and "32" in label
+    assert scene_summary_label({"enabled": False, "season": "summer"}) is None
+    ops = scene_ops_payload({"scene_enabled": True, "condition": "hot", "weather_active": True})
+    assert "thresholds" in ops and "howto" in ops
+    assert "hot" in ops["affinity_hints"]
+
+
 def test_product_reco_weather_condition_keys():
     """产品推荐天气乘子须使用 weather_client 的 lowercase condition。"""
     p = PoolProduct(
@@ -139,6 +180,95 @@ def test_product_reco_weather_condition_keys():
     assert mult_legacy_upper == mult_hot
     assert mult_rain_old > 1.0
     assert _weather_reason_for(p, {"condition": "hot"}) == "天气炎热更清爽"
+    # 总开关关闭：乘子与天气理由均失效
+    assert _scene_multiplier(p, {"scene_enabled": False, "season": "summer", "condition": "hot"}) == 1.0
+    assert _weather_reason_for(p, {"scene_enabled": False, "condition": "hot"}) is None
+
+
+def test_product_spicy_mild_weather_flags():
+    """辣度维参与天气乘子：炎热抬升清淡、寒冷抬升麻辣。"""
+    mild_p = PoolProduct(
+        id=3,
+        name="清汤面",
+        price=Decimal("12"),
+        main_image=None,
+        category_id=1,
+        category_name="招牌面",
+        is_hot=False,
+        is_recommended=False,
+        sales_count=0,
+        created_at=None,
+        stock=10,
+        tags=["清淡"],
+        dimensions={"spicy": 0, "temperature": 2},
+    )
+    spicy_p = PoolProduct(
+        id=4,
+        name="麻辣牛肉面",
+        price=Decimal("16"),
+        main_image=None,
+        category_id=1,
+        category_name="招牌面",
+        is_hot=False,
+        is_recommended=False,
+        sales_count=0,
+        created_at=None,
+        stock=10,
+        tags=["麻辣"],
+        dimensions={"spicy": 3, "temperature": 3},
+    )
+    flags_m = _product_scene_flags(mild_p)
+    flags_s = _product_scene_flags(spicy_p)
+    assert flags_m["mild"] and not flags_m["spicy"]
+    assert flags_s["spicy"] and not flags_s["mild"]
+    assert _scene_multiplier(mild_p, {"season": "summer", "condition": "hot"}) > 1.0
+    assert _scene_multiplier(spicy_p, {"season": "winter", "condition": "cold"}) > 1.0
+
+
+@pytest.mark.asyncio
+async def test_build_scene_context_weather_off():
+    """天气子开关关闭时：季节仍在，condition 为空，带 reason。"""
+    from app.services.preference_scene import build_scene_context
+
+    db = MagicMock()
+
+    async def _eff(db_, key, default=True, store_id=None):
+        if key == "preference_scene_enabled":
+            return True
+        if key == "weather_pref_enabled":
+            return False
+        return default
+
+    with patch(
+        "app.services.system_settings_service.SystemSettingsService.effective_bool",
+        new=AsyncMock(side_effect=_eff),
+    ):
+        ctx = await build_scene_context(db, store_id=1)
+    assert ctx["scene_enabled"] is True
+    assert ctx["weather_pref_enabled"] is False
+    assert ctx["weather_active"] is False
+    assert ctx["condition"] is None
+    assert "天气口味加权已关闭" in (ctx["weather_reason"] or "")
+    assert ctx["season"] in ("spring", "summer", "autumn", "winter")
+
+
+@pytest.mark.asyncio
+async def test_build_scene_context_scene_off():
+    from app.services.preference_scene import build_scene_context
+
+    db = MagicMock()
+
+    async def _eff(db_, key, default=True, store_id=None):
+        return False if key == "preference_scene_enabled" else True
+
+    with patch(
+        "app.services.system_settings_service.SystemSettingsService.effective_bool",
+        new=AsyncMock(side_effect=_eff),
+    ):
+        ctx = await build_scene_context(db, store_id=1)
+    assert ctx["scene_enabled"] is False
+    assert ctx["label"] is None
+    assert "口味场景加权已关闭" in (ctx["weather_reason"] or "")
 
 
 def test_store_staff_cannot_edit_hq_group():

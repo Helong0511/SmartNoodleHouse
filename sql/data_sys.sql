@@ -1749,7 +1749,7 @@ WHERE NOT EXISTS (
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'preference_scene_enabled',
     'true',
-    '口味场景加权（季节/同星期同餐段）'
+    '口味场景加权总开关：季节/同星期同餐段；开启后才生效天气加权；读侧微调不改历史'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
@@ -1759,13 +1759,20 @@ WHERE NOT EXISTS (
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'weather_pref_enabled',
     'true',
-    '天气口味加权（需门店经纬度）'
+    '天气口味加权：需经纬度；≥28℃清淡/冰品，≤10℃加辣/浓汤，雨天暖胃；失败降级'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
         FROM `system_settings`
         WHERE `setting_key` = 'weather_pref_enabled'
     );
+-- 已有库同步说明文案（不改 value）
+UPDATE `system_settings`
+SET `description` = '口味场景加权总开关：季节/同星期同餐段；开启后才生效天气加权；读侧微调不改历史'
+WHERE `setting_key` = 'preference_scene_enabled';
+UPDATE `system_settings`
+SET `description` = '天气口味加权：需经纬度；≥28℃清淡/冰品，≤10℃加辣/浓汤，雨天暖胃；失败降级'
+WHERE `setting_key` = 'weather_pref_enabled';
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'night_batch_enabled',
     'true',

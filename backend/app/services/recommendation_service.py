@@ -77,15 +77,16 @@ TAG_REASON_MAP = {
 # 场景（季节/天气）对标签/温度的小幅乘子，作用于最终分，克制在 ±8%
 # 天气 condition 与 weather_client / preference_scene 一致：hot/cold/rainy/mild
 _SCENE_TAG_MULT = {
-    "summer": {"ice": 1.08, "cool": 1.05, "hot_drink": 0.96},
-    "winter": {"ice": 0.95, "cool": 0.97, "hot_drink": 1.08, "soup": 1.05},
-    "spring": {"cool": 1.03},
-    "autumn": {"soup": 1.03, "hot_drink": 1.03},
+    "summer": {"ice": 1.08, "cool": 1.05, "hot_drink": 0.96, "mild": 1.04, "spicy": 0.97},
+    "winter": {"ice": 0.95, "cool": 0.97, "hot_drink": 1.08, "soup": 1.05, "spicy": 1.05},
+    "spring": {"cool": 1.03, "mild": 1.02},
+    "autumn": {"soup": 1.03, "hot_drink": 1.03, "spicy": 1.03},
 }
+# 天气对餐品标签/温度维度；condition 须与 weather_client 一致（小写）
 _WEATHER_TAG_MULT = {
-    "rainy": {"soup": 1.06, "hot_drink": 1.05},
-    "cold": {"hot_drink": 1.08, "soup": 1.06, "ice": 0.94},
-    "hot": {"ice": 1.08, "cool": 1.05, "hot_drink": 0.95},
+    "rainy": {"soup": 1.06, "hot_drink": 1.05, "spicy": 1.04},
+    "cold": {"hot_drink": 1.08, "soup": 1.06, "ice": 0.94, "spicy": 1.06},
+    "hot": {"ice": 1.08, "cool": 1.05, "hot_drink": 0.95, "mild": 1.05, "spicy": 0.97},
     "mild": {},
 }
 _WEATHER_REASON = {
@@ -265,19 +266,33 @@ def _tag_reason(key: str, target_name: str | None) -> str | None:
 
 
 def _product_scene_flags(p: PoolProduct) -> dict[str, bool]:
+    """餐品场景旗标：温度维 + 辣度维 + 汤类标签/品名。"""
     temp = p.dimensions.get("temperature")
+    spicy = p.dimensions.get("spicy")
     is_ice = temp is not None and temp <= 0
     is_cool = temp == 1
     is_hot_drink = temp == 3
+    # spicy: 0 不辣 / 1 微辣 / 2 中辣 / 3 特辣（与 taste_profile_service 一致）
+    is_spicy = (spicy is not None and spicy >= 2) or any(
+        t in (p.tags or []) for t in ("麻辣", "香辣", "重辣", "特辣")
+    ) or any(w in (p.name or "") for w in ("麻辣", "香辣", "水煮", "冒椒"))
+    is_mild = (spicy is not None and spicy <= 1) or any(
+        t in (p.tags or []) for t in ("清淡", "不辣", "微辣")
+    ) or any(w in (p.name or "") for w in ("清汤", "番茄", "原味"))
     return {
         "ice": is_ice,
         "cool": is_cool,
         "hot_drink": is_hot_drink,
-        "soup": any(t in p.tags for t in ("汤", "浓汤", "汤面")) or "汤" in p.name,
+        "soup": any(t in p.tags for t in ("汤", "浓汤", "汤面")) or "汤" in (p.name or ""),
+        "spicy": bool(is_spicy),
+        "mild": bool(is_mild) and not bool(is_spicy),
     }
 
 
 def _scene_multiplier(p: PoolProduct, scene_ctx: dict[str, Any]) -> float:
+    # 口味场景总开关关闭时不做季节/天气乘子
+    if scene_ctx.get("scene_enabled") is False:
+        return 1.0
     mult = 1.0
     flags = _product_scene_flags(p)
     season = scene_ctx.get("season")
@@ -291,6 +306,10 @@ def _scene_multiplier(p: PoolProduct, scene_ctx: dict[str, Any]) -> float:
 
 def _weather_reason_for(p: PoolProduct, scene_ctx: dict[str, Any]) -> str | None:
     """天气乘子真正生效时返回可读理由，否则 None。"""
+    if scene_ctx.get("scene_enabled") is False:
+        return None
+    if scene_ctx.get("weather_active") is False and not scene_ctx.get("condition"):
+        return None
     cond = str(scene_ctx.get("condition") or "").strip().lower()
     if not cond or cond not in _WEATHER_REASON:
         return None
@@ -805,15 +824,20 @@ class RecommendationService:
         )
         from app.services.preference_scene import scene_summary_label
 
+        scene_on = scene_ctx.get("scene_enabled") is not False
         scene_view = {
-            "season": scene_ctx.get("season"),
-            "condition": scene_ctx.get("condition"),
-            "temp_c": scene_ctx.get("temp_c"),
-            "weather_active": bool(scene_ctx.get("weather_active")),
+            "season": scene_ctx.get("season") if scene_on else None,
+            "condition": scene_ctx.get("condition") if scene_on else None,
+            "temp_c": scene_ctx.get("temp_c") if scene_on else None,
+            "condition_label": scene_ctx.get("condition_label") if scene_on else None,
+            "weather_active": bool(scene_ctx.get("weather_active")) if scene_on else False,
             "weather_reason": scene_ctx.get("weather_reason"),
-            "enabled": True,
+            "weather_affinity_hint": scene_ctx.get("weather_affinity_hint") if scene_on else None,
+            "scene_enabled": scene_on,
+            "weather_pref_enabled": bool(scene_ctx.get("weather_pref_enabled", True)),
+            "enabled": scene_on,
         }
-        scene_view["label"] = scene_summary_label(scene_view)
+        scene_view["label"] = scene_ctx.get("label") or scene_summary_label(scene_view)
         return ranked, state, {
             "pool_size": len(pool),
             "total_events": total_events,
