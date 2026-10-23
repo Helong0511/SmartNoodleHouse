@@ -536,8 +536,8 @@ SELECT NULL, 'member_anniversary_today', '今日入会周年（未填生日）',
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `customer_segments` WHERE `store_id` IS NULL AND `code` = 'member_anniversary_today');
 
--- 预置营销活动（总部 DRAFT；按分群 code / 券模板 name / admin 关联，不硬编码 id）
--- 状态一律 DRAFT：导入后不自动发券，需后台发布
+-- 预置营销活动（总部；按分群 code / 券模板 name / admin 关联，不硬编码 id）
+-- INSERT 先写 DRAFT，文末统一抬升为已启用（年度 PAUSED / 其余 RUNNING + published_at；导入不入队普发）
 -- 射洪肠旺面客单约 8～15 元：轻券优先满15/20减3，忌无排期对全体发 10 元代金
 -- 身份节日绑公益分群；生日绑 birthday_today；无生日绑 member_anniversary_today（勿绑 all_members，否则一发布即普发）
 -- 固定节日用 schedule_mode=ANNUAL_MD（公历/农历月日）每年自动启停，勿逐年改绝对日期
@@ -1341,3 +1341,30 @@ SET `mc`.`remark` = CONCAT(
     )
 WHERE `mc`.`store_id` IS NULL
   AND `mc`.`code` IN ('wakeup_sleep30', 'wakeup_sleep90', 'wakeup_lifecycle_dormant');
+
+-- 默认全部启用总部预置活动（幂等：仅抬升仍为 DRAFT 且已绑分群+券的）
+-- 年度月日 → PAUSED+published（窗外待机，入窗由 advance 拉起并发券）
+-- 其余 → RUNNING+published（生日/周年每日补圈；唤醒/新客/会员日等推荐加权立即生效，导入不批量入队以免普发）
+UPDATE `marketing_campaigns`
+SET `status` = IF(IFNULL(`schedule_mode`, 'ABSOLUTE') = 'ANNUAL_MD', 'PAUSED', 'RUNNING'),
+    `published_at` = IFNULL(`published_at`, NOW(3))
+WHERE `store_id` IS NULL
+  AND `status` = 'DRAFT'
+  AND `segment_id` IS NOT NULL
+  AND `coupon_template_id` IS NOT NULL;
+
+-- 发布等价：补 SEGMENT 规则（后台 publish 也会写；种子侧幂等）
+INSERT INTO `marketing_rules` (`campaign_id`, `rule_type`, `config_json`, `priority`, `status`)
+SELECT `mc`.`id`,
+       'SEGMENT',
+       JSON_OBJECT('segment_id', `mc`.`segment_id`),
+       100,
+       1
+FROM `marketing_campaigns` `mc`
+WHERE `mc`.`store_id` IS NULL
+  AND `mc`.`segment_id` IS NOT NULL
+  AND `mc`.`status` IN ('RUNNING', 'PAUSED', 'SCHEDULED')
+  AND NOT EXISTS (
+        SELECT 1 FROM `marketing_rules` `mr`
+         WHERE `mr`.`campaign_id` = `mc`.`id` AND `mr`.`rule_type` = 'SEGMENT'
+    );
