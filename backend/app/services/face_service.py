@@ -1035,8 +1035,12 @@ class WelcomeService:
 
     TTS_QUEUE_KEY = TTS_WELCOME_QUEUE_KEY
     TTS_QUEUE_MAX = 100
+    # 人已离开视野后仍播旧句 → 丢弃排队过久的任务（秒）
+    TTS_ITEM_MAX_AGE_SEC = 8.0
     _queue: asyncio.Queue | None = None
     _last_member_cd_log_at: dict[str, float] = {}
+    # 同摄像头播报世代：会员入队时 +1，打断正在播的陌生迎宾
+    _speak_gen: dict[int, int] = {}
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
@@ -1046,9 +1050,32 @@ class WelcomeService:
         return cls._queue
 
     @classmethod
+    def speak_generation(cls, camera_id: int | None) -> int:
+        return int(cls._speak_gen.get(int(camera_id or 0), 0))
+
+    @classmethod
+    def bump_speak_generation(cls, camera_id: int | None) -> int:
+        cid = int(camera_id or 0)
+        nxt = int(cls._speak_gen.get(cid, 0)) + 1
+        cls._speak_gen[cid] = nxt
+        return nxt
+
+    @classmethod
+    def _parse_queue_item(cls, raw: str | bytes) -> tuple[str, dict | None]:
+        import json
+
+        s = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        try:
+            obj = json.loads(s)
+        except Exception:
+            return s, None
+        return s, obj if isinstance(obj, dict) else None
+
+    @classmethod
     async def enqueue(cls, item: dict) -> None:
         """入队迎宾播报；跨热重载仍可由 Leader TTS 消费。"""
         import json
+        import time as _time
 
         payload = dict(item or {})
         text = str(payload.get("text") or "").strip()
@@ -1056,40 +1083,48 @@ class WelcomeService:
             return
         payload["text"] = text
         kind = str(payload.get("kind") or "")
+        cam_s = str(payload.get("camera_id") if payload.get("camera_id") is not None else "")
+        payload.setdefault("enqueued_at", _time.time())
+        # 会员优先：作废同机位排队中的陌生迎宾，并打断正在播的低优先级句
+        if kind == "member" and cam_s:
+            cls.bump_speak_generation(payload.get("camera_id"))
         raw = json.dumps(payload, ensure_ascii=False)
         try:
             redis = await get_redis()
-            # 试听连点：去掉队列里同摄像头同 kind 的待播项，再入队（保留最后一次；
-            # 正在播的已 BRPOP 出队，不受影响，播完后继续播本条）
-            if kind.startswith("test_speak"):
+            # 试听连点 / 会员入队：整理 pending 再写入
+            if kind.startswith("test_speak") or kind == "member":
                 try:
                     items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
                     kept: list[str] = []
                     dropped = 0
                     for it in items or []:
-                        s = it.decode("utf-8", errors="replace") if isinstance(it, bytes) else str(it)
-                        try:
-                            obj = json.loads(s)
-                        except Exception:
+                        s, obj = cls._parse_queue_item(it)
+                        if obj is None:
                             kept.append(s)
                             continue
-                        if (
-                            str(obj.get("kind") or "") == kind
-                            and str(obj.get("camera_id")) == str(payload.get("camera_id"))
-                        ):
-                            dropped += 1
-                            continue
+                        o_kind = str(obj.get("kind") or "")
+                        o_cam = str(obj.get("camera_id") if obj.get("camera_id") is not None else "")
+                        if kind.startswith("test_speak"):
+                            if o_kind == kind and o_cam == cam_s:
+                                dropped += 1
+                                continue
+                        elif kind == "member":
+                            # 丢掉同机位待播陌生迎宾，避免「欢迎光临」挡会员长句
+                            if o_kind == "unknown_visitor" and o_cam == cam_s:
+                                dropped += 1
+                                continue
                         kept.append(s)
                     pipe = redis.pipeline()
                     pipe.delete(cls.TTS_QUEUE_KEY)
                     if kept:
                         pipe.rpush(cls.TTS_QUEUE_KEY, *kept)
+                    # 会员插到队尾即将被 BRPOP 的一侧（RPUSH+BRPOP=后进先出），尽快出声
                     pipe.rpush(cls.TTS_QUEUE_KEY, raw)
                     pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
                     await pipe.execute()
                     if dropped:
                         logger.info(
-                            "试听入队替换 pending=%s kind=%s camera_id=%s",
+                            "迎宾入队替换 pending=%s kind=%s camera_id=%s",
                             dropped,
                             kind,
                             payload.get("camera_id"),
@@ -1097,7 +1132,27 @@ class WelcomeService:
                     cls._schedule_g711_warmup(text)
                     return
                 except Exception:
-                    logger.exception("试听队列替换失败，回退普通入队")
+                    logger.exception("迎宾队列整理失败，回退普通入队")
+            if kind == "unknown_visitor" and cam_s:
+                # 已有同机位会员待播则不再塞陌生句
+                try:
+                    items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
+                    for it in items or []:
+                        _s, obj = cls._parse_queue_item(it)
+                        if not obj:
+                            continue
+                        if (
+                            str(obj.get("kind") or "") == "member"
+                            and str(obj.get("camera_id") if obj.get("camera_id") is not None else "")
+                            == cam_s
+                        ):
+                            logger.info(
+                                "跳过陌生迎宾（队列已有会员） camera_id=%s",
+                                payload.get("camera_id"),
+                            )
+                            return
+                except Exception:
+                    logger.debug("检查会员待播失败，继续陌生入队", exc_info=True)
             pipe = redis.pipeline()
             pipe.rpush(cls.TTS_QUEUE_KEY, raw)
             pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
@@ -1140,26 +1195,69 @@ class WelcomeService:
         loop.create_task(_run())
 
     @classmethod
-    async def dequeue(cls, timeout: float = 1.0) -> dict | None:
-        """取出一条迎宾任务；超时返回 None。"""
-        import json
+    def is_stale_item(cls, item: dict | None) -> bool:
+        """排队过久的迎宾（人多半已离开）不再播。"""
+        import time as _time
 
+        if not item:
+            return True
+        kind = str(item.get("kind") or "")
+        # 试听不按过期丢弃
+        if kind.startswith("test_speak"):
+            return False
+        try:
+            enq = float(item.get("enqueued_at") or 0.0)
+        except (TypeError, ValueError):
+            enq = 0.0
+        if enq <= 0:
+            return False
+        age = _time.time() - enq
+        return age > float(cls.TTS_ITEM_MAX_AGE_SEC)
+
+    @classmethod
+    async def dequeue(cls, timeout: float = 1.0) -> dict | None:
+        """取出一条迎宾任务；超时返回 None。过期项直接丢弃并继续取。"""
+        import json
+        import time as _time
+
+        deadline = _time.monotonic() + max(0.2, float(timeout))
         try:
             redis = await get_redis()
-            # BRPOP 超时至少 1 秒（redis-py 整数秒）
-            wait = max(1, int(timeout))
-            got = await redis.brpop(cls.TTS_QUEUE_KEY, timeout=wait)
-            if got:
+            while _time.monotonic() < deadline:
+                wait = max(1, int(min(1.0, deadline - _time.monotonic() + 0.01)))
+                got = await redis.brpop(cls.TTS_QUEUE_KEY, timeout=wait)
+                if not got:
+                    return None
                 _key, raw = got
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8", errors="replace")
                 data = json.loads(raw)
-                return data if isinstance(data, dict) else None
+                if not isinstance(data, dict):
+                    continue
+                if cls.is_stale_item(data):
+                    logger.info(
+                        "丢弃过期迎宾 kind=%s camera_id=%s age=%.1fs text=%s",
+                        data.get("kind"),
+                        data.get("camera_id"),
+                        _time.time() - float(data.get("enqueued_at") or 0),
+                        str(data.get("text") or "")[:40],
+                    )
+                    continue
+                return data
+            return None
         except Exception:
             logger.exception("迎宾 TTS Redis 出队失败，回退进程内队列")
         q = cls.get_queue()
         try:
-            return await asyncio.wait_for(q.get(), timeout=timeout)
+            item = await asyncio.wait_for(q.get(), timeout=timeout)
+            if isinstance(item, dict) and cls.is_stale_item(item):
+                logger.info(
+                    "丢弃过期迎宾(内存) kind=%s camera_id=%s",
+                    item.get("kind"),
+                    item.get("camera_id"),
+                )
+                return None
+            return item
         except asyncio.TimeoutError:
             return None
 

@@ -33,6 +33,19 @@ _CHUNK_SLEEP = _CHUNK_BYTES / _G711_RATE
 _DEFAULT_CODEC = "alaw"
 from app.core.hot_cache import HotCache
 
+
+def tail_hold_seconds(audio_s: float, send_s: float) -> float:
+    """节奏推流结束后、close 前应等待的秒数，避免尾句被切断。
+
+    上送常快于实时播放；若只等固定 0.4s，长句末尾（店名）会被对讲 close 截掉。
+    """
+    audio_s = max(0.0, float(audio_s))
+    send_s = max(0.0, float(send_s))
+    remain = audio_s - send_s + 0.28
+    if remain <= 0.05:
+        return 0.05 if audio_s > 0.2 else 0.0
+    return min(remain, audio_s + 0.5)
+
 # 同摄像头对讲会话互斥（跨 TTSWorker 实例）
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
 _CAMERA_LOCKS_GUARD = asyncio.Lock()
@@ -494,12 +507,14 @@ def _stream_audio_data_content_length_zero(
     username: str,
     password: str,
     g711_data: bytes,
+    should_abort=None,
 ) -> dict[str, int]:
     """go2rtc 同款：PUT audioData + Content-Length:0，再写 TCP 正文。
 
     仅前 ~240ms 零休眠启动扬声器；其后按约 1.5–2x 节奏推送。
     日志曾证实：前 1.2s 整段突发时短句「试听播报」固件只出「试」一声。
     返回 first_chunk_ms / send_ms 供上层日志。
+    should_abort：可选无参回调，返回 True 时中断推流（会员打断陌生迎宾）。
     """
     def _one_shot(auth_header: str | None) -> tuple[socket.socket, int, dict[str, str]]:
         sock = socket.create_connection((host, port), timeout=5.0)
@@ -543,6 +558,7 @@ def _stream_audio_data_content_length_zero(
         )
     sock, status, hdrs = _one_shot(auth_header)
     first_chunk_ms = -1
+    aborted = False
     try:
         if status == 401:
             www = hdrs.get("www-authenticate") or ""
@@ -557,7 +573,15 @@ def _stream_audio_data_content_length_zero(
             if status >= 400:
                 raise RuntimeError(f"audioData 握手失败 HTTP {status}")
         # 2) 极短启动突发 + 受控节奏（防固件只响一声）
+        aborted = False
         for i in range(0, len(g711_data), _CHUNK_BYTES):
+            if should_abort is not None:
+                try:
+                    if should_abort():
+                        aborted = True
+                        break
+                except Exception:
+                    pass
             sock.sendall(g711_data[i : i + _CHUNK_BYTES])
             if first_chunk_ms < 0:
                 first_chunk_ms = int((time.perf_counter() - t_start) * 1000)
@@ -585,6 +609,7 @@ def _stream_audio_data_content_length_zero(
         "first_chunk_ms": max(0, first_chunk_ms),
         "send_ms": send_ms,
         "audio_ms": int(dur * 1000),
+        "aborted": 1 if aborted else 0,
     }
 
 
@@ -719,7 +744,13 @@ class HikvisionTwoWayAudio:
         client = await self._shared_client(timeout)
         return await self._detect_codec(client)
 
-    async def play_g711(self, g711_data: bytes, *, codec: str = "ulaw") -> None:
+    async def play_g711(
+        self,
+        g711_data: bytes,
+        *,
+        codec: str = "ulaw",
+        should_abort=None,
+    ) -> None:
         if not g711_data:
             return
         codec = normalize_g711_codec(codec)
@@ -736,6 +767,13 @@ class HikvisionTwoWayAudio:
         lock = await self._lock_for()
         key = self._cache_key()
         async with lock:
+            if should_abort is not None:
+                try:
+                    if should_abort():
+                        logger.info("海康对讲播报在 open 前已取消 base=%s", self.base_url)
+                        return
+                except Exception:
+                    pass
             client = await self._shared_client(timeout)
             t_open = time.perf_counter()
             # 已知空闲则跳过预 close，少一轮 Digest（常见省 0.5–1s）
@@ -768,17 +806,22 @@ class HikvisionTwoWayAudio:
                     username=self.username,
                     password=self.password,
                     g711_data=g711_data,
+                    should_abort=should_abort,
                 )
                 if not isinstance(stats, dict):
                     stats = {}
                 send_s = time.perf_counter() - t0
-                # 上送略快于播放时，close 前补一点尾音缓冲
-                remain = max(0.08, audio_s - send_s + 0.18)
-                if remain > 0.08:
-                    await asyncio.sleep(min(remain, audio_s * 0.35 + 0.25))
+                aborted = int(stats.get("aborted") or 0) == 1
+                # 节奏推流常快于实时：close 太早会砍掉尾句（如「肠旺面(总店)」）。
+                # 须等到设备播完剩余时长；打断时跳过。
+                remain = 0.0
+                if not aborted:
+                    remain = tail_hold_seconds(audio_s, send_s)
+                    if remain > 0.05:
+                        await asyncio.sleep(remain)
                 logger.info(
                     "海康对讲节奏推流完成 codec=%s bytes=%s open_ms=%s first_chunk_ms=%s "
-                    "send_ms=%s push_ms=%s audio_ms=%s",
+                    "send_ms=%s push_ms=%s audio_ms=%s remain_ms=%s aborted=%s",
                     codec,
                     len(g711_data),
                     open_ms,
@@ -786,6 +829,8 @@ class HikvisionTwoWayAudio:
                     stats.get("send_ms", int(send_s * 1000)),
                     int((time.perf_counter() - t0) * 1000),
                     stats.get("audio_ms", int(audio_s * 1000)),
+                    int(remain * 1000),
+                    aborted,
                 )
             finally:
                 try:
@@ -794,7 +839,7 @@ class HikvisionTwoWayAudio:
                 except Exception:
                     logger.debug("hikvision close after play ignored", exc_info=True)
                     _SESSION_NEED_CLOSE[key] = True
-                await asyncio.sleep(0.12)
+                await asyncio.sleep(0.08)
 
     async def play_ulaw(self, ulaw_data: bytes) -> None:
         await self.play_g711(ulaw_data, codec="ulaw")

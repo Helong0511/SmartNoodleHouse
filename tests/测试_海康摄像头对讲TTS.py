@@ -16,10 +16,25 @@ from app.services.hikvision_audio import (
     pcm16le_to_ulaw,
     resolve_isapi_base,
     sync_channel_osd_name,
+    tail_hold_seconds,
     wav_bytes_to_g711_8k,
     wav_bytes_to_ulaw8k,
 )
-from app.workers.tts_worker import CameraSpeakerTTS, LocalTTS
+from app.workers.tts_worker import CameraSpeakerTTS, LocalTTS, sanitize_tts_speech_text
+
+
+def test_tail_hold_waits_for_unplayed_store_name():
+    """长句上送约 4s、音频 6.6s 时，须再等约 2s+，否则尾部店名被 close 截断。"""
+    remain = tail_hold_seconds(6.637, 3.989)
+    assert remain >= 2.5
+    assert remain <= 7.2
+
+
+def test_sanitize_tts_unwraps_store_parens():
+    assert (
+        sanitize_tts_speech_text("尊贵的 老贺 普通会员，欢迎您再次光临肠旺面(总店)")
+        == "尊贵的 老贺 普通会员，欢迎您再次光临肠旺面，总店"
+    )
 
 
 def _make_wav(pcm: bytes, rate: int = 8000) -> bytes:
@@ -251,7 +266,7 @@ async def test_camera_speaker_tts_on_plays_camera():
     ):
         await provider.speak("欢迎回来", camera_id=9)
 
-    play.assert_awaited_once_with("欢迎回来", 9)
+    play.assert_awaited_once_with("欢迎回来", 9, should_abort=None)
     local.speak.assert_not_awaited()
 
 

@@ -872,10 +872,3 @@ queue.json[FC3T]: F:WeChat queue page JSON setting navigationBarTitleText to tak
 queue.wxml[FU5T]: F:WeChat queue markup for people pick ticket status and cancel | R:code:miniprogram-wechat/packageOrder/queue/queue.js | A:takeNumber,cancelQueue | S:-
 queue.wxss[FU4T]: F:Styles for WeChat queue take-number card people grid and called state | R:code:miniprogram-wechat/packageOrder/queue/queue.wxml | A:.queue-card,.people-grid | S:-
 
-===E:/SmartNoodleHouse/examples/notes-example/notes-example/===
-main.js[XZ4T]: F:Electron main process for notes CSV export demo window | R:code:examples/notes-example/notes-example/preload.js,code:examples/notes-example/notes-example/package.json | A:notes:export | S:-
-package.json[XZ2T]: F:Private package manifest naming Electron main entry main.js | R:code:examples/notes-example/notes-example/main.js | A:main | S:-
-preload.js[XZ3T]: F:Exposes notes.exportCsv to renderer via contextBridge | R:code:examples/notes-example/notes-example/main.js,code:examples/notes-example/notes-example/renderer.js | A:exportCsv | S:-
-renderer.js[XZ2T]: F:Wires export button to notes.exportCsv and shows save path | R:code:examples/notes-example/notes-example/preload.js | A:- | S:-
-csv.js[XZ3T]: F:Serializes note id/title rows to RFC4180-style CSV text | R:code:examples/notes-example/notes-example/main.js | A:toCsv | S:Doubles embedded quotes inside title fields
-index.html[XZ2T]: F:Minimal Notes Electron page shell with export button and status | R:code:examples/notes-example/notes-example/renderer.js | A:- | S:-

@@ -4,11 +4,27 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform
+import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_tts_speech_text(text: str) -> str:
+    """合成前润色：SAPI 常把括号当旁白弱读/跳过，店名「肠旺面(总店)」易丢尾。"""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    s = (
+        s.replace("（", "，")
+        .replace("）", "")
+        .replace("(", "，")
+        .replace(")", "")
+    )
+    s = re.sub(r"[，,]{2,}", "，", s)
+    return s.strip("，, ").strip()
 
 
 class TTSProvider:
@@ -194,7 +210,7 @@ class LocalTTS(TTSProvider):
 
     def synthesize_wav_sync(self, text: str) -> bytes:
         """合成 WAV 字节，供摄像头推流；失败返回空。短句带进程内缓存。"""
-        text = (text or "").strip()
+        text = sanitize_tts_speech_text(text)
         if not text:
             return b""
         hit = _WAV_CACHE.get(text)
@@ -225,7 +241,7 @@ class LocalTTS(TTSProvider):
         """文本 → G.711（命中启动预热缓存则跳过合成+转码）。"""
         from app.services.hikvision_audio import normalize_g711_codec, wav_bytes_to_g711_8k
 
-        text = (text or "").strip()
+        text = sanitize_tts_speech_text(text)
         if not text:
             return b""
         c = normalize_g711_codec(codec)
@@ -348,12 +364,14 @@ class CameraSpeakerTTS(TTSProvider):
         also_local: bool = False,
         force_local: bool = False,
         force_camera: bool = False,
+        should_abort=None,
     ) -> None:
         """播报路由。
 
         - force_local：只走电脑扬声器（试听电脑）
         - force_camera：只走摄像头对讲，失败不回退本机（试听摄像头）
         - also_local：摄像头成功后仍再播本机（旧 both 试听）
+        - should_abort：摄像头推流可中断（会员入队打断陌生迎宾）
         """
         if force_local:
             await self.local.speak(text, camera_id=camera_id)
@@ -379,7 +397,9 @@ class CameraSpeakerTTS(TTSProvider):
         camera_ok = False
         if use_camera:
             try:
-                camera_ok = await self._play_on_camera(text, int(camera_id))
+                camera_ok = await self._play_on_camera(
+                    text, int(camera_id), should_abort=should_abort
+                )
                 if not camera_ok:
                     logger.warning("摄像头播报未成功 camera_id=%s", camera_id)
             except Exception:
@@ -411,7 +431,9 @@ class CameraSpeakerTTS(TTSProvider):
                 store_id=store_id,
             )
 
-    async def _play_on_camera(self, text: str, camera_id: int) -> bool:
+    async def _play_on_camera(
+        self, text: str, camera_id: int, *, should_abort=None
+    ) -> bool:
         from app.core.config import get_settings
         from app.core.database import AsyncSessionLocal
         from app.models import Camera
@@ -500,7 +522,7 @@ class CameraSpeakerTTS(TTSProvider):
                 text[:40],
             )
         t2 = time.perf_counter()
-        await client.play_g711(g711, codec=codec)
+        await client.play_g711(g711, codec=codec, should_abort=should_abort)
         push_ms = int((time.perf_counter() - t2) * 1000)
         logger.info(
             "摄像头迎宾播报完成 camera_id=%s codec=%s volume=%s%% "
@@ -559,12 +581,24 @@ class TTSWorker:
                     camera_id,
                     text[:40],
                 )
+                should_abort = None
+                # 陌生迎宾可被同机位后续会员入队打断，避免人走了还在播「欢迎光临」
+                if kind == "unknown_visitor" and camera_id is not None:
+                    from app.services.face_service import WelcomeService
+
+                    gen0 = WelcomeService.speak_generation(camera_id)
+
+                    def _abort_if_bumped() -> bool:
+                        return WelcomeService.speak_generation(camera_id) != gen0
+
+                    should_abort = _abort_if_bumped
                 await self.provider.speak(
                     text,
                     camera_id=camera_id,
                     force_local=(kind == "test_speak_pc"),
                     force_camera=(kind == "test_speak_camera"),
                     also_local=(kind == "test_speak"),
+                    should_abort=should_abort,
                 )
                 logger.info("TTS 播报结束 kind=%s camera_id=%s", kind, camera_id)
             except Exception as e:
