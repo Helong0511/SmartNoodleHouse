@@ -474,7 +474,13 @@ async function restartCam(id: number) {
   }
 }
 
+const speakingIds = ref<Set<number>>(new Set())
+
 async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
+  if (speakingIds.value.has(id)) {
+    ElMessage.warning('该摄像头正在试听/播报，请稍候再试')
+    return
+  }
   const row = cameras.value.find((c: any) => c.id === id)
   const online = String(row?.status || '').toUpperCase() === 'ONLINE' || !!row?.runtime?.has_frame
   if (target === 'camera' && !online) {
@@ -488,12 +494,23 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
       return
     }
   }
+  speakingIds.value.add(id)
   try {
     const text = target === 'camera' ? '摄像头扬声器播报测试' : '电脑扬声器播报测试'
     await api.post(`/cameras/${id}/test-speak`, { text, target })
-    ElMessage.success(target === 'camera' ? '已触发摄像头对讲试听' : '已触发电脑扬声器试听')
+    ElMessage.success(
+      target === 'camera'
+        ? '已触发摄像头对讲试听（约数秒，勿连点）'
+        : '已触发电脑扬声器试听',
+    )
+    // 摄像头对讲按实时推流，短句大约 5–15 秒；期间禁止连点堆积队列
+    if (target === 'camera') {
+      await new Promise((r) => setTimeout(r, 8000))
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '试听失败')
+  } finally {
+    speakingIds.value.delete(id)
   }
 }
 

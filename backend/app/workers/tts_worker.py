@@ -305,7 +305,7 @@ class CameraSpeakerTTS(TTSProvider):
         from app.core.database import AsyncSessionLocal
         from app.models import Camera
         from app.services.camera_credentials import build_connect_source, decrypt_password
-        from app.services.hikvision_audio import HikvisionTwoWayAudio, resolve_isapi_base, wav_bytes_to_ulaw8k
+        from app.services.hikvision_audio import HikvisionTwoWayAudio, resolve_isapi_base
         from app.services.system_settings_service import SystemSettingsService
 
         async with AsyncSessionLocal() as db:
@@ -370,29 +370,20 @@ class CameraSpeakerTTS(TTSProvider):
         if not wav:
             logger.warning("TTS 合成 WAV 为空，无法推摄像头 camera_id=%s", camera_id)
             return False
-        t1 = time.perf_counter()
-        ulaw = await loop.run_in_executor(
-            None,
-            lambda: wav_bytes_to_ulaw8k(wav, volume_percent=int(volume)),
-        )
-        encode_ms = int((time.perf_counter() - t1) * 1000)
-        # 连接 5s；整段推流超时在 play_ulaw 内按音频时长计算
+        # 探测摄像头 G.711alaw/ulaw 后实时推流（错编码会只响一声/无声）
         client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
-        t2 = time.perf_counter()
-        await client.play_ulaw(ulaw)
-        push_ms = int((time.perf_counter() - t2) * 1000)
-        audio_ms = int(len(ulaw) / 8.0)  # 8kHz µ-law
+        t1 = time.perf_counter()
+        codec = await client.play_wav(wav, volume_percent=int(volume))
+        push_ms = int((time.perf_counter() - t1) * 1000)
         logger.info(
-            "摄像头迎宾播报完成 camera_id=%s bytes=%s volume=%s%% "
-            "synth_ms=%s encode_ms=%s push_ms=%s audio_ms=%s total_ms=%s",
+            "摄像头迎宾播报完成 camera_id=%s codec=%s volume=%s%% "
+            "synth_ms=%s push_ms=%s total_ms=%s",
             camera_id,
-            len(ulaw),
+            codec,
             volume,
             synth_ms,
-            encode_ms,
             push_ms,
-            audio_ms,
-            synth_ms + encode_ms + push_ms,
+            synth_ms + push_ms,
         )
         return True
 

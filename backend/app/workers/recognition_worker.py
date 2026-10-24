@@ -70,7 +70,9 @@ class RecognitionWorker:
                             continue
 
                         try:
-                            emb = np.array(extract_face_embedding_bgr(frame), dtype=np.float32)
+                            # 同步 InsightFace 绝不能堵事件循环，否则 TTS sleep/对讲会被拖到十几秒
+                            emb_list = await asyncio.to_thread(extract_face_embedding_bgr, frame)
+                            emb = np.array(emb_list, dtype=np.float32)
                         except Exception:
                             continue
                         best_id, best_sim = None, 0.0

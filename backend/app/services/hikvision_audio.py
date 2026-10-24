@@ -1,9 +1,20 @@
-"""海康 ISAPI 双向对讲：把 G.711 µ-law 音频推到摄像头扬声器。"""
+"""海康 ISAPI 双向对讲：按摄像头声明的 G.711 µ-law / A-law 推到扬声器。
+
+推流策略对齐 go2rtc / 社区实践：
+- close → open → audioData
+- audioData 使用 Content-Length: 0，再按 8kHz 实时写 TCP（整包快传会导致只响一下/偶发无声）
+- 编码必须与通道 audioCompressionType 一致（G.711alaw / G.711ulaw）
+"""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
+import re
+import socket
 import struct
+import time
 import wave
 from io import BytesIO
 from urllib.parse import urlparse
@@ -13,24 +24,16 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# G.711 µ-law 实时推流：8kHz 单声道 = 8000 字节/秒
-_ULAW_RATE = 8000
+# G.711 实时推流：8kHz 单声道 = 8000 字节/秒
+_G711_RATE = 8000
 _CHUNK_BYTES = 160  # 20ms
-_CHUNK_SLEEP = _CHUNK_BYTES / _ULAW_RATE
+_CHUNK_SLEEP = _CHUNK_BYTES / _G711_RATE
 # 同摄像头对讲会话互斥（跨 TTSWorker 实例）
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
 _CAMERA_LOCKS_GUARD = asyncio.Lock()
-
-# ITU-T G.711 µ-law（与 CPython audioop.lin2ulaw 同思路）
-_BIAS = 0x84
-_CLIP = 32635
-_EXP_LUT = (
-    [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3]
-    + [4] * 16
-    + [5] * 32
-    + [6] * 64
-    + [7] * 128
-)
+# 通道编码缓存，避免每次试听都多一轮 Digest GET（~0.7s）
+_CODEC_CACHE: dict[str, tuple[float, str]] = {}
+_CODEC_CACHE_TTL = 600.0
 
 
 def resolve_isapi_base(source_url: str) -> str | None:
@@ -50,33 +53,93 @@ def resolve_isapi_base(source_url: str) -> str | None:
     if parsed.scheme in ("http", "https"):
         port = f":{parsed.port}" if parsed.port else ""
         return f"{parsed.scheme}://{host}{port}"
-    # RTSP/RTSPS：管理口默认 HTTP 80
     return f"http://{host}"
 
 
-def linear16_to_ulaw(sample: int) -> int:
-    """16-bit PCM → µ-law 字节。"""
+def _lin2xlaw(pcm: bytes, *, law: str) -> bytes:
+    """16-bit LE PCM → G.711；优先 stdlib audioop（Py3.11），否则纯 Python 回退。"""
+    if not pcm:
+        return b""
+    try:
+        import audioop  # type: ignore
+
+        if law == "alaw":
+            return audioop.lin2alaw(pcm, 2)
+        return audioop.lin2ulaw(pcm, 2)
+    except Exception:
+        pass
+    out = bytearray(len(pcm) // 2)
+    for i in range(0, len(pcm) - 1, 2):
+        sample = struct.unpack_from("<h", pcm, i)[0]
+        out[i // 2] = (
+            _linear16_to_alaw_fallback(sample)
+            if law == "alaw"
+            else _linear16_to_ulaw_fallback(sample)
+        )
+    return bytes(out)
+
+
+def _linear16_to_ulaw_fallback(sample: int) -> int:
+    bias, clip = 0x84, 32635
+    exp_lut = (
+        [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3]
+        + [4] * 16
+        + [5] * 32
+        + [6] * 64
+        + [7] * 128
+    )
     sample = max(-32768, min(32767, int(sample)))
     sign = 0x80 if sample < 0 else 0
     if sample < 0:
         sample = -sample
-    if sample > _CLIP:
-        sample = _CLIP
-    sample = sample + _BIAS
-    exponent = _EXP_LUT[(sample >> 7) & 0xFF]
+    if sample > clip:
+        sample = clip
+    sample = sample + bias
+    exponent = exp_lut[(sample >> 7) & 0xFF]
     mantissa = (sample >> (exponent + 3)) & 0x0F
     return (~(sign | (exponent << 4) | mantissa)) & 0xFF
 
 
+def _linear16_to_alaw_fallback(sample: int) -> int:
+    seg_end = (0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF, 0x3FFF, 0x7FFF)
+    pcm_val = max(-32768, min(32767, int(sample))) >> 2
+    if pcm_val >= 0:
+        mask = 0xD5
+    else:
+        mask = 0x55
+        pcm_val = -pcm_val - 8
+    seg = 7
+    for i, end in enumerate(seg_end):
+        if pcm_val <= end:
+            seg = i
+            break
+    if seg >= 8:
+        return 0x7F ^ mask
+    aval = seg << 4
+    if seg < 2:
+        aval |= (pcm_val >> 4) & 0x0F
+    else:
+        aval |= (pcm_val >> (seg + 3)) & 0x0F
+    return aval ^ mask
+
+
+def linear16_to_ulaw(sample: int) -> int:
+    return _lin2xlaw(struct.pack("<h", int(sample)), law="ulaw")[0]
+
+
+def linear16_to_alaw(sample: int) -> int:
+    return _lin2xlaw(struct.pack("<h", int(sample)), law="alaw")[0]
+
+
 def pcm16le_to_ulaw(pcm: bytes) -> bytes:
-    out = bytearray(len(pcm) // 2)
-    for i in range(0, len(pcm) - 1, 2):
-        sample = struct.unpack_from("<h", pcm, i)[0]
-        out[i // 2] = linear16_to_ulaw(sample)
-    return bytes(out)
+    return _lin2xlaw(pcm, law="ulaw")
 
 
-def resample_pcm16_mono(pcm: bytes, src_rate: int, dst_rate: int = _ULAW_RATE) -> bytes:
+def pcm16le_to_alaw(pcm: bytes) -> bytes:
+    return _lin2xlaw(pcm, law="alaw")
+
+
+def resample_pcm16_mono(pcm: bytes, src_rate: int, dst_rate: int = _G711_RATE) -> bytes:
     if src_rate <= 0:
         raise ValueError("invalid sample rate")
     if src_rate == dst_rate:
@@ -99,7 +162,6 @@ def resample_pcm16_mono(pcm: bytes, src_rate: int, dst_rate: int = _ULAW_RATE) -
 
 
 def scale_pcm16_volume(pcm: bytes, volume_percent: int) -> bytes:
-    """按百分比缩放 16-bit PCM 音量（0=静音，100=原音，可略超 100 但会限幅）。"""
     try:
         pct = int(volume_percent)
     except (TypeError, ValueError):
@@ -116,8 +178,7 @@ def scale_pcm16_volume(pcm: bytes, volume_percent: int) -> bytes:
     return bytes(out)
 
 
-def wav_bytes_to_ulaw8k(wav_data: bytes, *, volume_percent: int = 100) -> bytes:
-    """WAV（任意常见 PCM）→ 8kHz mono G.711 µ-law 裸流；可选音量百分比。"""
+def _wav_to_pcm8k(wav_data: bytes, *, volume_percent: int = 100) -> bytes:
     with wave.open(BytesIO(wav_data), "rb") as wf:
         channels = wf.getnchannels()
         sampwidth = wf.getsampwidth()
@@ -126,14 +187,35 @@ def wav_bytes_to_ulaw8k(wav_data: bytes, *, volume_percent: int = 100) -> bytes:
     if sampwidth != 2:
         raise ValueError(f"仅支持 16-bit PCM WAV，当前 sampwidth={sampwidth}")
     if channels > 1:
-        # 取左声道
         mono = bytearray()
         for i in range(0, len(frames), sampwidth * channels):
             mono.extend(frames[i : i + 2])
         frames = bytes(mono)
-    pcm8k = resample_pcm16_mono(frames, rate, _ULAW_RATE)
-    pcm8k = scale_pcm16_volume(pcm8k, volume_percent)
+    pcm8k = resample_pcm16_mono(frames, rate, _G711_RATE)
+    return scale_pcm16_volume(pcm8k, volume_percent)
+
+
+def normalize_g711_codec(raw: str | None) -> str:
+    s = (raw or "").strip().lower().replace(" ", "").replace("_", "").replace(".", "")
+    if "alaw" in s or s in ("g711a", "pcma"):
+        return "alaw"
+    return "ulaw"
+
+
+def wav_bytes_to_g711_8k(
+    wav_data: bytes,
+    *,
+    codec: str = "ulaw",
+    volume_percent: int = 100,
+) -> bytes:
+    pcm8k = _wav_to_pcm8k(wav_data, volume_percent=volume_percent)
+    if normalize_g711_codec(codec) == "alaw":
+        return pcm16le_to_alaw(pcm8k)
     return pcm16le_to_ulaw(pcm8k)
+
+
+def wav_bytes_to_ulaw8k(wav_data: bytes, *, volume_percent: int = 100) -> bytes:
+    return wav_bytes_to_g711_8k(wav_data, codec="ulaw", volume_percent=volume_percent)
 
 
 def _xml_local(tag: str) -> str:
@@ -153,8 +235,170 @@ def _parse_session_id(xml_text: str) -> str | None:
     return None
 
 
+def _parse_channel_audio(xml_text: str, channel: int) -> tuple[str, bool]:
+    codec = "ulaw"
+    enabled = True
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return codec, enabled
+    for ch in root.iter():
+        if _xml_local(ch.tag) != "TwoWayAudioChannel":
+            continue
+        cid = None
+        ctype = None
+        cen = None
+        for child in list(ch):
+            name = _xml_local(child.tag)
+            text = (child.text or "").strip()
+            if name == "id":
+                cid = text
+            elif name == "audioCompressionType":
+                ctype = text
+            elif name == "enabled":
+                cen = text.lower() in ("true", "1", "yes")
+        if cid is not None and str(cid) != str(channel):
+            continue
+        if ctype:
+            codec = normalize_g711_codec(ctype)
+        if cen is not None:
+            enabled = cen
+        break
+    return codec, enabled
+
+
+def _md5_hex(s: str) -> str:
+    return hashlib.md5(s.encode("utf-8")).hexdigest()
+
+
+def _build_digest_authorization(
+    www_authenticate: str,
+    *,
+    method: str,
+    uri: str,
+    username: str,
+    password: str,
+) -> str:
+    """构造 HTTP Digest Authorization（兼容 Hikvision qop=auth）。"""
+    realm_m = re.search(r'realm="([^"]+)"', www_authenticate, re.I)
+    nonce_m = re.search(r'nonce="([^"]+)"', www_authenticate, re.I)
+    qop_m = re.search(r"qop=\"([^\"]+)\"", www_authenticate, re.I)
+    opaque_m = re.search(r'opaque="([^"]+)"', www_authenticate, re.I)
+    realm = realm_m.group(1) if realm_m else ""
+    nonce = nonce_m.group(1) if nonce_m else ""
+    ha1 = _md5_hex(f"{username}:{realm}:{password}")
+    ha2 = _md5_hex(f"{method}:{uri}")
+    if qop_m and "auth" in qop_m.group(1).lower():
+        cnonce = hashlib.md5(os.urandom(8)).hexdigest()
+        nc = "00000001"
+        resp = _md5_hex(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}")
+        parts = [
+            f'username="{username}"',
+            f'realm="{realm}"',
+            f'nonce="{nonce}"',
+            f'uri="{uri}"',
+            f'response="{resp}"',
+            "qop=auth",
+            f"nc={nc}",
+            f'cnonce="{cnonce}"',
+        ]
+        if opaque_m:
+            parts.append(f'opaque="{opaque_m.group(1)}"')
+        return "Digest " + ", ".join(parts)
+    resp = _md5_hex(f"{ha1}:{nonce}:{ha2}")
+    return (
+        f'Digest username="{username}", realm="{realm}", nonce="{nonce}", '
+        f'uri="{uri}", response="{resp}"'
+    )
+
+
+def _read_http_response(sock: socket.socket) -> tuple[int, dict[str, str], bytes]:
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+        if len(buf) > 65536:
+            break
+    header_raw, _, rest = buf.partition(b"\r\n\r\n")
+    lines = header_raw.decode("latin-1", errors="replace").split("\r\n")
+    status = 0
+    if lines:
+        parts = lines[0].split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            status = int(parts[1])
+    hdrs: dict[str, str] = {}
+    for line in lines[1:]:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            hdrs[k.strip().lower()] = v.strip()
+    return status, hdrs, rest
+
+
+def _stream_audio_data_content_length_zero(
+    *,
+    host: str,
+    port: int,
+    path: str,
+    username: str,
+    password: str,
+    g711_data: bytes,
+) -> None:
+    """go2rtc 同款：PUT audioData + Content-Length:0，再按实时节奏写 TCP 正文。"""
+    def _one_shot(auth_header: str | None) -> tuple[socket.socket, int, dict[str, str]]:
+        sock = socket.create_connection((host, port), timeout=8.0)
+        sock.settimeout(8.0)
+        lines = [
+            f"PUT {path} HTTP/1.1",
+            f"Host: {host if port in (80, 443) else f'{host}:{port}'}",
+            "Content-Type: application/octet-stream",
+            "Content-Length: 0",
+            "Connection: keep-alive",
+        ]
+        if auth_header:
+            lines.append(f"Authorization: {auth_header}")
+        payload = ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
+        sock.sendall(payload)
+        status, hdrs, _ = _read_http_response(sock)
+        return sock, status, hdrs
+
+    # 1) 拿 Digest challenge
+    sock, status, hdrs = _one_shot(None)
+    try:
+        if status == 401:
+            www = hdrs.get("www-authenticate") or ""
+            auth = _build_digest_authorization(
+                www, method="PUT", uri=path, username=username, password=password
+            )
+            sock.close()
+            sock, status, hdrs = _one_shot(auth)
+        if status not in (0, 200, 100) and status != 401:
+            # 部分固件对 CL:0 不立即回包，status=0 表示还没响应，可继续写
+            if status >= 400:
+                raise RuntimeError(f"audioData 握手失败 HTTP {status}")
+        # 2) 实时写音频（非法 HTTP，但是海康对讲约定）
+        for i in range(0, len(g711_data), _CHUNK_BYTES):
+            sock.sendall(g711_data[i : i + _CHUNK_BYTES])
+            time.sleep(_CHUNK_SLEEP)
+        try:
+            sock.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        try:
+            sock.settimeout(2.0)
+            _read_http_response(sock)
+        except OSError:
+            pass
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
 class HikvisionTwoWayAudio:
-    """对一台海康摄像头打开对讲通道并推送 µ-law 音频。"""
+    """对一台海康摄像头打开对讲通道并按设备编码推送 G.711。"""
 
     def __init__(
         self,
@@ -180,20 +424,51 @@ class HikvisionTwoWayAudio:
                 _CAMERA_LOCKS[key] = lock
             return lock
 
-    def _url(self, suffix: str) -> str:
+    def _url(self, suffix: str = "") -> str:
         return f"{self.base_url}/ISAPI/System/TwoWayAudio/channels/{self.channel}{suffix}"
 
-    async def play_ulaw(self, ulaw_data: bytes) -> None:
-        if not ulaw_data:
+    def _cache_key(self) -> str:
+        return f"{self.base_url}|{self.channel}"
+
+    async def _detect_codec(self, client: httpx.AsyncClient) -> str:
+        cached = _CODEC_CACHE.get(self._cache_key())
+        if cached and time.time() - cached[0] < _CODEC_CACHE_TTL:
+            return cached[1]
+        try:
+            resp = await client.get(f"{self.base_url}/ISAPI/System/TwoWayAudio/channels")
+            if resp.status_code == 200 and resp.text:
+                codec, enabled = _parse_channel_audio(resp.text, self.channel)
+                _CODEC_CACHE[self._cache_key()] = (time.time(), codec)
+                logger.info(
+                    "海康对讲通道 codec=%s enabled=%s base=%s channel=%s",
+                    codec,
+                    enabled,
+                    self.base_url,
+                    self.channel,
+                )
+                return codec
+        except Exception:
+            logger.debug("hikvision detect codec failed, fallback ulaw", exc_info=True)
+        return "ulaw"
+
+    async def play_g711(self, g711_data: bytes, *, codec: str = "ulaw") -> None:
+        if not g711_data:
             return
+        codec = normalize_g711_codec(codec)
         auth = httpx.DigestAuth(self.username, self.password)
-        # µ-law 8kHz 实时推流：读超时需覆盖整段音频，否则会 ReadTimeout 后无声
-        stream_secs = max(float(self.timeout), len(ulaw_data) / 8000.0 + 15.0)
-        timeout = httpx.Timeout(stream_secs, connect=5.0, write=stream_secs, pool=10.0)
+        timeout = httpx.Timeout(
+            max(float(self.timeout), len(g711_data) / float(_G711_RATE) + 20.0),
+            connect=5.0,
+        )
+        parsed = urlparse(self.base_url)
+        host = parsed.hostname or ""
+        port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
+        if not host:
+            raise RuntimeError("invalid ISAPI base url")
+
         lock = await self._lock_for()
         async with lock:
             async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
-                # 清理残留会话（忽略失败）
                 try:
                     await client.put(self._url("/close"))
                 except Exception:
@@ -202,45 +477,63 @@ class HikvisionTwoWayAudio:
                 open_resp = await client.put(self._url("/open"))
                 open_resp.raise_for_status()
                 session_id = _parse_session_id(open_resp.text) or ""
-                audio_url = self._url("/audioData")
+                path = f"/ISAPI/System/TwoWayAudio/channels/{self.channel}/audioData"
                 if session_id:
-                    audio_url = f"{audio_url}?sessionId={session_id}"
+                    path = f"{path}?sessionId={session_id}"
 
-                play_secs = len(ulaw_data) / float(_ULAW_RATE)
+                t0 = time.perf_counter()
                 try:
-                    # 部分海康固件对 chunked 流式 PUT 会中途断开；短句整包更稳
-                    # 长音频仍按实时块推，避免一次性撑满内存/缓冲
-                    if len(ulaw_data) <= 8000 * 8:  # ≤约 8 秒
-                        put_resp = await client.put(
-                            audio_url,
-                            content=ulaw_data,
-                            headers={
-                                "Content-Type": "application/octet-stream",
-                                "Content-Length": str(len(ulaw_data)),
-                            },
-                        )
-                        put_resp.raise_for_status()
-                        # 整包 PUT 常秒回 200；立刻 close 会打断播放 → 有时有声有时无声
-                        await asyncio.sleep(play_secs + 0.35)
-                    else:
-
-                        async def _body():
-                            for i in range(0, len(ulaw_data), _CHUNK_BYTES):
-                                chunk = ulaw_data[i : i + _CHUNK_BYTES]
-                                yield chunk
-                                await asyncio.sleep(_CHUNK_SLEEP)
-
-                        put_resp = await client.put(
-                            audio_url,
-                            content=_body(),
-                            headers={"Content-Type": "application/octet-stream"},
-                        )
-                        put_resp.raise_for_status()
+                    # 主路径：CL:0 + 实时写 socket（与 go2rtc 一致）
+                    await asyncio.to_thread(
+                        _stream_audio_data_content_length_zero,
+                        host=host,
+                        port=port,
+                        path=path,
+                        username=self.username,
+                        password=self.password,
+                        g711_data=g711_data,
+                    )
+                    logger.info(
+                        "海康对讲实时推流完成 codec=%s bytes=%s push_ms=%s",
+                        codec,
+                        len(g711_data),
+                        int((time.perf_counter() - t0) * 1000),
+                    )
+                except Exception as e:
+                    # 回退：整包 Content-Length（部分固件只吃这种）
+                    logger.warning(
+                        "海康实时推流失败，回退整包 PUT: %s", e
+                    )
+                    audio_url = f"{self.base_url}{path}"
+                    put_resp = await client.put(
+                        audio_url,
+                        content=g711_data,
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "Content-Length": str(len(g711_data)),
+                        },
+                    )
+                    put_resp.raise_for_status()
+                    await asyncio.sleep(len(g711_data) / float(_G711_RATE) + 0.5)
                 finally:
                     try:
                         await client.put(self._url("/close"))
                     except Exception:
                         logger.debug("hikvision close after play ignored", exc_info=True)
 
-    async def play_wav(self, wav_data: bytes) -> None:
-        await self.play_ulaw(wav_bytes_to_ulaw8k(wav_data))
+    async def play_ulaw(self, ulaw_data: bytes) -> None:
+        await self.play_g711(ulaw_data, codec="ulaw")
+
+    async def play_wav(self, wav_data: bytes, *, volume_percent: int = 100) -> str:
+        auth = httpx.DigestAuth(self.username, self.password)
+        timeout = httpx.Timeout(15.0, connect=5.0)
+        async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
+            codec = await self._detect_codec(client)
+        g711 = await asyncio.to_thread(
+            wav_bytes_to_g711_8k,
+            wav_data,
+            codec=codec,
+            volume_percent=volume_percent,
+        )
+        await self.play_g711(g711, codec=codec)
+        return codec

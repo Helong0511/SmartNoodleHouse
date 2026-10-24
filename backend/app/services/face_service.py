@@ -798,6 +798,26 @@ class WelcomeService:
         if not text:
             return
         payload["text"] = text
+        kind = str(payload.get("kind") or "")
+        # 试听连点：同摄像头同 kind 已在队尾则跳过，避免排队叠播「有时有声有时像没反应」
+        if kind.startswith("test_speak"):
+            try:
+                redis = await get_redis()
+                tail = await redis.lindex(cls.TTS_QUEUE_KEY, -1)
+                if tail:
+                    last = json.loads(tail)
+                    if (
+                        str(last.get("kind") or "") == kind
+                        and str(last.get("camera_id")) == str(payload.get("camera_id"))
+                    ):
+                        logger.info(
+                            "跳过重复试听入队 kind=%s camera_id=%s",
+                            kind,
+                            payload.get("camera_id"),
+                        )
+                        return
+            except Exception:
+                pass
         raw = json.dumps(payload, ensure_ascii=False)
         try:
             redis = await get_redis()

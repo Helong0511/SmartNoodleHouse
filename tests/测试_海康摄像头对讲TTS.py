@@ -10,8 +10,11 @@ import pytest
 
 from app.services.hikvision_audio import (
     HikvisionTwoWayAudio,
+    normalize_g711_codec,
+    pcm16le_to_alaw,
     pcm16le_to_ulaw,
     resolve_isapi_base,
+    wav_bytes_to_g711_8k,
     wav_bytes_to_ulaw8k,
 )
 from app.workers.tts_worker import CameraSpeakerTTS, LocalTTS
@@ -49,6 +52,18 @@ def test_pcm16le_to_ulaw_nonempty():
     pcm = struct.pack("<" + "h" * 8, 0, 1000, -1000, 5000, -5000, 20000, -20000, 0)
     out = pcm16le_to_ulaw(pcm)
     assert len(out) == 8
+
+
+def test_normalize_and_alaw_encode():
+    assert normalize_g711_codec("G.711alaw") == "alaw"
+    assert normalize_g711_codec("G.711ulaw") == "ulaw"
+    pcm = struct.pack("<" + "h" * 8, 0, 1000, -1000, 5000, -5000, 20000, -20000, 0)
+    alaw = pcm16le_to_alaw(pcm)
+    ulaw = pcm16le_to_ulaw(pcm)
+    assert len(alaw) == 8
+    assert alaw != ulaw
+    wav = _make_wav(pcm, rate=8000)
+    assert len(wav_bytes_to_g711_8k(wav, codec="alaw")) == 8
 
 
 @pytest.mark.asyncio
@@ -94,16 +109,26 @@ async def test_hikvision_play_ulaw_open_put_close():
                 )
             return _Resp()
 
-    with patch("app.services.hikvision_audio.httpx.AsyncClient", _Client):
+    streamed: list[bytes] = []
+
+    def _fake_stream(**kwargs):
+        streamed.append(kwargs.get("g711_data") or b"")
+
+    with (
+        patch("app.services.hikvision_audio.httpx.AsyncClient", _Client),
+        patch(
+            "app.services.hikvision_audio._stream_audio_data_content_length_zero",
+            _fake_stream,
+        ),
+        patch("app.services.hikvision_audio._CHUNK_SLEEP", 0),
+    ):
         client = HikvisionTwoWayAudio("http://192.168.1.64", "admin", "pass")
-        # 缩短睡眠，避免单测拖长时间
-        with patch("app.services.hikvision_audio._CHUNK_SLEEP", 0):
-            await client.play_ulaw(ulaw)
+        await client.play_ulaw(ulaw)
 
     paths = [p for _, p in calls]
     assert any(p.endswith("/close") for p in paths)
     assert any(p.endswith("/open") for p in paths)
-    assert any(p.endswith("/audioData") for p in paths)
+    assert streamed and streamed[0] == ulaw
 
 
 @pytest.mark.asyncio
