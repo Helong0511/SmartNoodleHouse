@@ -217,19 +217,38 @@ class TTSWorker:
         self.provider = provider or CameraSpeakerTTS()
         self._running = False
 
-    async def run(self, queue: asyncio.Queue) -> None:
+    async def run(self, queue: asyncio.Queue | None = None) -> None:
+        """消费迎宾队列。
+
+        每轮重新取 WelcomeService.get_queue()，避免 uvicorn --reload 后
+        TTS 仍监听旧模块单例队列、新迎宾入新队列导致「有事件无声音」。
+        测试可传入固定 queue 覆盖。
+        """
         self._running = True
         while self._running:
             try:
-                item = await asyncio.wait_for(queue.get(), timeout=1.0)
+                if queue is not None:
+                    q = queue
+                else:
+                    from app.services.face_service import WelcomeService
+
+                    q = WelcomeService.get_queue()
+                item = await asyncio.wait_for(q.get(), timeout=1.0)
                 text = item.get("text") or ""
                 if not text:
                     continue
                 camera_id = item.get("camera_id")
+                kind = item.get("kind") or "member"
                 try:
                     camera_id = int(camera_id) if camera_id is not None else None
                 except (TypeError, ValueError):
                     camera_id = None
+                logger.info(
+                    "TTS 开始播报 kind=%s camera_id=%s text=%s",
+                    kind,
+                    camera_id,
+                    text[:40],
+                )
                 await self.provider.speak(text, camera_id=camera_id)
             except asyncio.TimeoutError:
                 continue

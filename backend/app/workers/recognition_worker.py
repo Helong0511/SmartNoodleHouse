@@ -91,6 +91,14 @@ class RecognitionWorker:
                         )
                         # 未匹配到授权会员 → 未知访客抓拍 + 可选陌生客迎宾（按日目录存图，30s 节流）
                         if best_id is None or best_sim < threshold:
+                            if best_id is not None:
+                                logger.info(
+                                    "人脸未达匹配阈值 camera_id=%s best_customer=%s sim=%.4f threshold=%.4f",
+                                    cam_id,
+                                    best_id,
+                                    best_sim,
+                                    threshold,
+                                )
                             capture_on = await SystemSettingsService.effective_bool(
                                 db,
                                 "unknown_visitor_capture_enabled",

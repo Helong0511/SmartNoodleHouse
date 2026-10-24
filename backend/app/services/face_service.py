@@ -546,6 +546,12 @@ class VisitorService:
         if not text:
             return False
         cls._last_unknown_welcome_at[int(camera_id)] = now
+        logger.info(
+            "陌生访客迎宾入队 camera_id=%s store_id=%s text=%s",
+            camera_id,
+            store_id,
+            text[:40],
+        )
         await WelcomeService.get_queue().put(
             {"customer_id": None, "text": text, "camera_id": camera_id, "kind": "unknown_visitor"}
         )

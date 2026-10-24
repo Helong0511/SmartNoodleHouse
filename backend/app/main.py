@@ -224,7 +224,8 @@ async def lifespan(app: FastAPI):
             logger.exception("启动定时任务覆盖订阅失败")
         logger.info("Scheduler started (leader worker_id=%s role=%s)", _leader_worker_id, role)
         if settings.tts_provider == "local":
-            tts_task = asyncio.create_task(tts_worker.run(WelcomeService.get_queue()))
+            # 不绑死队列实例：run() 内每轮取 WelcomeService.get_queue()，兼容 --reload
+            tts_task = asyncio.create_task(tts_worker.run())
             logger.info("TTS worker started (leader)")
         if settings.enable_recognition_worker:
             try:
