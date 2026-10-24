@@ -44,6 +44,8 @@ def test_store_scope_split():
     assert SystemSettingsService.allows_store_override("invoice_enabled") is True
     assert SystemSettingsService.allows_store_override("shared_cart_enabled") is True
     assert SystemSettingsService.allows_store_override("camera_speaker_tts_enabled") is True
+    assert SystemSettingsService.allows_store_override("unknown_visitor_welcome_enabled") is True
+    assert SystemSettingsService.allows_store_override("unknown_visitor_welcome_text") is True
     assert SystemSettingsService.allows_store_override("jwt_expire_minutes") is False
     assert SystemSettingsService.allows_store_override("enable_wx_phone_bind") is False
     assert SystemSettingsService.allows_store_override("h5_public_base_url") is False
