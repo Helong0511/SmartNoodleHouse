@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-24T12:26:36Z",
+  "updated_at": "2026-10-24T12:40:23Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "0d6e39916344d379b95aebf6c72b687a297dd37c08409e52a88fb682f59da407",
-      "size": 189819,
-      "normalized_sha256": "0d6e39916344d379b95aebf6c72b687a297dd37c08409e52a88fb682f59da407"
+      "sha256": "216934d0261621f878462713bd9dc7ad93379846ca9891451310dfb73c1a64ce",
+      "size": 189477,
+      "normalized_sha256": "216934d0261621f878462713bd9dc7ad93379846ca9891451310dfb73c1a64ce"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1091,9 +1091,9 @@
     },
     "backend/app/main.py": {
       "role": "index",
-      "sha256": "5a16636ffdce1b9379f4c527590b86e5985ce06ccd459ff9d7420b12665e5d3e",
-      "size": 26462,
-      "normalized_sha256": "b3f5f259f0c7f102ceaa6f646ec2045264a2146111853a5227472e56cf8909ff"
+      "sha256": "ea46d591346eb713955d10d37892d1a0c9bc4528c4e8b3b63b852d59ec6d167f",
+      "size": 27742,
+      "normalized_sha256": "d52d408b4339c3ae4c6bb01b25f54b9a766e60df290bdcb1d08cf0e39efe040f"
     },
     "backend/app/models/__init__.py": {
       "role": "index",
@@ -1397,9 +1397,9 @@
     },
     "backend/app/services/face_service.py": {
       "role": "index",
-      "sha256": "653eb6e2905c6d7965b537f0c11fd6f959a51fda089fb183af8aad198ec585a8",
-      "size": 58344,
-      "normalized_sha256": "653eb6e2905c6d7965b537f0c11fd6f959a51fda089fb183af8aad198ec585a8"
+      "sha256": "2d21beb381cf3bad0273244b35b9022c119efd1dd433c6c50fad53c4848e7d42",
+      "size": 59575,
+      "normalized_sha256": "2d21beb381cf3bad0273244b35b9022c119efd1dd433c6c50fad53c4848e7d42"
     },
     "backend/app/services/feedback_service.py": {
       "role": "index",
@@ -1427,9 +1427,9 @@
     },
     "backend/app/services/hikvision_audio.py": {
       "role": "index",
-      "sha256": "7637393805bcb50df1eb176c9b256fabca19388eb9e89a9dd8548b50954aa57c",
-      "size": 18825,
-      "normalized_sha256": "7637393805bcb50df1eb176c9b256fabca19388eb9e89a9dd8548b50954aa57c"
+      "sha256": "884b11cce7082eda70d7ab20f49e32ff0f96249c5d73234352732c811d800272",
+      "size": 18990,
+      "normalized_sha256": "884b11cce7082eda70d7ab20f49e32ff0f96249c5d73234352732c811d800272"
     },
     "backend/app/services/kitchen_auto_service.py": {
       "role": "index",
@@ -1727,9 +1727,9 @@
     },
     "backend/app/services/system_settings_service.py": {
       "role": "index",
-      "sha256": "7224aefb70ca7eef3b853cc448dde202730361f9eaa19a5a9fcfd451580eb80a",
-      "size": 53755,
-      "normalized_sha256": "7224aefb70ca7eef3b853cc448dde202730361f9eaa19a5a9fcfd451580eb80a"
+      "sha256": "a6be26f2f2c55c4abfc44f283ff8981fc39e494c12bc1adf01a08ad8f2b0cc82",
+      "size": 53822,
+      "normalized_sha256": "a6be26f2f2c55c4abfc44f283ff8981fc39e494c12bc1adf01a08ad8f2b0cc82"
     },
     "backend/app/services/table_resolve.py": {
       "role": "index",
@@ -1871,9 +1871,9 @@
     },
     "backend/app/workers/tts_worker.py": {
       "role": "index",
-      "sha256": "7f8a3d47c1b5ee2fc57f2a7105bb05ca3da239b7e45f59b39b70beb078d1ae37",
-      "size": 20139,
-      "normalized_sha256": "577c962c178924b04a3e30bde3684a02645e50a2230b6aa67d732516f69c19c7"
+      "sha256": "a514cd7079c0c795f278fa1f2186d28a4e4a1d2f3a3de913f5d6b7d8117ce1b9",
+      "size": 20477,
+      "normalized_sha256": "51a831ccc6253342577b224de3f937b2cf88aec62296461f791b3c980f500d42"
     },
     "backend/requirements.lock": {
       "role": "index",
@@ -2395,9 +2395,9 @@
     },
     "frontend/src/views/Cameras.vue": {
       "role": "index",
-      "sha256": "8a67053fe0aa45071e78a683446e436b62b928c48e28bfda943c0f32bf22988c",
-      "size": 21974,
-      "normalized_sha256": "8a67053fe0aa45071e78a683446e436b62b928c48e28bfda943c0f32bf22988c"
+      "sha256": "ffe502678f48d7dadd07e2d1d10beb7cc15665566325c37957e61a9106476b1d",
+      "size": 21713,
+      "normalized_sha256": "ffe502678f48d7dadd07e2d1d10beb7cc15665566325c37957e61a9106476b1d"
     },
     "frontend/src/views/Categories.vue": {
       "role": "index",

@@ -230,9 +230,9 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "摄像头播放迎宾语音",
         "unit": "",
         "type": "bool",
-        "default": False,
+        "default": True,
         "store_override": True,
-        "description": "后台开关，改完即时生效（不写 .env）。开启后迎宾 TTS 经海康对讲推到触发识别的摄像头扬声器（须对讲型机）；关闭则本机播报；推流失败自动回退本机。可按门店覆盖",
+        "description": "后台开关，改完即时生效（不写 .env）。开启后会员/访客迎宾 TTS 经海康对讲推到触发识别的摄像头扬声器（须对讲型机）；关闭则本机播报；推流失败自动回退本机。可按门店覆盖。已有库若仍为 false 请在业务参数中打开",
     },
     "camera_speaker_volume_percent": {
         "group": "welcome",

@@ -76,11 +76,15 @@ async def _warmup_recognition_and_tts() -> None:
         from app.workers.tts_worker import warmup_tts_phrases
 
         settings = get_settings()
+        # 摄像头对讲常用短句：WAV + G.711 一并预热，迎宾/试听命中缓存可跳过合成
         phrases = [
             "试听播报",
             "电脑试听",
             "欢迎光临",
             "欢迎回来",
+            "欢迎回来。",
+            "欢迎回来，尊贵的会员。",
+            "欢迎回来，尊贵的会员",
             "摄像头扬声器播报测试",
             "电脑扬声器播报测试",
         ]
@@ -99,11 +103,27 @@ async def _warmup_recognition_and_tts() -> None:
                     "welcome_greeting_prefix",
                     fallback="欢迎回来，{称呼}。",
                 )
-                # 模板含占位符时无法整句预热，仅预热无占位的固定句
-                if greeting and "{" not in str(greeting):
-                    phrases.append(str(greeting).strip())
+                g = str(greeting or "").strip()
+                if g and "{" not in g and "｛" not in g:
+                    phrases.append(g)
+                elif g:
+                    # 模板含占位符：用常见取值预填几条整句，覆盖摄像头迎宾热路径
+                    samples = (
+                        {"称呼": "贵宾", "会员等级": "金卡会员", "店名": "本店", "名字": "贵宾"},
+                        {"称呼": "会员", "会员等级": "会员", "店名": "射洪肠旺面", "名字": "会员"},
+                        {"称呼": "尊贵的会员", "会员等级": "", "店名": "", "名字": "尊贵的会员"},
+                    )
+                    for sample in samples:
+                        filled = g
+                        for key, val in sample.items():
+                            for ph in (f"{{{key}}}", f"｛{key}｝", f"{{ {key} }}"):
+                                filled = filled.replace(ph, val)
+                        # 压缩多余空白；仍含未替换占位则跳过
+                        filled = " ".join(filled.split())
+                        if "{" not in filled and "｛" not in filled and filled:
+                            phrases.append(filled)
         except Exception:
-            logger.debug("读取陌生客迎宾文案失败，仅预热内置短句", exc_info=True)
+            logger.debug("读取迎宾文案失败，仅预热内置短句", exc_info=True)
 
         volumes: tuple[int, ...] = (100, 80)
         try:

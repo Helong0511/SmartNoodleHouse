@@ -1038,28 +1038,47 @@ class WelcomeService:
             return
         payload["text"] = text
         kind = str(payload.get("kind") or "")
-        # 试听连点：同摄像头同 kind 已在队尾则跳过，避免排队叠播「有时有声有时像没反应」
-        if kind.startswith("test_speak"):
-            try:
-                redis = await get_redis()
-                tail = await redis.lindex(cls.TTS_QUEUE_KEY, -1)
-                if tail:
-                    last = json.loads(tail)
-                    if (
-                        str(last.get("kind") or "") == kind
-                        and str(last.get("camera_id")) == str(payload.get("camera_id"))
-                    ):
-                        logger.info(
-                            "跳过重复试听入队 kind=%s camera_id=%s",
-                            kind,
-                            payload.get("camera_id"),
-                        )
-                        return
-            except Exception:
-                pass
         raw = json.dumps(payload, ensure_ascii=False)
         try:
             redis = await get_redis()
+            # 试听连点：去掉队列里同摄像头同 kind 的待播项，再入队（保留最后一次；
+            # 正在播的已 BRPOP 出队，不受影响，播完后继续播本条）
+            if kind.startswith("test_speak"):
+                try:
+                    items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
+                    kept: list[str] = []
+                    dropped = 0
+                    for it in items or []:
+                        s = it.decode("utf-8", errors="replace") if isinstance(it, bytes) else str(it)
+                        try:
+                            obj = json.loads(s)
+                        except Exception:
+                            kept.append(s)
+                            continue
+                        if (
+                            str(obj.get("kind") or "") == kind
+                            and str(obj.get("camera_id")) == str(payload.get("camera_id"))
+                        ):
+                            dropped += 1
+                            continue
+                        kept.append(s)
+                    pipe = redis.pipeline()
+                    pipe.delete(cls.TTS_QUEUE_KEY)
+                    if kept:
+                        pipe.rpush(cls.TTS_QUEUE_KEY, *kept)
+                    pipe.rpush(cls.TTS_QUEUE_KEY, raw)
+                    pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
+                    await pipe.execute()
+                    if dropped:
+                        logger.info(
+                            "试听入队替换 pending=%s kind=%s camera_id=%s",
+                            dropped,
+                            kind,
+                            payload.get("camera_id"),
+                        )
+                    return
+                except Exception:
+                    logger.exception("试听队列替换失败，回退普通入队")
             pipe = redis.pipeline()
             pipe.rpush(cls.TTS_QUEUE_KEY, raw)
             pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
@@ -1479,6 +1498,13 @@ class WelcomeService:
             else (f"尊贵的{level_name}会员" if level_name else "尊贵的会员")
         )
 
+        logger.info(
+            "会员迎宾入队 customer_id=%s camera_id=%s store_id=%s text=%s",
+            customer_id,
+            camera_id,
+            store_id,
+            text[:60],
+        )
         await cls.enqueue(
             {
                 "customer_id": customer_id,

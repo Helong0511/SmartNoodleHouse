@@ -352,6 +352,12 @@ class CameraSpeakerTTS(TTSProvider):
                 except Exception:
                     logger.exception("读取摄像头播报开关失败 camera_id=%s", camera_id)
                     use_camera = False
+                if not use_camera:
+                    logger.warning(
+                        "摄像头播报开关关闭，迎宾/访客改本机扬声器 camera_id=%s "
+                        "（请在后台「业务参数 → 摄像头播放迎宾语音」开启）",
+                        camera_id,
+                    )
 
         camera_ok = False
         if use_camera:

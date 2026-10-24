@@ -532,6 +532,8 @@ class HikvisionTwoWayAudio:
                         await client.put(self._url("/close"))
                     except Exception:
                         logger.debug("hikvision close after play ignored", exc_info=True)
+                    # 固件需要短暂恢复；否则上一段未完全释放时下一段 open 失败像「不播」
+                    await asyncio.sleep(0.35)
 
     async def play_ulaw(self, ulaw_data: bytes) -> None:
         await self.play_g711(ulaw_data, codec="ulaw")
