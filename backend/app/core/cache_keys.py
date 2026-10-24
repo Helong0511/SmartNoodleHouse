@@ -38,6 +38,12 @@ TTS_WELCOME_QUEUE_KEY = "snh:tts:welcome"
 WELCOME_COOLDOWN_PREFIX = "snh:welcome:cooldown"
 WELCOME_FRAMES_PREFIX = "snh:welcome:frames"
 FACE_LIVENESS_PREFIX = "snh:face:liveness"
+# 海康对讲 codec（alaw/ulaw）跨热重载持久化，避免首次播报再堵十几秒探测
+HIKVISION_CODEC_PREFIX = "snh:hik:codec:"
+
+
+def hikvision_codec_key(base_url: str, channel: int = 1) -> str:
+    return f"{HIKVISION_CODEC_PREFIX}{base_url}|{int(channel)}"
 
 # ---------------------------------------------------------------------------
 # 系统设置 / 调度 / Leader

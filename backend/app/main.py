@@ -57,18 +57,7 @@ _leader_worker_id: str | None = None
 
 
 async def _warmup_recognition_and_tts() -> None:
-    """后台预热：InsightFace + 常用迎宾/试听句 WAV 与 G.711，避免点击后再等合成。"""
-    try:
-        def _load_models() -> None:
-            from app.services.face_extractor import _face_app, _face_app_live
-
-            _face_app()
-            _face_app_live()
-
-        await asyncio.to_thread(_load_models)
-        logger.info("InsightFace 模型预热完成")
-    except Exception:
-        logger.exception("InsightFace 模型预热失败")
+    """后台预热：先 TTS/G.711（迎宾热路径），再 InsightFace，避免人脸模型占满 CPU 导致首播合成卡数秒。"""
     try:
         from app.core.config import get_settings
         from app.core.database import AsyncSessionLocal
@@ -198,7 +187,10 @@ async def _warmup_recognition_and_tts() -> None:
                 if not password:
                     continue
                 try:
-                    codec = await HikvisionTwoWayAudio(base, user, password).resolve_codec()
+                    # 启动时阻塞探测一次并写入 Redis，运行中播报走非阻塞 resolve
+                    codec = await HikvisionTwoWayAudio(base, user, password).resolve_codec(
+                        block=True
+                    )
                     warmed += 1
                     logger.info(
                         "摄像头 codec 预热 camera_id=%s codec=%s",
@@ -212,6 +204,18 @@ async def _warmup_recognition_and_tts() -> None:
             logger.exception("摄像头 codec 预热失败")
     except Exception:
         logger.exception("TTS 预热失败")
+
+    try:
+        def _load_models() -> None:
+            from app.services.face_extractor import _face_app, _face_app_live
+
+            _face_app()
+            _face_app_live()
+
+        await asyncio.to_thread(_load_models)
+        logger.info("InsightFace 模型预热完成")
+    except Exception:
+        logger.exception("InsightFace 模型预热失败")
 
 
 @asynccontextmanager

@@ -10,10 +10,12 @@ import pytest
 
 from app.services.hikvision_audio import (
     HikvisionTwoWayAudio,
+    clip_osd_channel_name,
     normalize_g711_codec,
     pcm16le_to_alaw,
     pcm16le_to_ulaw,
     resolve_isapi_base,
+    sync_channel_osd_name,
     wav_bytes_to_g711_8k,
     wav_bytes_to_ulaw8k,
 )
@@ -37,6 +39,65 @@ def test_resolve_isapi_base_from_rtsp():
     assert resolve_isapi_base("http://192.168.1.64:80") == "http://192.168.1.64:80"
     assert resolve_isapi_base("0") is None
     assert resolve_isapi_base("") is None
+
+
+def test_clip_osd_channel_name_utf8_budget():
+    assert clip_osd_channel_name("肠旺面_测试摄像头") == "肠旺面_测试摄像头"
+    long = "测" * 20
+    clipped = clip_osd_channel_name(long, max_bytes=32)
+    assert len(clipped.encode("utf-8")) <= 32
+    assert clipped.startswith("测")
+
+
+@pytest.mark.asyncio
+async def test_sync_channel_osd_name_put_overlay():
+    calls: list[tuple[str, str]] = []
+
+    class _Resp:
+        def __init__(self, text: str = "", status: int = 200):
+            self.text = text
+            self.status_code = status
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"http {self.status_code}")
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            calls.append(("GET", url))
+            if url.endswith("channelNameOverlay"):
+                return _Resp(
+                    '<?xml version="1.0"?><channelNameOverlay>'
+                    "<enabled>true</enabled><name>Camera 01</name>"
+                    "</channelNameOverlay>"
+                )
+            return _Resp(
+                '<?xml version="1.0"?><VideoInputChannel>'
+                "<id>1</id><name>Camera 01</name></VideoInputChannel>"
+            )
+
+        async def put(self, url, content=None, headers=None):
+            body = content.decode("utf-8") if isinstance(content, (bytes, bytearray)) else str(content)
+            calls.append(("PUT", url))
+            assert "肠旺面" in body or "测试" in body
+            assert "Camera 01" not in body
+            return _Resp()
+
+    with patch("app.services.hikvision_audio.httpx.AsyncClient", _Client):
+        out = await sync_channel_osd_name(
+            "http://192.168.1.64", "admin", "pass", "肠旺面_测试摄像头"
+        )
+    assert out.get("ok") is True
+    assert any(m == "PUT" and u.endswith("channelNameOverlay") for m, u in calls)
 
 
 def test_wav_to_ulaw_8k_length():
@@ -68,8 +129,12 @@ def test_normalize_and_alaw_encode():
 
 @pytest.mark.asyncio
 async def test_hikvision_play_ulaw_open_put_close():
+    import app.services.hikvision_audio as ha
+
     ulaw = b"\xff" * 320
     calls: list[tuple[str, str]] = []
+    ha._SHARED_HTTP.clear()
+    ha._SESSION_NEED_CLOSE.clear()
 
     class _Resp:
         def __init__(self, text: str = "", status: int = 200):
@@ -82,18 +147,12 @@ async def test_hikvision_play_ulaw_open_put_close():
 
     class _Client:
         def __init__(self, *a, **k):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
+            self.is_closed = False
+            self.timeout = k.get("timeout")
 
         async def put(self, url, content=None, headers=None):
             method_path = url.split("/ISAPI", 1)[-1]
             if content is not None:
-                # 消费异步迭代器
                 if hasattr(content, "__aiter__"):
                     chunks = []
                     async for c in content:
@@ -113,6 +172,7 @@ async def test_hikvision_play_ulaw_open_put_close():
 
     def _fake_stream(**kwargs):
         streamed.append(kwargs.get("g711_data") or b"")
+        return {"first_chunk_ms": 1, "send_ms": 2, "audio_ms": 40}
 
     with (
         patch("app.services.hikvision_audio.httpx.AsyncClient", _Client),
@@ -124,11 +184,46 @@ async def test_hikvision_play_ulaw_open_put_close():
     ):
         client = HikvisionTwoWayAudio("http://192.168.1.64", "admin", "pass")
         await client.play_ulaw(ulaw)
+        # 第二次应复用同一 Digest Client，不再新建
+        n_clients = len(ha._SHARED_HTTP)
+        await client.play_ulaw(ulaw)
+        assert len(ha._SHARED_HTTP) == n_clients == 1
 
     paths = [p for _, p in calls]
-    assert any(p.endswith("/close") for p in paths)
-    assert any(p.endswith("/open") for p in paths)
+    assert paths.count("/System/TwoWayAudio/channels/1/open") == 2
+    assert paths.count("/System/TwoWayAudio/channels/1/close") >= 2
     assert streamed and streamed[0] == ulaw
+    ha._SHARED_HTTP.clear()
+
+
+def test_stream_pace_short_clip_slower_than_medium():
+    """短句 pace 更慢，避免固件只响开头一字。"""
+    import app.services.hikvision_audio as ha
+
+    # 复用模块内公式：短 ≤2.5s → 0.72；中 ≤3.5 → 0.58；长 ≤8 → 0.50
+    def _pace(dur: float) -> float:
+        if dur <= 2.5:
+            return 0.72
+        if dur <= 3.5:
+            return 0.58
+        if dur <= 8.0:
+            return 0.50
+        return 0.62
+
+    assert _pace(1.7) > _pace(3.0) > _pace(5.0)
+    assert ha._CHUNK_BYTES * 2 == 1280  # 启动突发上限约 160ms
+
+
+def test_live_downscale_caps_long_edge():
+    import numpy as np
+
+    from app.services.face_extractor import _downscale_for_live
+
+    big = np.zeros((1440, 2560, 3), dtype=np.uint8)
+    out = _downscale_for_live(big, max_side=1280)
+    assert max(out.shape[0], out.shape[1]) == 1280
+    small = np.zeros((480, 640, 3), dtype=np.uint8)
+    assert _downscale_for_live(small) is small or _downscale_for_live(small).shape == small.shape
 
 
 @pytest.mark.asyncio

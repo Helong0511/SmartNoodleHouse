@@ -592,6 +592,7 @@ class VisitorService:
     _UNKNOWN_REUSE_MIN_SIM = 0.42
     _unknown_tracks: dict[int, list[dict]] = {}
     _last_unknown_welcome_at: dict[int, float] = {}
+    _last_unknown_cd_log_at: dict[int, float] = {}
 
     @staticmethod
     def uploads_url_to_key(url: str | None) -> str | None:
@@ -770,6 +771,11 @@ class VisitorService:
             store_id=store_id,
         )
         if not enabled:
+            logger.info(
+                "陌生访客迎宾已关闭 camera_id=%s store_id=%s",
+                camera_id,
+                store_id,
+            )
             return False
         cooldown = await SystemSettingsService.effective_int(
             db,
@@ -780,6 +786,16 @@ class VisitorService:
         now = _time.time()
         last = cls._last_unknown_welcome_at.get(int(camera_id), 0.0)
         if cooldown > 0 and now - last < float(cooldown):
+            remain = float(cooldown) - (now - last)
+            # 人一直站门口时每帧都会走到这里，节流避免刷屏
+            if now - cls._last_unknown_cd_log_at.get(int(camera_id), 0.0) >= 15.0:
+                cls._last_unknown_cd_log_at[int(camera_id)] = now
+                logger.info(
+                    "陌生访客迎宾冷却中 camera_id=%s remain=%.1fs cooldown=%ss",
+                    camera_id,
+                    remain,
+                    cooldown,
+                )
             return False
         text = (
             await SystemSettingsService.effective_setting(
@@ -791,6 +807,7 @@ class VisitorService:
             or "欢迎光临"
         ).strip()
         if not text:
+            logger.warning("陌生访客迎宾文案为空，跳过 camera_id=%s", camera_id)
             return False
         cls._last_unknown_welcome_at[int(camera_id)] = now
         logger.info(
@@ -1019,6 +1036,7 @@ class WelcomeService:
     TTS_QUEUE_KEY = TTS_WELCOME_QUEUE_KEY
     TTS_QUEUE_MAX = 100
     _queue: asyncio.Queue | None = None
+    _last_member_cd_log_at: dict[str, float] = {}
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
@@ -1076,6 +1094,7 @@ class WelcomeService:
                             kind,
                             payload.get("camera_id"),
                         )
+                    cls._schedule_g711_warmup(text)
                     return
                 except Exception:
                     logger.exception("试听队列替换失败，回退普通入队")
@@ -1083,14 +1102,42 @@ class WelcomeService:
             pipe.rpush(cls.TTS_QUEUE_KEY, raw)
             pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
             await pipe.execute()
+            # 后台预热本句 G.711：首句未命中时边播边写入，下一遍直接命中缓存
+            cls._schedule_g711_warmup(text)
             return
         except Exception:
             logger.exception("迎宾 TTS Redis 入队失败，回退进程内队列")
         q = cls.get_queue()
         try:
             q.put_nowait(payload)
+            cls._schedule_g711_warmup(text)
         except asyncio.QueueFull:
             logger.warning("迎宾 TTS 进程内队列已满，丢弃 text=%s", text[:40])
+
+    @classmethod
+    def _schedule_g711_warmup(cls, text: str) -> None:
+        """入队后异步预热 WAV/G.711，避免会员长句首次合成拖慢摄像头播报。"""
+        t = (text or "").strip()
+        if not t:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def _run() -> None:
+            try:
+                from app.workers.tts_worker import ensure_g711_cached
+
+                # 常见音量都预热；codec 以 alaw 为主（海康本地机）
+                for vol in (100, 80):
+                    await asyncio.to_thread(
+                        ensure_g711_cached, t, codec="alaw", volume_percent=vol
+                    )
+            except Exception:
+                logger.debug("迎宾 G.711 预热失败 text=%s", t[:40], exc_info=True)
+
+        loop.create_task(_run())
 
     @classmethod
     async def dequeue(cls, timeout: float = 1.0) -> dict | None:
@@ -1402,10 +1449,22 @@ class WelcomeService:
             return False
         # 先原子抢冷却，禁止 exists()+setex() 双步竞态导致重复迎宾
         if not await cls.try_acquire_cooldown(customer_id, db, store_id=store_id):
+            import time as _time
+
+            now = _time.time()
+            cd_key = f"{int(camera_id or 0)}:{int(customer_id)}"
+            if now - cls._last_member_cd_log_at.get(cd_key, 0.0) >= 15.0:
+                cls._last_member_cd_log_at[cd_key] = now
+                logger.info(
+                    "会员迎宾冷却中 customer_id=%s camera_id=%s",
+                    customer_id,
+                    camera_id,
+                )
             return False
 
         customer = await db.get(Customer, customer_id)
         if not customer:
+            logger.warning("会员迎宾顾客不存在 customer_id=%s", customer_id)
             return False
 
         call_as, level_name = await cls.resolve_welcome_identity(db, customer)
@@ -1433,20 +1492,25 @@ class WelcomeService:
             store_id=store_id,
             fallback=cls.DEFAULT_PRODUCT_TEMPLATE,
         )
+        # 仅主模板占位才查库：默认副句含 {口味}，一并查会拖慢入队且拉长摄像头音频
         need_taste = cls.template_has_placeholder(
-            greeting_template, "口味", "taste"
-        ) or bool((preference_template or "").strip() or cls.DEFAULT_PREFERENCE_TEMPLATE)
+            greeting_template or "", "口味", "taste"
+        )
         need_product = cls.template_has_placeholder(
-            greeting_template, "餐品", "product"
-        ) or bool((product_template or "").strip())
+            greeting_template or "", "餐品", "product"
+        )
 
         preference_bits: list[str] = []
         if need_taste:
             try:
                 from app.services.customer_service import PreferenceService
 
-                rec = await PreferenceService.get_recommendations(
-                    db, customer_id, store_id=store_id
+                # 口味推荐偶发数秒；超时则跳过，避免认出后卡在入队前
+                rec = await asyncio.wait_for(
+                    PreferenceService.get_recommendations(
+                        db, customer_id, store_id=store_id
+                    ),
+                    timeout=0.25,
                 )
                 prefs = (rec or {}).get("preferences") or []
                 if prefs:
@@ -1466,13 +1530,16 @@ class WelcomeService:
             try:
                 from app.services.recommendation_service import RecommendationService
 
-                ranked, _state, _meta = await RecommendationService.recommend(
-                    db,
-                    int(store_id),
-                    customer_id=customer_id,
-                    scene="recommend_menu",
-                    limit=2,
-                    use_cache=True,
+                ranked, _state, _meta = await asyncio.wait_for(
+                    RecommendationService.recommend(
+                        db,
+                        int(store_id),
+                        customer_id=customer_id,
+                        scene="recommend_menu",
+                        limit=2,
+                        use_cache=True,
+                    ),
+                    timeout=0.25,
                 )
                 for item in ranked[:2]:
                     pname = str(getattr(getattr(item, "product", None), "name", "") or "").strip()

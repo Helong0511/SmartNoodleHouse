@@ -63,6 +63,23 @@ _WAV_CACHE: HotCache[str, bytes] = HotCache("tts.wav", max_size=64)
 _G711_CACHE: HotCache[str, bytes] = HotCache("tts.g711", max_size=128)
 
 
+def ensure_g711_cached(
+    text: str,
+    *,
+    codec: str = "alaw",
+    volume_percent: int = 100,
+) -> bool:
+    """合成并写入 G.711 热缓存；已命中则直接 True。供入队后后台预热。"""
+    text = (text or "").strip()
+    if not text:
+        return False
+    tts = LocalTTS()
+    data = tts.synthesize_g711_sync(
+        text, codec=codec, volume_percent=volume_percent
+    )
+    return bool(data)
+
+
 def warmup_tts_phrases(
     phrases: list[str],
     *,
@@ -460,10 +477,11 @@ class CameraSpeakerTTS(TTSProvider):
         client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
         loop = asyncio.get_running_loop()
         t0 = time.perf_counter()
-        # codec 探测可能数秒；启动预热后应命中 _CODEC_CACHE
-        codec = await client.resolve_codec()
+        # 不阻塞探测：内存/Redis 命中或默认 alaw 立即返回（避免热重载后 codec_ms 十余秒）
+        codec = await client.resolve_codec(block=False)
         codec_ms = int((time.perf_counter() - t0) * 1000)
         t1 = time.perf_counter()
+        # 命中 G711 热缓存则 synth≈0；未命中写入缓存供下次秒出
         g711 = await loop.run_in_executor(
             None,
             lambda: self.local.synthesize_g711_sync(
@@ -474,6 +492,13 @@ class CameraSpeakerTTS(TTSProvider):
         if not g711:
             logger.warning("TTS/G711 为空，无法推摄像头 camera_id=%s", camera_id)
             return False
+        if synth_ms >= 200:
+            logger.info(
+                "摄像头播报合成并已缓存 camera_id=%s synth_ms=%s text=%s",
+                camera_id,
+                synth_ms,
+                text[:40],
+            )
         t2 = time.perf_counter()
         await client.play_g711(g711, codec=codec)
         push_ms = int((time.perf_counter() - t2) * 1000)

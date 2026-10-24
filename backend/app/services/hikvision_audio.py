@@ -2,7 +2,8 @@
 
 推流策略对齐 go2rtc / 社区实践：
 - close → open → audioData
-- audioData 使用 Content-Length: 0，再按 8kHz 实时写 TCP（整包快传会导致只响一下/偶发无声）
+- audioData 使用 Content-Length: 0，再按略快于实时写 TCP
+  （整包/长突发快传会触发固件「只响一下」；纯 1x 又会让长句首声偏慢）
 - 编码必须与通道 audioCompressionType 一致（G.711alaw / G.711ulaw）
 """
 from __future__ import annotations
@@ -24,17 +25,26 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# G.711 实时推流：8kHz 单声道 = 8000 字节/秒
+# G.711 推流：8kHz 单声道 = 8000 字节/秒
 _G711_RATE = 8000
-_CHUNK_BYTES = 160  # 20ms
+_CHUNK_BYTES = 640  # 80ms/块，减少 syscall；短句可更快出声
 _CHUNK_SLEEP = _CHUNK_BYTES / _G711_RATE
+# 国内海康门口机多数为 alaw；探测未命中时先用此值，避免堵死首播
+_DEFAULT_CODEC = "alaw"
 from app.core.hot_cache import HotCache
 
 # 同摄像头对讲会话互斥（跨 TTSWorker 实例）
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
 _CAMERA_LOCKS_GUARD = asyncio.Lock()
-# 通道编码热缓存，避免每次试听都多一轮 Digest GET（~0.7s）
-_CODEC_CACHE: HotCache[str, str] = HotCache("hikvision.codec", max_size=32, ttl_seconds=600.0)
+# 同机复用 Digest 认证状态，避免 open/close 每次新建 Client 再撞 401
+_SHARED_HTTP: dict[str, httpx.AsyncClient] = {}
+_SHARED_HTTP_GUARD = asyncio.Lock()
+# 通道编码热缓存，避免每次试听都多一轮 Digest GET
+_CODEC_CACHE: HotCache[str, str] = HotCache("hikvision.codec", max_size=32, ttl_seconds=3600.0)
+# 上一轮已正常 close 则跳过本轮预 close（省一次 Digest 往返，约 0.5–1s）
+_SESSION_NEED_CLOSE: dict[str, bool] = {}
+# audioData Digest 挑战缓存（同机短时复用，少一次 401 往返）
+_DIGEST_WWW_CACHE: HotCache[str, str] = HotCache("hikvision.digest_www", max_size=32, ttl_seconds=120.0)
 
 
 def resolve_isapi_base(source_url: str) -> str | None:
@@ -55,6 +65,145 @@ def resolve_isapi_base(source_url: str) -> str | None:
         port = f":{parsed.port}" if parsed.port else ""
         return f"{parsed.scheme}://{host}{port}"
     return f"http://{host}"
+
+
+# 海康通道名 / OSD 名称常见上限 32 字节（UTF-8）
+_OSD_NAME_MAX_BYTES = 32
+
+
+def clip_osd_channel_name(name: str, *, max_bytes: int = _OSD_NAME_MAX_BYTES) -> str:
+    """裁剪到设备可接受长度，避免中文名 PUT 失败。"""
+    raw = (name or "").strip()
+    if not raw:
+        return ""
+    encoded = raw.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return raw
+    out = bytearray()
+    for ch in raw:
+        b = ch.encode("utf-8")
+        if len(out) + len(b) > max_bytes:
+            break
+        out.extend(b)
+    return out.decode("utf-8", errors="ignore")
+
+
+def _xml_set_tag_text(xml_text: str, tag: str, value: str) -> str:
+    """在已有 ISAPI XML 中替换首个同名标签正文（保留其余字段）。"""
+    pattern = re.compile(
+        rf"(<{re.escape(tag)}(?:\s[^>]*)?>)(.*?)(</{re.escape(tag)}>)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    escaped = (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    new_xml, n = pattern.subn(rf"\g<1>{escaped}\g<3>", xml_text, count=1)
+    if n == 0:
+        raise ValueError(f"XML 缺少 <{tag}>")
+    return new_xml
+
+
+async def sync_channel_osd_name(
+    base_url: str,
+    username: str,
+    password: str,
+    display_name: str,
+    *,
+    channel: int = 1,
+) -> dict:
+    """把后台摄像头名称写到海康右下角通道名 OSD（channelNameOverlay）。
+
+    同时更新 VideoInputChannel.name，与预览角标保持一致。
+    """
+    name = clip_osd_channel_name(display_name)
+    if not name:
+        return {"ok": False, "reason": "empty_name"}
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return {"ok": False, "reason": "no_base"}
+    ch = max(1, int(channel or 1))
+    overlay_path = f"/ISAPI/System/Video/inputs/channels/{ch}/overlays/channelNameOverlay"
+    channel_path = f"/ISAPI/System/Video/inputs/channels/{ch}"
+    auth = httpx.DigestAuth(username or "admin", password or "")
+    timeout = httpx.Timeout(8.0, connect=3.0)
+    async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
+        ov = await client.get(f"{base}{overlay_path}")
+        ov.raise_for_status()
+        ov_xml = _xml_set_tag_text(ov.text or "", "name", name)
+        # 确保 OSD 开启，否则改名也看不见
+        if re.search(r"<enabled>\s*false\s*</enabled>", ov_xml, re.I):
+            ov_xml = re.sub(
+                r"<enabled>\s*false\s*</enabled>",
+                "<enabled>true</enabled>",
+                ov_xml,
+                count=1,
+                flags=re.I,
+            )
+        put_ov = await client.put(
+            f"{base}{overlay_path}",
+            content=ov_xml.encode("utf-8"),
+            headers={"Content-Type": "application/xml; charset=UTF-8"},
+        )
+        put_ov.raise_for_status()
+
+        ch_resp = await client.get(f"{base}{channel_path}")
+        if ch_resp.status_code == 200 and ch_resp.text:
+            try:
+                ch_xml = _xml_set_tag_text(ch_resp.text, "name", name)
+                put_ch = await client.put(
+                    f"{base}{channel_path}",
+                    content=ch_xml.encode("utf-8"),
+                    headers={"Content-Type": "application/xml; charset=UTF-8"},
+                )
+                put_ch.raise_for_status()
+            except Exception:
+                logger.debug("update VideoInputChannel name skipped", exc_info=True)
+
+    logger.info(
+        "海康通道名 OSD 已同步 channel=%s name=%s base=%s",
+        ch,
+        name,
+        base,
+    )
+    return {"ok": True, "name": name, "channel": ch}
+
+
+async def try_sync_camera_osd_name(
+    *,
+    source_url: str,
+    username: str | None,
+    password_encrypted: str | None,
+    display_name: str,
+) -> dict:
+    """最佳努力：USB/无 ISAPI 基址时跳过；失败只记日志不抛给前端。"""
+    base = resolve_isapi_base(source_url)
+    if not base:
+        return {"ok": False, "reason": "not_isapi"}
+    try:
+        from app.services.camera_credentials import decrypt_password
+
+        pwd = decrypt_password(password_encrypted) if password_encrypted else ""
+    except Exception:
+        pwd = ""
+    try:
+        return await sync_channel_osd_name(
+            base,
+            username or "admin",
+            pwd,
+            display_name,
+            channel=1,
+        )
+    except Exception as e:
+        logger.warning(
+            "同步海康通道名 OSD 失败 base=%s name=%s err=%s",
+            base,
+            (display_name or "")[:40],
+            str(e)[:120],
+        )
+        return {"ok": False, "reason": "isapi_error", "error": str(e)[:200]}
 
 
 def _lin2xlaw(pcm: bytes, *, law: str) -> bytes:
@@ -345,11 +494,16 @@ def _stream_audio_data_content_length_zero(
     username: str,
     password: str,
     g711_data: bytes,
-) -> None:
-    """go2rtc 同款：PUT audioData + Content-Length:0，再按实时节奏写 TCP 正文。"""
+) -> dict[str, int]:
+    """go2rtc 同款：PUT audioData + Content-Length:0，再写 TCP 正文。
+
+    仅前 ~240ms 零休眠启动扬声器；其后按约 1.5–2x 节奏推送。
+    日志曾证实：前 1.2s 整段突发时短句「试听播报」固件只出「试」一声。
+    返回 first_chunk_ms / send_ms 供上层日志。
+    """
     def _one_shot(auth_header: str | None) -> tuple[socket.socket, int, dict[str, str]]:
-        sock = socket.create_connection((host, port), timeout=8.0)
-        sock.settimeout(8.0)
+        sock = socket.create_connection((host, port), timeout=5.0)
+        sock.settimeout(5.0)
         lines = [
             f"PUT {path} HTTP/1.1",
             f"Host: {host if port in (80, 443) else f'{host}:{port}'}",
@@ -364,30 +518,60 @@ def _stream_audio_data_content_length_zero(
         status, hdrs, _ = _read_http_response(sock)
         return sock, status, hdrs
 
-    # 1) 拿 Digest challenge
-    sock, status, hdrs = _one_shot(None)
+    t_start = time.perf_counter()
+    dur = len(g711_data) / float(_G711_RATE)
+    # 短句略慢于实时，防「试听播报」固件只出「试」；中长句再略加速首声
+    if dur <= 2.5:
+        pace = 0.72
+    elif dur <= 3.5:
+        pace = 0.58
+    elif dur <= 8.0:
+        pace = 0.50
+    else:
+        pace = 0.62
+    chunk_sleep = _CHUNK_SLEEP * pace
+    # 最多 2 块（约 160ms）零休眠；3 块短句仍易被固件截成一声
+    burst_bytes = min(len(g711_data), _CHUNK_BYTES * 2)
+    digest_key = f"{host}:{port}|{path}|{username}"
+
+    # 1) Digest：优先用缓存的 WWW-Authenticate，省掉首包 401
+    www_cached = _DIGEST_WWW_CACHE.get(digest_key)
+    auth_header = None
+    if www_cached:
+        auth_header = _build_digest_authorization(
+            www_cached, method="PUT", uri=path, username=username, password=password
+        )
+    sock, status, hdrs = _one_shot(auth_header)
+    first_chunk_ms = -1
     try:
         if status == 401:
             www = hdrs.get("www-authenticate") or ""
+            if www:
+                _DIGEST_WWW_CACHE.put(digest_key, www)
             auth = _build_digest_authorization(
                 www, method="PUT", uri=path, username=username, password=password
             )
             sock.close()
             sock, status, hdrs = _one_shot(auth)
         if status not in (0, 200, 100) and status != 401:
-            # 部分固件对 CL:0 不立即回包，status=0 表示还没响应，可继续写
             if status >= 400:
                 raise RuntimeError(f"audioData 握手失败 HTTP {status}")
-        # 2) 实时写音频（非法 HTTP，但是海康对讲约定）
+        # 2) 极短启动突发 + 受控节奏（防固件只响一声）
         for i in range(0, len(g711_data), _CHUNK_BYTES):
             sock.sendall(g711_data[i : i + _CHUNK_BYTES])
-            time.sleep(_CHUNK_SLEEP)
+            if first_chunk_ms < 0:
+                first_chunk_ms = int((time.perf_counter() - t_start) * 1000)
+            end = i + _CHUNK_BYTES
+            if end < burst_bytes:
+                continue
+            if chunk_sleep > 0 and end < len(g711_data):
+                time.sleep(chunk_sleep)
         try:
             sock.shutdown(socket.SHUT_WR)
         except OSError:
             pass
         try:
-            sock.settimeout(2.0)
+            sock.settimeout(1.5)
             _read_http_response(sock)
         except OSError:
             pass
@@ -396,6 +580,12 @@ def _stream_audio_data_content_length_zero(
             sock.close()
         except OSError:
             pass
+    send_ms = int((time.perf_counter() - t_start) * 1000)
+    return {
+        "first_chunk_ms": max(0, first_chunk_ms),
+        "send_ms": send_ms,
+        "audio_ms": int(dur * 1000),
+    }
 
 
 class HikvisionTwoWayAudio:
@@ -431,16 +621,45 @@ class HikvisionTwoWayAudio:
     def _cache_key(self) -> str:
         return f"{self.base_url}|{self.channel}"
 
+    async def _shared_client(self, timeout: httpx.Timeout) -> httpx.AsyncClient:
+        """按摄像头复用 AsyncClient，保留 Digest 协商结果，缩短 open 首包。"""
+        key = self._cache_key()
+        async with _SHARED_HTTP_GUARD:
+            client = _SHARED_HTTP.get(key)
+            if client is None or getattr(client, "is_closed", False):
+                client = httpx.AsyncClient(
+                    auth=httpx.DigestAuth(self.username, self.password),
+                    timeout=timeout,
+                    follow_redirects=False,
+                )
+                _SHARED_HTTP[key] = client
+            else:
+                try:
+                    client.timeout = timeout
+                except Exception:
+                    pass
+            return client
+
+    async def _persist_codec(self, codec: str) -> None:
+        key = self._cache_key()
+        c = normalize_g711_codec(codec)
+        _CODEC_CACHE.put(key, c)
+        try:
+            from app.core.cache_keys import hikvision_codec_key
+            from app.core.redis_client import get_redis
+
+            redis = await get_redis()
+            await redis.set(hikvision_codec_key(self.base_url, self.channel), c, ex=7 * 24 * 3600)
+        except Exception:
+            logger.debug("persist hikvision codec failed", exc_info=True)
+
     async def _detect_codec(self, client: httpx.AsyncClient) -> str:
         key = self._cache_key()
-        cached = _CODEC_CACHE.get(key)
-        if cached:
-            return cached
         try:
             resp = await client.get(f"{self.base_url}/ISAPI/System/TwoWayAudio/channels")
             if resp.status_code == 200 and resp.text:
                 codec, enabled = _parse_channel_audio(resp.text, self.channel)
-                _CODEC_CACHE.put(key, codec)
+                await self._persist_codec(codec)
                 logger.info(
                     "海康对讲通道 codec=%s enabled=%s base=%s channel=%s",
                     codec,
@@ -448,26 +667,62 @@ class HikvisionTwoWayAudio:
                     self.base_url,
                     self.channel,
                 )
-                return codec
+                return normalize_g711_codec(codec)
         except Exception:
-            logger.debug("hikvision detect codec failed, fallback ulaw", exc_info=True)
-        return "ulaw"
+            logger.debug("hikvision detect codec failed, fallback %s", _DEFAULT_CODEC, exc_info=True)
+        await self._persist_codec(_DEFAULT_CODEC)
+        return _DEFAULT_CODEC
 
-    async def resolve_codec(self) -> str:
-        """读取（或探测并缓存）摄像头 G.711 编码。"""
-        cached = _CODEC_CACHE.get(self._cache_key())
+    async def resolve_codec(self, *, block: bool = False) -> str:
+        """解析 G.711 编码。
+
+        默认不阻塞：内存/Redis 未命中时立即返回 alaw，后台再探测校正。
+        热重载后首播若同步探测，曾出现 codec_ms>15s 导致「认出很久才出声」。
+        """
+        key = self._cache_key()
+        cached = _CODEC_CACHE.get(key)
         if cached:
             return cached
-        auth = httpx.DigestAuth(self.username, self.password)
-        timeout = httpx.Timeout(10.0, connect=5.0)
-        async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
-            return await self._detect_codec(client)
+        try:
+            from app.core.cache_keys import hikvision_codec_key
+            from app.core.redis_client import get_redis
+
+            redis = await get_redis()
+            raw = await redis.get(hikvision_codec_key(self.base_url, self.channel))
+            if raw:
+                c = normalize_g711_codec(
+                    raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                )
+                _CODEC_CACHE.put(key, c)
+                return c
+        except Exception:
+            logger.debug("redis hikvision codec read failed", exc_info=True)
+
+        if not block:
+            _CODEC_CACHE.put(key, _DEFAULT_CODEC)
+
+            async def _bg() -> None:
+                try:
+                    timeout = httpx.Timeout(8.0, connect=3.0)
+                    client = await self._shared_client(timeout)
+                    await self._detect_codec(client)
+                except Exception:
+                    logger.debug("bg hikvision codec detect failed", exc_info=True)
+
+            try:
+                asyncio.get_running_loop().create_task(_bg())
+            except RuntimeError:
+                pass
+            return _DEFAULT_CODEC
+
+        timeout = httpx.Timeout(8.0, connect=3.0)
+        client = await self._shared_client(timeout)
+        return await self._detect_codec(client)
 
     async def play_g711(self, g711_data: bytes, *, codec: str = "ulaw") -> None:
         if not g711_data:
             return
         codec = normalize_g711_codec(codec)
-        auth = httpx.DigestAuth(self.username, self.password)
         timeout = httpx.Timeout(
             max(float(self.timeout), len(g711_data) / float(_G711_RATE) + 20.0),
             connect=5.0,
@@ -479,70 +734,75 @@ class HikvisionTwoWayAudio:
             raise RuntimeError("invalid ISAPI base url")
 
         lock = await self._lock_for()
+        key = self._cache_key()
         async with lock:
-            async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
+            client = await self._shared_client(timeout)
+            t_open = time.perf_counter()
+            # 已知空闲则跳过预 close，少一轮 Digest（常见省 0.5–1s）
+            if _SESSION_NEED_CLOSE.get(key, False):
                 try:
                     await client.put(self._url("/close"))
                 except Exception:
                     logger.debug("hikvision close stale session ignored", exc_info=True)
-
-                open_resp = await client.put(self._url("/open"))
-                open_resp.raise_for_status()
-                session_id = _parse_session_id(open_resp.text) or ""
-                path = f"/ISAPI/System/TwoWayAudio/channels/{self.channel}/audioData"
-                if session_id:
-                    path = f"{path}?sessionId={session_id}"
-
-                t0 = time.perf_counter()
-                try:
-                    # 主路径：CL:0 + 实时写 socket（与 go2rtc 一致）
-                    await asyncio.to_thread(
-                        _stream_audio_data_content_length_zero,
-                        host=host,
-                        port=port,
-                        path=path,
-                        username=self.username,
-                        password=self.password,
-                        g711_data=g711_data,
-                    )
-                    logger.info(
-                        "海康对讲实时推流完成 codec=%s bytes=%s push_ms=%s",
-                        codec,
-                        len(g711_data),
-                        int((time.perf_counter() - t0) * 1000),
-                    )
-                except Exception as e:
-                    # 回退：整包 Content-Length（部分固件只吃这种）
-                    logger.warning(
-                        "海康实时推流失败，回退整包 PUT: %s", e
-                    )
-                    audio_url = f"{self.base_url}{path}"
-                    put_resp = await client.put(
-                        audio_url,
-                        content=g711_data,
-                        headers={
-                            "Content-Type": "application/octet-stream",
-                            "Content-Length": str(len(g711_data)),
-                        },
-                    )
-                    put_resp.raise_for_status()
-                    await asyncio.sleep(len(g711_data) / float(_G711_RATE) + 0.5)
                 finally:
-                    try:
-                        await client.put(self._url("/close"))
-                    except Exception:
-                        logger.debug("hikvision close after play ignored", exc_info=True)
-                    # 固件需要短暂恢复；否则上一段未完全释放时下一段 open 失败像「不播」
-                    await asyncio.sleep(0.35)
+                    _SESSION_NEED_CLOSE[key] = False
+
+            open_resp = await client.put(self._url("/open"))
+            open_resp.raise_for_status()
+            open_ms = int((time.perf_counter() - t_open) * 1000)
+            _SESSION_NEED_CLOSE[key] = True
+            session_id = _parse_session_id(open_resp.text) or ""
+            path = f"/ISAPI/System/TwoWayAudio/channels/{self.channel}/audioData"
+            if session_id:
+                path = f"{path}?sessionId={session_id}"
+
+            t0 = time.perf_counter()
+            audio_s = len(g711_data) / float(_G711_RATE)
+            try:
+                # CL:0 + 受控节奏：过快突发会「只响试」；过慢则长句首声拖很久
+                stats = await asyncio.to_thread(
+                    _stream_audio_data_content_length_zero,
+                    host=host,
+                    port=port,
+                    path=path,
+                    username=self.username,
+                    password=self.password,
+                    g711_data=g711_data,
+                )
+                if not isinstance(stats, dict):
+                    stats = {}
+                send_s = time.perf_counter() - t0
+                # 上送略快于播放时，close 前补一点尾音缓冲
+                remain = max(0.08, audio_s - send_s + 0.18)
+                if remain > 0.08:
+                    await asyncio.sleep(min(remain, audio_s * 0.35 + 0.25))
+                logger.info(
+                    "海康对讲节奏推流完成 codec=%s bytes=%s open_ms=%s first_chunk_ms=%s "
+                    "send_ms=%s push_ms=%s audio_ms=%s",
+                    codec,
+                    len(g711_data),
+                    open_ms,
+                    stats.get("first_chunk_ms", -1),
+                    stats.get("send_ms", int(send_s * 1000)),
+                    int((time.perf_counter() - t0) * 1000),
+                    stats.get("audio_ms", int(audio_s * 1000)),
+                )
+            finally:
+                try:
+                    await client.put(self._url("/close"))
+                    _SESSION_NEED_CLOSE[key] = False
+                except Exception:
+                    logger.debug("hikvision close after play ignored", exc_info=True)
+                    _SESSION_NEED_CLOSE[key] = True
+                await asyncio.sleep(0.12)
 
     async def play_ulaw(self, ulaw_data: bytes) -> None:
         await self.play_g711(ulaw_data, codec="ulaw")
 
     async def play_wav(self, wav_data: bytes, *, volume_percent: int = 100) -> str:
-        auth = httpx.DigestAuth(self.username, self.password)
         timeout = httpx.Timeout(15.0, connect=5.0)
-        async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
-            codec = await self._detect_codec(client)
+        client = await self._shared_client(timeout)
+        codec = await self._detect_codec(client)
         g711 = await asyncio.to_thread(
             wav_bytes_to_g711_8k,
             wav_data,

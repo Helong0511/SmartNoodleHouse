@@ -246,6 +246,85 @@ class TestSpeakBody(BaseModel):
     target: str = Field(default="pc", pattern="^(pc|camera|both)$")
 
 
+@router.post("/{camera_id}/probe-face", dependencies=[require_permission("camera:manage")])
+async def probe_camera_face(
+    camera_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """对当前实时帧做人脸探测+匹配（不落库、不播报），用于排查「识别到却不迎宾」。"""
+    import time as _time
+
+    import numpy as np
+    from camera.camera_manager import CameraManager
+
+    from app.core.config import get_settings
+    from app.services.face_extractor import extract_face_embedding_bgr
+    from app.services.face_service import face_embedding_cache
+    from app.services.system_settings_service import SystemSettingsService
+
+    camera = await db.get(Camera, camera_id)
+    if not camera:
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
+
+    mgr = CameraManager()
+    worker = mgr.get_worker(camera_id)
+    if not worker:
+        raise AppException(40921, "摄像头未启动", status_code=409)
+    frame, ts = worker.frame_buffer.get_frame()
+    age = _time.time() - ts if ts else None
+    if frame is None:
+        return success(
+            {
+                "ok": False,
+                "reason": "no_frame",
+                "status": getattr(worker, "status", None),
+                "age": age,
+            },
+            request=request,
+        )
+
+    settings = get_settings()
+    store_id = int(camera.store_id) if camera.store_id else None
+    threshold = await SystemSettingsService.effective_float(
+        db, "face_match_threshold", settings.face_match_threshold, store_id=store_id
+    )
+    try:
+        emb_list = await asyncio.to_thread(extract_face_embedding_bgr, frame, live=True)
+        emb = np.array(emb_list, dtype=np.float32)
+        face_ok = True
+        face_err = None
+    except Exception as e:
+        emb = None
+        face_ok = False
+        face_err = str(e)[:120]
+
+    best_id, best_sim = None, 0.0
+    if face_ok and emb is not None:
+        best_id, best_sim = await face_embedding_cache.best_match(
+            db, emb, float(threshold), camera_id=camera_id
+        )
+
+    shape = list(getattr(frame, "shape", []) or [])
+    return success(
+        {
+            "ok": face_ok,
+            "reason": None if face_ok else "no_face",
+            "error": face_err,
+            "status": getattr(worker, "status", None),
+            "age": age,
+            "shape": shape,
+            "threshold": threshold,
+            "best_customer_id": best_id,
+            "best_similarity": float(best_sim) if best_sim is not None else None,
+            "matched": bool(best_id is not None and float(best_sim) >= float(threshold)),
+        },
+        request=request,
+    )
+
+
 @router.post("/{camera_id}/test-speak", dependencies=[require_permission("camera:manage")])
 async def test_camera_speak(
     camera_id: int,
@@ -385,6 +464,17 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
         },
         request=request,
     )
+    # 新建网络摄像头：名称写入设备右下角通道名 OSD（失败不影响创建）
+    osd_sync: dict | None = None
+    if (camera.camera_type or "").upper() == "RTSP" and (camera.name or "").strip():
+        from app.services.hikvision_audio import try_sync_camera_osd_name
+
+        osd_sync = await try_sync_camera_osd_name(
+            source_url=camera.source_url,
+            username=camera.username,
+            password_encrypted=camera.password_encrypted,
+            display_name=camera.name,
+        )
     if data.auto_start:
         _start_worker(camera, force=True)
         await asyncio.sleep(0.3)
@@ -395,10 +485,16 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
         camera.status = st if st else "OFFLINE"
         if camera.status == "ONLINE":
             camera.last_online_at = now_local()
-        return success(_serialize(camera, mgr), request=request)
+        payload = _serialize(camera, mgr)
+        if osd_sync is not None:
+            payload["osd_sync"] = osd_sync
+        return success(payload, request=request)
     from camera.camera_manager import CameraManager
 
-    return success(_serialize(camera, CameraManager()), request=request)
+    payload = _serialize(camera, CameraManager())
+    if osd_sync is not None:
+        payload["osd_sync"] = osd_sync
+    return success(payload, request=request)
 
 
 @router.put("/{camera_id}", dependencies=[require_permission("camera:manage")])
@@ -409,8 +505,13 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     _assert_cam_access(user, camera)
     payload = data.model_dump(exclude_unset=True)
     restart = False
+    name_before = (camera.name or "").strip()
+    name_changed = False
     if "name" in payload and payload["name"]:
-        camera.name = payload["name"].strip()
+        new_name = str(payload["name"]).strip()
+        if new_name:
+            name_changed = new_name != name_before
+            camera.name = new_name
     if "camera_type" in payload and payload["camera_type"]:
         camera.camera_type = payload["camera_type"]
         restart = True
@@ -450,6 +551,17 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     if restart and mgr.get_worker(camera_id):
         _start_worker(camera, force=True)
         camera.status = mgr.get_status(camera_id) or "OFFLINE"
+    # 仅名称实际变更时同步海康右下角通道名 OSD（改地址/密码不同步）
+    osd_sync: dict | None = None
+    if name_changed and (camera.camera_type or "").upper() == "RTSP":
+        from app.services.hikvision_audio import try_sync_camera_osd_name
+
+        osd_sync = await try_sync_camera_osd_name(
+            source_url=camera.source_url,
+            username=camera.username,
+            password_encrypted=camera.password_encrypted,
+            display_name=camera.name,
+        )
     await AuditService.log(
         db,
         user_id=user.id,
@@ -461,10 +573,14 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
             "store_id": camera.store_id,
             "changes": {k: v for k, v in payload.items() if k not in ("password",)},
             "restart": restart,
+            "osd_sync": osd_sync,
         },
         request=request,
     )
-    return success(_serialize(camera, mgr), request=request)
+    body = _serialize(camera, mgr)
+    if osd_sync is not None:
+        body["osd_sync"] = osd_sync
+    return success(body, request=request)
 
 
 @router.delete("/{camera_id}", dependencies=[require_permission("camera:manage")])

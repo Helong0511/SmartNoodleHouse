@@ -17,6 +17,14 @@ class RecognitionWorker:
         self._last_detect_at: dict[int, float] = {}
         self._last_visitor_at: dict[int, float] = {}
         self._last_member_event_at: dict[str, float] = {}
+        # 可观测：节流日志，避免无人脸时刷屏
+        self._last_miss_log_at: dict[int, float] = {}
+        self._last_stale_log_at: dict[int, float] = {}
+        self._last_hit_log_at: dict[int, float] = {}
+        self._miss_counts: dict[int, int] = {}
+        self._hit_counts: dict[int, int] = {}
+        # 迎宾入队后短暂让出 CPU，避免 InsightFace 拖慢 TTS/对讲首包
+        self._tts_yield_until: dict[int, float] = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -62,6 +70,8 @@ class RecognitionWorker:
                         worker = mgr.get_worker(cam_id)
                         if not worker or worker.status != "ONLINE":
                             continue
+                        if now < self._tts_yield_until.get(cam_id, 0):
+                            continue
                         cam = cam_rows.get(cam_id)
                         detect_fps = max(1, int(getattr(cam, "detect_fps", None) or 3))
                         min_interval = 1.0 / detect_fps
@@ -71,7 +81,18 @@ class RecognitionWorker:
 
                         # 实时帧缓冲，不落盘、不打开图片文件
                         frame, ts = worker.frame_buffer.get_frame()
-                        if frame is None or now - ts > 2:
+                        # 推理偶发变慢时放宽到 5s，避免「有预览却从不识别」
+                        age = now - ts if ts else 999.0
+                        if frame is None or age > 5.0:
+                            if now - self._last_stale_log_at.get(cam_id, 0) >= 15.0:
+                                self._last_stale_log_at[cam_id] = now
+                                logger.warning(
+                                    "识别跳过无帧/过期 camera_id=%s has_frame=%s age=%.2f status=%s",
+                                    cam_id,
+                                    frame is not None,
+                                    age,
+                                    getattr(worker, "status", None),
+                                )
                             continue
 
                         try:
@@ -80,8 +101,53 @@ class RecognitionWorker:
                                 extract_face_embedding_bgr, frame, live=True
                             )
                             emb = np.array(emb_list, dtype=np.float32)
-                        except Exception:
+                        except Exception as e:
+                            self._miss_counts[cam_id] = self._miss_counts.get(cam_id, 0) + 1
+                            misses = self._miss_counts.get(cam_id, 0)
+                            if now - self._last_miss_log_at.get(cam_id, 0) >= 10.0:
+                                self._last_miss_log_at[cam_id] = now
+                                shape = getattr(frame, "shape", None)
+                                logger.info(
+                                    "识别未检出人脸 camera_id=%s misses=%s shape=%s err=%s",
+                                    cam_id,
+                                    misses,
+                                    shape,
+                                    str(e)[:100],
+                                )
+                            # 连续漏检时落一张诊断图，便于对照预览画面是否有人/对准磨砂玻璃
+                            if misses in (1, 30, 120) or (misses > 0 and misses % 200 == 0):
+                                try:
+                                    from pathlib import Path
+
+                                    import cv2
+                                    import numpy as np
+
+                                    from app.core.config import get_settings
+
+                                    upload_root = Path(
+                                        getattr(get_settings(), "upload_dir", None) or "uploads"
+                                    )
+                                    dbg = upload_root / "debug"
+                                    dbg.mkdir(parents=True, exist_ok=True)
+                                    out = dbg / f"face_miss_cam{cam_id}.jpg"
+                                    cv2.imwrite(str(out), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                                    mean = float(np.mean(frame)) if getattr(frame, "size", 0) else 0.0
+                                    hint = ""
+                                    # 中灰均值且长期无脸：常见是对准毛玻璃/墙面而非通道
+                                    if 80.0 <= mean <= 160.0 and misses >= 30:
+                                        hint = " 提示=画面均值中灰且长期无脸，请核对镜头是否对准通道而非磨砂玻璃/墙"
+                                    logger.info(
+                                        "已保存漏检诊断帧 path=%s misses=%s mean=%.0f%s",
+                                        out.as_posix(),
+                                        misses,
+                                        mean,
+                                        hint,
+                                    )
+                                except Exception:
+                                    logger.debug("保存漏检诊断帧失败", exc_info=True)
                             continue
+
+                        self._hit_counts[cam_id] = self._hit_counts.get(cam_id, 0) + 1
                         from app.services.system_settings_service import SystemSettingsService
 
                         store_id = int(cam.store_id) if cam and cam.store_id else None
@@ -94,7 +160,7 @@ class RecognitionWorker:
                         best_id, best_sim = await face_embedding_cache.best_match(
                             db, emb, float(threshold), camera_id=cam_id
                         )
-                        # 未匹配到授权会员 → 未知访客抓拍 + 可选陌生客迎宾（按日目录存图，30s 节流）
+                        # 未匹配到授权会员 → 未知访客抓拍 + 可选陌生客迎宾
                         if best_id is None or best_sim < threshold:
                             if best_id is not None:
                                 logger.info(
@@ -104,15 +170,39 @@ class RecognitionWorker:
                                     best_sim,
                                     threshold,
                                 )
+                            elif now - self._last_hit_log_at.get(cam_id, 0) >= 5.0:
+                                self._last_hit_log_at[cam_id] = now
+                                logger.info(
+                                    "识别到访客人脸 camera_id=%s hits=%s shape=%s → 陌生迎宾",
+                                    cam_id,
+                                    self._hit_counts.get(cam_id, 0),
+                                    getattr(frame, "shape", None),
+                                )
+                            # 先入队播报再抓拍，降低「认出到出声」延迟
+                            try:
+                                welcomed = await VisitorService.maybe_welcome_unknown(
+                                    db, cam_id, store_id=store_id
+                                )
+                                await db.commit()
+                                if welcomed:
+                                    self._tts_yield_until[cam_id] = time.time() + 4.0
+                                else:
+                                    logger.debug(
+                                        "陌生迎宾未入队（关闭或冷却） camera_id=%s",
+                                        cam_id,
+                                    )
+                            except Exception:
+                                await db.rollback()
+                                logger.exception("未知访客迎宾失败 camera_id=%s", cam_id)
+
                             capture_on = await SystemSettingsService.effective_bool(
                                 db,
                                 "unknown_visitor_capture_enabled",
                                 getattr(settings, "unknown_visitor_capture_enabled", True),
                                 store_id=None,
                             )
-                            # 抓拍 30s 节流；迎宾走 maybe_welcome 自身冷却，不因抓拍节流而静音
-                            try:
-                                if capture_on and now - self._last_visitor_at.get(cam_id, 0) >= 30:
+                            if capture_on and now - self._last_visitor_at.get(cam_id, 0) >= 30:
+                                try:
                                     snap = await VisitorService.save_frame_snapshot(frame, cam_id)
                                     reuse_min = max(0.4, float(threshold) - 0.25)
                                     await VisitorService.record_event(
@@ -124,38 +214,70 @@ class RecognitionWorker:
                                         reuse_min_sim=reuse_min,
                                     )
                                     self._last_visitor_at[cam_id] = now
-                                await VisitorService.maybe_welcome_unknown(
-                                    db, cam_id, store_id=store_id
-                                )
-                                await db.commit()
-                            except Exception:
-                                await db.rollback()
-                                logger.exception("未知访客抓拍/迎宾失败 camera_id=%s", cam_id)
-                            continue
-                        confirmed, cid, avg = global_tracker.push(cam_id, emb, best_id, best_sim)
-                        if confirmed and cid:
-                            mem_key = f"{cam_id}:{cid}"
-                            try:
-                                if now - self._last_member_event_at.get(mem_key, 0) >= 30:
-                                    snap = await VisitorService.save_frame_snapshot(frame, cam_id)
-                                    await VisitorService.record_event(
-                                        db,
+                                    await db.commit()
+                                except Exception:
+                                    await db.rollback()
+                                    logger.exception(
+                                        "未知访客抓拍落库失败 camera_id=%s",
                                         cam_id,
-                                        "MATCH",
-                                        snapshot_path=snap,
-                                        embedding=emb,
-                                        customer_id=int(cid),
                                     )
-                                    self._last_member_event_at[mem_key] = now
-                                # 进程内已多帧确认，勿再 Redis 叠一层（否则约 2×confirm 才播报）
-                                await WelcomeService.try_welcome(
-                                    db, cid, cam_id, avg, preconfirmed=True
+                            continue
+
+                        confirmed, cid, avg = global_tracker.push(cam_id, emb, best_id, best_sim)
+                        if not confirmed or not cid:
+                            logger.debug(
+                                "会员多帧未确认 camera_id=%s customer_id=%s sim=%.4f",
+                                cam_id,
+                                best_id,
+                                best_sim,
+                            )
+                            continue
+
+                        logger.info(
+                            "识别到会员 camera_id=%s customer_id=%s avg_sim=%.4f → 迎宾",
+                            cam_id,
+                            cid,
+                            avg,
+                        )
+                        mem_key = f"{cam_id}:{cid}"
+                        try:
+                            # 先迎宾再落库，降低出声延迟
+                            ok = await WelcomeService.try_welcome(
+                                db, cid, cam_id, avg, preconfirmed=True
+                            )
+                            await db.commit()
+                            if ok:
+                                self._tts_yield_until[cam_id] = time.time() + 5.0
+                            else:
+                                logger.info(
+                                    "会员迎宾未入队（冷却或阈值） camera_id=%s customer_id=%s",
+                                    cam_id,
+                                    cid,
                                 )
+                        except Exception:
+                            await db.rollback()
+                            logger.exception(
+                                "会员迎宾失败 camera_id=%s customer_id=%s",
+                                cam_id,
+                                cid,
+                            )
+                        if now - self._last_member_event_at.get(mem_key, 0) >= 30:
+                            try:
+                                snap = await VisitorService.save_frame_snapshot(frame, cam_id)
+                                await VisitorService.record_event(
+                                    db,
+                                    cam_id,
+                                    "MATCH",
+                                    snapshot_path=snap,
+                                    embedding=emb,
+                                    customer_id=int(cid),
+                                )
+                                self._last_member_event_at[mem_key] = now
                                 await db.commit()
                             except Exception:
                                 await db.rollback()
                                 logger.exception(
-                                    "会员识别落库/迎宾失败 camera_id=%s customer_id=%s",
+                                    "会员识别落库失败 camera_id=%s customer_id=%s",
                                     cam_id,
                                     cid,
                                 )

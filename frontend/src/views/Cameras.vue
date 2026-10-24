@@ -224,6 +224,8 @@ const form = reactive({
   store_id: undefined as number | undefined,
   auto_start: true,
 })
+/** 打开编辑时的原名称；后端仅在名称真正变化时同步 OSD */
+let editNameSnapshot = ''
 
 const kpiCards = computed(() => [
   { label: '摄像头', value: overview.value.camera_count ?? cameras.value.length },
@@ -362,6 +364,7 @@ async function refreshAll() {
 function openForm(row?: any) {
   editingId.value = row?.id || null
   if (row) {
+    editNameSnapshot = String(row.name || '').trim()
     Object.assign(form, {
       name: row.name,
       camera_type: row.camera_type,
@@ -375,6 +378,7 @@ function openForm(row?: any) {
       auto_start: true,
     })
   } else {
+    editNameSnapshot = ''
     const sid = auth.user?.store_id || stores.value[0]?.id
     Object.assign(form, {
       name: '',
@@ -399,6 +403,14 @@ async function save() {
   }
   saving.value = true
   try {
+    const notifyOsd = (res: any) => {
+      const osd = res?.data?.osd_sync
+      if (!osd) return
+      if (osd.ok) ElMessage.success(`画面角标已同步为「${osd.name || form.name.trim()}」`)
+      else if (osd.reason && osd.reason !== 'not_isapi') {
+        ElMessage.warning('摄像头已保存，但画面角标同步失败（可检查设备账号/网络）')
+      }
+    }
     if (editingId.value) {
       const body: any = {
         name: form.name.trim(),
@@ -410,10 +422,11 @@ async function save() {
         clear_password: form.clear_password,
       }
       if (form.password) body.password = form.password
-      await api.put(`/cameras/${editingId.value}`, body)
+      const res = await api.put(`/cameras/${editingId.value}`, body)
       ElMessage.success('已更新')
+      notifyOsd(res)
     } else {
-      await api.post('/cameras', {
+      const res = await api.post('/cameras', {
         name: form.name.trim(),
         camera_type: form.camera_type,
         source_url: form.source_url.trim(),
@@ -425,6 +438,7 @@ async function save() {
         auto_start: form.auto_start,
       })
       ElMessage.success('摄像头已创建')
+      notifyOsd(res)
     }
     dialogVisible.value = false
     refreshAll()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from functools import lru_cache
 
 import numpy as np
@@ -10,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 # 生产统一 512 维 ArcFace embedding；OpenCV 兜底仅开发且显式允许
 EMBEDDING_DIM = 512
+# onnxruntime / InsightFace 非完全线程安全；识别 to_thread 与预热并发时需串行
+_INFER_LOCK = threading.Lock()
 
 
 def _onnx_providers() -> list[str]:
@@ -39,13 +42,45 @@ def _face_app():
 
 @lru_cache(maxsize=1)
 def _face_app_live():
-    """到店实时识别：较小 det_size，CPU 上明显更快；门口大脸足够。"""
+    """到店实时识别：偏召回（门口远景/侧脸/弱光）。"""
     from insightface.app import FaceAnalysis
 
     app = FaceAnalysis(name="buffalo_l", providers=_onnx_providers())
-    # 320：门口/近景 CPU 常用；640 实时帧会拖到数百 ms～数秒
-    app.prepare(ctx_id=0, det_size=(320, 320))
+    # det_thresh 默认 0.5 对门口远景过严；0.28 提高召回，误检由匹配阈值兜底
+    app.prepare(ctx_id=0, det_size=(640, 640), det_thresh=0.28)
     return app
+
+
+def _enhance_for_detect(img: np.ndarray) -> np.ndarray:
+    """弱光/低对比度帧增强，供检测失败时二次尝试。"""
+    import cv2
+
+    if img is None or getattr(img, "ndim", 0) != 3:
+        return img
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l2 = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge([l2, a, b]), cv2.COLOR_LAB2BGR)
+
+
+def _downscale_for_live(img: np.ndarray, *, max_side: int = 1280) -> np.ndarray:
+    """主码流偶发 2560x1440：全分辨率跑 buffalo+det640 又慢又易漏远景脸。
+
+    长边压到 max_side，检测与门口召回更稳；入库路径不走此缩放。
+    """
+    import cv2
+
+    if img is None or getattr(img, "ndim", 0) < 2:
+        return img
+    h, w = int(img.shape[0]), int(img.shape[1])
+    side = max(h, w)
+    if side <= max_side:
+        return img
+    scale = float(max_side) / float(side)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    return cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
 
 
 def _insightface_available() -> bool:
@@ -162,10 +197,24 @@ def _extract_insightface_bgr(img: np.ndarray, *, live: bool = False) -> list[flo
     if img is None or getattr(img, "size", 0) == 0:
         raise ValueError("无效视频帧")
 
+    # 用原图尺寸写错误信息；推理用缩放后的 live 帧
+    src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0
+    src_w = int(img.shape[1]) if getattr(img, "ndim", 0) >= 2 else 0
+    work = _downscale_for_live(img) if live else img
+
     app = _face_app_live() if live else _face_app()
-    faces = app.get(img)
+    with _INFER_LOCK:
+        faces = app.get(work)
+        # 门口弱光/逆光：原图无脸时 CLAHE 增强再检一次
+        if live and not faces:
+            enhanced = _enhance_for_detect(work)
+            if enhanced is not None and enhanced is not work:
+                faces = app.get(enhanced)
     if not faces:
-        raise ValueError("未检测到人脸，请正对摄像头")
+        mean = float(np.mean(work)) if getattr(work, "size", 0) else 0.0
+        raise ValueError(
+            f"未检测到人脸，请正对摄像头（{src_w}x{src_h} mean={mean:.0f}）"
+        )
     if live:
         # 门口实时：取框面积最大的脸，避免陪同导致整帧丢弃
         face = max(
@@ -180,9 +229,9 @@ def _extract_insightface_bgr(img: np.ndarray, *, live: bool = False) -> list[flo
         face = faces[0]
 
     det_score = float(getattr(face, "det_score", 1.0) or 1.0)
-    min_det = 0.35 if live else 0.5
+    min_det = 0.22 if live else 0.5
     if det_score < min_det:
-        raise ValueError("人脸检测置信度过低")
+        raise ValueError(f"人脸检测置信度过低 det_score={det_score:.3f}")
 
     # 优先官方已 L2 归一化向量
     raw = getattr(face, "normed_embedding", None)
