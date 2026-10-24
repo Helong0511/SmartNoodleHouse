@@ -222,6 +222,50 @@ async def visitor_events(
     )
 
 
+@router.delete("/visitors/events", dependencies=[require_permission("camera:manage")])
+async def clear_visitor_events(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    camera_id: int | None = None,
+    store_id: int | None = None,
+):
+    """清空最近访客事件（含抓拍图）。可按摄像头或门店范围；无参时清本店（超管须指定门店或摄像头）。"""
+    from app.services.face_service import VisitorService
+
+    cam_ids: list[int] = []
+    if camera_id:
+        camera = await db.get(Camera, camera_id)
+        if not camera:
+            raise AppException(40420, "摄像头不存在")
+        _assert_cam_access(user, camera)
+        cam_ids = [int(camera.id)]
+        scope_store = int(camera.store_id) if camera.store_id else None
+    else:
+        sid = require_bound_store(user, store_id)
+        if sid is None:
+            raise AppException(40020, "请指定门店或摄像头后再清空访客事件")
+        assert_store_access(user, sid)
+        cam_ids = list(
+            (await db.execute(select(Camera.id).where(Camera.store_id == int(sid)))).scalars().all()
+        )
+        scope_store = int(sid)
+    stats = await VisitorService.clear_events(db, camera_ids=cam_ids)
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.visitors.clear",
+        module="camera",
+        target_type="store" if scope_store else "camera",
+        target_id=scope_store or (cam_ids[0] if cam_ids else None),
+        detail={"camera_ids": cam_ids, **stats},
+        request=request,
+        store_id=scope_store,
+    )
+    await db.commit()
+    return success(stats, request=request)
+
+
 @router.post("", dependencies=[require_permission("camera:manage")])
 async def create_camera(data: CameraCreate, request: Request, db: DbSession, user: CurrentUser):
     # 超管可传 store_id；非超管强制本店。超管未传且无绑店则要求指定门店

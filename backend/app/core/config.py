@@ -226,6 +226,10 @@ class Settings(BaseSettings):
     face_liveness_challenge_timeout: int = 30  # 挑战有效期（秒）
     # 店内摄像头未知访客抓拍：默认开启；图片按日期目录保存，随 visitor_data_retention_days 清理
     unknown_visitor_capture_enabled: bool = True
+    # 陌生访客语音迎宾（可按门店覆盖；与会员人脸迎宾独立）
+    unknown_visitor_welcome_enabled: bool = True
+    unknown_visitor_welcome_text: str = "欢迎光临"
+    unknown_visitor_welcome_cooldown_seconds: int = 60
 
     @property
     def cors_origin_list(self) -> List[str]:

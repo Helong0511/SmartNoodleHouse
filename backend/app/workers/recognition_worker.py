@@ -88,7 +88,7 @@ class RecognitionWorker:
                             settings.face_match_threshold,
                             store_id=store_id,
                         )
-                        # 未匹配到授权会员 → 未知访客抓拍（按日目录存图，30s 节流）
+                        # 未匹配到授权会员 → 未知访客抓拍 + 可选陌生客迎宾（按日目录存图，30s 节流）
                         if best_id is None or best_sim < threshold:
                             capture_on = await SystemSettingsService.effective_bool(
                                 db,
@@ -99,8 +99,18 @@ class RecognitionWorker:
                             if capture_on and now - self._last_visitor_at.get(cam_id, 0) >= 30:
                                 try:
                                     snap = await VisitorService.save_frame_snapshot(frame, cam_id)
+                                    # 同摄像头短时相似脸复用访客号（阈值略低于会员匹配）
+                                    reuse_min = max(0.4, float(threshold) - 0.25)
                                     await VisitorService.record_event(
-                                        db, cam_id, "ENTER", snapshot_path=snap
+                                        db,
+                                        cam_id,
+                                        "ENTER",
+                                        snapshot_path=snap,
+                                        embedding=emb,
+                                        reuse_min_sim=reuse_min,
+                                    )
+                                    await VisitorService.maybe_welcome_unknown(
+                                        db, cam_id, store_id=store_id
                                     )
                                     await db.commit()
                                     self._last_visitor_at[cam_id] = now

@@ -1109,6 +1109,36 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'unknown_visitor_capture_enabled'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'unknown_visitor_welcome_enabled',
+    'true',
+    '陌生访客迎宾播报（默认开启；可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'unknown_visitor_welcome_enabled'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'unknown_visitor_welcome_text',
+    '欢迎光临',
+    '陌生访客欢迎语文案（可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'unknown_visitor_welcome_text'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'unknown_visitor_welcome_cooldown_seconds',
+    '60',
+    '陌生访客迎宾冷却秒数（可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'unknown_visitor_welcome_cooldown_seconds'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'camera_speaker_tts_enabled',
     'false',
     '摄像头播放迎宾语音（默认关闭；海康对讲扬声器）'

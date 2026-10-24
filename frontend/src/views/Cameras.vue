@@ -56,7 +56,10 @@
       <template #header>
         <div class="card-head">
           <span>最近访客事件</span>
-          <el-button link type="primary" @click="loadEvents">刷新</el-button>
+          <div class="card-head-actions">
+            <el-button v-if="canManageCameras" link type="danger" @click="clearEvents">清空访客事件</el-button>
+            <el-button link type="primary" @click="loadEvents">刷新</el-button>
+          </div>
         </div>
         <div class="event-filters">
           <el-select v-model="eventFilter.cameraId" clearable filterable placeholder="全部摄像头" style="width: 200px"
@@ -289,6 +292,35 @@ function reloadEvents() {
   return loadEvents()
 }
 
+async function clearEvents() {
+  const camHint = eventFilter.cameraId
+    ? `摄像头「${cameraName(eventFilter.cameraId)}」`
+    : auth.isSuperAdmin && storeFilter.value
+      ? `门店「${stores.value.find((s) => s.id === storeFilter.value)?.name || storeFilter.value}」`
+      : '当前门店'
+  try {
+    await ElMessageBox.confirm(
+      `确定清空${camHint}的全部最近访客事件及抓拍图？此操作不可恢复。`,
+      '清空访客事件',
+      { type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const params: Record<string, any> = {}
+    if (eventFilter.cameraId) params.camera_id = eventFilter.cameraId
+    else if (auth.isSuperAdmin && storeFilter.value) params.store_id = storeFilter.value
+    else if (auth.user?.store_id) params.store_id = auth.user.store_id
+    const res = await api.delete('/cameras/visitors/events', { params })
+    const n = res.data?.deleted_rows ?? 0
+    ElMessage.success(`已清空 ${n} 条访客事件`)
+    await Promise.all([loadOverview(), reloadEvents()])
+  } catch (e: any) {
+    ElMessage.error(e.message || '清空失败')
+  }
+}
+
 async function refreshAll() {
   await Promise.all([loadOverview(), load(), loadEvents()])
 }
@@ -491,6 +523,12 @@ onUnmounted(() => {
 .card-head {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+
+.card-head-actions {
+  display: flex;
+  gap: 4px;
   align-items: center;
 }
 

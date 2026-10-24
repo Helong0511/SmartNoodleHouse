@@ -348,6 +348,12 @@ class FaceService:
 
 
 class VisitorService:
+    # 同摄像头陌生客短时复用访客号（进程内；多 worker 不共享，可接受）
+    _UNKNOWN_TRACK_TTL_SEC = 1800.0
+    _UNKNOWN_REUSE_MIN_SIM = 0.45
+    _unknown_tracks: dict[int, list[dict]] = {}
+    _last_unknown_welcome_at: dict[int, float] = {}
+
     @staticmethod
     def uploads_url_to_key(url: str | None) -> str | None:
         s = str(url or "").strip().replace("\\", "/")
@@ -392,12 +398,64 @@ class VisitorService:
         key = cls.make_snapshot_key(camera_id, ext="jpg")
         return await get_storage().put_bytes(key, data, content_type="image/jpeg")
 
-    @staticmethod
+    @classmethod
+    def _prune_unknown_tracks(cls, camera_id: int, now: float) -> list[dict]:
+        tracks = cls._unknown_tracks.get(int(camera_id)) or []
+        kept = [t for t in tracks if now - float(t.get("ts") or 0) <= cls._UNKNOWN_TRACK_TTL_SEC]
+        cls._unknown_tracks[int(camera_id)] = kept
+        return kept
+
+    @classmethod
+    def resolve_visitor_no(
+        cls,
+        camera_id: int,
+        *,
+        store_no: str | None,
+        embedding: np.ndarray | None = None,
+        reuse_min_sim: float | None = None,
+    ) -> str:
+        """同摄像头短时内相似人脸复用访客号；否则新号。"""
+        import time as _time
+
+        now = _time.time()
+        min_sim = float(reuse_min_sim if reuse_min_sim is not None else cls._UNKNOWN_REUSE_MIN_SIM)
+        min_sim = max(0.35, min(0.95, min_sim))
+        if embedding is not None:
+            emb = np.asarray(embedding, dtype=np.float32)
+            tracks = cls._prune_unknown_tracks(camera_id, now)
+            best_no, best_sim = None, 0.0
+            for t in tracks:
+                vec = t.get("emb")
+                if vec is None:
+                    continue
+                sim = FaceService.cosine_similarity(emb, np.asarray(vec, dtype=np.float32))
+                if sim > best_sim:
+                    best_sim, best_no = sim, t.get("visitor_no")
+            if best_no and best_sim >= min_sim:
+                # 刷新该轨迹时间戳，保留最新特征
+                tracks[:] = [t for t in tracks if t.get("visitor_no") != best_no]
+                tracks.append({"emb": emb, "visitor_no": str(best_no), "ts": now})
+                cls._unknown_tracks[int(camera_id)] = tracks[-20:]
+                return str(best_no)
+
+        visitor_no = generate_no(BIZ_VI, store_no, None)
+        if embedding is not None:
+            emb = np.asarray(embedding, dtype=np.float32)
+            tracks = cls._prune_unknown_tracks(camera_id, now)
+            tracks.append({"emb": emb, "visitor_no": visitor_no, "ts": now})
+            cls._unknown_tracks[int(camera_id)] = tracks[-20:]
+        return visitor_no
+
+    @classmethod
     async def record_event(
+        cls,
         db: AsyncSession,
         camera_id: int,
         event_type: str = "ENTER",
         snapshot_path: str | None = None,
+        *,
+        embedding: np.ndarray | None = None,
+        reuse_min_sim: float | None = None,
     ) -> VisitorEvent:
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
@@ -411,8 +469,14 @@ class VisitorService:
         if cam and cam.store_id:
             store = await db.get(Store, cam.store_id)
             sno = store.store_no if store else None
+        visitor_no = cls.resolve_visitor_no(
+            camera_id,
+            store_no=sno,
+            embedding=embedding,
+            reuse_min_sim=reuse_min_sim,
+        )
         event = VisitorEvent(
-            visitor_no=generate_no(BIZ_VI, sno, None),
+            visitor_no=visitor_no,
             camera_id=camera_id,
             event_type=event_type,
             event_time=now_local(),
@@ -422,6 +486,104 @@ class VisitorService:
         db.add(event)
         await db.flush()
         return event
+
+    @classmethod
+    async def maybe_welcome_unknown(
+        cls,
+        db: AsyncSession,
+        camera_id: int,
+        *,
+        store_id: int | None,
+    ) -> bool:
+        """陌生访客语音迎宾：门店开关 + 冷却；入队后由 TTSWorker 播报。"""
+        import time as _time
+
+        from app.services.system_settings_service import SystemSettingsService
+
+        settings = get_settings()
+        enabled = await SystemSettingsService.effective_bool(
+            db,
+            "unknown_visitor_welcome_enabled",
+            getattr(settings, "unknown_visitor_welcome_enabled", True),
+            store_id=store_id,
+        )
+        if not enabled:
+            return False
+        cooldown = await SystemSettingsService.effective_int(
+            db,
+            "unknown_visitor_welcome_cooldown_seconds",
+            getattr(settings, "unknown_visitor_welcome_cooldown_seconds", 60),
+            store_id=store_id,
+        )
+        now = _time.time()
+        last = cls._last_unknown_welcome_at.get(int(camera_id), 0.0)
+        if cooldown > 0 and now - last < float(cooldown):
+            return False
+        text = (
+            await SystemSettingsService.effective_setting(
+                db,
+                "unknown_visitor_welcome_text",
+                store_id=store_id,
+                fallback=getattr(settings, "unknown_visitor_welcome_text", None) or "欢迎光临",
+            )
+            or "欢迎光临"
+        ).strip()
+        if not text:
+            return False
+        cls._last_unknown_welcome_at[int(camera_id)] = now
+        await WelcomeService.get_queue().put(
+            {"customer_id": None, "text": text, "camera_id": camera_id, "kind": "unknown_visitor"}
+        )
+        try:
+            from app.services.websocket_manager import ws_manager
+
+            await ws_manager.broadcast(
+                "cameras",
+                "WELCOME_UNKNOWN",
+                {"camera_id": camera_id, "text": text, "store_id": store_id},
+                store_id=store_id,
+            )
+        except Exception:
+            pass
+        return True
+
+    @classmethod
+    async def clear_events(
+        cls,
+        db: AsyncSession,
+        *,
+        camera_ids: list[int],
+    ) -> dict:
+        """清除指定摄像头范围内的访客事件及抓拍图。"""
+        from sqlalchemy import delete, select
+
+        from app.services.object_storage import get_storage
+
+        ids = [int(x) for x in camera_ids if x is not None]
+        if not ids:
+            return {"deleted_rows": 0, "deleted_files": 0}
+        rows = list(
+            (
+                await db.execute(select(VisitorEvent).where(VisitorEvent.camera_id.in_(ids)))
+            ).scalars().all()
+        )
+        storage = get_storage()
+        deleted_files = 0
+        for row in rows:
+            key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
+            if not key:
+                continue
+            try:
+                await storage.delete(key)
+                deleted_files += 1
+            except Exception:
+                logger.warning("清空访客时删除抓拍失败 path=%s", row.snapshot_path, exc_info=True)
+        result = await db.execute(delete(VisitorEvent).where(VisitorEvent.camera_id.in_(ids)))
+        deleted_rows = int(result.rowcount or 0)
+        for cid in ids:
+            cls._unknown_tracks.pop(int(cid), None)
+            cls._last_unknown_welcome_at.pop(int(cid), None)
+        return {"deleted_rows": deleted_rows, "deleted_files": deleted_files}
 
     @classmethod
     async def cleanup_expired(cls, db: AsyncSession) -> dict:
