@@ -19,10 +19,18 @@ from app.models import SystemSetting
 logger = logging.getLogger(__name__)
 
 OVERRIDES_KEY = "scheduler_job_overrides"
-OVERRIDES_VER_KEY = "snh:scheduler:overrides:ver"
-OVERRIDES_CHANNEL = "snh:scheduler:overrides"
-JOB_STATS_KEY = "snh:scheduler:job_stats"
-NEXT_RUNS_KEY = "snh:scheduler:next_runs"
+from app.core.cache_keys import (
+    SCHEDULER_JOB_STATS_KEY,
+    SCHEDULER_NEXT_RUNS_KEY,
+    SCHEDULER_OVERRIDES_CHANNEL,
+    SCHEDULER_OVERRIDES_VER_KEY,
+    scheduler_job_lock_key,
+)
+
+OVERRIDES_VER_KEY = SCHEDULER_OVERRIDES_VER_KEY
+OVERRIDES_CHANNEL = SCHEDULER_OVERRIDES_CHANNEL
+JOB_STATS_KEY = SCHEDULER_JOB_STATS_KEY
+NEXT_RUNS_KEY = SCHEDULER_NEXT_RUNS_KEY
 
 # Redis 不可用时的进程内兜底（仅本进程可见）
 _job_stats_mem: dict[str, dict[str, Any]] = {}
@@ -844,7 +852,7 @@ async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
     """
     from app.core.redis_client import get_redis
 
-    key = f"snh:scheduler:joblock:{job_id}"
+    key = scheduler_job_lock_key(job_id)
     token = uuid.uuid4().hex
     acquired = False
     try:

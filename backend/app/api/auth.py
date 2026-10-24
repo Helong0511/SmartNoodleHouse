@@ -40,11 +40,15 @@ def _login_scope(username: str, ip: str) -> str:
 
 
 def _login_fail_key(username: str, ip: str) -> str:
-    return f"snh:login:fail:{_login_scope(username, ip)}"
+    from app.core.cache_keys import login_fail_key
+
+    return login_fail_key(_login_scope(username, ip))
 
 
 def _login_lock_key(username: str, ip: str) -> str:
-    return f"snh:login:lock:{_login_scope(username, ip)}"
+    from app.core.cache_keys import login_lock_key
+
+    return login_lock_key(_login_scope(username, ip))
 
 
 async def _login_is_locked(username: str, ip: str = "unknown") -> bool:

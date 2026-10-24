@@ -1,4 +1,7 @@
 """智能口味：按顾客近期已付订单重算规格偏好。"""
+from __future__ import annotations
+
+import logging
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -6,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
 from app.models import Customer, CustomerPreference, Order, OrderItem, OrderItemOption
+
+logger = logging.getLogger(__name__)
 
 
 class PreferenceService:
@@ -68,6 +73,17 @@ class PreferenceService:
         customer = await db.get(Customer, order.customer_id)
         if customer:
             customer.last_order_at = now_local()
+            # 刚消费过的授权会员优先进人人脸热集，避免被定容踢出后进店认不出
+            try:
+                from app.services.face_service import face_embedding_cache
+
+                await face_embedding_cache.promote(db, int(order.customer_id))
+            except Exception:
+                logger.debug(
+                    "支付后提升人脸热集失败 customer_id=%s",
+                    order.customer_id,
+                    exc_info=True,
+                )
 
     @staticmethod
     async def recompute_for_customer(db: AsyncSession, customer_id: int) -> None:

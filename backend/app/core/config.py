@@ -222,6 +222,13 @@ class Settings(BaseSettings):
     # InsightFace 官方/门禁实践余弦阈值约 0.35–0.50；0.75 会导致大量拒识
     face_match_threshold: float = 0.48
     face_confirm_frames: int = 2
+    # 人脸热集人数：0=按本机可用内存自动定容；>0=固定上限（本地可写大数近似全量）
+    face_cache_max_profiles: int = 0
+    # 近 N 天有单的会员优先进入热集（与 lifecycle 频率分一起排序）
+    face_cache_recent_days: int = 90
+    # 热集未命中时冷库二次比对每批人数；摄像头冷搜冷却秒数
+    face_cache_cold_batch_size: int = 200
+    face_cache_cold_cooldown_seconds: float = 2.5
     # P1: 活体检测模式 — none=多帧确认（被动）；challenge=随机动作挑战（主动）
     face_liveness_mode: str = "challenge"
     face_liveness_challenge_timeout: int = 30  # 挑战有效期（秒）

@@ -7,12 +7,13 @@ from __future__ import annotations
 import hashlib
 import logging
 
+from app.core.cache_keys import WEBHOOK_REPLAY_PREFIX
 from app.core.redis_client import try_get_redis
 from app.domains.messaging import idempotency as _idem
 
 logger = logging.getLogger(__name__)
 
-REDIS_NS = "snh:webhook:replay:"
+REDIS_NS = WEBHOOK_REPLAY_PREFIX
 DEFAULT_TTL = 86400 * 2  # 48h
 
 

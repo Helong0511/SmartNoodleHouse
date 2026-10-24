@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import math
-import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -19,6 +18,8 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.hot_cache import HotCache
+from app.core.response import money, now_local
 from app.models import (
     Customer,
     CustomerTasteProfile,
@@ -29,7 +30,6 @@ from app.models import (
     ProductTasteProfile,
     StoreProductStock,
 )
-from app.core.response import money, now_local
 from app.utils.birthday import is_birthday_today, normalize_calendar
 from app.utils.product_visibility import is_product_visible
 
@@ -503,11 +503,15 @@ def _naive(dt: datetime) -> datetime:
 
 # ---------- IO 层 ----------
 
-# 极简 TTL 缓存（asyncio 单线程无需锁）
-_pool_cache: dict[int, tuple[float, list[PoolProduct], dict[int, ProductCategory]]] = {}
-_cf_cache: dict[int, tuple[float, dict[int, dict[int, int]]]] = {}
 POOL_TTL = 60.0
 CF_TTL = 300.0
+# 进程内热缓存（跨 worker 不共享；写路径主动 delete，其余靠 TTL）
+_POOL_CACHE: HotCache[int, tuple[list[PoolProduct], dict[int, ProductCategory]]] = HotCache(
+    "reco.pool", max_size=64, ttl_seconds=POOL_TTL
+)
+_CF_CACHE: HotCache[int, dict[int, dict[int, int]]] = HotCache(
+    "reco.cf", max_size=64, ttl_seconds=CF_TTL
+)
 
 
 async def invalidate_store_caches(store_id: int) -> None:
@@ -517,8 +521,8 @@ async def invalidate_store_caches(store_id: int) -> None:
     如需强一致可走 Redis pubsub 广播失效，当前 TTL 可接受。
     """
     sid = int(store_id)
-    _pool_cache.pop(sid, None)
-    _cf_cache.pop(sid, None)
+    _POOL_CACHE.delete(sid)
+    _CF_CACHE.delete(sid)
     # Task 12：菜单版本戳递增 + 聚合缓存失效 + 进程内兜底失效
     from app.core.menu_cache import bump_menu_version
     from app.services.menu_service import invalidate_local_menu_cache
@@ -535,9 +539,9 @@ class RecommendationService:
         db: AsyncSession, store_id: int, *, use_cache: bool = True
     ) -> tuple[list[PoolProduct], dict[int, ProductCategory]]:
         if use_cache:
-            hit = _pool_cache.get(int(store_id))
-            if hit and hit[0] > time.time():
-                return hit[1], hit[2]
+            hit = _POOL_CACHE.get(int(store_id))
+            if hit is not None:
+                return hit[0], hit[1]
 
         stopped = StoreProductStock.__table__.alias("sps_stop")
         rows = await db.execute(
@@ -605,7 +609,7 @@ class RecommendationService:
                 )
             )
         if use_cache:
-            _pool_cache[int(store_id)] = (time.time() + POOL_TTL, pool, cat_map)
+            _POOL_CACHE.put(int(store_id), (pool, cat_map))
         return pool, cat_map
 
     # ---------- 顾客画像 ----------
@@ -640,9 +644,9 @@ class RecommendationService:
     ) -> dict[int, dict[int, int]]:
         """门店近 90 天已付订单 item 共现计数（双向、每 item 截断 top K）。"""
         if use_cache:
-            hit = _cf_cache.get(int(store_id))
-            if hit and hit[0] > time.time():
-                return hit[1]
+            hit = _CF_CACHE.get(int(store_id))
+            if hit is not None:
+                return hit
         since = datetime.utcnow() - timedelta(days=CF_WINDOW_DAYS)
         a = OrderItem.__table__.alias("oi_a")
         b = OrderItem.__table__.alias("oi_b")
@@ -667,7 +671,7 @@ class RecommendationService:
             for q, neighbors in co.items()
         }
         if use_cache:
-            _cf_cache[int(store_id)] = (time.time() + CF_TTL, trimmed)
+            _CF_CACHE.put(int(store_id), trimmed)
         return trimmed
 
     @staticmethod

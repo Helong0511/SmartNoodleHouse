@@ -6,11 +6,12 @@ import json
 import logging
 from typing import Callable, Awaitable
 
+from app.core.cache_keys import WS_BROADCAST_CHANNEL
 from app.core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
-CHANNEL = "snh:ws:broadcast"
+CHANNEL = WS_BROADCAST_CHANNEL
 _listener_task: asyncio.Task | None = None
 
 

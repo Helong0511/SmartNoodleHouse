@@ -57,7 +57,7 @@ _leader_worker_id: str | None = None
 
 
 async def _warmup_recognition_and_tts() -> None:
-    """后台预热：InsightFace 模型 + 试听短句 WAV，缩短首人识别/首次摄像头试听延迟。"""
+    """后台预热：InsightFace + 常用迎宾/试听句 WAV 与 G.711，避免点击后再等合成。"""
     try:
         def _load_models() -> None:
             from app.services.face_extractor import _face_app, _face_app_live
@@ -70,12 +70,128 @@ async def _warmup_recognition_and_tts() -> None:
     except Exception:
         logger.exception("InsightFace 模型预热失败")
     try:
-        from app.workers.tts_worker import LocalTTS
+        from app.core.config import get_settings
+        from app.core.database import AsyncSessionLocal
+        from app.services.system_settings_service import SystemSettingsService
+        from app.workers.tts_worker import warmup_tts_phrases
 
-        await asyncio.to_thread(LocalTTS().synthesize_wav_sync, "试听播报")
-        logger.info("摄像头试听短句 WAV 已预热")
+        settings = get_settings()
+        phrases = [
+            "试听播报",
+            "电脑试听",
+            "欢迎光临",
+            "欢迎回来",
+            "摄像头扬声器播报测试",
+            "电脑扬声器播报测试",
+        ]
+        try:
+            async with AsyncSessionLocal() as db:
+                unknown = await SystemSettingsService.effective_setting(
+                    db,
+                    "unknown_visitor_welcome_text",
+                    fallback=getattr(settings, "unknown_visitor_welcome_text", None)
+                    or "欢迎光临",
+                )
+                if unknown:
+                    phrases.append(str(unknown).strip())
+                greeting = await SystemSettingsService.effective_setting(
+                    db,
+                    "welcome_greeting_prefix",
+                    fallback="欢迎回来，{称呼}。",
+                )
+                # 模板含占位符时无法整句预热，仅预热无占位的固定句
+                if greeting and "{" not in str(greeting):
+                    phrases.append(str(greeting).strip())
+        except Exception:
+            logger.debug("读取陌生客迎宾文案失败，仅预热内置短句", exc_info=True)
+
+        volumes: tuple[int, ...] = (100, 80)
+        try:
+            async with AsyncSessionLocal() as db:
+                vol = await SystemSettingsService.effective_int(
+                    db,
+                    "camera_speaker_volume_percent",
+                    getattr(settings, "camera_speaker_volume_percent", 80),
+                )
+            volumes = tuple(sorted({100, 80, int(vol)}))
+        except Exception:
+            logger.debug("读取摄像头音量失败，使用默认 100/80", exc_info=True)
+
+        stats = await asyncio.to_thread(
+            warmup_tts_phrases, phrases, codecs=("alaw", "ulaw"), volumes=volumes
+        )
+        logger.info(
+            "TTS 预热完成 phrases=%s wav_ok=%s g711=%s volumes=%s fail=%s",
+            stats.get("phrases"),
+            stats.get("wav_ok"),
+            stats.get("g711"),
+            stats.get("volumes"),
+            stats.get("fail"),
+        )
+        # 预探测各摄像头 G.711 codec，避免首次对讲再等 ISAPI
+        try:
+            from sqlalchemy import select
+
+            from app.core.warmup_budget import is_low_memory
+            from app.models import Camera
+            from app.services.camera_credentials import (
+                build_connect_source,
+                decrypt_password,
+            )
+            from app.services.hikvision_audio import HikvisionTwoWayAudio, resolve_isapi_base
+
+            async with AsyncSessionLocal() as db:
+                cams = (
+                    await db.execute(select(Camera).where(Camera.status != "DISABLED"))
+                ).scalars().all()
+            # 低内存：最多探测 1 路，避免启动期挤占识别热集
+            if is_low_memory() and cams:
+                logger.warning("可用内存偏低，摄像头 codec 预热缩量至 1 路")
+                cams = list(cams)[:1]
+            warmed = 0
+            for c in cams:
+                src = (c.source_url or "").strip()
+                if not src or src.isdigit():
+                    continue
+                base = resolve_isapi_base(src)
+                if not base:
+                    continue
+                user = (c.username or "admin").strip() or "admin"
+                password = ""
+                if c.password_encrypted:
+                    try:
+                        password = decrypt_password(c.password_encrypted)
+                    except Exception:
+                        continue
+                else:
+                    try:
+                        connected = build_connect_source(src, c.username, None)
+                        from urllib.parse import unquote, urlparse
+
+                        parsed = urlparse(connected)
+                        if parsed.password:
+                            password = unquote(parsed.password)
+                        if parsed.username:
+                            user = unquote(parsed.username)
+                    except Exception:
+                        continue
+                if not password:
+                    continue
+                try:
+                    codec = await HikvisionTwoWayAudio(base, user, password).resolve_codec()
+                    warmed += 1
+                    logger.info(
+                        "摄像头 codec 预热 camera_id=%s codec=%s",
+                        c.id,
+                        codec,
+                    )
+                except Exception:
+                    logger.debug("摄像头 codec 预热失败 camera_id=%s", c.id, exc_info=True)
+            logger.info("摄像头 codec 预热完成 count=%s", warmed)
+        except Exception:
+            logger.exception("摄像头 codec 预热失败")
     except Exception:
-        logger.exception("试听 WAV 预热失败")
+        logger.exception("TTS 预热失败")
 
 
 @asynccontextmanager
@@ -121,6 +237,7 @@ async def lifespan(app: FastAPI):
     # 菜单缓存预热：启动时加载在营门店菜单到 Redis，避免首批请求缓存击穿
     try:
         from app.core.database import AsyncSessionLocal
+        from app.core.warmup_budget import is_low_memory
         from app.services.menu_service import get_or_build_menu_bundle
 
         async with AsyncSessionLocal() as db:
@@ -129,6 +246,12 @@ async def lifespan(app: FastAPI):
 
             result = await db.execute(select(Store.id).where(Store.status == 1))
             store_ids = [r[0] for r in result.all()]
+            if is_low_memory() and len(store_ids) > 3:
+                logger.warning(
+                    "可用内存偏低，菜单预热缩量 %s→3 家门店",
+                    len(store_ids),
+                )
+                store_ids = store_ids[:3]
             for sid in store_ids:
                 try:
                     await get_or_build_menu_bundle(db, sid)
@@ -284,7 +407,11 @@ async def lifespan(app: FastAPI):
                 # 启动即加载授权会员人脸，保证识别时效（增量刷新仍走缓存）
                 try:
                     n = await face_embedding_cache.warmup(db)
-                    logger.info("启动预热人脸向量缓存 profiles=%s", n)
+                    logger.info(
+                        "启动预热人脸向量缓存 profiles=%s max=%s",
+                        n,
+                        getattr(face_embedding_cache, "_max_profiles", "?"),
+                    )
                 except Exception:
                     logger.exception("启动预热人脸向量缓存失败")
                 cams = (await db.execute(select(Camera).where(Camera.status != "DISABLED"))).scalars().all()

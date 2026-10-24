@@ -12,6 +12,7 @@ import re
 import time
 from typing import Any
 
+from app.core.cache_keys import PERF_ROUTES_SET_KEY, perf_count_key, perf_samples_key
 from app.core.redis_client import get_redis
 
 WINDOW_HOURS = 24  # 最大查询窗口
@@ -46,11 +47,11 @@ def _minute_bucket(epoch: float | None = None) -> int:
 
 
 def _sample_key(bucket: int, route: str) -> str:
-    return f"snh:perfs:{bucket}:{route}"
+    return perf_samples_key(str(bucket), route)
 
 
 def _count_key(bucket: int, route: str) -> str:
-    return f"snh:perfc:{bucket}:{route}"
+    return perf_count_key(str(bucket), route)
 
 
 async def record_request_timing(route: str, duration_ms: float, *, now: float | None = None) -> None:
@@ -60,8 +61,8 @@ async def record_request_timing(route: str, duration_ms: float, *, now: float | 
     try:
         r = await get_redis()
         pipe = r.pipeline()
-        pipe.sadd("snh:perf:routes", route)
-        pipe.expire("snh:perf:routes", _ROUTES_SET_TTL)
+        pipe.sadd(PERF_ROUTES_SET_KEY, route)
+        pipe.expire(PERF_ROUTES_SET_KEY, _ROUTES_SET_TTL)
         sk = _sample_key(bucket, route)
         pipe.rpush(sk, ms)
         pipe.ltrim(sk, -SAMPLES_PER_BUCKET, -1)
@@ -98,7 +99,7 @@ async def query_perf_metrics(
         if route:
             routes = [route]
         else:
-            routes = list(await r.smembers("snh:perf:routes"))
+            routes = list(await r.smembers(PERF_ROUTES_SET_KEY))
         if not routes:
             return {
                 "generated_at": int(time.time()),
@@ -157,7 +158,7 @@ async def query_perf_metrics(
     # 清理废弃路由（查询窗口内无数据）
     if stale_routes:
         try:
-            await r.srem("snh:perf:routes", *stale_routes)
+            await r.srem(PERF_ROUTES_SET_KEY, *stale_routes)
         except Exception:
             pass
 

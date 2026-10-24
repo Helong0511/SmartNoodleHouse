@@ -8,11 +8,10 @@ import socket
 import uuid
 from collections.abc import Awaitable, Callable
 
+from app.core.cache_keys import LEADER_KEY
 from app.core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
-
-LEADER_KEY = "snh:process:leader"
 DEFAULT_TTL = 45
 RENEW_INTERVAL = 15
 

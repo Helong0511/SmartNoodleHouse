@@ -27,7 +27,6 @@ class RecognitionWorker:
         from app.models import Camera
         from app.services.face_extractor import extract_face_embedding_bgr
         from app.services.face_service import (
-            FaceService,
             VisitorService,
             WelcomeService,
             face_embedding_cache,
@@ -50,8 +49,8 @@ class RecognitionWorker:
                     continue
 
                 async with AsyncSessionLocal() as db:
-                    # copy=False：启动已预热，热路径只读缓存避免每帧深拷贝
-                    profiles = await face_embedding_cache.get_profiles(db, copy=False)
+                    # 热集增量刷新一次/循环；单帧匹配走 best_match（含有界冷库）
+                    await face_embedding_cache.get_profiles(db, copy=False)
                     cam_rows = {
                         c.id: c
                         for c in (
@@ -83,13 +82,6 @@ class RecognitionWorker:
                             emb = np.array(emb_list, dtype=np.float32)
                         except Exception:
                             continue
-                        best_id, best_sim = None, 0.0
-                        for cid, vec in profiles:
-                            if vec.shape != emb.shape:
-                                continue
-                            sim = FaceService.cosine_similarity(emb, vec)
-                            if sim > best_sim:
-                                best_sim, best_id = sim, cid
                         from app.services.system_settings_service import SystemSettingsService
 
                         store_id = int(cam.store_id) if cam and cam.store_id else None
@@ -98,6 +90,9 @@ class RecognitionWorker:
                             "face_match_threshold",
                             settings.face_match_threshold,
                             store_id=store_id,
+                        )
+                        best_id, best_sim = await face_embedding_cache.best_match(
+                            db, emb, float(threshold), camera_id=cam_id
                         )
                         # 未匹配到授权会员 → 未知访客抓拍 + 可选陌生客迎宾（按日目录存图，30s 节流）
                         if best_id is None or best_sim < threshold:

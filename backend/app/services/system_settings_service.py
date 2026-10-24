@@ -907,7 +907,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
     },
 }
 
-REDIS_CACHE_VER_KEY = "snh:system_settings:ver"
+from app.core.cache_keys import SYSTEM_SETTINGS_VER_KEY as REDIS_CACHE_VER_KEY
 
 
 class SystemSettingsService:

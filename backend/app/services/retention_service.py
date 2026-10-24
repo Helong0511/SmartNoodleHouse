@@ -30,7 +30,7 @@ SETTING_SLEEP_WAKE_COUPON_90 = "sleep_wake_coupon_name_90"
 SETTING_BALANCE_LOW_THRESHOLD = "balance_low_threshold"
 
 # 余额提醒防重：30 天提醒一次
-BALANCE_NOTIFY_KEY_FMT = "snh:notify:balance_low:{customer_id}"
+from app.core.cache_keys import balance_notify_key
 BALANCE_NOTIFY_TTL_SECONDS = 30 * 24 * 3600
 
 DEFAULT_BATCH_SIZE = 500
@@ -355,7 +355,7 @@ async def run_balance_low_remind(
         if not rows:
             break
         for customer in rows:
-            key = BALANCE_NOTIFY_KEY_FMT.format(customer_id=int(customer.id))
+            key = balance_notify_key(int(customer.id))
             try:
                 set_ok = bool(await r.set(key, "1", nx=True, ex=BALANCE_NOTIFY_TTL_SECONDS))
             except Exception as exc:

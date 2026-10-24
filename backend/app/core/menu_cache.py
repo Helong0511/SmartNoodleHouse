@@ -16,23 +16,21 @@ import logging
 from typing import Any
 
 from app.core.async_utils import spawn_bg
-from app.core.cache_keys import menu_rebuild_lock_key, ttl_with_jitter
+from app.core.cache_keys import (
+    MENU_BUNDLE_TTL_SECONDS,
+    MENU_VERSION_TTL_SECONDS,
+    menu_bundle_key,
+    menu_rebuild_lock_key,
+    menu_version_key,
+    ttl_with_jitter,
+)
 from app.core.redis_client import delete_with_retry, get_redis
 
 logger = logging.getLogger(__name__)
 
-MENU_TTL_SECONDS = 60
-MENU_VERSION_TTL_SECONDS = 30 * 24 * 3600
+MENU_TTL_SECONDS = MENU_BUNDLE_TTL_SECONDS
 _BUNDLE_MAX_BYTES = 256 * 1024  # bundle JSON 超 256KB 跳过缓存以避免大Key
 _REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s，防持锁进程崩溃后永久锁
-
-
-def menu_bundle_key(store_id: int) -> str:
-    return f"snh:menu:bundle:{int(store_id)}"
-
-
-def menu_version_key(store_id: int) -> str:
-    return f"snh:menu:ver:{int(store_id)}"
 
 
 async def get_menu_version(store_id: int) -> int:

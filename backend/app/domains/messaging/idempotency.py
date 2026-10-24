@@ -16,12 +16,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache_keys import MSG_DONE_PREFIX
 from app.core.redis_client import try_get_redis
 from app.models import ProcessedMessage
 
 logger = logging.getLogger(__name__)
 
-REDIS_NS = "snh:msg:done:"
+REDIS_NS = MSG_DONE_PREFIX
 DEFAULT_TTL = 86400 * 2  # 48h
 
 

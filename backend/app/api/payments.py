@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentCustomer, CurrentUser, DbSession, StaffOrCustomer, require_permission, require_pos
 from app.core.exceptions import AppException
+from app.core.cache_keys import pay_sync_key
 from app.core.redis_client import get_redis
 from app.core.response import apply_date_range as _apply_date_range, calc_pages, success, serialize_dt
 from app.models import Order, Payment, PaymentRefund
@@ -29,7 +30,7 @@ class RefundCreate(BaseModel):
 async def _acquire_sync_cooldown(payment_id: int) -> None:
     """P1-13: per-payment 2s Redis cooldown (SET NX EX 2) to avoid flooding provider query API."""
     redis_client = await get_redis()
-    acquired = await redis_client.set(f"snh:pay:sync:{payment_id}", "1", nx=True, ex=2)
+    acquired = await redis_client.set(pay_sync_key(payment_id), "1", nx=True, ex=2)
     if not acquired:
         raise AppException(42901, "查询过于频繁，请稍后重试", status_code=429)
 

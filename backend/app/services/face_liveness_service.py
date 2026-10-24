@@ -15,6 +15,7 @@ import logging
 import secrets
 from datetime import timedelta
 
+from app.core.cache_keys import face_liveness_key
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.redis_client import try_get_redis
@@ -31,7 +32,6 @@ ACTION_LABELS = {
     "nod": "请点头一次",
     "smile": "请微笑一下",
 }
-CHALLENGE_KEY = "snh:face:liveness:{token}"
 CHALLENGE_TTL = 30  # 秒
 
 # 原子 GETDEL：一次性挑战 token 必须在单条命令内取出并删除，
@@ -84,7 +84,7 @@ async def generate_liveness_challenge(
     }
     from app.core.response import dumps_json
 
-    await redis.set(CHALLENGE_KEY.format(token=token), dumps_json(payload), ex=ttl)
+    await redis.set(face_liveness_key(token), dumps_json(payload), ex=ttl)
     expires_at = now_local() + timedelta(seconds=ttl)
     return {
         "token": token,
@@ -123,7 +123,7 @@ async def verify_liveness_challenge(
         logger.error("Liveness verify: Redis 不可用，fail-closed")
         return False
 
-    key = CHALLENGE_KEY.format(token=token)
+    key = face_liveness_key(token)
     # Lua 原子 GETDEL：取出即删，杜绝同一 token 并发重放
     raw = await redis.eval(_LUA_GET_DEL, 1, key)
     if not raw:

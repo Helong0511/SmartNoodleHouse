@@ -28,12 +28,13 @@ logger = logging.getLogger(__name__)
 _G711_RATE = 8000
 _CHUNK_BYTES = 160  # 20ms
 _CHUNK_SLEEP = _CHUNK_BYTES / _G711_RATE
+from app.core.hot_cache import HotCache
+
 # 同摄像头对讲会话互斥（跨 TTSWorker 实例）
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
 _CAMERA_LOCKS_GUARD = asyncio.Lock()
-# 通道编码缓存，避免每次试听都多一轮 Digest GET（~0.7s）
-_CODEC_CACHE: dict[str, tuple[float, str]] = {}
-_CODEC_CACHE_TTL = 600.0
+# 通道编码热缓存，避免每次试听都多一轮 Digest GET（~0.7s）
+_CODEC_CACHE: HotCache[str, str] = HotCache("hikvision.codec", max_size=32, ttl_seconds=600.0)
 
 
 def resolve_isapi_base(source_url: str) -> str | None:
@@ -431,14 +432,15 @@ class HikvisionTwoWayAudio:
         return f"{self.base_url}|{self.channel}"
 
     async def _detect_codec(self, client: httpx.AsyncClient) -> str:
-        cached = _CODEC_CACHE.get(self._cache_key())
-        if cached and time.time() - cached[0] < _CODEC_CACHE_TTL:
-            return cached[1]
+        key = self._cache_key()
+        cached = _CODEC_CACHE.get(key)
+        if cached:
+            return cached
         try:
             resp = await client.get(f"{self.base_url}/ISAPI/System/TwoWayAudio/channels")
             if resp.status_code == 200 and resp.text:
                 codec, enabled = _parse_channel_audio(resp.text, self.channel)
-                _CODEC_CACHE[self._cache_key()] = (time.time(), codec)
+                _CODEC_CACHE.put(key, codec)
                 logger.info(
                     "海康对讲通道 codec=%s enabled=%s base=%s channel=%s",
                     codec,
@@ -450,6 +452,16 @@ class HikvisionTwoWayAudio:
         except Exception:
             logger.debug("hikvision detect codec failed, fallback ulaw", exc_info=True)
         return "ulaw"
+
+    async def resolve_codec(self) -> str:
+        """读取（或探测并缓存）摄像头 G.711 编码。"""
+        cached = _CODEC_CACHE.get(self._cache_key())
+        if cached:
+            return cached
+        auth = httpx.DigestAuth(self.username, self.password)
+        timeout = httpx.Timeout(10.0, connect=5.0)
+        async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
+            return await self._detect_codec(client)
 
     async def play_g711(self, g711_data: bytes, *, codec: str = "ulaw") -> None:
         if not g711_data:

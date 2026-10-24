@@ -10,12 +10,27 @@ from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.biz_no import BIZ_VI, generate_no
+from app.core.cache_keys import (
+    TTS_WELCOME_QUEUE_KEY,
+    welcome_cooldown_key,
+    welcome_frames_key,
+)
+from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.redis_client import get_redis
 from app.core.response import now_local
-from app.models import Camera, Customer, FaceProfile, MemberLevel, Store, VisitorEvent, WelcomeLog
+from app.core.warmup_budget import face_cache_max_profiles
+from app.models import (
+    Camera,
+    Customer,
+    CustomerLifecycle,
+    FaceProfile,
+    MemberLevel,
+    Store,
+    VisitorEvent,
+    WelcomeLog,
+)
 from app.services.face_extractor import EMBEDDING_DIM
 from app.services.secret_encryption import _fernet_from_material
 
@@ -60,25 +75,80 @@ class FaceEncryption:
 
 
 class FaceEmbeddingCache:
-    """授权人脸向量内存缓存：按 updated_at 增量刷新，避免识别循环全表扫解密。"""
+    """授权人脸向量热集（专用热缓存，非 HotCache LRU）。
+
+    按消费活跃度 Top-N + 可用内存定容；增量按 updated_at；冷会员未命中时有界二次比对。
+    """
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._by_customer: dict[int, tuple[int, np.ndarray]] = {}  # customer_id -> (profile_id, vec)
+        self._touch_at: dict[int, float] = {}  # monotonic；淘汰优先踢沉默者
         self._last_sync: datetime | None = None
-        self._full_resync_every = 300.0  # 定期全量校正
+        self._full_resync_every = 300.0
         self._last_full_at = 0.0
+        self._cold_cooldown_until: dict[int, float] = {}  # camera_id -> monotonic
+        self._max_profiles: int = 800
 
     def invalidate(self) -> None:
         self._last_sync = None
 
+    def _resolve_max(self) -> int:
+        s = get_settings()
+        self._max_profiles = face_cache_max_profiles(
+            override=int(getattr(s, "face_cache_max_profiles", 0) or 0)
+        )
+        return self._max_profiles
+
+    @staticmethod
+    def _authorized_base():
+        return (
+            select(FaceProfile)
+            .join(Customer, Customer.id == FaceProfile.customer_id)
+            .outerjoin(CustomerLifecycle, CustomerLifecycle.customer_id == Customer.id)
+            .where(
+                FaceProfile.consent_status == "AUTHORIZED",
+                FaceProfile.feature_data.isnot(None),
+                Customer.status == 1,
+                Customer.account_status == "ACTIVE",
+                Customer.member_status == "MEMBER",
+            )
+        )
+
+    @staticmethod
+    def _activity_score_expr():
+        """近期消费阶梯 + 90 天频次 + RFM 微调（SQL 侧排序，避免全表进 Python）。"""
+        from sqlalchemy import case, func, literal
+
+        s = get_settings()
+        recent_days = max(1, int(getattr(s, "face_cache_recent_days", 90) or 90))
+        now = now_local()
+        d7 = now - timedelta(days=7)
+        d30 = now - timedelta(days=30)
+        d_recent = now - timedelta(days=recent_days)
+        recency = case(
+            (Customer.last_order_at >= d7, literal(1000)),
+            (Customer.last_order_at >= d30, literal(500)),
+            (Customer.last_order_at >= d_recent, literal(200)),
+            else_=literal(0),
+        )
+        freq = func.coalesce(CustomerLifecycle.order_count_90d, 0) * 10
+        rfm = func.coalesce(CustomerLifecycle.f_score, 0) * 5 + func.coalesce(
+            CustomerLifecycle.r_score, 0
+        ) * 3
+        return recency + freq + rfm
+
     async def warmup(self, db: AsyncSession) -> int:
-        """启动时全量加载授权会员人脸向量；返回缓存人数。"""
+        """启动按定容加载 Top-N 授权人脸；返回热集人数。"""
         async with self._lock:
             self._last_sync = None
             await self._refresh(db)
             n = len(self._by_customer)
-            logger.info("人脸向量缓存预热完成 profiles=%s", n)
+            logger.info(
+                "人脸向量缓存预热完成 profiles=%s max=%s",
+                n,
+                self._max_profiles,
+            )
             return n
 
     async def get_profiles(
@@ -88,8 +158,155 @@ class FaceEmbeddingCache:
             await self._refresh(db)
             if copy:
                 return [(cid, vec.copy()) for cid, (_pid, vec) in self._by_customer.items()]
-            # 识别热路径只读，避免每帧整表拷贝
             return [(cid, vec) for cid, (_pid, vec) in self._by_customer.items()]
+
+    def touch(self, customer_id: int) -> None:
+        import time
+
+        cid = int(customer_id)
+        if cid in self._by_customer:
+            self._touch_at[cid] = time.monotonic()
+
+    async def promote(self, db: AsyncSession, customer_id: int) -> bool:
+        """将指定顾客授权人脸拉入热集（支付成功/冷命中）；超 cap 淘汰沉默者。"""
+        cid = int(customer_id)
+        async with self._lock:
+            if cid in self._by_customer:
+                self.touch(cid)
+                return True
+            row = (
+                await db.execute(
+                    self._authorized_base().where(FaceProfile.customer_id == cid).limit(1)
+                )
+            ).scalar_one_or_none()
+            if not row:
+                return False
+            vec = self._decrypt_vec(FaceEncryption(), row)
+            if vec is None:
+                return False
+            self._by_customer[cid] = (int(row.id), vec)
+            self.touch(cid)
+            self._evict_overflow()
+            logger.info(
+                "face_cache promote customer_id=%s hot=%s max=%s",
+                cid,
+                len(self._by_customer),
+                self._max_profiles,
+            )
+            return True
+
+    async def best_match(
+        self,
+        db: AsyncSession,
+        embedding: np.ndarray,
+        threshold: float,
+        *,
+        camera_id: int | None = None,
+    ) -> tuple[int | None, float]:
+        """热集比对；未达阈值且质量路径允许时做有界冷库二次匹配。"""
+        import time
+
+        emb = np.asarray(embedding, dtype=np.float32)
+        async with self._lock:
+            await self._refresh(db)
+            best_id, best_sim = self._match_hot(emb)
+            if best_id is not None and best_sim >= threshold:
+                self.touch(best_id)
+                return best_id, best_sim
+
+            cam = int(camera_id) if camera_id is not None else None
+            now_m = time.monotonic()
+            if cam is not None:
+                until = self._cold_cooldown_until.get(cam, 0.0)
+                if now_m < until:
+                    return best_id, best_sim
+            s = get_settings()
+            cooldown = float(getattr(s, "face_cache_cold_cooldown_seconds", 2.5) or 2.5)
+            if cam is not None:
+                self._cold_cooldown_until[cam] = now_m + max(0.5, cooldown)
+
+            hot_ids = set(self._by_customer.keys())
+            cold_id, cold_sim = await self._cold_match(db, emb, threshold, hot_ids)
+            if cold_id is not None and cold_sim >= threshold:
+                # promote 内部会再抢锁；此处已持锁，直接写入
+                row = (
+                    await db.execute(
+                        self._authorized_base().where(FaceProfile.customer_id == cold_id).limit(1)
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    vec = self._decrypt_vec(FaceEncryption(), row)
+                    if vec is not None:
+                        self._by_customer[int(cold_id)] = (int(row.id), vec)
+                        self.touch(int(cold_id))
+                        self._evict_overflow()
+                logger.info(
+                    "face_cache cold_hit=1 customer_id=%s sim=%.4f hot=%s max=%s",
+                    cold_id,
+                    cold_sim,
+                    len(self._by_customer),
+                    self._max_profiles,
+                )
+                return int(cold_id), float(cold_sim)
+            return best_id, best_sim
+
+    def _match_hot(self, emb: np.ndarray) -> tuple[int | None, float]:
+        best_id, best_sim = None, 0.0
+        for cid, (_pid, vec) in self._by_customer.items():
+            if vec.shape != emb.shape:
+                continue
+            sim = FaceService.cosine_similarity(emb, vec)
+            if sim > best_sim:
+                best_sim, best_id = sim, cid
+        return best_id, best_sim
+
+    async def _cold_match(
+        self,
+        db: AsyncSession,
+        emb: np.ndarray,
+        threshold: float,
+        hot_ids: set[int],
+    ) -> tuple[int | None, float]:
+        s = get_settings()
+        batch = max(50, int(getattr(s, "face_cache_cold_batch_size", 200) or 200))
+        score = self._activity_score_expr()
+        enc = FaceEncryption()
+        best_id, best_sim = None, 0.0
+        offset = 0
+        # 最多扫 20 批，避免极端会员量打爆单帧
+        for _ in range(20):
+            q = self._authorized_base()
+            if hot_ids:
+                q = q.where(FaceProfile.customer_id.notin_(list(hot_ids)))
+            q = q.order_by(score.desc(), Customer.last_order_at.desc(), FaceProfile.id.asc())
+            q = q.offset(offset).limit(batch)
+            rows = list((await db.execute(q)).scalars().all())
+            if not rows:
+                break
+            for p in rows:
+                vec = self._decrypt_vec(enc, p)
+                if vec is None or vec.shape != emb.shape:
+                    continue
+                sim = FaceService.cosine_similarity(emb, vec)
+                if sim > best_sim:
+                    best_sim, best_id = sim, int(p.customer_id)
+                if best_sim >= threshold:
+                    return best_id, best_sim
+            if len(rows) < batch:
+                break
+            offset += batch
+        return best_id, best_sim
+
+    def _evict_overflow(self) -> None:
+        cap = self._resolve_max()
+        while len(self._by_customer) > cap:
+            # 无 touch 视为最旧；同 touch 任意踢一个
+            victim = min(
+                self._by_customer.keys(),
+                key=lambda cid: self._touch_at.get(cid, 0.0),
+            )
+            self._by_customer.pop(victim, None)
+            self._touch_at.pop(victim, None)
 
     async def _refresh(self, db: AsyncSession) -> None:
         import time
@@ -97,18 +314,14 @@ class FaceEmbeddingCache:
         now_mono = time.monotonic()
         force_full = self._last_sync is None or (now_mono - self._last_full_at) >= self._full_resync_every
         enc = FaceEncryption()
+        cap = self._resolve_max()
 
         if force_full:
-            # P0-18: join Customer 校验会员状态，仅缓存活跃会员的授权人脸
+            score = self._activity_score_expr()
             result = await db.execute(
-                select(FaceProfile)
-                .join(Customer, Customer.id == FaceProfile.customer_id)
-                .where(
-                    FaceProfile.consent_status == "AUTHORIZED",
-                    Customer.status == 1,
-                    Customer.account_status == "ACTIVE",
-                    Customer.member_status == "MEMBER",
-                )
+                self._authorized_base()
+                .order_by(score.desc(), Customer.last_order_at.desc(), FaceProfile.id.asc())
+                .limit(cap)
             )
             rows = list(result.scalars().all())
             fresh: dict[int, tuple[int, np.ndarray]] = {}
@@ -117,17 +330,23 @@ class FaceEmbeddingCache:
                 vec = self._decrypt_vec(enc, p)
                 if vec is None:
                     continue
-                fresh[int(p.customer_id)] = (int(p.id), vec)
+                cid = int(p.customer_id)
+                fresh[cid] = (int(p.id), vec)
                 ts = p.updated_at or p.consent_at
                 if ts and (newest is None or ts > newest):
                     newest = ts
+            # 保留仍在热集内的 touch
+            self._touch_at = {cid: t for cid, t in self._touch_at.items() if cid in fresh}
             self._by_customer = fresh
             self._last_sync = newest or now_local()
             self._last_full_at = now_mono
+            logger.debug(
+                "face_cache full_refresh hot=%s max=%s",
+                len(self._by_customer),
+                cap,
+            )
             return
 
-        # 增量：updated_at 晚于等于上次同步的行（含撤销）；用 coalesce 兜底 NULL，
-        # 避免 updated_at 为 NULL 的行在增量阶段永远刷不进缓存
         from sqlalchemy import func as sa_func
 
         result = await db.execute(
@@ -136,7 +355,6 @@ class FaceEmbeddingCache:
             )
         )
         newest = self._last_sync
-        # P0-18: 批量查这批 customer_id 对应的 Customer 状态
         changed_rows = list(result.scalars().all())
         cust_ids = {int(p.customer_id) for p in changed_rows}
         active_cust_ids: set[int] = set()
@@ -156,15 +374,22 @@ class FaceEmbeddingCache:
             if ts and (newest is None or ts > newest):
                 newest = ts
             cid = int(p.customer_id)
-            # P0-18: 非活跃会员或已撤销授权 → 从缓存移除
             if p.consent_status != "AUTHORIZED" or not p.feature_data or cid not in active_cust_ids:
                 self._by_customer.pop(cid, None)
+                self._touch_at.pop(cid, None)
+                continue
+            # 增量：仅更新已在热集中的；新人靠 promote / 下次全量 / 冷命中进入
+            if cid not in self._by_customer and len(self._by_customer) >= cap:
                 continue
             vec = self._decrypt_vec(enc, p)
             if vec is None:
                 self._by_customer.pop(cid, None)
+                self._touch_at.pop(cid, None)
                 continue
             self._by_customer[cid] = (int(p.id), vec)
+            if cid not in self._touch_at:
+                self._touch_at[cid] = now_mono
+        self._evict_overflow()
         self._last_sync = newest
 
     @staticmethod
@@ -791,7 +1016,7 @@ class VisitorService:
 class WelcomeService:
     """迎宾 TTS 队列：优先 Redis，避免 uvicorn --reload 后内存队列孤儿导致无声。"""
 
-    TTS_QUEUE_KEY = "snh:tts:welcome"
+    TTS_QUEUE_KEY = TTS_WELCOME_QUEUE_KEY
     TTS_QUEUE_MAX = 100
     _queue: asyncio.Queue | None = None
 
@@ -875,7 +1100,7 @@ class WelcomeService:
     @staticmethod
     async def is_cooled_down(customer_id: int) -> bool:
         redis = await get_redis()
-        key = f"snh:welcome:cooldown:{customer_id}"
+        key = welcome_cooldown_key(customer_id)
         return await redis.exists(key) > 0
 
     @staticmethod
@@ -903,7 +1128,7 @@ class WelcomeService:
         if seconds <= 0:
             return True
         redis = await get_redis()
-        key = f"snh:welcome:cooldown:{customer_id}"
+        key = welcome_cooldown_key(customer_id)
         ok = await redis.set(key, "1", nx=True, ex=seconds)
         return bool(ok)
 
@@ -916,7 +1141,7 @@ class WelcomeService:
         if seconds <= 0:
             return
         redis = await get_redis()
-        await redis.set(f"snh:welcome:cooldown:{customer_id}", "1", ex=seconds)
+        await redis.set(welcome_cooldown_key(customer_id), "1", ex=seconds)
 
     @staticmethod
     async def push_frame_score(
@@ -936,7 +1161,7 @@ class WelcomeService:
                 db, "face_confirm_frames", confirm_frames, store_id=store_id
             )
         redis = await get_redis()
-        key = f"snh:welcome:frames:{camera_id or 0}:{customer_id}"
+        key = welcome_frames_key(int(camera_id or 0), int(customer_id))
         pipe = redis.pipeline()
         pipe.rpush(key, f"{similarity:.6f}")
         pipe.ltrim(key, -confirm_frames, -1)
@@ -1266,7 +1491,7 @@ class WelcomeService:
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
         try:
             redis = await get_redis()
-            await redis.delete(f"snh:welcome:frames:{camera_id or 0}:{customer_id}")
+            await redis.delete(welcome_frames_key(int(camera_id or 0), int(customer_id)))
         except Exception:
             pass
         await db.flush()

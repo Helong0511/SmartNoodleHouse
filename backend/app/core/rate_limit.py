@@ -78,7 +78,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 limit, window = cfg
                 break
 
-        key = f"snh:rl:{client_ip(request) or 'unknown'}:{path.split('?')[0]}"
+        from app.core.cache_keys import rate_limit_key
+
+        key = rate_limit_key(client_ip(request) or "unknown", path.split("?")[0])
 
         try:
             r = await get_redis()

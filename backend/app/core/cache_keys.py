@@ -1,23 +1,75 @@
-"""Redis 键统一规范（智能推荐 Task 8）。
+"""Redis 键与 TTL 统一目录（全站唯一真源）。
 
-所有推荐/菜单缓存键集中在此，避免散落字符串导致失效遗漏。
-前缀 snh = SmartNoodleHouse；TTL 全部由调用方显式传入并限制在常量上限内。
+约定：
+- 前缀一律 `snh:`（SmartNoodleHouse）；禁止业务代码再散落裸字符串键。
+- TTL 由调用方显式传入，并应遵守本文件常量上限。
+- 热缓存（进程内存）见 `app.core.hot_cache`，不进 Redis。
+- Redis 不可用时业务须降级（除 Leader 锁等 fail-closed 场景）。
 """
 from __future__ import annotations
 
 import hashlib
 import random
 
+# ---------------------------------------------------------------------------
+# 推荐 / 菜单
+# ---------------------------------------------------------------------------
 RECO_KEY_PREFIX = "snh:reco"
 RECO_TTL_SECONDS = 120  # 推荐结果最长缓存 120s（spec 要求 ≤120s）
 
 MENU_CATALOG_PREFIX = "snh:menu"
 MENU_CATALOG_TTL_SECONDS = 120
+MENU_BUNDLE_TTL_SECONDS = 60
+MENU_VERSION_TTL_SECONDS = 30 * 24 * 3600
 
-# P2-6/P2-7：顾客令牌刷新旋转保护 & 登录凭证一次性消费
+# ---------------------------------------------------------------------------
+# 鉴权 / 登录
+# ---------------------------------------------------------------------------
 CUSTOMER_REFRESH_ROTATION_PREFIX = "snh:cust:refresh"
 LOGIN_CREDENTIAL_USED_PREFIX = "snh:authcode:used"
 LOGIN_CREDENTIAL_TTL_SECONDS = 300
+LOGIN_FAIL_PREFIX = "snh:login:fail"
+LOGIN_LOCK_PREFIX = "snh:login:lock"
+
+# ---------------------------------------------------------------------------
+# 迎宾 / 人脸 / TTS
+# ---------------------------------------------------------------------------
+TTS_WELCOME_QUEUE_KEY = "snh:tts:welcome"
+WELCOME_COOLDOWN_PREFIX = "snh:welcome:cooldown"
+WELCOME_FRAMES_PREFIX = "snh:welcome:frames"
+FACE_LIVENESS_PREFIX = "snh:face:liveness"
+
+# ---------------------------------------------------------------------------
+# 系统设置 / 调度 / Leader
+# ---------------------------------------------------------------------------
+SYSTEM_SETTINGS_VER_KEY = "snh:system_settings:ver"
+SCHEDULER_OVERRIDES_VER_KEY = "snh:scheduler:overrides:ver"
+SCHEDULER_OVERRIDES_CHANNEL = "snh:scheduler:overrides"
+SCHEDULER_JOB_STATS_KEY = "snh:scheduler:job_stats"
+SCHEDULER_NEXT_RUNS_KEY = "snh:scheduler:next_runs"
+SCHEDULER_JOB_LOCK_PREFIX = "snh:scheduler:joblock"
+LEADER_KEY = "snh:process:leader"
+
+# ---------------------------------------------------------------------------
+# 限流 / 支付 / 催单 / 消息
+# ---------------------------------------------------------------------------
+RATE_LIMIT_PREFIX = "snh:rl"
+ORDER_URGE_PREFIX = "snh:order:urge"
+PAY_SYNC_PREFIX = "snh:pay:sync"
+MSG_DONE_PREFIX = "snh:msg:done:"
+WEBHOOK_REPLAY_PREFIX = "snh:webhook:replay:"
+BALANCE_NOTIFY_PREFIX = "snh:notify:balance_low"
+WEATHER_PREFIX = "snh:weather:"
+
+# ---------------------------------------------------------------------------
+# WebSocket / 性能
+# ---------------------------------------------------------------------------
+WS_BROADCAST_CHANNEL = "snh:ws:broadcast"
+WS_CONN_IP_PREFIX = "snh:ws:conn:ip:"
+WS_CONN_USER_PREFIX = "snh:ws:conn:user:"
+PERF_SAMPLES_PREFIX = "snh:perfs"
+PERF_COUNT_PREFIX = "snh:perfc"
+PERF_ROUTES_SET_KEY = "snh:perf:routes"
 
 
 def ttl_with_jitter(ttl: int, *, min_ratio: float = 0.8, max_ratio: float = 1.2) -> int:
@@ -50,11 +102,19 @@ def reco_rebuild_lock_key(
 
 def menu_rebuild_lock_key(store_id: int) -> str:
     """菜单 bundle 重建互斥锁键。"""
-    return f"snh:menu:lock:{int(store_id)}"
+    return f"{MENU_CATALOG_PREFIX}:lock:{int(store_id)}"
 
 
 def menu_catalog_key(store_id: int) -> str:
     return f"{MENU_CATALOG_PREFIX}:s{int(store_id)}"
+
+
+def menu_bundle_key(store_id: int) -> str:
+    return f"{MENU_CATALOG_PREFIX}:bundle:{int(store_id)}"
+
+
+def menu_version_key(store_id: int) -> str:
+    return f"{MENU_CATALOG_PREFIX}:ver:{int(store_id)}"
 
 
 def cart_fingerprint(product_ids) -> str:
@@ -75,3 +135,59 @@ def login_credential_used_key(channel: str, credential: str) -> str:
     """P2-7 登录凭证一次性消费键：凭证原文不落 Redis，仅存不可逆短指纹。"""
     digest = hashlib.sha256(str(credential or "").encode("utf-8")).hexdigest()[:32]
     return f"{LOGIN_CREDENTIAL_USED_PREFIX}:{(channel or 'x').strip().lower()}:{digest}"
+
+
+def login_fail_key(scope: str) -> str:
+    return f"{LOGIN_FAIL_PREFIX}:{scope}"
+
+
+def login_lock_key(scope: str) -> str:
+    return f"{LOGIN_LOCK_PREFIX}:{scope}"
+
+
+def welcome_cooldown_key(customer_id: int) -> str:
+    return f"{WELCOME_COOLDOWN_PREFIX}:{int(customer_id)}"
+
+
+def welcome_frames_key(camera_id: int, customer_id: int) -> str:
+    return f"{WELCOME_FRAMES_PREFIX}:{int(camera_id)}:{int(customer_id)}"
+
+
+def face_liveness_key(token: str) -> str:
+    return f"{FACE_LIVENESS_PREFIX}:{token}"
+
+
+def scheduler_job_lock_key(job_id: str) -> str:
+    return f"{SCHEDULER_JOB_LOCK_PREFIX}:{job_id}"
+
+
+def rate_limit_key(client: str, path: str) -> str:
+    return f"{RATE_LIMIT_PREFIX}:{client}:{path}"
+
+
+def products_public_rate_limit_key(ip: str, store_id: int) -> str:
+    return f"{RATE_LIMIT_PREFIX}:products:public:{ip}:{int(store_id)}"
+
+
+def order_urge_key(order_id: int) -> str:
+    return f"{ORDER_URGE_PREFIX}:{int(order_id)}"
+
+
+def pay_sync_key(payment_id: int) -> str:
+    return f"{PAY_SYNC_PREFIX}:{int(payment_id)}"
+
+
+def balance_notify_key(customer_id: int) -> str:
+    return f"{BALANCE_NOTIFY_PREFIX}:{int(customer_id)}"
+
+
+def weather_key(suffix: str) -> str:
+    return f"{WEATHER_PREFIX}{suffix}"
+
+
+def perf_samples_key(bucket: str, route: str) -> str:
+    return f"{PERF_SAMPLES_PREFIX}:{bucket}:{route}"
+
+
+def perf_count_key(bucket: str, route: str) -> str:
+    return f"{PERF_COUNT_PREFIX}:{bucket}:{route}"

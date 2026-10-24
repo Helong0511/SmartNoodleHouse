@@ -174,7 +174,9 @@ async def urge_order(order_id: int, request: Request, db: DbSession, customer: C
     order = await get_customer_order_or_404(db, order_id, customer.id)
     if order.status not in _URGE_ALLOWED_STATUSES:
         raise AppException(40058, "当前订单状态无法催单")
-    limit_key = f"snh:order:urge:{int(order.id)}"
+    from app.core.cache_keys import order_urge_key
+
+    limit_key = order_urge_key(int(order.id))
     limited = True
     try:
         redis = await get_redis()

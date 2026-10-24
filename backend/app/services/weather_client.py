@@ -15,13 +15,12 @@ import logging
 from typing import Any
 
 from app.core.async_utils import spawn_bg
-from app.core.cache_keys import ttl_with_jitter
+from app.core.cache_keys import ttl_with_jitter, weather_key
 
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 1800
 _EMPTY_TTL = 60  # 空值标记 60s，防止 API 持续不可用时反复请求
-_CACHE_PREFIX = "snh:weather:"
 
 # 气温阈值（℃）：≥热 / ≤冷；雨天优先于气温（WMO 降水码）
 HOT_TEMP_C = 28.0
@@ -81,7 +80,7 @@ async def fetch_current_weather(lat: float, lng: float) -> dict[str, Any] | None
     if not (-90 <= lat_f <= 90 and -180 <= lng_f <= 180):
         return None
 
-    cache_key = f"{_CACHE_PREFIX}{lat_f:.2f}:{lng_f:.2f}"
+    cache_key = weather_key(f"{lat_f:.2f}:{lng_f:.2f}")
     empty_key = f"{cache_key}:empty"
     try:
         from app.core.redis_client import get_redis

@@ -181,7 +181,9 @@ async def list_products(
         # 公开菜单按 IP+门店限流（每分钟 180 次）。点餐会连拉多页，阈值过低会把正常翻页打成 429，购物车误判下架。
         if store_id is not None:
             ip = request.client.host if request.client else "unknown"
-            rl_key = f"snh:rl:products:public:{ip}:{int(store_id)}"
+            from app.core.cache_keys import products_public_rate_limit_key
+
+            rl_key = products_public_rate_limit_key(ip, int(store_id))
             try:
                 r = await get_redis()
                 cnt = await r.incr(rl_key)

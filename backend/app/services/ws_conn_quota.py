@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import logging
 
+from app.core.cache_keys import WS_CONN_IP_PREFIX, WS_CONN_USER_PREFIX
+
 logger = logging.getLogger(__name__)
 
-WS_IP_KEY = "snh:ws:conn:ip:"
-WS_USER_KEY = "snh:ws:conn:user:"
+WS_IP_KEY = WS_CONN_IP_PREFIX
+WS_USER_KEY = WS_CONN_USER_PREFIX
 # P1-7：TTL 须显著大于 WS 空闲超时(90s)，否则心跳连接在 5min 后配额失效。
 # touch() 会在每次心跳时续期，崩溃时靠 TTL 回收。
 WS_COUNT_TTL = 600

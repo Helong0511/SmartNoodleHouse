@@ -56,9 +56,57 @@ def _ensure_pywin32() -> bool:
         return False
 
 
-# 短句 WAV 缓存：避免每次 PowerShell 冷启动（曾测 synth_ms≈6s）
-_WAV_CACHE: dict[str, bytes] = {}
-_WAV_CACHE_MAX = 64
+# 短句 WAV / G.711：统一 HotCache（启动预热后试听/迎宾可跳过合成与转码）
+from app.core.hot_cache import HotCache
+
+_WAV_CACHE: HotCache[str, bytes] = HotCache("tts.wav", max_size=64)
+_G711_CACHE: HotCache[str, bytes] = HotCache("tts.g711", max_size=128)
+
+
+def warmup_tts_phrases(
+    phrases: list[str],
+    *,
+    codecs: tuple[str, ...] = ("alaw", "ulaw"),
+    volumes: tuple[int, ...] = (100, 80),
+) -> dict:
+    """同步预热：合成 WAV，并按常见 codec/音量转好 G.711。供启动任务调用。"""
+    from app.services.hikvision_audio import normalize_g711_codec, wav_bytes_to_g711_8k
+
+    tts = LocalTTS()
+    ok = 0
+    fail = 0
+    seen: set[str] = set()
+    vols = tuple(sorted({max(0, min(150, int(v))) for v in volumes})) or (100, 80)
+    for raw in phrases:
+        text = (raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        wav = tts.synthesize_wav_sync(text)
+        if not wav:
+            fail += 1
+            continue
+        ok += 1
+        for codec in codecs:
+            c = normalize_g711_codec(codec)
+            for vol in vols:
+                key = f"{c}|{vol}|{text}"
+                if _G711_CACHE.get(key) is not None:
+                    continue
+                try:
+                    _G711_CACHE.put(
+                        key,
+                        wav_bytes_to_g711_8k(wav, codec=c, volume_percent=vol),
+                    )
+                except Exception:
+                    fail += 1
+    return {
+        "wav_ok": ok,
+        "fail": fail,
+        "g711": len(_G711_CACHE),
+        "phrases": len(seen),
+        "volumes": list(vols),
+    }
 
 
 class LocalTTS(TTSProvider):
@@ -144,14 +192,41 @@ class LocalTTS(TTSProvider):
             else:
                 wav = self._espeak_to_wav(text)
             if wav:
-                if len(_WAV_CACHE) >= _WAV_CACHE_MAX:
-                    # 简单 FIFO：丢掉任意一条
-                    _WAV_CACHE.pop(next(iter(_WAV_CACHE)), None)
-                _WAV_CACHE[text] = wav
+                _WAV_CACHE.put(text, wav)
             return wav or b""
         except Exception as e:
             logger.warning("TTS synthesize failed: %s - %s", text[:50], e)
             return b""
+
+    def synthesize_g711_sync(
+        self,
+        text: str,
+        *,
+        codec: str = "alaw",
+        volume_percent: int = 100,
+    ) -> bytes:
+        """文本 → G.711（命中启动预热缓存则跳过合成+转码）。"""
+        from app.services.hikvision_audio import normalize_g711_codec, wav_bytes_to_g711_8k
+
+        text = (text or "").strip()
+        if not text:
+            return b""
+        c = normalize_g711_codec(codec)
+        try:
+            vol = int(volume_percent)
+        except (TypeError, ValueError):
+            vol = 100
+        vol = max(0, min(150, vol))
+        key = f"{c}|{vol}|{text}"
+        hit = _G711_CACHE.get(key)
+        if hit:
+            return hit
+        wav = self.synthesize_wav_sync(text)
+        if not wav:
+            return b""
+        g711 = wav_bytes_to_g711_8k(wav, codec=c, volume_percent=vol)
+        _G711_CACHE.put(key, g711)
+        return g711
 
     def _sapi_to_wav_win32com(self, text: str) -> bytes:
         try:
@@ -376,27 +451,37 @@ class CameraSpeakerTTS(TTSProvider):
 
         import time
 
+        client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
         loop = asyncio.get_running_loop()
         t0 = time.perf_counter()
-        wav = await loop.run_in_executor(None, self.local.synthesize_wav_sync, text)
-        synth_ms = int((time.perf_counter() - t0) * 1000)
-        if not wav:
-            logger.warning("TTS 合成 WAV 为空，无法推摄像头 camera_id=%s", camera_id)
-            return False
-        # 探测摄像头 G.711alaw/ulaw 后实时推流（错编码会只响一声/无声）
-        client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
+        # codec 探测可能数秒；启动预热后应命中 _CODEC_CACHE
+        codec = await client.resolve_codec()
+        codec_ms = int((time.perf_counter() - t0) * 1000)
         t1 = time.perf_counter()
-        codec = await client.play_wav(wav, volume_percent=int(volume))
-        push_ms = int((time.perf_counter() - t1) * 1000)
+        g711 = await loop.run_in_executor(
+            None,
+            lambda: self.local.synthesize_g711_sync(
+                text, codec=codec, volume_percent=int(volume)
+            ),
+        )
+        synth_ms = int((time.perf_counter() - t1) * 1000)
+        if not g711:
+            logger.warning("TTS/G711 为空，无法推摄像头 camera_id=%s", camera_id)
+            return False
+        t2 = time.perf_counter()
+        await client.play_g711(g711, codec=codec)
+        push_ms = int((time.perf_counter() - t2) * 1000)
         logger.info(
             "摄像头迎宾播报完成 camera_id=%s codec=%s volume=%s%% "
-            "synth_ms=%s push_ms=%s total_ms=%s",
+            "bytes=%s codec_ms=%s synth_ms=%s push_ms=%s total_ms=%s",
             camera_id,
             codec,
             volume,
+            len(g711),
+            codec_ms,
             synth_ms,
             push_ms,
-            synth_ms + push_ms,
+            codec_ms + synth_ms + push_ms,
         )
         return True
 

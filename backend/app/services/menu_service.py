@@ -7,12 +7,12 @@
 """
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import aliased
 
+from app.core.hot_cache import HotCache
 from app.core.menu_cache import (
     bump_menu_version,
     get_menu_bundle,
@@ -22,6 +22,7 @@ from app.core.menu_cache import (
     try_acquire_rebuild_lock,
     wait_for_rebuild,
 )
+from app.core.response import now_local, serialize_dt
 from app.models import (
     Product,
     ProductCategory,
@@ -38,7 +39,6 @@ from app.services.category_schedule import (
     load_enabled_schedules,
     pick_active_schedule,
 )
-from app.core.response import now_local, serialize_dt
 from app.utils.birthday import today_beijing
 from app.utils.product_visibility import (
     filter_visible_product_dicts,
@@ -47,7 +47,9 @@ from app.utils.product_visibility import (
 
 _BUILD_TTL_SECONDS = 60
 # 进程内兜底（Redis 不可用时仍避免每次请求重查）
-_build_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_BUILD_CACHE: HotCache[int, dict[str, Any]] = HotCache(
+    "menu.local_bundle", max_size=64, ttl_seconds=_BUILD_TTL_SECONDS
+)
 
 
 async def _active_schedule_id(db, store_id: int) -> int | None:
@@ -246,14 +248,13 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     ):
         return cached
 
-    hit = _build_cache.get(sid)
+    hit = _BUILD_CACHE.get(sid)
     if (
-        hit
-        and hit[0] > time.time()
-        and _bundle_schedule_id(hit[1]) == expected_sched
-        and _bundle_has_visibility_meta(hit[1])
+        hit is not None
+        and _bundle_schedule_id(hit) == expected_sched
+        and _bundle_has_visibility_meta(hit)
     ):
-        bundle = hit[1]
+        bundle = hit
     else:
         # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
         lock_ok = await try_acquire_rebuild_lock(sid)
@@ -269,11 +270,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                 return {**waited, "version": version}
         try:
             # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
-            if cached is not None or (hit and _bundle_schedule_id(hit[1]) != expected_sched):
+            if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
                 invalidate_local_menu_cache(sid)
                 await bump_menu_version(sid)
             bundle = await build_menu_bundle(db, sid)
-            _build_cache[sid] = (time.time() + _BUILD_TTL_SECONDS, bundle)
+            _BUILD_CACHE.put(sid, bundle)
         finally:
             if lock_ok:
                 await release_rebuild_lock(sid)
@@ -288,4 +289,4 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
 
 
 def invalidate_local_menu_cache(store_id: int) -> None:
-    _build_cache.pop(int(store_id), None)
+    _BUILD_CACHE.delete(int(store_id))
