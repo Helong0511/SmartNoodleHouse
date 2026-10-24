@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-23T04:02:29Z",
+  "updated_at": "2026-10-23T06:29:28Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "aa1345df79b8889c2bbc6029fad5257b0e6166439df06c58ec7593d1f6d279cc",
-      "size": 187311,
-      "normalized_sha256": "aa1345df79b8889c2bbc6029fad5257b0e6166439df06c58ec7593d1f6d279cc"
+      "sha256": "e95170588bf7b78cfb0d50cfb07474a4e6f4f41868005d112f4c6d7a6720db21",
+      "size": 187489,
+      "normalized_sha256": "e95170588bf7b78cfb0d50cfb07474a4e6f4f41868005d112f4c6d7a6720db21"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1643,9 +1643,9 @@
     },
     "backend/app/services/scheduler_admin.py": {
       "role": "index",
-      "sha256": "2f095c44f7371f41c80834fc7b6dbdd15b0602255d455b510a52a8bbd2cf503b",
-      "size": 24041,
-      "normalized_sha256": "54819a36aa104d7709b6798a234d9646ee458e3f55993643e4330ed8ac4b4c45"
+      "sha256": "e4accdd74a5de77780ccb8d8eb2c12284993e0293e7c9ed7e5a54011173ad404",
+      "size": 32130,
+      "normalized_sha256": "b570143554912e17889f4f64f8853b3560807db5c10429decb5997f81bea2148"
     },
     "backend/app/services/scope_override.py": {
       "role": "index",
@@ -1799,9 +1799,9 @@
     },
     "backend/app/tasks/scheduler.py": {
       "role": "index",
-      "sha256": "53d798c8db97e30f5a26a693d74d5c97286e54142cd712e40b22768baeff38a3",
-      "size": 45222,
-      "normalized_sha256": "53d798c8db97e30f5a26a693d74d5c97286e54142cd712e40b22768baeff38a3"
+      "sha256": "3d925f29e40409614e27b31b5381c0b3db69bdc2631709a086bbe2f8c66d26aa",
+      "size": 42629,
+      "normalized_sha256": "3d925f29e40409614e27b31b5381c0b3db69bdc2631709a086bbe2f8c66d26aa"
     },
     "backend/app/utils/alipay_keys.py": {
       "role": "index",
@@ -2563,9 +2563,9 @@
     },
     "frontend/src/views/Settings.vue": {
       "role": "index",
-      "sha256": "d10487ab789d5093977684f0bc9a941c7caf3d26a5beb2ceaed609dcba1b00ef",
-      "size": 30223,
-      "normalized_sha256": "d10487ab789d5093977684f0bc9a941c7caf3d26a5beb2ceaed609dcba1b00ef"
+      "sha256": "3765d47057ad258532f59f6b0ae3a5cf95637500cfe854954d2af80389f1333c",
+      "size": 30654,
+      "normalized_sha256": "3765d47057ad258532f59f6b0ae3a5cf95637500cfe854954d2af80389f1333c"
     },
     "frontend/src/views/SocialBenefits.vue": {
       "role": "index",
@@ -5140,9 +5140,9 @@
     },
     "tests/测试_定时任务跨进程锁.py": {
       "role": "observe",
-      "sha256": "2a0eb00149c61856bf5289cd31828c9a0fdef9d3bccbe66bac2cd04e238cc7df",
-      "size": 5089,
-      "normalized_sha256": "4a5233d715c205bacf3d96c4f68b509bdb802efaa4ccaf2255a64882363b3f9d"
+      "sha256": "0e2e0afed42ed33fdd3de383791e6988e83172eaa6e19a7e8777e0cbbab27fc2",
+      "size": 8768,
+      "normalized_sha256": "37b42235d35931fb669239166d7ba525313ae11ef9a87223e72deb61620bb789"
     },
     "tests/测试_审计日志.py": {
       "role": "observe",

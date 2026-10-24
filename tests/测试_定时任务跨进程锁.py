@@ -1,6 +1,7 @@
-"""定时任务调度：跨进程覆盖通知、任务锁、Leader fence。"""
+"""定时任务调度：跨进程覆盖通知、任务锁、Leader fence、基础设施容错。"""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -146,3 +147,103 @@ async def test_confirm_leader_and_job_enabled_gate():
     fake.get = AsyncMock(return_value=b"w-a")
     with patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)):
         assert await leader_lock.confirm_leader_owned() is True
+
+
+def test_infra_skip_reason_mysql_codes():
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+
+    from app.services.scheduler_admin import infra_skip_reason, is_retryable_infra
+
+    class _Orig(Exception):
+        def __init__(self, code: int, msg: str):
+            self.args = (code, msg)
+            super().__init__(code, msg)
+
+    op = OperationalError("stmt", {}, _Orig(1049, "Unknown database 'smart_noodle_house'"))
+    assert infra_skip_reason(op) == "db_infra:1049"
+    assert is_retryable_infra(op) is False
+
+    gone = OperationalError("stmt", {}, _Orig(2006, "MySQL server has gone away"))
+    assert infra_skip_reason(gone) == "db_infra:2006"
+    assert is_retryable_infra(gone) is True
+
+    missing = ProgrammingError(
+        "stmt", {}, _Orig(1146, "Table 'smart_noodle_house.webhook_inbox' doesn't exist")
+    )
+    assert infra_skip_reason(missing) == "db_infra:1146"
+    assert is_retryable_infra(missing) is False
+
+    assert infra_skip_reason(ValueError("business boom")) is None
+    assert infra_skip_reason(asyncio.CancelledError()) == "shutdown_cancelled"
+
+
+@pytest.mark.asyncio
+async def test_leader_job_infra_skip_not_error():
+    """库不存在等瞬态：记 skipped，不抛，不记 error。"""
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+    from sqlalchemy.exc import OperationalError
+
+    class _Orig(Exception):
+        def __init__(self):
+            self.args = (1049, "Unknown database 'x'")
+            super().__init__(1049, "Unknown database 'x'")
+
+    calls: list[dict] = []
+
+    async def _record(job_id, *, status, duration_ms, error=None):
+        calls.append({"job_id": job_id, "status": status, "error": error})
+
+    async def boom():
+        raise OperationalError("SELECT 1", {}, _Orig())
+
+    boom.__name__ = "drain_webhook_inbox"
+    wrapped = sa.leader_job(boom)
+
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-test")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-test")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock(side_effect=_record)),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        out = await wrapped()
+    assert out is None
+    assert calls and calls[-1]["status"] == "skipped"
+    assert "1049" in (calls[-1]["error"] or "")
+
+
+@pytest.mark.asyncio
+async def test_leader_job_business_error_still_raises():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    calls: list[dict] = []
+
+    async def _record(job_id, *, status, duration_ms, error=None):
+        calls.append({"status": status, "error": error})
+
+    async def boom():
+        raise RuntimeError("logic bug")
+
+    boom.__name__ = "close_expired_orders"
+    wrapped = sa.leader_job(boom)
+
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-test")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-test")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock(side_effect=_record)),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        with pytest.raises(RuntimeError, match="logic bug"):
+            await wrapped()
+    assert calls and calls[-1]["status"] == "error"

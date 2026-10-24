@@ -129,6 +129,223 @@ class JobSkipped(Exception):
         super().__init__(self.reason)
 
 
+# MySQL / 驱动：本地重导 struct、MySQL 重启、连接被掐时常见；记 skipped 勿刷 error_count
+_INFRA_MYSQL_CODES = frozenset(
+    {
+        1049,  # Unknown database
+        1146,  # Table doesn't exist
+        2002,  # Can't connect via socket
+        2003,  # Can't connect to MySQL server
+        2006,  # MySQL server has gone away
+        2013,  # Lost connection during query
+        2014,  # Commands out of sync
+        1205,  # Lock wait timeout exceeded
+        1213,  # Deadlock found
+    }
+)
+_INFRA_MSG_HINTS = (
+    "unknown database",
+    "doesn't exist",
+    "server has gone away",
+    "lost connection",
+    "can't connect",
+    "connection refused",
+    "too many connections",
+    "not connected",
+    "connection reset",
+    "timed out",
+    "timeout",
+)
+
+
+def _walk_exception_chain(exc: BaseException) -> list[BaseException]:
+    seen: set[int] = set()
+    out: list[BaseException] = []
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        out.append(cur)
+        nxt = getattr(cur, "orig", None)
+        if isinstance(nxt, BaseException) and id(nxt) not in seen:
+            cur = nxt
+            continue
+        cur = cur.__cause__ or cur.__context__
+    return out
+
+
+def _mysql_errno(exc: BaseException) -> int | None:
+    args = getattr(exc, "args", None)
+    if not args:
+        return None
+    try:
+        code = int(args[0])
+    except (TypeError, ValueError):
+        return None
+    return code if code > 0 else None
+
+
+def infra_skip_reason(exc: BaseException) -> str | None:
+    """基础设施瞬态错误 → 跳过原因；业务/未知异常返回 None（仍记 error）。
+
+    覆盖：库/表重建间隙、MySQL 宕机或断连、锁等待/死锁、常见网络超时。
+    """
+    if isinstance(exc, asyncio.CancelledError):
+        return "shutdown_cancelled"
+    if isinstance(exc, JobSkipped):
+        return exc.reason
+
+    try:
+        from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, ProgrammingError
+    except Exception:  # pragma: no cover
+        DBAPIError = InterfaceError = OperationalError = ProgrammingError = ()  # type: ignore
+
+    chain = _walk_exception_chain(exc)
+    # 优先认 MySQL errno（在 orig / 驱动异常上），避免被外层 OperationalError 文案抢先
+    for node in chain:
+        code = _mysql_errno(node)
+        if code in _INFRA_MYSQL_CODES:
+            return f"db_infra:{code}"
+
+    for node in chain:
+        msg = str(node).lower()
+        if any(h in msg for h in _INFRA_MSG_HINTS):
+            # 收紧：仅对 DBAPI / 连接类异常用文案匹配，避免误伤业务 ValueError
+            if isinstance(
+                node,
+                (
+                    OperationalError,
+                    ProgrammingError,
+                    InterfaceError,
+                    DBAPIError,
+                    ConnectionError,
+                    TimeoutError,
+                    OSError,
+                ),
+            ) or type(node).__module__.startswith(("pymysql", "aiomysql", "asyncmy")):
+                return f"db_infra:{type(node).__name__}"
+        if isinstance(node, (TimeoutError, ConnectionError)):
+            return f"net_infra:{type(node).__name__}"
+    return None
+
+
+def is_retryable_infra(exc: BaseException) -> bool:
+    """断连类可短重试一次；表/库不存在重试无意义。"""
+    codes = [_mysql_errno(n) for n in _walk_exception_chain(exc)]
+    codes = [c for c in codes if c is not None]
+    if any(c in (1049, 1146) for c in codes):
+        return False
+    if any(c in (2002, 2003, 2006, 2013, 2014, 1205, 1213) for c in codes):
+        return True
+    for node in _walk_exception_chain(exc):
+        name = type(node).__name__.lower()
+        if "timeout" in name or "disconnect" in name or "connection" in name:
+            return True
+    return False
+
+
+def leader_job(fn):
+    """定时任务全局包装：Leader fence + 启停门闩 + 执行统计 + 基础设施容错。
+
+    - JobSkipped / 库表重建 / MySQL 断连：记 skipped，不抛给 APScheduler（避免 ERROR 刷屏）
+    - CancelledError：记 skipped 后原样抛出（保证关机可中断）
+    - 其它异常：记 error 后抛出
+    - 断连类：自动短重试一次
+    """
+
+    async def _wrapped(*args, **kwargs):
+        import time
+
+        from app.core.leader_lock import confirm_leader_owned, is_leader_held
+
+        if not is_leader_held():
+            return None
+        if not await confirm_leader_owned():
+            return None
+        job_name = getattr(fn, "__name__", "")
+        if job_name and not is_job_enabled(job_name):
+            return None
+        started = time.perf_counter()
+
+        async def _refresh_next_run() -> None:
+            if not job_name:
+                return
+            try:
+                from app.main import scheduler as sched
+
+                job = sched.get_job(job_name) if sched is not None else None
+                nxt = getattr(job, "next_run_time", None) if job else None
+                await upsert_next_run(job_name, format_scheduler_wall_time(nxt))
+            except Exception:
+                pass
+
+        async def _finish(status: str, error: str | None = None) -> None:
+            if not job_name:
+                return
+            await record_job_run(
+                job_name,
+                status=status,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                error=error,
+            )
+            await _refresh_next_run()
+
+        async def _invoke():
+            return await fn(*args, **kwargs)
+
+        try:
+            try:
+                result = await _invoke()
+            except asyncio.CancelledError:
+                await _finish("skipped", "shutdown_cancelled")
+                raise
+            except JobSkipped as skip:
+                await _finish("skipped", skip.reason)
+                return None
+            except Exception as first:
+                reason = infra_skip_reason(first)
+                if reason and is_retryable_infra(first):
+                    try:
+                        await asyncio.sleep(0.35)
+                        result = await _invoke()
+                    except asyncio.CancelledError:
+                        await _finish("skipped", "shutdown_cancelled")
+                        raise
+                    except JobSkipped as skip:
+                        await _finish("skipped", skip.reason)
+                        return None
+                    except Exception as second:
+                        reason2 = infra_skip_reason(second) or reason
+                        if reason2:
+                            logger.warning(
+                                "定时任务基础设施暂不可用（已重试） job=%s: %s",
+                                job_name,
+                                reason2,
+                            )
+                            await _finish("skipped", reason2)
+                            return None
+                        await _finish("error", str(second) or type(second).__name__)
+                        raise
+                elif reason:
+                    logger.warning(
+                        "定时任务基础设施暂不可用 job=%s: %s",
+                        job_name,
+                        reason,
+                    )
+                    await _finish("skipped", reason)
+                    return None
+                else:
+                    await _finish("error", str(first) or type(first).__name__)
+                    raise
+            await _finish("ok")
+            return result
+        except asyncio.CancelledError:
+            raise
+
+    _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
+    _wrapped.__qualname__ = getattr(fn, "__qualname__", _wrapped.__name__)
+    return _wrapped
+
+
 def _job_stats_lock(job_id: str) -> asyncio.Lock:
     # setdefault 避免 get→create→assign 竞态下同 job 多把锁
     return _job_stats_locks.setdefault(job_id, asyncio.Lock())

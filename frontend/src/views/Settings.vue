@@ -266,20 +266,29 @@
               </el-tooltip>
               <el-tag v-else-if="row.last_status === 'error'" size="small" type="danger">失败</el-tag>
               <el-tag v-else-if="row.last_status === 'ok'" size="small" type="success">成功</el-tag>
-              <el-tag v-else-if="row.last_status === 'skipped'" size="small" type="info">跳过</el-tag>
+              <el-tooltip
+                v-else-if="row.last_status === 'skipped'"
+                :content="row.last_error || '主动跳过或基础设施暂不可用（不计入失败）'"
+                placement="top"
+              >
+                <el-tag size="small" type="info">跳过</el-tag>
+              </el-tooltip>
               <span v-else class="muted">—</span>
               <div v-if="row.last_duration_ms != null" class="muted scheduler-dur">
                 {{ formatSchedulerDuration(row.last_duration_ms) }}
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="累计" width="100">
+          <el-table-column label="累计" width="130">
             <template #default="{ row }">
-              <span class="muted">
+              <span class="muted" :title="'跳过含锁忙/库重建等瞬态，不计入失败'">
                 成 {{ row.ok_count || 0 }} / 败
                 <span :class="{ 'scheduler-fail-n': Number(row.error_count || 0) > 0 }">
                   {{ row.error_count || 0 }}
                 </span>
+                <template v-if="Number(row.skip_count || 0) > 0">
+                  / 跳 {{ row.skip_count }}
+                </template>
               </span>
             </template>
           </el-table-column>

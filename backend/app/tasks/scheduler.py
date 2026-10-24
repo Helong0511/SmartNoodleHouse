@@ -311,6 +311,7 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
                 "last_error": st.get("last_error"),
                 "ok_count": int(st.get("ok_count") or 0),
                 "error_count": int(st.get("error_count") or 0),
+                "skip_count": int(st.get("skip_count") or 0),
             }
         )
     return {
@@ -325,78 +326,8 @@ async def describe_scheduler_status(scheduler=None, db=None) -> dict:
 
 def register_tasks(scheduler) -> None:
     settings = get_settings()
-
-    def _leader_job(fn):
-        """调度任务 fence：内存旗标 + Redis 持锁校验，缩小双 Leader 窗口。"""
-
-        async def _wrapped(*args, **kwargs):
-            import time
-
-            from app.core.leader_lock import confirm_leader_owned, is_leader_held
-            from app.services.scheduler_admin import (
-                JobSkipped,
-                format_scheduler_wall_time,
-                is_job_enabled,
-                record_job_run,
-                upsert_next_run,
-            )
-
-            if not is_leader_held():
-                return None
-            # 二次确认 Redis 锁值仍属本进程（TTL 过期换主后，续期循环最多延迟 RENEW_INTERVAL）
-            if not await confirm_leader_owned():
-                return None
-            job_name = getattr(fn, "__name__", "")
-            if job_name and not is_job_enabled(job_name):
-                return None
-            started = time.perf_counter()
-
-            async def _refresh_next_run() -> None:
-                if not job_name:
-                    return
-                try:
-                    from app.main import scheduler as sched
-
-                    job = sched.get_job(job_name) if sched is not None else None
-                    nxt = getattr(job, "next_run_time", None) if job else None
-                    await upsert_next_run(job_name, format_scheduler_wall_time(nxt))
-                except Exception:
-                    pass
-
-            try:
-                result = await fn(*args, **kwargs)
-                if job_name:
-                    await record_job_run(
-                        job_name,
-                        status="ok",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
-                    )
-                    await _refresh_next_run()
-                return result
-            except JobSkipped as skip:
-                # 跨进程锁未拿到等主动跳过：勿记 ok
-                if job_name:
-                    await record_job_run(
-                        job_name,
-                        status="skipped",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
-                        error=skip.reason,
-                    )
-                    await _refresh_next_run()
-                return None
-            except Exception as exc:
-                if job_name:
-                    await record_job_run(
-                        job_name,
-                        status="error",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
-                        error=str(exc) or exc.__class__.__name__,
-                    )
-                    await _refresh_next_run()
-                raise
-
-        _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
-        return _wrapped
+    # 全局 Leader fence + 基础设施容错（库重建/断连记 skipped，真错误仍记 error）
+    from app.services.scheduler_admin import leader_job as _leader_job
 
     @scheduler.scheduled_job(
         "interval", seconds=5, id="drain_webhook_inbox", name="处理 Webhook 收件箱"
