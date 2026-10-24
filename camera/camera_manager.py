@@ -117,11 +117,21 @@ class CameraManager:
 
     @classmethod
     def set_leader_check(cls, check: Callable[[], bool] | None) -> None:
-        """注入 Leader 检查回调（后端启动时调用）。"""
-        cls._leader_check = check
+        """注入 Leader 检查回调（后端启动时调用）。
+
+        必须以 staticmethod 挂到类属性：裸函数作类属性时，经 instance 访问会
+        被绑定成方法，从而把 CameraManager 当成第一参数传给 is_leader_held()。
+        """
+        cls._leader_check = staticmethod(check) if check is not None else None
 
     def _assert_leader(self) -> None:
-        if self._leader_check is not None and not self._leader_check():
+        # 经类读取，避免 descriptor 绑定；兼容 staticmethod / 裸函数两种历史形态
+        raw = type(self).__dict__.get("_leader_check", None)
+        if isinstance(raw, staticmethod):
+            check = raw.__func__
+        else:
+            check = raw
+        if check is not None and not check():
             raise CameraNotLeaderError("摄像头操作需要 Leader 锁；非 Leader worker 拒绝执行")
 
     def _cleanup_stale_workers(self) -> None:
