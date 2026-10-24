@@ -234,6 +234,17 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "store_override": True,
         "description": "后台开关，改完即时生效（不写 .env）。开启后迎宾 TTS 经海康对讲推到触发识别的摄像头扬声器（须对讲型机）；关闭则本机播报；推流失败自动回退本机。可按门店覆盖",
     },
+    "camera_speaker_volume_percent": {
+        "group": "welcome",
+        "label": "摄像头播报音量",
+        "unit": "%",
+        "type": "int",
+        "min": 0,
+        "max": 100,
+        "default": 80,
+        "store_override": True,
+        "description": "推送到摄像头扬声器前的软件增益（0 静音～100 原音）。不改摄像机硬件音量；可按门店覆盖",
+    },
     "delivery_auto_confirm": {
         "group": "delivery",
         "label": "外卖自动接单",

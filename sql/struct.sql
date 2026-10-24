@@ -1552,9 +1552,10 @@ CREATE TABLE IF NOT EXISTS `users` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `visitor_events` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `visitor_no` varchar(64) NOT NULL COMMENT '匿名访客编号（非会员）',
+  `visitor_no` varchar(64) NOT NULL COMMENT '访客编号；会员事件可复用 customer_no',
   `camera_id` bigint UNSIGNED NOT NULL COMMENT '摄像头 → cameras.id',
-  `event_type` varchar(30) NOT NULL COMMENT 'ENTER=进入 | EXIT=离开 | PASS=路过',
+  `customer_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '命中授权会员时 → customers.id；陌生客为空',
+  `event_type` varchar(30) NOT NULL COMMENT 'ENTER=进入 | MATCH=会员识别 | EXIT=离开 | PASS=路过',
   `event_time` datetime(3) NOT NULL COMMENT '事件发生时间',
   `snapshot_path` varchar(500) NULL DEFAULT NULL COMMENT '抓拍图存储路径',
   `expires_at` datetime(3) NOT NULL COMMENT '数据保留到期时间（到期可清理）',
@@ -1562,8 +1563,10 @@ CREATE TABLE IF NOT EXISTS `visitor_events` (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_ve_camera_time`(`camera_id` ASC, `event_time` ASC) USING BTREE,
   INDEX `idx_ve_expires`(`expires_at` ASC) USING BTREE,
-  CONSTRAINT `fk_ve_camera` FOREIGN KEY (`camera_id`) REFERENCES `cameras` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '匿名客流事件表' ROW_FORMAT = Dynamic;
+  INDEX `idx_ve_customer_time`(`customer_id` ASC, `event_time` ASC) USING BTREE,
+  CONSTRAINT `fk_ve_camera` FOREIGN KEY (`camera_id`) REFERENCES `cameras` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_ve_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '客流/迎宾抓拍事件表' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for webhook_inbox
 -- ----------------------------

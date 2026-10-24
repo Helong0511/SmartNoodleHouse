@@ -349,8 +349,8 @@ class FaceService:
 
 class VisitorService:
     # 同摄像头陌生客短时复用访客号（进程内；多 worker 不共享，可接受）
-    _UNKNOWN_TRACK_TTL_SEC = 1800.0
-    _UNKNOWN_REUSE_MIN_SIM = 0.45
+    _UNKNOWN_TRACK_TTL_SEC = 14400.0  # 4 小时：同人临时客尽量同一访客号
+    _UNKNOWN_REUSE_MIN_SIM = 0.42
     _unknown_tracks: dict[int, list[dict]] = {}
     _last_unknown_welcome_at: dict[int, float] = {}
 
@@ -456,6 +456,7 @@ class VisitorService:
         *,
         embedding: np.ndarray | None = None,
         reuse_min_sim: float | None = None,
+        customer_id: int | None = None,
     ) -> VisitorEvent:
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
@@ -469,15 +470,29 @@ class VisitorService:
         if cam and cam.store_id:
             store = await db.get(Store, cam.store_id)
             sno = store.store_no if store else None
-        visitor_no = cls.resolve_visitor_no(
-            camera_id,
-            store_no=sno,
-            embedding=embedding,
-            reuse_min_sim=reuse_min_sim,
-        )
+
+        cid = int(customer_id) if customer_id else None
+        visitor_no: str
+        if cid:
+            # 会员：访客号固定为顾客编号，同一人始终同一号
+            cust = await db.get(Customer, cid)
+            visitor_no = (cust.customer_no if cust and cust.customer_no else None) or generate_no(
+                BIZ_VI, sno, None
+            )
+            event_type = (event_type or "MATCH").strip().upper() or "MATCH"
+        else:
+            visitor_no = cls.resolve_visitor_no(
+                camera_id,
+                store_no=sno,
+                embedding=embedding,
+                reuse_min_sim=reuse_min_sim,
+            )
+            event_type = (event_type or "ENTER").strip().upper() or "ENTER"
+
         event = VisitorEvent(
             visitor_no=visitor_no,
             camera_id=camera_id,
+            customer_id=cid,
             event_type=event_type,
             event_time=now_local(),
             snapshot_path=snapshot_path,

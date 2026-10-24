@@ -41,10 +41,16 @@ class Camera(Base, TimestampMixin):
 
 class VisitorEvent(Base):
     __tablename__ = "visitor_events"
-    __table_args__ = (Index("ix_ve_camera_event_time", "camera_id", "event_time"),)
+    __table_args__ = (
+        Index("ix_ve_camera_event_time", "camera_id", "event_time"),
+        Index("idx_ve_customer_time", "customer_id", "event_time"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     visitor_no: Mapped[str] = mapped_column(String(64))
     camera_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cameras.id"))
+    customer_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     event_type: Mapped[str] = mapped_column(String(30))
     event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     snapshot_path: Mapped[str | None] = mapped_column(String(500))

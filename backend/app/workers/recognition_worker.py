@@ -16,6 +16,7 @@ class RecognitionWorker:
         self._stop = asyncio.Event()
         self._last_detect_at: dict[int, float] = {}
         self._last_visitor_at: dict[int, float] = {}
+        self._last_member_event_at: dict[str, float] = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -120,9 +121,28 @@ class RecognitionWorker:
                             continue
                         confirmed, cid, avg = global_tracker.push(cam_id, emb, best_id, best_sim)
                         if confirmed and cid:
-                            welcomed = await WelcomeService.try_welcome(db, cid, cam_id, avg)
-                            if welcomed:
+                            mem_key = f"{cam_id}:{cid}"
+                            try:
+                                if now - self._last_member_event_at.get(mem_key, 0) >= 30:
+                                    snap = await VisitorService.save_frame_snapshot(frame, cam_id)
+                                    await VisitorService.record_event(
+                                        db,
+                                        cam_id,
+                                        "MATCH",
+                                        snapshot_path=snap,
+                                        embedding=emb,
+                                        customer_id=int(cid),
+                                    )
+                                    self._last_member_event_at[mem_key] = now
+                                await WelcomeService.try_welcome(db, cid, cam_id, avg)
                                 await db.commit()
+                            except Exception:
+                                await db.rollback()
+                                logger.exception(
+                                    "会员识别落库/迎宾失败 camera_id=%s customer_id=%s",
+                                    cam_id,
+                                    cid,
+                                )
             except asyncio.CancelledError:
                 raise
             except Exception as e:

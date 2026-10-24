@@ -1149,6 +1149,16 @@ WHERE NOT EXISTS (
         WHERE `setting_key` = 'camera_speaker_tts_enabled'
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
+SELECT 'camera_speaker_volume_percent',
+    '80',
+    '摄像头播报软件音量百分比（0-100，可按门店覆盖）'
+FROM DUAL
+WHERE NOT EXISTS (
+        SELECT 1
+        FROM `system_settings`
+        WHERE `setting_key` = 'camera_speaker_volume_percent'
+    );
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'operation_log_retention_days',
     '60',
     '操作日志保留天数'

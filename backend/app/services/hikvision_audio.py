@@ -98,8 +98,26 @@ def resample_pcm16_mono(pcm: bytes, src_rate: int, dst_rate: int = _ULAW_RATE) -
     return bytes(out)
 
 
-def wav_bytes_to_ulaw8k(wav_data: bytes) -> bytes:
-    """WAV（任意常见 PCM）→ 8kHz mono G.711 µ-law 裸流。"""
+def scale_pcm16_volume(pcm: bytes, volume_percent: int) -> bytes:
+    """按百分比缩放 16-bit PCM 音量（0=静音，100=原音，可略超 100 但会限幅）。"""
+    try:
+        pct = int(volume_percent)
+    except (TypeError, ValueError):
+        pct = 100
+    pct = max(0, min(150, pct))
+    if pct == 100 or not pcm:
+        return pcm
+    gain = pct / 100.0
+    out = bytearray(len(pcm))
+    for i in range(0, len(pcm) - 1, 2):
+        sample = struct.unpack_from("<h", pcm, i)[0]
+        scaled = int(sample * gain)
+        struct.pack_into("<h", out, i, max(-32768, min(32767, scaled)))
+    return bytes(out)
+
+
+def wav_bytes_to_ulaw8k(wav_data: bytes, *, volume_percent: int = 100) -> bytes:
+    """WAV（任意常见 PCM）→ 8kHz mono G.711 µ-law 裸流；可选音量百分比。"""
     with wave.open(BytesIO(wav_data), "rb") as wf:
         channels = wf.getnchannels()
         sampwidth = wf.getsampwidth()
@@ -114,6 +132,7 @@ def wav_bytes_to_ulaw8k(wav_data: bytes) -> bytes:
             mono.extend(frames[i : i + 2])
         frames = bytes(mono)
     pcm8k = resample_pcm16_mono(frames, rate, _ULAW_RATE)
+    pcm8k = scale_pcm16_volume(pcm8k, volume_percent)
     return pcm16le_to_ulaw(pcm8k)
 
 

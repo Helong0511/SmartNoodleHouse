@@ -134,10 +134,12 @@ class CameraSpeakerTTS(TTSProvider):
             )
 
     async def _play_on_camera(self, text: str, camera_id: int) -> bool:
+        from app.core.config import get_settings
         from app.core.database import AsyncSessionLocal
         from app.models import Camera
         from app.services.camera_credentials import build_connect_source, decrypt_password
         from app.services.hikvision_audio import HikvisionTwoWayAudio, resolve_isapi_base, wav_bytes_to_ulaw8k
+        from app.services.system_settings_service import SystemSettingsService
 
         async with AsyncSessionLocal() as db:
             cam = await db.get(Camera, camera_id)
@@ -147,6 +149,14 @@ class CameraSpeakerTTS(TTSProvider):
             source_url = cam.source_url or ""
             username = cam.username
             password_encrypted = cam.password_encrypted
+            store_id = int(cam.store_id) if cam.store_id else None
+            settings = get_settings()
+            volume = await SystemSettingsService.effective_int(
+                db,
+                "camera_speaker_volume_percent",
+                getattr(settings, "camera_speaker_volume_percent", 80),
+                store_id=store_id,
+            )
 
         # USB 数字源无法对讲
         if not source_url or source_url.isdigit():
@@ -187,10 +197,18 @@ class CameraSpeakerTTS(TTSProvider):
         wav = await loop.run_in_executor(None, self.local.synthesize_wav_sync, text)
         if not wav:
             return False
-        ulaw = await loop.run_in_executor(None, wav_bytes_to_ulaw8k, wav)
+        ulaw = await loop.run_in_executor(
+            None,
+            lambda: wav_bytes_to_ulaw8k(wav, volume_percent=int(volume)),
+        )
         client = HikvisionTwoWayAudio(base, user, password)
         await client.play_ulaw(ulaw)
-        logger.info("摄像头迎宾播报完成 camera_id=%s bytes=%s", camera_id, len(ulaw))
+        logger.info(
+            "摄像头迎宾播报完成 camera_id=%s bytes=%s volume=%s%%",
+            camera_id,
+            len(ulaw),
+            volume,
+        )
         return True
 
 

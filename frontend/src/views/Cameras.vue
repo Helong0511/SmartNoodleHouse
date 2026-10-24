@@ -75,10 +75,35 @@
         </div>
       </template>
       <el-table :data="events" size="small" border v-loading="eventsLoading">
+        <el-table-column label="抓拍" width="88" align="center">
+          <template #default="{ row }">
+            <el-image
+              v-if="row.snapshot_path"
+              :src="snapUrl(row.snapshot_path)"
+              :preview-src-list="[snapUrl(row.snapshot_path)]"
+              :preview-teleported="true"
+              fit="cover"
+              class="snap-thumb"
+            />
+            <span v-else class="muted">无图</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="event_time" label="时间" width="170">
           <template #default="{ row }">{{ fmt(row.event_time) }}</template>
         </el-table-column>
-        <el-table-column prop="visitor_no" label="访客号" min-width="140" />
+        <el-table-column label="访客/顾客" min-width="180">
+          <template #default="{ row }">
+            <div v-if="row.is_member || row.customer_id" class="cust-cell">
+              <el-tag size="small" type="success">会员</el-tag>
+              <span>{{ row.customer_name || row.customer_display_name || row.customer_nickname || '-' }}</span>
+              <span class="muted small">{{ row.visitor_no || row.customer_no }}</span>
+            </div>
+            <div v-else class="cust-cell">
+              <el-tag size="small" type="info">临时</el-tag>
+              <span>{{ row.visitor_no }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="摄像头" min-width="120">
           <template #default="{ row }">{{ cameraName(row.camera_id) }}</template>
         </el-table-column>
@@ -152,6 +177,7 @@ import {
   cameraStatusTagType,
   label,
 } from '@/utils/labels'
+import { mediaUrl } from '@/utils/media'
 
 const auth = useAuthStore()
 const canManageCameras = computed(
@@ -210,6 +236,9 @@ function statusType(s: string) {
 }
 function fmt(v?: string) {
   return v ? String(v).replace('T', ' ').slice(0, 19) : '-'
+}
+function snapUrl(path?: string | null) {
+  return mediaUrl(path)
 }
 
 async function loadOverview() {
@@ -530,6 +559,24 @@ onUnmounted(() => {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+
+.snap-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+
+.cust-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.cust-cell .small {
+  font-size: 12px;
 }
 
 .event-filters {

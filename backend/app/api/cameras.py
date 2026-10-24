@@ -197,18 +197,36 @@ async def visitor_events(
             )
         ).scalars()
     )
-    items = [
-        {
+    from app.models import Customer
+    from app.services.customer_service import CustomerService
+
+    cust_ids = {int(e.customer_id) for e in rows if getattr(e, "customer_id", None)}
+    cust_map: dict[int, Customer] = {}
+    if cust_ids:
+        cust_map = {
+            int(c.id): c
+            for c in (
+                await db.execute(select(Customer).where(Customer.id.in_(list(cust_ids))))
+            ).scalars().all()
+        }
+    items = []
+    for e in rows:
+        cid = int(e.customer_id) if getattr(e, "customer_id", None) else None
+        cust = cust_map.get(cid) if cid else None
+        item = {
             "id": e.id,
             "visitor_no": e.visitor_no,
             "camera_id": e.camera_id,
+            "customer_id": cid,
+            "customer_no": cust.customer_no if cust else None,
             "event_type": e.event_type,
             "event_time": serialize_dt(e.event_time),
             "expires_at": serialize_dt(e.expires_at),
             "snapshot_path": e.snapshot_path,
+            "is_member": bool(cid),
         }
-        for e in rows
-    ]
+        item.update(CustomerService.staff_customer_name_fields(cust))
+        items.append(item)
     return success(
         {
             "items": items,

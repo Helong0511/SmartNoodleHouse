@@ -230,6 +230,8 @@ class Settings(BaseSettings):
     unknown_visitor_welcome_enabled: bool = True
     unknown_visitor_welcome_text: str = "欢迎光临"
     unknown_visitor_welcome_cooldown_seconds: int = 60
+    # 摄像头对讲软件音量 0-100（推流前增益，非机内硬件旋钮）
+    camera_speaker_volume_percent: int = 80
 
     @property
     def cors_origin_list(self) -> List[str]:
