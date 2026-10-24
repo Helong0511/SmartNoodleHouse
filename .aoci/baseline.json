@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-24T09:18:20Z",
+  "updated_at": "2026-10-24T09:41:36Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -113,9 +113,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "92944907190981383872f0df1dd97c5ddcfb26eda1af11f51e59594ef2e4b870",
-      "size": 188500,
-      "normalized_sha256": "92944907190981383872f0df1dd97c5ddcfb26eda1af11f51e59594ef2e4b870"
+      "sha256": "702e1649e1e71ccbf30d68938e69bddfb96116260043ea3325c273c82c186877",
+      "size": 188575,
+      "normalized_sha256": "702e1649e1e71ccbf30d68938e69bddfb96116260043ea3325c273c82c186877"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1079,9 +1079,9 @@
     },
     "backend/app/main.py": {
       "role": "index",
-      "sha256": "370ad2035e428568050263ecfbc9c32d8d799ef8e8daabc59b46a0da4fcff4f8",
-      "size": 18682,
-      "normalized_sha256": "72dfd9bba5c67795c9de27b473959ca43ec34133604a5159d5fdd73e37f04b4b"
+      "sha256": "5d84dc5f408c99f4fa15743114e3e387079230b7b735627916290f129857d7a3",
+      "size": 18759,
+      "normalized_sha256": "1f7a657bc912697e7edd4a7939bec898b7dc4598cec81ab061759a7086f6da7e"
     },
     "backend/app/models/__init__.py": {
       "role": "index",
@@ -1385,9 +1385,9 @@
     },
     "backend/app/services/face_service.py": {
       "role": "index",
-      "sha256": "f03bce7c57ee06d369f4edce23c59c66553668b75208777aa166588a2d50ecc8",
-      "size": 42589,
-      "normalized_sha256": "f03bce7c57ee06d369f4edce23c59c66553668b75208777aa166588a2d50ecc8"
+      "sha256": "a01cbd80a7fdd3d4334fc523f66a65897d9b756d865757fed83c8a5f1bdaef25",
+      "size": 42761,
+      "normalized_sha256": "a01cbd80a7fdd3d4334fc523f66a65897d9b756d865757fed83c8a5f1bdaef25"
     },
     "backend/app/services/feedback_service.py": {
       "role": "index",
@@ -1853,15 +1853,15 @@
     },
     "backend/app/workers/recognition_worker.py": {
       "role": "index",
-      "sha256": "4784660446ac4d955f1e35edb6d69e06f50f517ea4a9bc7d9e342f266c7c824e",
-      "size": 7595,
-      "normalized_sha256": "4784660446ac4d955f1e35edb6d69e06f50f517ea4a9bc7d9e342f266c7c824e"
+      "sha256": "7ca1a47125406b0cdaa619c63bc6446c32ee1c11bb3dfba528fe95965b7d8f60",
+      "size": 8026,
+      "normalized_sha256": "7ca1a47125406b0cdaa619c63bc6446c32ee1c11bb3dfba528fe95965b7d8f60"
     },
     "backend/app/workers/tts_worker.py": {
       "role": "index",
-      "sha256": "55ec1f71004100705ea71d6e9f984e92a5304d76115d0e2644ea2fc90e6f12a2",
-      "size": 9256,
-      "normalized_sha256": "3459a07e7555bb3f0815e1c359590ad5d8cf061fd27d9c3f0d21b92ac616bf05"
+      "sha256": "25a9daa59d6ec456435bec918bd11650da33fcfc5042332cd97480486bd8021c",
+      "size": 10029,
+      "normalized_sha256": "4fcc8b9e91275ba697dfe82e1f51ec2a33832f341d2f7401c8778018c33c2657"
     },
     "backend/requirements.lock": {
       "role": "index",
@@ -1871,9 +1871,9 @@
     },
     "backend/requirements.txt": {
       "role": "index",
-      "sha256": "bf675b11aa473d775f9ad37d26382cd5b37c8518f652f6dc5b1f288a3615cb70",
-      "size": 1356,
-      "normalized_sha256": "671c89ed2c57a96dd45d2598f0efc0b27c99868ce57f1c3b5ea7d7af7f20a561"
+      "sha256": "b65a96a7e4db2ba3fa318afb9702ba736629fd9d498d1201200dc9a7fe45f534",
+      "size": 1488,
+      "normalized_sha256": "68e54fd4eca61e3a91fa13bd5971c776335104bf225f828cf298a2d258dbb14d"
     },
     "backend/scripts/migrate_images_to_webp.py": {
       "role": "index",
@@ -5839,6 +5839,12 @@
       "sha256": "e79d8b5b6108950d1a14630b6913c4724511908e565873a77071a15e23ca52cf",
       "size": 5787,
       "normalized_sha256": "e79d8b5b6108950d1a14630b6913c4724511908e565873a77071a15e23ca52cf"
+    },
+    "tests/诊断_访客抓拍匹配.py": {
+      "role": "observe",
+      "sha256": "2222be375490a050d47f1c778b7f2cf39faa6cc17b1eb62b59dd9ae47e49d826",
+      "size": 3545,
+      "normalized_sha256": "2222be375490a050d47f1c778b7f2cf39faa6cc17b1eb62b59dd9ae47e49d826"
     },
     "后台操作手册.md": {
       "role": "index",

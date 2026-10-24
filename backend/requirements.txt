@@ -31,6 +31,8 @@ zhdate>=0.1,<1.0
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
 onnxruntime>=1.16.0,<2.0
+# Windows 本机/摄像头迎宾 TTS（SAPI）；Linux 用 espeak，勿在 Ubuntu 强装
+pywin32>=306; platform_system=="Windows"
 # Alembic 同步驱动
 pymysql>=1.1.0,<2.0
 # 可选：S3/MinIO
