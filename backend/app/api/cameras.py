@@ -240,6 +240,63 @@ async def visitor_events(
     )
 
 
+class TestSpeakBody(BaseModel):
+    text: str = Field(default="欢迎光临", min_length=1, max_length=80)
+    # pc=仅电脑扬声器；camera=仅摄像头对讲；both=先摄像头失败再本机（兼容旧试听）
+    target: str = Field(default="pc", pattern="^(pc|camera|both)$")
+
+
+@router.post("/{camera_id}/test-speak", dependencies=[require_permission("camera:manage")])
+async def test_camera_speak(
+    camera_id: int,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    body: TestSpeakBody | None = None,
+):
+    """立即入队试听播报：可分别测电脑扬声器或摄像头对讲。"""
+    from app.services.face_service import WelcomeService
+
+    camera = await db.get(Camera, camera_id)
+    if not camera:
+        raise AppException(40420, "摄像头不存在")
+    _assert_cam_access(user, camera)
+    text = ((body.text if body else None) or "欢迎光临").strip()
+    target = ((body.target if body else None) or "pc").strip().lower()
+    if target not in ("pc", "camera", "both"):
+        target = "pc"
+    kind = {
+        "pc": "test_speak_pc",
+        "camera": "test_speak_camera",
+        "both": "test_speak",
+    }[target]
+    await WelcomeService.enqueue(
+        {
+            "customer_id": None,
+            "text": text,
+            "camera_id": int(camera_id),
+            "kind": kind,
+            "target": target,
+        }
+    )
+    await AuditService.log(
+        db,
+        user_id=user.id,
+        action="camera.test_speak",
+        module="camera",
+        target_type="camera",
+        target_id=camera_id,
+        detail={"text": text, "target": target},
+        request=request,
+        store_id=int(camera.store_id) if camera.store_id else None,
+    )
+    await db.commit()
+    return success(
+        {"queued": True, "camera_id": camera_id, "text": text, "target": target},
+        request=request,
+    )
+
+
 @router.delete("/visitors/events", dependencies=[require_permission("camera:manage")])
 async def clear_visitor_events(
     request: Request,

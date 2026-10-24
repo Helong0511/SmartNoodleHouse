@@ -105,10 +105,10 @@ class RecognitionWorker:
                                 getattr(settings, "unknown_visitor_capture_enabled", True),
                                 store_id=None,
                             )
-                            if capture_on and now - self._last_visitor_at.get(cam_id, 0) >= 30:
-                                try:
+                            # 抓拍 30s 节流；迎宾走 maybe_welcome 自身冷却，不因抓拍节流而静音
+                            try:
+                                if capture_on and now - self._last_visitor_at.get(cam_id, 0) >= 30:
                                     snap = await VisitorService.save_frame_snapshot(frame, cam_id)
-                                    # 同摄像头短时相似脸复用访客号（阈值略低于会员匹配）
                                     reuse_min = max(0.4, float(threshold) - 0.25)
                                     await VisitorService.record_event(
                                         db,
@@ -118,14 +118,14 @@ class RecognitionWorker:
                                         embedding=emb,
                                         reuse_min_sim=reuse_min,
                                     )
-                                    await VisitorService.maybe_welcome_unknown(
-                                        db, cam_id, store_id=store_id
-                                    )
-                                    await db.commit()
                                     self._last_visitor_at[cam_id] = now
-                                except Exception:
-                                    await db.rollback()
-                                    logger.exception("未知访客抓拍失败 camera_id=%s", cam_id)
+                                await VisitorService.maybe_welcome_unknown(
+                                    db, cam_id, store_id=store_id
+                                )
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
+                                logger.exception("未知访客抓拍/迎宾失败 camera_id=%s", cam_id)
                             continue
                         confirmed, cid, avg = global_tracker.push(cam_id, emb, best_id, best_sim)
                         if confirmed and cid:

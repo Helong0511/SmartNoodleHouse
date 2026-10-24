@@ -187,7 +187,9 @@ class HikvisionTwoWayAudio:
         if not ulaw_data:
             return
         auth = httpx.DigestAuth(self.username, self.password)
-        timeout = httpx.Timeout(self.timeout, connect=5.0)
+        # µ-law 8kHz 实时推流：读超时需覆盖整段音频，否则会 ReadTimeout 后无声
+        stream_secs = max(float(self.timeout), len(ulaw_data) / 8000.0 + 15.0)
+        timeout = httpx.Timeout(stream_secs, connect=5.0, write=stream_secs, pool=10.0)
         lock = await self._lock_for()
         async with lock:
             async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=False) as client:
@@ -204,20 +206,36 @@ class HikvisionTwoWayAudio:
                 if session_id:
                     audio_url = f"{audio_url}?sessionId={session_id}"
 
-                async def _body():
-                    for i in range(0, len(ulaw_data), _CHUNK_BYTES):
-                        chunk = ulaw_data[i : i + _CHUNK_BYTES]
-                        yield chunk
-                        await asyncio.sleep(_CHUNK_SLEEP)
-
+                play_secs = len(ulaw_data) / float(_ULAW_RATE)
                 try:
-                    # Digest 已在 /open 完成缓存；流式推送按实时速率
-                    put_resp = await client.put(
-                        audio_url,
-                        content=_body(),
-                        headers={"Content-Type": "application/octet-stream"},
-                    )
-                    put_resp.raise_for_status()
+                    # 部分海康固件对 chunked 流式 PUT 会中途断开；短句整包更稳
+                    # 长音频仍按实时块推，避免一次性撑满内存/缓冲
+                    if len(ulaw_data) <= 8000 * 8:  # ≤约 8 秒
+                        put_resp = await client.put(
+                            audio_url,
+                            content=ulaw_data,
+                            headers={
+                                "Content-Type": "application/octet-stream",
+                                "Content-Length": str(len(ulaw_data)),
+                            },
+                        )
+                        put_resp.raise_for_status()
+                        # 整包 PUT 常秒回 200；立刻 close 会打断播放 → 有时有声有时无声
+                        await asyncio.sleep(play_secs + 0.35)
+                    else:
+
+                        async def _body():
+                            for i in range(0, len(ulaw_data), _CHUNK_BYTES):
+                                chunk = ulaw_data[i : i + _CHUNK_BYTES]
+                                yield chunk
+                                await asyncio.sleep(_CHUNK_SLEEP)
+
+                        put_resp = await client.put(
+                            audio_url,
+                            content=_body(),
+                            headers={"Content-Type": "application/octet-stream"},
+                        )
+                        put_resp.raise_for_status()
                 finally:
                     try:
                         await client.put(self._url("/close"))

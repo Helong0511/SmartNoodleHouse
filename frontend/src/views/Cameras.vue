@@ -38,13 +38,15 @@
       <el-table-column prop="fps" label="采集FPS" width="80" />
       <el-table-column prop="detect_fps" label="识别FPS" width="80" />
       <el-table-column prop="store_id" label="门店" width="70" />
-      <el-table-column label="操作" width="320" fixed="right">
+      <el-table-column label="操作" width="460" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openPreview(row)">预览</el-button>
           <template v-if="canManageCameras">
             <el-button link size="small" @click="openForm(row)">编辑</el-button>
             <el-button link type="success" size="small" @click="startCam(row.id)">启动</el-button>
             <el-button link type="warning" size="small" @click="restartCam(row.id)">重启</el-button>
+            <el-button link type="primary" size="small" @click="testSpeak(row.id, 'pc')">试听电脑</el-button>
+            <el-button link type="primary" size="small" @click="testSpeak(row.id, 'camera')">试听摄像头</el-button>
             <el-button link size="small" @click="stopCam(row.id)">停止</el-button>
             <el-button link type="danger" size="small" @click="removeCam(row)">删除</el-button>
           </template>
@@ -342,8 +344,11 @@ async function clearEvents() {
     else if (auth.isSuperAdmin && storeFilter.value) params.store_id = storeFilter.value
     else if (auth.user?.store_id) params.store_id = auth.user.store_id
     const res = await api.delete('/cameras/visitors/events', { params })
-    const n = res.data?.deleted_rows ?? 0
-    ElMessage.success(`已清空 ${n} 条访客事件`)
+    const n = Number(res.data?.deleted_rows ?? 0)
+    const files = Number(res.data?.deleted_files ?? 0)
+    const orphans = Number(res.data?.orphan_files ?? 0)
+    const orphanHint = orphans > 0 ? `（含孤儿图 ${orphans}）` : ''
+    ElMessage.success(`已清空 ${n} 条访客事件，删除抓拍图 ${files} 张${orphanHint}`)
     await Promise.all([loadOverview(), reloadEvents()])
   } catch (e: any) {
     ElMessage.error(e.message || '清空失败')
@@ -466,6 +471,29 @@ async function restartCam(id: number) {
     refreshAll()
   } catch (e: any) {
     ElMessage.error(e.message || '重启失败')
+  }
+}
+
+async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
+  const row = cameras.value.find((c: any) => c.id === id)
+  const online = String(row?.status || '').toUpperCase() === 'ONLINE' || !!row?.runtime?.has_frame
+  if (target === 'camera' && !online) {
+    try {
+      await ElMessageBox.confirm(
+        '当前摄像头显示离线/无帧。试听摄像头前建议先「启动/重启」。仍要直接试对讲吗？',
+        '摄像头可能离线',
+        { type: 'warning', confirmButtonText: '仍试听', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  try {
+    const text = target === 'camera' ? '摄像头扬声器播报测试' : '电脑扬声器播报测试'
+    await api.post(`/cameras/${id}/test-speak`, { text, target })
+    ElMessage.success(target === 'camera' ? '已触发摄像头对讲试听' : '已触发电脑扬声器试听')
+  } catch (e: any) {
+    ElMessage.error(e.message || '试听失败')
   }
 }
 

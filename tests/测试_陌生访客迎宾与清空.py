@@ -65,6 +65,11 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
             return "欢迎光临测试店"
         return fallback
 
+    from app.services.face_service import WelcomeService
+
+    async def _enqueue(item):
+        q.append(item)
+
     with (
         patch(
             "app.services.system_settings_service.SystemSettingsService.effective_bool",
@@ -78,18 +83,11 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
             "app.services.system_settings_service.SystemSettingsService.effective_setting",
             new=AsyncMock(side_effect=_setting),
         ),
-        patch.object(
-            __import__("app.services.face_service", fromlist=["WelcomeService"]).WelcomeService,
-            "get_queue",
-            return_value=MagicMock(put=AsyncMock(side_effect=lambda item: q.append(item))),
-        ),
+        patch.object(WelcomeService, "enqueue", new=AsyncMock(side_effect=_enqueue)),
         patch("app.services.websocket_manager.ws_manager.broadcast", new=AsyncMock()),
     ):
-        from app.services.face_service import WelcomeService
-
-        with patch.object(WelcomeService, "get_queue", return_value=MagicMock(put=AsyncMock(side_effect=lambda item: q.append(item)))):
-            ok1 = await VisitorService.maybe_welcome_unknown(db, 8, store_id=1)
-            ok2 = await VisitorService.maybe_welcome_unknown(db, 8, store_id=1)
+        ok1 = await VisitorService.maybe_welcome_unknown(db, 8, store_id=1)
+        ok2 = await VisitorService.maybe_welcome_unknown(db, 8, store_id=1)
     assert ok1 is True
     assert ok2 is False  # 冷却中
     assert len(q) == 1
@@ -135,10 +133,14 @@ async def test_clear_events_deletes_rows_and_files():
 
     db.execute = AsyncMock(side_effect=_execute)
     storage = MagicMock()
-    storage.delete = AsyncMock()
+    storage.delete = AsyncMock(return_value=True)
 
-    with patch("app.services.object_storage.get_storage", return_value=storage):
+    with (
+        patch("app.services.object_storage.get_storage", return_value=storage),
+        patch.object(VisitorService, "_purge_local_camera_snapshots", AsyncMock(return_value=0)),
+    ):
         stats = await VisitorService.clear_events(db, camera_ids=[8])
     assert stats["deleted_rows"] == 1
     assert stats["deleted_files"] == 1
+    assert stats.get("orphan_files", 0) == 0
     storage.delete.assert_awaited()

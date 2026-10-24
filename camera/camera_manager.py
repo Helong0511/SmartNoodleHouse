@@ -68,15 +68,54 @@ class CameraWorker:
             if self.source.isdigit():
                 self._cap = cv2.VideoCapture(int(self.source))
             else:
-                self._cap = cv2.VideoCapture(self.source)
-            if self._cap.isOpened():
+                # 海康等设备 UDP 易丢包/无画面；强制 RTSP over TCP
+                import os
+
+                os.environ.setdefault(
+                    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+                    "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000",
+                )
+                self._cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+                try:
+                    self._cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8000)
+                    self._cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 8000)
+                    self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
+            if self._cap is not None and self._cap.isOpened():
                 self.status = "ONLINE"
                 self._reconnect_delay = 1
+                logger.info("Camera %s ONLINE", self.camera_id)
                 return True
+            logger.warning(
+                "Camera %s open failed (isOpened=false) source_host=%s",
+                self.camera_id,
+                self._source_host_hint(),
+            )
         except Exception as e:
             logger.error("Camera %s connect failed: %s", self.camera_id, e)
+        if self._cap is not None:
+            try:
+                self._cap.release()
+            except Exception:
+                pass
+            self._cap = None
         self.status = "OFFLINE"
         return False
+
+    def _source_host_hint(self) -> str:
+        raw = self.source or ""
+        if raw.isdigit():
+            return f"usb:{raw}"
+        try:
+            from urllib.parse import urlparse
+
+            p = urlparse(raw)
+            host = p.hostname or "?"
+            port = f":{p.port}" if p.port else ""
+            return f"{p.scheme}://{host}{port}{p.path or ''}"
+        except Exception:
+            return "(unparseable)"
 
     def _run(self) -> None:
         interval = 1.0 / max(self.fps, 1)

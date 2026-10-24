@@ -18,17 +18,22 @@ class ObjectStorage(ABC):
         """上传并返回可访问 URL（相对或绝对）。"""
 
     @abstractmethod
-    async def delete(self, key: str) -> None:
-        ...
+    async def delete(self, key: str) -> bool:
+        """删除对象；返回是否确实删掉了文件/对象。"""
 
 
 class LocalObjectStorage(ObjectStorage):
     @staticmethod
     def _safe_resolve(key: str) -> Path:
-        """解析并校验 key 不逃逸出上传根目录（commonpath 防兄弟目录前缀绕过）。"""
+        """解析并校验 key 不逃逸出上传根目录（commonpath 防兄弟目录前缀绕过）。
+
+        相对 UPLOAD_DIR 按进程 cwd 解析（Windows 本地调试与 Ubuntu systemd WorkingDirectory 均适用）。
+        """
         settings = get_settings()
-        root = Path(settings.upload_dir).resolve()
-        resolved = (root / key).resolve()
+        root = Path(settings.upload_dir).expanduser().resolve()
+        # key 统一正斜杠，Path 在 Win/Linux 均可拼接
+        safe_key = str(key or "").replace("\\", "/").lstrip("/")
+        resolved = (root / safe_key).resolve()
         import os
 
         if os.path.commonpath([str(root), str(resolved)]) != str(root):
@@ -41,10 +46,12 @@ class LocalObjectStorage(ObjectStorage):
         await asyncio.to_thread(path.write_bytes, data)
         return f"/uploads/{key.replace(chr(92), '/')}"
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: str) -> bool:
         path = self._safe_resolve(key)
         if path.is_file():
             await asyncio.to_thread(path.unlink)
+            return True
+        return False
 
 
 class S3ObjectStorage(ObjectStorage):
@@ -91,8 +98,9 @@ class S3ObjectStorage(ObjectStorage):
             return f"{self.endpoint}/{self.bucket}/{key}"
         return f"s3://{self.bucket}/{key}"
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: str) -> bool:
         await asyncio.to_thread(self._delete_sync, key)
+        return True
 
 
 _storage: ObjectStorage | None = None

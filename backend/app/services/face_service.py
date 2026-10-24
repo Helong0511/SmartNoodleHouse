@@ -359,10 +359,18 @@ class VisitorService:
         s = str(url or "").strip().replace("\\", "/")
         if not s:
             return None
-        if s.startswith("/uploads/"):
-            return s[len("/uploads/") :]
-        if s.startswith("uploads/"):
-            return s[len("uploads/") :]
+        # 完整 URL：http(s)://host/uploads/visitors/...
+        if "://" in s:
+            marker = "/uploads/"
+            idx = s.find(marker)
+            if idx >= 0:
+                s = s[idx + len(marker) :]
+            else:
+                return None
+        elif s.startswith("/uploads/"):
+            s = s[len("/uploads/") :]
+        elif s.startswith("uploads/"):
+            s = s[len("uploads/") :]
         # 已是相对对象键
         if s.startswith("visitors/"):
             return s
@@ -552,7 +560,7 @@ class VisitorService:
             store_id,
             text[:40],
         )
-        await WelcomeService.get_queue().put(
+        await WelcomeService.enqueue(
             {"customer_id": None, "text": text, "camera_id": camera_id, "kind": "unknown_visitor"}
         )
         try:
@@ -575,14 +583,18 @@ class VisitorService:
         *,
         camera_ids: list[int],
     ) -> dict:
-        """清除指定摄像头范围内的访客事件及抓拍图。"""
+        """清除指定摄像头范围内的访客事件及抓拍图。
+
+        Windows / Ubuntu 均走 object_storage（本地 Path.unlink 或 S3 deleteObject），
+        路径键用正斜杠；本地根目录相对路径按进程 cwd 解析（与 StaticFiles 一致）。
+        """
         from sqlalchemy import delete, select
 
         from app.services.object_storage import get_storage
 
         ids = [int(x) for x in camera_ids if x is not None]
         if not ids:
-            return {"deleted_rows": 0, "deleted_files": 0}
+            return {"deleted_rows": 0, "deleted_files": 0, "orphan_files": 0}
         rows = list(
             (
                 await db.execute(select(VisitorEvent).where(VisitorEvent.camera_id.in_(ids)))
@@ -593,18 +605,88 @@ class VisitorService:
         for row in rows:
             key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
             if not key:
+                if getattr(row, "snapshot_path", None):
+                    logger.warning(
+                        "清空访客无法解析抓拍键 path=%s",
+                        row.snapshot_path,
+                    )
                 continue
             try:
-                await storage.delete(key)
-                deleted_files += 1
+                if await storage.delete(key):
+                    deleted_files += 1
             except Exception:
                 logger.warning("清空访客时删除抓拍失败 path=%s", row.snapshot_path, exc_info=True)
         result = await db.execute(delete(VisitorEvent).where(VisitorEvent.camera_id.in_(ids)))
         deleted_rows = int(result.rowcount or 0)
+        # 再扫本地 visitors/ 下 cam{id}_* 孤儿文件（DB 已无记录但磁盘残留）
+        orphan_files = await cls._purge_local_camera_snapshots(ids)
         for cid in ids:
             cls._unknown_tracks.pop(int(cid), None)
             cls._last_unknown_welcome_at.pop(int(cid), None)
-        return {"deleted_rows": deleted_rows, "deleted_files": deleted_files}
+        return {
+            "deleted_rows": deleted_rows,
+            "deleted_files": deleted_files + orphan_files,
+            "orphan_files": orphan_files,
+        }
+
+    @classmethod
+    async def _purge_local_camera_snapshots(cls, camera_ids: list[int]) -> int:
+        """删除本地 uploads/visitors/**/cam{id}_* 文件（Win/Linux Path 通用）。"""
+        import asyncio
+        from pathlib import Path
+
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        if (getattr(settings, "storage_backend", "local") or "local").lower() != "local":
+            return 0
+        root = Path(settings.upload_dir).expanduser().resolve() / "visitors"
+        if not root.is_dir():
+            return 0
+        id_set = {int(x) for x in camera_ids}
+
+        def _walk() -> int:
+            removed = 0
+            for path in root.rglob("cam*_*.*"):
+                if not path.is_file():
+                    continue
+                name = path.name
+                # cam12_HHMMSS_xxxx.jpg
+                if not name.startswith("cam"):
+                    continue
+                try:
+                    cid = int(name.split("_", 1)[0][3:])
+                except ValueError:
+                    continue
+                if cid not in id_set:
+                    continue
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError:
+                    logger.warning("删除孤儿抓拍失败 path=%s", path, exc_info=True)
+            # 清理空日期目录
+            for day_dir in sorted(root.glob("*/*/*"), reverse=True):
+                if day_dir.is_dir() and not any(day_dir.iterdir()):
+                    try:
+                        day_dir.rmdir()
+                    except OSError:
+                        pass
+            for month_dir in sorted(root.glob("*/*"), reverse=True):
+                if month_dir.is_dir() and not any(month_dir.iterdir()):
+                    try:
+                        month_dir.rmdir()
+                    except OSError:
+                        pass
+            for year_dir in sorted(root.glob("*"), reverse=True):
+                if year_dir.is_dir() and not any(year_dir.iterdir()):
+                    try:
+                        year_dir.rmdir()
+                    except OSError:
+                        pass
+            return removed
+
+        return await asyncio.to_thread(_walk)
 
     @classmethod
     async def cleanup_expired(cls, db: AsyncSession) -> dict:
@@ -629,8 +711,8 @@ class VisitorService:
             if not key:
                 continue
             try:
-                await storage.delete(key)
-                deleted_files += 1
+                if await storage.delete(key):
+                    deleted_files += 1
             except Exception:
                 logger.warning("删除访客抓拍失败 path=%s", row.snapshot_path, exc_info=True)
 
@@ -693,14 +775,68 @@ class VisitorService:
 
 
 class WelcomeService:
+    """迎宾 TTS 队列：优先 Redis，避免 uvicorn --reload 后内存队列孤儿导致无声。"""
+
+    TTS_QUEUE_KEY = "snh:tts:welcome"
+    TTS_QUEUE_MAX = 100
     _queue: asyncio.Queue | None = None
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
-        # P1-59: 有界队列防止 OOM — 最多积压 100 条迎宾任务
+        # 进程内后备队列（单测 / Redis 不可用时）
         if cls._queue is None:
-            cls._queue = asyncio.Queue(maxsize=100)
+            cls._queue = asyncio.Queue(maxsize=cls.TTS_QUEUE_MAX)
         return cls._queue
+
+    @classmethod
+    async def enqueue(cls, item: dict) -> None:
+        """入队迎宾播报；跨热重载仍可由 Leader TTS 消费。"""
+        import json
+
+        payload = dict(item or {})
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            return
+        payload["text"] = text
+        raw = json.dumps(payload, ensure_ascii=False)
+        try:
+            redis = await get_redis()
+            pipe = redis.pipeline()
+            pipe.rpush(cls.TTS_QUEUE_KEY, raw)
+            pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
+            await pipe.execute()
+            return
+        except Exception:
+            logger.exception("迎宾 TTS Redis 入队失败，回退进程内队列")
+        q = cls.get_queue()
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            logger.warning("迎宾 TTS 进程内队列已满，丢弃 text=%s", text[:40])
+
+    @classmethod
+    async def dequeue(cls, timeout: float = 1.0) -> dict | None:
+        """取出一条迎宾任务；超时返回 None。"""
+        import json
+
+        try:
+            redis = await get_redis()
+            # BRPOP 超时至少 1 秒（redis-py 整数秒）
+            wait = max(1, int(timeout))
+            got = await redis.brpop(cls.TTS_QUEUE_KEY, timeout=wait)
+            if got:
+                _key, raw = got
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                data = json.loads(raw)
+                return data if isinstance(data, dict) else None
+        except Exception:
+            logger.exception("迎宾 TTS Redis 出队失败，回退进程内队列")
+        q = cls.get_queue()
+        try:
+            return await asyncio.wait_for(q.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
 
     @staticmethod
     async def is_cooled_down(customer_id: int) -> bool:
@@ -1074,7 +1210,14 @@ class WelcomeService:
             else (f"尊贵的{level_name}会员" if level_name else "尊贵的会员")
         )
 
-        await cls.get_queue().put({"customer_id": customer_id, "text": text, "camera_id": camera_id})
+        await cls.enqueue(
+            {
+                "customer_id": customer_id,
+                "text": text,
+                "camera_id": camera_id,
+                "kind": "member",
+            }
+        )
 
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
         try:

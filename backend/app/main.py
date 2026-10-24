@@ -126,10 +126,25 @@ async def lifespan(app: FastAPI):
     elif role in ("leader", "auto"):
         is_leader = await try_acquire_leader(_leader_worker_id)
         if role == "leader" and not is_leader:
+            # 显式 leader：热重载时常被已死进程的 TTL 锁挡住，强制接管保证 TTS/识别起来
             logger.warning(
-                "PROCESS_ROLE=leader 但未抢到 Redis Leader 锁（worker_id=%s），稍后后台重试抢锁",
+                "PROCESS_ROLE=leader 未抢到锁，强制接管 Redis Leader（worker_id=%s）",
                 _leader_worker_id,
             )
+            try:
+                from app.core.leader_lock import LEADER_KEY
+                from app.core.redis_client import get_redis
+
+                r = await get_redis()
+                await r.delete(LEADER_KEY)
+            except Exception:
+                logger.exception("强制删除 Leader 锁失败")
+            is_leader = await try_acquire_leader(_leader_worker_id)
+            if not is_leader:
+                logger.warning(
+                    "PROCESS_ROLE=leader 强制接管后仍失败（worker_id=%s），稍后后台重试",
+                    _leader_worker_id,
+                )
     else:
         logger.warning("未知 PROCESS_ROLE=%s，按 worker 处理", role)
         is_leader = False
@@ -224,7 +239,7 @@ async def lifespan(app: FastAPI):
             logger.exception("启动定时任务覆盖订阅失败")
         logger.info("Scheduler started (leader worker_id=%s role=%s)", _leader_worker_id, role)
         if settings.tts_provider == "local":
-            # 不绑死队列实例：run() 内每轮取 WelcomeService.get_queue()，兼容 --reload
+            # Redis 迎宾队列：run() 内 WelcomeService.dequeue，兼容 --reload
             tts_task = asyncio.create_task(tts_worker.run())
             logger.info("TTS worker started (leader)")
         if settings.enable_recognition_worker:
