@@ -12,12 +12,39 @@ logger = logging.getLogger(__name__)
 EMBEDDING_DIM = 512
 
 
+def _onnx_providers() -> list[str]:
+    """优先 CUDA，否则 CPU（本机无 GPU 时自动回落）。"""
+    try:
+        import onnxruntime as ort
+
+        available = set(ort.get_available_providers())
+        ordered = [
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        return [p for p in ordered if p in available] or ["CPUExecutionProvider"]
+    except Exception:
+        return ["CPUExecutionProvider"]
+
+
 @lru_cache(maxsize=1)
 def _face_app():
+    """授权入库用：较高检测分辨率，偏准。"""
     from insightface.app import FaceAnalysis
 
-    app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+    app = FaceAnalysis(name="buffalo_l", providers=_onnx_providers())
     app.prepare(ctx_id=0, det_size=(640, 640))
+    return app
+
+
+@lru_cache(maxsize=1)
+def _face_app_live():
+    """到店实时识别：较小 det_size，CPU 上明显更快；门口大脸足够。"""
+    from insightface.app import FaceAnalysis
+
+    app = FaceAnalysis(name="buffalo_l", providers=_onnx_providers())
+    # 320：门口/近景 CPU 常用；640 实时帧会拖到数百 ms～数秒
+    app.prepare(ctx_id=0, det_size=(320, 320))
     return app
 
 
@@ -58,14 +85,21 @@ def extract_face_embedding(image_bytes: bytes) -> list[float]:
     return extract_face_embedding_bgr(img)
 
 
-def extract_face_embedding_bgr(img: np.ndarray) -> list[float]:
+def extract_face_embedding_bgr(
+    img: np.ndarray,
+    *,
+    live: bool = False,
+) -> list[float]:
     """
     从摄像头 BGR 帧直接提特征（内存，不打开图片文件）。
     SCRFD 检测 + ArcFace 512D；InsightFace 不可用时生产 fail-closed。
+
+    live=True：到店实时路径——用较小 det_size，多人时取最大脸（门口常有陪同）。
+    live=False：授权入库——要求画面仅一人，检测更严。
     """
     if _insightface_available():
         try:
-            return _extract_insightface_bgr(img)
+            return _extract_insightface_bgr(img, live=live)
         except ValueError:
             raise
         except Exception as e:
