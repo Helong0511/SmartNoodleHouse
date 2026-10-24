@@ -60,8 +60,9 @@ async def test_validate_float_and_nan():
     with pytest.raises(ValueError):
         SystemSettingsService._validate_value("face_match_threshold", "")
     with pytest.raises(ValueError, match="须在"):
-        SystemSettingsService._validate_value("face_match_threshold", "0.4")
-    assert SystemSettingsService._validate_value("face_match_threshold", "0.75") == "0.75"
+        SystemSettingsService._validate_value("face_match_threshold", "0.2")
+    assert SystemSettingsService._validate_value("face_match_threshold", "0.4") == "0.4"
+    assert SystemSettingsService._validate_value("face_match_threshold", "0.48") == "0.48"
 
 
 def test_store_update_schema():

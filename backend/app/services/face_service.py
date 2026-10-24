@@ -72,10 +72,24 @@ class FaceEmbeddingCache:
     def invalidate(self) -> None:
         self._last_sync = None
 
-    async def get_profiles(self, db: AsyncSession) -> list[tuple[int, np.ndarray]]:
+    async def warmup(self, db: AsyncSession) -> int:
+        """启动时全量加载授权会员人脸向量；返回缓存人数。"""
+        async with self._lock:
+            self._last_sync = None
+            await self._refresh(db)
+            n = len(self._by_customer)
+            logger.info("人脸向量缓存预热完成 profiles=%s", n)
+            return n
+
+    async def get_profiles(
+        self, db: AsyncSession, *, copy: bool = True
+    ) -> list[tuple[int, np.ndarray]]:
         async with self._lock:
             await self._refresh(db)
-            return [(cid, vec.copy()) for cid, (_pid, vec) in self._by_customer.items()]
+            if copy:
+                return [(cid, vec.copy()) for cid, (_pid, vec) in self._by_customer.items()]
+            # 识别热路径只读，避免每帧整表拷贝
+            return [(cid, vec) for cid, (_pid, vec) in self._by_customer.items()]
 
     async def _refresh(self, db: AsyncSession) -> None:
         import time
@@ -1112,7 +1126,14 @@ class WelcomeService:
         customer_id: int,
         camera_id: int | None,
         similarity: float,
+        *,
+        preconfirmed: bool = False,
     ) -> bool:
+        """尝试会员迎宾。
+
+        preconfirmed=True：识别 worker 已用 MultiFrameTracker 确认，勿再 Redis 叠一层确认
+        （否则需约 2×confirm_frames 才播报，体感极慢且成功率低）。
+        """
         settings = get_settings()
         from app.services.system_settings_service import SystemSettingsService
 
@@ -1125,11 +1146,14 @@ class WelcomeService:
         threshold = await SystemSettingsService.effective_float(
             db, "face_match_threshold", settings.face_match_threshold, store_id=store_id
         )
-        ready, avg_sim = await cls.push_frame_score(
-            customer_id, camera_id, similarity, db, store_id=store_id
-        )
-        if not ready:
-            return False
+        if preconfirmed:
+            avg_sim = float(similarity)
+        else:
+            ready, avg_sim = await cls.push_frame_score(
+                customer_id, camera_id, similarity, db, store_id=store_id
+            )
+            if not ready:
+                return False
         if avg_sim < threshold:
             return False
         # 先原子抢冷却，禁止 exists()+setex() 双步竞态导致重复迎宾

@@ -33,7 +33,7 @@ class TrackState:
 class MultiFrameTracker:
     """摄像头维度的短时跟踪：连续 N 帧高相似才确认身份。"""
 
-    def __init__(self, confirm_frames: int = 3, ttl_seconds: float = 2.0):
+    def __init__(self, confirm_frames: int = 2, ttl_seconds: float = 2.5):
         self.confirm_frames = confirm_frames
         self.ttl_seconds = ttl_seconds
         self._tracks: dict[str, TrackState] = {}

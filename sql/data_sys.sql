@@ -1080,8 +1080,8 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'face_match_threshold',
-    '0.75',
-    '人脸匹配阈值'
+    '0.48',
+    '人脸匹配阈值（InsightFace 门禁常用 0.45–0.50；过高会大量拒识）'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1
@@ -1090,8 +1090,8 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'face_confirm_frames',
-    '5',
-    '人脸确认帧数'
+    '2',
+    '人脸确认帧数（推荐 2；过大则迎宾慢）'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1

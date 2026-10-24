@@ -56,8 +56,13 @@ def _ensure_pywin32() -> bool:
         return False
 
 
+# 短句 WAV 缓存：避免每次 PowerShell 冷启动（曾测 synth_ms≈6s）
+_WAV_CACHE: dict[str, bytes] = {}
+_WAV_CACHE_MAX = 64
+
+
 class LocalTTS(TTSProvider):
-    """本地 TTS：Windows 优先 System.Speech，其次 pywin32/SAPI；Linux 用 espeak。"""
+    """本地 TTS：Windows 优先 win32com（快），失败再 System.Speech；Linux 用 espeak。"""
 
     async def speak(self, text: str, *, camera_id: int | None = None) -> None:
         loop = asyncio.get_running_loop()
@@ -68,10 +73,9 @@ class LocalTTS(TTSProvider):
         if not text:
             return
         if platform.system() == "Windows":
-            # System.Speech 优先：不依赖 pywintypes，reload 子进程更稳
-            if self._speak_system_speech(text):
-                return
             if self._speak_win32com(text):
+                return
+            if self._speak_system_speech(text):
                 return
             logger.warning("TTS failed: Windows SAPI 均不可用 text=%s", text[:50])
             return
@@ -124,18 +128,27 @@ class LocalTTS(TTSProvider):
             return False
 
     def synthesize_wav_sync(self, text: str) -> bytes:
-        """合成 WAV 字节，供摄像头推流；失败返回空。"""
+        """合成 WAV 字节，供摄像头推流；失败返回空。短句带进程内缓存。"""
         text = (text or "").strip()
         if not text:
             return b""
+        hit = _WAV_CACHE.get(text)
+        if hit:
+            return hit
         try:
             if platform.system() == "Windows":
-                # System.Speech 优先，避免 uvicorn --reload 子进程缺 pywintypes
-                wav = self._sapi_to_wav_system_speech(text)
-                if wav:
-                    return wav
-                return self._sapi_to_wav_win32com(text)
-            return self._espeak_to_wav(text)
+                # win32com 写文件通常明显快于每次拉起 PowerShell
+                wav = self._sapi_to_wav_win32com(text)
+                if not wav:
+                    wav = self._sapi_to_wav_system_speech(text)
+            else:
+                wav = self._espeak_to_wav(text)
+            if wav:
+                if len(_WAV_CACHE) >= _WAV_CACHE_MAX:
+                    # 简单 FIFO：丢掉任意一条
+                    _WAV_CACHE.pop(next(iter(_WAV_CACHE)), None)
+                _WAV_CACHE[text] = wav
+            return wav or b""
         except Exception as e:
             logger.warning("TTS synthesize failed: %s - %s", text[:50], e)
             return b""

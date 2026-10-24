@@ -56,6 +56,28 @@ _leader_renew_task: asyncio.Task | None = None
 _leader_worker_id: str | None = None
 
 
+async def _warmup_recognition_and_tts() -> None:
+    """后台预热：InsightFace 模型 + 试听短句 WAV，缩短首人识别/首次摄像头试听延迟。"""
+    try:
+        def _load_models() -> None:
+            from app.services.face_extractor import _face_app, _face_app_live
+
+            _face_app()
+            _face_app_live()
+
+        await asyncio.to_thread(_load_models)
+        logger.info("InsightFace 模型预热完成")
+    except Exception:
+        logger.exception("InsightFace 模型预热失败")
+    try:
+        from app.workers.tts_worker import LocalTTS
+
+        await asyncio.to_thread(LocalTTS().synthesize_wav_sync, "试听播报")
+        logger.info("摄像头试听短句 WAV 已预热")
+    except Exception:
+        logger.exception("试听 WAV 预热失败")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tts_task, recognition_task, _leader_stop, _leader_renew_task, _leader_worker_id
@@ -256,8 +278,15 @@ async def lifespan(app: FastAPI):
             from app.core.database import AsyncSessionLocal
             from app.models import Camera
             from app.services.camera_credentials import build_connect_source
+            from app.services.face_service import face_embedding_cache
 
             async with AsyncSessionLocal() as db:
+                # 启动即加载授权会员人脸，保证识别时效（增量刷新仍走缓存）
+                try:
+                    n = await face_embedding_cache.warmup(db)
+                    logger.info("启动预热人脸向量缓存 profiles=%s", n)
+                except Exception:
+                    logger.exception("启动预热人脸向量缓存失败")
                 cams = (await db.execute(select(Camera).where(Camera.status != "DISABLED"))).scalars().all()
                 mgr = CameraManager()
                 for c in cams:
@@ -266,6 +295,8 @@ async def lifespan(app: FastAPI):
                 logger.info("Restored %s cameras", len(cams))
         except Exception as e:
             logger.warning("摄像头自动恢复失败: %s", e)
+        # 后台预热 InsightFace + 试听短句 WAV，避免首人/首次试听卡数秒
+        asyncio.create_task(_warmup_recognition_and_tts())
 
     async def _standby_promote_loop() -> None:
         """auto/leader 非持锁进程持续争抢；Leader 宕机后自动接管调度。"""

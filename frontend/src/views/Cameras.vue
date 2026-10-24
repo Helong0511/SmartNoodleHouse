@@ -496,16 +496,16 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
   }
   speakingIds.value.add(id)
   try {
-    const text = target === 'camera' ? '摄像头扬声器播报测试' : '电脑扬声器播报测试'
+    // 短句：合成更快；第二次起走服务端 WAV 缓存几乎无等待
+    const text = target === 'camera' ? '试听播报' : '电脑试听'
     await api.post(`/cameras/${id}/test-speak`, { text, target })
     ElMessage.success(
       target === 'camera'
         ? '已触发摄像头对讲试听（约数秒，勿连点）'
         : '已触发电脑扬声器试听',
     )
-    // 摄像头对讲按实时推流，短句大约 5–15 秒；期间禁止连点堆积队列
     if (target === 'camera') {
-      await new Promise((r) => setTimeout(r, 8000))
+      await new Promise((r) => setTimeout(r, 4500))
     }
   } catch (e: any) {
     ElMessage.error(e.message || '试听失败')

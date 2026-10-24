@@ -26,7 +26,12 @@ class RecognitionWorker:
         from app.core.config import get_settings
         from app.models import Camera
         from app.services.face_extractor import extract_face_embedding_bgr
-        from app.services.face_service import FaceService, VisitorService, WelcomeService
+        from app.services.face_service import (
+            FaceService,
+            VisitorService,
+            WelcomeService,
+            face_embedding_cache,
+        )
         from app.services.face_liveness import global_tracker
         from camera.camera_manager import CameraManager
         from sqlalchemy import select
@@ -45,7 +50,8 @@ class RecognitionWorker:
                     continue
 
                 async with AsyncSessionLocal() as db:
-                    profiles = await FaceService.get_authorized_profiles(db)
+                    # copy=False：启动已预热，热路径只读缓存避免每帧深拷贝
+                    profiles = await face_embedding_cache.get_profiles(db, copy=False)
                     cam_rows = {
                         c.id: c
                         for c in (
@@ -70,8 +76,10 @@ class RecognitionWorker:
                             continue
 
                         try:
-                            # 同步 InsightFace 绝不能堵事件循环，否则 TTS sleep/对讲会被拖到十几秒
-                            emb_list = await asyncio.to_thread(extract_face_embedding_bgr, frame)
+                            # 同步 InsightFace 绝不能堵事件循环；live=取最大脸+小 det_size
+                            emb_list = await asyncio.to_thread(
+                                extract_face_embedding_bgr, frame, live=True
+                            )
                             emb = np.array(emb_list, dtype=np.float32)
                         except Exception:
                             continue
@@ -144,7 +152,10 @@ class RecognitionWorker:
                                         customer_id=int(cid),
                                     )
                                     self._last_member_event_at[mem_key] = now
-                                await WelcomeService.try_welcome(db, cid, cam_id, avg)
+                                # 进程内已多帧确认，勿再 Redis 叠一层（否则约 2×confirm 才播报）
+                                await WelcomeService.try_welcome(
+                                    db, cid, cam_id, avg, preconfirmed=True
+                                )
                                 await db.commit()
                             except Exception:
                                 await db.rollback()

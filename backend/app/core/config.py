@@ -219,8 +219,9 @@ class Settings(BaseSettings):
     visitor_data_retention_days: int = 7
     operation_log_retention_days: int = 90
     welcome_cooldown_seconds: int = 60
-    face_match_threshold: float = 0.75
-    face_confirm_frames: int = 3
+    # InsightFace 官方/门禁实践余弦阈值约 0.35–0.50；0.75 会导致大量拒识
+    face_match_threshold: float = 0.48
+    face_confirm_frames: int = 2
     # P1: 活体检测模式 — none=多帧确认（被动）；challenge=随机动作挑战（主动）
     face_liveness_mode: str = "challenge"
     face_liveness_challenge_timeout: int = 30  # 挑战有效期（秒）

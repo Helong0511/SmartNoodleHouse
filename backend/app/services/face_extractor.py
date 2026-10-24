@@ -158,22 +158,37 @@ def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float]
     return emb, quality
 
 
-def _extract_insightface_bgr(img: np.ndarray) -> list[float]:
+def _extract_insightface_bgr(img: np.ndarray, *, live: bool = False) -> list[float]:
     if img is None or getattr(img, "size", 0) == 0:
         raise ValueError("无效视频帧")
 
-    faces = _face_app().get(img)
+    app = _face_app_live() if live else _face_app()
+    faces = app.get(img)
     if not faces:
         raise ValueError("未检测到人脸，请正对摄像头")
-    if len(faces) > 1:
-        raise ValueError("检测到多张人脸，请确保画面中只有您一人")
+    if live:
+        # 门口实时：取框面积最大的脸，避免陪同导致整帧丢弃
+        face = max(
+            faces,
+            key=lambda f: float(
+                max(0.0, (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            ),
+        )
+    else:
+        if len(faces) > 1:
+            raise ValueError("检测到多张人脸，请确保画面中只有您一人")
+        face = faces[0]
 
-    face = faces[0]
     det_score = float(getattr(face, "det_score", 1.0) or 1.0)
-    if det_score < 0.5:
+    min_det = 0.35 if live else 0.5
+    if det_score < min_det:
         raise ValueError("人脸检测置信度过低")
 
-    emb = face.embedding.astype(np.float32)
+    # 优先官方已 L2 归一化向量
+    raw = getattr(face, "normed_embedding", None)
+    if raw is None:
+        raw = face.embedding
+    emb = np.asarray(raw, dtype=np.float32)
     # fail-closed：禁止截断/padding，避免不同模型维度被 silently 对齐后误匹配
     if emb.size != EMBEDDING_DIM:
         raise ValueError(

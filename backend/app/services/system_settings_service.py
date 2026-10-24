@@ -172,10 +172,10 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "label": "人脸匹配阈值",
         "unit": "",
         "type": "float",
-        "min": 0.5,
+        "min": 0.35,
         "max": 0.99,
         "step": 0.01,
-        "description": "相似度达到该值才视为同一人（0.75 推荐）",
+        "description": "余弦相似度达到该值才视为同一人；InsightFace 门禁常用 0.45–0.50，过高（如 0.75）会大量认不出",
     },
     "face_confirm_frames": {
         "group": "welcome",
@@ -184,7 +184,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "type": "int",
         "min": 1,
         "max": 30,
-        "description": "连续 N 帧匹配成功才触发迎宾",
+        "description": "连续 N 帧匹配成功才触发迎宾（推荐 2；过大则反应慢）",
     },
     "unknown_visitor_capture_enabled": {
         "group": "welcome",
