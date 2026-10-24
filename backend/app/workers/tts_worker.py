@@ -438,7 +438,11 @@ class CameraSpeakerTTS(TTSProvider):
         from app.core.database import AsyncSessionLocal
         from app.models import Camera
         from app.services.camera_credentials import build_connect_source, decrypt_password
-        from app.services.hikvision_audio import HikvisionTwoWayAudio, resolve_isapi_base
+        from app.services.hikvision_audio import (
+            HikvisionTwoWayAudio,
+            normalize_g711_codec,
+            resolve_isapi_base,
+        )
         from app.services.system_settings_service import SystemSettingsService
 
         async with AsyncSessionLocal() as db:
@@ -499,17 +503,25 @@ class CameraSpeakerTTS(TTSProvider):
         client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
         loop = asyncio.get_running_loop()
         t0 = time.perf_counter()
-        # 不阻塞探测：内存/Redis 命中或默认 alaw 立即返回（避免热重载后 codec_ms 十余秒）
-        codec = await client.resolve_codec(block=False)
-        codec_ms = int((time.perf_counter() - t0) * 1000)
-        t1 = time.perf_counter()
-        # 命中 G711 热缓存则 synth≈0；未命中写入缓存供下次秒出
-        g711 = await loop.run_in_executor(
+        # codec 探测与 alaw 预合成并行（门口机多数 alaw，长句可省串行等待）
+        codec_task = asyncio.create_task(client.resolve_codec(block=False))
+        g711_alaw_task = loop.run_in_executor(
             None,
             lambda: self.local.synthesize_g711_sync(
-                text, codec=codec, volume_percent=int(volume)
+                text, codec="alaw", volume_percent=int(volume)
             ),
         )
+        codec = await codec_task
+        codec_ms = int((time.perf_counter() - t0) * 1000)
+        t1 = time.perf_counter()
+        g711 = await g711_alaw_task
+        if normalize_g711_codec(codec) != "alaw":
+            g711 = await loop.run_in_executor(
+                None,
+                lambda: self.local.synthesize_g711_sync(
+                    text, codec=codec, volume_percent=int(volume)
+                ),
+            )
         synth_ms = int((time.perf_counter() - t1) * 1000)
         if not g711:
             logger.warning("TTS/G711 为空，无法推摄像头 camera_id=%s", camera_id)

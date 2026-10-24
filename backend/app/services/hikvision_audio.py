@@ -37,14 +37,35 @@ from app.core.hot_cache import HotCache
 def tail_hold_seconds(audio_s: float, send_s: float) -> float:
     """节奏推流结束后、close 前应等待的秒数，避免尾句被切断。
 
-    上送常快于实时播放；若只等固定 0.4s，长句末尾（店名）会被对讲 close 截掉。
+    上送常快于实时播放；设备扬声器还有开播延迟。若 hold 不足，
+    长句末尾「肠旺面(总店)」会被对讲 close 截掉。
     """
     audio_s = max(0.0, float(audio_s))
     send_s = max(0.0, float(send_s))
-    remain = audio_s - send_s + 0.28
+    # +0.85：覆盖固件开播延迟；长句再抬一点地板（短试听句不必干等）
+    remain = audio_s - send_s + 0.85
+    if audio_s >= 4.0:
+        remain = max(remain, 1.15)
+    elif audio_s < 1.2:
+        remain = min(remain, 0.2)
     if remain <= 0.05:
-        return 0.05 if audio_s > 0.2 else 0.0
-    return min(remain, audio_s + 0.5)
+        return 0.08 if audio_s > 0.2 else 0.0
+    return min(remain, audio_s + 1.0)
+
+
+def g711_silence_bytes(codec: str, duration_ms: int) -> bytes:
+    """G.711 静音（alaw=0xD5，ulaw=0xFF），用于播完语音后再垫一段再 close。"""
+    ms = max(0, int(duration_ms))
+    n = int(_G711_RATE * ms / 1000)
+    if n <= 0:
+        return b""
+    if normalize_g711_codec(codec) == "alaw":
+        return bytes([0xD5]) * n
+    return bytes([0xFF]) * n
+
+
+# 推流尾部静音：close 落在静音上，避免砍掉「肠旺面，总店」
+_G711_TAIL_SILENCE_MS = 900
 
 # 同摄像头对讲会话互斥（跨 TTSWorker 实例）
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
@@ -795,7 +816,17 @@ class HikvisionTwoWayAudio:
                 path = f"{path}?sessionId={session_id}"
 
             t0 = time.perf_counter()
-            audio_s = len(g711_data) / float(_G711_RATE)
+            # 语音时长按「有效语音」算；会员长句尾部再垫静音，close 落在静音段
+            speech_s = len(g711_data) / float(_G711_RATE)
+            silence = b""
+            if (
+                _G711_TAIL_SILENCE_MS > 0
+                and should_abort is None
+                and speech_s >= 2.5
+            ):
+                silence = g711_silence_bytes(codec, _G711_TAIL_SILENCE_MS)
+            stream_data = g711_data + silence if silence else g711_data
+            audio_s = len(stream_data) / float(_G711_RATE)
             try:
                 # CL:0 + 受控节奏：过快突发会「只响试」；过慢则长句首声拖很久
                 stats = await asyncio.to_thread(
@@ -805,7 +836,7 @@ class HikvisionTwoWayAudio:
                     path=path,
                     username=self.username,
                     password=self.password,
-                    g711_data=g711_data,
+                    g711_data=stream_data,
                     should_abort=should_abort,
                 )
                 if not isinstance(stats, dict):
@@ -813,17 +844,23 @@ class HikvisionTwoWayAudio:
                 send_s = time.perf_counter() - t0
                 aborted = int(stats.get("aborted") or 0) == 1
                 # 节奏推流常快于实时：close 太早会砍掉尾句（如「肠旺面(总店)」）。
-                # 须等到设备播完剩余时长；打断时跳过。
+                # hold 按有效语音时长；尾静音再吃掉一截误差。打断时跳过。
                 remain = 0.0
                 if not aborted:
-                    remain = tail_hold_seconds(audio_s, send_s)
+                    # 已上送的静音可抵消部分 hold，但仍按 speech 留足店名
+                    silence_s = len(silence) / float(_G711_RATE)
+                    effective_send = max(0.0, send_s - silence_s * 0.85)
+                    remain = tail_hold_seconds(speech_s, effective_send)
                     if remain > 0.05:
                         await asyncio.sleep(remain)
                 logger.info(
-                    "海康对讲节奏推流完成 codec=%s bytes=%s open_ms=%s first_chunk_ms=%s "
-                    "send_ms=%s push_ms=%s audio_ms=%s remain_ms=%s aborted=%s",
+                    "海康对讲节奏推流完成 codec=%s bytes=%s speech_ms=%s silence_ms=%s "
+                    "open_ms=%s first_chunk_ms=%s send_ms=%s push_ms=%s audio_ms=%s "
+                    "remain_ms=%s aborted=%s",
                     codec,
-                    len(g711_data),
+                    len(stream_data),
+                    int(speech_s * 1000),
+                    int(len(silence) / float(_G711_RATE) * 1000),
                     open_ms,
                     stats.get("first_chunk_ms", -1),
                     stats.get("send_ms", int(send_s * 1000)),

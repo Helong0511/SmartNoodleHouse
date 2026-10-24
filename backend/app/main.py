@@ -57,7 +57,23 @@ _leader_worker_id: str | None = None
 
 
 async def _warmup_recognition_and_tts() -> None:
-    """后台预热：先 TTS/G.711（迎宾热路径），再 InsightFace，避免人脸模型占满 CPU 导致首播合成卡数秒。"""
+    """后台预热：先 InsightFace live（门口识别），再 TTS/G.711。
+
+    旧顺序「先 TTS 再人脸」会让 RecognitionWorker 空跑 40s+ 漏检，体感像「认出访客要等十几秒」。
+    """
+    # 1) 实时人脸模型优先，缩短「人到→检出」
+    try:
+
+        def _load_live() -> None:
+            from app.services.face_extractor import _face_app_live
+
+            _face_app_live()
+
+        await asyncio.to_thread(_load_live)
+        logger.info("InsightFace live 预热完成")
+    except Exception:
+        logger.exception("InsightFace live 预热失败")
+
     try:
         from app.core.config import get_settings
         from app.core.database import AsyncSessionLocal
@@ -205,17 +221,18 @@ async def _warmup_recognition_and_tts() -> None:
     except Exception:
         logger.exception("TTS 预热失败")
 
+    # 2) 入库用大图模型可后加载（不挡门口 live 识别）
     try:
-        def _load_models() -> None:
-            from app.services.face_extractor import _face_app, _face_app_live
+
+        def _load_enroll() -> None:
+            from app.services.face_extractor import _face_app
 
             _face_app()
-            _face_app_live()
 
-        await asyncio.to_thread(_load_models)
-        logger.info("InsightFace 模型预热完成")
+        await asyncio.to_thread(_load_enroll)
+        logger.info("InsightFace 入库模型预热完成")
     except Exception:
-        logger.exception("InsightFace 模型预热失败")
+        logger.exception("InsightFace 入库模型预热失败")
 
 
 @asynccontextmanager

@@ -23,7 +23,7 @@ type RetryableConfig = InternalAxiosRequestConfig & {
   __retrySafe?: boolean
 }
 
-const MAX_NETWORK_RETRIES = 2
+const MAX_NETWORK_RETRIES = 4
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -66,7 +66,9 @@ async function maybeRetryRequest(client: AxiosInstance, err: AxiosError): Promis
   const cfg = err.config as RetryableConfig | undefined
   if (!canRetryConfig(cfg, err) || !cfg) return null
   cfg.__retryCount = (cfg.__retryCount || 0) + 1
-  await sleep(280 * cfg.__retryCount)
+  // InsightFace 热重载常要数秒～十余秒；退避略拉长，减少误弹「暂时不可用」
+  const n = cfg.__retryCount
+  await sleep(Math.min(2500, 350 * n * n))
   return client.request(cfg)
 }
 

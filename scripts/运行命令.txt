@@ -177,10 +177,12 @@ Start-Sleep -Seconds 1
 cd E:\SmartNoodleHouse\backend
 
 # 模拟器调试（仅本机访问）
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+# --reload-dir 只盯代码：勿监视整个 backend/，否则 uploads 抓拍/漏检 jpg 会反复热重启，
+# 前端 Vite 代理就会刷「后端暂时不可用（可能正在热重载）」
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app --reload-dir ../camera
 
 # 真机调试（手机需能访问电脑局域网 IP）
-# python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app --reload-dir ../camera
 
 # 本地 API: http://127.0.0.1:8000
 # 真机 API: http://192.168.1.110:8000
@@ -264,7 +266,7 @@ http://127.0.0.1:5173/display?store_id=1&token=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb
 微信、支付宝 小程序 同步
 
 cd E:\SmartNoodleHouse\backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app --reload-dir ../camera
 
 cd E:\SmartNoodleHouse\frontend
 npm install

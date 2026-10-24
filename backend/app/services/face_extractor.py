@@ -51,6 +51,16 @@ def _face_app_live():
     return app
 
 
+def ensure_live_face_app() -> None:
+    """阻塞加载 live 模型（供启动预热 / RecognitionWorker 就绪门闩）。"""
+    _face_app_live()
+
+
+def is_live_face_ready() -> bool:
+    """live 模型是否已在进程内缓存。"""
+    return _face_app_live.cache_info().currsize > 0
+
+
 def _enhance_for_detect(img: np.ndarray) -> np.ndarray:
     """弱光/低对比度帧增强，供检测失败时二次尝试。"""
     import cv2
@@ -64,10 +74,10 @@ def _enhance_for_detect(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(cv2.merge([l2, a, b]), cv2.COLOR_LAB2BGR)
 
 
-def _downscale_for_live(img: np.ndarray, *, max_side: int = 1280) -> np.ndarray:
+def _downscale_for_live(img: np.ndarray, *, max_side: int = 960) -> np.ndarray:
     """主码流偶发 2560x1440：全分辨率跑 buffalo+det640 又慢又易漏远景脸。
 
-    长边压到 max_side，检测与门口召回更稳；入库路径不走此缩放。
+    长边压到 max_side（960：比 1280 更快出首检，门口脸仍够大）；入库不走此缩放。
     """
     import cv2
 

@@ -25,6 +25,8 @@ class RecognitionWorker:
         self._hit_counts: dict[int, int] = {}
         # 迎宾入队后短暂让出 CPU，避免 InsightFace 拖慢 TTS/对讲首包
         self._tts_yield_until: dict[int, float] = {}
+        # 近阈值暂缓陌生迎宾的起始时间（超时后仍按访客播，避免干等十余秒）
+        self._near_defer_since: dict[int, float] = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -33,7 +35,7 @@ class RecognitionWorker:
         from app.core.database import AsyncSessionLocal
         from app.core.config import get_settings
         from app.models import Camera
-        from app.services.face_extractor import extract_face_embedding_bgr
+        from app.services.face_extractor import extract_face_embedding_bgr, ensure_live_face_app
         from app.services.face_service import (
             VisitorService,
             WelcomeService,
@@ -48,6 +50,12 @@ class RecognitionWorker:
             "RecognitionWorker started (unknown_visitor_capture=%s)",
             bool(getattr(settings, "unknown_visitor_capture_enabled", True)),
         )
+        # 等 live 模型就绪再检脸，避免启动期空跑漏检被当成「识别后很久才播」
+        try:
+            await asyncio.to_thread(ensure_live_face_app)
+            logger.info("RecognitionWorker live 人脸模型就绪")
+        except Exception:
+            logger.exception("RecognitionWorker 等待 live 人脸模型失败，将边跑边加载")
         while not self._stop.is_set():
             try:
                 mgr = CameraManager()
@@ -114,20 +122,18 @@ class RecognitionWorker:
                                     shape,
                                     str(e)[:100],
                                 )
-                            # 连续漏检时落一张诊断图，便于对照预览画面是否有人/对准磨砂玻璃
+                            # 连续漏检时落一张诊断图，便于对照预览画面是否有人/对准磨砂玻璃。
+                            # 勿写入 backend/uploads：uvicorn --reload 监视 cwd 时会因写 jpg 反复重启，
+                            # 前端就会刷「后端暂时不可用（可能正在热重载）」。
                             if misses in (1, 30, 120) or (misses > 0 and misses % 200 == 0):
                                 try:
+                                    import tempfile
                                     from pathlib import Path
 
                                     import cv2
                                     import numpy as np
 
-                                    from app.core.config import get_settings
-
-                                    upload_root = Path(
-                                        getattr(get_settings(), "upload_dir", None) or "uploads"
-                                    )
-                                    dbg = upload_root / "debug"
+                                    dbg = Path(tempfile.gettempdir()) / "SmartNoodleHouse" / "face_debug"
                                     dbg.mkdir(parents=True, exist_ok=True)
                                     out = dbg / f"face_miss_cam{cam_id}.jpg"
                                     cv2.imwrite(str(out), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
@@ -178,32 +184,63 @@ class RecognitionWorker:
                                     self._hit_counts.get(cam_id, 0),
                                     getattr(frame, "shape", None),
                                 )
-                            # 近阈值：多半是会员下一帧就能确认；先别播「欢迎光临」，否则排队拖到人走远
-                            near_margin = 0.12
+                            # 近阈值：短暂等待会员确认；超时仍播访客，避免干等 10–20s
+                            near_margin = 0.08
+                            near_max_wait = 1.5
                             defer_unknown = (
                                 best_id is not None
                                 and best_sim >= float(threshold) - near_margin
                             )
                             if defer_unknown:
-                                logger.info(
-                                    "近阈值暂缓陌生迎宾 camera_id=%s best_customer=%s "
-                                    "sim=%.4f threshold=%.4f margin=%.2f",
-                                    cam_id,
-                                    best_id,
-                                    best_sim,
-                                    threshold,
-                                    near_margin,
-                                )
+                                since = self._near_defer_since.get(cam_id)
+                                if since is None:
+                                    self._near_defer_since[cam_id] = now
+                                    since = now
+                                waited = now - since
+                                if waited < near_max_wait:
+                                    logger.info(
+                                        "近阈值暂缓陌生迎宾 camera_id=%s best_customer=%s "
+                                        "sim=%.4f threshold=%.4f waited=%.1fs/%.1fs",
+                                        cam_id,
+                                        best_id,
+                                        best_sim,
+                                        threshold,
+                                        waited,
+                                        near_max_wait,
+                                    )
+                                else:
+                                    logger.info(
+                                        "近阈值超时改访客迎宾 camera_id=%s best_customer=%s "
+                                        "sim=%.4f waited=%.1fs",
+                                        cam_id,
+                                        best_id,
+                                        best_sim,
+                                        waited,
+                                    )
+                                    defer_unknown = False
                             else:
+                                self._near_defer_since.pop(cam_id, None)
+
+                            if not defer_unknown:
                                 # 先入队播报再抓拍，降低「认出到出声」延迟
                                 try:
+                                    t_hit = time.perf_counter()
                                     welcomed = await VisitorService.maybe_welcome_unknown(
                                         db, cam_id, store_id=store_id
                                     )
                                     await db.commit()
                                     if welcomed:
+                                        self._near_defer_since.pop(cam_id, None)
+                                        enqueue_ms = int((time.perf_counter() - t_hit) * 1000)
+                                        logger.info(
+                                            "访客迎宾已入队 camera_id=%s enqueue_ms=%s "
+                                            "best_sim=%s",
+                                            cam_id,
+                                            enqueue_ms,
+                                            f"{best_sim:.4f}" if best_id is not None else "-",
+                                        )
                                         # 仅短暂让出，过长会导致人已离开才识别到会员
-                                        self._tts_yield_until[cam_id] = time.time() + 1.0
+                                        self._tts_yield_until[cam_id] = time.time() + 0.6
                                     else:
                                         logger.debug(
                                             "陌生迎宾未入队（关闭或冷却） camera_id=%s",
@@ -257,6 +294,7 @@ class RecognitionWorker:
                             cid,
                             avg,
                         )
+                        self._near_defer_since.pop(cam_id, None)
                         mem_key = f"{cam_id}:{cid}"
                         try:
                             # 先迎宾再落库，降低出声延迟
@@ -265,7 +303,8 @@ class RecognitionWorker:
                             )
                             await db.commit()
                             if ok:
-                                self._tts_yield_until[cam_id] = time.time() + 1.2
+                                # 仅短暂让出给 TTS 首包；过长会拖下一位会员/复检
+                                self._tts_yield_until[cam_id] = time.time() + 0.35
                             else:
                                 logger.info(
                                     "会员迎宾未入队（冷却或阈值） camera_id=%s customer_id=%s",

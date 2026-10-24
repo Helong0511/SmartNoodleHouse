@@ -42,10 +42,20 @@ def test_speak_generation_bump_for_member_interrupt():
 
 
 def test_near_threshold_margin_covers_false_unknown():
-    """sim=0.44 / threshold=0.48 应落入近阈值，避免先播陌生迎宾。"""
+    """sim=0.44 / threshold=0.48 应落入近阈值，短暂暂缓陌生迎宾。"""
     threshold = 0.48
-    near_margin = 0.12
+    near_margin = 0.08
     best_sim = 0.444
     defer = best_sim >= threshold - near_margin
     assert defer is True
+    # 超时后仍按访客播，避免干等 10–20s
+    near_max_wait = 1.5
+    assert near_max_wait <= 2.0
     assert 0.15 < threshold - near_margin  # 真正陌生仍会迎宾
+
+
+def test_face_extractor_live_ready_helpers_exist():
+    from app.services.face_extractor import ensure_live_face_app, is_live_face_ready
+
+    assert callable(ensure_live_face_app)
+    assert callable(is_live_face_ready)

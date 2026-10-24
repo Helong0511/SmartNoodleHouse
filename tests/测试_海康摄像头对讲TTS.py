@@ -11,6 +11,7 @@ import pytest
 from app.services.hikvision_audio import (
     HikvisionTwoWayAudio,
     clip_osd_channel_name,
+    g711_silence_bytes,
     normalize_g711_codec,
     pcm16le_to_alaw,
     pcm16le_to_ulaw,
@@ -24,10 +25,19 @@ from app.workers.tts_worker import CameraSpeakerTTS, LocalTTS, sanitize_tts_spee
 
 
 def test_tail_hold_waits_for_unplayed_store_name():
-    """长句上送约 4s、音频 6.6s 时，须再等约 2s+，否则尾部店名被 close 截断。"""
+    """长句上送约 4s、音频 6.6s 时，须再等约 3s+，否则尾部店名被 close 截断。"""
     remain = tail_hold_seconds(6.637, 3.989)
-    assert remain >= 2.5
-    assert remain <= 7.2
+    assert remain >= 3.2
+    assert remain <= 7.7
+
+
+def test_g711_silence_bytes_alaw_ulaw():
+    alaw = g711_silence_bytes("alaw", 100)
+    ulaw = g711_silence_bytes("ulaw", 100)
+    assert len(alaw) == 800
+    assert len(ulaw) == 800
+    assert set(alaw) == {0xD5}
+    assert set(ulaw) == {0xFF}
 
 
 def test_sanitize_tts_unwraps_store_parens():
