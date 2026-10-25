@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-24T16:02:49Z",
+  "updated_at": "2026-10-25T08:20:27Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -4880,6 +4880,12 @@
       "size": 1831,
       "normalized_sha256": "90bcf030a3521beee6215c41153b8cda5ef2f6ee75d4702c12890ab615c67d40"
     },
+    "tests/测试_人脸最佳帧窗口.py": {
+      "role": "observe",
+      "sha256": "9a20fe5908f641227ad405ba32dbcb645704486ac474520c468355c636ed89fb",
+      "size": 1728,
+      "normalized_sha256": "9a20fe5908f641227ad405ba32dbcb645704486ac474520c468355c636ed89fb"
+    },
     "tests/测试_人脸活体接线.py": {
       "role": "observe",
       "sha256": "c9dd260738f6b7ee6314b15064ae368ac645d96c7e319d6769fece13db02af56",
@@ -5524,9 +5530,9 @@
     },
     "tests/测试_海康摄像头对讲TTS.py": {
       "role": "observe",
-      "sha256": "5b5c2f71c5b1f017e8ef78acfe9c215f44333372c9412087016e939754673084",
-      "size": 7125,
-      "normalized_sha256": "bb7ec40d556d4fda04138b1189afe7d982e6a617083fd8789ff5191fb72d1ac6"
+      "sha256": "bd711a06301288ae80a833a562e83f7d7573df596bd32ef142e9a4daa0e366d1",
+      "size": 10199,
+      "normalized_sha256": "f9d80107c55e61bc83a6d431bd2aaa13b5fd894270fd9f6a0d1a9ed0800042da"
     },
     "tests/测试_消息幂等与域模块.py": {
       "role": "observe",
@@ -5755,6 +5761,12 @@
       "sha256": "30496def8a6e1e771c04f55c12f5e2909456901588b2d2c27ea9a11f065c307b",
       "size": 796,
       "normalized_sha256": "b12c2079fa484cfeb6e8429e09463879ccb6982f552d50c3f00d8231efbbfabf"
+    },
+    "tests/测试_迎宾播报时延.py": {
+      "role": "observe",
+      "sha256": "415c89e5e221153371c630ae6d9dffed53a31cb15c828ce4a823602440087cbe",
+      "size": 1826,
+      "normalized_sha256": "415c89e5e221153371c630ae6d9dffed53a31cb15c828ce4a823602440087cbe"
     },
     "tests/测试_退款扣积分实时.py": {
       "role": "observe",

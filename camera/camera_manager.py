@@ -14,6 +14,47 @@ class CameraNotLeaderError(RuntimeError):
     """非 Leader worker 尝试操作摄像头时抛出。"""
 
 
+def is_rtsp_frame_usable(frame: np.ndarray | None) -> bool:
+    """过滤 HEVC/RTSP 半解码花屏（大面积纯灰 + 一侧碎条），避免写入识别缓冲。"""
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return False
+    try:
+        h, w = int(frame.shape[0]), int(frame.shape[1])
+        if h < 64 or w < 64:
+            return False
+        # 抽样降采样，开销极小
+        step = max(1, min(h, w) // 96)
+        sample = frame[::step, ::step]
+        if sample.ndim == 3:
+            gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = sample
+        mean = float(np.mean(gray))
+        std = float(np.std(gray))
+        # 典型坏帧：整幅近灰 std 极低；或左/右大半幅几乎常数、仅一条竖带有内容
+        if std < 8.0:
+            return False
+        # 左右各 1/4：若一侧几乎无纹理而另一侧有人，多为解码撕裂
+        mid = gray.shape[1] // 2
+        left = gray[:, : max(1, mid // 2)]
+        right = gray[:, -max(1, mid // 2) :]
+        left_std = float(np.std(left))
+        right_std = float(np.std(right))
+        if min(left_std, right_std) < 4.0 and max(left_std, right_std) > 18.0:
+            # 再看是否大片接近 mean（灰底）
+            flat_ratio = float(np.mean(np.abs(gray.astype(np.float32) - mean) < 6.0))
+            if flat_ratio > 0.55:
+                return False
+        # 全图过平（办公室正常画面 std 通常 >15）
+        if std < 12.0 and 90.0 <= mean <= 140.0:
+            flat_ratio = float(np.mean(np.abs(gray.astype(np.float32) - mean) < 8.0))
+            if flat_ratio > 0.72:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 class FrameBuffer:
     """线程安全的最新帧缓存"""
 
@@ -135,7 +176,9 @@ class CameraWorker:
                 time.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
                 continue
-            self.frame_buffer.update(frame)
+            # 丢弃 HEVC 半帧/花屏，保留上一帧好画面供识别与抓拍
+            if is_rtsp_frame_usable(frame):
+                self.frame_buffer.update(frame)
             self.status = "ONLINE"
             time.sleep(interval)
 

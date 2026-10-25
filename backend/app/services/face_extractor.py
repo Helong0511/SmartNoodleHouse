@@ -203,20 +203,91 @@ def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float]
     return emb, quality
 
 
+def extract_live_face_hit(img: np.ndarray):
+    """到店实时：返回 embedding + 脸框占比/清晰度/置信度，供短时窗口择优。"""
+    from app.services.face_best_frame import LiveFaceHit
+
+    if not _insightface_available():
+        emb = extract_face_embedding_bgr(img, live=True)
+        return LiveFaceHit(
+            embedding=np.asarray(emb, dtype=np.float32),
+            det_score=0.5,
+            face_area_ratio=0.05,
+            sharpness=40.0,
+        )
+    try:
+        return _extract_insightface_live_hit(img)
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning("InsightFace live hit 失败: %s", e)
+        if not _opencv_fallback_allowed():
+            raise ValueError(f"人脸特征提取失败: {e}") from e
+        emb = _extract_opencv_fallback_bgr(img)
+        return LiveFaceHit(
+            embedding=np.asarray(emb, dtype=np.float32),
+            det_score=0.4,
+            face_area_ratio=0.05,
+            sharpness=30.0,
+        )
+
+
 def _extract_insightface_bgr(img: np.ndarray, *, live: bool = False) -> list[float]:
+    if live:
+        return extract_live_face_hit(img).embedding.tolist()
+    return _extract_insightface_enroll(img).tolist()
+
+
+def _face_embedding_from_face(face) -> np.ndarray:
+    raw = getattr(face, "normed_embedding", None)
+    if raw is None:
+        raw = face.embedding
+    emb = np.asarray(raw, dtype=np.float32)
+    if emb.size != EMBEDDING_DIM:
+        raise ValueError(
+            f"人脸特征维度不匹配：期望 {EMBEDDING_DIM}，实际 {emb.size}（禁止 padding）"
+        )
+    return emb / (np.linalg.norm(emb) + 1e-8)
+
+
+def _pick_largest_face(faces):
+    return max(
+        faces,
+        key=lambda f: float(
+            max(0.0, (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+        ),
+    )
+
+
+def _face_roi_sharpness(work: np.ndarray, bbox) -> float:
+    import cv2
+
+    h, w = int(work.shape[0]), int(work.shape[1])
+    x1 = max(0, int(bbox[0]))
+    y1 = max(0, int(bbox[1]))
+    x2 = min(w, int(bbox[2]))
+    y2 = min(h, int(bbox[3]))
+    if x2 <= x1 + 2 or y2 <= y1 + 2:
+        return 0.0
+    roi = work[y1:y2, x1:x2]
+    if roi.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if roi.ndim == 3 else roi
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def _extract_insightface_live_hit(img: np.ndarray):
+    from app.services.face_best_frame import LiveFaceHit
+
     if img is None or getattr(img, "size", 0) == 0:
         raise ValueError("无效视频帧")
-
-    # 用原图尺寸写错误信息；推理用缩放后的 live 帧
     src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0
     src_w = int(img.shape[1]) if getattr(img, "ndim", 0) >= 2 else 0
-    work = _downscale_for_live(img) if live else img
-
-    app = _face_app_live() if live else _face_app()
+    work = _downscale_for_live(img)
+    app = _face_app_live()
     with _INFER_LOCK:
         faces = app.get(work)
-        # 门口弱光/逆光：原图无脸时 CLAHE 增强再检一次
-        if live and not faces:
+        if not faces:
             enhanced = _enhance_for_detect(work)
             if enhanced is not None and enhanced is not work:
                 faces = app.get(enhanced)
@@ -225,36 +296,46 @@ def _extract_insightface_bgr(img: np.ndarray, *, live: bool = False) -> list[flo
         raise ValueError(
             f"未检测到人脸，请正对摄像头（{src_w}x{src_h} mean={mean:.0f}）"
         )
-    if live:
-        # 门口实时：取框面积最大的脸，避免陪同导致整帧丢弃
-        face = max(
-            faces,
-            key=lambda f: float(
-                max(0.0, (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-            ),
-        )
-    else:
-        if len(faces) > 1:
-            raise ValueError("检测到多张人脸，请确保画面中只有您一人")
-        face = faces[0]
-
+    face = _pick_largest_face(faces)
     det_score = float(getattr(face, "det_score", 1.0) or 1.0)
-    min_det = 0.22 if live else 0.5
-    if det_score < min_det:
+    if det_score < 0.22:
         raise ValueError(f"人脸检测置信度过低 det_score={det_score:.3f}")
+    bbox = face.bbox
+    fw = max(0.0, float(bbox[2] - bbox[0]))
+    fh = max(0.0, float(bbox[3] - bbox[1]))
+    area = float(work.shape[0] * work.shape[1]) or 1.0
+    ratio = (fw * fh) / area
+    sharp = _face_roi_sharpness(work, bbox)
+    emb = _face_embedding_from_face(face)
+    return LiveFaceHit(
+        embedding=emb,
+        det_score=det_score,
+        face_area_ratio=float(ratio),
+        sharpness=sharp,
+    )
 
-    # 优先官方已 L2 归一化向量
-    raw = getattr(face, "normed_embedding", None)
-    if raw is None:
-        raw = face.embedding
-    emb = np.asarray(raw, dtype=np.float32)
-    # fail-closed：禁止截断/padding，避免不同模型维度被 silently 对齐后误匹配
-    if emb.size != EMBEDDING_DIM:
+
+def _extract_insightface_enroll(img: np.ndarray) -> np.ndarray:
+    if img is None or getattr(img, "size", 0) == 0:
+        raise ValueError("无效视频帧")
+    src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0
+    src_w = int(img.shape[1]) if getattr(img, "ndim", 0) >= 2 else 0
+    work = img
+    app = _face_app()
+    with _INFER_LOCK:
+        faces = app.get(work)
+    if not faces:
+        mean = float(np.mean(work)) if getattr(work, "size", 0) else 0.0
         raise ValueError(
-            f"人脸特征维度不匹配：期望 {EMBEDDING_DIM}，实际 {emb.size}（禁止 padding）"
+            f"未检测到人脸，请正对摄像头（{src_w}x{src_h} mean={mean:.0f}）"
         )
-    emb = emb / (np.linalg.norm(emb) + 1e-8)
-    return emb.tolist()
+    if len(faces) > 1:
+        raise ValueError("检测到多张人脸，请确保画面中只有您一人")
+    face = faces[0]
+    det_score = float(getattr(face, "det_score", 1.0) or 1.0)
+    if det_score < 0.5:
+        raise ValueError(f"人脸检测置信度过低 det_score={det_score:.3f}")
+    return _face_embedding_from_face(face)
 
 
 def _extract_opencv_fallback_bgr(img: np.ndarray) -> list[float]:

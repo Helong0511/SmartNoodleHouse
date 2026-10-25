@@ -42,10 +42,12 @@ def tail_hold_seconds(audio_s: float, send_s: float) -> float:
     """
     audio_s = max(0.0, float(audio_s))
     send_s = max(0.0, float(send_s))
-    # +0.85：覆盖固件开播延迟；长句再抬一点地板（短试听句不必干等）
-    remain = audio_s - send_s + 0.85
+    # +1.0：覆盖固件开播延迟；长句再抬一点地板（短试听句不必干等）
+    remain = audio_s - send_s + 1.0
     if audio_s >= 4.0:
-        remain = max(remain, 1.15)
+        remain = max(remain, 1.35)
+    elif audio_s >= 2.5:
+        remain = max(remain, 0.95)
     elif audio_s < 1.2:
         remain = min(remain, 0.2)
     if remain <= 0.05:
@@ -65,7 +67,7 @@ def g711_silence_bytes(codec: str, duration_ms: int) -> bytes:
 
 
 # 推流尾部静音：close 落在静音上，避免砍掉「肠旺面，总店」
-_G711_TAIL_SILENCE_MS = 900
+_G711_TAIL_SILENCE_MS = 1100
 
 # 同摄像头对讲会话互斥（跨 TTSWorker 实例）
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
@@ -822,7 +824,7 @@ class HikvisionTwoWayAudio:
             if (
                 _G711_TAIL_SILENCE_MS > 0
                 and should_abort is None
-                and speech_s >= 2.5
+                and speech_s >= 2.0
             ):
                 silence = g711_silence_bytes(codec, _G711_TAIL_SILENCE_MS)
             stream_data = g711_data + silence if silence else g711_data
