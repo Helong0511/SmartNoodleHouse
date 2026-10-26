@@ -65,9 +65,7 @@ def test_sync_speak_generation_from_redis_raises_local(monkeypatch):
     monkeypatch.setattr(
         "app.services.face_service.get_redis", _fake_get_redis
     )
-    out = asyncio.get_event_loop().run_until_complete(
-        WelcomeService.sync_speak_generation_from_redis(cam)
-    )
+    out = asyncio.run(WelcomeService.sync_speak_generation_from_redis(cam))
     assert out == 7
     assert WelcomeService.speak_generation(cam) == 7
 
@@ -100,9 +98,7 @@ def test_bump_speak_generation_async_uses_redis_incr(monkeypatch):
     monkeypatch.setattr(
         "app.services.face_service.get_redis", _fake_get_redis
     )
-    out = asyncio.get_event_loop().run_until_complete(
-        WelcomeService.bump_speak_generation_async(cam)
-    )
+    out = asyncio.run(WelcomeService.bump_speak_generation_async(cam))
     assert out == 1
     assert "incr" in calls and "expire" in calls
     assert WelcomeService.speak_generation(cam) == 1

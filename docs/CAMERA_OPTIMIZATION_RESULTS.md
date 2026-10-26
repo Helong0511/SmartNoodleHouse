@@ -72,7 +72,7 @@ pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修�
        tests/测试_陌生访客迎宾与清空.py tests/测试_海康摄像头对讲TTS.py
        tests/测试_人脸最佳帧窗口.py tests/测试_迎宾播报时延.py
        tests/测试_摄像头Leader守卫.py
-→ 44 passed
+→ 48 passed（2026-10-26 续作含 speak_gen Redis / light 签名用例）
 ```
 
 ## 5. 资源与依赖
@@ -87,11 +87,16 @@ pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修�
 - GPU（CUDA）本机不可用；勿宣称 GPU 加速。  
 - 固定真人标签回归集与阈值重标定。  
 - 多摄长时内存曲线。  
-- TTS/对讲路径本轮未再改（上轮已修 codec/改密）。
+- TTS/对讲：本轮补 Redis `speak_generation` 跨进程打断；codec/改密仍依赖上轮修复。
 
-## 7. 后续建议（未实施）
+## 7. 本轮续作（已落地）
+
+1. **Redis `speak_generation`**：`INCR`/`GET` + 本地缓存；会员 `enqueue` 走 `bump_speak_generation_async`；陌生播报中 0.2s 轮询 Redis 供同步 abort。  
+2. **收集期 light 检测**：`max_side=720`、跳过 CLAHE；定稿对 `best_frame` 再 `light=False` 完整提特征后匹配。
+
+## 8. 后续建议（仍未实施）
 
 1. 建立门店距离下的子码流人脸像素验证后再调 `detect_fps`/分辨率。  
-2. 仅在窗口定稿帧跑完整 recognition，收集期可用更轻检测（需准确率回归）。  
-3. 标签集驱动阈值曲线；禁止再靠直觉拧 `threshold+0.04`。  
-4. Redis 侧统一 `speak_generation`（多进程打断）。
+2. 标签集驱动阈值曲线；禁止再靠直觉拧 `threshold+0.04`。  
+3. 收集期 light 路径的真人准确率对比（需标签视频，勿臆造 %）。  
+4. 真实海康端到端 P50/P95。

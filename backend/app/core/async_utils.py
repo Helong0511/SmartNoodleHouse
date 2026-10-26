@@ -29,7 +29,14 @@ def spawn_bg(coro_or_task: Awaitable | asyncio.Task) -> None:
             loop = asyncio.get_running_loop()
             task = loop.create_task(coro_or_task)
     except RuntimeError:
-        # 无事件循环（同步测试环境等），静默忽略
+        # 无事件循环（同步测试环境等）：关闭未调度协程，避免 ResourceWarning
+        if not isinstance(coro_or_task, asyncio.Task):
+            close = getattr(coro_or_task, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
         return
     _BG_TASKS.add(task)
     task.add_done_callback(_BG_TASKS.discard)

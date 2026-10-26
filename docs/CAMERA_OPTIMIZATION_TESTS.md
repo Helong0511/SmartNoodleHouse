@@ -10,7 +10,7 @@ python -m pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头
   tests/测试_摄像头Leader守卫.py -q
 ```
 
-2026-10-26 结果：**44 passed**。
+2026-10-26 续作后以本机 pytest 为准（见 RESULTS）。
 
 ## 覆盖映射
 
@@ -23,6 +23,7 @@ python -m pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头
 | 陌生客 Redis 冷却 | `测试_陌生访客迎宾与清空.py` |
 | 窗口择优 | `测试_人脸最佳帧窗口.py` |
 | 海康 G711 / Client 复用 | `测试_海康摄像头对讲TTS.py` |
+| speak_generation Redis / light 签名 | `测试_迎宾播报时延.py` |
 
 ## 准确率 / 现场（未自动化）
 
