@@ -61,6 +61,14 @@ CameraManager (RTSP/TCP, Leader-only)
 | K1 | P1 | overview 只计 ONLINE | DEGRADED 被算离线，KPI 误导 | **已修**：计入 online + 透出 degraded | `test_cameras_overview_counts_degraded_as_usable` | 否 |
 | K2 | P2 | start/创建 的 last_online 仅 ONLINE | 降级态不刷新最近在线 | **已修**：ONLINE/DEGRADED 均写 | cameras.py | 否 |
 | K3 | P2 | speak_task 本地 TTL 用墙钟 | 时钟回拨永久挂住轮询态 | **已修**：`updated_mono` + monotonic prune | `test_speak_task_local_ttl_uses_monotonic` | 否 |
+| L1 | P1 | 入队成功后 commit 失败不写 yield/抑制 | TTS 已播仍可再排陌生「欢迎光临」 | **已修**：ok/welcomed 在 try 外判定再写 | `test_recognition_worker_sets_suppress_even_if_commit_fails` | 否 |
+| L2 | P3 | `cameraStatusTagType` 无 DEGRADED | 降级与离线同色 | **已修**：`warning` | labels.ts | 否 |
+| M1 | P0 | Leader 仅 `tts_provider==local` 启 TTSWorker | 生产 edge 迎宾队列永不消费、永不出声 | **已修**：edge/local 均启 | `test_leader_starts_tts_worker_for_edge_provider` | 否 |
+| M2 | P1 | stop/delete 不 bump speak_gen | 停采后对讲仍推完旧句 | **已修**：bump + 出队见无 worker 则 `camera_stopped` | stop/TTS 单测 | 否 |
+| M3 | P2 | overview 无 worker 信库 ONLINE | Leader 重启失败后 KPI 假在线 | **已修**：Leader 无 worker 降为 OFFLINE | `test_cameras_overview_leader_demotes_stale_online_without_worker` | 否 |
+| N1 | P1 | `_serialize` 无 worker 仍用库 ONLINE | 列表/详情假在线，与 overview 不一致 | **已修**：Leader 同降 OFFLINE | `test_serialize_leader_demotes_stale_online_without_worker` | 否 |
+| N2 | P2 | 停采 cancel 含 `test_speak`(both) | 双端试听整单取消、本机也不播 | **已修**：仅 member/unknown/test_speak_camera | TTS 单测 | 否 |
+| N3 | P3 | 双端试听不 poll speak-task | both 无推流结果提示 | **已修**：camera/both 均 poll | Cameras.vue | 否 |
 
 ## 3. 潜在 / 未修（有原因）
 

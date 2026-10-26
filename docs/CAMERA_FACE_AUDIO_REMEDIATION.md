@@ -94,6 +94,23 @@
 - **K2**：启动/创建后 `last_online_at` 在 `ONLINE` 与 `DEGRADED` 时均更新。
 - **K3**：进程内 `speak_task` 用 `updated_mono` 做 TTL；对外响应仍只暴露墙钟 `updated_at`。
 
+## L1–L2 入队后抑制 / DEGRADED 标签色（续）
+
+- **L1**：`recognition_worker` 会员/陌生迎宾入队成功后，即使 `db.commit` 失败仍写 `_tts_yield_until` / `_suppress_unknown_until`（TTS 已入队会播，勿再叠「欢迎光临」）。
+- **L2**：后台 `cameraStatusTagType` 将 `DEGRADED` 标为 `warning`，与离线 `info` 区分。
+
+## M1–M3 edge TTS / 停采打断 / overview 假在线（续）
+
+- **M1**：Leader 对 `TTS_PROVIDER=edge` 与 `local` 均启动 `TTSWorker`（原先仅 local，生产 edge 队列永不消费）。
+- **M2**：`stop`/`delete` bump `speak_gen`；TTS 出队后若 Leader 上无该机位 worker 则 `cancelled/camera_stopped`。
+- **M3**：overview 在 Leader 且无 worker 时不把库内 `ONLINE/DEGRADED/RECONNECTING` 计入在线（非 Leader 仍信库）。
+
+## N1–N3 列表假在线 / both 试听 / poll（续）
+
+- **N1**：`_serialize` 与 overview 同：Leader 无 worker 时列表/详情不展示库内 ONLINE/DEGRADED。
+- **N2**：`camera_stopped` 取消仅限 member/unknown_visitor/test_speak_camera；`test_speak`(both) 仍可叠本机。
+- **N3**：后台试听 `both` 与 `camera` 一样轮询 speak-task。
+
 ## 其它
 
 - `cameras.probe-face`：过期帧返回 `reason=stale_frame`。

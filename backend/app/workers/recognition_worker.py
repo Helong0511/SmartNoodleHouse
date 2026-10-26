@@ -429,34 +429,36 @@ class RecognitionWorker:
 
                             if not defer_unknown:
                                 # 先入队播报再抓拍，降低「认出到出声」延迟
+                                # 入队成功后即使 commit 失败，TTS 仍会播，须照样 yield
+                                welcomed = False
+                                t_hit = time.perf_counter()
                                 try:
-                                    t_hit = time.perf_counter()
                                     welcomed = await VisitorService.maybe_welcome_unknown(
                                         db, cam_id, store_id=store_id
                                     )
                                     await db.commit()
-                                    if welcomed:
-                                        self._near_defer_since.pop(cam_id, None)
-                                        enqueue_ms = int((time.perf_counter() - t_hit) * 1000)
-                                        logger.info(
-                                            "访客迎宾已入队 camera_id=%s enqueue_ms=%s "
-                                            "best_sim=%s",
-                                            cam_id,
-                                            enqueue_ms,
-                                            f"{best_sim:.4f}" if best_id is not None else "-",
-                                        )
-                                        # 仅短暂让出，过长会导致人已离开才识别到会员
-                                        self._tts_yield_until[cam_id] = (
-                                            time.monotonic() + 0.6
-                                        )
-                                    else:
-                                        logger.debug(
-                                            "陌生迎宾未入队（关闭或冷却） camera_id=%s",
-                                            cam_id,
-                                        )
                                 except Exception:
                                     await db.rollback()
                                     logger.exception("未知访客迎宾失败 camera_id=%s", cam_id)
+                                if welcomed:
+                                    self._near_defer_since.pop(cam_id, None)
+                                    enqueue_ms = int((time.perf_counter() - t_hit) * 1000)
+                                    logger.info(
+                                        "访客迎宾已入队 camera_id=%s enqueue_ms=%s "
+                                        "best_sim=%s",
+                                        cam_id,
+                                        enqueue_ms,
+                                        f"{best_sim:.4f}" if best_id is not None else "-",
+                                    )
+                                    # 仅短暂让出，过长会导致人已离开才识别到会员
+                                    self._tts_yield_until[cam_id] = (
+                                        time.monotonic() + 0.6
+                                    )
+                                else:
+                                    logger.debug(
+                                        "陌生迎宾未入队（关闭或冷却） camera_id=%s",
+                                        cam_id,
+                                    )
 
                             capture_on = await SystemSettingsService.effective_bool(
                                 db,
@@ -563,31 +565,33 @@ class RecognitionWorker:
                         )
                         self._near_defer_since.pop(cam_id, None)
                         mem_key = f"{cam_id}:{cid}"
+                        # 入队成功后即使 commit 失败，TTS 仍会播，须照样 yield/抑制陌生
+                        ok = False
                         try:
                             # 先迎宾再落库，降低出声延迟
                             ok = await WelcomeService.try_welcome(
                                 db, cid, cam_id, avg, preconfirmed=True
                             )
                             await db.commit()
-                            if ok:
-                                # 仅短暂让出给 TTS 首包；过长会拖下一位会员/复检
-                                self._tts_yield_until[cam_id] = (
-                                    time.monotonic() + 0.35
-                                )
-                                # 会员播报进行中勿再插「欢迎光临」（坏帧误判会再排 10s+）
-                                self._suppress_unknown_until[cam_id] = (
-                                    time.monotonic() + 25.0
-                                )
-                            else:
-                                logger.info(
-                                    "会员迎宾未入队（冷却或阈值） camera_id=%s customer_id=%s",
-                                    cam_id,
-                                    cid,
-                                )
                         except Exception:
                             await db.rollback()
                             logger.exception(
                                 "会员迎宾失败 camera_id=%s customer_id=%s",
+                                cam_id,
+                                cid,
+                            )
+                        if ok:
+                            # 仅短暂让出给 TTS 首包；过长会拖下一位会员/复检
+                            self._tts_yield_until[cam_id] = (
+                                time.monotonic() + 0.35
+                            )
+                            # 会员播报进行中勿再插「欢迎光临」（坏帧误判会再排 10s+）
+                            self._suppress_unknown_until[cam_id] = (
+                                time.monotonic() + 25.0
+                            )
+                        else:
+                            logger.info(
+                                "会员迎宾未入队（冷却或阈值） camera_id=%s customer_id=%s",
                                 cam_id,
                                 cid,
                             )

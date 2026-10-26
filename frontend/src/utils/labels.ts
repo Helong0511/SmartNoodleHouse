@@ -491,6 +491,8 @@ export function cameraStatusTagType(status: string) {
     ONLINE: 'success',
     OFFLINE: 'info',
     RECONNECTING: 'warning',
+    // 偶发坏帧仍可识别，勿与离线同色
+    DEGRADED: 'warning',
     DISABLED: 'info',
   }
   return m[String(status || '').toUpperCase()] || 'info'

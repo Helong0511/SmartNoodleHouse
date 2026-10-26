@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import cv2
@@ -25,6 +26,7 @@ from app.services.camera_credentials import (
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/cameras", tags=["摄像头"])
+logger = logging.getLogger(__name__)
 
 
 class CameraCreate(BaseModel):
@@ -94,14 +96,28 @@ def _serialize(c: Camera, mgr) -> dict:
             }
     except Exception:
         pass
-    live = runtime.get("status") if runtime.get("running") else c.status
+    # 与 overview 一致：有采集线程用 runtime；Leader 无 worker 勿用库内 ONLINE/DEGRADED 覆盖
+    if runtime.get("running"):
+        status_out = runtime.get("status") or "OFFLINE"
+    else:
+        try:
+            from app.core.leader_lock import is_leader_held
+
+            on_leader = bool(is_leader_held())
+        except Exception:
+            on_leader = False
+        db_st = str(c.status or "").upper()
+        if on_leader and db_st in ("ONLINE", "DEGRADED", "RECONNECTING"):
+            status_out = "OFFLINE"
+        else:
+            status_out = c.status or "OFFLINE"
     return {
         "id": c.id,
         "name": c.name,
         "camera_type": c.camera_type,
         "source_url": mask_rtsp_url(c.source_url),
         "username": c.username,
-        "status": live or c.status,
+        "status": status_out,
         "fps": c.fps,
         "detect_fps": c.detect_fps,
         "store_id": c.store_id,
@@ -126,8 +142,25 @@ async def cameras_overview(request: Request, db: DbSession, user: CurrentUser):
     online = 0
     degraded = 0
     reconnecting = 0
+    try:
+        from app.core.leader_lock import is_leader_held
+
+        on_leader = bool(is_leader_held())
+    except Exception:
+        on_leader = False
     for c in cams:
-        st = mgr.get_status(c.id) if mgr.get_worker(c.id) else c.status
+        if mgr.get_worker(c.id):
+            st = mgr.get_status(c.id) or "OFFLINE"
+        elif on_leader:
+            # Leader 无 worker：勿把库内残留 ONLINE/DEGRADED 计入在线（非 Leader 仍信库）
+            db_st = str(c.status or "").upper()
+            st = (
+                "OFFLINE"
+                if db_st in ("ONLINE", "DEGRADED", "RECONNECTING")
+                else (db_st or "OFFLINE")
+            )
+        else:
+            st = c.status or "OFFLINE"
         # DEGRADED：偶发坏帧但仍有近期好帧，识别 Worker 仍跑；KPI「在线」须计入
         if st == "ONLINE":
             online += 1
@@ -670,6 +703,8 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     if restart and mgr.get_worker(camera_id):
         _start_worker(camera, force=True)
         camera.status = mgr.get_status(camera_id) or "OFFLINE"
+        if camera.status in ("ONLINE", "DEGRADED"):
+            camera.last_online_at = now_local()
     # 仅名称实际变更时同步海康右下角通道名 OSD（改地址/密码不同步）
     osd_sync: dict | None = None
     if name_changed and (camera.camera_type or "").upper() == "RTSP":
@@ -713,6 +748,12 @@ async def delete_camera(camera_id: int, request: Request, db: DbSession, user: C
     store_id = camera.store_id
     name = camera.name
     CameraManager().stop_camera(camera_id)
+    try:
+        from app.services.face_service import WelcomeService
+
+        await WelcomeService.bump_speak_generation_async(camera_id)
+    except Exception:
+        logger.debug("delete bump speak_gen failed camera_id=%s", camera_id, exc_info=True)
     await db.delete(camera)
     await db.flush()
     await AuditService.log(
@@ -770,6 +811,13 @@ async def stop_camera(camera_id: int, request: Request, db: DbSession, user: Cur
     _assert_cam_access(user, camera)
     CameraManager().stop_camera(camera_id)
     camera.status = "OFFLINE"
+    # 打断进行中的摄像头推流，避免停采后扬声器仍播完旧句
+    try:
+        from app.services.face_service import WelcomeService
+
+        await WelcomeService.bump_speak_generation_async(camera_id)
+    except Exception:
+        logger.debug("stop bump speak_gen failed camera_id=%s", camera_id, exc_info=True)
     await AuditService.log(
         db,
         user_id=user.id,

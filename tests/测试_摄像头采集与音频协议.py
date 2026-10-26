@@ -81,6 +81,30 @@ def test_cameras_overview_counts_degraded_as_usable():
     assert '"degraded": degraded' in src
 
 
+def test_cameras_overview_leader_demotes_stale_online_without_worker():
+    """Leader 无采集线程时勿把库内 ONLINE/DEGRADED 计入 KPI 在线。"""
+    import inspect
+
+    from app.api import cameras as cam_api
+
+    src = inspect.getsource(cam_api.cameras_overview)
+    assert "is_leader_held" in src
+    assert 'db_st in ("ONLINE", "DEGRADED", "RECONNECTING")' in src or (
+        "ONLINE" in src and "DEGRADED" in src and "RECONNECTING" in src
+    )
+
+
+def test_serialize_leader_demotes_stale_online_without_worker():
+    """列表/详情序列化与 overview 一致：Leader 无 worker 不展示库内 ONLINE。"""
+    import inspect
+
+    from app.api import cameras as cam_api
+
+    src = inspect.getsource(cam_api._serialize)
+    assert "is_leader_held" in src
+    assert 'db_st in ("ONLINE", "DEGRADED", "RECONNECTING")' in src
+
+
 @pytest.mark.asyncio
 async def test_play_g711_rejects_https_base():
     from app.services.hikvision_audio import HikvisionTwoWayAudio

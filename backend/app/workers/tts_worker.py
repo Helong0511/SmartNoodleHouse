@@ -903,6 +903,38 @@ class TTSWorker:
                         camera_id=camera_id,
                     )
                     continue
+                # Leader 上该机位已无采集线程：丢弃须走摄像头的待播项（勿拦 test_speak_pc；
+                # test_speak=both 仍可继续，speak() 内摄像头失败可叠本机）
+                if camera_id is not None and kind in (
+                    "member",
+                    "unknown_visitor",
+                    "test_speak_camera",
+                ):
+                    try:
+                        from app.core.leader_lock import is_leader_held
+                        from camera.camera_manager import CameraManager
+
+                        if is_leader_held() and CameraManager().get_worker(camera_id) is None:
+                            await WelcomeService.set_speak_task_status(
+                                task_id,
+                                "cancelled",
+                                reason="camera_stopped",
+                                kind=kind,
+                                camera_id=camera_id,
+                            )
+                            logger.info(
+                                "丢弃停采后迎宾 kind=%s camera_id=%s task_id=%s",
+                                kind,
+                                camera_id,
+                                (task_id or "")[:12],
+                            )
+                            continue
+                    except Exception:
+                        logger.debug(
+                            "camera_stopped check failed camera_id=%s",
+                            camera_id,
+                            exc_info=True,
+                        )
                 logger.info(
                     "TTS 开始播报 kind=%s camera_id=%s task_id=%s text=%s",
                     kind,

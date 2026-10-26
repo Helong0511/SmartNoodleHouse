@@ -375,7 +375,7 @@ def test_member_speak_is_abortable_by_speak_gen():
 
 
 def test_recognition_worker_deadlines_use_monotonic():
-    """yield/抑制近阈值用 monotonic，避免墙上时钟回拨导致永久跳过识别。"""
+    """yield/抑制近截止日期用 monotonic，避免墙上时钟回拨导致永久跳过识别。"""
     import inspect
 
     from app.workers.recognition_worker import RecognitionWorker
@@ -387,6 +387,68 @@ def test_recognition_worker_deadlines_use_monotonic():
     assert "time.time() + 0.35" not in src
     assert "time.time() + 25.0" not in src
     assert "time.time() + 0.6" not in src
+
+
+def test_recognition_worker_sets_suppress_even_if_commit_fails():
+    """入队成功后 commit 失败仍须 yield/抑制陌生，避免与会员句叠播。"""
+    import inspect
+    import re
+
+    from app.workers.recognition_worker import RecognitionWorker
+
+    src = inspect.getsource(RecognitionWorker.run)
+    # 会员：ok 在 try 外判定后再写 suppress（勿把 suppress 仅绑在 commit 成功分支）
+    assert re.search(
+        r"ok\s*=\s*False[\s\S]*?try_welcome[\s\S]*?if ok:[\s\S]*?_suppress_unknown_until",
+        src,
+    )
+    # 陌生：welcomed 同理
+    assert re.search(
+        r"welcomed\s*=\s*False[\s\S]*?maybe_welcome_unknown[\s\S]*?if welcomed:[\s\S]*?_tts_yield_until",
+        src,
+    )
+
+
+def test_leader_starts_tts_worker_for_edge_provider():
+    """生产 TTS_PROVIDER=edge 时也须启 TTSWorker，否则迎宾队列永不消费。"""
+    import inspect
+
+    import app.main as main_mod
+
+    # _start_leader_work 嵌在 lifespan 内，读 lifespan 源码即可
+    src = inspect.getsource(main_mod.lifespan)
+    assert "tts_worker.run()" in src
+    assert 'tts_provider == "local"' not in src
+    assert "tts_provider == 'local'" not in src
+
+
+def test_tts_worker_skips_when_camera_stopped_on_leader():
+    """停采后队列里的摄像头迎宾须 cancelled；both 试听勿整单取消。"""
+    import inspect
+    import re
+
+    from app.workers.tts_worker import TTSWorker
+
+    src = inspect.getsource(TTSWorker.run)
+    assert "camera_stopped" in src
+    assert "get_worker" in src
+    m = re.search(
+        r'kind in \(\s*"member",\s*"unknown_visitor",\s*"test_speak_camera",\s*\)',
+        src,
+    )
+    assert m, "camera_stopped 仅应取消 member/unknown/test_speak_camera"
+    # both 的 kind=test_speak 不得出现在该元组内
+    assert '"test_speak",' not in m.group(0)
+
+
+def test_stop_camera_bumps_speak_generation():
+    """停止摄像头须 bump speak_gen，打断进行中的对讲推流。"""
+    import inspect
+
+    from app.api import cameras as cam_api
+
+    src = inspect.getsource(cam_api.stop_camera)
+    assert "bump_speak_generation_async" in src
 
 
 def test_need_taste_covers_preference_template_placeholder():

@@ -4,7 +4,7 @@
 
 | 项 | 结果 | 说明 |
 |---|---|---|
-| 迎宾相关 pytest 子集 | **48 passed**（K1–K3 核对：采集/迎宾时延/陌生/多帧播报） | 本机 pytest 为准 |
+| 迎宾相关 pytest 子集 | **54 passed**（N1–N3：serialize / both 试听 / poll） | 采集/迎宾时延/陌生/多帧播报 |
 | 会员抢占待播试听 | **模拟通过** | `test_enqueue_member_preempts_pending_test_speak` |
 | MultiFrame TTL monotonic | **模拟通过** | `test_multiframe_ttl_uses_monotonic` |
 | 会员播报可 speak_gen 打断 | **模拟通过** | `_abortable` 含 member |

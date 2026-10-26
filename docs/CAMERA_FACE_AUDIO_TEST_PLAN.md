@@ -30,6 +30,10 @@ python -m pytest tests/测试_人脸冷匹配top1.py tests/测试_摄像头采�
 | 陌生轨迹 TTL monotonic | `测试_陌生访客迎宾与清空.py` | 单元 |
 | overview 计 DEGRADED | `测试_摄像头采集与音频协议.py` | 单元 |
 | speak_task 本地 TTL monotonic | `测试_迎宾播报时延.py` | 单元 |
+| 入队后 commit 失败仍抑制 | `测试_迎宾播报时延.py` | 单元 |
+| edge 亦启 TTSWorker / 停采打断 | `测试_迎宾播报时延.py` | 单元 |
+| overview Leader 无 worker 降级 | `测试_摄像头采集与音频协议.py` | 单元 |
+| serialize Leader 无 worker 降级 | `测试_摄像头采集与音频协议.py` | 单元 |
 | 花屏过滤 | `测试_RTSP帧完整性.py` | 单元 |
 | 窗口择优 | `测试_人脸最佳帧窗口.py` | 单元 |
 
