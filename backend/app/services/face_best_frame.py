@@ -67,19 +67,18 @@ class BestFaceWindow:
         return bool(self._entries) or self._session_started_at is not None
 
     def prune_now(self, now: float) -> DecideResult | None:
-        """漏检时推进过期清理；墙钟超时且仍有样本则强制定稿。"""
+        """漏检时推进过期清理；墙钟超时且脸够大则定稿，过久仍远则放弃。"""
         self._prune(now)
         if self._session_started_at is None:
             return None
         waited = now - self._session_started_at
         if waited >= self.hard_abandon_sec:
-            # 漏检过久：整窗作废，不定稿
             self.clear()
             return None
         if waited >= self.max_wait_sec and self._entries:
             ranked = sorted(self._entries, key=lambda e: self.score(e.hit), reverse=True)
             best = ranked[0]
-            # 仍远/仍弱：继续等走近，勿定稿
+            # 漏检触发时：小人脸不定稿（避免花屏/远景去撞陌生迎宾）
             if best.hit.face_area_ratio < self.min_decide_ratio:
                 return None
             if (
@@ -91,8 +90,6 @@ class BestFaceWindow:
             out = (best.hit, best.frame, support)
             self.clear()
             return out
-        if waited > self.hard_abandon_sec and not self._entries:
-            self.clear()
         return None
 
     @staticmethod
@@ -156,10 +153,13 @@ class BestFaceWindow:
             and best.hit.det_score >= self.early_det_score
         )
         too_far = best.hit.face_area_ratio < self.min_decide_ratio
-        # 远景：一直等到走近（early/plateau），或 hard_abandon 后静默丢弃——禁止 max_wait 强制定稿
-        if too_far and not early and not plateau:
-            if waited >= self.hard_abandon_sec:
-                self.clear()
+        # 远景：优先等走近；满 max_wait 仍远则定稿仅供「试匹配会员」
+        # （RecognitionWorker 对 ratio 过小禁止陌生迎宾/ENTER，避免 17:33 误访客）
+        if too_far and not early and not plateau and waited < self.max_wait_sec:
+            return None
+        if too_far and waited >= self.hard_abandon_sec and not early and not plateau:
+            # 久远仍无走近：静默丢弃，勿反复用极小脸撞访客链路
+            self.clear()
             return None
         if early or plateau or waited >= self.window_sec or waited >= self.max_wait_sec:
             if (

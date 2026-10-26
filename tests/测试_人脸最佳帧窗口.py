@@ -60,8 +60,8 @@ def test_early_decide_when_face_already_large_and_sharp():
     assert isinstance(decided[2], list)
 
 
-def test_tiny_far_face_waits_for_closer_not_force_decide():
-    """由远走近：ratio 过小即使过 max_wait 也不定稿（避免误访客）。"""
+def test_tiny_far_face_waits_then_soft_decide_for_match():
+    """由远走近：max_wait 前不定稿；满窗后可定稿供试匹配（访客侧另有 ratio 守卫）。"""
     win = BestFaceWindow(
         window_sec=2.0,
         max_wait_sec=3.0,
@@ -73,20 +73,34 @@ def test_tiny_far_face_waits_for_closer_not_force_decide():
     )
     frame = np.zeros((32, 32, 3), dtype=np.uint8)
     assert win.push(_hit(ratio=0.0002, sharp=8000.0, det=0.35), frame=frame, now=0.0) is None
-    assert win.push(_hit(ratio=0.0003, sharp=5000.0, det=0.4), frame=frame, now=3.5) is None
-    assert win.push(_hit(ratio=0.0004, sharp=4000.0, det=0.5), frame=frame, now=6.0) is None
-    # 走近后够大才定稿
-    decided = win.push(_hit(ratio=0.01, sharp=200.0, det=0.86), frame=frame, now=7.0)
-    assert decided is not None
-    assert decided[0].face_area_ratio == 0.01
+    assert win.push(_hit(ratio=0.0003, sharp=5000.0, det=0.4), frame=frame, now=2.5) is None
+    soft = win.push(_hit(ratio=0.0003, sharp=5000.0, det=0.4), frame=frame, now=3.05)
+    assert soft is not None
+    assert soft[0].face_area_ratio < 0.006
 
 
 def test_far_face_hard_abandon_clears_without_decide():
-    win = BestFaceWindow(hard_abandon_sec=5.0, min_decide_ratio=0.006)
+    win = BestFaceWindow(max_wait_sec=3.0, hard_abandon_sec=5.0, min_decide_ratio=0.006)
     frame = np.zeros((32, 32, 3), dtype=np.uint8)
     assert win.push(_hit(ratio=0.0002, sharp=8000.0, det=0.3), frame=frame, now=10.0) is None
     assert win.push(_hit(ratio=0.0003, sharp=7000.0, det=0.3), frame=frame, now=15.5) is None
     assert win.empty()
+
+
+def test_closer_face_decides_before_max_wait():
+    win = BestFaceWindow(
+        window_sec=2.0,
+        max_wait_sec=5.0,
+        min_decide_ratio=0.006,
+        early_ratio=0.008,
+        early_sharpness=80.0,
+        early_det_score=0.55,
+    )
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    assert win.push(_hit(ratio=0.0002, sharp=8000.0, det=0.35), frame=frame, now=0.0) is None
+    decided = win.push(_hit(ratio=0.01, sharp=200.0, det=0.86), frame=frame, now=1.2)
+    assert decided is not None
+    assert decided[0].face_area_ratio == 0.01
 
 
 def test_plateau_decides_mid_distance():

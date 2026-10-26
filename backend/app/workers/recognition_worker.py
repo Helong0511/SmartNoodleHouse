@@ -261,20 +261,23 @@ class RecognitionWorker:
                                     self._hit_counts.get(cam_id, 0),
                                     getattr(frame, "shape", None),
                                 )
-                            # 远景小人脸：只收集不播「欢迎光临」（由远走近常见 sim 很低）
+                            # 远景小人脸：可试匹配会员，但禁止陌生迎宾/ENTER
+                            # （17:33 走廊 ratio≈0.0002 sim≈0.17 误播「欢迎光临」）
                             face_ratio = float(getattr(best_hit, "face_area_ratio", 0.0) or 0.0)
-                            if face_ratio < 0.005:
+                            min_visitor_ratio = 0.005
+                            if face_ratio < min_visitor_ratio:
                                 logger.info(
-                                    "远景小人脸跳过陌生迎宾 camera_id=%s ratio=%.4f sim=%s",
+                                    "远景小人脸跳过陌生迎宾 camera_id=%s ratio=%.4f sim=%s "
+                                    "（等走近再认/再迎）",
                                     cam_id,
                                     face_ratio,
                                     f"{best_sim:.4f}" if best_id is not None else "-",
                                 )
                                 continue
 
-                            # 近阈值：多等一会儿让人走近再认；勿 1.5s 就改访客
-                            near_margin = 0.10
-                            near_max_wait = 4.0
+                            # 近阈值：多等一会儿让人走近再认；勿过早改访客
+                            near_margin = 0.12
+                            near_max_wait = 5.0
                             defer_unknown = (
                                 best_id is not None
                                 and best_sim >= float(threshold) - near_margin
