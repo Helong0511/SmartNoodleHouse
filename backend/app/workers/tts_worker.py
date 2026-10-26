@@ -365,8 +365,8 @@ class CameraSpeakerTTS(TTSProvider):
         force_local: bool = False,
         force_camera: bool = False,
         should_abort=None,
-    ) -> None:
-        """播报路由。
+    ) -> str:
+        """播报路由。返回 ok | cancelled | failed | local。
 
         - force_local：只走电脑扬声器（试听电脑）
         - force_camera：只走摄像头对讲，失败不回退本机（试听摄像头）
@@ -375,7 +375,7 @@ class CameraSpeakerTTS(TTSProvider):
         """
         if force_local:
             await self.local.speak(text, camera_id=camera_id)
-            return
+            return "local"
 
         use_camera = False
         if camera_id is not None:
@@ -394,26 +394,40 @@ class CameraSpeakerTTS(TTSProvider):
                         camera_id,
                     )
 
-        camera_ok = False
+        camera_result = "skipped"
         if use_camera:
             try:
-                camera_ok = await self._play_on_camera(
+                camera_result = await self._play_on_camera(
                     text, int(camera_id), should_abort=should_abort
                 )
-                if not camera_ok:
+                if camera_result == "failed":
                     logger.warning("摄像头播报未成功 camera_id=%s", camera_id)
+                elif camera_result == "cancelled":
+                    logger.info(
+                        "摄像头播报已取消（不回退本机、不记成功）camera_id=%s",
+                        camera_id,
+                    )
             except Exception:
                 logger.exception("摄像头播报异常 camera_id=%s", camera_id)
-                camera_ok = False
+                camera_result = "failed"
 
         if force_camera:
-            if not camera_ok:
+            if camera_result == "cancelled":
+                return "cancelled"
+            if camera_result != "ok":
                 raise RuntimeError("摄像头播报失败（对讲未成功）")
-            return
+            return "ok"
 
+        # 取消（如会员打断陌生迎宾）不得回退本机扬声器
+        if camera_result == "cancelled":
+            return "cancelled"
+
+        camera_ok = camera_result == "ok"
         # 正常迎宾：摄像头失败才回退本机；also_local 时叠播本机
         if also_local or not camera_ok:
             await self.local.speak(text, camera_id=camera_id)
+            return "local" if not camera_ok else "ok"
+        return "ok"
 
     async def _camera_speaker_enabled(self, camera_id: int) -> bool:
         from app.core.database import AsyncSessionLocal
@@ -433,7 +447,8 @@ class CameraSpeakerTTS(TTSProvider):
 
     async def _play_on_camera(
         self, text: str, camera_id: int, *, should_abort=None
-    ) -> bool:
+    ) -> str:
+        """返回 ok | cancelled | failed。cancelled 表示主动打断，不得当成功或回退本机。"""
         from app.core.config import get_settings
         from app.core.database import AsyncSessionLocal
         from app.models import Camera
@@ -449,7 +464,7 @@ class CameraSpeakerTTS(TTSProvider):
             cam = await db.get(Camera, camera_id)
             if not cam:
                 logger.warning("摄像头不存在 id=%s", camera_id)
-                return False
+                return "failed"
             # 对讲走 HTTP ISAPI，与 RTSP 拉流是否 ONLINE 无关；勿因 RECONNECTING 直接跳过
             source_url = cam.source_url or ""
             username = cam.username
@@ -466,12 +481,12 @@ class CameraSpeakerTTS(TTSProvider):
         # USB 数字源无法对讲
         if not source_url or source_url.isdigit():
             logger.info("摄像头无网络地址，跳过对讲播报 id=%s", camera_id)
-            return False
+            return "failed"
 
         base = resolve_isapi_base(source_url)
         if not base:
             logger.warning("无法解析摄像头 ISAPI 地址 id=%s url=%s", camera_id, source_url)
-            return False
+            return "failed"
 
         user = (username or "admin").strip() or "admin"
         password = ""
@@ -480,7 +495,7 @@ class CameraSpeakerTTS(TTSProvider):
                 password = decrypt_password(password_encrypted)
             except Exception:
                 logger.warning("摄像头密码解密失败 id=%s", camera_id)
-                return False
+                return "failed"
         else:
             # 兼容历史：从连接串拆密码（仅用于播报）
             try:
@@ -496,7 +511,7 @@ class CameraSpeakerTTS(TTSProvider):
                 pass
         if not password:
             logger.warning("摄像头无密码，无法 Digest 对讲 id=%s", camera_id)
-            return False
+            return "failed"
 
         import time
 
@@ -525,7 +540,7 @@ class CameraSpeakerTTS(TTSProvider):
         synth_ms = int((time.perf_counter() - t1) * 1000)
         if not g711:
             logger.warning("TTS/G711 为空，无法推摄像头 camera_id=%s", camera_id)
-            return False
+            return "failed"
         if synth_ms >= 200:
             logger.info(
                 "摄像头播报合成并已缓存 camera_id=%s synth_ms=%s text=%s",
@@ -534,11 +549,31 @@ class CameraSpeakerTTS(TTSProvider):
                 text[:40],
             )
         t2 = time.perf_counter()
-        await client.play_g711(g711, codec=codec, should_abort=should_abort)
+        play_result = await client.play_g711(
+            g711, codec=codec, should_abort=should_abort
+        )
         push_ms = int((time.perf_counter() - t2) * 1000)
+        status = str((play_result or {}).get("status") or "failed")
+        if status == "cancelled":
+            logger.info(
+                "摄像头迎宾播报取消 camera_id=%s phase=%s push_ms=%s",
+                camera_id,
+                (play_result or {}).get("phase"),
+                push_ms,
+            )
+            return "cancelled"
+        if status != "completed":
+            logger.warning(
+                "摄像头迎宾播报失败 camera_id=%s error=%s detail=%s",
+                camera_id,
+                (play_result or {}).get("error"),
+                (play_result or {}).get("detail"),
+            )
+            return "failed"
         logger.info(
-            "摄像头迎宾播报完成 camera_id=%s codec=%s volume=%s%% "
-            "bytes=%s codec_ms=%s synth_ms=%s push_ms=%s total_ms=%s",
+            "摄像头迎宾推流完成(设备出声未验证) camera_id=%s codec=%s volume=%s%% "
+            "bytes=%s codec_ms=%s synth_ms=%s push_ms=%s total_ms=%s "
+            "device_playback=%s",
             camera_id,
             codec,
             volume,
@@ -547,8 +582,9 @@ class CameraSpeakerTTS(TTSProvider):
             synth_ms,
             push_ms,
             codec_ms + synth_ms + push_ms,
+            (play_result or {}).get("device_playback"),
         )
-        return True
+        return "ok"
 
 
 class TTSWorker:
@@ -583,22 +619,32 @@ class TTSWorker:
                     continue
                 camera_id = item.get("camera_id")
                 kind = item.get("kind") or "member"
+                task_id = str(item.get("task_id") or "").strip() or None
                 try:
                     camera_id = int(camera_id) if camera_id is not None else None
                 except (TypeError, ValueError):
                     camera_id = None
+                from app.services.face_service import WelcomeService
+
                 logger.info(
-                    "TTS 开始播报 kind=%s camera_id=%s text=%s",
+                    "TTS 开始播报 kind=%s camera_id=%s task_id=%s text=%s",
                     kind,
                     camera_id,
+                    (task_id or "")[:12],
                     text[:40],
+                )
+                await WelcomeService.set_speak_task_status(
+                    task_id,
+                    "sending",
+                    kind=kind,
+                    camera_id=camera_id,
                 )
                 should_abort = None
                 stop_gen_poll: asyncio.Event | None = None
+                final_status = "completed"
                 # 陌生迎宾可被同机位后续会员入队打断，避免人走了还在播「欢迎光临」
                 if kind == "unknown_visitor" and camera_id is not None:
                     from app.core.async_utils import spawn_bg
-                    from app.services.face_service import WelcomeService
 
                     # 先拉 Redis，避免另一 Worker 已 bump 而本进程仍见旧世代
                     gen0 = await WelcomeService.sync_speak_generation_from_redis(
@@ -625,7 +671,7 @@ class TTSWorker:
 
                     spawn_bg(_poll_speak_gen())
                 try:
-                    await self.provider.speak(
+                    speak_outcome = await self.provider.speak(
                         text,
                         camera_id=camera_id,
                         force_local=(kind == "test_speak_pc"),
@@ -633,10 +679,58 @@ class TTSWorker:
                         also_local=(kind == "test_speak"),
                         should_abort=should_abort,
                     )
+                    if speak_outcome == "cancelled":
+                        final_status = "cancelled"
+                    elif speak_outcome in ("ok", "local"):
+                        final_status = "completed"
+                    else:
+                        final_status = "failed"
+                    await WelcomeService.set_speak_task_status(
+                        task_id,
+                        final_status,
+                        kind=kind,
+                        camera_id=camera_id,
+                        speak_outcome=speak_outcome,
+                        device_playback=(
+                            "unverified"
+                            if final_status == "completed"
+                            and kind
+                            in (
+                                "member",
+                                "unknown_visitor",
+                                "test_speak_camera",
+                                "test_speak",
+                            )
+                            else None
+                        ),
+                    )
+                    final_status = ""
+                except Exception as speak_err:
+                    logger.error("TTS speak failed: %s", speak_err)
+                    await WelcomeService.set_speak_task_status(
+                        task_id,
+                        "failed",
+                        kind=kind,
+                        camera_id=camera_id,
+                        error=str(speak_err)[:160],
+                    )
+                    final_status = ""
                 finally:
                     if stop_gen_poll is not None:
                         stop_gen_poll.set()
-                logger.info("TTS 播报结束 kind=%s camera_id=%s", kind, camera_id)
+                if final_status:
+                    await WelcomeService.set_speak_task_status(
+                        task_id,
+                        final_status,
+                        kind=kind,
+                        camera_id=camera_id,
+                    )
+                logger.info(
+                    "TTS 播报结束 kind=%s camera_id=%s task_id=%s",
+                    kind,
+                    camera_id,
+                    (task_id or "")[:12],
+                )
             except Exception as e:
                 logger.error("TTS worker error: %s", e)
 

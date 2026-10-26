@@ -1,7 +1,11 @@
 """迎宾播报时延相关：过期丢弃、会员打断世代、近阈值策略常量。"""
 from __future__ import annotations
 
+import json
 import time
+from unittest.mock import AsyncMock
+
+import pytest
 
 from app.services.face_service import WelcomeService
 
@@ -12,6 +16,7 @@ def test_stale_item_drops_old_welcome():
         "text": "欢迎光临",
         "camera_id": 1,
         "enqueued_at": time.time() - 30.0,
+        "task_id": "stale-task-1",
     }
     fresh = {
         "kind": "member",
@@ -21,6 +26,51 @@ def test_stale_item_drops_old_welcome():
     }
     assert WelcomeService.is_stale_item(old) is True
     assert WelcomeService.is_stale_item(fresh) is False
+
+
+@pytest.mark.asyncio
+async def test_dequeue_marks_stale_task_cancelled(monkeypatch):
+    store: dict[str, str] = {}
+    calls = {"n": 0}
+
+    class _FakeRedis:
+        async def brpop(self, key, timeout=1):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                return None
+            raw = json.dumps(
+                {
+                    "kind": "unknown_visitor",
+                    "text": "欢迎光临",
+                    "camera_id": 1,
+                    "enqueued_at": time.time() - 99.0,
+                    "task_id": "stale-tid",
+                },
+                ensure_ascii=False,
+            )
+            return (key, raw)
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def expire(self, key, ex=None):
+            return True
+
+    monkeypatch.setattr(
+        "app.services.face_service.get_redis",
+        AsyncMock(return_value=_FakeRedis()),
+    )
+
+    out = await WelcomeService.dequeue(timeout=0.3)
+    assert out is None
+    data = await WelcomeService.get_speak_task("stale-tid")
+    assert data is not None
+    assert data["status"] == "cancelled"
+    assert data.get("reason") == "stale"
 
 
 def test_test_speak_never_stale():
@@ -112,6 +162,36 @@ def test_extract_live_face_hit_accepts_light_kw():
 
     sig = inspect.signature(extract_live_face_hit)
     assert "light" in sig.parameters
+
+
+def test_live_face_hit_exposes_face_side_px_fields():
+    from app.services.face_best_frame import LiveFaceHit
+    import numpy as np
+
+    emb = np.ones(512, dtype=np.float32)
+    emb = emb / (np.linalg.norm(emb) + 1e-8)
+    hit = LiveFaceHit(
+        embedding=emb,
+        det_score=0.9,
+        face_area_ratio=0.02,
+        sharpness=100.0,
+        face_side_px=96,
+        frame_w=1920,
+        frame_h=1080,
+    )
+    assert hit.face_side_px == 96
+    assert hit.frame_w == 1920
+
+
+def test_downscale_for_live_respects_max_side():
+    import numpy as np
+    from app.services.face_extractor import _downscale_for_live
+
+    img = np.zeros((1440, 2560, 3), dtype=np.uint8)
+    light = _downscale_for_live(img, max_side=720)
+    full = _downscale_for_live(img, max_side=960)
+    assert max(light.shape[0], light.shape[1]) == 720
+    assert max(full.shape[0], full.shape[1]) == 960
 
 
 def test_near_threshold_margin_covers_false_unknown():

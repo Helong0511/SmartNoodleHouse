@@ -173,7 +173,9 @@ def resolve_isapi_base(source_url: str) -> str | None:
         return None
     if parsed.scheme in ("http", "https"):
         port = f":{parsed.port}" if parsed.port else ""
+        # 保留调用方 scheme；play_g711 对 https 显式拒绝（无 TLS 推流）
         return f"{parsed.scheme}://{host}{port}"
+    # RTSP/其他：对讲 ISAPI 默认走 HTTP（非 TLS 明文 TCP audioData）
     return f"http://{host}"
 
 
@@ -666,9 +668,14 @@ def _stream_audio_data_content_length_zero(
             )
             sock.close()
             sock, status, hdrs = _one_shot(auth)
-        if status not in (0, 200, 100) and status != 401:
-            if status >= 400:
-                raise RuntimeError(f"audioData 握手失败 HTTP {status}")
+        # status==0 常见于对端无完整响应头，不得当作可靠成功；仅允许 100/200 继续推流
+        if status == 401:
+            raise RuntimeError("audioData Digest 认证失败 HTTP 401")
+        if status not in (200, 100):
+            if status >= 400 or status == 0:
+                raise RuntimeError(
+                    f"audioData 握手失败 HTTP {status}（禁止将 status=0 视为成功）"
+                )
         # 2) 极短启动突发 + 受控节奏（防固件只响一声）
         aborted = False
         for i in range(0, len(g711_data), _CHUNK_BYTES):
@@ -860,19 +867,47 @@ class HikvisionTwoWayAudio:
         *,
         codec: str = "ulaw",
         should_abort=None,
-    ) -> None:
+    ) -> dict:
+        """推送 G.711 到摄像头对讲。
+
+        返回结构化结果（不得把「字节已发送」等同于「扬声器已出声」）：
+        - status: completed | cancelled | failed
+        - device_playback: unverified（本链路无可靠播放完成 ACK）
+        - error: 可选错误码，如 unsupported_audio_transport
+        """
         if not g711_data:
-            return
+            return {
+                "status": "failed",
+                "error": "empty_payload",
+                "device_playback": "unverified",
+            }
         codec = normalize_g711_codec(codec)
         timeout = httpx.Timeout(
             max(float(self.timeout), len(g711_data) / float(_G711_RATE) + 20.0),
             connect=5.0,
         )
         parsed = urlparse(self.base_url)
+        scheme = (parsed.scheme or "http").lower()
+        # 方案 A：原始 TCP audioData 无 TLS；HTTPS 基址明确拒绝，禁止静默当 HTTP
+        if scheme == "https":
+            logger.error(
+                "海康对讲拒绝 HTTPS 基址（原始 TCP 推流无 TLS）base=%s",
+                self.base_url,
+            )
+            return {
+                "status": "failed",
+                "error": "unsupported_audio_transport",
+                "device_playback": "unverified",
+                "detail": "audioData uses plain TCP; configure HTTP ISAPI base",
+            }
         host = parsed.hostname or ""
-        port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
+        port = int(parsed.port or 80)
         if not host:
-            raise RuntimeError("invalid ISAPI base url")
+            return {
+                "status": "failed",
+                "error": "invalid_base_url",
+                "device_playback": "unverified",
+            }
 
         lock = await self._lock_for()
         key = self._device_key()
@@ -881,7 +916,11 @@ class HikvisionTwoWayAudio:
                 try:
                     if should_abort():
                         logger.info("海康对讲播报在 open 前已取消 base=%s", self.base_url)
-                        return
+                        return {
+                            "status": "cancelled",
+                            "phase": "before_open",
+                            "device_playback": "unverified",
+                        }
                 except Exception:
                     pass
             client = await self._shared_client(timeout)
@@ -895,8 +934,17 @@ class HikvisionTwoWayAudio:
                 finally:
                     _SESSION_NEED_CLOSE[key] = False
 
-            open_resp = await client.put(self._url("/open"))
-            open_resp.raise_for_status()
+            try:
+                open_resp = await client.put(self._url("/open"))
+                open_resp.raise_for_status()
+            except Exception as e:
+                logger.warning("海康对讲 open 失败 base=%s err=%s", self.base_url, e)
+                return {
+                    "status": "failed",
+                    "error": "open_failed",
+                    "device_playback": "unverified",
+                    "detail": str(e)[:160],
+                }
             open_ms = int((time.perf_counter() - t_open) * 1000)
             _SESSION_NEED_CLOSE[key] = True
             session_id = _parse_session_id(open_resp.text) or ""
@@ -916,6 +964,8 @@ class HikvisionTwoWayAudio:
                 silence = g711_silence_bytes(codec, _G711_TAIL_SILENCE_MS)
             stream_data = g711_data + silence if silence else g711_data
             audio_s = len(stream_data) / float(_G711_RATE)
+            aborted = False
+            stats: dict = {}
             try:
                 # CL:0 + 受控节奏：过快突发会「只响试」；过慢则长句首声拖很久
                 stats = await asyncio.to_thread(
@@ -945,7 +995,7 @@ class HikvisionTwoWayAudio:
                 logger.info(
                     "海康对讲节奏推流完成 codec=%s bytes=%s speech_ms=%s silence_ms=%s "
                     "open_ms=%s first_chunk_ms=%s send_ms=%s push_ms=%s audio_ms=%s "
-                    "remain_ms=%s aborted=%s",
+                    "remain_ms=%s aborted=%s device_playback=unverified",
                     codec,
                     len(stream_data),
                     int(speech_s * 1000),
@@ -958,6 +1008,15 @@ class HikvisionTwoWayAudio:
                     int(remain * 1000),
                     aborted,
                 )
+            except Exception as e:
+                logger.warning("海康对讲推流失败 base=%s err=%s", self.base_url, e)
+                return {
+                    "status": "failed",
+                    "error": "stream_failed",
+                    "device_playback": "unverified",
+                    "detail": str(e)[:160],
+                    "open_ms": open_ms,
+                }
             finally:
                 try:
                     await client.put(self._url("/close"))
@@ -966,6 +1025,24 @@ class HikvisionTwoWayAudio:
                     logger.debug("hikvision close after play ignored", exc_info=True)
                     _SESSION_NEED_CLOSE[key] = True
                 await asyncio.sleep(0.08)
+
+            if aborted:
+                return {
+                    "status": "cancelled",
+                    "phase": "sending",
+                    "device_playback": "unverified",
+                    "open_ms": open_ms,
+                    "first_chunk_ms": stats.get("first_chunk_ms", -1),
+                    "send_ms": stats.get("send_ms"),
+                }
+            return {
+                "status": "completed",
+                "device_playback": "unverified",
+                "open_ms": open_ms,
+                "first_chunk_ms": stats.get("first_chunk_ms", -1),
+                "send_ms": stats.get("send_ms"),
+                "note": "bytes_sent_not_speaker_ack",
+            }
 
     async def play_ulaw(self, ulaw_data: bytes) -> None:
         await self.play_g711(ulaw_data, codec="ulaw")

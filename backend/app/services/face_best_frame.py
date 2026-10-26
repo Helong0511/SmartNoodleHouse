@@ -14,6 +14,10 @@ class LiveFaceHit:
     det_score: float
     face_area_ratio: float
     sharpness: float
+    # 映射回源分辨率后的脸框短边像素，供运维判断「子码流够不够认」
+    face_side_px: int = 0
+    frame_w: int = 0
+    frame_h: int = 0
 
 
 @dataclass

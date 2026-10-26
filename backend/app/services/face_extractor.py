@@ -211,6 +211,8 @@ def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
     """
     from app.services.face_best_frame import LiveFaceHit
 
+    src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0
+    src_w = int(img.shape[1]) if getattr(img, "ndim", 0) >= 2 else 0
     if not _insightface_available():
         emb = extract_face_embedding_bgr(img, live=True)
         return LiveFaceHit(
@@ -218,6 +220,9 @@ def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
             det_score=0.5,
             face_area_ratio=0.05,
             sharpness=40.0,
+            face_side_px=0,
+            frame_w=src_w,
+            frame_h=src_h,
         )
     try:
         return _extract_insightface_live_hit(img, light=light)
@@ -233,6 +238,9 @@ def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
             det_score=0.4,
             face_area_ratio=0.05,
             sharpness=30.0,
+            face_side_px=0,
+            frame_w=src_w,
+            frame_h=src_h,
         )
 
 
@@ -308,15 +316,24 @@ def _extract_insightface_live_hit(img: np.ndarray, *, light: bool = False):
     bbox = face.bbox
     fw = max(0.0, float(bbox[2] - bbox[0]))
     fh = max(0.0, float(bbox[3] - bbox[1]))
-    area = float(work.shape[0] * work.shape[1]) or 1.0
+    work_h = int(work.shape[0])
+    work_w = int(work.shape[1])
+    area = float(work_h * work_w) or 1.0
     ratio = (fw * fh) / area
     sharp = _face_roi_sharpness(work, bbox)
     emb = _face_embedding_from_face(face)
+    # bbox 在 work 坐标系；短边映射回源分辨率，便于对照「门口距离 vs 像素」
+    sx = float(src_w) / float(work_w) if work_w else 1.0
+    sy = float(src_h) / float(work_h) if work_h else 1.0
+    face_side_px = int(round(min(fw * sx, fh * sy)))
     return LiveFaceHit(
         embedding=emb,
         det_score=det_score,
         face_area_ratio=float(ratio),
         sharpness=sharp,
+        face_side_px=face_side_px,
+        frame_w=src_w,
+        frame_h=src_h,
     )
 
 

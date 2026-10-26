@@ -23,7 +23,7 @@ python -m pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头
 | 陌生客 Redis 冷却 | `测试_陌生访客迎宾与清空.py` |
 | 窗口择优 | `测试_人脸最佳帧窗口.py` |
 | 海康 G711 / Client 复用 | `测试_海康摄像头对讲TTS.py` |
-| speak_generation Redis / light 签名 | `测试_迎宾播报时延.py` |
+| speak_generation Redis / light / face_side_px | `测试_迎宾播报时延.py` |
 
 ## 准确率 / 现场（未自动化）
 

@@ -157,12 +157,11 @@ async def test_verify_liveness_challenge_replay_blocked():
 
 @pytest.mark.asyncio
 async def test_verify_liveness_challenge_action_not_completed():
-    """token 有效但动作未完成 → False（token 仍被原子消费）。"""
+    """未显式 action_completed → False，且不消费 token（允许重试）。"""
     from app.services.face_liveness_service import verify_liveness_challenge
 
     fake_redis = MagicMock()
-    payload = '{"action": "blink", "customer_id": 1}'
-    fake_redis.eval = AsyncMock(return_value=payload)
+    fake_redis.eval = AsyncMock(return_value='{"action": "blink"}')
     with patch(
         "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
     ), patch(
@@ -172,6 +171,27 @@ async def test_verify_liveness_challenge_action_not_completed():
         ),
     ):
         ok = await verify_liveness_challenge("valid_token", action_completed=False)
+    assert ok is False
+    fake_redis.eval.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_liveness_challenge_claimed_action_mismatch():
+    from app.services.face_liveness_service import verify_liveness_challenge
+
+    fake_redis = MagicMock()
+    fake_redis.eval = AsyncMock(return_value='{"action": "blink", "customer_id": 1}')
+    with patch(
+        "app.services.face_liveness_service.try_get_redis", AsyncMock(return_value=fake_redis)
+    ), patch(
+        "app.services.face_liveness_service.get_settings",
+        return_value=__import__("types").SimpleNamespace(
+            face_liveness_mode="challenge", face_liveness_challenge_timeout=30
+        ),
+    ):
+        ok = await verify_liveness_challenge(
+            "valid_token", action_completed=True, claimed_action="nod"
+        )
     assert ok is False
 
 

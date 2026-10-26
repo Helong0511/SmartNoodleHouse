@@ -272,7 +272,7 @@ async def test_camera_speaker_tts_on_plays_camera():
 
     with (
         patch.object(provider, "_camera_speaker_enabled", AsyncMock(return_value=True)),
-        patch.object(provider, "_play_on_camera", AsyncMock(return_value=True)) as play,
+        patch.object(provider, "_play_on_camera", AsyncMock(return_value="ok")) as play,
     ):
         await provider.speak("欢迎回来", camera_id=9)
 
@@ -288,8 +288,23 @@ async def test_camera_speaker_tts_fallback_local_on_fail():
 
     with (
         patch.object(provider, "_camera_speaker_enabled", AsyncMock(return_value=True)),
-        patch.object(provider, "_play_on_camera", AsyncMock(return_value=False)),
+        patch.object(provider, "_play_on_camera", AsyncMock(return_value="failed")),
     ):
         await provider.speak("欢迎回来", camera_id=9)
 
     local.speak.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_camera_speaker_tts_cancelled_skips_local_fallback():
+    local = MagicMock(spec=LocalTTS)
+    local.speak = AsyncMock()
+    provider = CameraSpeakerTTS(local=local)
+
+    with (
+        patch.object(provider, "_camera_speaker_enabled", AsyncMock(return_value=True)),
+        patch.object(provider, "_play_on_camera", AsyncMock(return_value="cancelled")),
+    ):
+        await provider.speak("欢迎光临", camera_id=9)
+
+    local.speak.assert_not_awaited()

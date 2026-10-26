@@ -5,8 +5,12 @@
 - challenge：系统下发随机动作（如"请眨眼"/"请向左转头"），
   前端录制对应动作视频帧，后端校验挑战 token + 时效 + 动作完成。
 
-当前实现提供挑战生成与校验基础设施；实际动作识别依赖前端 SDK 回传
-action_completed 标记，后端做 token 防伪 + 时效 + 顾客绑定校验，防止重放。
+能力边界（务必遵守产品文案）：
+- `action_completed` 是**客户端自报**，不是服务端视觉证明；不能当作防照片/
+  防视频回放的充分证据。
+- 本模块保证：token 一次性、过期、顾客绑定、可选动作名一致性。
+- 摄像头门口迎宾与小程序高风险注册应使用不同安全等级；勿把 basic 门控
+  或客户端挑战标记宣传为「真活体」。
 """
 from __future__ import annotations
 
@@ -98,17 +102,19 @@ async def generate_liveness_challenge(
 async def verify_liveness_challenge(
     token: str,
     *,
-    action_completed: bool = True,
+    action_completed: bool = False,
+    claimed_action: str | None = None,
     customer_id: int | None = None,
 ) -> bool:
     """校验活体挑战 token：原子删除防止重放，并可校验绑定顾客。
 
     Args:
         token: generate_liveness_challenge 返回的 token
-        action_completed: 前端 SDK 判定动作是否完成
+        action_completed: 客户端自报动作是否完成（默认 False，须显式 True）
+        claimed_action: 可选；若传入须与签发时 action 一致
         customer_id: 若传入，须与签发时绑定的顾客一致
     Returns:
-        True 表示挑战通过（token 有效 + 动作完成 + 顾客匹配）
+        True 表示挑战协议校验通过（非服务端视觉活体证明）
     """
     settings = get_settings()
     mode = (getattr(settings, "face_liveness_mode", "challenge") or "challenge").strip().lower()
@@ -116,6 +122,11 @@ async def verify_liveness_challenge(
         return True
 
     if not token:
+        return False
+
+    # 未声称完成则直接失败，且不消费 token（允许客户端重试同一挑战）
+    if not action_completed:
+        logger.info("Liveness challenge rejected: action_completed not asserted")
         return False
 
     redis = await try_get_redis()
@@ -145,8 +156,15 @@ async def verify_liveness_challenge(
         )
         return False
 
-    if not action_completed:
-        logger.info("Liveness challenge action not completed for token %s", token[:8])
-        return False
+    issued_action = str(payload.get("action") or "")
+    if claimed_action is not None and issued_action:
+        if str(claimed_action).strip().lower() != issued_action.strip().lower():
+            logger.warning(
+                "Liveness challenge action mismatch token=%s issued=%s claimed=%s",
+                token[:8],
+                issued_action,
+                claimed_action,
+            )
+            return False
 
     return True

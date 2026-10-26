@@ -265,8 +265,7 @@ http://127.0.0.1:5173/display?store_id=1&token=VOpC_mpYINx2LA67gI-bNeeXqJI7qkLb
 选择 餐品后   点击 【加入购物车】按钮成功后 直接跳转到  购物车页面
 微信、支付宝 小程序 同步
 
-cd E:\SmartNoodleHouse\backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app --reload-dir ../camera
+cd E:\SmartNoodleHouse\backend; python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app --reload-dir ../camera
 
 cd E:\SmartNoodleHouse\frontend
 npm install
@@ -294,8 +293,18 @@ git clone git@github.com:Helong0511/SmartNoodleHouse.git  SmartNoodleHouse_20261
 
 
 rtsp://192.168.1.189:554/Streaming/Channels/102
+rtsp://192.168.1.189:554/Streaming/Channels/101
+admin
+He00407
 
 
+
+sudo apt update
+sudo apt install -y espeak espeak-data espeak-ng espeak-ng-data
+# 确认中文音色存在
+espeak --voices=zh
+# 试听（有声卡/耳机时）
+espeak -v zh "欢迎光临射洪肠旺面"
 
 
 

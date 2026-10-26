@@ -74,10 +74,15 @@ def _serialize(c: Camera, mgr) -> dict:
                     k: metrics[k]
                     for k in (
                         "detect_extract_ms",
+                        "refine_extract_ms",
                         "match_ms",
                         "frame_age_ms",
                         "face_ok",
                         "face_area_ratio",
+                        "face_side_px",
+                        "frame_w",
+                        "frame_h",
+                        "light_detect",
                         "det_score",
                         "best_similarity",
                         "matched_customer_id",
@@ -286,7 +291,7 @@ async def probe_camera_face(
     from camera.camera_manager import CameraManager
 
     from app.core.config import get_settings
-    from app.services.face_extractor import extract_face_embedding_bgr
+    from app.services.face_extractor import extract_live_face_hit
     from app.services.face_service import face_embedding_cache
     from app.services.system_settings_service import SystemSettingsService
 
@@ -300,7 +305,7 @@ async def probe_camera_face(
     if not worker:
         raise AppException(40921, "摄像头未启动", status_code=409)
     frame, ts = worker.frame_buffer.get_frame()
-    age = _time.time() - ts if ts else None
+    age = worker.frame_buffer.age_sec()
     if frame is None:
         return success(
             {
@@ -311,27 +316,47 @@ async def probe_camera_face(
             },
             request=request,
         )
+    # 与识别 Worker 一致：过期帧不做匹配，避免用墙钟跳变或断流残留误诊
+    max_frame_age_sec = 5.0
+    if age is None or float(age) > max_frame_age_sec:
+        return success(
+            {
+                "ok": False,
+                "reason": "stale_frame",
+                "status": getattr(worker, "status", None),
+                "age": age,
+                "max_age_sec": max_frame_age_sec,
+                "hint": "帧过期或无有效时间戳，请确认摄像头 ONLINE 且有新帧后再探测",
+            },
+            request=request,
+        )
 
     settings = get_settings()
     store_id = int(camera.store_id) if camera.store_id else None
     threshold = await SystemSettingsService.effective_float(
         db, "face_match_threshold", settings.face_match_threshold, store_id=store_id
     )
+    hit = None
+    t0 = _time.perf_counter()
     try:
-        emb_list = await asyncio.to_thread(extract_face_embedding_bgr, frame, live=True)
-        emb = np.array(emb_list, dtype=np.float32)
+        hit = await asyncio.to_thread(extract_live_face_hit, frame, light=False)
+        emb = np.asarray(hit.embedding, dtype=np.float32)
         face_ok = True
         face_err = None
     except Exception as e:
         emb = None
         face_ok = False
         face_err = str(e)[:120]
+    detect_ms = int((_time.perf_counter() - t0) * 1000)
 
     best_id, best_sim = None, 0.0
+    match_ms = None
     if face_ok and emb is not None:
+        t1 = _time.perf_counter()
         best_id, best_sim = await face_embedding_cache.best_match(
             db, emb, float(threshold), camera_id=camera_id
         )
+        match_ms = int((_time.perf_counter() - t1) * 1000)
 
     shape = list(getattr(frame, "shape", []) or [])
     return success(
@@ -343,9 +368,30 @@ async def probe_camera_face(
             "age": age,
             "shape": shape,
             "threshold": threshold,
+            "detect_extract_ms": detect_ms,
+            "match_ms": match_ms,
+            "face_area_ratio": (
+                round(float(hit.face_area_ratio), 4) if hit is not None else None
+            ),
+            "face_side_px": int(hit.face_side_px) if hit is not None else None,
+            "det_score": (
+                round(float(hit.det_score), 3) if hit is not None else None
+            ),
+            "sharpness": (
+                round(float(hit.sharpness), 1) if hit is not None else None
+            ),
             "best_customer_id": best_id,
             "best_similarity": float(best_sim) if best_sim is not None else None,
             "matched": bool(best_id is not None and float(best_sim) >= float(threshold)),
+            "hint": (
+                None
+                if not face_ok
+                else (
+                    "脸框短边偏小，远景/子码流可能不够认；请走近或提高分辨率后再测"
+                    if hit is not None and int(hit.face_side_px or 0) > 0 and int(hit.face_side_px) < 80
+                    else None
+                )
+            ),
         },
         request=request,
     )
@@ -375,7 +421,7 @@ async def test_camera_speak(
         "camera": "test_speak_camera",
         "both": "test_speak",
     }[target]
-    await WelcomeService.enqueue(
+    task_id = await WelcomeService.enqueue(
         {
             "customer_id": None,
             "text": text,
@@ -391,15 +437,37 @@ async def test_camera_speak(
         module="camera",
         target_type="camera",
         target_id=camera_id,
-        detail={"text": text, "target": target},
+        detail={"text": text, "target": target, "task_id": task_id},
         request=request,
         store_id=int(camera.store_id) if camera.store_id else None,
     )
     await db.commit()
     return success(
-        {"queued": True, "camera_id": camera_id, "text": text, "target": target},
+        {
+            "queued": True,
+            "camera_id": camera_id,
+            "text": text,
+            "target": target,
+            "task_id": task_id,
+            "note": "queued 仅表示入队；查 GET /cameras/speak-tasks/{task_id}；设备出声需现场听声确认",
+        },
         request=request,
     )
+
+
+@router.get("/speak-tasks/{task_id}", dependencies=[require_permission("camera:read")])
+async def get_speak_task_status(
+    task_id: str,
+    request: Request,
+    user: CurrentUser,
+):
+    """查询迎宾/试听播报任务状态（非设备扬声器 ACK）。"""
+    from app.services.face_service import WelcomeService
+
+    data = await WelcomeService.get_speak_task(task_id)
+    if not data:
+        raise AppException(40421, "播报任务不存在或已过期")
+    return success(data, request=request)
 
 
 @router.delete("/visitors/events", dependencies=[require_permission("camera:manage")])

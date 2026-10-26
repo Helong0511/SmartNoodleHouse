@@ -35,11 +35,17 @@
           <span v-else class="muted">无帧</span>
         </template>
       </el-table-column>
-      <el-table-column label="识别耗时" width="130">
+      <el-table-column label="识别耗时" width="168">
         <template #default="{ row }">
           <span v-if="row.runtime?.recognition?.detect_extract_ms != null" class="mono">
-            检{{ row.runtime.recognition.detect_extract_ms }} /
-            配{{ row.runtime.recognition.match_ms ?? '-' }} ms
+            检{{ row.runtime.recognition.detect_extract_ms }}
+            <template v-if="row.runtime.recognition.refine_extract_ms != null">
+              /精{{ row.runtime.recognition.refine_extract_ms }}
+            </template>
+            /配{{ row.runtime.recognition.match_ms ?? '-' }} ms
+            <template v-if="row.runtime.recognition.face_side_px">
+              ·脸{{ row.runtime.recognition.face_side_px }}px
+            </template>
           </span>
           <span v-else class="muted">-</span>
         </template>
@@ -510,15 +516,23 @@ async function probeFace(id: number) {
       )
       return
     }
+    const facePx =
+      d.face_side_px != null && d.face_side_px > 0 ? `脸短边${d.face_side_px}px` : ''
+    const timing =
+      d.detect_extract_ms != null
+        ? `检${d.detect_extract_ms}/配${d.match_ms ?? '-'}ms`
+        : ''
+    const extra = [facePx, timing].filter(Boolean).join(' · ')
+    const hint = d.hint ? `；${d.hint}` : ''
     if (d.matched) {
       ElMessage.success(
-        `已匹配会员 #${d.best_customer_id}，相似度 ${Number(d.best_similarity || 0).toFixed(4)}（阈值 ${Number(d.threshold || 0).toFixed(2)}）`,
+        `已匹配会员 #${d.best_customer_id}，相似度 ${Number(d.best_similarity || 0).toFixed(4)}（阈值 ${Number(d.threshold || 0).toFixed(2)}）${extra ? ' · ' + extra : ''}${hint}`,
       )
     } else {
       ElMessage.info(
         `检测到人脸，未达匹配阈值（best=${d.best_customer_id ?? '-'} sim=${
           d.best_similarity != null ? Number(d.best_similarity).toFixed(4) : '-'
-        } / ${Number(d.threshold || 0).toFixed(2)}）`,
+        } / ${Number(d.threshold || 0).toFixed(2)}）${extra ? ' · ' + extra : ''}${hint}`,
       )
     }
   } catch (e: any) {
@@ -543,14 +557,44 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
   try {
     // 短句走服务端 WAV/G711 热缓存；连点由后端同摄像头试听「队尾替换」保证下一条能播
     const text = target === 'camera' ? '试听播报' : '电脑试听'
-    await api.post(`/cameras/${id}/test-speak`, { text, target })
+    const res: any = await api.post(`/cameras/${id}/test-speak`, { text, target })
+    const d = res?.data ?? res
+    const taskId = d?.task_id ? String(d.task_id) : ''
+    const tid = taskId ? ` task=${taskId.slice(0, 8)}` : ''
     ElMessage.success(
       target === 'camera'
-        ? '已入队摄像头对讲试听（上一段播完后播本条；可连点，保留最后一次）'
-        : '已触发电脑扬声器试听',
+        ? `已入队摄像头对讲试听（仅入队≠已出声；可连点保留最后一次）${tid}`
+        : `已触发电脑扬声器试听${tid}`,
     )
+    if (taskId && target === 'camera') {
+      void pollSpeakTask(taskId)
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '试听失败')
+  }
+}
+
+/** 轮询播报任务状态（非设备扬声器 ACK）；超时仅提示。 */
+async function pollSpeakTask(taskId: string) {
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 500))
+    try {
+      const res: any = await api.get(`/cameras/speak-tasks/${taskId}`)
+      const st = res?.data ?? res
+      const status = String(st?.status || '')
+      if (status === 'completed') {
+        ElMessage.info(
+          `试听推流结束（设备出声未验证${st?.device_playback ? '·' + st.device_playback : ''}）`,
+        )
+        return
+      }
+      if (status === 'failed' || status === 'cancelled') {
+        ElMessage.warning(`试听任务${status}${st?.error ? '：' + st.error : ''}`)
+        return
+      }
+    } catch {
+      return
+    }
   }
 }
 

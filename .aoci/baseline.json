@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-25T08:20:27Z",
+  "updated_at": "2026-10-26T06:26:58Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -105,6 +105,12 @@
       "size": 15598,
       "normalized_sha256": "8484f0f198917ef25ad420ccaee45cb317b863905c1fe603498b187e01048490"
     },
+    "Debug/摄像头.md": {
+      "role": "index",
+      "sha256": "50739edff35c395264bf330f17bdd9535667fd955116f809190fd2aa2ee8da00",
+      "size": 34881,
+      "normalized_sha256": "c315bc3f145322412a26cdad6b39215697dbe3e4045b54930f4d76924970dfeb"
+    },
     "README.md": {
       "role": "index",
       "sha256": "74abe3b9ba09c92f3018833617b54879f7c16f534a2f824ffe0d5949e0a22c7d",
@@ -113,9 +119,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "0a76d79e27fe5943fb8eaef7090a13c3fb82c2e93ebe89c586a0b87392e62a6c",
-      "size": 189002,
-      "normalized_sha256": "0a76d79e27fe5943fb8eaef7090a13c3fb82c2e93ebe89c586a0b87392e62a6c"
+      "sha256": "d5ec34aa05acf78f81a82217b57e79e5c57f8477935462ef4402cf748d3c6086",
+      "size": 192991,
+      "normalized_sha256": "d5ec34aa05acf78f81a82217b57e79e5c57f8477935462ef4402cf748d3c6086"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -419,9 +425,9 @@
     },
     "backend/app/api/cameras.py": {
       "role": "index",
-      "sha256": "eca1efe1f74e45da3b3552a32578437991f2c91cdaa154cb9579bfa6e78c993f",
-      "size": 27507,
-      "normalized_sha256": "eca1efe1f74e45da3b3552a32578437991f2c91cdaa154cb9579bfa6e78c993f"
+      "sha256": "5cf7cdf5f53059bdbee42ac891b25b6341651145b33945e95ca4403152f953e0",
+      "size": 33053,
+      "normalized_sha256": "5cf7cdf5f53059bdbee42ac891b25b6341651145b33945e95ca4403152f953e0"
     },
     "backend/app/api/client_logs.py": {
       "role": "index",
@@ -911,9 +917,9 @@
     },
     "backend/app/core/async_utils.py": {
       "role": "index",
-      "sha256": "c7bae4ddc3d9cd112d402e5711c2f0197c7e2e9d80bab24456c1db185704e5bd",
-      "size": 1251,
-      "normalized_sha256": "e881349cef91ba6e005c24796a161d9485138e8af84d776ae1a61cd184e0a133"
+      "sha256": "f051065159da3e464f6927ce7ab8cb19e8e776b5a96ec929f9c40341fc6b4f29",
+      "size": 1544,
+      "normalized_sha256": "7c3ab941ed5ce908d5057a750d905e7b86b5b435c36ce39cb5bd9bd88c32a0c1"
     },
     "backend/app/core/biz_no.py": {
       "role": "index",
@@ -923,9 +929,9 @@
     },
     "backend/app/core/cache_keys.py": {
       "role": "index",
-      "sha256": "bedff8612156f4b8e819474b37fac749b05ca2861a21e31b467c214ad52069bf",
-      "size": 7385,
-      "normalized_sha256": "bedff8612156f4b8e819474b37fac749b05ca2861a21e31b467c214ad52069bf"
+      "sha256": "65653d553f450c6a68aa8d1974339f45ea5e9097cf35ffb21af29a79ddc91b8c",
+      "size": 7896,
+      "normalized_sha256": "65653d553f450c6a68aa8d1974339f45ea5e9097cf35ffb21af29a79ddc91b8c"
     },
     "backend/app/core/config.py": {
       "role": "index",
@@ -1091,9 +1097,9 @@
     },
     "backend/app/main.py": {
       "role": "index",
-      "sha256": "d62bc99f670f29b41c43b52985d0295ac604bf9f66464f9317eae020c63e4cea",
-      "size": 27937,
-      "normalized_sha256": "2a4755460dfdb8aad3984af1aceb398e8ab57061983c89bc0ae5e88a8891d9fc"
+      "sha256": "65a322f68c2316afa8e612f3514dd1c2d9fb671485b8836e7b3c3ffd616b2924",
+      "size": 28456,
+      "normalized_sha256": "3271fc9432cb3b0d3e30acd8028e4ebd3463568f82fed2917f10931d28874c12"
     },
     "backend/app/models/__init__.py": {
       "role": "index",
@@ -1377,29 +1383,41 @@
       "size": 13289,
       "normalized_sha256": "0b219f0d2f43a583dd9b6c708564fe0276991042d56fb3caf805172621e97dff"
     },
+    "backend/app/services/face_best_frame.py": {
+      "role": "index",
+      "sha256": "6e2d890c182800da3848caf9f46dec83a92cd5b24602b33f338f202806cd51c4",
+      "size": 7667,
+      "normalized_sha256": "6e2d890c182800da3848caf9f46dec83a92cd5b24602b33f338f202806cd51c4"
+    },
     "backend/app/services/face_extractor.py": {
       "role": "index",
-      "sha256": "21b53a6ef3ec994be6367b098ac2396bb2e21814287dd4021a2398ca063e9785",
-      "size": 10751,
-      "normalized_sha256": "d638c5d3bcda3fc3fb6891f1fec5a077d0944399886eee1ae9de7a078c03aa8d"
+      "sha256": "900f1f60e97660fd9c605473b9420b996aeb44e3a093d1527ad14109e163a83b",
+      "size": 14798,
+      "normalized_sha256": "64c0a638ebe551e2ca04f29c0aae837811735c11f5d411df75050914f7952fce"
     },
     "backend/app/services/face_liveness.py": {
       "role": "index",
-      "sha256": "bd3a076ff14175bce80021c3f3e8d95f31634a42468efa8a6e50632e51202f4f",
-      "size": 6129,
-      "normalized_sha256": "61ff3259623a41ddf7d695c9563f47f24ac4a1382c0c19fc8bb3d729a8efeb68"
+      "sha256": "65f4f0268937d13b7c4e88439ec37c1aa8a63ecd11d4767577e3982479954aac",
+      "size": 7055,
+      "normalized_sha256": "1eee3b8120d41f93467d6545dee198dbbe502deeb16b8c87c9865289253dbb0c"
     },
     "backend/app/services/face_liveness_service.py": {
       "role": "index",
-      "sha256": "379cdc4f9159cfd603f4b79f06c8222aee8093f9e930456f480f031b419490ea",
-      "size": 4917,
-      "normalized_sha256": "379cdc4f9159cfd603f4b79f06c8222aee8093f9e930456f480f031b419490ea"
+      "sha256": "c9d720dbb24eb4528eac58f4e8140c79d8d9a568a8eab8bb5a2e79979e3f9f0e",
+      "size": 5815,
+      "normalized_sha256": "c9d720dbb24eb4528eac58f4e8140c79d8d9a568a8eab8bb5a2e79979e3f9f0e"
+    },
+    "backend/app/services/face_pipeline_metrics.py": {
+      "role": "index",
+      "sha256": "3ad75d126f1d93b11cddd79833098bab4c4a722de749232cb3fccc80c64327b1",
+      "size": 729,
+      "normalized_sha256": "3ad75d126f1d93b11cddd79833098bab4c4a722de749232cb3fccc80c64327b1"
     },
     "backend/app/services/face_service.py": {
       "role": "index",
-      "sha256": "02dcf95e8209d3a655b6ee0cd7dfb0acb5fde7154aa046feaa8e007a123b5df4",
-      "size": 62435,
-      "normalized_sha256": "02dcf95e8209d3a655b6ee0cd7dfb0acb5fde7154aa046feaa8e007a123b5df4"
+      "sha256": "99468aa6ec261d15310a2cd20db96d42e16fe69da9471b1501d6430a09c20408",
+      "size": 77696,
+      "normalized_sha256": "99468aa6ec261d15310a2cd20db96d42e16fe69da9471b1501d6430a09c20408"
     },
     "backend/app/services/feedback_service.py": {
       "role": "index",
@@ -1427,9 +1445,9 @@
     },
     "backend/app/services/hikvision_audio.py": {
       "role": "index",
-      "sha256": "3d4543d95029981aa64b43f8e2fb4dcda4e5c7e36a429f3866c0fa0d5283c28a",
-      "size": 23859,
-      "normalized_sha256": "3d4543d95029981aa64b43f8e2fb4dcda4e5c7e36a429f3866c0fa0d5283c28a"
+      "sha256": "ac55bee1cadfc91939e7c3009bb7989f5e30c80b53fd1bf94ccc11217b14563d",
+      "size": 38877,
+      "normalized_sha256": "ac55bee1cadfc91939e7c3009bb7989f5e30c80b53fd1bf94ccc11217b14563d"
     },
     "backend/app/services/kitchen_auto_service.py": {
       "role": "index",
@@ -1865,15 +1883,15 @@
     },
     "backend/app/workers/recognition_worker.py": {
       "role": "index",
-      "sha256": "b0153021cd6ab7eb6741bb6f267671c4f73e62fb301d6ac3bbeb43e8893275c9",
-      "size": 15154,
-      "normalized_sha256": "b0153021cd6ab7eb6741bb6f267671c4f73e62fb301d6ac3bbeb43e8893275c9"
+      "sha256": "f4932bf3d9acec081bacee5b6a9f3749123e3d1d3d2c564e8b8332c26a32abe9",
+      "size": 34627,
+      "normalized_sha256": "f4932bf3d9acec081bacee5b6a9f3749123e3d1d3d2c564e8b8332c26a32abe9"
     },
     "backend/app/workers/tts_worker.py": {
       "role": "index",
-      "sha256": "9ff0ad2128e814b25ba09f43fe8a46a4d9a5e9c30df9b570e547b6961978cac7",
-      "size": 21299,
-      "normalized_sha256": "959e2d27c1443b691e4b246877c16c2c3759111dc70728a4221587a294f72977"
+      "sha256": "332942490340ae0057bc073cdf02b9b451e8291814212a9c162e4834b21cdc9d",
+      "size": 28187,
+      "normalized_sha256": "794d8895cb8822cc0d6b3f94d697e9e3171fc738f4d25db5ae7eaf1df3223d81"
     },
     "backend/requirements.lock": {
       "role": "index",
@@ -1901,15 +1919,75 @@
     },
     "camera/camera_manager.py": {
       "role": "index",
-      "sha256": "2d0877f0776e2da19fb963962efb820f8f85f4a02ee0cf3498a762ad79bd5cce",
-      "size": 8771,
-      "normalized_sha256": "888a13a61b7ecb0106c23c11af4e634a3f79342310d3927dd5cffa272e6800e2"
+      "sha256": "4f40f1e73d25d9fccfead66ded555c52d5fdd7273f6535ed741b68a9e8a494bd",
+      "size": 16287,
+      "normalized_sha256": "578c5faab64c8c9b7047af5f9d13e0b303af004055524b7887e3569a6c4be23e"
     },
     "deploy/nginx.conf": {
       "role": "index",
       "sha256": "0ec4b354abace666bb9f9b12ee54668b5829b81cda78e72ab39a38a7f8e4c1f6",
       "size": 345,
       "normalized_sha256": "a323cef4bb15ac542b010e5f726991f62b0826300c8f06ed23ad0233825aee00"
+    },
+    "docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md": {
+      "role": "index",
+      "sha256": "04372d52aa5cf66f81c3328217b3ba57c356f8295f42da7d7d3c6197ca868df9",
+      "size": 2258,
+      "normalized_sha256": "04372d52aa5cf66f81c3328217b3ba57c356f8295f42da7d7d3c6197ca868df9"
+    },
+    "docs/CAMERA_FACE_AUDIO_AUDIT.md": {
+      "role": "index",
+      "sha256": "978d8fbfa068d03c108f7436a5e083ddac1566a87b214d272b649ebc52123372",
+      "size": 3820,
+      "normalized_sha256": "978d8fbfa068d03c108f7436a5e083ddac1566a87b214d272b649ebc52123372"
+    },
+    "docs/CAMERA_FACE_AUDIO_OPERATIONS.md": {
+      "role": "index",
+      "sha256": "d34d5341862c911bbe30183fa5b18f57e6244d9287bf469ebd41983443cf52e3",
+      "size": 1669,
+      "normalized_sha256": "d34d5341862c911bbe30183fa5b18f57e6244d9287bf469ebd41983443cf52e3"
+    },
+    "docs/CAMERA_FACE_AUDIO_REMEDIATION.md": {
+      "role": "index",
+      "sha256": "9cce11be518e4b6a3044de42a9c9701ece6e55fd59d9001c58161b9b26b90c61",
+      "size": 2534,
+      "normalized_sha256": "9cce11be518e4b6a3044de42a9c9701ece6e55fd59d9001c58161b9b26b90c61"
+    },
+    "docs/CAMERA_FACE_AUDIO_ROLLBACK.md": {
+      "role": "index",
+      "sha256": "7532c88b9a40d39abe61d0f424634001eb403facba28c3b12cdbe5f71bd33670",
+      "size": 1366,
+      "normalized_sha256": "7532c88b9a40d39abe61d0f424634001eb403facba28c3b12cdbe5f71bd33670"
+    },
+    "docs/CAMERA_FACE_AUDIO_TEST_PLAN.md": {
+      "role": "index",
+      "sha256": "02b37879128202a4c2024c4c57c136c3398e0bf1a7b6ee7014075158e7de7c5d",
+      "size": 1383,
+      "normalized_sha256": "02b37879128202a4c2024c4c57c136c3398e0bf1a7b6ee7014075158e7de7c5d"
+    },
+    "docs/CAMERA_OPTIMIZATION_BASELINE.md": {
+      "role": "index",
+      "sha256": "d685d076bab20ff49353eac9698dee8595402d9ca5f7258c064d6bb52e092123",
+      "size": 4476,
+      "normalized_sha256": "d685d076bab20ff49353eac9698dee8595402d9ca5f7258c064d6bb52e092123"
+    },
+    "docs/CAMERA_OPTIMIZATION_RESULTS.md": {
+      "role": "index",
+      "sha256": "7c6cdf4ca2ee671693819001e04bfd624c8a319271e8afb4d0479b3256fc5401",
+      "size": 5055,
+      "normalized_sha256": "7c6cdf4ca2ee671693819001e04bfd624c8a319271e8afb4d0479b3256fc5401"
+    },
+    "docs/CAMERA_OPTIMIZATION_ROLLBACK.md": {
+      "role": "index",
+      "sha256": "53695578920809a3bab98a4eb5997c24b673d5290ea36d07f407eac87897b0c3",
+      "size": 1345,
+      "normalized_sha256": "53695578920809a3bab98a4eb5997c24b673d5290ea36d07f407eac87897b0c3"
+    },
+    "docs/CAMERA_OPTIMIZATION_TESTS.md": {
+      "role": "index",
+      "sha256": "1bf2fd20704de37b32b99e9a63dcba38626d93358ce719cb088a80c7f8584967",
+      "size": 1830,
+      "normalized_sha256": "1bf2fd20704de37b32b99e9a63dcba38626d93358ce719cb088a80c7f8584967"
     },
     "docs/Cwm9_全项目修复完善_Codex提示词.md": {
       "role": "index",
@@ -2191,9 +2269,9 @@
     },
     "frontend/src/api/index.ts": {
       "role": "index",
-      "sha256": "868d0004f22c24ea776d1bb8fee74289459d0eac61978a30066f8b2eb8f76368",
-      "size": 12598,
-      "normalized_sha256": "868d0004f22c24ea776d1bb8fee74289459d0eac61978a30066f8b2eb8f76368"
+      "sha256": "4f2f8f13ad13d07b06c2335cd4acb75811324a28c04e8a8acfed9af9c619155c",
+      "size": 12737,
+      "normalized_sha256": "4f2f8f13ad13d07b06c2335cd4acb75811324a28c04e8a8acfed9af9c619155c"
     },
     "frontend/src/components/CopyToStoreDialog.vue": {
       "role": "index",
@@ -2311,9 +2389,9 @@
     },
     "frontend/src/utils/labels.ts": {
       "role": "index",
-      "sha256": "b4fba42432d522ab5887fe410ddcbf3b4280cb382340a828e3aed31df87f445c",
-      "size": 17687,
-      "normalized_sha256": "b4fba42432d522ab5887fe410ddcbf3b4280cb382340a828e3aed31df87f445c"
+      "sha256": "f3d44d7512cb0a3b63e7c8a221b8d6c9c4753d7cc07deb52179ce2f3ab8d5eae",
+      "size": 17709,
+      "normalized_sha256": "f3d44d7512cb0a3b63e7c8a221b8d6c9c4753d7cc07deb52179ce2f3ab8d5eae"
     },
     "frontend/src/utils/logger.ts": {
       "role": "index",
@@ -2395,9 +2473,9 @@
     },
     "frontend/src/views/Cameras.vue": {
       "role": "index",
-      "sha256": "ffe502678f48d7dadd07e2d1d10beb7cc15665566325c37957e61a9106476b1d",
-      "size": 21713,
-      "normalized_sha256": "ffe502678f48d7dadd07e2d1d10beb7cc15665566325c37957e61a9106476b1d"
+      "sha256": "a91169cf876125076a21ee45ffa258a8b2a6d69c7a1f4a62153ff2725876b875",
+      "size": 25668,
+      "normalized_sha256": "a91169cf876125076a21ee45ffa258a8b2a6d69c7a1f4a62153ff2725876b875"
     },
     "frontend/src/views/Categories.vue": {
       "role": "index",
@@ -4349,9 +4427,9 @@
     },
     "scripts/运行命令.txt": {
       "role": "index",
-      "sha256": "8ff4e4a0e5eb10a9a02506632caffa2227c1ad843ebc3b6201c014419b12c02d",
-      "size": 16996,
-      "normalized_sha256": "8ff4e4a0e5eb10a9a02506632caffa2227c1ad843ebc3b6201c014419b12c02d"
+      "sha256": "715eb9f0e1eb37a1a1f2f76c1b612781f65a5ff417f023bd0191f839d822d454",
+      "size": 17362,
+      "normalized_sha256": "715eb9f0e1eb37a1a1f2f76c1b612781f65a5ff417f023bd0191f839d822d454"
     },
     "scripts/验证数据库.py": {
       "role": "index",
@@ -4373,9 +4451,9 @@
     },
     "sql/data_sys.sql": {
       "role": "index",
-      "sha256": "e420935b0e5549f0a38e02937f61c7e9a6ac5860878cf6a35592d6e4dbf4359a",
-      "size": 65960,
-      "normalized_sha256": "e420935b0e5549f0a38e02937f61c7e9a6ac5860878cf6a35592d6e4dbf4359a"
+      "sha256": "1fc32b5e5a7cde1cfb566e9769b15772a56de826a5e292a094d522ac5d7bb290",
+      "size": 65980,
+      "normalized_sha256": "1fc32b5e5a7cde1cfb566e9769b15772a56de826a5e292a094d522ac5d7bb290"
     },
     "sql/data_test.sql": {
       "role": "index",
@@ -4844,6 +4922,12 @@
       "size": 9224,
       "normalized_sha256": "70a4fcb57c392a20460ddfde0e3e229d8c14455623d46c41ed07e03f8e90ffac"
     },
+    "tests/测试_RTSP帧完整性.py": {
+      "role": "observe",
+      "sha256": "12894982f66c0292391bfb276fdbcd17609f67c826fe23a04a064f438bb8f589",
+      "size": 814,
+      "normalized_sha256": "12894982f66c0292391bfb276fdbcd17609f67c826fe23a04a064f438bb8f589"
+    },
     "tests/测试_Redis加固修复.py": {
       "role": "observe",
       "sha256": "61d1bba8d6d2ff62ab73bba13c8b8e191ed08283a4228f9dc2e4ac0e36f55f32",
@@ -4880,11 +4964,17 @@
       "size": 1831,
       "normalized_sha256": "90bcf030a3521beee6215c41153b8cda5ef2f6ee75d4702c12890ab615c67d40"
     },
+    "tests/测试_人脸冷匹配top1.py": {
+      "role": "observe",
+      "sha256": "453193774a7e32b7f525e41d5aa443df170035b70518524c38421903eb1fa9e4",
+      "size": 3666,
+      "normalized_sha256": "453193774a7e32b7f525e41d5aa443df170035b70518524c38421903eb1fa9e4"
+    },
     "tests/测试_人脸最佳帧窗口.py": {
       "role": "observe",
-      "sha256": "9a20fe5908f641227ad405ba32dbcb645704486ac474520c468355c636ed89fb",
-      "size": 1728,
-      "normalized_sha256": "9a20fe5908f641227ad405ba32dbcb645704486ac474520c468355c636ed89fb"
+      "sha256": "c2c0ef7709e9843eeee5d1d1ea7522261bd17bd9f5740fde2401fcf808e32ef8",
+      "size": 4694,
+      "normalized_sha256": "c2c0ef7709e9843eeee5d1d1ea7522261bd17bd9f5740fde2401fcf808e32ef8"
     },
     "tests/测试_人脸活体接线.py": {
       "role": "observe",
@@ -4897,6 +4987,12 @@
       "sha256": "ee11f202c411c04172317ec70c9d8ef7a67e8931aac19a7af131bb1bffe714f1",
       "size": 3926,
       "normalized_sha256": "ee11f202c411c04172317ec70c9d8ef7a67e8931aac19a7af131bb1bffe714f1"
+    },
+    "tests/测试_人脸热集矩阵匹配.py": {
+      "role": "observe",
+      "sha256": "67224f60007863caf3092195e0295ff14c8ed2ac77af15bb797352282e086174",
+      "size": 3278,
+      "normalized_sha256": "67224f60007863caf3092195e0295ff14c8ed2ac77af15bb797352282e086174"
     },
     "tests/测试_人脸迎宾称呼.py": {
       "role": "observe",
@@ -5101,6 +5197,12 @@
       "sha256": "e7fc7296a3da51bcbd942de9be76a550cdc22c8eba1ad37cde2f549fc75ce38e",
       "size": 14998,
       "normalized_sha256": "e7fc7296a3da51bcbd942de9be76a550cdc22c8eba1ad37cde2f549fc75ce38e"
+    },
+    "tests/测试_多帧确认去重与播报任务.py": {
+      "role": "observe",
+      "sha256": "31ff4c23b3ebdae0935b6bcb80b4f5119883b1eb48ecfc526907348cb5aab912",
+      "size": 2112,
+      "normalized_sha256": "31ff4c23b3ebdae0935b6bcb80b4f5119883b1eb48ecfc526907348cb5aab912"
     },
     "tests/测试_多支付方式退款.py": {
       "role": "observe",
@@ -5314,15 +5416,27 @@
     },
     "tests/测试_摄像头SSRF与活体.py": {
       "role": "observe",
-      "sha256": "0c1d2227fa9c37875b6df0492bfde3830c9760db04f14d766dbbee4c915761c4",
-      "size": 7381,
-      "normalized_sha256": "0c1d2227fa9c37875b6df0492bfde3830c9760db04f14d766dbbee4c915761c4"
+      "sha256": "83c36cfc44880615276bad7b36db8d098ddc165142f59a4b085fd57bfb626eaf",
+      "size": 8160,
+      "normalized_sha256": "83c36cfc44880615276bad7b36db8d098ddc165142f59a4b085fd57bfb626eaf"
     },
     "tests/测试_摄像头密码严格模式.py": {
       "role": "observe",
       "sha256": "9fd6b9fa80c1e2149f5e6c9b906cba6f46f49be9d1d2166acc7a90572ceaee4a",
       "size": 2011,
       "normalized_sha256": "9fd6b9fa80c1e2149f5e6c9b906cba6f46f49be9d1d2166acc7a90572ceaee4a"
+    },
+    "tests/测试_摄像头迎宾修复.py": {
+      "role": "observe",
+      "sha256": "cf5d54aa8994bbb4345f32de5e3b8129840a20595e9de31b03864c4a9d40e55d",
+      "size": 3132,
+      "normalized_sha256": "bb421fbd8bce613f91254727af066332000d4515d80eb20f389551f9c8f2ac54"
+    },
+    "tests/测试_摄像头采集与音频协议.py": {
+      "role": "observe",
+      "sha256": "a1595b4556c00c49daebbf597f0211c9ff3ddaa6354f0adce9544a9adfe0a5fd",
+      "size": 3932,
+      "normalized_sha256": "a1595b4556c00c49daebbf597f0211c9ff3ddaa6354f0adce9544a9adfe0a5fd"
     },
     "tests/测试_支付.py": {
       "role": "observe",
@@ -5530,9 +5644,9 @@
     },
     "tests/测试_海康摄像头对讲TTS.py": {
       "role": "observe",
-      "sha256": "bd711a06301288ae80a833a562e83f7d7573df596bd32ef142e9a4daa0e366d1",
-      "size": 10199,
-      "normalized_sha256": "f9d80107c55e61bc83a6d431bd2aaa13b5fd894270fd9f6a0d1a9ed0800042da"
+      "sha256": "f90feb18574db91937c43aab126d41a0b7f99f176e05452c2c5329619078c9bc",
+      "size": 10712,
+      "normalized_sha256": "9e05bc56837830744c0b78f1421b07c8cdfc7c57f1f593ccae8270c8b7e22499"
     },
     "tests/测试_消息幂等与域模块.py": {
       "role": "observe",
@@ -5732,6 +5846,12 @@
       "size": 3205,
       "normalized_sha256": "31b004223d54e93f6f87412b19323e33db4c80d6535fcc89654bee7222023f73"
     },
+    "tests/测试_诊断脚本_系统设置冷却.py": {
+      "role": "observe",
+      "sha256": "d50d441fa46c2eff67bcfc6b61cb6ff80c6eb6e2c0d9b3ad0a36b569b1737a56",
+      "size": 1229,
+      "normalized_sha256": "d50d441fa46c2eff67bcfc6b61cb6ff80c6eb6e2c0d9b3ad0a36b569b1737a56"
+    },
     "tests/测试_财务台账.py": {
       "role": "observe",
       "sha256": "cdcf8debbd3df84318dea9f99868293771607a9ec998395bf51d1c444fd555b1",
@@ -5764,9 +5884,9 @@
     },
     "tests/测试_迎宾播报时延.py": {
       "role": "observe",
-      "sha256": "415c89e5e221153371c630ae6d9dffed53a31cb15c828ce4a823602440087cbe",
-      "size": 1826,
-      "normalized_sha256": "415c89e5e221153371c630ae6d9dffed53a31cb15c828ce4a823602440087cbe"
+      "sha256": "eecc4a26788b56bc61ba4e3ed0735206296d5be20b06a23fe0aae588e85784c4",
+      "size": 6071,
+      "normalized_sha256": "eecc4a26788b56bc61ba4e3ed0735206296d5be20b06a23fe0aae588e85784c4"
     },
     "tests/测试_退款扣积分实时.py": {
       "role": "observe",
@@ -5806,9 +5926,9 @@
     },
     "tests/测试_陌生访客迎宾与清空.py": {
       "role": "observe",
-      "sha256": "0ad20340bc434e95a4505ce7f891549b2f2d49a2006716ff365675cd0963e8dd",
-      "size": 5532,
-      "normalized_sha256": "0ad20340bc434e95a4505ce7f891549b2f2d49a2006716ff365675cd0963e8dd"
+      "sha256": "eee0ea6e51d193483055c7a3bca50469f9ded846736462ee9f2f3a479aaace9f",
+      "size": 6039,
+      "normalized_sha256": "eee0ea6e51d193483055c7a3bca50469f9ded846736462ee9f2f3a479aaace9f"
     },
     "tests/测试_限流关闭失败.py": {
       "role": "observe",

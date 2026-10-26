@@ -31,11 +31,22 @@ class TrackState:
 
 
 class MultiFrameTracker:
-    """摄像头维度的短时跟踪：连续 N 帧高相似才确认身份。"""
+    """摄像头维度的短时跟踪：连续 N 帧高相似才确认身份。
 
-    def __init__(self, confirm_frames: int = 2, ttl_seconds: float = 2.5):
+    近重复 embedding（与上一帧余弦 ≥ duplicate_cos）不计入确认进度，
+    避免同一静止帧/缓冲复用被当成足够独立的证据。
+    """
+
+    def __init__(
+        self,
+        confirm_frames: int = 2,
+        ttl_seconds: float = 2.5,
+        *,
+        duplicate_cos: float = 0.995,
+    ):
         self.confirm_frames = confirm_frames
         self.ttl_seconds = ttl_seconds
+        self.duplicate_cos = float(duplicate_cos)
         self._tracks: dict[str, TrackState] = {}
 
     def _key(self, camera_id: int, track_id: str = "default") -> str:
@@ -62,8 +73,19 @@ class MultiFrameTracker:
             self._tracks[key] = st
 
         st.last_seen = now
+        emb = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        emb = emb / (np.linalg.norm(emb) + 1e-8)
+        if st.embeddings:
+            prev = np.asarray(st.embeddings[-1], dtype=np.float32).reshape(-1)
+            prev = prev / (np.linalg.norm(prev) + 1e-8)
+            if float(np.dot(emb, prev)) >= self.duplicate_cos:
+                # 近重复：刷新时间但不增加确认帧数
+                if st.scores:
+                    return False, st.customer_id, float(np.mean(st.scores))
+                return False, st.customer_id, float(similarity)
+
         st.frames += 1
-        st.embeddings.append(embedding)
+        st.embeddings.append(emb)
         st.scores.append(similarity)
         if candidate_id is not None:
             st.customer_id = candidate_id
@@ -92,7 +114,7 @@ def check_liveness_simple(image_bytes: bytes) -> dict:
     - 亮度合理
     - 人脸区域占比（若 InsightFace 可用则用 det bbox）
     当前**不是**真活体/挑战应答；生产建议接入厂商活体 SDK。
-    UI / API 应标注 anti_spoof_level=basic。
+    UI / API 应标注 anti_spoof_level=basic（非 challenge / 非厂商 SDK）。
     """
     import cv2
 

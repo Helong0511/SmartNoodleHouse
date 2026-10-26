@@ -72,7 +72,7 @@ pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修�
        tests/测试_陌生访客迎宾与清空.py tests/测试_海康摄像头对讲TTS.py
        tests/测试_人脸最佳帧窗口.py tests/测试_迎宾播报时延.py
        tests/测试_摄像头Leader守卫.py
-→ 48 passed（2026-10-26 续作含 speak_gen Redis / light 签名用例）
+→ 50 passed（含 speak_gen Redis / light / face_side_px / downscale 用例）
 ```
 
 ## 5. 资源与依赖
@@ -92,11 +92,12 @@ pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修�
 ## 7. 本轮续作（已落地）
 
 1. **Redis `speak_generation`**：`INCR`/`GET` + 本地缓存；会员 `enqueue` 走 `bump_speak_generation_async`；陌生播报中 0.2s 轮询 Redis 供同步 abort。  
-2. **收集期 light 检测**：`max_side=720`、跳过 CLAHE；定稿对 `best_frame` 再 `light=False` 完整提特征后匹配。
+2. **收集期 light 检测**：`max_side=720`、跳过 CLAHE；定稿对 `best_frame` 再 `light=False` 完整提特征后匹配。  
+3. **人脸像素可观测**：`face_side_px`（源分辨率短边）写入 runtime；列表显示「脸 Npx」；定稿 `refine_extract_ms` 与收集 `detect_extract_ms` 分离；`probe-face` 返回像素/耗时/偏小提示（**不**据此宣称准确率提升）。
 
 ## 8. 后续建议（仍未实施）
 
-1. 建立门店距离下的子码流人脸像素验证后再调 `detect_fps`/分辨率。  
+1. 用现场 `face_side_px` 样例决定是否改子码流/安装距离（本轮只提供观测，未改默认分辨率）。  
 2. 标签集驱动阈值曲线；禁止再靠直觉拧 `threshold+0.04`。  
 3. 收集期 light 路径的真人准确率对比（需标签视频，勿臆造 %）。  
 4. 真实海康端到端 P50/P95。

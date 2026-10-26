@@ -1,32 +1,33 @@
 # 摄像头人脸迎宾 — 测试计划
 
-## 单元 / 自动化（本地 Windows PowerShell）
+## 本地 Windows（PowerShell）
 
 ```powershell
 cd E:\SmartNoodleHouse
-python -m pytest tests/测试_摄像头迎宾修复.py tests/测试_陌生访客迎宾与清空.py `
-  tests/测试_海康摄像头对讲TTS.py tests/测试_RTSP帧完整性.py `
-  tests/测试_摄像头Leader守卫.py tests/测试_人脸最佳帧窗口.py `
-  tests/测试_迎宾播报时延.py tests/测试_人脸迎宾称呼.py -q
+python -m pytest tests/测试_人脸冷匹配top1.py tests/测试_摄像头采集与音频协议.py `
+  tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修复.py `
+  tests/测试_海康摄像头对讲TTS.py tests/测试_迎宾播报时延.py `
+  tests/测试_摄像头Leader守卫.py tests/测试_RTSP帧完整性.py `
+  tests/测试_人脸最佳帧窗口.py tests/测试_陌生访客迎宾与清空.py -q
 ```
 
-覆盖重点：
+## 覆盖映射
 
-| 项 | 测试文件 |
-|---|---|
-| codec 失败不持久化 / 改密清缓存 / 冷却回滚 | `测试_摄像头迎宾修复.py` |
-| 陌生客冷却与清空 | `测试_陌生访客迎宾与清空.py` |
-| G.711 / 对讲复用 Client / 开关回退本机 | `测试_海康摄像头对讲TTS.py` |
-| RTSP 花屏过滤 | `测试_RTSP帧完整性.py` |
-| Leader 守卫 | `测试_摄像头Leader守卫.py` |
-| SSRF / 活体令牌 | `测试_摄像头SSRF与活体.py` |
+| 项 | 测试 | 类型 |
+|---|---|---|
+| 冷匹配 top-1 | `测试_人脸冷匹配top1.py` | 单元/模拟 |
+| HTTPS 拒绝 / 取消 / 帧龄 / stop | `测试_摄像头采集与音频协议.py` | 单元/模拟 |
+| 矩阵匹配 / 冷锁释放 | `测试_人脸热集矩阵匹配.py` | 单元 |
+| 改密/codec/冷却 | `测试_摄像头迎宾修复.py` | 单元 |
+| G711 / TTS ok·fail·cancel | `测试_海康摄像头对讲TTS.py` | 单元/模拟 |
+| speak_gen Redis | `测试_迎宾播报时延.py` | 单元 |
+| 花屏过滤 | `测试_RTSP帧完整性.py` | 单元 |
+| 窗口择优 | `测试_人脸最佳帧窗口.py` | 单元 |
 
-## 集成（Mock 设备）
+## 真机（未自动执行）
 
-1. 模拟帧 → 匹配授权会员 → 入队 → Mock TTS/ISAPI → 断言任务与日志。
-2. 各环节失败：认证失败、codec 未知、队列满、TTS 失败 → 不得标成功、不得无限重试。
-3. 并发：同会员多摄像头 / 多 Worker 抢冷却 → 仅一次入队。
+见 `CAMERA_FACE_AUDIO_ACCEPTANCE.md` 真机表。无设备不得勾通过。
 
-## 性能测试（现场）
+## 压测 / 长稳
 
-记录：采集帧率、检测耗时、匹配耗时、入队延迟、TTS、音频发送、端到端延迟、CPU/内存。勿编造 QPS。
+本轮**未执行**多小时连续运行与 P99 采集。

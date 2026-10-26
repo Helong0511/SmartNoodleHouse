@@ -12,8 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import BIZ_VI, generate_no
 from app.core.cache_keys import (
+    SPEAK_TASK_TTL_SECONDS,
     TTS_WELCOME_QUEUE_KEY,
     speak_generation_key,
+    speak_task_key,
     unknown_welcome_cooldown_key,
     welcome_cooldown_key,
     welcome_frames_key,
@@ -295,13 +297,20 @@ class FaceEmbeddingCache:
         threshold: float,
         hot_ids: set[int],
     ) -> tuple[int | None, float]:
+        """有界冷库扫描：预算内取最高相似度，禁止「首个达标即返回」。
+
+        历史缺陷：按活跃度排序后遇到第一个 >=threshold 就 return，
+        会导致前面的弱匹配盖过后面的强匹配（例：A=0.47 先于 B=0.78）。
+        """
         s = get_settings()
         batch = max(50, int(getattr(s, "face_cache_cold_batch_size", 200) or 200))
         score = self._activity_score_expr()
         enc = FaceEncryption()
         best_id, best_sim = None, 0.0
+        second_sim = 0.0
+        scanned = 0
         offset = 0
-        # 最多扫 20 批，避免极端会员量打爆单帧
+        # 最多扫 20 批，避免极端会员量打爆单帧；整段预算内比完再决出 top-1
         for _ in range(20):
             q = self._authorized_base()
             if hot_ids:
@@ -312,17 +321,31 @@ class FaceEmbeddingCache:
             if not rows:
                 break
             for p in rows:
+                scanned += 1
                 vec = self._decrypt_vec(enc, p)
                 if vec is None or vec.shape != emb.shape:
                     continue
                 sim = FaceService.cosine_similarity(emb, vec)
                 if sim > best_sim:
-                    best_sim, best_id = sim, int(p.customer_id)
-                if best_sim >= threshold:
-                    return best_id, best_sim
+                    second_sim = best_sim
+                    best_sim, best_id = float(sim), int(p.customer_id)
+                elif sim > second_sim:
+                    second_sim = float(sim)
             if len(rows) < batch:
                 break
             offset += batch
+        if best_id is not None:
+            logger.info(
+                "face_cache cold_scan scanned=%s top1_id=%s top1=%.4f top2=%.4f "
+                "delta=%.4f threshold=%.4f hit=%s",
+                scanned,
+                best_id,
+                best_sim,
+                second_sim,
+                best_sim - second_sim,
+                float(threshold),
+                1 if best_sim >= float(threshold) else 0,
+            )
         return best_id, best_sim
 
     def _evict_overflow(self) -> None:
@@ -1204,19 +1227,68 @@ class WelcomeService:
         return s, obj if isinstance(obj, dict) else None
 
     @classmethod
-    async def enqueue(cls, item: dict) -> None:
-        """入队迎宾播报；跨热重载仍可由 Leader TTS 消费。"""
+    async def set_speak_task_status(
+        cls, task_id: str | None, status: str, **extra
+    ) -> None:
+        """写入播报任务状态（queued/synthesizing/sending/completed/cancelled/failed）。"""
+        tid = str(task_id or "").strip()
+        if not tid:
+            return
         import json
         import time as _time
+
+        payload = {
+            "task_id": tid,
+            "status": str(status or "unknown"),
+            "updated_at": _time.time(),
+            **{k: v for k, v in extra.items() if v is not None},
+        }
+        try:
+            redis = await get_redis()
+            await redis.set(
+                speak_task_key(tid),
+                json.dumps(payload, ensure_ascii=False),
+                ex=int(SPEAK_TASK_TTL_SECONDS),
+            )
+        except Exception:
+            logger.debug("speak_task status write failed task_id=%s", tid, exc_info=True)
+
+    @classmethod
+    async def get_speak_task(cls, task_id: str | None) -> dict | None:
+        tid = str(task_id or "").strip()
+        if not tid:
+            return None
+        import json
+
+        try:
+            redis = await get_redis()
+            raw = await redis.get(speak_task_key(tid))
+            if not raw:
+                return None
+            s = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+            obj = json.loads(s)
+            return obj if isinstance(obj, dict) else None
+        except Exception:
+            logger.debug("speak_task status read failed", exc_info=True)
+            return None
+
+    @classmethod
+    async def enqueue(cls, item: dict) -> str | None:
+        """入队迎宾播报；跨热重载仍可由 Leader TTS 消费。返回 task_id（空文本返回 None）。"""
+        import json
+        import time as _time
+        import uuid
 
         payload = dict(item or {})
         text = str(payload.get("text") or "").strip()
         if not text:
-            return
+            return None
         payload["text"] = text
         kind = str(payload.get("kind") or "")
         cam_s = str(payload.get("camera_id") if payload.get("camera_id") is not None else "")
         payload.setdefault("enqueued_at", _time.time())
+        task_id = str(payload.get("task_id") or "").strip() or uuid.uuid4().hex
+        payload["task_id"] = task_id
         # 会员优先：作废同机位排队中的陌生迎宾，并打断正在播的低优先级句
         if kind == "member" and cam_s:
             await cls.bump_speak_generation_async(payload.get("camera_id"))
@@ -1261,8 +1333,14 @@ class WelcomeService:
                             kind,
                             payload.get("camera_id"),
                         )
+                    await cls.set_speak_task_status(
+                        task_id,
+                        "queued",
+                        kind=kind,
+                        camera_id=payload.get("camera_id"),
+                    )
                     cls._schedule_g711_warmup(text)
-                    return
+                    return task_id
                 except Exception:
                     logger.exception("迎宾队列整理失败，回退普通入队")
             if kind == "unknown_visitor" and cam_s:
@@ -1282,24 +1360,48 @@ class WelcomeService:
                                 "跳过陌生迎宾（队列已有会员） camera_id=%s",
                                 payload.get("camera_id"),
                             )
-                            return
+                            await cls.set_speak_task_status(
+                                task_id,
+                                "cancelled",
+                                reason="member_pending",
+                                camera_id=payload.get("camera_id"),
+                            )
+                            return task_id
                 except Exception:
                     logger.debug("检查会员待播失败，继续陌生入队", exc_info=True)
             pipe = redis.pipeline()
             pipe.rpush(cls.TTS_QUEUE_KEY, raw)
             pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
             await pipe.execute()
+            await cls.set_speak_task_status(
+                task_id,
+                "queued",
+                kind=kind,
+                camera_id=payload.get("camera_id"),
+            )
             # 后台预热本句 G.711：首句未命中时边播边写入，下一遍直接命中缓存
             cls._schedule_g711_warmup(text)
-            return
+            return task_id
         except Exception:
             logger.exception("迎宾 TTS Redis 入队失败，回退进程内队列")
         q = cls.get_queue()
         try:
             q.put_nowait(payload)
+            await cls.set_speak_task_status(
+                task_id,
+                "queued",
+                kind=kind,
+                camera_id=payload.get("camera_id"),
+                transport="memory",
+            )
             cls._schedule_g711_warmup(text)
+            return task_id
         except asyncio.QueueFull:
             logger.warning("迎宾 TTS 进程内队列已满，丢弃 text=%s", text[:40])
+            await cls.set_speak_task_status(
+                task_id, "failed", error="queue_full", camera_id=payload.get("camera_id")
+            )
+            return task_id
 
     @classmethod
     def _schedule_g711_warmup(cls, text: str) -> None:
@@ -1374,6 +1476,13 @@ class WelcomeService:
                         _time.time() - float(data.get("enqueued_at") or 0),
                         str(data.get("text") or "")[:40],
                     )
+                    await cls.set_speak_task_status(
+                        data.get("task_id"),
+                        "cancelled",
+                        reason="stale",
+                        kind=data.get("kind"),
+                        camera_id=data.get("camera_id"),
+                    )
                     continue
                 return data
             return None
@@ -1387,6 +1496,13 @@ class WelcomeService:
                     "丢弃过期迎宾(内存) kind=%s camera_id=%s",
                     item.get("kind"),
                     item.get("camera_id"),
+                )
+                await cls.set_speak_task_status(
+                    item.get("task_id"),
+                    "cancelled",
+                    reason="stale",
+                    kind=item.get("kind"),
+                    camera_id=item.get("camera_id"),
                 )
                 return None
             return item

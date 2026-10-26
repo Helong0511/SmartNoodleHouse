@@ -35,6 +35,8 @@ LOGIN_LOCK_PREFIX = "snh:login:lock"
 # 迎宾 / 人脸 / TTS
 # ---------------------------------------------------------------------------
 TTS_WELCOME_QUEUE_KEY = "snh:tts:welcome"
+SPEAK_TASK_PREFIX = "snh:tts:speak_task"
+SPEAK_TASK_TTL_SECONDS = 600
 WELCOME_COOLDOWN_PREFIX = "snh:welcome:cooldown"
 UNKNOWN_WELCOME_COOLDOWN_PREFIX = "snh:welcome:unknown_cd"
 WELCOME_FRAMES_PREFIX = "snh:welcome:frames"
@@ -54,6 +56,10 @@ def unknown_welcome_cooldown_key(camera_id: int) -> str:
 
 def speak_generation_key(camera_id: int) -> str:
     return f"{SPEAK_GENERATION_PREFIX}:{int(camera_id)}"
+
+
+def speak_task_key(task_id: str) -> str:
+    return f"{SPEAK_TASK_PREFIX}:{str(task_id).strip()}"
 
 # ---------------------------------------------------------------------------
 # 系统设置 / 调度 / Leader

@@ -10,13 +10,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# RTSP 打开/读超时（毫秒）。.set() 返回 True 仅表示属性被接受，不保证 FFMPEG 一定生效。
+_RTSP_OPEN_TIMEOUT_MS = 8000
+_RTSP_READ_TIMEOUT_MS = 8000
+
 
 class CameraNotLeaderError(RuntimeError):
     """非 Leader worker 尝试操作摄像头时抛出。"""
 
 
 def is_rtsp_frame_usable(frame: np.ndarray | None) -> bool:
-    """过滤 HEVC/RTSP 半解码花屏（大面积纯灰 + 一侧碎条），避免写入识别缓冲。"""
+    """过滤 HEVC/RTSP 半解码花屏（大面积纯灰 + 一侧碎条），避免写入识别缓冲。
+
+    注意：低纹理墙面/夜视也可能 std 偏低；阈值偏保守，宁可多放几帧坏图
+    也不要把正常低对比画面一律判死（误过滤会表现为「有预览无识别」）。
+    """
     if frame is None or getattr(frame, "size", 0) == 0:
         return False
     try:
@@ -57,23 +65,36 @@ def is_rtsp_frame_usable(frame: np.ndarray | None) -> bool:
 
 
 class FrameBuffer:
-    """线程安全的最新帧缓存"""
+    """线程安全的最新帧缓存。
+
+    墙上时钟用于展示；帧年龄用 monotonic，避免 NTP/手动改时导致误判过期。
+    """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._frame: np.ndarray | None = None
-        self._timestamp: float = 0
+        self._wall_ts: float = 0.0
+        self._mono_ts: float = 0.0
 
     def update(self, frame: np.ndarray) -> None:
         with self._lock:
             self._frame = frame.copy()
-            self._timestamp = time.time()
+            self._wall_ts = time.time()
+            self._mono_ts = time.monotonic()
 
     def get_frame(self) -> tuple[np.ndarray | None, float]:
+        """返回 (帧副本, 墙上时间戳)；无帧时 ts=0。"""
         with self._lock:
             if self._frame is None:
-                return None, 0
-            return self._frame.copy(), self._timestamp
+                return None, 0.0
+            return self._frame.copy(), self._wall_ts
+
+    def age_sec(self) -> float | None:
+        """相对单调时钟的帧龄（秒）；无帧返回 None。"""
+        with self._lock:
+            if self._frame is None or self._mono_ts <= 0:
+                return None
+            return max(0.0, time.monotonic() - self._mono_ts)
 
 
 class CameraWorker:
@@ -90,25 +111,52 @@ class CameraWorker:
         self._cap: cv2.VideoCapture | None = None
         self._reconnect_delay = 1
         self._max_reconnect_delay = 30
+        self._last_backend: str = ""
+        self._consecutive_bad_frames = 0
+        self._last_good_frame_mono: float = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True, name=f"camera-{self.camera_id}")
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name=f"camera-{self.camera_id}"
+        )
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=5)
-        if self._cap:
-            self._cap.release()
+            if self._thread.is_alive():
+                logger.warning(
+                    "Camera %s stop: thread still alive after join timeout",
+                    self.camera_id,
+                )
+        self._release_cap()
+
+    def _release_cap(self) -> None:
+        cap = self._cap
+        self._cap = None
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                logger.debug("Camera %s release ignored", self.camera_id, exc_info=True)
+
+    def _interruptible_sleep(self, seconds: float) -> bool:
+        """可被 stop 打断的等待；返回 True 表示应退出循环。"""
+        return self._stop.wait(timeout=max(0.0, float(seconds)))
 
     def _connect(self) -> bool:
+        self._release_cap()
+        t0 = time.perf_counter()
         try:
             if self.source.isdigit():
+                self._last_backend = "DSHOW_OR_DEFAULT"
                 self._cap = cv2.VideoCapture(int(self.source))
+                open_timeout_applied = None
+                read_timeout_applied = None
             else:
                 # 海康等设备 UDP 易丢包/无画面；强制 RTSP over TCP
                 import os
@@ -117,31 +165,79 @@ class CameraWorker:
                     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
                     "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000",
                 )
-                self._cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+                self._last_backend = "FFMPEG"
+                # OpenCV 4.5+/5：优先 open 前 set 超时；.set True≠后端一定执行超时
+                cap = cv2.VideoCapture()
+                open_timeout_applied = False
+                read_timeout_applied = False
                 try:
-                    self._cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8000)
-                    self._cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 8000)
-                    self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    open_timeout_applied = bool(
+                        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, _RTSP_OPEN_TIMEOUT_MS)
+                    )
+                    read_timeout_applied = bool(
+                        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, _RTSP_READ_TIMEOUT_MS)
+                    )
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Camera %s timeout props set-before-open unsupported",
+                        self.camera_id,
+                        exc_info=True,
+                    )
+                opened = bool(cap.open(self.source, cv2.CAP_FFMPEG))
+                if opened:
+                    try:
+                        # 部分构建仅在 open 后接受属性；再试一次并记录
+                        if not open_timeout_applied:
+                            open_timeout_applied = bool(
+                                cap.set(
+                                    cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, _RTSP_OPEN_TIMEOUT_MS
+                                )
+                            )
+                        if not read_timeout_applied:
+                            read_timeout_applied = bool(
+                                cap.set(
+                                    cv2.CAP_PROP_READ_TIMEOUT_MSEC, _RTSP_READ_TIMEOUT_MS
+                                )
+                            )
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+                self._cap = cap if opened else None
+                if self._cap is None:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+
+            open_ms = int((time.perf_counter() - t0) * 1000)
             if self._cap is not None and self._cap.isOpened():
                 self.status = "ONLINE"
                 self._reconnect_delay = 1
-                logger.info("Camera %s ONLINE", self.camera_id)
+                logger.info(
+                    "Camera %s ONLINE backend=%s open_ms=%s "
+                    "open_timeout_ms=%s open_timeout_set=%s "
+                    "read_timeout_ms=%s read_timeout_set=%s "
+                    "host=%s note=set_true_does_not_prove_ffmpeg_honors_timeout",
+                    self.camera_id,
+                    self._last_backend,
+                    open_ms,
+                    _RTSP_OPEN_TIMEOUT_MS if self._last_backend == "FFMPEG" else "-",
+                    open_timeout_applied if self._last_backend == "FFMPEG" else "-",
+                    _RTSP_READ_TIMEOUT_MS if self._last_backend == "FFMPEG" else "-",
+                    read_timeout_applied if self._last_backend == "FFMPEG" else "-",
+                    self._source_host_hint(),
+                )
                 return True
             logger.warning(
-                "Camera %s open failed (isOpened=false) source_host=%s",
+                "Camera %s open failed (isOpened=false) backend=%s open_ms=%s host=%s",
                 self.camera_id,
+                self._last_backend,
+                open_ms,
                 self._source_host_hint(),
             )
         except Exception as e:
             logger.error("Camera %s connect failed: %s", self.camera_id, e)
-        if self._cap is not None:
-            try:
-                self._cap.release()
-            except Exception:
-                pass
-            self._cap = None
+        self._release_cap()
         self.status = "OFFLINE"
         return False
 
@@ -165,33 +261,41 @@ class CameraWorker:
             if not self._cap or not self._cap.isOpened():
                 self.status = "RECONNECTING"
                 if not self._connect():
-                    # 抖动避免多摄像头同时重连打满链路
-                    jitter = random.uniform(0, min(0.5, float(self._reconnect_delay) * 0.25))
-                    time.sleep(self._reconnect_delay + jitter)
-                    self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+                    jitter = random.uniform(
+                        0, min(0.5, float(self._reconnect_delay) * 0.25)
+                    )
+                    if self._interruptible_sleep(self._reconnect_delay + jitter):
+                        break
+                    self._reconnect_delay = min(
+                        self._reconnect_delay * 2, self._max_reconnect_delay
+                    )
                     continue
             ret, frame = self._cap.read()
             if not ret:
                 self.status = "OFFLINE"
-                if self._cap:
-                    self._cap.release()
-                    self._cap = None
+                self._release_cap()
                 jitter = random.uniform(0, min(0.5, float(self._reconnect_delay) * 0.25))
-                time.sleep(self._reconnect_delay + jitter)
-                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+                if self._interruptible_sleep(self._reconnect_delay + jitter):
+                    break
+                self._reconnect_delay = min(
+                    self._reconnect_delay * 2, self._max_reconnect_delay
+                )
                 continue
             # 丢弃 HEVC 半帧/花屏，保留上一帧好画面供识别与抓拍
             if is_rtsp_frame_usable(frame):
                 self.frame_buffer.update(frame)
                 self.status = "ONLINE"
+                self._consecutive_bad_frames = 0
+                self._last_good_frame_mono = time.monotonic()
             else:
-                # 连接可读但帧不可用：若缓冲已过期则勿继续伪装在线
-                _frm, ts = self.frame_buffer.get_frame()
-                if _frm is None or (time.time() - float(ts or 0)) > 5.0:
+                self._consecutive_bad_frames += 1
+                age = self.frame_buffer.age_sec()
+                if age is None or age > 5.0:
                     self.status = "DEGRADED"
                 else:
                     self.status = "ONLINE"
-            time.sleep(interval)
+            if self._interruptible_sleep(interval):
+                break
 
 
 class CameraManager:
@@ -230,14 +334,17 @@ class CameraManager:
     def _cleanup_stale_workers(self) -> None:
         """P0-6: 清理线程已死的 stale worker，防止僵尸残留。"""
         stale_ids = [
-            cid for cid, w in self._workers.items()
+            cid
+            for cid, w in self._workers.items()
             if w._thread and not w._thread.is_alive()
         ]
         for cid in stale_ids:
             logger.warning("Cleaning stale camera worker: %s", cid)
             self.stop_camera(cid)
 
-    def start_camera(self, camera_id: int, source: str, fps: int = 25, *, force: bool = False) -> CameraWorker:
+    def start_camera(
+        self, camera_id: int, source: str, fps: int = 25, *, force: bool = False
+    ) -> CameraWorker:
         self._assert_leader()
         self._cleanup_stale_workers()
         existing = self._workers.get(camera_id)
@@ -278,10 +385,16 @@ class CameraManager:
         if not worker:
             return {"running": False, "status": "OFFLINE", "fps": 0, "has_frame": False}
         frame, ts = worker.frame_buffer.get_frame()
+        age = worker.frame_buffer.age_sec()
         return {
             "running": bool(worker._thread and worker._thread.is_alive()),
             "status": worker.status,
             "fps": worker.fps,
             "has_frame": frame is not None,
-            "frame_age_sec": round(time.time() - ts, 2) if ts else None,
+            "frame_age_sec": round(age, 2) if age is not None else None,
+            "frame_wall_ts": ts if ts else None,
+            "backend": getattr(worker, "_last_backend", "") or None,
+            "consecutive_bad_frames": int(
+                getattr(worker, "_consecutive_bad_frames", 0) or 0
+            ),
         }

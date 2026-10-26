@@ -1,47 +1,45 @@
 # 摄像头人脸迎宾 — 修复记录
 
-## A1 改密后 Digest Client 失效（P0）
+> 日期：2026-10-26。无数据库结构变更。
 
-- **表现**：后台改摄像头密码后试听/迎宾 401，直至进程重启。
-- **根因**：`_SHARED_HTTP` 键仅为 `base|channel`，不含凭证。
-- **修复**：键改为 `base|channel|auth_fp`；新增 `invalidate_hikvision_caches`；`update_camera` 改源/密时调用。
-- **文件**：`hikvision_audio.py`、`api/cameras.py`
-- **风险**：无；旧 Client 被 aclose。
+## B1 冷匹配 top-1（P0）
 
-## A2 codec 探测失败不持久化默认值（P1）
+- **文件**：`backend/app/services/face_service.py` `_cold_match`
+- **改动**：去掉「首个 ≥threshold 即 return」；在最多 20 批预算内比较全部候选人，返回最高相似度；日志输出 top1/top2/delta。
+- **兼容**：返回签名仍为 `(customer_id|None, sim)`。
+- **风险**：冷库扫描可能略增（相对旧「早退」）；有批次数上限。
 
-- **表现**：探测失败或非 200 仍把 alaw 写入 Redis 7 天，真机 ulaw 时噪声/无声。
-- **修复**：`_detect_codec` 失败只返回临时默认值；`resolve_codec(block=False)` 不再把默认值写入热缓存；后台探测用 pending 去重。
-- **文件**：`hikvision_audio.py`
-- **风险**：首播在未探测成功前仍可能用临时 alaw（明确为临时，不锁死缓存）。
+## B2/B3/B4 RTSP 生命周期与帧龄（P1）
 
-## A3 会员冷却失败回滚（P1）
-
-- **表现**：抢到 Redis 冷却后顾客不存在，冷却不释放。
-- **修复**：`WelcomeService.release_cooldown`；顾客缺失/入队失败时删除冷却键。
-- **文件**：`face_service.py`
-
-## A4 陌生访客 Redis 冷却（P1）
-
-- **表现**：多 Worker 可重复播「欢迎光临」。
-- **修复**：`unknown_welcome_cooldown_key` + SET NX EX；Redis 失败回退进程内字典并记日志。
-- **文件**：`cache_keys.py`、`face_service.py`、`测试_陌生访客迎宾与清空.py`
-
-## A5 高相似快通质量门槛（P1）
-
-- **表现**：`sim >= threshold+0.04` 即可跳过多帧确认。
-- **修复**：额外要求 `face_area_ratio>=0.06` 且 `det_score>=0.55`。
-- **文件**：`recognition_worker.py`
-
-## A6 前端探测人脸（P2）
-
-- **修复**：`Cameras.vue` 增加「探测人脸」调用 `POST /cameras/{id}/probe-face`。
-
-## A7 种子默认对齐（P2）
-
-- **修复**：`sql/data_sys.sql` 中 `camera_speaker_tts_enabled` 默认改为 `true`（仅影响新库；已有 false 需手动开）。
-
-## A8 重连抖动与 DEGRADED（P2）
-
-- **修复**：重连退避加随机抖动；坏帧且缓冲过期时状态 `DEGRADED`。
 - **文件**：`camera/camera_manager.py`
+- **改动**：FFMPEG 路径 `VideoCapture()` → set 超时 → `open`；失败再尝试 open 后 set；重连用 `_stop.wait`；`FrameBuffer.age_sec()` 用 monotonic；runtime 增加 backend/坏帧计数。
+- **说明**：`.set()==True` 不证明超时一定被 FFMPEG 执行，日志已注明。
+
+## B5/B6/B7 音频协议与播报状态（P0/P1）
+
+- **文件**：`hikvision_audio.py`、`tts_worker.py`
+- **改动**：`play_g711` 返回 `{status, device_playback, error?}`；HTTPS 返回 `unsupported_audio_transport`；禁止 `status==0` 当成功；`CameraSpeakerTTS.speak` 返回 `ok|cancelled|failed|local`，取消不回退本机。
+- **兼容**：调用方需处理 dict / 字符串返回值（已改 TTS worker）。
+- **单测**：`test_stream_audio_rejects_http_status_zero`、`test_camera_speaker_speak_returns_cancelled`。
+
+## C1 播报 task_id 与状态（P1）
+
+- **文件**：`cache_keys.py`、`face_service.py`、`tts_worker.py`、`cameras.py`、`Cameras.vue`
+- **改动**：入队生成 `task_id`；Redis `snh:tts:speak_task:{id}`；`GET /cameras/speak-tasks/{task_id}`；试听返回 task_id；过期入队写 `cancelled`/`reason=stale`；前端 `pollSpeakTask` 轮询（仍≠设备出声 ACK）。
+- **单测**：`test_dequeue_marks_stale_task_cancelled`。
+
+## C2 多帧近重复不计确认（P1）
+
+- **文件**：`face_liveness.py` `MultiFrameTracker`
+- **改动**：与上一帧余弦 ≥0.995 只刷新时间、不增加确认帧数。
+
+## C3 活体挑战默认不信任客户端完成标记（P1）
+
+- **文件**：`face_liveness_service.py`
+- **改动**：`action_completed` 默认 False；未完成不消费 token；可选 `claimed_action` 须匹配；文档标明非视觉证明。
+
+## 其它
+
+- `cameras.probe-face`：过期帧返回 `reason=stale_frame`。
+- `recognition_worker`：帧龄改读 `age_sec()`。
+- 上轮 A1–A8、Redis speak_generation、light 检测、face_side_px 仍有效。

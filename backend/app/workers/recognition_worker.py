@@ -108,8 +108,9 @@ class RecognitionWorker:
 
                         # 实时帧缓冲，不落盘、不打开图片文件
                         frame, ts = worker.frame_buffer.get_frame()
-                        # 推理偶发变慢时放宽到 5s，避免「有预览却从不识别」
-                        age = now - ts if ts else 999.0
+                        # 帧龄用 monotonic（FrameBuffer.age_sec），避免墙上时钟跳变误杀
+                        age_opt = worker.frame_buffer.age_sec()
+                        age = float(age_opt) if age_opt is not None else 999.0
                         if frame is None or age > 5.0:
                             if now - self._last_stale_log_at.get(cam_id, 0) >= 15.0:
                                 self._last_stale_log_at[cam_id] = now
@@ -235,6 +236,12 @@ class RecognitionWorker:
                                     face_ok=True,
                                     face_area_ratio=round(float(hit.face_area_ratio), 4),
                                     det_score=round(float(hit.det_score), 3),
+                                    face_side_px=int(
+                                        getattr(hit, "face_side_px", 0) or 0
+                                    ),
+                                    frame_w=int(getattr(hit, "frame_w", 0) or 0),
+                                    frame_h=int(getattr(hit, "frame_h", 0) or 0),
+                                    light_detect=bool(use_light),
                                 )
                             except Exception:
                                 pass
@@ -273,12 +280,22 @@ class RecognitionWorker:
 
                                     record_recognition_metrics(
                                         cam_id,
-                                        detect_extract_ms=refine_ms,
+                                        refine_extract_ms=refine_ms,
                                         face_ok=True,
                                         face_area_ratio=round(
                                             float(best_hit.face_area_ratio), 4
                                         ),
                                         det_score=round(float(best_hit.det_score), 3),
+                                        face_side_px=int(
+                                            getattr(best_hit, "face_side_px", 0) or 0
+                                        ),
+                                        frame_w=int(
+                                            getattr(best_hit, "frame_w", 0) or 0
+                                        ),
+                                        frame_h=int(
+                                            getattr(best_hit, "frame_h", 0) or 0
+                                        ),
+                                        light_detect=False,
                                     )
                                 except Exception:
                                     pass
