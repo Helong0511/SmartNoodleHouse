@@ -388,10 +388,12 @@ class CameraManager:
 
     def list_camera_ids(self) -> list[int]:
         with self._lock:
+            self._cleanup_stale_workers()
             return list(self._workers.keys())
 
     def get_worker(self, camera_id: int) -> CameraWorker | None:
         with self._lock:
+            self._cleanup_stale_workers()
             return self._workers.get(camera_id)
 
     def _stop_camera_unlocked(self, camera_id: int) -> None:
@@ -406,13 +408,23 @@ class CameraManager:
 
     def get_status(self, camera_id: int) -> str:
         with self._lock:
+            self._cleanup_stale_workers()
             worker = self._workers.get(camera_id)
             return worker.status if worker else "OFFLINE"
 
     def get_runtime(self, camera_id: int) -> dict:
         with self._lock:
+            self._cleanup_stale_workers()
             worker = self._workers.get(camera_id)
             if not worker:
+                return {
+                    "running": False,
+                    "status": "OFFLINE",
+                    "fps": 0,
+                    "has_frame": False,
+                }
+            alive = bool(worker._thread and worker._thread.is_alive())
+            if not alive:
                 return {
                     "running": False,
                     "status": "OFFLINE",
@@ -422,7 +434,7 @@ class CameraManager:
             frame, ts = worker.frame_buffer.get_frame()
             age = worker.frame_buffer.age_sec()
             return {
-                "running": bool(worker._thread and worker._thread.is_alive()),
+                "running": True,
                 "status": worker.status,
                 "fps": worker.fps,
                 "has_frame": frame is not None,

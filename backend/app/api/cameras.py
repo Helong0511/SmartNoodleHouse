@@ -623,18 +623,29 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
             display_name=camera.name,
         )
     if data.auto_start:
-        _start_worker(camera, force=True)
-        await asyncio.sleep(0.3)
         from camera.camera_manager import CameraManager
 
-        mgr = CameraManager()
-        st = mgr.get_status(camera.id)
-        camera.status = st if st else "OFFLINE"
-        if camera.status in ("ONLINE", "DEGRADED"):
-            camera.last_online_at = now_local()
+        start_note: str | None = None
+        try:
+            _start_worker(camera, force=True)
+            await asyncio.sleep(0.3)
+            mgr = CameraManager()
+            st = mgr.get_status(camera.id)
+            camera.status = st if st else "OFFLINE"
+            if camera.status in ("ONLINE", "DEGRADED"):
+                camera.last_online_at = now_local()
+        except AppException as exc:
+            # 非 Leader 不得整单回滚创建；机位保留 OFFLINE，前端可再启采
+            if getattr(exc, "code", None) != 40922:
+                raise
+            camera.status = "OFFLINE"
+            start_note = "not_leader"
+            mgr = CameraManager()
         payload = _serialize(camera, mgr)
         if osd_sync is not None:
             payload["osd_sync"] = osd_sync
+        if start_note:
+            payload["start_note"] = start_note
         return success(payload, request=request)
     from camera.camera_manager import CameraManager
 

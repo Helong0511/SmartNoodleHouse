@@ -192,6 +192,147 @@ def test_pending_drop_reason_member_preempts_test_and_old_member():
         WelcomeService._pending_drop_reason("test_speak_camera", "test_speak_camera", True)
         == "replaced"
     )
+    assert (
+        WelcomeService._pending_drop_reason(
+            "test_speak_camera", "unknown_visitor", True
+        )
+        == "test_speak_preempt"
+    )
+    assert (
+        WelcomeService._pending_drop_reason("test_speak", "unknown_visitor", True)
+        == "test_speak_preempt"
+    )
+    assert WelcomeService._pending_drop_reason("test_speak_pc", "unknown_visitor", True) == ""
+
+
+@pytest.mark.asyncio
+async def test_enqueue_test_speak_preempts_pending_unknown(monkeypatch):
+    """摄像头试听须作废同机位待播陌生句，与陌生见试听跳过对称。"""
+    import json
+
+    from app.services.face_service import WelcomeService
+
+    store: dict[str, str] = {}
+    queue: list[str] = [
+        json.dumps(
+            {
+                "kind": "unknown_visitor",
+                "text": "欢迎光临",
+                "camera_id": 8,
+                "task_id": "unk-tid",
+                "enqueued_at": 1.0,
+            },
+            ensure_ascii=False,
+        )
+    ]
+
+    class _Pipe:
+        def __init__(self, q: list[str]):
+            self.q = q
+
+        def lrem(self, _key, _n, raw):
+            try:
+                self.q.remove(raw)
+            except ValueError:
+                pass
+
+        def rpush(self, _key, raw):
+            self.q.append(raw)
+
+        def ltrim(self, *_a):
+            return None
+
+        async def execute(self):
+            return True
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe(queue)
+
+        async def lrange(self, *_a, **_k):
+            return list(queue)
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def eval(self, script, numkeys, *args):
+            key = args[0]
+            floor = int(args[1])
+            cur = int(store.get(key) or 0)
+            nxt = max(cur, floor) + 1
+            store[key] = str(nxt)
+            return nxt
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+    WelcomeService._speak_task_local.clear()
+    tid = await WelcomeService.enqueue(
+        {"kind": "test_speak_camera", "text": "试听", "camera_id": 8}
+    )
+    assert tid
+    kinds = [json.loads(x).get("kind") for x in queue]
+    assert "unknown_visitor" not in kinds
+    assert "test_speak_camera" in kinds
+    old = await WelcomeService.get_speak_task("unk-tid")
+    assert old is not None
+    assert old["status"] == "cancelled"
+    assert old.get("reason") == "test_speak_preempt"
+    WelcomeService._speak_task_local.clear()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_queue_full_does_not_bump(monkeypatch):
+    """内存队列满返回 None 时不得 bump，避免打断在播却无替补。"""
+    from app.services.face_service import WelcomeService
+
+    cam = 90111
+    WelcomeService._speak_gen[cam] = 5
+    bumps: list[int] = []
+
+    async def _boom_redis():
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _boom_redis)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+
+    async def _track_bump(cid):
+        bumps.append(int(cid))
+        return WelcomeService.bump_speak_generation(cid)
+
+    monkeypatch.setattr(
+        WelcomeService, "bump_speak_generation_async", staticmethod(_track_bump)
+    )
+
+    q = WelcomeService.get_queue()
+    # 灌满
+    while True:
+        try:
+            q.put_nowait({"kind": "filler", "text": "x"})
+        except Exception:
+            break
+    tid = await WelcomeService.enqueue(
+        {"kind": "member", "text": "张先生您好", "camera_id": cam}
+    )
+    assert tid is None
+    assert bumps == []
+    assert WelcomeService.speak_generation(cam) == 5
+    # 清空以免污染其它用例
+    while True:
+        try:
+            q.get_nowait()
+        except Exception:
+            break
 
 
 @pytest.mark.asyncio

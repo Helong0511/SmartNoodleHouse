@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-26T09:22:27Z",
+  "updated_at": "2026-10-26T09:57:35Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "Debug/摄像头.md": {
       "role": "index",
-      "sha256": "04651356837af07f90bff06ef4f2b16c545e60d76da763f2b289fe8bd4d9e5a2",
-      "size": 36516,
-      "normalized_sha256": "89edaf66ff807333710cba908c702862fd561b6c54f57e97eba3cdedf65d4cfa"
+      "sha256": "bb36807e3e1dc8571006e2b1c3bd64ab7785bf0da717c428c50fbe73d6eb236e",
+      "size": 36667,
+      "normalized_sha256": "4c06769a6c4329bbf39573651aea45cecc70c9b78617c1a1330a409c46ab011a"
     },
     "README.md": {
       "role": "index",
@@ -119,9 +119,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "0674f060c53b568d6796c8dac869212588da08c4bb84ea02bd5d4b667530cbad",
-      "size": 193578,
-      "normalized_sha256": "0674f060c53b568d6796c8dac869212588da08c4bb84ea02bd5d4b667530cbad"
+      "sha256": "7ea82005bbec28ec49a9affbd4af76d9e86a26484d1b955dfd48527b8db344e2",
+      "size": 193683,
+      "normalized_sha256": "7ea82005bbec28ec49a9affbd4af76d9e86a26484d1b955dfd48527b8db344e2"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -425,9 +425,9 @@
     },
     "backend/app/api/cameras.py": {
       "role": "index",
-      "sha256": "b00326e95252c87e6c9d36cf41c657bf2daf57e3f59c491d8afb5b48030259cd",
-      "size": 35359,
-      "normalized_sha256": "b00326e95252c87e6c9d36cf41c657bf2daf57e3f59c491d8afb5b48030259cd"
+      "sha256": "f93881368bc83c9da1cf2d7e8995894946e9d9749b2d72fd9480fd07e3cadfff",
+      "size": 35706,
+      "normalized_sha256": "f93881368bc83c9da1cf2d7e8995894946e9d9749b2d72fd9480fd07e3cadfff"
     },
     "backend/app/api/client_logs.py": {
       "role": "index",
@@ -1919,9 +1919,9 @@
     },
     "camera/camera_manager.py": {
       "role": "index",
-      "sha256": "d2cfcb1e041b18335080901541952b045843a81840be952888806834112084a0",
-      "size": 17815,
-      "normalized_sha256": "452d640515f48ef7873ca5a9c5f23a33900a9f031c6fd1fcb5239847d426b185"
+      "sha256": "1244b5610972f87738a751828c35832118b6c53089ee16a04134d9c02688c9af",
+      "size": 18007,
+      "normalized_sha256": "fbda0dc644119cc83b8b5b1821940e8a5b3dc7768bd20ec77129a63f41a6663a"
     },
     "deploy/nginx.conf": {
       "role": "index",
@@ -1931,15 +1931,15 @@
     },
     "docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md": {
       "role": "index",
-      "sha256": "15747ac8731fe0ecd18e5758743677cfd595ce432b7f8d82feea101c044d1927",
-      "size": 3776,
-      "normalized_sha256": "15747ac8731fe0ecd18e5758743677cfd595ce432b7f8d82feea101c044d1927"
+      "sha256": "01deb1b9ff99c3834d2e1772ef12d90a72dff2f203494cecd3b5891113087abe",
+      "size": 3802,
+      "normalized_sha256": "01deb1b9ff99c3834d2e1772ef12d90a72dff2f203494cecd3b5891113087abe"
     },
     "docs/CAMERA_FACE_AUDIO_AUDIT.md": {
       "role": "index",
-      "sha256": "cce5be34830ed713d4f010fbc4e01e0e8c6af51b509a9e975986264e92fa0eaf",
-      "size": 10605,
-      "normalized_sha256": "cce5be34830ed713d4f010fbc4e01e0e8c6af51b509a9e975986264e92fa0eaf"
+      "sha256": "f4b14d9e70c3d05bfd2ff232935f6c800586f45b73d7809eb5d1392b6bfe8721",
+      "size": 11249,
+      "normalized_sha256": "f4b14d9e70c3d05bfd2ff232935f6c800586f45b73d7809eb5d1392b6bfe8721"
     },
     "docs/CAMERA_FACE_AUDIO_OPERATIONS.md": {
       "role": "index",
@@ -1949,9 +1949,9 @@
     },
     "docs/CAMERA_FACE_AUDIO_REMEDIATION.md": {
       "role": "index",
-      "sha256": "74c33d970276491f64da4bb5cec98189744b18a185a22f7e37e521bb8a201862",
-      "size": 7691,
-      "normalized_sha256": "74c33d970276491f64da4bb5cec98189744b18a185a22f7e37e521bb8a201862"
+      "sha256": "246270a10a7a961c92cd63aed6a26a871df94261c8ff406f222695fb8467e2de",
+      "size": 8099,
+      "normalized_sha256": "246270a10a7a961c92cd63aed6a26a871df94261c8ff406f222695fb8467e2de"
     },
     "docs/CAMERA_FACE_AUDIO_ROLLBACK.md": {
       "role": "index",
@@ -1961,9 +1961,9 @@
     },
     "docs/CAMERA_FACE_AUDIO_TEST_PLAN.md": {
       "role": "index",
-      "sha256": "308f2d45a245ed65dd32c399f2299fd1da529983911f2be99e52bd021c78c707",
-      "size": 2701,
-      "normalized_sha256": "308f2d45a245ed65dd32c399f2299fd1da529983911f2be99e52bd021c78c707"
+      "sha256": "d9885ab4478e2e0db3487f984bc0702370a6e2d290cd0802bb3535282b990f67",
+      "size": 2970,
+      "normalized_sha256": "d9885ab4478e2e0db3487f984bc0702370a6e2d290cd0802bb3535282b990f67"
     },
     "docs/CAMERA_OPTIMIZATION_BASELINE.md": {
       "role": "index",
@@ -5206,9 +5206,9 @@
     },
     "tests/测试_多帧确认去重与播报任务.py": {
       "role": "observe",
-      "sha256": "6c81ace1aadb3bfa76310aac557147ab971a929ee8adb4acb6702beb96b0619d",
-      "size": 14622,
-      "normalized_sha256": "6c81ace1aadb3bfa76310aac557147ab971a929ee8adb4acb6702beb96b0619d"
+      "sha256": "1848f59bac78bc2016bceff9ee32c0f2a0df718ecbfdcf882091968e10e982b3",
+      "size": 18738,
+      "normalized_sha256": "1848f59bac78bc2016bceff9ee32c0f2a0df718ecbfdcf882091968e10e982b3"
     },
     "tests/测试_多支付方式退款.py": {
       "role": "observe",
@@ -5416,9 +5416,9 @@
     },
     "tests/测试_摄像头Leader守卫.py": {
       "role": "observe",
-      "sha256": "b057e65facee0122ec6a72f7d20af0b983dfdf487413565b9fcf1fb1fc19ccf2",
-      "size": 1033,
-      "normalized_sha256": "b057e65facee0122ec6a72f7d20af0b983dfdf487413565b9fcf1fb1fc19ccf2"
+      "sha256": "dcc339bfd44b25ddfac9ee3363b679e5bb5a40bbda2690c25934ae6b5d0549fe",
+      "size": 1734,
+      "normalized_sha256": "dcc339bfd44b25ddfac9ee3363b679e5bb5a40bbda2690c25934ae6b5d0549fe"
     },
     "tests/测试_摄像头SSRF与活体.py": {
       "role": "observe",
@@ -5440,9 +5440,9 @@
     },
     "tests/测试_摄像头采集与音频协议.py": {
       "role": "observe",
-      "sha256": "262b1d6ea895218c150457359030e860c0a19dac06c02e95d5cf7dd6b8450bb1",
-      "size": 6892,
-      "normalized_sha256": "262b1d6ea895218c150457359030e860c0a19dac06c02e95d5cf7dd6b8450bb1"
+      "sha256": "61f88963d2e332f6960f9f768b40052dd4564f25da9dec24294169833a322f5b",
+      "size": 10122,
+      "normalized_sha256": "61f88963d2e332f6960f9f768b40052dd4564f25da9dec24294169833a322f5b"
     },
     "tests/测试_支付.py": {
       "role": "observe",

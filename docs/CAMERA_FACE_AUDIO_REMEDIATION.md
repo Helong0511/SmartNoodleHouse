@@ -111,6 +111,19 @@
 - **N2**：`camera_stopped` 取消仅限 member/unknown_visitor/test_speak_camera；`test_speak`(both) 仍可叠本机。
 - **N3**：后台试听 `both` 与 `camera` 一样轮询 speak-task。
 
+## O1–O3 DEGRADED 契约 / KPI 一致 / Leader 启采（续）
+
+- **O1**：坏帧且近期好帧≤5s→`DEGRADED`；无近期好帧→`RECONNECTING`（不再把不可识别态标成 DEGRADED 虚增 usable）。
+- **O2**：overview 与 `_serialize` 均以 `get_runtime().running`（线程存活）为准。
+- **O3**：`_start_worker` 捕获 `CameraNotLeaderError` → `AppException(40922, status=409)`。
+
+## P1–P4 试听抢占 / bump 时机 / 创建兜底 / 死线程（续）
+
+- **P1**：摄像头试听 kind 对同机位 `unknown_visitor` → `test_speak_preempt`。
+- **P2**：`enqueue` 仅在 Redis/内存入队成功后 `_bump_speak_gen_after_enqueue`。
+- **P3**：`create_camera(auto_start)` 遇 40922 保留 OFFLINE + `start_note=not_leader`。
+- **P4**：`get_status`/`get_runtime`/`get_worker`/`list_camera_ids` 读前 `_cleanup_stale_workers`。
+
 ## 其它
 
 - `cameras.probe-face`：过期帧返回 `reason=stale_frame`。

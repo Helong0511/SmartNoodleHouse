@@ -1276,7 +1276,12 @@ class WelcomeService:
         nk = str(new_kind or "")
         ok = str(old_kind or "")
         if nk.startswith("test_speak"):
-            return "replaced" if ok == nk else ""
+            if ok == nk:
+                return "replaced"
+            # 摄像头侧试听与陌生「见试听则跳过」对称：踢掉同机位待播陌生句
+            if nk in ("test_speak", "test_speak_camera") and ok == "unknown_visitor":
+                return "test_speak_preempt"
+            return ""
         if nk == "member":
             if ok == "unknown_visitor":
                 return "member_preempt"
@@ -1285,6 +1290,17 @@ class WelcomeService:
                 return "member_preempt" if ok.startswith("test_speak") else "replaced"
             return ""
         return ""
+
+    @classmethod
+    async def _bump_speak_gen_after_enqueue(
+        cls, kind: str, camera_id: int | None
+    ) -> None:
+        """入队成功后再 bump：会员/摄像头试听打断在播；电脑试听不 bump。"""
+        if camera_id is None:
+            return
+        k = str(kind or "")
+        if k in ("member", "test_speak_camera", "test_speak"):
+            await cls.bump_speak_generation_async(camera_id)
 
     # Redis 不可用时仍可供试听轮询（有 TTL，防泄漏）
     _speak_task_local: dict[str, dict] = {}
@@ -1395,14 +1411,7 @@ class WelcomeService:
         payload.setdefault("enqueued_at", _time.time())
         task_id = str(payload.get("task_id") or "").strip() or uuid.uuid4().hex
         payload["task_id"] = task_id
-        # 会员 / 会推摄像头的试听：作废同机位低优先级 pending，并 bump 打断正在推流的句
-        # test_speak（both）也会走摄像头，须 bump；仅电脑试听不 bump
-        if cam_s and (
-            kind == "member"
-            or kind == "test_speak_camera"
-            or kind == "test_speak"
-        ):
-            await cls.bump_speak_generation_async(payload.get("camera_id"))
+        # bump 须在入队成功后：避免 queue_full/跳过仍抬世代打断在播却无替补
         raw = json.dumps(payload, ensure_ascii=False)
         try:
             redis = await get_redis()
@@ -1450,6 +1459,9 @@ class WelcomeService:
                         "queued",
                         kind=kind,
                         camera_id=payload.get("camera_id"),
+                    )
+                    await cls._bump_speak_gen_after_enqueue(
+                        kind, payload.get("camera_id")
                     )
                     cls._schedule_g711_warmup(text)
                     return task_id
@@ -1534,6 +1546,7 @@ class WelcomeService:
                 kind=kind,
                 camera_id=payload.get("camera_id"),
             )
+            await cls._bump_speak_gen_after_enqueue(kind, payload.get("camera_id"))
             # 后台预热本句 G.711：首句未命中时边播边写入，下一遍直接命中缓存
             cls._schedule_g711_warmup(text)
             return task_id
@@ -1620,6 +1633,7 @@ class WelcomeService:
                 camera_id=payload.get("camera_id"),
                 transport="memory",
             )
+            await cls._bump_speak_gen_after_enqueue(kind, payload.get("camera_id"))
             cls._schedule_g711_warmup(text)
             return task_id
         except asyncio.QueueFull:
@@ -1627,7 +1641,7 @@ class WelcomeService:
             await cls.set_speak_task_status(
                 task_id, "failed", error="queue_full", camera_id=payload.get("camera_id")
             )
-            # 返回 None：调用方须释放冷却，避免无声占窗
+            # 返回 None：调用方须释放冷却，避免无声占窗；且勿 bump
             return None
 
     @classmethod

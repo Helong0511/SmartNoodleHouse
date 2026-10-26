@@ -69,6 +69,13 @@ CameraManager (RTSP/TCP, Leader-only)
 | N1 | P1 | `_serialize` 无 worker 仍用库 ONLINE | 列表/详情假在线，与 overview 不一致 | **已修**：Leader 同降 OFFLINE | `test_serialize_leader_demotes_stale_online_without_worker` | 否 |
 | N2 | P2 | 停采 cancel 含 `test_speak`(both) | 双端试听整单取消、本机也不播 | **已修**：仅 member/unknown/test_speak_camera | TTS 单测 | 否 |
 | N3 | P3 | 双端试听不 poll speak-task | both 无推流结果提示 | **已修**：camera/both 均 poll | Cameras.vue | 否 |
+| O1 | P0 | 坏帧 status 倒置 | age≤5 标 ONLINE、age>5 标 DEGRADED | KPI/识别契约反了：DEGRADED 实不可识别却计 usable | **已修**：近好帧→DEGRADED；否则 RECONNECTING | `test_bad_frame_with_recent_good_is_degraded` | 否 |
+| O2 | P1 | overview 用 get_worker、serialize 用 running | 死线程残留 worker | KPI 假在线、列表 OFFLINE | **已修**：两侧均 `get_runtime.running` | `test_overview_uses_runtime_running_like_serialize` | 否 |
+| O3 | P1 | `_start_worker` 未映射 CameraNotLeaderError | 非 Leader 启采 | 易变 500 | **已修**：AppException 40922 | Leader 守卫/采集单测 | 否 |
+| P1 | P1 | 试听不踢待播陌生 | test_speak 只换同 kind | 试听排在「欢迎光临」后 | **已修**：`test_speak_preempt` | 多帧播报单测 | 否 |
+| P2 | P1 | bump 早于入队成功 | queue_full 仍抬世代 | 打断在播无替补 | **已修**：入队成功后再 bump | `test_enqueue_queue_full_does_not_bump` | 否 |
+| P3 | P2 | create auto_start 非 Leader | 整单 409 回滚创建 | 机位建不出来 | **已修**：吞 40922+`start_note` | 源码断言 | 否 |
+| P4 | P1 | 死线程残留 | get_status 仍 ONLINE | KPI/写库/has_frame 误导 | **已修**：读路径 cleanup | `test_dead_worker_status_and_runtime_are_offline` | 否 |
 
 ## 3. 潜在 / 未修（有原因）
 

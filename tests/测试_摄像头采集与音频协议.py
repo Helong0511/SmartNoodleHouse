@@ -159,6 +159,45 @@ def test_start_worker_maps_not_leader_to_app_exception():
         CameraManager.set_leader_check(None)
 
 
+def test_create_camera_auto_start_swallows_not_leader():
+    """创建 auto_start 遇非 Leader 须保留机位，不得整单 409 回滚。"""
+    import inspect
+
+    from app.api import cameras as cam_api
+
+    src = inspect.getsource(cam_api.create_camera)
+    assert "40922" in src
+    assert "start_note" in src
+    assert "not_leader" in src
+
+
+def test_dead_worker_status_and_runtime_are_offline():
+    """死线程残留不得继续报 ONLINE/has_frame；读路径须清理或短路。"""
+    mgr = CameraManager()
+    CameraManager.set_leader_check(None)
+    cid = 99021
+    mgr.stop_camera(cid)
+    w = CameraWorker(camera_id=cid, source="0", fps=5)
+    w.status = "ONLINE"
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    frame[:] = (10, 20, 30)
+    w.frame_buffer.update(frame)
+    # 模拟曾启动但已死的线程
+    dead = threading.Thread(target=lambda: None)
+    dead.start()
+    dead.join()
+    w._thread = dead
+    with mgr._lock:
+        mgr._workers[cid] = w
+    assert mgr.get_status(cid) == "OFFLINE"
+    rt = mgr.get_runtime(cid)
+    assert rt["running"] is False
+    assert rt["status"] == "OFFLINE"
+    assert rt["has_frame"] is False
+    assert mgr.get_worker(cid) is None
+    mgr.stop_camera(cid)
+
+
 @pytest.mark.asyncio
 async def test_play_g711_rejects_https_base():
     from app.services.hikvision_audio import HikvisionTwoWayAudio
