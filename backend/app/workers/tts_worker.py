@@ -594,24 +594,48 @@ class TTSWorker:
                     text[:40],
                 )
                 should_abort = None
+                stop_gen_poll: asyncio.Event | None = None
                 # 陌生迎宾可被同机位后续会员入队打断，避免人走了还在播「欢迎光临」
                 if kind == "unknown_visitor" and camera_id is not None:
+                    from app.core.async_utils import spawn_bg
                     from app.services.face_service import WelcomeService
 
-                    gen0 = WelcomeService.speak_generation(camera_id)
+                    # 先拉 Redis，避免另一 Worker 已 bump 而本进程仍见旧世代
+                    gen0 = await WelcomeService.sync_speak_generation_from_redis(
+                        camera_id
+                    )
 
                     def _abort_if_bumped() -> bool:
                         return WelcomeService.speak_generation(camera_id) != gen0
 
                     should_abort = _abort_if_bumped
-                await self.provider.speak(
-                    text,
-                    camera_id=camera_id,
-                    force_local=(kind == "test_speak_pc"),
-                    force_camera=(kind == "test_speak_camera"),
-                    also_local=(kind == "test_speak"),
-                    should_abort=should_abort,
-                )
+                    stop_gen_poll = asyncio.Event()
+
+                    async def _poll_speak_gen() -> None:
+                        while not stop_gen_poll.is_set():
+                            await WelcomeService.sync_speak_generation_from_redis(
+                                camera_id
+                            )
+                            try:
+                                await asyncio.wait_for(
+                                    stop_gen_poll.wait(), timeout=0.2
+                                )
+                            except asyncio.TimeoutError:
+                                pass
+
+                    spawn_bg(_poll_speak_gen())
+                try:
+                    await self.provider.speak(
+                        text,
+                        camera_id=camera_id,
+                        force_local=(kind == "test_speak_pc"),
+                        force_camera=(kind == "test_speak_camera"),
+                        also_local=(kind == "test_speak"),
+                        should_abort=should_abort,
+                    )
+                finally:
+                    if stop_gen_poll is not None:
+                        stop_gen_poll.set()
                 logger.info("TTS 播报结束 kind=%s camera_id=%s", kind, camera_id)
             except Exception as e:
                 logger.error("TTS worker error: %s", e)

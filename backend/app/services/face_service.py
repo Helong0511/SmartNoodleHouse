@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.biz_no import BIZ_VI, generate_no
 from app.core.cache_keys import (
     TTS_WELCOME_QUEUE_KEY,
+    speak_generation_key,
+    unknown_welcome_cooldown_key,
     welcome_cooldown_key,
     welcome_frames_key,
 )
@@ -89,9 +91,14 @@ class FaceEmbeddingCache:
         self._last_full_at = 0.0
         self._cold_cooldown_until: dict[int, float] = {}  # camera_id -> monotonic
         self._max_profiles: int = 800
+        # 预归一化矩阵：避免每次匹配 Python 循环 + 重复 L2
+        self._matrix: np.ndarray | None = None
+        self._matrix_ids: list[int] = []
+        self._matrix_dirty: bool = True
 
     def invalidate(self) -> None:
         self._last_sync = None
+        self._matrix_dirty = True
 
     def _resolve_max(self) -> int:
         s = get_settings()
@@ -186,6 +193,7 @@ class FaceEmbeddingCache:
                 return False
             self._by_customer[cid] = (int(row.id), vec)
             self.touch(cid)
+            self._matrix_dirty = True
             self._evict_overflow()
             logger.info(
                 "face_cache promote customer_id=%s hot=%s max=%s",
@@ -203,7 +211,10 @@ class FaceEmbeddingCache:
         *,
         camera_id: int | None = None,
     ) -> tuple[int | None, float]:
-        """热集比对；未达阈值且质量路径允许时做有界冷库二次匹配。"""
+        """热集比对；未达阈值且质量路径允许时做有界冷库二次匹配。
+
+        冷库 DB 扫描不持全局锁，避免多摄像头识别互相堵死。
+        """
         import time
 
         emb = np.asarray(embedding, dtype=np.float32)
@@ -224,11 +235,11 @@ class FaceEmbeddingCache:
             cooldown = float(getattr(s, "face_cache_cold_cooldown_seconds", 2.5) or 2.5)
             if cam is not None:
                 self._cold_cooldown_until[cam] = now_m + max(0.5, cooldown)
-
             hot_ids = set(self._by_customer.keys())
-            cold_id, cold_sim = await self._cold_match(db, emb, threshold, hot_ids)
-            if cold_id is not None and cold_sim >= threshold:
-                # promote 内部会再抢锁；此处已持锁，直接写入
+
+        cold_id, cold_sim = await self._cold_match(db, emb, threshold, hot_ids)
+        if cold_id is not None and cold_sim >= threshold:
+            async with self._lock:
                 row = (
                     await db.execute(
                         self._authorized_base().where(FaceProfile.customer_id == cold_id).limit(1)
@@ -239,6 +250,7 @@ class FaceEmbeddingCache:
                     if vec is not None:
                         self._by_customer[int(cold_id)] = (int(row.id), vec)
                         self.touch(int(cold_id))
+                        self._matrix_dirty = True
                         self._evict_overflow()
                 logger.info(
                     "face_cache cold_hit=1 customer_id=%s sim=%.4f hot=%s max=%s",
@@ -247,18 +259,34 @@ class FaceEmbeddingCache:
                     len(self._by_customer),
                     self._max_profiles,
                 )
-                return int(cold_id), float(cold_sim)
-            return best_id, best_sim
+            return int(cold_id), float(cold_sim)
+        return best_id, best_sim
+
+    def _rebuild_matrix(self) -> None:
+        if not self._by_customer:
+            self._matrix = np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
+            self._matrix_ids = []
+            self._matrix_dirty = False
+            return
+        ids = list(self._by_customer.keys())
+        mat = np.stack([self._by_customer[cid][1] for cid in ids], axis=0).astype(np.float32)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8
+        self._matrix = mat / norms
+        self._matrix_ids = ids
+        self._matrix_dirty = False
 
     def _match_hot(self, emb: np.ndarray) -> tuple[int | None, float]:
-        best_id, best_sim = None, 0.0
-        for cid, (_pid, vec) in self._by_customer.items():
-            if vec.shape != emb.shape:
-                continue
-            sim = FaceService.cosine_similarity(emb, vec)
-            if sim > best_sim:
-                best_sim, best_id = sim, cid
-        return best_id, best_sim
+        if self._matrix_dirty or self._matrix is None:
+            self._rebuild_matrix()
+        if self._matrix is None or not self._matrix_ids:
+            return None, 0.0
+        q = np.asarray(emb, dtype=np.float32).reshape(-1)
+        if q.size != EMBEDDING_DIM:
+            return None, 0.0
+        q = q / (np.linalg.norm(q) + 1e-8)
+        sims = self._matrix @ q
+        bi = int(np.argmax(sims))
+        return self._matrix_ids[bi], float(sims[bi])
 
     async def _cold_match(
         self,
@@ -299,6 +327,7 @@ class FaceEmbeddingCache:
 
     def _evict_overflow(self) -> None:
         cap = self._resolve_max()
+        changed = False
         while len(self._by_customer) > cap:
             # 无 touch 视为最旧；同 touch 任意踢一个
             victim = min(
@@ -307,6 +336,9 @@ class FaceEmbeddingCache:
             )
             self._by_customer.pop(victim, None)
             self._touch_at.pop(victim, None)
+            changed = True
+        if changed:
+            self._matrix_dirty = True
 
     async def _refresh(self, db: AsyncSession) -> None:
         import time
@@ -338,6 +370,7 @@ class FaceEmbeddingCache:
             # 保留仍在热集内的 touch
             self._touch_at = {cid: t for cid, t in self._touch_at.items() if cid in fresh}
             self._by_customer = fresh
+            self._matrix_dirty = True
             self._last_sync = newest or now_local()
             self._last_full_at = now_mono
             logger.debug(
@@ -375,20 +408,25 @@ class FaceEmbeddingCache:
                 newest = ts
             cid = int(p.customer_id)
             if p.consent_status != "AUTHORIZED" or not p.feature_data or cid not in active_cust_ids:
-                self._by_customer.pop(cid, None)
-                self._touch_at.pop(cid, None)
+                if cid in self._by_customer:
+                    self._by_customer.pop(cid, None)
+                    self._touch_at.pop(cid, None)
+                    self._matrix_dirty = True
                 continue
             # 增量：仅更新已在热集中的；新人靠 promote / 下次全量 / 冷命中进入
             if cid not in self._by_customer and len(self._by_customer) >= cap:
                 continue
             vec = self._decrypt_vec(enc, p)
             if vec is None:
-                self._by_customer.pop(cid, None)
-                self._touch_at.pop(cid, None)
+                if cid in self._by_customer:
+                    self._by_customer.pop(cid, None)
+                    self._touch_at.pop(cid, None)
+                    self._matrix_dirty = True
                 continue
             self._by_customer[cid] = (int(p.id), vec)
             if cid not in self._touch_at:
                 self._touch_at[cid] = now_mono
+            self._matrix_dirty = True
         self._evict_overflow()
         self._last_sync = newest
 
@@ -398,7 +436,7 @@ class FaceEmbeddingCache:
             return None
         try:
             vec = json.loads(enc.decrypt(p.feature_data).decode())
-            arr = np.array(vec, dtype=np.float32)
+            arr = np.array(vec, dtype=np.float32).reshape(-1)
             if arr.size != EMBEDDING_DIM:
                 logger.warning(
                     "跳过维度不匹配的人脸档案 profile_id=%s dim=%s",
@@ -406,7 +444,8 @@ class FaceEmbeddingCache:
                     arr.size,
                 )
                 return None
-            return arr
+            # 与 live/enroll 提取路径一致：入库历史向量统一 L2，供矩阵点积匹配
+            return arr / (np.linalg.norm(arr) + 1e-8)
         except Exception:
             return None
 
@@ -784,16 +823,31 @@ class VisitorService:
             store_id=store_id,
         )
         now = _time.time()
-        last = cls._last_unknown_welcome_at.get(int(camera_id), 0.0)
-        if cooldown > 0 and now - last < float(cooldown):
-            remain = float(cooldown) - (now - last)
-            # 人一直站门口时每帧都会走到这里，节流避免刷屏
+        acquired = True
+        if cooldown > 0:
+            try:
+                redis = await get_redis()
+                ok = await redis.set(
+                    unknown_welcome_cooldown_key(int(camera_id)),
+                    "1",
+                    nx=True,
+                    ex=int(cooldown),
+                )
+                acquired = bool(ok)
+            except Exception:
+                # Redis 不可用时回退进程内字典（多 worker 不共享，明确降级）
+                logger.debug("unknown welcome redis cooldown failed, fallback memory", exc_info=True)
+                last = cls._last_unknown_welcome_at.get(int(camera_id), 0.0)
+                if now - last < float(cooldown):
+                    acquired = False
+                else:
+                    cls._last_unknown_welcome_at[int(camera_id)] = now
+        if not acquired:
             if now - cls._last_unknown_cd_log_at.get(int(camera_id), 0.0) >= 15.0:
                 cls._last_unknown_cd_log_at[int(camera_id)] = now
                 logger.info(
-                    "陌生访客迎宾冷却中 camera_id=%s remain=%.1fs cooldown=%ss",
+                    "陌生访客迎宾冷却中 camera_id=%s cooldown=%ss",
                     camera_id,
-                    remain,
                     cooldown,
                 )
             return False
@@ -808,17 +862,31 @@ class VisitorService:
         ).strip()
         if not text:
             logger.warning("陌生访客迎宾文案为空，跳过 camera_id=%s", camera_id)
+            if cooldown > 0:
+                try:
+                    redis = await get_redis()
+                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                except Exception:
+                    cls._last_unknown_welcome_at.pop(int(camera_id), None)
             return False
-        cls._last_unknown_welcome_at[int(camera_id)] = now
         logger.info(
             "陌生访客迎宾入队 camera_id=%s store_id=%s text=%s",
             camera_id,
             store_id,
             text[:40],
         )
-        await WelcomeService.enqueue(
-            {"customer_id": None, "text": text, "camera_id": camera_id, "kind": "unknown_visitor"}
-        )
+        try:
+            await WelcomeService.enqueue(
+                {"customer_id": None, "text": text, "camera_id": camera_id, "kind": "unknown_visitor"}
+            )
+        except Exception:
+            if cooldown > 0:
+                try:
+                    redis = await get_redis()
+                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                except Exception:
+                    cls._last_unknown_welcome_at.pop(int(camera_id), None)
+            raise
         try:
             from app.services.websocket_manager import ws_manager
 
@@ -879,6 +947,11 @@ class VisitorService:
         for cid in ids:
             cls._unknown_tracks.pop(int(cid), None)
             cls._last_unknown_welcome_at.pop(int(cid), None)
+            try:
+                redis = await get_redis()
+                await redis.delete(unknown_welcome_cooldown_key(int(cid)))
+            except Exception:
+                pass
         return {
             "deleted_rows": deleted_rows,
             "deleted_files": deleted_files + orphan_files,
@@ -1040,7 +1113,9 @@ class WelcomeService:
     _queue: asyncio.Queue | None = None
     _last_member_cd_log_at: dict[str, float] = {}
     # 同摄像头播报世代：会员入队时 +1，打断正在播的陌生迎宾
+    # 进程内缓存；跨 Worker 以 Redis 为协调真源（见 bump/sync）
     _speak_gen: dict[int, int] = {}
+    _SPEAK_GEN_TTL_SEC = 180
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
@@ -1051,14 +1126,71 @@ class WelcomeService:
 
     @classmethod
     def speak_generation(cls, camera_id: int | None) -> int:
+        """同步读本地缓存（推流 abort 回调必须同步）。"""
         return int(cls._speak_gen.get(int(camera_id or 0), 0))
 
     @classmethod
     def bump_speak_generation(cls, camera_id: int | None) -> int:
+        """同步本地 +1，并后台把至少该值写入 Redis（单测 / 同步调用方）。"""
         cid = int(camera_id or 0)
         nxt = int(cls._speak_gen.get(cid, 0)) + 1
         cls._speak_gen[cid] = nxt
+        try:
+            from app.core.async_utils import spawn_bg
+
+            spawn_bg(cls._redis_ensure_speak_gen_at_least(cid, nxt))
+        except Exception:
+            pass
         return nxt
+
+    @classmethod
+    async def bump_speak_generation_async(cls, camera_id: int | None) -> int:
+        """入队路径优先：Redis INCR 跨进程原子 + 回写本地。"""
+        cid = int(camera_id or 0)
+        try:
+            redis = await get_redis()
+            key = speak_generation_key(cid)
+            val = int(await redis.incr(key))
+            await redis.expire(key, cls._SPEAK_GEN_TTL_SEC)
+            cls._speak_gen[cid] = max(int(cls._speak_gen.get(cid, 0)), val)
+            return int(cls._speak_gen[cid])
+        except Exception:
+            logger.debug("speak_generation redis incr failed, local bump", exc_info=True)
+            return cls.bump_speak_generation(cid)
+
+    @classmethod
+    async def sync_speak_generation_from_redis(cls, camera_id: int | None) -> int:
+        """把 Redis 世代拉入本地（TTS 播陌生句时轮询，供同步 abort 可见跨进程 bump）。"""
+        cid = int(camera_id or 0)
+        local = int(cls._speak_gen.get(cid, 0))
+        try:
+            redis = await get_redis()
+            raw = await redis.get(speak_generation_key(cid))
+            if raw is None:
+                return local
+            remote = int(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+            if remote > local:
+                cls._speak_gen[cid] = remote
+                return remote
+        except Exception:
+            logger.debug("speak_generation redis sync failed", exc_info=True)
+        return local
+
+    @classmethod
+    async def _redis_ensure_speak_gen_at_least(cls, camera_id: int, min_val: int) -> None:
+        try:
+            redis = await get_redis()
+            key = speak_generation_key(int(camera_id))
+            raw = await redis.get(key)
+            cur = int(raw.decode("utf-8") if isinstance(raw, bytes) else raw) if raw else 0
+            target = max(cur, int(min_val), int(cls._speak_gen.get(int(camera_id), 0)))
+            if target != cur:
+                await redis.set(key, str(target), ex=cls._SPEAK_GEN_TTL_SEC)
+            else:
+                await redis.expire(key, cls._SPEAK_GEN_TTL_SEC)
+            cls._speak_gen[int(camera_id)] = target
+        except Exception:
+            logger.debug("speak_generation redis ensure failed", exc_info=True)
 
     @classmethod
     def _parse_queue_item(cls, raw: str | bytes) -> tuple[str, dict | None]:
@@ -1087,7 +1219,7 @@ class WelcomeService:
         payload.setdefault("enqueued_at", _time.time())
         # 会员优先：作废同机位排队中的陌生迎宾，并打断正在播的低优先级句
         if kind == "member" and cam_s:
-            cls.bump_speak_generation(payload.get("camera_id"))
+            await cls.bump_speak_generation_async(payload.get("camera_id"))
         raw = json.dumps(payload, ensure_ascii=False)
         try:
             redis = await get_redis()
@@ -1295,6 +1427,15 @@ class WelcomeService:
         key = welcome_cooldown_key(customer_id)
         ok = await redis.set(key, "1", nx=True, ex=seconds)
         return bool(ok)
+
+    @staticmethod
+    async def release_cooldown(customer_id: int) -> None:
+        """入队失败或顾客无效时回滚冷却，避免长时间误冷却。"""
+        try:
+            redis = await get_redis()
+            await redis.delete(welcome_cooldown_key(customer_id))
+        except Exception:
+            logger.debug("release welcome cooldown failed customer_id=%s", customer_id, exc_info=True)
 
     @staticmethod
     async def set_cooldown(
@@ -1562,7 +1703,8 @@ class WelcomeService:
 
         customer = await db.get(Customer, customer_id)
         if not customer:
-            logger.warning("会员迎宾顾客不存在 customer_id=%s", customer_id)
+            logger.warning("会员迎宾顾客不存在 customer_id=%s，回滚冷却", customer_id)
+            await cls.release_cooldown(customer_id)
             return False
 
         call_as, level_name = await cls.resolve_welcome_identity(db, customer)
@@ -1670,14 +1812,23 @@ class WelcomeService:
             store_id,
             text[:60],
         )
-        await cls.enqueue(
-            {
-                "customer_id": customer_id,
-                "text": text,
-                "camera_id": camera_id,
-                "kind": "member",
-            }
-        )
+        try:
+            await cls.enqueue(
+                {
+                    "customer_id": customer_id,
+                    "text": text,
+                    "camera_id": camera_id,
+                    "kind": "member",
+                }
+            )
+        except Exception:
+            logger.exception(
+                "会员迎宾入队失败，回滚冷却 customer_id=%s camera_id=%s",
+                customer_id,
+                camera_id,
+            )
+            await cls.release_cooldown(customer_id)
+            raise
 
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
         try:

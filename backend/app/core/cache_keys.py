@@ -36,7 +36,9 @@ LOGIN_LOCK_PREFIX = "snh:login:lock"
 # ---------------------------------------------------------------------------
 TTS_WELCOME_QUEUE_KEY = "snh:tts:welcome"
 WELCOME_COOLDOWN_PREFIX = "snh:welcome:cooldown"
+UNKNOWN_WELCOME_COOLDOWN_PREFIX = "snh:welcome:unknown_cd"
 WELCOME_FRAMES_PREFIX = "snh:welcome:frames"
+SPEAK_GENERATION_PREFIX = "snh:welcome:speak_gen"
 FACE_LIVENESS_PREFIX = "snh:face:liveness"
 # 海康对讲 codec（alaw/ulaw）跨热重载持久化，避免首次播报再堵十几秒探测
 HIKVISION_CODEC_PREFIX = "snh:hik:codec:"
@@ -44,6 +46,14 @@ HIKVISION_CODEC_PREFIX = "snh:hik:codec:"
 
 def hikvision_codec_key(base_url: str, channel: int = 1) -> str:
     return f"{HIKVISION_CODEC_PREFIX}{base_url}|{int(channel)}"
+
+
+def unknown_welcome_cooldown_key(camera_id: int) -> str:
+    return f"{UNKNOWN_WELCOME_COOLDOWN_PREFIX}:{int(camera_id)}"
+
+
+def speak_generation_key(camera_id: int) -> str:
+    return f"{SPEAK_GENERATION_PREFIX}:{int(camera_id)}"
 
 # ---------------------------------------------------------------------------
 # 系统设置 / 调度 / Leader

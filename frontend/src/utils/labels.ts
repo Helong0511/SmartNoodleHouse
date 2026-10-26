@@ -225,6 +225,7 @@ export const CAMERA_STATUS: Record<string, string> = {
   ONLINE: '在线',
   OFFLINE: '离线',
   RECONNECTING: '重连中',
+  DEGRADED: '降级',
   DISABLED: '停用',
 }
 

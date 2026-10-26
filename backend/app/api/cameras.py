@@ -63,6 +63,32 @@ def _start_worker(camera: Camera, *, force: bool = False) -> None:
 
 def _serialize(c: Camera, mgr) -> dict:
     runtime = mgr.get_runtime(c.id) if mgr else {"running": False, "status": c.status, "has_frame": False}
+    try:
+        from app.services.face_pipeline_metrics import get_recognition_metrics
+
+        metrics = get_recognition_metrics(c.id)
+        if metrics:
+            runtime = {
+                **runtime,
+                "recognition": {
+                    k: metrics[k]
+                    for k in (
+                        "detect_extract_ms",
+                        "match_ms",
+                        "frame_age_ms",
+                        "face_ok",
+                        "face_area_ratio",
+                        "det_score",
+                        "best_similarity",
+                        "matched_customer_id",
+                        "threshold",
+                        "at",
+                    )
+                    if k in metrics
+                },
+            }
+    except Exception:
+        pass
     live = runtime.get("status") if runtime.get("running") else c.status
     return {
         "id": c.id,
@@ -535,10 +561,24 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
             camera.username = user_name
         if plain_pwd:
             camera.password_encrypted = encrypt_password(plain_pwd)
+        elif payload.get("clear_password"):
+            pass
         elif "source_url" in payload and plain_pwd is None and not payload.get("password") and not payload.get("clear_password"):
             # 仅改 URL 时若 URL 内嵌了密码，prepare 已拆出 plain_pwd；否则保留原加密口令
             pass
         restart = True
+        # 改地址/账号/密码后必须丢掉旧 Digest Client 与 codec 缓存，否则会 401 到进程重启
+        try:
+            from app.services.hikvision_audio import (
+                invalidate_hikvision_caches,
+                resolve_isapi_base,
+            )
+
+            isapi = resolve_isapi_base(camera.source_url or "")
+            if isapi:
+                await invalidate_hikvision_caches(base_url=isapi, channel=1)
+        except Exception:
+            pass
     if "fps" in payload and payload["fps"] is not None:
         camera.fps = payload["fps"]
         restart = True

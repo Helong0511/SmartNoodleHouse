@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import threading
 import time
 from typing import Callable
@@ -164,7 +165,9 @@ class CameraWorker:
             if not self._cap or not self._cap.isOpened():
                 self.status = "RECONNECTING"
                 if not self._connect():
-                    time.sleep(self._reconnect_delay)
+                    # 抖动避免多摄像头同时重连打满链路
+                    jitter = random.uniform(0, min(0.5, float(self._reconnect_delay) * 0.25))
+                    time.sleep(self._reconnect_delay + jitter)
                     self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
                     continue
             ret, frame = self._cap.read()
@@ -173,13 +176,21 @@ class CameraWorker:
                 if self._cap:
                     self._cap.release()
                     self._cap = None
-                time.sleep(self._reconnect_delay)
+                jitter = random.uniform(0, min(0.5, float(self._reconnect_delay) * 0.25))
+                time.sleep(self._reconnect_delay + jitter)
                 self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
                 continue
             # 丢弃 HEVC 半帧/花屏，保留上一帧好画面供识别与抓拍
             if is_rtsp_frame_usable(frame):
                 self.frame_buffer.update(frame)
-            self.status = "ONLINE"
+                self.status = "ONLINE"
+            else:
+                # 连接可读但帧不可用：若缓冲已过期则勿继续伪装在线
+                _frm, ts = self.frame_buffer.get_frame()
+                if _frm is None or (time.time() - float(ts or 0)) > 5.0:
+                    self.status = "DEGRADED"
+                else:
+                    self.status = "ONLINE"
             time.sleep(interval)
 
 

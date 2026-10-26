@@ -90,7 +90,8 @@ class RecognitionWorker:
                     now = time.time()
                     for cam_id in camera_ids:
                         worker = mgr.get_worker(cam_id)
-                        if not worker or worker.status != "ONLINE":
+                        # DEGRADED：偶发坏帧但仍有近期好帧，须继续识别
+                        if not worker or worker.status not in ("ONLINE", "DEGRADED"):
                             continue
                         if now < self._tts_yield_until.get(cam_id, 0):
                             continue
@@ -133,10 +134,30 @@ class RecognitionWorker:
                             continue
 
                         decided = None
+                        t_detect0 = time.perf_counter()
+                        # 窗口收集中：轻量检测；尚未开窗或定稿前首检：完整路径
+                        use_light = bool(getattr(win, "collecting", lambda: False)())
                         try:
                             # 同步 InsightFace 绝不能堵事件循环；带回质量分供窗口择优
-                            hit = await asyncio.to_thread(extract_live_face_hit, frame)
+                            hit = await asyncio.to_thread(
+                                extract_live_face_hit, frame, light=use_light
+                            )
+                            detect_ms = int((time.perf_counter() - t_detect0) * 1000)
                         except Exception as e:
+                            detect_ms = int((time.perf_counter() - t_detect0) * 1000)
+                            try:
+                                from app.services.face_pipeline_metrics import (
+                                    record_recognition_metrics,
+                                )
+
+                                record_recognition_metrics(
+                                    cam_id,
+                                    detect_extract_ms=detect_ms,
+                                    frame_age_ms=int(age * 1000),
+                                    face_ok=False,
+                                )
+                            except Exception:
+                                pass
                             # 漏检推进墙钟；超时仍有样本则强制定稿
                             try:
                                 decided = win.prune_now(now)
@@ -202,6 +223,21 @@ class RecognitionWorker:
                         else:
                             self._hit_counts[cam_id] = self._hit_counts.get(cam_id, 0) + 1
                             self._miss_counts[cam_id] = 0
+                            try:
+                                from app.services.face_pipeline_metrics import (
+                                    record_recognition_metrics,
+                                )
+
+                                record_recognition_metrics(
+                                    cam_id,
+                                    detect_extract_ms=detect_ms,
+                                    frame_age_ms=int(age * 1000),
+                                    face_ok=True,
+                                    face_area_ratio=round(float(hit.face_area_ratio), 4),
+                                    det_score=round(float(hit.det_score), 3),
+                                )
+                            except Exception:
+                                pass
                             decided = win.push(hit, frame=frame, now=now)
                             if decided is None:
                                 if now - self._last_hit_log_at.get(cam_id, 0) >= 1.2:
@@ -220,6 +256,38 @@ class RecognitionWorker:
                         best_hit, best_frame, support_hits = decided
                         if best_frame is not None:
                             frame = best_frame
+                            # 收集期可能用 light 特征；定稿对最佳帧再完整提一次再匹配
+                            try:
+                                t_refine0 = time.perf_counter()
+                                refined = await asyncio.to_thread(
+                                    extract_live_face_hit, best_frame, light=False
+                                )
+                                best_hit = refined
+                                refine_ms = int(
+                                    (time.perf_counter() - t_refine0) * 1000
+                                )
+                                try:
+                                    from app.services.face_pipeline_metrics import (
+                                        record_recognition_metrics,
+                                    )
+
+                                    record_recognition_metrics(
+                                        cam_id,
+                                        detect_extract_ms=refine_ms,
+                                        face_ok=True,
+                                        face_area_ratio=round(
+                                            float(best_hit.face_area_ratio), 4
+                                        ),
+                                        det_score=round(float(best_hit.det_score), 3),
+                                    )
+                                except Exception:
+                                    pass
+                            except Exception:
+                                logger.debug(
+                                    "定稿完整提特征失败，沿用窗口 hit camera_id=%s",
+                                    cam_id,
+                                    exc_info=True,
+                                )
                         emb = np.asarray(best_hit.embedding, dtype=np.float32)
                         logger.info(
                             "人脸窗口定稿 camera_id=%s ratio=%.4f sharp=%.1f det=%.3f "
@@ -240,9 +308,27 @@ class RecognitionWorker:
                             settings.face_match_threshold,
                             store_id=store_id,
                         )
+                        t_match0 = time.perf_counter()
                         best_id, best_sim = await face_embedding_cache.best_match(
                             db, emb, float(threshold), camera_id=cam_id
                         )
+                        match_ms = int((time.perf_counter() - t_match0) * 1000)
+                        try:
+                            from app.services.face_pipeline_metrics import (
+                                record_recognition_metrics,
+                            )
+
+                            record_recognition_metrics(
+                                cam_id,
+                                match_ms=match_ms,
+                                best_similarity=(
+                                    round(float(best_sim), 4) if best_sim is not None else None
+                                ),
+                                matched_customer_id=best_id,
+                                threshold=round(float(threshold), 4),
+                            )
+                        except Exception:
+                            pass
                         # 未匹配到授权会员 → 未知访客抓拍 + 可选陌生客迎宾
                         if best_id is None or best_sim < threshold:
                             if best_id is not None:
@@ -421,14 +507,22 @@ class RecognitionWorker:
                                 len(support_sims),
                                 avg,
                             )
-                        # 高相似单次命中也可直接迎宾（窗口内已有优质近景）
-                        elif (not confirmed or not cid) and best_sim >= float(threshold) + 0.04:
+                        # 高相似单次命中：仅高质量近景才允许跳过多帧确认，降低误配姓名风险
+                        elif (
+                            (not confirmed or not cid)
+                            and best_sim >= float(threshold) + 0.04
+                            and float(best_hit.face_area_ratio) >= 0.06
+                            and float(best_hit.det_score) >= 0.55
+                        ):
                             confirmed, cid, avg = True, best_id, float(best_sim)
                             logger.info(
-                                "会员高相似跳过二次确认 camera_id=%s customer_id=%s sim=%.4f",
+                                "会员高相似跳过二次确认 camera_id=%s customer_id=%s "
+                                "sim=%.4f ratio=%.4f det=%.3f",
                                 cam_id,
                                 cid,
                                 avg,
+                                best_hit.face_area_ratio,
+                                best_hit.det_score,
                             )
                         if not confirmed or not cid:
                             logger.info(

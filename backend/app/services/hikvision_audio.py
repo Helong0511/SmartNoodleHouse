@@ -73,14 +73,88 @@ _G711_TAIL_SILENCE_MS = 1100
 _CAMERA_LOCKS: dict[str, asyncio.Lock] = {}
 _CAMERA_LOCKS_GUARD = asyncio.Lock()
 # 同机复用 Digest 认证状态，避免 open/close 每次新建 Client 再撞 401
+# 键含认证指纹，改密后自然错开；仍须调用 invalidate_hikvision_caches 关掉旧 Client
 _SHARED_HTTP: dict[str, httpx.AsyncClient] = {}
 _SHARED_HTTP_GUARD = asyncio.Lock()
-# 通道编码热缓存，避免每次试听都多一轮 Digest GET
+# 通道编码热缓存，避免每次试听都多一轮 Digest GET（仅存探测成功的值）
 _CODEC_CACHE: HotCache[str, str] = HotCache("hikvision.codec", max_size=32, ttl_seconds=3600.0)
+# 后台探测进行中，避免 resolve_codec(block=False) 反复 create_task
+_CODEC_DETECT_PENDING: set[str] = set()
 # 上一轮已正常 close 则跳过本轮预 close（省一次 Digest 往返，约 0.5–1s）
 _SESSION_NEED_CLOSE: dict[str, bool] = {}
 # audioData Digest 挑战缓存（同机短时复用，少一次 401 往返）
 _DIGEST_WWW_CACHE: HotCache[str, str] = HotCache("hikvision.digest_www", max_size=32, ttl_seconds=120.0)
+
+
+def _device_lock_key(base_url: str, channel: int) -> str:
+    return f"{base_url.rstrip('/')}|{int(channel)}"
+
+
+def _auth_fingerprint(username: str, password: str) -> str:
+    raw = f"{username or ''}\0{password or ''}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+async def invalidate_hikvision_caches(*, base_url: str, channel: int | None = None) -> None:
+    """改密/改地址后关闭共享 HTTP，并清 codec / Digest 挑战缓存。"""
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return
+    prefix = f"{base}|"
+    to_close: list[httpx.AsyncClient] = []
+    async with _SHARED_HTTP_GUARD:
+        for key, client in list(_SHARED_HTTP.items()):
+            if not key.startswith(prefix):
+                continue
+            if channel is not None:
+                parts = key.split("|")
+                if len(parts) < 2 or parts[1] != str(int(channel)):
+                    continue
+            _SHARED_HTTP.pop(key, None)
+            to_close.append(client)
+    for client in to_close:
+        try:
+            await client.aclose()
+        except Exception:
+            logger.debug("close hikvision shared client failed", exc_info=True)
+
+    with _CODEC_CACHE._lock:
+        codec_keys = [
+            k
+            for k in list(_CODEC_CACHE._data.keys())
+            if str(k).startswith(prefix)
+            and (
+                channel is None
+                or (len(str(k).split("|")) >= 2 and str(k).split("|")[1] == str(int(channel)))
+            )
+        ]
+    if channel is not None:
+        codec_keys.append(_device_lock_key(base, int(channel)))
+    elif not codec_keys:
+        codec_keys.append(_device_lock_key(base, 1))
+    for ck in set(codec_keys):
+        _CODEC_CACHE.delete(ck)
+        _CODEC_DETECT_PENDING.discard(str(ck))
+        _SESSION_NEED_CLOSE.pop(str(ck), None)
+        _DIGEST_WWW_CACHE.delete(str(ck))
+
+    try:
+        from app.core.cache_keys import hikvision_codec_key
+        from app.core.redis_client import get_redis
+
+        redis = await get_redis()
+        chans = [int(channel)] if channel is not None else sorted(
+            {
+                int(str(k).split("|")[1])
+                for k in codec_keys
+                if len(str(k).split("|")) >= 2 and str(k).split("|")[1].isdigit()
+            }
+            or {1}
+        )
+        for c in chans:
+            await redis.delete(hikvision_codec_key(base, c))
+    except Exception:
+        logger.debug("delete hikvision codec redis key failed", exc_info=True)
 
 
 def resolve_isapi_base(source_url: str) -> str | None:
@@ -655,7 +729,7 @@ class HikvisionTwoWayAudio:
         self.timeout = timeout
 
     async def _lock_for(self) -> asyncio.Lock:
-        key = f"{self.base_url}|{self.channel}"
+        key = _device_lock_key(self.base_url, self.channel)
         async with _CAMERA_LOCKS_GUARD:
             lock = _CAMERA_LOCKS.get(key)
             if lock is None:
@@ -666,12 +740,18 @@ class HikvisionTwoWayAudio:
     def _url(self, suffix: str = "") -> str:
         return f"{self.base_url}/ISAPI/System/TwoWayAudio/channels/{self.channel}{suffix}"
 
-    def _cache_key(self) -> str:
-        return f"{self.base_url}|{self.channel}"
+    def _device_key(self) -> str:
+        """设备维度键（与账号无关）：codec / 对讲锁 / session 标志。"""
+        return _device_lock_key(self.base_url, self.channel)
+
+    def _client_key(self) -> str:
+        """含认证指纹，改密后不会误复用旧 Digest Client。"""
+        fp = _auth_fingerprint(self.username, self.password)
+        return f"{self._device_key()}|{fp}"
 
     async def _shared_client(self, timeout: httpx.Timeout) -> httpx.AsyncClient:
-        """按摄像头复用 AsyncClient，保留 Digest 协商结果，缩短 open 首包。"""
-        key = self._cache_key()
+        """按摄像头+凭证复用 AsyncClient，保留 Digest 协商结果，缩短 open 首包。"""
+        key = self._client_key()
         async with _SHARED_HTTP_GUARD:
             client = _SHARED_HTTP.get(key)
             if client is None or getattr(client, "is_closed", False):
@@ -689,7 +769,7 @@ class HikvisionTwoWayAudio:
             return client
 
     async def _persist_codec(self, codec: str) -> None:
-        key = self._cache_key()
+        key = self._device_key()
         c = normalize_g711_codec(codec)
         _CODEC_CACHE.put(key, c)
         try:
@@ -702,7 +782,6 @@ class HikvisionTwoWayAudio:
             logger.debug("persist hikvision codec failed", exc_info=True)
 
     async def _detect_codec(self, client: httpx.AsyncClient) -> str:
-        key = self._cache_key()
         try:
             resp = await client.get(f"{self.base_url}/ISAPI/System/TwoWayAudio/channels")
             if resp.status_code == 200 and resp.text:
@@ -716,18 +795,23 @@ class HikvisionTwoWayAudio:
                     self.channel,
                 )
                 return normalize_g711_codec(codec)
+            logger.warning(
+                "hikvision detect codec HTTP %s，不持久化默认值 base=%s",
+                getattr(resp, "status_code", "?"),
+                self.base_url,
+            )
         except Exception:
-            logger.debug("hikvision detect codec failed, fallback %s", _DEFAULT_CODEC, exc_info=True)
-        await self._persist_codec(_DEFAULT_CODEC)
+            logger.debug("hikvision detect codec failed, ephemeral fallback %s", _DEFAULT_CODEC, exc_info=True)
+        # 探测失败：仅本次返回默认值，禁止写入内存/Redis，以免真机 ulaw 被锁死 7 天
         return _DEFAULT_CODEC
 
     async def resolve_codec(self, *, block: bool = False) -> str:
         """解析 G.711 编码。
 
-        默认不阻塞：内存/Redis 未命中时立即返回 alaw，后台再探测校正。
-        热重载后首播若同步探测，曾出现 codec_ms>15s 导致「认出很久才出声」。
+        默认不阻塞：内存/Redis 未命中时立即返回临时 alaw（不入缓存），后台再探测；
+        探测成功后才持久化。热重载后首播若同步探测，曾出现 codec_ms>15s。
         """
-        key = self._cache_key()
+        key = self._device_key()
         cached = _CODEC_CACHE.get(key)
         if cached:
             return cached
@@ -747,20 +831,23 @@ class HikvisionTwoWayAudio:
             logger.debug("redis hikvision codec read failed", exc_info=True)
 
         if not block:
-            _CODEC_CACHE.put(key, _DEFAULT_CODEC)
+            if key not in _CODEC_DETECT_PENDING:
+                _CODEC_DETECT_PENDING.add(key)
 
-            async def _bg() -> None:
+                async def _bg() -> None:
+                    try:
+                        timeout = httpx.Timeout(8.0, connect=3.0)
+                        client = await self._shared_client(timeout)
+                        await self._detect_codec(client)
+                    except Exception:
+                        logger.debug("bg hikvision codec detect failed", exc_info=True)
+                    finally:
+                        _CODEC_DETECT_PENDING.discard(key)
+
                 try:
-                    timeout = httpx.Timeout(8.0, connect=3.0)
-                    client = await self._shared_client(timeout)
-                    await self._detect_codec(client)
-                except Exception:
-                    logger.debug("bg hikvision codec detect failed", exc_info=True)
-
-            try:
-                asyncio.get_running_loop().create_task(_bg())
-            except RuntimeError:
-                pass
+                    asyncio.get_running_loop().create_task(_bg())
+                except RuntimeError:
+                    _CODEC_DETECT_PENDING.discard(key)
             return _DEFAULT_CODEC
 
         timeout = httpx.Timeout(8.0, connect=3.0)
@@ -788,7 +875,7 @@ class HikvisionTwoWayAudio:
             raise RuntimeError("invalid ISAPI base url")
 
         lock = await self._lock_for()
-        key = self._cache_key()
+        key = self._device_key()
         async with lock:
             if should_abort is not None:
                 try:

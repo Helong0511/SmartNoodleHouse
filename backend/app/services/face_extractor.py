@@ -203,8 +203,12 @@ def extract_face_embedding_with_quality(image_bytes: bytes) -> tuple[list[float]
     return emb, quality
 
 
-def extract_live_face_hit(img: np.ndarray):
-    """到店实时：返回 embedding + 脸框占比/清晰度/置信度，供短时窗口择优。"""
+def extract_live_face_hit(img: np.ndarray, *, light: bool = False):
+    """到店实时：返回 embedding + 脸框占比/清晰度/置信度，供短时窗口择优。
+
+    light=True：窗口收集期用更小缩放、跳过 CLAHE 二次检测，降 CPU；
+    定稿匹配前应对 best_frame 再跑 light=False 完整提特征。
+    """
     from app.services.face_best_frame import LiveFaceHit
 
     if not _insightface_available():
@@ -216,7 +220,7 @@ def extract_live_face_hit(img: np.ndarray):
             sharpness=40.0,
         )
     try:
-        return _extract_insightface_live_hit(img)
+        return _extract_insightface_live_hit(img, light=light)
     except ValueError:
         raise
     except Exception as e:
@@ -276,18 +280,19 @@ def _face_roi_sharpness(work: np.ndarray, bbox) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-def _extract_insightface_live_hit(img: np.ndarray):
+def _extract_insightface_live_hit(img: np.ndarray, *, light: bool = False):
     from app.services.face_best_frame import LiveFaceHit
 
     if img is None or getattr(img, "size", 0) == 0:
         raise ValueError("无效视频帧")
     src_h = int(img.shape[0]) if getattr(img, "ndim", 0) >= 2 else 0
     src_w = int(img.shape[1]) if getattr(img, "ndim", 0) >= 2 else 0
-    work = _downscale_for_live(img)
+    # 收集期 720：略降像素量；定稿/首检仍 960
+    work = _downscale_for_live(img, max_side=720 if light else 960)
     app = _face_app_live()
     with _INFER_LOCK:
         faces = app.get(work)
-        if not faces:
+        if not faces and not light:
             enhanced = _enhance_for_detect(work)
             if enhanced is not None and enhanced is not work:
                 faces = app.get(enhanced)

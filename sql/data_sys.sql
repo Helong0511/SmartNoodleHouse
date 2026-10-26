@@ -1140,8 +1140,8 @@ WHERE NOT EXISTS (
     );
 INSERT INTO `system_settings` (`setting_key`, `setting_value`, `description`)
 SELECT 'camera_speaker_tts_enabled',
-    'false',
-    '摄像头播放迎宾语音（默认关闭；海康对讲扬声器）'
+    'true',
+    '摄像头播放迎宾语音（默认开启；海康对讲扬声器；可按门店关闭）'
 FROM DUAL
 WHERE NOT EXISTS (
         SELECT 1

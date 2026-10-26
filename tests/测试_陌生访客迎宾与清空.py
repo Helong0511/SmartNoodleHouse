@@ -49,6 +49,7 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
     VisitorService._last_unknown_welcome_at.clear()
     db = MagicMock()
     q: list = []
+    redis_keys: dict[str, str] = {}
 
     async def _bool(db, key, fallback, store_id=None):
         if key == "unknown_visitor_welcome_enabled":
@@ -64,6 +65,17 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
         if key == "unknown_visitor_welcome_text":
             return "欢迎光临测试店"
         return fallback
+
+    class _FakeRedis:
+        async def set(self, key, value, nx=False, ex=None):
+            if nx and key in redis_keys:
+                return False
+            redis_keys[key] = value
+            return True
+
+        async def delete(self, key):
+            redis_keys.pop(key, None)
+            return 1
 
     from app.services.face_service import WelcomeService
 
@@ -83,16 +95,18 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
             "app.services.system_settings_service.SystemSettingsService.effective_setting",
             new=AsyncMock(side_effect=_setting),
         ),
+        patch("app.services.face_service.get_redis", new=AsyncMock(return_value=_FakeRedis())),
         patch.object(WelcomeService, "enqueue", new=AsyncMock(side_effect=_enqueue)),
         patch("app.services.websocket_manager.ws_manager.broadcast", new=AsyncMock()),
     ):
         ok1 = await VisitorService.maybe_welcome_unknown(db, 8, store_id=1)
         ok2 = await VisitorService.maybe_welcome_unknown(db, 8, store_id=1)
     assert ok1 is True
-    assert ok2 is False  # 冷却中
+    assert ok2 is False  # Redis NX 冷却中
     assert len(q) == 1
     assert q[0]["text"] == "欢迎光临测试店"
     assert q[0]["camera_id"] == 8
+    assert any("unknown_cd:8" in k for k in redis_keys)
     VisitorService._last_unknown_welcome_at.clear()
 
 

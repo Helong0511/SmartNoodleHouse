@@ -35,16 +35,26 @@
           <span v-else class="muted">无帧</span>
         </template>
       </el-table-column>
+      <el-table-column label="识别耗时" width="130">
+        <template #default="{ row }">
+          <span v-if="row.runtime?.recognition?.detect_extract_ms != null" class="mono">
+            检{{ row.runtime.recognition.detect_extract_ms }} /
+            配{{ row.runtime.recognition.match_ms ?? '-' }} ms
+          </span>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="fps" label="采集FPS" width="80" />
       <el-table-column prop="detect_fps" label="识别FPS" width="80" />
       <el-table-column prop="store_id" label="门店" width="70" />
-      <el-table-column label="操作" width="460" fixed="right">
+      <el-table-column label="操作" width="560" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openPreview(row)">预览</el-button>
           <template v-if="canManageCameras">
             <el-button link size="small" @click="openForm(row)">编辑</el-button>
             <el-button link type="success" size="small" @click="startCam(row.id)">启动</el-button>
             <el-button link type="warning" size="small" @click="restartCam(row.id)">重启</el-button>
+            <el-button link type="primary" size="small" @click="probeFace(row.id)">探测人脸</el-button>
             <el-button link type="primary" size="small" @click="testSpeak(row.id, 'pc')">试听电脑</el-button>
             <el-button link type="primary" size="small" @click="testSpeak(row.id, 'camera')">试听摄像头</el-button>
             <el-button link size="small" @click="stopCam(row.id)">停止</el-button>
@@ -485,6 +495,34 @@ async function restartCam(id: number) {
     refreshAll()
   } catch (e: any) {
     ElMessage.error(e.message || '重启失败')
+  }
+}
+
+async function probeFace(id: number) {
+  try {
+    const res: any = await api.post(`/cameras/${id}/probe-face`)
+    const d = res?.data ?? res
+    if (!d?.ok) {
+      ElMessage.warning(
+        d?.reason === 'no_frame'
+          ? `无有效帧（状态 ${d?.status || '-'}，帧龄 ${d?.age != null ? Number(d.age).toFixed(1) + 's' : '-'}）`
+          : `未检测到人脸${d?.error ? '：' + d.error : ''}`,
+      )
+      return
+    }
+    if (d.matched) {
+      ElMessage.success(
+        `已匹配会员 #${d.best_customer_id}，相似度 ${Number(d.best_similarity || 0).toFixed(4)}（阈值 ${Number(d.threshold || 0).toFixed(2)}）`,
+      )
+    } else {
+      ElMessage.info(
+        `检测到人脸，未达匹配阈值（best=${d.best_customer_id ?? '-'} sim=${
+          d.best_similarity != null ? Number(d.best_similarity).toFixed(4) : '-'
+        } / ${Number(d.threshold || 0).toFixed(2)}）`,
+      )
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '探测人脸失败')
   }
 }
 
