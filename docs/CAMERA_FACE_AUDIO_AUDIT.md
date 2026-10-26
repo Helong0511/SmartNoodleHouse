@@ -49,6 +49,18 @@ CameraManager (RTSP/TCP, Leader-only)
 | G4 | P2 | Redis 宕机时 speak_task 不可读 | 试听轮询 404 | **已修**：进程内 TTL 缓存回退 | `test_speak_task_local_fallback_when_redis_down` | 否 |
 | G5 | P2 | `play_ulaw`/`play_wav` 忽略结构化结果 | 调用方易当成功 | **已修**：返回 dict（含 status） | `test_hikvision_play_ulaw_open_put_close` | 否 |
 | G6 | P2 | TTS 空文本直接 continue | task 永久 queued | **已修**：写 cancelled/`empty_text` | 代码路径 | 否 |
+| H1 | P1 | 会员播报不挂 speak_gen abort | 下一句会员/试听无法打断长句 | **已修**：member 纳入 `_abortable` | `test_member_speak_is_abortable_by_speak_gen` | 否 |
+| H2 | P1 | 识别 yield/抑制用 `time.time()` | 时钟回拨可永久跳过识别 | **已修**：改 `monotonic` | `test_recognition_worker_deadlines_use_monotonic` | 否 |
+| H3 | P1 | CameraManager 启停无锁 | 并发 start 可双 Worker | **已修**：`RLock` 串行化 | `test_camera_manager_start_force_replaces_under_lock` | 否 |
+| I1 | P1 | MultiFrameTracker TTL 用 `time.time()` | 时钟回拨破坏确认窗 | **已修**：改 `monotonic` | `test_multiframe_ttl_uses_monotonic` | 否 |
+| I2 | P1 | 会员入队不抢占待播试听/旧会员 | 试听句挡门迎宾 | **已修**：`_pending_drop_reason` 统一抢占 | `test_enqueue_member_preempts_pending_test_speak` | 否 |
+| I3 | P2 | 陌生迎宾无视待播摄像头试听 | 试听中仍插「欢迎光临」 | **已修**：`test_speak_pending` 跳过 | 与 member_pending 同路径 | 否 |
+| J1 | P1 | stop `join(5)` < RTSP open 8s | 重启时旧线程仍可能占 VideoCapture | **已修**：join≥open+4s；`_connect` 见 stop 放弃 | `test_stop_join_timeout_covers_rtsp_open_budget` | 否 |
+| J2 | P1 | 陌生轨迹 TTL 用 `time.time()` | 时钟回拨永久复用访客号 | **已修**：改 `monotonic` | `test_unknown_tracks_ttl_uses_monotonic` | 否 |
+| J3 | P2 | 试听 UI 仅认 ONLINE | DEGRADED 误弹「可能离线」 | **已修**：ONLINE/DEGRADED/has_frame | Cameras.vue | 否 |
+| K1 | P1 | overview 只计 ONLINE | DEGRADED 被算离线，KPI 误导 | **已修**：计入 online + 透出 degraded | `test_cameras_overview_counts_degraded_as_usable` | 否 |
+| K2 | P2 | start/创建 的 last_online 仅 ONLINE | 降级态不刷新最近在线 | **已修**：ONLINE/DEGRADED 均写 | cameras.py | 否 |
+| K3 | P2 | speak_task 本地 TTL 用墙钟 | 时钟回拨永久挂住轮询态 | **已修**：`updated_mono` + monotonic prune | `test_speak_task_local_ttl_uses_monotonic` | 否 |
 
 ## 3. 潜在 / 未修（有原因）
 

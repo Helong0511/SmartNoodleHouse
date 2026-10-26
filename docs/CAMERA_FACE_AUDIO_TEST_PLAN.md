@@ -23,6 +23,13 @@ python -m pytest tests/测试_人脸冷匹配top1.py tests/测试_摄像头采�
 | speak_gen Redis Lua 单调 bump | `测试_迎宾播报时延.py` | 单元 |
 | FIFO BLPOP / member_pending / need_taste | `测试_迎宾播报时延.py` / `测试_多帧确认去重与播报任务.py` / `测试_陌生访客迎宾与清空.py` | 单元 |
 | ensure 不压低 / 内存 stale 续取 / 冷却回滚 | 同上 | 单元 |
+| both bump / speak_task 本地回退 / play_ulaw dict | `测试_迎宾播报时延.py` / `测试_海康摄像头对讲TTS.py` | 单元 |
+| 会员 abort / 识别 monotonic / CameraManager 锁 | `测试_迎宾播报时延.py` / `测试_摄像头采集与音频协议.py` | 单元 |
+| MultiFrame TTL / 会员抢占试听 | `测试_多帧确认去重与播报任务.py` | 单元 |
+| stop join / connect abort | `测试_摄像头采集与音频协议.py` | 单元 |
+| 陌生轨迹 TTL monotonic | `测试_陌生访客迎宾与清空.py` | 单元 |
+| overview 计 DEGRADED | `测试_摄像头采集与音频协议.py` | 单元 |
+| speak_task 本地 TTL monotonic | `测试_迎宾播报时延.py` | 单元 |
 | 花屏过滤 | `测试_RTSP帧完整性.py` | 单元 |
 | 窗口择优 | `测试_人脸最佳帧窗口.py` | 单元 |
 

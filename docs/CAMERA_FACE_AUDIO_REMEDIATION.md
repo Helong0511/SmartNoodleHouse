@@ -61,6 +61,39 @@
 - **F3**：进程内队列满时 `enqueue` 返回 `None`；`try_welcome` 无 `task_id` 则释放会员冷却。
 - **F4**：Redis 不可用时内存入队同样处理 `member_pending` / `replaced` / `member_preempt`。
 
+## G1–G6 both 试听打断 / 假入队 / 整理回退 / 状态回退（续）
+
+- **G1**：`test_speak`(both) 入队 bump `speak_gen`，TTS 挂 `should_abort`（与摄像头试听一致）。
+- **G2**：`POST test-speak` 的 `queued` 以是否有 `task_id` 为准；前端未入队改 warning。
+- **G3**：会员队列整理异常回退前，尽力 `LREM` 同机位 `unknown_visitor`。
+- **G4**：`speak_task` 进程内 TTL 缓存，Redis 读写失败时仍可轮询。
+- **G5**：`play_ulaw`/`play_wav` 返回与 `play_g711` 同结构的 dict。
+- **G6**：TTS 消费到空文本写 `cancelled/empty_text`，不留永久 queued。
+
+## H1–H3 会员打断 / 识别 monotonic / 采集锁（续）
+
+- **H1**：TTS 对 `member` 同样挂 `speak_gen` abort，新会员/试听可打断上一句长播报。
+- **H2**：`RecognitionWorker` 的 yield/抑制/近阈值/采样节拍改 `time.monotonic()`。
+- **H3**：`CameraManager` 用 `threading.RLock` 串行化 start/stop/list/get，防止并发双开。
+
+## I1–I3 多帧 TTL / 会员抢占试听（续）
+
+- **I1**：`MultiFrameTracker` 确认窗 TTL 改 `monotonic`。
+- **I2**：会员入队统一 `_pending_drop_reason`：抢占陌生/摄像头试听/同机位旧会员 pending。
+- **I3**：陌生迎宾遇同机位待播 `test_speak`/`test_speak_camera` 时写 `test_speak_pending` 并跳过（并释放冷却）。
+
+## J1–J3 stop 超时 / 访客轨迹 / DEGRADED 试听（续）
+
+- **J1**：`CameraWorker.stop` join 超时覆盖 RTSP open 预算；`_connect` 在 open 前后见 `_stop` 即释放并返回 False，降低重启双开同路风险。
+- **J2**：陌生访客进程内轨迹 TTL 与内存冷却改 `monotonic`（Redis NX 冷却仍用服务端墙钟 TTL）。
+- **J3**：后台试听 UI 将 `DEGRADED` 与 `ONLINE` 同等视为可对讲；probe 过期提示同步提及 DEGRADED。
+
+## K1–K3 overview 降级 / last_online / speak_task 本地 TTL（续）
+
+- **K1**：`GET /cameras/overview` 将 `DEGRADED` 计入 `online`，并返回 `degraded`；前端 KPI 有降级时显示「其中降级」。
+- **K2**：启动/创建后 `last_online_at` 在 `ONLINE` 与 `DEGRADED` 时均更新。
+- **K3**：进程内 `speak_task` 用 `updated_mono` 做 TTL；对外响应仍只暴露墙钟 `updated_at`。
+
 ## 其它
 
 - `cameras.probe-face`：过期帧返回 `reason=stale_frame`。

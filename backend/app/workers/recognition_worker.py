@@ -87,7 +87,8 @@ class RecognitionWorker:
                             await db.execute(select(Camera).where(Camera.id.in_(camera_ids)))
                         ).scalars().all()
                     }
-                    now = time.time()
+                    # 相对节拍一律 monotonic，避免 NTP/手动改时把 yield/抑制拉成永久
+                    now = time.monotonic()
                     for cam_id in camera_ids:
                         worker = mgr.get_worker(cam_id)
                         # DEGRADED：偶发坏帧但仍有近期好帧，须继续识别
@@ -445,7 +446,9 @@ class RecognitionWorker:
                                             f"{best_sim:.4f}" if best_id is not None else "-",
                                         )
                                         # 仅短暂让出，过长会导致人已离开才识别到会员
-                                        self._tts_yield_until[cam_id] = time.time() + 0.6
+                                        self._tts_yield_until[cam_id] = (
+                                            time.monotonic() + 0.6
+                                        )
                                     else:
                                         logger.debug(
                                             "陌生迎宾未入队（关闭或冷却） camera_id=%s",
@@ -568,9 +571,13 @@ class RecognitionWorker:
                             await db.commit()
                             if ok:
                                 # 仅短暂让出给 TTS 首包；过长会拖下一位会员/复检
-                                self._tts_yield_until[cam_id] = time.time() + 0.35
+                                self._tts_yield_until[cam_id] = (
+                                    time.monotonic() + 0.35
+                                )
                                 # 会员播报进行中勿再插「欢迎光临」（坏帧误判会再排 10s+）
-                                self._suppress_unknown_until[cam_id] = time.time() + 25.0
+                                self._suppress_unknown_until[cam_id] = (
+                                    time.monotonic() + 25.0
+                                )
                             else:
                                 logger.info(
                                     "会员迎宾未入队（冷却或阈值） camera_id=%s customer_id=%s",

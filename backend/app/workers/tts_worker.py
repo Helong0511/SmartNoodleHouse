@@ -920,11 +920,15 @@ class TTSWorker:
                 stop_gen_poll: asyncio.Event | None = None
                 final_status = "completed"
                 cancel_reason: str | None = None
-                # 陌生迎宾 / 摄像头试听 / both 试听可被同机位后续 bump 打断
-                if (
-                    kind in ("unknown_visitor", "test_speak_camera", "test_speak")
-                    and camera_id is not None
-                ):
+                # 可被同机位后续 bump 打断：陌生/试听/会员长句（新人入队或连点试听）
+                # 仅电脑试听不挂 abort
+                _abortable = (
+                    "unknown_visitor",
+                    "test_speak_camera",
+                    "test_speak",
+                    "member",
+                )
+                if kind in _abortable and camera_id is not None:
                     from app.core.async_utils import spawn_bg
 
                     # 先拉 Redis，避免另一 Worker 已 bump 而本进程仍见旧世代
@@ -963,14 +967,7 @@ class TTSWorker:
                     if speak_outcome == "cancelled":
                         final_status = "cancelled"
                         cancel_reason = (
-                            "speak_gen_bumped"
-                            if kind
-                            in (
-                                "unknown_visitor",
-                                "test_speak_camera",
-                                "test_speak",
-                            )
-                            else "cancelled"
+                            "speak_gen_bumped" if kind in _abortable else "cancelled"
                         )
                     elif speak_outcome in ("ok", "local"):
                         final_status = "completed"

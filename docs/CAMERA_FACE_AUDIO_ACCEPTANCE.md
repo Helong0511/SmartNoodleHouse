@@ -4,7 +4,14 @@
 
 | 项 | 结果 | 说明 |
 |---|---|---|
-| 迎宾相关 pytest 子集 | **53 passed**（F1–F4 核对子集） | 迎宾时延 / 多帧播报 / 陌生迎宾 / 采集音频 / 海康 TTS / 冷匹配 |
+| 迎宾相关 pytest 子集 | **48 passed**（K1–K3 核对：采集/迎宾时延/陌生/多帧播报） | 本机 pytest 为准 |
+| 会员抢占待播试听 | **模拟通过** | `test_enqueue_member_preempts_pending_test_speak` |
+| MultiFrame TTL monotonic | **模拟通过** | `test_multiframe_ttl_uses_monotonic` |
+| 会员播报可 speak_gen 打断 | **模拟通过** | `_abortable` 含 member |
+| 识别节拍 monotonic | **模拟通过** | yield/抑制不用 time.time() |
+| CameraManager 启停加锁 | **模拟通过** | force 替换仅一 worker |
+| both 试听 bump speak_gen | **模拟通过** | `test_test_speak_both_bumps_speak_generation` |
+| speak_task Redis 宕机本地回退 | **模拟通过** | `test_speak_task_local_fallback_when_redis_down` |
 | speak_gen ensure 不压低世代 | **模拟通过** | Lua `max(cur,want)` |
 | 内存 dequeue 跳过 stale 取下一项 | **模拟通过** | Redis 宕机降级路径 |
 | 会员 enqueue None 释放冷却 | **模拟通过** | `try_welcome` 回滚 |

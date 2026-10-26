@@ -243,13 +243,21 @@ const form = reactive({
 /** 打开编辑时的原名称；后端仅在名称真正变化时同步 OSD */
 let editNameSnapshot = ''
 
-const kpiCards = computed(() => [
-  { label: '摄像头', value: overview.value.camera_count ?? cameras.value.length },
-  { label: '在线', value: overview.value.online ?? 0 },
-  { label: '重连中', value: overview.value.reconnecting ?? 0 },
-  { label: '今日访客', value: overview.value.visitor_today ?? 0 },
-  { label: '累计访客', value: overview.value.visitor_total ?? 0 },
-])
+const kpiCards = computed(() => {
+  const cards = [
+    { label: '摄像头', value: overview.value.camera_count ?? cameras.value.length },
+    { label: '在线', value: overview.value.online ?? 0 },
+    { label: '重连中', value: overview.value.reconnecting ?? 0 },
+    { label: '今日访客', value: overview.value.visitor_today ?? 0 },
+    { label: '累计访客', value: overview.value.visitor_total ?? 0 },
+  ]
+  // DEGRADED 已计入「在线」；有降级时单独透出，避免误判全绿
+  const deg = Number(overview.value.degraded || 0)
+  if (deg > 0) {
+    cards.splice(2, 0, { label: '其中降级', value: deg })
+  }
+  return cards
+})
 
 function statusType(s: string) {
   return cameraStatusTagType(s)
@@ -548,7 +556,10 @@ async function probeFace(id: number) {
 
 async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
   const row = cameras.value.find((c: any) => c.id === id)
-  const online = String(row?.status || '').toUpperCase() === 'ONLINE' || !!row?.runtime?.has_frame
+  // 与识别 Worker 一致：ONLINE / DEGRADED（偶发坏帧仍有近期好帧）均可试对讲
+  const st = String(row?.status || row?.runtime?.status || '').toUpperCase()
+  const online =
+    st === 'ONLINE' || st === 'DEGRADED' || !!row?.runtime?.has_frame
   if (target === 'camera' && !online) {
     try {
       await ElMessageBox.confirm(

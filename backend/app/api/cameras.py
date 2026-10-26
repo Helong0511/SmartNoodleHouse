@@ -124,14 +124,19 @@ async def cameras_overview(request: Request, db: DbSession, user: CurrentUser):
     cams = list((await db.execute(q)).scalars().all())
     mgr = CameraManager()
     online = 0
+    degraded = 0
     reconnecting = 0
     for c in cams:
         st = mgr.get_status(c.id) if mgr.get_worker(c.id) else c.status
+        # DEGRADED：偶发坏帧但仍有近期好帧，识别 Worker 仍跑；KPI「在线」须计入
         if st == "ONLINE":
             online += 1
+        elif st == "DEGRADED":
+            degraded += 1
         elif st == "RECONNECTING":
             reconnecting += 1
 
+    usable = online + degraded
     today = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
     cam_ids = [c.id for c in cams] or [-1]
     visitor_today = int(
@@ -149,9 +154,10 @@ async def cameras_overview(request: Request, db: DbSession, user: CurrentUser):
     return success(
         {
             "camera_count": len(cams),
-            "online": online,
+            "online": usable,
+            "degraded": degraded,
             "reconnecting": reconnecting,
-            "offline": max(0, len(cams) - online - reconnecting),
+            "offline": max(0, len(cams) - usable - reconnecting),
             "visitor_today": visitor_today,
             "visitor_total": visitor_total,
         },
@@ -326,7 +332,7 @@ async def probe_camera_face(
                 "status": getattr(worker, "status", None),
                 "age": age,
                 "max_age_sec": max_frame_age_sec,
-                "hint": "帧过期或无有效时间戳，请确认摄像头 ONLINE 且有新帧后再探测",
+                "hint": "帧过期或无有效时间戳，请确认摄像头 ONLINE/DEGRADED 且有新帧后再探测",
             },
             request=request,
         )
@@ -582,7 +588,7 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
         mgr = CameraManager()
         st = mgr.get_status(camera.id)
         camera.status = st if st else "OFFLINE"
-        if camera.status == "ONLINE":
+        if camera.status in ("ONLINE", "DEGRADED"):
             camera.last_online_at = now_local()
         payload = _serialize(camera, mgr)
         if osd_sync is not None:
@@ -734,7 +740,7 @@ async def start_camera(camera_id: int, request: Request, db: DbSession, user: Cu
 
     st = CameraManager().get_status(camera_id) or "OFFLINE"
     camera.status = st
-    if st == "ONLINE":
+    if st in ("ONLINE", "DEGRADED"):
         camera.last_online_at = now_local()
     await AuditService.log(
         db,

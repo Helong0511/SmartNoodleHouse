@@ -44,6 +44,32 @@ def test_resolve_visitor_no_reuses_similar_embedding():
     VisitorService._unknown_tracks.clear()
 
 
+def test_unknown_tracks_ttl_uses_monotonic(monkeypatch):
+    """轨迹 TTL 走 monotonic，墙上时钟回拨不得把复用窗拉成永久。"""
+    import time as _time
+
+    VisitorService._unknown_tracks.clear()
+    cam_id = 88011
+    emb = np.zeros(512, dtype=np.float32)
+    emb[0] = 1.0
+    mono = {"t": 1000.0}
+
+    def _fake_monotonic():
+        return mono["t"]
+
+    monkeypatch.setattr(_time, "monotonic", _fake_monotonic)
+    no1 = VisitorService.resolve_visitor_no(cam_id, store_no="SH01", embedding=emb, reuse_min_sim=0.4)
+    # 墙钟大幅回拨不应影响轨迹（仍在 TTL 内应复用）
+    monkeypatch.setattr(_time, "time", lambda: 1.0)
+    no2 = VisitorService.resolve_visitor_no(cam_id, store_no="SH01", embedding=emb, reuse_min_sim=0.4)
+    assert no2 == no1
+    # monotonic 越过 TTL → 新号
+    mono["t"] = 1000.0 + VisitorService._UNKNOWN_TRACK_TTL_SEC + 1.0
+    no3 = VisitorService.resolve_visitor_no(cam_id, store_no="SH01", embedding=emb, reuse_min_sim=0.4)
+    assert no3 != no1
+    VisitorService._unknown_tracks.clear()
+
+
 @pytest.mark.asyncio
 async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
     VisitorService._last_unknown_welcome_at.clear()

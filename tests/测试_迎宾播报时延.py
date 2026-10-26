@@ -326,7 +326,67 @@ async def test_speak_task_local_fallback_when_redis_down(monkeypatch):
     got = await WelcomeService.get_speak_task("local-tid")
     assert got is not None
     assert got["status"] == "queued"
+    assert "updated_mono" not in got  # 对外不透出进程内时钟字段
     WelcomeService._speak_task_local.clear()
+
+
+@pytest.mark.asyncio
+async def test_speak_task_local_ttl_uses_monotonic(monkeypatch):
+    """本地 speak_task TTL 走 monotonic，墙上时钟回拨不得永久挂住。"""
+    import time as _time
+
+    from app.core.cache_keys import SPEAK_TASK_TTL_SECONDS
+
+    WelcomeService._speak_task_local.clear()
+
+    class _Boom:
+        async def set(self, *a, **k):
+            raise RuntimeError("redis down")
+
+        async def get(self, *a, **k):
+            raise RuntimeError("redis down")
+
+    monkeypatch.setattr(
+        "app.services.face_service.get_redis",
+        AsyncMock(return_value=_Boom()),
+    )
+    mono = {"t": 5000.0}
+    monkeypatch.setattr(_time, "monotonic", lambda: mono["t"])
+    await WelcomeService.set_speak_task_status("ttl-tid", "queued", kind="member")
+    assert await WelcomeService.get_speak_task("ttl-tid") is not None
+    # 墙钟大幅回拨不应误杀
+    monkeypatch.setattr(_time, "time", lambda: 1.0)
+    assert await WelcomeService.get_speak_task("ttl-tid") is not None
+    mono["t"] = 5000.0 + float(SPEAK_TASK_TTL_SECONDS) + 1.0
+    assert await WelcomeService.get_speak_task("ttl-tid") is None
+    WelcomeService._speak_task_local.clear()
+
+
+def test_member_speak_is_abortable_by_speak_gen():
+    """会员长句推流须可被后续 bump 打断（新人/试听），否则会挡下一句。"""
+    import inspect
+
+    from app.workers import tts_worker as tw
+
+    src = inspect.getsource(tw.TTSWorker.run)
+    assert '"member"' in src or "'member'" in src
+    assert "_abortable" in src
+    assert "speak_gen_bumped" in src
+
+
+def test_recognition_worker_deadlines_use_monotonic():
+    """yield/抑制近阈值用 monotonic，避免墙上时钟回拨导致永久跳过识别。"""
+    import inspect
+
+    from app.workers.recognition_worker import RecognitionWorker
+
+    src = inspect.getsource(RecognitionWorker.run)
+    assert "time.monotonic()" in src
+    assert "self._tts_yield_until[cam_id] = (" in src or "_tts_yield_until[cam_id] = time.monotonic()" in src
+    # 不应再用 time.time() 写入 yield/抑制截止
+    assert "time.time() + 0.35" not in src
+    assert "time.time() + 25.0" not in src
+    assert "time.time() + 0.6" not in src
 
 
 def test_need_taste_covers_preference_template_placeholder():

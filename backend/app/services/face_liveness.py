@@ -63,7 +63,8 @@ class MultiFrameTracker:
         """
         返回 (confirmed, customer_id, avg_similarity)
         """
-        now = time.time()
+        # TTL 用 monotonic，避免墙上时钟回拨把确认窗拉成永久或瞬间过期
+        now = time.monotonic()
         key = self._key(camera_id, track_id)
         st = self._tracks.get(key)
         if st is None or now - st.last_seen > self.ttl_seconds or (
@@ -100,7 +101,7 @@ class MultiFrameTracker:
         return True, cid, avg
 
     def cleanup(self) -> None:
-        now = time.time()
+        now = time.monotonic()
         dead = [k for k, v in self._tracks.items() if now - v.last_seen > self.ttl_seconds * 3]
         for k in dead:
             self._tracks.pop(k, None)

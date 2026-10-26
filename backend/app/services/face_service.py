@@ -727,7 +727,8 @@ class VisitorService:
         """同摄像头短时内相似人脸复用访客号；否则新号。"""
         import time as _time
 
-        now = _time.time()
+        # 进程内轨迹 TTL 用 monotonic，避免墙上时钟回拨把复用窗拉成永久
+        now = _time.monotonic()
         min_sim = float(reuse_min_sim if reuse_min_sim is not None else cls._UNKNOWN_REUSE_MIN_SIM)
         min_sim = max(0.35, min(0.95, min_sim))
         if embedding is not None:
@@ -845,7 +846,8 @@ class VisitorService:
             getattr(settings, "unknown_visitor_welcome_cooldown_seconds", 60),
             store_id=store_id,
         )
-        now = _time.time()
+        # 进程内冷却/日志节流用 monotonic；Redis NX EX 仍走服务端墙钟 TTL
+        now_mono = _time.monotonic()
         acquired = True
         if cooldown > 0:
             try:
@@ -861,13 +863,13 @@ class VisitorService:
                 # Redis 不可用时回退进程内字典（多 worker 不共享，明确降级）
                 logger.debug("unknown welcome redis cooldown failed, fallback memory", exc_info=True)
                 last = cls._last_unknown_welcome_at.get(int(camera_id), 0.0)
-                if now - last < float(cooldown):
+                if now_mono - last < float(cooldown):
                     acquired = False
                 else:
-                    cls._last_unknown_welcome_at[int(camera_id)] = now
+                    cls._last_unknown_welcome_at[int(camera_id)] = now_mono
         if not acquired:
-            if now - cls._last_unknown_cd_log_at.get(int(camera_id), 0.0) >= 15.0:
-                cls._last_unknown_cd_log_at[int(camera_id)] = now
+            if now_mono - cls._last_unknown_cd_log_at.get(int(camera_id), 0.0) >= 15.0:
+                cls._last_unknown_cd_log_at[int(camera_id)] = now_mono
                 logger.info(
                     "陌生访客迎宾冷却中 camera_id=%s cooldown=%ss",
                     camera_id,
@@ -1266,20 +1268,44 @@ class WelcomeService:
             return s, None
         return s, obj if isinstance(obj, dict) else None
 
+    @classmethod
+    def _pending_drop_reason(cls, new_kind: str, old_kind: str, same_cam: bool) -> str:
+        """同机位队列整理：返回 cancelled reason；空串表示保留。"""
+        if not same_cam:
+            return ""
+        nk = str(new_kind or "")
+        ok = str(old_kind or "")
+        if nk.startswith("test_speak"):
+            return "replaced" if ok == nk else ""
+        if nk == "member":
+            if ok == "unknown_visitor":
+                return "member_preempt"
+            # 待播试听/旧会员句挡门迎宾：一并作废
+            if ok in ("test_speak", "test_speak_camera", "member"):
+                return "member_preempt" if ok.startswith("test_speak") else "replaced"
+            return ""
+        return ""
+
     # Redis 不可用时仍可供试听轮询（有 TTL，防泄漏）
     _speak_task_local: dict[str, dict] = {}
 
     @classmethod
-    def _prune_speak_task_local(cls, now: float | None = None) -> None:
+    def _prune_speak_task_local(cls, now_mono: float | None = None) -> None:
         import time as _time
 
-        t = float(now if now is not None else _time.time())
+        # 本地 TTL 优先 monotonic；仅有旧字段 updated_at 时回退墙钟，勿混比
+        mono = float(now_mono if now_mono is not None else _time.monotonic())
+        wall = _time.time()
         ttl = float(SPEAK_TASK_TTL_SECONDS)
-        dead = [
-            k
-            for k, v in cls._speak_task_local.items()
-            if t - float((v or {}).get("updated_at") or 0) > ttl
-        ]
+        dead: list[str] = []
+        for k, v in cls._speak_task_local.items():
+            row = v or {}
+            if "updated_mono" in row:
+                age = mono - float(row.get("updated_mono") or 0)
+            else:
+                age = wall - float(row.get("updated_at") or 0)
+            if age > ttl:
+                dead.append(k)
         for k in dead:
             cls._speak_task_local.pop(k, None)
 
@@ -1294,17 +1320,20 @@ class WelcomeService:
         import json
         import time as _time
 
-        now = _time.time()
+        now_wall = _time.time()
+        now_mono = _time.monotonic()
         payload = {
             "task_id": tid,
             "status": str(status or "unknown"),
-            "updated_at": now,
+            "updated_at": now_wall,
             **{k: v for k, v in extra.items() if v is not None},
         }
-        cls._prune_speak_task_local(now)
-        cls._speak_task_local[tid] = payload
+        local_payload = {**payload, "updated_mono": now_mono}
+        cls._prune_speak_task_local(now_mono)
+        cls._speak_task_local[tid] = local_payload
         try:
             redis = await get_redis()
+            # Redis 侧不写 updated_mono（跨进程无意义）；EX 仍用墙钟 TTL
             await redis.set(
                 speak_task_key(tid),
                 json.dumps(payload, ensure_ascii=False),
@@ -1335,12 +1364,19 @@ class WelcomeService:
         local = cls._speak_task_local.get(tid)
         if not local:
             return None
-        if _time.time() - float(local.get("updated_at") or 0) > float(
-            SPEAK_TASK_TTL_SECONDS
-        ):
+        age_base = float(local.get("updated_mono") or local.get("updated_at") or 0)
+        now_m = _time.monotonic()
+        # 旧条目仅有 updated_at（墙钟）：回退比较墙钟，避免误杀
+        if "updated_mono" in local:
+            expired = now_m - age_base > float(SPEAK_TASK_TTL_SECONDS)
+        else:
+            expired = _time.time() - age_base > float(SPEAK_TASK_TTL_SECONDS)
+        if expired:
             cls._speak_task_local.pop(tid, None)
             return None
-        return dict(local)
+        out = dict(local)
+        out.pop("updated_mono", None)
+        return out
 
     @classmethod
     async def enqueue(cls, item: dict) -> str | None:
@@ -1382,14 +1418,9 @@ class WelcomeService:
                             continue
                         o_kind = str(obj.get("kind") or "")
                         o_cam = str(obj.get("camera_id") if obj.get("camera_id") is not None else "")
-                        drop_reason = ""
-                        if kind.startswith("test_speak"):
-                            if o_kind == kind and o_cam == cam_s:
-                                drop_reason = "replaced"
-                        elif kind == "member":
-                            # 丢掉同机位待播陌生迎宾，避免「欢迎光临」挡会员长句
-                            if o_kind == "unknown_visitor" and o_cam == cam_s:
-                                drop_reason = "member_preempt"
+                        drop_reason = cls._pending_drop_reason(
+                            kind, o_kind, o_cam == cam_s and bool(cam_s)
+                        )
                         if drop_reason:
                             dropped += 1
                             drop_raws.append(s)
@@ -1424,7 +1455,7 @@ class WelcomeService:
                     return task_id
                 except Exception:
                     logger.exception("迎宾队列整理失败，回退普通入队前尽力抢占")
-                    # 整理失败时仍尽量去掉同机位陌生句，避免会员排在「欢迎光临」后
+                    # 整理失败时仍尽量去掉同机位低优先级句，避免会员排在试听/欢迎光临后
                     if kind == "member" and cam_s:
                         try:
                             items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
@@ -1432,54 +1463,67 @@ class WelcomeService:
                                 s, obj = cls._parse_queue_item(it)
                                 if not obj:
                                     continue
-                                if (
-                                    str(obj.get("kind") or "") == "unknown_visitor"
-                                    and str(
-                                        obj.get("camera_id")
-                                        if obj.get("camera_id") is not None
-                                        else ""
-                                    )
-                                    == cam_s
-                                ):
-                                    try:
-                                        await redis.lrem(cls.TTS_QUEUE_KEY, 1, s)
-                                    except Exception:
-                                        pass
-                                    await cls.set_speak_task_status(
-                                        obj.get("task_id"),
-                                        "cancelled",
-                                        reason="member_preempt",
-                                        kind="unknown_visitor",
-                                        camera_id=obj.get("camera_id"),
-                                    )
+                                o_kind = str(obj.get("kind") or "")
+                                o_cam = str(
+                                    obj.get("camera_id")
+                                    if obj.get("camera_id") is not None
+                                    else ""
+                                )
+                                reason = cls._pending_drop_reason(
+                                    "member", o_kind, o_cam == cam_s
+                                )
+                                if not reason:
+                                    continue
+                                try:
+                                    await redis.lrem(cls.TTS_QUEUE_KEY, 1, s)
+                                except Exception:
+                                    pass
+                                await cls.set_speak_task_status(
+                                    obj.get("task_id"),
+                                    "cancelled",
+                                    reason=reason,
+                                    kind=o_kind,
+                                    camera_id=obj.get("camera_id"),
+                                )
                         except Exception:
                             logger.debug("会员回退抢占失败", exc_info=True)
             if kind == "unknown_visitor" and cam_s:
-                # 已有同机位会员待播则不再塞陌生句
+                # 已有同机位会员或摄像头试听待播则不再塞陌生句
                 try:
                     items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
                     for it in items or []:
                         _s, obj = cls._parse_queue_item(it)
                         if not obj:
                             continue
-                        if (
-                            str(obj.get("kind") or "") == "member"
-                            and str(obj.get("camera_id") if obj.get("camera_id") is not None else "")
-                            == cam_s
+                        o_kind = str(obj.get("kind") or "")
+                        o_cam = str(
+                            obj.get("camera_id") if obj.get("camera_id") is not None else ""
+                        )
+                        if o_cam != cam_s:
+                            continue
+                        if o_kind == "member" or o_kind in (
+                            "test_speak_camera",
+                            "test_speak",
                         ):
+                            skip_reason = (
+                                "member_pending"
+                                if o_kind == "member"
+                                else "test_speak_pending"
+                            )
                             logger.info(
-                                "跳过陌生迎宾（队列已有会员） camera_id=%s",
+                                "跳过陌生迎宾（队列已有 %s） camera_id=%s",
+                                o_kind,
                                 payload.get("camera_id"),
                             )
                             await cls.set_speak_task_status(
                                 task_id,
                                 "cancelled",
-                                reason="member_pending",
+                                reason=skip_reason,
                                 camera_id=payload.get("camera_id"),
                             )
                             return None
                 except Exception:
-                    logger.debug("检查会员待播失败，继续陌生入队", exc_info=True)
+                    logger.debug("检查会员/试听待播失败，继续陌生入队", exc_info=True)
             pipe = redis.pipeline()
             pipe.rpush(cls.TTS_QUEUE_KEY, raw)
             pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
@@ -1505,22 +1549,33 @@ class WelcomeService:
                 except asyncio.QueueEmpty:
                     break
             if kind == "unknown_visitor" and cam_s:
-                if any(
-                    isinstance(p, dict)
-                    and str(p.get("kind") or "") == "member"
-                    and str(p.get("camera_id") if p.get("camera_id") is not None else "")
-                    == cam_s
-                    for p in pending_items
-                ):
+                block = next(
+                    (
+                        p
+                        for p in pending_items
+                        if isinstance(p, dict)
+                        and str(p.get("camera_id") if p.get("camera_id") is not None else "")
+                        == cam_s
+                        and str(p.get("kind") or "")
+                        in ("member", "test_speak_camera", "test_speak")
+                    ),
+                    None,
+                )
+                if block is not None:
                     for item in pending_items:
                         try:
                             q.put_nowait(item)
                         except asyncio.QueueFull:
                             break
+                    b_kind = str(block.get("kind") or "")
                     await cls.set_speak_task_status(
                         task_id,
                         "cancelled",
-                        reason="member_pending",
+                        reason=(
+                            "member_pending"
+                            if b_kind == "member"
+                            else "test_speak_pending"
+                        ),
                         camera_id=payload.get("camera_id"),
                         transport="memory",
                     )
@@ -1534,11 +1589,9 @@ class WelcomeService:
                 o_cam = str(
                     pending.get("camera_id") if pending.get("camera_id") is not None else ""
                 )
-                drop_reason = ""
-                if kind.startswith("test_speak") and o_kind == kind and o_cam == cam_s:
-                    drop_reason = "replaced"
-                elif kind == "member" and o_kind == "unknown_visitor" and o_cam == cam_s:
-                    drop_reason = "member_preempt"
+                drop_reason = cls._pending_drop_reason(
+                    kind, o_kind, o_cam == cam_s and bool(cam_s)
+                )
                 if drop_reason:
                     await cls.set_speak_task_status(
                         pending.get("task_id"),
@@ -1986,10 +2039,10 @@ class WelcomeService:
         if not await cls.try_acquire_cooldown(customer_id, db, store_id=store_id):
             import time as _time
 
-            now = _time.time()
+            now_mono = _time.monotonic()
             cd_key = f"{int(camera_id or 0)}:{int(customer_id)}"
-            if now - cls._last_member_cd_log_at.get(cd_key, 0.0) >= 15.0:
-                cls._last_member_cd_log_at[cd_key] = now
+            if now_mono - cls._last_member_cd_log_at.get(cd_key, 0.0) >= 15.0:
+                cls._last_member_cd_log_at[cd_key] = now_mono
                 logger.info(
                     "会员迎宾冷却中 customer_id=%s camera_id=%s",
                     customer_id,
