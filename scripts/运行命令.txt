@@ -298,7 +298,7 @@ admin
 He00407
 
 
-
+Ubuntu服务器上安装 语音
 sudo apt update
 sudo apt install -y espeak espeak-data espeak-ng espeak-ng-data
 # 确认中文音色存在
