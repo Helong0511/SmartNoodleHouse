@@ -509,11 +509,17 @@ async function probeFace(id: number) {
     const res: any = await api.post(`/cameras/${id}/probe-face`)
     const d = res?.data ?? res
     if (!d?.ok) {
-      ElMessage.warning(
-        d?.reason === 'no_frame'
-          ? `无有效帧（状态 ${d?.status || '-'}，帧龄 ${d?.age != null ? Number(d.age).toFixed(1) + 's' : '-'}）`
-          : `未检测到人脸${d?.error ? '：' + d.error : ''}`,
-      )
+      if (d?.reason === 'no_frame') {
+        ElMessage.warning(
+          `无有效帧（状态 ${d?.status || '-'}，帧龄 ${d?.age != null ? Number(d.age).toFixed(1) + 's' : '-'}）`,
+        )
+      } else if (d?.reason === 'stale_frame') {
+        ElMessage.warning(
+          `帧已过期（状态 ${d?.status || '-'}，帧龄 ${d?.age != null ? Number(d.age).toFixed(1) + 's' : '-'}），请等新帧后再探测`,
+        )
+      } else {
+        ElMessage.warning(`未检测到人脸${d?.error ? '：' + d.error : ''}`)
+      }
       return
     }
     const facePx =
@@ -561,6 +567,10 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
     const d = res?.data ?? res
     const taskId = d?.task_id ? String(d.task_id) : ''
     const tid = taskId ? ` task=${taskId.slice(0, 8)}` : ''
+    if (d?.queued === false) {
+      ElMessage.warning(d?.note || '试听未入队（队列满或被跳过）')
+      return
+    }
     ElMessage.success(
       target === 'camera'
         ? `已入队摄像头对讲试听（仅入队≠已出声；可连点保留最后一次）${tid}`
@@ -574,7 +584,7 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
   }
 }
 
-/** 轮询播报任务状态（非设备扬声器 ACK）；超时仅提示。 */
+/** 轮询播报任务状态（非设备扬声器 ACK）；超时会提示。 */
 async function pollSpeakTask(taskId: string) {
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 500))
@@ -589,13 +599,16 @@ async function pollSpeakTask(taskId: string) {
         return
       }
       if (status === 'failed' || status === 'cancelled') {
-        ElMessage.warning(`试听任务${status}${st?.error ? '：' + st.error : ''}`)
+        const detail = st?.reason || st?.error || ''
+        ElMessage.warning(`试听任务${status}${detail ? '：' + detail : ''}`)
         return
       }
     } catch {
+      ElMessage.warning('试听任务状态查询失败（设备出声仍需现场确认）')
       return
     }
   }
+  ElMessage.warning('试听任务轮询超时（可能仍在推流；设备出声需现场听声确认）')
 }
 
 async function stopCam(id: number) {

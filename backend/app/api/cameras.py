@@ -430,6 +430,7 @@ async def test_camera_speak(
             "target": target,
         }
     )
+    queued = bool(task_id)
     await AuditService.log(
         db,
         user_id=user.id,
@@ -437,19 +438,23 @@ async def test_camera_speak(
         module="camera",
         target_type="camera",
         target_id=camera_id,
-        detail={"text": text, "target": target, "task_id": task_id},
+        detail={"text": text, "target": target, "task_id": task_id, "queued": queued},
         request=request,
         store_id=int(camera.store_id) if camera.store_id else None,
     )
     await db.commit()
     return success(
         {
-            "queued": True,
+            "queued": queued,
             "camera_id": camera_id,
             "text": text,
             "target": target,
             "task_id": task_id,
-            "note": "queued 仅表示入队；查 GET /cameras/speak-tasks/{task_id}；设备出声需现场听声确认",
+            "note": (
+                "queued 仅表示入队；查 GET /cameras/speak-tasks/{task_id}；设备出声需现场听声确认"
+                if queued
+                else "入队失败（队列满或被跳过）；未产生可轮询 task_id"
+            ),
         },
         request=request,
     )

@@ -4,8 +4,18 @@
 
 | 项 | 结果 | 说明 |
 |---|---|---|
-| 迎宾相关 pytest 子集 | **44 passed**（本轮核对子集） | 采集音频协议 / 迎宾时延 / 冷匹配 / 多帧播报 / 海康 TTS / 活体接线 |
-| audioData `status=0` | **模拟通过** | 握手拒绝，禁止当成功 |
+| 迎宾相关 pytest 子集 | **53 passed**（F1–F4 核对子集） | 迎宾时延 / 多帧播报 / 陌生迎宾 / 采集音频 / 海康 TTS / 冷匹配 |
+| speak_gen ensure 不压低世代 | **模拟通过** | Lua `max(cur,want)` |
+| 内存 dequeue 跳过 stale 取下一项 | **模拟通过** | Redis 宕机降级路径 |
+| 会员 enqueue None 释放冷却 | **模拟通过** | `try_welcome` 回滚 |
+| 内存 member_pending | **模拟通过** | 与 Redis 语义对齐 |
+| speak_gen TTL 后仍单调 bump | **模拟通过** | Lua `max(redis,local)+1` |
+| 队列 FIFO `RPUSH+BLPOP` | **模拟通过** | stale dequeue 走 `blpop` |
+| member_pending 不入队 + 释放冷却 | **模拟通过** | enqueue None；陌生冷却键删除 |
+| need_taste 含偏好副模板 | **模拟通过** | 默认 `{口味}` 副句纳入 |
+| audioData `status=0` / `302` | **模拟通过** | 仅允许 100/200 握手继续推流 |
+| 试听连点旧任务 `cancelled/replaced` | **模拟通过** | `LREM` + `test_enqueue_test_speak_marks_replaced_cancelled` |
+| 多脸择优 `面积×det_score` | **模拟通过** | `test_pick_face_prefers_area_times_det_score` |
 | 过期入队 → speak_task `cancelled` | **模拟通过** | `dequeue` 写 `reason=stale` |
 | `CameraSpeakerTTS.speak` 返回 `cancelled` | **模拟通过** | 取消不回退本机扬声器 |
 | 冷匹配 A=0.47&lt;B=0.78 | **模拟通过** | `测试_人脸冷匹配top1.py` |

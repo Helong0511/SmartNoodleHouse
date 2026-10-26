@@ -263,10 +263,12 @@ def _face_embedding_from_face(face) -> np.ndarray:
 
 
 def _pick_largest_face(faces):
+    """多脸择优：面积 × det_score，避免大框低置信广告脸压过近处真人脸。"""
     return max(
         faces,
         key=lambda f: float(
             max(0.0, (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            * max(0.05, float(getattr(f, "det_score", 1.0) or 1.0))
         ),
     )
 

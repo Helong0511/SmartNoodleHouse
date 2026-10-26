@@ -63,3 +63,285 @@ async def test_speak_task_status_roundtrip(monkeypatch):
     data2 = await WelcomeService.get_speak_task(tid)
     assert data2["status"] == "completed"
     assert data2["device_playback"] == "unverified"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_test_speak_marks_replaced_cancelled(monkeypatch):
+    """同机位试听连点：旧 pending 必须写 cancelled/reason=replaced。"""
+    import json
+
+    from app.services.face_service import WelcomeService
+
+    store: dict[str, str] = {}
+    queue: list[str] = [
+        json.dumps(
+            {
+                "kind": "test_speak_camera",
+                "text": "旧试听",
+                "camera_id": 3,
+                "task_id": "old-tid",
+                "enqueued_at": 1.0,
+            },
+            ensure_ascii=False,
+        )
+    ]
+
+    class _Pipe:
+        def __init__(self, q: list[str]):
+            self.q = q
+            self.ops: list = []
+
+        def lrem(self, key, count, value):
+            self.ops.append(("lrem", key, count, value))
+
+        def rpush(self, key, *vals):
+            self.ops.append(("rpush", key, vals))
+
+        def ltrim(self, key, start, end):
+            self.ops.append(("ltrim", key, start, end))
+
+        async def execute(self):
+            for op in self.ops:
+                if op[0] == "lrem":
+                    val = str(op[3])
+                    if val in self.q:
+                        self.q.remove(val)
+                elif op[0] == "rpush":
+                    self.q.extend(str(v) for v in op[2])
+            self.ops.clear()
+            return True
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe(queue)
+
+        async def lrange(self, key, start, end):
+            return list(queue)
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def eval(self, script, numkeys, *args):
+            key = args[0]
+            floor = int(args[1])
+            cur = int(store.get(key) or 0)
+            nxt = max(cur, floor) + 1
+            store[key] = str(nxt)
+            return nxt
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+
+    new_tid = await WelcomeService.enqueue(
+        {
+            "kind": "test_speak_camera",
+            "text": "试听播报",
+            "camera_id": 3,
+        }
+    )
+    assert new_tid
+    old = await WelcomeService.get_speak_task("old-tid")
+    assert old is not None
+    assert old["status"] == "cancelled"
+    assert old.get("reason") == "replaced"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_unknown_skipped_when_member_pending(monkeypatch):
+    """同机位已有会员待播时，陌生迎宾不得入队，task 记 member_pending。"""
+    import json
+
+    from app.services.face_service import WelcomeService
+
+    store: dict[str, str] = {}
+    queue: list[str] = [
+        json.dumps(
+            {
+                "kind": "member",
+                "text": "欢迎回来，张三。",
+                "camera_id": 5,
+                "task_id": "mem-tid",
+                "enqueued_at": 1.0,
+            },
+            ensure_ascii=False,
+        )
+    ]
+
+    class _FakeRedis:
+        def pipeline(self):
+            raise AssertionError("member_pending 路径不应写队列")
+
+        async def lrange(self, key, start, end):
+            return list(queue)
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+
+    tid = await WelcomeService.enqueue(
+        {
+            "kind": "unknown_visitor",
+            "text": "欢迎光临",
+            "camera_id": 5,
+            "task_id": "unk-tid",
+        }
+    )
+    assert tid is None
+    assert len(queue) == 1
+    task = await WelcomeService.get_speak_task("unk-tid")
+    assert task is not None
+    assert task["status"] == "cancelled"
+    assert task.get("reason") == "member_pending"
+
+
+@pytest.mark.asyncio
+async def test_memory_enqueue_unknown_skipped_when_member_pending(monkeypatch):
+    """Redis 不可用时，内存队列仍须遵守 member_pending。"""
+    WelcomeService = __import__(
+        "app.services.face_service", fromlist=["WelcomeService"]
+    ).WelcomeService
+
+    WelcomeService._queue = None
+    q = WelcomeService.get_queue()
+    q.put_nowait(
+        {
+            "kind": "member",
+            "text": "会员先播",
+            "camera_id": 11,
+            "task_id": "mem-m",
+            "enqueued_at": 1.0,
+        }
+    )
+
+    store: dict[str, str] = {}
+
+    class _FakeRedis:
+        async def lrange(self, *a, **k):
+            raise RuntimeError("force memory")
+
+        def pipeline(self):
+            raise RuntimeError("force memory")
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def eval(self, *a, **k):
+            return 1
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+
+    tid = await WelcomeService.enqueue(
+        {
+            "kind": "unknown_visitor",
+            "text": "欢迎光临",
+            "camera_id": 11,
+            "task_id": "mem-u",
+        }
+    )
+    assert tid is None
+    assert q.qsize() == 1
+    task = await WelcomeService.get_speak_task("mem-u")
+    assert task is not None
+    assert task.get("reason") == "member_pending"
+    WelcomeService._queue = None
+
+
+@pytest.mark.asyncio
+async def test_try_welcome_releases_cooldown_when_enqueue_none(monkeypatch):
+    """enqueue 返回 None 时会员冷却必须释放。"""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.services.face_service import WelcomeService
+
+    db = MagicMock()
+    customer = MagicMock()
+    customer.id = 42
+    customer.display_name = "测试"
+    customer.nickname = None
+    customer.level_id = None
+
+    async def _get(model, pk):
+        if model.__name__ == "Customer" or getattr(model, "__name__", "") == "Customer":
+            return customer
+        return None
+
+    db.get = AsyncMock(side_effect=lambda model, pk: customer if pk == 42 else None)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+
+    released: list[int] = []
+
+    async def _release(cid):
+        released.append(int(cid))
+
+    with (
+        patch.object(WelcomeService, "try_acquire_cooldown", new=AsyncMock(return_value=True)),
+        patch.object(WelcomeService, "release_cooldown", new=AsyncMock(side_effect=_release)),
+        patch.object(
+            WelcomeService, "resolve_welcome_identity", new=AsyncMock(return_value=("测试", ""))
+        ),
+        patch.object(WelcomeService, "enqueue", new=AsyncMock(return_value=None)),
+        patch(
+            "app.services.system_settings_service.SystemSettingsService.effective_float",
+            new=AsyncMock(return_value=0.35),
+        ),
+        patch(
+            "app.services.system_settings_service.SystemSettingsService.effective_setting",
+            new=AsyncMock(side_effect=lambda *a, **k: k.get("fallback") or a[2] if len(a) > 2 else ""),
+        ),
+    ):
+        # effective_setting is called with (db, key, store_id=, fallback=)
+        async def _setting(db, key, store_id=None, fallback=None):
+            return fallback
+
+        with patch(
+            "app.services.system_settings_service.SystemSettingsService.effective_setting",
+            new=AsyncMock(side_effect=_setting),
+        ):
+            ok = await WelcomeService.try_welcome(
+                db, 42, camera_id=None, similarity=0.9, preconfirmed=True
+            )
+    assert ok is False
+    assert released == [42]
+
+
+def test_pick_face_prefers_area_times_det_score():
+    from types import SimpleNamespace
+
+    from app.services.face_extractor import _pick_largest_face
+
+    big_weak = SimpleNamespace(bbox=[0, 0, 100, 100], det_score=0.2)
+    small_strong = SimpleNamespace(bbox=[0, 0, 60, 60], det_score=0.95)
+    # 10000*0.2=2000 < 3600*0.95=3420 → 应选强置信近脸
+    picked = _pick_largest_face([big_weak, small_strong])
+    assert picked is small_strong

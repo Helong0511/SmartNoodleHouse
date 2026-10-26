@@ -898,8 +898,9 @@ class VisitorService:
             store_id,
             text[:40],
         )
+        tid = None
         try:
-            await WelcomeService.enqueue(
+            tid = await WelcomeService.enqueue(
                 {"customer_id": None, "text": text, "camera_id": camera_id, "kind": "unknown_visitor"}
             )
         except Exception:
@@ -910,6 +911,15 @@ class VisitorService:
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             raise
+        if not tid:
+            # member_pending 等取消：释放冷却，避免无声却占窗
+            if cooldown > 0:
+                try:
+                    redis = await get_redis()
+                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                except Exception:
+                    cls._last_unknown_welcome_at.pop(int(camera_id), None)
+            return False
         try:
             from app.services.websocket_manager import ws_manager
 
@@ -1139,6 +1149,24 @@ class WelcomeService:
     # 进程内缓存；跨 Worker 以 Redis 为协调真源（见 bump/sync）
     _speak_gen: dict[int, int] = {}
     _SPEAK_GEN_TTL_SEC = 180
+    # Redis 键过期后 INCR 会从 1 重计；用 max(redis,local)+1 保证打断令牌单调抬升
+    _SPEAK_GEN_BUMP_LUA = (
+        "local cur = tonumber(redis.call('GET', KEYS[1]) or '0') "
+        "local floor = tonumber(ARGV[1]) "
+        "local ttl = tonumber(ARGV[2]) "
+        "local nxt = math.max(cur, floor) + 1 "
+        "redis.call('SET', KEYS[1], nxt, 'EX', ttl) "
+        "return nxt"
+    )
+    # 仅抬升到至少 want，禁止非原子 GET+SET 把并发 bump 结果压低
+    _SPEAK_GEN_ENSURE_LUA = (
+        "local cur = tonumber(redis.call('GET', KEYS[1]) or '0') "
+        "local want = tonumber(ARGV[1]) "
+        "local ttl = tonumber(ARGV[2]) "
+        "local nxt = math.max(cur, want) "
+        "redis.call('SET', KEYS[1], nxt, 'EX', ttl) "
+        "return nxt"
+    )
 
     @classmethod
     def get_queue(cls) -> asyncio.Queue:
@@ -1168,17 +1196,24 @@ class WelcomeService:
 
     @classmethod
     async def bump_speak_generation_async(cls, camera_id: int | None) -> int:
-        """入队路径优先：Redis INCR 跨进程原子 + 回写本地。"""
+        """入队路径优先：Redis 单调 +1（相对 max(redis,本地)），键过期后仍能打断。"""
         cid = int(camera_id or 0)
+        floor = int(cls._speak_gen.get(cid, 0))
         try:
             redis = await get_redis()
             key = speak_generation_key(cid)
-            val = int(await redis.incr(key))
-            await redis.expire(key, cls._SPEAK_GEN_TTL_SEC)
-            cls._speak_gen[cid] = max(int(cls._speak_gen.get(cid, 0)), val)
-            return int(cls._speak_gen[cid])
+            val = await redis.eval(
+                cls._SPEAK_GEN_BUMP_LUA,
+                1,
+                key,
+                str(floor),
+                str(int(cls._SPEAK_GEN_TTL_SEC)),
+            )
+            nxt = int(val)
+            cls._speak_gen[cid] = nxt
+            return nxt
         except Exception:
-            logger.debug("speak_generation redis incr failed, local bump", exc_info=True)
+            logger.debug("speak_generation redis bump failed, local bump", exc_info=True)
             return cls.bump_speak_generation(cid)
 
     @classmethod
@@ -1201,17 +1236,22 @@ class WelcomeService:
 
     @classmethod
     async def _redis_ensure_speak_gen_at_least(cls, camera_id: int, min_val: int) -> None:
+        cid = int(camera_id)
+        want = max(int(min_val), int(cls._speak_gen.get(cid, 0)))
         try:
             redis = await get_redis()
-            key = speak_generation_key(int(camera_id))
-            raw = await redis.get(key)
-            cur = int(raw.decode("utf-8") if isinstance(raw, bytes) else raw) if raw else 0
-            target = max(cur, int(min_val), int(cls._speak_gen.get(int(camera_id), 0)))
-            if target != cur:
-                await redis.set(key, str(target), ex=cls._SPEAK_GEN_TTL_SEC)
-            else:
-                await redis.expire(key, cls._SPEAK_GEN_TTL_SEC)
-            cls._speak_gen[int(camera_id)] = target
+            key = speak_generation_key(cid)
+            val = await redis.eval(
+                cls._SPEAK_GEN_ENSURE_LUA,
+                1,
+                key,
+                str(want),
+                str(int(cls._SPEAK_GEN_TTL_SEC)),
+            )
+            nxt = int(val)
+            local = int(cls._speak_gen.get(cid, 0))
+            if nxt > local:
+                cls._speak_gen[cid] = nxt
         except Exception:
             logger.debug("speak_generation redis ensure failed", exc_info=True)
 
@@ -1226,6 +1266,23 @@ class WelcomeService:
             return s, None
         return s, obj if isinstance(obj, dict) else None
 
+    # Redis 不可用时仍可供试听轮询（有 TTL，防泄漏）
+    _speak_task_local: dict[str, dict] = {}
+
+    @classmethod
+    def _prune_speak_task_local(cls, now: float | None = None) -> None:
+        import time as _time
+
+        t = float(now if now is not None else _time.time())
+        ttl = float(SPEAK_TASK_TTL_SECONDS)
+        dead = [
+            k
+            for k, v in cls._speak_task_local.items()
+            if t - float((v or {}).get("updated_at") or 0) > ttl
+        ]
+        for k in dead:
+            cls._speak_task_local.pop(k, None)
+
     @classmethod
     async def set_speak_task_status(
         cls, task_id: str | None, status: str, **extra
@@ -1237,12 +1294,15 @@ class WelcomeService:
         import json
         import time as _time
 
+        now = _time.time()
         payload = {
             "task_id": tid,
             "status": str(status or "unknown"),
-            "updated_at": _time.time(),
+            "updated_at": now,
             **{k: v for k, v in extra.items() if v is not None},
         }
+        cls._prune_speak_task_local(now)
+        cls._speak_task_local[tid] = payload
         try:
             redis = await get_redis()
             await redis.set(
@@ -1259,18 +1319,28 @@ class WelcomeService:
         if not tid:
             return None
         import json
+        import time as _time
 
         try:
             redis = await get_redis()
             raw = await redis.get(speak_task_key(tid))
-            if not raw:
-                return None
-            s = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-            obj = json.loads(s)
-            return obj if isinstance(obj, dict) else None
+            if raw:
+                s = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                obj = json.loads(s)
+                if isinstance(obj, dict):
+                    return obj
         except Exception:
             logger.debug("speak_task status read failed", exc_info=True)
+        cls._prune_speak_task_local()
+        local = cls._speak_task_local.get(tid)
+        if not local:
             return None
+        if _time.time() - float(local.get("updated_at") or 0) > float(
+            SPEAK_TASK_TTL_SECONDS
+        ):
+            cls._speak_task_local.pop(tid, None)
+            return None
+        return dict(local)
 
     @classmethod
     async def enqueue(cls, item: dict) -> str | None:
@@ -1289,8 +1359,13 @@ class WelcomeService:
         payload.setdefault("enqueued_at", _time.time())
         task_id = str(payload.get("task_id") or "").strip() or uuid.uuid4().hex
         payload["task_id"] = task_id
-        # 会员优先：作废同机位排队中的陌生迎宾，并打断正在播的低优先级句
-        if kind == "member" and cam_s:
+        # 会员 / 会推摄像头的试听：作废同机位低优先级 pending，并 bump 打断正在推流的句
+        # test_speak（both）也会走摄像头，须 bump；仅电脑试听不 bump
+        if cam_s and (
+            kind == "member"
+            or kind == "test_speak_camera"
+            or kind == "test_speak"
+        ):
             await cls.bump_speak_generation_async(payload.get("camera_id"))
         raw = json.dumps(payload, ensure_ascii=False)
         try:
@@ -1299,30 +1374,36 @@ class WelcomeService:
             if kind.startswith("test_speak") or kind == "member":
                 try:
                     items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
-                    kept: list[str] = []
                     dropped = 0
+                    drop_raws: list[str] = []
                     for it in items or []:
                         s, obj = cls._parse_queue_item(it)
                         if obj is None:
-                            kept.append(s)
                             continue
                         o_kind = str(obj.get("kind") or "")
                         o_cam = str(obj.get("camera_id") if obj.get("camera_id") is not None else "")
+                        drop_reason = ""
                         if kind.startswith("test_speak"):
                             if o_kind == kind and o_cam == cam_s:
-                                dropped += 1
-                                continue
+                                drop_reason = "replaced"
                         elif kind == "member":
                             # 丢掉同机位待播陌生迎宾，避免「欢迎光临」挡会员长句
                             if o_kind == "unknown_visitor" and o_cam == cam_s:
-                                dropped += 1
-                                continue
-                        kept.append(s)
+                                drop_reason = "member_preempt"
+                        if drop_reason:
+                            dropped += 1
+                            drop_raws.append(s)
+                            await cls.set_speak_task_status(
+                                obj.get("task_id"),
+                                "cancelled",
+                                reason=drop_reason,
+                                kind=o_kind,
+                                camera_id=obj.get("camera_id"),
+                            )
+                    # LREM 精确删待替换项，避免 DELETE 整表抹掉并发入队；队列 FIFO=RPUSH+BLPOP
                     pipe = redis.pipeline()
-                    pipe.delete(cls.TTS_QUEUE_KEY)
-                    if kept:
-                        pipe.rpush(cls.TTS_QUEUE_KEY, *kept)
-                    # 会员插到队尾即将被 BRPOP 的一侧（RPUSH+BRPOP=后进先出），尽快出声
+                    for s in drop_raws:
+                        pipe.lrem(cls.TTS_QUEUE_KEY, 1, s)
                     pipe.rpush(cls.TTS_QUEUE_KEY, raw)
                     pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
                     await pipe.execute()
@@ -1342,7 +1423,37 @@ class WelcomeService:
                     cls._schedule_g711_warmup(text)
                     return task_id
                 except Exception:
-                    logger.exception("迎宾队列整理失败，回退普通入队")
+                    logger.exception("迎宾队列整理失败，回退普通入队前尽力抢占")
+                    # 整理失败时仍尽量去掉同机位陌生句，避免会员排在「欢迎光临」后
+                    if kind == "member" and cam_s:
+                        try:
+                            items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
+                            for it in items or []:
+                                s, obj = cls._parse_queue_item(it)
+                                if not obj:
+                                    continue
+                                if (
+                                    str(obj.get("kind") or "") == "unknown_visitor"
+                                    and str(
+                                        obj.get("camera_id")
+                                        if obj.get("camera_id") is not None
+                                        else ""
+                                    )
+                                    == cam_s
+                                ):
+                                    try:
+                                        await redis.lrem(cls.TTS_QUEUE_KEY, 1, s)
+                                    except Exception:
+                                        pass
+                                    await cls.set_speak_task_status(
+                                        obj.get("task_id"),
+                                        "cancelled",
+                                        reason="member_preempt",
+                                        kind="unknown_visitor",
+                                        camera_id=obj.get("camera_id"),
+                                    )
+                        except Exception:
+                            logger.debug("会员回退抢占失败", exc_info=True)
             if kind == "unknown_visitor" and cam_s:
                 # 已有同机位会员待播则不再塞陌生句
                 try:
@@ -1366,7 +1477,7 @@ class WelcomeService:
                                 reason="member_pending",
                                 camera_id=payload.get("camera_id"),
                             )
-                            return task_id
+                            return None
                 except Exception:
                     logger.debug("检查会员待播失败，继续陌生入队", exc_info=True)
             pipe = redis.pipeline()
@@ -1385,6 +1496,68 @@ class WelcomeService:
         except Exception:
             logger.exception("迎宾 TTS Redis 入队失败，回退进程内队列")
         q = cls.get_queue()
+        # 内存降级：与 Redis 路径对齐 member_pending / 试听替换 / 会员抢占（drain 再回填，不碰私有 _queue）
+        try:
+            pending_items: list = []
+            while True:
+                try:
+                    pending_items.append(q.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            if kind == "unknown_visitor" and cam_s:
+                if any(
+                    isinstance(p, dict)
+                    and str(p.get("kind") or "") == "member"
+                    and str(p.get("camera_id") if p.get("camera_id") is not None else "")
+                    == cam_s
+                    for p in pending_items
+                ):
+                    for item in pending_items:
+                        try:
+                            q.put_nowait(item)
+                        except asyncio.QueueFull:
+                            break
+                    await cls.set_speak_task_status(
+                        task_id,
+                        "cancelled",
+                        reason="member_pending",
+                        camera_id=payload.get("camera_id"),
+                        transport="memory",
+                    )
+                    return None
+            kept: list = []
+            for pending in pending_items:
+                if not isinstance(pending, dict):
+                    kept.append(pending)
+                    continue
+                o_kind = str(pending.get("kind") or "")
+                o_cam = str(
+                    pending.get("camera_id") if pending.get("camera_id") is not None else ""
+                )
+                drop_reason = ""
+                if kind.startswith("test_speak") and o_kind == kind and o_cam == cam_s:
+                    drop_reason = "replaced"
+                elif kind == "member" and o_kind == "unknown_visitor" and o_cam == cam_s:
+                    drop_reason = "member_preempt"
+                if drop_reason:
+                    await cls.set_speak_task_status(
+                        pending.get("task_id"),
+                        "cancelled",
+                        reason=drop_reason,
+                        kind=o_kind,
+                        camera_id=pending.get("camera_id"),
+                        transport="memory",
+                    )
+                else:
+                    kept.append(pending)
+            for item in kept:
+                try:
+                    q.put_nowait(item)
+                except asyncio.QueueFull:
+                    logger.warning("迎宾内存队列整理回填满，丢弃一项")
+                    break
+        except Exception:
+            logger.debug("迎宾内存队列整理失败，继续入队", exc_info=True)
         try:
             q.put_nowait(payload)
             await cls.set_speak_task_status(
@@ -1401,7 +1574,8 @@ class WelcomeService:
             await cls.set_speak_task_status(
                 task_id, "failed", error="queue_full", camera_id=payload.get("camera_id")
             )
-            return task_id
+            # 返回 None：调用方须释放冷却，避免无声占窗
+            return None
 
     @classmethod
     def _schedule_g711_warmup(cls, text: str) -> None:
@@ -1459,7 +1633,8 @@ class WelcomeService:
             redis = await get_redis()
             while _time.monotonic() < deadline:
                 wait = max(1, int(min(1.0, deadline - _time.monotonic() + 0.01)))
-                got = await redis.brpop(cls.TTS_QUEUE_KEY, timeout=wait)
+                # FIFO：与入队 RPUSH 配对用 BLPOP（取最旧）；BRPOP 会变成 LIFO 饿死旧任务
+                got = await redis.blpop(cls.TTS_QUEUE_KEY, timeout=wait)
                 if not got:
                     return None
                 _key, raw = got
@@ -1489,8 +1664,14 @@ class WelcomeService:
         except Exception:
             logger.exception("迎宾 TTS Redis 出队失败，回退进程内队列")
         q = cls.get_queue()
-        try:
-            item = await asyncio.wait_for(q.get(), timeout=timeout)
+        # 与 Redis 路径一致：过期项丢弃后继续取，勿因一条 stale 直接空返回饿死后项
+        deadline = _time.monotonic() + max(0.2, float(timeout))
+        while _time.monotonic() < deadline:
+            remain = deadline - _time.monotonic()
+            try:
+                item = await asyncio.wait_for(q.get(), timeout=max(0.05, remain))
+            except asyncio.TimeoutError:
+                return None
             if isinstance(item, dict) and cls.is_stale_item(item):
                 logger.info(
                     "丢弃过期迎宾(内存) kind=%s camera_id=%s",
@@ -1504,10 +1685,9 @@ class WelcomeService:
                     kind=item.get("kind"),
                     camera_id=item.get("camera_id"),
                 )
-                return None
+                continue
             return item
-        except asyncio.TimeoutError:
-            return None
+        return None
 
     @staticmethod
     async def is_cooled_down(customer_id: int) -> bool:
@@ -1848,12 +2028,16 @@ class WelcomeService:
             store_id=store_id,
             fallback=cls.DEFAULT_PRODUCT_TEMPLATE,
         )
-        # 仅主模板占位才查库：默认副句含 {口味}，一并查会拖慢入队且拉长摄像头音频
+        # 主模板或附句模板含 {口味}/{餐品} 才查库（默认副句含口味，须纳入否则永远不生效）
         need_taste = cls.template_has_placeholder(
             greeting_template or "", "口味", "taste"
+        ) or cls.template_has_placeholder(
+            preference_template or "", "口味", "taste"
         )
         need_product = cls.template_has_placeholder(
             greeting_template or "", "餐品", "product"
+        ) or cls.template_has_placeholder(
+            product_template or "", "餐品", "product"
         )
 
         preference_bits: list[str] = []
@@ -1928,8 +2112,9 @@ class WelcomeService:
             store_id,
             text[:60],
         )
+        tid = None
         try:
-            await cls.enqueue(
+            tid = await cls.enqueue(
                 {
                     "customer_id": customer_id,
                     "text": text,
@@ -1945,6 +2130,15 @@ class WelcomeService:
             )
             await cls.release_cooldown(customer_id)
             raise
+        if not tid:
+            # queue_full / 空文本等：释放冷却，避免无声占窗
+            logger.warning(
+                "会员迎宾未入队，回滚冷却 customer_id=%s camera_id=%s",
+                customer_id,
+                camera_id,
+            )
+            await cls.release_cooldown(customer_id)
+            return False
 
         db.add(WelcomeLog(customer_id=customer_id, camera_id=camera_id, welcome_text=text))
         try:

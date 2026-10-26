@@ -5,11 +5,35 @@ import asyncio
 import logging
 import platform
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# 友好别名 → Microsoft Edge 神经音色（Ubuntu 生产默认温柔女声）
+_TTS_VOICE_ALIASES: dict[str, str] = {
+    "zh-cn": "zh-CN-XiaoxiaoNeural",
+    "female": "zh-CN-XiaoxiaoNeural",
+    "女生": "zh-CN-XiaoxiaoNeural",
+    "gentle_female": "zh-CN-XiaoxiaoNeural",
+    "温柔女生": "zh-CN-XiaoxiaoNeural",
+    "xiaoxiao": "zh-CN-XiaoxiaoNeural",
+    "male": "zh-CN-YunjianNeural",
+    "男生": "zh-CN-YunjianNeural",
+    "yunjian": "zh-CN-YunjianNeural",
+}
+
+# Windows SAPI：按别名优先匹配的描述关键字（小写）
+_SAPI_VOICE_HINTS: dict[str, tuple[str, ...]] = {
+    "female": ("huihui", "yaoyao", "female", "zira", "xiaoxiao"),
+    "gentle_female": ("huihui", "yaoyao", "female", "xiaoxiao"),
+    "温柔女生": ("huihui", "yaoyao", "female"),
+    "女生": ("huihui", "yaoyao", "female"),
+    "male": ("kangkang", "male", "david", "mark", "yunjian"),
+    "男生": ("kangkang", "male"),
+}
 
 
 def sanitize_tts_speech_text(text: str) -> str:
@@ -25,6 +49,50 @@ def sanitize_tts_speech_text(text: str) -> str:
     )
     s = re.sub(r"[，,]{2,}", "，", s)
     return s.strip("，, ").strip()
+
+
+def resolve_tts_voice(raw: str | None = None) -> str:
+    """解析 TTS_VOICE：别名映射到 Edge 神经音色；已是正式名则原样返回。"""
+    if raw is None:
+        try:
+            from app.core.config import get_settings
+
+            raw = get_settings().tts_voice
+        except Exception:
+            raw = "gentle_female"
+    key = (raw or "").strip()
+    if not key:
+        key = "gentle_female"
+    mapped = _TTS_VOICE_ALIASES.get(key.lower()) or _TTS_VOICE_ALIASES.get(key)
+    return mapped or key
+
+
+def resolve_tts_provider(raw: str | None = None) -> str:
+    """edge=微软神经 TTS（需出网+ffmpeg）；local=本机 SAPI/espeak。"""
+    if raw is None:
+        try:
+            from app.core.config import get_settings
+
+            raw = get_settings().tts_provider
+        except Exception:
+            raw = "edge"
+    p = (raw or "edge").strip().lower()
+    if p in ("edge", "edge-tts", "neural"):
+        return "edge"
+    return "local"
+
+
+def resolve_tts_rate(raw: str | None = None) -> str:
+    """语速：略慢更接近「温柔」；空则默认 -10%。"""
+    if raw is None:
+        try:
+            from app.core.config import get_settings
+
+            raw = getattr(get_settings(), "tts_rate", None)
+        except Exception:
+            raw = None
+    s = (raw or "").strip()
+    return s or "-10%"
 
 
 class TTSProvider:
@@ -79,6 +147,10 @@ _WAV_CACHE: HotCache[str, bytes] = HotCache("tts.wav", max_size=64)
 _G711_CACHE: HotCache[str, bytes] = HotCache("tts.g711", max_size=128)
 
 
+def _cache_voice_key() -> str:
+    return f"{resolve_tts_provider()}|{resolve_tts_voice()}|{resolve_tts_rate()}"
+
+
 def ensure_g711_cached(
     text: str,
     *,
@@ -110,6 +182,7 @@ def warmup_tts_phrases(
     fail = 0
     seen: set[str] = set()
     vols = tuple(sorted({max(0, min(150, int(v))) for v in volumes})) or (100, 80)
+    voice_key = _cache_voice_key()
     for raw in phrases:
         text = (raw or "").strip()
         if not text or text in seen:
@@ -123,7 +196,7 @@ def warmup_tts_phrases(
         for codec in codecs:
             c = normalize_g711_codec(codec)
             for vol in vols:
-                key = f"{c}|{vol}|{text}"
+                key = f"{voice_key}|{c}|{vol}|{text}"
                 if _G711_CACHE.get(key) is not None:
                     continue
                 try:
@@ -139,11 +212,12 @@ def warmup_tts_phrases(
         "g711": len(_G711_CACHE),
         "phrases": len(seen),
         "volumes": list(vols),
+        "voice": voice_key,
     }
 
 
 class LocalTTS(TTSProvider):
-    """本地 TTS：Windows 优先 win32com（快），失败再 System.Speech；Linux 用 espeak。"""
+    """TTS：edge=神经女声（Ubuntu 推荐）；local=Windows SAPI / Linux espeak。"""
 
     async def speak(self, text: str, *, camera_id: int | None = None) -> None:
         loop = asyncio.get_running_loop()
@@ -153,6 +227,10 @@ class LocalTTS(TTSProvider):
         text = (text or "").strip()
         if not text:
             return
+        if resolve_tts_provider() == "edge":
+            wav = self.synthesize_wav_sync(text)
+            if wav and self._play_wav_bytes(wav):
+                return
         if platform.system() == "Windows":
             if self._speak_win32com(text):
                 return
@@ -165,6 +243,43 @@ class LocalTTS(TTSProvider):
         except Exception as e:
             logger.warning("TTS failed: %s - %s", text[:50], e)
 
+    def _play_wav_bytes(self, wav: bytes) -> bool:
+        """把合成好的 WAV 播到本机（Ubuntu aplay / Windows 仅作 edge 回退路径）。"""
+        if not wav or len(wav) <= 44:
+            return False
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            path = tmp.name
+            tmp.write(wav)
+        try:
+            if platform.system() == "Windows":
+                # winsound 同步播放
+                try:
+                    import winsound
+
+                    winsound.PlaySound(path, winsound.SND_FILENAME)
+                    return True
+                except Exception as e:
+                    logger.warning("winsound 播放失败: %s", e)
+                    return False
+            player = shutil.which("aplay") or shutil.which("paplay")
+            if not player:
+                return False
+            r = subprocess.run(
+                [player, path],
+                check=False,
+                timeout=120,
+                capture_output=True,
+            )
+            return r.returncode == 0
+        except Exception as e:
+            logger.warning("WAV 本机播放失败: %s", e)
+            return False
+        finally:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
     def _speak_win32com(self, text: str) -> bool:
         try:
             if not _ensure_pywin32():
@@ -172,6 +287,7 @@ class LocalTTS(TTSProvider):
             import win32com.client  # type: ignore
 
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            self._apply_sapi_voice(speaker)
             speaker.Speak(text)
             return True
         except Exception as e:
@@ -181,11 +297,13 @@ class LocalTTS(TTSProvider):
     def _speak_system_speech(self, text: str) -> bool:
         """不依赖 pywin32：用 PowerShell + System.Speech 本机播报。"""
         try:
+            voice_hint = self._sapi_select_ps_snippet()
             cmd = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
                 "$s.SetOutputToDefaultAudioDevice(); "
                 "$s.Volume = 100; "
+                f"{voice_hint}"
                 f"$s.Speak('{_ps_escape(text)}'); "
                 "$s.Dispose()"
             )
@@ -213,19 +331,24 @@ class LocalTTS(TTSProvider):
         text = sanitize_tts_speech_text(text)
         if not text:
             return b""
-        hit = _WAV_CACHE.get(text)
+        cache_key = f"{_cache_voice_key()}|{text}"
+        hit = _WAV_CACHE.get(cache_key)
         if hit:
             return hit
         try:
-            if platform.system() == "Windows":
-                # win32com 写文件通常明显快于每次拉起 PowerShell
-                wav = self._sapi_to_wav_win32com(text)
-                if not wav:
-                    wav = self._sapi_to_wav_system_speech(text)
-            else:
-                wav = self._espeak_to_wav(text)
+            wav = b""
+            if resolve_tts_provider() == "edge":
+                wav = self._edge_tts_to_wav(text)
+            if not wav:
+                if platform.system() == "Windows":
+                    # win32com 写文件通常明显快于每次拉起 PowerShell
+                    wav = self._sapi_to_wav_win32com(text)
+                    if not wav:
+                        wav = self._sapi_to_wav_system_speech(text)
+                else:
+                    wav = self._espeak_to_wav(text)
             if wav:
-                _WAV_CACHE.put(text, wav)
+                _WAV_CACHE.put(cache_key, wav)
             return wav or b""
         except Exception as e:
             logger.warning("TTS synthesize failed: %s - %s", text[:50], e)
@@ -250,7 +373,7 @@ class LocalTTS(TTSProvider):
         except (TypeError, ValueError):
             vol = 100
         vol = max(0, min(150, vol))
-        key = f"{c}|{vol}|{text}"
+        key = f"{_cache_voice_key()}|{c}|{vol}|{text}"
         hit = _G711_CACHE.get(key)
         if hit:
             return hit
@@ -260,6 +383,150 @@ class LocalTTS(TTSProvider):
         g711 = wav_bytes_to_g711_8k(wav, codec=c, volume_percent=vol)
         _G711_CACHE.put(key, g711)
         return g711
+
+    def _edge_tts_to_wav(self, text: str) -> bytes:
+        """edge-tts → mp3 → ffmpeg WAV。生产 Ubuntu 需出网与 ffmpeg。"""
+        voice = resolve_tts_voice()
+        rate = resolve_tts_rate()
+        try:
+            import edge_tts  # type: ignore
+        except ImportError:
+            logger.warning("edge-tts 未安装，回退本机 TTS；pip install edge-tts")
+            return b""
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            logger.warning("未找到 ffmpeg，edge-tts 无法转 WAV；Ubuntu: apt install ffmpeg")
+            return b""
+
+        mp3_path = ""
+        wav_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                mp3_path = tmp.name
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                wav_path = tmp.name
+
+            async def _save() -> None:
+                communicate = edge_tts.Communicate(text, voice, rate=rate)
+                await communicate.save(mp3_path)
+
+            try:
+                asyncio.run(_save())
+            except RuntimeError:
+                # 已有事件循环的线程里用新 loop
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_save())
+                finally:
+                    loop.close()
+
+            r = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    mp3_path,
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-sample_fmt",
+                    "s16",
+                    wav_path,
+                ],
+                check=False,
+                timeout=90,
+                capture_output=True,
+            )
+            if r.returncode != 0:
+                logger.warning(
+                    "ffmpeg 转 WAV 失败 code=%s err=%s",
+                    r.returncode,
+                    (r.stderr or b"")[:200],
+                )
+                return b""
+            data = Path(wav_path).read_bytes()
+            return data if len(data) > 44 else b""
+        except Exception as e:
+            logger.warning("edge-tts 合成失败 voice=%s: %s", voice, e)
+            return b""
+        finally:
+            for p in (mp3_path, wav_path):
+                if not p:
+                    continue
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _apply_sapi_voice(self, speaker) -> None:
+        """按 TTS_VOICE 别名优先选女声/男声；找不到则保持系统默认。"""
+        try:
+            raw = ""
+            try:
+                from app.core.config import get_settings
+
+                raw = (get_settings().tts_voice or "").strip()
+            except Exception:
+                raw = ""
+            hints = _SAPI_VOICE_HINTS.get(raw.lower()) or _SAPI_VOICE_HINTS.get(raw)
+            if not hints and raw:
+                # 直接用配置串当描述子串，如 Huihui
+                hints = (raw.lower(),)
+            if not hints:
+                hints = _SAPI_VOICE_HINTS["gentle_female"]
+            voices = speaker.GetVoices()
+            for i in range(int(voices.Count)):
+                v = voices.Item(i)
+                desc = (v.GetDescription() or "").lower()
+                gender = ""
+                try:
+                    gender = (v.GetAttribute("Gender") or "").lower()
+                except Exception:
+                    pass
+                blob = f"{desc} {gender}"
+                if any(h in blob for h in hints):
+                    speaker.Voice = v
+                    return
+            # 别名未命中时：女声优先
+            if any(k in (raw or "gentle_female").lower() for k in ("female", "女", "huihui", "xiao")) or not raw:
+                for i in range(int(voices.Count)):
+                    v = voices.Item(i)
+                    try:
+                        if (v.GetAttribute("Gender") or "").lower() == "female":
+                            speaker.Voice = v
+                            return
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.debug("SAPI 选音色跳过: %s", e)
+
+    def _sapi_select_ps_snippet(self) -> str:
+        """System.Speech 选女声/男声的 PowerShell 片段。"""
+        raw = ""
+        try:
+            from app.core.config import get_settings
+
+            raw = (get_settings().tts_voice or "").strip()
+        except Exception:
+            raw = ""
+        prefer_female = True
+        low = raw.lower()
+        if low in ("male", "男生", "yunjian") or "male" in low or "男" in raw:
+            prefer_female = False
+        if prefer_female:
+            return (
+                "$f = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Gender -eq 'Female' "
+                "-and $_.VoiceInfo.Culture.Name -like 'zh*' } | Select-Object -First 1; "
+                "if (-not $f) { $f = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Gender -eq 'Female' } "
+                "| Select-Object -First 1 }; "
+                "if ($f) { $s.SelectVoice($f.VoiceInfo.Name) }; "
+            )
+        return (
+            "$m = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Gender -eq 'Male' "
+            "-and $_.VoiceInfo.Culture.Name -like 'zh*' } | Select-Object -First 1; "
+            "if ($m) { $s.SelectVoice($m.VoiceInfo.Name) }; "
+        )
 
     def _sapi_to_wav_win32com(self, text: str) -> bytes:
         try:
@@ -275,6 +542,7 @@ class LocalTTS(TTSProvider):
             stream = win32com.client.Dispatch("SAPI.SpFileStream")
             stream.Open(path, 3)  # SSFMCreateForWrite
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            self._apply_sapi_voice(speaker)
             speaker.AudioOutputStream = stream
             speaker.Speak(text)
             stream.Close()
@@ -295,10 +563,12 @@ class LocalTTS(TTSProvider):
         try:
             # 路径用单引号；反斜杠在 PowerShell 单引号中字面量即可
             out = path.replace("'", "''")
+            voice_hint = self._sapi_select_ps_snippet()
             cmd = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
                 f"$s.SetOutputToWaveFile('{out}'); "
+                f"{voice_hint}"
                 f"$s.Speak('{_ps_escape(text)}'); "
                 "$s.Dispose()"
             )
@@ -615,8 +885,6 @@ class TTSWorker:
                     if item is None:
                         continue
                 text = item.get("text") or ""
-                if not text:
-                    continue
                 camera_id = item.get("camera_id")
                 kind = item.get("kind") or "member"
                 task_id = str(item.get("task_id") or "").strip() or None
@@ -626,6 +894,15 @@ class TTSWorker:
                     camera_id = None
                 from app.services.face_service import WelcomeService
 
+                if not str(text).strip():
+                    await WelcomeService.set_speak_task_status(
+                        task_id,
+                        "cancelled",
+                        reason="empty_text",
+                        kind=kind,
+                        camera_id=camera_id,
+                    )
+                    continue
                 logger.info(
                     "TTS 开始播报 kind=%s camera_id=%s task_id=%s text=%s",
                     kind,
@@ -642,8 +919,12 @@ class TTSWorker:
                 should_abort = None
                 stop_gen_poll: asyncio.Event | None = None
                 final_status = "completed"
-                # 陌生迎宾可被同机位后续会员入队打断，避免人走了还在播「欢迎光临」
-                if kind == "unknown_visitor" and camera_id is not None:
+                cancel_reason: str | None = None
+                # 陌生迎宾 / 摄像头试听 / both 试听可被同机位后续 bump 打断
+                if (
+                    kind in ("unknown_visitor", "test_speak_camera", "test_speak")
+                    and camera_id is not None
+                ):
                     from app.core.async_utils import spawn_bg
 
                     # 先拉 Redis，避免另一 Worker 已 bump 而本进程仍见旧世代
@@ -681,6 +962,16 @@ class TTSWorker:
                     )
                     if speak_outcome == "cancelled":
                         final_status = "cancelled"
+                        cancel_reason = (
+                            "speak_gen_bumped"
+                            if kind
+                            in (
+                                "unknown_visitor",
+                                "test_speak_camera",
+                                "test_speak",
+                            )
+                            else "cancelled"
+                        )
                     elif speak_outcome in ("ok", "local"):
                         final_status = "completed"
                     else:
@@ -691,6 +982,7 @@ class TTSWorker:
                         kind=kind,
                         camera_id=camera_id,
                         speak_outcome=speak_outcome,
+                        reason=cancel_reason,
                         device_playback=(
                             "unverified"
                             if final_status == "completed"

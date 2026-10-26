@@ -208,10 +208,12 @@ async def test_hikvision_play_ulaw_open_put_close():
         patch("app.services.hikvision_audio._CHUNK_SLEEP", 0),
     ):
         client = HikvisionTwoWayAudio("http://192.168.1.64", "admin", "pass")
-        await client.play_ulaw(ulaw)
+        out1 = await client.play_ulaw(ulaw)
+        assert isinstance(out1, dict) and out1.get("status") == "completed"
         # 第二次应复用同一 Digest Client，不再新建
         n_clients = len(ha._SHARED_HTTP)
-        await client.play_ulaw(ulaw)
+        out2 = await client.play_ulaw(ulaw)
+        assert out2.get("status") == "completed"
         assert len(ha._SHARED_HTTP) == n_clients == 1
 
     paths = [p for _, p in calls]

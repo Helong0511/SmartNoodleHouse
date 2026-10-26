@@ -298,15 +298,23 @@ admin
 He00407
 
 
-Ubuntu服务器上安装 语音
+# ---------- 场景：生产 Ubuntu 迎宾 TTS（温柔女声）----------
+# .env：TTS_PROVIDER=edge  TTS_VOICE=gentle_female  TTS_RATE=-10%
 sudo apt update
-sudo apt install -y espeak espeak-data espeak-ng espeak-ng-data
-# 确认中文音色存在
-espeak --voices=zh
-# 试听（有声卡/耳机时）
-espeak -v zh "欢迎光临射洪肠旺面"
+sudo apt install -y ffmpeg espeak espeak-data espeak-ng espeak-ng-data
+# 后端 venv 内：
+#   pip install "edge-tts>=6.1.0,<8.0"
+# 改完 .env 后：
+#   sudo systemctl restart smart-noodle
+# 离线兜底（机械音）才需要 espeak；神经女声依赖出网 + ffmpeg
 
+sudo apt update
+sudo apt install -y ffmpeg espeak espeak-ng
 
+cd /path/to/SmartNoodleHouse/backend
+source ../.venv/bin/activate   # 按你实际 venv 路径
+pip install -r requirements.txt
+# 或：pip install "edge-tts>=6.1.0,<8.0"
 
 
 

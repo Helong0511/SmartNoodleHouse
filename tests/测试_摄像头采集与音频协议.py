@@ -76,8 +76,7 @@ async def test_play_g711_cancelled_before_open(monkeypatch):
     assert out["phase"] == "before_open"
 
 
-def test_stream_audio_rejects_http_status_zero(monkeypatch):
-    """握手 status=0 不得当成功继续推流。"""
+def _patch_audio_handshake(monkeypatch, status: int):
     from app.services import hikvision_audio as ha
 
     class _Sock:
@@ -97,10 +96,30 @@ def test_stream_audio_rejects_http_status_zero(monkeypatch):
         ha.socket, "create_connection", lambda *a, **k: _Sock()
     )
     monkeypatch.setattr(
-        ha, "_read_http_response", lambda *_a, **_k: (0, {}, b"")
+        ha, "_read_http_response", lambda *_a, **_k: (status, {}, b"")
     )
     monkeypatch.setattr(ha, "_build_digest_authorization", lambda **k: "Digest x")
-    with pytest.raises(RuntimeError, match="status=0"):
+    return ha
+
+
+def test_stream_audio_rejects_http_status_zero(monkeypatch):
+    """握手 status=0 不得当成功继续推流。"""
+    ha = _patch_audio_handshake(monkeypatch, 0)
+    with pytest.raises(RuntimeError, match="HTTP 0"):
+        ha._stream_audio_data_content_length_zero(
+            host="192.0.2.10",
+            port=80,
+            path="/ISAPI/System/TwoWayAudio/channels/1/audioData",
+            username="admin",
+            password="pwd",
+            g711_data=b"\xff" * 64,
+        )
+
+
+def test_stream_audio_rejects_http_redirect(monkeypatch):
+    """握手 302 等非 100/200 不得落穿推流。"""
+    ha = _patch_audio_handshake(monkeypatch, 302)
+    with pytest.raises(RuntimeError, match="HTTP 302"):
         ha._stream_audio_data_content_length_zero(
             host="192.0.2.10",
             port=80,

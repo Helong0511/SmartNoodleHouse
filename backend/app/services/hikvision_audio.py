@@ -668,14 +668,13 @@ def _stream_audio_data_content_length_zero(
             )
             sock.close()
             sock, status, hdrs = _one_shot(auth)
-        # status==0 常见于对端无完整响应头，不得当作可靠成功；仅允许 100/200 继续推流
+        # 仅允许 100/200 继续推流；status=0（无完整响应头）与 3xx 等均禁止落穿
         if status == 401:
             raise RuntimeError("audioData Digest 认证失败 HTTP 401")
         if status not in (200, 100):
-            if status >= 400 or status == 0:
-                raise RuntimeError(
-                    f"audioData 握手失败 HTTP {status}（禁止将 status=0 视为成功）"
-                )
+            raise RuntimeError(
+                f"audioData 握手失败 HTTP {status}（仅允许 100/200；禁止 status=0 或 3xx 等当成功）"
+            )
         # 2) 极短启动突发 + 受控节奏（防固件只响一声）
         aborted = False
         for i in range(0, len(g711_data), _CHUNK_BYTES):
@@ -1044,10 +1043,11 @@ class HikvisionTwoWayAudio:
                 "note": "bytes_sent_not_speaker_ack",
             }
 
-    async def play_ulaw(self, ulaw_data: bytes) -> None:
-        await self.play_g711(ulaw_data, codec="ulaw")
+    async def play_ulaw(self, ulaw_data: bytes) -> dict:
+        """兼容封装：返回与 play_g711 相同的结构化结果；失败不静默当成功。"""
+        return await self.play_g711(ulaw_data, codec="ulaw")
 
-    async def play_wav(self, wav_data: bytes, *, volume_percent: int = 100) -> str:
+    async def play_wav(self, wav_data: bytes, *, volume_percent: int = 100) -> dict:
         timeout = httpx.Timeout(15.0, connect=5.0)
         client = await self._shared_client(timeout)
         codec = await self._detect_codec(client)
@@ -1057,5 +1057,7 @@ class HikvisionTwoWayAudio:
             codec=codec,
             volume_percent=volume_percent,
         )
-        await self.play_g711(g711, codec=codec)
-        return codec
+        result = await self.play_g711(g711, codec=codec)
+        if isinstance(result, dict):
+            result = {**result, "codec": codec}
+        return result

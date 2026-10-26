@@ -81,6 +81,7 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
 
     async def _enqueue(item):
         q.append(item)
+        return "mock-tid-ok"
 
     with (
         patch(
@@ -107,6 +108,64 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
     assert q[0]["text"] == "欢迎光临测试店"
     assert q[0]["camera_id"] == 8
     assert any("unknown_cd:8" in k for k in redis_keys)
+    VisitorService._last_unknown_welcome_at.clear()
+
+
+@pytest.mark.asyncio
+async def test_maybe_welcome_unknown_releases_cooldown_on_member_pending():
+    """enqueue 返回 None（member_pending）时须删冷却键，避免无声占窗。"""
+    from app.services.face_service import WelcomeService
+
+    VisitorService._last_unknown_welcome_at.clear()
+    db = MagicMock()
+    redis_keys: dict[str, str] = {}
+
+    async def _bool(db, key, fallback, store_id=None):
+        if key == "unknown_visitor_welcome_enabled":
+            return True
+        return fallback
+
+    async def _int(db, key, fallback, store_id=None):
+        if key == "unknown_visitor_welcome_cooldown_seconds":
+            return 60
+        return fallback
+
+    async def _setting(db, key, store_id=None, fallback=None):
+        if key == "unknown_visitor_welcome_text":
+            return "欢迎光临"
+        return fallback
+
+    class _FakeRedis:
+        async def set(self, key, value, nx=False, ex=None):
+            if nx and key in redis_keys:
+                return False
+            redis_keys[key] = value
+            return True
+
+        async def delete(self, key):
+            redis_keys.pop(key, None)
+            return 1
+
+    with (
+        patch(
+            "app.services.system_settings_service.SystemSettingsService.effective_bool",
+            new=AsyncMock(side_effect=_bool),
+        ),
+        patch(
+            "app.services.system_settings_service.SystemSettingsService.effective_int",
+            new=AsyncMock(side_effect=_int),
+        ),
+        patch(
+            "app.services.system_settings_service.SystemSettingsService.effective_setting",
+            new=AsyncMock(side_effect=_setting),
+        ),
+        patch("app.services.face_service.get_redis", new=AsyncMock(return_value=_FakeRedis())),
+        patch.object(WelcomeService, "enqueue", new=AsyncMock(return_value=None)),
+        patch("app.services.websocket_manager.ws_manager.broadcast", new=AsyncMock()),
+    ):
+        ok = await VisitorService.maybe_welcome_unknown(db, 9, store_id=1)
+    assert ok is False
+    assert not any("unknown_cd:9" in k for k in redis_keys)
     VisitorService._last_unknown_welcome_at.clear()
 
 

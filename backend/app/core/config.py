@@ -109,8 +109,12 @@ class Settings(BaseSettings):
     # 仅当 platform_store_bindings 缺失时，允许 .env 全局 Token 用于该本系统门店 ID（0=禁用）
     delivery_env_fallback_store_id: int = 0
 
-    tts_provider: str = "local"
-    tts_voice: str = "zh-CN"
+    # edge=微软神经 TTS（Ubuntu 温柔女声推荐，需出网+ffmpeg）；local=本机 SAPI/espeak
+    tts_provider: str = "edge"
+    # 别名 gentle_female/温柔女生/女生 → zh-CN-XiaoxiaoNeural；也可直接填神经音色名
+    tts_voice: str = "gentle_female"
+    # edge-tts 语速，略慢更柔；如 -10%、+0%
+    tts_rate: str = "-10%"
 
     camera_url: str = ""
     camera_username: str = ""

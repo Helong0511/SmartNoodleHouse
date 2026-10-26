@@ -29,6 +29,26 @@ CameraManager (RTSP/TCP, Leader-only)
 | C1 | P1 | TTS 无 task_id/状态 | 试听只返回 queued | 无法区分入队与推流结果 | **已修**：task_id + Redis + GET + 前端 poll；过期→cancelled | 多帧播报 / `test_dequeue_marks_stale_task_cancelled` | 否 |
 | C2 | P1 | MultiFrame 近重复帧 | 同帧复用凑满确认 | 假确认加速误识 | **已修**：cosine≥0.995 不计进度 | 同上 | 否 |
 | C3 | P1 | 活体 action_completed 默认 True | 客户端未断言也过 | 夸大活体 | **已修**：默认 False；可选 claimed_action | 活体单测 | 否 |
+| D1 | P0 | audioData 非 100/200 | 302 等中间态仍推流 | 假成功 | **已修**：非白名单一律拒绝 | `test_stream_audio_rejects_http_redirect` | 否 |
+| D2 | P1 | 队尾替换旧 task | 停在 queued | 前端轮询卡死 | **已修**：写 cancelled/replaced\|member_preempt | 多帧播报单测 | 否 |
+| D3 | P1 | 试听不 abort / 不 bump | 打断不了 in-flight | 连点/会员无效 | **已修**：test_speak_camera bump+abort | 逻辑单测+既有 TTS | 建议 |
+| D4 | P1 | 前端 stale_frame / poll | 误报无人脸；超时静默 | 运维误判 | **已修**：分支提示 + reason/超时 | 手工 UI | 否 |
+| D5 | P2 | 多脸只按面积 | 大框弱脸压过 | 错匹配风险 | **已修**：面积×det_score | 择优单测 | 现场 |
+| E1 | P0 | speak_gen Redis TTL 后 INCR 从 1 重计 | 打断令牌回落，会员无法打断旧陌生句 | **已修**：Lua `max(redis,local)+1` + SET EX | `test_bump_speak_generation_async_uses_redis_lua` | 否 |
+| E2 | P1 | 队尾替换用 DELETE 整表 | 抹掉并发入队任务 | **已修**：LREM 精确删 + RPUSH | 多帧播报 replaced 单测 | 否 |
+| E3 | P1 | 出队 BRPOP（LIFO） | 旧任务饿死、人走后仍播新句 | **已修**：BLPOP 与 RPUSH 组成 FIFO | dequeue stale 单测 | 否 |
+| E4 | P1 | need_taste 只看主模板 | 默认副句 `{口味}` 永不查库 | **已修**：主模板∨偏好模板 | `test_need_taste_covers_preference_template_placeholder` | 否 |
+| E5 | P2 | member_pending 仍占陌生冷却 | 无声却冷却占窗 | **已修**：enqueue None 删冷却键 | 陌生迎宾冷却释放单测 | 否 |
+| F1 | P0 | `_redis_ensure_speak_gen` 非原子 GET+SET | 与 bump 竞态可把 Redis 世代压低 | **已修**：Lua `max(cur,want)` | `test_redis_ensure_speak_gen_never_lowers` | 否 |
+| F2 | P1 | 内存 dequeue 遇 stale 直接 return None | 后项饿死到下次轮询 | **已修**：丢弃后继续取 | `test_memory_dequeue_skips_stale_and_returns_next` | 否 |
+| F3 | P1 | 会员 enqueue 失败/满仍占冷却 | 无声占窗；QueueFull 曾返回假成功 task_id | **已修**：QueueFull→None；try_welcome 检查 tid | `test_try_welcome_releases_cooldown_when_enqueue_none` | 否 |
+| F4 | P2 | 内存降级无 member_pending/抢占 | Redis 宕机时行为不一致 | **已修**：内存 drain 对齐 Redis 语义 | `test_memory_enqueue_unknown_skipped_when_member_pending` | 否 |
+| G1 | P1 | `test_speak`(both) 不 bump/不 abort | 会员或连点无法打断双端试听推流 | **已修**：both 与 camera 同 bump+abort | `test_test_speak_both_bumps_speak_generation` | 否 |
+| G2 | P1 | 试听 API 恒 `queued:true` | 入队失败仍提示成功 | **已修**：`queued=bool(task_id)`；前端 warning | API+Cameras.vue | 否 |
+| G3 | P1 | 会员队列整理失败后普通入队不抢占 | 「欢迎光临」仍挡会员 | **已修**：回退前尽力 LREM 陌生句 | 逻辑+既有 preempt 单测 | 否 |
+| G4 | P2 | Redis 宕机时 speak_task 不可读 | 试听轮询 404 | **已修**：进程内 TTL 缓存回退 | `test_speak_task_local_fallback_when_redis_down` | 否 |
+| G5 | P2 | `play_ulaw`/`play_wav` 忽略结构化结果 | 调用方易当成功 | **已修**：返回 dict（含 status） | `test_hikvision_play_ulaw_open_put_close` | 否 |
+| G6 | P2 | TTS 空文本直接 continue | task 永久 queued | **已修**：写 cancelled/`empty_text` | 代码路径 | 否 |
 
 ## 3. 潜在 / 未修（有原因）
 
@@ -44,10 +64,8 @@ CameraManager (RTSP/TCP, Leader-only)
 ## 4. 测试基线（本轮）
 
 ```
-pytest tests/测试_人脸冷匹配top1.py tests/测试_摄像头采集与音频协议.py
-       tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修复.py
-       tests/测试_海康摄像头对讲TTS.py tests/测试_迎宾播报时延.py
-       tests/测试_摄像头Leader守卫.py tests/测试_RTSP帧完整性.py
-       tests/测试_人脸最佳帧窗口.py tests/测试_陌生访客迎宾与清空.py
-→ 60 passed（2026-10-26）
+pytest tests/测试_迎宾播报时延.py tests/测试_多帧确认去重与播报任务.py
+       tests/测试_陌生访客迎宾与清空.py tests/测试_摄像头采集与音频协议.py
+       tests/测试_海康摄像头对讲TTS.py tests/测试_人脸冷匹配top1.py
+→ 见 ACCEPTANCE 最新计数（F1–F4 核对子集）
 ```

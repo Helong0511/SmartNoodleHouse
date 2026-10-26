@@ -34,7 +34,7 @@ async def test_dequeue_marks_stale_task_cancelled(monkeypatch):
     calls = {"n": 0}
 
     class _FakeRedis:
-        async def brpop(self, key, timeout=1):
+        async def blpop(self, key, timeout=1):
             calls["n"] += 1
             if calls["n"] > 1:
                 return None
@@ -120,7 +120,7 @@ def test_sync_speak_generation_from_redis_raises_local(monkeypatch):
     assert WelcomeService.speak_generation(cam) == 7
 
 
-def test_bump_speak_generation_async_uses_redis_incr(monkeypatch):
+def test_bump_speak_generation_async_uses_redis_lua(monkeypatch):
     import asyncio
 
     cam = 90003
@@ -129,16 +129,18 @@ def test_bump_speak_generation_async_uses_redis_incr(monkeypatch):
 
     class _FakeRedis:
         def __init__(self):
-            self.v = 0
+            self.store: dict[str, str] = {}
 
-        async def incr(self, key):
-            calls.append("incr")
-            self.v += 1
-            return self.v
-
-        async def expire(self, key, ttl):
-            calls.append("expire")
-            return True
+        async def eval(self, script, numkeys, *args):
+            calls.append("eval")
+            key = args[0]
+            floor = int(args[1])
+            ttl = int(args[2])
+            cur = int(self.store.get(key) or 0)
+            nxt = max(cur, floor) + 1
+            self.store[key] = str(nxt)
+            self.store[f"{key}:ttl"] = str(ttl)
+            return nxt
 
     fake = _FakeRedis()
 
@@ -150,8 +152,193 @@ def test_bump_speak_generation_async_uses_redis_incr(monkeypatch):
     )
     out = asyncio.run(WelcomeService.bump_speak_generation_async(cam))
     assert out == 1
-    assert "incr" in calls and "expire" in calls
+    assert "eval" in calls
     assert WelcomeService.speak_generation(cam) == 1
+    # 模拟 Redis TTL 过期后键消失，但本地仍为 1：再 bump 必须抬升到 2（打断令牌）
+    fake.store.clear()
+    out2 = asyncio.run(WelcomeService.bump_speak_generation_async(cam))
+    assert out2 == 2
+    assert WelcomeService.speak_generation(cam) == 2
+
+
+def test_redis_ensure_speak_gen_never_lowers(monkeypatch):
+    """ensure 与并发 bump 竞态时不得把 Redis 世代压低。"""
+    import asyncio
+
+    cam = 90004
+    WelcomeService._speak_gen[cam] = 5
+
+    class _FakeRedis:
+        def __init__(self):
+            self.store = {f"snh:welcome:speak_gen:{cam}": "7"}  # 已被别处 bump 到 7
+
+        async def eval(self, script, numkeys, *args):
+            assert "math.max" in script or "max" in script
+            key = args[0]
+            want = int(args[1])
+            ttl = int(args[2])
+            cur = int(self.store.get(key) or 0)
+            nxt = max(cur, want)
+            self.store[key] = str(nxt)
+            self.store[f"{key}:ttl"] = str(ttl)
+            return nxt
+
+    fake = _FakeRedis()
+
+    async def _fake_get_redis():
+        return fake
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _fake_get_redis)
+    from app.core.cache_keys import speak_generation_key
+
+    # ensure 只要求至少 5，但 Redis 已是 7 → 必须保持 7
+    asyncio.run(WelcomeService._redis_ensure_speak_gen_at_least(cam, 5))
+    assert fake.store[speak_generation_key(cam)] == "7"
+    assert WelcomeService.speak_generation(cam) == 7
+
+
+@pytest.mark.asyncio
+async def test_memory_dequeue_skips_stale_and_returns_next(monkeypatch):
+    """内存队列：过期项丢弃后应继续取到后续有效任务。"""
+    import time as _time
+
+    WelcomeService._queue = None
+    q = WelcomeService.get_queue()
+    stale = {
+        "kind": "unknown_visitor",
+        "text": "过期",
+        "camera_id": 1,
+        "enqueued_at": _time.time() - 99.0,
+        "task_id": "mem-stale",
+    }
+    fresh = {
+        "kind": "member",
+        "text": "会员句",
+        "camera_id": 1,
+        "enqueued_at": _time.time(),
+        "task_id": "mem-fresh",
+    }
+    q.put_nowait(stale)
+    q.put_nowait(fresh)
+
+    store: dict[str, str] = {}
+
+    class _FakeRedis:
+        async def blpop(self, key, timeout=1):
+            raise RuntimeError("force memory path")
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+    monkeypatch.setattr(
+        "app.services.face_service.get_redis",
+        AsyncMock(return_value=_FakeRedis()),
+    )
+    out = await WelcomeService.dequeue(timeout=0.5)
+    assert out is not None
+    assert out.get("task_id") == "mem-fresh"
+    stale_st = await WelcomeService.get_speak_task("mem-stale")
+    assert stale_st is not None
+    assert stale_st.get("reason") == "stale"
+    WelcomeService._queue = None
+
+
+@pytest.mark.asyncio
+async def test_test_speak_both_bumps_speak_generation(monkeypatch):
+    """both 试听也会推摄像头，入队须 bump，否则无法打断上一句推流。"""
+    cam = 90005
+    WelcomeService._speak_gen[cam] = 3
+    store: dict[str, str] = {}
+
+    class _Pipe:
+        def __init__(self):
+            self.ops = []
+
+        def lrem(self, *a):
+            self.ops.append(("lrem", a))
+
+        def rpush(self, *a):
+            self.ops.append(("rpush", a))
+
+        def ltrim(self, *a):
+            self.ops.append(("ltrim", a))
+
+        async def execute(self):
+            return True
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe()
+
+        async def lrange(self, *a, **k):
+            return []
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def eval(self, script, numkeys, *args):
+            key = args[0]
+            floor = int(args[1])
+            cur = int(store.get(key) or 0)
+            nxt = max(cur, floor) + 1
+            store[key] = str(nxt)
+            return nxt
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+    tid = await WelcomeService.enqueue(
+        {"kind": "test_speak", "text": "双端试听", "camera_id": cam}
+    )
+    assert tid
+    assert WelcomeService.speak_generation(cam) == 4
+
+
+@pytest.mark.asyncio
+async def test_speak_task_local_fallback_when_redis_down(monkeypatch):
+    """Redis 写失败时仍可从进程内读到播报状态（供试听轮询）。"""
+    WelcomeService._speak_task_local.clear()
+
+    class _Boom:
+        async def set(self, *a, **k):
+            raise RuntimeError("redis down")
+
+        async def get(self, *a, **k):
+            raise RuntimeError("redis down")
+
+    monkeypatch.setattr(
+        "app.services.face_service.get_redis",
+        AsyncMock(return_value=_Boom()),
+    )
+    await WelcomeService.set_speak_task_status("local-tid", "queued", kind="member")
+    got = await WelcomeService.get_speak_task("local-tid")
+    assert got is not None
+    assert got["status"] == "queued"
+    WelcomeService._speak_task_local.clear()
+
+
+def test_need_taste_covers_preference_template_placeholder():
+    """默认副句含 {口味}：need_taste 须把 preference 模板纳入，否则口味推荐永不查库。"""
+    greeting = WelcomeService.DEFAULT_GREETING_TEMPLATE
+    pref = WelcomeService.DEFAULT_PREFERENCE_TEMPLATE
+    assert not WelcomeService.template_has_placeholder(greeting, "口味", "taste")
+    assert WelcomeService.template_has_placeholder(pref, "口味", "taste")
+    need_taste = WelcomeService.template_has_placeholder(
+        greeting, "口味", "taste"
+    ) or WelcomeService.template_has_placeholder(pref, "口味", "taste")
+    assert need_taste is True
 
 
 def test_extract_live_face_hit_accepts_light_kw():

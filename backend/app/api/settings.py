@@ -213,8 +213,21 @@ def _build_env_groups(settings) -> list[dict]:
         {
             "title": "迎宾 / TTS / 摄像头",
             "items": [
-                _env_item("TTS_PROVIDER", settings.tts_provider, "TTS 提供商（local 等）"),
-                _env_item("TTS_VOICE", settings.tts_voice, "语音音色（当前本地 TTS 未读取，保留配置位）"),
+                _env_item(
+                    "TTS_PROVIDER",
+                    settings.tts_provider,
+                    "TTS：edge=神经女声（需出网+ffmpeg）；local=本机 SAPI/espeak",
+                ),
+                _env_item(
+                    "TTS_VOICE",
+                    settings.tts_voice,
+                    "音色：gentle_female/温柔女生/女生/男生，或 zh-CN-XiaoxiaoNeural",
+                ),
+                _env_item(
+                    "TTS_RATE",
+                    getattr(settings, "tts_rate", "-10%"),
+                    "edge 语速（如 -10% 略慢更柔）",
+                ),
                 _env_item("CAMERA_URL", settings.camera_url, "默认 RTSP（可在摄像头管理覆盖）", sensitive=True),
                 _env_item("CAMERA_USERNAME", settings.camera_username, "摄像头默认用户名"),
                 _env_item("CAMERA_PASSWORD", settings.camera_password, "摄像头默认密码", sensitive=True),

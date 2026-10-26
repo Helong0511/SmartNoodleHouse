@@ -38,6 +38,29 @@
 - **文件**：`face_liveness_service.py`
 - **改动**：`action_completed` 默认 False；未完成不消费 token；可选 `claimed_action` 须匹配；文档标明非视觉证明。
 
+## D1–D5 握手白名单 / 任务结案 / 试听打断 / UI / 多脸（续）
+
+- **D1**：`hikvision_audio` audioData 仅允许 HTTP 100/200，302 等一律失败。
+- **D2**：入队替换 pending 时写旧 `task_id` → `cancelled`（`replaced` / `member_preempt`）。
+- **D3**：`test_speak_camera` 入队 bump `speak_gen`；TTS 对试听挂 `should_abort`，cancelled 带 `reason`。
+- **D4**：`Cameras.vue` 区分 `stale_frame`；`pollSpeakTask` 展示 reason 与超时提示。
+- **D5**：`_pick_largest_face` 改为面积×det_score。
+
+## E1–E5 打断令牌 / FIFO / 口味模板 / 冷却释放（续）
+
+- **E1**：`bump_speak_generation_async` 用 Lua `max(GET, floor)+1` + `SET EX`，键过期后仍相对本地抬升，避免打断令牌回落。
+- **E2**：试听/会员替换 pending 改为 `LREM` 精确删除，避免 `DELETE` 抹掉并发入队。
+- **E3**：出队由 `BRPOP` 改为 `BLPOP`，与 `RPUSH` 组成 FIFO，避免旧任务饿死。
+- **E4**：`need_taste` / `need_product` 同时检查主模板与偏好/餐品副模板（默认副句含 `{口味}`）。
+- **E5**：`enqueue` 因 `member_pending` 返回 `None` 时，陌生迎宾删除 Redis NX 冷却，避免无声占窗。
+
+## F1–F4 ensure 竞态 / 内存队列 / 会员冷却（续）
+
+- **F1**：`_redis_ensure_speak_gen_at_least` 改为 Lua `max(cur,want)`，禁止非原子 SET 压低并发 bump。
+- **F2**：内存 `dequeue` 丢弃 stale 后继续取，与 Redis 路径一致。
+- **F3**：进程内队列满时 `enqueue` 返回 `None`；`try_welcome` 无 `task_id` 则释放会员冷却。
+- **F4**：Redis 不可用时内存入队同样处理 `member_pending` / `replaced` / `member_preempt`。
+
 ## 其它
 
 - `cameras.probe-face`：过期帧返回 `reason=stale_frame`。
