@@ -35,3 +35,25 @@ def test_leader_check_false_raises():
 def test_leader_check_none_allows():
     CameraManager.set_leader_check(None)
     CameraManager()._assert_leader()
+
+
+def test_api_start_worker_maps_not_leader():
+    """API 层须把 CameraNotLeaderError 映射为 AppException 40922。"""
+    from unittest.mock import MagicMock
+
+    from app.api.cameras import _start_worker
+    from app.core.exceptions import AppException
+
+    CameraManager.set_leader_check(lambda: False)
+    try:
+        cam = MagicMock()
+        cam.id = 99199
+        cam.source_url = "rtsp://192.0.2.20/Streaming/Channels/101"
+        cam.username = "admin"
+        cam.password_encrypted = None
+        cam.fps = 5
+        with pytest.raises(AppException) as ei:
+            _start_worker(cam)
+        assert ei.value.code == 40922
+    finally:
+        CameraManager.set_leader_check(None)

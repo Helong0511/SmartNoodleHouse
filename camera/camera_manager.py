@@ -294,20 +294,24 @@ class CameraWorker:
                 )
                 continue
             # 丢弃 HEVC 半帧/花屏，保留上一帧好画面供识别与抓拍
-            if is_rtsp_frame_usable(frame):
-                self.frame_buffer.update(frame)
-                self.status = "ONLINE"
-                self._consecutive_bad_frames = 0
-                self._last_good_frame_mono = time.monotonic()
-            else:
-                self._consecutive_bad_frames += 1
-                age = self.frame_buffer.age_sec()
-                if age is None or age > 5.0:
-                    self.status = "DEGRADED"
-                else:
-                    self.status = "ONLINE"
+            self._apply_decode_result(frame, usable=is_rtsp_frame_usable(frame))
             if self._interruptible_sleep(interval):
                 break
+
+    def _apply_decode_result(self, frame, *, usable: bool) -> None:
+        """好帧→ONLINE；坏帧且近期好帧≤5s→DEGRADED；否则 RECONNECTING（不计 usable）。"""
+        if usable:
+            self.frame_buffer.update(frame)
+            self.status = "ONLINE"
+            self._consecutive_bad_frames = 0
+            self._last_good_frame_mono = time.monotonic()
+            return
+        self._consecutive_bad_frames += 1
+        age = self.frame_buffer.age_sec()
+        if age is not None and age <= 5.0:
+            self.status = "DEGRADED"
+        else:
+            self.status = "RECONNECTING"
 
 
 class CameraManager:

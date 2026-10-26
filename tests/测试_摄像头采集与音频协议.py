@@ -105,6 +105,60 @@ def test_serialize_leader_demotes_stale_online_without_worker():
     assert 'db_st in ("ONLINE", "DEGRADED", "RECONNECTING")' in src
 
 
+def test_bad_frame_with_recent_good_is_degraded():
+    """坏帧但仍有近期好帧须标 DEGRADED（计入 usable），而非误标 ONLINE。"""
+    w = CameraWorker(camera_id=99011, source="0", fps=5)
+    good = np.zeros((48, 48, 3), dtype=np.uint8)
+    good[:] = (40, 80, 120)
+    w.frame_buffer.update(good)
+    bad = np.zeros((48, 48, 3), dtype=np.uint8)
+    w._apply_decode_result(bad, usable=False)
+    assert w.status == "DEGRADED"
+    assert w.frame_buffer.age_sec() is not None
+    assert w.frame_buffer.age_sec() <= 5.0
+
+
+def test_bad_frame_without_recent_good_is_reconnecting():
+    """无近期好帧时坏帧须 RECONNECTING，不得标 DEGRADED 虚增 KPI。"""
+    w = CameraWorker(camera_id=99012, source="0", fps=5)
+    bad = np.zeros((48, 48, 3), dtype=np.uint8)
+    w._apply_decode_result(bad, usable=False)
+    assert w.status == "RECONNECTING"
+
+
+def test_overview_uses_runtime_running_like_serialize():
+    """overview 与 _serialize 均以线程存活为准，避免死线程 worker 虚增在线。"""
+    import inspect
+
+    from app.api import cameras as cam_api
+
+    src = inspect.getsource(cam_api.cameras_overview)
+    assert "get_runtime" in src
+    assert 'rt.get("running")' in src
+
+
+def test_start_worker_maps_not_leader_to_app_exception():
+    """非 Leader 启采须业务 409，而非未捕获 CameraNotLeaderError→500。"""
+    from app.api.cameras import _start_worker
+    from app.core.exceptions import AppException
+    from camera.camera_manager import CameraManager
+
+    CameraManager.set_leader_check(lambda: False)
+    try:
+        cam = MagicMock()
+        cam.id = 99013
+        cam.source_url = "rtsp://192.0.2.10/Streaming/Channels/101"
+        cam.username = "admin"
+        cam.password_encrypted = None
+        cam.fps = 5
+        with pytest.raises(AppException) as ei:
+            _start_worker(cam)
+        assert ei.value.code == 40922
+        assert ei.value.status_code == 409
+    finally:
+        CameraManager.set_leader_check(None)
+
+
 @pytest.mark.asyncio
 async def test_play_g711_rejects_https_base():
     from app.services.hikvision_audio import HikvisionTwoWayAudio

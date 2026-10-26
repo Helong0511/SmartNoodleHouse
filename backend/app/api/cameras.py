@@ -57,10 +57,17 @@ def _assert_cam_access(user, camera: Camera) -> None:
 
 
 def _start_worker(camera: Camera, *, force: bool = False) -> None:
-    from camera.camera_manager import CameraManager
+    from camera.camera_manager import CameraManager, CameraNotLeaderError
 
     source = build_connect_source(camera.source_url, camera.username, camera.password_encrypted)
-    CameraManager().start_camera(camera.id, source, camera.fps or 25, force=force)
+    try:
+        CameraManager().start_camera(camera.id, source, camera.fps or 25, force=force)
+    except CameraNotLeaderError as exc:
+        raise AppException(
+            40922,
+            "当前实例非 Leader，无法启采",
+            status_code=409,
+        ) from exc
 
 
 def _serialize(c: Camera, mgr) -> dict:
@@ -149,10 +156,12 @@ async def cameras_overview(request: Request, db: DbSession, user: CurrentUser):
     except Exception:
         on_leader = False
     for c in cams:
-        if mgr.get_worker(c.id):
-            st = mgr.get_status(c.id) or "OFFLINE"
+        # 与 _serialize 一致：以线程存活为准，勿仅凭 worker 对象残留计在线
+        rt = mgr.get_runtime(c.id)
+        if rt.get("running"):
+            st = rt.get("status") or "OFFLINE"
         elif on_leader:
-            # Leader 无 worker：勿把库内残留 ONLINE/DEGRADED 计入在线（非 Leader 仍信库）
+            # Leader 无线程：勿把库内残留 ONLINE/DEGRADED 计入在线（非 Leader 仍信库）
             db_st = str(c.status or "").upper()
             st = (
                 "OFFLINE"
