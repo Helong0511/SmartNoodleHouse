@@ -175,6 +175,87 @@ async def test_enqueue_test_speak_marks_replaced_cancelled(monkeypatch):
     assert old.get("reason") == "replaced"
 
 
+@pytest.mark.asyncio
+async def test_finalize_keeps_latest_test_speak_after_concurrent_rpush(monkeypatch):
+    """并发两路试听都已 RPUSH 时，finalize 须 LREM 同机位旧项只留最新。"""
+    import json
+
+    from app.services.face_service import WelcomeService
+
+    store: dict[str, str] = {}
+    old_raw = json.dumps(
+        {
+            "kind": "test_speak_camera",
+            "text": "旧并发试听",
+            "camera_id": 11,
+            "task_id": "race-old",
+            "enqueued_at": 1.0,
+        },
+        ensure_ascii=False,
+    )
+    new_payload = {
+        "kind": "test_speak_camera",
+        "text": "新并发试听",
+        "camera_id": 11,
+        "task_id": "race-new",
+        "enqueued_at": 2.0,
+    }
+    new_raw = json.dumps(new_payload, ensure_ascii=False)
+    queue: list[str] = [old_raw, new_raw]
+
+    class _FakeRedis:
+        async def lrange(self, key, start, end):
+            return list(queue)
+
+        async def lrem(self, key, count, value):
+            val = str(value)
+            removed = 0
+            while removed < int(count) and val in queue:
+                queue.remove(val)
+                removed += 1
+            return removed
+
+        async def set(self, key, value, ex=None):
+            store[key] = str(value)
+            return True
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def eval(self, script, numkeys, *args):
+            key = args[0]
+            floor = int(args[1])
+            cur = int(store.get(key) or 0)
+            nxt = max(cur, floor) + 1
+            store[key] = str(nxt)
+            return nxt
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+
+    tid = await WelcomeService._finalize_redis_enqueue(
+        task_id="race-new",
+        kind="test_speak_camera",
+        payload=new_payload,
+        text="新并发试听",
+        raw=new_raw,
+        cam_s="11",
+        redis=_FakeRedis(),
+    )
+    assert tid == "race-new"
+    assert old_raw not in queue
+    assert new_raw in queue
+    old = await WelcomeService.get_speak_task("race-old")
+    assert old is not None
+    assert old["status"] == "cancelled"
+    assert old.get("reason") == "replaced"
+
+
 def test_pending_drop_reason_member_preempts_test_and_old_member():
     from app.services.face_service import WelcomeService
 
@@ -203,6 +284,16 @@ def test_pending_drop_reason_member_preempts_test_and_old_member():
         == "test_speak_preempt"
     )
     assert WelcomeService._pending_drop_reason("test_speak_pc", "unknown_visitor", True) == ""
+    # both ↔ camera 同机位互抢
+    assert (
+        WelcomeService._pending_drop_reason("test_speak", "test_speak_camera", True)
+        == "replaced"
+    )
+    assert (
+        WelcomeService._pending_drop_reason("test_speak_camera", "test_speak", True)
+        == "replaced"
+    )
+    assert WelcomeService._pending_drop_reason("test_speak_pc", "test_speak", True) == ""
 
 
 @pytest.mark.asyncio
@@ -598,6 +689,67 @@ async def test_try_welcome_releases_cooldown_when_enqueue_none(monkeypatch):
             )
     assert ok is False
     assert released == [42]
+
+
+@pytest.mark.asyncio
+async def test_memory_enqueue_keep_latest_after_put(monkeypatch):
+    """内存路径 put 后须 keep-latest，与 Redis T2 对称。"""
+    import asyncio
+
+    from app.services.face_service import WelcomeService
+
+    class _BoomRedis:
+        async def lrange(self, *a, **k):
+            raise RuntimeError("redis down")
+
+    async def _gr():
+        return _BoomRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+    WelcomeService._queue = asyncio.Queue(maxsize=WelcomeService.TTS_QUEUE_MAX)
+    q = WelcomeService.get_queue()
+    q.put_nowait(
+        {
+            "kind": "test_speak_camera",
+            "text": "旧",
+            "camera_id": 21,
+            "task_id": "mem-old",
+        }
+    )
+    tid = await WelcomeService.enqueue(
+        {
+            "kind": "test_speak",
+            "text": "新 both",
+            "camera_id": 21,
+            "task_id": "mem-new",
+        }
+    )
+    assert tid == "mem-new"
+    left = []
+    while not q.empty():
+        left.append(q.get_nowait())
+    assert len(left) == 1
+    assert left[0].get("task_id") == "mem-new"
+    old = await WelcomeService.get_speak_task("mem-old")
+    assert old is not None
+    assert old["status"] == "cancelled"
+    assert old.get("reason") == "replaced"
+    WelcomeService._queue = None
+
+
+def test_redis_pushed_outer_except_retries_finalize():
+    """普通 RPUSH 成功后外层异常须再试 finalize，禁止裸 return task_id。"""
+    import inspect
+
+    from app.services.face_service import WelcomeService
+
+    src = inspect.getsource(WelcomeService.enqueue)
+    # 外层 except redis_pushed 分支须含 finalize 重试
+    assert "禁止内存再入队" in src
+    assert src.count("_finalize_redis_enqueue") >= 3
 
 
 def test_pick_face_prefers_area_times_det_score():

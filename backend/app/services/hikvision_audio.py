@@ -78,6 +78,10 @@ _SHARED_HTTP: dict[str, httpx.AsyncClient] = {}
 _SHARED_HTTP_GUARD = asyncio.Lock()
 # 通道编码热缓存，避免每次试听都多一轮 Digest GET（仅存探测成功的值）
 _CODEC_CACHE: HotCache[str, str] = HotCache("hikvision.codec", max_size=32, ttl_seconds=3600.0)
+# 已写入设备的 speakerVolume，避免每次播报都 PUT
+_SPEAKER_VOL_CACHE: HotCache[str, int] = HotCache(
+    "hikvision.speaker_volume", max_size=32, ttl_seconds=3600.0
+)
 # 后台探测进行中，避免 resolve_codec(block=False) 反复 create_task
 _CODEC_DETECT_PENDING: set[str] = set()
 # 上一轮已正常 close 则跳过本轮预 close（省一次 Digest 往返，约 0.5–1s）
@@ -134,6 +138,7 @@ async def invalidate_hikvision_caches(*, base_url: str, channel: int | None = No
         codec_keys.append(_device_lock_key(base, 1))
     for ck in set(codec_keys):
         _CODEC_CACHE.delete(ck)
+        _SPEAKER_VOL_CACHE.delete(ck)
         _CODEC_DETECT_PENDING.discard(str(ck))
         _SESSION_NEED_CLOSE.pop(str(ck), None)
         _DIGEST_WWW_CACHE.delete(str(ck))
@@ -529,6 +534,35 @@ def _parse_channel_audio(xml_text: str, channel: int) -> tuple[str, bool]:
     return codec, enabled
 
 
+def patch_twoway_speaker_volume_xml(xml_text: str, volume_percent: int) -> str | None:
+    """把 TwoWayAudioChannel XML 里的 speakerVolume 改成目标值；无该字段则返回 None。"""
+    try:
+        pct = int(volume_percent)
+    except (TypeError, ValueError):
+        pct = 100
+    pct = max(0, min(100, pct))
+    raw = xml_text or ""
+    if "speakerVolume" not in raw:
+        return None
+    new, n = re.subn(
+        r"(<speakerVolume>)\s*-?\d+\s*(</speakerVolume>)",
+        rf"\g<1>{pct}\g<2>",
+        raw,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if n:
+        return new
+    new, n = re.subn(
+        r"<speakerVolume>\s*</speakerVolume>",
+        f"<speakerVolume>{pct}</speakerVolume>",
+        raw,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return new if n else None
+
+
 def _md5_hex(s: str) -> str:
     return hashlib.md5(s.encode("utf-8")).hexdigest()
 
@@ -860,6 +894,67 @@ class HikvisionTwoWayAudio:
         client = await self._shared_client(timeout)
         return await self._detect_codec(client)
 
+    async def set_speaker_volume(self, volume_percent: int) -> bool:
+        """写入对讲通道 speakerVolume（设备硬件音量）。成功 True，无字段/失败 False。"""
+        try:
+            pct = int(volume_percent)
+        except (TypeError, ValueError):
+            pct = 100
+        pct = max(0, min(100, pct))
+        key = self._device_key()
+        cached = _SPEAKER_VOL_CACHE.get(key)
+        if cached is not None and int(cached) == pct:
+            return True
+        timeout = httpx.Timeout(8.0, connect=3.0)
+        try:
+            client = await self._shared_client(timeout)
+            url = self._url("")
+            resp = await client.get(url)
+            if resp.status_code != 200 or not (resp.text or "").strip():
+                logger.warning(
+                    "读取对讲通道失败，无法写 speakerVolume base=%s status=%s",
+                    self.base_url,
+                    getattr(resp, "status_code", "?"),
+                )
+                return False
+            patched = patch_twoway_speaker_volume_xml(resp.text, pct)
+            if not patched:
+                logger.info(
+                    "对讲通道无 speakerVolume 字段，回退软件增益 base=%s",
+                    self.base_url,
+                )
+                return False
+            # 已是目标值则只记缓存，免多余 PUT
+            if patched == resp.text:
+                _SPEAKER_VOL_CACHE.put(key, pct)
+                return True
+            put = await client.put(
+                url,
+                content=patched.encode("utf-8"),
+                headers={"Content-Type": "application/xml"},
+            )
+            if put.status_code not in (200, 201):
+                logger.warning(
+                    "写入 speakerVolume 失败 base=%s status=%s body=%s",
+                    self.base_url,
+                    put.status_code,
+                    (put.text or "")[:160],
+                )
+                return False
+            _SPEAKER_VOL_CACHE.put(key, pct)
+            logger.info(
+                "已写入摄像头对讲 speakerVolume=%s base=%s channel=%s",
+                pct,
+                self.base_url,
+                self.channel,
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "写入 speakerVolume 异常 base=%s", self.base_url, exc_info=True
+            )
+            return False
+
     async def play_g711(
         self,
         g711_data: bytes,
@@ -946,6 +1041,30 @@ class HikvisionTwoWayAudio:
                 }
             open_ms = int((time.perf_counter() - t_open) * 1000)
             _SESSION_NEED_CLOSE[key] = True
+            # open 往返可能阻塞数百 ms：再查一次 abort，尽快 /close 释锁
+            if should_abort is not None:
+                try:
+                    if should_abort():
+                        logger.info(
+                            "海康对讲播报在 open 后取消 base=%s", self.base_url
+                        )
+                        try:
+                            await client.put(self._url("/close"))
+                            _SESSION_NEED_CLOSE[key] = False
+                        except Exception:
+                            logger.debug(
+                                "hikvision close after open-abort ignored",
+                                exc_info=True,
+                            )
+                            _SESSION_NEED_CLOSE[key] = True
+                        return {
+                            "status": "cancelled",
+                            "phase": "after_open",
+                            "device_playback": "unverified",
+                            "open_ms": open_ms,
+                        }
+                except Exception:
+                    pass
             session_id = _parse_session_id(open_resp.text) or ""
             path = f"/ISAPI/System/TwoWayAudio/channels/{self.channel}/audioData"
             if session_id:
@@ -964,6 +1083,7 @@ class HikvisionTwoWayAudio:
             stream_data = g711_data + silence if silence else g711_data
             audio_s = len(stream_data) / float(_G711_RATE)
             aborted = False
+            abort_phase = "sending"
             stats: dict = {}
             try:
                 # CL:0 + 受控节奏：过快突发会「只响试」；过慢则长句首声拖很久
@@ -990,7 +1110,21 @@ class HikvisionTwoWayAudio:
                     effective_send = max(0.0, send_s - silence_s * 0.85)
                     remain = tail_hold_seconds(speech_s, effective_send)
                     if remain > 0.05:
-                        await asyncio.sleep(remain)
+                        # 可打断 sleep：bump 后勿占满 hold 拖住对讲锁
+                        hold_deadline = time.monotonic() + remain
+                        while True:
+                            left = hold_deadline - time.monotonic()
+                            if left <= 0:
+                                break
+                            if should_abort is not None:
+                                try:
+                                    if should_abort():
+                                        aborted = True
+                                        abort_phase = "tail_hold"
+                                        break
+                                except Exception:
+                                    pass
+                            await asyncio.sleep(min(0.2, left))
                 logger.info(
                     "海康对讲节奏推流完成 codec=%s bytes=%s speech_ms=%s silence_ms=%s "
                     "open_ms=%s first_chunk_ms=%s send_ms=%s push_ms=%s audio_ms=%s "
@@ -1028,7 +1162,7 @@ class HikvisionTwoWayAudio:
             if aborted:
                 return {
                     "status": "cancelled",
-                    "phase": "sending",
+                    "phase": abort_phase,
                     "device_playback": "unverified",
                     "open_ms": open_ms,
                     "first_chunk_ms": stats.get("first_chunk_ms", -1),

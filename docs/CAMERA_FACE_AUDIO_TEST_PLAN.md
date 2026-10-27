@@ -37,9 +37,20 @@ python -m pytest tests/测试_人脸冷匹配top1.py tests/测试_摄像头采�
 | 坏帧 DEGRADED/RECONNECTING 契约 | `测试_摄像头采集与音频协议.py` | 单元 |
 | overview 认 runtime.running | `测试_摄像头采集与音频协议.py` | 单元 |
 | 非 Leader 启采 40922 | `测试_摄像头Leader守卫.py` / 采集协议 | 单元 |
+| 非 Leader 停采/删机 40922 | `测试_迎宾播报时延.py` | 源码 |
+| 停采先 bump + 锁外 join | `测试_迎宾播报时延.py` / 采集协议 | 源码 |
+| Redis 空仍 drain 内存待播 | `测试_迎宾播报时延.py` | 单元 |
+| 启采 to_thread | `测试_迎宾播报时延.py` | 源码 |
+| 合成中途 abort | `测试_摄像头采集与音频协议.py` | 单元 |
+| local_only device_playback | `测试_摄像头采集与音频协议.py` / Cameras.vue | 源码 |
+| 并发试听 keep-latest | `测试_多帧确认去重与播报任务.py` | 单元 |
+| both↔camera 互抢 / 内存 keep-latest | `测试_多帧确认去重与播报任务.py` | 单元 |
+| abort cancel_reason 区分停采 | `测试_迎宾播报时延.py` | 源码 |
 | 试听抢占待播陌生 | `测试_多帧确认去重与播报任务.py` | 单元 |
 | queue_full 不 bump | `测试_多帧确认去重与播报任务.py` | 单元 |
 | 死线程 status/runtime OFFLINE | `测试_摄像头采集与音频协议.py` | 单元 |
+| start/update force bump | `测试_迎宾播报时延.py` | 源码 |
+| 合成阶段 should_abort | `测试_摄像头采集与音频协议.py` | 单元 |
 | 花屏过滤 | `测试_RTSP帧完整性.py` | 单元 |
 | 窗口择优 | `测试_人脸最佳帧窗口.py` | 单元 |
 

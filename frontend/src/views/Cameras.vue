@@ -448,6 +448,9 @@ async function save() {
       if (form.password) body.password = form.password
       const res = await api.put(`/cameras/${editingId.value}`, body)
       ElMessage.success('已更新')
+      if (res?.data?.restart_note === 'not_leader') {
+        ElMessage.warning('参数已保存，但当前实例非 Leader，未能重建采集')
+      }
       notifyOsd(res)
     } else {
       const res = await api.post('/cameras', {
@@ -462,6 +465,9 @@ async function save() {
         auto_start: form.auto_start,
       })
       ElMessage.success('摄像头已创建')
+      if (res?.data?.start_note === 'not_leader') {
+        ElMessage.warning('已创建，但当前实例非 Leader，未能自动启采')
+      }
       notifyOsd(res)
     }
     dialogVisible.value = false
@@ -604,9 +610,13 @@ async function pollSpeakTask(taskId: string) {
       const st = res?.data ?? res
       const status = String(st?.status || '')
       if (status === 'completed') {
-        ElMessage.info(
-          `试听推流结束（设备出声未验证${st?.device_playback ? '·' + st.device_playback : ''}）`,
-        )
+        if (st?.device_playback === 'local_only') {
+          ElMessage.warning('试听已回退本机扬声器（摄像头推流未成功）')
+        } else {
+          ElMessage.info(
+            `试听推流结束（设备出声未验证${st?.device_playback ? '·' + st.device_playback : ''}）`,
+          )
+        }
         return
       }
       if (status === 'failed' || status === 'cancelled') {

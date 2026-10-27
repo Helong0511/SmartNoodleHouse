@@ -4,7 +4,7 @@
 
 | 项 | 结果 | 说明 |
 |---|---|---|
-| 迎宾相关 pytest 子集 | **10 passed**（P 聚焦：试听抢占/bump/死线程/创建兜底/Leader） | 另跑全量采集+迎宾子集建议本地确认 |
+| 迎宾相关 pytest 子集 | **V 聚焦 73 passed**（内存 dequeue / 启采 to_thread / 合成中 abort / local_only） | 迎宾时延+采集协议+多帧三文件 |
 | 会员抢占待播试听 | **模拟通过** | `test_enqueue_member_preempts_pending_test_speak` |
 | MultiFrame TTL monotonic | **模拟通过** | `test_multiframe_ttl_uses_monotonic` |
 | 会员播报可 speak_gen 打断 | **模拟通过** | `_abortable` 含 member |
@@ -31,25 +31,26 @@
 | 后台试听轮询 `speak-tasks` | **已接线** | `Cameras.vue` `pollSpeakTask`；仍≠设备出声 ACK |
 | 前端 `vite build` | **通过**（约 23s，历史） | 跳过卡住的 `vue-tsc -b`；完整 `npm run build` 仍建议本地再跑 |
 
-## 真实设备（待现场验证）
+## 真实设备（现场）
 
-目标：海康 DS-2CD3347SWDV3-LT。下列项**未执行**，不得标通过。
+目标：库内 `cameras.id=1`（`肠旺面_测试摄像头`，`rtsp://192.168.1.189:554/.../101`）。证据：`tests/_out/field_camera_1.json`；脚本 `scripts/现场验收海康迎宾.py`。
 
-| # | 步骤 | 预期 | 实际 | 通过 |
+| # | 步骤 | 预期 | 实际（2026-10-27） | 通过 |
 |---|---|---|---|---|
-| 1 | 读设备能力 / 对讲编码 | 真实 codec | 未执行 | 待验证 |
-| 2 | RTSP 持续采集 + 超时日志 | ONLINE，open_ms/timeout_set 有日志 | 未执行 | 待验证 |
-| 3 | 会员迎宾出声 | 扬声器可闻 | 未执行 | 待验证 |
-| 4 | 陌生客 + 会员打断 | 陌生停、会员播，不回退 PC | 未执行 | 待验证 |
-| 5 | HTTP ISAPI（非 HTTPS） | 推流 completed，device_playback=unverified | 未执行 | 待验证 |
-| 6 | 多人进店 | 不错配姓名 | 未执行 | 待验证 |
-| 7 | 断网恢复 | 退避后恢复 | 未执行 | 待验证 |
-| 8 | 门口 face_side_px | 列表可见，辅助码流决策 | 未执行 | 待验证 |
+| 1 | 读设备能力 / 对讲编码 | 真实 codec | **alaw**（ISAPI `resolve_codec` ≈3.7s） | **通过** |
+| 2 | RTSP 持续采集 | 能开流读帧 | 注入凭据后开流成功，帧 **2560×1440**（≈2.2s） | **通过** |
+| 3 | 会员/试听出声 | 扬声器可闻 | G711 推流 completed；**人耳确认听到「欢迎光临」**（2026-10-27） | **通过** |
+| 4 | 陌生客 + 会员打断 | 陌生停、会员播，不回退 PC | 业务进程在线：Redis 入队 `unknown_visitor`→`member`；unknown **cancelled / speak_gen_bumped**；member **completed / ok**，`device_playback=unverified`（非 local_only） | **通过**（业务打断；非真人进出） |
+| 5 | HTTP ISAPI（非 HTTPS） | 推流 completed，unverified | `http://192.168.1.189`，play 完成 open_ms≈942 send_ms≈1461 | **通过** |
+| 6 | 多人进店 | 不错配姓名 | 未做（画面为办公空景，无多人同时入镜） | 待验证 |
+| 7 | 断网恢复 | 退避后恢复 | **软重开** RTSP 两次均成功；拔网线/断电源未测 | 部分（软通过） |
+| 8 | 门口 face_side_px | 列表/探测可见 | 漏检诊断帧 `tests/_out/field_miss_cam1.jpg`：办公隔断/工位空景，**无人脸**；`face_side_px` 无法观测 | 部分（有帧无脸） |
 
-说明：音频「推流完成」≠「顾客已听到」；无设备 ACK 时记 **PLAYBACK_UNVERIFIED**。
+说明：项 3 人耳确认「欢迎光临」；项 4 证据 `tests/_out/field_interrupt_cam1.json`。复测推流：`python scripts/现场验收海康迎宾.py --camera-id 1 --play-g711 --heard yes`。
 
 ## 验收结论
 
 - **代码正确性（冷匹配、HTTPS 拒绝、取消语义、帧龄）**：自动化模拟通过。
-- **真机播报与识别 SLA**：**未验收**。
-- **性能提升百分比**：**未宣称**（无本轮新基线对比表外推）。
+- **真机项 1/2/3/4/5**：**已通过**（3 人耳；4 为在线业务打断链路，非真人进出）。
+- **仍待人/场景：** 项 6 多人；项 7 拔线；项 8 门口有人脸（当前镜头为空办公景）。
+- **性能提升百分比**：**未宣称**。

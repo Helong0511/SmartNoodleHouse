@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-26T09:57:35Z",
+  "updated_at": "2026-10-27T03:59:16Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "Debug/摄像头.md": {
       "role": "index",
-      "sha256": "bb36807e3e1dc8571006e2b1c3bd64ab7785bf0da717c428c50fbe73d6eb236e",
-      "size": 36667,
-      "normalized_sha256": "4c06769a6c4329bbf39573651aea45cecc70c9b78617c1a1330a409c46ab011a"
+      "sha256": "2f2892cda5d562bcfabe18589b378cb10c9515a56042ea3d931062f6331b2e43",
+      "size": 37816,
+      "normalized_sha256": "e5b5739c943c370e041068d4e081a2ed56e8941510915d4428fe417fb2a18575"
     },
     "README.md": {
       "role": "index",
@@ -119,9 +119,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "7ea82005bbec28ec49a9affbd4af76d9e86a26484d1b955dfd48527b8db344e2",
-      "size": 193683,
-      "normalized_sha256": "7ea82005bbec28ec49a9affbd4af76d9e86a26484d1b955dfd48527b8db344e2"
+      "sha256": "503b0ff14cf2b819d11b07c182f68f706f2a464f2cff123b72b31023b5d28d96",
+      "size": 194420,
+      "normalized_sha256": "503b0ff14cf2b819d11b07c182f68f706f2a464f2cff123b72b31023b5d28d96"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -425,9 +425,9 @@
     },
     "backend/app/api/cameras.py": {
       "role": "index",
-      "sha256": "f93881368bc83c9da1cf2d7e8995894946e9d9749b2d72fd9480fd07e3cadfff",
-      "size": 35706,
-      "normalized_sha256": "f93881368bc83c9da1cf2d7e8995894946e9d9749b2d72fd9480fd07e3cadfff"
+      "sha256": "76e633a4e9c419519975efd2eb0c261226026778eef179ecd42d64ae79320cbe",
+      "size": 38069,
+      "normalized_sha256": "76e633a4e9c419519975efd2eb0c261226026778eef179ecd42d64ae79320cbe"
     },
     "backend/app/api/client_logs.py": {
       "role": "index",
@@ -1415,9 +1415,9 @@
     },
     "backend/app/services/face_service.py": {
       "role": "index",
-      "sha256": "8616965e7852a04eb21f5a10ae1ae19a5252f0aefe32b9f1b480b87c78fe0227",
-      "size": 88589,
-      "normalized_sha256": "8616965e7852a04eb21f5a10ae1ae19a5252f0aefe32b9f1b480b87c78fe0227"
+      "sha256": "041d3dad53c04b7a5d42ac561969bff603c1e3e5454b336ccce2b2341d2b5804",
+      "size": 102807,
+      "normalized_sha256": "041d3dad53c04b7a5d42ac561969bff603c1e3e5454b336ccce2b2341d2b5804"
     },
     "backend/app/services/feedback_service.py": {
       "role": "index",
@@ -1445,9 +1445,9 @@
     },
     "backend/app/services/hikvision_audio.py": {
       "role": "index",
-      "sha256": "eea54cbbc1cefa3bbc2589983c053b6e50ef5840ff6961d11c555a370ae45d49",
-      "size": 39040,
-      "normalized_sha256": "eea54cbbc1cefa3bbc2589983c053b6e50ef5840ff6961d11c555a370ae45d49"
+      "sha256": "7671409b65dba212aee47a258c59a7a39b5cdef57d164c8a53d356eb1271a643",
+      "size": 44433,
+      "normalized_sha256": "7671409b65dba212aee47a258c59a7a39b5cdef57d164c8a53d356eb1271a643"
     },
     "backend/app/services/kitchen_auto_service.py": {
       "role": "index",
@@ -1745,9 +1745,9 @@
     },
     "backend/app/services/system_settings_service.py": {
       "role": "index",
-      "sha256": "a6be26f2f2c55c4abfc44f283ff8981fc39e494c12bc1adf01a08ad8f2b0cc82",
-      "size": 53822,
-      "normalized_sha256": "a6be26f2f2c55c4abfc44f283ff8981fc39e494c12bc1adf01a08ad8f2b0cc82"
+      "sha256": "5ee64fb045aa60bc67d6bdb3e2df5e5cd9441555dd4401c77f2f0413b8bdc5be",
+      "size": 53854,
+      "normalized_sha256": "5ee64fb045aa60bc67d6bdb3e2df5e5cd9441555dd4401c77f2f0413b8bdc5be"
     },
     "backend/app/services/table_resolve.py": {
       "role": "index",
@@ -1889,9 +1889,9 @@
     },
     "backend/app/workers/tts_worker.py": {
       "role": "index",
-      "sha256": "0683555b2b12cc99ea4e54a00e348f1a4b907178f5acc84b1e9d58ca2ad09ecd",
-      "size": 40965,
-      "normalized_sha256": "ca643cfda803e5a1be6422cf32d5d805a85e7bc838307713eb0f9a51050749b9"
+      "sha256": "e3494dcd9d771c678438d8f49638a2fc8ed1256bba9b6a5cea298345bd3d2007",
+      "size": 44635,
+      "normalized_sha256": "d4d97bfdbc61566c6d1b74a622e6f62ad5bcdf6105972b80c9edf4454b49264b"
     },
     "backend/requirements.lock": {
       "role": "index",
@@ -1919,9 +1919,9 @@
     },
     "camera/camera_manager.py": {
       "role": "index",
-      "sha256": "1244b5610972f87738a751828c35832118b6c53089ee16a04134d9c02688c9af",
-      "size": 18007,
-      "normalized_sha256": "fbda0dc644119cc83b8b5b1821940e8a5b3dc7768bd20ec77129a63f41a6663a"
+      "sha256": "1a94ce0d41057e1064d4b018b8c7f3a8aed156f5811da536b1359a01bf0ccac6",
+      "size": 19678,
+      "normalized_sha256": "32968f956f2eafb6fe206d396823af4bdc7bb8c69afdb663db3fdcb5abebfd5b"
     },
     "deploy/nginx.conf": {
       "role": "index",
@@ -1931,27 +1931,27 @@
     },
     "docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md": {
       "role": "index",
-      "sha256": "01deb1b9ff99c3834d2e1772ef12d90a72dff2f203494cecd3b5891113087abe",
-      "size": 3802,
-      "normalized_sha256": "01deb1b9ff99c3834d2e1772ef12d90a72dff2f203494cecd3b5891113087abe"
+      "sha256": "154078282c2db880b5b9960ea809d9d923e22f785577760bfd97d155f01c10d5",
+      "size": 4763,
+      "normalized_sha256": "154078282c2db880b5b9960ea809d9d923e22f785577760bfd97d155f01c10d5"
     },
     "docs/CAMERA_FACE_AUDIO_AUDIT.md": {
       "role": "index",
-      "sha256": "f4b14d9e70c3d05bfd2ff232935f6c800586f45b73d7809eb5d1392b6bfe8721",
-      "size": 11249,
-      "normalized_sha256": "f4b14d9e70c3d05bfd2ff232935f6c800586f45b73d7809eb5d1392b6bfe8721"
+      "sha256": "1720e580ae65ed58838d185b5be91032976b52c0892b06bca78649d3046ed176",
+      "size": 15860,
+      "normalized_sha256": "1720e580ae65ed58838d185b5be91032976b52c0892b06bca78649d3046ed176"
     },
     "docs/CAMERA_FACE_AUDIO_OPERATIONS.md": {
       "role": "index",
-      "sha256": "d34d5341862c911bbe30183fa5b18f57e6244d9287bf469ebd41983443cf52e3",
-      "size": 1669,
-      "normalized_sha256": "d34d5341862c911bbe30183fa5b18f57e6244d9287bf469ebd41983443cf52e3"
+      "sha256": "91cbf81202271b2237086c26c9fe25aadecddd7dda73c75aed224cf9e2741a22",
+      "size": 2246,
+      "normalized_sha256": "91cbf81202271b2237086c26c9fe25aadecddd7dda73c75aed224cf9e2741a22"
     },
     "docs/CAMERA_FACE_AUDIO_REMEDIATION.md": {
       "role": "index",
-      "sha256": "246270a10a7a961c92cd63aed6a26a871df94261c8ff406f222695fb8467e2de",
-      "size": 8099,
-      "normalized_sha256": "246270a10a7a961c92cd63aed6a26a871df94261c8ff406f222695fb8467e2de"
+      "sha256": "66e103bf8d01804dd19418b5fac57c923f44d9a7869a84ceaafe2ad3ed271c96",
+      "size": 11463,
+      "normalized_sha256": "66e103bf8d01804dd19418b5fac57c923f44d9a7869a84ceaafe2ad3ed271c96"
     },
     "docs/CAMERA_FACE_AUDIO_ROLLBACK.md": {
       "role": "index",
@@ -1961,9 +1961,9 @@
     },
     "docs/CAMERA_FACE_AUDIO_TEST_PLAN.md": {
       "role": "index",
-      "sha256": "d9885ab4478e2e0db3487f984bc0702370a6e2d290cd0802bb3535282b990f67",
-      "size": 2970,
-      "normalized_sha256": "d9885ab4478e2e0db3487f984bc0702370a6e2d290cd0802bb3535282b990f67"
+      "sha256": "2da71ca11fe7d651c90c7bfaabb6efd5ba44d49534855e64049676d2829d473e",
+      "size": 4134,
+      "normalized_sha256": "2da71ca11fe7d651c90c7bfaabb6efd5ba44d49534855e64049676d2829d473e"
     },
     "docs/CAMERA_OPTIMIZATION_BASELINE.md": {
       "role": "index",
@@ -2473,9 +2473,9 @@
     },
     "frontend/src/views/Cameras.vue": {
       "role": "index",
-      "sha256": "f943b89e5c6d2762100518cca9ab57ff4aa4e07170040f47a23daf5dc857fb1c",
-      "size": 26783,
-      "normalized_sha256": "f943b89e5c6d2762100518cca9ab57ff4aa4e07170040f47a23daf5dc857fb1c"
+      "sha256": "ae92e77b2c1b96deeac898f8cf4635f9309eee72630579b095aa9304f121cb0c",
+      "size": 27264,
+      "normalized_sha256": "ae92e77b2c1b96deeac898f8cf4635f9309eee72630579b095aa9304f121cb0c"
     },
     "frontend/src/views/Categories.vue": {
       "role": "index",
@@ -4401,6 +4401,12 @@
       "size": 4141,
       "normalized_sha256": "708a594b04c604ffe61448ac42a31dc59a1f3dbd313d0ae3184949f435326333"
     },
+    "scripts/现场验收海康迎宾.py": {
+      "role": "index",
+      "sha256": "429fa244470f1cdd1522cf04eed86c43815dfb5967278a28fed577dac5209d69",
+      "size": 10207,
+      "normalized_sha256": "429fa244470f1cdd1522cf04eed86c43815dfb5967278a28fed577dac5209d69"
+    },
     "scripts/生产部署-ubuntu.txt": {
       "role": "index",
       "sha256": "1792cabc472976fe996ed28f8d5daa2e35565b37bbf778cfae4111e3f38a14d8",
@@ -4495,6 +4501,28 @@
       "sha256": "87805f75b9026cc61a5ef049fa95b4ef698ce2baf31200bb408bece4fbd9d685",
       "size": 17976,
       "normalized_sha256": "d597777e0de9a774f48404afb7f380a57a4d229679cc1bff6c9e5461a5aa62dc"
+    },
+    "tests/_out/field_camera_1.json": {
+      "role": "observe",
+      "sha256": "625a954a238dc393b1867d70a9f8a53ce2ac18389ce6a26000b9318d3c5b900e",
+      "size": 1373,
+      "normalized_sha256": "d2b7ba121f17dc01103a16c05d92713f5e2a139342a04b8ee10873d4506163b5"
+    },
+    "tests/_out/field_frame_cam1.jpg": {
+      "role": "observe",
+      "sha256": "e3ce954f70aebd757db3921c0efa4646a109cbaf915dadca0950404843b06c4c",
+      "size": 560561
+    },
+    "tests/_out/field_interrupt_cam1.json": {
+      "role": "observe",
+      "sha256": "5b4f44958acd53f220c01f0e30529316966b6422d8e0d4f624d1484ceecbe55a",
+      "size": 617,
+      "normalized_sha256": "21f7abff9b08c5e3206ba19221e43f1085d1dddff857d49866e8b2086960e251"
+    },
+    "tests/_out/field_miss_cam1.jpg": {
+      "role": "observe",
+      "sha256": "3d95d3f852824f00d837f6c02252a42f67a36ed99ae33d0aac2d707e738c1171",
+      "size": 293223
     },
     "tests/_临时_写入共享车开关.py": {
       "role": "observe",
@@ -5206,9 +5234,9 @@
     },
     "tests/测试_多帧确认去重与播报任务.py": {
       "role": "observe",
-      "sha256": "1848f59bac78bc2016bceff9ee32c0f2a0df718ecbfdcf882091968e10e982b3",
-      "size": 18738,
-      "normalized_sha256": "1848f59bac78bc2016bceff9ee32c0f2a0df718ecbfdcf882091968e10e982b3"
+      "sha256": "f71c6f93d57d2c522c75daf7e2e5f7ac51e1f0d80b9a8ade2a875c5a9c0bffe5",
+      "size": 23380,
+      "normalized_sha256": "f71c6f93d57d2c522c75daf7e2e5f7ac51e1f0d80b9a8ade2a875c5a9c0bffe5"
     },
     "tests/测试_多支付方式退款.py": {
       "role": "observe",
@@ -5440,9 +5468,9 @@
     },
     "tests/测试_摄像头采集与音频协议.py": {
       "role": "observe",
-      "sha256": "61f88963d2e332f6960f9f768b40052dd4564f25da9dec24294169833a322f5b",
-      "size": 10122,
-      "normalized_sha256": "61f88963d2e332f6960f9f768b40052dd4564f25da9dec24294169833a322f5b"
+      "sha256": "26e98713bb0a9f6a6ace3f5dc84954b6b3eb22ec91462fe9e51764c62b99cc7c",
+      "size": 17963,
+      "normalized_sha256": "26e98713bb0a9f6a6ace3f5dc84954b6b3eb22ec91462fe9e51764c62b99cc7c"
     },
     "tests/测试_支付.py": {
       "role": "observe",
@@ -5842,9 +5870,9 @@
     },
     "tests/测试_访客抓拍会员与音量.py": {
       "role": "observe",
-      "sha256": "27a4186dc7def3dab50da1fdcea483eb4bd92ebc133a0e41c377a465554d5ac9",
-      "size": 1824,
-      "normalized_sha256": "27a4186dc7def3dab50da1fdcea483eb4bd92ebc133a0e41c377a465554d5ac9"
+      "sha256": "49845f292ee5467a61c41272ac695c3ed928a64e2b27dc981f7ab195bc9d233e",
+      "size": 2642,
+      "normalized_sha256": "49845f292ee5467a61c41272ac695c3ed928a64e2b27dc981f7ab195bc9d233e"
     },
     "tests/测试_评价列表后台.py": {
       "role": "observe",
@@ -5890,9 +5918,9 @@
     },
     "tests/测试_迎宾播报时延.py": {
       "role": "observe",
-      "sha256": "204180bf4bf592765dbd5b933f252c1dfb4a3555388abe1c425eeeb8255a4dfb",
-      "size": 16588,
-      "normalized_sha256": "204180bf4bf592765dbd5b933f252c1dfb4a3555388abe1c425eeeb8255a4dfb"
+      "sha256": "885c44dbd2d7ddcdf5d06e014d0b073df1663ce75bb575b7043c405587b3b520",
+      "size": 27508,
+      "normalized_sha256": "885c44dbd2d7ddcdf5d06e014d0b073df1663ce75bb575b7043c405587b3b520"
     },
     "tests/测试_退款扣积分实时.py": {
       "role": "observe",

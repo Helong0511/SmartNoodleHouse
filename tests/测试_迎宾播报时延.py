@@ -248,6 +248,43 @@ async def test_memory_dequeue_skips_stale_and_returns_next(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dequeue_drains_memory_when_redis_blpop_empty(monkeypatch):
+    """Redis 已恢复但 BLPOP 空时，须排空故障窗口写入的内存待播。"""
+    import time as _time
+
+    WelcomeService._queue = None
+    q = WelcomeService.get_queue()
+    q.put_nowait(
+        {
+            "kind": "member",
+            "text": "内存残留",
+            "camera_id": 3,
+            "enqueued_at": _time.time(),
+            "task_id": "mem-backlog",
+        }
+    )
+
+    class _EmptyRedis:
+        async def blpop(self, key, timeout=1):
+            return None
+
+        async def set(self, key, value, ex=None):
+            return True
+
+        async def get(self, key):
+            return None
+
+    monkeypatch.setattr(
+        "app.services.face_service.get_redis",
+        AsyncMock(return_value=_EmptyRedis()),
+    )
+    out = await WelcomeService.dequeue(timeout=0.8)
+    assert out is not None
+    assert out.get("task_id") == "mem-backlog"
+    WelcomeService._queue = None
+
+
+@pytest.mark.asyncio
 async def test_test_speak_both_bumps_speak_generation(monkeypatch):
     """both 试听也会推摄像头，入队须 bump，否则无法打断上一句推流。"""
     cam = 90005
@@ -444,11 +481,274 @@ def test_tts_worker_skips_when_camera_stopped_on_leader():
 def test_stop_camera_bumps_speak_generation():
     """停止摄像头须 bump speak_gen，打断进行中的对讲推流。"""
     import inspect
+    import re
 
     from app.api import cameras as cam_api
 
     src = inspect.getsource(cam_api.stop_camera)
-    assert "bump_speak_generation_async" in src
+    assert "_bump_speak_gen_safe" in src or "bump_speak_generation_async" in src
+    # 先 bump 再 stop：join 前即可打断对讲（对齐 start）
+    m = re.search(
+        r"_bump_speak_gen_safe[\s\S]*?stop_camera",
+        src,
+    )
+    assert m, "stop 须先 bump 再 CameraManager.stop_camera"
+    assert "to_thread" in src
+    del_src = inspect.getsource(cam_api.delete_camera)
+    m_del = re.search(
+        r"_bump_speak_gen_safe[\s\S]*?stop_camera",
+        del_src,
+    )
+    assert m_del, "delete 须先 bump 再 stop"
+    assert "to_thread" in del_src
+
+
+def test_stop_and_delete_require_leader():
+    """非 Leader 停采/删机须 40922，禁止写库假 OFFLINE。"""
+    import inspect
+
+    from app.api import cameras as cam_api
+
+    helper = inspect.getsource(cam_api._require_leader_for_capture_control)
+    assert "40922" in helper
+    assert "is_leader_held" in helper
+    stop = inspect.getsource(cam_api.stop_camera)
+    delete = inspect.getsource(cam_api.delete_camera)
+    assert "_require_leader_for_capture_control" in stop
+    assert "_require_leader_for_capture_control" in delete
+
+
+def test_start_and_update_force_bump_speak_generation():
+    """force 启采/改参重建须 bump，且 bump 须在 _start_worker 之前；启采用 to_thread 勿堵事件循环。"""
+    import inspect
+    import re
+
+    from app.api import cameras as cam_api
+
+    start_src = inspect.getsource(cam_api.start_camera)
+    assert "_bump_speak_gen_safe" in start_src
+    assert "to_thread" in start_src
+    m_start = re.search(
+        r"_bump_speak_gen_safe[\s\S]*?_start_worker\(camera,\s*force=True\)",
+        start_src,
+    )
+    assert m_start, "start 须先 bump 再 force 启采，避免 gen0 吸收 bump"
+    upd = inspect.getsource(cam_api.update_camera)
+    assert "_start_worker(camera, force=True)" in upd
+    assert "to_thread" in upd.split("if restart")[1].split("osd_sync")[0]
+    assert "get_worker(camera_id)" not in upd.split("if restart")[1].split("osd_sync")[0]
+    assert "restart_note" in upd
+    assert "_bump_speak_gen_safe" in upd
+    m_upd = re.search(
+        r"_bump_speak_gen_safe[\s\S]*?_start_worker\(camera,\s*force=True\)",
+        upd.split("if restart")[1].split("osd_sync")[0],
+    )
+    assert m_upd, "update restart 须先 bump 再 force 启采"
+    # create auto_start 与 start 对称
+    create_src = inspect.getsource(cam_api.create_camera)
+    auto = create_src.split("if data.auto_start")[1].split("return success(payload")[0]
+    assert "to_thread" in auto
+    m_create = re.search(
+        r"_bump_speak_gen_safe[\s\S]*?_start_worker\(camera,\s*force=True\)",
+        auto,
+    )
+    assert m_create, "create auto_start 须先 bump 再 force 启采"
+
+
+def test_tts_abort_aware_of_camera_stopped():
+    """bump 失败时停采仍须 abort：Leader 无 worker 视同打断。"""
+    import inspect
+
+    from app.workers.tts_worker import TTSWorker
+
+    src = inspect.getsource(TTSWorker.run)
+    assert "_stop_aware" in src
+    assert "get_worker(camera_id) is None" in src
+
+
+def test_tts_cancel_reason_distinguishes_camera_stopped():
+    """abort 取消须区分 speak_gen_bumped 与 camera_stopped，勿一律报 bump。"""
+    import inspect
+
+    from app.workers.tts_worker import TTSWorker
+
+    src = inspect.getsource(TTSWorker.run)
+    assert "abort_meta" in src
+    assert 'abort_meta["reason"] = "speak_gen_bumped"' in src
+    assert 'abort_meta["reason"] = "camera_stopped"' in src
+    assert 'abort_meta.get("reason") or "speak_gen_bumped"' in src
+
+
+def test_stale_item_prefers_enqueued_mono(monkeypatch):
+    """队列过期优先 monotonic；墙钟回拨不得永久不 stale。"""
+    import time as _time
+
+    mono = {"t": 1000.0}
+    monkeypatch.setattr(_time, "monotonic", lambda: mono["t"])
+    monkeypatch.setattr(_time, "time", lambda: 1.0)  # 墙钟远小于 enqueued_at
+    item = {
+        "kind": "member",
+        "text": "您好",
+        "camera_id": 1,
+        "enqueued_at": 999999.0,
+        "enqueued_mono": 1000.0 - 30.0,
+    }
+    assert WelcomeService.is_stale_item(item) is True
+    mono["t"] = 1000.0
+    item2 = {
+        "kind": "member",
+        "text": "您好",
+        "camera_id": 1,
+        "enqueued_at": 1.0,
+        "enqueued_mono": 995.0,
+    }
+    assert WelcomeService.is_stale_item(item2) is False
+
+
+@pytest.mark.asyncio
+async def test_enqueue_no_double_rpush_when_status_fails(monkeypatch):
+    """RPUSH 成功后 status/bump 失败不得再入队（含内存回退）。"""
+    queue: list[str] = []
+    bumps = {"n": 0}
+
+    class _Pipe:
+        def __init__(self):
+            self.ops = []
+
+        def lrem(self, *a):
+            self.ops.append(("lrem", a))
+            return self
+
+        def rpush(self, key, raw):
+            self.ops.append(("rpush", raw))
+            queue.append(raw)
+            return self
+
+        def ltrim(self, *a):
+            self.ops.append(("ltrim", a))
+            return self
+
+        async def execute(self):
+            return [True] * len(self.ops)
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe()
+
+        async def lrange(self, *a, **k):
+            return list(queue)
+
+        async def lrem(self, key, count, raw):
+            if raw in queue:
+                queue.remove(raw)
+            return 1
+
+        async def set(self, *a, **k):
+            raise RuntimeError("status boom")
+
+        async def get(self, *a, **k):
+            return None
+
+        async def eval(self, *a, **k):
+            bumps["n"] += 1
+            return 1
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+    # 禁止 bump 也抛，验证仍只一份 RPUSH
+    async def _boom_bump(*_a, **_k):
+        raise RuntimeError("bump boom")
+
+    monkeypatch.setattr(WelcomeService, "_bump_speak_gen_after_enqueue", _boom_bump)
+    tid = await WelcomeService.enqueue(
+        {"kind": "test_speak_camera", "text": "试听", "camera_id": 42}
+    )
+    assert tid
+    assert len(queue) == 1
+    # 内存队列不得再塞同 task
+    mem_q = WelcomeService.get_queue()
+    drained = []
+    while True:
+        try:
+            drained.append(mem_q.get_nowait())
+        except Exception:
+            break
+    assert not any(
+        isinstance(x, dict) and str(x.get("task_id") or "") == tid for x in drained
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_enqueue_toc_tou_lrem_self(monkeypatch):
+    """陌生句 RPUSH 后若出现同机位会员 pending，须 LREM 自身。"""
+    queue: list[str] = []
+
+    class _Pipe:
+        def rpush(self, key, raw):
+            queue.append(raw)
+            return self
+
+        def ltrim(self, *a):
+            return self
+
+        async def execute(self):
+            # 模拟并发：RPUSH 完成后立刻有会员项
+            member = json.dumps(
+                {
+                    "kind": "member",
+                    "text": "会员您好",
+                    "camera_id": 7,
+                    "task_id": "mem-1",
+                },
+                ensure_ascii=False,
+            )
+            if member not in queue:
+                queue.append(member)
+            return [True, True]
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe()
+
+        async def lrange(self, *a, **k):
+            return list(queue)
+
+        async def lrem(self, key, count, raw):
+            removed = 0
+            while raw in queue:
+                queue.remove(raw)
+                removed += 1
+                if count and removed >= count:
+                    break
+            return removed
+
+        async def set(self, *a, **k):
+            return True
+
+        async def get(self, *a, **k):
+            return None
+
+        async def eval(self, *a, **k):
+            return 1
+
+    async def _gr():
+        return _FakeRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+    tid = await WelcomeService.enqueue(
+        {"kind": "unknown_visitor", "text": "欢迎光临", "camera_id": 7}
+    )
+    assert tid is None
+    assert all("unknown_visitor" not in x for x in queue)
+    assert any("mem-1" in x for x in queue)
 
 
 def test_need_taste_covers_preference_template_placeholder():
@@ -521,3 +821,58 @@ def test_face_extractor_live_ready_helpers_exist():
 
     assert callable(ensure_live_face_app)
     assert callable(is_live_face_ready)
+
+
+@pytest.mark.asyncio
+async def test_unknown_memory_enqueue_toc_tou(monkeypatch):
+    """内存降级：陌生 put 后若已有同机位会员，须撤出自身。"""
+    WelcomeService._queue = None  # 强制新队列
+    q = WelcomeService.get_queue()
+    # 先塞会员，模拟并发已入队
+    await q.put(
+        {
+            "kind": "member",
+            "text": "会员您好",
+            "camera_id": 11,
+            "task_id": "mem-m",
+        }
+    )
+
+    class _BoomRedis:
+        async def lrange(self, *a, **k):
+            raise RuntimeError("redis down")
+
+        async def set(self, *a, **k):
+            return True
+
+        async def get(self, *a, **k):
+            return None
+
+        async def eval(self, *a, **k):
+            return 1
+
+        def pipeline(self):
+            raise RuntimeError("redis down")
+
+    async def _gr():
+        return _BoomRedis()
+
+    monkeypatch.setattr("app.services.face_service.get_redis", _gr)
+    monkeypatch.setattr(
+        WelcomeService, "_schedule_g711_warmup", staticmethod(lambda *_a, **_k: None)
+    )
+    tid = await WelcomeService.enqueue(
+        {"kind": "unknown_visitor", "text": "欢迎光临", "camera_id": 11}
+    )
+    assert tid is None
+    left = []
+    while True:
+        try:
+            left.append(q.get_nowait())
+        except Exception:
+            break
+    assert any(isinstance(x, dict) and x.get("task_id") == "mem-m" for x in left)
+    assert not any(
+        isinstance(x, dict) and str(x.get("kind") or "") == "unknown_visitor"
+        for x in left
+    )

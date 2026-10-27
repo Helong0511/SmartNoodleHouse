@@ -785,28 +785,72 @@ class CameraSpeakerTTS(TTSProvider):
 
         import time
 
+        def _aborted() -> bool:
+            try:
+                return bool(should_abort and should_abort())
+            except Exception:
+                return False
+
+        if _aborted():
+            return "cancelled"
+
+        async def _await_with_abort(awaitable, *, poll: float = 0.2):
+            """短周期可打断等待：合成/codec 中途 bump 或停采立即 cancelled。"""
+            task = asyncio.ensure_future(awaitable)
+            while not task.done():
+                if _aborted():
+                    return None
+                done, _ = await asyncio.wait({task}, timeout=poll)
+                if done:
+                    break
+            if _aborted():
+                return None
+            return task.result()
+
         client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
         loop = asyncio.get_running_loop()
         t0 = time.perf_counter()
-        # codec 探测与 alaw 预合成并行（门口机多数 alaw，长句可省串行等待）
+        # 硬件 speakerVolume 与 codec 探测并行；PCM 默认按 100% 合成（音量交给设备）
+        vol_task = asyncio.create_task(client.set_speaker_volume(int(volume)))
         codec_task = asyncio.create_task(client.resolve_codec(block=False))
         g711_alaw_task = loop.run_in_executor(
             None,
             lambda: self.local.synthesize_g711_sync(
-                text, codec="alaw", volume_percent=int(volume)
+                text, codec="alaw", volume_percent=100
             ),
         )
-        codec = await codec_task
+        hw_vol_ok = await _await_with_abort(vol_task)
+        if hw_vol_ok is None and _aborted():
+            return "cancelled"
+        codec = await _await_with_abort(codec_task)
+        if codec is None and _aborted():
+            return "cancelled"
         codec_ms = int((time.perf_counter() - t0) * 1000)
+        if _aborted():
+            return "cancelled"
+        # 无硬件音量字段时回退软件增益；有硬件则 PCM 保持原音避免双重衰减
+        pcm_vol = 100 if hw_vol_ok else int(volume)
+        volume_mode = "hardware" if hw_vol_ok else "software"
         t1 = time.perf_counter()
-        g711 = await g711_alaw_task
-        if normalize_g711_codec(codec) != "alaw":
-            g711 = await loop.run_in_executor(
-                None,
-                lambda: self.local.synthesize_g711_sync(
-                    text, codec=codec, volume_percent=int(volume)
-                ),
+        g711 = await _await_with_abort(g711_alaw_task)
+        if g711 is None and _aborted():
+            return "cancelled"
+        if _aborted():
+            return "cancelled"
+        need_resynth = (pcm_vol != 100) or (normalize_g711_codec(codec) != "alaw")
+        if need_resynth:
+            g711 = await _await_with_abort(
+                loop.run_in_executor(
+                    None,
+                    lambda: self.local.synthesize_g711_sync(
+                        text, codec=codec, volume_percent=int(pcm_vol)
+                    ),
+                )
             )
+            if g711 is None and _aborted():
+                return "cancelled"
+            if _aborted():
+                return "cancelled"
         synth_ms = int((time.perf_counter() - t1) * 1000)
         if not g711:
             logger.warning("TTS/G711 为空，无法推摄像头 camera_id=%s", camera_id)
@@ -818,6 +862,8 @@ class CameraSpeakerTTS(TTSProvider):
                 synth_ms,
                 text[:40],
             )
+        if _aborted():
+            return "cancelled"
         t2 = time.perf_counter()
         play_result = await client.play_g711(
             g711, codec=codec, should_abort=should_abort
@@ -842,11 +888,12 @@ class CameraSpeakerTTS(TTSProvider):
             return "failed"
         logger.info(
             "摄像头迎宾推流完成(设备出声未验证) camera_id=%s codec=%s volume=%s%% "
-            "bytes=%s codec_ms=%s synth_ms=%s push_ms=%s total_ms=%s "
+            "volume_mode=%s bytes=%s codec_ms=%s synth_ms=%s push_ms=%s total_ms=%s "
             "device_playback=%s",
             camera_id,
             codec,
             volume,
+            volume_mode,
             len(g711),
             codec_ms,
             synth_ms,
@@ -952,6 +999,8 @@ class TTSWorker:
                 stop_gen_poll: asyncio.Event | None = None
                 final_status = "completed"
                 cancel_reason: str | None = None
+                # abort 时区分 speak_gen_bumped / camera_stopped，勿一律报 bump
+                abort_meta: dict[str, str | None] = {"reason": None}
                 # 可被同机位后续 bump 打断：陌生/试听/会员长句（新人入队或连点试听）
                 # 仅电脑试听不挂 abort
                 _abortable = (
@@ -967,9 +1016,33 @@ class TTSWorker:
                     gen0 = await WelcomeService.sync_speak_generation_from_redis(
                         camera_id
                     )
+                    # bump 失败时停采仍须能打断：Leader 上无 worker 视同 abort
+                    # （test_speak both 可叠本机，不因停采整单取消）
+                    _stop_aware = kind in (
+                        "member",
+                        "unknown_visitor",
+                        "test_speak_camera",
+                    )
 
                     def _abort_if_bumped() -> bool:
-                        return WelcomeService.speak_generation(camera_id) != gen0
+                        if WelcomeService.speak_generation(camera_id) != gen0:
+                            abort_meta["reason"] = "speak_gen_bumped"
+                            return True
+                        if not _stop_aware:
+                            return False
+                        try:
+                            from app.core.leader_lock import is_leader_held
+                            from camera.camera_manager import CameraManager
+
+                            if (
+                                is_leader_held()
+                                and CameraManager().get_worker(camera_id) is None
+                            ):
+                                abort_meta["reason"] = "camera_stopped"
+                                return True
+                        except Exception:
+                            return False
+                        return False
 
                     should_abort = _abort_if_bumped
                     stop_gen_poll = asyncio.Event()
@@ -998,9 +1071,12 @@ class TTSWorker:
                     )
                     if speak_outcome == "cancelled":
                         final_status = "cancelled"
-                        cancel_reason = (
-                            "speak_gen_bumped" if kind in _abortable else "cancelled"
-                        )
+                        if kind in _abortable and camera_id is not None:
+                            cancel_reason = (
+                                abort_meta.get("reason") or "speak_gen_bumped"
+                            )
+                        else:
+                            cancel_reason = "cancelled"
                     elif speak_outcome in ("ok", "local"):
                         final_status = "completed"
                     else:
@@ -1013,7 +1089,13 @@ class TTSWorker:
                         speak_outcome=speak_outcome,
                         reason=cancel_reason,
                         device_playback=(
-                            "unverified"
+                            (
+                                "unverified"
+                                if speak_outcome == "ok"
+                                else "local_only"
+                                if speak_outcome == "local"
+                                else None
+                            )
                             if final_status == "completed"
                             and kind
                             in (

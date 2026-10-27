@@ -353,7 +353,10 @@ class CameraManager:
             raise CameraNotLeaderError("摄像头操作需要 Leader 锁；非 Leader worker 拒绝执行")
 
     def _cleanup_stale_workers(self) -> None:
-        """P0-6: 清理线程已死的 stale worker，防止僵尸残留。调用方须已持 `_lock`。"""
+        """P0-6: 清理线程已死的 stale worker，防止僵尸残留。调用方须已持 `_lock`。
+
+        死线程 join 几乎立即返回；此处仅 signal+摘除，完整 join 由锁外路径兜底。
+        """
         stale_ids = [
             cid
             for cid, w in self._workers.items()
@@ -361,12 +364,15 @@ class CameraManager:
         ]
         for cid in stale_ids:
             logger.warning("Cleaning stale camera worker: %s", cid)
-            self._stop_camera_unlocked(cid)
+            w = self._workers.pop(cid, None)
+            if w:
+                w._stop.set()
 
     def start_camera(
         self, camera_id: int, source: str, fps: int = 25, *, force: bool = False
     ) -> CameraWorker:
         self._assert_leader()
+        old: CameraWorker | None = None
         with self._lock:
             self._cleanup_stale_workers()
             existing = self._workers.get(camera_id)
@@ -374,13 +380,32 @@ class CameraManager:
                 # 已在跑则复用；卡死（线程死了）则重建
                 if existing._thread and existing._thread.is_alive():
                     return existing
-                self._stop_camera_unlocked(camera_id)
+                old = self._workers.pop(camera_id, None)
             elif existing and force:
-                self._stop_camera_unlocked(camera_id)
+                old = self._workers.pop(camera_id, None)
+            if old:
+                old._stop.set()
+        # 先在锁外 join 旧线程，再启新 worker：避免双开同一 VideoCapture；
+        # join 不持锁，停采 abort 的 get_worker 不被堵住
+        if old:
+            old.stop()
+        extra: CameraWorker | None = None
+        with self._lock:
+            existing = self._workers.get(camera_id)
+            if existing and not force:
+                if existing._thread and existing._thread.is_alive():
+                    return existing
+                extra = self._workers.pop(camera_id, None)
+            elif existing and force:
+                extra = self._workers.pop(camera_id, None)
+            if extra:
+                extra._stop.set()
             worker = CameraWorker(camera_id, source, fps)
             worker.start()
             self._workers[camera_id] = worker
-            return worker
+        if extra:
+            extra.stop()
+        return worker
 
     def restart_camera(self, camera_id: int, source: str, fps: int = 25) -> CameraWorker:
         self._assert_leader()
@@ -396,15 +421,19 @@ class CameraManager:
             self._cleanup_stale_workers()
             return self._workers.get(camera_id)
 
-    def _stop_camera_unlocked(self, camera_id: int) -> None:
+    def _stop_camera_unlocked(self, camera_id: int) -> CameraWorker | None:
+        """持锁调用：只从 map 摘除并 signal；调用方须在锁外 `worker.stop()` join。"""
         worker = self._workers.pop(camera_id, None)
         if worker:
-            worker.stop()
+            worker._stop.set()
+        return worker
 
     def stop_camera(self, camera_id: int) -> None:
-        # stop 允许非 Leader 调用（安全退出场景）
+        # stop 允许非 Leader 调用（安全退出场景）；join 在锁外，避免堵 get_worker
         with self._lock:
-            self._stop_camera_unlocked(camera_id)
+            worker = self._stop_camera_unlocked(camera_id)
+        if worker:
+            worker.stop()
 
     def get_status(self, camera_id: int) -> str:
         with self._lock:

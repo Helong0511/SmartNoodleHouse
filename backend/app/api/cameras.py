@@ -70,6 +70,30 @@ def _start_worker(camera: Camera, *, force: bool = False) -> None:
         ) from exc
 
 
+async def _bump_speak_gen_safe(camera_id: int, *, reason: str) -> None:
+    """force 启采/停采后打断进行中对讲；失败仅记日志。"""
+    try:
+        from app.services.face_service import WelcomeService
+
+        await WelcomeService.bump_speak_generation_async(camera_id)
+    except Exception:
+        logger.debug(
+            "%s bump speak_gen failed camera_id=%s", reason, camera_id, exc_info=True
+        )
+
+
+def _require_leader_for_capture_control(*, action: str) -> None:
+    """停采/删机须在 Leader：非 Leader 本地 stop 假成功会导致库 OFFLINE 而采集仍跑。"""
+    from app.core.leader_lock import is_leader_held
+
+    if not is_leader_held():
+        raise AppException(
+            40922,
+            f"当前实例非 Leader，无法{action}",
+            status_code=409,
+        )
+
+
 def _serialize(c: Camera, mgr) -> dict:
     runtime = mgr.get_runtime(c.id) if mgr else {"running": False, "status": c.status, "has_frame": False}
     try:
@@ -627,7 +651,9 @@ async def create_camera(data: CameraCreate, request: Request, db: DbSession, use
 
         start_note: str | None = None
         try:
-            _start_worker(camera, force=True)
+            # 与 start/update 对称：先 bump 再 force 启采；启采 join 放线程池
+            await _bump_speak_gen_safe(camera.id, reason="create")
+            await asyncio.to_thread(lambda: _start_worker(camera, force=True))
             await asyncio.sleep(0.3)
             mgr = CameraManager()
             st = mgr.get_status(camera.id)
@@ -720,11 +746,20 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     from camera.camera_manager import CameraManager
 
     mgr = CameraManager()
-    if restart and mgr.get_worker(camera_id):
-        _start_worker(camera, force=True)
-        camera.status = mgr.get_status(camera_id) or "OFFLINE"
-        if camera.status in ("ONLINE", "DEGRADED"):
-            camera.last_online_at = now_local()
+    restart_note: str | None = None
+    if restart:
+        # 勿仅信本地 get_worker：请求可能落在非 Leader，Leader 上仍跑旧 RTSP
+        # 先 bump 再 force 启采：避免新线程已起、gen0 未采时 bump 被吸收、旧句推完
+        try:
+            await _bump_speak_gen_safe(camera_id, reason="update")
+            await asyncio.to_thread(lambda: _start_worker(camera, force=True))
+            camera.status = mgr.get_status(camera_id) or "OFFLINE"
+            if camera.status in ("ONLINE", "DEGRADED"):
+                camera.last_online_at = now_local()
+        except AppException as exc:
+            if getattr(exc, "code", None) != 40922:
+                raise
+            restart_note = "not_leader"
     # 仅名称实际变更时同步海康右下角通道名 OSD（改地址/密码不同步）
     osd_sync: dict | None = None
     if name_changed and (camera.camera_type or "").upper() == "RTSP":
@@ -747,6 +782,7 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
             "store_id": camera.store_id,
             "changes": {k: v for k, v in payload.items() if k not in ("password",)},
             "restart": restart,
+            "restart_note": restart_note,
             "osd_sync": osd_sync,
         },
         request=request,
@@ -754,6 +790,8 @@ async def update_camera(camera_id: int, data: CameraUpdate, request: Request, db
     body = _serialize(camera, mgr)
     if osd_sync is not None:
         body["osd_sync"] = osd_sync
+    if restart_note:
+        body["restart_note"] = restart_note
     return success(body, request=request)
 
 
@@ -765,15 +803,12 @@ async def delete_camera(camera_id: int, request: Request, db: DbSession, user: C
     if not camera:
         raise AppException(40420, "摄像头不存在")
     _assert_cam_access(user, camera)
+    _require_leader_for_capture_control(action="删除摄像头")
     store_id = camera.store_id
     name = camera.name
-    CameraManager().stop_camera(camera_id)
-    try:
-        from app.services.face_service import WelcomeService
-
-        await WelcomeService.bump_speak_generation_async(camera_id)
-    except Exception:
-        logger.debug("delete bump speak_gen failed camera_id=%s", camera_id, exc_info=True)
+    # 先 bump 再 stop（对齐 start）：join 前即可打断对讲；stop 放线程池免堵事件循环
+    await _bump_speak_gen_safe(camera_id, reason="delete")
+    await asyncio.to_thread(CameraManager().stop_camera, camera_id)
     await db.delete(camera)
     await db.flush()
     await AuditService.log(
@@ -795,7 +830,10 @@ async def start_camera(camera_id: int, request: Request, db: DbSession, user: Cu
     if not camera:
         raise AppException(40420, "摄像头不存在")
     _assert_cam_access(user, camera)
-    _start_worker(camera, force=True)
+    # 先 bump 再 force 启采：否则新线程已存在时 camera_stopped 放过，
+    # 且 bump 落在 gen0 之前会被吸收，旧句仍推完
+    await _bump_speak_gen_safe(camera_id, reason="start")
+    await asyncio.to_thread(lambda: _start_worker(camera, force=True))
     await asyncio.sleep(0.3)
     from camera.camera_manager import CameraManager
 
@@ -829,15 +867,12 @@ async def stop_camera(camera_id: int, request: Request, db: DbSession, user: Cur
     if not camera:
         raise AppException(40420, "摄像头不存在")
     _assert_cam_access(user, camera)
-    CameraManager().stop_camera(camera_id)
+    # 非 Leader 不得写库 OFFLINE：Leader 上采集仍会跑，造成假停采
+    _require_leader_for_capture_control(action="停采")
+    # 先 bump 再 stop（对齐 start）：join 前即可打断对讲；stop 放线程池免堵事件循环
+    await _bump_speak_gen_safe(camera_id, reason="stop")
+    await asyncio.to_thread(CameraManager().stop_camera, camera_id)
     camera.status = "OFFLINE"
-    # 打断进行中的摄像头推流，避免停采后扬声器仍播完旧句
-    try:
-        from app.services.face_service import WelcomeService
-
-        await WelcomeService.bump_speak_generation_async(camera_id)
-    except Exception:
-        logger.debug("stop bump speak_gen failed camera_id=%s", camera_id, exc_info=True)
     await AuditService.log(
         db,
         user_id=user.id,
@@ -942,7 +977,7 @@ async def camera_stream(
     mgr = CameraManager()
     worker = mgr.get_worker(camera_id)
     if not worker:
-        _start_worker(camera)
+        await asyncio.to_thread(lambda: _start_worker(camera))
         worker = mgr.get_worker(camera_id)
 
     def generate():

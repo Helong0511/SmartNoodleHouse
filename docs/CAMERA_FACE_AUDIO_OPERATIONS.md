@@ -4,7 +4,7 @@
 
 1. 后台填写 RTSP 地址、账号、密码（密码加密入库，勿写进文档仓库）。
 2. 对讲 ISAPI 使用 **HTTP**（`resolve_isapi_base` 对 RTSP 默认 `http://主机`）。勿配 HTTPS 对讲基址（当前拒绝 `unsupported_audio_transport`）。
-3. 业务参数打开「摄像头播放迎宾语音」；音量键 `camera_speaker_volume_percent`。
+3. 业务参数打开「摄像头播放迎宾语音」；音量键 `camera_speaker_volume_percent`（播报前写入对讲通道 `speakerVolume`；无该字段才用软件增益）。
 
 ## 编码查询
 
@@ -34,3 +34,15 @@
 2. 探测人脸 → 非 stale；看相似度与脸像素。  
 3. 试听摄像头 → 听扬声器（唯一真机出声证据）。  
 4. 进店实测会员/陌生人/打断。
+
+## 现场验收脚本（本地 Windows）
+
+```powershell
+$env:PYTHONPATH='E:\SmartNoodleHouse;E:\SmartNoodleHouse\backend'
+python scripts\现场验收海康迎宾.py --camera-id 1
+python scripts\现场验收海康迎宾.py --camera-id 1 --play-g711
+# 人耳确认听到后：
+python scripts\现场验收海康迎宾.py --camera-id 1 --play-g711 --heard yes
+```
+
+结果写入 `tests/_out/field_camera_<id>.json`。脚本故意不 import `face_service`（避免 InsightFace 冷启动卡住）。

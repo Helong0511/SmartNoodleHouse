@@ -76,6 +76,29 @@ CameraManager (RTSP/TCP, Leader-only)
 | P2 | P1 | bump 早于入队成功 | queue_full 仍抬世代 | 打断在播无替补 | **已修**：入队成功后再 bump | `test_enqueue_queue_full_does_not_bump` | 否 |
 | P3 | P2 | create auto_start 非 Leader | 整单 409 回滚创建 | 机位建不出来 | **已修**：吞 40922+`start_note` | 源码断言 | 否 |
 | P4 | P1 | 死线程残留 | get_status 仍 ONLINE | KPI/写库/has_frame 误导 | **已修**：读路径 cleanup | `test_dead_worker_status_and_runtime_are_offline` | 否 |
+| Q1 | P1 | start/update force 不 bump | 相对 stop/delete | 旧句对讲不受 camera_stopped | **已修**：`_bump_speak_gen_safe` | 迎宾时延源码断言 | 否 |
+| Q2 | P1 | update 仅本地有 worker 才重建 | 请求落非 Leader | Leader 仍吃旧 RTSP | **已修**：restart 总试 force；40922→`restart_note` | 源码断言 | 否 |
+| Q3 | P2 | 合成阶段不查 abort | 长合成阻塞 | bump 推迟到 open 前 | **已修**：合成前后查 should_abort | `test_play_on_camera_aborts_during_synth` | 否 |
+| R1 | P1 | 入队后 status/bump 失败再入队 | 双份 pending | 同 task 播两次 | **已修**：`redis_pushed` 短路 | `test_enqueue_no_double_rpush_when_status_fails` | 否 |
+| R2 | P1 | force 先启线程再 bump | gen0 吸收 bump | 旧句推完 | **已修**：先 bump 再 start | 迎宾时延源码序断言 | 否 |
+| R3 | P1 | 陌生先查再 RPUSH TOCTOU | 并发会员入队 | 陌生插在会员后 | **已修**：入队后复检 LREM | `test_unknown_enqueue_toc_tou_lrem_self` | 否 |
+| R4 | P2 | 队列过期用墙钟 | NTP 回拨 | 永久不 stale | **已修**：`enqueued_mono` | `test_stale_item_prefers_enqueued_mono` | 否 |
+| S1 | P1 | 内存入队无陌生 TOCTOU | Redis 宕机回退 | 陌生插在会员后 | **已修**：put 后复检撤自身 | `test_unknown_memory_enqueue_toc_tou` | 否 |
+| S2 | P2 | open/尾 hold 不认 abort | Digest/hold 阻塞 | 占锁拖下一句 | **已修**：after_open + 可打断 hold | `test_play_g711_cancelled_after_open` 等 | 否 |
+| S3 | P2 | create auto_start 未 bump | 相对 start/update | force 路径不对称 | **已修**：先 bump 再启采 | create 源码序断言 | 否 |
+| S4 | P2 | abort 只看 speak_gen | bump 失败 | 停采后仍推完 | **已修**：Leader 无 worker→abort | `test_tts_abort_aware_of_camera_stopped` | 否 |
+| S5 | P2 | 前端忽略 start/restart_note | 非 Leader | 假「已启采」 | **已修**：warning toast | Cameras.vue | 否 |
+| T1 | P1 | 非 Leader 停采/删机写库 OFFLINE | 采集仍在 Leader 跑 | 假停采 | **已修**：`_require_leader`→40922 | 迎宾时延源码断言 | 否 |
+| T2 | P2 | 并发试听双 RPUSH 互不可见 | 连点竞态 | 同机位多待播 | **已修**：finalize keep-latest LREM | `test_finalize_keeps_latest_test_speak_after_concurrent_rpush` | 否 |
+| T3 | P3 | abort 一律 `speak_gen_bumped` | 停采打断 | reason 误导排障 | **已修**：`abort_meta` 区分 `camera_stopped` | `test_tts_cancel_reason_distinguishes_camera_stopped` | 否 |
+| U1 | P1 | stop join 持锁 + bump 在后 | 停采窗口 | 对讲难以及时 abort、堵事件循环 | **已修**：先 bump；锁外 join；`to_thread` | 迎宾时延/采集源码断言 | 否 |
+| U2 | P1 | `test_speak`↔`test_speak_camera` 互不抢 | 连点切换目标 | 同机位双待播 | **已修**：摄像头试听族互 `replaced` | 多帧 `_pending_drop_reason` | 否 |
+| U3 | P2 | 内存入队缺 keep-latest | Redis 宕机回退 | 并发双待播 | **已修**：put 后再 drain | `test_memory_enqueue_keep_latest_after_put` | 否 |
+| U4 | P2 | RPUSH 后外层异常裸 return | finalize 跳过 | 假 queued/双待播 | **已修**：再试 `_finalize_redis_enqueue` | 源码断言 | 否 |
+| V1 | P1 | Redis 空则不扫内存队列 | Redis 恢复 | 故障窗口待播饿死 | **已修**：BLPOP 空仍 drain 内存 | `test_dequeue_drains_memory_when_redis_blpop_empty` | 否 |
+| V2 | P1 | force 启采同步 join | start/update/create/MJPEG | 堵事件循环 | **已修**：`to_thread(_start_worker)` | 迎宾时延源码断言 | 否 |
+| V3 | P2 | 合成 await 中途不认 abort | 长句 edge | bump 推迟到合成结束 | **已修**：`_await_with_abort` 短周期 | `test_play_on_camera_aborts_mid_synth_wait` | 否 |
+| V4 | P2 | `local` 仍标 `unverified` | 摄像头失败回退本机 | 假「对讲完成」 | **已修**：`local_only` + 前端文案 | 源码断言 / Cameras.vue | 否 |
 
 ## 3. 潜在 / 未修（有原因）
 
@@ -94,5 +117,7 @@ CameraManager (RTSP/TCP, Leader-only)
 pytest tests/测试_迎宾播报时延.py tests/测试_多帧确认去重与播报任务.py
        tests/测试_陌生访客迎宾与清空.py tests/测试_摄像头采集与音频协议.py
        tests/测试_海康摄像头对讲TTS.py tests/测试_人脸冷匹配top1.py
-→ 见 ACCEPTANCE 最新计数（F1–F4 核对子集）
+→ 见 ACCEPTANCE 最新计数（V 轮 + 迎宾/多帧/采集）
 ```
+
+

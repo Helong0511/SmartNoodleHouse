@@ -1,0 +1,7 @@
+{
+  "tid_unknown": "08cd24d6e25947d2aeb729420b6a0091",
+  "tid_member": "fbf833506fd645b09ac50d9d2c1eb938",
+  "unknown": "{\"task_id\": \"08cd24d6e25947d2aeb729420b6a0091\", \"status\": \"cancelled\", \"updated_at\": 1793073227.4903185, \"kind\": \"unknown_visitor\", \"camera_id\": 1, \"speak_outcome\": \"cancelled\", \"reason\": \"speak_gen_bumped\"}",
+  "member": "{\"task_id\": \"fbf833506fd645b09ac50d9d2c1eb938\", \"status\": \"completed\", \"updated_at\": 1793073231.7557135, \"kind\": \"member\", \"camera_id\": 1, \"speak_outcome\": \"ok\", \"device_playback\": \"unverified\"}",
+  "speak_gen": "1"
+}

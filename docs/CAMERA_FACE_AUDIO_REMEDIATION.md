@@ -124,6 +124,47 @@
 - **P3**：`create_camera(auto_start)` 遇 40922 保留 OFFLINE + `start_note=not_leader`。
 - **P4**：`get_status`/`get_runtime`/`get_worker`/`list_camera_ids` 读前 `_cleanup_stale_workers`。
 
+## Q1–Q3 force bump / update 重建 / 合成 abort（续）
+
+- **Q1**：`start`/`update(force)` 与 stop/delete 同走 `_bump_speak_gen_safe`。
+- **Q2**：`update` 需重建时不依赖本地 `get_worker`；非 Leader → `restart_note=not_leader`。
+- **Q3**：`_play_on_camera` 在 codec/合成前后查 `should_abort`。
+
+## R1–R4 入队幂等 / bump 序 / TOCTOU / mono 过期（续）
+
+- **R1**：Redis `RPUSH` 成功后 status/bump 失败只记日志，禁止再 `RPUSH`/内存回填（`_finalize_redis_enqueue` + `redis_pushed`）。
+- **R2**：`start`/`update(force)` **先** `_bump_speak_gen_safe` **再** `_start_worker`，避免新线程已起时 bump 被 gen0 吸收。
+- **R3**：`unknown_visitor` 入队后复检同机位 member/试听 pending，命中则 `LREM` 自身。
+- **R4**：队列项写 `enqueued_mono`；`is_stale_item` 优先 monotonic。
+
+## S1–S5 内存 TOCTOU / open-hold abort / create bump / 停采 abort / UI note（续）
+
+- **S1**：内存降级陌生入队后同样 TOCTOU 复检（与 Redis R3 对齐）。
+- **S2**：`play_g711` 在 open 后与尾 hold 分段查 `should_abort`，取消尽快 `/close`。
+- **S3**：`create(auto_start)` 与 start 对称：先 bump 再 force 启采。
+- **S4**：TTS abort 在 member/unknown/test_speak_camera 上：Leader 无 worker 视同打断。
+- **S5**：后台创建/更新 toast 识别 `start_note`/`restart_note=not_leader`。
+
+## T1–T3 非 Leader 停删 / 试听 keep-latest / cancel reason（续）
+
+- **T1**：`stop`/`delete` 经 `_require_leader_for_capture_control`；非 Leader → AppException 40922，禁止写库假 OFFLINE。
+- **T2**：`_finalize_redis_enqueue` 对试听/会员入队后再扫同机位，按 `_pending_drop_reason` LREM 旧项（并发双 RPUSH 兜底）。
+- **T3**：TTS abort 经 `abort_meta.reason` 区分 `speak_gen_bumped` 与 `camera_stopped`。
+
+## U1–U4 停采序 / 试听族 / 内存 keep-latest / finalize 重试（续）
+
+- **U1**：`stop`/`delete` 先 bump 再 `asyncio.to_thread(stop)`；Manager 锁内仅 pop+signal，join 在锁外；force 启采先锁外 join 旧线程再启新。
+- **U2**：`test_speak` 与 `test_speak_camera` 同机位互 `replaced`（`test_speak_pc` 不互抢）。
+- **U3**：内存入队 put 后 keep-latest，对齐 Redis finalize。
+- **U4**：普通 RPUSH 外层异常时再试 `_finalize_redis_enqueue`，禁止裸 return。
+
+## V1–V4 内存 dequeue / 启采 to_thread / 合成中 abort / local_only（续）
+
+- **V1**：`dequeue` 在 Redis BLPOP 空时仍 drain 内存 backlog（Redis 恢复后不饿死故障窗口入队）。
+- **V2**：`start`/`update`/`create`/MJPEG 启采均 `asyncio.to_thread(_start_worker)`，对齐停采不堵事件循环。
+- **V3**：`_play_on_camera` 对 codec/合成用 `_await_with_abort` 短周期轮询。
+- **V4**：`speak_outcome=local` → `device_playback=local_only`；前端区分本机回退提示。
+
 ## 其它
 
 - `cameras.probe-face`：过期帧返回 `reason=stale_frame`。

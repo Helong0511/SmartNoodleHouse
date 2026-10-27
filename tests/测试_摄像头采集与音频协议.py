@@ -13,19 +13,46 @@ import pytest
 from camera.camera_manager import CameraManager, CameraWorker, FrameBuffer
 
 
-def test_camera_manager_start_force_replaces_under_lock():
+def test_camera_manager_start_force_replaces_under_lock(monkeypatch):
     """同机位 force 启动须串行替换，最终只保留一个 worker。"""
+    # 勿开真实摄像头/RTSP：仅验证 map 替换与锁外 join 序
+    monkeypatch.setattr(CameraWorker, "_connect", lambda self: False)
+    monkeypatch.setattr(
+        CameraWorker,
+        "_run",
+        lambda self: self._stop.wait(timeout=30),
+    )
     mgr = CameraManager()
     CameraManager.set_leader_check(None)
-    # 清理可能残留的测试机位
     for cid in (99101,):
         mgr.stop_camera(cid)
-    w1 = mgr.start_camera(99101, "0", fps=5)
-    w2 = mgr.start_camera(99101, "0", fps=5, force=True)
+    w1 = mgr.start_camera(99101, "rtsp://192.0.2.1/x", fps=5)
+    w2 = mgr.start_camera(99101, "rtsp://192.0.2.1/x", fps=5, force=True)
     assert mgr.get_worker(99101) is w2
     assert w1 is not w2
     mgr.stop_camera(99101)
     assert mgr.get_worker(99101) is None
+
+
+def test_stop_camera_joins_outside_manager_lock():
+    """stop join 须在锁外，否则 abort/get_worker 会卡在同一把 RLock。"""
+    import inspect
+
+    from camera import camera_manager as cm
+
+    src = inspect.getsource(cm.CameraManager.stop_camera)
+    # 锁内仅 pop/signal；worker.stop()（含 join）在 with 块外
+    assert "_stop_camera_unlocked" in src
+    assert "worker.stop()" in src
+    # with 结束后才 stop：粗检「with」块后出现 stop
+    after_with = src.split("with self._lock:")[1]
+    # 内层不应再调用会 join 的 worker.stop
+    locked_body = after_with.split("\n        if worker:")[0]
+    assert "worker.stop()" not in locked_body
+    start_src = inspect.getsource(cm.CameraManager.start_camera)
+    assert "old.stop()" in start_src
+    # 先锁外 join 旧线程，再二次持锁启新 worker
+    assert start_src.index("old.stop()") < start_src.rindex("worker.start()")
 
 
 def test_frame_buffer_age_uses_monotonic():
@@ -235,6 +262,69 @@ async def test_play_g711_cancelled_before_open(monkeypatch):
     assert out["phase"] == "before_open"
 
 
+@pytest.mark.asyncio
+async def test_play_g711_cancelled_after_open(monkeypatch):
+    """open 往返后仍须认 abort，尽快 close 释锁。"""
+    from app.services import hikvision_audio as ha
+
+    client = ha.HikvisionTwoWayAudio("http://192.0.2.10", "admin", "pwd", timeout=3.0)
+    calls = {"n": 0, "close": 0}
+
+    async def _lock():
+        class _L:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _L()
+
+    class _Resp:
+        text = "<sessionId>1</sessionId>"
+
+        def raise_for_status(self):
+            return None
+
+    class _Http:
+        async def put(self, url):
+            if url.endswith("/close"):
+                calls["close"] += 1
+                return _Resp()
+            return _Resp()
+
+    async def _shared(_timeout):
+        return _Http()
+
+    def _abort():
+        calls["n"] += 1
+        # 第一次 before_open 放行，第二次 after_open 取消
+        return calls["n"] >= 2
+
+    monkeypatch.setattr(client, "_lock_for", _lock)
+    monkeypatch.setattr(client, "_shared_client", _shared)
+    ha._SESSION_NEED_CLOSE.clear()
+    out = await client.play_g711(
+        b"\x00" * 80, codec="ulaw", should_abort=_abort
+    )
+    assert out["status"] == "cancelled"
+    assert out["phase"] == "after_open"
+    assert calls["close"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_play_g711_abort_during_tail_hold(monkeypatch):
+    """尾 hold 须可打断，勿 sleep(remain) 占满对讲锁。"""
+    import inspect
+
+    from app.services import hikvision_audio as ha
+
+    src = inspect.getsource(ha.HikvisionTwoWayAudio.play_g711)
+    assert 'abort_phase = "tail_hold"' in src or 'phase": "tail_hold"' in src
+    assert "hold_deadline" in src
+    assert "min(0.2, left)" in src
+
+
 def _patch_audio_handshake(monkeypatch, status: int):
     from app.services import hikvision_audio as ha
 
@@ -305,3 +395,166 @@ async def test_camera_speaker_speak_returns_cancelled(monkeypatch):
     out = await provider.speak("欢迎光临", camera_id=1)
     assert out == "cancelled"
     local.speak.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_play_on_camera_aborts_during_synth(monkeypatch):
+    """合成阶段须认 should_abort，勿等到 play_g711 before_open。"""
+    from types import SimpleNamespace
+
+    from app.workers.tts_worker import CameraSpeakerTTS, LocalTTS
+
+    local = MagicMock(spec=LocalTTS)
+    local.synthesize_g711_sync = MagicMock(return_value=b"\xff" * 80)
+    provider = CameraSpeakerTTS(local=local)
+
+    class _Sess:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, _model, _id):
+            return SimpleNamespace(
+                source_url="rtsp://192.0.2.10/Streaming/Channels/101",
+                username="admin",
+                password_encrypted="enc",
+                store_id=1,
+            )
+
+    monkeypatch.setattr(
+        "app.core.database.AsyncSessionLocal", lambda: _Sess()
+    )
+    monkeypatch.setattr(
+        "app.services.camera_credentials.decrypt_password", lambda *_a, **_k: "pwd"
+    )
+    monkeypatch.setattr(
+        "app.services.system_settings_service.SystemSettingsService.effective_int",
+        AsyncMock(return_value=80),
+    )
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def resolve_codec(self, block=False):
+            return "alaw"
+
+        async def play_g711(self, *a, **k):
+            raise AssertionError("aborted before play")
+
+    monkeypatch.setattr(
+        "app.services.hikvision_audio.HikvisionTwoWayAudio", _Client
+    )
+    monkeypatch.setattr(
+        "app.services.hikvision_audio.resolve_isapi_base",
+        lambda *_a, **_k: "http://192.0.2.10",
+    )
+    monkeypatch.setattr(
+        "app.services.hikvision_audio.normalize_g711_codec", lambda c: c
+    )
+
+    aborted = {"n": 0}
+
+    def should_abort():
+        aborted["n"] += 1
+        return aborted["n"] >= 2  # 过 codec 后在合成完成检查处取消
+
+    out = await provider._play_on_camera(
+        "欢迎光临", 1, should_abort=should_abort
+    )
+    assert out == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_play_on_camera_aborts_mid_synth_wait(monkeypatch):
+    """合成 await 中途须可 abort，勿等 executor 跑完。"""
+    import time as _time
+    from types import SimpleNamespace
+
+    from app.workers.tts_worker import CameraSpeakerTTS, LocalTTS
+
+    local = MagicMock(spec=LocalTTS)
+
+    def _slow_synth(*_a, **_k):
+        _time.sleep(1.2)
+        return b"\xff" * 80
+
+    local.synthesize_g711_sync = MagicMock(side_effect=_slow_synth)
+    provider = CameraSpeakerTTS(local=local)
+
+    class _Sess:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, _model, _id):
+            return SimpleNamespace(
+                source_url="rtsp://192.0.2.10/Streaming/Channels/101",
+                username="admin",
+                password_encrypted="enc",
+                store_id=1,
+            )
+
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: _Sess())
+    monkeypatch.setattr(
+        "app.services.camera_credentials.decrypt_password", lambda *_a, **_k: "pwd"
+    )
+    monkeypatch.setattr(
+        "app.services.system_settings_service.SystemSettingsService.effective_int",
+        AsyncMock(return_value=80),
+    )
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def resolve_codec(self, block=False):
+            return "alaw"
+
+        async def play_g711(self, *a, **k):
+            raise AssertionError("aborted before play")
+
+    monkeypatch.setattr(
+        "app.services.hikvision_audio.HikvisionTwoWayAudio", _Client
+    )
+    monkeypatch.setattr(
+        "app.services.hikvision_audio.resolve_isapi_base",
+        lambda *_a, **_k: "http://192.0.2.10",
+    )
+    monkeypatch.setattr(
+        "app.services.hikvision_audio.normalize_g711_codec", lambda c: c
+    )
+
+    t0 = _time.perf_counter()
+    flag = {"go": False}
+
+    def should_abort():
+        return flag["go"]
+
+    async def _trip():
+        await asyncio.sleep(0.25)
+        flag["go"] = True
+
+    trip = asyncio.create_task(_trip())
+    out = await provider._play_on_camera(
+        "欢迎光临", 1, should_abort=should_abort
+    )
+    await trip
+    elapsed = _time.perf_counter() - t0
+    assert out == "cancelled"
+    assert elapsed < 1.0, f"mid-synth abort too slow: {elapsed:.2f}s"
+
+
+def test_tts_local_outcome_marks_device_playback_local_only():
+    """speak_outcome=local 不得标 unverified，以免假「对讲完成」。"""
+    import inspect
+
+    from app.workers.tts_worker import TTSWorker
+
+    src = inspect.getsource(TTSWorker.run)
+    assert 'local_only' in src
+    assert 'speak_outcome == "local"' in src or "speak_outcome == 'local'" in src

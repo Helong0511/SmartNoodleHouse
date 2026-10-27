@@ -5,7 +5,11 @@ import struct
 import wave
 from io import BytesIO
 
-from app.services.hikvision_audio import scale_pcm16_volume, wav_bytes_to_ulaw8k
+from app.services.hikvision_audio import (
+    patch_twoway_speaker_volume_xml,
+    scale_pcm16_volume,
+    wav_bytes_to_ulaw8k,
+)
 from app.services.system_settings_service import BUSINESS_SETTING_META, SystemSettingsService
 
 
@@ -17,6 +21,7 @@ def test_camera_speaker_volume_meta():
     assert meta.get("min") == 0
     assert meta.get("max") == 100
     assert SystemSettingsService._validate_value("camera_speaker_volume_percent", "50") == "50"
+    assert "speakerVolume" in (meta.get("description") or "")
 
 
 def test_scale_pcm16_volume_half_and_mute():
@@ -29,6 +34,24 @@ def test_scale_pcm16_volume_half_and_mute():
     assert struct.unpack("<4h", mute) == (0, 0, 0, 0)
     same = scale_pcm16_volume(pcm, 100)
     assert same == pcm
+
+
+def test_patch_twoway_speaker_volume_xml():
+    xml = (
+        '<?xml version="1.0"?>'
+        "<TwoWayAudioChannel>"
+        "<id>1</id>"
+        "<speakerVolume>50</speakerVolume>"
+        "<microphoneVolume>100</microphoneVolume>"
+        "</TwoWayAudioChannel>"
+    )
+    out = patch_twoway_speaker_volume_xml(xml, 20)
+    assert out is not None
+    assert "<speakerVolume>20</speakerVolume>" in out
+    assert "<microphoneVolume>100</microphoneVolume>" in out
+    assert patch_twoway_speaker_volume_xml("<TwoWayAudioChannel/>", 30) is None
+    assert patch_twoway_speaker_volume_xml(xml, 150) is not None
+    assert "<speakerVolume>100</speakerVolume>" in patch_twoway_speaker_volume_xml(xml, 150)
 
 
 def _make_wav_pcm16(samples: list[int], rate: int = 8000) -> bytes:

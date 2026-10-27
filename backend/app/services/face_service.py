@@ -1276,10 +1276,14 @@ class WelcomeService:
         nk = str(new_kind or "")
         ok = str(old_kind or "")
         if nk.startswith("test_speak"):
+            # both/camera 都走摄像头推流：同机位互视为同一试听族
+            cam_test = ("test_speak", "test_speak_camera")
+            if nk in cam_test and ok in cam_test:
+                return "replaced"
             if ok == nk:
                 return "replaced"
             # 摄像头侧试听与陌生「见试听则跳过」对称：踢掉同机位待播陌生句
-            if nk in ("test_speak", "test_speak_camera") and ok == "unknown_visitor":
+            if nk in cam_test and ok == "unknown_visitor":
                 return "test_speak_preempt"
             return ""
         if nk == "member":
@@ -1395,6 +1399,131 @@ class WelcomeService:
         return out
 
     @classmethod
+    async def _finalize_redis_enqueue(
+        cls,
+        *,
+        task_id: str,
+        kind: str,
+        payload: dict,
+        text: str,
+        raw: str,
+        cam_s: str,
+        redis,
+    ) -> str | None:
+        """RPUSH 已成功：写状态/bump；失败只记日志，禁止再入队。陌生句做 TOCTOU 复检。"""
+        if kind == "unknown_visitor" and cam_s:
+            try:
+                items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
+                block_kind: str | None = None
+                for it in items or []:
+                    _s, obj = cls._parse_queue_item(it)
+                    if not obj:
+                        continue
+                    if str(obj.get("task_id") or "") == task_id:
+                        continue
+                    o_kind = str(obj.get("kind") or "")
+                    o_cam = str(
+                        obj.get("camera_id") if obj.get("camera_id") is not None else ""
+                    )
+                    if o_cam != cam_s:
+                        continue
+                    if o_kind == "member" or o_kind in (
+                        "test_speak_camera",
+                        "test_speak",
+                    ):
+                        block_kind = o_kind
+                        break
+                if block_kind:
+                    try:
+                        await redis.lrem(cls.TTS_QUEUE_KEY, 1, raw)
+                    except Exception:
+                        logger.debug("陌生迎宾 TOCTOU LREM 失败", exc_info=True)
+                    skip_reason = (
+                        "member_pending"
+                        if block_kind == "member"
+                        else "test_speak_pending"
+                    )
+                    logger.info(
+                        "跳过陌生迎宾（入队后发现 %s） camera_id=%s",
+                        block_kind,
+                        payload.get("camera_id"),
+                    )
+                    await cls.set_speak_task_status(
+                        task_id,
+                        "cancelled",
+                        reason=skip_reason,
+                        camera_id=payload.get("camera_id"),
+                    )
+                    return None
+            except Exception:
+                logger.debug("陌生迎宾 TOCTOU 复检失败，保留入队", exc_info=True)
+        # 并发试听/会员：两路都 RPUSH 后互相看不见；入队后再扫同机位，只留本 task
+        if cam_s and (kind.startswith("test_speak") or kind == "member"):
+            try:
+                items = await redis.lrange(cls.TTS_QUEUE_KEY, 0, -1)
+                dropped = 0
+                for it in items or []:
+                    s, obj = cls._parse_queue_item(it)
+                    if not obj:
+                        continue
+                    if str(obj.get("task_id") or "") == task_id:
+                        continue
+                    o_kind = str(obj.get("kind") or "")
+                    o_cam = str(
+                        obj.get("camera_id") if obj.get("camera_id") is not None else ""
+                    )
+                    drop_reason = cls._pending_drop_reason(
+                        kind, o_kind, o_cam == cam_s
+                    )
+                    if not drop_reason:
+                        continue
+                    try:
+                        await redis.lrem(cls.TTS_QUEUE_KEY, 1, s)
+                    except Exception:
+                        logger.debug(
+                            "试听/会员 keep-latest LREM 失败", exc_info=True
+                        )
+                        continue
+                    dropped += 1
+                    await cls.set_speak_task_status(
+                        obj.get("task_id"),
+                        "cancelled",
+                        reason=drop_reason,
+                        kind=o_kind,
+                        camera_id=obj.get("camera_id"),
+                    )
+                if dropped:
+                    logger.info(
+                        "入队后 keep-latest 作废同机位旧项 kind=%s camera_id=%s dropped=%s",
+                        kind,
+                        payload.get("camera_id"),
+                        dropped,
+                    )
+            except Exception:
+                logger.debug("试听/会员入队后 keep-latest 失败", exc_info=True)
+        try:
+            await cls.set_speak_task_status(
+                task_id,
+                "queued",
+                kind=kind,
+                camera_id=payload.get("camera_id"),
+            )
+        except Exception:
+            logger.exception(
+                "迎宾入队后写 speak_task 失败 task_id=%s（队列已有项，勿再入队）",
+                task_id[:12],
+            )
+        try:
+            await cls._bump_speak_gen_after_enqueue(kind, payload.get("camera_id"))
+        except Exception:
+            logger.exception(
+                "迎宾入队后 bump 失败 task_id=%s（队列已有项，勿再入队）",
+                task_id[:12],
+            )
+        cls._schedule_g711_warmup(text)
+        return task_id
+
+    @classmethod
     async def enqueue(cls, item: dict) -> str | None:
         """入队迎宾播报；跨热重载仍可由 Leader TTS 消费。返回 task_id（空文本返回 None）。"""
         import json
@@ -1409,10 +1538,12 @@ class WelcomeService:
         kind = str(payload.get("kind") or "")
         cam_s = str(payload.get("camera_id") if payload.get("camera_id") is not None else "")
         payload.setdefault("enqueued_at", _time.time())
+        payload.setdefault("enqueued_mono", _time.monotonic())
         task_id = str(payload.get("task_id") or "").strip() or uuid.uuid4().hex
         payload["task_id"] = task_id
         # bump 须在入队成功后：避免 queue_full/跳过仍抬世代打断在播却无替补
         raw = json.dumps(payload, ensure_ascii=False)
+        redis_pushed = False
         try:
             redis = await get_redis()
             # 试听连点 / 会员入队：整理 pending 再写入
@@ -1447,6 +1578,7 @@ class WelcomeService:
                     pipe.rpush(cls.TTS_QUEUE_KEY, raw)
                     pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
                     await pipe.execute()
+                    redis_pushed = True
                     if dropped:
                         logger.info(
                             "迎宾入队替换 pending=%s kind=%s camera_id=%s",
@@ -1454,18 +1586,30 @@ class WelcomeService:
                             kind,
                             payload.get("camera_id"),
                         )
-                    await cls.set_speak_task_status(
-                        task_id,
-                        "queued",
+                    return await cls._finalize_redis_enqueue(
+                        task_id=task_id,
                         kind=kind,
-                        camera_id=payload.get("camera_id"),
+                        payload=payload,
+                        text=text,
+                        raw=raw,
+                        cam_s=cam_s,
+                        redis=redis,
                     )
-                    await cls._bump_speak_gen_after_enqueue(
-                        kind, payload.get("camera_id")
-                    )
-                    cls._schedule_g711_warmup(text)
-                    return task_id
                 except Exception:
+                    if redis_pushed:
+                        logger.exception(
+                            "迎宾整理入队后收尾失败，队列已有项勿再入队 task_id=%s",
+                            task_id[:12],
+                        )
+                        return await cls._finalize_redis_enqueue(
+                            task_id=task_id,
+                            kind=kind,
+                            payload=payload,
+                            text=text,
+                            raw=raw,
+                            cam_s=cam_s,
+                            redis=redis,
+                        )
                     logger.exception("迎宾队列整理失败，回退普通入队前尽力抢占")
                     # 整理失败时仍尽量去掉同机位低优先级句，避免会员排在试听/欢迎光临后
                     if kind == "member" and cam_s:
@@ -1540,17 +1684,38 @@ class WelcomeService:
             pipe.rpush(cls.TTS_QUEUE_KEY, raw)
             pipe.ltrim(cls.TTS_QUEUE_KEY, -cls.TTS_QUEUE_MAX, -1)
             await pipe.execute()
-            await cls.set_speak_task_status(
-                task_id,
-                "queued",
+            redis_pushed = True
+            return await cls._finalize_redis_enqueue(
+                task_id=task_id,
                 kind=kind,
-                camera_id=payload.get("camera_id"),
+                payload=payload,
+                text=text,
+                raw=raw,
+                cam_s=cam_s,
+                redis=redis,
             )
-            await cls._bump_speak_gen_after_enqueue(kind, payload.get("camera_id"))
-            # 后台预热本句 G.711：首句未命中时边播边写入，下一遍直接命中缓存
-            cls._schedule_g711_warmup(text)
-            return task_id
         except Exception:
+            if redis_pushed:
+                logger.exception(
+                    "迎宾 Redis 入队已成功但收尾异常，禁止内存再入队 task_id=%s",
+                    task_id[:12],
+                )
+                # 与整理路径对称：再试一次 finalize（keep-latest / queued / bump）
+                try:
+                    return await cls._finalize_redis_enqueue(
+                        task_id=task_id,
+                        kind=kind,
+                        payload=payload,
+                        text=text,
+                        raw=raw,
+                        cam_s=cam_s,
+                        redis=redis,
+                    )
+                except Exception:
+                    logger.exception(
+                        "迎宾 Redis finalize 重试仍失败 task_id=%s", task_id[:12]
+                    )
+                    return task_id
             logger.exception("迎宾 TTS Redis 入队失败，回退进程内队列")
         q = cls.get_queue()
         # 内存降级：与 Redis 路径对齐 member_pending / 试听替换 / 会员抢占（drain 再回填，不碰私有 _queue）
@@ -1626,16 +1791,6 @@ class WelcomeService:
             logger.debug("迎宾内存队列整理失败，继续入队", exc_info=True)
         try:
             q.put_nowait(payload)
-            await cls.set_speak_task_status(
-                task_id,
-                "queued",
-                kind=kind,
-                camera_id=payload.get("camera_id"),
-                transport="memory",
-            )
-            await cls._bump_speak_gen_after_enqueue(kind, payload.get("camera_id"))
-            cls._schedule_g711_warmup(text)
-            return task_id
         except asyncio.QueueFull:
             logger.warning("迎宾 TTS 进程内队列已满，丢弃 text=%s", text[:40])
             await cls.set_speak_task_status(
@@ -1643,6 +1798,129 @@ class WelcomeService:
             )
             # 返回 None：调用方须释放冷却，避免无声占窗；且勿 bump
             return None
+        # 对齐 Redis T2：put 后再扫，并发试听/会员只留本 task
+        if cam_s and (kind.startswith("test_speak") or kind == "member"):
+            try:
+                after: list = []
+                while True:
+                    try:
+                        after.append(q.get_nowait())
+                    except asyncio.QueueEmpty:
+                        break
+                kept_latest: list = []
+                dropped = 0
+                for p in after:
+                    if not isinstance(p, dict):
+                        kept_latest.append(p)
+                        continue
+                    if str(p.get("task_id") or "") == task_id:
+                        kept_latest.append(p)
+                        continue
+                    o_kind = str(p.get("kind") or "")
+                    o_cam = str(
+                        p.get("camera_id") if p.get("camera_id") is not None else ""
+                    )
+                    drop_reason = cls._pending_drop_reason(
+                        kind, o_kind, o_cam == cam_s
+                    )
+                    if drop_reason:
+                        dropped += 1
+                        await cls.set_speak_task_status(
+                            p.get("task_id"),
+                            "cancelled",
+                            reason=drop_reason,
+                            kind=o_kind,
+                            camera_id=p.get("camera_id"),
+                            transport="memory",
+                        )
+                    else:
+                        kept_latest.append(p)
+                for p in kept_latest:
+                    try:
+                        q.put_nowait(p)
+                    except asyncio.QueueFull:
+                        logger.warning("迎宾内存 keep-latest 回填满，丢弃一项")
+                        break
+                if dropped:
+                    logger.info(
+                        "内存入队后 keep-latest 作废同机位旧项 kind=%s camera_id=%s dropped=%s",
+                        kind,
+                        payload.get("camera_id"),
+                        dropped,
+                    )
+            except Exception:
+                logger.debug("内存试听/会员 keep-latest 失败", exc_info=True)
+        # 对齐 Redis R3：入队后再扫，避免 TOCTOU 把陌生句插在并发会员/试听后
+        if kind == "unknown_visitor" and cam_s:
+            try:
+                after: list = []
+                while True:
+                    try:
+                        after.append(q.get_nowait())
+                    except asyncio.QueueEmpty:
+                        break
+                block_kind: str | None = None
+                for p in after:
+                    if not isinstance(p, dict):
+                        continue
+                    if str(p.get("task_id") or "") == task_id:
+                        continue
+                    if (
+                        str(p.get("camera_id") if p.get("camera_id") is not None else "")
+                        != cam_s
+                    ):
+                        continue
+                    o_kind = str(p.get("kind") or "")
+                    if o_kind == "member" or o_kind in (
+                        "test_speak_camera",
+                        "test_speak",
+                    ):
+                        block_kind = o_kind
+                        break
+                if block_kind:
+                    for p in after:
+                        if isinstance(p, dict) and str(p.get("task_id") or "") == task_id:
+                            continue
+                        try:
+                            q.put_nowait(p)
+                        except asyncio.QueueFull:
+                            break
+                    skip_reason = (
+                        "member_pending"
+                        if block_kind == "member"
+                        else "test_speak_pending"
+                    )
+                    logger.info(
+                        "跳过陌生迎宾（内存入队后发现 %s） camera_id=%s",
+                        block_kind,
+                        payload.get("camera_id"),
+                    )
+                    await cls.set_speak_task_status(
+                        task_id,
+                        "cancelled",
+                        reason=skip_reason,
+                        camera_id=payload.get("camera_id"),
+                        transport="memory",
+                    )
+                    return None
+                for p in after:
+                    try:
+                        q.put_nowait(p)
+                    except asyncio.QueueFull:
+                        logger.warning("迎宾内存队列 TOCTOU 回填满，丢弃一项")
+                        break
+            except Exception:
+                logger.debug("内存陌生迎宾 TOCTOU 复检失败，保留入队", exc_info=True)
+        await cls.set_speak_task_status(
+            task_id,
+            "queued",
+            kind=kind,
+            camera_id=payload.get("camera_id"),
+            transport="memory",
+        )
+        await cls._bump_speak_gen_after_enqueue(kind, payload.get("camera_id"))
+        cls._schedule_g711_warmup(text)
+        return task_id
 
     @classmethod
     def _schedule_g711_warmup(cls, text: str) -> None:
@@ -1671,7 +1949,7 @@ class WelcomeService:
 
     @classmethod
     def is_stale_item(cls, item: dict | None) -> bool:
-        """排队过久的迎宾（人多半已离开）不再播。"""
+        """排队过久的迎宾（人多半已离开）不再播。优先 monotonic，兼容旧墙钟字段。"""
         import time as _time
 
         if not item:
@@ -1680,18 +1958,54 @@ class WelcomeService:
         # 试听不按过期丢弃
         if kind.startswith("test_speak"):
             return False
+        age: float | None = None
         try:
-            enq = float(item.get("enqueued_at") or 0.0)
+            mono = item.get("enqueued_mono")
+            if mono is not None:
+                age = _time.monotonic() - float(mono)
         except (TypeError, ValueError):
-            enq = 0.0
-        if enq <= 0:
-            return False
-        age = _time.time() - enq
+            age = None
+        if age is None:
+            try:
+                enq = float(item.get("enqueued_at") or 0.0)
+            except (TypeError, ValueError):
+                enq = 0.0
+            if enq <= 0:
+                return False
+            age = _time.time() - enq
         return age > float(cls.TTS_ITEM_MAX_AGE_SEC)
 
     @classmethod
+    async def _take_memory_item_nowait(cls) -> dict | None:
+        """非阻塞取一条内存待播；过期则作废并继续，空则 None。"""
+        q = cls.get_queue()
+        while True:
+            try:
+                item = q.get_nowait()
+            except asyncio.QueueEmpty:
+                return None
+            if isinstance(item, dict) and cls.is_stale_item(item):
+                logger.info(
+                    "丢弃过期迎宾(内存) kind=%s camera_id=%s",
+                    item.get("kind"),
+                    item.get("camera_id"),
+                )
+                await cls.set_speak_task_status(
+                    item.get("task_id"),
+                    "cancelled",
+                    reason="stale",
+                    kind=item.get("kind"),
+                    camera_id=item.get("camera_id"),
+                )
+                continue
+            return item if isinstance(item, dict) else None
+
+    @classmethod
     async def dequeue(cls, timeout: float = 1.0) -> dict | None:
-        """取出一条迎宾任务；超时返回 None。过期项直接丢弃并继续取。"""
+        """取出一条迎宾任务；超时返回 None。过期项直接丢弃并继续取。
+
+        Redis 恢复后仍须排空故障窗口写入的内存待播，避免「入队成功却永不出声」。
+        """
         import json
         import time as _time
 
@@ -1699,11 +2013,19 @@ class WelcomeService:
         try:
             redis = await get_redis()
             while _time.monotonic() < deadline:
+                # 先排空内存 backlog（Redis 宕机窗口入队），再 BLPOP
+                mem = await cls._take_memory_item_nowait()
+                if mem is not None:
+                    return mem
                 wait = max(1, int(min(1.0, deadline - _time.monotonic() + 0.01)))
                 # FIFO：与入队 RPUSH 配对用 BLPOP（取最旧）；BRPOP 会变成 LIFO 饿死旧任务
                 got = await redis.blpop(cls.TTS_QUEUE_KEY, timeout=wait)
                 if not got:
-                    return None
+                    # 空等后勿直接放弃：再扫一次内存（并发入队可能刚 put）
+                    mem = await cls._take_memory_item_nowait()
+                    if mem is not None:
+                        return mem
+                    continue
                 _key, raw = got
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8", errors="replace")
@@ -1727,7 +2049,7 @@ class WelcomeService:
                     )
                     continue
                 return data
-            return None
+            return await cls._take_memory_item_nowait()
         except Exception:
             logger.exception("迎宾 TTS Redis 出队失败，回退进程内队列")
         q = cls.get_queue()

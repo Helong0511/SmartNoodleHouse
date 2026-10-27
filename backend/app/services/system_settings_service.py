@@ -243,7 +243,7 @@ BUSINESS_SETTING_META: dict[str, dict[str, Any]] = {
         "max": 100,
         "default": 80,
         "store_override": True,
-        "description": "推送到摄像头扬声器前的软件增益（0 静音～100 原音）。不改摄像机硬件音量；可按门店覆盖",
+        "description": "写入海康对讲通道 speakerVolume（0 静音～100 最大）。播报前自动下发；设备无该字段时才回退软件增益。可按门店覆盖",
     },
     "delivery_auto_confirm": {
         "group": "delivery",
