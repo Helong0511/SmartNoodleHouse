@@ -689,10 +689,20 @@ class VisitorService:
         return f"visitors/{day}/cam{int(camera_id)}_{stamp}_{uuid.uuid4().hex[:8]}.{ext.lstrip('.')}"
 
     @staticmethod
-    def encode_frame_jpeg(frame, *, quality: int = 85) -> bytes:
+    def encode_frame_jpeg(frame, *, quality: int = 85, max_side: int | None = 1280) -> bytes:
+        """编码抓拍 JPEG；访客事件默认长边压到 1280，避免主码流 2560 原图占盘。"""
         import cv2
 
-        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+        img = frame
+        if max_side and img is not None and getattr(img, "ndim", 0) >= 2:
+            h, w = int(img.shape[0]), int(img.shape[1])
+            side = max(h, w)
+            if side > int(max_side):
+                scale = float(max_side) / float(side)
+                nw = max(1, int(round(w * scale)))
+                nh = max(1, int(round(h * scale)))
+                img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
         if not ok or buf is None:
             raise ValueError("抓拍帧编码失败")
         return buf.tobytes()

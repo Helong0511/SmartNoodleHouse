@@ -155,6 +155,8 @@ def prepare_camera_source(
     返回 (safe_url, username, password_plaintext_to_encrypt)。
     """
     safe, url_user, url_pwd = extract_url_credentials(source_url)
+    # 入库也规范到子码流，避免后台仍显示 101 而实际识别已改连
+    safe = prefer_hikvision_substream_url(safe)
     user = (username or url_user or None)
     pwd = password if password is not None and password != "" else url_pwd
     ensure_no_plaintext_password_in_url(safe)
@@ -178,6 +180,37 @@ def build_rtsp_url(host: str, username: str, password: str, channel: str = "102"
     return f"rtsp://{user}:{pwd}@{host}/Streaming/Channels/{channel}"
 
 
+def prefer_hikvision_substream_url(source_url: str) -> str:
+    """海康主码流 …/Channels/x01 → 子码流 x02，供识别拉流降解码负载。
+
+    仅改写常见主码流尾号 01（101/201/301…）；已是 02/其它通道原样返回。
+    USB 数字源、非 Streaming/Channels 路径不改。
+    """
+    if not source_url or source_url.isdigit():
+        return source_url
+    try:
+        parsed = urlparse(source_url)
+    except Exception:
+        return source_url
+    if parsed.scheme not in ("rtsp", "rtsps", "http", "https"):
+        return source_url
+    path = parsed.path or ""
+    marker = "/Streaming/Channels/"
+    idx = path.find(marker)
+    if idx < 0:
+        return source_url
+    rest = path[idx + len(marker) :]
+    channel = rest.split("/", 1)[0].split("?", 1)[0].strip()
+    if not channel.isdigit() or len(channel) < 2:
+        return source_url
+    # 主码流约定：通道号以 01 结尾（101/201…）；子码流为 02
+    if not channel.endswith("01"):
+        return source_url
+    new_channel = channel[:-2] + "02"
+    new_path = path[: idx + len(marker)] + new_channel + path[idx + len(marker) + len(channel) :]
+    return urlunparse(parsed._replace(path=new_path))
+
+
 def build_connect_source(
     source_url: str,
     username: str | None,
@@ -188,9 +221,11 @@ def build_connect_source(
     - USB 数字源原样返回
     - 已含明文密码的 URL：优先用加密字段覆盖
     - 仅 host 路径：用 username + 解密密码拼装
+    - 海康主码流自动改连子码流（识别用，降 2560 解码）
     """
     if not source_url or source_url.isdigit():
         return source_url
+    source_url = prefer_hikvision_substream_url(source_url)
     if not password_encrypted:
         # 无加密密码字段：若 URL 内嵌明文密码则用之（历史脏数据兼容）
         try:

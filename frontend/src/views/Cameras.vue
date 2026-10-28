@@ -146,7 +146,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="源地址" required>
-          <el-input v-model="form.source_url" placeholder="USB 填 0；RTSP 填 rtsp://..." />
+          <el-input v-model="form.source_url" placeholder="USB 填 0；海康识别建议 …/Streaming/Channels/102" />
         </el-form-item>
         <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
         <el-form-item label="密码">

@@ -264,16 +264,12 @@ class RecognitionWorker:
                         best_hit, best_frame, support_hits = decided
                         if best_frame is not None:
                             frame = best_frame
-                            # 收集期可能用 light 特征；定稿对最佳帧再完整提一次再匹配
-                            try:
-                                t_refine0 = time.perf_counter()
-                                refined = await asyncio.to_thread(
-                                    extract_live_face_hit, best_frame, light=False
-                                )
-                                best_hit = refined
-                                refine_ms = int(
-                                    (time.perf_counter() - t_refine0) * 1000
-                                )
+                            # 收集期可能用 light 特征；定稿默认再完整提一次。
+                            # 近脸且置信够高时跳过 refine，避免主码流上再付 ~1–2s CPU。
+                            side_px = int(getattr(best_hit, "face_side_px", 0) or 0)
+                            det_ok = float(getattr(best_hit, "det_score", 0) or 0)
+                            skip_refine = side_px >= 140 and det_ok >= 0.45
+                            if skip_refine:
                                 try:
                                     from app.services.face_pipeline_metrics import (
                                         record_recognition_metrics,
@@ -281,31 +277,68 @@ class RecognitionWorker:
 
                                     record_recognition_metrics(
                                         cam_id,
-                                        refine_extract_ms=refine_ms,
+                                        refine_extract_ms=0,
                                         face_ok=True,
                                         face_area_ratio=round(
                                             float(best_hit.face_area_ratio), 4
                                         ),
-                                        det_score=round(float(best_hit.det_score), 3),
-                                        face_side_px=int(
-                                            getattr(best_hit, "face_side_px", 0) or 0
-                                        ),
+                                        det_score=round(det_ok, 3),
+                                        face_side_px=side_px,
                                         frame_w=int(
                                             getattr(best_hit, "frame_w", 0) or 0
                                         ),
                                         frame_h=int(
                                             getattr(best_hit, "frame_h", 0) or 0
                                         ),
-                                        light_detect=False,
+                                        light_detect=True,
                                     )
                                 except Exception:
                                     pass
-                            except Exception:
-                                logger.debug(
-                                    "定稿完整提特征失败，沿用窗口 hit camera_id=%s",
-                                    cam_id,
-                                    exc_info=True,
-                                )
+                            else:
+                                try:
+                                    t_refine0 = time.perf_counter()
+                                    refined = await asyncio.to_thread(
+                                        extract_live_face_hit, best_frame, light=False
+                                    )
+                                    best_hit = refined
+                                    refine_ms = int(
+                                        (time.perf_counter() - t_refine0) * 1000
+                                    )
+                                    try:
+                                        from app.services.face_pipeline_metrics import (
+                                            record_recognition_metrics,
+                                        )
+
+                                        record_recognition_metrics(
+                                            cam_id,
+                                            refine_extract_ms=refine_ms,
+                                            face_ok=True,
+                                            face_area_ratio=round(
+                                                float(best_hit.face_area_ratio), 4
+                                            ),
+                                            det_score=round(
+                                                float(best_hit.det_score), 3
+                                            ),
+                                            face_side_px=int(
+                                                getattr(best_hit, "face_side_px", 0)
+                                                or 0
+                                            ),
+                                            frame_w=int(
+                                                getattr(best_hit, "frame_w", 0) or 0
+                                            ),
+                                            frame_h=int(
+                                                getattr(best_hit, "frame_h", 0) or 0
+                                            ),
+                                            light_detect=False,
+                                        )
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    logger.debug(
+                                        "定稿完整提特征失败，沿用窗口 hit camera_id=%s",
+                                        cam_id,
+                                        exc_info=True,
+                                    )
                         emb = np.asarray(best_hit.embedding, dtype=np.float32)
                         logger.info(
                             "人脸窗口定稿 camera_id=%s ratio=%.4f sharp=%.1f det=%.3f "

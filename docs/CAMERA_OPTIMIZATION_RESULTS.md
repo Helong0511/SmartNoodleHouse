@@ -95,9 +95,29 @@ pytest tests/测试_人脸热集矩阵匹配.py tests/测试_摄像头迎宾修�
 2. **收集期 light 检测**：`max_side=720`、跳过 CLAHE；定稿对 `best_frame` 再 `light=False` 完整提特征后匹配。  
 3. **人脸像素可观测**：`face_side_px`（源分辨率短边）写入 runtime；列表显示「脸 Npx」；定稿 `refine_extract_ms` 与收集 `detect_extract_ms` 分离；`probe-face` 返回像素/耗时/偏小提示（**不**据此宣称准确率提升）。
 
+## 7.1 访客事件库+图证据后的第三轮（2026-10-28）
+
+**本地库证据**（`visitor_events` 19 条；图在 `backend/uploads/visitors`）：
+
+| 项 | 值 |
+|---|---|
+| 类型 | ENTER 11 / MATCH 8 |
+| 抓拍分辨率 | **全部 2560×1440**（当时 `Channels/101` 主码流） |
+| live light 复检 face_side_px | n=18，min22 / max392 / **avg≈215**；近脸 MATCH 常 ≥350 |
+| 未改 | `face_match_threshold=0.48`、`detect_fps=3` |
+
+**已落地（不降阈值）**：
+
+1. **海康主码流→子码流**：`prefer_hikvision_substream_url`；`prepare_camera_source` 入库与 `build_connect_source` 拉流均把 `…/Channels/x01` 改写为 `x02`。本地 cam1 已写回 102。  
+2. **近脸跳过 refine**：定稿时 `face_side_px≥140` 且 `det_score≥0.45` 则沿用 light hit（`refine_extract_ms=0`），避免再付 ~1–2s CPU。  
+3. **访客抓拍降分辨率**：`encode_frame_jpeg` 默认长边 ≤1280，减轻盘占用；识别仍用内存帧。
+
+单测：`tests/测试_海康子码流优先.py`（与密码严格模式一并 11 passed）。  
+分析产物：`tests/_out/visitor_events_analysis.json`（脚本 `scripts/_analyze_visitor_events.py`）。
+
 ## 8. 后续建议（仍未实施）
 
-1. 用现场 `face_side_px` 样例决定是否改子码流/安装距离（本轮只提供观测，未改默认分辨率）。  
+1. 重启 API 后启采，对照 runtime「检/精/配」是否明显下降（子码流+跳过 refine）；**勿**据此外推准确率%。  
 2. 标签集驱动阈值曲线；禁止再靠直觉拧 `threshold+0.04`。  
 3. 收集期 light 路径的真人准确率对比（需标签视频，勿臆造 %）。  
-4. 真实海康端到端 P50/P95。
+4. 真实海康端到端 P50/P95；现场项 6 多人 / 7 拔线仍待。

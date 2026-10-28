@@ -58,6 +58,7 @@ logs/**
 # 数据库备份产物
 backups/
 tests/_db_audit_report.json
+tests/_out/
 
 # 编译产物
 *.pyc
