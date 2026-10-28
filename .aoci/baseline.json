@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-29T06:57:38Z",
-  "updated_at": "2026-10-27T03:59:16Z",
+  "updated_at": "2026-10-27T10:24:55Z",
   "files": {
     ".cursor/mcp.json": {
       "role": "index",
@@ -107,9 +107,9 @@
     },
     "Debug/摄像头.md": {
       "role": "index",
-      "sha256": "2f2892cda5d562bcfabe18589b378cb10c9515a56042ea3d931062f6331b2e43",
-      "size": 37816,
-      "normalized_sha256": "e5b5739c943c370e041068d4e081a2ed56e8941510915d4428fe417fb2a18575"
+      "sha256": "ae838d824a3423e2c736d2b7e73d161e45a21efe77c7823b2a38ac8b37daf08c",
+      "size": 37759,
+      "normalized_sha256": "2353cebf675cfd078c0c3e79c7e1b17cd47446ffea253a92d620c150a0338979"
     },
     "README.md": {
       "role": "index",
@@ -119,9 +119,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "503b0ff14cf2b819d11b07c182f68f706f2a464f2cff123b72b31023b5d28d96",
-      "size": 194420,
-      "normalized_sha256": "503b0ff14cf2b819d11b07c182f68f706f2a464f2cff123b72b31023b5d28d96"
+      "sha256": "c05c5f2132cae78972c25b4009a53cbe137b21319a57750d1406d8e66d7292d0",
+      "size": 194710,
+      "normalized_sha256": "c05c5f2132cae78972c25b4009a53cbe137b21319a57750d1406d8e66d7292d0"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -1931,9 +1931,9 @@
     },
     "docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md": {
       "role": "index",
-      "sha256": "154078282c2db880b5b9960ea809d9d923e22f785577760bfd97d155f01c10d5",
-      "size": 4763,
-      "normalized_sha256": "154078282c2db880b5b9960ea809d9d923e22f785577760bfd97d155f01c10d5"
+      "sha256": "279babc68e0dbe2a1070cbdefdb783ebb8ed1a9d9e365f93fdd0dca1f7c259d0",
+      "size": 4977,
+      "normalized_sha256": "279babc68e0dbe2a1070cbdefdb783ebb8ed1a9d9e365f93fdd0dca1f7c259d0"
     },
     "docs/CAMERA_FACE_AUDIO_AUDIT.md": {
       "role": "index",
@@ -4299,6 +4299,12 @@
       "size": 862,
       "normalized_sha256": "85b57eafb64b8659e71c8be44c5f71d414c99fb7f47f46776de7125fed45e157"
     },
+    "scripts/_field_residual_soft_face.py": {
+      "role": "index",
+      "sha256": "28e83ccc81328ef89fd35e0df2d1128fae0ea764be11f96f57d7969af70e1791",
+      "size": 5511,
+      "normalized_sha256": "28e83ccc81328ef89fd35e0df2d1128fae0ea764be11f96f57d7969af70e1791"
+    },
     "scripts/_run_followup_tests.py": {
       "role": "index",
       "sha256": "36b26aea83cd1bb937dd8e48ad8fc2b8500f2d711dfa2f9603aded89b03a74ad",
@@ -4523,6 +4529,23 @@
       "role": "observe",
       "sha256": "3d95d3f852824f00d837f6c02252a42f67a36ed99ae33d0aac2d707e738c1171",
       "size": 293223
+    },
+    "tests/_out/field_residual_cam1.json": {
+      "role": "observe",
+      "sha256": "4c85eda5d90888ceda3324bfa5f79708010bff8b3f8fb4101812e13ce3aa5bee",
+      "size": 946,
+      "normalized_sha256": "8d9c023de9f78819f89709b165142b64d35b022d15397ca04d817fc4d1fd42b0"
+    },
+    "tests/_out/field_residual_frame_cam1.jpg": {
+      "role": "observe",
+      "sha256": "9cd3c7cb8d9248e5eddc7a7ec65dba45ebc00e7be8cfcd09a2a1f0333d4f778d",
+      "size": 915210
+    },
+    "tests/_out/field_residual_soft_face.json": {
+      "role": "observe",
+      "sha256": "6e43b4e6efaac24ea30af5f55be27d26aff7ae51c16a5bb1233cc07d150bdca8",
+      "size": 612,
+      "normalized_sha256": "a032d851d34514db6ac023cf7f622ff01e87dad320842d778bfb42bef1b2184f"
     },
     "tests/_临时_写入共享车开关.py": {
       "role": "observe",

@@ -372,7 +372,7 @@ Cwm9_全项目修复完善_Codex提示词.md[SQ5L]: F:Master Codex/Cursor prompt
 数据交换检查.mdc[SG4T]: F:Cursor rule for API/JSON money time and ID serialization review | R:- | A:- | S:alwaysApply false; globs py/js/ts/vue; IDs as JSON number unless beyond 2^53
 本地Windows测试启动教程.md[SO5M]: F:Local Windows PowerShell guide for MySQL Redis API admin and miniprogram | R:code:.env.development.example | A:- | S:Local-debug scene only; do not mix Ubuntu production commands or .env templates
 面馆管理系统_提示词库.md[SA6L]: F:AI marketing prompt library P0 system and P1-P9 scene templates | R:- | A:- | S:Double-brace placeholders filled from MySQL; output JSON or plain text for storage
-CAMERA_FACE_AUDIO_ACCEPTANCE.md[SH5T]: F:海康迎宾自动化与现场验收清单 | R:code:docs/CAMERA_FACE_AUDIO_TEST_PLAN.md,code:scripts/现场验收海康迎宾.py | A:- | S:项1/2/3/4/5真机通过（3人耳；4业务打断证据 field_interrupt_cam1.json）；6/7拔线/8有脸仍待；勿编准确率%
+CAMERA_FACE_AUDIO_ACCEPTANCE.md[SH5T]: F:海康迎宾自动化与现场验收清单 | R:code:docs/CAMERA_FACE_AUDIO_TEST_PLAN.md,code:scripts/现场验收海康迎宾.py,code:scripts/_field_residual_soft_face.py | A:- | S:项1-5/8真机通过（8直连 face_side_px=181）；6多人与7拔线仍待；勿编准确率%
 CAMERA_FACE_AUDIO_AUDIT.md[SH5S]: F:海康人脸迎宾代码审计问题台账与修复状态 | R:code:docs/CAMERA_FACE_AUDIO_REMEDIATION.md | A:- | S:禁止仅凭型号推断固件能力；A–V 状态以仓库代码与对应单测为准
 CAMERA_FACE_AUDIO_REMEDIATION.md[SH5S]: F:海康迎宾已确认缺陷的修复说明与风险边界 | R:code:docs/CAMERA_FACE_AUDIO_AUDIT.md | A:- | S:含 D–V：内存dequeue、启采to_thread、合成中abort、local_only；停采先bump锁外join、试听族互抢、内存keep-latest、finalize重试
 CAMERA_FACE_AUDIO_TEST_PLAN.md[SH5T]: F:海康迎宾自动化与现场测试步骤清单 | R:code:docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md | A:- | S:现场项无设备不得勾通过；含内存drain、启采to_thread、合成中abort、local_only、停采bump序、both↔camera互抢、内存keep-latest
@@ -840,6 +840,7 @@ _run_followup_tests.py[TQ5S]: F:Run follow-up pytest subset from tests dir | R:c
 备份恢复演练.py[OR5T]: F:Orchestrates mysqldump backup then optional restore-drill into DRILL_DATABASE_URL | R:code:scripts/备份数据库.py,code:scripts/恢复数据库.py | A:main | S:--restore-drill needs isolated DRILL_DATABASE_URL; never point drill at production DSN
 恢复数据库.py[OR5S]: F:Restores gzipped or plain SQL dump into target DATABASE_URL with explicit --yes | R:code:scripts/备份数据库.py,code:scripts/备份恢复演练.py | A:main | S:Refuses without --yes; overwrites target schema/data; prefer drill DB first
 现场验收海康迎宾.py[OH6S]: F:本机对库内摄像头跑编码 RTSP HTTP 推流现场验收并写 JSON | R:code:backend/app/services/hikvision_audio.py,code:docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md | A:main,_run,_decrypt_camera_password | S:本地 Fernet 解密禁 import face_service；RTSP 须注入账号密码；--heard 才可确认出声
+_field_residual_soft_face.py[OH5S]: F:软重开 RTSP 两次并 InsightFace 直连测 face_side_px | R:code:scripts/现场验收海康迎宾.py,code:docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md | A:main | S:禁 import face_service；写 tests/_out/field_residual_soft_face.json；库 OFFLINE 仍可直连开流
 
 ===E:/SmartNoodleHouse/sql/===
 data_test.sql[PP6M]: F:Local-only test seed after struct data_sys data_custom for SH02 fixtures and face sample | R:code:sql/struct.sql,code:sql/data_sys.sql,code:sql/data_custom.sql | A:- | S:Never import to production; face sample keys off customer_no TEST-CUST-FACE-001 without hardcoded ids
@@ -886,5 +887,5 @@ queue.wxml[FU5T]: F:WeChat queue markup for people pick ticket status and cancel
 queue.wxss[FU4T]: F:Styles for WeChat queue take-number card people grid and called state | R:code:miniprogram-wechat/packageOrder/queue/queue.wxml | A:.queue-card,.people-grid | S:-
 
 ===E:/SmartNoodleHouse/Debug/===
-摄像头.md[SH6L]: F:海康人脸迎宾审计修复验收执行提示词与状态头 | R:code:docs/CAMERA_FACE_AUDIO_AUDIT.md,code:docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md,code:scripts/现场验收海康迎宾.py | A:- | S:自动化≠现场；queued≠出声；cam1@189 项1/2/3/4/5已过（3人耳；4业务打断）；6多人/7拔线/8有脸仍待
+摄像头.md[SH6L]: F:海康人脸迎宾审计修复验收执行提示词与状态头 | R:code:docs/CAMERA_FACE_AUDIO_AUDIT.md,code:docs/CAMERA_FACE_AUDIO_ACCEPTANCE.md,code:scripts/现场验收海康迎宾.py | A:- | S:自动化≠现场；queued≠出声；cam1 项1-5/8已过；6多人与7拔线仍待；库 OFFLINE 需启采
 

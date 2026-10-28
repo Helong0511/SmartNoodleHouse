@@ -42,15 +42,15 @@
 | 3 | 会员/试听出声 | 扬声器可闻 | G711 推流 completed；**人耳确认听到「欢迎光临」**（2026-10-27） | **通过** |
 | 4 | 陌生客 + 会员打断 | 陌生停、会员播，不回退 PC | 业务进程在线：Redis 入队 `unknown_visitor`→`member`；unknown **cancelled / speak_gen_bumped**；member **completed / ok**，`device_playback=unverified`（非 local_only） | **通过**（业务打断；非真人进出） |
 | 5 | HTTP ISAPI（非 HTTPS） | 推流 completed，unverified | `http://192.168.1.189`，play 完成 open_ms≈942 send_ms≈1461 | **通过** |
-| 6 | 多人进店 | 不错配姓名 | 未做（画面为办公空景，无多人同时入镜） | 待验证 |
-| 7 | 断网恢复 | 退避后恢复 | **软重开** RTSP 两次均成功；拔网线/断电源未测 | 部分（软通过） |
-| 8 | 门口 face_side_px | 列表/探测可见 | 漏检诊断帧 `tests/_out/field_miss_cam1.jpg`：办公隔断/工位空景，**无人脸**；`face_side_px` 无法观测 | 部分（有帧无脸） |
+| 6 | 多人进店 | 不错配姓名 | 当前帧仅 **1 脸**；多脸择优单测通过；真机多人同框未做 | 待验证 |
+| 7 | 断网恢复 | 退避后恢复 | **软重开** RTSP 两次成功（≈2.0–2.2s，2560×1440）；库内 status=**OFFLINE**；拔网线/断电源未测 | 部分（软通过） |
+| 8 | 门口 face_side_px | 列表/探测可见 | 真人入镜：InsightFace 直连 RTSP 帧检出 **1 脸**，`face_side_px=181`（det≈0.85）；帧 `field_residual_frame_cam1.jpg`；库内 OFFLINE 故后台列表未刷新 | **通过**（直连探测；非 API overview） |
 
-说明：项 3 人耳确认「欢迎光临」；项 4 证据 `tests/_out/field_interrupt_cam1.json`。复测推流：`python scripts/现场验收海康迎宾.py --camera-id 1 --play-g711 --heard yes`。
+说明：项 3 人耳确认「欢迎光临」；项 4 证据 `field_interrupt_cam1.json`；项 7/8 证据 `field_residual_soft_face.json`。复测推流：`python scripts/现场验收海康迎宾.py --camera-id 1 --play-g711 --heard yes`。
 
 ## 验收结论
 
 - **代码正确性（冷匹配、HTTPS 拒绝、取消语义、帧龄）**：自动化模拟通过。
-- **真机项 1/2/3/4/5**：**已通过**（3 人耳；4 为在线业务打断链路，非真人进出）。
-- **仍待人/场景：** 项 6 多人；项 7 拔线；项 8 门口有人脸（当前镜头为空办公景）。
+- **真机项 1/2/3/4/5/8**：**已通过**（3 人耳；4 业务打断；8 直连帧 `face_side_px=181`）。
+- **仍待人/场景：** 项 6 多人同框；项 7 拔线/断电（软重开已过；摄像头库状态 OFFLINE 需后台启采）。
 - **性能提升百分比**：**未宣称**。
