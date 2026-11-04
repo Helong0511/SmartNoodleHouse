@@ -266,6 +266,8 @@ class MeituanProvider(DeliveryProvider):
             resp = await client.post(url, data=params)
         else:
             resp = await client.get(url, params=params)
+        # HTTP 4xx/5xx 不能仅凭 JSON body 中的 data=ok 被误判为平台成功。
+        resp.raise_for_status()
         try:
             data = resp.json()
         except Exception:
@@ -585,6 +587,8 @@ class ElemeProvider(DeliveryProvider):
         url = settings.eleme_api_base.rstrip("/") + "/"
         client = await get_http_client()
         resp = await client.post(url, json=payload)
+        # JSON-RPC 错误体可能不含 error 字段；HTTP 非 2xx 必须先失败。
+        resp.raise_for_status()
         try:
             data = resp.json()
         except Exception:
