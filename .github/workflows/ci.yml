@@ -149,3 +149,21 @@ jobs:
         run: |
           npm ci
           npm audit --audit-level=high
+
+
+  miniprogram-static-check:
+    name: miniprogram-static-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check WeChat and Alipay mini-program JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            node --check --input-type=module < "$file"
+          done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)
