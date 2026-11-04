@@ -120,14 +120,18 @@ async def test_扣到0发出售罄镜像(db_session):
 
 
 @pytest.mark.asyncio
-async def test_未扣到0不发镜像(db_session):
+async def test_未扣到0也发库存数量镜像(db_session):
     store = await _make_store(db_session, "S-SOLD-2")
     product = await _make_product(db_session, store, "P-SOLD-2")
     stock_row = await _make_listing(db_session, store, product, stock=5)
     await db_session.commit()
 
     await deduct_stock(db_session, product.id, 2, store_id=store.id)
-    assert await _outbox_row(db_session, stock_row.id) is None
+    ob = await _outbox_row(db_session, stock_row.id)
+    assert ob is not None and ob.status == "PENDING"
+    payload = json.loads(ob.payload)
+    assert payload["zero"] is False
+    assert payload["store_id"] == store.id and payload["product_id"] == product.id
 
 
 # ── 信号行复活：同一餐品反复售罄/补货只保留一行 ────────────────────────────
@@ -400,3 +404,61 @@ async def test_库存不足落单被拒_不建本地单且写告警(db_session):
     # 本地订单 / 外卖订单扩展均无记录
     assert (await db_session.execute(select(Order))).scalars().all() == []
     assert (await db_session.execute(select(DeliveryOrder))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_无门店覆盖行时产品基础库存变化也会镜像(db_session, monkeypatch):
+    store = await _make_store(db_session, "S-BASE-MIRROR")
+    product = await _make_product(db_session, store, "P-BASE-MIRROR", price="18.00")
+    product.stock = 5
+    await _make_binding_and_map(db_session, store, product, sku="SKU-BASE", code="BASE")
+    await db_session.commit()
+
+    await deduct_stock(db_session, product.id, 2, store_id=store.id)
+    ob = (
+        await db_session.execute(
+            select(OutboxEvent).where(
+                OutboxEvent.aggregate_type == "delivery_stock_base",
+                OutboxEvent.aggregate_id == product.id,
+                OutboxEvent.event_kind == "mirror",
+            )
+        )
+    ).scalar_one_or_none()
+    assert ob is not None
+
+    pushed = []
+    fake = MagicMock()
+
+    async def _set(items):
+        pushed.append(items[0]["stock"])
+        return 1
+
+    fake.set_sku_stock = _set
+    _patch_provider(monkeypatch, fake)
+    await delivery_stock_mirror_handler(db_session, SimpleNamespace(id=ob.id, payload=ob.payload))
+    assert pushed == [3]
+
+
+def test_外卖菜单初次同步使用门店覆盖库存():
+    from app.services.product_sync_service import ProductSyncService
+
+    product = SimpleNamespace(
+        id=1, product_no="N-1", name="牛肉面", description="", price=Decimal("18.00"),
+        stock=999, status="ON_SALE", box_price=Decimal("0.00"), min_order_count=1,
+        main_image="/uploads/beef.jpg",
+    )
+    store_stock = SimpleNamespace(stock=5, status=1)
+    payload = ProductSyncService._build_product_payload_cached(
+        product, None, "SHOP-1", None, store_stock
+    )
+    assert payload["stock"] == 5
+    assert payload["skus"][0]["stock"] == 5
+    assert payload["is_sold_out"] == 0
+
+    store_stock.status = 0
+    payload = ProductSyncService._build_product_payload_cached(
+        product, None, "SHOP-1", None, store_stock
+    )
+    assert payload["stock"] == 0
+    assert payload["skus"][0]["stock"] == 0
+    assert payload["is_sold_out"] == 1
