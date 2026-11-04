@@ -99,8 +99,9 @@ class CustomerService:
         page: int = 1,
         page_size: int = 20,
         store_id: int | None = None,
+        allow_global_exact_phone_fallback: bool = False,
     ) -> tuple[list[Customer], int]:
-        """搜索启用顾客。store_id 非空时限定本店注册或本店下过单的顾客。"""
+        """搜索启用顾客。默认严格门店隔离；POS 可显式允许查找未验证的收银预留壳账号。"""
         import re
 
         kw = (keyword or "").strip()
@@ -134,10 +135,17 @@ class CustomerService:
                 )
             ).scalars().all()
         )
-        # 完整手机号在本店口径下无命中时，再按全局精确手机号兜底（便于选中「收银预留」壳）
-        if not rows and re.fullmatch(r"1\d{10}", kw):
+        # 全局手机号兜底仅供 POS 查找未验证的「收银预留」壳账号；
+        # 钱包搜索、后台顾客列表等默认严格门店隔离，不能借精确手机号读取外店会员余额。
+        if allow_global_exact_phone_fallback and not rows and re.fullmatch(r"1\d{10}", kw):
             exact = await CustomerService.find_active_by_phone(db, kw)
-            if exact is not None:
+            is_pos_shell = bool(
+                exact
+                and str(getattr(exact, "member_status", "") or "").upper() == "GUEST"
+                and str(getattr(exact, "profile_status", "") or "").upper() == "PARTIAL"
+                and not bool(int(getattr(exact, "phone_verified", 0) or 0))
+            )
+            if is_pos_shell:
                 return [exact], 1
         return rows, int(total)
 
