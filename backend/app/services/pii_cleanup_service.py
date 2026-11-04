@@ -40,8 +40,8 @@ async def anonymize_expired_delivery_pii(
     expired_order_ids = select(Order.id).where(
         Order.status.in_(_FINAL_STATUSES),
         or_(
-            Order.completed_at.isnot(None),
-            Order.cancelled_at.isnot(None),
+            (Order.completed_at.isnot(None) & (Order.completed_at < cutoff)),
+            (Order.cancelled_at.isnot(None) & (Order.cancelled_at < cutoff)),
         ),
     )
     # 主更新：脱敏这些订单对应的 delivery_orders PII
