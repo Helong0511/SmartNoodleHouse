@@ -111,4 +111,5 @@ def test_production_webhook_allowlist_rejects_invalid_ip_and_cidr():
 
     assert _invalid_ip_allowlist_entries("203.0.113.10, 2001:db8::/32") == []
     assert _invalid_ip_allowlist_entries("203.0.113.10, not-an-ip") == ["not-an-ip"]
+    assert _invalid_ip_allowlist_entries("0.0.0.0/0") == ["0.0.0.0/0"]
     assert _invalid_ip_allowlist_entries("") == ["<empty>"]
