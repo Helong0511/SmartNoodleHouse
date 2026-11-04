@@ -95,7 +95,11 @@ async def get_my_preferences(
     from app.models import Customer
     result = await db.execute(
         select(CustomerPreference)
-        .where(CustomerPreference.customer_id == customer.id)
+        .join(Customer, Customer.id == CustomerPreference.customer_id)
+        .where(
+            CustomerPreference.customer_id == customer.id,
+            Customer.recommend_opt_in == 1,
+        )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
     )
     prefs["all"] = [
