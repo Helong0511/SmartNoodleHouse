@@ -429,7 +429,7 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `registered_store_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '会员激活时门店 → stores.id；只记第一次',
   `registered_table_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '会员激活时桌台 → tables.id；只记第一次',
   `last_order_at` datetime(3) NULL DEFAULT NULL COMMENT '最近下单时间',
-  `recommend_opt_in` int NOT NULL DEFAULT 1 COMMENT '个性化推荐开关：1=开启（默认） 0=关闭（退回非个性化热销榜，不采集行为）',
+  `recommend_opt_in` int NOT NULL DEFAULT 0 COMMENT '个性化推荐开关：默认关闭；顾客明确同意后开启',
   `consent_version` varchar(40) NULL DEFAULT NULL COMMENT '个性化推荐同意的隐私政策版本（版本化留痕，PIPL 合规）',
   `recommend_consent_at` datetime(3) NULL DEFAULT NULL COMMENT '个性化推荐同意时间',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '首次建档时间（游客即可）',
