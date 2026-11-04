@@ -387,10 +387,12 @@ async def get_visitor_snapshot(
     from app.services.visitor_snapshot_access import verify_visitor_snapshot_signature
 
     event = await db.get(VisitorEvent, int(event_id))
-    if (
-        not event
-        or not event.snapshot_path
-        or (event.expires_at is not None and event.expires_at <= now_local())
+    current_time = now_local()
+    expires_at = getattr(event, "expires_at", None) if event else None
+    if expires_at is not None and getattr(expires_at, "tzinfo", None) is None:
+        expires_at = expires_at.replace(tzinfo=current_time.tzinfo)
+    if not event or not event.snapshot_path or (
+        expires_at is not None and expires_at <= current_time
     ):
         raise AppException(40425, "访客抓拍不存在或访问链接已过期", status_code=404)
     camera = await db.get(Camera, int(event.camera_id))
