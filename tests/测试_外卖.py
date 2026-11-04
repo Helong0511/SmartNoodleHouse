@@ -116,3 +116,62 @@ def test_parse_meituan_foods_detail_json():
     assert items[0]["app_food_code"] == "P001"
     assert items[0]["quantity"] == 2
     assert items[0]["options"][0]["value"] == "大份"
+
+
+@pytest.mark.asyncio
+async def test_meituan_rejects_http_500_even_if_json_claims_success(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import MeituanProvider
+
+    url = "https://waimaiopen.meituan.com/api/v1/order/confirm"
+    response = httpx.Response(
+        500,
+        json={"data": "ok"},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response), get=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(httpx.HTTPStatusError):
+            await MeituanProvider()._request("/api/v1/order/confirm", {"order_id": "O1"}, method="POST")
+
+
+@pytest.mark.asyncio
+async def test_eleme_rejects_http_500_empty_json_response(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        500,
+        json={},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(httpx.HTTPStatusError):
+            await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
