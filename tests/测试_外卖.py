@@ -208,3 +208,52 @@ async def test_eleme_rejects_http_200_empty_json_envelope(monkeypatch):
         result = await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
 
     assert result["error"]["code"] == "INVALID_RESPONSE"
+
+
+@pytest.mark.asyncio
+async def test_eleme_sync_product_requires_item_id_and_applies_off_shelf_state(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.services.delivery_providers import ElemeProvider
+
+    settings = SimpleNamespace(eleme_app_id="app", is_production=False, allow_delivery_mock=False)
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    provider = ElemeProvider()
+    provider._rpc = AsyncMock(return_value={"result": {"itemId": "ELEME-ITEM-1"}})
+    shelf_calls = []
+
+    async def _set_shelf(items, on_shelf):
+        shelf_calls.append((items, on_shelf))
+        return len(items)
+
+    provider.set_sell_status = _set_shelf
+    result = await provider.sync_product(
+        {
+            "shop_id": "SHOP-1", "name": "牛肉面", "app_food_code": "NOODLE-1",
+            "price": "18.00", "stock": 0, "is_sold_out": 1,
+        }
+    )
+    assert result["ok"] is True
+    assert result["platform_id"] == "ELEME-ITEM-1"
+    assert shelf_calls and shelf_calls[0][1] is False
+
+
+@pytest.mark.asyncio
+async def test_eleme_sync_product_does_not_create_mapping_without_item_id(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.services.delivery_providers import ElemeProvider
+
+    settings = SimpleNamespace(eleme_app_id="app", is_production=False, allow_delivery_mock=False)
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    provider = ElemeProvider()
+    provider._rpc = AsyncMock(return_value={"result": {}})
+    provider.set_sell_status = AsyncMock(return_value=1)
+    result = await provider.sync_product(
+        {"shop_id": "SHOP-1", "name": "牛肉面", "app_food_code": "NOODLE-1", "price": "18.00"}
+    )
+    assert result["ok"] is False
+    assert result["platform_id"] is None
+    provider.set_sell_status.assert_not_awaited()
