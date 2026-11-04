@@ -1,6 +1,7 @@
 """生产启动校验：危险默认配置必须显式覆盖。"""
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 import sys
@@ -43,6 +44,23 @@ def _entropy_score(value: str) -> float:
         classes += 1
     uniq = len(set(value))
     return (classes * 8.0) + (uniq / max(len(value), 1)) * 32.0
+
+
+def _invalid_ip_allowlist_entries(raw: str) -> list[str]:
+    """返回非法 Webhook IP/CIDR 项；生产配置必须至少包含一项有效地址。"""
+    parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    invalid: list[str] = []
+    if not parts:
+        return ["<empty>"]
+    for part in parts:
+        try:
+            if "/" in part:
+                ipaddress.ip_network(part, strict=False)
+            else:
+                ipaddress.ip_address(part)
+        except ValueError:
+            invalid.append(part)
+    return invalid
 
 
 def validate_settings(settings: Settings) -> None:
@@ -149,11 +167,13 @@ def validate_settings(settings: Settings) -> None:
         warnings.append("生产环境建议 STORAGE_BACKEND=s3，避免本地 uploads 直出")
 
     webhook_allow = (getattr(settings, "webhook_ip_allowlist", None) or "").strip()
-    if is_prod and getattr(settings, "webhook_require_allowlist", False) and not webhook_allow:
-        errors.append("已开启 WEBHOOK_REQUIRE_ALLOWLIST 但未配置 WEBHOOK_IP_ALLOWLIST")
-
-    if is_prod and not webhook_allow:
-        errors.append("生产须配置 WEBHOOK_IP_ALLOWLIST（支付/外卖回调 IP 白名单）")
+    if is_prod:
+        invalid_webhook_entries = _invalid_ip_allowlist_entries(webhook_allow)
+        if invalid_webhook_entries:
+            errors.append(
+                "生产 WEBHOOK_IP_ALLOWLIST 必须是有效 IP/CIDR 列表；非法项: "
+                + ", ".join(invalid_webhook_entries)
+            )
 
     # P1-41: 生产环境必需配置项不得使用开发默认值
     db_url = (getattr(settings, "database_url", None) or "").strip().lower()
