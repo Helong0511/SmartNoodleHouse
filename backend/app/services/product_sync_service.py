@@ -349,7 +349,13 @@ class ProductSyncService:
             )
         ).scalar_one_or_none()
         if existing:
-            # 饿了么重新同步可能拿到新 itemId，更新映射
+            # 同一平台 SKU 只能持续归属同一条本地餐品；禁止通过同步覆盖把旧映射静默转给另一条餐品。
+            if int(existing.product_id) != int(product.id):
+                raise AppException(
+                    40002,
+                    f"平台 SKU「{sku}」已绑定其他本地餐品（product_id={int(existing.product_id)}），拒绝覆盖映射",
+                )
+            # 同一餐品重新同步时允许刷新名称等元数据。
             existing.platform_sku_name = product.name
             existing.platform_spu_code = product.product_no
             existing.app_food_code = product.product_no
