@@ -99,6 +99,10 @@ def _patch_provider(monkeypatch, fake):
     async def _creds(db, platform, store_id):
         return MagicMock()
 
+    async def _set_sell_status(items, on_shelf):
+        return len(items)
+
+    fake.set_sell_status = _set_sell_status
     monkeypatch.setattr(hmod, "get_credentials_for_store", _creds)
 
 
@@ -263,7 +267,7 @@ async def test_handler_commits_before_platform_http():
         hmod,
         "_collect_stock_push_jobs",
         new_callable=AsyncMock,
-        return_value=[("MEITUAN", MagicMock(), [{"stock": 0}])],
+        return_value=[("MEITUAN", MagicMock(), [{"stock": 0}], True)],
     ), patch.object(
         hmod,
         "_execute_stock_push_jobs",
