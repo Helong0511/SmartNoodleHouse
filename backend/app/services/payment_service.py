@@ -1300,6 +1300,36 @@ class PaymentService:
         ).scalar_one_or_none()
 
     @classmethod
+    async def _lock_order_then_payment_for_refund(
+        cls, db: AsyncSession, refund: PaymentRefund
+    ) -> tuple[Payment, Order]:
+        """退款成功入账统一按 Order → Payment 加锁，与支付回调/订单状态机保持同序。
+
+        退款行可能已由回调/补偿任务先锁定；但不得先锁 Payment 再锁 Order，
+        否则会与 _lock_order_then_payment() 形成 Order↔Payment 死锁环。
+        """
+        order_id = int(refund.order_id) if refund.order_id is not None else 0
+        if order_id <= 0:
+            raise AppException(40302, "退款记录缺少有效订单关联")
+        order = (
+            await db.execute(
+                select(Order).where(Order.id == order_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not order:
+            raise AppException(40402, "退款关联订单不存在")
+        payment = (
+            await db.execute(
+                select(Payment).where(Payment.id == int(refund.payment_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not payment:
+            raise AppException(40401, "支付记录不存在")
+        if payment.order_id is None or int(payment.order_id) != order_id:
+            raise AppException(40302, "退款记录与原支付订单关联不一致")
+        return payment, order
+
+    @classmethod
     async def sync_payment_status(
         cls, db: AsyncSession, payment: Payment
     ) -> tuple[Payment, dict]:
@@ -2231,11 +2261,8 @@ class PaymentService:
             row.status = "SUCCESS"
             row._callback_transitioned_to_success = True
             row.succeeded_at = now_local()
-            payment = (
-                await db.execute(select(Payment).where(Payment.id == row.payment_id).with_for_update())
-            ).scalar_one_or_none()
-            if not payment:
-                raise AppException(40401, "支付记录不存在")
+            # 先锁订单再锁支付单，避免与支付回调的 Order→Payment 锁序死锁。
+            payment, order = await cls._lock_order_then_payment_for_refund(db, row)
             success_sum = await db.scalar(
                 select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
                     PaymentRefund.payment_id == payment.id,
@@ -2255,9 +2282,6 @@ class PaymentService:
                 source=source,
                 remark=f"refund_no={row.refund_no}",
             )
-            order = (
-                await db.execute(select(Order).where(Order.id == row.order_id).with_for_update())
-            ).scalar_one_or_none()
             if order:
                 provider_u = (payment.provider or "").upper()
                 if provider_u != "BALANCE":
