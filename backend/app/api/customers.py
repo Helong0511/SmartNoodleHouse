@@ -798,7 +798,11 @@ async def get_preferences(
     prefs = await PreferenceService.get_recommendations(db, customer_id, store_id=store_id)
     result = await db.execute(
         select(CustomerPreference)
-        .where(CustomerPreference.customer_id == customer_id)
+        .join(Customer, Customer.id == CustomerPreference.customer_id)
+        .where(
+            CustomerPreference.customer_id == customer_id,
+            Customer.recommend_opt_in == 1,
+        )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
     )
     prefs["all"] = [
