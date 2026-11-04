@@ -22,7 +22,7 @@ async def _emit_stock_mirror(
     zero: bool,
     aggregate_type: str = "delivery_stock",
 ) -> None:
-    """库存跨 0 翻转时发出外卖镜像信号（同事务）。
+    """库存发生变化时发出外卖绝对库存镜像信号（同事务）。
 
     复用 outbox：aggregate 用门店库存行 id（每店每品唯一）。因同一餐品会反复
     售罄/补货，而 outbox 键永久唯一，信号行为 DONE 时将其复活为 PENDING；
@@ -203,7 +203,6 @@ async def restore_stock(
             return
         row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
-            was_zero = int(row.stock or 0) == 0
             await db.execute(
                 text(
                     """
