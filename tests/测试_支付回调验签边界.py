@@ -238,8 +238,15 @@ def test_refund_callback_rejects_provider_mismatch():
 def test_refund_callback_rejects_payment_without_order_binding():
     payment, refund, parsed = _refund_binding_objects()
     payment.order_id = None
-    with pytest.raises(AppException, match="未绑定订单"):
+    with pytest.raises(AppException, match="订单关联不一致"):
         _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_allows_non_order_recharge_when_both_order_ids_are_null():
+    payment, refund, parsed = _refund_binding_objects()
+    payment.order_id = None
+    refund.order_id = None
+    _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
 
 
 def test_refund_callback_rejects_cross_order_refund_record():
