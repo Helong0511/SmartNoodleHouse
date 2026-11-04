@@ -576,6 +576,8 @@ class DeliveryService:
             product = await db.get(Product, mapping.product_id)
             if not product:
                 raise AppException(40451, f"映射餐品不存在: {mapping.product_id}")
+            if int(product.store_id) != int(store_id):
+                raise AppException(40301, f"外卖餐品映射跨门店，拒绝落单: {mapping.id}")
             option_ids: list[int] = []
             if mapping.option_map_json:
                 try:
