@@ -239,8 +239,10 @@ async def trade_refund_query(*, payment_no: str, refund_no: str) -> dict[str, An
         status = "PROCESSING"
     return {
         "refund_no": body.get("out_request_no") or refund_no,
+        "payment_no": body.get("out_trade_no") or payment_no,
+        "provider_trade_no": body.get("trade_no"),
         "status": status,
-        "provider_refund_no": None,  # trade_no 是原支付交易号，不是退款单号
+        "provider_refund_no": body.get("refund_id"),
         "amount": body.get("refund_amount"),
         "raw": body,
     }
