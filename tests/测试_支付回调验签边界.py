@@ -13,7 +13,7 @@ from app.core.exceptions import AppException
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.payment_service import AlipayProvider, PaymentService
 from app.services.alipay_client import trade_refund_query
-from app.services.payment_service import _validate_refund_callback_binding
+from app.services.payment_service import _validate_refund_callback_binding, _validate_duplicate_paid_callback
 
 
 def _wechat_settings():
@@ -745,3 +745,53 @@ async def test_refund_query_poll_rejects_mismatched_refund_identifier(monkeypatc
     with pytest.raises(AppException, match="退款单号"):
         await PaymentService.sync_refund_status(db, refund)
     finalize.assert_not_awaited()
+
+
+
+def test_duplicate_paid_callback_requires_same_provider_amount_and_trade_id():
+    payment = SimpleNamespace(
+        provider="ALIPAY",
+        amount=Decimal("5.00"),
+        provider_trade_no="TRADE-100",
+    )
+    parsed = {
+        "status": "PAID",
+        "amount": "5.00",
+        "provider_trade_no": "TRADE-100",
+    }
+    _validate_duplicate_paid_callback("ALIPAY", payment, parsed)
+
+
+def test_duplicate_paid_callback_rejects_cross_provider():
+    payment = SimpleNamespace(
+        provider="WECHAT",
+        amount=Decimal("5.00"),
+        provider_trade_no="WX-TRADE-100",
+    )
+    parsed = {
+        "status": "PAID",
+        "amount": 500,
+        "provider_trade_no": "WX-TRADE-100",
+    }
+    with pytest.raises(AppException, match="渠道"):
+        _validate_duplicate_paid_callback("ALIPAY", payment, parsed)
+
+
+def test_duplicate_paid_callback_rejects_amount_or_trade_mismatch():
+    payment = SimpleNamespace(
+        provider="WECHAT",
+        amount=Decimal("5.00"),
+        provider_trade_no="WX-TRADE-100",
+    )
+    with pytest.raises(AppException, match="金额"):
+        _validate_duplicate_paid_callback(
+            "WECHAT",
+            payment,
+            {"status": "PAID", "amount": 400, "provider_trade_no": "WX-TRADE-100"},
+        )
+    with pytest.raises(AppException, match="交易号"):
+        _validate_duplicate_paid_callback(
+            "WECHAT",
+            payment,
+            {"status": "PAID", "amount": 500, "provider_trade_no": "WX-TRADE-OTHER"},
+        )
