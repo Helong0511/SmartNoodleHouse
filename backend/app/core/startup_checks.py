@@ -55,7 +55,9 @@ def _invalid_ip_allowlist_entries(raw: str) -> list[str]:
     for part in parts:
         try:
             if "/" in part:
-                ipaddress.ip_network(part, strict=False)
+                network = ipaddress.ip_network(part, strict=False)
+                if network.prefixlen == 0:
+                    invalid.append(part)
             else:
                 ipaddress.ip_address(part)
         except ValueError:
