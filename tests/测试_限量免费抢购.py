@@ -916,3 +916,76 @@ async def test_api_verify_other_store_rejected(db_session):
         )
         assert r.status_code == 403
         assert r.json()["code"] == 40300
+
+
+@pytest.mark.asyncio
+async def test_api_customer_anonymous_browse_but_claim_requires_login(db_session):
+    """顾客端：列表允许匿名浏览，我的资格/抢购必须登录（401/40100）。"""
+    seed = await _seed(db_session)
+    async with _api_client(db_session) as ac:
+        r = await ac.get(
+            "/api/miniprogram/flash-sales", params={"store_id": seed["store_a_id"]}
+        )
+        assert r.status_code == 200
+        assert r.json()["data"]["items"]
+
+        r2 = await ac.get(
+            "/api/miniprogram/flash-sales/mine", params={"store_id": seed["store_a_id"]}
+        )
+        assert r2.status_code == 401
+        assert r2.json()["code"] == 40100
+
+        r3 = await ac.post(
+            f"/api/miniprogram/flash-sales/{seed['campaign_id']}/claim",
+            json={"store_id": seed["store_a_id"]},
+        )
+        assert r3.status_code == 401
+        assert r3.json()["code"] == 40100
+    # 未登录请求不产生资格、不消耗库存
+    assert await _remaining(db_session, seed["campaign_id"], seed["store_a_id"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_api_admin_requires_login_and_rejects_bad_token(db_session):
+    """后台：无 token 返回 40100，伪造 token 返回 40101。"""
+    seed = await _seed(db_session)
+    detail_url = f"/api/marketing/flash-sales/campaigns/{seed['campaign_id']}"
+    async with _api_client(db_session) as ac:
+        r = await ac.get(detail_url)
+        assert r.status_code == 401
+        assert r.json()["code"] == 40100
+
+        r2 = await ac.get(detail_url, headers={"Authorization": "Bearer not-a-jwt"})
+        assert r2.status_code == 401
+        assert r2.json()["code"] == 40101
+
+        r3 = await ac.post(
+            "/api/marketing/flash-sales/claims/verify",
+            json={"claim_no": "FS-NOT-EXIST"},
+        )
+        assert r3.status_code == 401
+        assert r3.json()["code"] == 40100
+
+
+@pytest.mark.asyncio
+async def test_api_parameter_validation(db_session):
+    """入参校验：store_id 必填且 >=1，缺失/非法统一返回 40001。"""
+    seed = await _seed(db_session)
+    async with _api_client(db_session, customer=seed["customer"]) as ac:
+        r = await ac.get("/api/miniprogram/flash-sales")
+        assert r.status_code == 422
+        assert r.json()["code"] == 40001
+
+        r2 = await ac.get(
+            "/api/miniprogram/flash-sales", params={"store_id": 0}
+        )
+        assert r2.status_code == 422
+        assert r2.json()["code"] == 40001
+
+        r3 = await ac.post(
+            f"/api/miniprogram/flash-sales/{seed['campaign_id']}/claim",
+            json={"store_id": 0},
+        )
+        assert r3.status_code == 422
+        assert r3.json()["code"] == 40001
+    assert await _remaining(db_session, seed["campaign_id"], seed["store_a_id"]) == 2
