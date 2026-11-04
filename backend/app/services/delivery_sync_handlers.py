@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.models import (
     DeliveryProductMap,
     PlatformStoreBinding,
+    Product,
     StoreProductStock,
 )
 from app.services.delivery_context import get_credentials_for_store
@@ -40,12 +41,27 @@ async def _collect_stock_push_jobs(
         )
     ).scalar_one_or_none()
     if row is None:
-        logger.info("库存镜像跳过：门店库存行不存在 store=%s product=%s", store_id, product_id)
-        return []
-
-    if int(row.status) == 1:
+        # 没有门店覆盖行时，stock_service 使用 products.stock 作为该店有效库存。
+        product = (
+            await db.execute(
+                select(Product).where(
+                    Product.id == product_id,
+                    Product.store_id == store_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if product is None:
+            logger.info("库存镜像跳过：餐品不属于门店 store=%s product=%s", store_id, product_id)
+            return []
+        s = int(product.stock or 0)
+        target = (
+            _PLATFORM_UNLIMITED
+            if product.status == "ON_SALE" and s >= UNLIMITED_STOCK
+            else max(0, s) if product.status == "ON_SALE" else 0
+        )
+    elif int(row.status) == 1:
         s = int(row.stock or 0)
-        target = _PLATFORM_UNLIMITED if s >= UNLIMITED_STOCK else s
+        target = _PLATFORM_UNLIMITED if s >= UNLIMITED_STOCK else max(0, s)
     else:
         target = 0  # 门店停售 = 平台售罄
 
@@ -134,6 +150,7 @@ async def _push_store_product_stock(db, store_id: int, product_id: int) -> int:
     return await _execute_stock_push_jobs(jobs, store_id=store_id, product_id=product_id)
 
 
+@register_outbox_handler("delivery_stock_base", "mirror")
 @register_outbox_handler("delivery_stock", "mirror")
 async def delivery_stock_mirror_handler(db, row) -> None:
     payload = json.loads(row.payload) if row.payload else {}
