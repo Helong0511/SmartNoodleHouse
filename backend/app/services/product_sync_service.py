@@ -397,6 +397,29 @@ class ProductSyncService:
         if not maps:
             return {"ok": True, "updated": 0, "total": 0, "on_shelf": on_shelf}
 
+        # 映射表自身也可能因历史数据、手工 SQL 或旧版本缺陷而出现跨店关联。
+        # 在调用第三方平台前，必须再次确认每个映射对应的本地餐品确实属于当前门店。
+        mapped_product_ids = sorted({int(m.product_id) for m in maps})
+        foreign_product_id = await db.scalar(
+            select(Product.id)
+            .where(
+                Product.id.in_(mapped_product_ids),
+                Product.store_id != int(store_id),
+            )
+            .limit(1)
+        )
+        if foreign_product_id is not None:
+            logger.error(
+                "拒绝跨门店外卖上下架：store_id=%s platform=%s product_id=%s",
+                store_id,
+                platform,
+                foreign_product_id,
+            )
+            raise AppException(
+                40301,
+                f"检测到跨门店外卖餐品映射（product_id={int(foreign_product_id)}），已拒绝平台上下架操作",
+            )
+
         items = [
             {"app_food_code": m.app_food_code or m.platform_sku_id, "platform_sku_id": m.platform_sku_id}
             for m in maps
