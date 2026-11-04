@@ -31,6 +31,10 @@ async def test_anonymize_issues_update_with_correct_filters():
     assert "is not null" in stmt_str
     assert "recipient_name" in stmt_str
     assert "rider_phone" in stmt_str
+    # 关键回归：清理子查询必须按完成/取消时间与 cutoff 比较，不能只判断时间非空。
+    assert "completed_at" in stmt_str
+    assert "cancelled_at" in stmt_str
+    assert " < " in stmt_str
 
 
 @pytest.mark.asyncio
