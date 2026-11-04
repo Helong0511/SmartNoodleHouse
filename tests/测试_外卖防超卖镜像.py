@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import select, text
 
+from app.core.exceptions import AppException
 from app.models import (
     DeliveryOrder,
     DeliveryProductMap,
@@ -462,3 +463,54 @@ def test_外卖菜单初次同步使用门店覆盖库存():
     assert payload["stock"] == 0
     assert payload["skus"][0]["stock"] == 0
     assert payload["is_sold_out"] == 1
+
+
+@pytest.mark.asyncio
+async def test_跨门店餐品映射不得用于外卖订单落单(db_session):
+    from app.services.delivery_service import DeliveryService
+
+    store_a = await _make_store(db_session, "S-MAP-CROSS-A")
+    store_b = await _make_store(db_session, "S-MAP-CROSS-B")
+    product_b = await _make_product(db_session, store_b, "P-MAP-CROSS-B")
+    db_session.add(
+        DeliveryProductMap(
+            id=next(_seq), store_id=store_a.id, platform="MEITUAN",
+            platform_sku_id="SKU-CROSS", app_food_code="CODE-CROSS",
+            product_id=product_b.id, status=1,
+        )
+    )
+    await db_session.flush()
+
+    with pytest.raises(AppException, match="跨门店"):
+        await DeliveryService._resolve_product(
+            db_session, store_a.id, "MEITUAN",
+            {"platform_sku_id": "SKU-CROSS", "app_food_code": "CODE-CROSS", "name": "跨店餐品"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_跨门店餐品不得被推送到其他门店平台(db_session):
+    from app.services.product_sync_service import ProductSyncService
+
+    store_a = await _make_store(db_session, "S-SYNC-CROSS-A")
+    store_b = await _make_store(db_session, "S-SYNC-CROSS-B")
+    product_b = await _make_product(db_session, store_b, "P-SYNC-CROSS-B")
+    db_session.add(
+        PlatformStoreBinding(
+            id=next(_seq), store_id=store_a.id, platform="MEITUAN",
+            platform_shop_id=f"MT-{store_a.id}", status=1, auto_sync_open=False,
+        )
+    )
+    db_session.add(
+        DeliveryProductMap(
+            id=next(_seq), store_id=store_a.id, platform="MEITUAN",
+            platform_sku_id="SKU-SYNC-CROSS", app_food_code="CODE-SYNC-CROSS",
+            product_id=product_b.id, status=1,
+        )
+    )
+    await db_session.flush()
+
+    with pytest.raises(AppException, match="跨门店"):
+        await ProductSyncService._load_maps_products(db_session, store_a.id, "MEITUAN")
+    with pytest.raises(AppException, match="不属于当前门店"):
+        await ProductSyncService.sync_single_product(db_session, store_a.id, "MEITUAN", product_b.id)
