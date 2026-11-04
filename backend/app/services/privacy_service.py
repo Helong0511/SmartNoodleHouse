@@ -56,6 +56,13 @@ class PrivacyService:
         opt_in = 1 if opt_in else 0
         old = int(customer.recommend_opt_in or 0)
         customer.recommend_opt_in = opt_in
+        if opt_in:
+            # 顾客主动点击授权后调用；每次重新开启均记录新的同意时间与政策版本。
+            customer.consent_version = CONSENT_VERSION
+            customer.recommend_consent_at = datetime.now(timezone.utc)
+        else:
+            # 撤回授权后立即清除派生画像与行为数据；订单及财务凭证不删除。
+            await cls.clear_taste_profile(db, customer, request=request)
         await db.flush()
         await AuditService.log(
             db,
@@ -63,7 +70,7 @@ class PrivacyService:
             module="privacy",
             target_type="customer",
             target_id=int(customer.id),
-            detail={"old": old, "new": opt_in},
+            detail={"old": old, "new": opt_in, "consent_version": customer.consent_version if opt_in else None, "consented_at": serialize_dt(customer.recommend_consent_at) if opt_in and customer.recommend_consent_at else None},
             request=request,
             category=AuditService.CATEGORY_CUSTOMER,
         )
