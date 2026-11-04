@@ -33,6 +33,35 @@ from app.services.webhook_replay import claim_once, make_receipt_key, release_cl
 logger = logging.getLogger(__name__)
 
 
+def _validate_duplicate_paid_callback(provider_u: str, payment: Payment, parsed: dict) -> None:
+    """已支付记录的重复成功回调必须与原渠道、原金额、原交易号完全一致。"""
+    provider = str(provider_u or "").strip().upper()
+    stored_provider = str(getattr(payment, "provider", "") or "").strip().upper()
+    if provider not in ("WECHAT", "ALIPAY") or stored_provider != provider:
+        raise AppException(40302, "支付回调渠道与本地支付记录不匹配")
+
+    raw_amount = parsed.get("amount")
+    if isinstance(raw_amount, dict):
+        raw_amount = raw_amount.get("total")
+    if raw_amount is None:
+        raise AppException(40302, "重复支付回调缺少金额")
+    try:
+        callback_amount = (
+            money(Decimal(str(raw_amount)) / 100)
+            if provider == "WECHAT"
+            else money(Decimal(str(raw_amount)))
+        )
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise AppException(40302, "重复支付回调金额非法") from exc
+    if callback_amount != money(payment.amount):
+        raise AppException(40302, "重复支付回调金额与原支付记录不匹配")
+
+    callback_trade_no = str(parsed.get("provider_trade_no") or "").strip()
+    stored_trade_no = str(getattr(payment, "provider_trade_no", "") or "").strip()
+    if not callback_trade_no or not stored_trade_no or callback_trade_no != stored_trade_no:
+        raise AppException(40302, "重复支付回调渠道交易号与原支付记录不匹配")
+
+
 def _validate_refund_callback_binding(
     provider: str,
     parsed: dict,
@@ -1875,8 +1904,12 @@ class PaymentService:
         payment = await cls._lock_order_then_payment(db, int(peek))
         if not payment:
             raise AppException(40401, "支付记录不存在")
+        if str(payment.provider or "").strip().upper() != str(provider_u or "").strip().upper():
+            raise AppException(40302, "支付回调渠道与本地支付记录不匹配")
 
         if payment.status == "PAID":
+            if str(parsed.get("status") or "").strip().upper() == "PAID":
+                _validate_duplicate_paid_callback(provider_u, payment, parsed)
             return payment
 
         # 储值充值回调
