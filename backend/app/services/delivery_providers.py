@@ -680,6 +680,23 @@ class ElemeProvider(DeliveryProvider):
             except Exception:
                 result = {}
         platform_id = str(result.get("itemId") or result.get("id") or "") if ok else None
+        if ok and not platform_id and not data.get("_mock"):
+            return {
+                "ok": False,
+                "platform_id": None,
+                "error": "饿了么成功响应缺少 itemId，拒绝写入错误商品映射",
+            }
+        if ok and platform_id:
+            shelf_done = await self.set_sell_status(
+                [{"platform_sku_id": platform_id}],
+                on_shelf=int(payload.get("is_sold_out", 0)) == 0,
+            )
+            if shelf_done < 1:
+                return {
+                    "ok": False,
+                    "platform_id": platform_id,
+                    "error": "饿了么商品已创建，但上下架状态同步失败",
+                }
         return {"ok": ok, "platform_id": platform_id or None, "error": None if ok else str(data.get("error"))}
 
     async def sync_prices(self, items: list[dict]) -> int:
