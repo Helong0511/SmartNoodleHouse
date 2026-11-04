@@ -177,3 +177,34 @@ async def test_eleme_rejects_http_500_empty_json_response(monkeypatch):
     with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
         with pytest.raises(httpx.HTTPStatusError):
             await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
+
+
+@pytest.mark.asyncio
+async def test_eleme_rejects_http_200_empty_json_envelope(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        json={},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        result = await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
+
+    assert result["error"]["code"] == "INVALID_RESPONSE"
