@@ -594,6 +594,12 @@ class ElemeProvider(DeliveryProvider):
         except Exception:
             logger.error("饿了么响应非 JSON: %s", resp.text[:200])
             return {"error": resp.text[:200]}
+        if not isinstance(data, dict):
+            logger.error("饿了么响应结构无效 action=%s type=%s", action, type(data).__name__)
+            return {"error": {"code": "INVALID_RESPONSE", "message": "响应必须为 JSON 对象"}}
+        if data.get("error") is None and "result" not in data:
+            logger.error("饿了么响应缺少 result/error action=%s", action)
+            return {"error": {"code": "INVALID_RESPONSE", "message": "响应缺少 result 字段"}}
         if data.get("error"):
             logger.error("饿了么 API 失败 %s: %s", action, data)
         return data
