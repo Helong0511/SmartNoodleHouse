@@ -32,6 +32,18 @@ async def _collect_stock_push_jobs(
     db, store_id: int, product_id: int
 ) -> list[tuple[str, Any, list[dict], bool]]:
     """只读本地库存与映射，拼出平台推送任务（不含 HTTP）。"""
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.id == product_id,
+                Product.store_id == store_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if product is None:
+        logger.info("库存镜像跳过：餐品不属于门店 store=%s product=%s", store_id, product_id)
+        return []
+
     row = (
         await db.execute(
             select(StoreProductStock).where(
@@ -40,33 +52,18 @@ async def _collect_stock_push_jobs(
             )
         )
     ).scalar_one_or_none()
+    # 商品主档停售具有最高优先级；门店库存覆盖不能把总部/主档已下架商品重新上架。
     if row is None:
-        # 没有门店覆盖行时，stock_service 使用 products.stock 作为该店有效库存。
-        product = (
-            await db.execute(
-                select(Product).where(
-                    Product.id == product_id,
-                    Product.store_id == store_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if product is None:
-            logger.info("库存镜像跳过：餐品不属于门店 store=%s product=%s", store_id, product_id)
-            return []
         s = int(product.stock or 0)
         on_shelf = product.status == "ON_SALE"
-        target = (
-            _PLATFORM_UNLIMITED
-            if on_shelf and s >= UNLIMITED_STOCK
-            else max(0, s) if on_shelf else 0
-        )
     else:
-        on_shelf = int(row.status) == 1
-        if on_shelf:
-            s = int(row.stock or 0)
-            target = _PLATFORM_UNLIMITED if s >= UNLIMITED_STOCK else max(0, s)
-        else:
-            target = 0  # 门店停售：库存置0并同步下架
+        s = int(row.stock or 0)
+        on_shelf = int(row.status) == 1 and product.status == "ON_SALE"
+    target = (
+        _PLATFORM_UNLIMITED
+        if on_shelf and s >= UNLIMITED_STOCK
+        else max(0, s) if on_shelf else 0
+    )
 
     bindings = (
         await db.execute(
