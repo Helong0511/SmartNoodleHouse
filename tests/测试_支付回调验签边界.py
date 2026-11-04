@@ -796,3 +796,32 @@ def test_duplicate_paid_callback_rejects_amount_or_trade_mismatch():
             payment,
             {"status": "PAID", "amount": 500, "provider_trade_no": "WX-TRADE-OTHER"},
         )
+
+
+@pytest.mark.asyncio
+async def test_wechat_refund_query_uses_official_out_refund_no_path(monkeypatch):
+    """微信官方接口路径为 /v3/refund/domestic/refunds/{out_refund_no}。"""
+    from app.services import wechat_pay_client
+
+    request_mock = AsyncMock(
+        return_value={
+            "status": "SUCCESS",
+            "out_refund_no": "RF202611040001",
+            "out_trade_no": "PAY202611040001",
+            "transaction_id": "420000000000000001",
+            "refund_id": "500000000000000001",
+            "amount": {"refund": 100, "total": 100, "currency": "CNY"},
+        }
+    )
+    monkeypatch.setattr(wechat_pay_client, "_request", request_mock)
+
+    result = await wechat_pay_client.query_refund(refund_no="RF202611040001")
+
+    request_mock.assert_awaited_once_with(
+        "GET", "/v3/refund/domestic/refunds/RF202611040001"
+    )
+    assert result["status"] == "SUCCESS"
+    assert result["refund_no"] == "RF202611040001"
+    assert result["payment_no"] == "PAY202611040001"
+    assert result["provider_trade_no"] == "420000000000000001"
+    assert result["provider_refund_no"] == "500000000000000001"
