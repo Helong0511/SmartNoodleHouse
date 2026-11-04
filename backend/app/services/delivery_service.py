@@ -844,8 +844,10 @@ class DeliveryService:
             raise AppException(40453, "退款记录不存在")
         if refund.status in ("APPROVED", "REJECTED"):
             raise AppException(40053, f"退款已处理: {refund.status}")
-        if refund.status not in ("PENDING", "PROCESSING"):
-            raise AppException(40053, f"退款已处理: {refund.status}")
+        if refund.status == "PROCESSING":
+            raise AppException(40953, "退款正在平台处理中，请勿重复提交；请先核对平台退款结果")
+        if refund.status != "PENDING":
+            raise AppException(40053, f"退款当前状态不可处理: {refund.status}")
 
         d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
         order = await db.get(Order, refund.order_id) if refund.order_id else None
@@ -871,14 +873,19 @@ class DeliveryService:
         await db.commit()
 
         provider = get_delivery_provider(platform, credentials)
-        if approve:
-            ok = await provider.agree_refund(platform_refund_id, platform_order_id)
-        else:
-            ok = await provider.disagree_refund(
-                platform_refund_id,
-                platform_order_id,
-                reason or "商家拒绝退款",
-            )
+        try:
+            if approve:
+                ok = await provider.agree_refund(platform_refund_id, platform_order_id)
+            else:
+                ok = await provider.disagree_refund(
+                    platform_refund_id,
+                    platform_order_id,
+                    reason or "商家拒绝退款",
+                )
+        except Exception as exc:
+            # 网络超时/连接中断时平台可能已受理；保持 PROCESSING，禁止盲目重试造成重复退款。
+            logger.exception("外卖退款平台结果不确定，保留 PROCESSING refund_id=%s", refund_id)
+            raise AppException(50353, "平台退款结果暂不确定，退款单已锁定处理中，请先查询平台结果") from exc
 
         refund = (
             await db.execute(
@@ -896,6 +903,7 @@ class DeliveryService:
             # 平台拒绝：回 PENDING 供商家重试
             refund.status = "PENDING"
             await db.flush()
+            await db.commit()
             raise AppException(40062, "平台拒绝同意退款，请稍后重试或联系平台" if approve else "平台拒绝退款拒绝操作，请稍后重试或联系平台")
 
         d_order = await db.get(DeliveryOrder, delivery_order_id)
