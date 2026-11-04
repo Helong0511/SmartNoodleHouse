@@ -279,6 +279,8 @@ async def query_refund(*, refund_no: str) -> dict[str, Any]:
         status = "UNKNOWN"
     return {
         "refund_no": data.get("out_refund_no") or refund_no,
+        "payment_no": data.get("out_trade_no"),
+        "provider_trade_no": data.get("transaction_id"),
         "status": status,
         "provider_refund_no": data.get("refund_id"),
         "amount": data.get("amount", {}),
