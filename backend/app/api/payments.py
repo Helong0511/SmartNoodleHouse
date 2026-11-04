@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from fastapi import APIRouter, Request
@@ -20,6 +21,8 @@ from app.services.store_scope import assert_order_store_access, require_bound_st
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/payments", tags=["支付"])
+
+logger = logging.getLogger(__name__)
 
 
 class RefundCreate(BaseModel):
@@ -533,16 +536,20 @@ async def _notify_paid_or_refunded(db: DbSession, result, *, transitioned: bool 
     ):
         order = await db.get(Order, result.order_id)
         if order:
-            await ws_manager.notify_order_event(
-                "ORDER_REFUNDED",
-                {
-                    "order_id": order.id,
-                    "order_no": order.order_no,
-                    "refund_no": result.refund_no,
-                    "amount": str(result.amount),
-                    "store_id": order.store_id,
-                },
-            )
+            try:
+                await ws_manager.notify_order_event(
+                    "ORDER_REFUNDED",
+                    {
+                        "order_id": order.id,
+                        "order_no": order.order_no,
+                        "refund_no": result.refund_no,
+                        "amount": str(result.amount),
+                        "store_id": order.store_id,
+                    },
+                )
+            except Exception:
+                # 数据库已提交；WebSocket 是可重取的实时提示，不能因此让支付平台重试已入账回调。
+                logger.exception("退款回调已提交，但 WebSocket 通知失败 order_id=%s", order.id)
     elif (
         isinstance(result, Payment)
         and result.status == "PAID"
@@ -550,10 +557,13 @@ async def _notify_paid_or_refunded(db: DbSession, result, *, transitioned: bool 
     ):
         order = await db.get(Order, result.order_id)
         if order:
-            await ws_manager.notify_order_event(
-                "ORDER_PAID",
-                {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
-            )
+            try:
+                await ws_manager.notify_order_event(
+                    "ORDER_PAID",
+                    {"order_id": order.id, "order_no": order.order_no, "store_id": order.store_id},
+                )
+            except Exception:
+                logger.exception("支付回调已提交，但 WebSocket 通知失败 order_id=%s", order.id)
 
 
 @router.post("/wechat/notify")
@@ -562,6 +572,8 @@ async def wechat_notify(request: Request, db: DbSession):
     body = await request.body()
     headers = dict(request.headers)
     result = await PaymentService.handle_callback(db, "WECHAT", headers, body)
+    # FastAPI yield 依赖默认在响应发送后执行；Webhook 必须先提交事实数据，再向微信 ACK。
+    await db.commit()
     await _notify_paid_or_refunded(db, result)
     return {"code": "SUCCESS", "message": "成功"}
 
@@ -578,6 +590,8 @@ async def alipay_notify(request: Request, db: DbSession):
     body = await request.body()
     headers = dict(request.headers)
     result = await PaymentService.handle_callback(db, "ALIPAY", headers, body)
+    # 必须在返回支付宝 success 前提交，避免平台停止重试而本地事务随后回滚。
+    await db.commit()
     await _notify_paid_or_refunded(db, result)
     return "success"
 
