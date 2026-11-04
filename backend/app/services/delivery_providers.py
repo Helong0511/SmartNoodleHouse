@@ -331,7 +331,14 @@ class MeituanProvider(DeliveryProvider):
                 "price": payload["price"],
                 "box_price": payload.get("box_price", "0"),
                 "min_order_count": payload.get("min_order_count", 1),
-                "skus": payload.get("skus") or [{"sku_id": payload["app_food_code"], "price": payload["price"], "spec": "默认"}],
+                "skus": payload.get("skus") or [
+                    {
+                        "sku_id": payload["app_food_code"],
+                        "price": payload["price"],
+                        "spec": "默认",
+                        "stock": payload.get("stock", 9999),
+                    }
+                ],
             },
             ensure_ascii=False,
         )
@@ -384,7 +391,7 @@ class MeituanProvider(DeliveryProvider):
                 "name": p["name"],
                 "description": p.get("description", ""),
                 "price": p["price"],
-                "is_sold_out": 0,
+                "is_sold_out": int(p.get("is_sold_out", 1 if int(p.get("stock", 9999)) <= 0 else 0)),
                 "min_order_count": p.get("min_order_count", 1) or 1,
                 "unit": "份",
                 "box_price": str(p.get("box_price", 0) or 0),
@@ -652,7 +659,14 @@ class ElemeProvider(DeliveryProvider):
                 "name": payload["name"],
                 "description": payload.get("description", ""),
                 "categoryName": payload.get("category_name", "默认"),
-                "specs": [{"specId": payload["app_food_code"], "name": "默认", "price": payload["price"]}],
+                "specs": [
+                    {
+                        "specId": payload["app_food_code"],
+                        "name": "默认",
+                        "price": payload["price"],
+                        "stock": int(payload.get("stock", 9999)),
+                    }
+                ],
             },
         )
         ok = _ok_or_mock(data, ok_expr=data.get("error") is None)
