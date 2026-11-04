@@ -104,3 +104,11 @@ def test_prod_rejects_allow_print_mock():
     )
     with pytest.raises(SystemExit):
         validate_settings(s)
+
+
+def test_production_webhook_allowlist_rejects_invalid_ip_and_cidr():
+    from app.core.startup_checks import _invalid_ip_allowlist_entries
+
+    assert _invalid_ip_allowlist_entries("203.0.113.10, 2001:db8::/32") == []
+    assert _invalid_ip_allowlist_entries("203.0.113.10, not-an-ip") == ["not-an-ip"]
+    assert _invalid_ip_allowlist_entries("") == ["<empty>"]
