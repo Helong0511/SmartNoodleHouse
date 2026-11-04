@@ -263,7 +263,9 @@ class WechatPayProvider:
         return {
             "payment_no": data.get("out_trade_no"),
             "provider_trade_no": data.get("transaction_id"),
-            "amount": str(total),  # 微信回调金额单位：分
+            # 保留微信原始 amount 对象（total/refund/currency/payer_total）。
+            # 支付回调处理器读取 total；退款处理器还必须读取 refund 和 currency。
+            "amount": dict(amt) if isinstance(amt, dict) else str(total),
             "currency": currency,
             "status": "PAID" if data.get("trade_state") == "SUCCESS" else "FAILED",
             "mchid": data.get("mchid"),
