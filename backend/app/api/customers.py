@@ -709,8 +709,9 @@ async def update_customer(
         old_opt = int(customer.recommend_opt_in or 0)
         new_opt = int(body.recommend_opt_in)
         if old_opt != new_opt:
-            if new_opt and (not customer.consent_version or not customer.recommend_consent_at):
-                raise AppException(40931, "顾客尚未明确授权个性化推荐，员工不能代替顾客开启")
+            if new_opt:
+                # 即使曾经同意过，撤回后也不能由员工代替顾客重新开启。
+                raise AppException(40931, "只能由顾客本人在小程序隐私设置中明确授权开启")
             changes["recommend_opt_in"] = {"old": old_opt, "new": new_opt}
             customer.recommend_opt_in = new_opt
             if not new_opt:
