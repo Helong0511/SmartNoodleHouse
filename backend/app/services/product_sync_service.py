@@ -131,6 +131,8 @@ class ProductSyncService:
         product = await db.get(Product, product_id)
         if not product:
             return {"ok": False, "message": "餐品不存在"}
+        if int(product.store_id) != int(store_id):
+            raise AppException(40301, "餐品不属于当前门店，禁止跨店同步")
 
         cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
         store_stock = (
@@ -243,9 +245,20 @@ class ProductSyncService:
         products = {
             p.id: p
             for p in (
-                await db.execute(select(Product).where(Product.id.in_(pids or [-1])))
+                await db.execute(
+                    select(Product).where(
+                        Product.id.in_(pids or [-1]),
+                        Product.store_id == store_id,
+                    )
+                )
             ).scalars().all()
         }
+        invalid_maps = [m.id for m in maps if int(m.product_id) not in products]
+        if invalid_maps:
+            raise AppException(
+                40301,
+                f"检测到跨门店或不存在的外卖餐品映射，拒绝同步: {invalid_maps[:10]}",
+            )
         return maps, products
 
     @classmethod
