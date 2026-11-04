@@ -141,3 +141,12 @@ async def test_payment_webhook_commits_before_success_ack(monkeypatch, route_nam
 
     assert events == ["handle", "commit", "notify"]
     db.commit.assert_awaited_once()
+
+
+def test_db_session_dependency_commits_before_response_scope():
+    from typing import get_args
+
+    from app.api.deps import DbSession
+
+    dependency = get_args(DbSession)[1]
+    assert dependency.scope == "function"
