@@ -72,3 +72,51 @@ async def test_set_shelf_rejects_cross_store_product_mapping_before_platform_cal
     assert db.committed is False
     credentials.assert_not_awaited()
     provider_factory.assert_not_awaited()
+
+
+
+class _SingleResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _MappingDb:
+    def __init__(self, existing):
+        self.existing = existing
+        self.flushed = False
+
+    async def execute(self, _statement):
+        return _SingleResult(self.existing)
+
+    async def flush(self):
+        self.flushed = True
+
+
+@pytest.mark.asyncio
+async def test_ensure_default_map_rejects_reassigning_existing_platform_sku():
+    db = _MappingDb(
+        existing=SimpleNamespace(
+            product_id=100,
+            platform_sku_name="旧餐品",
+            platform_spu_code="OLD",
+            app_food_code="OLD",
+            status=1,
+        )
+    )
+    product = SimpleNamespace(id=200, product_no="NEW", name="新餐品")
+
+    with pytest.raises(AppException) as exc:
+        await ProductSyncService._ensure_default_map(
+            db,
+            store_id=1,
+            platform="MEITUAN",
+            product=product,
+            platform_sku_id="PLATFORM-SKU-100",
+        )
+
+    assert exc.value.code == 40002
+    assert "已绑定其他本地餐品" in str(exc.value)
+    assert db.flushed is False
