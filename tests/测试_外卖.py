@@ -1,5 +1,7 @@
 """美团 / 饿了么官方签名、事件分类与解析测试"""
 import json
+
+import pytest
 from decimal import Decimal
 
 from app.services.delivery_events import DeliveryEvent, EVENT_WS_MAP, classify_eleme_event, classify_meituan_event, parse_meituan_foods
