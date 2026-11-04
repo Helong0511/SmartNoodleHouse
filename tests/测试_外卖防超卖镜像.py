@@ -298,23 +298,32 @@ async def test_推送库存映射不限与停售(db_session, monkeypatch):
     await db_session.commit()
 
     seen = []
+    shelf_states = []
     fake = MagicMock()
 
     async def _set(items):
         seen.append(items[0]["stock"])
         return 1
 
+    async def _shelf(items, on_shelf):
+        shelf_states.append(on_shelf)
+        return len(items)
+
     fake.set_sku_stock = _set
+    fake.set_sell_status = _shelf
     _patch_provider(monkeypatch, fake)
+    fake.set_sell_status = _shelf
 
     assert await _push_store_product_stock(db_session, store.id, product.id) == 0
     assert seen == [9999]  # 本地"不限"映射为平台充足值
+    assert shelf_states == [True]
 
-    # 门店停售 → 平台售罄 0
+    # 门店停售 → 平台库存归零并同步下架
     stock_row.status = 0
     await db_session.commit()
     assert await _push_store_product_stock(db_session, store.id, product.id) == 0
     assert seen == [9999, 0]
+    assert shelf_states == [True, False]
 
 
 # ── 门店隔离：只推目标门店绑定，不波及其它门店 ─────────────────────────────
