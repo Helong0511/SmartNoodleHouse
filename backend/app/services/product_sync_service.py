@@ -272,9 +272,10 @@ class ProductSyncService:
     ) -> dict:
         raw_stock = int(store_stock.stock if store_stock is not None else product.stock or 0)
         store_available = store_stock is None or int(store_stock.status) == 1
+        is_on_shelf = product.status == "ON_SALE" and store_available
         stock = (
             9999 if raw_stock >= 999 else max(0, raw_stock)
-        ) if product.status == "ON_SALE" and store_available else 0
+        ) if is_on_shelf else 0
         skus = [
             {
                 "sku_id": product.product_no,
@@ -299,7 +300,7 @@ class ProductSyncService:
             "box_price": str(getattr(product, "box_price", 0) or 0),
             "min_order_count": getattr(product, "min_order_count", 1) or 1,
             "stock": stock,
-            "is_sold_out": 1 if stock <= 0 else 0,
+            "is_sold_out": 0 if is_on_shelf else 1,
             "picture": product.main_image or "",
             "skus": skus,
         }
