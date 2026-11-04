@@ -99,3 +99,45 @@ def test_liveness_rejects_bad_bytes():
 
     with pytest.raises(ValueError):
         check_liveness_simple(b"not-an-image")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route_name", "provider"),
+    [("wechat_notify", "WECHAT"), ("alipay_notify", "ALIPAY")],
+)
+async def test_payment_webhook_commits_before_success_ack(monkeypatch, route_name, provider):
+    """支付平台收到成功 ACK 前，本地业务事务必须已提交。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.api import payments
+
+    events = []
+
+    async def _handle_callback(db, provider_name, headers, body):
+        events.append("handle")
+        assert provider_name == provider
+        assert body == b'{"notify":"test"}'
+        return object()
+
+    async def _commit():
+        events.append("commit")
+
+    async def _notify(db, result):
+        events.append("notify")
+
+    monkeypatch.setattr(
+        payments.PaymentService, "handle_callback", AsyncMock(side_effect=_handle_callback)
+    )
+    monkeypatch.setattr(payments, "_notify_paid_or_refunded", AsyncMock(side_effect=_notify))
+    request = SimpleNamespace(
+        body=AsyncMock(return_value=b'{"notify":"test"}'),
+        headers={"x-test": "1"},
+    )
+    db = SimpleNamespace(commit=AsyncMock(side_effect=_commit))
+
+    await getattr(payments, route_name)(request, db)
+
+    assert events == ["handle", "commit", "notify"]
+    db.commit.assert_awaited_once()
