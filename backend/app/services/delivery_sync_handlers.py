@@ -30,7 +30,7 @@ _PLATFORM_UNLIMITED = 9999
 
 async def _collect_stock_push_jobs(
     db, store_id: int, product_id: int
-) -> list[tuple[str, Any, list[dict]]]:
+) -> list[tuple[str, Any, list[dict], bool]]:
     """只读本地库存与映射，拼出平台推送任务（不含 HTTP）。"""
     row = (
         await db.execute(
@@ -54,16 +54,19 @@ async def _collect_stock_push_jobs(
             logger.info("库存镜像跳过：餐品不属于门店 store=%s product=%s", store_id, product_id)
             return []
         s = int(product.stock or 0)
+        on_shelf = product.status == "ON_SALE"
         target = (
             _PLATFORM_UNLIMITED
-            if product.status == "ON_SALE" and s >= UNLIMITED_STOCK
-            else max(0, s) if product.status == "ON_SALE" else 0
+            if on_shelf and s >= UNLIMITED_STOCK
+            else max(0, s) if on_shelf else 0
         )
-    elif int(row.status) == 1:
-        s = int(row.stock or 0)
-        target = _PLATFORM_UNLIMITED if s >= UNLIMITED_STOCK else max(0, s)
     else:
-        target = 0  # 门店停售 = 平台售罄
+        on_shelf = int(row.status) == 1
+        if on_shelf:
+            s = int(row.stock or 0)
+            target = _PLATFORM_UNLIMITED if s >= UNLIMITED_STOCK else max(0, s)
+        else:
+            target = 0  # 门店停售：库存置0并同步下架
 
     bindings = (
         await db.execute(
@@ -74,7 +77,7 @@ async def _collect_stock_push_jobs(
         )
     ).scalars().all()
 
-    jobs: list[tuple[str, Any, list[dict]]] = []
+    jobs: list[tuple[str, Any, list[dict], bool]] = []
     for binding in bindings:
         maps = (
             await db.execute(
@@ -97,38 +100,43 @@ async def _collect_stock_push_jobs(
             for m in maps
         ]
         creds = await get_credentials_for_store(db, binding.platform, store_id)
-        jobs.append((binding.platform, creds, items))
+        jobs.append((binding.platform, creds, items, on_shelf))
     return jobs
 
 
 async def _execute_stock_push_jobs(
-    jobs: list[tuple[str, Any, list[dict]]],
+    jobs: list[tuple[str, Any, list[dict], bool]],
     *,
     store_id: int,
     product_id: int,
 ) -> int:
     """纯平台 HTTP：不持有 DB 会话。返回失败平台数。"""
     failures = 0
-    for platform, creds, items in jobs:
+    for platform, creds, items, on_shelf in jobs:
         try:
             provider = get_delivery_provider(platform, creds)
-            done = await provider.set_sku_stock(items)
-            if done <= 0:
+            stock_done = await provider.set_sku_stock(items)
+            shelf_done = await provider.set_sell_status(items, on_shelf=on_shelf)
+            if stock_done < len(items) or shelf_done < len(items):
                 failures += 1
                 logger.warning(
-                    "库存镜像平台返回0成功 store=%s platform=%s product=%s target=%s",
+                    "库存/上下架镜像未全部成功 store=%s platform=%s product=%s stock=%s on_shelf=%s stock_done=%s shelf_done=%s",
                     store_id,
                     platform,
                     product_id,
                     items[0].get("stock") if items else None,
+                    on_shelf,
+                    stock_done,
+                    shelf_done,
                 )
             else:
                 logger.info(
-                    "库存镜像成功 store=%s platform=%s product=%s stock=%s",
+                    "库存镜像成功 store=%s platform=%s product=%s stock=%s on_shelf=%s",
                     store_id,
                     platform,
                     product_id,
                     items[0].get("stock") if items else None,
+                    on_shelf,
                 )
         except Exception:  # noqa: BLE001 单平台失败累计后由 outbox 重试（覆盖推送幂等）
             failures += 1
