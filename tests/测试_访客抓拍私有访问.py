@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.api.cameras import get_visitor_snapshot
+from app.core.response import now_local
 from app.services.face_service import VisitorService
 from app.services.object_storage import LocalObjectStorage
 from app.services.visitor_snapshot_access import (
@@ -100,3 +102,69 @@ async def test_save_frame_snapshot_stores_private_reference(monkeypatch):
 
     assert result == "private://visitors/test.jpg"
     storage.put_bytes.assert_awaited_once_with("visitors/test.jpg", b"jpeg", content_type="image/jpeg")
+
+
+
+class _SnapshotDB:
+    def __init__(self, event, camera):
+        self.event = event
+        self.camera = camera
+        self.calls = 0
+
+    async def get(self, model, row_id):
+        self.calls += 1
+        return self.event if self.calls == 1 else self.camera
+
+
+@pytest.mark.asyncio
+async def test_visitor_snapshot_route_streams_only_valid_signed_private_object(monkeypatch):
+    from datetime import timedelta
+
+    event = SimpleNamespace(
+        id=12,
+        camera_id=3,
+        snapshot_path="private://visitors/test.jpg",
+        expires_at=now_local() + timedelta(days=1),
+    )
+    camera = SimpleNamespace(id=3, store_id=7)
+    db = _SnapshotDB(event, camera)
+    image_bytes = b"\xff\xd8\xffprivate-jpeg"
+    storage = SimpleNamespace(get_bytes=AsyncMock(return_value=image_bytes))
+    monkeypatch.setattr(
+        "app.services.visitor_snapshot_access.verify_visitor_snapshot_signature",
+        lambda *args: True,
+    )
+    monkeypatch.setattr("app.services.object_storage.get_storage", lambda: storage)
+
+    response = await get_visitor_snapshot(12, 1_900_000_000, "a" * 64, db)
+
+    assert response.body == image_bytes
+    assert response.media_type == "image/jpeg"
+    assert response.headers["cache-control"] == "private, no-store, max-age=0"
+    storage.get_bytes.assert_awaited_once_with("visitors/test.jpg")
+
+
+@pytest.mark.asyncio
+async def test_visitor_snapshot_route_rejects_invalid_signature_before_storage(monkeypatch):
+    from datetime import timedelta
+
+    event = SimpleNamespace(
+        id=12,
+        camera_id=3,
+        snapshot_path="private://visitors/test.jpg",
+        expires_at=now_local() + timedelta(days=1),
+    )
+    camera = SimpleNamespace(id=3, store_id=7)
+    db = _SnapshotDB(event, camera)
+    storage = SimpleNamespace(get_bytes=AsyncMock(return_value=b""))
+    monkeypatch.setattr(
+        "app.services.visitor_snapshot_access.verify_visitor_snapshot_signature",
+        lambda *args: False,
+    )
+    monkeypatch.setattr("app.services.object_storage.get_storage", lambda: storage)
+
+    from app.core.exceptions import AppException
+
+    with pytest.raises(AppException, match="访问链接已过期"):
+        await get_visitor_snapshot(12, 1_900_000_000, "0" * 64, db)
+    storage.get_bytes.assert_not_awaited()
