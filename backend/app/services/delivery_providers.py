@@ -328,9 +328,11 @@ class MeituanProvider(DeliveryProvider):
                 "app_food_code": payload["app_food_code"],
                 "name": payload["name"],
                 "description": payload.get("description", ""),
+                "category_name": payload.get("category_name", "默认分类"),
                 "price": payload["price"],
                 "box_price": payload.get("box_price", "0"),
                 "min_order_count": payload.get("min_order_count", 1),
+                "is_sold_out": int(payload.get("is_sold_out", 0)),
                 "skus": payload.get("skus") or [
                     {
                         "sku_id": payload["app_food_code"],
@@ -391,7 +393,7 @@ class MeituanProvider(DeliveryProvider):
                 "name": p["name"],
                 "description": p.get("description", ""),
                 "price": p["price"],
-                "is_sold_out": int(p.get("is_sold_out", 1 if int(p.get("stock", 9999)) <= 0 else 0)),
+                "is_sold_out": int(p.get("is_sold_out", 0)),
                 "min_order_count": p.get("min_order_count", 1) or 1,
                 "unit": "份",
                 "box_price": str(p.get("box_price", 0) or 0),
