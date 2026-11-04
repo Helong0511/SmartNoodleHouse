@@ -17,6 +17,10 @@ class ObjectStorage(ABC):
     async def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
         """上传并返回可访问 URL（相对或绝对）。"""
 
+    async def get_bytes(self, key: str) -> bytes:
+        """读取对象内容；旧的自定义 storage adapter 可按需实现。"""
+        raise NotImplementedError("当前对象存储适配器不支持读取对象")
+
     @abstractmethod
     async def delete(self, key: str) -> bool:
         """删除对象；返回是否确实删掉了文件/对象。"""
@@ -45,6 +49,12 @@ class LocalObjectStorage(ObjectStorage):
         path.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(path.write_bytes, data)
         return f"/uploads/{key.replace(chr(92), '/')}"
+
+    async def get_bytes(self, key: str) -> bytes:
+        path = self._safe_resolve(key)
+        if not path.is_file():
+            raise FileNotFoundError(key)
+        return await asyncio.to_thread(path.read_bytes)
 
     async def delete(self, key: str) -> bool:
         path = self._safe_resolve(key)
@@ -97,6 +107,28 @@ class S3ObjectStorage(ObjectStorage):
         if self.endpoint:
             return f"{self.endpoint}/{self.bucket}/{key}"
         return f"s3://{self.bucket}/{key}"
+
+    async def get_bytes(self, key: str) -> bytes:
+        def _read_object() -> bytes:
+            try:
+                result = self.client.get_object(Bucket=self.bucket, Key=key)
+            except Exception as exc:
+                response = getattr(exc, "response", {}) or {}
+                code = str((response.get("Error") or {}).get("Code") or "")
+                if code in ("NoSuchKey", "404", "NotFound"):
+                    raise FileNotFoundError(key) from exc
+                raise
+            body = result.get("Body")
+            if body is None:
+                raise FileNotFoundError(key)
+            try:
+                return body.read()
+            finally:
+                close = getattr(body, "close", None)
+                if callable(close):
+                    close()
+
+        return await asyncio.to_thread(_read_object)
 
     async def delete(self, key: str) -> bool:
         await asyncio.to_thread(self._delete_sync, key)

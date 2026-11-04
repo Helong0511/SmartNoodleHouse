@@ -658,6 +658,12 @@ def create_app() -> FastAPI:
     import mimetypes
 
     mimetypes.add_type("image/webp", ".webp")
+
+    # 开发环境静态挂载也必须拦截访客人脸抓拍，不能因绕过 Nginx 而公开。
+    @app.get("/uploads/visitors/{key:path}", include_in_schema=False)
+    async def _deny_public_visitor_snapshot(key: str):
+        raise AppException(40425, "访客抓拍不允许通过公开静态路径访问", status_code=404)
+
     if settings.is_development:
         app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
 

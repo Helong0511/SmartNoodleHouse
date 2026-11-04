@@ -69,8 +69,8 @@ class WechatPayVerifier:
         nonce = headers.get("wechatpay-nonce") or headers.get("Wechatpay-Nonce")
         serial = headers.get("wechatpay-serial") or headers.get("Wechatpay-Serial")
 
-        if not all([sig, ts, nonce]):
-            raise ValueError("微信回调缺少签名头")
+        if not all([sig, ts, nonce, serial]):
+            raise ValueError("微信回调缺少签名头或平台证书序列号")
 
         try:
             ts_int = int(ts)
@@ -80,10 +80,35 @@ class WechatPayVerifier:
             raise ValueError("微信回调时间戳过期（疑似重放）")
 
         message = f"{ts}\n{nonce}\n{body_str}\n".encode("utf-8")
+        # 使用证书文件验签时，同时校验证书序列号，避免仅用任意本地证书公钥验签。
+        # 若配置的是独立平台公钥 PEM，则 serial 仍必须存在，但公钥本身不携带证书序列号。
+        settings_cert = (settings.wechat_platform_public_key or "").strip()
+        if not settings_cert:
+            cert_path = Path(settings.wechat_platform_cert_path)
+            if cert_path.is_file():
+                settings_cert = cert_path.read_text(encoding="utf-8")
+        received_serial = str(serial).strip()
+        if "BEGIN CERTIFICATE" in settings_cert:
+            from cryptography import x509
+
+            platform_cert = x509.load_pem_x509_certificate(settings_cert.encode("utf-8"))
+            expected_serial = format(platform_cert.serial_number, "X").lstrip("0") or "0"
+            normalized_received = received_serial.upper().replace(":", "").lstrip("0") or "0"
+            if normalized_received != expected_serial:
+                raise ValueError("微信回调平台证书序列号不匹配")
+        else:
+            # 独立平台公钥 PEM 不含证书序列号，必须显式绑定配置的 serial，
+            # 否则无法确认请求头 serial 与本地验签公钥属于同一平台密钥。
+            expected_serial = str(getattr(settings, "wechat_platform_serial_no", "") or "").strip()
+            if not expected_serial:
+                raise ValueError("使用微信平台公钥 PEM 时必须配置 WECHAT_PLATFORM_SERIAL_NO")
+            if received_serial != expected_serial:
+                raise ValueError("微信回调平台公钥序列号不匹配")
+
         pub_key = _load_wechat_platform_public_key()
         try:
             pub_key.verify(
-                base64.b64decode(sig),
+                base64.b64decode(sig, validate=True),
                 message,
                 padding.PKCS1v15(),
                 hashes.SHA256(),
@@ -98,11 +123,40 @@ class WechatPayVerifier:
 
         plain = self._decrypt_resource(resource, settings.wechat_api_v3_key)
         inner = json.loads(plain)
-        # 可选：校验商户号
+        # 商户号必须存在且必须匹配；缺失时不能把回调归属猜测为当前商户。
         mch = inner.get("mchid") or inner.get("mch_id")
-        if mch and str(mch) != str(settings.wechat_mch_id):
+        if not mch:
+            raise ValueError("微信回调资源缺少商户号")
+        if str(mch) != str(settings.wechat_mch_id):
             raise ValueError("微信回调商户号不匹配")
-        event_type = str(data.get("event_type") or "")
+
+        event_type = str(data.get("event_type") or "").strip().upper()
+        # 交易成功事件必须带齐商户订单号、渠道交易号和有效金额。
+        # 微信金额单位为分；不接受缺失、零/负数或非 CNY 币种。
+        if event_type == "TRANSACTION.SUCCESS":
+            # 普通商户交易通知必须绑定下单 AppID，避免同一商户号下其他应用的交易进入本系统。
+            callback_appid = str(inner.get("appid") or "").strip()
+            expected_appid = str(settings.wechat_app_id or "").strip()
+            if not callback_appid:
+                raise ValueError("微信支付成功回调缺少 appid")
+            if expected_appid and callback_appid != expected_appid:
+                raise ValueError("微信支付成功回调 appid 不匹配")
+            if not inner.get("out_trade_no") or not inner.get("transaction_id"):
+                raise ValueError("微信支付成功回调缺少商户订单号或渠道交易号")
+            amount = inner.get("amount")
+            if not isinstance(amount, dict):
+                raise ValueError("微信支付成功回调缺少金额对象")
+            try:
+                total_fen = int(amount.get("total"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("微信支付成功回调金额非法") from exc
+            if total_fen <= 0:
+                raise ValueError("微信支付成功回调金额必须大于零")
+            currency = str(amount.get("currency") or "CNY").upper()
+            if currency != "CNY":
+                raise ValueError("暂不支持非 CNY 微信支付回调")
+            if str(inner.get("trade_state") or "").upper() != "SUCCESS":
+                raise ValueError("微信 TRANSACTION.SUCCESS 事件的交易状态不是 SUCCESS")
         return {
             "event_type": event_type,
             "out_trade_no": inner.get("out_trade_no"),
@@ -148,18 +202,51 @@ class AlipayVerifier:
             raise ValueError("支付宝未配置，拒绝回调")
 
         sign = params.pop("sign", None)
-        params.pop("sign_type", None)
+        sign_type = str(params.pop("sign_type", "") or "").strip().upper()
         if not sign:
             raise ValueError("支付宝回调缺少 sign")
+        if sign_type != "RSA2":
+            raise ValueError("支付宝回调 sign_type 必须为 RSA2")
 
         content = self._build_sign_content(params)
         if not self._verify_rsa2(content, sign, settings.alipay_public_key):
             raise ValueError("支付宝签名验证失败")
 
-        # 校验 app_id
-        app_id = params.get("app_id")
-        if app_id and settings.alipay_app_id and str(app_id) != str(settings.alipay_app_id):
+        # 生产环境必须配置本应用 app_id；只检查回调字段存在但不绑定本地配置，
+        # 会允许其他应用签名的通知进入当前商户处理链。
+        expected_app_id = str(getattr(settings, "alipay_app_id", "") or "").strip()
+        if getattr(settings, "is_production", False) and not expected_app_id:
+            raise ValueError("生产环境未配置 ALIPAY_APP_ID，拒绝处理支付宝回调")
+        app_id = str(params.get("app_id") or "").strip()
+        if not app_id:
+            raise ValueError("支付宝回调缺少 app_id")
+        if expected_app_id and app_id != expected_app_id:
             raise ValueError("支付宝回调 app_id 不匹配")
+
+        # app_id 绑定应用；seller_id / seller_email 进一步绑定实际收款卖家账户。
+        expected_seller_id = str(getattr(settings, "alipay_seller_id", "") or "").strip()
+        expected_seller_email = str(getattr(settings, "alipay_seller_email", "") or "").strip()
+        if getattr(settings, "is_production", False) and not (
+            expected_seller_id or expected_seller_email
+        ):
+            raise ValueError(
+                "生产环境必须配置 ALIPAY_SELLER_ID 或 ALIPAY_SELLER_EMAIL，拒绝未绑定卖家身份的回调"
+            )
+        callback_seller_id = str(params.get("seller_id") or "").strip()
+        callback_seller_email = str(params.get("seller_email") or "").strip()
+        if expected_seller_id and callback_seller_id and callback_seller_id != expected_seller_id:
+            raise ValueError("支付宝回调 seller_id 不匹配")
+        if expected_seller_email and callback_seller_email and callback_seller_email.lower() != expected_seller_email.lower():
+            raise ValueError("支付宝回调 seller_email 不匹配")
+        seller_matched = bool(
+            (expected_seller_id and callback_seller_id == expected_seller_id)
+            or (
+                expected_seller_email
+                and callback_seller_email.lower() == expected_seller_email.lower()
+            )
+        )
+        if getattr(settings, "is_production", False) and not seller_matched:
+            raise ValueError("支付宝回调缺少或未匹配已配置的卖家身份")
 
         return params
 
@@ -172,7 +259,7 @@ class AlipayVerifier:
     def _verify_rsa2(content: str, sign_b64: str, public_key_pem: str) -> bool:
         try:
             pub_key = _load_pem(public_key_pem, is_private=False)
-            signature = base64.b64decode(sign_b64)
+            signature = base64.b64decode(sign_b64, validate=True)
             pub_key.verify(
                 signature,
                 content.encode("utf-8"),

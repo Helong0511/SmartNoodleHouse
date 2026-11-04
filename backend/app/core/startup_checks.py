@@ -49,6 +49,13 @@ def validate_settings(settings: Settings) -> None:
     errors: list[str] = []
     warnings: list[str] = []
     is_prod = bool(getattr(settings, "is_production", False))
+    face_liveness_mode = str(
+        getattr(settings, "face_liveness_mode", "challenge") or "challenge"
+    ).strip().lower()
+    if is_prod and face_liveness_mode == "none":
+        errors.append(
+            "生产环境禁止 FACE_LIVENESS_MODE=none；至少启用一次性 challenge 门控（仍非服务端视觉活体证明）"
+        )
 
     env = str(getattr(settings, "app_env", "") or "").strip().lower()
     if env and env not in _ALLOWED_APP_ENV:
@@ -207,12 +214,23 @@ def validate_settings(settings: Settings) -> None:
             errors.append(
                 "生产须至少配置微信（MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID）或支付宝（APP_ID/私钥/公钥）之一"
             )
+        if alipay_ok and not (
+            (getattr(settings, "alipay_seller_id", None) or "").strip()
+            or (getattr(settings, "alipay_seller_email", None) or "").strip()
+        ):
+            errors.append("生产启用支付宝时须配置 ALIPAY_SELLER_ID 或 ALIPAY_SELLER_EMAIL")
         if wechat_ok:
             plat_key = (getattr(settings, "wechat_platform_public_key", None) or "").strip()
             plat_cert = (getattr(settings, "wechat_platform_cert_path", None) or "").strip()
             cert_ok = False
             if plat_key:
                 cert_ok = True
+                if "BEGIN CERTIFICATE" not in plat_key and not (
+                    getattr(settings, "wechat_platform_serial_no", None) or ""
+                ).strip():
+                    errors.append(
+                        "使用独立微信平台公钥 PEM 时必须配置 WECHAT_PLATFORM_SERIAL_NO"
+                    )
             elif plat_cert:
                 from pathlib import Path
 

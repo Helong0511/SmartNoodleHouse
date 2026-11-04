@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     wechat_subscribe_template_order_ready: str = ""
 
     alipay_app_id: str = ""
+    # 支付宝回调卖家身份绑定：生产至少配置 seller_id 或 seller_email
+    alipay_seller_id: str = ""
+    alipay_seller_email: str = ""
     alipay_private_key: str = ""
     alipay_public_key: str = ""
     alipay_aes_key: str = ""
@@ -123,11 +126,15 @@ class Settings(BaseSettings):
     face_encryption_key: str = ""
     # 轮换时保留旧密钥以便解密历史向量；新注册只用 face_encryption_key
     face_encryption_key_previous: str = ""
-    # 平台 Token 等业务密钥加密；未单独配置时回退到 FACE_ENCRYPTION_KEY
+    # 平台 Token / 摄像头口令等业务密钥加密；生产须独立于 FACE_ENCRYPTION_KEY
     secret_encryption_key: str = ""
+    # 轮换期间保留上一把业务密钥，读取历史 snhenc:v1 密文；完成重加密后可清空
+    secret_encryption_key_previous: str = ""
 
     # 微信平台公钥/证书 PEM（回调 Wechatpay-Signature 验签必填；生产强制）
     wechat_platform_public_key: str = ""
+    # 使用独立平台公钥 PEM 时，必须配置对应 Wechatpay-Serial（例如 PUB_KEY_ID_...）
+    wechat_platform_serial_no: str = ""
     wechat_platform_cert_path: str = "certs/wechat_platform_cert.pem"
 
     # 仅开发环境允许：假支付 / mock 小程序登录（生产启动校验会拒绝）

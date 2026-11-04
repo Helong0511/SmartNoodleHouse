@@ -110,8 +110,8 @@ function getAuthCode() {
   return new Promise((resolve, reject) => {
     const env = getEnvDebugInfo()
     // 开发者工具统一用稳定 mock，避免 IDE 真实 authCode / mock 混用导致重复建客
-    if (env && env.isDevtools) {
-      console.warn('[auth] 开发者工具使用稳定 mock 登录（mock:simulator）')
+    if (env && env.isDevtools && !env.isRelease) {
+      console.warn('[auth] 非正式版开发者工具使用稳定 mock 登录（mock:simulator）')
       resolve({ authCode: 'mock:simulator' })
       return
     }
@@ -122,8 +122,8 @@ function getAuthCode() {
         const msg = formatError(err, '')
         // 真机偶发「未关联」类错误时仍允许 mock，避免卡死联调
         const ideAuthGap = /关联小程序|选择关联|请先\[选择/i.test(msg)
-        if (ideAuthGap) {
-          console.warn('[auth] getAuthCode 失败，使用 mock 登录', err)
+        if (ideAuthGap && !(env && env.isRelease)) {
+          console.warn('[auth] 非正式版 getAuthCode 失败，使用 mock 登录', err)
           resolve({ authCode: 'mock:simulator' })
           return
         }

@@ -378,18 +378,21 @@ async def fetch_and_save_remote_image(url: str, subdir: str = "avatars") -> str:
     max_size = mb * 1024 * 1024
     data = b""
 
-    async with httpx.AsyncClient(timeout=_REMOTE_TIMEOUT, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=_REMOTE_TIMEOUT, follow_redirects=False, trust_env=False) as client:
         for _ in range(_REMOTE_MAX_REDIRECTS + 1):
             assert_public_http_url(current)
             async with client.stream(
                 "GET", current, headers={"User-Agent": "SmartNoodleHouse/1.0"}
             ) as resp:
                 peer = _peer_ip_from_response(resp)
-                if peer:
-                    try:
-                        _assert_ip_public(ipaddress.ip_address(peer))
-                    except ValueError:
-                        raise AppException(40021, _UNSAFE_URL_MSG) from None
+                # 必须校验实际 socket 对端；无法取得 peer 时不能仅凭连接前 DNS 结果放行，
+                # 否则 DNS rebinding / 代理环境可能绕过目标 IP 检查。
+                if not peer:
+                    raise AppException(40021, "无法验证头像下载连接的目标IP")
+                try:
+                    _assert_ip_public(ipaddress.ip_address(peer))
+                except ValueError:
+                    raise AppException(40021, _UNSAFE_URL_MSG) from None
                 if resp.status_code in (301, 302, 303, 307, 308):
                     loc = resp.headers.get("location")
                     if not loc:

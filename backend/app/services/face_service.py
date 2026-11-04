@@ -658,25 +658,36 @@ class VisitorService:
 
     @staticmethod
     def uploads_url_to_key(url: str | None) -> str | None:
+        """将历史公开 URL、S3 URL 或 private:// 对象引用安全归一为 visitors/ 对象键。"""
+        from urllib.parse import urlparse
+
         s = str(url or "").strip().replace("\\", "/")
         if not s:
             return None
-        # 完整 URL：http(s)://host/uploads/visitors/...
-        if "://" in s:
-            marker = "/uploads/"
-            idx = s.find(marker)
-            if idx >= 0:
-                s = s[idx + len(marker) :]
-            else:
-                return None
+        if s.startswith("private://"):
+            s = s[len("private://") :]
+        elif s.startswith("s3://"):
+            # s3://bucket/visitors/...
+            parsed = urlparse(s)
+            s = parsed.path.lstrip("/")
+        elif "://" in s:
+            parsed = urlparse(s)
+            s = parsed.path.lstrip("/")
         elif s.startswith("/uploads/"):
             s = s[len("/uploads/") :]
         elif s.startswith("uploads/"):
             s = s[len("uploads/") :]
-        # 已是相对对象键
-        if s.startswith("visitors/"):
-            return s
-        return None
+        # 兼容 endpoint/bucket/key 形式，仅接受路径中明确的 visitors/ 前缀。
+        if not s.startswith("visitors/") and "/visitors/" in s:
+            s = s[s.index("visitors/") :]
+        parts = s.split("/")
+        if (
+            not s.startswith("visitors/")
+            or any(part in ("", ".", "..") for part in parts)
+            or "\x00" in s
+        ):
+            return None
+        return s
 
     @staticmethod
     def make_snapshot_key(camera_id: int, *, ext: str = "jpg") -> str:
@@ -709,14 +720,15 @@ class VisitorService:
 
     @classmethod
     async def save_frame_snapshot(cls, frame, camera_id: int) -> str:
-        """保存摄像头帧为 JPEG，返回 /uploads/visitors/年/月/日/... 路径。"""
+        """保存摄像头访客抓拍为私有对象；数据库仅保存 private:// 对象引用。"""
         import asyncio
 
         from app.services.object_storage import get_storage
 
         data = await asyncio.to_thread(cls.encode_frame_jpeg, frame)
         key = cls.make_snapshot_key(camera_id, ext="jpg")
-        return await get_storage().put_bytes(key, data, content_type="image/jpeg")
+        await get_storage().put_bytes(key, data, content_type="image/jpeg")
+        return f"private://{key}"
 
     @classmethod
     def _prune_unknown_tracks(cls, camera_id: int, now: float) -> list[dict]:

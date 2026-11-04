@@ -392,8 +392,8 @@ class PosRefundService:
                     row.status = "PROCESSING"
                     await db.flush()
                     await db.commit()
-                elif last_refund.status in ("PENDING", "PROCESSING", "UNKNOWN"):
-                    # 渠道仅受理/处理中：保持 PROCESSING，不得记入 executed 或标 SUCCESS
+                elif last_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
+                    # 渠道仅受理/处理中/异常待处理：保持 PROCESSING，不得记入 executed 或标 SUCCESS
                     row.status = "PROCESSING"
                     row.payment_id = payment_id
                     row.refund_id = last_refund.id

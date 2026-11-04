@@ -1,6 +1,9 @@
 """小程序登录/刷新/登出：从 miniprogram 路由拆出，路径仍挂在 /api/miniprogram。"""
 from __future__ import annotations
 
+import logging
+import time
+
 from fastapi import APIRouter, Request
 from jose import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, Field
@@ -129,32 +132,40 @@ async def _consume_login_credential(channel: str, credential: str) -> None:
         raise AppException(LOGIN_CREDENTIAL_REUSED, "登录凭证已使用，请重新获取", status_code=401)
 
 
-async def _consume_refresh_rotation(customer_id: int, token_exp: int, grace_hours: int) -> bool:
-    """P2-6 刷新旋转保护：同一旧令牌只能成功刷新一次。
+async def _consume_refresh_rotation(
+    customer_id: int,
+    token_exp: int,
+    grace_hours: int,
+    token_jti: str | None,
+) -> bool:
+    """同一旧 JWT 的 jti 只能成功刷新一次；不同设备/渠道的令牌互不影响。
 
-    Redis 记录该顾客已成功消费的最大旧令牌 exp（Lua 原子比较，exp 单调递增才放行）。
-    Redis 不可用时 fail-open（token_version 撤销与宽限窗口校验仍然生效）。
+    键的 TTL 覆盖旧令牌剩余有效期 + 宽限期，避免固定 24 小时后旧令牌再次可刷新。
+    Redis 不可用时 fail-closed：访问令牌仍可继续使用至过期，之后重新走平台登录。
     """
-    if token_exp <= 0:
-        return True
-    r = await try_get_redis()
-    if r is None:
-        return True
-    ttl = max(60, int(grace_hours) * 3600)
-    script = """
-    local cur = redis.call('GET', KEYS[1])
-    local exp = tonumber(ARGV[1])
-    if cur and tonumber(cur) >= exp then
-        return 0
-    end
-    redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-    return 1
-    """
+    if token_exp <= 0 or not token_jti:
+        return False
     try:
-        result = await r.eval(script, 1, customer_refresh_rotation_key(customer_id), int(token_exp), ttl)
-        return int(result) == 1
-    except Exception:
-        return True
+        r = await try_get_redis()
+        if r is None:
+            return False
+        ttl = max(60, int(token_exp) - int(time.time()) + max(0, int(grace_hours)) * 3600)
+        ok = await r.set(
+            customer_refresh_rotation_key(customer_id, token_jti),
+            "1",
+            nx=True,
+            ex=ttl,
+        )
+        return bool(ok)
+    except Exception as exc:
+        logging.getLogger(__name__).error("顾客令牌刷新旋转存储不可用，拒绝刷新: %s", exc)
+        return False
+
+
+def _validated_customer_channel(payload: dict) -> str:
+    """从已验签且通过过期宽限校验的 JWT payload 取渠道，不重新解码过期令牌。"""
+    channel = str(payload.get("channel") or "").strip().lower()
+    return channel if channel in ("wechat", "alipay") else "wechat"
 
 
 def _persistable_avatar_url(url: str | None) -> str | None:
@@ -287,10 +298,10 @@ async def refresh_customer_token(request: Request, db: DbSession):
     if int(payload.get("ver") or 0) != int(getattr(customer, "token_version", 0) or 0):
         raise AppException(TOKEN_INVALID, "令牌已失效，请重新登录", status_code=401)
 
-    if not await _consume_refresh_rotation(customer_id, token_exp, grace_hours):
+    if not await _consume_refresh_rotation(customer_id, token_exp, grace_hours, str(payload.get("jti") or "")):
         raise AppException(TOKEN_ALREADY_REFRESHED, "令牌已被刷新，请使用最新令牌重试", status_code=401)
 
-    channel = _customer_channel_from_request(request, "wechat")
+    channel = _validated_customer_channel(payload)
     new_token = _issue_customer_token(customer, channel)
     return success(
         {

@@ -96,9 +96,9 @@
         <el-table-column label="抓拍" width="88" align="center">
           <template #default="{ row }">
             <el-image
-              v-if="row.snapshot_path"
-              :src="snapUrl(row.snapshot_path)"
-              :preview-src-list="[snapUrl(row.snapshot_path)]"
+              v-if="row.snapshot_url"
+              :src="snapUrl(row.snapshot_url)"
+              :preview-src-list="[snapUrl(row.snapshot_url)]"
               :preview-teleported="true"
               fit="cover"
               class="snap-thumb"
@@ -593,7 +593,7 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
         ? `已入队摄像头对讲试听（仅入队≠已出声；可连点保留最后一次）${tid}`
         : `已触发电脑扬声器试听${tid}`,
     )
-    if (taskId && (target === 'camera' || target === 'both')) {
+    if (taskId && target === 'camera') {
       void pollSpeakTask(taskId)
     }
   } catch (e: any) {

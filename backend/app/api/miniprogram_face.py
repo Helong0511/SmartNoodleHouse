@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -19,11 +20,18 @@ from app.services.face_service import FaceService
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
+def _is_supported_face_image(raw: bytes) -> bool:
+    """只接受真实 JPEG/PNG 文件头；不能用文本转义序列替代二进制魔数。"""
+    return raw.startswith(b"\xff\xd8\xff") or raw.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+
 class FaceConsentBase64Request(BaseModel):
     image_base64: str = Field(default="", description="摄像头实拍 JPEG/PNG 的 base64")
     liveness_token: str | None = None
     token: str | None = Field(default=None, description="liveness_token 别名")
-    action_completed: bool = True
+    action_completed: bool = False
+    claimed_action: str | None = Field(default=None, max_length=32)
     # 显式声明以便拒绝客户端上传特征（禁止绕过服务端提取）
     feature: object | None = None
     embedding: object | None = None
@@ -67,6 +75,7 @@ async def consent_face_base64(
         customer.id,
         liveness_token=body.liveness_token or body.token,
         action_completed=bool(body.action_completed),
+        claimed_action=body.claimed_action,
     )
     b64 = body.image_base64 or ""
     if "," in b64:
@@ -84,17 +93,20 @@ async def consent_face_base64(
     if len(b64) > max_b64:
         raise AppException(40030, f"图片超过 {mb}MB")
     try:
-        raw = base64.b64decode(b64, validate=False)
+        raw = base64.b64decode(b64, validate=True)
         max_size = mb * 1024 * 1024
         if len(raw) > max_size:
             raise AppException(40030, f"图片超过 {mb}MB")
         if len(raw) < 1024:
             raise AppException(40034, "人脸图像过小，请重新正对摄像头采集")
+        # 该接口只接收小程序摄像头 JPEG/PNG，拒绝 TIFF/BMP/GIF 等额外解码面。
+        if not _is_supported_face_image(raw):
+            raise AppException(40031, "仅支持小程序摄像头采集的 JPEG/PNG 图片")
         feature, quality = await asyncio.to_thread(extract_face_embedding_with_quality, raw)
     except AppException:
         raise
-    except ValueError as e:
-        raise AppException(40031, str(e)) from e
+    except (ValueError, binascii.Error) as e:
+        raise AppException(40031, "人脸图片 Base64 格式无效") from e
     except Exception as e:
         raise AppException(40035, f"人脸采集失败: {e}") from e
 
@@ -141,6 +153,7 @@ async def _enforce_liveness_challenge(
     *,
     liveness_token: str | None,
     action_completed: bool = True,
+    claimed_action: str | None = None,
 ) -> str:
     """challenge 模式下强制一次性活体 token；none 模式直接放行。返回实际模式。"""
     settings = get_settings()
@@ -149,9 +162,12 @@ async def _enforce_liveness_challenge(
         return "none"
     from app.services.face_liveness_service import verify_liveness_challenge
 
+    if not claimed_action:
+        raise AppException(40037, "缺少本次随机动作标识，请重新获取挑战")
     ok = await verify_liveness_challenge(
         (liveness_token or "").strip(),
         action_completed=bool(action_completed),
+        claimed_action=str(claimed_action),
         customer_id=int(customer_id),
     )
     if not ok:

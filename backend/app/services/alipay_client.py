@@ -214,7 +214,7 @@ async def trade_refund(
     return {
         "refund_no": refund_no,
         "status": status,
-        "provider_refund_no": body.get("trade_no"),
+        "provider_refund_no": None,  # trade_no 是原支付交易号，不是退款单号
         "amount": f"{refund_yuan:.2f}",
         "raw": body,
     }
@@ -229,18 +229,18 @@ async def trade_refund_query(*, payment_no: str, refund_no: str) -> dict[str, An
             "out_request_no": refund_no,
         },
     )
-    refund_status = str(body.get("refund_status") or "").upper()
+    refund_status = str(body.get("refund_status") or "").strip().upper()
     if refund_status == "REFUND_SUCCESS":
         status = "SUCCESS"
-    elif refund_status:
+    elif refund_status in ("REFUND_CLOSED", "REFUND_FAILED", "FAILED", "CLOSED"):
         status = "FAILED"
     else:
-        # 未返回 refund_status：可能尚未处理完
+        # WAIT_* / 未知或未返回状态均不得误判为失败或成功；留给后续查询补偿。
         status = "PROCESSING"
     return {
         "refund_no": body.get("out_request_no") or refund_no,
         "status": status,
-        "provider_refund_no": body.get("trade_no"),
+        "provider_refund_no": None,  # trade_no 是原支付交易号，不是退款单号
         "amount": body.get("refund_amount"),
         "raw": body,
     }

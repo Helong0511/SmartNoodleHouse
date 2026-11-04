@@ -1,0 +1,612 @@
+"""支付回调验签边界回归：商户归属、金额字段与支付宝签名类型。"""
+from __future__ import annotations
+
+import base64
+import json
+import time
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.core.exceptions import AppException
+from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
+from app.services.payment_service import AlipayProvider, PaymentService
+from app.services.alipay_client import trade_refund_query
+from app.services.payment_service import _validate_refund_callback_binding
+
+
+def _wechat_settings():
+    return SimpleNamespace(
+        wechat_api_v3_key="k" * 32,
+        wechat_mch_id="1900000001",
+        wechat_app_id="wx-app-1",
+        wechat_platform_public_key="PUBLIC KEY",
+        wechat_platform_serial_no="ABCD",
+        wechat_platform_cert_path="/nonexistent/platform.pem",
+    )
+
+
+def _wechat_call(inner, serial="ABCD"):
+    inner.setdefault("appid", "wx-app-1")
+    body = json.dumps(
+        {
+            "event_type": "TRANSACTION.SUCCESS",
+            "resource": {"ciphertext": "YQ==", "nonce": "123456789012"},
+        },
+        separators=(",", ":"),
+    ).encode()
+    headers = {
+        "Wechatpay-Signature": base64.b64encode(b"signature").decode(),
+        "Wechatpay-Timestamp": str(int(time.time())),
+        "Wechatpay-Nonce": "nonce",
+        "Wechatpay-Serial": serial,
+    }
+    key = MagicMock()
+    key.verify = MagicMock(return_value=None)
+    with patch("app.services.payment_verify.get_settings", return_value=_wechat_settings()), patch(
+        "app.services.payment_verify._load_wechat_platform_public_key", return_value=key
+    ), patch.object(WechatPayVerifier, "_decrypt_resource", return_value=json.dumps(inner)):
+        return WechatPayVerifier().verify_and_parse(headers, body)
+
+
+def test_wechat_transaction_callback_requires_matching_merchant():
+    with pytest.raises(ValueError, match="商户号"):
+        _wechat_call(
+            {
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 100, "currency": "CNY"},
+            }
+        )
+
+
+def test_wechat_transaction_callback_rejects_appid_mismatch():
+    with pytest.raises(ValueError, match="appid"):
+        _wechat_call(
+            {
+                "appid": "other-app",
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 100, "currency": "CNY"},
+            }
+        )
+
+
+def test_wechat_transaction_callback_requires_positive_amount():
+    with pytest.raises(ValueError, match="金额"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 0, "currency": "CNY"},
+            }
+        )
+
+
+def test_wechat_transaction_callback_rejects_non_cny():
+    with pytest.raises(ValueError, match="CNY"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 100, "currency": "USD"},
+            }
+        )
+
+
+def test_wechat_transaction_callback_accepts_valid_payload():
+    result = _wechat_call(
+        {
+            "mchid": "1900000001",
+            "out_trade_no": "P1",
+            "transaction_id": "T1",
+            "trade_state": "SUCCESS",
+            "amount": {"total": 100, "currency": "CNY"},
+        }
+    )
+    assert result["out_trade_no"] == "P1"
+    assert result["amount"]["total"] == 100
+
+
+def test_alipay_callback_requires_rsa2_and_app_id():
+    verifier = AlipayVerifier()
+    settings = SimpleNamespace(alipay_public_key="PUBLIC KEY", alipay_app_id="app-1")
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&app_id=app-1&trade_status=TRADE_SUCCESS"
+    with patch("app.services.payment_verify.get_settings", return_value=settings), patch.object(
+        AlipayVerifier, "_verify_rsa2", return_value=True
+    ):
+        parsed = verifier.verify_and_parse({}, body)
+    assert parsed["app_id"] == "app-1"
+
+
+def test_alipay_callback_rejects_missing_app_id():
+    verifier = AlipayVerifier()
+    settings = SimpleNamespace(alipay_public_key="PUBLIC KEY", alipay_app_id="app-1")
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&trade_status=TRADE_SUCCESS"
+    with patch("app.services.payment_verify.get_settings", return_value=settings), patch.object(
+        AlipayVerifier, "_verify_rsa2", return_value=True
+    ):
+        with pytest.raises(ValueError, match="app_id"):
+            verifier.verify_and_parse({}, body)
+
+
+def test_alipay_callback_rejects_non_rsa2():
+    verifier = AlipayVerifier()
+    settings = SimpleNamespace(alipay_public_key="PUBLIC KEY", alipay_app_id="app-1")
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA&app_id=app-1&trade_status=TRADE_SUCCESS"
+    with patch("app.services.payment_verify.get_settings", return_value=settings):
+        with pytest.raises(ValueError, match="RSA2"):
+            verifier.verify_and_parse({}, body)
+
+
+def test_wechat_public_key_callback_requires_matching_serial():
+    with pytest.raises(ValueError, match="序列号"):
+        _wechat_call(
+            {
+                "mchid": "1900000001",
+                "out_trade_no": "P1",
+                "transaction_id": "T1",
+                "trade_state": "SUCCESS",
+                "amount": {"total": 100, "currency": "CNY"},
+            },
+            serial="WRONG",
+        )
+
+
+def test_alipay_signature_base64_must_be_strict():
+    fake_key = MagicMock()
+    with patch("app.services.payment_verify._load_pem", return_value=fake_key):
+        assert AlipayVerifier._verify_rsa2("content", "%%%not-base64%%%", "PUBLIC KEY") is False
+    fake_key.verify.assert_not_called()
+
+
+
+def test_alipay_production_callback_requires_configured_app_id():
+    verifier = AlipayVerifier()
+    settings = SimpleNamespace(
+        alipay_public_key="PUBLIC KEY",
+        alipay_app_id="",
+        is_production=True,
+    )
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&app_id=app-1&trade_status=TRADE_SUCCESS"
+    with patch("app.services.payment_verify.get_settings", return_value=settings), patch.object(
+        AlipayVerifier, "_verify_rsa2", return_value=True
+    ):
+        with pytest.raises(ValueError, match="ALIPAY_APP_ID"):
+            verifier.verify_and_parse({}, body)
+
+
+def test_alipay_callback_rejects_app_id_mismatch():
+    verifier = AlipayVerifier()
+    settings = SimpleNamespace(
+        alipay_public_key="PUBLIC KEY",
+        alipay_app_id="expected-app",
+        is_production=False,
+    )
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&app_id=other-app&trade_status=TRADE_SUCCESS"
+    with patch("app.services.payment_verify.get_settings", return_value=settings), patch.object(
+        AlipayVerifier, "_verify_rsa2", return_value=True
+    ):
+        with pytest.raises(ValueError, match="app_id"):
+            verifier.verify_and_parse({}, body)
+
+
+
+def _refund_binding_objects(*, provider="WECHAT", payment_no="P-100", refund_no="R-100"):
+    payment = SimpleNamespace(
+        id=10,
+        order_id=20,
+        payment_no=payment_no,
+        provider=provider,
+        provider_trade_no="TRADE-100",
+    )
+    refund = SimpleNamespace(
+        id=30,
+        payment_id=payment.id,
+        order_id=payment.order_id,
+        refund_no=refund_no,
+    )
+    parsed = {
+        "payment_no": payment_no,
+        "refund_no": refund_no,
+        "provider_trade_no": "TRADE-100",
+    }
+    return payment, refund, parsed
+
+
+def test_refund_callback_requires_exact_original_payment_binding():
+    payment, refund, parsed = _refund_binding_objects()
+    parsed["payment_no"] = "SOME-OTHER-PAYMENT"
+    with pytest.raises(AppException, match="原支付单号"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_provider_mismatch():
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    with pytest.raises(AppException, match="支付渠道"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_payment_without_order_binding():
+    payment, refund, parsed = _refund_binding_objects()
+    payment.order_id = None
+    with pytest.raises(AppException, match="未绑定订单"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_cross_order_refund_record():
+    payment, refund, parsed = _refund_binding_objects()
+    refund.order_id = 999
+    with pytest.raises(AppException, match="关联不一致"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_mismatched_provider_trade_no():
+    payment, refund, parsed = _refund_binding_objects()
+    parsed["provider_trade_no"] = "OTHER-TRADE"
+    with pytest.raises(AppException, match="原交易号"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_missing_local_provider_trade_no():
+    payment, refund, parsed = _refund_binding_objects()
+    payment.provider_trade_no = None
+    with pytest.raises(AppException, match="原交易号"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_mismatched_refund_no():
+    payment, refund, parsed = _refund_binding_objects()
+    parsed["refund_no"] = "ANOTHER-REFUND"
+    with pytest.raises(AppException, match="退款单号"):
+        _validate_refund_callback_binding("WECHAT", parsed, refund, payment)
+
+
+def test_refund_callback_accepts_exact_alipay_refund_request_number():
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    _validate_refund_callback_binding("ALIPAY", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_payment_number_as_refund_number():
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    parsed["refund_no"] = payment.payment_no
+    with pytest.raises(AppException, match="退款单号"):
+        _validate_refund_callback_binding("ALIPAY", parsed, refund, payment)
+
+
+def test_refund_callback_rejects_missing_refund_number():
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    parsed.pop("refund_no")
+    with pytest.raises(AppException, match="缺少商户退款单号"):
+        _validate_refund_callback_binding("ALIPAY", parsed, refund, payment)
+
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _RefundCallbackDB:
+    def __init__(self, refund, payment):
+        self.refund = refund
+        self.payment = payment
+        self.flush = AsyncMock()
+
+    async def execute(self, statement):
+        return _ScalarResult(self.refund)
+
+    async def get(self, model, row_id):
+        return self.payment
+
+
+@pytest.mark.asyncio
+async def test_alipay_provider_preserves_actual_refund_status_instead_of_synthesizing_success():
+    parsed = await AlipayProvider().handle_callback(
+        {
+            "out_trade_no": "P-100",
+            "trade_no": "TRADE-100",
+            "out_biz_no": "R-100",
+            "refund_fee": "7.00",
+            "refund_status": "WAIT_SELLER_AGREE",
+            "trade_status": "TRADE_SUCCESS",
+        }
+    )
+    assert parsed["is_refund"] is True
+    assert parsed["refund_status"] == "WAIT_SELLER_AGREE"
+    assert parsed["refund_fee"] == "7.00"
+
+
+@pytest.mark.asyncio
+async def test_alipay_callback_uses_exact_refund_query_amount_not_cumulative_refund_fee(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    refund.amount = 5
+    payment.amount = 20
+    parsed["refund_fee"] = "10.00"  # 已累计退款 10 元；本次退款申请仅 5 元
+    db = _RefundCallbackDB(refund, payment)
+    query = AsyncMock(
+        return_value={
+            "status": "SUCCESS",
+            "amount": "5.00",
+            "provider_refund_no": "TRADE-100",
+            "raw": {"refund_status": "REFUND_SUCCESS"},
+        }
+    )
+    monkeypatch.setattr("app.services.payment_service.alipay_client.trade_refund_query", query)
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    result = await PaymentService._apply_refund_callback(
+        db, "ALIPAY", {}, parsed, "receipt-1"
+    )
+
+    assert result is refund
+    query.assert_awaited_once_with(payment_no="P-100", refund_no="R-100")
+    assert finalize.await_args.args[2] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_alipay_callback_can_confirm_by_query_when_optional_cumulative_fee_is_absent(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    refund.amount = 5
+    payment.amount = 20
+    parsed.pop("refund_fee", None)
+    db = _RefundCallbackDB(refund, payment)
+    monkeypatch.setattr(
+        "app.services.payment_service.alipay_client.trade_refund_query",
+        AsyncMock(return_value={"status": "SUCCESS", "amount": "5.00", "raw": {}}),
+    )
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    await PaymentService._apply_refund_callback(db, "ALIPAY", {}, parsed, "receipt-no-cumulative")
+
+    assert finalize.await_args.args[2] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_alipay_callback_does_not_promote_waiting_refund_to_success(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    refund.amount = 5
+    payment.amount = 20
+    parsed["refund_fee"] = "2.00"  # 之前已有退款；当前这笔仍在等待
+    db = _RefundCallbackDB(refund, payment)
+    monkeypatch.setattr(
+        "app.services.payment_service.alipay_client.trade_refund_query",
+        AsyncMock(return_value={"status": "PROCESSING", "amount": None, "raw": {}}),
+    )
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    await PaymentService._apply_refund_callback(db, "ALIPAY", {}, parsed, "receipt-2")
+
+    assert finalize.await_args.args[2] == "PROCESSING"
+
+
+@pytest.mark.asyncio
+async def test_alipay_callback_rejects_refund_query_amount_mismatch(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="ALIPAY")
+    refund.amount = 5
+    payment.amount = 20
+    parsed["refund_fee"] = "10.00"
+    db = _RefundCallbackDB(refund, payment)
+    monkeypatch.setattr(
+        "app.services.payment_service.alipay_client.trade_refund_query",
+        AsyncMock(return_value={"status": "SUCCESS", "amount": "4.00", "raw": {}}),
+    )
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    with pytest.raises(AppException, match="本次退款金额"):
+        await PaymentService._apply_refund_callback(db, "ALIPAY", {}, parsed, "receipt-3")
+    finalize.assert_not_awaited()
+
+
+
+def _verify_alipay_with_settings(settings, body):
+    with patch("app.services.payment_verify.get_settings", return_value=settings), patch.object(
+        AlipayVerifier, "_verify_rsa2", return_value=True
+    ):
+        return AlipayVerifier().verify_and_parse({}, body)
+
+
+def test_alipay_callback_rejects_seller_id_mismatch():
+    settings = SimpleNamespace(
+        alipay_public_key="PUBLIC KEY",
+        alipay_app_id="app-1",
+        alipay_seller_id="seller-1",
+        alipay_seller_email="",
+        is_production=True,
+    )
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&app_id=app-1&seller_id=seller-2"
+    with pytest.raises(ValueError, match="seller_id"):
+        _verify_alipay_with_settings(settings, body)
+
+
+def test_alipay_callback_requires_seller_identity_configuration_in_production():
+    settings = SimpleNamespace(
+        alipay_public_key="PUBLIC KEY",
+        alipay_app_id="app-1",
+        alipay_seller_id="",
+        alipay_seller_email="",
+        is_production=True,
+    )
+    body = b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&app_id=app-1&seller_id=seller-1"
+    with pytest.raises(ValueError, match="SELLER_ID"):
+        _verify_alipay_with_settings(settings, body)
+
+
+def test_alipay_callback_accepts_matching_seller_email_in_production():
+    settings = SimpleNamespace(
+        alipay_public_key="PUBLIC KEY",
+        alipay_app_id="app-1",
+        alipay_seller_id="",
+        alipay_seller_email="merchant@example.com",
+        is_production=True,
+    )
+    body = (
+        b"sign=ZmFrZQ%3D%3D&sign_type=RSA2&app_id=app-1"
+        b"&seller_email=MERCHANT%40EXAMPLE.COM"
+    )
+    parsed = _verify_alipay_with_settings(settings, body)
+    assert parsed["seller_email"] == "MERCHANT@example.com"
+
+
+
+@pytest.mark.asyncio
+async def test_wechat_refund_callback_binds_original_total_and_refund_amount(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="WECHAT")
+    payment.amount = 10
+    refund.amount = 5
+    parsed["refund_amount"] = 500
+    parsed["amount"] = {"total": 1_000, "refund": 500, "currency": "CNY"}
+    db = _RefundCallbackDB(refund, payment)
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    await PaymentService._apply_refund_callback(db, "WECHAT", {"event_type": "REFUND.SUCCESS"}, parsed, "wx-receipt")
+
+    assert finalize.await_args.args[2] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_wechat_refund_callback_rejects_original_total_mismatch(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="WECHAT")
+    payment.amount = 10
+    refund.amount = 5
+    parsed["refund_amount"] = 500
+    parsed["amount"] = {"total": 900, "refund": 500, "currency": "CNY"}
+    db = _RefundCallbackDB(refund, payment)
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    with pytest.raises(AppException, match="原订单总金额"):
+        await PaymentService._apply_refund_callback(db, "WECHAT", {"event_type": "REFUND.SUCCESS"}, parsed, "wx-receipt")
+    finalize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wechat_refund_callback_rejects_non_cny_refund(monkeypatch):
+    payment, refund, parsed = _refund_binding_objects(provider="WECHAT")
+    payment.amount = 10
+    refund.amount = 5
+    parsed["refund_amount"] = 500
+    parsed["amount"] = {"total": 1_000, "refund": 500, "currency": "USD"}
+    db = _RefundCallbackDB(refund, payment)
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    with pytest.raises(AppException, match="币种"):
+        await PaymentService._apply_refund_callback(db, "WECHAT", {"event_type": "REFUND.SUCCESS"}, parsed, "wx-receipt")
+    finalize.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_alipay_refund_query_waiting_status_is_not_marked_failed(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.alipay_client._gateway_call",
+        AsyncMock(
+            return_value={
+                "code": "10000",
+                "refund_status": "WAIT_SELLER_AGREE",
+                "refund_amount": "5.00",
+            }
+        ),
+    )
+    result = await trade_refund_query(payment_no="P-100", refund_no="R-100")
+    assert result["status"] == "PROCESSING"
+    assert result["amount"] == "5.00"
+
+
+@pytest.mark.asyncio
+async def test_alipay_refund_query_only_refund_success_is_success(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.alipay_client._gateway_call",
+        AsyncMock(
+            return_value={
+                "code": "10000",
+                "refund_status": "REFUND_SUCCESS",
+                "refund_amount": "5.00",
+            }
+        ),
+    )
+    result = await trade_refund_query(payment_no="P-100", refund_no="R-100")
+    assert result["status"] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_wechat_abnormal_refund_remains_reserved_and_not_failed():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from decimal import Decimal
+
+    row = SimpleNamespace(status="PROCESSING", fail_reason=None)
+    db = SimpleNamespace(flush=AsyncMock())
+    await PaymentService._finalize_refund(
+        db,
+        row,
+        "ABNORMAL",
+        fail_reason="微信退款异常",
+        source="CALLBACK",
+    )
+    assert row.status == "ABNORMAL"
+    assert row.status != "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_abnormal_refund_is_included_in_refundable_amount_reservation():
+    from decimal import Decimal
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+
+    db = SimpleNamespace(scalar=AsyncMock(return_value=Decimal("10.00")))
+    payment = SimpleNamespace(id=77, amount=Decimal("10.00"))
+    remaining = await PaymentService.refundable_amount(db, payment)
+    statement = db.scalar.await_args.args[0]
+    assert "ABNORMAL" in str(statement)
+    assert remaining == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_alipay_refund_query_does_not_mislabel_original_trade_no_as_refund_id(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.alipay_client._gateway_call",
+        AsyncMock(
+            return_value={
+                "code": "10000",
+                "refund_status": "REFUND_SUCCESS",
+                "refund_amount": "5.00",
+                "trade_no": "2026110400000000000000000000",
+            }
+        ),
+    )
+    result = await trade_refund_query(payment_no="P-100", refund_no="R-100")
+    assert result["status"] == "SUCCESS"
+    assert result["provider_refund_no"] is None
+
+
+@pytest.mark.asyncio
+async def test_alipay_callback_does_not_treat_payment_trade_no_as_refund_id():
+    data = {
+        "trade_status": "",
+        "out_trade_no": "P-100",
+        "trade_no": "2026110400000000000000000000",
+        "refund_fee": "5.00",
+        "gmt_refund": "2026-11-04 10:00:00",
+        "out_biz_no": "R-100",
+    }
+    parsed = await AlipayProvider().handle_callback(data)
+    assert parsed["provider_trade_no"] == data["trade_no"]
+    assert parsed["provider_refund_no"] is None

@@ -486,8 +486,8 @@ async def refund_payment(
             "message": (
                 "退款成功"
                 if row.status == "SUCCESS"
-                else "退款已受理，等待平台确认"
-                if row.status in ("PENDING", "PROCESSING", "UNKNOWN")
+                else ("退款异常，需在支付平台处理后重新查询" if row.status == "ABNORMAL" else "退款已受理，等待平台确认")
+                if row.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")
                 else f"退款状态: {row.status}"
             ),
         },
@@ -684,7 +684,7 @@ async def list_payments(
             select(PaymentRefund.payment_id, func.coalesce(func.sum(PaymentRefund.amount), 0))
             .where(
                 PaymentRefund.payment_id.in_(ids),
-                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN")),
+                PaymentRefund.status.in_(("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL")),
             )
             .group_by(PaymentRefund.payment_id)
         )
