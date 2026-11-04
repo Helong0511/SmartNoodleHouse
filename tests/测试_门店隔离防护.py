@@ -125,3 +125,87 @@ def test_create_stream_ticket_omits_store_id_when_none():
     ticket = create_stream_ticket(user_id=1, camera_id=5)
     payload = decode_token(ticket)
     assert "store" not in payload
+
+
+# ── P1: 钱包搜索不得通过精确手机号越过门店隔离 ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_customer_search_does_not_use_global_phone_fallback_by_default(monkeypatch):
+    from app.services.customer_service import CustomerService
+
+    shell = SimpleNamespace(
+        id=99, member_status="GUEST", profile_status="PARTIAL", phone_verified=0
+    )
+    lookup = AsyncMock(return_value=shell)
+    monkeypatch.setattr(CustomerService, "find_active_by_phone", lookup)
+
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=0)
+    db.execute = AsyncMock(return_value=result)
+
+    rows, total = await CustomerService.search_active_customers(
+        db, "13800138000", store_id=1
+    )
+
+    assert rows == []
+    assert total == 0
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pos_global_phone_fallback_rejects_verified_member(monkeypatch):
+    from app.services.customer_service import CustomerService
+
+    member = SimpleNamespace(
+        id=88, member_status="MEMBER", profile_status="COMPLETE", phone_verified=1
+    )
+    lookup = AsyncMock(return_value=member)
+    monkeypatch.setattr(CustomerService, "find_active_by_phone", lookup)
+
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=0)
+    db.execute = AsyncMock(return_value=result)
+
+    rows, total = await CustomerService.search_active_customers(
+        db,
+        "13800138000",
+        store_id=1,
+        allow_global_exact_phone_fallback=True,
+    )
+
+    assert rows == []
+    assert total == 0
+    lookup.assert_awaited_once_with(db, "13800138000")
+
+
+@pytest.mark.asyncio
+async def test_pos_global_phone_fallback_allows_only_unverified_guest_shell(monkeypatch):
+    from app.services.customer_service import CustomerService
+
+    shell = SimpleNamespace(
+        id=99, member_status="GUEST", profile_status="PARTIAL", phone_verified=0
+    )
+    lookup = AsyncMock(return_value=shell)
+    monkeypatch.setattr(CustomerService, "find_active_by_phone", lookup)
+
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = AsyncMock()
+    db.scalar = AsyncMock(return_value=0)
+    db.execute = AsyncMock(return_value=result)
+
+    rows, total = await CustomerService.search_active_customers(
+        db,
+        "13800138000",
+        store_id=1,
+        allow_global_exact_phone_fallback=True,
+    )
+
+    assert rows == [shell]
+    assert total == 1
+    lookup.assert_awaited_once_with(db, "13800138000")
