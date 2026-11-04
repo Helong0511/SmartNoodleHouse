@@ -14,6 +14,7 @@ from app.models import (
     PlatformStoreBinding,
     Product,
     ProductCategory,
+    StoreProductStock,
 )
 from app.services.delivery_context import get_credentials_for_store
 from app.services.delivery_providers import get_delivery_provider
@@ -43,6 +44,15 @@ class ProductSyncService:
             ).scalars().all()
         )
         cat_ids = list({p.category_id for p in products})
+        stock_rows = (
+            await db.execute(
+                select(StoreProductStock).where(
+                    StoreProductStock.store_id == store_id,
+                    StoreProductStock.product_id.in_([p.id for p in products] or [-1]),
+                )
+            )
+        ).scalars().all()
+        stock_by_product = {int(row.product_id): row for row in stock_rows}
         cats = {
             c.id: c
             for c in (
@@ -66,6 +76,7 @@ class ProductSyncService:
                     cats.get(p.category_id),
                     binding.platform_shop_id,
                     cat_maps.get(int(p.category_id)) if p.category_id else None,
+                    stock_by_product.get(int(p.id)),
                 ),
             )
             for p in products
@@ -122,6 +133,14 @@ class ProductSyncService:
             return {"ok": False, "message": "餐品不存在"}
 
         cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
+        store_stock = (
+            await db.execute(
+                select(StoreProductStock).where(
+                    StoreProductStock.store_id == store_id,
+                    StoreProductStock.product_id == product_id,
+                )
+            )
+        ).scalar_one_or_none()
         creds = await get_credentials_for_store(db, platform, store_id)
         if not creds:
             raise AppException(40063, "缺少平台凭证")
@@ -131,7 +150,9 @@ class ProductSyncService:
             cat_maps = await cls.resolve_category_maps(db, store_id=store_id, platform=platform)
             cat_map = cat_maps.get(int(product.category_id))
 
-        payload = cls._build_product_payload_cached(product, cat, binding.platform_shop_id, cat_map)
+        payload = cls._build_product_payload_cached(
+            product, cat, binding.platform_shop_id, cat_map, store_stock
+        )
         product_name = product.name
         await db.commit()
         result = await provider.sync_product(payload)
@@ -170,15 +191,35 @@ class ProductSyncService:
     async def sync_stock(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         maps, products = await cls._load_maps_products(db, store_id, platform)
         creds = await get_credentials_for_store(db, platform, store_id)
-        items = [
-            {
-                "app_food_code": m.app_food_code or products[m.product_id].product_no,
-                "platform_sku_id": m.platform_sku_id,
-                "stock": 9999 if products[m.product_id].stock >= 999 else products[m.product_id].stock,
-            }
-            for m in maps
-            if m.product_id in products
-        ]
+        stock_rows = (
+            await db.execute(
+                select(StoreProductStock).where(
+                    StoreProductStock.store_id == store_id,
+                    StoreProductStock.product_id.in_(list(products) or [-1]),
+                )
+            )
+        ).scalars().all()
+        stock_by_product = {int(row.product_id): row for row in stock_rows}
+        items = []
+        for m in maps:
+            product = products.get(m.product_id)
+            if product is None:
+                continue
+            override = stock_by_product.get(int(product.id))
+            effective = int(override.stock if override is not None else product.stock or 0)
+            is_available = product.status == "ON_SALE" and (
+                override is None or int(override.status) == 1
+            )
+            effective = (
+                9999 if effective >= 999 else max(0, effective)
+            ) if is_available else 0
+            items.append(
+                {
+                    "app_food_code": m.app_food_code or product.product_no,
+                    "platform_sku_id": m.platform_sku_id,
+                    "stock": effective,
+                }
+            )
         await db.commit()
         provider = get_delivery_provider(platform, creds)
         # 修复：原先可能把本地 stock 原样推平台导致 999=不限被当成 999 份
@@ -214,9 +255,21 @@ class ProductSyncService:
         cat: ProductCategory | None,
         shop_id: str,
         cat_map: PlatformCategoryMap | None = None,
+        store_stock: StoreProductStock | None = None,
     ) -> dict:
-        skus = [{"sku_id": product.product_no, "price": str(product.price), "spec": "默认"}]
-        stock = 9999 if product.stock >= 999 else product.stock
+        raw_stock = int(store_stock.stock if store_stock is not None else product.stock or 0)
+        store_available = store_stock is None or int(store_stock.status) == 1
+        stock = (
+            9999 if raw_stock >= 999 else max(0, raw_stock)
+        ) if product.status == "ON_SALE" and store_available else 0
+        skus = [
+            {
+                "sku_id": product.product_no,
+                "price": str(product.price),
+                "spec": "默认",
+                "stock": stock,
+            }
+        ]
         # 分类名：门店覆盖总部映射优先，否则本地分类名
         category_name = (
             (cat_map.platform_category_name if cat_map and cat_map.platform_category_name else None)
@@ -233,6 +286,7 @@ class ProductSyncService:
             "box_price": str(getattr(product, "box_price", 0) or 0),
             "min_order_count": getattr(product, "min_order_count", 1) or 1,
             "stock": stock,
+            "is_sold_out": 1 if stock <= 0 else 0,
             "picture": product.main_image or "",
             "skus": skus,
         }
