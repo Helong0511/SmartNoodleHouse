@@ -36,12 +36,16 @@ async def test_wechat_provider_detects_refund_callback():
         "out_refund_no": "RF1",
         "refund_id": "5001",
         "refund_status": "SUCCESS",
-        "amount": {"refund": 100, "total": 5400},
+        "amount": {"refund": 100, "total": 5400, "currency": "CNY"},
     }
     parsed = await WechatPayProvider().handle_callback(data)
     assert parsed["is_refund"] is True
     assert parsed["refund_no"] == "RF1"
     assert parsed["provider_refund_no"] == "5001"
+    # 退款业务必须拿到原始 amount 对象，不能退化成只含 total 的字符串。
+    assert parsed["amount"] == data["amount"]
+    assert parsed["refund_amount"] == 100
+    assert parsed["currency"] == "CNY"
 
 
 @pytest.mark.asyncio
