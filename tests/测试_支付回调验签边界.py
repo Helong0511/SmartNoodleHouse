@@ -617,3 +617,131 @@ async def test_alipay_callback_does_not_treat_payment_trade_no_as_refund_id():
     parsed = await AlipayProvider().handle_callback(data)
     assert parsed["provider_trade_no"] == data["trade_no"]
     assert parsed["provider_refund_no"] is None
+
+
+
+class _SyncRefundDB:
+    def __init__(self, payment):
+        self.payment = payment
+
+    async def get(self, model, row_id):
+        return self.payment
+
+
+def _sync_refund_objects(provider="ALIPAY"):
+    payment = SimpleNamespace(
+        id=1,
+        order_id=2,
+        provider=provider,
+        payment_no="P-100",
+        provider_trade_no="TRADE-100",
+        amount=20,
+    )
+    refund = SimpleNamespace(
+        id=9,
+        payment_id=1,
+        order_id=2,
+        refund_no="R-100",
+        amount=5,
+        status="PROCESSING",
+    )
+    return payment, refund
+
+
+@pytest.mark.asyncio
+async def test_alipay_refund_query_poll_validates_per_request_amount(monkeypatch):
+    payment, refund = _sync_refund_objects("ALIPAY")
+    db = _SyncRefundDB(payment)
+    query = AsyncMock(
+        return_value={
+            "refund_no": "R-100",
+            "payment_no": "P-100",
+            "provider_trade_no": "TRADE-100",
+            "status": "SUCCESS",
+            "amount": "5.00",
+        }
+    )
+    monkeypatch.setattr(PaymentService, "_query_channel_refund", query)
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    result = await PaymentService.sync_refund_status(db, refund)
+
+    assert result is refund
+    assert finalize.await_args.args[2] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_alipay_refund_query_poll_rejects_amount_mismatch(monkeypatch):
+    payment, refund = _sync_refund_objects("ALIPAY")
+    db = _SyncRefundDB(payment)
+    monkeypatch.setattr(
+        PaymentService,
+        "_query_channel_refund",
+        AsyncMock(
+            return_value={
+                "refund_no": "R-100",
+                "payment_no": "P-100",
+                "provider_trade_no": "TRADE-100",
+                "status": "SUCCESS",
+                "amount": "4.00",
+            }
+        ),
+    )
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    with pytest.raises(AppException, match="本次退款金额"):
+        await PaymentService.sync_refund_status(db, refund)
+    finalize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wechat_refund_query_poll_validates_refund_and_original_total(monkeypatch):
+    payment, refund = _sync_refund_objects("WECHAT")
+    payment.amount = 10
+    db = _SyncRefundDB(payment)
+    monkeypatch.setattr(
+        PaymentService,
+        "_query_channel_refund",
+        AsyncMock(
+            return_value={
+                "refund_no": "R-100",
+                "payment_no": "P-100",
+                "provider_trade_no": "TRADE-100",
+                "status": "SUCCESS",
+                "amount": {"refund": 500, "total": 1_000, "currency": "CNY"},
+            }
+        ),
+    )
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    await PaymentService.sync_refund_status(db, refund)
+
+    assert finalize.await_args.args[2] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_refund_query_poll_rejects_mismatched_refund_identifier(monkeypatch):
+    payment, refund = _sync_refund_objects("ALIPAY")
+    db = _SyncRefundDB(payment)
+    monkeypatch.setattr(
+        PaymentService,
+        "_query_channel_refund",
+        AsyncMock(
+            return_value={
+                "refund_no": "R-OTHER",
+                "payment_no": "P-100",
+                "provider_trade_no": "TRADE-100",
+                "status": "SUCCESS",
+                "amount": "5.00",
+            }
+        ),
+    )
+    finalize = AsyncMock(return_value=refund)
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    with pytest.raises(AppException, match="退款单号"):
+        await PaymentService.sync_refund_status(db, refund)
+    finalize.assert_not_awaited()
