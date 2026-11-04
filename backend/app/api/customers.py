@@ -447,14 +447,14 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
     )
     prefs = await PreferenceService.get_recommendations(db, customer_id, store_id=effective_store)
     pref_list = prefs.get("preferences") or []
-    all_prefs = list(
-        (
-            await db.execute(
-                select(CustomerPreference)
-                .where(CustomerPreference.customer_id == customer_id)
-                .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
-            )
-        ).scalars().all()
+    all_prefs = (
+        list((await db.execute(
+            select(CustomerPreference)
+            .where(CustomerPreference.customer_id == customer_id)
+            .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+        )).scalars().all())
+        if int(getattr(customer, "recommend_opt_in", 0) or 0)
+        else []
     )
     order_count_q = select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
     if effective_store is not None:
