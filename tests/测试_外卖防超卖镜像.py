@@ -456,6 +456,15 @@ def test_外卖菜单初次同步使用门店覆盖库存():
     assert payload["skus"][0]["stock"] == 5
     assert payload["is_sold_out"] == 0
 
+    # 库存为0但仍在售：必须显示售罄，不应被误判为下架。
+    store_stock.stock = 0
+    payload = ProductSyncService._build_product_payload_cached(
+        product, None, "SHOP-1", None, store_stock
+    )
+    assert payload["stock"] == 0
+    assert payload["is_sold_out"] == 0
+
+    store_stock.stock = 5
     store_stock.status = 0
     payload = ProductSyncService._build_product_payload_cached(
         product, None, "SHOP-1", None, store_stock
