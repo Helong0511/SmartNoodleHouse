@@ -825,3 +825,64 @@ async def test_wechat_refund_query_uses_official_out_refund_no_path(monkeypatch)
     assert result["payment_no"] == "PAY202611040001"
     assert result["provider_trade_no"] == "420000000000000001"
     assert result["provider_refund_no"] == "500000000000000001"
+
+
+@pytest.mark.asyncio
+async def test_refund_finalization_locks_order_before_payment():
+    """退款成功入账的锁顺序必须与支付回调一致：Order → Payment。"""
+    order = SimpleNamespace(id=11)
+    payment = SimpleNamespace(id=22, order_id=11)
+    statements = []
+
+    class _Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class _DB:
+        async def execute(self, statement):
+            sql = str(statement).lower()
+            statements.append(sql)
+            if "from orders" in sql:
+                return _Result(order)
+            if "from payments" in sql:
+                return _Result(payment)
+            raise AssertionError(f"Unexpected SQL: {sql}")
+
+    locked_payment, locked_order = await PaymentService._lock_order_then_payment_for_refund(
+        _DB(), SimpleNamespace(order_id=11, payment_id=22)
+    )
+
+    assert locked_order is order
+    assert locked_payment is payment
+    assert "from orders" in statements[0]
+    assert "from payments" in statements[1]
+
+
+@pytest.mark.asyncio
+async def test_refund_finalization_rejects_cross_order_payment_binding():
+    order = SimpleNamespace(id=11)
+    payment = SimpleNamespace(id=22, order_id=12)
+
+    class _Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class _DB:
+        async def execute(self, statement):
+            sql = str(statement).lower()
+            if "from orders" in sql:
+                return _Result(order)
+            if "from payments" in sql:
+                return _Result(payment)
+            raise AssertionError(f"Unexpected SQL: {sql}")
+
+    with pytest.raises(AppException, match="关联不一致"):
+        await PaymentService._lock_order_then_payment_for_refund(
+            _DB(), SimpleNamespace(order_id=11, payment_id=22)
+        )
