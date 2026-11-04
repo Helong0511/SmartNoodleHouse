@@ -12,7 +12,7 @@ from app.core.exceptions import AppException
 from app.core.security import decode_customer_token, decode_token
 from app.models import Customer, Permission, RolePermission, User
 
-DbSession = Annotated[AsyncSession, Depends(get_db)]
+DbSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
 
 
 async def get_current_user(
