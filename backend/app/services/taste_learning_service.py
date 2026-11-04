@@ -191,7 +191,11 @@ class TasteLearningService:
 
     @staticmethod
     async def learn_from_events(db, customer_id: int, *, limit: int = EVENT_BATCH_LIMIT) -> int:
-        """增量 fold 水位之后的事件；返回处理事件数。"""
+        """仅对明确同意个性化推荐的顾客增量 fold 行为事件。"""
+        from app.models import Customer
+        customer = await db.get(Customer, customer_id)
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+            return 0
         rows = await TasteLearningService._load_rows(db, customer_id)
         watermark = max((r.last_event_at for r in rows.values() if r.last_event_at), default=None)
         q = select(CustomerBehaviorEvent).where(
@@ -231,6 +235,10 @@ class TasteLearningService:
         """轻量评价直接 fold（评价明细已独立入库；此处分流口味信号）。"""
         from datetime import timezone
 
+        from app.models import Customer
+        customer = await db.get(Customer, int(feedback.customer_id))
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
+            return
         sentiment = (feedback.sentiment or "NEUTRAL").upper()
         w = FEEDBACK_WEIGHTS.get(sentiment, 0.0)
         if not w or not feedback.product_id:
@@ -268,6 +276,10 @@ class TasteLearningService:
         """
         order = await db.get(Order, order_id)
         if not order or not order.customer_id or (order.payment_status or "") != "REFUNDED":
+            return 0
+        from app.models import Customer
+        customer = await db.get(Customer, int(order.customer_id))
+        if not customer or not int(getattr(customer, "recommend_opt_in", 0) or 0):
             return 0
         items = list((await db.execute(
             select(OrderItem).where(OrderItem.order_id == order_id)
