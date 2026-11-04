@@ -58,8 +58,8 @@ class Customer(Base, TimestampMixin):
     birthday_calendar: Mapped[str] = mapped_column(String(10), default="SOLAR")
     # 1=小程序端已确认不可再改；后台员工仍可改
     birthday_locked: Mapped[int] = mapped_column(Integer, default=0)
-    # 智能推荐合规：1=开启个性化推荐（默认），0=关闭（退回非个性化热销榜，不采集行为）
-    recommend_opt_in: Mapped[int] = mapped_column(Integer, default=1)
+    # 隐私保护默认关闭；仅顾客明确同意后开启个性化推荐
+    recommend_opt_in: Mapped[int] = mapped_column(Integer, default=0)
     # 个性化推荐同意的隐私政策版本与同意时间（版本化留痕，PIPL 合规）
     consent_version: Mapped[str | None] = mapped_column(String(40), default=None)
     recommend_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
