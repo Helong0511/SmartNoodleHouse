@@ -294,7 +294,8 @@ async def list_customers(
         pref_rows = (
             await db.execute(
                 select(CustomerPreference)
-                .where(CustomerPreference.customer_id.in_(ids))
+                .join(Customer, Customer.id == CustomerPreference.customer_id)
+                .where(CustomerPreference.customer_id.in_(ids), Customer.recommend_opt_in == 1)
                 .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
             )
         ).scalars().all()
