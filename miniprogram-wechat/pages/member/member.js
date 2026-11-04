@@ -1172,5 +1172,9 @@ Page({
   // ---------- 排队取号入口 ----------
   goQueue() {
     wx.navigateTo({ url: '/packageOrder/queue/queue' })
+  },
+
+  goFlashSale() {
+    wx.navigateTo({ url: '/packageOrder/flash-sale/flash-sale' })
   }
 })

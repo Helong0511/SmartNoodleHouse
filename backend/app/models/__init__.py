@@ -108,10 +108,14 @@ from app.models.marketing import (  # noqa: F401
     CustomerSegment,
     CustomerSegmentMember,
     MarketingCampaign,
+    MarketingCampaignStore,
     MarketingRule,
     MarketingTask,
     MarketingMessageLog,
     CampaignAttribution,
+    FlashSaleConfig,
+    FlashSaleStock,
+    FlashSaleClaim,
 )
 
 __all__ = [
@@ -200,9 +204,13 @@ __all__ = [
     "CustomerSegment",
     "CustomerSegmentMember",
     "MarketingCampaign",
+    "MarketingCampaignStore",
     "MarketingRule",
     "MarketingTask",
     "MarketingMessageLog",
     "CampaignAttribution",
+    "FlashSaleConfig",
+    "FlashSaleStock",
+    "FlashSaleClaim",
 ]
 

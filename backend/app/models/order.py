@@ -36,6 +36,7 @@ class Order(Base, TimestampMixin):
         Index("ix_orders_created_at_table_id", "created_at", "table_id"),
         Index("ix_orders_created_at_status", "created_at", "status"),
         Index("ix_orders_paid_at_store_id", "paid_at", "store_id"),
+        Index("ix_orders_marketing_campaign", "marketing_campaign_id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     order_no: Mapped[str] = mapped_column(String(40), unique=True)
@@ -70,6 +71,10 @@ class Order(Base, TimestampMixin):
     urged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     # 预点单：打包单预约取餐时段（仅 TAKEOUT 类型使用）
     scheduled_pickup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # 营销免单（0 元）订单：不计入普通营业收入，不产生支付流水
+    non_revenue: Mapped[bool] = mapped_column(Boolean, default=False)
+    marketing_campaign_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    flash_claim_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
 
 
 class OrderItem(Base):

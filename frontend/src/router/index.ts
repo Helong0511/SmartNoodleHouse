@@ -33,6 +33,7 @@ const router = createRouter({
         { path: 'social-benefits', component: () => import('@/views/SocialBenefits.vue'), meta: { title: '社会贡献', permission: 'customer:read', denyCashier: true } },
         { path: 'marketing/segments', component: () => import('@/views/MarketingSegments.vue'), meta: { title: '客户分群', permission: 'customer:read', denyCashier: true } },
         { path: 'marketing/campaigns', component: () => import('@/views/MarketingCampaigns.vue'), meta: { title: '营销活动', permission: 'coupon:read', denyCashier: true } },
+        { path: 'marketing/flash-sales', component: () => import('@/views/MarketingFlashSales.vue'), meta: { title: '限量抢购', permission: 'coupon:read', denyCashier: true } },
         { path: 'marketing/report', component: () => import('@/views/MarketingReport.vue'), meta: { title: '营销报表', permission: 'coupon:read', denyCashier: true } },
         { path: 'tables', component: () => import('@/views/Tables.vue'), meta: { title: '桌台管理', permission: 'table:manage', denyCashier: true } },
         { path: 'users', component: () => import('@/views/Users.vue'), meta: { title: '员工管理', permission: 'user:read', denyCashier: true } },

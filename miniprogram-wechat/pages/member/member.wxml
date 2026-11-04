@@ -356,6 +356,13 @@
           <button class="btn-primary" bindtap="goMenu">按爱好去点餐</button>
         </block>
       </view>
+      <view class="more-block">
+        <view class="privacy-row link-row" bindtap="goFlashSale">
+          <text>限量免费抢购</text>
+          <text class="arrow">›</text>
+        </view>
+        <view class="tip">射洪霸王面限量免费，抢到资格后到店出示核销码，逾期自动作废。</view>
+      </view>
       <view class="more-block" wx:if="{{showQueueEntry}}">
         <view class="privacy-row link-row" bindtap="goQueue">
           <text>排队取号</text>

@@ -37,6 +37,7 @@
           <el-menu-item v-if="showCustomers" index="/social-benefits">社会贡献</el-menu-item>
           <el-menu-item v-if="showCustomers" index="/marketing/segments">客户分群</el-menu-item>
           <el-menu-item v-if="showCoupons" index="/marketing/campaigns">营销活动</el-menu-item>
+          <el-menu-item v-if="showCoupons" index="/marketing/flash-sales">限量抢购</el-menu-item>
           <el-menu-item v-if="showCoupons" index="/marketing/report">营销报表</el-menu-item>
         </el-sub-menu>
 

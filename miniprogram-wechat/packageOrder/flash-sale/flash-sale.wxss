@@ -1,0 +1,28 @@
+.page { padding: 8px 16px 40px; background: #f7f7f7; min-height: 100vh; box-sizing: border-box; }
+.tabs { display: flex; background: #fff; border-radius: 12px; padding: 6px; margin-bottom: 12px; }
+.tab { flex: 1; text-align: center; padding: 8px 0; font-size: 14px; color: #666; border-radius: 8px; }
+.tab.on { background: #fff1eb; color: #ff6b35; font-weight: 600; }
+.list { display: block; }
+.card { background: #fff; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; }
+.card-name { font-size: 16px; font-weight: 600; color: #333; }
+.stock { font-size: 12px; color: #ff6b35; }
+.stock.off { color: #999; }
+.product { margin-top: 8px; font-size: 15px; color: #333; }
+.meta { margin-top: 4px; font-size: 13px; }
+.meta .price { color: #999; text-decoration: line-through; margin-right: 8px; }
+.meta .free { color: #ff6b35; font-weight: 600; }
+.rule { margin-top: 6px; font-size: 12px; color: #888; }
+.rule text { margin-right: 10px; }
+.notice { margin-top: 8px; font-size: 12px; color: #e67e22; line-height: 1.5; }
+.mine-tip { margin-top: 8px; font-size: 12px; color: #ff6b35; }
+.code { margin-top: 6px; font-size: 13px; color: #333; font-weight: 600; letter-spacing: 1px; }
+.status { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #f2f2f2; color: #999; }
+.status-CLAIMED { background: #fff1eb; color: #ff6b35; }
+.status-USED { background: #eef9f0; color: #18a058; }
+.status-EXPIRED, .status-CANCELLED { background: #f5f5f5; color: #999; }
+.claim-btn { margin-top: 12px; width: 100%; background: #ff6b35; color: #fff; border-radius: 20px; font-size: 14px; }
+.claim-btn[disabled] { background: #f0f0f0; color: #999; }
+.empty-card { background: #fff; border-radius: 12px; padding: 32px 16px; text-align: center; }
+.empty-title { font-size: 15px; color: #333; font-weight: 600; }
+.empty-tip { margin-top: 8px; font-size: 12px; color: #999; line-height: 1.6; }

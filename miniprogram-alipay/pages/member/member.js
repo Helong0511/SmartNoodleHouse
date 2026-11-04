@@ -1236,5 +1236,9 @@ Page({
   // ---------- 排队取号入口 ----------
   goQueue() {
     my.navigateTo({ url: '/packageOrder/queue/queue' })
+  },
+
+  goFlashSale() {
+    my.navigateTo({ url: '/packageOrder/flash-sale/flash-sale' })
   }
 })

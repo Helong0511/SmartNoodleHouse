@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -21,6 +21,7 @@ from app.models import (
     CustomerCoupon,
     CustomerSegment,
     MarketingCampaign,
+    MarketingCampaignStore,
     MarketingRule,
     MarketingTask,
     User,
@@ -142,13 +143,61 @@ class MarketingService:
         return (code or "").strip().upper()
 
     @classmethod
+    async def excluded_campaign_ids(
+        cls,
+        db: AsyncSession,
+        *,
+        store_id: int,
+        campaign_ids: list[int] | set[int] | tuple[int, ...],
+    ) -> set[int]:
+        """总部活动中被排除在本店之外的活动 id（included=False 才记录例外）。"""
+        ids = {int(x) for x in campaign_ids}
+        if not ids:
+            return set()
+        rows = (
+            await db.execute(
+                select(MarketingCampaignStore.campaign_id).where(
+                    MarketingCampaignStore.store_id == int(store_id),
+                    MarketingCampaignStore.included.is_(False),
+                    MarketingCampaignStore.campaign_id.in_(ids),
+                )
+            )
+        ).scalars().all()
+        return {int(x) for x in rows}
+
+    @classmethod
+    async def filter_campaigns_for_store(
+        cls, db: AsyncSession, rows: list[MarketingCampaign], *, store_id: int
+    ) -> list[MarketingCampaign]:
+        """过滤掉本店不参与的总部活动（门店自有活动始终参与）。"""
+        hq_ids = [int(c.id) for c in rows if c.store_id is None]
+        excluded = await cls.excluded_campaign_ids(
+            db, store_id=int(store_id), campaign_ids=hq_ids
+        )
+        return [c for c in rows if not (c.store_id is None and int(c.id) in excluded)]
+
+    @classmethod
+    async def is_store_participating(
+        cls, db: AsyncSession, campaign: MarketingCampaign, *, store_id: int
+    ) -> bool:
+        """活动是否参与本店：门店活动仅本店，总部活动默认全店（可配置排除）。"""
+        if campaign.store_id is not None:
+            return int(campaign.store_id) == int(store_id)
+        excluded = await cls.excluded_campaign_ids(
+            db, store_id=int(store_id), campaign_ids=[int(campaign.id)]
+        )
+        return not excluded
+
+    @classmethod
     async def resolve_running_campaigns(
         cls, db: AsyncSession, store_id: int, *, now=None
     ) -> list[MarketingCampaign]:
-        """本店 RUNNING 活动按 code 门店覆盖总部（推荐加权等运行时解析）。"""
-        from datetime import datetime
+        """本店 RUNNING 活动按 code 门店覆盖总部（推荐加权等运行时解析）。
 
-        at = now or datetime.utcnow()
+        时间基准与 publish/worker 一致使用北京时间 naive；总部活动默认全店参与，
+        marketing_campaign_stores 中 included=False 的门店不参与。
+        """
+        at = now or naive_local_now()
         rows = list(
             (
                 await db.execute(
@@ -167,6 +216,7 @@ class MarketingService:
             .all()
         )
         # 空 code 不参与同键覆盖（避免多条无 code 活动被错误压成一条）；正常创建 API 要求 code 非空
+        rows = await cls.filter_campaigns_for_store(db, rows, store_id=int(store_id))
         return merge_store_over_hq(
             rows,
             key_fn=lambda c: cls.campaign_code_key(c.code) or f"__id__:{int(c.id)}",
@@ -496,6 +546,23 @@ class MarketingService:
             raise AppException(40401, "活动不存在")
         return row
 
+    @staticmethod
+    def _store_scope_condition(store_id: int):
+        """门店可见活动范围：本店活动 + 未被排除的总部活动（总部默认全店参与）。"""
+        excluded_hq = (
+            select(MarketingCampaignStore.id)
+            .where(
+                MarketingCampaignStore.campaign_id == MarketingCampaign.id,
+                MarketingCampaignStore.store_id == int(store_id),
+                MarketingCampaignStore.included.is_(False),
+            )
+            .exists()
+        )
+        return or_(
+            MarketingCampaign.store_id == int(store_id),
+            and_(MarketingCampaign.store_id.is_(None), ~excluded_hq),
+        )
+
     @classmethod
     async def list_campaigns(
         cls,
@@ -508,7 +575,7 @@ class MarketingService:
     ) -> tuple[list[dict], int]:
         q = select(MarketingCampaign)
         if store_id is not None:
-            q = q.where(or_(MarketingCampaign.store_id == store_id, MarketingCampaign.store_id.is_(None)))
+            q = q.where(cls._store_scope_condition(int(store_id)))
         if status:
             q = q.where(MarketingCampaign.status == status.upper())
         total = int(await db.scalar(select(func.count()).select_from(q.subquery())) or 0)
@@ -614,17 +681,28 @@ class MarketingService:
                 raise AppException(40301, "总部活动仅超管可修改")
             if store_id is not None and row.store_id not in (None, store_id):
                 raise AppException(40301, "无权修改该活动")
+            scope_store_id = int(row.store_id) if row.store_id is not None else None
         else:
-            exists = await db.scalar(
-                select(MarketingCampaign.id).where(
-                    MarketingCampaign.store_id == store_id,
-                    MarketingCampaign.code == code,
-                )
-            )
-            if exists:
-                raise AppException(40002, "活动 code 已存在")
+            scope_store_id = int(store_id) if store_id is not None else None
+            row = None
+
+        # code 查重：HQ(store_id=None) 与门店同一作用域内按大写比较，排除自身
+        code_key = cls.campaign_code_key(code)
+        dup_q = select(MarketingCampaign.id).where(
+            func.upper(MarketingCampaign.code) == code_key
+        )
+        if scope_store_id is None:
+            dup_q = dup_q.where(MarketingCampaign.store_id.is_(None))
+        else:
+            dup_q = dup_q.where(MarketingCampaign.store_id == scope_store_id)
+        if campaign_id:
+            dup_q = dup_q.where(MarketingCampaign.id != int(campaign_id))
+        if await db.scalar(dup_q):
+            raise AppException(40002, "活动 code 已存在")
+
+        if row is None:
             row = MarketingCampaign(
-                store_id=store_id,
+                store_id=scope_store_id,
                 code=code,
                 name=name,
                 status="DRAFT",
@@ -660,6 +738,8 @@ class MarketingService:
             cal = "SOLAR"
 
         row.code = code
+        # 应用维护的唯一键：store_id 为空时 MySQL 的 (store_id, code) 唯一约束不去重
+        row.code_key = f"{'HQ' if scope_store_id is None else scope_store_id}:{code_key}"
         row.name = name
         row.campaign_type = ctype
         row.segment_id = int(segment_id) if segment_id else None
@@ -993,15 +1073,8 @@ class MarketingService:
                 elif (not in_window) and c.status == "RUNNING":
                     c.status = "PAUSED"
                     paused += 1
-                    await db.execute(
-                        update(MarketingTask)
-                        .where(
-                            MarketingTask.campaign_id == c.id,
-                            MarketingTask.status == "PENDING",
-                        )
-                        .values(status="CANCELLED")
-                    )
-                    # 出窗作废本季已发未用券（季标识按昨日，避免跨日边界错季）
+                    # 暂停保留 PENDING（与 set_status 一致），下一季窗内继续发券；
+                    # 出窗仅作废本季已发未用券（季标识按昨日，避免跨日边界错季）
                     season = annual_season_token(
                         calendar=getattr(c, "schedule_calendar", None),
                         start_month=getattr(c, "annual_start_month", None),
@@ -1162,21 +1235,8 @@ class MarketingService:
                 stats["processed"] += 1
             return
         if camp.status == "PAUSED":
-            # 窗外暂停：取消残留 PENDING，避免队列空转
-            cancelled = await db.execute(
-                update(MarketingTask)
-                .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
-                .values(
-                    status="CANCELLED",
-                    last_error="活动已暂停（排期窗外）",
-                    executed_at=now,
-                    updated_at=now,
-                    result_json={"reason": "paused_out_of_window"},
-                )
-            )
-            if cancelled.rowcount:
-                stats["cancelled"] += 1
-                stats["processed"] += 1
+            # 暂停保留 PENDING（与 set_status 语义一致），恢复 RUNNING 后继续发券；
+            # 批次选取已过滤非 RUNNING 活动，不会空转阻塞其他活动任务
             return
         if camp.status == "SCHEDULED":
             return
@@ -1214,10 +1274,29 @@ class MarketingService:
                 stats["processed"] += 1
             return
 
-        # 总部活动：顾客归属门店已有同 code 覆盖活动时跳过总部发券
+        # 总部活动：顾客归属门店不参与本活动 / 已有同 code 覆盖活动时跳过发券
         if camp.store_id is None:
             home_sid = await cls.customer_home_store_id(db, int(task.customer_id))
             if home_sid is not None:
+                if not await cls.is_store_participating(db, camp, store_id=home_sid):
+                    skipped = await db.execute(
+                        update(MarketingTask)
+                        .where(MarketingTask.id == tid, MarketingTask.status == "PENDING")
+                        .values(
+                            status="SKIPPED",
+                            last_error="顾客归属门店未参与该总部活动",
+                            executed_at=now,
+                            updated_at=now,
+                            result_json={
+                                "reason": "campaign_store_excluded",
+                                "store_id": home_sid,
+                            },
+                        )
+                    )
+                    if skipped.rowcount:
+                        stats["skipped"] += 1
+                        stats["processed"] += 1
+                    return
                 override = await cls.store_has_code_override(
                     db, store_id=home_sid, code=camp.code or ""
                 )
@@ -1398,8 +1477,14 @@ class MarketingService:
             (
                 await db.execute(
                     select(MarketingTask.id)
+                    # 仅消费 RUNNING 活动：PAUSED 保留 PENDING，恢复后继续，不空转阻塞队列
+                    .join(
+                        MarketingCampaign,
+                        MarketingCampaign.id == MarketingTask.campaign_id,
+                    )
                     .where(
                         MarketingTask.status == "PENDING",
+                        MarketingCampaign.status == "RUNNING",
                         or_(MarketingTask.scheduled_at.is_(None), MarketingTask.scheduled_at <= now),
                     )
                     .order_by(MarketingTask.id)
@@ -1503,7 +1588,7 @@ class MarketingService:
 
         q = select(MarketingCampaign)
         if store_id is not None:
-            q = q.where(or_(MarketingCampaign.store_id == store_id, MarketingCampaign.store_id.is_(None)))
+            q = q.where(cls._store_scope_condition(int(store_id)))
         camps = list((await db.execute(q.order_by(MarketingCampaign.id.desc()).limit(50))).scalars().all())
         items = []
         for c in camps:

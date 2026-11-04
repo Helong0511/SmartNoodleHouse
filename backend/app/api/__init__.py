@@ -17,6 +17,7 @@ from app.api import (
     favorites,
     feedbacks,
     financial_ledger,
+    flash_sale_admin,
     health,
     invoices,
     marketing,
@@ -25,6 +26,7 @@ from app.api import (
     miniprogram_auth,
     miniprogram_customer,
     miniprogram_dine,
+    miniprogram_flash_sale,
     miniprogram_member,
     miniprogram_face,
     miniprogram_menu,
@@ -89,6 +91,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(miniprogram.router)
 api_router.include_router(miniprogram_auth.router)
 api_router.include_router(miniprogram_customer.router)
+api_router.include_router(miniprogram_flash_sale.router)
 api_router.include_router(miniprogram_dine.router)
 api_router.include_router(miniprogram_member.router)
 api_router.include_router(miniprogram_face.router)
@@ -110,4 +113,5 @@ api_router.include_router(invoices.router)
 api_router.include_router(queue.router)
 api_router.include_router(social_benefits.router)
 api_router.include_router(marketing.router)
+api_router.include_router(flash_sale_admin.router)
 api_router.include_router(reconcile.router)

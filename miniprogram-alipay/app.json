@@ -20,7 +20,8 @@
         "confirm/confirm",
         "result/result",
         "queue/queue",
-        "invoice/invoice"
+        "invoice/invoice",
+        "flash-sale/flash-sale"
       ]
     }
   ],

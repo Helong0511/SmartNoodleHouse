@@ -1,0 +1,78 @@
+<view class="page">
+  <store-bar compact="{{true}}" onTableChange="onTableChange" />
+
+  <view a:if="{{!storeId}}" class="empty-card">
+    <view class="empty-title">请先选择门店</view>
+    <view class="empty-tip">扫码桌台或在上方切换门店后，即可查看本店限量免费活动。</view>
+  </view>
+
+  <block a:else>
+    <view class="tabs">
+      <view class="tab {{tab === 'active' ? 'on' : ''}}" data-tab="active" onTap="switchTab">可抢购</view>
+      <view class="tab {{tab === 'mine' ? 'on' : ''}}" data-tab="mine" onTap="switchTab">我的资格</view>
+    </view>
+
+    <view a:if="{{tab === 'active'}}" class="list">
+      <view a:if="{{!items.length}}" class="empty-card">
+        <view class="empty-title">本店暂无可抢购活动</view>
+        <view class="empty-tip">活动开始后会出现在这里，先到先得，抢完即止。</view>
+      </view>
+
+      <view class="card" a:for="{{items}}" a:key="campaign_id">
+        <view class="card-head">
+          <view class="card-name">{{item.name}}</view>
+          <text class="stock {{item.sold_out ? 'off' : ''}}">{{item.stockText}}</text>
+        </view>
+        <view class="product">{{item.product_name || '免费餐品'}}</view>
+        <view class="meta">
+          <text class="price">原价 ¥{{item.product_price}}</text>
+          <text class="free">免费</text>
+        </view>
+        <view class="rule">
+          <text>每人限 {{item.per_customer_limit}} 份</text>
+          <text>抢到后 {{item.claim_valid_minutes}} 分钟内核销</text>
+        </view>
+        <view class="rule" a:if="{{item.verify_deadline_at}}">
+          <text>核销截止 {{item.verify_deadline_at}}</text>
+        </view>
+        <view class="rule" a:if="{{item.start_at && item.end_at}}">
+          <text>活动时间 {{item.start_at}} ~ {{item.end_at}}</text>
+        </view>
+        <view class="notice" a:if="{{item.notice}}">{{item.notice}}</view>
+        <view class="mine-tip" a:if="{{item.my_claim}}">
+          已抢到，核销码 {{item.my_claim.claim_no}}
+        </view>
+        <button
+          class="claim-btn"
+          size="mini"
+          disabled="{{item.disabled}}"
+          loading="{{claimingId === item.campaign_id}}"
+          data-id="{{item.campaign_id}}"
+          onTap="onClaim"
+        >{{item.btnText}}</button>
+      </view>
+    </view>
+
+    <view a:else class="list">
+      <view a:if="{{!mine.length}}" class="empty-card">
+        <view class="empty-title">暂无抢购资格</view>
+        <view class="empty-tip">抢到资格后，可在门店出示核销码免费领取餐品。</view>
+      </view>
+
+      <view class="card" a:for="{{mine}}" a:key="claim_id">
+        <view class="card-head">
+          <view class="card-name">{{item.campaign_name || '限量抢购'}}</view>
+          <text class="status status-{{item.status}}">{{item.statusLabel}}</text>
+        </view>
+        <view class="product">{{item.product_name || '免费餐品'}}</view>
+        <view class="code">核销码 {{item.claim_no}}</view>
+        <view class="rule" a:if="{{item.expires_at}}">
+          <text>核销截止 {{item.expires_at}}</text>
+        </view>
+        <view class="rule" a:if="{{item.status === 'USED' && item.verified_at}}">
+          <text>核销时间 {{item.verified_at}}</text>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

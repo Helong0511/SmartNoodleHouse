@@ -61,6 +61,8 @@ class MarketingCampaign(Base, TimestampMixin):
     __tablename__ = "marketing_campaigns"
     __table_args__ = (
         UniqueConstraint("store_id", "code", name="uk_mc_store_code"),
+        # 应用维护的唯一键：store_id 为空（总部）时 MySQL 的 NULL 不去重，靠该列兜底
+        UniqueConstraint("code_key", name="uk_mc_code_key"),
         Index("idx_mc_status_time", "status", "start_at", "end_at"),
         Index("idx_mc_schedule_mode", "schedule_mode", "status"),
     )
@@ -69,6 +71,8 @@ class MarketingCampaign(Base, TimestampMixin):
     )
     store_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"), default=None)
     code: Mapped[str] = mapped_column(String(64))
+    # HQ:{CODE} 或 {store_id}:{CODE}；由服务层统一写入并用于跨库唯一校验
+    code_key: Mapped[str | None] = mapped_column(String(96), default=None)
     name: Mapped[str] = mapped_column(String(100))
     campaign_type: Mapped[str] = mapped_column(String(30), default="MEMBER_DAY")
     status: Mapped[str] = mapped_column(String(20), default="DRAFT")
@@ -183,3 +187,101 @@ class CampaignAttribution(Base, TimestampMixin):
     meta: Mapped[dict | None] = mapped_column(JSON, default=None)
     attributed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class MarketingCampaignStore(Base, TimestampMixin):
+    """活动参与门店范围。
+
+    总部活动（campaign.store_id 为空）默认全部门店参与；本表仅记录例外。
+    included=False 表示该门店被排除；门店活动自身不受本表影响。
+    """
+
+    __tablename__ = "marketing_campaign_stores"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "store_id", name="uk_mcs_camp_store"),
+        Index("idx_mcs_store", "store_id", "campaign_id"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE")
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"))
+    included: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class FlashSaleConfig(Base, TimestampMixin):
+    """限量免费抢购配置：与活动 1:1，库存按门店拆分（FlashSaleStock）。"""
+
+    __tablename__ = "marketing_flash_sales"
+    __table_args__ = (UniqueConstraint("campaign_id", name="uk_mfs_campaign"),)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE")
+    )
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("products.id"))
+    per_customer_limit: Mapped[int] = mapped_column(Integer, default=1)
+    # 抢到资格后须在该分钟数内完成核销
+    claim_valid_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    # 绝对核销截止（可空；与活动结束时间取更早者）
+    verify_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    notice: Mapped[str | None] = mapped_column(String(200), default=None)
+
+
+class FlashSaleStock(Base, TimestampMixin):
+    """活动门店库存：扣减必须走条件 UPDATE，不允许先查后减。"""
+
+    __tablename__ = "marketing_flash_sale_stocks"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "store_id", name="uk_mfss_camp_store"),
+        Index("idx_mfss_store", "store_id", "campaign_id"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE")
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"))
+    # 门店专属抢购餐品；为空时回退 FlashSaleConfig.product_id（仅单店活动可回退）
+    product_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("products.id"), default=None
+    )
+    total_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    remaining_quantity: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FlashSaleClaim(Base, TimestampMixin):
+    """顾客抢购资格；unit_no 配合唯一键实现每人限购。"""
+
+    __tablename__ = "marketing_flash_sale_claims"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "customer_id", "unit_no", name="uk_mfsc_cust_unit"),
+        UniqueConstraint("claim_no", name="uk_mfsc_no"),
+        UniqueConstraint("client_request_id", name="uk_mfsc_req"),
+        Index("idx_mfsc_customer_status", "customer_id", "status"),
+        Index("idx_mfsc_status_expire", "status", "expires_at"),
+        Index("idx_mfsc_campaign_store", "campaign_id", "store_id", "status"),
+    )
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("marketing_campaigns.id", ondelete="CASCADE")
+    )
+    store_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stores.id", ondelete="CASCADE"))
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customers.id", ondelete="CASCADE"))
+    unit_no: Mapped[int] = mapped_column(Integer, default=1)
+    claim_no: Mapped[str] = mapped_column(String(40))
+    # CLAIMED=待核销；USED=已核销；EXPIRED=超时失效；CANCELLED=活动终止
+    status: Mapped[str] = mapped_column(String(20), default="CLAIMED")
+    claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verify_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    order_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    verified_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), default=None)
+    client_request_id: Mapped[str | None] = mapped_column(String(64), default=None)
