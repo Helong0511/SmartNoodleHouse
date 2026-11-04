@@ -171,8 +171,10 @@ class DeliveryService:
             order = await cls._handle_confirmed(db, platform, platform_order_id)
             return DeliveryNotifyResult(event=event, order=order)
 
-        if event not in (DeliveryEvent.ORDER_NEW, DeliveryEvent.UNKNOWN):
-            logger.info("未处理的外卖事件 %s: %s", event, platform_order_id)
+        # 仅明确识别为新订单的事件允许创建本地订单。
+        # UNKNOWN 是开放平台新增/未知回调码，必须记录并忽略，不能按新订单落库。
+        if event != DeliveryEvent.ORDER_NEW:
+            logger.info("忽略未识别或不支持的外卖事件 %s: %s", event, platform_order_id)
             return DeliveryNotifyResult(event=event)
 
         if not platform_order_id:
@@ -580,10 +582,20 @@ class DeliveryService:
                 raise AppException(40301, f"外卖餐品映射跨门店，拒绝落单: {mapping.id}")
             option_ids: list[int] = []
             if mapping.option_map_json:
+                # SQLAlchemy JSON 列在正常读取时已反序列化为 dict；
+                # 兼容历史 TEXT 字符串，但映射损坏时必须拒绝落单，不能静默丢失规格。
                 try:
-                    option_ids = [int(v) for v in json.loads(mapping.option_map_json).values()]
-                except Exception:
-                    option_ids = []
+                    option_map = mapping.option_map_json
+                    if isinstance(option_map, str):
+                        option_map = json.loads(option_map)
+                    if not isinstance(option_map, dict):
+                        raise ValueError("option_map_json 必须是对象")
+                    option_ids = [int(v) for v in option_map.values()]
+                    if any(option_id <= 0 for option_id in option_ids):
+                        raise ValueError("规格选项 ID 必须为正整数")
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    logger.exception("外卖规格映射数据无效 map_id=%s", mapping.id)
+                    raise AppException(40952, "外卖规格映射配置无效，请联系门店管理员修复") from exc
             return product, option_ids
 
         name = item.get("name") or ""
