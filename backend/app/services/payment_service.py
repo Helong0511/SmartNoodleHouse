@@ -48,10 +48,15 @@ def _validate_refund_callback_binding(
     callback_payment_no = str(parsed.get("payment_no") or "").strip()
     if not callback_payment_no or callback_payment_no != str(payment.payment_no or "").strip():
         raise AppException(40302, "退款回调原支付单号与本地记录不匹配")
-    if payment.order_id is None:
-        raise AppException(40302, "退款关联的支付记录未绑定订单")
-    if int(refund.payment_id) != int(payment.id) or int(refund.order_id) != int(payment.order_id):
-        raise AppException(40302, "退款单与原支付单/订单关联不一致")
+    if int(refund.payment_id) != int(payment.id):
+        raise AppException(40302, "退款单与原支付记录关联不一致")
+    refund_order_id = getattr(refund, "order_id", None)
+    payment_order_id = getattr(payment, "order_id", None)
+    # 订单支付必须绑定同一订单；余额充值等非订单支付允许双方 order_id 同时为空。
+    if (refund_order_id is None) != (payment_order_id is None):
+        raise AppException(40302, "退款单与原支付单订单关联不一致")
+    if refund_order_id is not None and int(refund_order_id) != int(payment_order_id):
+        raise AppException(40302, "退款单与原支付单订单关联不一致")
     # 微信退款通知 transaction_id、支付宝异步通知 trade_no 均用于标识原渠道交易。
     # 必须与本地已保存的 provider_trade_no 绑定，不能只依赖商户侧 payment_no。
     callback_trade_no = str(parsed.get("provider_trade_no") or "").strip()
