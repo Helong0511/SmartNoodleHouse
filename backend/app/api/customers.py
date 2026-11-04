@@ -708,8 +708,13 @@ async def update_customer(
         old_opt = int(customer.recommend_opt_in or 0)
         new_opt = int(body.recommend_opt_in)
         if old_opt != new_opt:
+            if new_opt and (not customer.consent_version or not customer.recommend_consent_at):
+                raise AppException(40931, "顾客尚未明确授权个性化推荐，员工不能代替顾客开启")
             changes["recommend_opt_in"] = {"old": old_opt, "new": new_opt}
             customer.recommend_opt_in = new_opt
+            if not new_opt:
+                from app.services.privacy_service import PrivacyService
+                await PrivacyService.clear_taste_profile(db, customer, request=request)
 
     if not changes:
         # 提交字段与现值相同：不写审计、不空刷渠道
