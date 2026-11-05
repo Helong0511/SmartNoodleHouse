@@ -17,20 +17,46 @@ from app.services.webhook_inbox import (
 async def test_reclaim_stale_inbox_issues_update_and_commits():
     """reclaim 应对 PROCESSING 行发出 UPDATE（status + locked_at 条件）并 commit。"""
     db = MagicMock()
-    result = MagicMock()
-    result.rowcount = 2
-    db.execute = AsyncMock(return_value=result)
+    terminal = MagicMock()
+    terminal.rowcount = 0
+    retry = MagicMock()
+    retry.rowcount = 2
+    db.execute = AsyncMock(side_effect=[terminal, retry])
     db.commit = AsyncMock()
     n = await reclaim_stale_inbox(db, stale_after=300)
     assert n == 2
     assert db.commit.await_count == 1
-    stmt = db.execute.await_args[0][0]
-    stmt_str = str(stmt).lower()
-    assert "webhook_inbox" in stmt_str
-    assert "status" in stmt_str
-    assert "locked_at" in stmt_str
-    compiled = stmt.compile()
-    assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+    assert db.execute.await_count == 2
+    for call in db.execute.await_args_list:
+        stmt = call.args[0]
+        stmt_str = str(stmt).lower()
+        assert "webhook_inbox" in stmt_str
+        assert "status" in stmt_str
+        assert "locked_at" in stmt_str
+        compiled = stmt.compile()
+        assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+
+
+@pytest.mark.asyncio
+async def test_reclaim_stale_inbox_dead_letters_exhausted_attempts():
+    db = MagicMock()
+    terminal = MagicMock()
+    terminal.rowcount = 1
+    retry = MagicMock()
+    retry.rowcount = 0
+    db.execute = AsyncMock(side_effect=[terminal, retry])
+    db.commit = AsyncMock()
+
+    n = await reclaim_stale_inbox(db, stale_after=300)
+
+    assert n == 1
+    assert db.execute.await_count == 2
+    terminal_stmt = db.execute.await_args_list[0].args[0]
+    terminal_sql = str(terminal_stmt).lower()
+    assert "attempt_count" in terminal_sql
+    assert "failed" in [str(v).lower() for v in terminal_stmt.compile().params.values()]
+    retry_stmt = db.execute.await_args_list[1].args[0]
+    assert "attempt_count" in str(retry_stmt).lower()
 
 
 @pytest.mark.asyncio
@@ -38,7 +64,7 @@ async def test_reclaim_stale_inbox_zero_when_nothing_stale():
     db = MagicMock()
     result = MagicMock()
     result.rowcount = 0
-    db.execute = AsyncMock(return_value=result)
+    db.execute = AsyncMock(side_effect=[result, result])
     db.commit = AsyncMock()
     n = await reclaim_stale_inbox(db)
     assert n == 0
@@ -50,7 +76,7 @@ async def test_reclaim_stale_inbox_uses_default_threshold():
     db = MagicMock()
     result = MagicMock()
     result.rowcount = 0
-    db.execute = AsyncMock(return_value=result)
+    db.execute = AsyncMock(side_effect=[result, result])
     db.commit = AsyncMock()
     await reclaim_stale_inbox(db)
     assert STALE_PROCESSING_SEC == 300
