@@ -826,6 +826,9 @@ def create_app() -> FastAPI:
             )
         return await call_next(request)
 
+    # 请求体硬限制放在 Allowlist/RateLimit 之后执行：先拒绝未授权来源，
+    # 避免攻击者在读取完整回调体前占用缓冲槽。
+    app.add_middleware(WebhookBodyLimitMiddleware, max_body_bytes=settings.webhook_max_body_bytes)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(WebhookAllowlistMiddleware)
@@ -837,8 +840,6 @@ def create_app() -> FastAPI:
 
     app.add_middleware(PerformanceMetricsMiddleware)
     app.add_middleware(JsonGZipMiddleware)
-    # 最外层读取真实 ASGI body，覆盖 chunked/无 Content-Length 请求。
-    app.add_middleware(WebhookBodyLimitMiddleware, max_body_bytes=settings.webhook_max_body_bytes)
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
