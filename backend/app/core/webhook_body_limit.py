@@ -48,7 +48,11 @@ class WebhookBodyLimitMiddleware:
             if not raw or not raw.isdigit():
                 await self._reject(send, 400, "Invalid Content-Length")
                 return
-            declared_length = int(raw)
+            try:
+                declared_length = int(raw)
+            except (ValueError, OverflowError):
+                await self._reject(send, 400, "Invalid Content-Length")
+                return
             if declared_length > self.max_body_bytes:
                 await self._reject(send, 413, "Webhook body too large")
                 return
