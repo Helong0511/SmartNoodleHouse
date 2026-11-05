@@ -61,6 +61,14 @@ async def test_database_epoch_is_monotonic_and_owner_bound(fencing_db):
 
 @pytest.mark.asyncio
 async def test_current_epoch_can_commit_business_transaction(fencing_db):
+    async with fencing_db() as db:
+        await db.execute(
+            text(
+                "UPDATE leader_fencing_state SET epoch = 7, owner_id = 'leader-current' "
+                "WHERE id = 1"
+            )
+        )
+        await db.commit()
     activate_leader_epoch(7, "leader-current")
     async with fencing_db() as db:
         with leader_fence_scope():
