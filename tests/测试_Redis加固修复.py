@@ -368,6 +368,60 @@ def test_reco_invalidation_waits_for_outer_transaction_after_nested_savepoint():
 
 
 @pytest.mark.asyncio
+async def test_reco_cache_read_atomically_rejects_stale_generation():
+    from app.services import reco_cache
+    from app.core.cache_keys import reco_generation_key, reco_key
+
+    class AtomicReadFakeRedis(FakeRedis):
+        async def eval(self, script, numkeys, generation_key, cache_key, expected_generation):
+            self.eval_calls.append((script, numkeys, generation_key, cache_key, expected_generation))
+            if str(self.store.get(generation_key, "0")) != str(expected_generation):
+                return None
+            return self.store.get(cache_key)
+
+    fake = AtomicReadFakeRedis()
+    generation_key = reco_generation_key(123)
+    old_cache_key = reco_key(123, 1, "menu", "a", "", generation=5)
+    fake.store[generation_key] = "6"
+    fake.store[old_cache_key] = '{"items":[{"id":5}]}'
+
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        hit = await reco_cache.get_cached_reco(
+            123, 1, "menu", "a", "", generation=5,
+        )
+
+    assert hit is None
+    assert len(fake.eval_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_read_returns_value_when_generation_matches():
+    from app.services import reco_cache
+    from app.core.cache_keys import reco_generation_key, reco_key
+
+    class AtomicReadFakeRedis(FakeRedis):
+        async def eval(self, script, numkeys, generation_key, cache_key, expected_generation):
+            if str(self.store.get(generation_key, "0")) != str(expected_generation):
+                return None
+            return self.store.get(cache_key)
+
+    fake = AtomicReadFakeRedis()
+    generation_key = reco_generation_key(123)
+    cache_key = reco_key(123, 1, "menu", "a", "", generation=6)
+    fake.store[generation_key] = "6"
+    fake.store[cache_key] = '{"items":[{"id":6}]}'
+
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        hit = await reco_cache.get_cached_reco(
+            123, 1, "menu", "a", "", generation=6,
+        )
+
+    assert hit is not None
+    assert hit["items"][0]["id"] == 6
+    assert hit["cache_hit"] is True
+
+
+@pytest.mark.asyncio
 async def test_reco_cache_generation_read_failure_never_reads_generation_zero():
     from app.services import reco_cache
 
