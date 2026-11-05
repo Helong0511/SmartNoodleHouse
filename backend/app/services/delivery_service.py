@@ -507,6 +507,9 @@ class DeliveryService:
         ).scalar_one_or_none()
         if not d_order:
             raise AppException(40450, "非外卖订单")
+        if d_order.delivery_status == "ACCEPTED" and order.status == "CONFIRMED":
+            # 已接单重复请求视为幂等成功，不再次向平台发送 confirm。
+            return order, []
         if d_order.delivery_status not in ("PENDING", "ACCEPTED"):
             raise AppException(40054, f"当前配送状态不可接单: {d_order.delivery_status}")
         credentials = await get_credentials_for_store(db, d_order.platform, order.store_id)
