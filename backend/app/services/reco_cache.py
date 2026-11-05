@@ -87,15 +87,16 @@ def _invalidate_local_reco_customer(customer_id: int) -> None:
 
 
 
-async def get_reco_generation(customer_id: int | None) -> int:
-    """读取顾客推荐缓存代际；Redis 故障时返回 0，个性化结果不走本地缓存兜底。"""
+async def get_reco_generation(customer_id: int | None) -> int | None:
+    """读取顾客推荐缓存代际；Redis 不可用返回 None，调用方必须 fail-closed。"""
     if customer_id is None:
         return 0
     try:
         r = await get_redis()
         return max(0, int(await r.get(reco_generation_key(customer_id)) or 0))
     except Exception:
-        return 0
+        logger.warning("读取推荐缓存代际失败(customer=%s)，禁止读取个性化缓存", customer_id, exc_info=True)
+        return None
 
 
 async def get_cached_reco(
@@ -104,6 +105,9 @@ async def get_cached_reco(
 ) -> dict[str, Any] | None:
     """按顾客代际读取缓存；跨 Worker 的顾客级推荐不使用本地短缓存。"""
     gen = await get_reco_generation(customer_id) if generation is None else max(0, int(generation))
+    # 个性化结果的版本未知时不能猜测为 0，否则 Redis 短暂故障恢复后可能命中旧代际缓存。
+    if customer_id is not None and gen is None:
+        return None
     local_key = _local_reco_key(customer_id, store_id, scene, bucket, fingerprint)
     if customer_id is None:
         local_hit = _get_local_reco(local_key)
@@ -215,11 +219,21 @@ def defer_invalidate_customer(db, customer_id: int) -> None:
     info["_reco_cache_invalidation_listener"] = True
 
     def _after_commit(sync_session) -> None:
+        # FeedbackService 会在 SAVEPOINT 内学习画像；嵌套事务提交不是业务事务提交。
+        # 只有最外层事务结束提交后才推进代际，防止外层回滚却提前失效/发布新版本。
+        if sync_session.in_transaction() or sync_session.in_nested_transaction():
+            return
         customer_ids = tuple(sync_session.info.pop("_reco_cache_invalidation_ids", set()))
         for cid in customer_ids:
             spawn_bg(invalidate_customer(cid))
 
+    def _after_rollback(sync_session) -> None:
+        # 仅外层事务回滚时清理待失效集合；SAVEPOINT 回滚不应抹掉外层已排队的失效。
+        if not sync_session.in_transaction() and not sync_session.in_nested_transaction():
+            sync_session.info.pop("_reco_cache_invalidation_ids", None)
+
     event.listen(session, "after_commit", _after_commit)
+    event.listen(session, "after_rollback", _after_rollback)
 
 
 async def invalidate_customer(customer_id: int) -> None:
