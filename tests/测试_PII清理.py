@@ -24,7 +24,9 @@ async def test_anonymize_issues_update_with_correct_filters():
     assert n == 3
     assert db.commit.await_count == 1
 
-    stmt = db.execute.await_args[0][0]
+    # execute 顺序为 DeliveryOrder、DeliveryRefund、CallbackLog、WebhookInbox；
+    # await_args 只指向最后一次调用，必须检查首条 SQL。
+    stmt = db.execute.await_args_list[0].args[0]
     stmt_str = str(stmt).lower()
     assert "delivery_orders" in stmt_str
     assert "recipient_phone" in stmt_str
