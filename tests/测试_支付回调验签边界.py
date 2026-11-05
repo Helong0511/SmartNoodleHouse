@@ -17,6 +17,7 @@ from app.services.alipay_client import trade_refund_query
 from app.services.payment_service import (
     _validate_refund_callback_binding,
     _validate_duplicate_paid_callback,
+    _wechat_callback_receipt_identity,
 )
 
 
@@ -1040,3 +1041,41 @@ async def test_receipt_integrity_error_without_matching_receipt_is_not_acknowled
         await PaymentService.handle_callback(FakeDB(), "ALIPAY", {}, b"callback")
 
     release.assert_awaited_once_with("pay:ALIPAY", "receipt-test")
+
+
+def test_wechat_receipt_identity_is_stable_across_http_signature_nonce_retries():
+    data = {
+        "id": "EVT-100",
+        "event_type": "TRANSACTION.SUCCESS",
+        "out_trade_no": "P-100",
+        "transaction_id": "WX-TRADE-100",
+    }
+    parsed = {
+        "is_refund": False,
+        "payment_no": "P-100",
+        "provider_trade_no": "WX-TRADE-100",
+        "status": "PAID",
+    }
+
+    # HTTP Wechatpay-Nonce 不参与业务通知身份；同一通知重试必须得到同一 key。
+    first = _wechat_callback_receipt_identity(data, parsed)
+    second = _wechat_callback_receipt_identity(data, parsed)
+    assert first == second
+    assert first[0] == "EVT-100"
+
+
+def test_wechat_refund_receipt_identity_distinguishes_notification_states():
+    base = {
+        "out_refund_no": "R-100",
+        "event_type": "REFUND.SUCCESS",
+        "success_time": "2026-11-05T09:00:00+08:00",
+    }
+    parsed = {"is_refund": True, "refund_no": "R-100", "refund_status": "SUCCESS"}
+
+    assert _wechat_callback_receipt_identity(base, parsed) == _wechat_callback_receipt_identity(
+        dict(base), parsed
+    )
+    processing = {**base, "event_type": "REFUND.PROCESSING", "success_time": ""}
+    assert _wechat_callback_receipt_identity(base, parsed) != _wechat_callback_receipt_identity(
+        processing, {**parsed, "refund_status": "PROCESSING"}
+    )
