@@ -59,10 +59,10 @@ def _unique_single_column_index_exists(conn) -> bool:
                 "SELECT 1 FROM information_schema.STATISTICS "
                 "WHERE TABLE_SCHEMA = DATABASE() "
                 "AND TABLE_NAME = 'payment_refunds' "
-                "AND COLUMN_NAME = 'idempotency_key' "
                 "AND NON_UNIQUE = 0 "
                 "GROUP BY INDEX_NAME "
                 "HAVING COUNT(*) = 1 "
+                "AND SUM(CASE WHEN COLUMN_NAME = 'idempotency_key' THEN 1 ELSE 0 END) = 1 "
                 "LIMIT 1"
             )
         ).first()
