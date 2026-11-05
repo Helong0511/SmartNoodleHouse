@@ -229,13 +229,11 @@ async def process_outbox_item(outbox_id: int) -> None:
                     )
                 )
                 done_result = await db.execute(done_stmt)
-                if int(done_result.rowcount or 0) != 1:
-                    # 失去 claim 所有权时，Handler 的 DB 修改必须一起回滚；
-                    # 不能只跳过 Outbox DONE，却提交旧 worker 的业务副作用。
-                    await db.rollback()
-                    logger.warning(
-                        "Outbox claim 已丢失，回滚旧 worker 事务 id=%s", outbox_id
-                    )
+                from app.services.worker_common import rollback_if_claim_lost
+
+                if await rollback_if_claim_lost(
+                    db, done_result, model=OutboxEvent, row_id=outbox_id
+                ):
                     return
                 # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
                 # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
