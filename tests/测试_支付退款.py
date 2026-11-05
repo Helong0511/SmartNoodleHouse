@@ -180,7 +180,7 @@ async def test_finalize_refund_deducts_points_for_customer():
     payment_result.scalar_one_or_none.return_value = payment
     order_result = MagicMock()
     order_result.scalar_one_or_none.return_value = order
-    db.execute = AsyncMock(side_effect=[payment_result, order_result])
+    db.execute = AsyncMock(side_effect=[order_result, payment_result])
     db.flush = AsyncMock()
 
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
