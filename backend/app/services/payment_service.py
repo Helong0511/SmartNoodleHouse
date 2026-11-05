@@ -2382,17 +2382,16 @@ class PaymentService:
                 if net <= 0:
                     # 公益台账与营销归因冲减必须和退款 SUCCESS 同事务写入 Outbox。
                     # 不在资金确认事务中吞掉副作用异常；worker 使用 refund_id 幂等重试。
-                    if order.customer_id:
-                        from app.services.outbox_worker import enqueue_outbox
+                    from app.services.outbox_worker import enqueue_outbox
 
-                        for event_kind in ("social_benefit_reverse", "campaign_attribution_reverse"):
-                            await enqueue_outbox(
-                                db,
-                                aggregate_type="refund",
-                                aggregate_id=int(row.id),
-                                event_kind=event_kind,
-                                payload={"refund_id": int(row.id), "order_id": int(order.id)},
-                            )
+                    for event_kind in ("social_benefit_reverse", "campaign_attribution_reverse"):
+                        await enqueue_outbox(
+                            db,
+                            aggregate_type="refund",
+                            aggregate_id=int(row.id),
+                            event_kind=event_kind,
+                            payload={"refund_id": int(row.id), "order_id": int(order.id)},
+                        )
                     if order.status not in ("CANCELLED", "REFUNDED"):
                         await apply_order_status(
                             db,
