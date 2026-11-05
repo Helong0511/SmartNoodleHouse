@@ -520,8 +520,11 @@ class CameraManager:
         finally:
             for lock in reversed(acquired):
                 lock.release()
-            with self._lock:
-                self._stopping_all = False
+
+    def resume_camera_manager(self) -> None:
+        """新 Leader 完成接管后重新允许摄像头启动。"""
+        with self._lock:
+            self._stopping_all = False
 
     def get_status(self, camera_id: int) -> str:
         with self._lock:
