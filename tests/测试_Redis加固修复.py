@@ -454,3 +454,12 @@ async def test_reco_rebuild_lock_old_owner_cannot_delete_new_owner():
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
         await reco_cache.release_reco_lock(7, 5, "default", "b0", token="expired-old-owner-token")
     assert fake.store[key] == "new-owner-token"
+
+
+def test_rate_limit_bucket_collapses_dynamic_ids_and_keeps_sensitive_policies_separate():
+    from app.core.rate_limit import _rate_limit_bucket
+
+    assert _rate_limit_bucket("/api/orders/10001") == _rate_limit_bucket("/api/orders/99999")
+    assert _rate_limit_bucket("/api/miniprogram/orders/10001") == "/api/miniprogram"
+    assert _rate_limit_bucket("/api/auth/login") == "/api/auth/login"
+    assert _rate_limit_bucket("/api/auth/verify-password") == "/api/auth/verify-password"
