@@ -37,8 +37,8 @@ def test_redis_outage_logs_are_throttled_to_prevent_log_storms(monkeypatch):
     calls = []
     monkeypatch.setattr(rate_limit.time, "monotonic", lambda: clock["now"])
     monkeypatch.setattr(rate_limit.logger, "warning", lambda *args: calls.append(args))
-    rate_limit._last_redis_error_log_at = 0.0
-    rate_limit._suppressed_redis_error_logs = 0
+    monkeypatch.setattr(rate_limit, "_last_redis_error_log_at", 0.0)
+    monkeypatch.setattr(rate_limit, "_suppressed_redis_error_logs", 0)
 
     error = RuntimeError("redis unavailable")
     rate_limit._log_redis_failure("/api/menu", error, fail_closed=False)
