@@ -314,6 +314,46 @@ async def test_reco_cache_publish_rejects_stale_customer_generation():
     assert reco_cache.reco_key(41, 3, "menu", "v1", "", generation=0) not in fake.store
 
 
+def test_reco_invalidation_waits_for_outer_transaction_after_nested_savepoint():
+    from sqlalchemy.orm import Session
+    from app.services import reco_cache
+
+    session = Session()
+    scheduled = []
+
+    def capture(coro):
+        scheduled.append(coro)
+        coro.close()
+
+    with patch.object(reco_cache, "spawn_bg", side_effect=capture):
+        with session.begin():
+            with session.begin_nested():
+                reco_cache.defer_invalidate_customer(session, 42)
+            # SAVEPOINT 已提交，但外层业务事务仍未提交。
+            assert scheduled == []
+        # 只有外层事务提交后才允许推进 Redis 代际。
+        assert len(scheduled) == 1
+
+    session.close()
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_generation_read_failure_never_reads_generation_zero():
+    from app.services import reco_cache
+
+    with patch.object(
+        reco_cache, "get_redis", new_callable=AsyncMock,
+        side_effect=RuntimeError("redis temporarily unavailable"),
+    ):
+        generation = await reco_cache.get_reco_generation(123)
+        hit = await reco_cache.get_cached_reco(
+            123, 1, "menu", "a", generation=generation,
+        )
+
+    assert generation is None
+    assert hit is None
+
+
 @pytest.mark.asyncio
 async def test_reco_cache_invalidate_increments_generation_without_scan():
     from app.services import reco_cache
