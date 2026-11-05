@@ -34,7 +34,7 @@ DEFAULT_LIMIT = (120, 60)
 # Redis 故障时限流中间件可能在高 QPS 下逐请求触发异常。
 # 日志必须限频，避免故障本身再引发磁盘/日志采集 IO 雪崩。
 _REDIS_ERROR_LOG_INTERVAL_SEC = 30.0
-_last_redis_error_log_at = 0.0
+_last_redis_error_log_at = -_REDIS_ERROR_LOG_INTERVAL_SEC
 _suppressed_redis_error_logs = 0
 
 
