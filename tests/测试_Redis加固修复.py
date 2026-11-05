@@ -503,7 +503,7 @@ async def test_reco_rebuild_lock_old_owner_cannot_delete_new_owner():
     from app.services import reco_cache
 
     fake = FakeRedis()
-    key = "snh:reco:lock:c7:s5:default:b0"
+    key = "snh:reco:lock:c7:s5:default:b0:g0"
     fake.store[key] = "new-owner-token"
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
         await reco_cache.release_reco_lock(7, 5, "default", "b0", token="expired-old-owner-token")
@@ -641,7 +641,10 @@ async def test_reco_cache_customer_invalidation_clears_local_fallback():
     from app.services import reco_cache
 
     reco_cache._LOCAL_RECO_CACHE.clear()
-    await reco_cache.set_cached_reco(19, 2, "menu", "a", {"items": [1]}, "")
+    # 模拟历史/错误路径残留的顾客级本地缓存，失效函数仍应清除本 Worker 的副本。
+    reco_cache._set_local_reco(
+        reco_cache._local_reco_key(19, 2, "menu", "a", ""), {"items": [1]}
+    )
     reco_cache._invalidate_local_reco_customer(19)
     assert reco_cache._get_local_reco(reco_cache._local_reco_key(19, 2, "menu", "a", "")) is None
 
