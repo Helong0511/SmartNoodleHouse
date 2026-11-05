@@ -163,6 +163,13 @@ class CameraWorker:
         self._release_cap()
         t0 = time.perf_counter()
         try:
+            if not self.source.isdigit():
+                # 配置保存时的 DNS 检查不足以保护长期运行的采集线程：
+                # 旧配置/手工写库/后续 DNS 变化都可能绕过保存时校验。
+                # 每次初次连接及重连前重新解析并拒绝危险目标。
+                from app.services.camera_credentials import assert_camera_url_safe
+
+                assert_camera_url_safe(self.source)
             if self.source.isdigit():
                 self._last_backend = "DSHOW_OR_DEFAULT"
                 self._cap = cv2.VideoCapture(int(self.source))
