@@ -385,17 +385,17 @@ async def lifespan(app: FastAPI):
             if task is None or task.done():
                 return True
             task.cancel()
-            try:
-                await asyncio.wait_for(task, timeout=5.0)
-                return True
-            except asyncio.CancelledError:
-                return True
-            except asyncio.TimeoutError:
+            done, _pending = await asyncio.wait({task}, timeout=5.0)
+            if task not in done:
                 logger.critical("%s 在 Leader 降级后 5 秒内未退出；禁止本进程重新竞选", label)
                 return False
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                return True
             except Exception:
                 logger.exception("%s 在 Leader 降级时异常退出", label)
-                return True
+            return True
 
         tts_ok = await _cancel_and_wait(tts_task, "TTS worker")
         recognition_ok = await _cancel_and_wait(recognition_task, "RecognitionWorker")
