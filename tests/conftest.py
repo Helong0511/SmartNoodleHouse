@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import BigInteger, Integer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 # 添加 backend 到 path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -21,7 +22,9 @@ from app.services.order_service import OrderPriceCalculator
 # 默认内存 SQLite；CI MySQL job 通过 TEST_DATABASE_URL 注入
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+# 测试中的 pytest-asyncio fixture 使用函数级事件循环；禁用连接池，避免
+# AsyncEngine 把前一个 loop 创建的 aiomysql/aiosqlite 连接复用到下一个 loop。
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -55,7 +58,7 @@ def _make_sqlite_pk_autoincrement():
 _make_sqlite_pk_autoincrement()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
