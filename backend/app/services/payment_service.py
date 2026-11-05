@@ -34,6 +34,24 @@ from app.services.webhook_replay import claim_once, make_receipt_key, release_cl
 logger = logging.getLogger(__name__)
 
 
+def _wechat_callback_receipt_identity(data: dict, parsed: dict) -> tuple[str, ...]:
+    """构造稳定的微信通知身份；签名头 nonce 是每次 HTTP 请求随机值，不能用于回调幂等。"""
+    notification_id = str(data.get("id") or "").strip()
+    if parsed.get("is_refund"):
+        return (
+            f"{notification_id}" if notification_id else "",
+            str(parsed.get("refund_no") or data.get("out_refund_no") or "").strip(),
+            str(data.get("event_type") or parsed.get("refund_status") or "").strip().upper(),
+            str(data.get("success_time") or data.get("create_time") or "").strip(),
+        )
+    return (
+        notification_id,
+        str(data.get("out_trade_no") or parsed.get("payment_no") or "").strip(),
+        str(data.get("transaction_id") or parsed.get("provider_trade_no") or "").strip(),
+        str(data.get("event_type") or parsed.get("status") or "").strip().upper(),
+    )
+
+
 def _validate_duplicate_paid_callback(provider_u: str, payment: Payment, parsed: dict) -> None:
     """已支付记录的重复成功回调必须与原渠道、原金额、原交易号完全一致。"""
     provider = str(provider_u or "").strip().upper()
@@ -1771,16 +1789,12 @@ class PaymentService:
             if parsed_probe.get("is_refund"):
                 receipt = make_receipt_key(
                     f"{provider_u}:REFUND",
-                    headers.get("wechatpay-nonce") or headers.get("Wechatpay-Nonce") or "",
-                    str(parsed_probe.get("refund_no") or ""),
-                    str(parsed_probe.get("provider_refund_no") or ""),
+                    *_wechat_callback_receipt_identity(data, parsed_probe),
                 )
             else:
                 receipt = make_receipt_key(
                     provider_u,
-                    headers.get("wechatpay-nonce") or headers.get("Wechatpay-Nonce") or "",
-                    data.get("out_trade_no") or "",
-                    data.get("transaction_id") or "",
+                    *_wechat_callback_receipt_identity(data, parsed_probe),
                 )
         else:
             data = AlipayVerifier().verify_and_parse(headers, body)
