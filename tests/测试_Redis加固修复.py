@@ -758,3 +758,34 @@ async def test_reco_rebuild_wait_is_bounded_when_cache_never_appears():
         result = await reco_cache.wait_for_reco(1, 2, "menu", "a", timeout=0.05)
     assert result is None
     assert calls["n"] >= 1
+
+
+
+@pytest.mark.asyncio
+async def test_redis_owned_lock_heartbeat_renews_and_stops():
+    from app.core.redis_client import start_redis_lock_heartbeat, stop_redis_lock_heartbeat
+
+    fake = FakeRedis()
+    fake.store["lease:key"] = "owner-a"
+    task = start_redis_lock_heartbeat(
+        fake, "lease:key", "owner-a", ttl=3, label="test"
+    )
+    await asyncio.sleep(1.1)
+    assert any("expire" in call[0].lower() for call in fake.eval_calls)
+    await stop_redis_lock_heartbeat(task)
+    assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_redis_owned_lock_heartbeat_stops_after_owner_changes():
+    from app.core.redis_client import start_redis_lock_heartbeat
+
+    fake = FakeRedis()
+    fake.store["lease:key"] = "owner-a"
+    task = start_redis_lock_heartbeat(
+        fake, "lease:key", "owner-a", ttl=3, label="test-lost"
+    )
+    fake.store["lease:key"] = "owner-b"
+    await asyncio.sleep(1.1)
+    assert task.done()
+    assert fake.store["lease:key"] == "owner-b"
