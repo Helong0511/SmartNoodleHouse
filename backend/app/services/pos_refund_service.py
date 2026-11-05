@@ -331,7 +331,15 @@ class PosRefundService:
         if row.status == "PROCESSING" and row.refund_id:
             from app.models import PaymentRefund
 
-            linked_refund = await db.get(PaymentRefund, int(row.refund_id))
+            # 这里只做非锁定读取，避免先持有 POS 申请锁再等待退款行锁；
+            # 退款成功回调的锁序是 PaymentRefund → Order → Payment → POS request。
+            linked_refund = (
+                await db.execute(
+                    select(PaymentRefund)
+                    .where(PaymentRefund.id == int(row.refund_id))
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
             if linked_refund and linked_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
                 await db.refresh(row)
                 return row
@@ -394,6 +402,20 @@ class PosRefundService:
                     operator_id=user.id,
                     pos_refund_request_id=request_id,
                 )
+                # 回调可能与退款申请响应并发到达。按 PaymentRefund → POS request 锁序，
+                # 重新读取并锁定渠道退款事实，避免用过期 PROCESSING 覆盖刚提交的 SUCCESS。
+                from app.models import PaymentRefund
+
+                last_refund = (
+                    await db.execute(
+                        select(PaymentRefund)
+                        .where(PaymentRefund.id == int(last_refund.id))
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                ).scalar_one_or_none()
+                if not last_refund:
+                    raise AppException(40405, "渠道退款记录不存在")
                 row = await cls._lock_request(db, request_id)
                 if not row:
                     raise AppException(40404, "退款申请不存在")
