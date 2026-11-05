@@ -544,6 +544,9 @@ async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch
     winner_result.scalar_one_or_none.return_value = winner
 
     db = AsyncMock()
+    # AsyncSession.add() is synchronous; keep it a normal mock to avoid an
+    # un-awaited coroutine warning that can hide real async lifecycle bugs.
+    db.add = MagicMock()
     db.execute = AsyncMock(side_effect=[
         locked_result, no_existing_result, winner_result,
     ])
