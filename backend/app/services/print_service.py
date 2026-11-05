@@ -530,8 +530,8 @@ class PrintService:
     ) -> PrintJob:
         """创建或更新 PrintJob 为 PENDING，写入已 sanitize 的 content。
 
-        P1 修复：按 (order_id, ticket_type) 查找现有 PENDING/PRINTING 任务，
-        存在则复用，避免超时重试重复出票。
+        重复触发时复用未完成任务。查询使用行锁，避免并发请求同时创建同订单同票型任务；
+        PRINTING 任务不得被重置为 PENDING，否则会抢占正在执行的打印并导致重复出纸。
         """
         safe = _prepare_job_content(content)
         digest = _content_hash(safe)
@@ -542,11 +542,15 @@ class PrintService:
             # 幂等：复用同订单同票型的未完成打印任务，避免重复出票
             existing = (
                 await db.execute(
-                    select(PrintJob).where(
+                    select(PrintJob)
+                    .where(
                         PrintJob.order_id == int(order_id),
                         PrintJob.ticket_type == ticket_type,
                         PrintJob.status.in_(("PENDING", "PRINTING")),
                     )
+                    .order_by(PrintJob.id.desc())
+                    .limit(1)
+                    .with_for_update()
                 )
             ).scalar_one_or_none()
             if existing is not None:
@@ -564,6 +568,9 @@ class PrintService:
             db.add(job)
             await db.flush()
         else:
+            # 正在打印的任务由当前 owner 持有；重复触发只能复用，不能清锁或重置状态。
+            if job.status == "PRINTING":
+                return job
             job.store_id = int(store_id)
             job.order_id = int(order_id)
             job.ticket_type = ticket_type
@@ -733,6 +740,15 @@ class PrintService:
             content=content,
             print_job_id=print_job_id,
         )
+        # Outbox/Webhook 重复投递时，若已有打印仍在进行，不得再次调用物理打印机。
+        # 真正超时的 PRINTING 会由 reclaim_stale_printing 回收，再走 PrintJob 重试队列。
+        if job.status == "PRINTING" and print_job_id is None:
+            return {
+                "code": 0,
+                "msg": "print already in progress; duplicate trigger ignored",
+                "print_job_id": int(job.id),
+                "deduplicated": True,
+            }
         await cls._begin_printing(db, job)
         job_id = int(job.id)
         store_id = int(ctx.order.store_id)
