@@ -126,21 +126,23 @@ class BalanceService:
                 or money(existing_amount) != pay
                 or (
                     payment_id is not None
-                    and existing.payment_id is not None
-                    and int(existing.payment_id) != int(payment_id)
+                    and (
+                        existing.payment_id is None
+                        or int(existing.payment_id) != int(payment_id)
+                    )
                 )
                 or (
                     store_id is not None
-                    and existing.store_id is not None
-                    and int(existing.store_id) != int(store_id)
+                    and (
+                        existing.store_id is None
+                        or int(existing.store_id) != int(store_id)
+                    )
                 )
             ):
                 raise AppException(40994, "订单已有储值扣款流水，但顾客/金额/支付单不一致，拒绝重复扣款")
             return existing
         from app.services.customer_service import CustomerService
 
-        if not c:
-            raise AppException(40995, "会员储值账户余额异常")
         if not CustomerService.is_member(cust):
             raise AppException(40320, "请先开通会员后再使用余额支付", status_code=403)
         gift = money(cust.balance_gift or 0)
