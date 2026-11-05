@@ -156,3 +156,41 @@ async def test_webhook_claim_lease_guard_cancels_owner_when_claim_is_lost(monkey
     await asyncio.sleep(1.1)
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+
+def test_deferred_webhook_payload_does_not_persist_platform_secrets_or_customer_pii():
+    from app.services.webhook_inbox import _build_deferred_outbox_payload
+
+    payload = _build_deferred_outbox_payload(
+        {
+            "action": "reply_urge",
+            "platform": "MEITUAN",
+            "platform_order_id": "platform-order-1",
+            "credentials": {
+                "store_id": 9,
+                "access_token": "secret-access-token",
+                "refresh_token": "secret-refresh-token",
+            },
+            "raw": {
+                "reply_type": 2,
+                "recipient_phone": "13800000000",
+                "recipient_address": "private address",
+            },
+        },
+        "MEITUAN",
+    )
+    assert payload["store_id"] == 9
+    assert payload["raw"] == {"reply_type": 2}
+    serialized = str(payload)
+    assert "secret-access-token" not in serialized
+    assert "secret-refresh-token" not in serialized
+    assert "13800000000" not in serialized
+    assert "private address" not in serialized
+
+
+def test_deferred_webhook_payload_rejects_unknown_action():
+    from app.services.webhook_inbox import _build_deferred_outbox_payload
+
+    with pytest.raises(ValueError, match="unsupported deferred webhook action"):
+        _build_deferred_outbox_payload({"action": "execute_arbitrary"}, "MEITUAN")
