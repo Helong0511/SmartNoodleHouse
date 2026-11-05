@@ -103,9 +103,13 @@ def _isolate_system_settings_cache(monkeypatch):
     """
     from app.services.system_settings_service import SystemSettingsService
 
-    async def _touch_cache_test(db=None):
+    original_touch_cache = SystemSettingsService.touch_cache.__func__
+
+    async def _touch_cache_test(cls, db=None):
+        # 测试不提供 Session 时禁止连接真实数据库；提供 Session 时必须走生产
+        # single-flight 实现，避免测试桩绕过锁而掩盖并发回源问题。
         if db is not None:
-            await SystemSettingsService._load_raw(db)
+            await original_touch_cache(cls, db)
 
     monkeypatch.setattr(SystemSettingsService, "touch_cache", classmethod(_touch_cache_test))
     SystemSettingsService.invalidate_cache_local()
