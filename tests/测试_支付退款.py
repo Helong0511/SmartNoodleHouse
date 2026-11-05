@@ -265,3 +265,25 @@ async def test_async_refund_success_flags_pos_request_over_refund_for_reconcilia
     assert request.executed_amount == Decimal("35.00")
     assert request.status == "RECONCILIATION_REQUIRED"
     assert "超过申请金额" in request.fail_reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current_status", ["SUCCESS", "FAILED", "CLOSED", "ABNORMAL"])
+async def test_stale_processing_refund_result_never_downgrades_terminal_status(current_status):
+    from types import SimpleNamespace
+
+    from app.services.payment_service import PaymentService
+
+    row = SimpleNamespace(
+        status=current_status,
+        provider_refund_no="provider-rf-1",
+        callback_raw=None,
+        fail_reason=None,
+    )
+    db = AsyncMock()
+
+    result = await PaymentService._finalize_refund(db, row, "PROCESSING", source="STALE_CALLBACK")
+
+    assert result is row
+    assert row.status == current_status
+    db.flush.assert_not_awaited()
