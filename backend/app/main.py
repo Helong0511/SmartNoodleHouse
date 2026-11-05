@@ -441,6 +441,13 @@ async def lifespan(app: FastAPI):
                 "Leader 降级未完成安全排空，本进程停止自动 promotion；需人工检查残留任务"
             )
 
+    async def _run_leader_scoped(awaitable):
+        """让长期 Leader worker 的所有 DB commit 同样经过 epoch fencing。"""
+        from app.core.leader_fencing import leader_fence_scope
+
+        with leader_fence_scope():
+            return await awaitable
+
     async def _start_leader_work() -> None:
         """抢到锁后启动调度器 / TTS / 识别 / 摄像头。"""
         nonlocal is_leader, _leader_promote_task
@@ -516,7 +523,7 @@ async def lifespan(app: FastAPI):
             logger.exception("启动定时任务覆盖订阅失败")
         logger.info("Scheduler started (leader worker_id=%s role=%s)", _leader_worker_id, role)
         # edge / local 均靠 TTSWorker 消费 Redis 迎宾队列；仅 local 时启会导致生产 edge 永不出声
-        tts_task = asyncio.create_task(tts_worker.run())
+        tts_task = asyncio.create_task(_run_leader_scoped(tts_worker.run()))
         logger.info(
             "TTS worker started (leader) provider=%s",
             getattr(settings, "tts_provider", "?"),
@@ -525,7 +532,9 @@ async def lifespan(app: FastAPI):
             try:
                 from app.workers.recognition_worker import RecognitionWorker
 
-                recognition_task = asyncio.create_task(RecognitionWorker().run())
+                recognition_task = asyncio.create_task(
+                    _run_leader_scoped(RecognitionWorker().run())
+                )
                 logger.info("RecognitionWorker started (leader)")
             except Exception as e:
                 logger.warning("RecognitionWorker 未启动: %s", e)
@@ -557,7 +566,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("摄像头自动恢复失败: %s", e)
         # 后台预热 InsightFace + 试听短句 WAV，避免首人/首次试听卡数秒
-        _leader_warmup_task = asyncio.create_task(_warmup_recognition_and_tts())
+        _leader_warmup_task = asyncio.create_task(
+            _run_leader_scoped(_warmup_recognition_and_tts())
+        )
 
     async def _standby_promote_loop() -> None:
         """auto/leader 非持锁进程持续争抢；Leader 宕机后自动接管调度。"""
