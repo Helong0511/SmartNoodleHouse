@@ -427,6 +427,8 @@ async def test_cancel_active_leader_jobs_has_bounded_wait_for_cancel_resistant_t
 
     task = asyncio.create_task(cancellation_resistant())
     sa._active_leader_job_tasks.add(task)
+    # 确保协程已进入可捕获 CancelledError 的 await，再触发取消。
+    await asyncio.sleep(0)
     try:
         count = await sa.cancel_active_leader_jobs(timeout=0.1)
         assert count == 1
