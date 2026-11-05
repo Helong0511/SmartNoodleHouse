@@ -10,6 +10,7 @@ from app.core.exceptions import AppException
 from app.models import Order, OrderItem, PrintJob, Store
 from app.services.print_service import (
     MAX_PRINT_ATTEMPTS,
+    STALE_PRINTING_SEC,
     PrintService,
     _escape_print_text,
     _prepare_job_content,
@@ -259,7 +260,7 @@ async def test_stale_print_recovery_emits_critical_uncertain_result_alert(db_ses
         content_hash="uncertain-stale-print",
         status="PRINTING",
         attempt_count=1,
-        locked_at=now_local() - timedelta(seconds=PrintService.STALE_PRINTING_SEC + 1),
+        locked_at=now_local() - timedelta(seconds=STALE_PRINTING_SEC + 1),
         locked_by="crashed-worker",
     )
     db_session.add(job)
