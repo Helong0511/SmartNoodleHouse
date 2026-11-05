@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.response import naive_local_now
 from app.models import Order, OrderItem, Product, ProductCategory, Store
 from app.services.dining_session_service import DiningSessionService
 from app.services.order_service import OrderReorderService
@@ -75,7 +76,7 @@ async def test_dining_session_touch_accepts_naive_mysql_datetime():
     """MySQL DATETIME 读回 naive 时，触碰就餐会话不能抛时区比较异常。"""
     session = SimpleNamespace(
         status="ACTIVE",
-        expires_at=datetime.now() + timedelta(hours=1),
+        expires_at=naive_local_now() + timedelta(hours=1),
         last_active_at=None,
     )
     db = SimpleNamespace(get=AsyncMock(return_value=session), flush=AsyncMock())
