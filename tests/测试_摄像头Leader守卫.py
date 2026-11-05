@@ -87,6 +87,7 @@ def test_stop_all_cameras_signals_and_releases_every_worker():
 
     manager = CameraManager()
     original = manager._workers
+    old_stopping = manager._stopping_all
     first, second = FakeWorker(), FakeWorker()
     manager._workers = {99101: first, 99102: second}
     try:
@@ -96,6 +97,7 @@ def test_stop_all_cameras_signals_and_releases_every_worker():
         assert manager._workers == {}
     finally:
         manager._workers = original
+        manager._stopping_all = old_stopping
 
 
 def test_stop_all_cameras_keeps_worker_when_thread_does_not_exit():
@@ -120,6 +122,7 @@ def test_stop_all_cameras_keeps_worker_when_thread_does_not_exit():
 
     manager = CameraManager()
     original = manager._workers
+    old_stopping = manager._stopping_all
     worker = FakeWorker()
     manager._workers = {99103: worker}
     try:
@@ -129,6 +132,7 @@ def test_stop_all_cameras_keeps_worker_when_thread_does_not_exit():
         assert manager._workers.get(99103) is worker
     finally:
         manager._workers = original
+        manager._stopping_all = old_stopping
 
 
 
