@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from app.core import webhook_body_limit
 from app.core.webhook_body_limit import WebhookBodyLimitMiddleware
 
 
@@ -131,3 +134,26 @@ async def test_content_length_mismatch_is_rejected():
     ], headers=[(b"content-length", b"4")])
     assert not called
     assert sent[0]["status"] == 400
+
+
+@pytest.mark.asyncio
+async def test_slow_callback_body_is_rejected_after_total_deadline(monkeypatch):
+    monkeypatch.setattr(webhook_body_limit, "_CALLBACK_BODY_TOTAL_TIMEOUT_SEC", 0.01)
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        await asyncio.Future()
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    middleware = WebhookBodyLimitMiddleware(app, max_body_bytes=8)
+    await middleware(_scope("/webhook/provider"), receive, send)
+    assert not called
+    assert sent[0]["status"] == 408
