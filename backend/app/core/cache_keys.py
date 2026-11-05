@@ -99,10 +99,19 @@ def ttl_with_jitter(ttl: int, *, min_ratio: float = 0.8, max_ratio: float = 1.2)
     return max(1, int(ttl * random.uniform(min_ratio, max_ratio)))
 
 
-def reco_key(customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "") -> str:
-    """推荐结果键。fingerprint 用于 settle_addon 区分不同购物车内容。"""
+def reco_generation_key(customer_id: int | None) -> str:
+    """顾客推荐缓存代际版本；画像/授权变化时原子递增，阻止旧计算结果回写。"""
     cid = int(customer_id) if customer_id else 0
-    base = f"{RECO_KEY_PREFIX}:c{cid}:s{int(store_id)}:{scene}:{bucket}"
+    return f"{RECO_KEY_PREFIX}:gen:c{cid}"
+
+
+def reco_key(
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", generation: int = 0,
+) -> str:
+    """推荐结果键按顾客代际隔离；旧代际缓存自然过期，不会被新请求读取。"""
+    cid = int(customer_id) if customer_id else 0
+    base = f"{RECO_KEY_PREFIX}:c{cid}:s{int(store_id)}:{scene}:{bucket}:g{max(0, int(generation))}"
     if fingerprint:
         return f"{base}:{fingerprint}"
     return base
