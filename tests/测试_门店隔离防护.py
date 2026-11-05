@@ -27,7 +27,7 @@ async def test_build_order_items_rejects_mismatched_store(monkeypatch):
     monkeypatch.setattr(OrderPriceCalculator, "calculate_items_batch", fake_calc)
 
     db = AsyncMock()
-    order = SimpleNamespace(id=1, store_id=store_a)
+    order = SimpleNamespace(id=1, store_id=store_a, customer_id=None)
     with pytest.raises(AppException) as ei:
         await OrderPriceCalculator.build_order_items(
             db, order, [{"product_id": 99, "quantity": 1, "option_ids": []}]
@@ -56,7 +56,7 @@ async def test_build_order_items_accepts_matching_store(monkeypatch):
     db.add = MagicMock()
     db.flush = AsyncMock()
 
-    order = SimpleNamespace(id=2, store_id=store)
+    order = SimpleNamespace(id=2, store_id=store, customer_id=None)
     subtotal, packing, discountable = await OrderPriceCalculator.build_order_items(
         db, order, [{"product_id": 10, "quantity": 1, "option_ids": []}], deduct_stock=False
     )
