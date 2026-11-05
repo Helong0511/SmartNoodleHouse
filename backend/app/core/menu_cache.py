@@ -124,6 +124,9 @@ async def set_menu_bundle_if_owner(
     if not token:
         return False
     try:
+        expected_version = int(expected_version)
+        if expected_version <= 0:
+            return False
         r = await get_redis()
         from app.core.response import dumps_json
 
@@ -135,7 +138,7 @@ async def set_menu_bundle_if_owner(
             return False
         script = """
         if redis.call('GET', KEYS[1]) == ARGV[1]
-           and (redis.call('GET', KEYS[3]) or '0') == ARGV[4] then
+           and redis.call('GET', KEYS[3]) == ARGV[4] then
             return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
         end
         return false
@@ -149,7 +152,7 @@ async def set_menu_bundle_if_owner(
             token,
             raw,
             ttl_with_jitter(MENU_TTL_SECONDS),
-            str(max(0, int(expected_version))),
+            str(expected_version),
         )
         return bool(result)
     except Exception:
