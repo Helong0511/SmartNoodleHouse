@@ -283,7 +283,7 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                     lock_ok = lock_token is not None
                     if not lock_ok:
                         # 跨进程持锁者可能仍在构建；短暂等待后再查缓存。
-                        waited = await wait_for_rebuild(sid, 0.3)
+                        waited = await wait_for_rebuild(sid, 2.0)
                         if (
                             waited is not None
                             and _bundle_schedule_id(waited) == expected_sched
