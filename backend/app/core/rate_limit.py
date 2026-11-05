@@ -1,6 +1,7 @@
 """API 限流中间件（Redis Token Bucket；路径分桶防动态 URL key 爆炸）"""
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from fastapi import Request
@@ -57,9 +58,19 @@ def _rate_limit_bucket(path: str) -> str:
     normalized = (path or "/").split("?", 1)[0]
     parts = [part for part in normalized.strip("/").split("/") if part]
     if len(parts) >= 2 and parts[0].lower() == "api":
-        return f"/api/{parts[1].lower()}"
+        resource = parts[1].lower()
+        shard = int.from_bytes(
+            hashlib.blake2s(resource.encode("utf-8", errors="replace"), digest_size=2).digest(),
+            "big",
+        ) % 64
+        return f"/api/_resource_{shard:02d}"
     if parts:
-        return f"/{parts[0].lower()}"
+        resource = parts[0].lower()
+        shard = int.from_bytes(
+            hashlib.blake2s(resource.encode("utf-8", errors="replace"), digest_size=2).digest(),
+            "big",
+        ) % 64
+        return f"/_path_{shard:02d}"
     return "/"
 
 # 原子 Token Bucket：避免固定窗口在边界处出现接近 2 倍突发。
