@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
+from time import monotonic
 import uuid
 
 import redis.asyncio as redis
@@ -27,7 +27,7 @@ _suppressed_redis_degrade_logs = 0
 
 def _log_redis_degraded(error: Exception) -> None:
     global _last_redis_degrade_log_at, _suppressed_redis_degrade_logs
-    now = time.monotonic()
+    now = monotonic()
     if now - _last_redis_degrade_log_at < _REDIS_DEGRADE_LOG_INTERVAL_SEC:
         _suppressed_redis_degrade_logs += 1
         return
