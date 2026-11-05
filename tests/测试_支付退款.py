@@ -312,6 +312,7 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
         provider="ALIPAY",
         provider_trade_no="ALI-TRADE-12",
         order_id=9,
+        amount=Decimal("20.00"),
     )
     initial_result = MagicMock()
     initial_result.scalar_one_or_none.return_value = row
