@@ -438,6 +438,9 @@ async def test_play_on_camera_aborts_during_synth(monkeypatch):
         def __init__(self, *a, **k):
             pass
 
+        async def set_speaker_volume(self, volume):
+            return True
+
         async def resolve_codec(self, block=False):
             return "alaw"
 
@@ -511,6 +514,9 @@ async def test_play_on_camera_aborts_mid_synth_wait(monkeypatch):
     class _Client:
         def __init__(self, *a, **k):
             pass
+
+        async def set_speaker_volume(self, volume):
+            return True
 
         async def resolve_codec(self, block=False):
             return "alaw"
