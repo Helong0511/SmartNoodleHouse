@@ -306,6 +306,8 @@ async def test_paid_order_invalidates_customer_cache(db_session, fake_redis):
     # 下单支付 → record_paid_order_events 学习 + 主动失效
     order = await make_paid_order(db, cust.id, store.id, [(p, 1, [])])
     await TasteLearningService.record_paid_order_events(db, order.id)
+    # 个性化缓存失效在业务事务提交后执行；未提交前不能推进共享代际。
+    await db.commit()
 
     keys_left = list(fake_redis.store.keys())
     assert not any(f":c{cust.id}:" in k for k in keys_left), "支付后该顾客缓存应被清除"
