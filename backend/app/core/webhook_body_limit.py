@@ -36,7 +36,7 @@ class WebhookBodyLimitMiddleware:
             (b"content-type", b"application/json; charset=utf-8"),
             (b"content-length", str(len(body)).encode("ascii")),
             (b"cache-control", b"no-store"),
-            (b"connection", b"close") if status == 503 else (b"x-content-type-options", b"nosniff"),
+            (b"retry-after", b"1") if status == 503 else (b"x-content-type-options", b"nosniff"),
         ]})
         await send({"type": "http.response.body", "body": body, "more_body": False})
 
