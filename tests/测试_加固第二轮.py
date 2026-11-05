@@ -151,4 +151,6 @@ async def test_confirm_leader_owned_fail_closed_on_redis_error():
     leader_lock.set_leader_worker_id("w1")
     with patch("app.core.leader_lock.get_redis", AsyncMock(side_effect=RuntimeError("down"))):
         assert await leader_lock.confirm_leader_owned() is False
+        # 默认 fail-closed 已清除本地门闩；单独验证显式 fail_open 的旧行为。
+        leader_lock.set_leader_held(True)
         assert await leader_lock.confirm_leader_owned(fail_open=True) is True
