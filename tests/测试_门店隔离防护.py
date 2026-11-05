@@ -21,7 +21,7 @@ async def test_build_order_items_rejects_mismatched_store(monkeypatch):
     )
 
     # mock calculate_items_batch 直接返回跨店餐品行，单独测试 build_order_items 的断言
-    async def fake_calc(db, items_data, *, store_id):
+    async def fake_calc(db, items_data, *, store_id, customer_id=None):
         return [(product_b, 10, [], 1)]
 
     monkeypatch.setattr(OrderPriceCalculator, "calculate_items_batch", fake_calc)
