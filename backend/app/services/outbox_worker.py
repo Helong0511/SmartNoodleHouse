@@ -244,17 +244,29 @@ async def process_outbox_item(outbox_id: int) -> None:
                 idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
                 try:
                     from app.domains.messaging.idempotency import try_acquire
-    
-                    await try_acquire(
+
+                    idem_acquired = await try_acquire(
                         db,
                         scope="outbox",
                         message_id=idem_msg,
                         ttl_seconds=86400 * 7,
                         mark_redis=False,
                     )
-                except Exception:
-                    # TODO: 考虑补偿监控告警，当前依赖 done_result.rowcount 兜底
-                    logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
+                    if not idem_acquired:
+                        # 并发/历史幂等记录已存在：回滚本次 handler 的业务改动，
+                        # 让下一轮预检读取已完成记录后只收敛 Outbox 状态。
+                        await db.rollback()
+                        await _mark_failed(
+                            db, row, "idempotency_already_exists_after_handler", wid=wid
+                        )
+                        return
+                except Exception as e:
+                    # 无法持久化幂等事实时，绝不能提交 handler 的副作用。
+                    await db.rollback()
+                    await _mark_failed(
+                        db, row, f"idempotency_write_failed: {e}", wid=wid
+                    )
+                    return
                 await db.commit()
             try:
                 from app.domains.messaging.idempotency import mark_processed_redis
