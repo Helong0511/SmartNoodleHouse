@@ -610,3 +610,18 @@ async def test_scheduler_job_lock_renews_long_running_lease():
             await asyncio.sleep(1.8)
     assert any("expire" in call[0].lower() for call in fake.eval_calls)
     assert any("del" in call[0].lower() for call in fake.eval_calls)
+
+
+def test_production_redis_url_requires_password_for_redis_and_rediss():
+    from app.core.startup_checks import _production_redis_url_errors
+
+    assert any("密码" in x for x in _production_redis_url_errors("redis://user@cache.example.net:6379/0"))
+    assert any("密码" in x for x in _production_redis_url_errors("rediss://cache.example.net:6379/0"))
+    assert _production_redis_url_errors("rediss://:secret@cache.example.net:6379/0") == []
+
+
+def test_production_redis_url_rejects_loopback_and_invalid_scheme():
+    from app.core.startup_checks import _production_redis_url_errors
+
+    assert any("回环" in x for x in _production_redis_url_errors("rediss://:secret@127.0.0.1:6379/0"))
+    assert any("redis://" in x for x in _production_redis_url_errors("http://:secret@cache.example.net:6379/0"))
