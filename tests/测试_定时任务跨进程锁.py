@@ -455,3 +455,29 @@ def _activate_test_database_leader_epoch(monkeypatch):
     )
     yield
     leader_fencing.deactivate_leader_epoch("test-worker")
+
+
+
+@pytest.mark.asyncio
+async def test_leader_job_refuses_to_run_without_database_epoch():
+    from app.core import leader_lock, leader_fencing
+    from app.services import scheduler_admin as sa
+
+    called = False
+
+    async def job():
+        nonlocal called
+        called = True
+
+    job.__name__ = "must_not_run_without_epoch"
+    wrapped = sa.leader_job(job)
+    leader_fencing.deactivate_leader_epoch()
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-no-db-epoch")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-no-db-epoch")
+
+    with patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)):
+        assert await wrapped() is None
+
+    assert called is False
