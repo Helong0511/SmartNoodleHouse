@@ -15,15 +15,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "outbox_events",
-        sa.Column(
-            "sync_version",
-            sa.Integer(),
-            nullable=False,
-            server_default="0",
-        ),
-    )
+    conn = op.get_bind()
+    columns = {column["name"] for column in sa.inspect(conn).get_columns("outbox_events")}
+    if "sync_version" not in columns:
+        op.add_column(
+            "outbox_events",
+            sa.Column(
+                "sync_version",
+                sa.Integer(),
+                nullable=False,
+                server_default="0",
+            ),
+        )
 
 
 def downgrade() -> None:
