@@ -101,3 +101,21 @@ async def claim_lease_guard(
             await heartbeat_task
         except asyncio.CancelledError:
             pass
+
+
+
+async def rollback_if_claim_lost(db, result, *, model, row_id: int) -> bool:
+    """DONE 条件更新未命中唯一 claim owner 时回滚整个业务事务。
+
+    返回 True 表示 claim 已丢失且事务已回滚；调用方必须立即停止，不得提交、
+    写幂等完成标记或发送成功通知。rowcount=None 也按无法证明所有权处理。
+    """
+    if int(getattr(result, "rowcount", 0) or 0) == 1:
+        return False
+    await db.rollback()
+    logger.warning(
+        "后台任务完成时 claim 所有权已丢失，已回滚业务事务 model=%s id=%s",
+        getattr(model, "__name__", str(model)),
+        row_id,
+    )
+    return True
