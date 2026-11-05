@@ -101,6 +101,26 @@ class PosRefundService:
             parts.append(f"{name}¥{amt}")
         return " + ".join(parts)
 
+    @staticmethod
+    def _finalize_persisted_execution_state(row: PosRefundRequest, amount_total: Decimal) -> Decimal:
+        """以数据库已累计的 executed_amount 为准收敛终态，不能使用调用前的局部快照。"""
+        executed = money(getattr(row, "executed_amount", None) or 0)
+        if row.status == "RECONCILIATION_REQUIRED":
+            # 超额退款是资金对账异常，不能被普通成功/失败收敛逻辑覆盖。
+            return executed
+        if executed > money(amount_total):
+            row.status = "RECONCILIATION_REQUIRED"
+            row.fail_reason = (
+                f"实际退款累计 ¥{executed} 超过申请金额 ¥{money(amount_total)}，需人工核对"
+            )[:255]
+        elif executed >= money(amount_total):
+            row.status = "SUCCESS"
+            row.fail_reason = None
+        else:
+            row.status = "FAILED"
+            row.fail_reason = f"部分退款成功 ¥{executed}，剩余请重试"[:255]
+        return executed
+
     @classmethod
     async def create_request(
         cls,
@@ -479,9 +499,11 @@ class PosRefundService:
         row = await cls._lock_request(db, request_id)
         if not row:
             raise AppException(40404, "退款申请不存在")
-        if executed + money(0) >= amount_total:
-            row.status = "SUCCESS"
-            row.fail_reason = None
+        # _finalize_refund / 异步回调会在同一事务内更新 executed_amount。
+        # 上面的局部 executed 是审批开始时的快照，不能用于最终判定，否则同步 SUCCESS
+        # 已累计入库后仍会被旧值覆盖为 FAILED。
+        persisted_executed = cls._finalize_persisted_execution_state(row, amount_total)
+        if row.status == "SUCCESS":
             from types import SimpleNamespace
 
             summary = cls._alloc_summary(
@@ -489,9 +511,6 @@ class PosRefundService:
             )
             if summary and not (row.review_remark or "").strip():
                 row.review_remark = f"分摊：{summary}"[:500]
-        else:
-            row.status = "FAILED"
-            row.fail_reason = f"部分退款成功 ¥{executed}，剩余请重试"[:255]
         await db.flush()
         await db.refresh(row)
         return row
