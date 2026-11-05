@@ -141,20 +141,41 @@ async def reclaim_stale_inbox(
     复位时不清零 attempt_count（避免无限重试），仅释放锁、保留退避。
     """
     cutoff = now_local() - timedelta(seconds=stale_after)
-    stmt = (
+    stale_filter = (
+        WebhookInbox.status == "PROCESSING",
+        or_(WebhookInbox.locked_at.is_(None), WebhookInbox.locked_at < cutoff),
+    )
+    # 若 worker 在最后一次允许尝试后崩溃，必须进入终态死信；
+    # 不得重新置为 PENDING，否则会绕过 MAX_ATTEMPTS 无限重放。
+    terminal_stmt = (
         update(WebhookInbox)
-        .where(
-            WebhookInbox.status == "PROCESSING",
-            or_(WebhookInbox.locked_at.is_(None), WebhookInbox.locked_at < cutoff),
+        .where(*stale_filter, WebhookInbox.attempt_count >= MAX_ATTEMPTS)
+        .values(
+            status="FAILED",
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+            last_error="claim lease expired after maximum attempts",
         )
+    )
+    retry_stmt = (
+        update(WebhookInbox)
+        .where(*stale_filter, WebhookInbox.attempt_count < MAX_ATTEMPTS)
         .values(status="PENDING", locked_at=None, locked_by=None)
     )
-    result = await db.execute(stmt)
+    terminal_result = await db.execute(terminal_stmt)
+    retry_result = await db.execute(retry_stmt)
     await db.commit()
-    count = int(result.rowcount or 0)
-    if count:
-        logger.warning("Reclaimed %s stale PROCESSING inbox events", count)
-    return count
+    terminal_count = int(terminal_result.rowcount or 0)
+    retry_count = int(retry_result.rowcount or 0)
+    if retry_count:
+        logger.warning("Reclaimed %s stale PROCESSING inbox events", retry_count)
+    if terminal_count:
+        logger.critical(
+            "Webhook inbox events exhausted max_attempts after lease expiry: count=%s",
+            terminal_count,
+        )
+    return terminal_count + retry_count
 
 
 async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | None = None) -> WebhookInbox | None:
@@ -170,7 +191,10 @@ async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | Non
         .where(
             WebhookInbox.id == inbox_id,
             or_(
-                WebhookInbox.status == "PENDING",
+                and_(
+                    WebhookInbox.status == "PENDING",
+                    WebhookInbox.attempt_count < MAX_ATTEMPTS,
+                ),
                 and_(
                     WebhookInbox.status == "FAILED",
                     WebhookInbox.attempt_count < MAX_ATTEMPTS,
