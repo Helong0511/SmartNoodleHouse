@@ -226,11 +226,16 @@ async def test_duplicate_print_trigger_does_not_reset_or_resend_active_job(db_se
 
     with patch("app.services.print_service.EscposClient.print_ticket", new_callable=AsyncMock) as mock_print:
         result = await PrintService.print_order(db_session, order.id)
+        explicit_retry = await PrintService.print_order(
+            db_session, order.id, print_job_id=job.id
+        )
         mock_print.assert_not_awaited()
 
     await db_session.refresh(job)
     assert result["deduplicated"] is True
+    assert explicit_retry["deduplicated"] is True
     assert result["print_job_id"] == job.id
+    assert explicit_retry["print_job_id"] == job.id
     assert job.status == "PRINTING"
     assert job.locked_by == "original-print-owner"
     assert job.attempt_count == 1
