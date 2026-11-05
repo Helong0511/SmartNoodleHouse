@@ -94,6 +94,29 @@ async def acquire_database_epoch(owner_id: str) -> int:
     return value
 
 
+async def revoke_database_epoch(owner_id: str) -> bool:
+    """Leader 丢锁时主动废止旧 epoch；若新 Leader 已接管则不覆盖其 owner。"""
+    from sqlalchemy import update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models import LeaderFencingState
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            result = await db.execute(
+                update(LeaderFencingState)
+                .where(
+                    LeaderFencingState.id == 1,
+                    LeaderFencingState.owner_id == str(owner_id)[:64],
+                )
+                .values(
+                    epoch=LeaderFencingState.epoch + 1,
+                    owner_id=None,
+                )
+            )
+            return result.rowcount == 1
+
+
 def _before_commit_fence(session: Session) -> None:
     identity = _current_fence.get()
     if identity is None:
