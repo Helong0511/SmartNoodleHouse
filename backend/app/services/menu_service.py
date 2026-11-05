@@ -257,7 +257,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         bundle = hit
     else:
         # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
-        lock_ok = await try_acquire_rebuild_lock(sid)
+        lock_token = await try_acquire_rebuild_lock(sid)
+        lock_ok = lock_token is not None
         if not lock_ok:
             # 未抢到锁：短暂等待其他进程重建完成后重读缓存
             waited = await wait_for_rebuild(sid, 0.3)
@@ -277,7 +278,7 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
             _BUILD_CACHE.put(sid, bundle)
         finally:
             if lock_ok:
-                await release_rebuild_lock(sid)
+                await release_rebuild_lock(sid, lock_token)
 
     version = await get_menu_version(sid)
     if version <= 0:
