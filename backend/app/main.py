@@ -29,6 +29,7 @@ from app.core.exceptions import (
 from app.core.http_client import close_http_client
 from app.core.intrusion_detection import detect_intrusion
 from app.core.ip_allowlist import WebhookAllowlistMiddleware
+from app.core.webhook_body_limit import WebhookBodyLimitMiddleware
 from app.core.logging_config import setup_logging
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.redis_client import RequestIDMiddleware
@@ -782,17 +783,6 @@ def create_app() -> FastAPI:
     # P1-40: Security headers 中间件
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next):
-        # P1-43: Webhook body size limit — 超限返回 413
-        path = request.url.path
-        if "/webhook" in path or "/notify" in path or "/callback" in path:
-            cl = request.headers.get("content-length")
-            if cl and int(cl) > settings.webhook_max_body_bytes:
-                from fastapi.responses import JSONResponse
-
-                return JSONResponse(
-                    status_code=413,
-                    content={"code": 413, "message": "Webhook body too large"},
-                )
         response = await call_next(request)
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -847,6 +837,8 @@ def create_app() -> FastAPI:
 
     app.add_middleware(PerformanceMetricsMiddleware)
     app.add_middleware(JsonGZipMiddleware)
+    # 最外层读取真实 ASGI body，覆盖 chunked/无 Content-Length 请求。
+    app.add_middleware(WebhookBodyLimitMiddleware, max_body_bytes=settings.webhook_max_body_bytes)
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
