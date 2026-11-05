@@ -16,7 +16,7 @@ from app.core.response import dumps_json, now_local
 from app.models import WebhookInbox
 from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
-from app.services.delivery_tasks import run_deferred_tasks
+from app.services.outbox_worker import enqueue_outbox
 from app.services.websocket_manager import ws_manager
 from app.services.worker_common import backoff_seconds, claim_lease_guard, claim_token, worker_id
 
@@ -198,6 +198,36 @@ async def process_inbox_item(inbox_id: int) -> bool:
                 result = await DeliveryService.process_raw(
                     db, row.channel, raw if isinstance(raw, dict) else {}
                 )
+                # 将所有必须在事务提交后执行的副作用写入同一 DB Outbox 事务。
+                # 不持久化 access_token / refresh_token，也不保存整份 webhook raw。
+                for task_index, task in enumerate(result.deferred_tasks or []):
+                    action = str(task.get("action") or "").strip().lower()
+                    if action not in {"confirm_order", "cancel_order", "reply_urge", "print_ticket"}:
+                        raise ValueError(f"unsupported deferred webhook action: {action or 'empty'}")
+                    credentials = task.get("credentials") or {}
+                    store_id = task.get("store_id") or (
+                        credentials.get("store_id") if isinstance(credentials, dict) else None
+                    )
+                    safe_task = {
+                        "action": action,
+                        "platform": str(task.get("platform") or row.channel).upper(),
+                        "platform_order_id": str(task.get("platform_order_id") or ""),
+                        "store_id": int(store_id) if store_id else None,
+                        "order_id": int(task["order_id"]) if task.get("order_id") else None,
+                        "rollback_on_fail": bool(task.get("rollback_on_fail")),
+                        "reason": str(task.get("reason") or "")[:200],
+                        "ticket_type": str(task.get("ticket_type") or "KITCHEN").upper(),
+                        # 美团催单回复只需要 reply_type；不保存顾客地址/手机号等完整回调内容。
+                        "raw": {"reply_type": task.get("raw", {}).get("reply_type", 2)}
+                        if action == "reply_urge" and isinstance(task.get("raw"), dict) else {},
+                    }
+                    await enqueue_outbox(
+                        db,
+                        aggregate_type="webhook_task",
+                        aggregate_id=int(inbox_id),
+                        event_kind=f"deferred_{task_index:04d}",
+                        payload=safe_task,
+                    )
                 # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
                 # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
                 done_stmt = (
@@ -241,8 +271,6 @@ async def process_inbox_item(inbox_id: int) -> bool:
                     }
                 )
             await ws_manager.notify_order_event(ws_event, payload)
-            if result.deferred_tasks:
-                await run_deferred_tasks(result.deferred_tasks)
             return True
         except Exception as e:
             logger.exception("inbox 处理失败 id=%s: %s", inbox_id, e)
