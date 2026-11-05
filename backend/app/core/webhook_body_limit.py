@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 _ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[Any]], Callable[..., Awaitable[Any]]], Awaitable[None]]
+_MAX_CALLBACK_BUFFER_BUDGET_BYTES = 16 * 1024 * 1024
 _MAX_CONCURRENT_CALLBACKS = 32
 _CALLBACK_SLOT_WAIT_SEC = 0.5
 _CALLBACK_BODY_TOTAL_TIMEOUT_SEC = 15.0
@@ -21,9 +22,14 @@ class WebhookBodyLimitMiddleware:
         self.max_body_bytes = int(max_body_bytes)
         if self.max_body_bytes < 1:
             raise ValueError("max_body_bytes must be positive")
-        # A per-process cap prevents N simultaneous 512KB buffers from becoming a
-        # memory-exhaustion vector. Across workers the total cap is multiplied by worker count.
-        self._callback_slots = asyncio.Semaphore(_MAX_CONCURRENT_CALLBACKS)
+        # Bound aggregate in-memory callback payload per process, not only request count.
+        # At the default 512KB limit this permits 32 callbacks; at 10MB it permits one.
+        # Joining chunks may temporarily double payload memory, so plan for ~2x this budget.
+        slots = max(1, min(
+            _MAX_CONCURRENT_CALLBACKS,
+            _MAX_CALLBACK_BUFFER_BUDGET_BYTES // self.max_body_bytes,
+        ))
+        self._callback_slots = asyncio.Semaphore(slots)
 
     @staticmethod
     def _is_limited_path(path: str) -> bool:
