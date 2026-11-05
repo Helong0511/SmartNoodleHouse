@@ -117,6 +117,11 @@ async def get_menu_bundle_api(
 _RECO_SCENES = {"recommend_menu", "settle_addon"}
 
 
+def _reco_cache_fingerprint(fingerprint: str, limit: int) -> str:
+    """缓存身份必须包含所有影响推荐响应内容的参数。"""
+    return f"{fingerprint}:limit={int(limit)}"
+
+
 def _serialize_reco(ranked, state, meta, ab_bucket, ab_status=None):
     items = []
     for r in ranked:
@@ -177,7 +182,7 @@ async def get_recommendations(
     weight_override = None
     fingerprint = cart_fingerprint(exclude_ids) if scene == "settle_addon" else ""
     # limit 会改变排序截断结果，必须参与缓存隔离，避免 5 条请求污染 20 条请求。
-    cache_fingerprint = f"{fingerprint}:limit={limit}"
+    cache_fingerprint = _reco_cache_fingerprint(fingerprint, limit)
     cid = customer.id if customer else None
 
     if cid is not None:
