@@ -336,16 +336,35 @@ async def lifespan(app: FastAPI):
         _leader_promote_task = asyncio.create_task(_standby_promote_loop())
 
     async def _stop_leader_work() -> None:
-        """锁丢失：立即停调度与后台 worker，避免双 Leader；随后重新 standby 争抢。"""
+        """锁丢失：停止 Leader 工作；只有确认旧任务退出后才允许本进程重新竞选。"""
         nonlocal is_leader
+        global tts_task, recognition_task
         logger.warning("执行 Leader 降级：cancel active jobs / shutdown scheduler / TTS / RecognitionWorker")
+        jobs_drained = True
+        workers_drained = True
         try:
-            from app.services.scheduler_admin import cancel_active_leader_jobs
+            from app.services.scheduler_admin import (
+                active_leader_job_count,
+                cancel_active_leader_jobs,
+            )
 
             cancelled = await cancel_active_leader_jobs(timeout=5.0)
-            logger.warning("Leader 降级已请求取消运行中定时任务 count=%s", cancelled)
+            remaining = active_leader_job_count()
+            jobs_drained = remaining == 0
+            logger.warning(
+                "Leader 降级取消定时任务 count=%s remaining=%s",
+                cancelled,
+                remaining,
+            )
+            if not jobs_drained:
+                logger.critical(
+                    "仍有 %s 个 Leader 定时任务未退出；禁止本进程重新竞选，避免旧任务与新 Leader 并存",
+                    remaining,
+                )
         except Exception:
-            logger.exception("取消运行中 Leader 定时任务失败")
+            jobs_drained = False
+            logger.exception("取消运行中 Leader 定时任务失败；禁止本进程重新竞选")
+
         try:
             from app.services.scheduler_admin import stop_overrides_watcher
 
@@ -360,14 +379,41 @@ async def lifespan(app: FastAPI):
         try:
             tts_worker.stop()
         except Exception:
-            pass
-        if tts_task and not tts_task.done():
-            tts_task.cancel()
-        if recognition_task and not recognition_task.done():
-            recognition_task.cancel()
+            logger.exception("停止 TTS worker 失败")
+
+        async def _cancel_and_wait(task: asyncio.Task | None, label: str) -> bool:
+            if task is None or task.done():
+                return True
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+                return True
+            except asyncio.CancelledError:
+                return True
+            except asyncio.TimeoutError:
+                logger.critical("%s 在 Leader 降级后 5 秒内未退出；禁止本进程重新竞选", label)
+                return False
+            except Exception:
+                logger.exception("%s 在 Leader 降级时异常退出", label)
+                return True
+
+        tts_ok = await _cancel_and_wait(tts_task, "TTS worker")
+        recognition_ok = await _cancel_and_wait(recognition_task, "RecognitionWorker")
+        workers_drained = tts_ok and recognition_ok
+        if tts_ok:
+            tts_task = None
+        if recognition_ok:
+            recognition_task = None
+
         is_leader = False
-        # gunicorn 其他 worker / 本进程降级后继续争抢，避免调度永久空窗
-        await _arm_standby_promote()
+        # 若旧任务无法确认退出，本进程保持 standby，不允许 5 秒后重新成为 Leader。
+        # 其他独立进程仍可在 Redis 租约到期后接管。
+        if jobs_drained and workers_drained:
+            await _arm_standby_promote()
+        else:
+            logger.critical(
+                "Leader 降级未完成安全排空，本进程停止自动 promotion；需人工检查残留任务"
+            )
 
     async def _start_leader_work() -> None:
         """抢到锁后启动调度器 / TTS / 识别 / 摄像头。"""
