@@ -13,7 +13,7 @@ from app.core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 DEFAULT_TTL = 45
-RENEW_INTERVAL = 15
+RENEW_INTERVAL = 10
 
 # Lua 原子脚本：避免 GET→DELETE / GET→EXPIRE 的 TOCTOU（A 的 release 误删 B 的锁等）
 # compare-and-delete：仅当值=worker_id 时才 DEL
@@ -126,6 +126,17 @@ async def try_acquire_leader(worker_id: str, *, ttl: int = DEFAULT_TTL) -> bool:
         return False
 
 
+async def renew_leader_lease(worker_id: str, *, ttl: int = DEFAULT_TTL) -> bool:
+    """续期专用路径：Redis 网络异常向上抛出，锁不匹配才返回 False。"""
+    r = await get_redis()
+    renewed = await r.eval(_LUA_COMPARE_EXPIRE, 1, LEADER_KEY, worker_id, int(ttl))
+    if renewed:
+        set_leader_held(True)
+        return True
+    set_leader_held(False)
+    return False
+
+
 async def release_leader(worker_id: str) -> None:
     try:
         r = await get_redis()
@@ -150,7 +161,7 @@ async def renew_leader_loop(worker_id: str, stop: asyncio.Event, *, ttl: int = D
         if stop.is_set():
             break
         try:
-            held = await try_acquire_leader(worker_id, ttl=ttl)
+            held = await renew_leader_lease(worker_id, ttl=ttl)
             if not held:
                 logger.error(
                     "Leader 锁丢失，停止本进程调度任务以防双 Leader（worker_id=%s）",
@@ -171,8 +182,8 @@ async def renew_leader_loop(worker_id: str, stop: asyncio.Event, *, ttl: int = D
         except Exception as e:
             consecutive_errors += 1
             logger.warning("Leader 锁续期异常(%s): %s", consecutive_errors, e)
-            # 连续多次异常才放弃，避免 Redis 瞬时抖动误杀 Leader
-            if consecutive_errors >= 3:
+            # 连续两次异常才放弃；10 秒续期间隔确保在 45 秒租约过期前留有安全余量
+            if consecutive_errors >= 2:
                 logger.error("Leader 锁续期连续失败，降级退出 worker_id=%s", worker_id)
                 set_leader_held(False)
                 cb = _on_lost
