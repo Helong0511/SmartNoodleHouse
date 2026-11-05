@@ -113,10 +113,11 @@ async def enqueue_delivery_webhook(
         headers_json=dumps_json(safe_headers),
         status="PENDING",
     )
-    db.add(row)
     try:
-        # SAVEPOINT 隔离唯一冲突，避免 rollback 连带回滚调用方事务中的其他写入
+        # 必须在 SAVEPOINT 内 add + flush：begin_nested() 会先 flush 外层 pending 状态，
+        # 若先 db.add(row)，唯一键冲突可能发生在 SAVEPOINT 建立前并污染调用方事务。
         async with db.begin_nested():
+            db.add(row)
             await db.flush()
         return row, True
     except IntegrityError:
