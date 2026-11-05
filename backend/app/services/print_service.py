@@ -1001,5 +1001,9 @@ class PrintService:
         await db.commit()
         count = int(result.rowcount or 0)
         if count:
-            logger.warning("Reclaimed %s stale PRINTING print jobs", count)
+            logger.critical(
+                "PRINT RESULT UNCERTAIN: reclaimed %s stale PRINTING jobs; printer may already have accepted the ticket. "
+                "Automatic retry can create duplicate kitchen tickets. Inspect printer/output before manual intervention.",
+                count,
+            )
         return count
