@@ -249,6 +249,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     ):
         return cached
 
+    lock_token: str | None = None
+    lock_ok = False
     hit = _BUILD_CACHE.get(sid)
     if (
         hit is not None
@@ -257,8 +259,6 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     ):
         bundle = hit
     else:
-        lock_token: str | None = None
-        lock_ok = False
         # Redis 锁负责跨进程协调；本地 single-flight 负责 Redis 故障/等待者兜底，
         # 避免同一 worker 内所有请求在 300ms 等待后同时重建。
         from app.core.async_utils import local_singleflight
