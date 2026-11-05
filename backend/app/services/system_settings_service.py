@@ -992,7 +992,10 @@ class SystemSettingsService:
         return await cls._bump_remote_version()
 
     @classmethod
-    async def _load_raw(cls, db: AsyncSession, *, force: bool = False) -> dict[str, str]:
+    async def _load_raw_unlocked(
+        cls, db: AsyncSession, *, force: bool = False
+    ) -> dict[str, str]:
+        """调用方必须持有 _cache_refresh_lock，避免跨请求并发回源。"""
         now = time.monotonic()
         remote_ver = await cls._remote_version()
         cache_age = now - cls._cache_at
@@ -1009,6 +1012,12 @@ class SystemSettingsService:
         cls._cache_at = now
         cls._cache_ver = remote_ver if remote_ver is not None and remote_ver > 0 else -1
         return cls._cache
+
+    @classmethod
+    async def _load_raw(cls, db: AsyncSession, *, force: bool = False) -> dict[str, str]:
+        """所有 DB 回源统一 single-flight；包含 get_value 等非 touch_cache 直接调用路径。"""
+        async with cls._cache_refresh_lock:
+            return await cls._load_raw_unlocked(db, force=force)
 
     @classmethod
     async def invalidate_cache(cls) -> None:
@@ -1145,8 +1154,7 @@ class SystemSettingsService:
         if db is not None:
             # 调用方提供 Session 的路径也必须 single-flight；否则所有请求同时遇到
             # Redis 版本变化/缓存过期时，会各自使用自己的 Session 并发回源 MySQL。
-            async with cls._cache_refresh_lock:
-                await cls._load_raw(db)
+            await cls._load_raw(db)
             return
 
         def _is_fresh(remote_ver: int | None) -> bool:
@@ -1171,7 +1179,7 @@ class SystemSettingsService:
             from app.core.database import AsyncSessionLocal
 
             async with AsyncSessionLocal() as session:
-                await cls._load_raw(session)
+                await cls._load_raw_unlocked(session)
 
     @classmethod
     async def get_float(cls, db: AsyncSession, key: str, fallback: float) -> float:
