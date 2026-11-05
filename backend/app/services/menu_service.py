@@ -238,7 +238,6 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     """
     sid = int(store_id)
     expected_sched = await _active_schedule_id(db, sid)
-    remote_version = await get_menu_version(sid)
 
     def _bundle_has_visibility_meta(bundle: dict[str, Any] | None) -> bool:
         """旧缓存若无 visibility_rule 字段，过滤会把限时菜当常显，须重建。"""
@@ -252,6 +251,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         return "visibility_rule" in sample
 
     cached = await get_menu_bundle(sid)
+    # 在读取 Redis bundle 之后读取版本戳，避免先读旧版本、随后读到写路径已删除前的旧缓存。
+    remote_version = await get_menu_version(sid)
     if (
         cached is not None
         and _bundle_schedule_id(cached) == expected_sched
@@ -283,14 +284,26 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         async with local_singleflight(f"menu:{sid}"):
             # 等待本地前一个请求期间，缓存可能已经被填充；必须二次检查。
             cached_after_wait = await get_menu_bundle(sid)
+            remote_after_wait = await get_menu_version(sid)
             if (
                 cached_after_wait is not None
                 and _bundle_schedule_id(cached_after_wait) == expected_sched
                 and _bundle_has_visibility_meta(cached_after_wait)
+                and (
+                    remote_after_wait <= 0
+                    or _bundle_version(cached_after_wait) == remote_after_wait
+                )
             ):
                 bundle = cached_after_wait
             else:
                 hit_after_wait = _BUILD_CACHE.get(sid)
+                if (
+                    hit_after_wait is not None
+                    and remote_after_wait > 0
+                    and _bundle_version(hit_after_wait) != remote_after_wait
+                ):
+                    _BUILD_CACHE.delete(sid)
+                    hit_after_wait = None
                 if (
                     hit_after_wait is not None
                     and _bundle_schedule_id(hit_after_wait) == expected_sched
