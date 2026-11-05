@@ -36,3 +36,10 @@ def test_arbitrary_unknown_resources_have_a_hard_bucket_cardinality_bound():
         for i in range(10_000)
     }
     assert len(buckets) <= 64
+
+
+def test_sensitive_auth_endpoints_keep_separate_buckets():
+    assert _rate_limit_bucket("/api/auth/login") != _rate_limit_bucket(
+        "/api/auth/verify-password"
+    )
+    assert _rate_limit_bucket("/api/payments/wechat/notify") == "/api/payments"
