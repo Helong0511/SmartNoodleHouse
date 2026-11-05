@@ -18,17 +18,14 @@ from collections import OrderedDict
 from threading import RLock
 from typing import Any
 
-from app.core.async_utils import spawn_bg
 from app.core.cache_keys import (
     RECO_TTL_SECONDS,
-    reco_customer_pattern,
     reco_generation_key,
     reco_key,
     reco_rebuild_lock_key,
     ttl_with_jitter,
 )
 from app.core.redis_client import (
-    delete_with_retry,
     get_redis,
     release_owned_lock,
     start_redis_lock_heartbeat,
@@ -213,23 +210,6 @@ async def invalidate_customer(customer_id: int) -> None:
         # 旧代际键使用短 TTL 自然回收；无需 SCAN/双删，避免画像高频更新放大 Redis 负载。
     except Exception:  # noqa: BLE001
         logger.warning("推荐缓存代际失效失败(customer=%s)，旧缓存等待 TTL", customer_id, exc_info=True)
-
-
-async def _delayed_invalidate(pattern: str) -> None:
-    """延迟再删一次，防止并发写窗口中旧值残留。"""
-    try:
-        await asyncio.sleep(0.1)
-        r = await get_redis()
-        batch = []
-        async for k in r.scan_iter(match=pattern, count=200):
-            batch.append(k)
-            if len(batch) >= 200:
-                await r.delete(*batch)
-                batch.clear()
-        if batch:
-            await r.delete(*batch)
-    except Exception:
-        pass
 
 
 async def try_acquire_reco_lock(
