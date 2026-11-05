@@ -48,7 +48,8 @@ async def test_anonymize_issues_update_with_correct_filters():
     inbox_stmt = db.execute.await_args_list[3].args[0]
     inbox_sql = str(inbox_stmt).lower()
     assert "webhook_inbox" in inbox_sql
-    assert "failed" in inbox_sql
+    inbox_params = inbox_stmt.compile().params
+    assert "FAILED" in {str(value).upper() for value in inbox_params.values()}
     assert "next_retry_at is null" in inbox_sql
     assert "received_at" in inbox_sql
     assert "payload" in inbox_sql
