@@ -127,5 +127,8 @@ async def test_notify_order_ready_tries_both_channels(db_session, monkeypatch):
     )
 
     await order_lifecycle.notify_order_ready_subscribe(db_session, order)
+    # 通知投递有意在后台 task 中执行，避免延长订单行锁；让事件循环调度任务后再断言。
+    import asyncio
+    await asyncio.sleep(0)
     assert wx.await_count == 1
     assert ali.await_count == 1
