@@ -13,7 +13,7 @@ from app.services.pii_cleanup_service import (
 
 @pytest.mark.asyncio
 async def test_anonymize_issues_update_with_correct_filters():
-    """UPDATE 语句应包含 recipient_phone IS NOT NULL + order_id IN (子查询)。"""
+    """订单、退款、回调日志的原始 PII payload 均按同一截止时间清理。"""
     db = MagicMock()
     result = MagicMock()
     result.rowcount = 3
@@ -35,6 +35,14 @@ async def test_anonymize_issues_update_with_correct_filters():
     assert "completed_at" in stmt_str
     assert "cancelled_at" in stmt_str
     assert " < " in stmt_str
+    assert "raw_payload" in stmt_str
+    assert db.execute.await_count == 3
+    refund_stmt = db.execute.await_args_list[1].args[0]
+    callback_stmt = db.execute.await_args_list[2].args[0]
+    assert "delivery_refunds" in str(refund_stmt)
+    assert "raw_payload" in str(refund_stmt)
+    assert "delivery_callback_logs" in str(callback_stmt)
+    assert "payload" in str(callback_stmt)
 
 
 @pytest.mark.asyncio
