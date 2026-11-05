@@ -1125,7 +1125,10 @@ class SystemSettingsService:
     async def touch_cache(cls, db: AsyncSession | None = None) -> None:
         """请求路径轻量刷新；缓存失效时单进程 single-flight 回源，避免 DB 雪崩。"""
         if db is not None:
-            await cls._load_raw(db)
+            # 调用方提供 Session 的路径也必须 single-flight；否则所有请求同时遇到
+            # Redis 版本变化/缓存过期时，会各自使用自己的 Session 并发回源 MySQL。
+            async with cls._cache_refresh_lock:
+                await cls._load_raw(db)
             return
 
         def _is_fresh(remote_ver: int) -> bool:
