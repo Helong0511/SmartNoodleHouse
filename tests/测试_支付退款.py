@@ -362,3 +362,94 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
     assert result is row
     assert observed == ["unlocked_read", "channel_query", "locked_read"]
     finalize.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("provider", "payment", "refund", "result", "error_text"),
+    [
+        (
+            "WECHAT",
+            {"id": 1, "payment_no": "PAY-1", "provider_trade_no": "WX-1", "order_id": 9, "amount": Decimal("50.00")},
+            {"payment_id": 1, "refund_no": "RF-1", "order_id": 9, "amount": Decimal("12.00")},
+            {"status": "SUCCESS", "refund_no": "RF-1", "payment_no": "PAY-1", "provider_trade_no": "WX-1", "amount": {"refund": 1100, "total": 5000, "currency": "CNY"}},
+            "本次退款金额",
+        ),
+        (
+            "ALIPAY",
+            {"id": 2, "payment_no": "PAY-2", "provider_trade_no": "ALI-2", "order_id": 10, "amount": Decimal("80.00")},
+            {"payment_id": 2, "refund_no": "RF-2", "order_id": 10, "amount": Decimal("20.00")},
+            {"status": "SUCCESS", "refund_no": "RF-WRONG", "payment_no": "PAY-2", "provider_trade_no": "ALI-2", "amount": "20.00"},
+            "退款单号不匹配",
+        ),
+        (
+            "ALIPAY",
+            {"id": 3, "payment_no": "PAY-3", "provider_trade_no": "ALI-3", "order_id": 11, "amount": Decimal("80.00")},
+            {"payment_id": 3, "refund_no": "RF-3", "order_id": 11, "amount": Decimal("20.00")},
+            {"status": "SUCCESS", "refund_no": "RF-3", "payment_no": "PAY-OTHER", "provider_trade_no": "ALI-3", "amount": "20.00"},
+            "原支付单号不匹配",
+        ),
+    ],
+)
+def test_refund_query_validation_rejects_mismatched_channel_results(
+    provider, payment, refund, result, error_text
+):
+    from types import SimpleNamespace
+
+    from app.core.exceptions import AppException
+    from app.services.payment_service import PaymentService
+
+    with pytest.raises(AppException, match=error_text):
+        PaymentService._validate_refund_query_result(
+            provider=provider,
+            payment=SimpleNamespace(**payment),
+            refund=SimpleNamespace(**refund),
+            result=result,
+        )
+
+
+def test_wechat_refund_query_validation_requires_original_payment_total_and_currency():
+    from types import SimpleNamespace
+
+    from app.core.exceptions import AppException
+    from app.services.payment_service import PaymentService
+
+    payment = SimpleNamespace(
+        id=7, payment_no="PAY-7", provider_trade_no="WX-7",
+        order_id=17, amount=Decimal("50.00"),
+    )
+    refund = SimpleNamespace(
+        payment_id=7, refund_no="RF-7", order_id=17, amount=Decimal("10.00"),
+    )
+    with pytest.raises(AppException, match="原订单总金额"):
+        PaymentService._validate_refund_query_result(
+            provider="WECHAT",
+            payment=payment,
+            refund=refund,
+            result={
+                "status": "SUCCESS",
+                "refund_no": "RF-7",
+                "payment_no": "PAY-7",
+                "provider_trade_no": "WX-7",
+                "amount": {"refund": 1000, "total": 4900, "currency": "CNY"},
+            },
+        )
+
+
+def test_refund_query_validation_accepts_matching_processing_result():
+    from types import SimpleNamespace
+
+    from app.services.payment_service import PaymentService
+
+    payment = SimpleNamespace(
+        id=8, payment_no="PAY-8", provider_trade_no="WX-8",
+        order_id=18, amount=Decimal("50.00"),
+    )
+    refund = SimpleNamespace(
+        payment_id=8, refund_no="RF-8", order_id=18, amount=Decimal("10.00"),
+    )
+    assert PaymentService._validate_refund_query_result(
+        provider="WECHAT",
+        payment=payment,
+        refund=refund,
+        result={"status": "PROCESSING", "refund_no": "RF-8", "payment_no": "PAY-8"},
+    ) == "PROCESSING"
