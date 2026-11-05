@@ -127,6 +127,50 @@ async def set_cached_reco(
         logger.debug("推荐缓存写入失败，忽略", exc_info=True)
 
 
+
+async def set_cached_reco_if_owner(
+    customer_id: int | None,
+    store_id: int,
+    scene: str,
+    bucket: str,
+    payload: dict[str, Any],
+    fingerprint: str,
+    token: str,
+) -> bool:
+    """仅允许仍持有推荐重建租约的 worker 发布 Redis/本地缓存。"""
+    if not token:
+        return False
+    body = dict(payload)
+    body["cache_hit"] = False
+    try:
+        r = await get_redis()
+        raw = dumps_json(body, compact=True)
+        script = """
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+        end
+        return false
+        """
+        result = await r.eval(
+            script,
+            2,
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+            reco_key(customer_id, store_id, scene, bucket, fingerprint),
+            token,
+            raw,
+            ttl_with_jitter(RECO_TTL_SECONDS),
+        )
+        if not result:
+            return False
+        _set_local_reco(
+            _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
+        )
+        return True
+    except Exception:
+        logger.warning("推荐缓存租约校验发布失败(store=%s)", store_id, exc_info=True)
+        return False
+
+
 async def invalidate_customer(customer_id: int) -> None:
     """失效某顾客全部场景/桶位的推荐结果。延迟双删防止并发写窗口旧值残留。"""
     if not customer_id:
