@@ -799,3 +799,22 @@ async def test_redis_owned_lock_heartbeat_stops_after_owner_changes():
     await asyncio.sleep(1.1)
     assert task.done()
     assert fake.store["lease:key"] == "owner-b"
+
+
+
+@pytest.mark.asyncio
+async def test_redis_lock_heartbeat_stops_when_owner_task_exits():
+    from app.core.redis_client import start_redis_lock_heartbeat
+
+    fake = FakeRedis()
+    fake.store["lease:orphan"] = "owner-orphan"
+
+    async def acquire_and_exit():
+        return start_redis_lock_heartbeat(
+            fake, "lease:orphan", "owner-orphan", ttl=3, label="orphan-test"
+        )
+
+    heartbeat = await asyncio.create_task(acquire_and_exit())
+    await asyncio.sleep(1.1)
+    assert heartbeat.done()
+    assert fake.eval_calls == []
