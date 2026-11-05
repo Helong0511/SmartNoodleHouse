@@ -189,3 +189,55 @@ def test_worker_lease_columns_use_mysql_microsecond_precision():
     for model in (OutboxEvent, WebhookInbox):
         compiled = model.__table__.c.locked_at.type.compile(dialect=mysql.dialect())
         assert compiled.upper() == "DATETIME(6)"
+
+
+
+@pytest.mark.asyncio
+async def test_lost_claim_completion_rolls_back_entire_business_transaction():
+    from app.models import OutboxEvent
+    from app.services.worker_common import rollback_if_claim_lost
+
+    db = MagicMock()
+    db.rollback = AsyncMock()
+    result = MagicMock(rowcount=0)
+
+    rolled_back = await rollback_if_claim_lost(
+        db, result, model=OutboxEvent, row_id=123
+    )
+
+    assert rolled_back is True
+    assert db.rollback.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_owned_claim_completion_does_not_rollback():
+    from app.models import OutboxEvent
+    from app.services.worker_common import rollback_if_claim_lost
+
+    db = MagicMock()
+    db.rollback = AsyncMock()
+    result = MagicMock(rowcount=1)
+
+    rolled_back = await rollback_if_claim_lost(
+        db, result, model=OutboxEvent, row_id=123
+    )
+
+    assert rolled_back is False
+    assert db.rollback.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_claim_completion_rowcount_fails_closed():
+    from app.models import OutboxEvent
+    from app.services.worker_common import rollback_if_claim_lost
+
+    db = MagicMock()
+    db.rollback = AsyncMock()
+    result = MagicMock(rowcount=None)
+
+    rolled_back = await rollback_if_claim_lost(
+        db, result, model=OutboxEvent, row_id=123
+    )
+
+    assert rolled_back is True
+    assert db.rollback.await_count == 1
