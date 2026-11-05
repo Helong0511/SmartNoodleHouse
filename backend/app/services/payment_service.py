@@ -2284,6 +2284,12 @@ class PaymentService:
         #   recovery happens via sync_refund_status query / scheduled compensation.
         if row.status == "SUCCESS":
             return row
+        # 支付平台通知可能乱序：终态退款不能被迟到的 PROCESSING/UNKNOWN 覆盖。
+        # FAILED/CLOSED 仅允许后续权威 SUCCESS 查询/通知纠正；ABNORMAL 必须等待人工/平台处理结果。
+        if row.status in ("FAILED", "CLOSED") and new_status != "SUCCESS":
+            return row
+        if row.status == "ABNORMAL" and new_status in ("PENDING", "PROCESSING", "UNKNOWN"):
+            return row
 
         if provider_refund_no:
             row.provider_refund_no = provider_refund_no
