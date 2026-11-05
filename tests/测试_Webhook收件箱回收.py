@@ -8,6 +8,7 @@ import pytest
 from app.services.webhook_inbox import (
     STALE_PROCESSING_SEC,
     reclaim_stale_inbox,
+    claim_inbox_item,
     process_pending_inbox,
 )
 
@@ -103,3 +104,19 @@ async def test_process_pending_inbox_zero_when_all_skipped():
         mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=None)
         n = await process_pending_inbox(limit=10)
     assert n == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_inbox_claim_uses_unique_per_attempt_owner_token():
+    db = MagicMock()
+    result = MagicMock()
+    result.rowcount = 1
+    db.execute = AsyncMock(return_value=result)
+    fetched = MagicMock(id=17, status="PROCESSING")
+    db.get = AsyncMock(return_value=fetched)
+
+    await claim_inbox_item(db, inbox_id=17, worker="same-worker")
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    owner_values = [str(v) for v in compiled.params.values()]
+    assert any(v.startswith("same-worker:") and len(v) == 64 for v in owner_values)
