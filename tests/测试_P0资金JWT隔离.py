@@ -443,3 +443,40 @@ async def test_balance_restore_for_refund_is_idempotent_by_refund_id():
         store_id=1,
     )
     assert out is existing
+
+
+def test_jwt_decoder_rejects_unconfigured_signature_algorithm():
+    settings = _jwt_settings(jwt_algorithm="HS256")
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": "1",
+        "exp": now + timedelta(minutes=5),
+        "iat": now,
+        "nbf": now,
+        "iss": settings.app_name,
+        "aud": settings.jwt_audience,
+        "typ": "staff",
+        "ver": 0,
+    }
+    # 不能根据 token 自带的 alg 放宽验证；服务端只接受配置的 HS256。
+    token = jwt.encode(payload, settings.jwt_secret, algorithm="HS512")
+    with patch("app.core.security.get_settings", return_value=settings):
+        with pytest.raises(JWTError):
+            decode_token(token)
+
+
+def test_jwt_decoder_requires_all_security_critical_claims():
+    settings = _jwt_settings()
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "iss": settings.app_name,
+            "aud": settings.jwt_audience,
+        },
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    with patch("app.core.security.get_settings", return_value=settings):
+        with pytest.raises(JWTError):
+            decode_token(token)
