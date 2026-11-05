@@ -859,9 +859,10 @@ async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
         r = await get_redis()
         acquired = bool(await r.set(key, token, nx=True, ex=max(5, int(ttl))))
     except Exception as e:
-        logger.warning("任务锁获取失败 job_id=%s: %s（fail-open 继续执行）", job_id, e)
-        # Redis 不可用时 fail-open：依赖 Leader fence，避免调度全停
-        yield True
+        # 任务锁是防止重复执行的最后一道跨进程保护；Redis 不可用时必须 fail-closed。
+        # 继续执行可能在 Leader 租约短暂分歧/网络分区时造成双重发券、重复对账或重复同步。
+        logger.error("任务锁获取失败 job_id=%s: %s（fail-closed 跳过本次任务）", job_id, e)
+        yield False
         return
     if not acquired:
         yield False
