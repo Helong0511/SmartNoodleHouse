@@ -445,6 +445,47 @@ async def test_美团门店shop_id缺失必须返回无凭证(monkeypatch):
     assert credentials is None
 
 
+@pytest.mark.asyncio
+async def test_饿了么Provider不得把门店token缺失回退到全局token(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import delivery_providers as providers
+    from app.services.delivery_context import PlatformCredentials
+
+    monkeypatch.setattr(
+        providers, "get_settings",
+        lambda: SimpleNamespace(
+            eleme_app_id="app", eleme_app_secret="secret",
+            eleme_access_token="GLOBAL-WRONG-STORE-TOKEN",
+            is_production=True, allow_delivery_mock=False,
+        ),
+    )
+    provider = providers.ElemeProvider(
+        PlatformCredentials(store_id=14, platform_shop_id="SHOP-14", access_token=None)
+    )
+    with pytest.raises(ValueError, match="拒绝使用全局 token"):
+        await provider._rpc("eleme.shop.getShop", {"shopId": "SHOP-14"})
+
+
+@pytest.mark.asyncio
+async def test_美团Provider门店上下文缺shop_id时必须拒绝请求(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import delivery_providers as providers
+    from app.services.delivery_context import PlatformCredentials
+
+    monkeypatch.setattr(
+        providers, "get_settings",
+        lambda: SimpleNamespace(
+            meituan_app_id="app", meituan_app_secret="secret",
+            is_production=True, allow_delivery_mock=False,
+        ),
+    )
+    provider = providers.MeituanProvider(
+        PlatformCredentials(store_id=15, platform_shop_id=None)
+    )
+    with pytest.raises(ValueError, match="缺少 platform_shop_id"):
+        await provider._request("/api/v1/food/updateStock", {"app_food_code": "SKU-1"})
+
+
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
 
 @pytest.mark.asyncio
