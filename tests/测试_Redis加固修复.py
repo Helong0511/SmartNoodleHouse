@@ -314,6 +314,36 @@ async def test_reco_cache_publish_rejects_stale_customer_generation():
     assert reco_cache.reco_key(41, 3, "menu", "v1", "", generation=0) not in fake.store
 
 
+@pytest.mark.asyncio
+async def test_privacy_profile_clear_schedules_recommendation_cache_invalidation():
+    from types import SimpleNamespace
+    from app.services import privacy_service, reco_cache
+
+    class FakeResult:
+        rowcount = 0
+        def all(self):
+            return []
+
+    class FakeDb:
+        async def execute(self, *_args, **_kwargs):
+            return FakeResult()
+        async def flush(self):
+            return None
+
+    scheduled = []
+    with (
+        patch.object(reco_cache, "defer_invalidate_customer",
+                     side_effect=lambda db, cid: scheduled.append((db, cid))),
+        patch.object(privacy_service.AuditService, "log", new_callable=AsyncMock),
+    ):
+        await privacy_service.PrivacyService.clear_taste_profile(
+            FakeDb(), SimpleNamespace(id=987), request=None,
+        )
+
+    assert len(scheduled) == 1
+    assert scheduled[0][1] == 987
+
+
 def test_reco_invalidation_waits_for_outer_transaction_after_nested_savepoint():
     from sqlalchemy.orm import Session
     from app.services import reco_cache
