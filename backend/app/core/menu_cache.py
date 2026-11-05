@@ -110,9 +110,17 @@ async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
 
 
 async def set_menu_bundle_if_owner(
-    store_id: int, bundle: dict[str, Any], token: str
+    store_id: int,
+    bundle: dict[str, Any],
+    token: str,
+    *,
+    expected_version: int,
 ) -> bool:
-    """仅允许仍持有重建租约的 worker 发布缓存，防止过期持有者覆盖新结果。"""
+    """仅允许仍持有租约且菜单版本未变化的 worker 发布缓存。
+
+    expected_version 是读取 DB 快照前的版本；写路径若在构建期间 bump 版本，
+    Lua 会拒绝旧快照发布，避免延迟双删窗口之外的长期脏缓存。
+    """
     if not token:
         return False
     try:
@@ -126,14 +134,22 @@ async def set_menu_bundle_if_owner(
             )
             return False
         script = """
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
+        if redis.call('GET', KEYS[1]) == ARGV[1]
+           and (redis.call('GET', KEYS[3]) or '0') == ARGV[4] then
             return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
         end
         return false
         """
         result = await r.eval(
-            script, 2, menu_rebuild_lock_key(store_id), menu_bundle_key(store_id),
-            token, raw, ttl_with_jitter(MENU_TTL_SECONDS),
+            script,
+            3,
+            menu_rebuild_lock_key(store_id),
+            menu_bundle_key(store_id),
+            menu_version_key(store_id),
+            token,
+            raw,
+            ttl_with_jitter(MENU_TTL_SECONDS),
+            str(max(0, int(expected_version))),
         )
         return bool(result)
     except Exception:
