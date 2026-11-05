@@ -50,6 +50,9 @@ def _backoff_seconds(attempt_count: int) -> int:
 
 def _resolve_outbox_handler(row: OutboxEvent) -> OutboxHandler | None:
     handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
+    # 每次推荐画像变更使用独立 event_kind，统一路由到幂等失效 handler。
+    if handler is None and row.aggregate_type == "reco_cache" and row.event_kind.startswith("invalidate_"):
+        handler = OUTBOX_HANDLERS.get(("reco_cache", "invalidate"))
     # 同一 Inbox 允许产生多个 deferred_* 动作；它们共用一个白名单执行 handler。
     if handler is None and row.aggregate_type == "webhook_task" and row.event_kind.startswith("deferred_"):
         handler = OUTBOX_HANDLERS.get(("webhook_task", "execute"))
@@ -229,6 +232,13 @@ async def process_outbox_item(outbox_id: int) -> None:
                 import app.services.delivery_tasks  # noqa: F401
             except Exception:
                 logger.exception("Failed to import delivery_tasks handler registry")
+        if row.aggregate_type == "reco_cache":
+            try:
+                from app.services.reco_cache import register_reco_cache_outbox_handler
+
+                register_reco_cache_outbox_handler()
+            except Exception:
+                logger.exception("Failed to register recommendation cache invalidation handler")
         handler = _resolve_outbox_handler(row)
         if handler is None:
             logger.error(
@@ -421,6 +431,12 @@ async def process_pending_outbox(limit: int = 30) -> int:
         import app.services.delivery_tasks  # noqa: F401
     except Exception:
         logger.exception("Failed to import delivery_tasks handlers")
+    try:
+        from app.services.reco_cache import register_reco_cache_outbox_handler
+
+        register_reco_cache_outbox_handler()
+    except Exception:
+        logger.exception("Failed to register recommendation cache invalidation handler")
     now = now_local()
     async with AsyncSessionLocal() as db:
         rows = (
