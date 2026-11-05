@@ -170,32 +170,49 @@ async def process_outbox_item(outbox_id: int) -> None:
             return
         # claim 后 row.locked_by 即本 worker 的 owner token
         wid = (row.locked_by or "")[:64]
-        # 若业务幂等已标记完成（上次 handler 成功但 DONE 更新失败），跳过 handler
-        try:
-            from app.domains.messaging.idempotency import is_processed
+        # 库存镜像 Outbox 行会被反复复用，必须由 sync_version 驱动重新投递；
+        # 不能使用一次性 processed_messages/Redis 幂等键，否则首次成功后所有后续
+        # 库存变化都会被旧幂等记录跳过。
+        is_stock_mirror = (
+            row.aggregate_type in ("delivery_stock", "delivery_stock_base")
+            and row.event_kind == "mirror"
+        )
+        # 普通业务事件仍使用持久幂等预检，防止重复发券、积分等副作用。
+        if not is_stock_mirror:
+            try:
+                from app.domains.messaging.idempotency import is_processed
 
-            msg_id = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
-            if await is_processed(db, scope="outbox", message_id=msg_id):
-                await db.execute(
-                    update(OutboxEvent)
-                    .where(OutboxEvent.id == outbox_id, OutboxEvent.locked_by == wid)
-                    .values(
-                        status="DONE",
-                        processed_at=now_local(),
-                        last_error=None,
-                        next_retry_at=None,
-                        locked_at=None,
-                        locked_by=None,
+                msg_id = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
+                if await is_processed(db, scope="outbox", message_id=msg_id):
+                    done_result = await db.execute(
+                        update(OutboxEvent)
+                        .where(
+                            OutboxEvent.id == outbox_id,
+                            OutboxEvent.locked_by == wid,
+                        )
+                        .values(
+                            status="DONE",
+                            processed_at=now_local(),
+                            last_error=None,
+                            next_retry_at=None,
+                            locked_at=None,
+                            locked_by=None,
+                        )
                     )
-                )
-                await db.commit()
+                    from app.services.worker_common import rollback_if_claim_lost
+
+                    if await rollback_if_claim_lost(
+                        db, done_result, model=OutboxEvent, row_id=outbox_id
+                    ):
+                        return
+                    await db.commit()
+                    return
+            except Exception as e:
+                # 无法确认消息是否已处理时必须 fail-closed；继续 handler 可能重复发券/记积分。
+                logger.exception("outbox 幂等预检失败 id=%s，停止处理并安排重试", outbox_id)
+                await db.rollback()
+                await _mark_failed(db, row, f"idempotency_precheck_failed: {e}", wid=wid)
                 return
-        except Exception as e:
-            # 无法确认消息是否已处理时必须 fail-closed；继续 handler 可能重复发券/记积分。
-            logger.exception("outbox 幂等预检失败 id=%s，停止处理并安排重试", outbox_id)
-            await db.rollback()
-            await _mark_failed(db, row, f"idempotency_precheck_failed: {e}", wid=wid)
-            return
 
         handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
         if handler is None:
@@ -288,41 +305,42 @@ async def process_outbox_item(outbox_id: int) -> None:
                     db, done_result, model=OutboxEvent, row_id=outbox_id
                 ):
                     return
-                # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
-                # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
-                idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
-                try:
-                    from app.domains.messaging.idempotency import try_acquire
+                # 普通一次性业务事件需要持久幂等；库存镜像是可重复触发的状态收敛信号，
+                # 每次由 sync_version 标识新一代，不得写入永久 processed_messages 键。
+                if not is_stock_mirror:
+                    idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
+                    try:
+                        from app.domains.messaging.idempotency import try_acquire
 
-                    idem_acquired = await try_acquire(
-                        db,
-                        scope="outbox",
-                        message_id=idem_msg,
-                        ttl_seconds=86400 * 7,
-                        mark_redis=False,
-                    )
-                    if not idem_acquired:
-                        # 并发/历史幂等记录已存在：回滚本次 handler 的业务改动，
-                        # 让下一轮预检读取已完成记录后只收敛 Outbox 状态。
+                        idem_acquired = await try_acquire(
+                            db,
+                            scope="outbox",
+                            message_id=idem_msg,
+                            ttl_seconds=86400 * 7,
+                            mark_redis=False,
+                        )
+                        if not idem_acquired:
+                            await db.rollback()
+                            await _mark_failed(
+                                db, row, "idempotency_already_exists_after_handler", wid=wid
+                            )
+                            return
+                    except Exception as e:
                         await db.rollback()
                         await _mark_failed(
-                            db, row, "idempotency_already_exists_after_handler", wid=wid
+                            db, row, f"idempotency_write_failed: {e}", wid=wid
                         )
                         return
-                except Exception as e:
-                    # 无法持久化幂等事实时，绝不能提交 handler 的副作用。
-                    await db.rollback()
-                    await _mark_failed(
-                        db, row, f"idempotency_write_failed: {e}", wid=wid
-                    )
-                    return
                 await db.commit()
-            try:
-                from app.domains.messaging.idempotency import mark_processed_redis
+            if not is_stock_mirror:
+                try:
+                    from app.domains.messaging.idempotency import mark_processed_redis
 
-                await mark_processed_redis(scope="outbox", message_id=idem_msg, ttl_seconds=86400 * 7)
-            except Exception:
-                logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
+                    await mark_processed_redis(
+                        scope="outbox", message_id=idem_msg, ttl_seconds=86400 * 7
+                    )
+                except Exception:
+                    logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
         except Exception as e:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, e)
             # handler 异常后会话可能处于失败态，先回滚再用同一会话标记失败
