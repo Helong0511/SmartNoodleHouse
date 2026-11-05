@@ -793,10 +793,17 @@ class DeliveryService:
             return None
 
         order = await db.get(Order, d_order.order_id)
-        refund_id = str(raw.get("refund_id") or raw.get("refundId") or parsed.get("refund_id") or "")
+        refund_id = str(
+            raw.get("refund_id") or raw.get("refundId") or raw.get("refund_no")
+            or raw.get("refundNo") or raw.get("out_refund_no") or parsed.get("refund_id") or ""
+        )
         amount = money(parsed.get("refund_amount") or raw.get("refund_amount") or raw.get("refundAmount") or 0)
         reason = str(raw.get("reason") or raw.get("refund_reason") or parsed.get("reason") or "")
-        refund_type = "PARTIAL" if amount and order and amount < order.total_amount else "FULL"
+        if amount <= 0:
+            raise AppException(40063, "外卖退款回调缺少有效退款金额，已拒绝生成退款台账")
+        if not order or amount > money(order.total_amount):
+            raise AppException(40063, "外卖退款金额超过订单金额或关联订单不存在")
+        refund_type = "PARTIAL" if amount < money(order.total_amount) else "FULL"
 
         if not refund_id:
             # 部分平台回调不提供退款单号。使用原始事件规范化内容生成稳定指纹，
