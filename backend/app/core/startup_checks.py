@@ -84,6 +84,22 @@ def _invalid_ip_allowlist_entries(raw: str) -> list[str]:
             invalid.append(part)
     return invalid
 
+def _invalid_trusted_proxy_entries(raw: str) -> list[str]:
+    """可信代理允许为空（不信任任何转发头），但不能包含非法项或全网段。"""
+    parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    invalid: list[str] = []
+    for part in parts:
+        try:
+            if "/" in part:
+                network = ipaddress.ip_network(part, strict=False)
+                if network.prefixlen == 0:
+                    invalid.append(part)
+            else:
+                ipaddress.ip_address(part)
+        except ValueError:
+            invalid.append(part)
+    return invalid
+
 
 _REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS = (
     "/api/auth/login",
@@ -227,6 +243,19 @@ def validate_settings(settings: Settings) -> None:
             errors.append(
                 "生产 WEBHOOK_IP_ALLOWLIST 必须是有效 IP/CIDR 列表；非法项: "
                 + ", ".join(invalid_webhook_entries)
+            )
+
+    if is_prod:
+        trusted_proxy_raw = (getattr(settings, "trusted_proxy_ips", None) or "").strip()
+        invalid_proxy_entries = _invalid_trusted_proxy_entries(trusted_proxy_raw)
+        if invalid_proxy_entries:
+            errors.append(
+                "生产 TRUSTED_PROXY_IPS 不得包含非法地址或 0.0.0.0/0、::/0 等全网段；非法项: "
+                + ", ".join(invalid_proxy_entries)
+            )
+        elif not trusted_proxy_raw:
+            warnings.append(
+                "生产 TRUSTED_PROXY_IPS 为空：将不信任任何转发头，反代后的请求会统一按代理 IP 限流"
             )
 
     # P1-41: 生产环境必需配置项不得使用开发默认值
