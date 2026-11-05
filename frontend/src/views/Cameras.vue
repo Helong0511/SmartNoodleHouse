@@ -593,7 +593,7 @@ async function testSpeak(id: number, target: 'pc' | 'camera' = 'pc') {
         ? `已入队摄像头对讲试听（仅入队≠已出声；可连点保留最后一次）${tid}`
         : `已触发电脑扬声器试听${tid}`,
     )
-    if (taskId && (target === 'camera' || target === 'both')) {
+    if (taskId && target === 'camera') {
       void pollSpeakTask(taskId)
     }
   } catch (e: any) {
