@@ -2778,6 +2778,71 @@ class PaymentService:
         return None
 
     @classmethod
+    def _validate_refund_query_result(
+        cls, *, provider: str, payment: Payment, refund: PaymentRefund, result: dict
+    ) -> str:
+        """统一校验主动查单与定时补偿的渠道退款结果；只有完整匹配才允许入账。"""
+        provider_u = str(provider or "").strip().upper()
+        if provider_u not in ("WECHAT", "ALIPAY"):
+            raise AppException(40302, "退款查询渠道与本地支付记录不匹配")
+        if (
+            int(refund.payment_id) != int(payment.id)
+            or not payment.payment_no
+            or not refund.refund_no
+        ):
+            raise AppException(40302, "退款单缺少有效的原支付/退款编号")
+        refund_order_id = getattr(refund, "order_id", None)
+        payment_order_id = getattr(payment, "order_id", None)
+        if (refund_order_id is None) != (payment_order_id is None):
+            raise AppException(40302, "退款单与原支付订单关联不一致")
+        if refund_order_id is not None and int(refund_order_id) != int(payment_order_id):
+            raise AppException(40302, "退款单与原支付订单关联不一致")
+
+        result_refund_no = str(result.get("refund_no") or "").strip()
+        if result_refund_no and result_refund_no != str(refund.refund_no):
+            raise AppException(40302, "渠道退款查询返回的退款单号不匹配")
+        result_payment_no = str(result.get("payment_no") or "").strip()
+        if result_payment_no and result_payment_no != str(payment.payment_no):
+            raise AppException(40302, "渠道退款查询返回的原支付单号不匹配")
+        result_trade_no = str(result.get("provider_trade_no") or "").strip()
+        local_trade_no = str(payment.provider_trade_no or "").strip()
+        if result_trade_no and (not local_trade_no or result_trade_no != local_trade_no):
+            raise AppException(40302, "渠道退款查询返回的原交易号不匹配")
+
+        query_status = str(result.get("status") or "PROCESSING").strip().upper()
+        if query_status == "SUCCESS":
+            if provider_u == "ALIPAY":
+                amount_raw = result.get("amount")
+                if amount_raw is None:
+                    raise AppException(50302, "支付宝退款查询缺少本次退款金额，拒绝入账")
+                try:
+                    query_amount = money(Decimal(str(amount_raw)))
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(50302, "支付宝退款查询金额解析失败") from exc
+                if query_amount != money(refund.amount):
+                    raise AppException(40302, "支付宝退款查询本次退款金额与本地申请不匹配")
+            else:
+                amount_info = result.get("amount")
+                if not isinstance(amount_info, dict):
+                    raise AppException(50302, "微信退款查询缺少金额信息，拒绝入账")
+                refund_raw = amount_info.get("refund")
+                total_raw = amount_info.get("total")
+                if refund_raw is None or total_raw is None:
+                    raise AppException(50302, "微信退款查询缺少本次退款或原订单金额")
+                try:
+                    query_refund_amount = money(Decimal(str(refund_raw)) / 100)
+                    query_total_amount = money(Decimal(str(total_raw)) / 100)
+                except (InvalidOperation, ValueError) as exc:
+                    raise AppException(50302, "微信退款查询金额解析失败") from exc
+                if query_refund_amount != money(refund.amount):
+                    raise AppException(40302, "微信退款查询本次退款金额与本地申请不匹配")
+                if query_total_amount != money(payment.amount):
+                    raise AppException(40302, "微信退款查询原订单总金额与本地支付金额不匹配")
+                if str(amount_info.get("currency") or "CNY").upper() != "CNY":
+                    raise AppException(40302, "微信退款查询币种必须为 CNY")
+        return query_status
+
+    @classmethod
     async def sync_refund_status(cls, db: AsyncSession, row: PaymentRefund) -> PaymentRefund:
         """主动查询平台退款结果（补偿回调丢失）。"""
         if row.status == "SUCCESS":
@@ -2805,49 +2870,10 @@ class PaymentService:
         if result is None:
             return row
 
-        # 渠道查询也是入账依据，必须核对其返回的原支付单、退款单和交易号。
-        result_refund_no = str(result.get("refund_no") or "").strip()
-        if result_refund_no and result_refund_no != str(row.refund_no):
-            raise AppException(40302, "渠道退款查询返回的退款单号不匹配")
-        result_payment_no = str(result.get("payment_no") or "").strip()
-        if result_payment_no and result_payment_no != str(payment.payment_no):
-            raise AppException(40302, "渠道退款查询返回的原支付单号不匹配")
-        result_trade_no = str(result.get("provider_trade_no") or "").strip()
-        local_trade_no = str(payment.provider_trade_no or "").strip()
-        if result_trade_no and (not local_trade_no or result_trade_no != local_trade_no):
-            raise AppException(40302, "渠道退款查询返回的原交易号不匹配")
-
-        query_status = str(result.get("status") or "PROCESSING").strip().upper()
-        if query_status == "SUCCESS":
-            if provider == "ALIPAY":
-                amount_raw = result.get("amount")
-                if amount_raw is None:
-                    raise AppException(50302, "支付宝退款查询缺少本次退款金额，拒绝入账")
-                try:
-                    query_amount = money(Decimal(str(amount_raw)))
-                except (InvalidOperation, ValueError) as exc:
-                    raise AppException(50302, "支付宝退款查询金额解析失败") from exc
-                if query_amount != money(row.amount):
-                    raise AppException(40302, "支付宝退款查询本次退款金额与本地申请不匹配")
-            else:
-                amount_info = result.get("amount")
-                if not isinstance(amount_info, dict):
-                    raise AppException(50302, "微信退款查询缺少金额信息，拒绝入账")
-                refund_raw = amount_info.get("refund")
-                total_raw = amount_info.get("total")
-                if refund_raw is None or total_raw is None:
-                    raise AppException(50302, "微信退款查询缺少本次退款或原订单金额")
-                try:
-                    query_refund_amount = money(Decimal(str(refund_raw)) / 100)
-                    query_total_amount = money(Decimal(str(total_raw)) / 100)
-                except (InvalidOperation, ValueError) as exc:
-                    raise AppException(50302, "微信退款查询金额解析失败") from exc
-                if query_refund_amount != money(row.amount):
-                    raise AppException(40302, "微信退款查询本次退款金额与本地申请不匹配")
-                if query_total_amount != money(payment.amount):
-                    raise AppException(40302, "微信退款查询原订单总金额与本地支付金额不匹配")
-                if str(amount_info.get("currency") or "CNY").upper() != "CNY":
-                    raise AppException(40302, "微信退款查询币种必须为 CNY")
+        # 主动查单与定时补偿共用同一套渠道身份、订单关联、金额和币种校验。
+        query_status = cls._validate_refund_query_result(
+            provider=provider, payment=payment, refund=row, result=result
+        )
 
         # HTTP 查单期间可能有异步回调/另一个补偿 Worker 已完成退款。
         # 必须在网络请求结束后重新当前读并锁定退款行，不能用请求前的 ORM 快照
