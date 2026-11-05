@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core import database
 from app.core.leader_fencing import (
@@ -34,7 +34,7 @@ async def fencing_db(monkeypatch):
                 "VALUES (1, 0, NULL)"
             )
         )
-    maker = async_sessionmaker(engine, class_=database.AsyncSessionLocal.class_, expire_on_commit=False)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(database, "AsyncSessionLocal", maker)
     yield maker
     deactivate_leader_epoch()
