@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 _ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[Any]], Callable[..., Awaitable[Any]]], Awaitable[None]]
 _MAX_CONCURRENT_CALLBACKS = 32
 _CALLBACK_SLOT_WAIT_SEC = 0.5
+_CALLBACK_BODY_TOTAL_TIMEOUT_SEC = 15.0
 
 
 class WebhookBodyLimitMiddleware:
@@ -76,8 +77,17 @@ class WebhookBodyLimitMiddleware:
 
         chunks: list[bytes] = []
         total = 0
+        deadline = asyncio.get_running_loop().time() + _CALLBACK_BODY_TOTAL_TIMEOUT_SEC
         while True:
-            message = await receive()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                await self._reject(send, 408, "Webhook body read timeout")
+                return
+            try:
+                message = await asyncio.wait_for(receive(), timeout=remaining)
+            except asyncio.TimeoutError:
+                await self._reject(send, 408, "Webhook body read timeout")
+                return
             if message.get("type") == "http.disconnect":
                 return
             if message.get("type") != "http.request":
