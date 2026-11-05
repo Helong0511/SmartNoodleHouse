@@ -312,25 +312,13 @@ async def lifespan(app: FastAPI):
     elif role in ("leader", "auto"):
         is_leader = await try_acquire_leader(_leader_worker_id)
         if role == "leader" and not is_leader:
-            # 显式 leader：热重载时常被已死进程的 TTL 锁挡住，强制接管保证 TTS/识别起来
+            # 显式 leader 也必须尊重当前租约；禁止启动时无条件 DEL 其他 worker 的锁。
+            # 旧 worker 崩溃时等待 TTL 到期，由 standby promote loop 自动接管。
             logger.warning(
-                "PROCESS_ROLE=leader 未抢到锁，强制接管 Redis Leader（worker_id=%s）",
+                "PROCESS_ROLE=leader 当前已有其他 Leader 或 Redis 不可用；不强制删除锁，"
+                "本进程进入 standby 并在后台重试（worker_id=%s）",
                 _leader_worker_id,
             )
-            try:
-                from app.core.leader_lock import LEADER_KEY
-                from app.core.redis_client import get_redis
-
-                r = await get_redis()
-                await r.delete(LEADER_KEY)
-            except Exception:
-                logger.exception("强制删除 Leader 锁失败")
-            is_leader = await try_acquire_leader(_leader_worker_id)
-            if not is_leader:
-                logger.warning(
-                    "PROCESS_ROLE=leader 强制接管后仍失败（worker_id=%s），稍后后台重试",
-                    _leader_worker_id,
-                )
     else:
         logger.warning("未知 PROCESS_ROLE=%s，按 worker 处理", role)
         is_leader = False
