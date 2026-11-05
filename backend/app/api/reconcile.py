@@ -19,6 +19,9 @@ from app.services.store_scope import assert_store_access, effective_store_id
 
 router = APIRouter(prefix="/reconcile", tags=["reconcile"])
 
+# 对账 CSV 不是普通文本输入：限制读取上限，避免授权用户上传超大文件耗尽内存。
+MAX_RECONCILE_BILL_BYTES = 10 * 1024 * 1024
+
 
 @router.post("/payments/import", dependencies=[require_permission("reconcile:manage")])
 async def import_payment_bill(
@@ -29,11 +32,21 @@ async def import_payment_bill(
     bill_date: Annotated[date, Form()],
     file: UploadFile = File(...),
 ):
-    raw = await file.read()
+    raw = await file.read(MAX_RECONCILE_BILL_BYTES + 1)
+    if len(raw) > MAX_RECONCILE_BILL_BYTES:
+        raise AppException(41312, "渠道账单文件不能超过 10 MiB", status_code=413)
+    if not raw:
+        raise AppException(40012, "渠道账单文件为空", status_code=400)
     try:
-        text = raw.decode("utf-8")
+        text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
-        text = raw.decode("gbk", errors="replace")
+        try:
+            text = raw.decode("gbk")
+        except UnicodeDecodeError as exc:
+            raise AppException(40012, "渠道账单编码不受支持，请使用 UTF-8 或 GBK", status_code=400) from exc
+    # 文件名仅作为审计元数据保存；剥离路径分隔符、控制字符并限制长度。
+    source_filename = str(file.filename or "channel-bill.csv").replace("\\\\", "/").split("/")[-1]
+    source_filename = "".join(ch for ch in source_filename if ch.isprintable())[:255] or "channel-bill.csv"
     try:
         batch = await PaymentReconcileService.run_batch(
             db,
@@ -41,7 +54,7 @@ async def import_payment_bill(
             bill_date=bill_date,
             bill_csv=text,
             created_by=user.id,
-            source_filename=file.filename,
+            source_filename=source_filename,
         )
         await db.commit()
     except ValueError as e:
