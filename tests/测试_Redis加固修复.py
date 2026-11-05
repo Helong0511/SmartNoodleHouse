@@ -581,3 +581,16 @@ async def test_owned_lock_release_does_not_delete_replaced_cooldown():
     released = await release_owned_lock(fake, "snh:welcome:unknown:camera:5", "old-owner")
     assert released is False
     assert fake.store["snh:welcome:unknown:camera:5"] == "new-cooldown-owner"
+
+
+@pytest.mark.asyncio
+async def test_critical_scheduler_lock_is_not_granted_if_redis_client_fails():
+    from app.services import scheduler_admin
+    from app.core import redis_client
+
+    async def failing_client():
+        raise RuntimeError("connection unavailable")
+
+    with patch.object(redis_client, "get_redis", failing_client):
+        async with scheduler_admin.redis_job_lock("test-critical-job", ttl=30) as acquired:
+            assert acquired is False
