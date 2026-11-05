@@ -872,6 +872,37 @@ class DeliveryService:
         ).scalar_one_or_none()
         if not refund:
             raise AppException(40453, "退款记录不存在")
+        if refund.status == "APPROVED_LEDGER_PENDING":
+            # 平台已确认退款，但本地财务分录上次写入失败；只补记账，绝不再次调用平台退款接口。
+            d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
+            order = await db.get(Order, refund.order_id) if refund.order_id else None
+            if not order:
+                raise AppException(40454, "关联订单不存在，无法补记退款分录")
+            from app.services.financial_ledger_service import FinancialLedgerService
+
+            try:
+                await FinancialLedgerService.record_refund(
+                    db,
+                    store_id=int(order.store_id),
+                    amount=refund.amount,
+                    channel=refund.platform or getattr(order, "channel", None),
+                    provider=refund.platform,
+                    order_id=order.id,
+                    delivery_order_id=refund.delivery_order_id,
+                    delivery_refund_id=refund.id,
+                    remark=f"delivery_refund:{refund.platform}:{refund.platform_refund_id or refund.id}",
+                )
+                refund.status = "APPROVED"
+                refund.handled_at = now_local()
+                if d_order:
+                    d_order.refund_status = "APPROVED"
+                await db.commit()
+                return {"ok": True, "status": "APPROVED", "refund_type": refund.refund_type, "ledger_recovered": True}
+            except Exception as exc:
+                await db.rollback()
+                logger.exception("外卖退款财务分录补记失败 delivery_refund_id=%s", refund.id)
+                raise AppException(50354, "平台退款已成功，但财务分录仍待补记；请稍后重试补记账，不要重复退款") from exc
+
         if refund.status in ("APPROVED", "REJECTED"):
             raise AppException(40053, f"退款已处理: {refund.status}")
         if refund.status == "PROCESSING":
@@ -978,8 +1009,14 @@ class DeliveryService:
                         refund.id,
                         order.id,
                     )
-                    if get_settings().is_production:
-                        raise AppException(50010, "外卖退款分录写入失败，请重试") from exc
+                    # 平台退款已成功，不能回滚为 PENDING 或再次请求平台。
+                    # 持久化专用待补账状态；同一审批入口重试时只重试本地幂等分录。
+                    refund.status = "APPROVED_LEDGER_PENDING"
+                    if d_order:
+                        d_order.refund_status = "APPROVED_LEDGER_PENDING"
+                    await db.flush()
+                    await db.commit()
+                    raise AppException(50354, "平台退款已成功，但财务分录写入失败；请重试补记账，不要再次退款") from exc
         else:
             refund.status = "REJECTED"
             if d_order:
