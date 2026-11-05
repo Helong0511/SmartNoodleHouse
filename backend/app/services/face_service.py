@@ -22,7 +22,7 @@ from app.core.cache_keys import (
 )
 from app.core.config import get_settings
 from app.core.exceptions import AppException
-from app.core.redis_client import get_redis
+from app.core.redis_client import get_redis, release_owned_lock
 from app.core.response import now_local
 from app.core.warmup_budget import face_cache_max_profiles
 from app.models import (
@@ -871,12 +871,14 @@ class VisitorService:
         # 进程内冷却/日志节流用 monotonic；Redis NX EX 仍走服务端墙钟 TTL
         now_mono = _time.monotonic()
         acquired = True
+        cooldown_token = uuid.uuid4().hex
+        cooldown_key = unknown_welcome_cooldown_key(int(camera_id))
         if cooldown > 0:
             try:
                 redis = await get_redis()
                 ok = await redis.set(
-                    unknown_welcome_cooldown_key(int(camera_id)),
-                    "1",
+                    cooldown_key,
+                    cooldown_token,
                     nx=True,
                     ex=int(cooldown),
                 )
@@ -912,7 +914,7 @@ class VisitorService:
             if cooldown > 0:
                 try:
                     redis = await get_redis()
-                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                    await release_owned_lock(redis, cooldown_key, cooldown_token)
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             return False
@@ -931,7 +933,7 @@ class VisitorService:
             if cooldown > 0:
                 try:
                     redis = await get_redis()
-                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                    await release_owned_lock(redis, cooldown_key, cooldown_token)
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             raise
@@ -940,7 +942,7 @@ class VisitorService:
             if cooldown > 0:
                 try:
                     redis = await get_redis()
-                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                    await release_owned_lock(redis, cooldown_key, cooldown_token)
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             return False
