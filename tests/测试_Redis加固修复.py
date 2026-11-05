@@ -171,6 +171,11 @@ async def test_menu_cache_rebuild_lock_acquire_release():
         # 释放后可再次抢锁
         ok3 = await menu_cache.try_acquire_rebuild_lock(1)
         assert isinstance(ok3, str) and ok3
+        assert ok3 in menu_cache._REBUILD_HEARTBEATS
+        heartbeat = menu_cache._REBUILD_HEARTBEATS[ok3]
+        await menu_cache.release_rebuild_lock(1, ok3)
+        assert heartbeat.done()
+        assert ok3 not in menu_cache._REBUILD_HEARTBEATS
 
 
 # ── menu_cache 大Key 跳过 ──
@@ -231,6 +236,11 @@ async def test_reco_cache_lock_acquire_release():
         await reco_cache.release_reco_lock(1, 1, "default", "a", token=ok1)
         ok3 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
         assert isinstance(ok3, str) and ok3
+        assert ok3 in reco_cache._REBUILD_HEARTBEATS
+        heartbeat = reco_cache._REBUILD_HEARTBEATS[ok3]
+        await reco_cache.release_reco_lock(1, 1, "default", "a", token=ok3)
+        assert heartbeat.done()
+        assert ok3 not in reco_cache._REBUILD_HEARTBEATS
 
 
 # ── reco_cache jitter TTL ──
