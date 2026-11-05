@@ -138,13 +138,9 @@ async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
     SystemSettingsService._cache_refresh_lock = asyncio.Lock()
     calls = {"count": 0}
 
-    class Scalars:
-        def all(self):
-            return [SimpleNamespace(setting_key="test_setting", setting_value="ok")]
-
     class Result:
         def scalars(self):
-            return Scalars()
+            return [SimpleNamespace(setting_key="test_setting", setting_value="ok")]
 
     class FakeDB:
         async def execute(self, _statement):
