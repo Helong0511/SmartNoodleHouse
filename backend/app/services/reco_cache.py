@@ -22,6 +22,7 @@ from app.core.async_utils import spawn_bg
 from app.core.cache_keys import (
     RECO_TTL_SECONDS,
     reco_customer_pattern,
+    reco_generation_key,
     reco_key,
     reco_rebuild_lock_key,
     ttl_with_jitter,
@@ -86,18 +87,31 @@ def _invalidate_local_reco_customer(customer_id: int) -> None:
 
 
 
-async def get_cached_reco(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
-) -> dict[str, Any] | None:
-    """读取推荐缓存。缓存穿透防护：无额外空值标记，因推荐服务对任意 customer/store
-    都会返回合法 payload（冷启动时返回热门餐品），空结果本身会被缓存。"""
-    local_key = _local_reco_key(customer_id, store_id, scene, bucket, fingerprint)
-    local_hit = _get_local_reco(local_key)
-    if local_hit is not None:
-        return local_hit
+async def get_reco_generation(customer_id: int | None) -> int:
+    """读取顾客推荐缓存代际；Redis 故障时返回 0，个性化结果不走本地缓存兜底。"""
+    if customer_id is None:
+        return 0
     try:
         r = await get_redis()
-        raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint))
+        return max(0, int(await r.get(reco_generation_key(customer_id)) or 0))
+    except Exception:
+        return 0
+
+
+async def get_cached_reco(
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", *, generation: int | None = None,
+) -> dict[str, Any] | None:
+    """按顾客代际读取缓存；跨 Worker 的顾客级推荐不使用本地短缓存。"""
+    gen = await get_reco_generation(customer_id) if generation is None else max(0, int(generation))
+    local_key = _local_reco_key(customer_id, store_id, scene, bucket, fingerprint)
+    if customer_id is None:
+        local_hit = _get_local_reco(local_key)
+        if local_hit is not None:
+            return local_hit
+    try:
+        r = await get_redis()
+        raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint, gen))
         if raw:
             payload = json.loads(raw)
             if isinstance(payload, dict):
@@ -120,13 +134,15 @@ async def set_cached_reco(
     body = dict(payload)
     body["cache_hit"] = False
     # 先写本地短缓存，再尝试 Redis；即使 Redis 客户端初始化本身失败也能 single-flight 复用。
-    _set_local_reco(
-        _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
-    )
+    if customer_id is None:
+        _set_local_reco(
+            _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
+        )
     try:
         r = await get_redis()
+        generation = await get_reco_generation(customer_id)
         await r.set(
-            reco_key(customer_id, store_id, scene, bucket, fingerprint),
+            reco_key(customer_id, store_id, scene, bucket, fingerprint, generation),
             dumps_json(body, compact=True),
             ex=ttl_with_jitter(RECO_TTL_SECONDS),
         )
@@ -143,8 +159,10 @@ async def set_cached_reco_if_owner(
     payload: dict[str, Any],
     fingerprint: str,
     token: str,
+    *,
+    expected_generation: int = 0,
 ) -> bool:
-    """仅允许仍持有推荐重建租约的 worker 发布 Redis/本地缓存。"""
+    """仅允许仍持有租约且顾客代际未变化的 worker 发布缓存。"""
     if not token:
         return False
     body = dict(payload)
@@ -153,25 +171,29 @@ async def set_cached_reco_if_owner(
         r = await get_redis()
         raw = dumps_json(body, compact=True)
         script = """
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
+        if redis.call('GET', KEYS[1]) == ARGV[1]
+           and (redis.call('GET', KEYS[3]) or '0') == ARGV[4] then
             return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
         end
         return false
         """
         result = await r.eval(
             script,
-            2,
-            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
-            reco_key(customer_id, store_id, scene, bucket, fingerprint),
+            3,
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, expected_generation),
+            reco_key(customer_id, store_id, scene, bucket, fingerprint, expected_generation),
+            reco_generation_key(customer_id),
             token,
             raw,
             ttl_with_jitter(RECO_TTL_SECONDS),
+            str(max(0, int(expected_generation))),
         )
         if not result:
             return False
-        _set_local_reco(
-            _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
-        )
+        if customer_id is None:
+            _set_local_reco(
+                _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
+            )
         return True
     except Exception:
         logger.warning("推荐缓存租约校验发布失败(store=%s)", store_id, exc_info=True)
@@ -179,27 +201,18 @@ async def set_cached_reco_if_owner(
 
 
 async def invalidate_customer(customer_id: int) -> None:
-    """失效某顾客全部场景/桶位的推荐结果。延迟双删防止并发写窗口旧值残留。"""
+    """原子推进顾客缓存代际；旧的慢速重建任务无法把失效前快照写回。"""
     if not customer_id:
         return
     _invalidate_local_reco_customer(customer_id)
-    pattern = reco_customer_pattern(customer_id)
     try:
         r = await get_redis()
-        # SCAN 使用游标迭代；分批删除，避免某顾客积累大量 cart fingerprint 时
-        # 把所有匹配 Key 一次性装入 Python 列表造成额外内存峰值。
-        batch = []
-        async for k in r.scan_iter(match=pattern, count=200):
-            batch.append(k)
-            if len(batch) >= 200:
-                await delete_with_retry(r, *batch)
-                batch.clear()
-        if batch:
-            await delete_with_retry(r, *batch)
-        # 延迟双删：防止删后又有并发请求写入旧推荐结果
-        spawn_bg(_delayed_invalidate(pattern))
+        key = reco_generation_key(customer_id)
+        await r.incr(key)
+        await r.expire(key, 30 * 24 * 3600)
+        # 旧代际键使用短 TTL 自然回收；无需 SCAN/双删，避免画像高频更新放大 Redis 负载。
     except Exception:  # noqa: BLE001
-        logger.debug("推荐缓存失效失败(customer=%s)，等待 TTL", customer_id, exc_info=True)
+        logger.warning("推荐缓存代际失效失败(customer=%s)，旧缓存等待 TTL", customer_id, exc_info=True)
 
 
 async def _delayed_invalidate(pattern: str) -> None:
@@ -220,13 +233,14 @@ async def _delayed_invalidate(pattern: str) -> None:
 
 
 async def try_acquire_reco_lock(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", *, generation: int = 0,
 ) -> str | None:
     """缓存击穿保护：返回唯一持有者 token；失败/Redis 不可用返回 None。"""
     try:
         r = await get_redis()
         token = uuid.uuid4().hex
-        key = reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint)
+        key = reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, generation)
         acquired = await r.set(key, token, nx=True, ex=_REBUILD_LOCK_TTL)
         if not acquired:
             return None
@@ -245,7 +259,7 @@ async def try_acquire_reco_lock(
 
 async def release_reco_lock(
     customer_id: int | None, store_id: int, scene: str, bucket: str,
-    fingerprint: str = "", token: str | None = None,
+    fingerprint: str = "", token: str | None = None, *, generation: int = 0,
 ) -> None:
     """只释放当前调用方持有的锁，避免误删后续持有者的锁。"""
     if not token:
@@ -255,7 +269,7 @@ async def release_reco_lock(
     try:
         r = await get_redis()
         await release_owned_lock(
-            r, reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint), token
+            r, reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, generation), token
         )
     except Exception:
         pass
@@ -263,12 +277,14 @@ async def release_reco_lock(
 
 async def wait_for_reco(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "",
-    timeout: float = 2.0,
+    timeout: float = 2.0, *, generation: int | None = None,
 ) -> dict[str, Any] | None:
     """未抢到锁时有界轮询缓存，避免固定等待后多个 worker 同时重算。"""
     deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
     while True:
-        cached = await get_cached_reco(customer_id, store_id, scene, bucket, fingerprint)
+        cached = await get_cached_reco(
+            customer_id, store_id, scene, bucket, fingerprint, generation=generation
+        )
         if cached is not None:
             return cached
         remaining = deadline - asyncio.get_running_loop().time()
