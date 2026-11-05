@@ -129,6 +129,7 @@ def test_key_builders_exact(builder, args, expected):
 
 @pytest.mark.asyncio
 async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
+    from types import SimpleNamespace
     from app.services.system_settings_service import SystemSettingsService
 
     SystemSettingsService._cache = None
@@ -137,23 +138,22 @@ async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
     SystemSettingsService._cache_refresh_lock = asyncio.Lock()
     calls = {"count": 0}
 
-    async def load_once(_db, *, force=False):
-        calls["count"] += 1
-        await asyncio.sleep(0.02)
-        SystemSettingsService._cache = {"test_setting": "ok"}
-        SystemSettingsService._cache_ver = 0
-        SystemSettingsService._cache_at = time.monotonic()
-        return SystemSettingsService._cache
+    class Result:
+        def scalars(self):
+            return [SimpleNamespace(setting_key="test_setting", setting_value="ok")]
+
+    class FakeDB:
+        async def execute(self, _statement):
+            calls["count"] += 1
+            await asyncio.sleep(0.02)
+            return Result()
 
     monkeypatch.setattr(
         SystemSettingsService, "_remote_version", AsyncMock(return_value=None)
     )
-    monkeypatch.setattr(SystemSettingsService, "_load_raw_unlocked", AsyncMock(side_effect=load_once))
-    db = object()
-
+    db = FakeDB()
     await asyncio.gather(*(SystemSettingsService.touch_cache(db) for _ in range(5)))
 
     assert calls["count"] == 1
     assert SystemSettingsService._cache == {"test_setting": "ok"}
-    # asyncio.Lock 可能绑定当前事件循环；测试结束前重置，避免跨 loop 污染。
     SystemSettingsService._cache_refresh_lock = asyncio.Lock()
