@@ -22,7 +22,7 @@ from app.core.cache_keys import (
     reco_rebuild_lock_key,
     ttl_with_jitter,
 )
-from app.core.redis_client import delete_with_retry, get_redis
+from app.core.redis_client import delete_with_retry, get_redis, release_owned_lock
 from app.core.response import dumps_json
 
 logger = logging.getLogger(__name__)
@@ -103,26 +103,32 @@ async def _delayed_invalidate(pattern: str) -> None:
 
 async def try_acquire_reco_lock(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
-) -> bool:
-    """缓存击穿保护：SET NX EX 抢锁。Redis 不可用时 fail-open。"""
+) -> str | None:
+    """缓存击穿保护：返回唯一持有者 token；失败/Redis 不可用返回 None。"""
     try:
         r = await get_redis()
-        return bool(
-            await r.set(
-                reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
-                "1", nx=True, ex=_REBUILD_LOCK_TTL,
-            )
+        token = __import__("uuid").uuid4().hex
+        acquired = await r.set(
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+            token, nx=True, ex=_REBUILD_LOCK_TTL,
         )
+        return token if acquired else None
     except Exception:
-        return False
+        return None
 
 
 async def release_reco_lock(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", token: str | None = None,
 ) -> None:
+    """只释放当前调用方持有的锁，避免误删后续持有者的锁。"""
+    if not token:
+        return
     try:
         r = await get_redis()
-        await r.delete(reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint))
+        await release_owned_lock(
+            r, reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint), token
+        )
     except Exception:
         pass
 
