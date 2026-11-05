@@ -29,9 +29,9 @@ _PLATFORM_UNLIMITED = 9999
 
 
 async def _collect_stock_push_jobs(
-    db, store_id: int, product_id: int
+    db, store_id: int, product_id: int, *, platform_filter: str | None = None
 ) -> list[tuple[str, Any, list[dict], bool]]:
-    """只读本地库存与映射，拼出平台推送任务（不含 HTTP）。"""
+    """读取本地库存与映射；可限定平台，以便每次推送前刷新快照。"""
     product = (
         await db.execute(
             select(Product).where(
@@ -166,9 +166,26 @@ async def delivery_stock_mirror_handler(db, row) -> None:
         logger.warning("库存镜像事件缺少 store_id/product_id id=%s payload=%s", row.id, payload)
         return
     sid, pid = int(store_id), int(product_id)
-    jobs = await _collect_stock_push_jobs(db, sid, pid)
-    # claim 后的会话在此释放，平台 HTTP 不再占连接池
+    # 先取有效平台列表。每个平台真正发送前重新读取库存、上下架、映射和凭证，
+    # 读完立即 commit 释放连接，再执行 HTTP，避免后续平台沿用陈旧快照。
+    platform_rows = await db.execute(
+        select(PlatformStoreBinding.platform).where(
+            PlatformStoreBinding.store_id == sid,
+            PlatformStoreBinding.status == 1,
+        )
+    )
+    platforms = list(dict.fromkeys(str(p) for p in platform_rows.scalars().all() if p))
     await db.commit()
-    failures = await _execute_stock_push_jobs(jobs, store_id=sid, product_id=pid)
+
+    failures = 0
+    for platform in platforms:
+        db.expire_all()
+        jobs = await _collect_stock_push_jobs(
+            db, sid, pid, platform_filter=platform
+        )
+        await db.commit()
+        failures += await _execute_stock_push_jobs(
+            jobs, store_id=sid, product_id=pid
+        )
     if failures:
         raise RuntimeError(f"库存镜像存在 {failures} 个平台失败，等待 outbox 重试")
