@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 
 import redis.asyncio as redis
@@ -18,6 +19,22 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_REDIS_DEGRADE_LOG_INTERVAL_SEC = 30.0
+_last_redis_degrade_log_at = -_REDIS_DEGRADE_LOG_INTERVAL_SEC
+_suppressed_redis_degrade_logs = 0
+
+
+def _log_redis_degraded(error: Exception) -> None:
+    global _last_redis_degrade_log_at, _suppressed_redis_degrade_logs
+    now = time.monotonic()
+    if now - _last_redis_degrade_log_at < _REDIS_DEGRADE_LOG_INTERVAL_SEC:
+        _suppressed_redis_degrade_logs += 1
+        return
+    suppressed = _suppressed_redis_degrade_logs
+    _suppressed_redis_degrade_logs = 0
+    _last_redis_degrade_log_at = now
+    logger.warning("Redis 不可用，进入降级: %s（此前抑制重复日志 %s 次）", error, suppressed)
 
 # 只允许锁持有者释放自己的锁；禁止无条件 DEL（锁过期并被接管后会误删新持有者）。
 _LUA_RELEASE_OWNED_LOCK = """
@@ -99,7 +116,7 @@ async def try_get_redis() -> redis.Redis | None:
         await r.ping()
         return r
     except Exception as e:
-        logger.warning("Redis 不可用，进入降级: %s", e)
+        _log_redis_degraded(e)
         return None
 
 
