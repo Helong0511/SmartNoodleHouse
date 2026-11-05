@@ -235,7 +235,10 @@ class MeituanProvider(DeliveryProvider):
             "logistics_code": data.get("logistics_code") or order_obj.get("logistics_code"),
             "rider_name": data.get("rider_name") or data.get("courier_name"),
             "rider_phone": data.get("rider_phone") or data.get("courier_phone"),
-            "refund_id": str(data.get("refund_id") or data.get("refundId") or ""),
+            "refund_id": str(
+                data.get("refund_id") or data.get("refundId") or data.get("refund_no")
+                or data.get("refundNo") or data.get("out_refund_no") or ""
+            ),
             "refund_amount": Decimal(str(data.get("refund_amount") or data.get("refundAmount") or "0")),
             "reason": data.get("reason") or data.get("refund_reason"),
         }
@@ -566,7 +569,10 @@ class ElemeProvider(DeliveryProvider):
             "logistics_code": order.get("logisticsCode") or data.get("logistics_code"),
             "rider_name": (order.get("deliveryMan") or {}).get("name") if isinstance(order.get("deliveryMan"), dict) else None,
             "rider_phone": (order.get("deliveryMan") or {}).get("phone") if isinstance(order.get("deliveryMan"), dict) else None,
-            "refund_id": str(data.get("refundId") or order.get("refundId") or ""),
+            "refund_id": str(
+                data.get("refundId") or order.get("refundId") or data.get("refund_id")
+                or data.get("refundOrderId") or order.get("refundOrderId") or data.get("refund_no") or ""
+            ),
             "refund_amount": Decimal(str(order.get("refundAmount") or data.get("refund_amount") or "0")),
             "reason": order.get("refundReason") or data.get("reason"),
         }
