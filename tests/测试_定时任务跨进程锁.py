@@ -327,3 +327,62 @@ async def test_leader_job_does_not_replay_after_ambiguous_database_disconnect():
         assert await wrapped() is None
     assert calls == 1
     assert statuses == ["skipped"]
+
+
+
+@pytest.mark.asyncio
+async def test_scheduler_stats_failure_does_not_swallow_leader_cancellation():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    started = asyncio.Event()
+
+    async def long_job():
+        started.set()
+        await asyncio.Event().wait()
+
+    long_job.__name__ = "test_stats_failure_cancel"
+    wrapped = sa.leader_job(long_job)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-stats-cancel")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-stats-cancel")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock(side_effect=RuntimeError("stats db down"))),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        task = asyncio.create_task(wrapped())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await sa.cancel_active_leader_jobs(timeout=1) == 1
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert task.done()
+    assert task not in sa._active_leader_job_tasks
+
+
+@pytest.mark.asyncio
+async def test_scheduler_stats_failure_does_not_change_success_result():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    async def successful_job():
+        return "business-result"
+
+    successful_job.__name__ = "test_stats_failure_success"
+    wrapped = sa.leader_job(successful_job)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-stats-success")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-stats-success")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock(side_effect=RuntimeError("stats db down"))),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        assert await wrapped() == "business-result"
