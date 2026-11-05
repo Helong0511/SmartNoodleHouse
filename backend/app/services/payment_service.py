@@ -1900,27 +1900,14 @@ class PaymentService:
                 return await cls._apply_refund_callback(db, provider_u, data, parsed_probe, receipt)
             return await cls._apply_payment_callback(db, provider_u, provider_inst, data, receipt)
         except Exception:
-            # 瞬时/未知错误（OperationalError/Timeout 等）：回滚（receipt 未提交随之回滚），
-            # 释放 Redis 让 provider 重试，re-raise 让 provider 知道重试。
+            # 回执与支付/退款业务写入属于同一 DB 事务；rollback 会原子撤销本请求的回执。
+            # 绝不能用独立 Session 按 receipt_key 删除“查到的回执”：它可能属于并发请求
+            # 已成功提交的事务，删除后会重新开放已处理回调，造成重复入账/退款。
             try:
                 await db.rollback()
             except Exception:
-                pass
-            try:
-                async with AsyncSessionLocal() as db_clean:
-                    existing = (
-                        await db_clean.execute(
-                            select(PaymentCallbackReceipt).where(
-                                PaymentCallbackReceipt.provider == receipt_provider,
-                                PaymentCallbackReceipt.receipt_key == receipt,
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    if existing:
-                        await db_clean.delete(existing)
-                        await db_clean.commit()
-            except Exception as clean_err:
-                logger.warning("回调失败后清理 DB 回执失败: %s", clean_err)
+                logger.exception("支付回调失败后 DB rollback 异常 receipt=%s", receipt)
+            # 仅释放本请求拥有的 Redis claim；若本请求是 Redis 降级放行则 Lua 安全 no-op。
             await release_claim(redis_channel, receipt, claim_token)
             raise
 
