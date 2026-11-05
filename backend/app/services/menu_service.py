@@ -256,29 +256,56 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     ):
         bundle = hit
     else:
-        # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
-        lock_token = await try_acquire_rebuild_lock(sid)
-        lock_ok = lock_token is not None
-        if not lock_ok:
-            # 未抢到锁：短暂等待其他进程重建完成后重读缓存
-            waited = await wait_for_rebuild(sid, 0.3)
+        # Redis 锁负责跨进程协调；本地 single-flight 负责 Redis 故障/等待者兜底，
+        # 避免同一 worker 内所有请求在 300ms 等待后同时重建。
+        from app.core.async_utils import local_singleflight
+
+        async with local_singleflight(f"menu:{sid}"):
+            # 等待本地前一个请求期间，缓存可能已经被填充；必须二次检查。
+            cached_after_wait = await get_menu_bundle(sid)
             if (
-                waited is not None
-                and _bundle_schedule_id(waited) == expected_sched
-                and _bundle_has_visibility_meta(waited)
+                cached_after_wait is not None
+                and _bundle_schedule_id(cached_after_wait) == expected_sched
+                and _bundle_has_visibility_meta(cached_after_wait)
             ):
-                version = await get_menu_version(sid)
-                return {**waited, "version": version}
-        try:
-            # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
-            if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
-                invalidate_local_menu_cache(sid)
-                await bump_menu_version(sid)
-            bundle = await build_menu_bundle(db, sid)
-            _BUILD_CACHE.put(sid, bundle)
-        finally:
-            if lock_ok:
-                await release_rebuild_lock(sid, lock_token)
+                bundle = cached_after_wait
+            else:
+                hit_after_wait = _BUILD_CACHE.get(sid)
+                if (
+                    hit_after_wait is not None
+                    and _bundle_schedule_id(hit_after_wait) == expected_sched
+                    and _bundle_has_visibility_meta(hit_after_wait)
+                ):
+                    bundle = hit_after_wait
+                else:
+                    lock_token = await try_acquire_rebuild_lock(sid)
+                    lock_ok = lock_token is not None
+                    if not lock_ok:
+                        # 跨进程持锁者可能仍在构建；短暂等待后再查缓存。
+                        waited = await wait_for_rebuild(sid, 0.3)
+                        if (
+                            waited is not None
+                            and _bundle_schedule_id(waited) == expected_sched
+                            and _bundle_has_visibility_meta(waited)
+                        ):
+                            bundle = waited
+                        else:
+                            bundle = None
+                    else:
+                        bundle = None
+                    try:
+                        if bundle is None:
+                            # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
+                            if cached is not None or (
+                                hit is not None and _bundle_schedule_id(hit) != expected_sched
+                            ):
+                                invalidate_local_menu_cache(sid)
+                                await bump_menu_version(sid)
+                            bundle = await build_menu_bundle(db, sid)
+                            _BUILD_CACHE.put(sid, bundle)
+                    finally:
+                        if lock_ok:
+                            await release_rebuild_lock(sid, lock_token)
 
     version = await get_menu_version(sid)
     if version <= 0:
