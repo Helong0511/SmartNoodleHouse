@@ -88,6 +88,14 @@ else
 end
 """
 
+# compare-and-expire：只有仍持有当前 Token 的任务才能续租。
+_LUA_COMPARE_EXPIRE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
 # Lua：原子更新任务执行统计，避免 HGET→改计数→HSET 的丢更新
 _LUA_RECORD_JOB_RUN = """
 local prev = redis.call('hget', KEYS[1], ARGV[1])
@@ -854,10 +862,11 @@ async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
 
     key = scheduler_job_lock_key(job_id)
     token = uuid.uuid4().hex
+    lease_ttl = max(5, int(ttl))
     acquired = False
     try:
         r = await get_redis()
-        acquired = bool(await r.set(key, token, nx=True, ex=max(5, int(ttl))))
+        acquired = bool(await r.set(key, token, nx=True, ex=lease_ttl))
     except Exception as e:
         # 任务锁是防止重复执行的最后一道跨进程保护；Redis 不可用时必须 fail-closed。
         # 继续执行可能在 Leader 租约短暂分歧/网络分区时造成双重发券、重复对账或重复同步。
@@ -867,11 +876,45 @@ async def redis_job_lock(job_id: str, *, ttl: int = 180) -> AsyncIterator[bool]:
     if not acquired:
         yield False
         return
+
+    owner_task = asyncio.current_task()
+    stop_renew = asyncio.Event()
+
+    async def _renew_lease() -> None:
+        # 任务可长于初始 TTL；续租失败即取消持锁任务，不能让旧执行者继续产生副作用。
+        interval = max(1.0, min(30.0, lease_ttl / 3.0))
+        while not stop_renew.is_set():
+            try:
+                await asyncio.wait_for(stop_renew.wait(), timeout=interval)
+                return
+            except asyncio.TimeoutError:
+                pass
+            try:
+                renewed = await r.eval(
+                    _LUA_COMPARE_EXPIRE, 1, key, token, lease_ttl
+                )
+            except Exception as e:
+                logger.error("任务锁续租异常 job_id=%s: %s，取消任务", job_id, e)
+                if owner_task is not None:
+                    owner_task.cancel()
+                return
+            if not renewed:
+                logger.error("任务锁已丢失 job_id=%s，取消旧持有者任务", job_id)
+                if owner_task is not None:
+                    owner_task.cancel()
+                return
+
+    renew_task = asyncio.create_task(_renew_lease())
     try:
         yield True
     finally:
+        stop_renew.set()
+        renew_task.cancel()
         try:
-            r = await get_redis()
+            await renew_task
+        except asyncio.CancelledError:
+            pass
+        try:
             await r.eval(_LUA_COMPARE_DELETE, 1, key, token)
         except Exception:
             logger.warning("任务锁释放失败 job_id=%s", job_id)
