@@ -128,6 +128,9 @@ def _missing_rate_limit_fail_closed_paths(raw: str) -> list[str]:
 def validate_settings(settings: Settings) -> None:
     errors: list[str] = []
     warnings: list[str] = []
+    webhook_limit = getattr(settings, "webhook_max_body_bytes", 512 * 1024)
+    if not isinstance(webhook_limit, int) or not 1024 <= webhook_limit <= 10 * 1024 * 1024:
+        errors.append("WEBHOOK_MAX_BODY_BYTES 必须在 1024 至 10485760 字节之间")
     is_prod = bool(getattr(settings, "is_production", False))
     face_liveness_mode = str(
         getattr(settings, "face_liveness_mode", "challenge") or "challenge"
