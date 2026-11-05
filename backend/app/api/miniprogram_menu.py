@@ -188,29 +188,40 @@ async def get_recommendations(
     if cached is not None:
         return success(cached, request=request)
 
-    # 互斥重建：避免缓存击穿时多请求同时 recommend 压垮 DB
-    lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
-    lock_ok = lock_token is not None
-    if not lock_ok:
-        waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
-        if waited is not None:
-            return success(waited, request=request)
-    try:
-        ranked, state, meta = await RecommendationService.recommend(
-            db,
-            store_id,
-            customer_id=cid,
-            scene=scene,
-            limit=limit,
-            exclude_ids=exclude_ids,
-            weight_override=weight_override,
-        )
-        payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
-        await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
-        payload["cache_hit"] = False
-    finally:
-        if lock_ok:
-            await release_reco_lock(cid, store_id, scene, ab_bucket, fingerprint, token=lock_token)
+    # Redis 锁负责跨进程协调；本地 single-flight 在 Redis 故障时限制同 worker 并发重算。
+    from app.core.async_utils import local_singleflight
+
+    flight_key = f"reco:{cid or 0}:{store_id}:{scene}:{ab_bucket}:{fingerprint}"
+    async with local_singleflight(flight_key):
+        # 等待本地前一个请求期间，先重新检查 Redis 缓存，避免重复计算。
+        cached_after_wait = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint)
+        if cached_after_wait is not None:
+            return success(cached_after_wait, request=request)
+
+        lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
+        lock_ok = lock_token is not None
+        if not lock_ok:
+            waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
+            if waited is not None:
+                return success(waited, request=request)
+        try:
+            ranked, state, meta = await RecommendationService.recommend(
+                db,
+                store_id,
+                customer_id=cid,
+                scene=scene,
+                limit=limit,
+                exclude_ids=exclude_ids,
+                weight_override=weight_override,
+            )
+            payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
+            await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
+            payload["cache_hit"] = False
+        finally:
+            if lock_ok:
+                await release_reco_lock(
+                    cid, store_id, scene, ab_bucket, fingerprint, token=lock_token
+                )
     return success(payload, request=request)
 
 
