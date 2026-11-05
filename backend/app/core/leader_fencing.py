@@ -94,6 +94,34 @@ async def acquire_database_epoch(owner_id: str) -> int:
     return value
 
 
+async def confirm_database_epoch(owner_id: str | None = None) -> bool:
+    """只读确认本进程 epoch 仍是数据库当前 owner；DB 故障向上抛出。"""
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models import LeaderFencingState
+
+    expected_epoch = _active_epoch
+    expected_owner = _active_owner
+    if expected_epoch is None or expected_owner is None:
+        return False
+    if owner_id is not None and expected_owner != owner_id:
+        return False
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(
+                select(LeaderFencingState.epoch, LeaderFencingState.owner_id).where(
+                    LeaderFencingState.id == 1
+                )
+            )
+        ).one_or_none()
+    return bool(
+        row
+        and int(row.epoch) == expected_epoch
+        and row.owner_id == expected_owner
+    )
+
+
 async def revoke_database_epoch(owner_id: str) -> bool:
     """Leader 丢锁时主动废止旧 epoch；若新 Leader 已接管则不覆盖其 owner。"""
     from sqlalchemy import update
