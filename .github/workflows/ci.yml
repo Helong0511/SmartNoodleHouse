@@ -29,6 +29,7 @@ jobs:
             pip install -r backend/requirements.txt
           fi
           pip install pytest pytest-asyncio httpx pytest-cov
+          python scripts/check_requirements_lock.py
       - name: Compile check
         run: |
           python -m compileall backend/app -q
@@ -83,6 +84,7 @@ jobs:
             pip install -r backend/requirements.txt
           fi
           pip install pytest pytest-asyncio httpx
+          python scripts/check_requirements_lock.py
       - name: Prepare database
         env:
           MYSQL_PWD: root
