@@ -112,6 +112,7 @@ async def test_webhook_inbox_claim_uses_unique_per_attempt_owner_token():
     result = MagicMock()
     result.rowcount = 1
     db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
     fetched = MagicMock(id=17, status="PROCESSING")
     db.get = AsyncMock(return_value=fetched)
 
