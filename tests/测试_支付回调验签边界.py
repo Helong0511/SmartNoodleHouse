@@ -980,3 +980,63 @@ async def test_business_integrity_error_is_rethrown_for_provider_retry(monkeypat
         await PaymentService.handle_callback(FakeDB(), "ALIPAY", {}, b"callback")
 
     release.assert_awaited_once_with("pay:ALIPAY", "receipt-test")
+
+
+@pytest.mark.asyncio
+async def test_receipt_integrity_error_without_matching_receipt_is_not_acknowledged(monkeypatch):
+    import sqlite3
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services import payment_service
+
+    class Result:
+        def scalar_one_or_none(self):
+            return None
+
+    class FakeDB:
+        def add(self, obj):
+            self.receipt = obj
+
+        async def flush(self):
+            raise IntegrityError(
+                "INSERT", {}, sqlite3.IntegrityError("FOREIGN KEY constraint failed")
+            )
+
+        async def rollback(self):
+            return None
+
+        async def execute(self, statement):
+            return Result()
+
+    class Provider:
+        async def handle_callback(self, data):
+            return {
+                "payment_no": "P-TEST",
+                "provider_trade_no": "TRADE-TEST",
+                "amount": "1.00",
+                "status": "PAID",
+                "app_id": "",
+                "is_refund": False,
+            }
+
+    release = AsyncMock()
+    monkeypatch.setattr(payment_service.PaymentService, "get_provider", lambda _p: Provider())
+    monkeypatch.setattr(AlipayVerifier, "verify_and_parse", lambda self, headers, body: {
+        "out_trade_no": "P-TEST",
+        "trade_no": "TRADE-TEST",
+        "notify_id": "NOTIFY-TEST",
+        "total_amount": "1.00",
+        "trade_status": "TRADE_SUCCESS",
+    })
+    monkeypatch.setattr(payment_service, "get_settings", lambda: SimpleNamespace(
+        is_production=False, alipay_app_id=""
+    ))
+    monkeypatch.setattr(payment_service, "claim_once", AsyncMock(return_value=True))
+    monkeypatch.setattr(payment_service, "release_claim", release)
+    monkeypatch.setattr(payment_service, "make_receipt_key", lambda *args: "receipt-test")
+
+    with pytest.raises(IntegrityError):
+        await PaymentService.handle_callback(FakeDB(), "ALIPAY", {}, b"callback")
+
+    release.assert_awaited_once_with("pay:ALIPAY", "receipt-test")
