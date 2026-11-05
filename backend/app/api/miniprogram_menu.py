@@ -176,6 +176,8 @@ async def get_recommendations(
     ab_status = None
     weight_override = None
     fingerprint = cart_fingerprint(exclude_ids) if scene == "settle_addon" else ""
+    # limit 会改变排序截断结果，必须参与缓存隔离，避免 5 条请求污染 20 条请求。
+    cache_fingerprint = f"{fingerprint}:limit={limit}"
     cid = customer.id if customer else None
 
     if cid is not None:
@@ -184,7 +186,7 @@ async def get_recommendations(
             ab_status = ab_exp.status
         weight_override = (ab_params or {}).get("reco_weights")
 
-    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint)
+    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, cache_fingerprint)
     if cached is not None:
         return success(cached, request=request)
 
@@ -194,14 +196,14 @@ async def get_recommendations(
     flight_key = f"reco:{cid or 0}:{store_id}:{scene}:{ab_bucket}:{fingerprint}"
     async with local_singleflight(flight_key):
         # 等待本地前一个请求期间，先重新检查 Redis 缓存，避免重复计算。
-        cached_after_wait = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint)
+        cached_after_wait = await get_cached_reco(cid, store_id, scene, ab_bucket, cache_fingerprint)
         if cached_after_wait is not None:
             return success(cached_after_wait, request=request)
 
-        lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
+        lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, cache_fingerprint)
         lock_ok = lock_token is not None
         if not lock_ok:
-            waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 2.0)
+            waited = await wait_for_reco(cid, store_id, scene, ab_bucket, cache_fingerprint, 2.0)
             if waited is not None:
                 return success(waited, request=request)
             # Redis 锁竞争/不可用且短缓存未命中时，不允许所有 worker 同时重算。
@@ -223,13 +225,13 @@ async def get_recommendations(
             )
             payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
             await set_cached_reco_if_owner(
-                cid, store_id, scene, ab_bucket, payload, fingerprint, lock_token
+                cid, store_id, scene, ab_bucket, payload, cache_fingerprint, lock_token
             )
             payload["cache_hit"] = False
         finally:
             if lock_ok:
                 await release_reco_lock(
-                    cid, store_id, scene, ab_bucket, fingerprint, token=lock_token
+                    cid, store_id, scene, ab_bucket, cache_fingerprint, token=lock_token
                 )
     return success(payload, request=request)
 
