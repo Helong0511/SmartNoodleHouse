@@ -101,3 +101,33 @@ async def test_non_callback_path_is_passed_through_without_buffering():
     ])
     assert observed[0]["body"] == b"unbounded-here"
     assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_content_length_headers_are_rejected():
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    sent = await _run(app, "/webhook/provider", [], headers=[
+        (b"content-length", b"1"), (b"content-length", b"1"),
+    ])
+    assert not called
+    assert sent[0]["status"] == 400
+
+
+@pytest.mark.asyncio
+async def test_content_length_mismatch_is_rejected():
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    sent = await _run(app, "/notify/provider", [
+        {"type": "http.request", "body": b"abc", "more_body": False},
+    ], headers=[(b"content-length", b"4")])
+    assert not called
+    assert sent[0]["status"] == 400
