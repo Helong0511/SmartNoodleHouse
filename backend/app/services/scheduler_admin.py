@@ -305,10 +305,17 @@ def leader_job(fn):
         import time
 
         from app.core.leader_lock import confirm_leader_owned, is_leader_held
+        from app.core.leader_fencing import active_leader_epoch, leader_fence_scope
 
         if not is_leader_held():
             return None
         if not await confirm_leader_owned():
+            return None
+        if active_leader_epoch() is None:
+            logger.critical(
+                "Leader job 拒绝执行：数据库 fencing epoch 未激活 job=%s",
+                getattr(fn, "__name__", "unknown"),
+            )
             return None
         job_name = getattr(fn, "__name__", "")
         if job_name and not is_job_enabled(job_name):
@@ -354,7 +361,10 @@ def leader_job(fn):
                 logger.debug("刷新定时任务下次执行时间失败 job=%s", job_name, exc_info=True)
 
         async def _invoke():
-            return await fn(*args, **kwargs)
+            # ContextVar 会传播到本任务创建的 asyncio 子任务；每个 DB commit
+            # 都会在 SQLAlchemy before_commit 中验证 epoch 并锁住 fencing 行。
+            with leader_fence_scope():
+                return await fn(*args, **kwargs)
 
         try:
             try:
