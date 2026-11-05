@@ -142,7 +142,10 @@ async def claim_outbox_item(
         .where(
             OutboxEvent.id == outbox_id,
             or_(
-                OutboxEvent.status == "PENDING",
+                and_(
+                    OutboxEvent.status == "PENDING",
+                    OutboxEvent.attempt_count < OutboxEvent.max_attempts,
+                ),
                 and_(
                     OutboxEvent.status == "FAILED",
                     OutboxEvent.attempt_count < OutboxEvent.max_attempts,
