@@ -50,7 +50,7 @@ async def get_menu_bundle_api(
 
     先经 get_or_build 校验当前分类时段方案；跨时段会 bump version。
     客户端 version 与当前一致时返回 changed:false；否则返回完整 bundle。
-    Redis 不可用时降级为每次查库。
+    Redis 缓存协调不可用且无本地可用缓存时返回可重试 503，避免并发回源。
     限时/生日菜在返回前按今日与顾客生日过滤。
     """
     if not store_id:
@@ -201,7 +201,7 @@ async def get_recommendations(
         lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
         lock_ok = lock_token is not None
         if not lock_ok:
-            waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
+            waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 2.0)
             if waited is not None:
                 return success(waited, request=request)
             # Redis 锁竞争/不可用且短缓存未命中时，不允许所有 worker 同时重算。
