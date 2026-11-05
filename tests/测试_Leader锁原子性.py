@@ -168,6 +168,9 @@ async def test_renew_loop_recovers_after_single_transient_redis_error(monkeypatc
     async def _on_lost():
         calls["lost"] += 1
 
+    from app.core import leader_fencing
+
+    monkeypatch.setattr(leader_fencing, "confirm_database_epoch", __import__("unittest.mock").mock.AsyncMock(return_value=True))
     monkeypatch.setattr(leader_lock, "RENEW_INTERVAL", 0.001)
     monkeypatch.setattr(leader_lock, "renew_leader_lease", _renew)
     monkeypatch.setattr(leader_lock, "_on_lost", _on_lost)
