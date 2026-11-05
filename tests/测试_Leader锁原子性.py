@@ -122,3 +122,30 @@ async def test_release_does_not_delete_others_lock(monkeypatch):
     monkeypatch.setattr(leader_lock, "get_redis", _get_redis)
     await leader_lock.release_leader("worker_A")
     assert not fake3.delete_called, "compare 失败时不得 DEL"
+
+
+
+@pytest.mark.asyncio
+async def test_renew_leader_lease_propagates_redis_connection_error(monkeypatch):
+    async def _get_redis():
+        raise ConnectionError("temporary redis outage")
+
+    monkeypatch.setattr(leader_lock, "get_redis", _get_redis)
+    with pytest.raises(ConnectionError):
+        await leader_lock.renew_leader_lease("worker_A", ttl=45)
+
+
+@pytest.mark.asyncio
+async def test_renew_leader_lease_returns_false_only_when_owner_check_fails(monkeypatch):
+    class _LostLeaseRedis:
+        async def eval(self, script, numkeys, *args):
+            assert "expire" in script.lower()
+            return 0
+
+    async def _get_redis():
+        return _LostLeaseRedis()
+
+    monkeypatch.setattr(leader_lock, "get_redis", _get_redis)
+    leader_lock.set_leader_held(True)
+    assert await leader_lock.renew_leader_lease("worker_A", ttl=45) is False
+    assert leader_lock.is_leader_held() is False
