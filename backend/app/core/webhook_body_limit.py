@@ -1,22 +1,28 @@
 """Bounded request-body middleware for payment/provider callbacks."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 _ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[Any]], Callable[..., Awaitable[Any]]], Awaitable[None]]
+_MAX_CONCURRENT_CALLBACKS = 32
+_CALLBACK_SLOT_WAIT_SEC = 0.5
 
 
 class WebhookBodyLimitMiddleware:
-    """Buffer callback bodies only up to a strict byte ceiling, then replay once."""
+    """Bound callback body bytes and concurrent buffering, then replay body once."""
 
     def __init__(self, app: _ASGIApp, *, max_body_bytes: int = 512 * 1024) -> None:
         self.app = app
         self.max_body_bytes = int(max_body_bytes)
         if self.max_body_bytes < 1:
             raise ValueError("max_body_bytes must be positive")
+        # A per-process cap prevents N simultaneous 512KB buffers from becoming a
+        # memory-exhaustion vector. Across workers the total cap is multiplied by worker count.
+        self._callback_slots = asyncio.Semaphore(_MAX_CONCURRENT_CALLBACKS)
 
     @staticmethod
     def _is_limited_path(path: str) -> bool:
@@ -30,6 +36,7 @@ class WebhookBodyLimitMiddleware:
             (b"content-type", b"application/json; charset=utf-8"),
             (b"content-length", str(len(body)).encode("ascii")),
             (b"cache-control", b"no-store"),
+            (b"connection", b"close") if status == 503 else (b"x-content-type-options", b"nosniff"),
         ]})
         await send({"type": "http.response.body", "body": body, "more_body": False})
 
@@ -37,7 +44,17 @@ class WebhookBodyLimitMiddleware:
         if scope.get("type") != "http" or not self._is_limited_path(str(scope.get("path") or "")):
             await self.app(scope, receive, send)
             return
+        try:
+            await asyncio.wait_for(self._callback_slots.acquire(), timeout=_CALLBACK_SLOT_WAIT_SEC)
+        except asyncio.TimeoutError:
+            await self._reject(send, 503, "Webhook capacity temporarily exhausted")
+            return
+        try:
+            await self._handle_callback(scope, receive, send)
+        finally:
+            self._callback_slots.release()
 
+    async def _handle_callback(self, scope: dict[str, Any], receive: Callable[..., Awaitable[Any]], send: Callable[..., Awaitable[Any]]) -> None:
         raw_lengths = [value.strip() for name, value in scope.get("headers", []) if name.lower() == b"content-length"]
         if len(raw_lengths) > 1:
             await self._reject(send, 400, "Invalid Content-Length")
