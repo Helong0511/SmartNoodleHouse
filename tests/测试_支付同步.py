@@ -406,3 +406,70 @@ async def test_sync_refund_status使用查单后锁内刷新出来的最新退�
     assert finalize.await_args.args[2] == "PROCESSING"
     stmt = db.execute.await_args.args[0]
     assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_key_retry_returns_original_after_full_refund():
+    payment = SimpleNamespace(id=71, status="REFUNDED")
+    existing = SimpleNamespace(
+        id=81, payment_id=71, amount=Decimal("6.00"),
+        reason="顾客取消", status="SUCCESS", idempotency_key="refund-retry-81",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing)),
+    ])
+
+    returned = await PaymentService.refund(
+        db, payment, Decimal("6.00"), "顾客取消",
+        idempotency_key="refund-retry-81",
+    )
+
+    assert returned is existing
+    assert db.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_key_cannot_be_reused_with_different_amount():
+    payment = SimpleNamespace(id=72, status="PARTIAL_REFUND")
+    existing = SimpleNamespace(
+        id=82, payment_id=72, amount=Decimal("6.00"),
+        reason="顾客取消", status="SUCCESS", idempotency_key="refund-retry-82",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing)),
+    ])
+
+    with pytest.raises(AppException) as exc:
+        await PaymentService.refund(
+            db, payment, Decimal("8.00"), "顾客取消",
+            idempotency_key="refund-retry-82",
+        )
+
+    assert exc.value.code == 40955
+    assert db.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_key_cannot_cross_payment_boundary():
+    payment = SimpleNamespace(id=73, status="PAID")
+    existing = SimpleNamespace(
+        id=83, payment_id=999, amount=Decimal("6.00"),
+        reason="顾客取消", status="SUCCESS", idempotency_key="refund-retry-83",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing)),
+    ])
+
+    with pytest.raises(AppException) as exc:
+        await PaymentService.refund(
+            db, payment, Decimal("6.00"), "顾客取消",
+            idempotency_key="refund-retry-83",
+        )
+
+    assert exc.value.code == 40955
