@@ -28,7 +28,7 @@ from app.core.response import dumps_json
 
 logger = logging.getLogger(__name__)
 
-_REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s
+_REBUILD_LOCK_TTL = 30  # 30s 租约；唯一 token 防止过期持有者误删新锁
 
 
 async def get_cached_reco(
