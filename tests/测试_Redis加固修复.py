@@ -62,6 +62,8 @@ class FakeRedis:
         if "INCR" in script:
             count = int(self.store.get(key, 0)) + 1
             self.store[key] = str(count)
+            if "EXPIRE" in script.upper():
+                self.expire_calls.append((key, int(token)))
             return count
         if self.store.get(key) != str(token):
             return 0
@@ -324,6 +326,7 @@ async def test_reco_cache_invalidate_increments_generation_without_scan():
 
     assert fake.store[reco_generation_key(1)] == "1"
     assert fake.expire_calls[-1] == (reco_generation_key(1), 30 * 24 * 3600)
+    assert len(fake.eval_calls) == 1
     # 代际隔离后不再执行 SCAN/DEL 风暴；旧 key 由短 TTL 自然回收。
     assert fake.delete_calls == []
 
