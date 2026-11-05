@@ -16,7 +16,7 @@ from app.services.feedback_service import EVALUABLE_PAYMENT_STATUSES, FeedbackSe
 from app.services.reco_cache import (
     get_cached_reco,
     release_reco_lock,
-    set_cached_reco,
+    set_cached_reco_if_owner,
     try_acquire_reco_lock,
     wait_for_reco,
 )
@@ -222,7 +222,9 @@ async def get_recommendations(
                 weight_override=weight_override,
             )
             payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
-            await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
+            await set_cached_reco_if_owner(
+                cid, store_id, scene, ab_bucket, payload, fingerprint, lock_token
+            )
             payload["cache_hit"] = False
         finally:
             if lock_ok:
