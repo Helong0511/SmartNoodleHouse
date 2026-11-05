@@ -136,6 +136,35 @@ _local_overrides_ver: int = 0
 # 同进程内串行化同 job 的统计写入（跨 await 防交错）
 _job_stats_locks: dict[str, asyncio.Lock] = {}
 
+# Leader 丢失时主动取消当前进程内已启动的定时任务。
+# APScheduler.shutdown(wait=False) 只停止调度，不保证取消已经运行的 coroutine。
+_active_leader_job_tasks: set[asyncio.Task] = set()
+
+
+async def cancel_active_leader_jobs(*, timeout: float = 5.0) -> int:
+    """取消并等待本进程正在运行的 Leader 定时任务，给事务清理留出有限时间。"""
+    current = asyncio.current_task()
+    tasks = [
+        task for task in tuple(_active_leader_job_tasks)
+        if task is not current and not task.done()
+    ]
+    for task in tasks:
+        task.cancel()
+    if not tasks:
+        return 0
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=max(0.1, float(timeout)),
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "等待 Leader 定时任务取消超时 count=%s；任务可能正在不可取消的外部 I/O 中",
+            len(tasks),
+        )
+    return len(tasks)
+
+
 
 class JobSkipped(Exception):
     """任务主动跳过（如跨进程锁未拿到）。_leader_job 记为 skipped，勿记 ok。"""
@@ -281,6 +310,9 @@ def leader_job(fn):
         if job_name and not is_job_enabled(job_name):
             return None
         started = time.perf_counter()
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            _active_leader_job_tasks.add(current_task)
 
         async def _refresh_next_run() -> None:
             if not job_name:
@@ -356,6 +388,9 @@ def leader_job(fn):
             return result
         except asyncio.CancelledError:
             raise
+        finally:
+            if current_task is not None:
+                _active_leader_job_tasks.discard(current_task)
 
     _wrapped.__name__ = getattr(fn, "__name__", "leader_job")
     _wrapped.__qualname__ = getattr(fn, "__qualname__", _wrapped.__name__)
