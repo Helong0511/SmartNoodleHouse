@@ -161,6 +161,7 @@ async def test_renew_loop_recovers_after_single_transient_redis_error(monkeypatc
         calls["n"] += 1
         if calls["n"] == 1:
             raise ConnectionError("temporary redis outage")
+        calls["held_before_recovery"] = leader_lock.is_leader_held()
         leader_lock.set_leader_held(True)
         stop.set()
         return True
@@ -181,5 +182,19 @@ async def test_renew_loop_recovers_after_single_transient_redis_error(monkeypatc
     await leader_lock.renew_leader_loop("worker_A", stop, ttl=45)
 
     assert calls["n"] == 2
+    assert calls["held_before_recovery"] is False
     assert calls["lost"] == 0
     assert leader_lock.is_leader_held() is True
+
+
+@pytest.mark.asyncio
+async def test_confirm_leader_owned_fails_closed_immediately_on_redis_error(monkeypatch):
+    async def _get_redis():
+        raise ConnectionError("redis state unknown")
+
+    monkeypatch.setattr(leader_lock, "get_redis", _get_redis)
+    monkeypatch.setattr(leader_lock, "_held", True)
+    monkeypatch.setattr(leader_lock, "_worker_id", "worker_A")
+
+    assert await leader_lock.confirm_leader_owned() is False
+    assert leader_lock.is_leader_held() is False
