@@ -120,3 +120,39 @@ async def test_webhook_inbox_claim_uses_unique_per_attempt_owner_token():
     compiled = stmt.compile()
     owner_values = [str(v) for v in compiled.params.values()]
     assert any(v.startswith("same-worker:") and len(v) == 64 for v in owner_values)
+
+
+@pytest.mark.asyncio
+async def test_webhook_claim_lease_guard_cancels_owner_when_claim_is_lost(monkeypatch):
+    import asyncio
+    from app.models import WebhookInbox
+    from app.services import worker_common
+
+    class FakeResult:
+        rowcount = 0
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def execute(self, stmt):
+            return FakeResult()
+
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(worker_common, "AsyncSessionLocal", FakeSession)
+
+    async def worker():
+        async with worker_common.claim_lease_guard(
+            WebhookInbox, 1, "owner-token", interval_seconds=1
+        ):
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(worker())
+    await asyncio.sleep(1.1)
+    with pytest.raises(asyncio.CancelledError):
+        await task
