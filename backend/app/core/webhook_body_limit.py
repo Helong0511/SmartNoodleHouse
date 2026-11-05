@@ -27,8 +27,11 @@ class WebhookBodyLimitMiddleware:
 
     @staticmethod
     def _is_limited_path(path: str) -> bool:
-        lowered = path.lower()
-        return any(part in lowered for part in ("/webhook", "/notify", "/callback"))
+        # 与 WebhookAllowlistMiddleware 共用唯一的回调路径清单，避免
+        # substring 误匹配普通业务 API，或新回调只加了大小限制却漏掉 IP 白名单。
+        from app.core.ip_allowlist import WEBHOOK_PATHS
+
+        return path.rstrip("/") in WEBHOOK_PATHS
 
     @staticmethod
     async def _reject(send: Callable[..., Awaitable[Any]], status: int, message: str) -> None:
