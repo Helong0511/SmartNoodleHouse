@@ -98,6 +98,21 @@ async def test_claim_outbox_item_returns_none_when_rowcount_zero():
 
 
 @pytest.mark.asyncio
+async def test_claim_outbox_item_pending_requires_attempts_below_maximum():
+    db = MagicMock()
+    result = MagicMock()
+    result.rowcount = 0
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+    claimed = await claim_outbox_item(db, outbox_id=7, worker="wA")
+    assert claimed is None
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    assert "max_attempts" in str(stmt).lower()
+    assert "attempt_count" in str(stmt).lower()
+    assert "<" in str(stmt)
+
+@pytest.mark.asyncio
 async def test_claim_outbox_item_returns_row_on_success():
     db = MagicMock()
     result = MagicMock()
@@ -111,24 +126,27 @@ async def test_claim_outbox_item_returns_row_on_success():
 
 
 @pytest.mark.asyncio
-async def test_reclaim_stale_processing_issues_update_and_commits():
+async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
     db = MagicMock()
-    result = MagicMock()
-    result.rowcount = 3
-    db.execute = AsyncMock(return_value=result)
+    terminal_result = MagicMock(rowcount=2)
+    retry_result = MagicMock(rowcount=3)
+    db.execute = AsyncMock(side_effect=[terminal_result, retry_result])
     db.commit = AsyncMock()
     n = await reclaim_stale_processing(db, stale_after=300)
-    assert n == 3
+    assert n == 5
     assert db.commit.await_count == 1
-    # 验证 UPDATE 语句 WHERE 针对 outbox_events 的 status + locked_at
-    stmt = db.execute.await_args[0][0]
-    stmt_str = str(stmt).lower()
-    assert "outbox_events" in stmt_str
-    assert "status" in stmt_str
-    assert "locked_at" in stmt_str
-    # 编译后的绑定参数应包含 PROCESSING 值
-    compiled = stmt.compile()
-    assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+    terminal_stmt, retry_stmt = [
+        call.args[0] for call in db.execute.await_args_list
+    ]
+    for stmt in (terminal_stmt, retry_stmt):
+        compiled = stmt.compile()
+        assert "outbox_events" in str(stmt).lower()
+        assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+        assert "locked_at" in str(stmt).lower()
+    assert ">=" in str(terminal_stmt.compile())
+    assert "<" in str(retry_stmt.compile())
+    assert "FAILED" in [str(v) for v in terminal_stmt.compile().params.values()]
+    assert "PENDING" in [str(v) for v in retry_stmt.compile().params.values()]
 
 
 @pytest.mark.asyncio
