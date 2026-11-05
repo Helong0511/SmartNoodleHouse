@@ -143,3 +143,33 @@ async def test_fenced_commit_fails_closed_when_singleton_row_is_missing(fencing_
     async with fencing_db() as db:
         count = await db.scalar(text("SELECT COUNT(*) FROM fenced_test_rows"))
     assert count == 0
+
+
+
+@pytest.mark.asyncio
+async def test_revoke_epoch_only_revokes_matching_owner(fencing_db):
+    from app.core.leader_fencing import confirm_database_epoch, revoke_database_epoch
+
+    async with fencing_db() as db:
+        await db.execute(
+            text(
+                "UPDATE leader_fencing_state SET epoch = 21, owner_id = 'leader-A' "
+                "WHERE id = 1"
+            )
+        )
+        await db.commit()
+    activate_leader_epoch(21, "leader-A")
+
+    assert await revoke_database_epoch("leader-B") is False
+    assert await confirm_database_epoch("leader-A") is True
+    assert await revoke_database_epoch("leader-A") is True
+    assert await confirm_database_epoch("leader-A") is False
+
+    async with fencing_db() as db:
+        row = (
+            await db.execute(
+                text("SELECT epoch, owner_id FROM leader_fencing_state WHERE id = 1")
+            )
+        ).one()
+    assert int(row.epoch) == 22
+    assert row.owner_id is None
