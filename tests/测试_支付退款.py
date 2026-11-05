@@ -120,6 +120,9 @@ async def test_finalize_refund_marks_partial():
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
+        "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",
+        new_callable=AsyncMock,
+    ), patch(
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new_callable=AsyncMock,
     ), patch(
@@ -181,6 +184,9 @@ async def test_finalize_refund_deducts_points_for_customer():
     with patch("app.services.payment_service.record_payment_status", new_callable=AsyncMock), patch(
         "app.services.payment_service.apply_order_status", new_callable=AsyncMock
     ), patch(
+        "app.services.payment_service.PaymentService._sync_pos_refund_request_on_success",
+        new_callable=AsyncMock,
+    ), patch(
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new_callable=AsyncMock,
     ), patch(
@@ -198,3 +204,64 @@ async def test_finalize_refund_deducts_points_for_customer():
     args = deduct.await_args
     assert args[0][1] is order
     assert args[0][2] == Decimal("40.00")
+
+
+@pytest.mark.asyncio
+async def test_async_refund_success_updates_pos_request_once_by_refund_id():
+    from types import SimpleNamespace
+
+    from app.services.payment_service import PaymentService
+
+    request = SimpleNamespace(
+        id=77,
+        refund_id=901,
+        amount=Decimal("30.00"),
+        executed_amount=Decimal("10.00"),
+        payment_id=12,
+        status="PROCESSING",
+        fail_reason=None,
+    )
+    refund = SimpleNamespace(id=901, payment_id=12, amount=Decimal("20.00"))
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = request
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    db.flush = AsyncMock()
+
+    await PaymentService._sync_pos_refund_request_on_success(db, refund)
+
+    assert request.executed_amount == Decimal("30.00")
+    assert request.status == "SUCCESS"
+    assert request.payment_id == 12
+    db.flush.assert_awaited_once()
+    stmt = db.execute.call_args.args[0]
+    assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_async_refund_success_flags_pos_request_over_refund_for_reconciliation():
+    from types import SimpleNamespace
+
+    from app.services.payment_service import PaymentService
+
+    request = SimpleNamespace(
+        id=78,
+        refund_id=902,
+        amount=Decimal("30.00"),
+        executed_amount=Decimal("20.00"),
+        payment_id=12,
+        status="PROCESSING",
+        fail_reason=None,
+    )
+    refund = SimpleNamespace(id=902, payment_id=13, amount=Decimal("15.00"))
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = request
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    db.flush = AsyncMock()
+
+    await PaymentService._sync_pos_refund_request_on_success(db, refund)
+
+    assert request.executed_amount == Decimal("35.00")
+    assert request.status == "RECONCILIATION_REQUIRED"
+    assert "超过申请金额" in request.fail_reason
