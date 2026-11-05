@@ -325,3 +325,84 @@ async def test_poll_pending_payments_settles():
     assert n == 1
     claim_db.commit.assert_awaited()
     settle_db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_refund_status并发回调已成功时不得重复执行入账(monkeypatch):
+    """平台查单在锁外；期间若回调先成功，必须以锁内当前行状态为准。"""
+    payment = SimpleNamespace(
+        id=31, payment_no="PAY_RF_RACE", provider="ALIPAY",
+        provider_trade_no="ali_trade_31", order_id=41,
+        amount=Decimal("20.00"),
+    )
+    stale = SimpleNamespace(
+        id=51, refund_no="RF_RACE", payment_id=31, order_id=41,
+        amount=Decimal("5.00"), status="PROCESSING",
+    )
+    current = SimpleNamespace(
+        id=51, refund_no="RF_RACE", payment_id=31, order_id=41,
+        amount=Decimal("5.00"), status="SUCCESS",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = current
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=payment)
+    db.execute = AsyncMock(return_value=result)
+
+    with patch.object(
+        PaymentService, "_query_channel_refund", new_callable=AsyncMock,
+        return_value={
+            "status": "SUCCESS", "refund_no": "RF_RACE",
+            "payment_no": "PAY_RF_RACE", "provider_trade_no": "ali_trade_31",
+            "amount": "5.00", "provider_refund_no": "ali_refund_51",
+        },
+    ), patch.object(
+        PaymentService, "_finalize_refund", new_callable=AsyncMock
+    ) as finalize:
+        returned = await PaymentService.sync_refund_status(db, stale)
+
+    assert returned is current
+    finalize.assert_not_awaited()
+    stmt = db.execute.await_args.args[0]
+    assert stmt._for_update_arg is not None
+
+
+@pytest.mark.asyncio
+async def test_sync_refund_status使用查单后锁内刷新出来的最新退款行(monkeypatch):
+    payment = SimpleNamespace(
+        id=32, payment_no="PAY_RF_REFRESH", provider="ALIPAY",
+        provider_trade_no="ali_trade_32", order_id=42,
+        amount=Decimal("30.00"),
+    )
+    stale = SimpleNamespace(
+        id=52, refund_no="RF_REFRESH", payment_id=32, order_id=42,
+        amount=Decimal("7.00"), status="UNKNOWN",
+    )
+    current = SimpleNamespace(
+        id=52, refund_no="RF_REFRESH", payment_id=32, order_id=42,
+        amount=Decimal("7.00"), status="PROCESSING",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = current
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=payment)
+    db.execute = AsyncMock(return_value=result)
+
+    with patch.object(
+        PaymentService, "_query_channel_refund", new_callable=AsyncMock,
+        return_value={
+            "status": "PROCESSING", "refund_no": "RF_REFRESH",
+            "payment_no": "PAY_RF_REFRESH", "provider_trade_no": "ali_trade_32",
+        },
+    ), patch.object(
+        PaymentService, "_finalize_refund", new_callable=AsyncMock,
+        return_value=current,
+    ) as finalize:
+        returned = await PaymentService.sync_refund_status(db, stale)
+
+    assert returned is current
+    finalize.assert_awaited_once()
+    assert finalize.await_args.args[1] is current
+    assert finalize.await_args.args[2] == "PROCESSING"
+    stmt = db.execute.await_args.args[0]
+    assert stmt._for_update_arg is not None
