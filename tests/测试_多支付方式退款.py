@@ -63,7 +63,8 @@ async def test_finalize_refund_keeps_order_when_other_tender_remains():
                 "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
                 AsyncMock(return_value=None),
             ):
-                with patch("app.services.payment_service.apply_order_status", AsyncMock()) as apply:
+                with patch("app.services.payment_service.apply_order_status", AsyncMock()) as apply, \
+                     patch.object(PaymentService, "_sync_pos_refund_request_on_success", AsyncMock()):
                     out = await PaymentService._finalize_refund(db, row, "SUCCESS", source="TEST")
 
     assert out.status == "SUCCESS"
