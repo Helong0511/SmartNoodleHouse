@@ -162,6 +162,7 @@ def test_production_required_rate_limit_paths_are_covered():
         "/api/miniprogram/auth/refresh"
     ) == []
     assert _missing_rate_limit_fail_closed_paths("/api/auth/login,/api/payments/") == [
+        "/api/auth/verify-password",
         "/api/miniprogram/wechat/login",
         "/api/miniprogram/alipay/login",
         "/api/miniprogram/auth/refresh",
