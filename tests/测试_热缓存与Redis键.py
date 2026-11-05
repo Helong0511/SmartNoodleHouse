@@ -127,50 +127,6 @@ def test_key_builders_exact(builder, args, expected):
 
 @pytest.mark.asyncio
 async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
-    from app.core import database
-    from app.services.system_settings_service import SystemSettingsService
-
-    SystemSettingsService._cache = None
-    SystemSettingsService._cache_ver = -1
-    SystemSettingsService._cache_at = 0.0
-    # asyncio.Lock 在等待竞争时会绑定当前事件循环；测试间重置避免跨 loop 复用。
-    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
-    calls = {"count": 0}
-
-    class DummySession:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    async def load_once(_session):
-        calls["count"] += 1
-        await asyncio.sleep(0.02)
-        SystemSettingsService._cache = {"test_setting": "ok"}
-        SystemSettingsService._cache_ver = 0
-        SystemSettingsService._cache_at = time.monotonic()
-        return SystemSettingsService._cache
-
-    monkeypatch.setattr(database, "AsyncSessionLocal", lambda: DummySession())
-    monkeypatch.setattr(
-        SystemSettingsService, "_remote_version", AsyncMock(return_value=0)
-    )
-    monkeypatch.setattr(SystemSettingsService, "_load_raw", AsyncMock(side_effect=load_once))
-
-    await asyncio.gather(
-        SystemSettingsService.touch_cache(),
-        SystemSettingsService.touch_cache(),
-        SystemSettingsService.touch_cache(),
-        SystemSettingsService.touch_cache(),
-    )
-
-    assert calls["count"] == 1
-    assert SystemSettingsService._cache == {"test_setting": "ok"}
-    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
-
-@pytest.mark.asyncio
-async def test_system_settings_cache_refresh_with_supplied_session_is_single_flight(monkeypatch):
     from app.services.system_settings_service import SystemSettingsService
 
     SystemSettingsService._cache = None
@@ -180,16 +136,9 @@ async def test_system_settings_cache_refresh_with_supplied_session_is_single_fli
     calls = {"count": 0}
 
     async def load_once(_db):
-        now = time.monotonic()
-        if (
-            SystemSettingsService._cache is not None
-            and SystemSettingsService._cache_ver == 0
-            and now - SystemSettingsService._cache_at < SystemSettingsService.CACHE_TTL
-        ):
-            return SystemSettingsService._cache
         calls["count"] += 1
         await asyncio.sleep(0.02)
-        SystemSettingsService._cache = {"request_session_setting": "ok"}
+        SystemSettingsService._cache = {"test_setting": "ok"}
         SystemSettingsService._cache_ver = 0
         SystemSettingsService._cache_at = time.monotonic()
         return SystemSettingsService._cache
@@ -200,11 +149,9 @@ async def test_system_settings_cache_refresh_with_supplied_session_is_single_fli
     monkeypatch.setattr(SystemSettingsService, "_load_raw", AsyncMock(side_effect=load_once))
     db = object()
 
-    await asyncio.gather(
-        *(SystemSettingsService.touch_cache(db) for _ in range(5))
-    )
+    await asyncio.gather(*(SystemSettingsService.touch_cache(db) for _ in range(5)))
 
     assert calls["count"] == 1
-    assert SystemSettingsService._cache == {"request_session_setting": "ok"}
+    assert SystemSettingsService._cache == {"test_setting": "ok"}
+    # asyncio.Lock 可能绑定当前事件循环；测试结束前重置，避免跨 loop 污染。
     SystemSettingsService._cache_refresh_lock = asyncio.Lock()
-
