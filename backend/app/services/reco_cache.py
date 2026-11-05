@@ -219,21 +219,17 @@ def defer_invalidate_customer(db, customer_id: int) -> None:
     info["_reco_cache_invalidation_listener"] = True
 
     def _after_commit(sync_session) -> None:
-        # FeedbackService 会在 SAVEPOINT 内学习画像；嵌套事务提交不是业务事务提交。
-        # 只有最外层事务结束提交后才推进代际，防止外层回滚却提前失效/发布新版本。
-        if sync_session.in_transaction() or sync_session.in_nested_transaction():
+        # SQLAlchemy after_commit 回调期间 in_transaction() 仍可能为 True。
+        # SAVEPOINT 提交时外层 transaction 仍 active；只有外层 transaction 已 COMMITTED
+        # 且 inactive 才能执行缓存失效，避免把嵌套提交误判为业务提交。
+        outer_transaction = sync_session.get_transaction()
+        if outer_transaction is None or outer_transaction.is_active:
             return
         customer_ids = tuple(sync_session.info.pop("_reco_cache_invalidation_ids", set()))
         for cid in customer_ids:
             spawn_bg(invalidate_customer(cid))
 
-    def _after_rollback(sync_session) -> None:
-        # 仅外层事务回滚时清理待失效集合；SAVEPOINT 回滚不应抹掉外层已排队的失效。
-        if not sync_session.in_transaction() and not sync_session.in_nested_transaction():
-            sync_session.info.pop("_reco_cache_invalidation_ids", None)
-
     event.listen(session, "after_commit", _after_commit)
-    event.listen(session, "after_rollback", _after_rollback)
 
 
 async def invalidate_customer(customer_id: int) -> None:
