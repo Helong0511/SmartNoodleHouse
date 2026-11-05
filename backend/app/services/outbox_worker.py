@@ -215,6 +215,9 @@ async def process_outbox_item(outbox_id: int) -> None:
                 return
 
         handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
+        # 同一 Inbox 允许产生多个 deferred_* 动作；它们共用一个经过白名单校验的执行 handler。
+        if handler is None and row.aggregate_type == "webhook_task" and row.event_kind.startswith("deferred_"):
+            handler = OUTBOX_HANDLERS.get(("webhook_task", "execute"))
         if handler is None:
             logger.error(
                 "Outbox handler not registered: %s/%s id=%s",
