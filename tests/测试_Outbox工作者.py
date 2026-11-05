@@ -482,3 +482,36 @@ async def test_reco_cache_outbox_handler_raises_when_redis_is_unavailable(monkey
 
     with pytest.raises(RuntimeError, match="redis unavailable"):
         await handler(MagicMock(), row)
+
+
+@pytest.mark.asyncio
+async def test_outbox_retry_exhaustion_emits_critical_dead_letter_log(caplog):
+    from types import SimpleNamespace
+    import logging
+
+    from app.services.outbox_worker import _mark_failed
+
+    row = SimpleNamespace(
+        id=991,
+        aggregate_type="payment",
+        aggregate_id=42,
+    )
+    fresh = SimpleNamespace(
+        id=991,
+        status="PROCESSING",
+        attempt_count=8,
+        max_attempts=8,
+    )
+    result = MagicMock(rowcount=1)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=fresh)
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+
+    with caplog.at_level(logging.CRITICAL, logger="app.services.outbox_worker"):
+        await _mark_failed(db, row, "provider permanently rejected", wid="worker-token")
+
+    assert "Outbox DEAD-LETTER" in caplog.text
+    assert "991" in caplog.text
+    assert "8" in caplog.text
+    db.commit.assert_awaited_once()
