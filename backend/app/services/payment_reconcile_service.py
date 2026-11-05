@@ -30,6 +30,7 @@ def parse_channel_bill_csv(channel: str, text: str) -> list[dict[str, Any]]:
     生产可先用脚本裁剪官方账单再导入。
     """
     rows: list[dict[str, Any]] = []
+    seen_trade_numbers: set[str] = set()
     reader = csv.DictReader(io.StringIO(text.lstrip("\ufeff")))
     if not reader.fieldnames:
         return rows
@@ -45,6 +46,13 @@ def parse_channel_bill_csv(channel: str, text: str) -> list[dict[str, Any]]:
         amount = _dec(raw.get(amt_key))
         if not trade_no or amount is None:
             continue
+        # 交易号是渠道账单的唯一匹配键；重复行不能通过 dict 覆盖静默丢失，
+        # 否则 channel_count 与差异数会失真，可能把重复扣款/账单异常当成正常。
+        if trade_no in seen_trade_numbers:
+            raise ValueError(f"渠道账单存在重复交易号: {trade_no}")
+        seen_trade_numbers.add(trade_no)
+        if amount < 0:
+            raise ValueError(f"渠道账单金额不能为负数: {trade_no}")
         rows.append(
             {
                 "channel": channel.upper(),
@@ -114,8 +122,9 @@ class PaymentReconcileService:
                             and_(
                                 Payment.provider == ch,
                                 Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
-                                Payment.created_at >= start,
-                                Payment.created_at < end,
+                                # 对账日按渠道实际支付成功时间，而非本地创建支付单时间归属。
+                                Payment.paid_at >= start,
+                                Payment.paid_at < end,
                             )
                         )
                     )
