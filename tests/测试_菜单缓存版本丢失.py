@@ -79,3 +79,42 @@ async def test_menu_bundle_does_not_serve_local_or_waited_cache_without_version(
 
     menu_service.wait_for_rebuild.assert_awaited_once()
     menu_service._BUILD_CACHE.delete(sid)
+
+
+@pytest.mark.asyncio
+async def test_menu_cache_publish_refuses_missing_or_zero_version(monkeypatch):
+    from app.core import menu_cache
+
+    class FakeRedis:
+        def __init__(self):
+            self.store = {
+                menu_cache.menu_rebuild_lock_key(77125): "owner-token",
+            }
+
+        async def eval(
+            self, script, numkeys, lock_key, bundle_key, version_key,
+            token, raw, ttl, expected_version,
+        ):
+            if self.store.get(lock_key) != token:
+                return 0
+            if self.store.get(version_key) != str(expected_version):
+                return 0
+            self.store[bundle_key] = raw
+            return "OK"
+
+    fake = FakeRedis()
+
+    async def get_redis():
+        return fake
+
+    monkeypatch.setattr(menu_cache, "get_redis", get_redis)
+
+    # Version 0 is never a valid published generation.
+    assert await menu_cache.set_menu_bundle_if_owner(
+        77125, {"products": []}, "owner-token", expected_version=0
+    ) is False
+    # A positive expected version cannot be published if Redis evicted its version key.
+    assert await menu_cache.set_menu_bundle_if_owner(
+        77125, {"products": []}, "owner-token", expected_version=1
+    ) is False
+    assert menu_cache.menu_bundle_key(77125) not in fake.store
