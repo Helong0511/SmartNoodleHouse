@@ -147,3 +147,74 @@ async def test_wallet_refund_idempotency_rejects_changed_amount():
     assert exc.value.code == 40994
     db.add.assert_not_called()
     db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payment_id", "principal", "gift", "expected_code"),
+    [
+        (1002, Decimal("7.00"), Decimal("3.00"), 40994),
+        (1001, Decimal("8.00"), Decimal("3.00"), 40994),
+        (1001, Decimal("7.00"), Decimal("4.00"), 40994),
+    ],
+)
+async def test_wallet_topup_idempotency_rejects_changed_payment_or_credit_facts(
+    payment_id, principal, gift, expected_code
+):
+    from app.core.exceptions import AppException
+
+    customer = SimpleNamespace(id=7, balance_principal=Decimal("20.00"), balance_gift=Decimal("5.00"))
+    recharge = SimpleNamespace(
+        id=90,
+        customer_id=7,
+        store_id=1,
+        recharge_no="R90",
+        credit_principal=principal,
+        credit_gift=gift,
+    )
+    existing = SimpleNamespace(
+        customer_id=7,
+        recharge_order_id=90,
+        payment_id=1001,
+        store_id=1,
+        delta_principal=Decimal("7.00"),
+        delta_gift=Decimal("3.00"),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_result(customer), _result(existing)])
+
+    with pytest.raises(AppException) as exc:
+        await BalanceService.credit_topup(db, recharge=recharge, payment_id=payment_id)
+
+    assert exc.value.code == expected_code
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wallet_topup_idempotency_returns_existing_only_when_all_facts_match():
+    customer = SimpleNamespace(id=7, balance_principal=Decimal("20.00"), balance_gift=Decimal("5.00"))
+    recharge = SimpleNamespace(
+        id=90,
+        customer_id=7,
+        store_id=1,
+        recharge_no="R90",
+        credit_principal=Decimal("7.00"),
+        credit_gift=Decimal("3.00"),
+    )
+    existing = SimpleNamespace(
+        customer_id=7,
+        recharge_order_id=90,
+        payment_id=1001,
+        store_id=1,
+        delta_principal=Decimal("7.00"),
+        delta_gift=Decimal("3.00"),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_result(customer), _result(existing)])
+
+    result = await BalanceService.credit_topup(db, recharge=recharge, payment_id=1001)
+
+    assert result is existing
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
