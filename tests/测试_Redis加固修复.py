@@ -504,3 +504,26 @@ async def test_ws_subscriber_closes_pubsub_connection_on_shutdown():
         await ws_pubsub.stop_ws_subscriber()
 
     assert pubsub.closed is True
+
+
+@pytest.mark.asyncio
+async def test_local_singleflight_serializes_same_key_and_cleans_registry():
+    from app.core import async_utils
+
+    active = 0
+    maximum = 0
+    calls = 0
+
+    async def worker():
+        nonlocal active, maximum, calls
+        async with async_utils.local_singleflight("test:redis:hot-key"):
+            calls += 1
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+
+    await asyncio.gather(*(worker() for _ in range(12)))
+    assert maximum == 1
+    assert calls == 12
+    assert "test:redis:hot-key" not in async_utils._SINGLEFLIGHT_LOCKS
