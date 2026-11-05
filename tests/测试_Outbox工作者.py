@@ -155,6 +155,7 @@ async def test_outbox_claim_uses_unique_per_attempt_owner_token():
     result = MagicMock()
     result.rowcount = 1
     db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
     fetched = MagicMock(id=9, status="PROCESSING")
     db.get = AsyncMock(return_value=fetched)
 
@@ -429,14 +430,15 @@ def test_reco_cache_invalidation_events_are_persisted_and_have_unique_event_kind
     """同一顾客多次画像修改必须创建独立 Outbox 事件，不能被历史 DONE 去重。"""
     from app.services.reco_cache import defer_invalidate_customer
 
-    class FakeSession:
-        info = {}
+    from sqlalchemy.orm import Session
 
     class FakeDB:
-        sync_session = FakeSession()
-
         def __init__(self):
+            self.sync_session = Session()
             self.rows = []
+
+        def close(self):
+            self.sync_session.close()
 
         def add(self, row):
             self.rows.append(row)
@@ -451,6 +453,7 @@ def test_reco_cache_invalidation_events_are_persisted_and_have_unique_event_kind
     assert all(row.event_kind.startswith("invalidate_") for row in db.rows)
     assert db.rows[0].event_kind != db.rows[1].event_kind
     assert all('"customer_id":123' in row.payload for row in db.rows)
+    db.close()
 
 
 def test_reco_cache_outbox_dynamic_event_kinds_resolve_to_handler():
