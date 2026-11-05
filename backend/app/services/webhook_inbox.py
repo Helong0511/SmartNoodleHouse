@@ -18,7 +18,7 @@ from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
 from app.services.delivery_tasks import run_deferred_tasks
 from app.services.websocket_manager import ws_manager
-from app.services.worker_common import backoff_seconds, claim_token, worker_id
+from app.services.worker_common import backoff_seconds, claim_lease_guard, claim_token, worker_id
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,10 @@ async def process_inbox_item(inbox_id: int) -> bool:
         try:
             envelope = json.loads(row.payload)
             raw = envelope.get("raw") if isinstance(envelope, dict) and envelope.get("_verified") else envelope
-            result = await DeliveryService.process_raw(db, row.channel, raw if isinstance(raw, dict) else {})
+            async with claim_lease_guard(WebhookInbox, inbox_id, wid):
+                result = await DeliveryService.process_raw(
+                    db, row.channel, raw if isinstance(raw, dict) else {}
+                )
             # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
             # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
             done_stmt = (
