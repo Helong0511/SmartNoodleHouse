@@ -449,6 +449,7 @@ async def lifespan(app: FastAPI):
         from camera.camera_manager import CameraManager
 
         CameraManager.set_leader_check(is_leader_held)
+        CameraManager().resume_camera_manager()
         _leader_stop = asyncio.Event()
         _leader_renew_task = asyncio.create_task(renew_leader_loop(_leader_worker_id, _leader_stop))
         # reload 场景下可能曾启动过又关掉，避免重复 register
