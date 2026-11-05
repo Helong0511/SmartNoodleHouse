@@ -60,6 +60,19 @@ async def get_redis() -> redis.Redis:
     return _redis
 
 
+async def close_redis() -> None:
+    """关闭当前进程 Redis 连接池；应用 shutdown/reload 时调用。"""
+    global _redis
+    async with _lock:
+        client = _redis
+        _redis = None
+    if client is not None:
+        try:
+            await client.aclose()
+        except Exception:
+            logger.debug("关闭 Redis 连接池失败", exc_info=True)
+
+
 async def try_get_redis() -> redis.Redis | None:
     """获取 Redis；失败返回 None（供降级路径使用）。"""
     try:
