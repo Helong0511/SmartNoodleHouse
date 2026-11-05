@@ -818,3 +818,41 @@ async def test_redis_lock_heartbeat_stops_when_owner_task_exits():
     await asyncio.sleep(1.1)
     assert heartbeat.done()
     assert fake.eval_calls == []
+
+@pytest.mark.asyncio
+async def test_redis_client_uses_bounded_blocking_pool(monkeypatch):
+    """连接池耗尽时有限等待，不应立即拒绝或无限排队。"""
+    from types import SimpleNamespace
+    from app.core import redis_client
+
+    pool = MagicMock()
+    pool.disconnect = AsyncMock()
+    client = MagicMock()
+    client.aclose = AsyncMock()
+
+    redis_client._redis = None
+    redis_client._redis_pool = None
+    monkeypatch.setattr(
+        redis_client, "get_settings",
+        lambda: SimpleNamespace(redis_url="redis://cache.example:6379/0", redis_max_connections=23),
+    )
+    with (
+        patch.object(
+            redis_client.redis.BlockingConnectionPool, "from_url", return_value=pool
+        ) as make_pool,
+        patch.object(redis_client.redis, "Redis", return_value=client) as make_client,
+    ):
+        assert await redis_client.get_redis() is client
+        make_pool.assert_called_once()
+        kwargs = make_pool.call_args.kwargs
+        assert kwargs["max_connections"] == 23
+        assert kwargs["timeout"] == redis_client._REDIS_POOL_WAIT_TIMEOUT_SEC
+        assert 0 < kwargs["timeout"] <= 1.0
+        make_client.assert_called_once_with(connection_pool=pool)
+        await redis_client.close_redis()
+
+    client.aclose.assert_awaited_once()
+    pool.disconnect.assert_awaited_once_with(inuse_connections=True)
+    assert redis_client._redis is None
+    assert redis_client._redis_pool is None
+
