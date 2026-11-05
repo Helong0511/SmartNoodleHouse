@@ -60,6 +60,12 @@ def main() -> int:
         if len(exact) != 1:
             errors.append(f"{req.name}: lock must contain exactly one == pin")
             continue
+        missing_extras = set(req.extras) - set().union(*(set(candidate.extras) for candidate in candidates))
+        if missing_extras:
+            errors.append(
+                f"{req.name}: lock omits required extras: {', '.join(sorted(missing_extras))}"
+            )
+            continue
         pinned = Version(exact[0])
         if req.specifier and pinned not in req.specifier:
             errors.append(f"{req.name}: locked {pinned} violates {req.specifier}")
