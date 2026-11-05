@@ -237,9 +237,14 @@ def defer_invalidate_customer(db, customer_id: int) -> None:
     def _after_commit(sync_session) -> None:
         # SQLAlchemy after_commit 回调期间 in_transaction() 仍可能为 True。
         # SAVEPOINT 提交时外层 transaction 仍 active；只有外层 transaction 已 COMMITTED
-        # 且 inactive 才能执行缓存失效，避免把嵌套提交误判为业务提交。
+        # 且 inactive 才能处理，避免把嵌套提交误判为业务提交。
         outer_transaction = sync_session.get_transaction()
         if outer_transaction is None or outer_transaction.is_active:
+            return
+        if sync_session.info.get("_reco_cache_async_commit_owner"):
+            # FastAPI get_db 在 commit 返回后会 await 失效；这里只记录已提交状态，
+            # 不 fire-and-forget，避免响应返回前旧缓存仍可被并发请求命中。
+            sync_session.info["_reco_cache_pending_committed"] = True
             return
         customer_ids = tuple(sync_session.info.pop("_reco_cache_invalidation_ids", set()))
         for cid in customer_ids:
