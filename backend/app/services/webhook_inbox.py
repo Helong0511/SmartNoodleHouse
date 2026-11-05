@@ -350,7 +350,10 @@ async def process_pending_inbox(limit: int = 20) -> int:
                 select(WebhookInbox.id)
                 .where(
                     or_(
-                        WebhookInbox.status == "PENDING",
+                        and_(
+                            WebhookInbox.status == "PENDING",
+                            WebhookInbox.attempt_count < MAX_ATTEMPTS,
+                        ),
                         and_(
                             WebhookInbox.status == "FAILED",
                             WebhookInbox.attempt_count < MAX_ATTEMPTS,
