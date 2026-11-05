@@ -1,6 +1,7 @@
 """外卖订单接入服务：推单落库 → 统一 Order → 厨房；取消/退款/催单/配送"""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -227,17 +228,23 @@ class DeliveryService:
         order_id: int | None,
         raw: dict,
     ) -> None:
+        # 有平台事件 ID 时优先使用；限制长度以匹配数据库列宽。
         event_id = None
         for key in ("requestId", "request_id", "msg_id", "msgid", "notify_id", "event_id"):
             if raw.get(key):
-                event_id = str(raw[key])
+                event_id = str(raw[key]).strip()[:128] or None
                 break
-        if not event_id and platform_order_id:
-            event_id = f"{event_type}:{platform_order_id}"
-        # 截断 payload，避免无限期保存大量 PII
+
+        # 部分平台通知没有独立事件 ID。不能仅用 event_type + order_id：
+        # 同一订单可能多次产生相同类型的合法状态通知，而日志表对此有唯一约束。
+        # 对规范化后的完整事件内容做摘要：完全相同的回调稳定去重，不同内容不会撞同一个业务键。
         payload = dumps_json(raw)
-        if len(payload) > 8000:
-            payload = payload[:8000] + "...[truncated]"
+        if not event_id:
+            digest = hashlib.sha256(
+                f"{platform.upper()}|{event_type}|{platform_order_id or ''}|{payload}".encode("utf-8")
+            ).hexdigest()
+            event_id = f"sha256:{digest}"
+        # 截断 payload，避免无限期保存大量 PII
         db.add(
             DeliveryCallbackLog(
                 platform=platform.upper(),
