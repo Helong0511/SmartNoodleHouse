@@ -344,6 +344,25 @@ async def test_privacy_profile_clear_schedules_recommendation_cache_invalidation
     assert scheduled[0][1] == 987
 
 
+def test_request_session_defers_cache_invalidation_for_awaited_post_commit_drain():
+    from sqlalchemy.orm import Session
+    from app.services import reco_cache
+
+    session = Session()
+    session.info["_reco_cache_async_commit_owner"] = True
+    scheduled = []
+
+    with patch.object(reco_cache, "spawn_bg", side_effect=lambda coro: scheduled.append(coro)):
+        session.begin()
+        reco_cache.defer_invalidate_customer(session, 43)
+        session.commit()
+
+    assert scheduled == []
+    assert session.info["_reco_cache_pending_committed"] is True
+    assert session.info["_reco_cache_invalidation_ids"] == {43}
+    session.close()
+
+
 def test_reco_invalidation_waits_for_outer_transaction_after_nested_savepoint():
     from sqlalchemy.orm import Session
     from app.services import reco_cache
