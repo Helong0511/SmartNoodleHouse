@@ -2505,6 +2505,7 @@ class PaymentService:
         amount: Decimal,
         reason: str,
         operator_id: int | None = None,
+        pos_refund_request_id: int | None = None,
     ) -> PaymentRefund:
         locked = (
             await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
@@ -2560,7 +2561,27 @@ class PaymentService:
         db.add(row)
         await db.flush()
 
-        # 短事务：落库 PENDING 退款单并释放行锁后再调第三方
+        if pos_refund_request_id is not None:
+            pos_request = (
+                await db.execute(
+                    select(PosRefundRequest)
+                    .where(PosRefundRequest.id == int(pos_refund_request_id))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if (
+                pos_request is None
+                or int(pos_request.order_id) != int(payment.order_id or 0)
+                or pos_request.status not in ("PROCESSING", "FAILED")
+            ):
+                raise AppException(40954, "POS 退款申请状态已变化，无法绑定渠道退款单")
+            # 在调用渠道前先建立精确关联，避免极快的异步 SUCCESS 回调早于 POS refund_id 落库。
+            pos_request.refund_id = row.id
+            pos_request.payment_id = payment.id
+            pos_request.status = "PROCESSING"
+            pos_request.fail_reason = None
+
+        # 短事务：落库 PENDING 退款单和 POS 关联并释放行锁后再调第三方
         refund_id = row.id
         payment_id = payment.id
         await db.commit()
