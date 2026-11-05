@@ -48,6 +48,14 @@ def _backoff_seconds(attempt_count: int) -> int:
     return backoff_seconds(attempt_count, cap=BACKOFF_CAP_SEC)
 
 
+def _resolve_outbox_handler(row: OutboxEvent) -> OutboxHandler | None:
+    handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
+    # 同一 Inbox 允许产生多个 deferred_* 动作；它们共用一个白名单执行 handler。
+    if handler is None and row.aggregate_type == "webhook_task" and row.event_kind.startswith("deferred_"):
+        handler = OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    return handler
+
+
 async def enqueue_outbox(
     db: AsyncSession,
     *,
@@ -214,10 +222,7 @@ async def process_outbox_item(outbox_id: int) -> None:
                 await _mark_failed(db, row, f"idempotency_precheck_failed: {e}", wid=wid)
                 return
 
-        handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
-        # 同一 Inbox 允许产生多个 deferred_* 动作；它们共用一个经过白名单校验的执行 handler。
-        if handler is None and row.aggregate_type == "webhook_task" and row.event_kind.startswith("deferred_"):
-            handler = OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+        handler = _resolve_outbox_handler(row)
         if handler is None:
             logger.error(
                 "Outbox handler not registered: %s/%s id=%s",
