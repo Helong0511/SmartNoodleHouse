@@ -125,3 +125,43 @@ async def test_reclaim_stale_processing_issues_update_and_commits():
     # 编译后的绑定参数应包含 PROCESSING 值
     compiled = stmt.compile()
     assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+
+@pytest.mark.asyncio
+async def test_reclaim_stale_exhausted_attempts_moves_to_failed():
+    """最后一次尝试后 worker 崩溃，回收时必须进入 FAILED，不能重置为可无限重试。"""
+    db = MagicMock()
+    result = MagicMock()
+    result.rowcount = 1
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+
+    await reclaim_stale_processing(db, stale_after=300)
+
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    sql = str(compiled).upper()
+    assert "CASE" in sql
+    assert "ATTEMPT_COUNT" in sql
+    assert "MAX_ATTEMPTS" in sql
+    assert "NEXT_RETRY_AT" in sql
+    assert "LAST_ERROR" in sql
+
+
+@pytest.mark.asyncio
+async def test_claim_pending_outbox_requires_remaining_attempt_budget():
+    """PENDING 也必须受 max_attempts 约束，防止异常状态数据绕过重试上限。"""
+    db = MagicMock()
+    result = MagicMock()
+    result.rowcount = 0
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+    db.get = AsyncMock(return_value=None)
+
+    await claim_outbox_item(db, outbox_id=7, worker="w-budget")
+
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    sql = str(compiled).upper()
+    assert "ATTEMPT_COUNT" in sql
+    assert "MAX_ATTEMPTS" in sql
+
