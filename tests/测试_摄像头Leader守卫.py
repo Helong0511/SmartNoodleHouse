@@ -129,3 +129,37 @@ def test_stop_all_cameras_keeps_worker_when_thread_does_not_exit():
         assert manager._workers.get(99103) is worker
     finally:
         manager._workers = original
+
+
+
+def test_stop_camera_keeps_unstopped_worker_registered():
+    import threading
+
+    class FakeThread:
+        def is_alive(self):
+            return True
+
+        def join(self, timeout=None):
+            return None
+
+    class FakeWorker:
+        def __init__(self):
+            self._stop = threading.Event()
+            self._thread = FakeThread()
+            self.stopped = False
+
+        def stop(self):
+            self._stop.set()
+            self.stopped = True
+            return False
+
+    manager = CameraManager()
+    original = manager._workers
+    worker = FakeWorker()
+    manager._workers = {99104: worker}
+    try:
+        manager.stop_camera(99104)
+        assert worker.stopped
+        assert manager._workers.get(99104) is worker
+    finally:
+        manager._workers = original
