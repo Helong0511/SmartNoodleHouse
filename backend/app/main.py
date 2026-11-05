@@ -534,6 +534,13 @@ async def lifespan(app: FastAPI):
             except (asyncio.CancelledError, Exception):
                 pass
         scheduler.shutdown()
+    # 关闭本进程 Redis 连接池，避免 reload / 测试生命周期内遗留连接。
+    try:
+        from app.core.redis_client import close_redis
+
+        await close_redis()
+    except Exception:
+        logger.exception("关闭 Redis 连接池失败")
 
 
 def create_app() -> FastAPI:
