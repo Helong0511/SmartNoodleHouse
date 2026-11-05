@@ -1,7 +1,7 @@
 from typing import Annotated, Optional, Tuple
 
 from fastapi import Depends, Header, Request
-from jose import JWTError
+from jwt import InvalidTokenError as JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
