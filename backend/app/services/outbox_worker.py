@@ -190,8 +190,12 @@ async def process_outbox_item(outbox_id: int) -> None:
                 )
                 await db.commit()
                 return
-        except Exception:
-            logger.warning("outbox 幂等预检失败 id=%s，继续执行 handler", outbox_id)
+        except Exception as e:
+            # 无法确认消息是否已处理时必须 fail-closed；继续 handler 可能重复发券/记积分。
+            logger.exception("outbox 幂等预检失败 id=%s，停止处理并安排重试", outbox_id)
+            await db.rollback()
+            await _mark_failed(db, row, f"idempotency_precheck_failed: {e}", wid=wid)
+            return
 
         handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
         if handler is None:
