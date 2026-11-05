@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     database_url: str = "mysql+aiomysql://root:password@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4"
     redis_url: str = "redis://127.0.0.1:6379/0"
+    # 每个 Gunicorn/Uvicorn Worker 独立连接池；全局 Redis 连接上限约 Worker 数 × 此值
     redis_max_connections: int = Field(default=50, ge=1, le=1000)
     # 每进程连接池；gunicorn -w N 时总连接 ≈ N*(pool_size+max_overflow)
     db_pool_size: int = 5
