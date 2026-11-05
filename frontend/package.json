@@ -28,5 +28,6 @@
     "vite": "^8.3.4",
     "vitest": "^5.1.0",
     "vue-tsc": "^3.3.14"
-  }
+  },
+  "packageManager": "npm@11.19.1"
 }
