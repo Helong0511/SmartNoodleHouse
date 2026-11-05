@@ -386,3 +386,26 @@ async def test_scheduler_stats_failure_does_not_change_success_result():
         patch.object(sa, "is_job_enabled", return_value=True),
     ):
         assert await wrapped() == "business-result"
+
+
+
+@pytest.mark.asyncio
+async def test_active_leader_job_count_tracks_only_running_tasks():
+    from app.services import scheduler_admin as sa
+
+    finished = asyncio.Event()
+
+    async def running():
+        await finished.wait()
+
+    task = asyncio.create_task(running())
+    sa._active_leader_job_tasks.add(task)
+    try:
+        assert sa.active_leader_job_count() >= 1
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        sa._active_leader_job_tasks.discard(task)
+
+    assert sa.active_leader_job_count() == 0
