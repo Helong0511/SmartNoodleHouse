@@ -1,5 +1,4 @@
 """美团 / 饿了么外卖接入 API"""
-import asyncio
 from typing import Literal
 
 from pydantic import BaseModel
@@ -13,10 +12,10 @@ from app.core.exceptions import AppException
 from app.core.response import success, serialize_dt
 from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryRefund
 from app.services.audit_service import AuditService
-from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
-from app.services.delivery_tasks import run_deferred_tasks
 from app.services.websocket_manager import ws_manager
+from app.services.outbox_worker import enqueue_outbox
+from app.services.webhook_inbox import _build_deferred_outbox_payload
 
 router = APIRouter(prefix="/delivery", tags=["外卖"])
 
@@ -43,13 +42,6 @@ def _ws_payload(result, platform: str) -> dict:
     if order:
         data.update({"order_id": order.id, "order_no": order.order_no, "status": order.status})
     return data
-
-
-async def _after_notify(result, platform: str, deferred: list):
-    ws_event = EVENT_WS_MAP.get(result.event, "DELIVERY_UNKNOWN")
-    await ws_manager.notify_order_event(ws_event, _ws_payload(result, platform))
-    if deferred:
-        asyncio.create_task(run_deferred_tasks(deferred))
 
 
 @router.post("/meituan/notify")
@@ -118,8 +110,16 @@ async def confirm_delivery_order(
         raise AppException(40404, "订单不存在", status_code=404)
     assert_order_store_access(user, existing)
     order, deferred = await DeliveryService.merchant_confirm(db, order_id)
-    if deferred:
-        background_tasks.add_task(run_deferred_tasks, deferred)
+    for task in deferred:
+        outbox_row, _ = await enqueue_outbox(
+            db,
+            aggregate_type="delivery_manual",
+            aggregate_id=int(order.id),
+            event_kind="confirm",
+            payload=_build_deferred_outbox_payload(task, task.get("platform") or ""),
+        )
+        # FastAPI function-scoped DB dependency commits before background tasks execute.
+        background_tasks.add_task(__import__("app.services.outbox_worker", fromlist=["process_outbox_item"]).process_outbox_item, outbox_row.id)
     await ws_manager.notify_order_event(
         "ORDER_CONFIRMED",
         {"order_id": order.id, "order_no": order.order_no, "status": order.status, "store_id": order.store_id},
