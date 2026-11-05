@@ -542,3 +542,51 @@ def test_outbox_retry_jitter_is_deterministic_bounded_and_spread():
     ]
     assert all(1 <= delay <= BACKOFF_CAP_SEC for delay in capped)
     assert len(set(capped)) > 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_kind", "service_module", "service_name"),
+    [
+        ("social_benefit_reverse", "app.services.social_benefit_service", "SocialBenefitService"),
+        ("campaign_attribution_reverse", "app.services.attribution_service", "AttributionService"),
+    ],
+)
+async def test_refund_reconciliation_handlers_lock_order_and_dispatch(
+    monkeypatch, event_kind, service_module, service_name
+):
+    """退款后公益/营销冲减由 Outbox 分发，并先锁订单串行化同单退款。"""
+    import importlib
+
+    from app.models import Order, PaymentRefund
+    from app.services import paid_side_effects  # noqa: F401 — 注册退款 handler
+
+    module = importlib.import_module(service_module)
+    service = getattr(module, service_name)
+    method_name = "reverse_for_order"
+    handler = OUTBOX_HANDLERS[("refund", event_kind)]
+    reverse = AsyncMock()
+    monkeypatch.setattr(service, method_name, reverse)
+
+    refund = MagicMock(id=501, order_id=88)
+    order = MagicMock(id=88)
+    scalar_result = MagicMock()
+    scalar_result.scalar_one_or_none.return_value = order
+    db = MagicMock()
+    db.get = AsyncMock(return_value=refund)
+    db.execute = AsyncMock(return_value=scalar_result)
+
+    row = MagicMock(aggregate_id=501)
+    await handler(db, row)
+
+    db.get.assert_awaited_once_with(PaymentRefund, 501)
+    stmt = db.execute.await_args.args[0]
+    assert "FOR UPDATE" in str(stmt.compile()).upper()
+    reverse.assert_awaited_once_with(db, 88)
+
+
+def test_refund_reconciliation_handlers_are_registered():
+    from app.services import paid_side_effects  # noqa: F401 — 注册退款 handler
+
+    assert ("refund", "social_benefit_reverse") in OUTBOX_HANDLERS
+    assert ("refund", "campaign_attribution_reverse") in OUTBOX_HANDLERS
