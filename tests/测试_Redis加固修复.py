@@ -563,7 +563,10 @@ async def test_reco_cache_invalidation_deletes_large_key_sets_in_bounded_batches
     fake = FakeRedis()
     for i in range(450):
         fake.store[f"snh:reco:c77:s1:menu:b{i}"] = "{}"
-    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+    with (
+        patch.object(reco_cache, "get_redis", _patch_get_redis(fake)),
+        patch.object(reco_cache, "spawn_bg", lambda coro: coro.close()),
+    ):
         await reco_cache.invalidate_customer(77)
     assert len(fake.delete_calls) == 450
     assert not any(key in fake.store for key in fake.delete_calls)
