@@ -60,10 +60,24 @@ class BalanceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if existing:
-            return existing
         dp = money(recharge.credit_principal)
         dg = money(recharge.credit_gift)
+        if existing:
+            # 幂等命中必须验证同一笔充值的全部资金事实，不能把不同支付单、
+            # 顾客/门店或变更后的本金/赠送金额静默当作已成功入账。
+            if (
+                int(existing.customer_id) != int(recharge.customer_id)
+                or int(existing.recharge_order_id or 0) != int(recharge.id)
+                or existing.payment_id != payment_id
+                or existing.store_id != recharge.store_id
+                or money(existing.delta_principal) != dp
+                or money(existing.delta_gift) != dg
+            ):
+                raise AppException(
+                    40994,
+                    "充值编号已关联不同的储值入账流水，顾客/门店/支付单/本金/赠送金额不一致，拒绝重复入账",
+                )
+            return existing
         cust.balance_principal = money(cust.balance_principal or 0) + dp
         cust.balance_gift = money(cust.balance_gift or 0) + dg
         row = BalanceLedger(
