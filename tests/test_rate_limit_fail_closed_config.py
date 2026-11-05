@@ -37,8 +37,8 @@ def test_redis_outage_logs_are_throttled_to_prevent_log_storms(monkeypatch):
     calls = []
     monkeypatch.setattr(rate_limit.time, "monotonic", lambda: clock["now"])
     monkeypatch.setattr(rate_limit.logger, "warning", lambda *args: calls.append(args))
-    monkeypatch.setattr(rate_limit, "_last_redis_error_log_at", 0.0)
-    monkeypatch.setattr(rate_limit, "_suppressed_redis_error_logs", 0)
+    monkeypatch.setattr(rate_limit, "_last_redis_fail_open_log_at", 0.0)
+    monkeypatch.setattr(rate_limit, "_suppressed_redis_fail_open_logs", 0)
 
     error = RuntimeError("redis unavailable")
     rate_limit._log_redis_failure("/api/menu", error, fail_closed=False)
@@ -51,3 +51,25 @@ def test_redis_outage_logs_are_throttled_to_prevent_log_storms(monkeypatch):
     assert len(calls) == 2
     assert "suppressed=%s" in calls[1][0]
     assert calls[1][2] == 1
+
+
+def test_fail_closed_redis_alert_is_not_suppressed_by_fail_open_traffic(monkeypatch):
+    from app.core import rate_limit
+
+    clock = {"now": 100.0}
+    warnings, errors = [], []
+    monkeypatch.setattr(rate_limit.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(rate_limit.logger, "warning", lambda *args: warnings.append(args))
+    monkeypatch.setattr(rate_limit.logger, "error", lambda *args: errors.append(args))
+    monkeypatch.setattr(rate_limit, "_last_redis_fail_open_log_at", 0.0)
+    monkeypatch.setattr(rate_limit, "_last_redis_fail_closed_log_at", 0.0)
+    monkeypatch.setattr(rate_limit, "_suppressed_redis_fail_open_logs", 0)
+    monkeypatch.setattr(rate_limit, "_suppressed_redis_fail_closed_logs", 0)
+
+    error = RuntimeError("redis unavailable")
+    rate_limit._log_redis_failure("/api/catalog", error, fail_closed=False)
+    rate_limit._log_redis_failure("/api/auth/login", error, fail_closed=True)
+
+    assert len(warnings) == 1
+    assert len(errors) == 1
+    assert "fail-closed" in errors[0][0]
