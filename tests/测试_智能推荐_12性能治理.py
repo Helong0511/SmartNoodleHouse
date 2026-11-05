@@ -84,8 +84,39 @@ class FakeRedis:
     async def get(self, key):
         return self.kv.get(key)
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
+        if nx and key in self.kv:
+            return None
+        if xx and key not in self.kv:
+            return None
         self.kv[key] = str(value)
+        return True
+
+    async def eval(self, script, numkeys, *args):
+        keys = list(args[:numkeys])
+        argv = list(args[numkeys:])
+        # owner-token 心跳续租
+        if "redis.call('expire'" in script and len(keys) == 1:
+            if self.kv.get(keys[0]) == str(argv[0]):
+                return await self.expire(keys[0], int(argv[1]))
+            return 0
+        # owner-token 释放
+        if "redis.call('del'" in script and len(keys) == 1:
+            if self.kv.get(keys[0]) == str(argv[0]):
+                return await self.delete(keys[0])
+            return 0
+        # 菜单缓存发布：同时校验锁 token 与构建前版本，模拟 Lua 原子比较。
+        if "redis.call('SET', KEYS[2]" in script and len(keys) == 3:
+            lock_key, bundle_key, version_key = keys
+            token, raw, _ttl, expected_version = argv
+            if (
+                self.kv.get(lock_key) == str(token)
+                and self.kv.get(version_key, "0") == str(expected_version)
+            ):
+                self.kv[bundle_key] = str(raw)
+                return "OK"
+            return None
+        raise NotImplementedError("FakeRedis.eval 未覆盖该 Lua 脚本")
 
     async def delete(self, *keys):
         n = 0
