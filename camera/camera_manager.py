@@ -391,8 +391,18 @@ class CameraManager:
                 old._stop.set()
         # 先在锁外 join 旧线程，再启新 worker：避免双开同一 VideoCapture；
         # join 不持锁，停采 abort 的 get_worker 不被堵住
+        if old and not old.stop():
+            # 旧线程仍在运行时绝不启动同一路新线程；保留旧 worker 供后续清理/诊断。
+            with self._lock:
+                if self._workers.get(camera_id) is None:
+                    self._workers[camera_id] = old
+            raise RuntimeError(
+                f"camera {camera_id} old capture thread did not stop; refusing duplicate worker"
+            )
         if old:
-            old.stop()
+            with self._lock:
+                if self._workers.get(camera_id) is old:
+                    self._workers.pop(camera_id, None)
         extra: CameraWorker | None = None
         with self._lock:
             existing = self._workers.get(camera_id)
@@ -433,11 +443,16 @@ class CameraManager:
         return worker
 
     def stop_camera(self, camera_id: int) -> None:
-        # stop 允许非 Leader 调用（安全退出场景）；join 在锁外，避免堵 get_worker
+        # stop 允许非 Leader 调用（安全退出场景）；join 在锁外，避免堵 get_worker。
+        # 在线程确认退出前保留注册表项，防止并发 start_camera 启动第二个采集线程。
         with self._lock:
-            worker = self._stop_camera_unlocked(camera_id)
-        if worker:
-            worker.stop()
+            worker = self._workers.get(camera_id)
+            if worker:
+                worker._stop.set()
+        if worker and worker.stop():
+            with self._lock:
+                if self._workers.get(camera_id) is worker:
+                    self._workers.pop(camera_id, None)
 
     def stop_all_cameras(self, *, timeout: float = _STOP_JOIN_TIMEOUT_SEC) -> bool:
         """停止本进程全部采集线程；统一 deadline，避免多摄像头逐个累计等待。
