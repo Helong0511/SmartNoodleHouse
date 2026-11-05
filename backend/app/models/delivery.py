@@ -144,7 +144,7 @@ class DeliveryRefund(Base):
     # 平台退款编号与无编号事件指纹分别唯一；NULL 退款编号由 event_fingerprint 兜底去重。
     __table_args__ = (
         UniqueConstraint("platform", "platform_refund_id"),
-        UniqueConstraint("platform", "event_fingerprint"),
+        Index("uq_delivery_refund_event_fingerprint", "platform", "event_fingerprint", unique=True),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
