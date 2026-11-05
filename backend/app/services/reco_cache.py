@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 from app.core.async_utils import spawn_bg
@@ -107,7 +108,7 @@ async def try_acquire_reco_lock(
     """缓存击穿保护：返回唯一持有者 token；失败/Redis 不可用返回 None。"""
     try:
         r = await get_redis()
-        token = __import__("uuid").uuid4().hex
+        token = uuid.uuid4().hex
         acquired = await r.set(
             reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
             token, nx=True, ex=_REBUILD_LOCK_TTL,
