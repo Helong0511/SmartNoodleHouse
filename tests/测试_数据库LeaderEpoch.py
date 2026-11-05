@@ -173,3 +173,81 @@ async def test_revoke_epoch_only_revokes_matching_owner(fencing_db):
         ).one()
     assert int(row.epoch) == 22
     assert row.owner_id is None
+
+
+
+@pytest.mark.mysql
+@pytest.mark.asyncio
+async def test_mysql_old_leader_commit_uses_current_read_and_is_rejected(db_session):
+    """MySQL REPEATABLE READ 下，before_commit 的 FOR UPDATE 必须读到最新 epoch。"""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    if db_session.get_bind().dialect.name != "mysql":
+        pytest.skip("requires MySQL 8")
+
+    maker = async_sessionmaker(
+        db_session.get_bind(), class_=AsyncSession, expire_on_commit=False
+    )
+    old_owner = "mysql-fence-old"
+    new_owner = "mysql-fence-new"
+    probe_value = "fence-probe-" + __import__("uuid").uuid4().hex
+
+    deactivate_leader_epoch()
+    try:
+        async with maker() as setup:
+            await setup.execute(
+                text(
+                    "INSERT INTO leader_fencing_state (id, epoch, owner_id) "
+                    "VALUES (1, 1001, :owner) "
+                    "ON DUPLICATE KEY UPDATE epoch = VALUES(epoch), owner_id = VALUES(owner_id)"
+                ),
+                {"owner": old_owner},
+            )
+            await setup.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS leader_fence_ci_probe "
+                    "(value VARCHAR(100) PRIMARY KEY)"
+                )
+            )
+            await setup.commit()
+
+        old_tx = maker()
+        try:
+            # 先在旧事务中写入业务数据，建立事务上下文，但暂不提交。
+            await old_tx.execute(
+                text("INSERT INTO leader_fence_ci_probe (value) VALUES (:value)"),
+                {"value": probe_value},
+            )
+
+            # 新 Leader 在另一个事务中推进 epoch 并提交。
+            async with maker() as new_tx:
+                await new_tx.execute(
+                    text(
+                        "UPDATE leader_fencing_state "
+                        "SET epoch = 1002, owner_id = :owner WHERE id = 1"
+                    ),
+                    {"owner": new_owner},
+                )
+                await new_tx.commit()
+
+            activate_leader_epoch(1001, old_owner)
+            with leader_fence_scope():
+                with pytest.raises(LeaderFenceLostError, match="fencing mismatch"):
+                    await old_tx.commit()
+            await old_tx.rollback()
+        finally:
+            await old_tx.close()
+
+        async with maker() as verify:
+            count = await verify.scalar(
+                text(
+                    "SELECT COUNT(*) FROM leader_fence_ci_probe WHERE value = :value"
+                ),
+                {"value": probe_value},
+            )
+            assert count == 0
+    finally:
+        deactivate_leader_epoch()
+        async with maker() as cleanup:
+            await cleanup.execute(text("DROP TABLE IF EXISTS leader_fence_ci_probe"))
+            await cleanup.commit()
