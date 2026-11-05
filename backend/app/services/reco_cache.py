@@ -1,11 +1,11 @@
 """推荐结果 Redis 缓存层（Task 8）。
 
 - 仅缓存接口响应 payload（瘦身字段后的 dict），TTL ≤ 120s；
-- Redis 不可用时优先使用短 TTL 本地缓存；无缓存且无法获得分布式锁时由接口返回可重试 503，避免并发回源；
-- 画像更新 / 下单 / 评价后调用 invalidate_customer 主动失效；
+- Redis 不可用时仅匿名推荐可使用短 TTL 本地缓存；顾客画像结果必须经过共享 Redis 代际校验；
+- 顾客画像更新在数据库提交后推进共享代际，旧计算结果不能复活；
 - 缓存击穿：SET NX EX 互斥锁，避免并发重建压垮 DB；
 - 缓存雪崩：TTL 加 ±20% 随机偏移；
-- 延迟双删：invalidate_customer 删后延迟再删一次。
+- 旧代际缓存依靠短 TTL 自然回收，不执行高成本 SCAN 双删。
 """
 from __future__ import annotations
 
@@ -42,8 +42,7 @@ logger = logging.getLogger(__name__)
 _REBUILD_LOCK_TTL = 30  # 短租约由 owner-token 心跳续期
 _REBUILD_HEARTBEATS: dict[str, asyncio.Task] = {}
 
-# Redis 故障时的短 TTL 进程内兜底缓存：配合 local_singleflight 防止同 worker 重复重算。
-# 仅保存推荐响应（短至 2 秒），有界 LRU；客户画像/订单变化时按 customer_id 主动失效。
+# Redis 故障时仅为匿名推荐保留短 TTL 进程内兜底；顾客级推荐不缓存于本地，避免跨 Worker 授权撤回后继续返回画像结果。
 _LOCAL_RECO_TTL = 2.0
 _LOCAL_RECO_MAX = 512
 _LOCAL_RECO_CACHE: OrderedDict[tuple, tuple[float, dict[str, Any]]] = OrderedDict()
@@ -117,7 +116,8 @@ async def get_cached_reco(
             payload = json.loads(raw)
             if isinstance(payload, dict):
                 payload["cache_hit"] = True
-                _set_local_reco(local_key, payload)
+                if customer_id is None:
+                    _set_local_reco(local_key, payload)
                 return payload
     except Exception:  # noqa: BLE001 - 缓存不可用必须降级
         logger.debug("推荐缓存读取失败，降级直算", exc_info=True)
@@ -134,7 +134,7 @@ async def set_cached_reco(
 ) -> None:
     body = dict(payload)
     body["cache_hit"] = False
-    # 先写本地短缓存，再尝试 Redis；即使 Redis 客户端初始化本身失败也能 single-flight 复用。
+    # 匿名推荐可先写本地短缓存；顾客级结果只写共享 Redis 代际键。
     if customer_id is None:
         _set_local_reco(
             _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
