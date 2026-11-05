@@ -463,32 +463,35 @@ async def refund_payment(
         operator_id=user.id,
         idempotency_key=idempotency_key,
     )
-    from app.services.audit_service import AuditService
+    # 幂等重放只返回原退款状态；不得重复写审计记录或重复广播成功事件。
+    is_replay = bool(getattr(row, "_idempotent_replay", False))
+    if not is_replay:
+        from app.services.audit_service import AuditService
 
-    await AuditService.log_refund(
-        db,
-        user_id=user.id,
-        refund_no=row.refund_no,
-        payment_no=payment.payment_no,
-        amount=row.amount,
-        reason=data.reason,
-        request=request,
-        extra={"order_id": order.id, "status": row.status},
-        store_id=order.store_id,
-    )
-    if row.status == "SUCCESS":
-        await db.commit()
-        await ws_manager.notify_order_event(
-            "ORDER_REFUNDED",
-            {
-                "order_id": order.id,
-                "order_no": order.order_no,
-                "payment_no": payment.payment_no,
-                "refund_no": row.refund_no,
-                "amount": str(row.amount),
-                "store_id": order.store_id,
-            },
+        await AuditService.log_refund(
+            db,
+            user_id=user.id,
+            refund_no=row.refund_no,
+            payment_no=payment.payment_no,
+            amount=row.amount,
+            reason=data.reason,
+            request=request,
+            extra={"order_id": order.id, "status": row.status},
+            store_id=order.store_id,
         )
+        if row.status == "SUCCESS":
+            await db.commit()
+            await ws_manager.notify_order_event(
+                "ORDER_REFUNDED",
+                {
+                    "order_id": order.id,
+                    "order_no": order.order_no,
+                    "payment_no": payment.payment_no,
+                    "refund_no": row.refund_no,
+                    "amount": str(row.amount),
+                    "store_id": order.store_id,
+                },
+            )
     return success(
         {
             "refund_no": row.refund_no,
