@@ -212,40 +212,40 @@ async def process_outbox_item(outbox_id: int) -> None:
         try:
             async with claim_lease_guard(OutboxEvent, outbox_id, wid):
                 await handler(db, row)
-            # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
-            done_stmt = (
-                update(OutboxEvent)
-                .where(
-                    OutboxEvent.id == outbox_id,
-                    OutboxEvent.locked_by == wid,
+                # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
+                done_stmt = (
+                    update(OutboxEvent)
+                    .where(
+                        OutboxEvent.id == outbox_id,
+                        OutboxEvent.locked_by == wid,
+                    )
+                    .values(
+                        status="DONE",
+                        processed_at=now_local(),
+                        last_error=None,
+                        next_retry_at=None,
+                        locked_at=None,
+                        locked_by=None,
+                    )
                 )
-                .values(
-                    status="DONE",
-                    processed_at=now_local(),
-                    last_error=None,
-                    next_retry_at=None,
-                    locked_at=None,
-                    locked_by=None,
-                )
-            )
-            done_result = await db.execute(done_stmt)
-            # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
-            # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
-            idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
-            try:
-                from app.domains.messaging.idempotency import try_acquire
-
-                await try_acquire(
-                    db,
-                    scope="outbox",
-                    message_id=idem_msg,
-                    ttl_seconds=86400 * 7,
-                    mark_redis=False,
-                )
-            except Exception:
-                # TODO: 考虑补偿监控告警，当前依赖 done_result.rowcount 兜底
-                logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
-            await db.commit()
+                done_result = await db.execute(done_stmt)
+                # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
+                # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
+                idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
+                try:
+                    from app.domains.messaging.idempotency import try_acquire
+    
+                    await try_acquire(
+                        db,
+                        scope="outbox",
+                        message_id=idem_msg,
+                        ttl_seconds=86400 * 7,
+                        mark_redis=False,
+                    )
+                except Exception:
+                    # TODO: 考虑补偿监控告警，当前依赖 done_result.rowcount 兜底
+                    logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
+                await db.commit()
             try:
                 from app.domains.messaging.idempotency import mark_processed_redis
 
