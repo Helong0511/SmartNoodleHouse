@@ -1,6 +1,7 @@
 """小程序会员注册/资料/手机号：从 miniprogram 路由拆出，路径仍挂在 /api/miniprogram。"""
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, File, Request, UploadFile
@@ -21,6 +22,8 @@ from app.services.audit_service import AuditService
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
 from app.utils.upload import fetch_and_save_remote_image, read_upload_limited, save_upload
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/miniprogram", tags=["小程序"])
 
