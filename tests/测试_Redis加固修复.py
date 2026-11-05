@@ -551,3 +551,16 @@ async def test_reco_cache_customer_invalidation_clears_local_fallback():
     await reco_cache.set_cached_reco(19, 2, "menu", "a", {"items": [1]}, "")
     reco_cache._invalidate_local_reco_customer(19)
     assert reco_cache._get_local_reco(reco_cache._local_reco_key(19, 2, "menu", "a", "")) is None
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_invalidation_deletes_large_key_sets_in_bounded_batches():
+    from app.services import reco_cache
+
+    fake = FakeRedis()
+    for i in range(450):
+        fake.store[f"snh:reco:c77:s1:menu:b{i}"] = "{}"
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        await reco_cache.invalidate_customer(77)
+    assert len(fake.delete_calls) == 450
+    assert not any(key in fake.store for key in fake.delete_calls)
