@@ -25,7 +25,13 @@ from app.core.cache_keys import (
     menu_version_key,
     ttl_with_jitter,
 )
-from app.core.redis_client import (\n    delete_with_retry, get_redis, release_owned_lock,\n    start_redis_lock_heartbeat, stop_redis_lock_heartbeat,\n)
+from app.core.redis_client import (
+    delete_with_retry,
+    get_redis,
+    release_owned_lock,
+    start_redis_lock_heartbeat,
+    stop_redis_lock_heartbeat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +144,14 @@ async def try_acquire_rebuild_lock(store_id: int) -> str | None:
     try:
         r = await get_redis()
         token = uuid.uuid4().hex
-        acquired = await r.set(menu_rebuild_lock_key(store_id), token, nx=True, ex=_REBUILD_LOCK_TTL)
-        return token if acquired else None
+        key = menu_rebuild_lock_key(store_id)
+        acquired = await r.set(key, token, nx=True, ex=_REBUILD_LOCK_TTL)
+        if not acquired:
+            return None
+        _REBUILD_HEARTBEATS[token] = start_redis_lock_heartbeat(
+            r, key, token, ttl=_REBUILD_LOCK_TTL, label=f"menu:{store_id}"
+        )
+        return token
     except Exception:
         return None
 
@@ -148,6 +160,8 @@ async def release_rebuild_lock(store_id: int, token: str | None) -> None:
     """只释放当前调用方持有的锁，防止过期锁被新进程接管后误删。"""
     if not token:
         return
+    heartbeat = _REBUILD_HEARTBEATS.pop(token, None)
+    await stop_redis_lock_heartbeat(heartbeat)
     try:
         r = await get_redis()
         await release_owned_lock(r, menu_rebuild_lock_key(store_id), token)
