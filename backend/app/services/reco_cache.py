@@ -37,7 +37,8 @@ from app.core.response import dumps_json
 
 logger = logging.getLogger(__name__)
 
-_REBUILD_LOCK_TTL = 30  # 短租约由 owner-token 心跳续期\n_REBUILD_HEARTBEATS: dict[str, asyncio.Task] = {}
+_REBUILD_LOCK_TTL = 30  # 短租约由 owner-token 心跳续期
+_REBUILD_HEARTBEATS: dict[str, asyncio.Task] = {}
 
 # Redis 故障时的短 TTL 进程内兜底缓存：配合 local_singleflight 防止同 worker 重复重算。
 # 仅保存推荐响应（短至 2 秒），有界 LRU；客户画像/订单变化时按 customer_id 主动失效。
