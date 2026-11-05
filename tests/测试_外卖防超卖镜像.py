@@ -293,6 +293,57 @@ async def test_handler_refreshes_each_platform_snapshot_before_http():
     assert db.expire_all.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_平台间库存变化时后续平台必须读取更新后的数据库值(db_session, monkeypatch):
+    store = await _make_store(db_session, "S-PLATFORM-REFRESH")
+    product = await _make_product(db_session, store, "P-PLATFORM-REFRESH")
+    stock_row = await _make_listing(db_session, store, product, stock=3)
+    await _make_binding_and_map(
+        db_session, store, product, platform="MEITUAN", sku="SKU-MT", code="CODE-MT"
+    )
+    await _make_binding_and_map(
+        db_session, store, product, platform="ELEME", sku="SKU-EL", code="CODE-EL"
+    )
+    await db_session.commit()
+
+    pushed: list[tuple[str, int]] = []
+
+    class Provider:
+        def __init__(self, platform: str):
+            self.platform = platform
+
+        async def set_sku_stock(self, items):
+            pushed.append((self.platform, items[0]["stock"]))
+            if self.platform == "MEITUAN":
+                # 模拟美团 HTTP 等待期间，本地库存被新订单扣减。
+                await db_session.execute(
+                    text("UPDATE store_product_stocks SET stock = 1 WHERE id = :id"),
+                    {"id": stock_row.id},
+                )
+                await db_session.commit()
+            return len(items)
+
+        async def set_sell_status(self, items, on_shelf):
+            return len(items)
+
+    monkeypatch.setattr(
+        hmod, "get_delivery_provider", lambda platform, creds: Provider(platform)
+    )
+    async def _creds(db, platform, store_id):
+        return MagicMock()
+    monkeypatch.setattr(hmod, "get_credentials_for_store", _creds)
+
+    await delivery_stock_mirror_handler(
+        db_session,
+        SimpleNamespace(
+            id=987,
+            payload=json.dumps({"store_id": store.id, "product_id": product.id}),
+        ),
+    )
+
+    assert pushed == [("MEITUAN", 3), ("ELEME", 1)]
+
+
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
 
 @pytest.mark.asyncio
