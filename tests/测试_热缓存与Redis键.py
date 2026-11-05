@@ -146,7 +146,7 @@ async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
         return SystemSettingsService._cache
 
     monkeypatch.setattr(
-        SystemSettingsService, "_remote_version", AsyncMock(return_value=0)
+        SystemSettingsService, "_remote_version", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(SystemSettingsService, "_load_raw_unlocked", AsyncMock(side_effect=load_once))
     db = object()
