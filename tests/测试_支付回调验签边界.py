@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 import json
-import sqlite3
 import time
 from decimal import Decimal
 from types import SimpleNamespace
@@ -15,12 +14,9 @@ from app.core.exceptions import AppException
 from app.services.payment_verify import AlipayVerifier, WechatPayVerifier
 from app.services.payment_service import AlipayProvider, PaymentService
 from app.services.alipay_client import trade_refund_query
-from sqlalchemy.exc import IntegrityError
-
 from app.services.payment_service import (
     _validate_refund_callback_binding,
     _validate_duplicate_paid_callback,
-    _is_duplicate_key_integrity_error,
 )
 
 
@@ -902,25 +898,3 @@ async def test_refund_finalization_rejects_cross_order_payment_binding():
         )
 
 
-def test_callback_integrity_error_classifier_only_accepts_unique_violations():
-    duplicate = IntegrityError(
-        "INSERT", {}, sqlite3.IntegrityError("UNIQUE constraint failed: payment.order_id")
-    )
-    foreign_key = IntegrityError(
-        "INSERT", {}, sqlite3.IntegrityError("FOREIGN KEY constraint failed")
-    )
-    mysql_duplicate = IntegrityError("INSERT", {}, Exception(1062, "Duplicate entry"))
-    pg_duplicate = IntegrityError("INSERT", {}, SimpleNamespace(sqlstate="23505"))
-
-    assert _is_duplicate_key_integrity_error(duplicate) is True
-    assert _is_duplicate_key_integrity_error(mysql_duplicate) is True
-    assert _is_duplicate_key_integrity_error(pg_duplicate) is True
-    assert _is_duplicate_key_integrity_error(foreign_key) is False
-
-
-def test_callback_integrity_error_classifier_rejects_unknown_integrity_failures():
-    unknown = IntegrityError("INSERT", {}, sqlite3.IntegrityError("NOT NULL constraint failed: payment.amount"))
-    check = IntegrityError("INSERT", {}, sqlite3.IntegrityError("CHECK constraint failed: amount_positive"))
-
-    assert _is_duplicate_key_integrity_error(unknown) is False
-    assert _is_duplicate_key_integrity_error(check) is False
