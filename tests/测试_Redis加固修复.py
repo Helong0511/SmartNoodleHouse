@@ -55,7 +55,16 @@ class FakeRedis:
         return 1 if key in self.store else 0
 
     async def eval(self, script, numkeys, key, token, *args):
-        if self.store.get(key) == token:
+        # 模拟项目中使用的几类 Lua 原子脚本，避免把 compare-expire 错当成 delete。
+        if "INCR" in script:
+            count = int(self.store.get(key, 0)) + 1
+            self.store[key] = str(count)
+            return count
+        if self.store.get(key) != str(token):
+            return 0
+        if "expire" in script.lower():
+            return 1
+        if "del" in script.lower():
             del self.store[key]
             return 1
         return 0
