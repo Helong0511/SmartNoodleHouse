@@ -2597,9 +2597,10 @@ class PaymentService:
         t_no, t_ph = await _order_table_parts(db, order)
         sno = await _order_store_no(db, order)
         refund_no = generate_no(refund_biz(payment.provider), sno, t_no, table_placeholder=t_ph)
+        locked_payment_id = int(payment.id)
         row = PaymentRefund(
             refund_no=refund_no,
-            payment_id=payment.id,
+            payment_id=locked_payment_id,
             order_id=payment.order_id,
             amount=amount,
             reason=reason,
@@ -2624,7 +2625,7 @@ class PaymentService:
                 ).scalar_one_or_none()
                 if winner is not None:
                     if (
-                        int(winner.payment_id) != int(payment.id)
+                        int(winner.payment_id) != locked_payment_id
                         or money(winner.amount) != money(amount)
                         or str(winner.reason or "") != str(reason or "")
                     ):
