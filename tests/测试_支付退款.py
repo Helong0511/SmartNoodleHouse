@@ -453,3 +453,62 @@ def test_refund_query_validation_accepts_matching_processing_result():
         refund=refund,
         result={"status": "PROCESSING", "refund_no": "RF-8", "payment_no": "PAY-8"},
     ) == "PROCESSING"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_refund_poll_rejects_success_with_wrong_amount(monkeypatch):
+    """定时退款补偿不能绕过主动查单的金额校验直接 SUCCESS 入账。"""
+    from types import SimpleNamespace
+
+    from app.services import payment_service
+    from app.services.payment_service import PaymentService
+
+    refund = SimpleNamespace(
+        id=77, payment_id=8, order_id=18, refund_no="RF-77",
+        amount=Decimal("10.00"), status="PROCESSING",
+    )
+    payment = SimpleNamespace(
+        id=8, provider="WECHAT", payment_no="PAY-8",
+        provider_trade_no="WX-8", order_id=18, amount=Decimal("50.00"),
+    )
+
+    id_result = MagicMock()
+    id_result.scalars.return_value.all.return_value = [77]
+    row_result = MagicMock()
+    row_result.scalar_one_or_none.return_value = refund
+
+    first_db = MagicMock()
+    first_db.execute = AsyncMock(return_value=id_result)
+    second_db = MagicMock()
+    second_db.execute = AsyncMock(return_value=row_result)
+    second_db.get = AsyncMock(return_value=payment)
+    second_db.commit = AsyncMock()
+
+    class SessionContext:
+        def __init__(self, db):
+            self.db = db
+
+        async def __aenter__(self):
+            return self.db
+
+        async def __aexit__(self, *args):
+            return False
+
+    sessions = iter((SessionContext(first_db), SessionContext(second_db)))
+    monkeypatch.setattr(payment_service, "AsyncSessionLocal", lambda: next(sessions))
+    monkeypatch.setattr(
+        PaymentService,
+        "_query_channel_refund",
+        AsyncMock(return_value={
+            "status": "SUCCESS",
+            "refund_no": "RF-77",
+            "payment_no": "PAY-8",
+            "provider_trade_no": "WX-8",
+            "amount": {"refund": 900, "total": 5000, "currency": "CNY"},
+        }),
+    )
+    finalize = AsyncMock()
+    monkeypatch.setattr(PaymentService, "_finalize_refund", finalize)
+
+    assert await PaymentService.poll_pending_refunds(limit=10) == 0
+    finalize.assert_not_awaited()
