@@ -19,6 +19,25 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# 只允许锁持有者释放自己的锁；禁止无条件 DEL（锁过期并被接管后会误删新持有者）。
+_LUA_RELEASE_OWNED_LOCK = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+async def release_owned_lock(r, key: str, token: str) -> bool:
+    """原子比较 token 并释放锁；token 不匹配时绝不删除其他进程的锁。"""
+    if not token:
+        return False
+    try:
+        return bool(await r.eval(_LUA_RELEASE_OWNED_LOCK, 1, key, token))
+    except Exception:
+        logger.debug("Redis owner-checked lock release failed: key=%s", key, exc_info=True)
+        return False
+
 _redis: redis.Redis | None = None
 _lock = asyncio.Lock()
 
