@@ -25,13 +25,13 @@ from app.core.cache_keys import (
     menu_version_key,
     ttl_with_jitter,
 )
-from app.core.redis_client import delete_with_retry, get_redis, release_owned_lock
+from app.core.redis_client import (\n    delete_with_retry, get_redis, release_owned_lock,\n    start_redis_lock_heartbeat, stop_redis_lock_heartbeat,\n)
 
 logger = logging.getLogger(__name__)
 
 MENU_TTL_SECONDS = MENU_BUNDLE_TTL_SECONDS
 _BUNDLE_MAX_BYTES = 256 * 1024  # bundle JSON 超 256KB 跳过缓存以避免大Key
-_REBUILD_LOCK_TTL = 30  # 30s 租约；唯一 token 防止过期持有者误删新锁
+_REBUILD_LOCK_TTL = 30  # 短租约由 owner-token 心跳续期\n_REBUILD_HEARTBEATS: dict[str, asyncio.Task] = {}
 
 
 async def get_menu_version(store_id: int) -> int:
