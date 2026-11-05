@@ -140,7 +140,7 @@ async def test_token_bucket_allowed_request_continues(monkeypatch):
     )
     expected = MagicMock(status_code=200)
     next_call = AsyncMock(return_value=expected)
-    with patch("app.core.rate_limit.SystemSettingsService.touch_cache", AsyncMock(), create=True), patch(
+    with patch("app.services.system_settings_service.SystemSettingsService.touch_cache", AsyncMock()), patch(
         "app.core.rate_limit.get_settings", return_value=settings
     ), patch(
         "app.core.rate_limit.get_redis", AsyncMock(return_value=redis_client)
