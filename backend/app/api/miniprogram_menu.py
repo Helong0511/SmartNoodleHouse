@@ -198,7 +198,7 @@ async def get_recommendations(
     # Redis 锁负责跨进程协调；本地 single-flight 在 Redis 故障时限制同 worker 并发重算。
     from app.core.async_utils import local_singleflight
 
-    flight_key = f"reco:{cid or 0}:{store_id}:{scene}:{ab_bucket}:{fingerprint}"
+    flight_key = f"reco:{cid or 0}:{store_id}:{scene}:{ab_bucket}:{cache_fingerprint}"
     async with local_singleflight(flight_key):
         # 等待本地前一个请求期间，先重新检查 Redis 缓存，避免重复计算。
         cached_after_wait = await get_cached_reco(cid, store_id, scene, ab_bucket, cache_fingerprint)
