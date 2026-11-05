@@ -287,8 +287,8 @@ async def test_webhook_process_inbox_uses_atomic_owner_release():
             ok = await webhook_inbox.process_inbox_item(1)
 
     assert ok is True
-    # 确认 worker 被传入
-    assert call_args["worker"] is not None
+    # worker 参数允许为空；claim_inbox_item 内部必须生成独立 owner token。
+    assert row.locked_by
     # 确认执行了原子 UPDATE（而非 ORM 属性设置）
     # execute 应被调用于 done_stmt
     assert db.execute.await_count >= 1
@@ -310,6 +310,7 @@ async def test_webhook_process_inbox_reclaimed_during_processing_skips_ws():
     db = MagicMock()
     db.execute = AsyncMock(return_value=done_result)
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     delivery_result = SimpleNamespace(
         event="ORDER_NEW", order=None, deferred_tasks=[], extra={},
@@ -420,6 +421,7 @@ async def test_outbox_process_uses_atomic_owner_release():
     db = MagicMock()
     db.execute = AsyncMock(return_value=done_result)
     db.scalar = AsyncMock(return_value=None)
+    db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
 
