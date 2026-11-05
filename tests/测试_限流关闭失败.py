@@ -106,7 +106,7 @@ async def test_token_bucket_denial_returns_retry_after(monkeypatch):
         rate_limit_fail_closed_paths="/api/auth/login",
     )
     next_call = AsyncMock(return_value=MagicMock(status_code=200))
-    with patch("app.core.rate_limit.SystemSettingsService.touch_cache", AsyncMock(), create=True), patch(
+    with patch("app.services.system_settings_service.SystemSettingsService.touch_cache", AsyncMock()), patch(
         "app.core.rate_limit.get_settings", return_value=settings
     ), patch(
         "app.core.rate_limit.get_redis", AsyncMock(return_value=redis_client)
