@@ -341,3 +341,37 @@ def test_visitor_snapshot_signature_binds_event_store_and_object_key():
         assert not verify_visitor_snapshot_signature(
             10, 20, "visitors/2026/11/04/cam1_test.jpg", exp, sig, now=exp + 1
         )
+
+def test_camera_url_fails_closed_when_hostname_dns_lookup_fails(monkeypatch):
+    """无法解析主机名时不得按安全目标放行。"""
+    import socket
+
+    def _fail_dns(host, port, *args, **kwargs):
+        raise socket.gaierror("temporary DNS failure")
+
+    monkeypatch.setattr("app.services.camera_credentials.socket.getaddrinfo", _fail_dns)
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://camera.example.invalid/Streaming/Channels/102")
+    assert ei.value.code == 40026
+
+
+def test_camera_worker_revalidates_target_before_open_and_reconnect(monkeypatch):
+    """运行时每次连接前都必须重新校验，旧数据库配置不能绕过保存时 SSRF 检查。"""
+    import camera.camera_manager as camera_manager
+
+    def _reject(_source):
+        raise AppException(40026, "DNS 解析到危险地址")
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.assert_camera_url_safe", _reject
+    )
+    capture = MagicMock()
+    monkeypatch.setattr(camera_manager.cv2, "VideoCapture", capture)
+
+    worker = camera_manager.CameraWorker(
+        999, "rtsp://camera.example/Streaming/Channels/102", 25
+    )
+    assert worker._connect() is False
+    capture.assert_not_called()
+    assert worker.status == "OFFLINE"
+
