@@ -308,9 +308,11 @@ async def test_paid_order_invalidates_customer_cache(db_session, fake_redis):
     await TasteLearningService.record_paid_order_events(db, order.id)
     # 个性化缓存失效在业务事务提交后执行；未提交前不能推进共享代际。
     await db.commit()
-
-    keys_left = list(fake_redis.store.keys())
-    assert not any(f":c{cust.id}:" in k for k in keys_left), "支付后该顾客缓存应被清除"
+    # after_commit 会异步推进共享代际；旧代际键保留到 TTL，自然不可再命中。
+    import asyncio
+    await asyncio.sleep(0)
+    from app.core.cache_keys import reco_generation_key
+    assert fake_redis.store.get(reco_generation_key(cust.id)) == "1"
 
     third = await _call(db, store, customer=cust)
     assert third["cache_hit"] is False
