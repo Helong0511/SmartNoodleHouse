@@ -326,7 +326,9 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                         # 跨进程持锁者可能仍在构建；短暂等待后再查缓存。
                         waited = await wait_for_rebuild(sid, 2.0)
                         if (
-                            waited is not None
+                            remote_after_wait > 0
+                            and waited is not None
+                            and _bundle_version(waited) == remote_after_wait
                             and _bundle_schedule_id(waited) == expected_sched
                             and _bundle_has_visibility_meta(waited)
                         ):
