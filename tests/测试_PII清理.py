@@ -36,13 +36,20 @@ async def test_anonymize_issues_update_with_correct_filters():
     assert "cancelled_at" in stmt_str
     assert " < " in stmt_str
     assert "raw_payload" in stmt_str
-    assert db.execute.await_count == 3
+    assert db.execute.await_count == 4
     refund_stmt = db.execute.await_args_list[1].args[0]
     callback_stmt = db.execute.await_args_list[2].args[0]
     assert "delivery_refunds" in str(refund_stmt)
     assert "raw_payload" in str(refund_stmt)
     assert "delivery_callback_logs" in str(callback_stmt)
     assert "payload" in str(callback_stmt)
+    inbox_stmt = db.execute.await_args_list[3].args[0]
+    inbox_sql = str(inbox_stmt).lower()
+    assert "webhook_inbox" in inbox_sql
+    assert "failed" in inbox_sql
+    assert "next_retry_at is null" in inbox_sql
+    assert "received_at" in inbox_sql
+    assert "payload" in inbox_sql
 
 
 @pytest.mark.asyncio
