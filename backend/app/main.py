@@ -338,7 +338,14 @@ async def lifespan(app: FastAPI):
     async def _stop_leader_work() -> None:
         """锁丢失：立即停调度与后台 worker，避免双 Leader；随后重新 standby 争抢。"""
         nonlocal is_leader
-        logger.warning("执行 Leader 降级：shutdown scheduler / TTS / RecognitionWorker")
+        logger.warning("执行 Leader 降级：cancel active jobs / shutdown scheduler / TTS / RecognitionWorker")
+        try:
+            from app.services.scheduler_admin import cancel_active_leader_jobs
+
+            cancelled = await cancel_active_leader_jobs(timeout=5.0)
+            logger.warning("Leader 降级已请求取消运行中定时任务 count=%s", cancelled)
+        except Exception:
+            logger.exception("取消运行中 Leader 定时任务失败")
         try:
             from app.services.scheduler_admin import stop_overrides_watcher
 
