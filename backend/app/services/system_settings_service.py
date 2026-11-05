@@ -918,6 +918,8 @@ class SystemSettingsService:
     _cache_ver: int = -1
     CACHE_TTL = 15.0
     _seed_lock = asyncio.Lock()
+    # Redis 版本失效/故障时合并并发刷新，避免每个请求同时回源 MySQL。
+    _cache_refresh_lock = asyncio.Lock()
 
     @classmethod
     def _env_default(cls, key: str, settings: Settings | None = None) -> str:
@@ -1121,22 +1123,32 @@ class SystemSettingsService:
 
     @classmethod
     async def touch_cache(cls, db: AsyncSession | None = None) -> None:
-        """请求路径轻量刷新：Redis 版本未变且在 TTL 内则无 DB 查询。"""
+        """请求路径轻量刷新；缓存失效时单进程 single-flight 回源，避免 DB 雪崩。"""
         if db is not None:
             await cls._load_raw(db)
             return
-        now = time.monotonic()
-        remote_ver = await cls._remote_version()
-        if (
-            cls._cache is not None
-            and cls._cache_ver == remote_ver
-            and now - cls._cache_at < cls.CACHE_TTL
-        ):
-            return
-        from app.core.database import AsyncSessionLocal
 
-        async with AsyncSessionLocal() as session:
-            await cls._load_raw(session)
+        def _is_fresh(remote_ver: int) -> bool:
+            return bool(
+                cls._cache is not None
+                and cls._cache_ver == remote_ver
+                and time.monotonic() - cls._cache_at < cls.CACHE_TTL
+            )
+
+        remote_ver = await cls._remote_version()
+        if _is_fresh(remote_ver):
+            return
+
+        # 多个请求同时遇到 Redis 版本变化/Redis 故障时，只允许一个请求回源；
+        # 其余请求等待后重新检查缓存，不再同时打 MySQL。
+        async with cls._cache_refresh_lock:
+            remote_ver = await cls._remote_version()
+            if _is_fresh(remote_ver):
+                return
+            from app.core.database import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                await cls._load_raw(session)
 
     @classmethod
     async def get_float(cls, db: AsyncSession, key: str, fallback: float) -> float:
