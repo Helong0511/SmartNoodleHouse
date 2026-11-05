@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import aliased
 
 from app.core.hot_cache import HotCache
+from app.core.exceptions import AppException
 from app.core.menu_cache import (
     bump_menu_version,
     get_menu_bundle,
@@ -290,7 +291,14 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                         ):
                             bundle = waited
                         else:
-                            bundle = None
+                            # 未持有分布式锁时绝不能自行回源重建，否则每个 gunicorn
+                            # worker 都会在 300ms 后同时打穿 MySQL。宁可短暂返回
+                            # 503，也不在 Redis 故障/锁竞争时制造数据库雪崩。
+                            raise AppException(
+                                50301,
+                                "菜单正在更新或缓存协调服务暂不可用，请稍后重试",
+                                status_code=503,
+                            )
                     else:
                         bundle = None
                     try:
