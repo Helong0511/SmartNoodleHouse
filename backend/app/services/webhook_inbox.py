@@ -221,14 +221,11 @@ async def process_inbox_item(inbox_id: int) -> bool:
                     )
                 )
                 done_result = await db.execute(done_stmt)
-                if int(done_result.rowcount or 0) != 1:
-                    # 失去 claim 所有权时，DeliveryService 的 DB 修改必须一起回滚；
-                    # 旧 worker 不得提交业务副作用，也不得发出成功通知。
-                    await db.rollback()
-                    logger.warning(
-                        "Webhook inbox claim 已丢失，回滚旧 worker 事务 id=%s",
-                        inbox_id,
-                    )
+                from app.services.worker_common import rollback_if_claim_lost
+
+                if await rollback_if_claim_lost(
+                    db, done_result, model=WebhookInbox, row_id=inbox_id
+                ):
                     return True
                 await db.commit()
 
