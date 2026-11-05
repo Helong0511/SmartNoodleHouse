@@ -56,6 +56,13 @@ def _rate_limit_bucket(path: str) -> str:
     这是有意的容量保护；需要独立额度的固定路由应加入 SENSITIVE_LIMITS。
     """
     normalized = (path or "/").split("?", 1)[0]
+    for prefix in SENSITIVE_LIMITS:
+        # 通用小程序/外卖前缀只提供默认限额；具体资源继续走固定分片，
+        # 以免整个渠道共用一个桶。具体登录/支付/回调路由保持独立桶。
+        if prefix in ("/api/miniprogram/", "/api/delivery/"):
+            continue
+        if normalized.startswith(prefix) or normalized == prefix.rstrip("/"):
+            return prefix.rstrip("/")
     parts = [part for part in normalized.strip("/").split("/") if part]
     if len(parts) >= 2 and parts[0].lower() == "api":
         resource = parts[1].lower()
