@@ -4,13 +4,13 @@ name: One-time npm lock refresh
 on:
   push:
     branches: ["fix/comprehensive-audit-2026-11-04"]
+    paths: ["frontend/package.json"]
 
 permissions:
   contents: write
 
 jobs:
   refresh:
-    if: github.ref == 'refs/heads/fix/comprehensive-audit-2026-11-04' && github.event.head_commit.message == 'ci: regenerate npm lockfile with security fixes'
     runs-on: ubuntu-latest
     defaults:
       run:
