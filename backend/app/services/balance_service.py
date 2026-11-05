@@ -224,6 +224,12 @@ class BalanceService:
                 existing.entry_type != "REFUND_RESTORE"
                 or int(existing.customer_id) != int(customer_id)
                 or int(existing.order_id or 0) != int(order_id)
+                or (
+                    store_id is not None
+                    and int(getattr(existing, "store_id", 0) or 0) != int(store_id)
+                )
+                or money(existing.delta_principal) < 0
+                or money(existing.delta_gift) < 0
                 or money(existing_amount) != amt
             ):
                 raise AppException(40994, "退款编号已关联不同的储值回补流水，拒绝重复入账")
