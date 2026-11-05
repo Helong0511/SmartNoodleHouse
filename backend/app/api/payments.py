@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
@@ -435,6 +435,7 @@ async def refund_payment(
     request: Request,
     db: DbSession,
     user: CurrentUser,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=64),
 ):
     """管理端直接退款（仅店长/超管）。
 
@@ -454,7 +455,14 @@ async def refund_payment(
     if (order.channel or "").upper() == "POS" and user.role.code not in ("SUPER_ADMIN", "STORE_ADMIN"):
         raise AppException(40301, "收银渠道订单请走退款审批（店长/管理员执行）")
     assert_order_store_access(user, order)
-    row = await PaymentService.refund(db, payment, data.amount, data.reason, operator_id=user.id)
+    row = await PaymentService.refund(
+        db,
+        payment,
+        data.amount,
+        data.reason,
+        operator_id=user.id,
+        idempotency_key=idempotency_key,
+    )
     from app.services.audit_service import AuditService
 
     await AuditService.log_refund(
