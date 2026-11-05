@@ -405,3 +405,62 @@ def test_webhook_deferred_event_kinds_resolve_to_shared_handler():
             event_kind=event_kind,
         )
         assert _resolve_outbox_handler(row) is handler
+
+
+def test_reco_cache_invalidation_events_are_persisted_and_have_unique_event_kinds():
+    """同一顾客多次画像修改必须创建独立 Outbox 事件，不能被历史 DONE 去重。"""
+    from app.services.reco_cache import defer_invalidate_customer
+
+    class FakeSession:
+        info = {}
+
+    class FakeDB:
+        sync_session = FakeSession()
+
+        def __init__(self):
+            self.rows = []
+
+        def add(self, row):
+            self.rows.append(row)
+
+    db = FakeDB()
+    defer_invalidate_customer(db, 123)
+    defer_invalidate_customer(db, 123)
+
+    assert len(db.rows) == 2
+    assert all(row.aggregate_type == "reco_cache" for row in db.rows)
+    assert all(row.aggregate_id == 123 for row in db.rows)
+    assert all(row.event_kind.startswith("invalidate_") for row in db.rows)
+    assert db.rows[0].event_kind != db.rows[1].event_kind
+    assert all('"customer_id":123' in row.payload for row in db.rows)
+
+
+def test_reco_cache_outbox_dynamic_event_kinds_resolve_to_handler():
+    from app.services.reco_cache import register_reco_cache_outbox_handler
+    from app.services.outbox_worker import _resolve_outbox_handler
+
+    register_reco_cache_outbox_handler()
+    row = MagicMock(aggregate_type="reco_cache", event_kind="invalidate_0123456789abcdef")
+    assert _resolve_outbox_handler(row) is not None
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_outbox_handler_raises_when_redis_is_unavailable(monkeypatch):
+    import json
+
+    from app.services import reco_cache
+    from app.services.outbox_worker import OUTBOX_HANDLERS
+
+    async def _redis_down():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(reco_cache, "get_redis", _redis_down)
+    reco_cache.register_reco_cache_outbox_handler()
+    handler = OUTBOX_HANDLERS[("reco_cache", "invalidate")]
+    row = MagicMock(
+        aggregate_id=123,
+        payload=json.dumps({"customer_id": 123}),
+    )
+
+    with pytest.raises(RuntimeError, match="redis unavailable"):
+        await handler(MagicMock(), row)
