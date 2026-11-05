@@ -123,11 +123,12 @@ def reco_customer_pattern(customer_id: int) -> str:
 
 
 def reco_rebuild_lock_key(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", generation: int = 0,
 ) -> str:
-    """推荐结果重建互斥锁键。fingerprint 用于 settle_addon 区分不同购物车内容。"""
+    """按顾客缓存代际隔离重建锁，旧代际的慢任务不会阻塞新代际重建。"""
     cid = int(customer_id) if customer_id else 0
-    base = f"{RECO_KEY_PREFIX}:lock:c{cid}:s{int(store_id)}:{scene}:{bucket}"
+    base = f"{RECO_KEY_PREFIX}:lock:c{cid}:s{int(store_id)}:{scene}:{bucket}:g{max(0, int(generation))}"
     return f"{base}:{fingerprint}" if fingerprint else base
 
 
