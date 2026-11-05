@@ -191,7 +191,11 @@ async def test_payment_amount_range_and_operator_filter(db_session: AsyncSession
 
     app = await _override_app(db_session, user=_super_user())
     try:
-        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"payment:read"})):
+        # 此用例验证支付流水筛选，不验证 Redis 故障时的 fail-closed 策略；
+        # 给限流中间件提供成功的原子计数器，避免测试环境缺少 Redis 时被 503 提前拦截。
+        rate_limit_redis = SimpleNamespace(eval=AsyncMock(return_value=1))
+        with patch("app.api.deps.get_user_permissions", AsyncMock(return_value={"payment:read"})), \
+             patch("app.core.rate_limit.get_redis", AsyncMock(return_value=rate_limit_redis)):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 min_res = await ac.get("/api/payments", params={"amount_min": 10})
                 range_res = await ac.get("/api/payments",
