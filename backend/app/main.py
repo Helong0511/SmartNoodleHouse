@@ -340,7 +340,21 @@ async def lifespan(app: FastAPI):
         """锁丢失：停止 Leader 工作；只有确认旧任务退出后才允许本进程重新竞选。"""
         nonlocal is_leader
         global tts_task, recognition_task, _leader_warmup_task
-        logger.warning("执行 Leader 降级：cancel active jobs / shutdown scheduler / TTS / RecognitionWorker")
+        logger.warning("执行 Leader 降级：撤销数据库 epoch 并排空后台工作")
+        from app.core.leader_fencing import deactivate_leader_epoch, revoke_database_epoch
+
+        # 先禁止本进程启动新的 fenced job，再在数据库中推进 epoch。
+        # 已运行事务持有的 ContextVar 仍会在 commit 时与 DB 当前 epoch 比较。
+        deactivate_leader_epoch(_leader_worker_id)
+        try:
+            await asyncio.wait_for(
+                revoke_database_epoch(_leader_worker_id),
+                timeout=5.0,
+            )
+        except Exception:
+            logger.exception(
+                "Leader 丢锁后数据库 epoch 撤销失败；新 Leader 必须先成功递增 epoch 才能启动"
+            )
         jobs_drained = True
         workers_drained = True
         try:
@@ -433,8 +447,12 @@ async def lifespan(app: FastAPI):
         global tts_task, recognition_task, _leader_warmup_task, _leader_stop, _leader_renew_task
         from app.core.leader_lock import is_leader_held, set_leader_held, set_on_leader_lost
 
-        # 成为 Leader 后停掉 standby 争抢
-        if _leader_promote_task is not None and not _leader_promote_task.done():
+        # 成为 Leader 后停掉 standby 争抢。Promotion loop 可能正是当前 task，
+        # 不能取消/await 自己，否则会触发 self-await RuntimeError。
+        current_task = asyncio.current_task()
+        if _leader_promote_task is current_task:
+            _leader_promote_task = None
+        elif _leader_promote_task is not None and not _leader_promote_task.done():
             _leader_promote_task.cancel()
             try:
                 await _leader_promote_task
@@ -442,9 +460,28 @@ async def lifespan(app: FastAPI):
                 pass
             _leader_promote_task = None
 
+        from app.core.leader_fencing import acquire_database_epoch, deactivate_leader_epoch
+
+        deactivate_leader_epoch()
+        try:
+            epoch = await acquire_database_epoch(_leader_worker_id)
+        except Exception:
+            logger.exception(
+                "Redis Leader 锁已获取，但数据库 fencing epoch 获取失败；拒绝启动任何 Leader 工作"
+            )
+            await release_leader(_leader_worker_id)
+            is_leader = False
+            await _arm_standby_promote()
+            return
+
         is_leader = True
         set_leader_held(True)
         set_on_leader_lost(_stop_leader_work)
+        logger.warning(
+            "Leader 数据库 fencing 已激活 epoch=%s worker_id=%s",
+            epoch,
+            _leader_worker_id,
+        )
         # P0-6: 注入 Leader 检查回调到 CameraManager
         from camera.camera_manager import CameraManager
 
@@ -668,6 +705,9 @@ async def lifespan(app: FastAPI):
 
     if is_leader:
         if jobs_drained and tts_ok and recognition_ok and warmup_ok and camera_ok and renew_stopped:
+            from app.core.leader_fencing import deactivate_leader_epoch
+
+            deactivate_leader_epoch(_leader_worker_id)
             if _leader_worker_id:
                 await release_leader(_leader_worker_id)
             logger.info("Leader 工作全部排空，已释放 Leader 租约")
