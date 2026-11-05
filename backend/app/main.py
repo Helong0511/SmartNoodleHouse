@@ -51,6 +51,7 @@ scheduler = AsyncIOScheduler(
 tts_worker = TTSWorker()
 tts_task: asyncio.Task | None = None
 recognition_task: asyncio.Task | None = None
+_leader_warmup_task: asyncio.Task | None = None
 _leader_stop: asyncio.Event | None = None
 _leader_renew_task: asyncio.Task | None = None
 _leader_worker_id: str | None = None
@@ -338,7 +339,7 @@ async def lifespan(app: FastAPI):
     async def _stop_leader_work() -> None:
         """锁丢失：停止 Leader 工作；只有确认旧任务退出后才允许本进程重新竞选。"""
         nonlocal is_leader
-        global tts_task, recognition_task
+        global tts_task, recognition_task, _leader_warmup_task
         logger.warning("执行 Leader 降级：cancel active jobs / shutdown scheduler / TTS / RecognitionWorker")
         jobs_drained = True
         workers_drained = True
@@ -399,12 +400,23 @@ async def lifespan(app: FastAPI):
 
         tts_ok = await _cancel_and_wait(tts_task, "TTS worker")
         recognition_ok = await _cancel_and_wait(recognition_task, "RecognitionWorker")
-        workers_drained = tts_ok and recognition_ok
+        warmup_ok = await _cancel_and_wait(_leader_warmup_task, "Leader warmup")
         if tts_ok:
             tts_task = None
         if recognition_ok:
             recognition_task = None
+        if warmup_ok:
+            _leader_warmup_task = None
 
+        camera_ok = False
+        try:
+            from camera.camera_manager import CameraManager
+
+            camera_ok = CameraManager().stop_all_cameras()
+        except Exception:
+            logger.exception("Leader 降级停止摄像头采集失败")
+
+        workers_drained = tts_ok and recognition_ok and warmup_ok and camera_ok
         is_leader = False
         # 若旧任务无法确认退出，本进程保持 standby，不允许 5 秒后重新成为 Leader。
         # 其他独立进程仍可在 Redis 租约到期后接管。
@@ -418,7 +430,7 @@ async def lifespan(app: FastAPI):
     async def _start_leader_work() -> None:
         """抢到锁后启动调度器 / TTS / 识别 / 摄像头。"""
         nonlocal is_leader, _leader_promote_task
-        global tts_task, recognition_task, _leader_stop, _leader_renew_task
+        global tts_task, recognition_task, _leader_warmup_task, _leader_stop, _leader_renew_task
         from app.core.leader_lock import is_leader_held, set_leader_held, set_on_leader_lost
 
         # 成为 Leader 后停掉 standby 争抢
@@ -507,7 +519,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("摄像头自动恢复失败: %s", e)
         # 后台预热 InsightFace + 试听短句 WAV，避免首人/首次试听卡数秒
-        asyncio.create_task(_warmup_recognition_and_tts())
+        _leader_warmup_task = asyncio.create_task(_warmup_recognition_and_tts())
 
     async def _standby_promote_loop() -> None:
         """auto/leader 非持锁进程持续争抢；Leader 宕机后自动接管调度。"""
