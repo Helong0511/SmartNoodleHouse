@@ -1,7 +1,9 @@
 """热缓存原语与 Redis 键目录标准化校验。"""
 from __future__ import annotations
 
+import asyncio
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -121,3 +123,45 @@ def test_hot_cache_get_or_set():
 )
 def test_key_builders_exact(builder, args, expected):
     assert builder(*args) == expected
+
+
+@pytest.mark.asyncio
+async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
+    from app.core import database
+    from app.services.system_settings_service import SystemSettingsService
+
+    SystemSettingsService._cache = None
+    SystemSettingsService._cache_ver = -1
+    SystemSettingsService._cache_at = 0.0
+    calls = {"count": 0}
+
+    class DummySession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    async def load_once(_session):
+        calls["count"] += 1
+        await asyncio.sleep(0.02)
+        SystemSettingsService._cache = {"test_setting": "ok"}
+        SystemSettingsService._cache_ver = 0
+        SystemSettingsService._cache_at = time.monotonic()
+        return SystemSettingsService._cache
+
+    monkeypatch.setattr(database, "AsyncSessionLocal", lambda: DummySession())
+    monkeypatch.setattr(
+        SystemSettingsService, "_remote_version", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(SystemSettingsService, "_load_raw", AsyncMock(side_effect=load_once))
+
+    await asyncio.gather(
+        SystemSettingsService.touch_cache(),
+        SystemSettingsService.touch_cache(),
+        SystemSettingsService.touch_cache(),
+        SystemSettingsService.touch_cache(),
+    )
+
+    assert calls["count"] == 1
+    assert SystemSettingsService._cache == {"test_setting": "ok"}
