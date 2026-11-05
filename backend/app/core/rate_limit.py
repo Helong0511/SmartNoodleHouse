@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -29,6 +30,33 @@ SENSITIVE_LIMITS = {
     "/api/delivery/eleme/notify": (300, 60),
 }
 DEFAULT_LIMIT = (120, 60)
+
+# Redis 故障时限流中间件可能在高 QPS 下逐请求触发异常。
+# 日志必须限频，避免故障本身再引发磁盘/日志采集 IO 雪崩。
+_REDIS_ERROR_LOG_INTERVAL_SEC = 30.0
+_last_redis_error_log_at = 0.0
+_suppressed_redis_error_logs = 0
+
+
+def _log_redis_failure(path: str, error: Exception, *, fail_closed: bool) -> None:
+    global _last_redis_error_log_at, _suppressed_redis_error_logs
+    now = time.monotonic()
+    if now - _last_redis_error_log_at < _REDIS_ERROR_LOG_INTERVAL_SEC:
+        _suppressed_redis_error_logs += 1
+        return
+    suppressed = _suppressed_redis_error_logs
+    _suppressed_redis_error_logs = 0
+    _last_redis_error_log_at = now
+    if fail_closed:
+        logger.error(
+            "限流 Redis 不可用，敏感路径 fail-closed: path=%s suppressed=%s err=%s",
+            path, suppressed, error,
+        )
+    else:
+        logger.warning(
+            "限流 Redis 不可用，降级放行: path=%s suppressed=%s err=%s",
+            path, suppressed, error,
+        )
 
 
 def _fail_closed_prefixes(raw: str) -> list[str]:
@@ -155,13 +183,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             raw_paths = getattr(settings, "rate_limit_fail_closed_paths", "")
             prefixes = _fail_closed_prefixes(raw_paths if isinstance(raw_paths, str) else "")
             if path_requires_fail_closed(path, prefixes):
-                logger.error("限流 Redis 不可用，敏感路径 fail-closed: path=%s err=%s", path, e)
+                _log_redis_failure(path, e, fail_closed=True)
                 return json_error_response(
                     request,
                     status_code=503,
                     code=50301,
                     message="限流服务暂不可用，请稍后重试",
                 )
-            logger.error("限流 Redis 不可用，降级放行: %s", e)
+            _log_redis_failure(path, e, fail_closed=False)
 
         return await call_next(request)
