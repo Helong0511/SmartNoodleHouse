@@ -2,7 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError as JWTError
 from passlib.context import CryptContext
 
 from app.core.config import get_settings
@@ -173,11 +174,7 @@ def decode_token(token: str, *, leeway_seconds: int = 0) -> dict[str, Any]:
         issuer=settings.app_name,
         audience=settings.jwt_audience,
         options={
-            "require_exp": True,
-            "require_iat": True,
-            "require_sub": True,
-            "require_nbf": True,
-            "require_aud": True,
-            "leeway": int(leeway_seconds or 0),
+            "require": ["exp", "iat", "sub", "nbf", "aud"],
         },
+        leeway=int(leeway_seconds or 0),
     )
