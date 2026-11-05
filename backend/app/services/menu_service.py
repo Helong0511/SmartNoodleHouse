@@ -251,6 +251,7 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
 
     lock_token: str | None = None
     lock_ok = False
+    build_version: int | None = None
     hit = _BUILD_CACHE.get(sid)
     if (
         hit is not None
@@ -311,6 +312,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                             ):
                                 invalidate_local_menu_cache(sid)
                                 await bump_menu_version(sid)
+                            # 先固定 DB 快照对应的菜单版本。若构建期间写路径 bump 版本，
+                            # 后续 Lua 发布会拒绝将旧快照写回 Redis。
+                            build_version = await get_menu_version(sid)
+                            if build_version <= 0:
+                                build_version = await bump_menu_version(sid)
                             bundle = await build_menu_bundle(db, sid)
                     except BaseException:
                         if lock_ok:
@@ -321,10 +327,20 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     if version <= 0:
         # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
         version = await bump_menu_version(sid)
-    bundle = {**bundle, "version": version}
+    # 若版本在构建期间发生变化，返回旧版本号，促使客户端下一次请求重新拉取；
+    # 更重要的是绝不把旧快照伪装成最新版本发布到共享缓存。
+    response_version = (
+        build_version if build_version is not None and version != build_version else version
+    )
+    bundle = {**bundle, "version": response_version}
     if lock_ok and lock_token:
         try:
-            published = await set_menu_bundle_if_owner(sid, bundle, lock_token)
+            published = await set_menu_bundle_if_owner(
+                sid,
+                bundle,
+                lock_token,
+                expected_version=build_version if build_version is not None else version,
+            )
             if published:
                 _BUILD_CACHE.put(sid, bundle)
             else:
