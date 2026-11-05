@@ -37,7 +37,7 @@ async def _collect_stock_push_jobs(
             select(Product).where(
                 Product.id == product_id,
                 Product.store_id == store_id,
-            )
+            ).execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if product is None:
@@ -49,7 +49,7 @@ async def _collect_stock_push_jobs(
             select(StoreProductStock).where(
                 StoreProductStock.store_id == store_id,
                 StoreProductStock.product_id == product_id,
-            )
+            ).execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     # 商品主档停售具有最高优先级；门店库存覆盖不能把总部/主档已下架商品重新上架。
@@ -70,7 +70,8 @@ async def _collect_stock_push_jobs(
             select(PlatformStoreBinding).where(
                 PlatformStoreBinding.store_id == store_id,
                 PlatformStoreBinding.status == 1,
-            )
+                *([PlatformStoreBinding.platform == platform_filter] if platform_filter else []),
+            ).execution_options(populate_existing=True)
         )
     ).scalars().all()
 
@@ -83,7 +84,7 @@ async def _collect_stock_push_jobs(
                     DeliveryProductMap.platform == binding.platform,
                     DeliveryProductMap.product_id == product_id,
                     DeliveryProductMap.status == 1,
-                )
+                ).execution_options(populate_existing=True)
             )
         ).scalars().all()
         if not maps:
