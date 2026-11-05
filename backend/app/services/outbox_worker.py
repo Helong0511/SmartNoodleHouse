@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
 from app.models import OutboxEvent
-from app.services.worker_common import backoff_seconds, claim_token, worker_id
+from app.services.worker_common import backoff_seconds, claim_lease_guard, claim_token, worker_id
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,8 @@ async def process_outbox_item(outbox_id: int) -> None:
             await _mark_failed(db, row, "payload_invalid_json", wid=wid)
             return
         try:
-            await handler(db, row)
+            async with claim_lease_guard(OutboxEvent, outbox_id, wid):
+                await handler(db, row)
             # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
             done_stmt = (
                 update(OutboxEvent)
