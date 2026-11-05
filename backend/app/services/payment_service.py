@@ -2608,7 +2608,34 @@ class PaymentService:
             idempotency_key=idem_key,
         )
         db.add(row)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            # 不同支付单并发复用同一幂等键时，先由唯一索引裁决；
+            # 回滚失败事务后重新读取胜出的退款单，匹配参数则安全返回原单。
+            await db.rollback()
+            if idem_key is not None:
+                winner = (
+                    await db.execute(
+                        select(PaymentRefund).where(
+                            PaymentRefund.idempotency_key == idem_key
+                        )
+                    )
+                ).scalar_one_or_none()
+                if winner is not None:
+                    if (
+                        int(winner.payment_id) != int(payment.id)
+                        or money(winner.amount) != money(amount)
+                        or str(winner.reason or "") != str(reason or "")
+                    ):
+                        raise AppException(
+                            40955, "退款幂等键已被不同的支付单或退款参数使用"
+                        )
+                    winner._idempotent_replay = True
+                    return winner
+            # 不是幂等键冲突（例如退款单号冲突）时保留原始数据库异常，
+            # 不伪装成可重试的幂等成功。
+            raise
 
         if pos_refund_request_id is not None:
             pos_request = (
