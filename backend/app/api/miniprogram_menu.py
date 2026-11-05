@@ -220,7 +220,6 @@ async def get_recommendations(
         if not lock_ok:
             waited = await wait_for_reco(
                 cid, store_id, scene, ab_bucket, cache_fingerprint, 2.0,
-                generation=reco_generation,
             )
             if waited is not None:
                 return success(waited, request=request)
