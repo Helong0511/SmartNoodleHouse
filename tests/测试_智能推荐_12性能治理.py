@@ -362,6 +362,31 @@ async def test_menu_bundle_version_flow(fake_redis, db_session):
 
 
 @pytest.mark.asyncio
+async def test_menu_bundle_invalidates_stale_local_cache_from_remote_version(fake_redis, db_session):
+    db = db_session
+    store = await make_store(db)
+    cat = await make_category(db, store.id)
+    product = await make_product(db, store.id, cat.id, name="旧菜单名")
+
+    first = await get_menu_bundle_api(request=None, db=db, store_id=store.id)
+    old_version = first["data"]["version"]
+    assert first["data"]["products"]["items"][0]["name"] == "旧菜单名"
+
+    # 模拟另一个 worker 更新数据并只 bump Redis 版本；本 worker 的进程内缓存没有被直接清除。
+    product.name = "新菜单名"
+    await db.flush()
+    new_version = await menu_cache.bump_menu_version(store.id)
+    assert new_version > old_version
+
+    refreshed = await get_menu_bundle_api(
+        request=None, db=db, store_id=store.id, version=old_version
+    )
+    assert refreshed["data"]["changed"] is True
+    assert refreshed["data"]["version"] == new_version
+    assert refreshed["data"]["products"]["items"][0]["name"] == "新菜单名"
+
+
+@pytest.mark.asyncio
 async def test_menu_bundle_requires_store(fake_redis, db_session):
     from app.core.exceptions import AppException
 
