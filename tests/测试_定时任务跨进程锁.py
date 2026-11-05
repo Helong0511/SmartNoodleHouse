@@ -409,3 +409,32 @@ async def test_active_leader_job_count_tracks_only_running_tasks():
         sa._active_leader_job_tasks.discard(task)
 
     assert sa.active_leader_job_count() == 0
+
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_leader_jobs_has_bounded_wait_for_cancel_resistant_task():
+    from app.services import scheduler_admin as sa
+
+    release = asyncio.Event()
+
+    async def cancellation_resistant():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # 模拟第三方 I/O / 任务错误地吞掉取消信号。
+            await release.wait()
+
+    task = asyncio.create_task(cancellation_resistant())
+    sa._active_leader_job_tasks.add(task)
+    try:
+        count = await sa.cancel_active_leader_jobs(timeout=0.1)
+        assert count == 1
+        assert not task.done()
+        assert sa.active_leader_job_count() >= 1
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        sa._active_leader_job_tasks.discard(task)
+
+    assert sa.active_leader_job_count() == 0
