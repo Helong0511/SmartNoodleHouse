@@ -251,13 +251,18 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         return "visibility_rule" in sample
 
     cached = await get_menu_bundle(sid)
-    # 在读取 Redis bundle 之后读取版本戳，避免先读旧版本、随后读到写路径已删除前的旧缓存。
+    # 在读取 Redis bundle 之后读取版本戳。版本键缺失/不可读时，缓存身份无法验证：
+    # Redis 可能只淘汰了 ver key 而保留旧 bundle，绝不能把 unknown 当作 generation 0 命中。
     remote_version = await get_menu_version(sid)
+    if remote_version <= 0:
+        # 同时丢弃本进程缓存；Redis 不可用时也不能用跨 worker 无法失效的旧菜单兜底。
+        invalidate_local_menu_cache(sid)
     if (
-        cached is not None
+        remote_version > 0
+        and cached is not None
         and _bundle_schedule_id(cached) == expected_sched
         and _bundle_has_visibility_meta(cached)
-        and (remote_version <= 0 or _bundle_version(cached) == remote_version)
+        and _bundle_version(cached) == remote_version
     ):
         return cached
 
@@ -267,11 +272,15 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     hit = _BUILD_CACHE.get(sid)
     # 本地缓存跨 worker 不会被直接删除；Redis 版本戳是远端失效广播。
     # 版本不一致时必须丢弃本进程旧 bundle，否则其它 worker 的更新会被旧值遮住 60 秒。
-    if hit is not None and remote_version > 0 and _bundle_version(hit) != remote_version:
+    if hit is not None and (
+        remote_version <= 0 or _bundle_version(hit) != remote_version
+    ):
         _BUILD_CACHE.delete(sid)
         hit = None
     if (
-        hit is not None
+        remote_version > 0
+        and hit is not None
+        and _bundle_version(hit) == remote_version
         and _bundle_schedule_id(hit) == expected_sched
         and _bundle_has_visibility_meta(hit)
     ):
@@ -286,13 +295,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
             cached_after_wait = await get_menu_bundle(sid)
             remote_after_wait = await get_menu_version(sid)
             if (
-                cached_after_wait is not None
+                remote_after_wait > 0
+                and cached_after_wait is not None
+                and _bundle_version(cached_after_wait) == remote_after_wait
                 and _bundle_schedule_id(cached_after_wait) == expected_sched
                 and _bundle_has_visibility_meta(cached_after_wait)
-                and (
-                    remote_after_wait <= 0
-                    or _bundle_version(cached_after_wait) == remote_after_wait
-                )
             ):
                 bundle = cached_after_wait
             else:
@@ -305,7 +312,9 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                     _BUILD_CACHE.delete(sid)
                     hit_after_wait = None
                 if (
-                    hit_after_wait is not None
+                    remote_after_wait > 0
+                    and hit_after_wait is not None
+                    and _bundle_version(hit_after_wait) == remote_after_wait
                     and _bundle_schedule_id(hit_after_wait) == expected_sched
                     and _bundle_has_visibility_meta(hit_after_wait)
                 ):
