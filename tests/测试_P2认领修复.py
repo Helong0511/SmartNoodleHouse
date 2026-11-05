@@ -419,7 +419,9 @@ async def test_outbox_process_uses_atomic_owner_release():
 
     db = MagicMock()
     db.execute = AsyncMock(return_value=done_result)
+    db.scalar = AsyncMock(return_value=None)
     db.commit = AsyncMock()
+    db.rollback = AsyncMock()
 
     handler = AsyncMock()
 
@@ -441,7 +443,10 @@ async def test_outbox_mark_failed_uses_atomic_owner_check():
     """_mark_failed 使用原子 UPDATE WHERE locked_by=wid。"""
     from app.services import outbox_worker
 
-    row = SimpleNamespace(id=5, locked_by="host:1234:pid")
+    row = SimpleNamespace(
+        id=5, locked_by="host:1234:pid",
+        aggregate_type="payment", aggregate_id=9,
+    )
     fresh = SimpleNamespace(
         id=5, status="PROCESSING", attempt_count=2, max_attempts=8,
     )
