@@ -4,11 +4,31 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+from urllib.parse import urlsplit
 import sys
 
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def _production_redis_url_errors(raw_url: str) -> list[str]:
+    """严格解析 redis:// 与 rediss://，不能用字符串中是否含 @ 判断密码。"""
+    value = (raw_url or "").strip()
+    errors: list[str] = []
+    try:
+        parsed = urlsplit(value)
+        hostname = (parsed.hostname or "").strip().lower()
+        password = parsed.password
+    except Exception:
+        return ["生产环境 REDIS_URL 格式无效，须为 redis:// 或 rediss:// URL"]
+    if parsed.scheme.lower() not in ("redis", "rediss") or not hostname:
+        errors.append("生产环境 REDIS_URL 须使用有效的 redis:// 或 rediss:// 地址")
+    if hostname in ("localhost", "127.0.0.1", "::1"):
+        errors.append("生产环境 REDIS_URL 不得指向 localhost/回环地址，须为生产 Redis 地址")
+    if not password:
+        errors.append("生产环境 REDIS_URL 必须配置 Redis 密码（支持 ACL username:password）")
+    return errors
 
 _DANGEROUS_JWT = {
     "change-me",
@@ -183,13 +203,8 @@ def validate_settings(settings: Settings) -> None:
         errors.append("生产环境 DATABASE_URL 不得使用 sqlite/localhost，须为生产 MySQL 地址")
 
     redis_url = (getattr(settings, "redis_url", None) or "").strip()
-    redis_url_lower = redis_url.lower()
-    if is_prod and "redis://" in redis_url_lower:
-        if "localhost" in redis_url_lower or "127.0.0.1" in redis_url_lower:
-            errors.append("生产环境 REDIS_URL 不得指向 localhost/127.0.0.1，须为生产 Redis 地址")
-        # 无密码检查：redis://host:port/db 或 redis://host:port（不含 @）
-        if "@" not in redis_url_lower and "://" in redis_url_lower:
-            errors.append("生产环境 REDIS_URL 须包含密码（redis://:password@host:port/db），当前无认证凭据")
+    if is_prod:
+        errors.extend(_production_redis_url_errors(redis_url))
     if is_prod:
         # maxmemory 与持久化为 Redis 服务端配置，代码层无法验证，但须提醒运维检查
         warnings.append(
