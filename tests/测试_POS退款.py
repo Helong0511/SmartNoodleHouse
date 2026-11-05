@@ -240,13 +240,15 @@ async def test_approve_claims_processing_before_channel_refund():
         fail_reason=None,
     )
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_lock_result(row))
+    refund_row = SimpleNamespace(id=99, status="SUCCESS", fail_reason=None)
+    request_result = _lock_result(row)
+    refund_result = _lock_result(refund_row)
+    db.execute = AsyncMock(side_effect=[request_result, refund_result, request_result, request_result])
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
     db.get = AsyncMock(return_value=payment)
 
-    refund_row = SimpleNamespace(id=99, status="SUCCESS", fail_reason=None)
     refund_mock = AsyncMock(return_value=refund_row)
 
     with patch(
