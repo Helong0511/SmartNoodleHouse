@@ -84,6 +84,7 @@ async def test_finalize_refund_marks_partial():
 
     payment = MagicMock()
     payment.id = 1
+    payment.order_id = 9
     payment.amount = Decimal("100.00")
     payment.status = "PAID"
 
@@ -148,6 +149,7 @@ async def test_finalize_refund_deducts_points_for_customer():
 
     payment = MagicMock()
     payment.id = 1
+    payment.order_id = 9
     payment.amount = Decimal("100.00")
     payment.status = "PAID"
 
