@@ -345,7 +345,10 @@ async def process_pending_outbox(limit: int = 30) -> int:
                 select(OutboxEvent.id)
                 .where(
                     or_(
-                        OutboxEvent.status == "PENDING",
+                        and_(
+                            OutboxEvent.status == "PENDING",
+                            OutboxEvent.attempt_count < OutboxEvent.max_attempts,
+                        ),
                         and_(
                             OutboxEvent.status == "FAILED",
                             OutboxEvent.attempt_count < OutboxEvent.max_attempts,
