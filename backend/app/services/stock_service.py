@@ -1,7 +1,7 @@
 """库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌餐品库存"""
 from __future__ import annotations
 
-from sqlalchemy import select, text, update
+from sqlalchemy import case, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
@@ -37,6 +37,11 @@ async def _emit_stock_mirror(
         payload=payload,
     )
     if not is_new:
+        # 正在处理的事件绝不能被新库存变化抢占/清锁，否则新旧 Worker 会并发
+        # 向平台发送 HTTP，旧请求可能最后完成并覆盖较新的库存。
+        # PROCESSING 保持原 owner 和租约，只递增版本；旧 Worker 完成时检测版本变化
+        # 并将同一行重新排队。非处理中事件则正常复活并清理旧重试状态。
+        processing = OutboxEvent.status == "PROCESSING"
         await db.execute(
             update(OutboxEvent)
             .where(
@@ -45,11 +50,12 @@ async def _emit_stock_mirror(
                 OutboxEvent.event_kind == "mirror",
             )
             .values(
-                status="PENDING",
-                attempt_count=0,
-                next_retry_at=None,
-                locked_at=None,
-                locked_by=None,
+                sync_version=OutboxEvent.sync_version + 1,
+                status=case((processing, OutboxEvent.status), else_="PENDING"),
+                attempt_count=case((processing, OutboxEvent.attempt_count), else_=0),
+                next_retry_at=case((processing, OutboxEvent.next_retry_at), else_=None),
+                locked_at=case((processing, OutboxEvent.locked_at), else_=None),
+                locked_by=case((processing, OutboxEvent.locked_by), else_=None),
                 last_error=None,
                 payload=dumps_json(payload),
             )
