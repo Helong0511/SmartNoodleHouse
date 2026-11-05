@@ -1004,7 +1004,7 @@ async def test_reco_rebuild_wait_is_bounded_when_cache_never_appears():
     from app.services import reco_cache
 
     calls = {"n": 0}
-    async def fake_get(*_args):
+    async def fake_get(*_args, **_kwargs):
         calls["n"] += 1
         return None
 
