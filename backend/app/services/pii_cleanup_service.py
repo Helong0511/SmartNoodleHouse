@@ -11,7 +11,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
-from app.models import DeliveryOrder, Order
+from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryRefund, Order
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,15 @@ async def anonymize_expired_delivery_pii(
     stmt = (
         update(DeliveryOrder)
         .where(
-            DeliveryOrder.recipient_phone.isnot(None),
             DeliveryOrder.order_id.in_(expired_order_ids),
+            or_(
+                DeliveryOrder.recipient_name.isnot(None),
+                DeliveryOrder.recipient_phone.isnot(None),
+                DeliveryOrder.recipient_address.isnot(None),
+                DeliveryOrder.rider_name.isnot(None),
+                DeliveryOrder.rider_phone.isnot(None),
+                DeliveryOrder.raw_payload.isnot(None),
+            ),
         )
         .values(
             recipient_name=None,
@@ -57,9 +64,21 @@ async def anonymize_expired_delivery_pii(
             recipient_address=None,
             rider_name=None,
             rider_phone=None,
+            raw_payload=None,
         )
     )
     result = await db.execute(stmt)
+    # 原始回调/退款 payload 也可能包含收件人、骑手和地址信息，必须与订单 PII 同期脱敏。
+    await db.execute(
+        update(DeliveryRefund)
+        .where(DeliveryRefund.order_id.in_(expired_order_ids), DeliveryRefund.raw_payload.isnot(None))
+        .values(raw_payload=None)
+    )
+    await db.execute(
+        update(DeliveryCallbackLog)
+        .where(DeliveryCallbackLog.order_id.in_(expired_order_ids), DeliveryCallbackLog.payload.isnot(None))
+        .values(payload=None)
+    )
     await db.commit()
     count = int(result.rowcount or 0)
     if count:
