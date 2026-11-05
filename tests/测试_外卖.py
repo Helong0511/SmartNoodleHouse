@@ -281,3 +281,22 @@ async def test_delivery_callback_log_fallback_event_id_is_content_stable_and_dis
     assert first_row.event_id == duplicate_row.event_id
     assert first_row.event_id != changed_row.event_id
     assert len(first_row.event_id) <= 128
+
+
+def test_refund_event_fingerprint_is_stable_without_provider_refund_id():
+    from decimal import Decimal
+
+    from app.services.delivery_service import _refund_event_fingerprint
+
+    raw_a = {"refund_amount": "12.00", "reason": "顾客申请", "status": "SUCCESS"}
+    raw_b = {"status": "SUCCESS", "reason": "顾客申请", "refund_amount": "12.00"}
+
+    first = _refund_event_fingerprint("MEITUAN", 88, Decimal("12.00"), "PARTIAL", raw_a)
+    retry = _refund_event_fingerprint("meituan", 88, Decimal("12.00"), "PARTIAL", raw_b)
+    changed = _refund_event_fingerprint(
+        "MEITUAN", 88, Decimal("15.00"), "PARTIAL", {"refund_amount": "15.00", "status": "SUCCESS"}
+    )
+
+    assert first == retry
+    assert first != changed
+    assert len(first) == 64
