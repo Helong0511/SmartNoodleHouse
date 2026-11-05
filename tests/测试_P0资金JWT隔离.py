@@ -25,7 +25,7 @@ from app.services.store_scope import assert_store_access
 
 def _jwt_settings(**over):
     base = dict(
-        jwt_secret="s" * 48,
+        jwt_secret="s" * 64,
         jwt_algorithm="HS256",
         jwt_expire_minutes=60,
         customer_jwt_expire_minutes=120,
