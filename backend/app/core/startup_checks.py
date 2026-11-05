@@ -84,6 +84,7 @@ def _invalid_ip_allowlist_entries(raw: str) -> list[str]:
             invalid.append(part)
     return invalid
 
+
 def _invalid_trusted_proxy_entries(raw: str) -> list[str]:
     """可信代理允许为空（不信任任何转发头），但不能包含非法项或全网段。"""
     parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
