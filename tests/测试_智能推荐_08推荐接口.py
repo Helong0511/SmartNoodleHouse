@@ -50,18 +50,29 @@ class FakeRedis:
     async def eval(self, script, numkeys, *args):
         keys = list(args[:numkeys])
         argv = list(args[numkeys:])
-        if "redis.call('SET', KEYS[2]" in script and len(keys) == 2:
-            lock_key, cache_key = keys
-            token, raw, _ttl = argv
-            if self.store.get(lock_key) == str(token):
+        if "redis.call('INCR'" in script and len(keys) == 1:
+            generation = int(self.store.get(keys[0]) or 0) + 1
+            self.store[keys[0]] = str(generation)
+            return generation
+        if "redis.call('SET', KEYS[2]" in script and len(keys) == 3:
+            lock_key, cache_key, generation_key = keys
+            token, raw, _ttl, expected_generation = argv
+            current_generation = self.store.get(generation_key) or "0"
+            if self.store.get(lock_key) == str(token) and current_generation == str(expected_generation):
                 self.store[cache_key] = str(raw)
                 return "OK"
             return None
-        if "redis.call('del'" in script and len(keys) == 1:
+        if "redis.call('GET', KEYS[1])" in script and len(keys) == 2:
+            generation_key, cache_key = keys
+            expected_generation = str(argv[0])
+            if (self.store.get(generation_key) or "0") == expected_generation:
+                return self.store.get(cache_key)
+            return None
+        if "redis.call('del'" in script.lower() and len(keys) == 1:
             if self.store.get(keys[0]) == str(argv[0]):
                 return await self.delete(keys[0])
             return 0
-        if "redis.call('expire'" in script and len(keys) == 1:
+        if "redis.call('expire'" in script.lower() and len(keys) == 1:
             return 1 if self.store.get(keys[0]) == str(argv[0]) else 0
         raise NotImplementedError("FakeRedis.eval 未覆盖该 Lua 脚本")
 
