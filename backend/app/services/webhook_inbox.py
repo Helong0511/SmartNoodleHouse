@@ -30,6 +30,31 @@ BACKOFF_CAP_SEC = 3600
 STALE_PROCESSING_SEC = 300
 
 
+def _build_deferred_outbox_payload(task: dict[str, Any], channel: str) -> dict[str, Any]:
+    """构建最小化、无密钥的持久化副作用 payload。"""
+    action = str(task.get("action") or "").strip().lower()
+    if action not in {"confirm_order", "cancel_order", "reply_urge", "print_ticket"}:
+        raise ValueError(f"unsupported deferred webhook action: {action or 'empty'}")
+    credentials = task.get("credentials") or {}
+    store_id = task.get("store_id") or (
+        credentials.get("store_id") if isinstance(credentials, dict) else None
+    )
+    raw = task.get("raw")
+    return {
+        "action": action,
+        "platform": str(task.get("platform") or channel).upper(),
+        "platform_order_id": str(task.get("platform_order_id") or ""),
+        "store_id": int(store_id) if store_id else None,
+        "order_id": int(task["order_id"]) if task.get("order_id") else None,
+        "rollback_on_fail": bool(task.get("rollback_on_fail")),
+        "reason": str(task.get("reason") or "")[:200],
+        "ticket_type": str(task.get("ticket_type") or "KITCHEN").upper(),
+        # 催单接口仅使用 reply_type；不保存整份 webhook（可能含顾客地址/手机号）。
+        "raw": {"reply_type": raw.get("reply_type", 2)}
+        if action == "reply_urge" and isinstance(raw, dict) else {},
+    }
+
+
 def _backoff_seconds(attempt_count: int) -> int:
     """指数退避：2^attempt 秒，封顶 1 小时。"""
     return backoff_seconds(attempt_count, cap=BACKOFF_CAP_SEC)
@@ -201,32 +226,12 @@ async def process_inbox_item(inbox_id: int) -> bool:
                 # 将所有必须在事务提交后执行的副作用写入同一 DB Outbox 事务。
                 # 不持久化 access_token / refresh_token，也不保存整份 webhook raw。
                 for task_index, task in enumerate(result.deferred_tasks or []):
-                    action = str(task.get("action") or "").strip().lower()
-                    if action not in {"confirm_order", "cancel_order", "reply_urge", "print_ticket"}:
-                        raise ValueError(f"unsupported deferred webhook action: {action or 'empty'}")
-                    credentials = task.get("credentials") or {}
-                    store_id = task.get("store_id") or (
-                        credentials.get("store_id") if isinstance(credentials, dict) else None
-                    )
-                    safe_task = {
-                        "action": action,
-                        "platform": str(task.get("platform") or row.channel).upper(),
-                        "platform_order_id": str(task.get("platform_order_id") or ""),
-                        "store_id": int(store_id) if store_id else None,
-                        "order_id": int(task["order_id"]) if task.get("order_id") else None,
-                        "rollback_on_fail": bool(task.get("rollback_on_fail")),
-                        "reason": str(task.get("reason") or "")[:200],
-                        "ticket_type": str(task.get("ticket_type") or "KITCHEN").upper(),
-                        # 美团催单回复只需要 reply_type；不保存顾客地址/手机号等完整回调内容。
-                        "raw": {"reply_type": task.get("raw", {}).get("reply_type", 2)}
-                        if action == "reply_urge" and isinstance(task.get("raw"), dict) else {},
-                    }
                     await enqueue_outbox(
                         db,
                         aggregate_type="webhook_task",
                         aggregate_id=int(inbox_id),
                         event_kind=f"deferred_{task_index:04d}",
-                        payload=safe_task,
+                        payload=_build_deferred_outbox_payload(task, row.channel),
                     )
                 # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
                 # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
