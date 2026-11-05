@@ -39,8 +39,31 @@ class FakeRedis:
     async def get(self, key):
         return self.store.get(key)
 
-    async def set(self, key, value, ex=None):
-        self.store[key] = value
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
+        if nx and key in self.store:
+            return None
+        if xx and key not in self.store:
+            return None
+        self.store[key] = str(value)
+        return True
+
+    async def eval(self, script, numkeys, *args):
+        keys = list(args[:numkeys])
+        argv = list(args[numkeys:])
+        if "redis.call('SET', KEYS[2]" in script and len(keys) == 2:
+            lock_key, cache_key = keys
+            token, raw, _ttl = argv
+            if self.store.get(lock_key) == str(token):
+                self.store[cache_key] = str(raw)
+                return "OK"
+            return None
+        if "redis.call('del'" in script and len(keys) == 1:
+            if self.store.get(keys[0]) == str(argv[0]):
+                return await self.delete(keys[0])
+            return 0
+        if "redis.call('expire'" in script and len(keys) == 1:
+            return 1 if self.store.get(keys[0]) == str(argv[0]) else 0
+        raise NotImplementedError("FakeRedis.eval 未覆盖该 Lua 脚本")
 
     async def delete(self, *keys):
         n = 0
@@ -60,7 +83,7 @@ class BrokenRedis(FakeRedis):
     async def get(self, key):
         raise RuntimeError("redis down")
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
         raise RuntimeError("redis down")
 
     async def scan_iter(self, match, count=None):
@@ -236,7 +259,7 @@ async def test_anonymous_vs_customer_cache_separated(db_session, fake_redis):
 
 
 @pytest.mark.asyncio
-async def test_redis_failure_degrades_gracefully(db_session, monkeypatch):
+async def test_redis_failure_without_cache_fails_closed_to_prevent_db_stampede(db_session, monkeypatch):
     async def _get():
         return BrokenRedis()
 
@@ -246,9 +269,12 @@ async def test_redis_failure_degrades_gracefully(db_session, monkeypatch):
     cat = await make_category(db, store.id, name="招牌面")
     await make_product(db, store.id, cat.id, name="小面", sales_count=10)
 
-    data = await _call(db, store)
-    assert data["items"]
-    assert data["cache_hit"] is False
+    # 推荐是非关键展示能力；Redis 不可用且本地无缓存时返回可重试 503，
+    # 不允许每个 worker 都绕过分布式锁并发回源查询画像/订单。
+    with pytest.raises(AppException) as exc:
+        await _call(db, store)
+    assert exc.value.code == 50301
+    assert exc.value.status_code == 503
 
 
 # ---------- TR-8.2 写后主动失效 ----------
