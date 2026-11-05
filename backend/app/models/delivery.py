@@ -141,15 +141,18 @@ class DeliverySyncAlert(Base):
 
 class DeliveryRefund(Base):
     __tablename__ = "delivery_refunds"
-    # (platform, platform_refund_id) 唯一：防止重复回调/并发请求创建多条退款台账
-    # platform_refund_id 为 NULL 时不受约束（平台未给 refund_id 的退款仍可入账）
-    __table_args__ = (UniqueConstraint("platform", "platform_refund_id"),)
+    # 平台退款编号与无编号事件指纹分别唯一；NULL 退款编号由 event_fingerprint 兜底去重。
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_refund_id"),
+        UniqueConstraint("platform", "event_fingerprint"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     delivery_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("delivery_orders.id", ondelete="CASCADE"), index=True)
     order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), index=True)
     platform: Mapped[str] = mapped_column(String(20))
     platform_refund_id: Mapped[str | None] = mapped_column(String(64))
+    event_fingerprint: Mapped[str | None] = mapped_column(String(64))
     refund_type: Mapped[str] = mapped_column(String(30), default="FULL")
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     reason: Mapped[str | None] = mapped_column(String(500))
