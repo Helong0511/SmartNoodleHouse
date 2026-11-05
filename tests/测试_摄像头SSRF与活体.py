@@ -375,3 +375,25 @@ def test_camera_worker_revalidates_target_before_open_and_reconnect(monkeypatch)
     capture.assert_not_called()
     assert worker.status == "OFFLINE"
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "rtsp://192.168.1.10:99999/Streaming/Channels/102",
+        "rtsp://192.168.1.10:not-a-port/Streaming/Channels/102",
+    ],
+)
+def test_camera_url_rejects_invalid_ports(url):
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe(url)
+    assert ei.value.code == 40026
+
+
+def test_camera_url_rejects_empty_dns_answer(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [],
+    )
+    with pytest.raises(AppException) as ei:
+        assert_camera_url_safe("rtsp://camera.example.invalid/Streaming/Channels/102")
+    assert ei.value.code == 40026
+
