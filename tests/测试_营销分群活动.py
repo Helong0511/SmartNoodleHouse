@@ -524,7 +524,9 @@ async def test_draft_publish_idempotent_pause(db_session):
     await db_session.commit()
     stats2 = await MarketingService.process_pending_tasks(db_session, limit=20)
     await db_session.commit()
-    assert stats2["success"] == 3
+    # 已存在同模板未用券时，重复执行应被标记为 SKIPPED，而不是重复发券。
+    assert stats2["success"] == 0
+    assert stats2["skipped"] == 3
     coupons2 = int(
         await db_session.scalar(
             select(func.count())
