@@ -997,9 +997,10 @@ class VisitorService:
                 continue
             try:
                 # False 表示本地对象已不存在；删除目标已经满足，可清理数据库引用。
-                await storage.delete(key)
+                removed = await storage.delete(key)
                 deletable_ids.append(int(row.id))
-                deleted_files += 1
+                if removed:
+                    deleted_files += 1
             except Exception:
                 # 对象删除失败时保留 DB 行，供下一轮任务重试，禁止制造孤儿文件。
                 logger.warning("清空访客时删除抓拍失败，保留事件记录 id=%s path=%s", row.id, snapshot_path, exc_info=True)
