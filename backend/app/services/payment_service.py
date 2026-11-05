@@ -2529,6 +2529,7 @@ class PaymentService:
         reason: str,
         operator_id: int | None = None,
         pos_refund_request_id: int | None = None,
+        idempotency_key: str | None = None,
     ) -> PaymentRefund:
         locked = (
             await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
@@ -2536,6 +2537,28 @@ class PaymentService:
         if not locked:
             raise AppException(40401, "支付记录不存在")
         payment = locked
+        # HTTP 客户端可用 Idempotency-Key 安全重试退款请求。
+        # 必须在支付终态检查之前查询，才能在“部分退款成功但响应丢失”后返回原退款单，
+        # 而不是再次向渠道发起一笔新的部分退款。
+        idem_key = str(idempotency_key or "").strip() or None
+        if idem_key is not None:
+            if len(idem_key) > 64:
+                raise AppException(40055, "退款幂等键长度不能超过 64 个字符")
+            existing_refund = (
+                await db.execute(
+                    select(PaymentRefund)
+                    .where(PaymentRefund.idempotency_key == idem_key)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if existing_refund is not None:
+                if (
+                    int(existing_refund.payment_id) != int(payment.id)
+                    or money(existing_refund.amount) != money(amount)
+                    or str(existing_refund.reason or "") != str(reason or "")
+                ):
+                    raise AppException(40955, "退款幂等键已被不同的支付单或退款参数使用")
+                return existing_refund
         if payment.status == "REFUNDED":
             raise AppException(40053, "该支付已全额退款，不可重复退款")
         if payment.status not in ("PAID", "PARTIAL_REFUND"):
@@ -2580,6 +2603,7 @@ class PaymentService:
             reason=reason,
             status="PENDING",
             operator_id=operator_id,
+            idempotency_key=idem_key,
         )
         db.add(row)
         await db.flush()
