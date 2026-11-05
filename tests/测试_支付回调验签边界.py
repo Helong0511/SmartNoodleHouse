@@ -583,7 +583,8 @@ async def test_abnormal_refund_is_included_in_refundable_amount_reservation():
     payment = SimpleNamespace(id=77, amount=Decimal("10.00"))
     remaining = await PaymentService.refundable_amount(db, payment)
     statement = db.scalar.await_args.args[0]
-    assert "ABNORMAL" in str(statement)
+    compiled = statement.compile(compile_kwargs={"literal_binds": True})
+    assert "ABNORMAL" in str(compiled)
     assert remaining == Decimal("0.00")
 
 
@@ -622,11 +623,17 @@ async def test_alipay_callback_does_not_treat_payment_trade_no_as_refund_id():
 
 
 class _SyncRefundDB:
-    def __init__(self, payment):
+    def __init__(self, payment, refund):
         self.payment = payment
+        self.refund = refund
 
     async def get(self, model, row_id):
         return self.payment
+
+    async def execute(self, statement):
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = self.refund
+        return result
 
 
 def _sync_refund_objects(provider="ALIPAY"):
@@ -652,7 +659,7 @@ def _sync_refund_objects(provider="ALIPAY"):
 @pytest.mark.asyncio
 async def test_alipay_refund_query_poll_validates_per_request_amount(monkeypatch):
     payment, refund = _sync_refund_objects("ALIPAY")
-    db = _SyncRefundDB(payment)
+    db = _SyncRefundDB(payment, refund)
     query = AsyncMock(
         return_value={
             "refund_no": "R-100",
@@ -675,7 +682,7 @@ async def test_alipay_refund_query_poll_validates_per_request_amount(monkeypatch
 @pytest.mark.asyncio
 async def test_alipay_refund_query_poll_rejects_amount_mismatch(monkeypatch):
     payment, refund = _sync_refund_objects("ALIPAY")
-    db = _SyncRefundDB(payment)
+    db = _SyncRefundDB(payment, refund)
     monkeypatch.setattr(
         PaymentService,
         "_query_channel_refund",
@@ -701,7 +708,7 @@ async def test_alipay_refund_query_poll_rejects_amount_mismatch(monkeypatch):
 async def test_wechat_refund_query_poll_validates_refund_and_original_total(monkeypatch):
     payment, refund = _sync_refund_objects("WECHAT")
     payment.amount = 10
-    db = _SyncRefundDB(payment)
+    db = _SyncRefundDB(payment, refund)
     monkeypatch.setattr(
         PaymentService,
         "_query_channel_refund",
@@ -726,7 +733,7 @@ async def test_wechat_refund_query_poll_validates_refund_and_original_total(monk
 @pytest.mark.asyncio
 async def test_refund_query_poll_rejects_mismatched_refund_identifier(monkeypatch):
     payment, refund = _sync_refund_objects("ALIPAY")
-    db = _SyncRefundDB(payment)
+    db = _SyncRefundDB(payment, refund)
     monkeypatch.setattr(
         PaymentService,
         "_query_channel_refund",
