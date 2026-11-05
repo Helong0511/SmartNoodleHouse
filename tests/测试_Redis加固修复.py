@@ -862,19 +862,19 @@ async def test_reco_cache_customer_invalidation_clears_local_fallback():
 
 
 @pytest.mark.asyncio
-async def test_reco_cache_invalidation_deletes_large_key_sets_in_bounded_batches():
+async def test_reco_cache_invalidation_bumps_generation_without_scanning_keys():
     from app.services import reco_cache
+    from app.core.cache_keys import reco_generation_key
 
     fake = FakeRedis()
     for i in range(450):
         fake.store[f"snh:reco:c77:s1:menu:b{i}"] = "{}"
-    with (
-        patch.object(reco_cache, "get_redis", _patch_get_redis(fake)),
-        patch.object(reco_cache, "spawn_bg", lambda coro: coro.close()),
-    ):
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
         await reco_cache.invalidate_customer(77)
-    assert len(fake.delete_calls) == 450
-    assert not any(key in fake.store for key in fake.delete_calls)
+    # 新方案只原子推进 generation；旧代际缓存自然过期，不执行 SCAN/批量 DEL。
+    assert fake.store[reco_generation_key(77)] == "1"
+    assert fake.delete_calls == []
+    assert len([k for k in fake.store if k.startswith("snh:reco:c77:")]) == 450
 
 
 @pytest.mark.asyncio
@@ -967,7 +967,7 @@ async def test_reco_rebuild_wait_polls_until_cache_is_ready():
     from app.services import reco_cache
 
     calls = {"n": 0}
-    async def fake_get(*_args):
+    async def fake_get(*_args, **_kwargs):
         calls["n"] += 1
         return {"items": []} if calls["n"] >= 3 else None
 
