@@ -229,6 +229,14 @@ async def process_outbox_item(outbox_id: int) -> None:
                     )
                 )
                 done_result = await db.execute(done_stmt)
+                if int(done_result.rowcount or 0) != 1:
+                    # 失去 claim 所有权时，Handler 的 DB 修改必须一起回滚；
+                    # 不能只跳过 Outbox DONE，却提交旧 worker 的业务副作用。
+                    await db.rollback()
+                    logger.warning(
+                        "Outbox claim 已丢失，回滚旧 worker 事务 id=%s", outbox_id
+                    )
+                    return
                 # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
                 # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
                 idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
@@ -252,10 +260,6 @@ async def process_outbox_item(outbox_id: int) -> None:
                 await mark_processed_redis(scope="outbox", message_id=idem_msg, ttl_seconds=86400 * 7)
             except Exception:
                 logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
-            if not done_result.rowcount:
-                logger.warning(
-                    "Outbox 行在处理期间被 reclaim 释放 id=%s", outbox_id
-                )
         except Exception as e:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, e)
             # handler 异常后会话可能处于失败态，先回滚再用同一会话标记失败
