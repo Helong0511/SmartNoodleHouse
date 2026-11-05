@@ -253,28 +253,29 @@ async def test_handler平台返回失败时抛错等待重试(db_session, monkey
 
 
 @pytest.mark.asyncio
-async def test_handler_commits_before_platform_http():
-    """outbox 库存镜像：collect 后 commit，再调平台。"""
+async def test_handler_refreshes_each_platform_snapshot_before_http():
+    """每个平台 HTTP 前独立重读库存并提交读事务，不能复用上一平台的快照。"""
     order: list[str] = []
     db = AsyncMock()
+    db.commit = AsyncMock(side_effect=lambda: order.append("commit"))
+    db.expire_all = MagicMock()
+    platform_result = MagicMock()
+    platform_result.scalars.return_value.all.return_value = ["MEITUAN", "ELEME"]
+    db.execute = AsyncMock(return_value=platform_result)
 
-    async def _commit():
-        order.append("commit")
+    async def _collect(_db, store_id, product_id, *, platform_filter=None):
+        order.append(f"read:{platform_filter}")
+        stock = 3 if platform_filter == "MEITUAN" else 2
+        return [(platform_filter, MagicMock(), [{"stock": stock}], True)]
 
-    db.commit = AsyncMock(side_effect=_commit)
+    async def _push(jobs, *, store_id, product_id):
+        order.append(f"http:{jobs[0][0]}:{jobs[0][2][0]['stock']}")
+        return 0
 
     with patch.object(
-        hmod,
-        "_collect_stock_push_jobs",
-        new_callable=AsyncMock,
-        return_value=[("MEITUAN", MagicMock(), [{"stock": 0}], True)],
+        hmod, "_collect_stock_push_jobs", new_callable=AsyncMock, side_effect=_collect
     ), patch.object(
-        hmod,
-        "_execute_stock_push_jobs",
-        new_callable=AsyncMock,
-        side_effect=lambda jobs, store_id, product_id: (
-            order.append("http") or 0
-        ),
+        hmod, "_execute_stock_push_jobs", new_callable=AsyncMock, side_effect=_push
     ):
         await delivery_stock_mirror_handler(
             db,
@@ -284,7 +285,13 @@ async def test_handler_commits_before_platform_http():
             ),
         )
 
-    assert order == ["commit", "http"]
+    assert order == [
+        "commit",
+        "read:MEITUAN", "commit", "http:MEITUAN:3",
+        "read:ELEME", "commit", "http:ELEME:2",
+    ]
+    assert db.expire_all.await_count == 0
+    assert db.expire_all.call_count == 2
 
 
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
