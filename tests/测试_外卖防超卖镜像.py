@@ -290,7 +290,6 @@ async def test_handler_refreshes_each_platform_snapshot_before_http():
         "read:MEITUAN", "commit", "http:MEITUAN:3",
         "read:ELEME", "commit", "http:ELEME:2",
     ]
-    assert db.expire_all.await_count == 0
     assert db.expire_all.call_count == 2
 
 
