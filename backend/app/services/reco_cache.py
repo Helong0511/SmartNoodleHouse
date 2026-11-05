@@ -110,13 +110,14 @@ async def set_cached_reco(
     payload: dict[str, Any],
     fingerprint: str = "",
 ) -> None:
+    body = dict(payload)
+    body["cache_hit"] = False
+    # 先写本地短缓存，再尝试 Redis；即使 Redis 客户端初始化本身失败也能 single-flight 复用。
+    _set_local_reco(
+        _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
+    )
     try:
         r = await get_redis()
-        body = dict(payload)
-        body["cache_hit"] = False
-        _set_local_reco(
-            _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
-        )
         await r.set(
             reco_key(customer_id, store_id, scene, bucket, fingerprint),
             dumps_json(body, compact=True),
