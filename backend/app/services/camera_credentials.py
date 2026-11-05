@@ -77,11 +77,10 @@ def assert_camera_url_safe(source_url: str) -> None:
         pass
     try:
         infos = socket.getaddrinfo(host, None)
-    except OSError:
-        # 无法解析时不放行可疑主机名到云元数据别名；普通局域网主机名允许后续连接失败
-        if "metadata" in host or host.endswith(".internal"):
-            raise AppException(40026, f"摄像头地址禁止指向元数据/危险端点: {host}")
-        return
+    except OSError as exc:
+        # 无法解析就无法证明目标安全；拒绝保存，防止 DNS 故障/临时 NXDOMAIN
+        # 被当作安全放行，随后主机名解析结果变化指向内网管理面或云元数据。
+        raise AppException(40026, f"摄像头主机名无法解析，拒绝连接: {host}") from exc
     for info in infos:
         addr = info[4][0]
         if _is_blocked_ip(str(addr)):
