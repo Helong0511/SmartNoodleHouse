@@ -35,24 +35,30 @@ def test_camera_manager_start_force_replaces_under_lock(monkeypatch):
 
 
 def test_stop_camera_joins_outside_manager_lock():
-    """stop join 须在锁外，否则 abort/get_worker 会卡在同一把 RLock。"""
-    import inspect
+    """stop 的 join 必须在全局注册表锁外执行，避免阻塞其他摄像头操作。"""
+    import threading
 
     from camera import camera_manager as cm
 
-    src = inspect.getsource(cm.CameraManager.stop_camera)
-    # 锁内仅 pop/signal；worker.stop()（含 join）在 with 块外
-    assert "_stop_camera_unlocked" in src
-    assert "worker.stop()" in src
-    # with 结束后才 stop：粗检「with」块后出现 stop
-    after_with = src.split("with self._lock:")[1]
-    # 内层不应再调用会 join 的 worker.stop
-    locked_body = after_with.split("\n        if worker:")[0]
-    assert "worker.stop()" not in locked_body
-    start_src = inspect.getsource(cm.CameraManager.start_camera)
-    assert "old.stop()" in start_src
-    # 先锁外 join 旧线程，再二次持锁启新 worker
-    assert start_src.index("old.stop()") < start_src.rindex("worker.start()")
+    mgr = cm.CameraManager()
+    camera_id = 99177
+    stopped = []
+
+    class Worker:
+        _stop = threading.Event()
+
+        def stop(self):
+            # RLock 的 _is_owned 只用于测试断言：此处不能持有全局 _lock。
+            assert not mgr._lock._is_owned()
+            stopped.append(True)
+            return True
+
+    worker = Worker()
+    with mgr._lock:
+        mgr._workers[camera_id] = worker
+    mgr.stop_camera(camera_id)
+    assert stopped == [True]
+    assert mgr.get_worker(camera_id) is None
 
 
 def test_frame_buffer_age_uses_monotonic():
