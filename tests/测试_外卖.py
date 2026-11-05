@@ -257,3 +257,27 @@ async def test_eleme_sync_product_does_not_create_mapping_without_item_id(monkey
     assert result["ok"] is False
     assert result["platform_id"] is None
     provider.set_sell_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delivery_callback_log_fallback_event_id_is_content_stable_and_distinct():
+    """无平台事件 ID 时，同订单同类型的不同回调不能因唯一键冲突而丢失。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    first = {"status": "PREPARING", "sequence": 1}
+    changed = {"status": "PREPARING", "sequence": 2}
+
+    await DeliveryService._log_callback(db, "MEITUAN", "ORDER_STATUS", "ORDER-1", 10, first)
+    first_row = db.add.call_args.args[0]
+    await DeliveryService._log_callback(db, "MEITUAN", "ORDER_STATUS", "ORDER-1", 10, first)
+    duplicate_row = db.add.call_args.args[0]
+    await DeliveryService._log_callback(db, "MEITUAN", "ORDER_STATUS", "ORDER-1", 10, changed)
+    changed_row = db.add.call_args.args[0]
+
+    assert first_row.event_id == duplicate_row.event_id
+    assert first_row.event_id != changed_row.event_id
+    assert len(first_row.event_id) <= 128
