@@ -68,6 +68,7 @@ def test_inbox_event_id_unique_fields():
 def test_stock_unlimited_maps_to_platform():
     class P:
         product_no = "P1"
+        status = "ON_SALE"
         name = "面"
         description = ""
         category_id = 1
@@ -86,10 +87,13 @@ def test_multi_frame_tracker_confirms():
     from app.services.face_liveness import MultiFrameTracker
 
     tr = MultiFrameTracker(confirm_frames=3, ttl_seconds=5)
-    emb = np.ones(8, dtype=np.float32)
-    ok1, _, _ = tr.push(1, emb, 7, 0.9)
-    ok2, _, _ = tr.push(1, emb, 7, 0.91)
-    ok3, cid, avg = tr.push(1, emb, 7, 0.92)
+    # 三帧必须是独立观测；完全相同的 embedding 会被防重复逻辑正确忽略。
+    emb1 = np.array([1, 0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+    emb2 = np.array([0, 1, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+    emb3 = np.array([0, 0, 1, 0, 0, 0, 0, 0], dtype=np.float32)
+    ok1, _, _ = tr.push(1, emb1, 7, 0.9)
+    ok2, _, _ = tr.push(1, emb2, 7, 0.91)
+    ok3, cid, avg = tr.push(1, emb3, 7, 0.92)
     assert (ok1, ok2, ok3) == (False, False, True)
     assert cid == 7 and avg >= 0.9
 
