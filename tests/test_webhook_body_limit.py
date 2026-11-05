@@ -157,3 +157,17 @@ async def test_slow_callback_body_is_rejected_after_total_deadline(monkeypatch):
     await middleware(_scope("/api/delivery/meituan/notify"), receive, send)
     assert not called
     assert sent[0]["status"] == 408
+
+
+@pytest.mark.asyncio
+async def test_non_webhook_path_containing_callback_is_not_buffered():
+    observed = []
+
+    async def app(scope, receive, send):
+        observed.append(await receive())
+
+    sent = await _run(app, "/api/orders/callback", [
+        {"type": "http.request", "body": b"normal-order", "more_body": False},
+    ])
+    assert observed[0]["body"] == b"normal-order"
+    assert sent == []
