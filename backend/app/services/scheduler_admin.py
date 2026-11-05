@@ -157,15 +157,14 @@ async def cancel_active_leader_jobs(*, timeout: float = 5.0) -> int:
         task.cancel()
     if not tasks:
         return 0
-    try:
-        await asyncio.wait_for(
-            asyncio.gather(*tasks, return_exceptions=True),
-            timeout=max(0.1, float(timeout)),
-        )
-    except asyncio.TimeoutError:
+    done, pending = await asyncio.wait(
+        tasks, timeout=max(0.1, float(timeout))
+    )
+    if pending:
         logger.error(
-            "等待 Leader 定时任务取消超时 count=%s；任务可能正在不可取消的外部 I/O 中",
+            "等待 Leader 定时任务取消超时 count=%s pending=%s；可能存在屏蔽取消的外部 I/O",
             len(tasks),
+            len(pending),
         )
     return len(tasks)
 
