@@ -19,9 +19,13 @@ from app.services.system_settings_service import BUSINESS_SETTING_META, SystemSe
 @pytest.fixture(autouse=True)
 def _reset_settings_cache():
     SystemSettingsService.invalidate_cache_local()
+    # 测试按函数创建独立事件循环；模块级 asyncio.Lock 必须随 loop 一并重建。
     SystemSettingsService._seed_lock = asyncio.Lock()
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
     yield
     SystemSettingsService.invalidate_cache_local()
+    SystemSettingsService._seed_lock = asyncio.Lock()
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
 
 
 @pytest.fixture
