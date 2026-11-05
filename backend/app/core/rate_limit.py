@@ -53,9 +53,14 @@ def _rate_limit_bucket(path: str) -> str:
     """
     normalized = (path or "/").split("?", 1)[0]
     for prefix in SENSITIVE_LIMITS:
+        # 通用小程序/外卖前缀只定义限额，不应把所有业务路由挤进同一个桶。
+        if prefix in ("/api/miniprogram/", "/api/delivery/"):
+            continue
         if normalized.startswith(prefix) or normalized == prefix.rstrip("/"):
             return prefix.rstrip("/")
     parts = [part for part in normalized.strip("/").split("/") if part]
+    if len(parts) >= 3 and parts[0] == "api":
+        return f"/api/{parts[1]}/{parts[2]}"
     if len(parts) >= 2 and parts[0] == "api":
         return f"/api/{parts[1]}"
     return f"/{parts[0]}" if parts else "/"
