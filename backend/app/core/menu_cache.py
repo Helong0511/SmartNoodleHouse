@@ -24,7 +24,7 @@ from app.core.cache_keys import (
     menu_version_key,
     ttl_with_jitter,
 )
-from app.core.redis_client import delete_with_retry, get_redis
+from app.core.redis_client import delete_with_retry, get_redis, release_owned_lock
 
 logger = logging.getLogger(__name__)
 
@@ -100,19 +100,24 @@ async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
         pass
 
 
-async def try_acquire_rebuild_lock(store_id: int) -> bool:
-    """缓存击穿保护：SET NX EX 抢锁，避免并发重建压垮数据库。Redis 不可用时 fail-open。"""
+async def try_acquire_rebuild_lock(store_id: int) -> str | None:
+    """缓存击穿保护：返回唯一持有者 token；失败/Redis 不可用返回 None。"""
     try:
         r = await get_redis()
-        return bool(await r.set(menu_rebuild_lock_key(store_id), "1", nx=True, ex=_REBUILD_LOCK_TTL))
+        token = __import__("uuid").uuid4().hex
+        acquired = await r.set(menu_rebuild_lock_key(store_id), token, nx=True, ex=_REBUILD_LOCK_TTL)
+        return token if acquired else None
     except Exception:
-        return False
+        return None
 
 
-async def release_rebuild_lock(store_id: int) -> None:
+async def release_rebuild_lock(store_id: int, token: str | None) -> None:
+    """只释放当前调用方持有的锁，防止过期锁被新进程接管后误删。"""
+    if not token:
+        return
     try:
         r = await get_redis()
-        await r.delete(menu_rebuild_lock_key(store_id))
+        await release_owned_lock(r, menu_rebuild_lock_key(store_id), token)
     except Exception:
         pass
 
