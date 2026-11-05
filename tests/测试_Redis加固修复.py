@@ -54,6 +54,12 @@ class FakeRedis:
     async def exists(self, key):
         return 1 if key in self.store else 0
 
+    async def eval(self, script, numkeys, key, token, *args):
+        if self.store.get(key) == token:
+            del self.store[key]
+            return 1
+        return 0
+
     def pipeline(self):
         outer = self
 
@@ -145,14 +151,14 @@ async def test_menu_cache_rebuild_lock_acquire_release():
     fake = FakeRedis()
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
         ok1 = await menu_cache.try_acquire_rebuild_lock(1)
-        assert ok1 is True
+        assert isinstance(ok1, str) and ok1
         # 第二次抢锁应失败（NX 互斥）
         ok2 = await menu_cache.try_acquire_rebuild_lock(1)
-        assert ok2 is False
-        await menu_cache.release_rebuild_lock(1)
+        assert ok2 is None
+        await menu_cache.release_rebuild_lock(1, ok1)
         # 释放后可再次抢锁
         ok3 = await menu_cache.try_acquire_rebuild_lock(1)
-        assert ok3 is True
+        assert isinstance(ok3, str) and ok3
 
 
 # ── menu_cache 大Key 跳过 ──
@@ -207,12 +213,12 @@ async def test_reco_cache_lock_acquire_release():
     fake = FakeRedis()
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
         ok1 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
-        assert ok1 is True
+        assert isinstance(ok1, str) and ok1
         ok2 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
-        assert ok2 is False
-        await reco_cache.release_reco_lock(1, 1, "default", "a")
+        assert ok2 is None
+        await reco_cache.release_reco_lock(1, 1, "default", "a", token=ok1)
         ok3 = await reco_cache.try_acquire_reco_lock(1, 1, "default", "a")
-        assert ok3 is True
+        assert isinstance(ok3, str) and ok3
 
 
 # ── reco_cache jitter TTL ──
@@ -411,3 +417,27 @@ async def test_scheduler_admin_notify_expire(monkeypatch):
         await scheduler_admin.notify_overrides_changed(job_id="test")
         expire_keys = [k for k, _ in fake.expire_calls if "scheduler" in k and "overrides" in k]
         assert len(expire_keys) == 1, "incr 后应补 expire"
+
+
+@pytest.mark.asyncio
+async def test_menu_rebuild_lock_old_owner_cannot_delete_new_owner():
+    from app.core import menu_cache
+
+    fake = FakeRedis()
+    key = menu_cache.menu_rebuild_lock_key(5)
+    fake.store[key] = "new-owner-token"
+    with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
+        await menu_cache.release_rebuild_lock(5, "expired-old-owner-token")
+    assert fake.store[key] == "new-owner-token"
+
+
+@pytest.mark.asyncio
+async def test_reco_rebuild_lock_old_owner_cannot_delete_new_owner():
+    from app.services import reco_cache
+
+    fake = FakeRedis()
+    key = "snh:reco:lock:c7:s5:default:b0"
+    fake.store[key] = "new-owner-token"
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        await reco_cache.release_reco_lock(7, 5, "default", "b0", token="expired-old-owner-token")
+    assert fake.store[key] == "new-owner-token"
