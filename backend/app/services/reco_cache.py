@@ -202,11 +202,15 @@ async def release_reco_lock(
 
 async def wait_for_reco(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "",
-    timeout: float = 0.3,
+    timeout: float = 2.0,
 ) -> dict[str, Any] | None:
-    """未抢到锁的调用方短暂等待后重读缓存。"""
-    try:
-        await asyncio.sleep(timeout)
-        return await get_cached_reco(customer_id, store_id, scene, bucket, fingerprint)
-    except Exception:
-        return None
+    """未抢到锁时有界轮询缓存，避免固定等待后多个 worker 同时重算。"""
+    deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
+    while True:
+        cached = await get_cached_reco(customer_id, store_id, scene, bucket, fingerprint)
+        if cached is not None:
+            return cached
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return None
+        await asyncio.sleep(min(0.10 + (time.monotonic_ns() % 100_000_000) / 1_000_000_000, remaining))
