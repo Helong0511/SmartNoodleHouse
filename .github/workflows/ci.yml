@@ -5,14 +5,17 @@ on:
     branches: [main, master, develop, "fix/**"]
   pull_request:
 
-# 同一分支只保留最新 CI，避免每次小提交堆积大量过期排队任务。
+# 不取消正在运行的 CI：后端全量测试可能需要数分钟，频繁推送不应中断正在执行的验证。
+# GitHub 默认保留一个 pending run；后续新提交会替换尚未开始的 pending run，
+# 但当前运行会完整结束，随后再验证最新提交。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: .
@@ -57,6 +60,7 @@ jobs:
 
   backend-mysql:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       mysql:
         image: mysql:8.0
@@ -110,6 +114,7 @@ jobs:
 
   frontend-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -131,6 +136,7 @@ jobs:
   dependency-security-audit:
     name: dependency-security-audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -155,6 +161,7 @@ jobs:
   miniprogram-static-check:
     name: miniprogram-static-check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
