@@ -442,9 +442,16 @@ async def test_cancel_active_leader_jobs_has_bounded_wait_for_cancel_resistant_t
 
 
 @pytest.fixture(autouse=True)
-def _activate_test_database_leader_epoch():
-    from app.core.leader_fencing import activate_leader_epoch, deactivate_leader_epoch
+def _activate_test_database_leader_epoch(monkeypatch):
+    from unittest.mock import AsyncMock
 
-    activate_leader_epoch(100, "test-worker")
+    from app.core import leader_fencing
+
+    leader_fencing.activate_leader_epoch(100, "test-worker")
+    monkeypatch.setattr(
+        leader_fencing,
+        "confirm_database_epoch",
+        AsyncMock(return_value=True),
+    )
     yield
-    deactivate_leader_epoch("test-worker")
+    leader_fencing.deactivate_leader_epoch("test-worker")
