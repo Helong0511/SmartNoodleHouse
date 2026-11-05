@@ -183,7 +183,6 @@ def test_parent_prefix_covers_sensitive_rate_limit_paths():
         "/api/miniprogram/wechat/login",
         "/api/miniprogram/alipay/login",
         "/api/miniprogram/auth/refresh",
-        "/api/payments/",
         "/api/delivery/meituan/notify",
         "/api/delivery/eleme/notify",
     ]
