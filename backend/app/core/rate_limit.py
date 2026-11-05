@@ -47,23 +47,20 @@ def path_requires_fail_closed(path: str, prefixes: list[str]) -> bool:
 
 
 def _rate_limit_bucket(path: str) -> str:
-    """将请求路径归一到限流桶，避免动态 ID/随机路径制造海量 Redis key。
+    """将请求路径归一到稳定的资源级限流桶，避免动态 URL 参数制造高基数 Redis key。
 
-    已配置敏感限流前缀按各自策略独立分桶；其他 /api 路径按一级资源分桶。
+    敏感接口在 dispatch 中仍按 SENSITIVE_LIMITS 配置限额；这里仅决定键分组。
+    普通 API 只使用 /api/{resource} 两段，绝不把订单 ID、用户 ID、随机 slug
+    或任意后续路径段写入 Redis key。代价是同一资源下的普通接口共享限流额度，
+    这是有意的容量保护；需要独立额度的固定路由应加入 SENSITIVE_LIMITS。
     """
     normalized = (path or "/").split("?", 1)[0]
-    for prefix in SENSITIVE_LIMITS:
-        # 通用小程序/外卖前缀只定义限额，不应把所有业务路由挤进同一个桶。
-        if prefix in ("/api/miniprogram/", "/api/delivery/"):
-            continue
-        if normalized.startswith(prefix) or normalized == prefix.rstrip("/"):
-            return prefix.rstrip("/")
     parts = [part for part in normalized.strip("/").split("/") if part]
-    if len(parts) >= 3 and parts[0] == "api":
-        return f"/api/{parts[1]}/{parts[2]}"
-    if len(parts) >= 2 and parts[0] == "api":
-        return f"/api/{parts[1]}"
-    return f"/{parts[0]}" if parts else "/"
+    if len(parts) >= 2 and parts[0].lower() == "api":
+        return f"/api/{parts[1].lower()}"
+    if parts:
+        return f"/{parts[0].lower()}"
+    return "/"
 
 # 原子 Token Bucket：避免固定窗口在边界处出现接近 2 倍突发。
 # Redis TIME 作为权威时钟，Hash 仅保存 tokens/last_ms，空间恒定，不使用高基数 ZSET。
