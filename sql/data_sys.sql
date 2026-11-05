@@ -41,6 +41,11 @@ TRUNCATE TABLE `dining_sessions`;
 TRUNCATE TABLE `face_profiles`;
 TRUNCATE TABLE `financial_ledger`;
 TRUNCATE TABLE `invoice_requests`;
+TRUNCATE TABLE `leader_fencing_state`;
+TRUNCATE TABLE `marketing_campaign_stores`;
+TRUNCATE TABLE `marketing_flash_sale_claims`;
+TRUNCATE TABLE `marketing_flash_sale_stocks`;
+TRUNCATE TABLE `marketing_flash_sales`;
 TRUNCATE TABLE `marketing_campaigns`;
 TRUNCATE TABLE `marketing_message_logs`;
 TRUNCATE TABLE `marketing_rules`;
@@ -97,6 +102,8 @@ TRUNCATE TABLE `users`;
 TRUNCATE TABLE `visitor_events`;
 TRUNCATE TABLE `webhook_inbox`;
 TRUNCATE TABLE `welcome_logs`;
+INSERT INTO `leader_fencing_state` (`id`, `epoch`, `owner_id`)
+VALUES (1, 0, NULL);
 -- 一、角色
 INSERT INTO `roles` (`code`, `name`, `description`)
 SELECT 'SUPER_ADMIN',
