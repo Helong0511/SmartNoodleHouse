@@ -36,7 +36,7 @@ async def test_finalize_refund_keeps_order_when_other_tender_remains():
         fail_reason=None,
         succeeded_at=None,
     )
-    payment = SimpleNamespace(id=1, amount=Decimal("50.00"), status="PAID", channel="POS", provider="CASH")
+    payment = SimpleNamespace(id=1, order_id=9, amount=Decimal("50.00"), status="PAID", channel="POS", provider="CASH")
     order = SimpleNamespace(
         id=9,
         store_id=1,
@@ -50,8 +50,8 @@ async def test_finalize_refund_keeps_order_when_other_tender_remains():
     db = MagicMock()
     db.execute = AsyncMock(
         side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=payment)),
         ]
     )
     db.scalar = AsyncMock(return_value=Decimal("50.00"))
