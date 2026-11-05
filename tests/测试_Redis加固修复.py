@@ -257,20 +257,22 @@ async def test_reco_cache_set_uses_jitter():
         assert 96 <= ex <= 144
 
 
-# ── reco_cache invalidate_customer 延迟双删 ──
+# ── reco_cache 代际失效：不扫描全量 key，阻止慢构建写回旧结果 ──
 
 @pytest.mark.asyncio
-async def test_reco_cache_invalidate_uses_retry(monkeypatch):
+async def test_reco_cache_invalidate_increments_generation_without_scan():
     from app.services import reco_cache
+    from app.core.cache_keys import reco_generation_key
+
     fake = FakeRedis()
-    # 预填充一些推荐缓存键
-    fake.store["snh:reco:c1:s1:default:a"] = "{}"
+    fake.store["snh:reco:c1:s1:default:a:g0"] = "{}"
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
-        # 禁用延迟双删的 sleep
-        monkeypatch.setattr("asyncio.sleep", AsyncMock())
         await reco_cache.invalidate_customer(1)
-        # 应该调用了 delete
-        assert len(fake.delete_calls) > 0
+
+    assert fake.store[reco_generation_key(1)] == "1"
+    assert fake.expire_calls[-1] == (reco_generation_key(1), 30 * 24 * 3600)
+    # 代际隔离后不再执行 SCAN/DEL 风暴；旧 key 由短 TTL 自然回收。
+    assert fake.delete_calls == []
 
 
 # ── auth TTL 补全 ──
@@ -583,7 +585,7 @@ async def test_local_singleflight_serializes_same_key_and_cleans_registry():
 
 
 @pytest.mark.asyncio
-async def test_reco_cache_uses_local_fallback_when_redis_is_unavailable():
+async def test_reco_cache_does_not_serve_personalized_local_fallback_when_redis_is_unavailable():
     from app.services import reco_cache
 
     reco_cache._LOCAL_RECO_CACHE.clear()
@@ -591,9 +593,9 @@ async def test_reco_cache_uses_local_fallback_when_redis_is_unavailable():
     with patch.object(reco_cache, "get_redis", new_callable=AsyncMock, side_effect=RuntimeError("redis down")):
         await reco_cache.set_cached_reco(9, 2, "menu", "a", payload, "")
         hit = await reco_cache.get_cached_reco(9, 2, "menu", "a", "")
-    assert hit is not None
-    assert hit["items"] == payload["items"]
-    assert hit["cache_hit"] is True
+    # 顾客授权撤回/画像删除可能发生在其他 Worker；不能用进程内缓存绕过共享代际。
+    assert hit is None
+    assert reco_cache._get_local_reco(reco_cache._local_reco_key(9, 2, "menu", "a", "")) is None
 
 
 @pytest.mark.asyncio
@@ -601,32 +603,37 @@ async def test_reco_cache_publish_requires_current_rebuild_owner():
     from app.services import reco_cache
 
     class OwnerAwareFakeRedis(FakeRedis):
-        async def eval(self, script, numkeys, lock_key, cache_key, token, raw, ttl):
-            self.eval_calls.append((script, numkeys, lock_key, cache_key, token, raw, ttl))
+        async def eval(self, script, numkeys, lock_key, cache_key, generation_key, token, raw, ttl, expected_generation):
+            self.eval_calls.append((script, numkeys, lock_key, cache_key, generation_key, token, raw, ttl, expected_generation))
             if self.store.get(lock_key) != token:
+                return 0
+            if int(self.store.get(generation_key, "0")) != int(expected_generation):
                 return 0
             self.store[cache_key] = raw
             return "OK"
 
     fake = OwnerAwareFakeRedis()
-    lock_key = reco_cache.reco_rebuild_lock_key(7, 5, "menu", "a", "")
-    cache_key = reco_cache.reco_key(7, 5, "menu", "a", "")
+    lock_key = reco_cache.reco_rebuild_lock_key(7, 5, "menu", "a", "", generation=0)
+    cache_key = reco_cache.reco_key(7, 5, "menu", "a", "", generation=0)
     fake.store[lock_key] = "current-owner"
     reco_cache._LOCAL_RECO_CACHE.clear()
 
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
         stale = await reco_cache.set_cached_reco_if_owner(
-            7, 5, "menu", "a", {"items": [{"id": 1}]}, "", "expired-owner"
+            7, 5, "menu", "a", {"items": [{"id": 1}]}, "", "expired-owner",
+            expected_generation=0,
         )
         current = await reco_cache.set_cached_reco_if_owner(
-            7, 5, "menu", "a", {"items": [{"id": 2}]}, "", "current-owner"
+            7, 5, "menu", "a", {"items": [{"id": 2}]}, "", "current-owner",
+            expected_generation=0,
         )
 
     assert stale is False
     assert current is True
     assert '"id":2' in fake.store[cache_key]
+    # 顾客级推荐不进入进程内缓存，避免授权撤回后其他 Worker 继续返回旧画像。
     local = reco_cache._get_local_reco(reco_cache._local_reco_key(7, 5, "menu", "a", ""))
-    assert local is not None and local["items"][0]["id"] == 2
+    assert local is None
 
 
 @pytest.mark.asyncio
