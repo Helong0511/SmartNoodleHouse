@@ -107,7 +107,8 @@ async def _call_refresh(token, settings, redis=None, customer=None):
 async def test_refresh_with_valid_token_returns_new_customer_token():
     token = _expired_customer_token(minutes_ago=-60)  # 未过期
     settings = _full_settings()
-    patches = _refresh_patches(settings)
+    redis = _fake_redis(set_result=True)
+    patches = _refresh_patches(settings, redis=redis)
     with patches[0], patches[1], patches[2], patches[3]:
         resp = await mp.refresh_customer_token(
             _request(f"Bearer {token}"), _db(_customer())
@@ -124,7 +125,11 @@ async def test_refresh_with_valid_token_returns_new_customer_token():
 @pytest.mark.asyncio
 async def test_refresh_expired_token_within_grace_window():
     token = _expired_customer_token(minutes_ago=30)  # 过期 30 分钟 < 24h 宽限
-    resp = await _call_refresh(token, _full_settings(customer_refresh_grace_hours=24))
+    resp = await _call_refresh(
+        token,
+        _full_settings(customer_refresh_grace_hours=24),
+        redis=_fake_redis(set_result=True),
+    )
     assert resp["code"] == 0
     assert resp["data"]["customer_token"]
 
@@ -160,17 +165,19 @@ async def test_refresh_rejects_disabled_customer():
 @pytest.mark.asyncio
 async def test_refresh_rotation_blocks_second_use_of_same_token():
     token = _expired_customer_token(minutes_ago=-60)
-    redis = _fake_redis(eval_result=0)  # Lua 判定：该 exp 已消费过
+    redis = _fake_redis(set_result=False)  # SET NX 失败：该 jti 已消费过
     with pytest.raises(AppException) as ei:
         await _call_refresh(token, _full_settings(), redis=redis)
     assert ei.value.code == 40105
 
 
 @pytest.mark.asyncio
-async def test_refresh_fails_open_when_redis_unavailable():
+async def test_refresh_fails_closed_when_redis_unavailable():
     token = _expired_customer_token(minutes_ago=-60)
-    resp = await _call_refresh(token, _full_settings(), redis=None)
-    assert resp["code"] == 0
+    with pytest.raises(AppException) as ei:
+        await _call_refresh(token, _full_settings(), redis=None)
+    assert ei.value.code == 40105
+    assert ei.value.status_code == 401
 
 
 @pytest.mark.asyncio
