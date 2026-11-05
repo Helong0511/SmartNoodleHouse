@@ -520,3 +520,58 @@ async def test_refund_api_idempotent_replay_does_not_duplicate_audit_or_websocke
     audit.assert_not_awaited()
     notify.assert_not_awaited()
     db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refund_idempotency_unique_race_returns_winning_refund(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    payment = SimpleNamespace(
+        id=74, status="PAID", amount=Decimal("10.00"),
+        provider="WECHAT", order_id=75, payment_no="PAY_RACE",
+    )
+    order = SimpleNamespace(id=75)
+    winner = SimpleNamespace(
+        id=84, payment_id=74, amount=Decimal("3.00"),
+        reason="顾客取消", status="PENDING",
+        idempotency_key="refund-race-key",
+    )
+    locked_result = MagicMock()
+    locked_result.scalar_one_or_none.return_value = payment
+    no_existing_result = MagicMock()
+    no_existing_result.scalar_one_or_none.return_value = None
+    winner_result = MagicMock()
+    winner_result.scalar_one_or_none.return_value = winner
+
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        locked_result, no_existing_result, winner_result,
+    ])
+    db.scalar = AsyncMock(side_effect=[0, Decimal("0.00")])
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock(
+        side_effect=IntegrityError("INSERT payment_refunds", {}, Exception("duplicate"))
+    )
+
+    monkeypatch.setattr(
+        "app.services.payment_service._order_table_parts",
+        AsyncMock(return_value=("TABLE", "T1")),
+    )
+    monkeypatch.setattr(
+        "app.services.payment_service._order_store_no",
+        AsyncMock(return_value="S1"),
+    )
+    monkeypatch.setattr(
+        "app.services.payment_service.generate_no",
+        lambda *args, **kwargs: "RF_RACE",
+    )
+
+    returned = await PaymentService.refund(
+        db, payment, Decimal("3.00"), "顾客取消",
+        idempotency_key="refund-race-key",
+    )
+
+    assert returned is winner
+    assert getattr(returned, "_idempotent_replay", False) is True
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()
