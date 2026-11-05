@@ -3298,10 +3298,7 @@ class PaymentService:
 
     @classmethod
     async def poll_pending_refunds(cls, limit: int = 20) -> int:
-        """定时补偿：拉取 PROCESSING/PENDING/UNKNOWN 退款单（query 恢复）。
-
-        与支付 poll 相同：id 扫描 → 渠道 HTTP 锁外 → 短事务 finalize，避免锁住多行做 HTTP。
-        """
+        """定时补偿：拉取未决退款；与主动查单共用严格的渠道结果校验。"""
         from types import SimpleNamespace
 
         async with AsyncSessionLocal() as db:
@@ -3321,6 +3318,7 @@ class PaymentService:
         done = 0
         for rid in ids:
             try:
+                # 第一阶段只读取快照，随后立即提交释放连接/锁；绝不持锁调用渠道 HTTP。
                 async with AsyncSessionLocal() as db:
                     row = (
                         await db.execute(
@@ -3339,28 +3337,42 @@ class PaymentService:
                     if not payment:
                         await db.commit()
                         continue
-                    snap = SimpleNamespace(
-                        refund_id=row.id,
-                        refund_no=row.refund_no,
+                    refund_snapshot = SimpleNamespace(
+                        id=int(row.id),
+                        payment_id=int(row.payment_id),
                         order_id=row.order_id,
-                        payment_id=row.payment_id,
-                        provider=payment.provider,
-                        payment_no=payment.payment_no,
-                        before=before,
+                        refund_no=str(row.refund_no or ""),
+                        amount=row.amount,
+                    )
+                    payment_snapshot = SimpleNamespace(
+                        id=int(payment.id),
+                        provider=str(payment.provider or "").strip().upper(),
+                        payment_no=str(payment.payment_no or ""),
+                        provider_trade_no=str(payment.provider_trade_no or ""),
+                        order_id=payment.order_id,
+                        amount=payment.amount,
                     )
                     await db.commit()
 
                 try:
                     result = await cls._query_channel_refund(
-                        provider=str(snap.provider or ""),
-                        payment_no=str(snap.payment_no or ""),
-                        refund_no=str(snap.refund_no or ""),
+                        provider=payment_snapshot.provider,
+                        payment_no=payment_snapshot.payment_no,
+                        refund_no=refund_snapshot.refund_no,
                     )
                 except Exception as e:
-                    logger.warning("退款查询失败 refund_no=%s: %s", snap.refund_no, e)
+                    logger.warning("退款查询失败 refund_no=%s: %s", refund_snapshot.refund_no, e)
                     continue
                 if result is None:
                     continue
+
+                # 定时任务不得绕过主动查单的渠道身份、订单、金额和币种校验。
+                query_status = cls._validate_refund_query_result(
+                    provider=payment_snapshot.provider,
+                    payment=payment_snapshot,
+                    refund=refund_snapshot,
+                    result=result,
+                )
 
                 async with AsyncSessionLocal() as db:
                     row = (
@@ -3373,16 +3385,44 @@ class PaymentService:
                     if row is None or row.status == "SUCCESS":
                         await db.commit()
                         continue
+                    if (
+                        int(row.payment_id) != refund_snapshot.payment_id
+                        or str(row.refund_no or "") != refund_snapshot.refund_no
+                        or money(row.amount) != money(refund_snapshot.amount)
+                        or row.order_id != refund_snapshot.order_id
+                    ):
+                        await db.rollback()
+                        logger.error("退款查单期间本地退款单发生变化，拒绝应用结果 refund_id=%s", rid)
+                        continue
+
+                    if query_status == "SUCCESS":
+                        # 资金入账前按统一 Order→Payment 顺序锁定并重新核对原支付快照。
+                        current_payment, _ = await cls._lock_order_then_payment_for_refund(db, row)
+                    else:
+                        current_payment = await db.get(
+                            Payment, row.payment_id, populate_existing=True
+                        )
+                    if not current_payment or (
+                        str(current_payment.provider or "").strip().upper() != payment_snapshot.provider
+                        or str(current_payment.payment_no or "") != payment_snapshot.payment_no
+                        or str(current_payment.provider_trade_no or "") != payment_snapshot.provider_trade_no
+                        or current_payment.order_id != payment_snapshot.order_id
+                        or money(current_payment.amount) != money(payment_snapshot.amount)
+                    ):
+                        await db.rollback()
+                        logger.error("退款查单期间原支付记录发生变化，拒绝应用结果 refund_id=%s", rid)
+                        continue
+
                     await cls._finalize_refund(
                         db,
                         row,
-                        result.get("status") or "PROCESSING",
+                        query_status,
                         provider_refund_no=result.get("provider_refund_no"),
                         callback_raw={"query": result.get("raw")},
                         source="REFUND_QUERY",
                     )
                     await db.commit()
-                    if snap.before != "SUCCESS" and row.status == "SUCCESS":
+                    if before != "SUCCESS" and row.status == "SUCCESS":
                         done += 1
                         try:
                             from app.services.websocket_manager import ws_manager
