@@ -222,6 +222,13 @@ async def process_outbox_item(outbox_id: int) -> None:
                 await _mark_failed(db, row, f"idempotency_precheck_failed: {e}", wid=wid)
                 return
 
+        # process_outbox_item 也会被 API BackgroundTasks 直接调用，不能假设一定经过
+        # process_pending_outbox 的预加载路径；确保 Webhook 延迟任务 handler 已注册。
+        if row.aggregate_type in ("webhook_task", "delivery_manual"):
+            try:
+                import app.services.delivery_tasks  # noqa: F401
+            except Exception:
+                logger.exception("Failed to import delivery_tasks handler registry")
         handler = _resolve_outbox_handler(row)
         if handler is None:
             logger.error(
