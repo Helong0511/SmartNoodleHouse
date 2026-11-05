@@ -294,7 +294,7 @@ def leader_job(fn):
     - JobSkipped / 库表重建 / MySQL 断连：记 skipped，不抛给 APScheduler（避免 ERROR 刷屏）
     - CancelledError：记 skipped 后原样抛出（保证关机可中断）
     - 其它异常：记 error 后抛出
-    - 断连类：自动短重试一次
+    - 基础设施错误：记录 skipped，等待下一次调度，不对结果不确定的任务自动重放
     """
 
     async def _wrapped(*args, **kwargs):
@@ -351,39 +351,18 @@ def leader_job(fn):
                 return None
             except Exception as first:
                 reason = infra_skip_reason(first)
-                if reason and is_retryable_infra(first):
-                    try:
-                        await asyncio.sleep(0.35)
-                        result = await _invoke()
-                    except asyncio.CancelledError:
-                        await _finish("skipped", "shutdown_cancelled")
-                        raise
-                    except JobSkipped as skip:
-                        await _finish("skipped", skip.reason)
-                        return None
-                    except Exception as second:
-                        reason2 = infra_skip_reason(second) or reason
-                        if reason2:
-                            logger.warning(
-                                "定时任务基础设施暂不可用（已重试） job=%s: %s",
-                                job_name,
-                                reason2,
-                            )
-                            await _finish("skipped", reason2)
-                            return None
-                        await _finish("error", str(second) or type(second).__name__)
-                        raise
-                elif reason:
+                if reason:
+                    # 连接中断可能发生在 DB COMMIT 已成功、客户端尚未收到确认之后。
+                    # 自动重放整个 job 会重复发券/推送/对账；交由下一次调度和行级幂等恢复。
                     logger.warning(
-                        "定时任务基础设施暂不可用 job=%s: %s",
+                        "定时任务基础设施暂不可用，跳过本次且不自动重放 job=%s: %s",
                         job_name,
                         reason,
                     )
                     await _finish("skipped", reason)
                     return None
-                else:
-                    await _finish("error", str(first) or type(first).__name__)
-                    raise
+                await _finish("error", str(first) or type(first).__name__)
+                raise
             await _finish("ok")
             return result
         except asyncio.CancelledError:
