@@ -241,3 +241,36 @@ async def test_duplicate_print_trigger_does_not_reset_or_resend_active_job(db_se
     assert job.attempt_count == 1
     get_settings.cache_clear()
 
+
+
+@pytest.mark.asyncio
+async def test_stale_print_recovery_emits_critical_uncertain_result_alert(db_session, caplog):
+    import logging
+    from datetime import timedelta
+
+    from app.core.response import now_local
+
+    store, order = await _seed_paid_order(db_session)
+    job = PrintJob(
+        store_id=store.id,
+        order_id=order.id,
+        ticket_type="KITCHEN",
+        content="<C>uncertain</C><CUT>",
+        content_hash="uncertain-stale-print",
+        status="PRINTING",
+        attempt_count=1,
+        locked_at=now_local() - timedelta(seconds=PrintService.STALE_PRINTING_SEC + 1),
+        locked_by="crashed-worker",
+    )
+    db_session.add(job)
+    await db_session.commit()
+
+    with caplog.at_level(logging.CRITICAL, logger="app.services.print_service"):
+        reclaimed = await PrintService.reclaim_stale_printing(db_session)
+
+    await db_session.refresh(job)
+    assert reclaimed == 1
+    assert job.status == "RETRYING"
+    assert job.locked_at is None
+    assert job.locked_by is None
+    assert any("PRINT RESULT UNCERTAIN" in record.message for record in caplog.records)
