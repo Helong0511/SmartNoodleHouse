@@ -78,6 +78,7 @@ async def test_cashier_cannot_apply_others_payment():
                 db, user=_user("CASHIER", uid=1), order_id=10, amount=None, reason="顾客不要了"
             )
     assert exc.value.code == 40301
+    db.get.assert_awaited_once_with(__import__("app.models", fromlist=["Order"]).Order, 10, with_for_update=True)
 
 
 @pytest.mark.asyncio
@@ -115,6 +116,11 @@ async def test_create_request_uses_order_level_refundable():
     # 分摊首笔为现金
     assert row.payment_id == cash.id
     db.add.assert_called_once()
+    db.get.assert_awaited_once_with(__import__("app.models", fromlist=["Order"]).Order, 10, with_for_update=True)
+    pending_stmt = db.scalar.await_args.args[0]
+    pending_params = pending_stmt.compile().params
+    pending_statuses = next(v for k, v in pending_params.items() if "status" in k)
+    assert set(pending_statuses) == {"PENDING", "PROCESSING", "RECONCILIATION_REQUIRED"}
 
 
 @pytest.mark.asyncio
