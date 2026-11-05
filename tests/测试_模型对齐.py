@@ -34,32 +34,37 @@ def parse_sql_schema(path: Path) -> dict[str, dict[str, str]]:
 
 
 def parse_models(path: Path) -> dict[str, dict[str, str]]:
-    src = path.read_text(encoding="utf-8")
+    """从模型包全部模块解析表定义；models/__init__.py 现在只负责聚合导入。"""
+    source_paths = sorted(path.rglob("*.py")) if path.is_dir() else [path]
     tables: dict[str, dict[str, str]] = {}
-    for m in re.finditer(
-        r'class (\w+)\(.*?\):\s*(?:\n\s*"""[\s\S]*?""")?\s*\n\s*__tablename__ = "(\w+)"',
-        src,
-    ):
-        tname = m.group(2)
-        block = src[m.end() :]
-        end = block.find("\nclass ")
-        block = block[:end] if end != -1 else block
-        cols: dict[str, str] = {}
-        for cm in re.finditer(r"(\w+):\s*Mapped.*?=\s*mapped_column\(([^)]+)\)", block):
-            col = cm.group(1)
-            args = cm.group(2)
-            type_m = re.search(
-                r"(BigInteger|String\(\d+\)|Integer|Boolean|Text|JSON|Numeric\([^)]+\)|LargeBinary|DateTime)",
-                args,
-            )
-            cols[col] = type_m.group(1) if type_m else "unknown"
-        tables[tname] = cols
+    pattern = re.compile(
+        r'class (\w+)\(.*?\):\s*(?:\n\s*"""[\s\S]*?""")?\s*\n\s*__tablename__ = "(\w+)"'
+    )
+    for source_path in source_paths:
+        src = source_path.read_text(encoding="utf-8")
+        for m in pattern.finditer(src):
+            tname = m.group(2)
+            block = src[m.end() :]
+            end = block.find("\nclass ")
+            block = block[:end] if end != -1 else block
+            cols: dict[str, str] = {}
+            for cm in re.finditer(r"(\w+):\s*Mapped.*?=\s*mapped_column\(([^)]+)\)", block):
+                col = cm.group(1)
+                args = cm.group(2)
+                type_m = re.search(
+                    r"(BigInteger|String\(\d+\)|Integer|Boolean|Text|JSON|Numeric\([^)]+\)|LargeBinary|DateTime)",
+                    args,
+                )
+                cols[col] = type_m.group(1) if type_m else "unknown"
+            if tname in tables:
+                raise AssertionError(f"重复 ORM 表定义: {tname} ({source_path})")
+            tables[tname] = cols
     return tables
 
 
 def test_schema_model_table_alignment():
     sql_tables = parse_sql_schema(ROOT / "sql" / "struct.sql")
-    model_tables = parse_models(ROOT / "backend" / "app" / "models" / "__init__.py")
+    model_tables = parse_models(ROOT / "backend" / "app" / "models")
 
     assert not (set(model_tables) - set(sql_tables)), (
         "models 有但 schema 无: " + str(sorted(set(model_tables) - set(sql_tables)))
