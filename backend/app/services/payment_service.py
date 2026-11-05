@@ -34,28 +34,6 @@ from app.services.webhook_replay import claim_once, make_receipt_key, release_cl
 logger = logging.getLogger(__name__)
 
 
-def _is_duplicate_key_integrity_error(exc: IntegrityError) -> bool:
-    """仅把明确的唯一键冲突视为幂等重复；FK/CHECK/NOT NULL 等错误必须重试并报警。"""
-    original = getattr(exc, "orig", None)
-    if original is None:
-        return False
-    code = None
-    for value in getattr(original, "args", ())[:2]:
-        if isinstance(value, int):
-            code = value
-            break
-        if isinstance(value, str) and value.isdigit():
-            code = int(value)
-            break
-    if code in (1062, 1555, 2067):  # MySQL duplicate / SQLite unique or primary-key
-        return True
-    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
-    if sqlstate == "23505":
-        return True
-    message = str(original).lower()
-    return "unique constraint failed" in message or "duplicate entry" in message or "is not unique" in message
-
-
 def _validate_duplicate_paid_callback(provider_u: str, payment: Payment, parsed: dict) -> None:
     """已支付记录的重复成功回调必须与原渠道、原金额、原交易号完全一致。"""
     provider = str(provider_u or "").strip().upper()
@@ -1895,13 +1873,7 @@ class PaymentService:
             if parsed_probe.get("is_refund"):
                 return await cls._apply_refund_callback(db, provider_u, data, parsed_probe, receipt)
             return await cls._apply_payment_callback(db, provider_u, provider_inst, data, receipt)
-        except IntegrityError as exc:
-            # 只有明确的 UNIQUE/duplicate-key 才能按幂等重复处理。
-            # FK/CHECK/NOT NULL 等完整性错误绝不能吞掉，否则支付平台会收到成功 ACK，
-            # 但支付/退款业务事务可能已整体回滚，形成永久漏单。
-            try:
-                await db.rollback()
-            except Exception:
+        except Exception:
                 pass
             if not _is_duplicate_key_integrity_error(exc):
                 await release_claim(redis_channel, receipt)
