@@ -481,6 +481,27 @@ async def lifespan(app: FastAPI):
             await _arm_standby_promote()
             return
 
+        # DB epoch 递增可能等待数据库锁；递增完成后必须再次确认 Redis 租约，
+        # 否则旧竞选者可能在 Redis 锁已转移后才拿到一个更大的 DB epoch。
+        from app.core.leader_lock import confirm_leader_owned
+
+        if not await confirm_leader_owned():
+            logger.error("数据库 epoch 获取期间 Redis Leader 租约已丢失，撤销本次 epoch")
+            from app.core.leader_fencing import deactivate_leader_epoch, revoke_database_epoch
+
+            deactivate_leader_epoch(_leader_worker_id)
+            try:
+                await asyncio.wait_for(
+                    revoke_database_epoch(_leader_worker_id),
+                    timeout=5.0,
+                )
+            except Exception:
+                logger.exception("撤销未能确认 Redis 所有权的数据库 epoch 失败")
+            await release_leader(_leader_worker_id)
+            is_leader = False
+            await _arm_standby_promote()
+            return
+
         is_leader = True
         set_leader_held(True)
         set_on_leader_lost(_stop_leader_work)
