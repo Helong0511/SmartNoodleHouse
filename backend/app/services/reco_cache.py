@@ -13,6 +13,9 @@ import asyncio
 import json
 import logging
 import uuid
+import time
+from collections import OrderedDict
+from threading import RLock
 from typing import Any
 
 from app.core.async_utils import spawn_bg
@@ -30,12 +33,61 @@ logger = logging.getLogger(__name__)
 
 _REBUILD_LOCK_TTL = 30  # 30s 租约；唯一 token 防止过期持有者误删新锁
 
+# Redis 故障时的短 TTL 进程内兜底缓存：配合 local_singleflight 防止同 worker 重复重算。
+# 仅保存推荐响应（短至 2 秒），有界 LRU；客户画像/订单变化时按 customer_id 主动失效。
+_LOCAL_RECO_TTL = 2.0
+_LOCAL_RECO_MAX = 512
+_LOCAL_RECO_CACHE: OrderedDict[tuple, tuple[float, dict[str, Any]]] = OrderedDict()
+_LOCAL_RECO_GUARD = RLock()
+
+
+def _local_reco_key(
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str
+) -> tuple:
+    return (int(customer_id) if customer_id is not None else None, int(store_id),
+            str(scene), str(bucket), str(fingerprint or ""))
+
+
+def _get_local_reco(key: tuple) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _LOCAL_RECO_GUARD:
+        item = _LOCAL_RECO_CACHE.get(key)
+        if item is None:
+            return None
+        expires_at, payload = item
+        if expires_at <= now:
+            _LOCAL_RECO_CACHE.pop(key, None)
+            return None
+        _LOCAL_RECO_CACHE.move_to_end(key)
+        return {**payload, "cache_hit": True}
+
+
+def _set_local_reco(key: tuple, payload: dict[str, Any]) -> None:
+    with _LOCAL_RECO_GUARD:
+        _LOCAL_RECO_CACHE[key] = (time.monotonic() + _LOCAL_RECO_TTL, dict(payload))
+        _LOCAL_RECO_CACHE.move_to_end(key)
+        while len(_LOCAL_RECO_CACHE) > _LOCAL_RECO_MAX:
+            _LOCAL_RECO_CACHE.popitem(last=False)
+
+
+def _invalidate_local_reco_customer(customer_id: int) -> None:
+    cid = int(customer_id)
+    with _LOCAL_RECO_GUARD:
+        for key in list(_LOCAL_RECO_CACHE):
+            if key[0] == cid:
+                _LOCAL_RECO_CACHE.pop(key, None)
+
+
 
 async def get_cached_reco(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
 ) -> dict[str, Any] | None:
     """读取推荐缓存。缓存穿透防护：无额外空值标记，因推荐服务对任意 customer/store
     都会返回合法 payload（冷启动时返回热门餐品），空结果本身会被缓存。"""
+    local_key = _local_reco_key(customer_id, store_id, scene, bucket, fingerprint)
+    local_hit = _get_local_reco(local_key)
+    if local_hit is not None:
+        return local_hit
     try:
         r = await get_redis()
         raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint))
@@ -43,6 +95,7 @@ async def get_cached_reco(
             payload = json.loads(raw)
             if isinstance(payload, dict):
                 payload["cache_hit"] = True
+                _set_local_reco(local_key, payload)
                 return payload
     except Exception:  # noqa: BLE001 - 缓存不可用必须降级
         logger.debug("推荐缓存读取失败，降级直算", exc_info=True)
@@ -61,6 +114,9 @@ async def set_cached_reco(
         r = await get_redis()
         body = dict(payload)
         body["cache_hit"] = False
+        _set_local_reco(
+            _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
+        )
         await r.set(
             reco_key(customer_id, store_id, scene, bucket, fingerprint),
             dumps_json(body, compact=True),
@@ -74,6 +130,7 @@ async def invalidate_customer(customer_id: int) -> None:
     """失效某顾客全部场景/桶位的推荐结果。延迟双删防止并发写窗口旧值残留。"""
     if not customer_id:
         return
+    _invalidate_local_reco_customer(customer_id)
     pattern = reco_customer_pattern(customer_id)
     try:
         r = await get_redis()
