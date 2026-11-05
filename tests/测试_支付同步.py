@@ -427,6 +427,7 @@ async def test_refund_idempotency_key_retry_returns_original_after_full_refund()
     )
 
     assert returned is existing
+    assert getattr(returned, "_idempotent_replay", False) is True
     assert db.execute.await_count == 2
 
 
@@ -473,3 +474,49 @@ async def test_refund_idempotency_key_cannot_cross_payment_boundary():
         )
 
     assert exc.value.code == 40955
+
+
+@pytest.mark.asyncio
+async def test_refund_api_idempotent_replay_does_not_duplicate_audit_or_websocket():
+    from app.api.payments import RefundCreate, refund_payment
+
+    payment = SimpleNamespace(id=91, payment_no="PAY_REPLAY", order_id=92)
+    order = SimpleNamespace(
+        id=92, order_no="ORDER_REPLAY", channel="ONLINE", store_id=3
+    )
+    refund = SimpleNamespace(
+        id=93, refund_no="RF_REPLAY", status="SUCCESS",
+        amount=Decimal("4.00"), _idempotent_replay=True,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = payment
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    db.get = AsyncMock(return_value=order)
+    user = SimpleNamespace(id=7, role=SimpleNamespace(code="STORE_ADMIN"))
+    request = MagicMock()
+
+    with patch("app.api.payments.assert_order_store_access"), patch(
+        "app.api.payments.PaymentService.refund",
+        new_callable=AsyncMock,
+        return_value=refund,
+    ), patch(
+        "app.services.audit_service.AuditService.log_refund",
+        new_callable=AsyncMock,
+    ) as audit, patch(
+        "app.api.payments.ws_manager.notify_order_event",
+        new_callable=AsyncMock,
+    ) as notify:
+        response = await refund_payment(
+            "PAY_REPLAY",
+            RefundCreate(amount=Decimal("4.00"), reason="顾客取消"),
+            request,
+            db,
+            user,
+            idempotency_key="stable-replay-key",
+        )
+
+    assert response is not None
+    audit.assert_not_awaited()
+    notify.assert_not_awaited()
+    db.commit.assert_not_awaited()
