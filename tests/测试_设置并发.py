@@ -107,7 +107,7 @@ async def test_concurrent_seed_same_session_safe(mem_db: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_update_and_read_cache(mem_db: AsyncSession):
-    with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=0)):
+    with patch.object(SystemSettingsService, "_remote_version", new=AsyncMock(return_value=1)):
         with patch.object(SystemSettingsService, "_bump_remote_version", new=AsyncMock(return_value=1)):
             await SystemSettingsService.update_business(mem_db, {"welcome_cooldown_seconds": 120})
             v = await SystemSettingsService.get_int(mem_db, "welcome_cooldown_seconds", 60)
