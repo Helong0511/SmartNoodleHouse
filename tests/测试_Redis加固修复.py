@@ -579,6 +579,39 @@ async def test_reco_cache_uses_local_fallback_when_redis_is_unavailable():
 
 
 @pytest.mark.asyncio
+async def test_reco_cache_publish_requires_current_rebuild_owner():
+    from app.services import reco_cache
+
+    class OwnerAwareFakeRedis(FakeRedis):
+        async def eval(self, script, numkeys, lock_key, cache_key, token, raw, ttl):
+            self.eval_calls.append((script, numkeys, lock_key, cache_key, token, raw, ttl))
+            if self.store.get(lock_key) != token:
+                return 0
+            self.store[cache_key] = raw
+            return "OK"
+
+    fake = OwnerAwareFakeRedis()
+    lock_key = reco_cache.reco_rebuild_lock_key(7, 5, "menu", "a", "")
+    cache_key = reco_cache.reco_key(7, 5, "menu", "a", "")
+    fake.store[lock_key] = "current-owner"
+    reco_cache._LOCAL_RECO_CACHE.clear()
+
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        stale = await reco_cache.set_cached_reco_if_owner(
+            7, 5, "menu", "a", {"items": [{"id": 1}]}, "", "expired-owner"
+        )
+        current = await reco_cache.set_cached_reco_if_owner(
+            7, 5, "menu", "a", {"items": [{"id": 2}]}, "", "current-owner"
+        )
+
+    assert stale is False
+    assert current is True
+    assert '"id":2' in fake.store[cache_key]
+    local = reco_cache._get_local_reco(reco_cache._local_reco_key(7, 5, "menu", "a", ""))
+    assert local is not None and local["items"][0]["id"] == 2
+
+
+@pytest.mark.asyncio
 async def test_reco_cache_customer_invalidation_clears_local_fallback():
     from app.services import reco_cache
 
