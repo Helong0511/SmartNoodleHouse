@@ -329,13 +329,25 @@ def leader_job(fn):
         async def _finish(status: str, error: str | None = None) -> None:
             if not job_name:
                 return
-            await record_job_run(
-                job_name,
-                status=status,
-                duration_ms=int((time.perf_counter() - started) * 1000),
-                error=error,
-            )
-            await _refresh_next_run()
+            # 任务统计/下次运行时间属于观测数据，不能覆盖业务任务的真实结果，
+            # 尤其不能在 CancelledError 路径中因统计库故障吞掉取消信号。
+            try:
+                await record_job_run(
+                    job_name,
+                    status=status,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    error=error,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("记录定时任务执行统计失败 job=%s status=%s", job_name, status)
+            try:
+                await _refresh_next_run()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("刷新定时任务下次执行时间失败 job=%s", job_name, exc_info=True)
 
         async def _invoke():
             return await fn(*args, **kwargs)
