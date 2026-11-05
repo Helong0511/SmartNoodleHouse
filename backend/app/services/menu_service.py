@@ -73,6 +73,15 @@ def _bundle_schedule_id(bundle: dict[str, Any] | None) -> int | None:
         return None
 
 
+def _bundle_version(bundle: dict[str, Any] | None) -> int:
+    if not bundle:
+        return 0
+    try:
+        return max(0, int(bundle.get("version") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _category_payload(cat: ProductCategory, store_name: str | None) -> dict[str, Any]:
     return {
         "id": cat.id,
@@ -229,6 +238,7 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     """
     sid = int(store_id)
     expected_sched = await _active_schedule_id(db, sid)
+    remote_version = await get_menu_version(sid)
 
     def _bundle_has_visibility_meta(bundle: dict[str, Any] | None) -> bool:
         """旧缓存若无 visibility_rule 字段，过滤会把限时菜当常显，须重建。"""
@@ -246,6 +256,7 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         cached is not None
         and _bundle_schedule_id(cached) == expected_sched
         and _bundle_has_visibility_meta(cached)
+        and (remote_version <= 0 or _bundle_version(cached) == remote_version)
     ):
         return cached
 
@@ -253,6 +264,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     lock_ok = False
     build_version: int | None = None
     hit = _BUILD_CACHE.get(sid)
+    # 本地缓存跨 worker 不会被直接删除；Redis 版本戳是远端失效广播。
+    # 版本不一致时必须丢弃本进程旧 bundle，否则其它 worker 的更新会被旧值遮住 60 秒。
+    if hit is not None and remote_version > 0 and _bundle_version(hit) != remote_version:
+        _BUILD_CACHE.delete(sid)
+        hit = None
     if (
         hit is not None
         and _bundle_schedule_id(hit) == expected_sched
