@@ -2558,6 +2558,8 @@ class PaymentService:
                     or str(existing_refund.reason or "") != str(reason or "")
                 ):
                     raise AppException(40955, "退款幂等键已被不同的支付单或退款参数使用")
+                # 标记这是客户端重试命中旧记录；API 层据此避免重复审计/广播副作用。
+                existing_refund._idempotent_replay = True
                 return existing_refund
         if payment.status == "REFUNDED":
             raise AppException(40053, "该支付已全额退款，不可重复退款")
