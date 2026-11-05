@@ -229,8 +229,17 @@ async def invalidate_customer(customer_id: int) -> None:
     try:
         r = await get_redis()
         key = reco_generation_key(customer_id)
-        await r.incr(key)
-        await r.expire(key, 30 * 24 * 3600)
+        # INCR 与 EXPIRE 必须原子执行；否则进程若在两条命令之间崩溃，会留下永久代际键。
+        await r.eval(
+            """
+            local generation = redis.call('INCR', KEYS[1])
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+            return generation
+            """,
+            1,
+            key,
+            30 * 24 * 3600,
+        )
         # 旧代际键使用短 TTL 自然回收；无需 SCAN/双删，避免画像高频更新放大 Redis 负载。
     except Exception:  # noqa: BLE001
         logger.warning("推荐缓存代际失效失败(customer=%s)，旧缓存等待 TTL", customer_id, exc_info=True)
