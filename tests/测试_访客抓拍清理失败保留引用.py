@@ -46,8 +46,13 @@ async def test_clear_events_keeps_db_row_when_snapshot_delete_fails():
     delete_stmt = db.execute.await_args_list[1].args[0]
     compiled = delete_stmt.compile()
     assert "visitor_events.id IN" in str(delete_stmt)
-    assert 11 in compiled.params.values()
-    assert 12 not in compiled.params.values()
+    bound_values = [
+        item
+        for value in compiled.params.values()
+        for item in (value if isinstance(value, (list, tuple, set)) else [value])
+    ]
+    assert 11 in bound_values
+    assert 12 not in bound_values
 
 
 @pytest.mark.asyncio
@@ -77,5 +82,10 @@ async def test_cleanup_expired_keeps_db_row_when_snapshot_delete_fails(monkeypat
     delete_stmt = db.execute.await_args_list[1].args[0]
     compiled = delete_stmt.compile()
     assert "visitor_events.id IN" in str(delete_stmt)
-    assert 21 in compiled.params.values()
-    assert 22 not in compiled.params.values()
+    bound_values = [
+        item
+        for value in compiled.params.values()
+        for item in (value if isinstance(value, (list, tuple, set)) else [value])
+    ]
+    assert 21 in bound_values
+    assert 22 not in bound_values
