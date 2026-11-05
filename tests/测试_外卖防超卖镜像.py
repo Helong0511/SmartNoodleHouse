@@ -344,6 +344,34 @@ async def test_平台间库存变化时后续平台必须读取更新后的数�
     assert pushed == [("MEITUAN", 3), ("ELEME", 1)]
 
 
+@pytest.mark.asyncio
+async def test_平台绑定凭证缺失时必须拒绝发送请求(db_session, monkeypatch):
+    store = await _make_store(db_session, "S-CREDENTIAL-FAIL-CLOSED")
+    product = await _make_product(db_session, store, "P-CREDENTIAL-FAIL-CLOSED")
+    await _make_listing(db_session, store, product, stock=4)
+    await _make_binding_and_map(
+        db_session, store, product, platform="MEITUAN",
+        sku="SKU-CRED", code="CODE-CRED",
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        hmod, "get_credentials_for_store", AsyncMock(return_value=None)
+    )
+    provider_factory = MagicMock(side_effect=AssertionError("凭证缺失时不得创建 Provider"))
+    monkeypatch.setattr(hmod, "get_delivery_provider", provider_factory)
+
+    with pytest.raises(RuntimeError, match="凭证不可用"):
+        await delivery_stock_mirror_handler(
+            db_session,
+            SimpleNamespace(
+                id=991,
+                payload=json.dumps({"store_id": store.id, "product_id": product.id}),
+            ),
+        )
+    provider_factory.assert_not_called()
+
+
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
 
 @pytest.mark.asyncio
