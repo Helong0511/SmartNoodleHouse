@@ -14,7 +14,7 @@ from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryRefund
 from app.services.audit_service import AuditService
 from app.services.delivery_service import DeliveryService
 from app.services.websocket_manager import ws_manager
-from app.services.outbox_worker import enqueue_outbox
+from app.services.outbox_worker import enqueue_outbox, process_outbox_item
 from app.services.webhook_inbox import _build_deferred_outbox_payload
 
 router = APIRouter(prefix="/delivery", tags=["外卖"])
@@ -119,7 +119,7 @@ async def confirm_delivery_order(
             payload=_build_deferred_outbox_payload(task, task.get("platform") or ""),
         )
         # FastAPI function-scoped DB dependency commits before background tasks execute.
-        background_tasks.add_task(__import__("app.services.outbox_worker", fromlist=["process_outbox_item"]).process_outbox_item, outbox_row.id)
+        background_tasks.add_task(process_outbox_item, outbox_row.id)
     await ws_manager.notify_order_event(
         "ORDER_CONFIRMED",
         {"order_id": order.id, "order_no": order.order_no, "status": order.status, "store_id": order.store_id},
