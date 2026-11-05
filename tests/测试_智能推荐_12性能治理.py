@@ -300,6 +300,35 @@ async def test_metrics_endpoint_reads_middleware_data(fake_redis):
 # ---------- 菜单聚合版本戳 ----------
 
 @pytest.mark.asyncio
+async def test_menu_bundle_publish_is_fenced_by_build_version(fake_redis):
+    from app.core.cache_keys import menu_bundle_key, menu_rebuild_lock_key, menu_version_key
+
+    store_id = 99123
+    await fake_redis.set(menu_rebuild_lock_key(store_id), "owner-token")
+    await fake_redis.set(menu_version_key(store_id), "7")
+
+    published = await menu_cache.set_menu_bundle_if_owner(
+        store_id,
+        {"version": 7, "products": {"items": []}},
+        "owner-token",
+        expected_version=7,
+    )
+    assert published is True
+    assert menu_bundle_key(store_id) in fake_redis.kv
+
+    # 写路径在快照构建后 bump 版本：旧 worker 即使仍持有租约，也不得覆盖新版本。
+    await fake_redis.set(menu_version_key(store_id), "8")
+    stale_publish = await menu_cache.set_menu_bundle_if_owner(
+        store_id,
+        {"version": 7, "products": {"items": ["stale"]}},
+        "owner-token",
+        expected_version=7,
+    )
+    assert stale_publish is False
+    assert '"stale"' not in fake_redis.kv[menu_bundle_key(store_id)]
+
+
+@pytest.mark.asyncio
 async def test_menu_bundle_version_flow(fake_redis, db_session):
     db = db_session
     store = await make_store(db)
