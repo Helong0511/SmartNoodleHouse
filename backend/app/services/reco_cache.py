@@ -230,9 +230,13 @@ async def try_acquire_reco_lock(
         acquired = await r.set(key, token, nx=True, ex=_REBUILD_LOCK_TTL)
         if not acquired:
             return None
-        _REBUILD_HEARTBEATS[token] = start_redis_lock_heartbeat(
+        heartbeat = start_redis_lock_heartbeat(
             r, key, token, ttl=_REBUILD_LOCK_TTL,
             label=f"reco:{store_id}:{scene}",
+        )
+        _REBUILD_HEARTBEATS[token] = heartbeat
+        heartbeat.add_done_callback(
+            lambda _task, owner=token: _REBUILD_HEARTBEATS.pop(owner, None)
         )
         return token
     except Exception:
