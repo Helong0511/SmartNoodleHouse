@@ -132,18 +132,19 @@ async def set_cached_reco(
     payload: dict[str, Any],
     fingerprint: str = "",
 ) -> None:
+    # 无 owner token 的便捷写接口只允许匿名结果；顾客级缓存必须走 generation + owner Lua fencing。
+    if customer_id is not None:
+        logger.warning("拒绝无租约写入顾客级推荐缓存(customer=%s)", customer_id)
+        return
     body = dict(payload)
     body["cache_hit"] = False
-    # 匿名推荐可先写本地短缓存；顾客级结果只写共享 Redis 代际键。
-    if customer_id is None:
-        _set_local_reco(
-            _local_reco_key(customer_id, store_id, scene, bucket, fingerprint), body
-        )
+    _set_local_reco(
+        _local_reco_key(None, store_id, scene, bucket, fingerprint), body
+    )
     try:
         r = await get_redis()
-        generation = await get_reco_generation(customer_id)
         await r.set(
-            reco_key(customer_id, store_id, scene, bucket, fingerprint, generation),
+            reco_key(None, store_id, scene, bucket, fingerprint, 0),
             dumps_json(body, compact=True),
             ex=ttl_with_jitter(RECO_TTL_SECONDS),
         )
