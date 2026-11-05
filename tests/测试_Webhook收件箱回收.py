@@ -226,3 +226,36 @@ def test_deferred_webhook_payload_rejects_unknown_action():
 
     with pytest.raises(ValueError, match="unsupported deferred webhook action"):
         _build_deferred_outbox_payload({"action": "execute_arbitrary"}, "MEITUAN")
+
+
+@pytest.mark.asyncio
+async def test_enqueue_webhook_adds_row_inside_savepoint_before_flush():
+    """Inbox 唯一键冲突必须发生在 SAVEPOINT 内，不能污染调用方外层事务。"""
+    from app.services.webhook_inbox import enqueue_delivery_webhook
+
+    events = []
+
+    class Nested:
+        async def __aenter__(self):
+            events.append("savepoint_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append("savepoint_exit")
+            return False
+
+    db = MagicMock()
+    db.begin_nested = MagicMock(return_value=Nested())
+    db.add = MagicMock(side_effect=lambda row: events.append("add"))
+    db.flush = AsyncMock(side_effect=lambda: events.append("flush"))
+
+    row, is_new = await enqueue_delivery_webhook(
+        db,
+        platform="MEITUAN",
+        headers={"Content-Type": "application/json"},
+        body=b'{"request_id":"evt-savepoint-1"}',
+        raw={"request_id": "evt-savepoint-1"},
+    )
+
+    assert is_new is True
+    assert row is not None
+    assert events == ["savepoint_enter", "add", "flush", "savepoint_exit"]
