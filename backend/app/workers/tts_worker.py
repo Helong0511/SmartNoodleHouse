@@ -799,19 +799,35 @@ class CameraSpeakerTTS(TTSProvider):
             task = asyncio.ensure_future(awaitable)
             while not task.done():
                 if _aborted():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
                     return None
                 done, _ = await asyncio.wait({task}, timeout=poll)
                 if done:
                     break
             if _aborted():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
                 return None
             return task.result()
 
         client = HikvisionTwoWayAudio(base, user, password, timeout=30.0)
         loop = asyncio.get_running_loop()
         t0 = time.perf_counter()
+
+        async def _set_hardware_volume() -> bool:
+            # 设备适配器/测试替身可能不提供硬件音量能力；缺失时安全回退软件增益。
+            setter = getattr(client, "set_speaker_volume", None)
+            if not callable(setter):
+                return False
+            try:
+                return bool(await setter(int(volume)))
+            except Exception:
+                logger.warning("设置摄像头硬件音量失败，回退软件增益 camera_id=%s", camera_id, exc_info=True)
+                return False
+
         # 硬件 speakerVolume 与 codec 探测并行；PCM 默认按 100% 合成（音量交给设备）
-        vol_task = asyncio.create_task(client.set_speaker_volume(int(volume)))
+        vol_task = asyncio.create_task(_set_hardware_volume())
         codec_task = asyncio.create_task(client.resolve_codec(block=False))
         g711_alaw_task = loop.run_in_executor(
             None,
