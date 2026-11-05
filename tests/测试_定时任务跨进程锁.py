@@ -287,3 +287,43 @@ async def test_leader_loss_cancels_inflight_wrapped_jobs():
             await task
     assert cancelled.is_set()
     assert task not in sa._active_leader_job_tasks
+
+
+@pytest.mark.asyncio
+async def test_leader_job_does_not_replay_after_ambiguous_database_disconnect():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+    from sqlalchemy.exc import OperationalError
+
+    class _Orig(Exception):
+        def __init__(self):
+            self.args = (2013, "Lost connection during query")
+            super().__init__(2013, "Lost connection during query")
+
+    calls = 0
+    statuses = []
+
+    async def maybe_committed_then_disconnected():
+        nonlocal calls
+        calls += 1
+        raise OperationalError("COMMIT", {}, _Orig())
+
+    async def record(job_id, *, status, duration_ms, error=None):
+        statuses.append(status)
+
+    maybe_committed_then_disconnected.__name__ = "ambiguous_commit_job"
+    wrapped = sa.leader_job(maybe_committed_then_disconnected)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-ambiguous")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-ambiguous")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", side_effect=record),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        assert await wrapped() is None
+    assert calls == 1
+    assert statuses == ["skipped"]
