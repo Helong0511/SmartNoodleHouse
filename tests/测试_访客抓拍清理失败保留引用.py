@@ -34,7 +34,7 @@ async def test_clear_events_keeps_db_row_when_snapshot_delete_fails():
         delete=AsyncMock(side_effect=[True, OSError("storage temporarily unavailable")])
     )
 
-    with patch("app.services.face_service.get_storage", return_value=storage), patch(
+    with patch("app.services.object_storage.get_storage", return_value=storage), patch(
         "app.services.face_service.get_redis", new=AsyncMock(return_value=redis)
     ), patch.object(
         VisitorService, "_purge_local_camera_snapshots", new=AsyncMock(return_value=0)
@@ -63,7 +63,7 @@ async def test_cleanup_expired_keeps_db_row_when_snapshot_delete_fails(monkeypat
         delete=AsyncMock(side_effect=[True, OSError("storage temporarily unavailable")])
     )
 
-    with patch("app.services.face_service.get_storage", return_value=storage), patch(
+    with patch("app.services.object_storage.get_storage", return_value=storage), patch(
         "app.services.system_settings_service.SystemSettingsService.get_int",
         new=AsyncMock(return_value=30),
     ), patch.object(
