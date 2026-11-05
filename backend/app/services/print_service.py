@@ -732,6 +732,18 @@ class PrintService:
                 fallback=settings.kitchen_ticket_order_no,
             ),
         )
+        # 以订单行为互斥锁：即使尚无 PrintJob 行，两个并发请求也不能同时创建任务。
+        # 锁只持有到下面 PRINTING 状态提交，不跨越打印机网络调用。
+        locked_order_id = (
+            await db.execute(
+                select(Order.id)
+                .where(Order.id == int(order_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if locked_order_id is None:
+            return None
+
         job = await cls._upsert_pending_job(
             db,
             store_id=int(ctx.order.store_id),
@@ -741,8 +753,9 @@ class PrintService:
             print_job_id=print_job_id,
         )
         # Outbox/Webhook 重复投递时，若已有打印仍在进行，不得再次调用物理打印机。
-        # 真正超时的 PRINTING 会由 reclaim_stale_printing 回收，再走 PrintJob 重试队列。
-        if job.status == "PRINTING" and print_job_id is None:
+        # 包括显式 print_job_id 的调用；真正超时的 PRINTING 会由 reclaim_stale_printing
+        # 回收，再走 PrintJob 重试队列，而不是由重复事件抢占。
+        if job.status == "PRINTING":
             return {
                 "code": 0,
                 "msg": "print already in progress; duplicate trigger ignored",
