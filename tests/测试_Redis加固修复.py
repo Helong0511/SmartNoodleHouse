@@ -457,6 +457,36 @@ async def test_menu_rebuild_lock_old_owner_cannot_delete_new_owner():
 
 
 @pytest.mark.asyncio
+async def test_menu_cache_publish_requires_current_rebuild_owner():
+    from app.core import menu_cache
+
+    class OwnerAwareFakeRedis(FakeRedis):
+        async def eval(self, script, numkeys, lock_key, cache_key, token, raw, ttl):
+            self.eval_calls.append((script, numkeys, lock_key, cache_key, token, raw, ttl))
+            if self.store.get(lock_key) != token:
+                return 0
+            self.store[cache_key] = raw
+            return "OK"
+
+    fake = OwnerAwareFakeRedis()
+    lock_key = menu_cache.menu_rebuild_lock_key(5)
+    cache_key = menu_cache.menu_bundle_key(5)
+    fake.store[lock_key] = "new-owner"
+
+    with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
+        stale = await menu_cache.set_menu_bundle_if_owner(
+            5, {"products": []}, "expired-old-owner"
+        )
+        current = await menu_cache.set_menu_bundle_if_owner(
+            5, {"products": [{"id": 9}]}, "new-owner"
+        )
+
+    assert stale is False
+    assert current is True
+    assert '"id":9' in fake.store[cache_key]
+
+
+@pytest.mark.asyncio
 async def test_reco_rebuild_lock_old_owner_cannot_delete_new_owner():
     from app.services import reco_cache
 
