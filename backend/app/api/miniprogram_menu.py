@@ -204,6 +204,13 @@ async def get_recommendations(
             waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
             if waited is not None:
                 return success(waited, request=request)
+            # Redis 锁竞争/不可用且短缓存未命中时，不允许所有 worker 同时重算。
+            # 返回可重试错误，保护推荐查询背后的订单/行为画像查询链路。
+            raise AppException(
+                50301,
+                "推荐服务正在刷新或缓存协调服务暂不可用，请稍后重试",
+                status_code=503,
+            )
         try:
             ranked, state, meta = await RecommendationService.recommend(
                 db,
