@@ -221,13 +221,16 @@ async def process_inbox_item(inbox_id: int) -> bool:
                     )
                 )
                 done_result = await db.execute(done_stmt)
+                if int(done_result.rowcount or 0) != 1:
+                    # 失去 claim 所有权时，DeliveryService 的 DB 修改必须一起回滚；
+                    # 旧 worker 不得提交业务副作用，也不得发出成功通知。
+                    await db.rollback()
+                    logger.warning(
+                        "Webhook inbox claim 已丢失，回滚旧 worker 事务 id=%s",
+                        inbox_id,
+                    )
+                    return True
                 await db.commit()
-            if not done_result.rowcount:
-                # 行已被 reclaim 并被其他 worker 重新 claim：不通知 WS（新 owner 负责）
-                logger.warning(
-                    "inbox 行在处理期间被 reclaim 释放 id=%s，跳过 WS 通知", inbox_id
-                )
-                return True
 
             ws_event = EVENT_WS_MAP.get(result.event, "DELIVERY_UNKNOWN")
             payload = {"channel": row.channel, "event": result.event, **result.extra}
