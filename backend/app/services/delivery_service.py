@@ -1024,6 +1024,8 @@ class DeliveryService:
 
         refund.handled_at = now_local()
         await db.flush()
+        # 平台操作和财务分录已经完成；先持久化退款终态，后续审计日志失败不能回滚资金状态。
+        await db.commit()
         return {"ok": ok, "status": refund.status, "refund_type": refund.refund_type}
 
     @classmethod
