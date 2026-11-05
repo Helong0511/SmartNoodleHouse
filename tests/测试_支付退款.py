@@ -316,7 +316,6 @@ async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
     locked_result = MagicMock()
     locked_result.scalar_one_or_none.return_value = row
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[initial_result, locked_result])
     db.get = AsyncMock(return_value=payment)
 
     observed = []
