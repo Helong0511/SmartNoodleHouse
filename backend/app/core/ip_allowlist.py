@@ -21,13 +21,25 @@ WEBHOOK_PATHS = (
 )
 
 
+def _normalize_ip(value: str | None) -> str | None:
+    """只接受合法 IP 字面量并统一压缩格式，拒绝端口、脏值和任意字符串。"""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return ipaddress.ip_address(raw).compressed
+    except ValueError:
+        return None
+
+
 def client_ip(request: Request) -> str:
     """解析真实客户端 IP。
 
     仅当 request.client.host 属于 TRUSTED_PROXY_IPS 时，才信任
     X-Real-IP / X-Forwarded-For；否则直接使用直连 peer，防止客户端伪造绕过白名单与限流。
     """
-    peer = request.client.host if request.client else ""
+    peer_raw = request.client.host if request.client else ""
+    peer = _normalize_ip(peer_raw) or peer_raw
     settings = get_settings()
     from app.services.system_settings_service import SystemSettingsService
 
@@ -39,7 +51,7 @@ def client_ip(request: Request) -> str:
     if not trusted or not peer or not ip_allowed(peer, trusted):
         return peer
 
-    real = (request.headers.get("x-real-ip") or "").strip()
+    real = _normalize_ip(request.headers.get("x-real-ip"))
     if real:
         return real
     xff = (request.headers.get("x-forwarded-for") or "").strip()
@@ -48,11 +60,14 @@ def client_ip(request: Request) -> str:
         # 从右向左跳过可信代理，取第一个非可信 IP；
         # 最左段由客户端可伪造，直接采用会被绕过白名单与限流
         for part in reversed(parts):
-            if not ip_allowed(part, trusted):
-                return part
-        # 整条链均为可信代理（异常场景）：回退最左段
-        if parts:
-            return parts[0]
+            candidate = _normalize_ip(part)
+            if candidate and not ip_allowed(candidate, trusted):
+                return candidate
+        # 整条链均为可信代理或含非法项：回退最左侧第一个合法地址。
+        for part in parts:
+            candidate = _normalize_ip(part)
+            if candidate:
+                return candidate
     return peer
 
 
