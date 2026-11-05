@@ -37,7 +37,7 @@ async def test_chunked_webhook_over_limit_is_rejected_without_calling_app():
         nonlocal called
         called = True
 
-    sent = await _run(app, "/api/payment/webhook", [
+    sent = await _run(app, "/api/payments/wechat/notify", [
         {"type": "http.request", "body": b"12345", "more_body": True},
         {"type": "http.request", "body": b"67890", "more_body": False},
     ])
@@ -56,7 +56,7 @@ async def test_valid_split_body_is_replayed_exactly_once():
         await send({"type": "http.response.start", "status": 204, "headers": []})
         await send({"type": "http.response.body", "body": b""})
 
-    sent = await _run(app, "/api/pay/notify", [
+    sent = await _run(app, "/api/payments/alipay/notify", [
         {"type": "http.request", "body": b"abc", "more_body": True},
         {"type": "http.request", "body": b"def", "more_body": False},
     ], headers=[(b"content-length", b"6")])
@@ -74,7 +74,7 @@ async def test_invalid_content_length_returns_400(value):
         nonlocal called
         called = True
 
-    sent = await _run(app, "/callback/payment", [], headers=[(b"content-length", value)])
+    sent = await _run(app, "/api/payments/wechat/refund-notify", [], headers=[(b"content-length", value)])
     assert not called
     assert sent[0]["status"] == 400
 
@@ -87,7 +87,7 @@ async def test_declared_oversize_rejected_before_reading_body():
         nonlocal called
         called = True
 
-    sent = await _run(app, "/webhook/provider", [], headers=[(b"content-length", b"9")])
+    sent = await _run(app, "/api/delivery/meituan/notify", [], headers=[(b"content-length", b"9")])
     assert not called
     assert sent[0]["status"] == 413
 
@@ -114,7 +114,7 @@ async def test_duplicate_content_length_headers_are_rejected():
         nonlocal called
         called = True
 
-    sent = await _run(app, "/webhook/provider", [], headers=[
+    sent = await _run(app, "/api/delivery/meituan/notify", [], headers=[
         (b"content-length", b"1"), (b"content-length", b"1"),
     ])
     assert not called
@@ -129,7 +129,7 @@ async def test_content_length_mismatch_is_rejected():
         nonlocal called
         called = True
 
-    sent = await _run(app, "/notify/provider", [
+    sent = await _run(app, "/api/delivery/eleme/notify", [
         {"type": "http.request", "body": b"abc", "more_body": False},
     ], headers=[(b"content-length", b"4")])
     assert not called
@@ -154,6 +154,6 @@ async def test_slow_callback_body_is_rejected_after_total_deadline(monkeypatch):
         sent.append(message)
 
     middleware = WebhookBodyLimitMiddleware(app, max_body_bytes=8)
-    await middleware(_scope("/webhook/provider"), receive, send)
+    await middleware(_scope("/api/delivery/meituan/notify"), receive, send)
     assert not called
     assert sent[0]["status"] == 408
