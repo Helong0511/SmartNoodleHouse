@@ -98,7 +98,7 @@ _REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS = (
 
 
 def _missing_rate_limit_fail_closed_paths(raw: str) -> list[str]:
-    """生产必须保证认证、支付及小程序登录路径在 Redis 故障时 fail-closed。"""
+    """生产必须保证认证、支付、小程序登录及外卖回调在 Redis 故障时 fail-closed。"""
     prefixes = [part.strip().rstrip("/") for part in (raw or "").split(",") if part.strip()]
     missing = []
     for target in _REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS:
