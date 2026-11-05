@@ -171,3 +171,13 @@ async def test_non_webhook_path_containing_callback_is_not_buffered():
     ])
     assert observed[0]["body"] == b"normal-order"
     assert sent == []
+
+ 
+def test_callback_buffer_concurrency_scales_with_configured_body_limit():
+    async def app(scope, receive, send):
+        return None
+
+    default_limit = WebhookBodyLimitMiddleware(app, max_body_bytes=512 * 1024)
+    maximum_limit = WebhookBodyLimitMiddleware(app, max_body_bytes=10 * 1024 * 1024)
+    assert default_limit._callback_slots._value == 32
+    assert maximum_limit._callback_slots._value == 1
