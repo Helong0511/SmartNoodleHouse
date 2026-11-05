@@ -16,8 +16,8 @@ async def test_try_get_redis_throttles_repeated_outage_logs(monkeypatch, caplog)
         raise ConnectionError("redis unavailable")
 
     monkeypatch.setattr(redis_client, "get_redis", fail_get_redis)
-    redis_client._last_redis_degrade_log_at = -redis_client._REDIS_DEGRADE_LOG_INTERVAL_SEC
-    redis_client._suppressed_redis_degrade_logs = 0
+    monkeypatch.setattr(redis_client, "_last_redis_degrade_log_at", -redis_client._REDIS_DEGRADE_LOG_INTERVAL_SEC)
+    monkeypatch.setattr(redis_client, "_suppressed_redis_degrade_logs", 0)
 
     with caplog.at_level(logging.WARNING, logger="app.core.redis_client"):
         assert await redis_client.try_get_redis() is None
