@@ -127,5 +127,8 @@ async def test_notify_order_ready_tries_both_channels(db_session, monkeypatch):
     )
 
     await order_lifecycle.notify_order_ready_subscribe(db_session, order)
+    # 投递通过 create_task 异步调度；让两个任务获得一次执行机会后再断言。
+    import asyncio
+    await asyncio.sleep(0)
     assert wx.await_count == 1
     assert ali.await_count == 1
