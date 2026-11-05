@@ -98,6 +98,13 @@ async def _collect_stock_push_jobs(
             for m in maps
         ]
         creds = await get_credentials_for_store(db, binding.platform, store_id)
+        if creds is None:
+            # 绑定存在但凭证读取失败/绑定被并发删除时，禁止使用 None 凭证继续请求。
+            # Provider 可能仍持有全局 App 凭证，误把请求发往错误门店。
+            raise RuntimeError(
+                f"外卖平台门店凭证不可用，拒绝库存同步 store={store_id} "
+                f"platform={binding.platform}"
+            )
         jobs.append((binding.platform, creds, items, on_shelf))
     return jobs
 
