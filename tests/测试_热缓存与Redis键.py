@@ -137,7 +137,7 @@ async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
     SystemSettingsService._cache_refresh_lock = asyncio.Lock()
     calls = {"count": 0}
 
-    async def load_once(_db):
+    async def load_once(_db, *, force=False):
         calls["count"] += 1
         await asyncio.sleep(0.02)
         SystemSettingsService._cache = {"test_setting": "ok"}
