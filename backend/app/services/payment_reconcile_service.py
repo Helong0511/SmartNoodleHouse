@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
@@ -91,14 +92,45 @@ class PaymentReconcileService:
         if ch not in ("WECHAT", "ALIPAY"):
             raise ValueError("channel 仅支持 WECHAT/ALIPAY")
 
+        # 已存在批次时加行锁，串行化同渠道/日期的重跑；首次并发创建则由唯一键兜底。
         existing = (
             await db.execute(
-                select(PaymentReconcileBatch).where(
+                select(PaymentReconcileBatch)
+                .where(
                     PaymentReconcileBatch.channel == ch,
                     PaymentReconcileBatch.bill_date == bill_date,
                 )
+                .with_for_update()
             )
         ).scalar_one_or_none()
+        if existing is None:
+            candidate = PaymentReconcileBatch(
+                channel=ch,
+                bill_date=bill_date,
+                status="PENDING",
+                created_by=created_by,
+            )
+            try:
+                # SAVEPOINT 保护唯一键竞争，不回滚调用方事务中此前已完成的业务写入。
+                async with db.begin_nested():
+                    db.add(candidate)
+                    await db.flush()
+                existing = candidate
+            except IntegrityError:
+                # 另一并发导入先创建了相同批次；读取并锁定赢家，复用同一批次。
+                existing = (
+                    await db.execute(
+                        select(PaymentReconcileBatch)
+                        .where(
+                            PaymentReconcileBatch.channel == ch,
+                            PaymentReconcileBatch.bill_date == bill_date,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    raise
+
         if existing and existing.status == "DONE":
             # 重跑：清旧差异
             old = (
@@ -112,14 +144,11 @@ class PaymentReconcileService:
             batch.status = "PENDING"
             batch.error_message = None
         else:
-            batch = existing or PaymentReconcileBatch(
-                channel=ch,
-                bill_date=bill_date,
-                status="PENDING",
-                created_by=created_by,
-            )
-            if existing is None:
-                db.add(batch)
+            batch = existing
+            batch.status = "PENDING"
+            batch.error_message = None
+            if batch.created_by is None and created_by is not None:
+                batch.created_by = created_by
         batch.source_filename = source_filename
         await db.flush()
 
