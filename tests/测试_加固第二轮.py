@@ -37,7 +37,7 @@ def test_jwt_audience_roundtrip():
 
 
 def test_jwt_rejects_wrong_audience():
-    from jose import jwt
+    import jwt
 
     from app.core.security import decode_token
 
