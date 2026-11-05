@@ -1,8 +1,10 @@
+from datetime import date
 from decimal import Decimal
 
 import pytest
 
-from app.services.payment_reconcile_service import parse_channel_bill_csv
+from app.models import PaymentReconcileBatch
+from app.services.payment_reconcile_service import PaymentReconcileService, parse_channel_bill_csv
 
 
 def test_channel_bill_parser_keeps_trade_amount_and_payment_number():
@@ -54,4 +56,44 @@ def test_channel_bill_parser_rejects_missing_header():
 
 def test_channel_bill_parser_allows_empty_bill_with_valid_headers():
     assert parse_channel_bill_csv("WECHAT", "trade_no,amount,payment_no\\n") == []
+
+@pytest.mark.asyncio
+async def test_reconcile_batch_rerun_reuses_same_batch_and_replaces_result(db_session):
+    """同渠道同账期重复导入复用批次，不能创建第二条批次记录。"""
+    bill_date = date(2026, 10, 31)
+    csv_bill = "trade_no,amount,payment_no\\n"
+
+    first = await PaymentReconcileService.run_batch(
+        db_session,
+        channel="WECHAT",
+        bill_date=bill_date,
+        bill_csv=csv_bill,
+        created_by=7,
+        source_filename="wechat-20261031.csv",
+    )
+    first_id = first.id
+    await db_session.commit()
+
+    second = await PaymentReconcileService.run_batch(
+        db_session,
+        channel="wechat",
+        bill_date=bill_date,
+        bill_csv=csv_bill,
+        created_by=8,
+        source_filename="wechat-retry.csv",
+    )
+    await db_session.commit()
+
+    rows = (
+        await db_session.execute(
+            select(PaymentReconcileBatch).where(
+                PaymentReconcileBatch.channel == "WECHAT",
+                PaymentReconcileBatch.bill_date == bill_date,
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert second.id == first_id
+    assert second.status == "DONE"
+    assert second.source_filename == "wechat-retry.csv"
 
