@@ -105,7 +105,8 @@ jobs:
           ALLOW_AUTH_MOCK: "true"
           ALLOW_DELIVERY_MOCK: "true"
         run: |
-          python -m pytest -q --tb=short -m mysql tests/测试_审计遗留加固.py
+          python -m pytest -q --tb=short -m mysql \
+            tests/测试_审计遗留加固.py tests/测试_数据库LeaderEpoch.py
 
   frontend-build:
     runs-on: ubuntu-latest
