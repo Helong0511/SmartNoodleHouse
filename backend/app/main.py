@@ -591,30 +591,9 @@ async def lifespan(app: FastAPI):
         await stop_overrides_watcher()
     except Exception:
         logger.exception("关机时停止 overrides watcher 失败")
-    if _leader_stop is not None:
-        _leader_stop.set()
-    if _leader_renew_task is not None:
-        done, _pending = await asyncio.wait({_leader_renew_task}, timeout=5.0)
-        if _leader_renew_task not in done:
-            _leader_renew_task.cancel()
-            logger.error("Leader 续租任务关机等待超时，已请求取消")
-        else:
-            try:
-                _leader_renew_task.result()
-            except (asyncio.CancelledError, Exception):
-                pass
-
-    # renew callback 若正好在关机前触发，可能启动 standby；再次确保其已停止。
-    if _leader_promote_task is not None:
-        _leader_promote_task.cancel()
-        try:
-            await _leader_promote_task
-        except (asyncio.CancelledError, Exception):
-            pass
-        _leader_promote_task = None
-
+    jobs_drained = True
+    tts_ok = recognition_ok = warmup_ok = camera_ok = True
     if is_leader:
-        jobs_drained = True
         try:
             from app.services.scheduler_admin import (
                 active_leader_job_count,
@@ -647,7 +626,33 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("关机时停止摄像头采集失败")
 
-        if jobs_drained and tts_ok and recognition_ok and warmup_ok and camera_ok:
+    # 保持 Leader 租约续期直到所有旧工作排空，避免长时间关机清理期间锁提前过期。
+    if _leader_stop is not None:
+        _leader_stop.set()
+    renew_stopped = True
+    if _leader_renew_task is not None:
+        done, _pending = await asyncio.wait({_leader_renew_task}, timeout=5.0)
+        if _leader_renew_task not in done:
+            renew_stopped = False
+            _leader_renew_task.cancel()
+            logger.error("Leader 续租任务关机等待超时，已请求取消")
+        else:
+            try:
+                _leader_renew_task.result()
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    # renew callback 若正好在关机前触发，可能启动 standby；再次确保其已停止。
+    if _leader_promote_task is not None:
+        _leader_promote_task.cancel()
+        try:
+            await _leader_promote_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _leader_promote_task = None
+
+    if is_leader:
+        if jobs_drained and tts_ok and recognition_ok and warmup_ok and camera_ok and renew_stopped:
             if _leader_worker_id:
                 await release_leader(_leader_worker_id)
             logger.info("Leader 工作全部排空，已释放 Leader 租约")
