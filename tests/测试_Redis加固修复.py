@@ -22,6 +22,7 @@ class FakeRedis:
         self.delete_calls: list[str] = []
         self.incr_calls: list[str] = []
         self.expire_calls: list[tuple] = []
+        self.eval_calls: list[tuple] = []
 
     async def get(self, key):
         return self.store.get(key)
@@ -56,6 +57,7 @@ class FakeRedis:
         return 1 if key in self.store else 0
 
     async def eval(self, script, numkeys, key, token, *args):
+        self.eval_calls.append((script, numkeys, key, token, args))
         # 模拟项目中使用的几类 Lua 原子脚本，避免把 compare-expire 错当成 delete。
         if "INCR" in script:
             count = int(self.store.get(key, 0)) + 1
@@ -594,3 +596,17 @@ async def test_critical_scheduler_lock_is_not_granted_if_redis_client_fails():
     with patch.object(redis_client, "get_redis", failing_client):
         async with scheduler_admin.redis_job_lock("test-critical-job", ttl=30) as acquired:
             assert acquired is False
+
+
+@pytest.mark.asyncio
+async def test_scheduler_job_lock_renews_long_running_lease():
+    from app.services import scheduler_admin
+    from app.core import redis_client
+
+    fake = FakeRedis()
+    with patch.object(redis_client, "get_redis", _patch_get_redis(fake)):
+        async with scheduler_admin.redis_job_lock("test-long-job", ttl=5) as acquired:
+            assert acquired is True
+            await asyncio.sleep(1.8)
+    assert any("expire" in call[0].lower() for call in fake.eval_calls)
+    assert any("del" in call[0].lower() for call in fake.eval_calls)
