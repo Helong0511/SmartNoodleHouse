@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -16,7 +17,7 @@ from app.core.leader_fencing import (
 from app.models.leader import LeaderFencingState
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def fencing_db(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
