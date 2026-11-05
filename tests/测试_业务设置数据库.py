@@ -56,7 +56,7 @@ def test_camera_speaker_tts_meta():
     meta = BUSINESS_SETTING_META["camera_speaker_tts_enabled"]
     assert meta["group"] == "welcome"
     assert meta["type"] == "bool"
-    assert meta.get("default") is False
+    assert meta.get("default") is True
     assert SystemSettingsService._validate_value("camera_speaker_tts_enabled", "1") == "true"
     assert SystemSettingsService._validate_value("camera_speaker_tts_enabled", "off") == "false"
 
