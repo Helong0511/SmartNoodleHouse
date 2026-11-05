@@ -245,6 +245,107 @@ async def test_unknown_claim_completion_rowcount_fails_closed():
 
 
 @pytest.mark.asyncio
+async def test_库存镜像复用事件不得被历史一次性幂等记录跳过(monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=901,
+        aggregate_type="delivery_stock",
+        aggregate_id=77,
+        event_kind="mirror",
+        locked_by="worker:stock-token",
+        payload='{"store_id":1,"product_id":2}',
+        sync_version=4,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=db)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+    handler = AsyncMock()
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: ctx)
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+
+    @asynccontextmanager
+    async def _guard(*args, **kwargs):
+        yield
+
+    monkeypatch.setattr(outbox_worker, "claim_lease_guard", _guard)
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("delivery_stock", "mirror"))
+    outbox_worker.OUTBOX_HANDLERS[("delivery_stock", "mirror")] = handler
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=True))
+    try:
+        await outbox_worker.process_outbox_item(901)
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("delivery_stock", "mirror"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("delivery_stock", "mirror")] = old_handler
+
+    handler.assert_awaited_once()
+    idempotency.is_processed.assert_not_awaited()
+    assert db.commit.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_库存镜像处理期间版本变化时重新排队而不是标记完成(monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=902,
+        aggregate_type="delivery_stock_base",
+        aggregate_id=88,
+        event_kind="mirror",
+        locked_by="worker:stock-token",
+        payload='{"store_id":1,"product_id":2}',
+        sync_version=10,
+    )
+    fresh = MagicMock(id=902, status="PROCESSING", locked_by="worker:stock-token")
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fresh
+    done_result = MagicMock(rowcount=0)  # sync_version 条件不匹配
+    requeue_result = MagicMock(rowcount=1)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[done_result, select_result, requeue_result])
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=db)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+    handler = AsyncMock()
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: ctx)
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+
+    @asynccontextmanager
+    async def _guard(*args, **kwargs):
+        yield
+
+    monkeypatch.setattr(outbox_worker, "claim_lease_guard", _guard)
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("delivery_stock_base", "mirror"))
+    outbox_worker.OUTBOX_HANDLERS[("delivery_stock_base", "mirror")] = handler
+    try:
+        await outbox_worker.process_outbox_item(902)
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("delivery_stock_base", "mirror"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("delivery_stock_base", "mirror")] = old_handler
+
+    handler.assert_awaited_once()
+    assert db.rollback.await_count == 1
+    assert db.commit.await_count == 1
+    requeue_stmt = db.execute.await_args_list[2].args[0]
+    assert "PENDING" in [str(v) for v in requeue_stmt.compile().params.values()]
+
+
+@pytest.mark.asyncio
 async def test_outbox_idempotency_precheck_failure_never_runs_handler(monkeypatch):
     from app.domains.messaging import idempotency
     from app.services import outbox_worker
