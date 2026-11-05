@@ -131,7 +131,9 @@ class PosRefundService:
         amount: Decimal | None,
         reason: str,
     ) -> PosRefundRequest:
-        order = await db.get(Order, int(order_id))
+        # 锁定订单行，串行化同一订单的退款申请创建；否则两个并发请求都可能
+        # 在 pending 检查时读到 0，并各自插入一条待审批申请。
+        order = await db.get(Order, int(order_id), with_for_update=True)
         if not order:
             raise AppException(40402, "订单不存在")
         assert_order_store_access(user, order)
@@ -169,7 +171,9 @@ class PosRefundService:
         pending = await db.scalar(
             select(func.count()).select_from(PosRefundRequest).where(
                 PosRefundRequest.order_id == order.id,
-                PosRefundRequest.status == "PENDING",
+                PosRefundRequest.status.in_(
+                    ("PENDING", "PROCESSING", "RECONCILIATION_REQUIRED")
+                ),
             )
         ) or 0
         if int(pending) > 0:
@@ -209,7 +213,8 @@ class PosRefundService:
         幂等：该订单已有待审批申请时直接返回原申请。资金执行复用现有审批流
         （店长/超管审批 → 按支付分摊原路退回）。
         """
-        order = await db.get(Order, int(order_id))
+        # 与 POS 退款申请使用同一订单行锁，避免顾客自助与员工端并发创建两笔申请。
+        order = await db.get(Order, int(order_id), with_for_update=True)
         if not order:
             raise AppException(40404, "订单不存在")
         if order.customer_id != int(customer_id):
@@ -227,7 +232,9 @@ class PosRefundService:
                     select(PosRefundRequest)
                     .where(
                         PosRefundRequest.order_id == order.id,
-                        PosRefundRequest.status == "PENDING",
+                        PosRefundRequest.status.in_(
+                            ("PENDING", "PROCESSING", "RECONCILIATION_REQUIRED")
+                        ),
                     )
                     .limit(1)
                 )
