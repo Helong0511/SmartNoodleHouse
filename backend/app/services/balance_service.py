@@ -244,6 +244,18 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if pay_row:
+            # 原扣款流水必须确属当前订单顾客/门店，且方向必须是扣款（负数）。
+            # 不能仅凭 order_id 找到任意 PAY 行就套用其本金/赠送比例。
+            if (
+                int(getattr(pay_row, "customer_id", 0) or 0) != int(customer_id)
+                or (
+                    store_id is not None
+                    and int(getattr(pay_row, "store_id", 0) or 0) != int(store_id)
+                )
+                or money(pay_row.delta_principal) > 0
+                or money(pay_row.delta_gift) > 0
+            ):
+                raise AppException(40991, "原储值支付流水与当前顾客/门店不匹配或扣款方向异常，拒绝自动回补")
             paid_principal = money(abs(pay_row.delta_principal))
             paid_gift = money(abs(pay_row.delta_gift))
             paid_total = money(paid_principal + paid_gift)
