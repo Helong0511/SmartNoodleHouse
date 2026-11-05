@@ -41,6 +41,17 @@ from app.services.product_sync_service import ProductSyncService
 
 logger = logging.getLogger(__name__)
 
+
+def _refund_event_fingerprint(platform: str, delivery_order_id: int, amount: Decimal, refund_type: str, raw: dict) -> str:
+    """平台未提供退款单号时，对完整规范化回调生成稳定去重指纹。"""
+    canonical_payload = json.dumps(
+        raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.sha256(
+        f"{platform.upper()}|{delivery_order_id}|{amount}|{refund_type}|{canonical_payload}".encode("utf-8")
+    ).hexdigest()
+
+
 STATUS_SYNC_MAP = {
     "CONFIRMED": "ACCEPTED",
     "PREPARING": "ACCEPTED",
@@ -790,12 +801,9 @@ class DeliveryService:
         if not refund_id:
             # 部分平台回调不提供退款单号。使用原始事件规范化内容生成稳定指纹，
             # 由数据库唯一约束兜底并发/重复投递；不把合成值伪装成平台退款编号。
-            canonical_payload = json.dumps(
-                raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+            fingerprint = _refund_event_fingerprint(
+                platform, d_order.id, amount, refund_type, raw
             )
-            fingerprint = hashlib.sha256(
-                f"{platform.upper()}|{d_order.id}|{amount}|{refund_type}|{canonical_payload}".encode("utf-8")
-            ).hexdigest()
             from sqlalchemy.exc import IntegrityError as _IntegrityError
 
             try:
