@@ -15,7 +15,7 @@ SET
     t.alipay_qr_url = NULL,
     t.updated_at = NOW(3)
 WHERE s.store_no = 'SH01'
-  AND t.table_no IN ('01', '02', '03');
+  AND t.table_no IN ('WM', 'A01', 'A02');
 
 -- Disable the three legacy demo staff accounts and invalidate their sessions.
 -- After execution, create replacement staff accounts with fresh passwords through
