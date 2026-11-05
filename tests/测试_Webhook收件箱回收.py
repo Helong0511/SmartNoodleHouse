@@ -107,6 +107,8 @@ async def test_process_pending_inbox_counts_only_claimed():
         n = await process_pending_inbox(limit=10)
     # 只有 1,3,5 成功 claim → 3
     assert n == 3
+    scan_stmt = db.execute.await_args.args[0]
+    assert "attempt_count" in str(scan_stmt).lower()
 
 
 @pytest.mark.asyncio
