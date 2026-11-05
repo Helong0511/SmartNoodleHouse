@@ -379,6 +379,19 @@ def test_perf_metrics_max_pipe_commands():
 # ── leader_lock 冗余 decode 清理 ──
 
 @pytest.mark.asyncio
+async def test_leader_lock_contender_never_overwrites_existing_owner():
+    from app.core import leader_lock
+
+    fake = FakeRedis()
+    fake.store[leader_lock.LEADER_KEY] = "active-worker-A"
+    leader_lock.set_leader_held(False)
+    with patch.object(leader_lock, "get_redis", _patch_get_redis(fake)):
+        acquired = await leader_lock.try_acquire_leader("new-worker-B")
+    assert acquired is False
+    assert fake.store[leader_lock.LEADER_KEY] == "active-worker-A"
+
+
+@pytest.mark.asyncio
 async def test_leader_lock_confirm_no_decode_call():
     from app.core import leader_lock
     fake = FakeRedis()
