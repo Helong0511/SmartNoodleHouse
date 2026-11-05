@@ -261,9 +261,9 @@ async def test_metrics_endpoint_reads_middleware_data(fake_redis):
 
     body = await reco_metrics(request=None, window_hours=1)
     routes = body["data"]["routes"]
-    # route.path 不含 /api 外层 prefix，键为路由模板 /miniprogram/menu
-    assert "/miniprogram/menu" in routes
-    assert routes["/miniprogram/menu"]["count"] >= 1
+    # FastAPI include_router 已将 /api prefix 纳入最终 route.path，指标键应与实际请求路径一致。
+    assert "/api/miniprogram/menu" in routes
+    assert routes["/api/miniprogram/menu"]["count"] >= 1
 
 
 # ---------- 菜单聚合版本戳 ----------
