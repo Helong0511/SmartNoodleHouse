@@ -300,3 +300,9 @@ def test_refund_event_fingerprint_is_stable_without_provider_refund_id():
     assert first == retry
     assert first != changed
     assert len(first) == 64
+
+
+def test_meituan_refund_no_is_classified_as_refund_event():
+    from app.services.delivery_events import DeliveryEvent, classify_meituan_event
+
+    assert classify_meituan_event({"refund_no": "RF-2026-01", "order_id": "OD-1"}) == DeliveryEvent.REFUND
