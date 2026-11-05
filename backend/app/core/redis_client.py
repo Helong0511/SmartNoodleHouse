@@ -39,36 +39,54 @@ async def release_owned_lock(r, key: str, token: str) -> bool:
         return False
 
 _redis: redis.Redis | None = None
+_redis_pool: redis.BlockingConnectionPool | None = None
 _lock = asyncio.Lock()
+
+# 池耗尽时有限等待后快速失败，避免默认 ConnectionPool 立即拒绝造成突发流量抖动，
+# 也避免无限排队拖垮 API。业务层仍按各自策略 fail-open / fail-closed。
+_REDIS_POOL_WAIT_TIMEOUT_SEC = 0.75
 
 
 async def get_redis() -> redis.Redis:
-    global _redis
+    global _redis, _redis_pool
     if _redis is None:
-        # 并发首调仅创建一个实例，避免被覆盖的实例连接泄漏
+        # 并发首调仅创建一个实例，避免被覆盖的实例连接泄漏。
+        # BlockingConnectionPool 在达到 max_connections 时最多等待 750ms，
+        # 超时后抛 ConnectionError；调用方已有降级/关键路径 fail-closed 策略。
         async with _lock:
             if _redis is None:
-                _redis = redis.from_url(
-                    get_settings().redis_url,
+                settings = get_settings()
+                pool = redis.BlockingConnectionPool.from_url(
+                    settings.redis_url,
                     decode_responses=True,
-                    max_connections=get_settings().redis_max_connections,
-                    # Redis 故障/网络半开时必须快速超时，不能让请求线程无限等待。
+                    max_connections=settings.redis_max_connections,
+                    timeout=_REDIS_POOL_WAIT_TIMEOUT_SEC,
                     socket_connect_timeout=2.0,
                     socket_timeout=3.0,
                     health_check_interval=30,
                 )
+                _redis_pool = pool
+                _redis = redis.Redis(connection_pool=pool)
     return _redis
 
 
 async def close_redis() -> None:
     """关闭当前进程 Redis 连接池；应用 shutdown/reload 时调用。"""
-    global _redis
+    global _redis, _redis_pool
     async with _lock:
         client = _redis
+        pool = _redis_pool
         _redis = None
+        _redis_pool = None
     if client is not None:
         try:
             await client.aclose()
+        except Exception:
+            logger.debug("关闭 Redis 客户端失败", exc_info=True)
+    # 显式关闭 pool：避免 Redis 客户端构造方式/版本的 auto-close 默认值差异。
+    if pool is not None:
+        try:
+            await pool.disconnect(inuse_connections=True)
         except Exception:
             logger.debug("关闭 Redis 连接池失败", exc_info=True)
 
