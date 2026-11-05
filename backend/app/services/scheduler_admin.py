@@ -141,6 +141,11 @@ _job_stats_locks: dict[str, asyncio.Lock] = {}
 _active_leader_job_tasks: set[asyncio.Task] = set()
 
 
+def active_leader_job_count() -> int:
+    """当前尚未退出的 Leader 定时任务数；用于降级时决定是否允许本进程重新竞选。"""
+    return sum(1 for task in tuple(_active_leader_job_tasks) if not task.done())
+
+
 async def cancel_active_leader_jobs(*, timeout: float = 5.0) -> int:
     """取消并等待本进程正在运行的 Leader 定时任务，给事务清理留出有限时间。"""
     current = asyncio.current_task()
