@@ -317,6 +317,14 @@ def leader_job(fn):
                 getattr(fn, "__name__", "unknown"),
             )
             return None
+        from app.core.leader_fencing import confirm_database_epoch
+
+        if not await confirm_database_epoch():
+            logger.critical(
+                "Leader job 拒绝执行：数据库 fencing epoch 已被更新 job=%s",
+                getattr(fn, "__name__", "unknown"),
+            )
+            return None
         job_name = getattr(fn, "__name__", "")
         if job_name and not is_job_enabled(job_name):
             return None
