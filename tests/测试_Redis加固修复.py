@@ -527,3 +527,27 @@ async def test_local_singleflight_serializes_same_key_and_cleans_registry():
     assert maximum == 1
     assert calls == 12
     assert "test:redis:hot-key" not in async_utils._SINGLEFLIGHT_LOCKS
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_uses_local_fallback_when_redis_is_unavailable():
+    from app.services import reco_cache
+
+    reco_cache._LOCAL_RECO_CACHE.clear()
+    payload = {"items": [{"id": 1}]}
+    with patch.object(reco_cache, "get_redis", new_callable=AsyncMock, side_effect=RuntimeError("redis down")):
+        await reco_cache.set_cached_reco(9, 2, "menu", "a", payload, "")
+        hit = await reco_cache.get_cached_reco(9, 2, "menu", "a", "")
+    assert hit is not None
+    assert hit["items"] == payload["items"]
+    assert hit["cache_hit"] is True
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_customer_invalidation_clears_local_fallback():
+    from app.services import reco_cache
+
+    reco_cache._LOCAL_RECO_CACHE.clear()
+    await reco_cache.set_cached_reco(19, 2, "menu", "a", {"items": [1]}, "")
+    reco_cache._invalidate_local_reco_customer(19)
+    assert reco_cache._get_local_reco(reco_cache._local_reco_key(19, 2, "menu", "a", "")) is None
