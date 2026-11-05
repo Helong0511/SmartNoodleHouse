@@ -1,4 +1,5 @@
 name: One-time npm lock refresh
+# Run only on the explicit refresh commit; subsequent branch pushes are ignored.
 
 on:
   push:
