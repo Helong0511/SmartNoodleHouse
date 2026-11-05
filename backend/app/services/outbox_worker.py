@@ -5,6 +5,7 @@ handler 必须自身幂等（按 aggregate_id 去重），outbox 表 UNIQUE 仅�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import timedelta
@@ -46,6 +47,18 @@ def register_outbox_handler(agg_type: str, kind: str) -> Callable[[OutboxHandler
 def _backoff_seconds(attempt_count: int) -> int:
     """指数退避：2^attempt 秒，封顶 10 分钟。"""
     return backoff_seconds(attempt_count, cap=BACKOFF_CAP_SEC)
+
+
+def _jittered_backoff_seconds(attempt_count: int, event_id: int) -> int:
+    """按事件 ID 稳定分散重试时间，避免大批 Outbox 在同一秒集体重试。"""
+    base = _backoff_seconds(attempt_count)
+    digest = hashlib.blake2s(
+        f"{int(event_id)}:{int(attempt_count)}".encode("ascii"),
+        digest_size=2,
+    ).digest()
+    # 确定性 -20%..+20% jitter，封顶后 clamp，便于排障与测试。
+    percent = int.from_bytes(digest, "big") % 41 - 20
+    return max(1, min(BACKOFF_CAP_SEC, int(round(base * (100 + percent) / 100))))
 
 
 def _resolve_outbox_handler(row: OutboxEvent) -> OutboxHandler | None:
@@ -414,7 +427,7 @@ async def _mark_failed(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str
     attempts = int(fresh.attempt_count or 1)
     max_att = int(fresh.max_attempts or MAX_ATTEMPTS)
     retry_at = (
-        now_local() + timedelta(seconds=_backoff_seconds(attempts))
+        now_local() + timedelta(seconds=_jittered_backoff_seconds(attempts, int(row.id)))
         if attempts < max_att
         else None
     )
