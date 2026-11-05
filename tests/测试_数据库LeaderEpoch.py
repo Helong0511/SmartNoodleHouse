@@ -61,14 +61,16 @@ async def test_database_epoch_is_monotonic_and_owner_bound(fencing_db):
 
 @pytest.mark.asyncio
 async def test_current_epoch_can_commit_business_transaction(fencing_db):
+    # 测试身份必须与数据库权威行一致，否则正确的 fencing 应拒绝提交。
     async with fencing_db() as db:
         await db.execute(
             text(
-                "UPDATE leader_fencing_state SET epoch = 7, owner_id = 'leader-current' "
-                "WHERE id = 1"
+                "UPDATE leader_fencing_state "
+                "SET epoch = 7, owner_id = 'leader-current' WHERE id = 1"
             )
         )
         await db.commit()
+
     activate_leader_epoch(7, "leader-current")
     async with fencing_db() as db:
         with leader_fence_scope():
@@ -83,17 +85,17 @@ async def test_current_epoch_can_commit_business_transaction(fencing_db):
 
 
 @pytest.mark.asyncio
-async def test_old_leader_epoch_is_rejected_at_database_commit(fencing_db):
-    activate_leader_epoch(11, "leader-old")
+async def test_old_leader_epoch_is_rejected_and_business_write_is_rolled_back(fencing_db):
     async with fencing_db() as db:
         await db.execute(
             text(
-                "UPDATE leader_fencing_state SET epoch = 12, owner_id = 'leader-new' "
-                "WHERE id = 1"
+                "UPDATE leader_fencing_state "
+                "SET epoch = 12, owner_id = 'leader-new' WHERE id = 1"
             )
         )
         await db.commit()
 
+    activate_leader_epoch(11, "leader-old")
     async with fencing_db() as stale_db:
         with leader_fence_scope():
             await stale_db.execute(
@@ -102,6 +104,41 @@ async def test_old_leader_epoch_is_rejected_at_database_commit(fencing_db):
             with pytest.raises(LeaderFenceLostError, match="fencing mismatch"):
                 await stale_db.commit()
         await stale_db.rollback()
+
+    async with fencing_db() as db:
+        count = await db.scalar(text("SELECT COUNT(*) FROM fenced_test_rows"))
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_non_leader_request_without_fence_scope_can_commit(fencing_db):
+    # 普通 API 请求不应因为同一进程当前存在 Leader 而被错误绑定到 Leader epoch。
+    async with fencing_db() as db:
+        await db.execute(
+            text("INSERT INTO fenced_test_rows (value) VALUES ('api-request')")
+        )
+        await db.commit()
+
+    async with fencing_db() as db:
+        count = await db.scalar(text("SELECT COUNT(*) FROM fenced_test_rows"))
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_fenced_commit_fails_closed_when_singleton_row_is_missing(fencing_db):
+    async with fencing_db() as db:
+        await db.execute(text("DELETE FROM leader_fencing_state WHERE id = 1"))
+        await db.commit()
+
+    activate_leader_epoch(3, "leader-with-missing-row")
+    async with fencing_db() as db:
+        with leader_fence_scope():
+            await db.execute(
+                text("INSERT INTO fenced_test_rows (value) VALUES ('must-not-commit')")
+            )
+            with pytest.raises(LeaderFenceLostError, match="row missing"):
+                await db.commit()
+        await db.rollback()
 
     async with fencing_db() as db:
         count = await db.scalar(text("SELECT COUNT(*) FROM fenced_test_rows"))
