@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import generate_no
@@ -189,14 +189,42 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if pay_row:
-            paid_total = money(abs(pay_row.delta_principal) + abs(pay_row.delta_gift))
-            if paid_total > 0:
-                gift_share = money(abs(pay_row.delta_gift) * amt / paid_total)
-                principal_share = amt - gift_share
-            else:
-                gift_share = Decimal("0.00")
-                principal_share = amt
+            paid_principal = money(abs(pay_row.delta_principal))
+            paid_gift = money(abs(pay_row.delta_gift))
+            paid_total = money(paid_principal + paid_gift)
+            if paid_total <= 0:
+                raise AppException(40991, "原储值支付流水金额无效，拒绝自动回补")
+            # 分笔退款不能逐笔独立四舍五入 gift 占比，否则多笔退款累加可能产生分币漂移。
+            # 按“累计已退款金额”计算目标赠送金回补值，本次只补差额；全额退时精确回到原始赠送金。
+            previous_restore = (
+                await db.execute(
+                    select(
+                        func.coalesce(func.sum(BalanceLedger.delta_principal), 0),
+                        func.coalesce(func.sum(BalanceLedger.delta_gift), 0),
+                    ).where(
+                        BalanceLedger.entry_type == "REFUND_RESTORE",
+                        BalanceLedger.order_id == order_id,
+                        BalanceLedger.customer_id == customer_id,
+                    )
+                )
+            ).one()
+            previous_principal = money(previous_restore[0] or 0)
+            previous_gift = money(previous_restore[1] or 0)
+            previous_total = money(previous_principal + previous_gift)
+            cumulative_refund = money(previous_total + amt)
+            if cumulative_refund > paid_total:
+                raise AppException(40992, "累计余额退款超过原储值支付金额，拒绝重复回补")
+            target_gift = (
+                paid_gift
+                if cumulative_refund == paid_total
+                else money(paid_gift * cumulative_refund / paid_total)
+            )
+            gift_share = money(target_gift - previous_gift)
+            principal_share = money(amt - gift_share)
+            if gift_share < 0 or principal_share < 0:
+                raise AppException(40993, "余额退款本金/赠送金分摊异常，需人工核对")
         else:
+            # 历史订单没有 PAY 流水时，沿用旧兼容策略：全部回补本金。
             gift_share = Decimal("0.00")
             principal_share = amt
 
