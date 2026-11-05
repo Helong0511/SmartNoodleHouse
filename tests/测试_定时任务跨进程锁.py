@@ -438,3 +438,13 @@ async def test_cancel_active_leader_jobs_has_bounded_wait_for_cancel_resistant_t
         sa._active_leader_job_tasks.discard(task)
 
     assert sa.active_leader_job_count() == 0
+
+
+
+@pytest.fixture(autouse=True)
+def _activate_test_database_leader_epoch():
+    from app.core.leader_fencing import activate_leader_epoch, deactivate_leader_epoch
+
+    activate_leader_epoch(100, "test-worker")
+    yield
+    deactivate_leader_epoch("test-worker")
