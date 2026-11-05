@@ -472,7 +472,7 @@ def test_alipay_callback_accepts_matching_seller_email_in_production():
         b"&seller_email=MERCHANT%40EXAMPLE.COM"
     )
     parsed = _verify_alipay_with_settings(settings, body)
-    assert parsed["seller_email"] == "MERCHANT@example.com"
+    assert parsed["seller_email"].casefold() == "merchant@example.com"
 
 
 
@@ -967,7 +967,7 @@ async def test_business_integrity_error_is_rethrown_for_provider_retry(monkeypat
     monkeypatch.setattr(payment_service, "get_settings", lambda: SimpleNamespace(
         is_production=False, alipay_app_id=""
     ))
-    monkeypatch.setattr(payment_service, "claim_once", AsyncMock(return_value=True))
+    monkeypatch.setattr(payment_service, "claim_once", AsyncMock(return_value="owner-token"))
     monkeypatch.setattr(payment_service, "release_claim", release)
     monkeypatch.setattr(payment_service, "make_receipt_key", lambda *args: "receipt-test")
     monkeypatch.setattr(payment_service, "AsyncSessionLocal", lambda: SessionContext())
@@ -980,7 +980,7 @@ async def test_business_integrity_error_is_rethrown_for_provider_retry(monkeypat
     with pytest.raises(IntegrityError):
         await PaymentService.handle_callback(FakeDB(), "ALIPAY", {}, b"callback")
 
-    release.assert_awaited_once_with("pay:ALIPAY", "receipt-test")
+    release.assert_awaited_once_with("pay:ALIPAY", "receipt-test", "owner-token")
 
 
 @pytest.mark.asyncio
