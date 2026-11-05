@@ -133,6 +133,8 @@ async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
     SystemSettingsService._cache = None
     SystemSettingsService._cache_ver = -1
     SystemSettingsService._cache_at = 0.0
+    # asyncio.Lock 在等待竞争时会绑定当前事件循环；测试间重置避免跨 loop 复用。
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
     calls = {"count": 0}
 
     class DummySession:
@@ -165,3 +167,4 @@ async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
 
     assert calls["count"] == 1
     assert SystemSettingsService._cache == {"test_setting": "ok"}
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
