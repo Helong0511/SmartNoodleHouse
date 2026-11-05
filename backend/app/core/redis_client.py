@@ -107,3 +107,60 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
+
+
+# Redis 重建锁续租：缓存计算可能超过短租约 TTL，必须按 owner token 原子续期。
+_LUA_RENEW_OWNED_LOCK = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
+
+def start_redis_lock_heartbeat(
+    r,
+    key: str,
+    token: str,
+    *,
+    ttl: int,
+    label: str = "redis-lock",
+) -> asyncio.Task:
+    """启动 owner-token 心跳。租约丢失后停止续期；调用方发布前仍必须做 owner fence。
+
+    Redis 短暂故障时继续尝试续期，但若租约已被接管，Lua owner 校验会终止旧心跳。
+    """
+    lease_ttl = max(3, int(ttl))
+    interval = max(1.0, min(10.0, lease_ttl / 3.0))
+
+    async def _run() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                renewed = await r.eval(
+                    _LUA_RENEW_OWNED_LOCK, 1, key, token, lease_ttl
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Redis 锁续租暂时失败 label=%s key=%s", label, key, exc_info=True)
+                continue
+            if not renewed:
+                logger.warning("Redis 锁租约已丢失，停止旧持有者续租 label=%s key=%s", label, key)
+                return
+
+    return asyncio.create_task(_run(), name=f"redis-lock-heartbeat:{label}")
+
+
+async def stop_redis_lock_heartbeat(task: asyncio.Task | None) -> None:
+    """停止并等待锁心跳，避免释放后留下后台任务。"""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.debug("Redis 锁心跳退出异常", exc_info=True)
