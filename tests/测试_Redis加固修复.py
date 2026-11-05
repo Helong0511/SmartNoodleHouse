@@ -473,6 +473,9 @@ def test_rate_limit_bucket_collapses_dynamic_ids_and_keeps_sensitive_policies_se
     assert _rate_limit_bucket("/api/miniprogram/orders/10001") == "/api/miniprogram"
     assert _rate_limit_bucket("/api/auth/login") == "/api/auth/login"
     assert _rate_limit_bucket("/api/auth/verify-password") == "/api/auth/verify-password"
+    assert _rate_limit_bucket("/api/miniprogram/orders/10001") == "/api/miniprogram/orders"
+    assert _rate_limit_bucket("/api/miniprogram/menu/1") == "/api/miniprogram/menu"
+    assert _rate_limit_bucket("/api/miniprogram/orders/10001") == _rate_limit_bucket("/api/miniprogram/orders/99999")
 
 
 @pytest.mark.asyncio
