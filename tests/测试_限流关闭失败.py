@@ -151,3 +151,32 @@ async def test_token_bucket_allowed_request_continues(monkeypatch):
 
     assert response is expected
     next_call.assert_awaited_once()
+
+
+def test_production_required_rate_limit_paths_are_covered():
+    from app.core.startup_checks import _missing_rate_limit_fail_closed_paths
+
+    assert _missing_rate_limit_fail_closed_paths(
+        "/api/auth/login,/api/auth/verify-password,/api/payments/,"
+        "/api/miniprogram/wechat/login,/api/miniprogram/alipay/login,"
+        "/api/miniprogram/auth/refresh"
+    ) == []
+    assert _missing_rate_limit_fail_closed_paths("/api/auth/login,/api/payments/") == [
+        "/api/miniprogram/wechat/login",
+        "/api/miniprogram/alipay/login",
+        "/api/miniprogram/auth/refresh",
+    ]
+
+
+def test_parent_prefix_covers_sensitive_rate_limit_paths():
+    from app.core.startup_checks import _missing_rate_limit_fail_closed_paths
+
+    assert _missing_rate_limit_fail_closed_paths("/api") == []
+    assert _missing_rate_limit_fail_closed_paths("") == [
+        "/api/auth/login",
+        "/api/auth/verify-password",
+        "/api/payments/",
+        "/api/miniprogram/wechat/login",
+        "/api/miniprogram/alipay/login",
+        "/api/miniprogram/auth/refresh",
+    ]
