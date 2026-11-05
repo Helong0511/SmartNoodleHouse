@@ -184,7 +184,7 @@ class Settings(BaseSettings):
     webhook_ip_allowlist: str = ""
     webhook_require_allowlist: bool = False
     # P1-43: Webhook 请求体最大字节数（超出返回 413）
-    webhook_max_body_bytes: int = 512 * 1024  # 512KB
+    webhook_max_body_bytes: int = Field(default=512 * 1024, ge=1024, le=10 * 1024 * 1024)  # 1KB–10MB
     # 仅这些直连 peer（反代）可让后端信任 X-Real-IP / X-Forwarded-For
     trusted_proxy_ips: str = "127.0.0.1,::1"
 
