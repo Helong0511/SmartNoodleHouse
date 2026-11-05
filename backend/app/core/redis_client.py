@@ -132,10 +132,15 @@ def start_redis_lock_heartbeat(
     """
     lease_ttl = max(3, int(ttl))
     interval = max(1.0, min(10.0, lease_ttl / 3.0))
+    owner_task = asyncio.current_task()
 
     async def _run() -> None:
         while True:
             await asyncio.sleep(interval)
+            # 请求/构建任务异常退出或被取消时，不得由心跳永久续租孤儿锁。
+            if owner_task is None or owner_task.done():
+                logger.warning("Redis 锁持有者任务已结束，停止心跳 label=%s key=%s", label, key)
+                return
             try:
                 renewed = await r.eval(
                     _LUA_RENEW_OWNED_LOCK, 1, key, token, lease_ttl
