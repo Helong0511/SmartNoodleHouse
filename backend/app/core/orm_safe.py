@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.orm.exc import UnmappedInstanceError
 
 
@@ -19,7 +20,8 @@ def orm_attr_loaded(obj: Any, attr: str) -> bool:
     """属性是否已在实例中加载（未加载则 sync 读取可能 MissingGreenlet）。"""
     try:
         state = sa_inspect(obj)
-    except UnmappedInstanceError:
+    except (UnmappedInstanceError, NoInspectionAvailable):
+        # 兼容 SimpleNamespace/DTO 等非 ORM 对象；它们没有 SQLAlchemy unloaded 状态。
         return hasattr(obj, attr)
     if state.transient:
         return False
