@@ -34,29 +34,40 @@ DEFAULT_LIMIT = (120, 60)
 # Redis 故障时限流中间件可能在高 QPS 下逐请求触发异常。
 # 日志必须限频，避免故障本身再引发磁盘/日志采集 IO 雪崩。
 _REDIS_ERROR_LOG_INTERVAL_SEC = 30.0
-_last_redis_error_log_at = -_REDIS_ERROR_LOG_INTERVAL_SEC
-_suppressed_redis_error_logs = 0
+_last_redis_fail_open_log_at = -_REDIS_ERROR_LOG_INTERVAL_SEC
+_last_redis_fail_closed_log_at = -_REDIS_ERROR_LOG_INTERVAL_SEC
+_suppressed_redis_fail_open_logs = 0
+_suppressed_redis_fail_closed_logs = 0
 
 
 def _log_redis_failure(path: str, error: Exception, *, fail_closed: bool) -> None:
-    global _last_redis_error_log_at, _suppressed_redis_error_logs
+    global _last_redis_fail_open_log_at, _last_redis_fail_closed_log_at
+    global _suppressed_redis_fail_open_logs, _suppressed_redis_fail_closed_logs
     now = time.monotonic()
-    if now - _last_redis_error_log_at < _REDIS_ERROR_LOG_INTERVAL_SEC:
-        _suppressed_redis_error_logs += 1
-        return
-    suppressed = _suppressed_redis_error_logs
-    _suppressed_redis_error_logs = 0
-    _last_redis_error_log_at = now
     if fail_closed:
+        last_at = _last_redis_fail_closed_log_at
+        if now - last_at < _REDIS_ERROR_LOG_INTERVAL_SEC:
+            _suppressed_redis_fail_closed_logs += 1
+            return
+        suppressed = _suppressed_redis_fail_closed_logs
+        _suppressed_redis_fail_closed_logs = 0
+        _last_redis_fail_closed_log_at = now
         logger.error(
             "限流 Redis 不可用，敏感路径 fail-closed: path=%s suppressed=%s err=%s",
             path, suppressed, error,
         )
-    else:
-        logger.warning(
-            "限流 Redis 不可用，降级放行: path=%s suppressed=%s err=%s",
-            path, suppressed, error,
-        )
+        return
+
+    if now - _last_redis_fail_open_log_at < _REDIS_ERROR_LOG_INTERVAL_SEC:
+        _suppressed_redis_fail_open_logs += 1
+        return
+    suppressed = _suppressed_redis_fail_open_logs
+    _suppressed_redis_fail_open_logs = 0
+    _last_redis_fail_open_log_at = now
+    logger.warning(
+        "限流 Redis 不可用，降级放行: path=%s suppressed=%s err=%s",
+        path, suppressed, error,
+    )
 
 
 def _fail_closed_prefixes(raw: str) -> list[str]:
