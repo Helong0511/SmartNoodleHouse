@@ -5,7 +5,7 @@ import logging
 import time
 
 from fastapi import APIRouter, Request
-from jose import ExpiredSignatureError, JWTError
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError as JWTError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
