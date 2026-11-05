@@ -537,8 +537,22 @@ async def lifespan(app: FastAPI):
                 logger.exception("standby 抢锁异常 attempt=%s", attempt)
                 continue
             if ok:
+                # 旧 Leader 的 RTSP open/read 线程最多按 CameraManager 的停止超时排空；
+                # 接管方留出略大于该窗口的交接缓冲，避免两进程同时打开同一路摄像头。
+                handoff_grace = 13.0
+                logger.warning(
+                    "standby 已取得 Leader 租约，等待 %.1fs 摄像头交接窗口后再启动工作 worker_id=%s",
+                    handoff_grace,
+                    _leader_worker_id,
+                )
+                await asyncio.sleep(handoff_grace)
+                from app.core.leader_lock import confirm_leader_owned
+
+                if not await confirm_leader_owned():
+                    logger.error("摄像头交接等待期间 Leader 租约丢失，取消本次 promotion")
+                    continue
                 logger.info(
-                    "standby 抢锁成功（attempt=%s role=%s worker_id=%s），启动调度",
+                    "standby Leader 租约仍有效（attempt=%s role=%s worker_id=%s），启动调度",
                     attempt,
                     role,
                     _leader_worker_id,
