@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/ 与仓库根目录均可放 .env（README 约定在根目录）
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
 
     database_url: str = "mysql+aiomysql://root:password@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4"
     redis_url: str = "redis://127.0.0.1:6379/0"
-    redis_max_connections: int = 50
+    redis_max_connections: int = Field(default=50, ge=1, le=1000)
     # 每进程连接池；gunicorn -w N 时总连接 ≈ N*(pool_size+max_overflow)
     db_pool_size: int = 5
     db_max_overflow: int = 10
