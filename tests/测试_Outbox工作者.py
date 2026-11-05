@@ -241,3 +241,47 @@ async def test_unknown_claim_completion_rowcount_fails_closed():
 
     assert rolled_back is True
     assert db.rollback.await_count == 1
+
+
+
+@pytest.mark.asyncio
+async def test_outbox_idempotency_precheck_failure_never_runs_handler(monkeypatch):
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=88,
+        aggregate_type="paid_side_effect",
+        aggregate_id=1234,
+        event_kind="points_award",
+        locked_by="worker:unique-token",
+        payload='{"order_id":1234}',
+    )
+    db = MagicMock()
+    db.rollback = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=db)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+    handler = AsyncMock()
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: ctx)
+    monkeypatch.setattr(
+        outbox_worker, "claim_outbox_item", AsyncMock(return_value=row)
+    )
+    monkeypatch.setattr(
+        idempotency, "is_processed", AsyncMock(side_effect=RuntimeError("db unavailable"))
+    )
+    monkeypatch.setattr(outbox_worker, "_mark_failed", AsyncMock())
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("paid_side_effect", "points_award"))
+    outbox_worker.OUTBOX_HANDLERS[("paid_side_effect", "points_award")] = handler
+    try:
+        await outbox_worker.process_outbox_item(88)
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("paid_side_effect", "points_award"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("paid_side_effect", "points_award")] = old_handler
+
+    assert db.rollback.await_count == 1
+    outbox_worker._mark_failed.assert_awaited_once()
+    handler.assert_not_awaited()
