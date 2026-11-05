@@ -4,7 +4,7 @@
 # Install: pip install -r backend/requirements.lock
 # Follow-up: replace this curated file with a full pip-tools/uv generated lock (with hashes).
 aiofiles==24.1.0
-aiomysql==0.2.0
+aiomysql==0.3.2
 alembic==1.14.1
 APScheduler==3.11.0
 bcrypt==4.0.1
@@ -26,9 +26,9 @@ pydantic==2.10.6
 pydantic-settings==2.7.1
 pydantic_core==2.27.2
 PyMySQL==1.1.1
-python-dotenv==1.0.1
-python-jose==3.5.0
-python-multipart==0.0.20
+python-dotenv==1.2.4
+PyJWT==2.15.1
+python-multipart==0.0.33
 redis==5.2.1
 SQLAlchemy==2.0.40
 uvicorn==0.34.0
