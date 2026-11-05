@@ -134,11 +134,16 @@ async def invalidate_customer(customer_id: int) -> None:
     pattern = reco_customer_pattern(customer_id)
     try:
         r = await get_redis()
-        keys = []
+        # SCAN 使用游标迭代；分批删除，避免某顾客积累大量 cart fingerprint 时
+        # 把所有匹配 Key 一次性装入 Python 列表造成额外内存峰值。
+        batch = []
         async for k in r.scan_iter(match=pattern, count=200):
-            keys.append(k)
-        if keys:
-            await delete_with_retry(r, *keys)
+            batch.append(k)
+            if len(batch) >= 200:
+                await delete_with_retry(r, *batch)
+                batch.clear()
+        if batch:
+            await delete_with_retry(r, *batch)
         # 延迟双删：防止删后又有并发请求写入旧推荐结果
         spawn_bg(_delayed_invalidate(pattern))
     except Exception:  # noqa: BLE001
@@ -150,11 +155,14 @@ async def _delayed_invalidate(pattern: str) -> None:
     try:
         await asyncio.sleep(0.1)
         r = await get_redis()
-        keys = []
+        batch = []
         async for k in r.scan_iter(match=pattern, count=200):
-            keys.append(k)
-        if keys:
-            await r.delete(*keys)
+            batch.append(k)
+            if len(batch) >= 200:
+                await r.delete(*batch)
+                batch.clear()
+        if batch:
+            await r.delete(*batch)
     except Exception:
         pass
 
