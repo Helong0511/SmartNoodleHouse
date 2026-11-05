@@ -339,8 +339,11 @@ class AlipayProvider:
 
     async def handle_callback(self, data: dict) -> dict:
         trade_status = data.get("trade_status", "")
-        # 退款异步：有 refund_fee / gmt_refund；用 out_biz_no 对齐 out_request_no
-        is_refund = bool(data.get("refund_fee") or data.get("gmt_refund"))
+        # 退款通知必须保留支付宝原始 refund_status；不能仅凭 refund_fee 推断退款成功。
+        # refund_status / gmt_refund 均属于支付宝异步通知字段。
+        is_refund = bool(
+            data.get("refund_status") or data.get("refund_fee") or data.get("gmt_refund")
+        )
         return {
             "payment_no": data.get("out_trade_no"),
             "provider_trade_no": data.get("trade_no"),
@@ -351,10 +354,29 @@ class AlipayProvider:
             "is_refund": is_refund,
             "refund_no": data.get("out_biz_no") or data.get("out_request_no"),
             "provider_refund_no": data.get("trade_no"),
-            "refund_status": "SUCCESS" if is_refund else None,
+            "refund_status": data.get("refund_status"),
             "refund_fee": data.get("refund_fee"),
             "trade_status": trade_status,
         }
+
+
+def _resolve_alipay_refund_status(parsed: dict) -> str:
+    """仅按支付宝明确退款状态或退款时间确认成功；退款金额字段本身不是成功凭据。"""
+    status = str(parsed.get("refund_status") or "").strip().upper()
+    if status in {"REFUND_SUCCESS", "SUCCESS"}:
+        return "SUCCESS"
+    if status in {"REFUND_CLOSED", "CLOSED"}:
+        return "CLOSED"
+    if status in {"SELLER_REFUSE_BUYER", "FAILED"}:
+        return "FAILED"
+    # 等待卖家同意、买家退货、卖家确认收货等状态都不是退款成功。
+    if status:
+        return "PROCESSING"
+    # 部分旧版通知可能只提供退款时间；时间戳可作为已发生退款的证据。
+    if parsed.get("gmt_refund"):
+        return "SUCCESS"
+    # refund_fee 仅表示金额，不足以证明退款状态已成功。
+    return "PROCESSING"
 
 
 class PaymentService:
@@ -2080,16 +2102,8 @@ class PaymentService:
             else:
                 new_status = "PROCESSING"
         else:
-            # 支付宝：须有明确退款成功信号，禁止仅因带 refund 字段就 SUCCESS
-            alipay_ok = status_raw in ("SUCCESS", "REFUND_SUCCESS", "")
-            # gmt_refund / refund_fee 已校验金额；无失败码才视为成功
-            fail_code = str(parsed.get("refund_status") or parsed.get("trade_status") or "").upper()
-            if fail_code in ("CLOSED", "FAILED", "REFUND_CLOSED"):
-                new_status = "CLOSED"
-            elif alipay_ok or parsed.get("gmt_refund") or parsed.get("refund_fee"):
-                new_status = "SUCCESS"
-            else:
-                new_status = "PROCESSING"
+            # 支付宝必须保留并判断原始 refund_status；refund_fee 只表示金额，不代表退款成功。
+            new_status = _resolve_alipay_refund_status(parsed)
 
         return await cls._finalize_refund(
             db,
