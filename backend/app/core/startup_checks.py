@@ -193,8 +193,10 @@ def validate_settings(settings: Settings) -> None:
     if is_prod:
         # maxmemory 与持久化为 Redis 服务端配置，代码层无法验证，但须提醒运维检查
         warnings.append(
-            "生产 Redis 须配置 maxmemory + maxmemory-policy=allkeys-lru，"
-            "并启用 AOF（appendonly yes）/ RDB 持久化，参考项目根目录 redis.conf.example"
+            "生产 Redis 须配置 maxmemory、容量告警和 AOF/RDB；本项目同一 Redis 同时承载缓存、"
+            "限流、一次性凭证与分布式锁，禁止不加区分地使用 allkeys-lru（可能淘汰锁/安全状态键）。"
+            "优先拆分缓存 Redis 与协调/安全 Redis；未拆分前须评估 noeviction、预留内存并监控写入拒绝，"
+            "参考 redis.conf.example"
         )
 
     process_role = (getattr(settings, "process_role", None) or "").strip().lower()
