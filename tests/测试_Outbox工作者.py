@@ -28,15 +28,19 @@ def test_backoff_seconds_caps_at_600():
 
 
 def test_register_outbox_handler_decorator():
-    OUTBOX_HANDLERS.clear()
+    key = ("test_paid_side_effect", "points_award")
+    previous = OUTBOX_HANDLERS.get(key)
 
-    @register_outbox_handler("paid_side_effect", "points_award")
+    @register_outbox_handler(*key)
     async def _handler(db, row):
         return None
 
-    assert ("paid_side_effect", "points_award") in OUTBOX_HANDLERS
-    assert OUTBOX_HANDLERS[("paid_side_effect", "points_award")] is _handler
-    OUTBOX_HANDLERS.clear()
+    assert key in OUTBOX_HANDLERS
+    assert OUTBOX_HANDLERS[key] is _handler
+    if previous is None:
+        OUTBOX_HANDLERS.pop(key, None)
+    else:
+        OUTBOX_HANDLERS[key] = previous
 
 
 @pytest.mark.asyncio
