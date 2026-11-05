@@ -115,7 +115,23 @@ async def get_cached_reco(
             return local_hit
     try:
         r = await get_redis()
-        raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint, gen))
+        cache_key = reco_key(customer_id, store_id, scene, bucket, fingerprint, gen)
+        if customer_id is None:
+            raw = await r.get(cache_key)
+        else:
+            # 原子检查 generation 并读取缓存；避免 GET generation 与 GET cache 之间被并发撤权穿透。
+            raw = await r.eval(
+                """
+                if (redis.call('GET', KEYS[1]) or '0') == ARGV[1] then
+                    return redis.call('GET', KEYS[2])
+                end
+                return false
+                """,
+                2,
+                reco_generation_key(customer_id),
+                cache_key,
+                str(gen),
+            )
         if raw:
             payload = json.loads(raw)
             if isinstance(payload, dict):
