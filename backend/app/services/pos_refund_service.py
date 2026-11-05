@@ -502,7 +502,7 @@ class PosRefundService:
         # _finalize_refund / 异步回调会在同一事务内更新 executed_amount。
         # 上面的局部 executed 是审批开始时的快照，不能用于最终判定，否则同步 SUCCESS
         # 已累计入库后仍会被旧值覆盖为 FAILED。
-        persisted_executed = cls._finalize_persisted_execution_state(row, amount_total)
+        cls._finalize_persisted_execution_state(row, amount_total)
         if row.status == "SUCCESS":
             from types import SimpleNamespace
 
