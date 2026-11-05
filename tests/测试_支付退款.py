@@ -287,3 +287,76 @@ async def test_stale_processing_refund_result_never_downgrades_terminal_status(c
     assert result is row
     assert row.status == current_status
     db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_alipay_refund_query_runs_without_payment_refund_row_lock():
+    """支付宝退款查单必须在锁外执行，查完再锁定并刷新退款记录。"""
+    from types import SimpleNamespace
+
+    from app.services.payment_service import PaymentService
+
+    row = SimpleNamespace(
+        id=901,
+        refund_no="RF901",
+        payment_id=12,
+        order_id=9,
+        amount=Decimal("20.00"),
+        status="PROCESSING",
+    )
+    payment = SimpleNamespace(
+        id=12,
+        payment_no="PAY12",
+        provider="ALIPAY",
+        provider_trade_no="ALI-TRADE-12",
+        order_id=9,
+    )
+    initial_result = MagicMock()
+    initial_result.scalar_one_or_none.return_value = row
+    locked_result = MagicMock()
+    locked_result.scalar_one_or_none.return_value = row
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[initial_result, locked_result])
+    db.get = AsyncMock(return_value=payment)
+
+    observed = []
+
+    async def query_refund(**kwargs):
+        observed.append("channel_query")
+        return {"status": "PROCESSING", "refund_no": "RF901", "payment_no": "PAY12"}
+
+    async def execute(statement):
+        observed.append("locked_read" if statement._for_update_arg is not None else "unlocked_read")
+        result = initial_result if observed.count("unlocked_read") == 1 else locked_result
+        return result
+
+    db.execute = AsyncMock(side_effect=execute)
+
+    with patch(
+        "app.services.payment_service._validate_refund_callback_binding"
+    ), patch(
+        "app.services.payment_service.alipay_client.trade_refund_query",
+        new_callable=AsyncMock,
+        side_effect=query_refund,
+    ), patch(
+        "app.services.payment_service.PaymentService._finalize_refund",
+        new_callable=AsyncMock,
+        return_value=row,
+    ) as finalize:
+        result = await PaymentService._apply_refund_callback(
+            db,
+            "ALIPAY",
+            {},
+            {
+                "refund_no": "RF901",
+                "payment_no": "PAY12",
+                "provider_trade_no": "ALI-TRADE-12",
+                "refund_fee": "20.00",
+                "refund_status": "SUCCESS",
+            },
+            "receipt-901",
+        )
+
+    assert result is row
+    assert observed == ["unlocked_read", "channel_query", "locked_read"]
+    finalize.assert_awaited_once()
