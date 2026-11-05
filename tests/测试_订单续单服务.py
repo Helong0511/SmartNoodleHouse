@@ -77,7 +77,7 @@ async def test_dining_session_touch_accepts_naive_mysql_datetime():
     session = SimpleNamespace(
         status="ACTIVE",
         # MySQL DATETIME 无时区值按应用时区解释，而不是 CI 主机 UTC。
-        expires_at=naive_local_now() + timedelta(hours=1),
+        expires_at=naive_local_now().replace(tzinfo=None) + timedelta(hours=1),
         last_active_at=None,
     )
     db = SimpleNamespace(get=AsyncMock(return_value=session), flush=AsyncMock())
