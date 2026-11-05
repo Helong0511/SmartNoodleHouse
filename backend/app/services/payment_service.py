@@ -1887,20 +1887,6 @@ class PaymentService:
                 return await cls._apply_refund_callback(db, provider_u, data, parsed_probe, receipt)
             return await cls._apply_payment_callback(db, provider_u, provider_inst, data, receipt)
         except Exception:
-                pass
-            if not _is_duplicate_key_integrity_error(exc):
-                await release_claim(redis_channel, receipt)
-                raise
-            if parsed_probe.get("is_refund"):
-                refund_no = parsed_probe.get("refund_no")
-                if refund_no:
-                    return (
-                        await db.execute(select(PaymentRefund).where(PaymentRefund.refund_no == refund_no))
-                    ).scalar_one_or_none()
-                return None
-            result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
-            return result.scalar_one_or_none()
-        except Exception:
             # 瞬时/未知错误（OperationalError/Timeout 等）：回滚（receipt 未提交随之回滚），
             # 释放 Redis 让 provider 重试，re-raise 让 provider 知道重试。
             try:
