@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 MENU_TTL_SECONDS = MENU_BUNDLE_TTL_SECONDS
 _BUNDLE_MAX_BYTES = 256 * 1024  # bundle JSON 超 256KB 跳过缓存以避免大Key
-_REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s，防持锁进程崩溃后永久锁
+_REBUILD_LOCK_TTL = 30  # 30s 租约；唯一 token 防止过期持有者误删新锁
 
 
 async def get_menu_version(store_id: int) -> int:
