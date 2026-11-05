@@ -960,7 +960,7 @@ class SystemSettingsService:
             version = int(raw or 0)
             return version if version > 0 else None
         except Exception:
-            logger.warning("读取系统设置 Redis 版本失败，进入短时 DB 快照降级", exc_info=True)
+            logger.debug("读取系统设置 Redis 版本失败，进入短时 DB 快照降级", exc_info=True)
             return None
 
     @classmethod
@@ -983,8 +983,8 @@ class SystemSettingsService:
 
     @classmethod
     async def public_config_version(cls) -> int:
-        """小程序/公开 API 用的配置世代号；全局或门店业务写路径 bump 后递增。"""
-        return await cls._remote_version()
+        """小程序/公开 API 用的配置世代号；Redis 未知时返回 0 表示不可验证。"""
+        return int(await cls._remote_version() or 0)
 
     @classmethod
     async def bump_public_config_version(cls) -> int:
