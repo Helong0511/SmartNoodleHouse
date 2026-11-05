@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+from datetime import datetime
 import json
 from decimal import Decimal
 from types import SimpleNamespace
@@ -177,6 +178,38 @@ async def test_补货时已完成信号行被复活而非新增(db_session):
     assert rows[0].status == "PENDING"         # 已复活
     assert rows[0].attempt_count == 0          # 重试计数清零
     assert json.loads(rows[0].payload)["zero"] is False
+
+
+@pytest.mark.asyncio
+async def test_处理中库存信号只递增版本不得抢占原Worker租约(db_session):
+    store = await _make_store(db_session, "S-PROCESSING-COALESCE")
+    product = await _make_product(db_session, store, "P-PROCESSING-COALESCE")
+    stock_row = await _make_listing(db_session, store, product, stock=5)
+    await db_session.commit()
+
+    await _emit_stock_mirror(
+        db_session, store_id=store.id, product_id=product.id,
+        mirror_id=stock_row.id, zero=False,
+    )
+    await db_session.commit()
+    ob = await _outbox_row(db_session, stock_row.id)
+    ob.status = "PROCESSING"
+    ob.locked_by = "worker:original-claim-token"
+    ob.locked_at = datetime.now()
+    ob.sync_version = 7
+    await db_session.commit()
+
+    # 模拟原 Worker 正在 HTTP 请求时又发生库存变化。
+    await _emit_stock_mirror(
+        db_session, store_id=store.id, product_id=product.id,
+        mirror_id=stock_row.id, zero=False,
+    )
+    await db_session.flush()
+    await db_session.refresh(ob)
+
+    assert ob.status == "PROCESSING"
+    assert ob.locked_by == "worker:original-claim-token"
+    assert ob.sync_version == 8
 
 
 # ── handler：重读最新库存，乱序/重复都收敛 ─────────────────────────────────
