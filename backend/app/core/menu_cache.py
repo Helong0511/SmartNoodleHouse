@@ -101,6 +101,38 @@ async def set_menu_bundle(store_id: int, bundle: dict[str, Any]) -> None:
         pass
 
 
+
+async def set_menu_bundle_if_owner(
+    store_id: int, bundle: dict[str, Any], token: str
+) -> bool:
+    """仅允许仍持有重建租约的 worker 发布缓存，防止过期持有者覆盖新结果。"""
+    if not token:
+        return False
+    try:
+        r = await get_redis()
+        from app.core.response import dumps_json
+
+        raw = dumps_json(bundle, compact=True)
+        if len(raw.encode("utf-8")) > _BUNDLE_MAX_BYTES:
+            logger.warning(
+                "menu bundle 过大 (store=%s)，跳过缓存以避免大Key", store_id
+            )
+            return False
+        script = """
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+            return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+        end
+        return false
+        """
+        result = await r.eval(
+            script, 2, menu_rebuild_lock_key(store_id), menu_bundle_key(store_id),
+            token, raw, ttl_with_jitter(MENU_TTL_SECONDS),
+        )
+        return bool(result)
+    except Exception:
+        logger.warning("菜单缓存租约校验发布失败(store=%s)", store_id, exc_info=True)
+        return False
+
 async def try_acquire_rebuild_lock(store_id: int) -> str | None:
     """缓存击穿保护：返回唯一持有者 token；失败/Redis 不可用返回 None。"""
     try:
