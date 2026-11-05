@@ -79,11 +79,15 @@ def _parse_allowlist(raw: str) -> list[ipaddress._BaseNetwork | ipaddress._BaseA
             continue
         try:
             if "/" in part:
-                items.append(ipaddress.ip_network(part, strict=False))
+                network = ipaddress.ip_network(part, strict=False)
+                # /0 等价于信任全网；用于 trusted_proxy_ips 时会让任意客户端伪造转发头。
+                if network.prefixlen == 0:
+                    raise ValueError("全网段不允许作为 IP 白名单")
+                items.append(network)
             else:
                 items.append(ipaddress.ip_address(part))
         except ValueError:
-            logger.warning("忽略非法 IP 白名单项: %s", part)
+            logger.debug("忽略非法 IP 白名单项: %s", part)
     return items
 
 
