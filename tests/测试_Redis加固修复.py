@@ -259,6 +259,59 @@ async def test_reco_cache_set_uses_jitter():
 
 # ── reco_cache 代际失效：不扫描全量 key，阻止慢构建写回旧结果 ──
 
+def test_reco_invalidation_is_deferred_until_database_commit():
+    from sqlalchemy.orm import Session
+    from app.services import reco_cache
+
+    session = Session()
+    scheduled = []
+
+    def capture(coro):
+        scheduled.append(coro)
+        coro.close()
+
+    with patch.object(reco_cache, "spawn_bg", side_effect=capture):
+        session.begin()
+        reco_cache.defer_invalidate_customer(session, 41)
+        reco_cache.defer_invalidate_customer(session, 41)
+        assert scheduled == []
+        session.commit()
+
+    assert len(scheduled) == 1
+    session.close()
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_publish_rejects_stale_customer_generation():
+    from app.services import reco_cache
+    from app.core.cache_keys import reco_generation_key
+
+    class GenerationAwareFakeRedis(FakeRedis):
+        async def eval(self, script, numkeys, lock_key, cache_key, generation_key,
+                       token, raw, ttl, expected_generation):
+            self.eval_calls.append((script, numkeys, lock_key, cache_key, generation_key,
+                                    token, raw, ttl, expected_generation))
+            if self.store.get(lock_key) != token:
+                return 0
+            if str(self.store.get(generation_key, "0")) != str(expected_generation):
+                return 0
+            self.store[cache_key] = raw
+            return "OK"
+
+    fake = GenerationAwareFakeRedis()
+    fake.store[reco_cache.reco_rebuild_lock_key(41, 3, "menu", "v1", "", generation=0)] = "old-owner"
+    fake.store[reco_generation_key(41)] = "1"
+
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        published = await reco_cache.set_cached_reco_if_owner(
+            41, 3, "menu", "v1", {"items": [{"id": 7}]}, "", "old-owner",
+            expected_generation=0,
+        )
+
+    assert published is False
+    assert reco_cache.reco_key(41, 3, "menu", "v1", "", generation=0) not in fake.store
+
+
 @pytest.mark.asyncio
 async def test_reco_cache_invalidate_increments_generation_without_scan():
     from app.services import reco_cache
