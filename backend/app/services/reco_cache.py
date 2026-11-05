@@ -223,13 +223,34 @@ async def set_cached_reco_if_owner(
 
 
 def defer_invalidate_customer(db, customer_id: int) -> None:
-    """把顾客缓存代际失效挂到当前 DB session 的 after_commit，避免提交前刷新造成旧快照复活。"""
+    """在业务事务内持久化缓存失效事件，并在 commit 后尽力立即刷新 Redis。
+
+    Redis 不是事实源：即使 commit 后 Redis 不可用，Outbox 事件仍与业务数据一起提交，
+    后续由 worker 重试。每次调用使用独立 event_kind，避免旧 DONE 事件阻止新失效。
+    """
     if not customer_id:
         return
     session = getattr(db, "sync_session", db)
     info = session.info
+    cid = int(customer_id)
     pending = info.setdefault("_reco_cache_invalidation_ids", set())
-    pending.add(int(customer_id))
+    pending.add(cid)
+
+    # 必须在业务事务 commit 前加入 Outbox；不要在 after_commit 再插入，
+    # 否则 DB commit 成功到补写事件之间进程崩溃仍会丢失失效通知。
+    from app.models import OutboxEvent
+
+    event_kind = f"invalidate_{uuid.uuid4().hex}"
+    db.add(
+        OutboxEvent(
+            aggregate_type="reco_cache",
+            aggregate_id=cid,
+            event_kind=event_kind,
+            payload=json.dumps({"customer_id": cid}, separators=(",", ":")),
+            status="PENDING",
+            max_attempts=8,
+        )
+    )
     if info.get("_reco_cache_invalidation_listener"):
         return
     info["_reco_cache_invalidation_listener"] = True
@@ -253,8 +274,8 @@ def defer_invalidate_customer(db, customer_id: int) -> None:
     event.listen(session, "after_commit", _after_commit)
 
 
-async def invalidate_customer(customer_id: int) -> None:
-    """原子推进顾客缓存代际；旧的慢速重建任务无法把失效前快照写回。"""
+async def invalidate_customer(customer_id: int, *, raise_on_error: bool = False) -> None:
+    """原子推进顾客缓存代际；持久化 Outbox handler 可要求 Redis 失败时抛错重试。"""
     if not customer_id:
         return
     _invalidate_local_reco_customer(customer_id)
@@ -274,7 +295,25 @@ async def invalidate_customer(customer_id: int) -> None:
         )
         # 旧代际键使用短 TTL 自然回收；无需 SCAN/双删，避免画像高频更新放大 Redis 负载。
     except Exception:  # noqa: BLE001
-        logger.warning("推荐缓存代际失效失败(customer=%s)，旧缓存等待 TTL", customer_id, exc_info=True)
+        logger.warning("推荐缓存代际失效失败(customer=%s)，等待 Outbox 重试", customer_id, exc_info=True)
+        if raise_on_error:
+            raise
+
+
+def register_reco_cache_outbox_handler() -> None:
+    """幂等注册推荐缓存失效 Outbox handler；worker 启动/消费时调用。"""
+    from app.services.outbox_worker import register_outbox_handler
+
+    @register_outbox_handler("reco_cache", "invalidate")
+    async def _handle_reco_cache_invalidation(db, row) -> None:
+        try:
+            payload = json.loads(row.payload or "{}")
+            customer_id = int(payload.get("customer_id") or row.aggregate_id)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid_reco_cache_invalidation_payload") from exc
+        if customer_id <= 0 or customer_id != int(row.aggregate_id):
+            raise ValueError("reco_cache_invalidation_customer_mismatch")
+        await invalidate_customer(customer_id, raise_on_error=True)
 
 
 async def try_acquire_reco_lock(
