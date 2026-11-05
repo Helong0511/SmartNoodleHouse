@@ -86,10 +86,15 @@ def test_multi_frame_tracker_confirms():
     from app.services.face_liveness import MultiFrameTracker
 
     tr = MultiFrameTracker(confirm_frames=3, ttl_seconds=5)
-    emb = np.ones(8, dtype=np.float32)
-    ok1, _, _ = tr.push(1, emb, 7, 0.9)
-    ok2, _, _ = tr.push(1, emb, 7, 0.91)
-    ok3, cid, avg = tr.push(1, emb, 7, 0.92)
+    # 每帧使用轻微变化但仍高度相似的 embedding；完全相同的帧会被
+    # duplicate_cos 防重机制正确忽略，不能当作三份独立活体证据。
+    embeddings = [
+        np.asarray([np.cos(theta), np.sin(theta), 0, 0, 0, 0, 0, 0], dtype=np.float32)
+        for theta in (0.0, 0.12, 0.24)
+    ]
+    ok1, _, _ = tr.push(1, embeddings[0], 7, 0.9)
+    ok2, _, _ = tr.push(1, embeddings[1], 7, 0.91)
+    ok3, cid, avg = tr.push(1, embeddings[2], 7, 0.92)
     assert (ok1, ok2, ok3) == (False, False, True)
     assert cid == 7 and avg >= 0.9
 
