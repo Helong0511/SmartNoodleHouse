@@ -123,10 +123,17 @@ async def release_rebuild_lock(store_id: int, token: str | None) -> None:
         pass
 
 
-async def wait_for_rebuild(store_id: int, timeout: float = 0.3) -> dict[str, Any] | None:
-    """未抢到锁的调用方短暂等待后重读缓存。"""
-    try:
-        await asyncio.sleep(timeout)
-        return await get_menu_bundle(store_id)
-    except Exception:
-        return None
+async def wait_for_rebuild(store_id: int, timeout: float = 2.0) -> dict[str, Any] | None:
+    """未抢到锁时有界轮询缓存，避免固定 300ms 后所有 worker 同时回源。
+
+    轮询带轻微随机抖动；总等待时间有上限，不会无限占用 API 请求。
+    """
+    deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
+    while True:
+        cached = await get_menu_bundle(store_id)
+        if cached is not None:
+            return cached
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return None
+        await asyncio.sleep(min(0.10 + (uuid.uuid4().int % 100) / 1000, remaining))
