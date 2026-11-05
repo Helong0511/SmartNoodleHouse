@@ -178,6 +178,26 @@ async def renew_leader_loop(worker_id: str, stop: asyncio.Event, *, ttl: int = D
                         logger.exception("Leader 丢失回调失败")
                 stop.set()
                 break
+            # Redis owner 仍匹配并不足够：数据库 epoch 是业务写入的最终 fencing 真源。
+            # 其他进程可能在 Redis 故障转移后取得更新 epoch，必须及时停止旧 Leader。
+            from app.core.leader_fencing import confirm_database_epoch
+
+            if not await confirm_database_epoch(worker_id):
+                logger.error(
+                    "Leader 数据库 fencing epoch 已失效，停止本进程业务 worker（worker_id=%s）",
+                    worker_id,
+                )
+                set_leader_held(False)
+                cb = _on_lost
+                if cb is not None:
+                    try:
+                        maybe = cb()
+                        if asyncio.iscoroutine(maybe) or isinstance(maybe, Awaitable):
+                            await maybe  # type: ignore[arg-type]
+                    except Exception:
+                        logger.exception("数据库 fencing 失效回调失败")
+                stop.set()
+                break
             consecutive_errors = 0
         except Exception as e:
             consecutive_errors += 1
