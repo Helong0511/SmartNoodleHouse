@@ -2132,9 +2132,11 @@ class PaymentService:
         # 不能按 payment_no 猜测“最近一笔进行中退款”：迟到/重试的旧通知可能被错误绑定到新退款。
         if not refund_no:
             raise AppException(40302, "退款回调缺少商户退款单号，拒绝自动匹配")
+        # 先无锁读取退款单。支付宝分支随后需要调用 refund.query；
+        # 绝不能在第三方 HTTP 请求期间持有 PaymentRefund 行锁。
         row = (
             await db.execute(
-                select(PaymentRefund).where(PaymentRefund.refund_no == refund_no).with_for_update()
+                select(PaymentRefund).where(PaymentRefund.refund_no == refund_no)
             )
         ).scalar_one_or_none()
 
@@ -2222,6 +2224,21 @@ class PaymentService:
             else:
                 new_status = "PROCESSING"
             provider_refund_no = (query_result or {}).get("provider_refund_no") or provider_refund_no
+
+        # 渠道查询已在无行锁状态下完成。现在重新获取当前退款行并加锁，
+        # 防止查询期间其他回调/查单已完成状态迁移；populate_existing 确保刷新旧快照。
+        row = (
+            await db.execute(
+                select(PaymentRefund)
+                .where(PaymentRefund.id == int(row.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise AppException(40403, "退款记录不存在")
+        linked_payment = await db.get(Payment, row.payment_id)
+        _validate_refund_callback_binding(provider_u, parsed, row, linked_payment)
 
         return await cls._finalize_refund(
             db,
