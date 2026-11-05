@@ -198,30 +198,30 @@ async def process_inbox_item(inbox_id: int) -> bool:
                 result = await DeliveryService.process_raw(
                     db, row.channel, raw if isinstance(raw, dict) else {}
                 )
-            # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
-            # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
-            done_stmt = (
-                update(WebhookInbox)
-                .where(
-                    WebhookInbox.id == inbox_id,
-                    WebhookInbox.locked_by == wid[:64],
+                # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
+                # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
+                done_stmt = (
+                    update(WebhookInbox)
+                    .where(
+                        WebhookInbox.id == inbox_id,
+                        WebhookInbox.locked_by == wid[:64],
+                    )
+                    .values(
+                        status="DONE",
+                        # 业务处理已完成，不再需要保存含顾客手机号/地址的原始 webhook body。
+                        # event_id、event_type、处理时间和状态保留，足以支持幂等与审计。
+                        payload="{}",
+                        headers_json="{}",
+                        processed_at=now_local(),
+                        error_message=None,
+                        last_error=None,
+                        next_retry_at=None,
+                        locked_at=None,
+                        locked_by=None,
+                    )
                 )
-                .values(
-                    status="DONE",
-                    # 业务处理已完成，不再需要保存含顾客手机号/地址的原始 webhook body。
-                    # event_id、event_type、处理时间和状态保留，足以支持幂等与审计。
-                    payload="{}",
-                    headers_json="{}",
-                    processed_at=now_local(),
-                    error_message=None,
-                    last_error=None,
-                    next_retry_at=None,
-                    locked_at=None,
-                    locked_by=None,
-                )
-            )
-            done_result = await db.execute(done_stmt)
-            await db.commit()
+                done_result = await db.execute(done_stmt)
+                await db.commit()
             if not done_result.rowcount:
                 # 行已被 reclaim 并被其他 worker 重新 claim：不通知 WS（新 owner 负责）
                 logger.warning(
