@@ -386,3 +386,18 @@ async def test_outbox_idempotency_precheck_failure_never_runs_handler(monkeypatc
     assert db.rollback.await_count == 1
     outbox_worker._mark_failed.assert_awaited_once()
     handler.assert_not_awaited()
+
+
+
+def test_webhook_deferred_event_kinds_resolve_to_shared_handler():
+    from app.services import delivery_tasks  # noqa: F401 — register handler
+    from app.models import OutboxEvent
+    from app.services.outbox_worker import _resolve_outbox_handler
+
+    handler = OUTBOX_HANDLERS[("webhook_task", "execute")]
+    for event_kind in ("deferred_0000", "deferred_0001", "deferred_0099"):
+        row = MagicMock(
+            aggregate_type="webhook_task",
+            event_kind=event_kind,
+        )
+        assert _resolve_outbox_handler(row) is handler
