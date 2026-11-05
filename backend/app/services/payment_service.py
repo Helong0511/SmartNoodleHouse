@@ -2606,15 +2606,26 @@ class PaymentService:
                     raise AppException(40401, "支付记录不存在")
                 result = await provider_inst.refund_payment(payment, amount, reason, refund_no)
         except AppException as e:
-            # 渠道明确拒绝（HTTP 业务错误）：结果确定，置 FAILED 允许重新发起
+            # 只有本地配置/签名材料缺失（请求尚未发出）才可判定为确定失败。
+            # 渠道返回的 4xx/5xx 业务错误也可能发生在受理之后，保守置 UNKNOWN 并查单，
+            # 绝不能因一个 AppException 就把可重试退款单标 FAILED 后再次发起退款。
             row = (
                 await db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())
             ).scalar_one_or_none()
+            if e.code in (50010, 50011, 50020):
+                if row and row.status in ("PENDING", "PROCESSING", "UNKNOWN"):
+                    row.status = "FAILED"
+                    row.fail_reason = str(e)[:255]
+                    await db.flush()
+                    await db.commit()
+                raise
             if row and row.status in ("PENDING", "PROCESSING", "UNKNOWN"):
-                row.status = "FAILED"
-                row.fail_reason = str(e)[:255]
+                row.status = "UNKNOWN"
+                row.fail_reason = f"渠道返回结果不确定，待查单补偿: {e}"[:255]
                 await db.flush()
                 await db.commit()
+                logger.warning("退款渠道返回不确定错误，保留原退款单 refund_no=%s: %s", refund_no, e)
+                return row
             raise
         except Exception as e:
             # 网络超时/结果未知：渠道侧可能已实际退款，置 UNKNOWN 并交由
