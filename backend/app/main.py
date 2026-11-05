@@ -560,45 +560,103 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    async def _cancel_task_bounded(task: asyncio.Task | None, label: str) -> bool:
+        if task is None:
+            return True
+        if not task.done():
+            task.cancel()
+            done, _pending = await asyncio.wait({task}, timeout=5.0)
+            if task not in done:
+                logger.critical("%s 关机时 5 秒内未退出", label)
+                return False
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("%s 关机时异常退出", label)
+        return True
+
+    # 先停止可能重新晋升的 standby，再停止 Leader 续租；锁必须在工作排空后才释放。
     if _leader_promote_task is not None:
         _leader_promote_task.cancel()
         try:
             await _leader_promote_task
         except (asyncio.CancelledError, Exception):
             pass
+        _leader_promote_task = None
     try:
         from app.services.scheduler_admin import stop_overrides_watcher
 
         await stop_overrides_watcher()
     except Exception:
-        pass
-    await stop_ws_subscriber()
-    await close_http_client()
+        logger.exception("关机时停止 overrides watcher 失败")
     if _leader_stop is not None:
         _leader_stop.set()
     if _leader_renew_task is not None:
-        _leader_renew_task.cancel()
-        try:
-            await _leader_renew_task
-        except (asyncio.CancelledError, Exception):
-            pass
-    if is_leader and _leader_worker_id:
-        await release_leader(_leader_worker_id)
-    if is_leader:
-        tts_worker.stop()
-        if tts_task:
-            tts_task.cancel()
+        done, _pending = await asyncio.wait({_leader_renew_task}, timeout=5.0)
+        if _leader_renew_task not in done:
+            _leader_renew_task.cancel()
+            logger.error("Leader 续租任务关机等待超时，已请求取消")
+        else:
             try:
-                await tts_task
-            except asyncio.CancelledError:
-                pass
-        if recognition_task:
-            recognition_task.cancel()
-            try:
-                await recognition_task
+                _leader_renew_task.result()
             except (asyncio.CancelledError, Exception):
                 pass
-        scheduler.shutdown()
+
+    # renew callback 若正好在关机前触发，可能启动 standby；再次确保其已停止。
+    if _leader_promote_task is not None:
+        _leader_promote_task.cancel()
+        try:
+            await _leader_promote_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _leader_promote_task = None
+
+    if is_leader:
+        jobs_drained = True
+        try:
+            from app.services.scheduler_admin import (
+                active_leader_job_count,
+                cancel_active_leader_jobs,
+            )
+
+            await cancel_active_leader_jobs(timeout=5.0)
+            jobs_drained = active_leader_job_count() == 0
+        except Exception:
+            jobs_drained = False
+            logger.exception("关机时排空 Leader 定时任务失败")
+        try:
+            if scheduler.running:
+                scheduler.shutdown(wait=False)
+        except Exception:
+            logger.exception("关机时关闭 scheduler 失败")
+        try:
+            tts_worker.stop()
+        except Exception:
+            logger.exception("关机时停止 TTS worker 失败")
+
+        tts_ok = await _cancel_task_bounded(tts_task, "TTS worker")
+        recognition_ok = await _cancel_task_bounded(recognition_task, "RecognitionWorker")
+        warmup_ok = await _cancel_task_bounded(_leader_warmup_task, "Leader warmup")
+        camera_ok = False
+        try:
+            from camera.camera_manager import CameraManager
+
+            camera_ok = CameraManager().stop_all_cameras()
+        except Exception:
+            logger.exception("关机时停止摄像头采集失败")
+
+        if jobs_drained and tts_ok and recognition_ok and warmup_ok and camera_ok:
+            if _leader_worker_id:
+                await release_leader(_leader_worker_id)
+            logger.info("Leader 工作全部排空，已释放 Leader 租约")
+        else:
+            # 不提前释放租约，避免其他进程在旧任务/摄像头线程仍存活时接管；
+            # 进程退出后由 Redis TTL 自然过期。
+            logger.critical("Leader 关机排空不完整，保留租约直至 TTL 到期")
+    await stop_ws_subscriber()
+    await close_http_client()
     # 关闭本进程 Redis 连接池，避免 reload / 测试生命周期内遗留连接。
     try:
         from app.core.redis_client import close_redis
