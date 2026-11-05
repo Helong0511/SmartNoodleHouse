@@ -332,9 +332,15 @@ class CameraManager:
             cls._instance = super().__new__(cls)
             cls._instance._workers = {}
             cls._instance._lock = threading.RLock()
+            cls._instance._camera_operation_locks = {}
+            cls._instance._stopping_all = False
         elif getattr(cls._instance, "_lock", None) is None:
             # 热重载旧单例无锁时补齐（RLock 是工厂函数，不能 isinstance(..., RLock)）
             cls._instance._lock = threading.RLock()
+        if not hasattr(cls._instance, "_camera_operation_locks"):
+            cls._instance._camera_operation_locks = {}
+        if not hasattr(cls._instance, "_stopping_all"):
+            cls._instance._stopping_all = False
         return cls._instance
 
     @classmethod
@@ -347,6 +353,9 @@ class CameraManager:
         cls._leader_check = staticmethod(check) if check is not None else None
 
     def _assert_leader(self) -> None:
+        with self._lock:
+            if self._stopping_all:
+                raise CameraNotLeaderError("摄像头管理器正在停止；拒绝启动新采集线程")
         # 经类读取，避免 descriptor 绑定；兼容 staticmethod / 裸函数两种历史形态
         raw = type(self).__dict__.get("_leader_check", None)
         if isinstance(raw, staticmethod):
@@ -355,6 +364,12 @@ class CameraManager:
             check = raw
         if check is not None and not check():
             raise CameraNotLeaderError("摄像头操作需要 Leader 锁；非 Leader worker 拒绝执行")
+
+    def _camera_operation_lock(self, camera_id: int) -> threading.Lock:
+        with self._lock:
+            return self._camera_operation_locks.setdefault(
+                int(camera_id), threading.Lock()
+            )
 
     def _cleanup_stale_workers(self) -> None:
         """P0-6: 清理线程已死的 stale worker，防止僵尸残留。调用方须已持 `_lock`。
@@ -375,51 +390,47 @@ class CameraManager:
     def start_camera(
         self, camera_id: int, source: str, fps: int = 25, *, force: bool = False
     ) -> CameraWorker:
-        self._assert_leader()
-        old: CameraWorker | None = None
-        with self._lock:
-            self._cleanup_stale_workers()
-            existing = self._workers.get(camera_id)
-            if existing and not force:
-                # 已在跑则复用；卡死（线程死了）则重建
-                if existing._thread and existing._thread.is_alive():
-                    return existing
-                old = self._workers.pop(camera_id, None)
-            elif existing and force:
-                old = self._workers.pop(camera_id, None)
+        op_lock = self._camera_operation_lock(camera_id)
+        with op_lock:
+            self._assert_leader()
+            old: CameraWorker | None = None
+            with self._lock:
+                self._cleanup_stale_workers()
+                existing = self._workers.get(camera_id)
+                if existing and not force:
+                    if existing._thread and existing._thread.is_alive():
+                        return existing
+                old = existing
+                if old:
+                    old._stop.set()
+
+            # 不持全局锁 join；同一摄像头的 start/stop 由 per-camera lock 串行化。
+            if old and not old.stop():
+                raise RuntimeError(
+                    f"camera {camera_id} old capture thread did not stop; refusing duplicate worker"
+                )
             if old:
-                old._stop.set()
-        # 先在锁外 join 旧线程，再启新 worker：避免双开同一 VideoCapture；
-        # join 不持锁，停采 abort 的 get_worker 不被堵住
-        if old and not old.stop():
-            # 旧线程仍在运行时绝不启动同一路新线程；保留旧 worker 供后续清理/诊断。
+                with self._lock:
+                    if self._workers.get(camera_id) is old:
+                        self._workers.pop(camera_id, None)
+
             with self._lock:
-                if self._workers.get(camera_id) is None:
-                    self._workers[camera_id] = old
-            raise RuntimeError(
-                f"camera {camera_id} old capture thread did not stop; refusing duplicate worker"
-            )
-        if old:
-            with self._lock:
-                if self._workers.get(camera_id) is old:
+                if self._stopping_all:
+                    raise CameraNotLeaderError("摄像头管理器正在停止；拒绝启动新采集线程")
+                self._assert_leader()
+                existing = self._workers.get(camera_id)
+                if existing and existing._thread and existing._thread.is_alive():
+                    if not force:
+                        return existing
+                    raise RuntimeError(
+                        f"camera {camera_id} already has a live worker; refusing duplicate worker"
+                    )
+                if existing:
                     self._workers.pop(camera_id, None)
-        extra: CameraWorker | None = None
-        with self._lock:
-            existing = self._workers.get(camera_id)
-            if existing and not force:
-                if existing._thread and existing._thread.is_alive():
-                    return existing
-                extra = self._workers.pop(camera_id, None)
-            elif existing and force:
-                extra = self._workers.pop(camera_id, None)
-            if extra:
-                extra._stop.set()
-            worker = CameraWorker(camera_id, source, fps)
-            worker.start()
-            self._workers[camera_id] = worker
-        if extra:
-            extra.stop()
-        return worker
+                worker = CameraWorker(camera_id, source, fps)
+                worker.start()
+                self._workers[camera_id] = worker
+                return worker
 
     def restart_camera(self, camera_id: int, source: str, fps: int = 25) -> CameraWorker:
         self._assert_leader()
@@ -443,56 +454,74 @@ class CameraManager:
         return worker
 
     def stop_camera(self, camera_id: int) -> None:
-        # stop 允许非 Leader 调用（安全退出场景）；join 在锁外，避免堵 get_worker。
-        # 在线程确认退出前保留注册表项，防止并发 start_camera 启动第二个采集线程。
-        with self._lock:
-            worker = self._workers.get(camera_id)
-            if worker:
-                worker._stop.set()
-        if worker and worker.stop():
+        # stop 允许非 Leader 调用；同一摄像头的 start/stop 串行化，但不持全局锁 join。
+        with self._camera_operation_lock(camera_id):
             with self._lock:
-                if self._workers.get(camera_id) is worker:
-                    self._workers.pop(camera_id, None)
+                worker = self._workers.get(camera_id)
+                if worker:
+                    worker._stop.set()
+            if worker and worker.stop():
+                with self._lock:
+                    if self._workers.get(camera_id) is worker:
+                        self._workers.pop(camera_id, None)
 
     def stop_all_cameras(self, *, timeout: float = _STOP_JOIN_TIMEOUT_SEC) -> bool:
-        """停止本进程全部采集线程；统一 deadline，避免多摄像头逐个累计等待。
+        """停止本进程全部采集线程；统一 deadline，防止多摄像头等待时间累加。
 
-        返回 False 表示仍有线程未退出。未退出的 worker 保留在注册表中，
-        不释放其 VideoCapture，也不允许本进程安全地重新启动同一路摄像头。
+        停止期间拒绝所有新 start；同一摄像头操作锁串行化。未退出的 worker
+        保留注册表且不释放 VideoCapture，返回 False 供 Leader 降级流程 fail-closed。
         """
         with self._lock:
+            self._stopping_all = True
             workers = list(self._workers.items())
-            for _camera_id, worker in workers:
-                worker._stop.set()
+            operation_locks = [
+                self._camera_operation_locks.setdefault(cid, threading.Lock())
+                for cid, _worker in workers
+            ]
 
-        deadline = time.monotonic() + max(0.1, float(timeout))
-        stopped_ids: list[int] = []
-        alive_ids: list[int] = []
-        for camera_id, worker in workers:
-            thread = worker._thread
-            if thread and thread.is_alive():
-                thread.join(timeout=max(0.0, deadline - time.monotonic()))
-            if thread and thread.is_alive():
-                alive_ids.append(camera_id)
-                continue
-            worker._release_cap()
-            worker.status = "OFFLINE"
-            stopped_ids.append(camera_id)
+        acquired: list[threading.Lock] = []
+        try:
+            for lock in operation_locks:
+                lock.acquire()
+                acquired.append(lock)
 
-        with self._lock:
-            for camera_id in stopped_ids:
-                # 防止并发管理操作误删后来注册的新 Worker。
-                if self._workers.get(camera_id) is dict(workers).get(camera_id):
-                    self._workers.pop(camera_id, None)
+            with self._lock:
+                workers = list(self._workers.items())
+                for _camera_id, worker in workers:
+                    worker._stop.set()
 
-        if alive_ids:
-            logger.critical(
-                "停止摄像头未完全成功，仍运行 camera_ids=%s；禁止本进程重新竞选 Leader",
-                alive_ids,
-            )
-            return False
-        logger.info("已停止全部摄像头采集线程 count=%s", len(stopped_ids))
-        return True
+            deadline = time.monotonic() + max(0.1, float(timeout))
+            stopped: list[tuple[int, CameraWorker]] = []
+            alive_ids: list[int] = []
+            for camera_id, worker in workers:
+                thread = worker._thread
+                if thread and thread.is_alive():
+                    thread.join(timeout=max(0.0, deadline - time.monotonic()))
+                if thread and thread.is_alive():
+                    alive_ids.append(camera_id)
+                    continue
+                worker._release_cap()
+                worker.status = "OFFLINE"
+                stopped.append((camera_id, worker))
+
+            with self._lock:
+                for camera_id, worker in stopped:
+                    if self._workers.get(camera_id) is worker:
+                        self._workers.pop(camera_id, None)
+
+            if alive_ids:
+                logger.critical(
+                    "停止摄像头未完全成功，仍运行 camera_ids=%s；禁止本进程重新竞选 Leader",
+                    alive_ids,
+                )
+                return False
+            logger.info("已停止全部摄像头采集线程 count=%s", len(stopped))
+            return True
+        finally:
+            for lock in reversed(acquired):
+                lock.release()
+            with self._lock:
+                self._stopping_all = False
 
     def get_status(self, camera_id: int) -> str:
         with self._lock:
