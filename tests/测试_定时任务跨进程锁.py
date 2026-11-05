@@ -58,12 +58,12 @@ async def test_redis_job_lock_exclusive():
 
 
 @pytest.mark.asyncio
-async def test_redis_job_lock_fail_open_on_redis_error():
+async def test_redis_job_lock_fails_closed_on_redis_error():
     from app.services.scheduler_admin import redis_job_lock
 
     with patch("app.core.redis_client.get_redis", AsyncMock(side_effect=RuntimeError("down"))):
         async with redis_job_lock("t2") as ok:
-            assert ok is True
+            assert ok is False
 
 
 @pytest.mark.asyncio
@@ -247,3 +247,43 @@ async def test_leader_job_business_error_still_raises():
         with pytest.raises(RuntimeError, match="logic bug"):
             await wrapped()
     assert calls and calls[-1]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_leader_loss_cancels_inflight_wrapped_jobs():
+    from app.core import leader_lock
+    from app.services import scheduler_admin as sa
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def long_job():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    long_job.__name__ = "test_long_leader_job"
+    wrapped = sa.leader_job(long_job)
+    leader_lock.set_leader_held(True)
+    leader_lock.set_leader_worker_id("w-cancel-test")
+    fake = MagicMock()
+    fake.get = AsyncMock(return_value=b"w-cancel-test")
+
+    with (
+        patch("app.core.leader_lock.get_redis", AsyncMock(return_value=fake)),
+        patch.object(sa, "record_job_run", AsyncMock()),
+        patch.object(sa, "upsert_next_run", AsyncMock()),
+        patch.object(sa, "is_job_enabled", return_value=True),
+    ):
+        task = asyncio.create_task(wrapped())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert task in sa._active_leader_job_tasks
+        count = await sa.cancel_active_leader_jobs(timeout=1)
+        assert count == 1
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert cancelled.is_set()
+    assert task not in sa._active_leader_job_tasks
