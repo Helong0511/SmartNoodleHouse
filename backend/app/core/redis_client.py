@@ -52,6 +52,10 @@ async def get_redis() -> redis.Redis:
                     get_settings().redis_url,
                     decode_responses=True,
                     max_connections=get_settings().redis_max_connections,
+                    # Redis 故障/网络半开时必须快速超时，不能让请求线程无限等待。
+                    socket_connect_timeout=2.0,
+                    socket_timeout=3.0,
+                    health_check_interval=30,
                 )
     return _redis
 
