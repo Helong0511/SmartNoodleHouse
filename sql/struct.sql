@@ -4,23 +4,7 @@ DROP DATABASE IF EXISTS `smart_noodle_house`;
 CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- 切换数据库
 USE `smart_noodle_house`;
--- 部署前必须将下方口令替换为强密码；禁止把真实数据库密码提交到版本库。   kb7$rL3d8!tQ
--- 仅授权本库；不含 GRANT OPTION / 跨库。生产应用账号可再收紧为仅 DML。
-CREATE USER IF NOT EXISTS 'remote' @'localhost' IDENTIFIED BY 'kb7$rL3d8!tQ';
-GRANT SELECT,
-  INSERT,
-  UPDATE,
-  DELETE,
-  CREATE,
-  ALTER,
-  DROP,
-  INDEX,
-  REFERENCES,
-  TRIGGER,
-  CREATE TEMPORARY TABLES,
-  EXECUTE,
-  SHOW VIEW,
-  LOCK TABLES ON `smart_noodle_house`.* TO 'remote' @'localhost';
+-- 部署前必须将 REPLACE_WITH_STRONG_DB_PASSWORD 替换为强密码；禁止把真实数据库密码提交到版本库。noodle_house`.* TO 'remote' @'localhost';
 FLUSH PRIVILEGES;
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 0;
