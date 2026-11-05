@@ -428,8 +428,12 @@ def test_prod_startup_rejects_payment_mock():
 async def test_balance_restore_for_refund_is_idempotent_by_refund_id():
     from app.services.balance_service import BalanceService
 
-    existing = SimpleNamespace(id=1, entry_type="REFUND_RESTORE")
+    existing = SimpleNamespace(
+        id=1, entry_type="REFUND_RESTORE", customer_id=1, order_id=2,
+        store_id=1, delta_principal=Decimal("5.00"), delta_gift=Decimal("0.00"),
+    )
     first = MagicMock()
+    first.scalar_one = MagicMock(return_value=SimpleNamespace(id=1))
     first.scalar_one_or_none = MagicMock(return_value=existing)
     db = AsyncMock()
     db.execute = AsyncMock(return_value=first)
