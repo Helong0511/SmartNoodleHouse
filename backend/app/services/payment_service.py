@@ -20,6 +20,7 @@ from app.models import (
     Payment,
     PaymentCallbackReceipt,
     PaymentRefund,
+    PosRefundRequest,
     RechargeOrder,
     Store,
 )
@@ -2234,6 +2235,38 @@ class PaymentService:
         )
 
     @classmethod
+    async def _sync_pos_refund_request_on_success(
+        cls, db: AsyncSession, refund: PaymentRefund
+    ) -> None:
+        """将异步渠道退款成功原子同步到对应 POS 退款申请，按 refund_id 严格关联。"""
+        request = (
+            await db.execute(
+                select(PosRefundRequest)
+                .where(PosRefundRequest.refund_id == int(refund.id))
+                .with_for_update()
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if request is None or request.status in ("SUCCESS", "REJECTED", "CANCELLED"):
+            return
+
+        executed = money(Decimal(str(request.executed_amount or 0)) + money(refund.amount))
+        request.executed_amount = executed
+        request.payment_id = int(refund.payment_id)
+        request.fail_reason = None
+        if executed > money(request.amount):
+            # 记录实际已退金额，但明确暴露申请金额被超出的异常，绝不静默封账。
+            request.status = "RECONCILIATION_REQUIRED"
+            request.fail_reason = (
+                f"实际退款累计 ¥{executed} 超过申请金额 ¥{money(request.amount)}，需人工核对"
+            )[:255]
+        elif executed >= money(request.amount):
+            request.status = "SUCCESS"
+        else:
+            request.status = "PROCESSING"
+        await db.flush()
+
+    @classmethod
     async def _finalize_refund(
         cls,
         db: AsyncSession,
@@ -2284,6 +2317,9 @@ class PaymentService:
                 source=source,
                 remark=f"refund_no={row.refund_no}",
             )
+            # POS 异步退款在审批返回后才收到 SUCCESS 回调；必须在同一事务内累计执行金额。
+            await cls._sync_pos_refund_request_on_success(db, row)
+
             if order:
                 provider_u = (payment.provider or "").upper()
                 if provider_u != "BALANCE":
@@ -2571,6 +2607,10 @@ class PaymentService:
                 await db.flush()
                 await db.commit()
             logger.error("退款申请结果未知 refund_no=%s: %s", refund_no, e)
+            # 将已持久化的 UNKNOWN 退款单返回调用方，使 POS 审批单能绑定 refund_id；
+            # 后续回调/查单成功时，_sync_pos_refund_request_on_success 才能精确补齐累计金额。
+            if row is not None:
+                return row
             raise AppException(40055, "退款结果未知，系统将自动查询退款结果，请稍后查看退款状态")
 
         row = (
