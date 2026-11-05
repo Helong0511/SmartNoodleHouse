@@ -55,6 +55,7 @@ async def test_alipay_provider_detects_refund_notify():
         "total_amount": "54.00",
         "refund_fee": "10.00",
         "gmt_refund": "2026-08-27 16:00:00",
+        "refund_status": "REFUND_SUCCESS",
         "out_biz_no": "RF1",
         "app_id": "app",
     }
@@ -72,6 +73,34 @@ async def test_alipay_provider_detects_refund_notify():
     parsed2 = await AlipayProvider().handle_callback(pay_only)
     assert parsed2["is_refund"] is False
     assert parsed2["status"] == "PAID"
+
+
+def test_alipay_refund_status_is_fail_closed():
+    from app.services.payment_service import _resolve_alipay_refund_status
+
+    assert _resolve_alipay_refund_status({"refund_status": "REFUND_SUCCESS"}) == "SUCCESS"
+    assert _resolve_alipay_refund_status({"refund_status": "REFUND_CLOSED"}) == "CLOSED"
+    assert _resolve_alipay_refund_status({"refund_status": "SELLER_REFUSE_BUYER"}) == "FAILED"
+    assert _resolve_alipay_refund_status({"refund_status": "WAIT_SELLER_AGREE"}) == "PROCESSING"
+    # 只有金额不代表成功；旧版通知有明确退款时间时才允许按时间戳确认。
+    assert _resolve_alipay_refund_status({"refund_fee": "10.00"}) == "PROCESSING"
+    assert _resolve_alipay_refund_status({"gmt_refund": "2026-08-27 16:00:00"}) == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_alipay_provider_preserves_refund_status():
+    from app.services.payment_service import AlipayProvider
+
+    parsed = await AlipayProvider().handle_callback({
+        "out_trade_no": "PAY2",
+        "trade_no": "20230828",
+        "trade_status": "TRADE_CLOSED",
+        "refund_status": "REFUND_CLOSED",
+        "out_biz_no": "RF2",
+        "app_id": "app",
+    })
+    assert parsed["is_refund"] is True
+    assert parsed["refund_status"] == "REFUND_CLOSED"
 
 
 @pytest.mark.asyncio
