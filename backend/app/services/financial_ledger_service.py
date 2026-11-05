@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppException
 from app.core.response import money
 from app.models import FinancialLedger
 
@@ -31,8 +32,34 @@ async def _flush_idempotent(db: AsyncSession, row: FinancialLedger) -> Financial
             )
         ).scalar_one_or_none()
         if existing:
-            return existing
+            return _assert_same_ledger(existing, row)
         raise
+
+
+def _assert_same_ledger(existing: FinancialLedger, expected: FinancialLedger) -> FinancialLedger:
+    """同一幂等业务键只能对应完全一致的财务事实，禁止静默接受金额/门店/渠道漂移。"""
+    fields = (
+        "store_id",
+        "entry_type",
+        "channel",
+        "provider",
+        "currency",
+        "order_id",
+        "payment_id",
+        "refund_id",
+        "delivery_order_id",
+        "delivery_refund_id",
+    )
+    mismatch = [name for name in fields if getattr(existing, name) != getattr(expected, name)]
+    if money(existing.amount) != money(expected.amount):
+        mismatch.append("amount")
+    if mismatch:
+        raise AppException(
+            40996,
+            "财务幂等键对应的分录内容不一致，已阻止重复覆盖；请人工核对字段: "
+            + ",".join(mismatch[:8]),
+        )
+    return existing
 
 
 class FinancialLedgerService:
@@ -65,7 +92,14 @@ class FinancialLedgerService:
                 )
             ).scalar_one_or_none()
             if existing:
-                return existing
+                expected = FinancialLedger(
+                    store_id=int(store_id), entry_type="SALE",
+                    channel=str(channel).upper()[:30] if channel else None,
+                    provider=str(provider).upper()[:20] if provider else None,
+                    amount=amt, currency="CNY", order_id=order_id,
+                    payment_id=payment_id, delivery_order_id=delivery_order_id,
+                )
+                return _assert_same_ledger(existing, expected)
         if payment_id is None and delivery_order_id is not None:
             existing = (
                 await db.execute(
@@ -76,7 +110,14 @@ class FinancialLedgerService:
                 )
             ).scalar_one_or_none()
             if existing:
-                return existing
+                expected = FinancialLedger(
+                    store_id=int(store_id), entry_type="SALE",
+                    channel=str(channel).upper()[:30] if channel else None,
+                    provider=str(provider).upper()[:20] if provider else None,
+                    amount=amt, currency="CNY", order_id=order_id,
+                    payment_id=payment_id, delivery_order_id=delivery_order_id,
+                )
+                return _assert_same_ledger(existing, expected)
 
         row = FinancialLedger(
             store_id=int(store_id),
@@ -121,7 +162,15 @@ class FinancialLedgerService:
                 )
             ).scalar_one_or_none()
             if existing:
-                return existing
+                expected = FinancialLedger(
+                    store_id=int(store_id), entry_type="REFUND",
+                    channel=str(channel).upper()[:30] if channel else None,
+                    provider=str(provider).upper()[:20] if provider else None,
+                    amount=amt, currency="CNY", order_id=order_id,
+                    payment_id=payment_id, refund_id=refund_id,
+                    delivery_order_id=delivery_order_id, delivery_refund_id=delivery_refund_id,
+                )
+                return _assert_same_ledger(existing, expected)
         if delivery_refund_id is not None:
             existing = (
                 await db.execute(
@@ -132,7 +181,15 @@ class FinancialLedgerService:
                 )
             ).scalar_one_or_none()
             if existing:
-                return existing
+                expected = FinancialLedger(
+                    store_id=int(store_id), entry_type="REFUND",
+                    channel=str(channel).upper()[:30] if channel else None,
+                    provider=str(provider).upper()[:20] if provider else None,
+                    amount=amt, currency="CNY", order_id=order_id,
+                    payment_id=payment_id, refund_id=refund_id,
+                    delivery_order_id=delivery_order_id, delivery_refund_id=delivery_refund_id,
+                )
+                return _assert_same_ledger(existing, expected)
 
         row = FinancialLedger(
             store_id=int(store_id),
