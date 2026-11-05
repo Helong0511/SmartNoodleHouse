@@ -85,6 +85,27 @@ def _invalid_ip_allowlist_entries(raw: str) -> list[str]:
     return invalid
 
 
+_REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS = (
+    "/api/auth/login",
+    "/api/auth/verify-password",
+    "/api/payments/",
+    "/api/miniprogram/wechat/login",
+    "/api/miniprogram/alipay/login",
+    "/api/miniprogram/auth/refresh",
+)
+
+
+def _missing_rate_limit_fail_closed_paths(raw: str) -> list[str]:
+    """生产必须保证认证、支付及小程序登录路径在 Redis 故障时 fail-closed。"""
+    prefixes = [part.strip().rstrip("/") for part in (raw or "").split(",") if part.strip()]
+    missing = []
+    for target in _REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS:
+        normalized = target.rstrip("/")
+        if not any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in prefixes):
+            missing.append(target)
+    return missing
+
+
 def validate_settings(settings: Settings) -> None:
     errors: list[str] = []
     warnings: list[str] = []
@@ -149,6 +170,15 @@ def validate_settings(settings: Settings) -> None:
 
     if is_prod and not getattr(settings, "enable_rate_limit", True):
         errors.append("生产环境禁止 ENABLE_RATE_LIMIT=false")
+    if is_prod:
+        missing_rate_limit_paths = _missing_rate_limit_fail_closed_paths(
+            getattr(settings, "rate_limit_fail_closed_paths", "") or ""
+        )
+        if missing_rate_limit_paths:
+            errors.append(
+                "生产 RATE_LIMIT_FAIL_CLOSED_PATHS 缺少关键路径；Redis 故障时这些接口会降级放行: "
+                + ", ".join(missing_rate_limit_paths)
+            )
 
     secret_enc = (getattr(settings, "secret_encryption_key", None) or "").strip()
     if is_prod and not secret_enc:
