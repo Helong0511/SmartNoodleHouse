@@ -186,7 +186,7 @@ async def test_mysql_old_leader_commit_uses_current_read_and_is_rejected(db_sess
         pytest.skip("requires MySQL 8")
 
     maker = async_sessionmaker(
-        db_session.get_bind(), class_=AsyncSession, expire_on_commit=False
+        db_session.bind, class_=AsyncSession, expire_on_commit=False
     )
     old_owner = "mysql-fence-old"
     new_owner = "mysql-fence-new"
