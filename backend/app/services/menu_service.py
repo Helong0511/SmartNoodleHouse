@@ -19,7 +19,7 @@ from app.core.menu_cache import (
     get_menu_bundle,
     get_menu_version,
     release_rebuild_lock,
-    set_menu_bundle,
+    set_menu_bundle_if_owner,
     try_acquire_rebuild_lock,
     wait_for_rebuild,
 )
@@ -257,6 +257,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     ):
         bundle = hit
     else:
+        lock_token: str | None = None
+        lock_ok = False
         # Redis 锁负责跨进程协调；本地 single-flight 负责 Redis 故障/等待者兜底，
         # 避免同一 worker 内所有请求在 300ms 等待后同时重建。
         from app.core.async_utils import local_singleflight
@@ -310,17 +312,29 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                                 invalidate_local_menu_cache(sid)
                                 await bump_menu_version(sid)
                             bundle = await build_menu_bundle(db, sid)
-                            _BUILD_CACHE.put(sid, bundle)
-                    finally:
+                    except BaseException:
                         if lock_ok:
                             await release_rebuild_lock(sid, lock_token)
+                        raise
 
     version = await get_menu_version(sid)
     if version <= 0:
         # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
         version = await bump_menu_version(sid)
     bundle = {**bundle, "version": version}
-    await set_menu_bundle(sid, bundle)
+    if lock_ok and lock_token:
+        try:
+            published = await set_menu_bundle_if_owner(sid, bundle, lock_token)
+            if published:
+                _BUILD_CACHE.put(sid, bundle)
+            else:
+                # 租约已丢失：不能把旧构建结果发布到 Redis 或本地共享缓存。
+                invalidate_local_menu_cache(sid)
+        finally:
+            await release_rebuild_lock(sid, lock_token)
+    elif cached is None and hit is None:
+        # 仅命中进程内 single-flight/缓存的分支，不向 Redis 发布未持锁结果。
+        pass
     return bundle
 
 
