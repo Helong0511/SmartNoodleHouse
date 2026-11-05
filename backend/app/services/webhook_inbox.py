@@ -18,7 +18,7 @@ from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
 from app.services.delivery_tasks import run_deferred_tasks
 from app.services.websocket_manager import ws_manager
-from app.services.worker_common import backoff_seconds, worker_id
+from app.services.worker_common import backoff_seconds, claim_token, worker_id
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | Non
     原子 claim：仅当 status=PENDING（或到点可重试的 FAILED）时 UPDATE 为 PROCESSING。
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = worker or worker_id()
+    wid = claim_token(worker)
     now = now_local()
     # UPDATE ... WHERE status 条件：跨 MySQL/SQLite 均可，无需 FOR UPDATE SKIP LOCKED
     stmt = (
@@ -180,11 +180,15 @@ async def process_inbox_item(inbox_id: int) -> bool:
     reclaim_stale_inbox 复位并被另一 worker 重新 claim，原 worker 的
     UPDATE 会命中 0 行，不会覆盖新 owner 的锁（避免误释放他人锁）。
     """
-    wid = worker_id()
     async with AsyncSessionLocal() as db:
-        row = await claim_inbox_item(db, inbox_id, worker=wid)
+        row = await claim_inbox_item(db, inbox_id)
         if not row:
             # 已被其他 worker claim，或 DONE / 未到重试时间
+            return False
+        # 每次 claim 使用唯一 token；不能用进程 worker_id 作为行锁 owner。
+        wid = (row.locked_by or "")[:64]
+        if not wid:
+            logger.error("Webhook inbox claim 成功但缺少 owner token id=%s", inbox_id)
             return False
 
         try:
