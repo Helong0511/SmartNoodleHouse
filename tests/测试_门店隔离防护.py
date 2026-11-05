@@ -47,7 +47,7 @@ async def test_build_order_items_accepts_matching_store(monkeypatch):
         price=12, box_price=0, no_member_discount=False,
     )
 
-    async def fake_calc(db, items_data, *, store_id):
+    async def fake_calc(db, items_data, *, store_id, customer_id=None):
         return [(product, 12, [], 1)]
 
     monkeypatch.setattr(OrderPriceCalculator, "calculate_items_batch", fake_calc)
