@@ -515,3 +515,24 @@ async def test_outbox_retry_exhaustion_emits_critical_dead_letter_log(caplog):
     assert "991" in caplog.text
     assert "8" in caplog.text
     db.commit.assert_awaited_once()
+
+
+def test_outbox_retry_jitter_is_deterministic_bounded_and_spread():
+    from app.services.outbox_worker import (
+        BACKOFF_CAP_SEC,
+        _jittered_backoff_seconds,
+    )
+
+    first = _jittered_backoff_seconds(8, 1001)
+    assert first == _jittered_backoff_seconds(8, 1001)
+    assert 1 <= first <= 600
+
+    delays = {_jittered_backoff_seconds(8, event_id) for event_id in range(1000, 1100)}
+    assert len(delays) > 10
+
+    capped = [
+        _jittered_backoff_seconds(30, event_id)
+        for event_id in range(1000, 1100)
+    ]
+    assert all(1 <= delay <= BACKOFF_CAP_SEC for delay in capped)
+    assert len(set(capped)) > 5
