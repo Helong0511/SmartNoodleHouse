@@ -127,3 +127,48 @@ async def test_settings_version_bump_is_atomic_increment_and_expire():
     assert numkeys == 1
     assert key == REDIS_CACHE_VER_KEY
     assert ttl == 30 * 24 * 3600
+
+
+@pytest.mark.asyncio
+async def test_direct_settings_loads_are_single_flight_across_sessions():
+    import asyncio
+
+    from app.services.system_settings_service import SystemSettingsService as Service
+
+    old_cache = Service._cache
+    old_last = Service._last_db_cache
+    old_at = Service._cache_at
+    old_ver = Service._cache_ver
+    try:
+        Service._cache = None
+        Service._last_db_cache = None
+        Service._cache_at = 0.0
+        Service._cache_ver = -1
+        gate = asyncio.Event()
+        calls = {"count": 0}
+
+        class SlowDB(_DB):
+            async def execute(self, *_args, **_kwargs):
+                calls["count"] += 1
+                await gate.wait()
+                return _Result([SimpleNamespace(
+                    setting_key="trusted_proxy_ips", setting_value="10.0.0.9"
+                )])
+
+        db1, db2 = SlowDB([]), SlowDB([])
+        with patch.object(Service, "_remote_version", new=AsyncMock(return_value=None)):
+            first = asyncio.create_task(Service._load_raw(db1))
+            await asyncio.sleep(0)
+            second = asyncio.create_task(Service._load_raw(db2))
+            await asyncio.sleep(0)
+            gate.set()
+            result1, result2 = await asyncio.gather(first, second)
+
+        assert calls["count"] == 1
+        assert result1["trusted_proxy_ips"] == "10.0.0.9"
+        assert result2["trusted_proxy_ips"] == "10.0.0.9"
+    finally:
+        Service._cache = old_cache
+        Service._last_db_cache = old_last
+        Service._cache_at = old_at
+        Service._cache_ver = old_ver
