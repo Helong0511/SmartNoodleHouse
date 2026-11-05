@@ -88,6 +88,7 @@ async def _rollback_confirm(order_id: int | None, platform: str, platform_order_
         logger.error("平台接单失败，已回滚本地状态 order_id=%s platform=%s", d_order.order_id, platform)
 
 
+@register_outbox_handler("delivery_manual", "confirm")
 @register_outbox_handler("webhook_task", "execute")
 async def execute_webhook_outbox_task(db, row) -> None:
     """执行已持久化的 Webhook 副作用任务。
