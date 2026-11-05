@@ -125,3 +125,19 @@ async def test_reclaim_stale_processing_issues_update_and_commits():
     # 编译后的绑定参数应包含 PROCESSING 值
     compiled = stmt.compile()
     assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+
+
+@pytest.mark.asyncio
+async def test_outbox_claim_uses_unique_per_attempt_owner_token():
+    db = MagicMock()
+    result = MagicMock()
+    result.rowcount = 1
+    db.execute = AsyncMock(return_value=result)
+    fetched = MagicMock(id=9, status="PROCESSING")
+    db.get = AsyncMock(return_value=fetched)
+
+    await claim_outbox_item(db, outbox_id=9, worker="same-worker")
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    owner_values = [str(v) for v in compiled.params.values()]
+    assert any(v.startswith("same-worker:") and len(v) == 64 for v in owner_values)
