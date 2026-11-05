@@ -625,3 +625,65 @@ def test_production_redis_url_rejects_loopback_and_invalid_scheme():
 
     assert any("回环" in x for x in _production_redis_url_errors("rediss://:secret@127.0.0.1:6379/0"))
     assert any("redis://" in x for x in _production_redis_url_errors("http://:secret@cache.example.net:6379/0"))
+
+
+# ── 缓存重建等待：轮询缓存，不允许固定等待后并发回源 ──
+
+@pytest.mark.asyncio
+async def test_menu_rebuild_wait_polls_until_cache_is_ready():
+    from app.core import menu_cache
+
+    calls = {"n": 0}
+    async def fake_get(_store_id):
+        calls["n"] += 1
+        return {"categories": []} if calls["n"] >= 3 else None
+
+    with patch.object(menu_cache, "get_menu_bundle", fake_get):
+        result = await menu_cache.wait_for_rebuild(8, timeout=0.5)
+    assert result == {"categories": []}
+    assert calls["n"] >= 3
+
+
+@pytest.mark.asyncio
+async def test_menu_rebuild_wait_is_bounded_when_cache_never_appears():
+    from app.core import menu_cache
+
+    calls = {"n": 0}
+    async def fake_get(_store_id):
+        calls["n"] += 1
+        return None
+
+    with patch.object(menu_cache, "get_menu_bundle", fake_get):
+        result = await menu_cache.wait_for_rebuild(8, timeout=0.05)
+    assert result is None
+    assert calls["n"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_reco_rebuild_wait_polls_until_cache_is_ready():
+    from app.services import reco_cache
+
+    calls = {"n": 0}
+    async def fake_get(*_args):
+        calls["n"] += 1
+        return {"items": []} if calls["n"] >= 3 else None
+
+    with patch.object(reco_cache, "get_cached_reco", fake_get):
+        result = await reco_cache.wait_for_reco(1, 2, "menu", "a", timeout=0.5)
+    assert result == {"items": []}
+    assert calls["n"] >= 3
+
+
+@pytest.mark.asyncio
+async def test_reco_rebuild_wait_is_bounded_when_cache_never_appears():
+    from app.services import reco_cache
+
+    calls = {"n": 0}
+    async def fake_get(*_args):
+        calls["n"] += 1
+        return None
+
+    with patch.object(reco_cache, "get_cached_reco", fake_get):
+        result = await reco_cache.wait_for_reco(1, 2, "menu", "a", timeout=0.05)
+    assert result is None
+    assert calls["n"] >= 1
