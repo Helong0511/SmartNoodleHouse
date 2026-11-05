@@ -6,12 +6,28 @@ import logging
 import os
 import socket
 import uuid
+from time import monotonic
 from collections.abc import Awaitable, Callable
 
 from app.core.cache_keys import LEADER_KEY
 from app.core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
+_LEADER_REDIS_ERROR_LOG_INTERVAL_SEC = 30.0
+_last_leader_redis_error_log_at = -_LEADER_REDIS_ERROR_LOG_INTERVAL_SEC
+_suppressed_leader_redis_error_logs = 0
+
+
+def _log_leader_redis_error(error: Exception) -> None:
+    global _last_leader_redis_error_log_at, _suppressed_leader_redis_error_logs
+    now = monotonic()
+    if now - _last_leader_redis_error_log_at < _LEADER_REDIS_ERROR_LOG_INTERVAL_SEC:
+        _suppressed_leader_redis_error_logs += 1
+        return
+    suppressed = _suppressed_leader_redis_error_logs
+    _suppressed_leader_redis_error_logs = 0
+    _last_leader_redis_error_log_at = now
+    logger.error("Leader Redis 租约确认/续期异常，已按 fail-closed 停止新任务 suppressed=%s err=%s", suppressed, error)
 DEFAULT_TTL = 45
 RENEW_INTERVAL = 10
 
@@ -88,9 +104,12 @@ async def confirm_leader_owned(*, fail_open: bool = False) -> bool:
             return False
         return True
     except Exception as e:
-        logger.warning("Leader 持锁二次确认失败: %s", e)
+        _log_leader_redis_error(e)
         if fail_open:
             return bool(_held)
+        # Redis 状态未知时立即关闭本地 Leader 门闩；不能等续租循环第二次失败，
+        # 否则摄像头/TTS 等非数据库副作用仍可能继续运行。
+        set_leader_held(False)
         return False
 
 
@@ -201,7 +220,10 @@ async def renew_leader_loop(worker_id: str, stop: asyncio.Event, *, ttl: int = D
             consecutive_errors = 0
         except Exception as e:
             consecutive_errors += 1
-            logger.warning("Leader 锁续期异常(%s): %s", consecutive_errors, e)
+            # 任意一次续租异常都立即阻止新 Leader 工作；下一轮若续租恢复，
+            # renew_leader_lease 会重新打开门闩。连续两次失败仍会执行完整降级回调。
+            set_leader_held(False)
+            _log_leader_redis_error(e)
             # 连续两次异常才放弃；10 秒续期间隔确保在 45 秒租约过期前留有安全余量
             if consecutive_errors >= 2:
                 logger.error("Leader 锁续期连续失败，降级退出 worker_id=%s", worker_id)
