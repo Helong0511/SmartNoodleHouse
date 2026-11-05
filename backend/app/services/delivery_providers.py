@@ -253,6 +253,10 @@ class MeituanProvider(DeliveryProvider):
             logger.warning("[MEITUAN mock] %s %s", path, biz_params)
             return {"data": "ok", "_mock": True}
 
+        if self.credentials.store_id is not None and not self.credentials.platform_shop_id:
+            raise ValueError(
+                f"美团门店凭证缺少 platform_shop_id，拒绝使用全局默认门店 store_id={self.credentials.store_id}"
+            )
         if self.credentials.platform_shop_id and "app_poi_code" not in biz_params:
             biz_params = {**biz_params, "app_poi_code": self.credentials.platform_shop_id}
 
@@ -579,7 +583,16 @@ class ElemeProvider(DeliveryProvider):
 
     async def _rpc(self, action: str, params: dict[str, Any]) -> dict:
         settings = get_settings()
-        token = self.credentials.access_token or settings.eleme_access_token
+        # 显式门店上下文只能使用该门店授权 token；不得静默回退到另一门店的全局 token。
+        token = (
+            self.credentials.access_token
+            if self.credentials.store_id is not None
+            else self.credentials.access_token or settings.eleme_access_token
+        )
+        if self.credentials.store_id is not None and not token:
+            raise ValueError(
+                f"饿了么门店 access_token 缺失，拒绝使用全局 token store_id={self.credentials.store_id}"
+            )
         if not settings.eleme_app_id or not settings.eleme_app_secret or not token:
             if settings.is_production or not settings.allow_delivery_mock:
                 raise ValueError("饿了么未配置，禁止 Mock 成功")
