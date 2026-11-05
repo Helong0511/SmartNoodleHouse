@@ -216,13 +216,22 @@ async def process_outbox_item(outbox_id: int) -> None:
         try:
             async with claim_lease_guard(OutboxEvent, outbox_id, wid):
                 await handler(db, row)
-                # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
+                # 库存镜像是可合并事件：处理期间若库存再次变化，不能标记 DONE，
+                # 必须在当前 HTTP 请求全部结束后重新排队推送最新绝对库存。
+                is_stock_mirror = (
+                    row.aggregate_type in ("delivery_stock", "delivery_stock_base")
+                    and row.event_kind == "mirror"
+                )
+                expected_sync_version = int(getattr(row, "sync_version", 0) or 0)
+                done_conditions = [
+                    OutboxEvent.id == outbox_id,
+                    OutboxEvent.locked_by == wid,
+                ]
+                if is_stock_mirror:
+                    done_conditions.append(OutboxEvent.sync_version == expected_sync_version)
                 done_stmt = (
                     update(OutboxEvent)
-                    .where(
-                        OutboxEvent.id == outbox_id,
-                        OutboxEvent.locked_by == wid,
-                    )
+                    .where(*done_conditions)
                     .values(
                         status="DONE",
                         processed_at=now_local(),
@@ -233,6 +242,46 @@ async def process_outbox_item(outbox_id: int) -> None:
                     )
                 )
                 done_result = await db.execute(done_stmt)
+
+                if is_stock_mirror and int(done_result.rowcount or 0) != 1:
+                    # rowcount=0 可能是库存版本已变化，也可能是 claim 已丢失。
+                    # 先回滚 handler 的本地事务，再用当前读确认 owner；只有仍持有
+                    # 原 claim 时才将事件 PENDING，绝不覆盖新 Worker 的状态。
+                    await db.rollback()
+                    fresh = (
+                        await db.execute(
+                            select(OutboxEvent)
+                            .where(
+                                OutboxEvent.id == outbox_id,
+                                OutboxEvent.status == "PROCESSING",
+                                OutboxEvent.locked_by == wid,
+                            )
+                            .execution_options(populate_existing=True)
+                        )
+                    ).scalar_one_or_none()
+                    if fresh is not None:
+                        requeue_result = await db.execute(
+                            update(OutboxEvent)
+                            .where(
+                                OutboxEvent.id == outbox_id,
+                                OutboxEvent.status == "PROCESSING",
+                                OutboxEvent.locked_by == wid,
+                            )
+                            .values(
+                                status="PENDING",
+                                attempt_count=0,
+                                next_retry_at=None,
+                                locked_at=None,
+                                locked_by=None,
+                                last_error=None,
+                            )
+                        )
+                        if int(requeue_result.rowcount or 0) == 1:
+                            await db.commit()
+                        else:
+                            await db.rollback()
+                    return
+
                 from app.services.worker_common import rollback_if_claim_lost
 
                 if await rollback_if_claim_lost(
