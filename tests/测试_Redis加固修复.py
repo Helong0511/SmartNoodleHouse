@@ -682,7 +682,7 @@ async def test_menu_cache_publish_requires_current_rebuild_owner():
             ))
             if self.store.get(lock_key) != token:
                 return 0
-            if str(self.store.get(version_key, "0")) != str(expected_version):
+            if self.store.get(version_key) != str(expected_version):
                 return 0
             self.store[cache_key] = raw
             return "OK"
@@ -691,13 +691,14 @@ async def test_menu_cache_publish_requires_current_rebuild_owner():
     lock_key = menu_cache.menu_rebuild_lock_key(5)
     cache_key = menu_cache.menu_bundle_key(5)
     fake.store[lock_key] = "new-owner"
+    fake.store[menu_cache.menu_version_key(5)] = "1"
 
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
         stale = await menu_cache.set_menu_bundle_if_owner(
-            5, {"products": []}, "expired-old-owner", expected_version=0
+            5, {"products": []}, "expired-old-owner", expected_version=1
         )
         current = await menu_cache.set_menu_bundle_if_owner(
-            5, {"products": [{"id": 9}]}, "new-owner", expected_version=0
+            5, {"products": [{"id": 9}]}, "new-owner", expected_version=1
         )
 
     assert stale is False
