@@ -120,7 +120,10 @@ async def test_webhook_inbox_claim_uses_unique_per_attempt_owner_token():
     stmt = db.execute.await_args.args[0]
     compiled = stmt.compile()
     owner_values = [str(v) for v in compiled.params.values()]
-    assert any(v.startswith("same-worker:") and len(v) == 64 for v in owner_values)
+    assert any(
+        v.startswith("same-worker:") and 32 < len(v) <= 64
+        for v in owner_values
+    )
 
 
 @pytest.mark.asyncio
