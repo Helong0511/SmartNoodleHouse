@@ -2800,9 +2800,37 @@ class PaymentService:
                 if str(amount_info.get("currency") or "CNY").upper() != "CNY":
                     raise AppException(40302, "微信退款查询币种必须为 CNY")
 
+        # HTTP 查单期间可能有异步回调/另一个补偿 Worker 已完成退款。
+        # 必须在网络请求结束后重新当前读并锁定退款行，不能用请求前的 ORM 快照
+        # 覆盖并发事务写入的 SUCCESS/FAILED 等状态，也不能重复执行财务分录。
+        current_row = (
+            await db.execute(
+                select(PaymentRefund)
+                .where(PaymentRefund.id == int(row.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if current_row is None:
+            raise AppException(40403, "退款记录不存在")
+        if (
+            int(current_row.payment_id) != int(payment.id)
+            or str(current_row.refund_no or "") != str(row.refund_no or "")
+            or money(current_row.amount) != money(row.amount)
+            or (
+                current_row.order_id is not None
+                and payment.order_id is not None
+                and int(current_row.order_id) != int(payment.order_id)
+            )
+        ):
+            raise AppException(40302, "退款记录在查单期间发生关联或金额变化，拒绝入账")
+        # 成功是不可逆终态；并发回调已完成时直接返回，避免重复财务/积分/钱包副作用。
+        if current_row.status == "SUCCESS":
+            return current_row
+
         return await cls._finalize_refund(
             db,
-            row,
+            current_row,
             query_status,
             provider_refund_no=result.get("provider_refund_no"),
             callback_raw={"query": result.get("raw")},
