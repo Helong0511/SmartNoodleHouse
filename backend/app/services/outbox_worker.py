@@ -438,6 +438,29 @@ async def _mark_failed(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str
         logger.warning(
             "Outbox 行在失败标记期间被 reclaim 释放 id=%s", row.id
         )
+        return
+    if attempts >= max_att:
+        # 终态失败不会再被自动 claim；必须以 CRITICAL 级别暴露给日志告警系统。
+        logger.critical(
+            "Outbox DEAD-LETTER: id=%s aggregate=%s/%s attempts=%s max_attempts=%s error=%s",
+            row.id,
+            row.aggregate_type,
+            row.aggregate_id,
+            attempts,
+            max_att,
+            err[:300],
+        )
+    else:
+        logger.warning(
+            "Outbox retry scheduled: id=%s aggregate=%s/%s attempt=%s/%s retry_at=%s error=%s",
+            row.id,
+            row.aggregate_type,
+            row.aggregate_id,
+            attempts,
+            max_att,
+            retry_at,
+            err[:300],
+        )
 
 
 async def process_pending_outbox(limit: int = 30) -> int:
