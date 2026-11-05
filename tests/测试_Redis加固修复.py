@@ -738,9 +738,8 @@ def test_rate_limit_bucket_collapses_dynamic_ids_and_keeps_sensitive_policies_se
     assert _rate_limit_bucket("/api/miniprogram/wechat/login") != _rate_limit_bucket(
         "/api/miniprogram/alipay/login"
     )
-    assert _rate_limit_bucket("/api/miniprogram/orders/10001") == _rate_limit_bucket(
-        "/api/miniprogram/menu/1"
-    ) or _rate_limit_bucket("/api/miniprogram/orders/10001").startswith("/api/_resource_")
+    assert _rate_limit_bucket("/api/miniprogram/orders/10001").startswith("/api/_resource_")
+    assert _rate_limit_bucket("/api/miniprogram/menu/1").startswith("/api/_resource_")
 
 
 @pytest.mark.asyncio
