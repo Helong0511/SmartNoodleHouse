@@ -167,3 +167,18 @@ def test_stop_camera_keeps_unstopped_worker_registered():
         assert manager._workers.get(99104) is worker
     finally:
         manager._workers = original
+
+
+
+def test_camera_manager_stays_closed_until_new_leader_resumes():
+    manager = CameraManager()
+    previous = manager._stopping_all
+    CameraManager.set_leader_check(lambda: True)
+    try:
+        manager._stopping_all = True
+        with pytest.raises(CameraNotLeaderError, match="正在停止"):
+            manager._assert_leader()
+        manager.resume_camera_manager()
+        manager._assert_leader()
+    finally:
+        manager._stopping_all = previous
