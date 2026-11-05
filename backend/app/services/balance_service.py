@@ -115,9 +115,32 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if existing:
+            # 幂等命中不代表本次请求参数可信：必须确认同一顾客、订单、支付单及金额，
+            # 否则不能把旧扣款流水当作新支付成功返回。
+            existing_amount = money(
+                abs(existing.delta_principal) + abs(existing.delta_gift)
+            )
+            if (
+                int(existing.customer_id) != int(customer_id)
+                or int(existing.order_id or 0) != int(order_id)
+                or money(existing_amount) != pay
+                or (
+                    payment_id is not None
+                    and existing.payment_id is not None
+                    and int(existing.payment_id) != int(payment_id)
+                )
+                or (
+                    store_id is not None
+                    and existing.store_id is not None
+                    and int(existing.store_id) != int(store_id)
+                )
+            ):
+                raise AppException(40994, "订单已有储值扣款流水，但顾客/金额/支付单不一致，拒绝重复扣款")
             return existing
         from app.services.customer_service import CustomerService
 
+        if not c:
+            raise AppException(40995, "会员储值账户余额异常")
         if not CustomerService.is_member(cust):
             raise AppException(40320, "请先开通会员后再使用余额支付", status_code=403)
         gift = money(cust.balance_gift or 0)
@@ -178,6 +201,16 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if existing:
+            existing_amount = money(
+                abs(existing.delta_principal) + abs(existing.delta_gift)
+            )
+            if (
+                existing.entry_type != "REFUND_RESTORE"
+                or int(existing.customer_id) != int(customer_id)
+                or int(existing.order_id or 0) != int(order_id)
+                or money(existing_amount) != amt
+            ):
+                raise AppException(40994, "退款编号已关联不同的储值回补流水，拒绝重复入账")
             return existing
 
         pay_row = (
