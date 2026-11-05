@@ -498,6 +498,14 @@ async def test_reco_rebuild_lock_old_owner_cannot_delete_new_owner():
     assert fake.store[key] == "new-owner-token"
 
 
+def test_recommendation_cache_identity_includes_limit():
+    from app.api.miniprogram_menu import _reco_cache_fingerprint
+
+    assert _reco_cache_fingerprint("", 5) != _reco_cache_fingerprint("", 20)
+    assert _reco_cache_fingerprint("cart:abc", 5) != _reco_cache_fingerprint("cart:abc", 10)
+    assert _reco_cache_fingerprint("", 10) == ":limit=10"
+
+
 def test_rate_limit_bucket_collapses_dynamic_ids_and_keeps_sensitive_policies_separate():
     from app.core.rate_limit import _rate_limit_bucket
 
