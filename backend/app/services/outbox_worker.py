@@ -10,7 +10,7 @@ import logging
 from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,7 +107,26 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
             OutboxEvent.status == "PROCESSING",
             or_(OutboxEvent.locked_at.is_(None), OutboxEvent.locked_at < cutoff),
         )
-        .values(status="PENDING", locked_at=None, locked_by=None)
+        .values(
+            # 崩溃发生在最后一次允许尝试时，不能复位为可无限 claim 的 PENDING。
+            status=case(
+                (OutboxEvent.attempt_count >= OutboxEvent.max_attempts, "FAILED"),
+                else_="PENDING",
+            ),
+            next_retry_at=case(
+                (OutboxEvent.attempt_count >= OutboxEvent.max_attempts, None),
+                else_=OutboxEvent.next_retry_at,
+            ),
+            last_error=case(
+                (
+                    OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+                    "max_attempts_exhausted_after_stale_processing",
+                ),
+                else_=OutboxEvent.last_error,
+            ),
+            locked_at=None,
+            locked_by=None,
+        )
     )
     result = await db.execute(stmt)
     await db.commit()
@@ -131,7 +150,10 @@ async def claim_outbox_item(
         .where(
             OutboxEvent.id == outbox_id,
             or_(
-                OutboxEvent.status == "PENDING",
+                and_(
+                    OutboxEvent.status == "PENDING",
+                    OutboxEvent.attempt_count < OutboxEvent.max_attempts,
+                ),
                 and_(
                     OutboxEvent.status == "FAILED",
                     OutboxEvent.attempt_count < OutboxEvent.max_attempts,
