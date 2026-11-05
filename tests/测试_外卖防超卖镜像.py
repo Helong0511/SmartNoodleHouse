@@ -405,6 +405,46 @@ async def test_平台绑定凭证缺失时必须拒绝发送请求(db_session, m
     provider_factory.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_饿了么门店token解密失败必须返回无凭证(monkeypatch):
+    from app.services import delivery_context as context
+
+    binding = SimpleNamespace(
+        store_id=11, platform_shop_id="ELEME-SHOP-11",
+        access_token="encrypted-token", refresh_token=None, extra_config=None,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = binding
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        context.SecretEncryptionService, "decrypt", staticmethod(lambda value: None)
+    )
+
+    credentials = await context.get_credentials_for_store(db, "ELEME", 11)
+    assert credentials is None
+
+
+@pytest.mark.asyncio
+async def test_美团门店shop_id缺失必须返回无凭证(monkeypatch):
+    from app.services import delivery_context as context
+
+    binding = SimpleNamespace(
+        store_id=12, platform_shop_id="", access_token=None,
+        refresh_token=None, extra_config=None,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = binding
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        context.SecretEncryptionService, "decrypt", staticmethod(lambda value: None)
+    )
+
+    credentials = await context.get_credentials_for_store(db, "MEITUAN", 12)
+    assert credentials is None
+
+
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
 
 @pytest.mark.asyncio
