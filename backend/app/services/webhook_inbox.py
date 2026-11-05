@@ -201,6 +201,10 @@ async def process_inbox_item(inbox_id: int) -> bool:
                 )
                 .values(
                     status="DONE",
+                    # 业务处理已完成，不再需要保存含顾客手机号/地址的原始 webhook body。
+                    # event_id、event_type、处理时间和状态保留，足以支持幂等与审计。
+                    payload="{}",
+                    headers_json="{}",
                     processed_at=now_local(),
                     error_message=None,
                     last_error=None,
