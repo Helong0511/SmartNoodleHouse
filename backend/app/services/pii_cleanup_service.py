@@ -11,7 +11,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
-from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryRefund, Order
+from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryRefund, Order, WebhookInbox
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,24 @@ async def anonymize_expired_delivery_pii(
         update(DeliveryCallbackLog)
         .where(DeliveryCallbackLog.order_id.in_(expired_order_ids), DeliveryCallbackLog.payload.isnot(None))
         .values(payload=None)
+    )
+    # DONE 回调在消费成功时已清空；达到最大重试次数且 next_retry_at 为空的
+    # FAILED Inbox 属于终态死信，不会再自动消费。超过保留期后清理其中的顾客 PII，
+    # 但保留 event_id/channel/status/attempt_count/时间戳供审计与排障。
+    await db.execute(
+        update(WebhookInbox)
+        .where(
+            WebhookInbox.status == "FAILED",
+            WebhookInbox.next_retry_at.is_(None),
+            WebhookInbox.received_at < cutoff,
+            WebhookInbox.payload != "{}",
+        )
+        .values(
+            payload="{}",
+            headers_json="{}",
+            error_message=None,
+            last_error=None,
+        )
     )
     await db.commit()
     count = int(result.rowcount or 0)
