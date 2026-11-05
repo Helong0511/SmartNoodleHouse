@@ -941,16 +941,27 @@ class SystemSettingsService:
             return str(meta["default"])
         return ""
 
+    # Redis 版本键缺失/不可用均视为“版本未知”，不能与有效版本 0 混为一谈。
+    # 版本未知时只允许使用本进程最近 15 秒内的 DB 快照，之后必须回源 DB。
+    _REMOTE_VERSION_TTL = 30 * 24 * 3600
+    _BUMP_REMOTE_VERSION_LUA = """
+    local version = redis.call('INCR', KEYS[1])
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    return version
+    """
+
     @classmethod
-    async def _remote_version(cls) -> int:
+    async def _remote_version(cls) -> int | None:
         try:
             from app.core.redis_client import get_redis
 
             r = await get_redis()
             raw = await r.get(REDIS_CACHE_VER_KEY)
-            return int(raw or 0)
+            version = int(raw or 0)
+            return version if version > 0 else None
         except Exception:
-            return 0
+            logger.warning("读取系统设置 Redis 版本失败，进入短时 DB 快照降级", exc_info=True)
+            return None
 
     @classmethod
     async def _bump_remote_version(cls) -> int:
@@ -958,10 +969,16 @@ class SystemSettingsService:
             from app.core.redis_client import get_redis
 
             r = await get_redis()
-            new_ver = int(await r.incr(REDIS_CACHE_VER_KEY))
-            await r.expire(REDIS_CACHE_VER_KEY, 30 * 24 * 3600)
-            return new_ver
+            # INCR + EXPIRE 必须在同一 Lua 原子执行，避免进程在两条命令之间崩溃
+            # 导致版本键永久无 TTL，最终形成永不过期的跨 worker 状态。
+            return int(await r.eval(
+                cls._BUMP_REMOTE_VERSION_LUA,
+                1,
+                REDIS_CACHE_VER_KEY,
+                cls._REMOTE_VERSION_TTL,
+            ))
         except Exception:
+            logger.warning("递增系统设置 Redis 版本失败，跨 worker 缓存失效可能延迟", exc_info=True)
             return 0
 
     @classmethod
@@ -978,18 +995,19 @@ class SystemSettingsService:
     async def _load_raw(cls, db: AsyncSession, *, force: bool = False) -> dict[str, str]:
         now = time.monotonic()
         remote_ver = await cls._remote_version()
-        if (
-            not force
-            and cls._cache is not None
-            and cls._cache_ver == remote_ver
-            and now - cls._cache_at < cls.CACHE_TTL
-        ):
-            return cls._cache
+        cache_age = now - cls._cache_at
+        if not force and cls._cache is not None and cache_age < cls.CACHE_TTL:
+            if remote_ver is None:
+                # Redis 故障或版本键丢失：仅短时复用本进程 DB 快照，不把“未知”当作版本 0。
+                cls._cache_ver = -1
+                return cls._cache
+            if remote_ver > 0 and cls._cache_ver == remote_ver:
+                return cls._cache
         result = await db.execute(select(SystemSetting))
         cls._cache = {row.setting_key: row.setting_value for row in result.scalars()}
         cls._last_db_cache = dict(cls._cache)
         cls._cache_at = now
-        cls._cache_ver = remote_ver
+        cls._cache_ver = remote_ver if remote_ver is not None and remote_ver > 0 else -1
         return cls._cache
 
     @classmethod
@@ -1131,12 +1149,14 @@ class SystemSettingsService:
                 await cls._load_raw(db)
             return
 
-        def _is_fresh(remote_ver: int) -> bool:
-            return bool(
-                cls._cache is not None
-                and cls._cache_ver == remote_ver
-                and time.monotonic() - cls._cache_at < cls.CACHE_TTL
-            )
+        def _is_fresh(remote_ver: int | None) -> bool:
+            if cls._cache is None or time.monotonic() - cls._cache_at >= cls.CACHE_TTL:
+                return False
+            if remote_ver is None:
+                # Redis 状态未知时允许短时 stale-if-error，TTL 到期后回源 DB。
+                cls._cache_ver = -1
+                return True
+            return remote_ver > 0 and cls._cache_ver == remote_ver
 
         remote_ver = await cls._remote_version()
         if _is_fresh(remote_ver):
