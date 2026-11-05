@@ -1,4 +1,4 @@
-"""API 限流中间件（Redis 滑动窗口近似：固定窗口计数）"""
+"""API 限流中间件（Redis 固定窗口计数；路径分桶防动态 URL key 爆炸）"""
 from __future__ import annotations
 
 import logging
@@ -45,6 +45,21 @@ def path_requires_fail_closed(path: str, prefixes: list[str]) -> bool:
             return True
     return False
 
+
+def _rate_limit_bucket(path: str) -> str:
+    """将请求路径归一到限流桶，避免动态 ID/随机路径制造海量 Redis key。
+
+    已配置敏感限流前缀按各自策略独立分桶；其他 /api 路径按一级资源分桶。
+    """
+    normalized = (path or "/").split("?", 1)[0]
+    for prefix in SENSITIVE_LIMITS:
+        if normalized.startswith(prefix) or normalized == prefix.rstrip("/"):
+            return prefix.rstrip("/")
+    parts = [part for part in normalized.strip("/").split("/") if part]
+    if len(parts) >= 2 and parts[0] == "api":
+        return f"/api/{parts[1]}"
+    return f"/{parts[0]}" if parts else "/"
+
 # INCR+EXPIRE 原子化：避免两步间失败留下无 TTL 计数键导致该 IP+路径永久 429
 _INCR_SLIDING = """
 local c = redis.call('INCR', KEYS[1])
@@ -82,7 +97,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         from app.core.cache_keys import rate_limit_key
 
-        key = rate_limit_key(client_ip(request) or "unknown", path.split("?")[0])
+        key = rate_limit_key(client_ip(request) or "unknown", _rate_limit_bucket(path))
 
         try:
             r = await get_redis()
