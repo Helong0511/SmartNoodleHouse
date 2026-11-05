@@ -1,6 +1,7 @@
 """Redis 加固修复验证测试：覆盖 jitter/互斥锁/空值标记/延迟双删/大Key/TTL补全等。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -472,3 +473,34 @@ def test_rate_limit_bucket_collapses_dynamic_ids_and_keeps_sensitive_policies_se
     assert _rate_limit_bucket("/api/miniprogram/orders/10001") == "/api/miniprogram"
     assert _rate_limit_bucket("/api/auth/login") == "/api/auth/login"
     assert _rate_limit_bucket("/api/auth/verify-password") == "/api/auth/verify-password"
+
+
+@pytest.mark.asyncio
+async def test_ws_subscriber_closes_pubsub_connection_on_shutdown():
+    from app.services import ws_pubsub
+
+    class FakePubSub:
+        def __init__(self):
+            self.closed = False
+
+        async def subscribe(self, channel):
+            self.channel = channel
+
+        async def listen(self):
+            while True:
+                await asyncio.sleep(1)
+                yield None
+
+        async def aclose(self):
+            self.closed = True
+
+    pubsub = FakePubSub()
+    fake_redis = MagicMock()
+    fake_redis.pubsub.return_value = pubsub
+
+    with patch.object(ws_pubsub, "get_redis", new_callable=AsyncMock, return_value=fake_redis):
+        await ws_pubsub.start_ws_subscriber(AsyncMock())
+        await asyncio.sleep(0.01)
+        await ws_pubsub.stop_ws_subscriber()
+
+    assert pubsub.closed is True
