@@ -268,14 +268,24 @@ def test_reco_invalidation_is_deferred_until_database_commit():
     session = Session()
     scheduled = []
 
+    class FakeDB:
+        sync_session = session
+
+        def add(self, row):
+            # Outbox row is asserted through the service's transaction contract;
+            # this test isolates SQLAlchemy after_commit listener behavior.
+            pass
+
+    db = FakeDB()
+
     def capture(coro):
         scheduled.append(coro)
         coro.close()
 
     with patch.object(reco_cache, "spawn_bg", side_effect=capture):
         session.begin()
-        reco_cache.defer_invalidate_customer(session, 41)
-        reco_cache.defer_invalidate_customer(session, 41)
+        reco_cache.defer_invalidate_customer(db, 41)
+        reco_cache.defer_invalidate_customer(db, 41)
         assert scheduled == []
         session.commit()
 
@@ -352,9 +362,15 @@ def test_request_session_defers_cache_invalidation_for_awaited_post_commit_drain
     session.info["_reco_cache_async_commit_owner"] = True
     scheduled = []
 
+    class FakeDB:
+        sync_session = session
+
+        def add(self, row):
+            pass
+
     with patch.object(reco_cache, "spawn_bg", side_effect=lambda coro: scheduled.append(coro)):
         session.begin()
-        reco_cache.defer_invalidate_customer(session, 43)
+        reco_cache.defer_invalidate_customer(FakeDB(), 43)
         session.commit()
 
     assert scheduled == []
@@ -370,6 +386,12 @@ def test_reco_invalidation_waits_for_outer_transaction_after_nested_savepoint():
     session = Session()
     scheduled = []
 
+    class FakeDB:
+        sync_session = session
+
+        def add(self, row):
+            pass
+
     def capture(coro):
         scheduled.append(coro)
         coro.close()
@@ -377,7 +399,7 @@ def test_reco_invalidation_waits_for_outer_transaction_after_nested_savepoint():
     with patch.object(reco_cache, "spawn_bg", side_effect=capture):
         with session.begin():
             with session.begin_nested():
-                reco_cache.defer_invalidate_customer(session, 42)
+                reco_cache.defer_invalidate_customer(FakeDB(), 42)
             # SAVEPOINT 已提交，但外层业务事务仍未提交。
             assert scheduled == []
         # 只有外层事务提交后才允许推进 Redis 代际。
