@@ -140,6 +140,8 @@ async def test_direct_settings_loads_are_single_flight_across_sessions():
     old_at = Service._cache_at
     old_ver = Service._cache_ver
     try:
+        # 并发等待会绑定 asyncio.Lock 到当前测试事件循环；每个测试独立重置。
+        Service._cache_refresh_lock = asyncio.Lock()
         Service._cache = None
         Service._last_db_cache = None
         Service._cache_at = 0.0
@@ -172,3 +174,4 @@ async def test_direct_settings_loads_are_single_flight_across_sessions():
         Service._last_db_cache = old_last
         Service._cache_at = old_at
         Service._cache_ver = old_ver
+        Service._cache_refresh_lock = asyncio.Lock()
