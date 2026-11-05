@@ -386,6 +386,9 @@ class CameraManager:
             w = self._workers.pop(cid, None)
             if w:
                 w._stop.set()
+                # 线程已确认死亡，可安全释放残留 VideoCapture，避免设备句柄泄漏。
+                w._release_cap()
+                w.status = "OFFLINE"
 
     def start_camera(
         self, camera_id: int, source: str, fps: int = 25, *, force: bool = False
