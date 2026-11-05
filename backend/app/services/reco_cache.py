@@ -14,6 +14,10 @@ import json
 import logging
 import uuid
 import time
+
+from sqlalchemy import event
+
+from app.core.async_utils import spawn_bg
 from collections import OrderedDict
 from threading import RLock
 from typing import Any
@@ -195,6 +199,26 @@ async def set_cached_reco_if_owner(
     except Exception:
         logger.warning("推荐缓存租约校验发布失败(store=%s)", store_id, exc_info=True)
         return False
+
+
+def defer_invalidate_customer(db, customer_id: int) -> None:
+    """把顾客缓存代际失效挂到当前 DB session 的 after_commit，避免提交前刷新造成旧快照复活。"""
+    if not customer_id:
+        return
+    session = getattr(db, "sync_session", db)
+    info = session.info
+    pending = info.setdefault("_reco_cache_invalidation_ids", set())
+    pending.add(int(customer_id))
+    if info.get("_reco_cache_invalidation_listener"):
+        return
+    info["_reco_cache_invalidation_listener"] = True
+
+    def _after_commit(sync_session) -> None:
+        customer_ids = tuple(sync_session.info.pop("_reco_cache_invalidation_ids", set()))
+        for cid in customer_ids:
+            spawn_bg(invalidate_customer(cid))
+
+    event.listen(session, "after_commit", _after_commit)
 
 
 async def invalidate_customer(customer_id: int) -> None:
