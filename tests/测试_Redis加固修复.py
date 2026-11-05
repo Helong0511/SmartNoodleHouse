@@ -252,7 +252,7 @@ async def test_reco_cache_set_uses_jitter():
     from app.services import reco_cache
     fake = FakeRedis()
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
-        await reco_cache.set_cached_reco(1, 1, "default", "a", {"items": []}, "")
+        await reco_cache.set_cached_reco(None, 1, "default", "a", {"items": []}, "")
         key, value, nx, ex = fake.set_calls[-1]
         # TTL 应在 96-144 范围内（120 ±20%）
         assert ex is not None
