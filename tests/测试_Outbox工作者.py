@@ -177,3 +177,15 @@ async def test_claim_lease_guard_cancels_owner_when_claim_is_lost(monkeypatch):
     await asyncio.sleep(1.1)
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+
+def test_worker_lease_columns_use_mysql_microsecond_precision():
+    """MySQL 秒精度会让 heartbeat 同秒更新被误判 rowcount=0。"""
+    from sqlalchemy.dialects import mysql
+
+    from app.models import OutboxEvent, WebhookInbox
+
+    for model in (OutboxEvent, WebhookInbox):
+        compiled = model.__table__.c.locked_at.type.compile(dialect=mysql.dialect())
+        assert compiled.upper() == "DATETIME(6)"
