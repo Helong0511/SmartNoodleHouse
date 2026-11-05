@@ -10,7 +10,7 @@ from app.core import redis_client
 @pytest.mark.asyncio
 async def test_try_get_redis_throttles_repeated_outage_logs(monkeypatch, caplog):
     calls = iter([100.0, 101.0, 131.0])
-    monkeypatch.setattr(redis_client.time, "monotonic", lambda: next(calls))
+    monkeypatch.setattr(redis_client, "monotonic", lambda: next(calls))
 
     async def fail_get_redis():
         raise ConnectionError("redis unavailable")
