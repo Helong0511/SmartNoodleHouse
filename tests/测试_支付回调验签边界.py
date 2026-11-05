@@ -1033,14 +1033,14 @@ async def test_receipt_integrity_error_without_matching_receipt_is_not_acknowled
     monkeypatch.setattr(payment_service, "get_settings", lambda: SimpleNamespace(
         is_production=False, alipay_app_id=""
     ))
-    monkeypatch.setattr(payment_service, "claim_once", AsyncMock(return_value=True))
+    monkeypatch.setattr(payment_service, "claim_once", AsyncMock(return_value="owner-token"))
     monkeypatch.setattr(payment_service, "release_claim", release)
     monkeypatch.setattr(payment_service, "make_receipt_key", lambda *args: "receipt-test")
 
     with pytest.raises(IntegrityError):
         await PaymentService.handle_callback(FakeDB(), "ALIPAY", {}, b"callback")
 
-    release.assert_awaited_once_with("pay:ALIPAY", "receipt-test")
+    release.assert_awaited_once_with("pay:ALIPAY", "receipt-test", "owner-token")
 
 
 def test_wechat_receipt_identity_is_stable_across_http_signature_nonce_retries():
