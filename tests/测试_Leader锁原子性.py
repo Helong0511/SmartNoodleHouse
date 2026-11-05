@@ -149,3 +149,32 @@ async def test_renew_leader_lease_returns_false_only_when_owner_check_fails(monk
     leader_lock.set_leader_held(True)
     assert await leader_lock.renew_leader_lease("worker_A", ttl=45) is False
     assert leader_lock.is_leader_held() is False
+
+
+
+@pytest.mark.asyncio
+async def test_renew_loop_recovers_after_single_transient_redis_error(monkeypatch):
+    calls = {"n": 0, "lost": 0}
+    stop = __import__("asyncio").Event()
+
+    async def _renew(_worker_id, *, ttl):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("temporary redis outage")
+        leader_lock.set_leader_held(True)
+        stop.set()
+        return True
+
+    async def _on_lost():
+        calls["lost"] += 1
+
+    monkeypatch.setattr(leader_lock, "RENEW_INTERVAL", 0.001)
+    monkeypatch.setattr(leader_lock, "renew_leader_lease", _renew)
+    monkeypatch.setattr(leader_lock, "_on_lost", _on_lost)
+    leader_lock.set_leader_held(True)
+
+    await leader_lock.renew_leader_loop("worker_A", stop, ttl=45)
+
+    assert calls["n"] == 2
+    assert calls["lost"] == 0
+    assert leader_lock.is_leader_held() is True
