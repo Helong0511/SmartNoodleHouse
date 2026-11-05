@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
 from app.models import OutboxEvent
-from app.services.worker_common import backoff_seconds, worker_id
+from app.services.worker_common import backoff_seconds, claim_token, worker_id
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ async def claim_outbox_item(
 
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = (worker or worker_id())[:64]
+    wid = claim_token(worker)
     now = now_local()
     stmt = (
         update(OutboxEvent)
