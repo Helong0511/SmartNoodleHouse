@@ -167,6 +167,11 @@ class PrivacyService:
         )
         await db.flush()
 
+        # 画像/行为数据已清除或授权已撤回：提交后推进 Redis 代际，禁止旧个性化缓存继续命中。
+        from app.services.reco_cache import defer_invalidate_customer
+
+        defer_invalidate_customer(db, cid)
+
         await AuditService.log(
             db,
             action="privacy.clear_taste_profile",
