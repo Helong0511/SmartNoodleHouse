@@ -570,3 +570,14 @@ async def test_reco_cache_invalidation_deletes_large_key_sets_in_bounded_batches
         await reco_cache.invalidate_customer(77)
     assert len(fake.delete_calls) == 450
     assert not any(key in fake.store for key in fake.delete_calls)
+
+
+@pytest.mark.asyncio
+async def test_owned_lock_release_does_not_delete_replaced_cooldown():
+    from app.core.redis_client import release_owned_lock
+
+    fake = FakeRedis()
+    fake.store["snh:welcome:unknown:camera:5"] = "new-cooldown-owner"
+    released = await release_owned_lock(fake, "snh:welcome:unknown:camera:5", "old-owner")
+    assert released is False
+    assert fake.store["snh:welcome:unknown:camera:5"] == "new-cooldown-owner"
