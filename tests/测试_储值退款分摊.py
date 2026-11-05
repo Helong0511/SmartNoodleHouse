@@ -19,6 +19,8 @@ def _result(value=None, *, one=None):
 async def test_split_balance_refunds_cumulatively_restore_exact_gift_and_principal():
     customer = SimpleNamespace(id=7, balance_principal=Decimal("0.00"), balance_gift=Decimal("0.00"))
     pay_row = SimpleNamespace(
+        customer_id=7,
+        store_id=1,
         delta_principal=Decimal("-7.00"),
         delta_gift=Decimal("-3.00"),
     )
@@ -60,9 +62,38 @@ async def test_split_balance_refunds_cumulatively_restore_exact_gift_and_princip
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pay_row",
+    [
+        SimpleNamespace(customer_id=8, store_id=1, delta_principal=Decimal("-7.00"), delta_gift=Decimal("-3.00")),
+        SimpleNamespace(customer_id=7, store_id=2, delta_principal=Decimal("-7.00"), delta_gift=Decimal("-3.00")),
+        SimpleNamespace(customer_id=7, store_id=1, delta_principal=Decimal("7.00"), delta_gift=Decimal("-3.00")),
+    ],
+)
+async def test_wallet_refund_rejects_original_pay_ledger_scope_or_direction_drift(pay_row):
+    from app.core.exceptions import AppException
+
+    customer = SimpleNamespace(id=7, balance_principal=Decimal("0.00"), balance_gift=Decimal("0.00"))
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_result(customer), _result(None), _result(pay_row)])
+
+    with pytest.raises(AppException) as exc:
+        await BalanceService.restore_for_refund(
+            db, customer_id=7, order_id=90, refund_id=601,
+            amount=Decimal("3.33"), store_id=1,
+        )
+
+    assert exc.value.code == 40991
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_balance_refund_cannot_restore_more_than_original_wallet_payment():
     customer = SimpleNamespace(id=7, balance_principal=Decimal("0.00"), balance_gift=Decimal("0.00"))
     pay_row = SimpleNamespace(
+        customer_id=7,
+        store_id=1,
         delta_principal=Decimal("-7.00"),
         delta_gift=Decimal("-3.00"),
     )
