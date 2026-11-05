@@ -54,6 +54,13 @@ def assert_camera_url_safe(source_url: str) -> None:
             raise AppException(40026, "摄像头地址协议不受支持")
         if "://" in source_url and not parsed.hostname:
             raise AppException(40026, "摄像头地址缺少有效主机名")
+        if "://" in source_url:
+            try:
+                port = parsed.port
+            except ValueError as exc:
+                raise AppException(40026, "摄像头地址端口格式非法") from exc
+            if port is not None and not (1 <= port <= 65535):
+                raise AppException(40026, "摄像头地址端口超出有效范围")
     except AppException:
         raise
     except Exception as exc:
@@ -81,6 +88,8 @@ def assert_camera_url_safe(source_url: str) -> None:
         # 无法解析就无法证明目标安全；拒绝保存，防止 DNS 故障/临时 NXDOMAIN
         # 被当作安全放行，随后主机名解析结果变化指向内网管理面或云元数据。
         raise AppException(40026, f"摄像头主机名无法解析，拒绝连接: {host}") from exc
+    if not infos:
+        raise AppException(40026, f"摄像头主机名没有有效 DNS 记录: {host}")
     for info in infos:
         addr = info[4][0]
         if _is_blocked_ip(str(addr)):
