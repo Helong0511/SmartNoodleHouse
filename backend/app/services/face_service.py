@@ -983,22 +983,31 @@ class VisitorService:
         )
         storage = get_storage()
         deleted_files = 0
+        deletable_ids: list[int] = []
         for row in rows:
-            key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
+            snapshot_path = getattr(row, "snapshot_path", None)
+            key = cls.uploads_url_to_key(snapshot_path)
+            if not snapshot_path:
+                # 没有关联抓拍文件，可以直接清除事件记录。
+                deletable_ids.append(int(row.id))
+                continue
             if not key:
-                if getattr(row, "snapshot_path", None):
-                    logger.warning(
-                        "清空访客无法解析抓拍键 path=%s",
-                        row.snapshot_path,
-                    )
+                # 无法安全解析对象键时保留记录，避免丢失后续人工定位/清理依据。
+                logger.warning("清空访客无法解析抓拍键，保留事件记录 id=%s path=%s", row.id, snapshot_path)
                 continue
             try:
-                if await storage.delete(key):
-                    deleted_files += 1
+                # False 表示本地对象已不存在；删除目标已经满足，可清理数据库引用。
+                await storage.delete(key)
+                deletable_ids.append(int(row.id))
+                deleted_files += 1
             except Exception:
-                logger.warning("清空访客时删除抓拍失败 path=%s", row.snapshot_path, exc_info=True)
-        result = await db.execute(delete(VisitorEvent).where(VisitorEvent.camera_id.in_(ids)))
-        deleted_rows = int(result.rowcount or 0)
+                # 对象删除失败时保留 DB 行，供下一轮任务重试，禁止制造孤儿文件。
+                logger.warning("清空访客时删除抓拍失败，保留事件记录 id=%s path=%s", row.id, snapshot_path, exc_info=True)
+        if deletable_ids:
+            result = await db.execute(delete(VisitorEvent).where(VisitorEvent.id.in_(deletable_ids)))
+            deleted_rows = int(result.rowcount or 0)
+        else:
+            deleted_rows = 0
         # 再扫本地 visitors/ 下 cam{id}_* 孤儿文件（DB 已无记录但磁盘残留）
         orphan_files = await cls._purge_local_camera_snapshots(ids)
         for cid in ids:
@@ -1092,18 +1101,30 @@ class VisitorService:
         )
         storage = get_storage()
         deleted_files = 0
+        deletable_ids: list[int] = []
         for row in rows:
-            key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
+            snapshot_path = getattr(row, "snapshot_path", None)
+            key = cls.uploads_url_to_key(snapshot_path)
+            if not snapshot_path:
+                deletable_ids.append(int(row.id))
+                continue
             if not key:
+                logger.warning("过期访客抓拍键无法解析，保留事件记录 id=%s path=%s", row.id, snapshot_path)
                 continue
             try:
-                if await storage.delete(key):
-                    deleted_files += 1
+                # 对象已不存在也可安全清除 DB 引用；适配器抛异常才视为删除失败。
+                await storage.delete(key)
+                deletable_ids.append(int(row.id))
+                deleted_files += 1
             except Exception:
-                logger.warning("删除访客抓拍失败 path=%s", row.snapshot_path, exc_info=True)
+                # 失败记录保留，下一轮 cleanup_expired 会再次尝试删除对象。
+                logger.warning("删除访客抓拍失败，保留事件记录 id=%s path=%s", row.id, snapshot_path, exc_info=True)
 
-        result = await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= now))
-        deleted_rows = int(result.rowcount or 0)
+        if deletable_ids:
+            result = await db.execute(delete(VisitorEvent).where(VisitorEvent.id.in_(deletable_ids)))
+            deleted_rows = int(result.rowcount or 0)
+        else:
+            deleted_rows = 0
         await db.commit()
 
         retention = await SystemSettingsService.get_int(
