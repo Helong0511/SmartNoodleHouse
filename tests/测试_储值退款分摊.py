@@ -150,6 +150,37 @@ async def test_wallet_refund_idempotency_rejects_changed_amount():
 
 
 @pytest.mark.asyncio
+async def test_wallet_refund_idempotency_rejects_changed_store_scope():
+    from app.core.exceptions import AppException
+
+    customer = SimpleNamespace(id=7, balance_principal=Decimal("0.00"), balance_gift=Decimal("0.00"))
+    existing = SimpleNamespace(
+        entry_type="REFUND_RESTORE",
+        customer_id=7,
+        order_id=90,
+        store_id=2,
+        delta_principal=Decimal("2.33"),
+        delta_gift=Decimal("1.00"),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_result(customer), _result(existing)])
+
+    with pytest.raises(AppException) as exc:
+        await BalanceService.restore_for_refund(
+            db,
+            customer_id=7,
+            order_id=90,
+            refund_id=501,
+            amount=Decimal("3.33"),
+            store_id=1,
+        )
+
+    assert exc.value.code == 40994
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payment_id", "principal", "gift", "expected_code"),
     [
