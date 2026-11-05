@@ -672,9 +672,17 @@ async def test_menu_cache_publish_requires_current_rebuild_owner():
     from app.core import menu_cache
 
     class OwnerAwareFakeRedis(FakeRedis):
-        async def eval(self, script, numkeys, lock_key, cache_key, token, raw, ttl):
-            self.eval_calls.append((script, numkeys, lock_key, cache_key, token, raw, ttl))
+        async def eval(
+            self, script, numkeys, lock_key, cache_key, version_key,
+            token, raw, ttl, expected_version,
+        ):
+            self.eval_calls.append((
+                script, numkeys, lock_key, cache_key, version_key,
+                token, raw, ttl, expected_version,
+            ))
             if self.store.get(lock_key) != token:
+                return 0
+            if str(self.store.get(version_key, "0")) != str(expected_version):
                 return 0
             self.store[cache_key] = raw
             return "OK"
@@ -686,10 +694,10 @@ async def test_menu_cache_publish_requires_current_rebuild_owner():
 
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
         stale = await menu_cache.set_menu_bundle_if_owner(
-            5, {"products": []}, "expired-old-owner"
+            5, {"products": []}, "expired-old-owner", expected_version=0
         )
         current = await menu_cache.set_menu_bundle_if_owner(
-            5, {"products": [{"id": 9}]}, "new-owner"
+            5, {"products": [{"id": 9}]}, "new-owner", expected_version=0
         )
 
     assert stale is False
