@@ -118,7 +118,7 @@ async def test_update_and_read_cache(mem_db: AsyncSession):
             assert v == 120
             SystemSettingsService._cache = {"welcome_cooldown_seconds": "999"}
             SystemSettingsService._cache_at = time.monotonic()
-            SystemSettingsService._cache_ver = 0
+            SystemSettingsService._cache_ver = 1
             cached = await SystemSettingsService.get_int(mem_db, "welcome_cooldown_seconds", 60)
             assert cached == 999
             SystemSettingsService.invalidate_cache_local()
