@@ -300,7 +300,10 @@ class PosRefundService:
     async def _lock_request(cls, db: AsyncSession, request_id: int) -> PosRefundRequest | None:
         return (
             await db.execute(
-                select(PosRefundRequest).where(PosRefundRequest.id == int(request_id)).with_for_update()
+                select(PosRefundRequest)
+                .where(PosRefundRequest.id == int(request_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
 
@@ -324,7 +327,16 @@ class PosRefundService:
         if not row:
             raise AppException(40404, "退款申请不存在")
         assert_store_access(user, row.store_id)
-        # PROCESSING：渠道处理中可重试收尾；PENDING/FAILED：首次或失败重试
+        # PROCESSING 且已绑定渠道退款单时，先检查原单状态；未终结的退款绝不重新发起。
+        if row.status == "PROCESSING" and row.refund_id:
+            from app.models import PaymentRefund
+
+            linked_refund = await db.get(PaymentRefund, int(row.refund_id))
+            if linked_refund and linked_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
+                await db.refresh(row)
+                return row
+        # PROCESSING：仅在上一笔已明确结束后，才允许继续处理剩余金额。
+        # PENDING/FAILED：首次执行或明确失败后的重试。
         if row.status not in ("PENDING", "FAILED", "PROCESSING"):
             raise AppException(40014, "当前状态不可执行退款")
 
@@ -380,16 +392,23 @@ class PosRefundService:
                     amt,
                     reason,
                     operator_id=user.id,
+                    pos_refund_request_id=request_id,
                 )
                 row = await cls._lock_request(db, request_id)
                 if not row:
                     raise AppException(40404, "退款申请不存在")
                 if last_refund.status == "SUCCESS":
-                    executed = money(executed + amt)
-                    row.executed_amount = executed
-                    row.payment_id = payment_id
-                    row.refund_id = last_refund.id
-                    row.status = "PROCESSING"
+                    # 新流程在 PaymentService.refund 内已先绑定 refund_id，
+                    # _finalize_refund 会在同一事务内累计 executed_amount。
+                    # 仅对旧数据（尚未建立关联）保留兼容性补记，防止重复累计。
+                    if row.refund_id != last_refund.id:
+                        executed = money(executed + amt)
+                        row.executed_amount = executed
+                        row.payment_id = payment_id
+                        row.refund_id = last_refund.id
+                    else:
+                        executed = money(row.executed_amount or 0)
+                    row.status = "SUCCESS" if executed >= amount_total else "PROCESSING"
                     await db.flush()
                     await db.commit()
                 elif last_refund.status in ("PENDING", "PROCESSING", "UNKNOWN", "ABNORMAL"):
