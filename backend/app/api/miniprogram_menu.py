@@ -15,6 +15,7 @@ from app.services.behavior_event_service import MAX_BATCH, ingest_events
 from app.services.feedback_service import EVALUABLE_PAYMENT_STATUSES, FeedbackService
 from app.services.reco_cache import (
     get_cached_reco,
+    get_reco_generation,
     release_reco_lock,
     set_cached_reco_if_owner,
     try_acquire_reco_lock,
@@ -191,7 +192,10 @@ async def get_recommendations(
             ab_status = ab_exp.status
         weight_override = (ab_params or {}).get("reco_weights")
 
-    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, cache_fingerprint)
+    reco_generation = await get_reco_generation(cid)
+    cached = await get_cached_reco(
+        cid, store_id, scene, ab_bucket, cache_fingerprint, generation=reco_generation
+    )
     if cached is not None:
         return success(cached, request=request)
 
@@ -201,14 +205,23 @@ async def get_recommendations(
     flight_key = f"reco:{cid or 0}:{store_id}:{scene}:{ab_bucket}:{cache_fingerprint}"
     async with local_singleflight(flight_key):
         # 等待本地前一个请求期间，先重新检查 Redis 缓存，避免重复计算。
-        cached_after_wait = await get_cached_reco(cid, store_id, scene, ab_bucket, cache_fingerprint)
+        # 本地排队期间顾客画像/授权可能已变化，必须重新读取代际。
+        reco_generation = await get_reco_generation(cid)
+        cached_after_wait = await get_cached_reco(
+            cid, store_id, scene, ab_bucket, cache_fingerprint, generation=reco_generation
+        )
         if cached_after_wait is not None:
             return success(cached_after_wait, request=request)
 
-        lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, cache_fingerprint)
+        lock_token = await try_acquire_reco_lock(
+            cid, store_id, scene, ab_bucket, cache_fingerprint, generation=reco_generation
+        )
         lock_ok = lock_token is not None
         if not lock_ok:
-            waited = await wait_for_reco(cid, store_id, scene, ab_bucket, cache_fingerprint, 2.0)
+            waited = await wait_for_reco(
+                cid, store_id, scene, ab_bucket, cache_fingerprint, 2.0,
+                generation=reco_generation,
+            )
             if waited is not None:
                 return success(waited, request=request)
             # Redis 锁竞争/不可用且短缓存未命中时，不允许所有 worker 同时重算。
@@ -230,13 +243,15 @@ async def get_recommendations(
             )
             payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
             await set_cached_reco_if_owner(
-                cid, store_id, scene, ab_bucket, payload, cache_fingerprint, lock_token
+                cid, store_id, scene, ab_bucket, payload, cache_fingerprint, lock_token,
+                expected_generation=reco_generation,
             )
             payload["cache_hit"] = False
         finally:
             if lock_ok:
                 await release_reco_lock(
-                    cid, store_id, scene, ab_bucket, cache_fingerprint, token=lock_token
+                    cid, store_id, scene, ab_bucket, cache_fingerprint,
+                    token=lock_token, generation=reco_generation,
                 )
     return success(payload, request=request)
 
