@@ -225,9 +225,9 @@ class TasteLearningService:
         db.add_all([r for r in rows.values()])
         await db.flush()
         # 画像变更，主动失效该顾客推荐缓存（Redis 异常在缓存层内吞掉）
-        from app.services.reco_cache import invalidate_customer
+        from app.services.reco_cache import defer_invalidate_customer
 
-        await invalidate_customer(customer_id)
+        defer_invalidate_customer(db, customer_id)
         return len(events)
 
     @staticmethod
@@ -263,9 +263,9 @@ class TasteLearningService:
             )
         db.add_all(list(rows.values()))
         await db.flush()
-        from app.services.reco_cache import invalidate_customer
+        from app.services.reco_cache import defer_invalidate_customer
 
-        await invalidate_customer(int(feedback.customer_id))
+        defer_invalidate_customer(db, int(feedback.customer_id))
 
     @staticmethod
     async def record_full_refund_events(db, order_id: int) -> int:
