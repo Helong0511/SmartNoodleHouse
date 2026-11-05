@@ -1829,11 +1829,11 @@ class PaymentService:
                 )
 
         redis_channel = f"pay:{provider_u}"
-        first = await claim_once(redis_channel, receipt)
-        if not first:
-            # Redis 显示已认领：可能是真重复，也可能是崩溃残留
-            # （claim 后、receipt 提交前 crash）。必须查 DB receipt 判断真相，
-            # 否则支付状态可能永久卡住（#2）。
+        claim_token = await claim_once(redis_channel, receipt)
+        if not claim_token:
+            # Redis 显示已认领：可能是真重复，也可能是崩溃残留。
+            # 必须查 DB receipt 判断事实；若没有 DB receipt，继续依赖 DB UNIQUE 竞争，
+            # 但绝不能删除未知请求的 Redis 锁（它可能仍由正在执行的请求持有）。
             receipt_provider_check = (
                 f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
             )
@@ -1846,7 +1846,7 @@ class PaymentService:
                 )
             ).scalar_one_or_none()
             if existing_receipt:
-                # 真重复：receipt 已落库，业务已处理过，短路返回现有对象
+                # 真重复：receipt 已落库，业务已处理过，短路返回现有对象。
                 if parsed_probe.get("is_refund"):
                     refund_no = parsed_probe.get("refund_no")
                     if refund_no:
@@ -1856,9 +1856,8 @@ class PaymentService:
                     return None
                 result = await db.execute(select(Payment).where(Payment.payment_no == parsed_probe.get("payment_no")))
                 return result.scalar_one_or_none()
-            # Redis claim 是崩溃残留（receipt 未落库）：释放 Redis，继续处理，
-            # 让本次回调真正入账，而不是被误判为重复。
-            await release_claim(redis_channel, receipt)
+            # 无 DB receipt 可能是崩溃残留，也可能是另一请求尚未提交。
+            # 继续由数据库唯一约束仲裁；当前请求没有 Redis 锁所有权，不得释放它。
 
         receipt_provider = f"{provider_u}:REFUND" if parsed_probe.get("is_refund") else provider_u
         try:
@@ -1884,7 +1883,7 @@ class PaymentService:
                 )
             ).scalar_one_or_none()
             if existing_receipt is None:
-                await release_claim(redis_channel, receipt)
+                await release_claim(redis_channel, receipt, claim_token)
                 raise
             if parsed_probe.get("is_refund"):
                 refund_no = parsed_probe.get("refund_no")
@@ -1922,7 +1921,7 @@ class PaymentService:
                         await db_clean.commit()
             except Exception as clean_err:
                 logger.warning("回调失败后清理 DB 回执失败: %s", clean_err)
-            await release_claim(redis_channel, receipt)
+            await release_claim(redis_channel, receipt, claim_token)
             raise
 
     @classmethod
