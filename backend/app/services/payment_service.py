@@ -2380,18 +2380,19 @@ class PaymentService:
                 net = await cls.order_net_collected(db, order.id)
                 total = money(order.total_amount)
                 if net <= 0:
-                    try:
-                        from app.services.social_benefit_service import SocialBenefitService
+                    # 公益台账与营销归因冲减必须和退款 SUCCESS 同事务写入 Outbox。
+                    # 不在资金确认事务中吞掉副作用异常；worker 使用 refund_id 幂等重试。
+                    if order.customer_id:
+                        from app.services.outbox_worker import enqueue_outbox
 
-                        await SocialBenefitService.reverse_for_order(db, int(order.id))
-                    except Exception:
-                        logger.exception("公益台账退款冲减失败 order_id=%s", order.id)
-                    try:
-                        from app.services.attribution_service import AttributionService
-
-                        await AttributionService.reverse_for_order(db, int(order.id))
-                    except Exception:
-                        logger.exception("营销归因退款冲减失败 order_id=%s", order.id)
+                        for event_kind in ("social_benefit_reverse", "campaign_attribution_reverse"):
+                            await enqueue_outbox(
+                                db,
+                                aggregate_type="refund",
+                                aggregate_id=int(row.id),
+                                event_kind=event_kind,
+                                payload={"refund_id": int(row.id), "order_id": int(order.id)},
+                            )
                     if order.status not in ("CANCELLED", "REFUNDED"):
                         await apply_order_status(
                             db,
