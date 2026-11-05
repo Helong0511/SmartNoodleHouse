@@ -112,20 +112,45 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
     复位时不清零 attempt_count（避免无限重试），仅释放锁、保留退避。
     """
     cutoff = now_local() - timedelta(seconds=stale_after)
-    stmt = (
+    stale_filter = (
+        OutboxEvent.status == "PROCESSING",
+        or_(OutboxEvent.locked_at.is_(None), OutboxEvent.locked_at < cutoff),
+    )
+    # 最后一次尝试后 worker 崩溃：进入终态 FAILED，不得重置为 PENDING
+    terminal_stmt = (
         update(OutboxEvent)
         .where(
-            OutboxEvent.status == "PROCESSING",
-            or_(OutboxEvent.locked_at.is_(None), OutboxEvent.locked_at < cutoff),
+            *stale_filter,
+            OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+        )
+        .values(
+            status="FAILED",
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+        )
+    )
+    retry_stmt = (
+        update(OutboxEvent)
+        .where(
+            *stale_filter,
+            OutboxEvent.attempt_count < OutboxEvent.max_attempts,
         )
         .values(status="PENDING", locked_at=None, locked_by=None)
     )
-    result = await db.execute(stmt)
+    terminal_result = await db.execute(terminal_stmt)
+    retry_result = await db.execute(retry_stmt)
     await db.commit()
-    count = int(result.rowcount or 0)
-    if count:
-        logger.warning("Reclaimed %s stale PROCESSING outbox events", count)
-    return count
+    terminal_count = int(terminal_result.rowcount or 0)
+    retry_count = int(retry_result.rowcount or 0)
+    if retry_count:
+        logger.warning("Reclaimed %s stale PROCESSING outbox events", retry_count)
+    if terminal_count:
+        logger.critical(
+            "Outbox events exhausted max_attempts after lease expiry: count=%s",
+            terminal_count,
+        )
+    return terminal_count + retry_count
 
 
 async def claim_outbox_item(
