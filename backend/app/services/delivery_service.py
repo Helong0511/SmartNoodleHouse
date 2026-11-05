@@ -788,20 +788,35 @@ class DeliveryService:
         refund_type = "PARTIAL" if amount and order and amount < order.total_amount else "FULL"
 
         if not refund_id:
-            # 平台未给 refund_id：不受唯一约束保护，直接插入
-            db.add(
-                DeliveryRefund(
-                    delivery_order_id=d_order.id,
-                    order_id=d_order.order_id,
-                    platform=platform.upper(),
-                    platform_refund_id=None,
-                    refund_type=refund_type,
-                    amount=amount,
-                    reason=reason,
-                    status="PENDING",
-                    raw_payload=dumps_json(raw),
-                )
+            # 部分平台回调不提供退款单号。使用原始事件规范化内容生成稳定指纹，
+            # 由数据库唯一约束兜底并发/重复投递；不把合成值伪装成平台退款编号。
+            canonical_payload = json.dumps(
+                raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
             )
+            fingerprint = hashlib.sha256(
+                f"{platform.upper()}|{d_order.id}|{amount}|{refund_type}|{canonical_payload}".encode("utf-8")
+            ).hexdigest()
+            from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        DeliveryRefund(
+                            delivery_order_id=d_order.id,
+                            order_id=d_order.order_id,
+                            platform=platform.upper(),
+                            platform_refund_id=None,
+                            event_fingerprint=fingerprint,
+                            refund_type=refund_type,
+                            amount=amount,
+                            reason=reason,
+                            status="PENDING",
+                            raw_payload=dumps_json(raw),
+                        )
+                    )
+            except _IntegrityError:
+                # 完全相同的无编号回调已存在；保持幂等，不再新增退款记录。
+                pass
         else:
             # 有 refund_id：利用唯一约束原子去重，IntegrityError 时回滚 savepoint 再查已有行
             from sqlalchemy.exc import IntegrityError as _IntegrityError
