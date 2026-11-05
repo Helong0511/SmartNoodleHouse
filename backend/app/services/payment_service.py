@@ -1858,7 +1858,20 @@ class PaymentService:
             await db.flush()
         except IntegrityError:
             await db.rollback()
-            # DB UNIQUE 已认领：与 Redis 一致视为重复，不再处理
+            # 不能仅凭 IntegrityError 就认定 receipt 重复；只有按 provider+receipt_key
+            # 查到已存在的回执才算并发重复。FK/NOT NULL/其他唯一键错误必须向平台报错，
+            # 否则平台收到成功 ACK、而本地没有处理支付的风险会变成永久漏单。
+            existing_receipt = (
+                await db.execute(
+                    select(PaymentCallbackReceipt).where(
+                        PaymentCallbackReceipt.provider == receipt_provider,
+                        PaymentCallbackReceipt.receipt_key == receipt,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_receipt is None:
+                await release_claim(redis_channel, receipt)
+                raise
             if parsed_probe.get("is_refund"):
                 refund_no = parsed_probe.get("refund_no")
                 if refund_no:
