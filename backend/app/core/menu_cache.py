@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 MENU_TTL_SECONDS = MENU_BUNDLE_TTL_SECONDS
 _BUNDLE_MAX_BYTES = 256 * 1024  # bundle JSON 超 256KB 跳过缓存以避免大Key
-_REBUILD_LOCK_TTL = 30  # 短租约由 owner-token 心跳续期\n_REBUILD_HEARTBEATS: dict[str, asyncio.Task] = {}
+_REBUILD_LOCK_TTL = 30  # 短租约由 owner-token 心跳续期
+_REBUILD_HEARTBEATS: dict[str, asyncio.Task] = {}
 
 
 async def get_menu_version(store_id: int) -> int:
