@@ -126,18 +126,22 @@ class CameraWorker:
         )
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
+        """停止采集线程；线程未退出时不跨线程 release VideoCapture，避免与 read/open 竞态。"""
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=_STOP_JOIN_TIMEOUT_SEC)
             if self._thread.is_alive():
-                logger.warning(
+                logger.critical(
                     "Camera %s stop: thread still alive after join timeout=%.1fs "
-                    "(open 可能仍阻塞；勿假定双机位已互斥)",
+                    "(open/read 可能仍阻塞；不得启动同一路新采集线程)",
                     self.camera_id,
                     _STOP_JOIN_TIMEOUT_SEC,
                 )
+                return False
         self._release_cap()
+        self.status = "OFFLINE"
+        return True
 
     def _release_cap(self) -> None:
         cap = self._cap
@@ -434,6 +438,46 @@ class CameraManager:
             worker = self._stop_camera_unlocked(camera_id)
         if worker:
             worker.stop()
+
+    def stop_all_cameras(self, *, timeout: float = _STOP_JOIN_TIMEOUT_SEC) -> bool:
+        """停止本进程全部采集线程；统一 deadline，避免多摄像头逐个累计等待。
+
+        返回 False 表示仍有线程未退出。未退出的 worker 保留在注册表中，
+        不释放其 VideoCapture，也不允许本进程安全地重新启动同一路摄像头。
+        """
+        with self._lock:
+            workers = list(self._workers.items())
+            for _camera_id, worker in workers:
+                worker._stop.set()
+
+        deadline = time.monotonic() + max(0.1, float(timeout))
+        stopped_ids: list[int] = []
+        alive_ids: list[int] = []
+        for camera_id, worker in workers:
+            thread = worker._thread
+            if thread and thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if thread and thread.is_alive():
+                alive_ids.append(camera_id)
+                continue
+            worker._release_cap()
+            worker.status = "OFFLINE"
+            stopped_ids.append(camera_id)
+
+        with self._lock:
+            for camera_id in stopped_ids:
+                # 防止并发管理操作误删后来注册的新 Worker。
+                if self._workers.get(camera_id) is dict(workers).get(camera_id):
+                    self._workers.pop(camera_id, None)
+
+        if alive_ids:
+            logger.critical(
+                "停止摄像头未完全成功，仍运行 camera_ids=%s；禁止本进程重新竞选 Leader",
+                alive_ids,
+            )
+            return False
+        logger.info("已停止全部摄像头采集线程 count=%s", len(stopped_ids))
+        return True
 
     def get_status(self, camera_id: int) -> str:
         with self._lock:
