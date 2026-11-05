@@ -31,3 +31,27 @@ def test_channel_bill_parser_rejects_negative_amounts():
             "WECHAT",
             "trade_no,amount\nWX-NEG,-1.00\n",
         )
+
+@pytest.mark.parametrize(
+    "bill, message",
+    [
+        ("wrong,columns\\nWX-1,1.00\\n", "缺少交易号或金额列"),
+        ("trade_no,amount\\n,1.00\\n", "缺少交易号"),
+        ("trade_no,amount\\nWX-1,NaN\\n", "金额无效"),
+        ("trade_no,amount\\nWX-1,Infinity\\n", "金额无效"),
+        ("trade_no,amount\\nWX-1,1.001\\n", "最多两位小数"),
+    ],
+)
+def test_channel_bill_parser_rejects_malformed_or_non_finite_amount_rows(bill, message):
+    with pytest.raises(ValueError, match=message):
+        parse_channel_bill_csv("WECHAT", bill)
+
+
+def test_channel_bill_parser_rejects_missing_header():
+    with pytest.raises(ValueError, match="缺少 CSV 表头"):
+        parse_channel_bill_csv("WECHAT", "")
+
+
+def test_channel_bill_parser_allows_empty_bill_with_valid_headers():
+    assert parse_channel_bill_csv("WECHAT", "trade_no,amount,payment_no\\n") == []
+
