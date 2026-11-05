@@ -1,11 +1,11 @@
 <template>
   <div v-loading="loading">
     <el-alert
-      type="info"
+      type="warning"
       :closable="false"
       show-icon
       class="tip"
-      title="导入精简 CSV（列：trade_no / amount，可选 payment_no）。官方账单请先裁剪后再上传。"
+      title="当前仅核对支付交易（trade_no / amount，可选 payment_no），不核对退款流水、手续费或结算净额。请先从官方账单筛选支付成功交易并裁剪成精简 CSV；退款必须单独对账，不能把退款行混入本批次。"
     />
 
     <el-card v-if="canManage" shadow="never" class="import-card">
