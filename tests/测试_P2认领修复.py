@@ -76,8 +76,9 @@ async def test_handle_refund_without_refund_id_inserts_directly():
     ):
         await DeliveryService._handle_refund(db, "ELEME", parsed, raw)
 
-    # 无 refund_id → 不走 begin_nested
-    db.begin_nested.assert_not_called()
+    # 无平台 refund_id 时仍使用 SAVEPOINT：唯一指纹冲突只能回滚本次插入，
+    # 不得回滚 webhook 处理事务中的其他订单状态更新。
+    db.begin_nested.assert_called_once()
     assert db.add.call_count == 1
 
 
@@ -277,8 +278,7 @@ async def test_webhook_process_inbox_uses_atomic_owner_release():
 
     with patch.object(webhook_inbox, "claim_inbox_item", side_effect=fake_claim), \
          patch.object(webhook_inbox, "DeliveryService") as mock_ds, \
-         patch.object(webhook_inbox, "ws_manager") as mock_ws, \
-         patch.object(webhook_inbox, "run_deferred_tasks", AsyncMock()):
+         patch.object(webhook_inbox, "ws_manager") as mock_ws:
         mock_ds.process_raw = AsyncMock(return_value=delivery_result)
         mock_ws.notify_order_event = AsyncMock()
         with patch.object(webhook_inbox, "AsyncSessionLocal") as mock_ctx:
@@ -319,8 +319,7 @@ async def test_webhook_process_inbox_reclaimed_during_processing_skips_ws():
 
     with patch.object(webhook_inbox, "claim_inbox_item", AsyncMock(return_value=row)), \
          patch.object(webhook_inbox, "DeliveryService") as mock_ds, \
-         patch.object(webhook_inbox, "ws_manager") as mock_ws, \
-         patch.object(webhook_inbox, "run_deferred_tasks", AsyncMock()):
+         patch.object(webhook_inbox, "ws_manager") as mock_ws:
         mock_ds.process_raw = AsyncMock(return_value=delivery_result)
         mock_ws.notify_order_event = ws_notify
         with patch.object(webhook_inbox, "AsyncSessionLocal") as mock_ctx:
