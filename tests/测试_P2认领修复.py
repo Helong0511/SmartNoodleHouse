@@ -428,7 +428,8 @@ async def test_outbox_process_uses_atomic_owner_release():
     handler = AsyncMock()
 
     with patch.object(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row)), \
-         patch.dict(outbox_worker.OUTBOX_HANDLERS, {("paid_side_effect", "points_award"): handler}):
+         patch.dict(outbox_worker.OUTBOX_HANDLERS, {("paid_side_effect", "points_award"): handler}), \
+         patch("app.domains.messaging.idempotency.try_acquire", AsyncMock(return_value=True)):
         with patch("app.services.outbox_worker.AsyncSessionLocal") as mock_ctx:
             mock_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
             mock_ctx.return_value.__aexit__ = AsyncMock(return_value=None)
