@@ -347,8 +347,8 @@ async def test_平台间库存变化时后续平台必须读取更新后的数�
 
         async def set_sku_stock(self, items):
             pushed.append((self.platform, items[0]["stock"]))
-            if self.platform == "MEITUAN":
-                # 模拟美团 HTTP 等待期间，本地库存被新订单扣减。
+            if len(pushed) == 1:
+                # 模拟第一个平台 HTTP 等待期间，本地库存被新订单扣减。
                 await db_session.execute(
                     text("UPDATE store_product_stocks SET stock = 1 WHERE id = :id"),
                     {"id": stock_row.id},
@@ -374,7 +374,10 @@ async def test_平台间库存变化时后续平台必须读取更新后的数�
         ),
     )
 
-    assert pushed == [("MEITUAN", 3), ("ELEME", 1)]
+    assert len(pushed) == 2
+    assert {platform for platform, _stock in pushed} == {"MEITUAN", "ELEME"}
+    assert pushed[0][1] == 3
+    assert pushed[1][1] == 1
 
 
 @pytest.mark.asyncio
