@@ -184,3 +184,62 @@ async def test_print_order_raises_when_enabled_but_incomplete(db_session, monkey
         await PrintService.print_order(db_session, order.id)
     assert ei.value.code == 50040
     get_settings.cache_clear()
+
+
+def test_prod_rejects_loopback_mysql_and_redis_without_explicit_opt_in():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                database_url="mysql+aiomysql://user:strong-password@127.0.0.1:3306/snh",
+                redis_url="redis://:strong-redis-password@127.0.0.1:6379/0",
+            )
+        )
+
+
+def test_prod_allows_loopback_mysql_and_redis_with_explicit_opt_in():
+    validate_settings(
+        _base_prod(
+            database_url="mysql+aiomysql://user:strong-password@127.0.0.1:3306/snh",
+            redis_url="redis://:strong-redis-password@[::1]:6379/0",
+            allow_loopback_production_services=True,
+        )
+    )
+
+
+def test_prod_loopback_redis_still_requires_password():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                redis_url="redis://127.0.0.1:6379/0",
+                allow_loopback_production_services=True,
+            )
+        )
+
+
+def test_prod_allows_empty_webhook_allowlist_only_when_explicitly_not_required():
+    validate_settings(
+        _base_prod(
+            webhook_ip_allowlist="",
+            webhook_require_allowlist=False,
+        )
+    )
+
+
+def test_prod_rejects_empty_webhook_allowlist_when_required():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                webhook_ip_allowlist="",
+                webhook_require_allowlist=True,
+            )
+        )
+
+
+def test_prod_rejects_invalid_nonempty_webhook_allowlist_even_when_optional():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                webhook_ip_allowlist="not-an-ip",
+                webhook_require_allowlist=False,
+            )
+        )
