@@ -99,6 +99,7 @@ class OutboxEvent(Base):
     payload: Mapped[str | None] = mapped_column(Text)
     # 每次库存镜像信号递增；worker 处理期间若版本变化，完成时必须重新排队。
     sync_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # UNCERTAIN 表示下游副作用可能已执行但结果未知；禁止 worker 自动认领，需人工核实。
     status: Mapped[str] = mapped_column(String(16), default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=8)
