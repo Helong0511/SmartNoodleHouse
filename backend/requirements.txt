@@ -4,7 +4,7 @@ starlette>=1.6.0,<2.0
 uvicorn[standard]>=0.27.0,<1.0
 # CVE-2024-1135（请求走私）修复于 23.0.0
 gunicorn>=23.0.0,<25
-sqlalchemy[asyncio]>=2.0.25,<3.0
+sqlalchemy[asyncio]>=2.1.6,<3.0
 aiomysql>=0.3.2,<0.4
 alembic>=1.13.0,<2.0
 pydantic>=2.14.2,<3.0
