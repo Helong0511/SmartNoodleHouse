@@ -13,8 +13,8 @@ async def test_process_refund_requires_order_store():
     refund = SimpleNamespace(id=1, order_id=9, status="PENDING", delivery_order_id=2, platform="ELEME")
     db = MagicMock()
     locked = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
-    db.execute = AsyncMock(return_value=locked)
-    db.get = AsyncMock(side_effect=[SimpleNamespace(id=2), None])  # d_order, order missing
+    db.execute = AsyncMock(side_effect=[locked, MagicMock(scalar_one_or_none=MagicMock(return_value=None))])
+    db.get = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
 
@@ -40,8 +40,14 @@ async def test_process_refund_fail_closed_without_credentials():
     order = SimpleNamespace(id=9, store_id=7, status="COOKING")
     d_order = SimpleNamespace(id=2, order_id=9, platform_order_id="po1")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # hint
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund FOR UPDATE
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no pending cancel intent
+    ])
+    db.get = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
 
@@ -60,7 +66,10 @@ async def test_process_refund_fail_closed_without_credentials():
 async def test_cancel_by_merchant_requires_order():
     d_order = SimpleNamespace(id=2, order_id=9, platform="MEITUAN", platform_order_id="po")
     db = MagicMock()
-    db.get = AsyncMock(side_effect=[d_order, None])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+    ])
     db.commit = AsyncMock()
     with pytest.raises(AppException) as ei:
         await DeliveryService.cancel_by_merchant(db, 2, "库存不足")
@@ -76,28 +85,32 @@ async def test_cancel_by_merchant_http_after_commit():
     )
     order = SimpleNamespace(id=9, store_id=7, status="COOKING")
     db = MagicMock()
-    db.get = AsyncMock(side_effect=[d_order, order, order, d_order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(first=MagicMock(return_value=None)),  # no active refund
+    ])
     db.commit = AsyncMock()
     db.flush = AsyncMock()
-    mock_provider = MagicMock()
-    mock_provider.cancel_order = AsyncMock(return_value=True)
+    outbox_event = SimpleNamespace(id=77, status="PENDING")
 
     with patch(
         "app.services.delivery_service.get_credentials_for_store",
         AsyncMock(return_value=MagicMock()),
     ), patch(
-        "app.services.delivery_service.get_delivery_provider",
-        return_value=mock_provider,
-    ), patch(
-        "app.services.order_lifecycle.apply_order_status",
-        new_callable=AsyncMock,
-    ) as apply:
+        "app.services.delivery_service.enqueue_outbox",
+        new=AsyncMock(return_value=(outbox_event, True)),
+    ) as enqueue:
         out = await DeliveryService.cancel_by_merchant(db, 2, "售罄")
 
-    assert out["ok"] is True
-    db.commit.assert_awaited()
-    mock_provider.cancel_order.assert_awaited_once()
-    apply.assert_awaited()
+    assert out == {
+        "ok": False, "status": "PENDING", "order_id": 9,
+        "outbox_id": 77, "queued": True,
+    }
+    db.commit.assert_awaited_once()
+    enqueue.assert_awaited_once()
+
 
 
 @pytest.mark.asyncio
@@ -105,31 +118,46 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     """平台已退但本地账本失败时，重试只补账，不再次调用外卖平台。"""
     refund = SimpleNamespace(
         id=31, order_id=91, delivery_order_id=41, platform="MEITUAN",
-        platform_refund_id="platform-rf-1", amount=12, refund_type="PARTIAL",
+        platform_refund_id="platform-rf-1", amount=12, refund_type="FULL",
         status="APPROVED_LEDGER_PENDING", handled_at=None,
     )
-    d_order = SimpleNamespace(id=41, order_id=91, refund_status="APPROVED_LEDGER_PENDING")
-    order = SimpleNamespace(id=91, store_id=7, channel="MEITUAN")
+    d_order = SimpleNamespace(id=41, order_id=91, refund_status="APPROVED_LEDGER_PENDING", delivery_status="ACCEPTED")
+    order = SimpleNamespace(id=91, store_id=7, channel="MEITUAN", status="COOKING")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+    ])
+    db.get = AsyncMock()
     db.commit = AsyncMock()
+
+    async def apply_refunded(_db, target, status, **_kwargs):
+        target.status = status
 
     with patch(
         "app.services.financial_ledger_service.FinancialLedgerService.record_refund",
         new=AsyncMock(return_value=SimpleNamespace(id=101)),
     ) as record, patch(
         "app.services.delivery_service.get_delivery_provider"
-    ) as provider_factory:
+    ) as provider_factory, patch(
+        "app.services.order_lifecycle.apply_order_status",
+        new=apply_refunded,
+    ):
         result = await DeliveryService.process_refund(db, 31, approve=True)
 
     assert result["status"] == "APPROVED"
     assert result["ledger_recovered"] is True
     assert refund.status == "APPROVED"
     assert d_order.refund_status == "APPROVED"
+    assert order.status == "REFUNDED"
+    assert d_order.delivery_status == "CANCELLED"
     record.assert_awaited_once()
     provider_factory.assert_not_called()
     db.commit.assert_awaited_once()
+    # 已确认平台退款成功的补账路径不检查取消 Outbox，也不会再次调用平台。
+    assert db.execute.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -142,8 +170,13 @@ async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state
     d_order = SimpleNamespace(id=42, order_id=92, refund_status="APPROVED_LEDGER_PENDING")
     order = SimpleNamespace(id=92, store_id=8, channel="ELEME")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+    ])
+    db.get = AsyncMock()
     db.rollback = AsyncMock()
 
     with patch(
@@ -156,3 +189,157 @@ async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state
     assert refund.status == "APPROVED_LEDGER_PENDING"
     assert d_order.refund_status == "APPROVED_LEDGER_PENDING"
     db.rollback.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_cancel_by_merchant_rejects_when_refund_is_active():
+    order = SimpleNamespace(id=9, store_id=7, status="COOKING")
+    d_order = SimpleNamespace(id=2, order_id=9, platform="MEITUAN", platform_order_id="po")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(first=MagicMock(return_value=(31, "PROCESSING"))),
+    ])
+    db.commit = AsyncMock()
+
+    with pytest.raises(AppException) as ei:
+        await DeliveryService.cancel_by_merchant(db, 2, "售罄")
+
+    assert ei.value.code == 40956
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_refund_rejects_when_cancel_outbox_is_active():
+    refund = SimpleNamespace(
+        id=41, order_id=91, delivery_order_id=51, platform="MEITUAN",
+        status="PENDING", platform_refund_id="rf-41", refund_type="FULL", amount=20,
+    )
+    order = SimpleNamespace(id=91, store_id=7, status="COOKING")
+    d_order = SimpleNamespace(id=51, order_id=91, platform_order_id="po-51")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # hint
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund lock
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[
+            '{"action":"cancel_order","platform":"MEITUAN","platform_order_id":"po-51","store_id":7,"order_id":999}',
+        ])))),  # callback-originated cancel task uses inbox id, not delivery_order_id
+    ])
+    db.commit = AsyncMock()
+
+    with pytest.raises(AppException) as ei:
+        await DeliveryService.process_refund(db, 41, approve=True)
+
+    assert ei.value.code == 40955
+    cancel_guard_sql = str(db.execute.await_args_list[4].args[0]).upper()
+    assert "FOR UPDATE" in cancel_guard_sql  # MySQL REPEATABLE READ current read
+    db.commit.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_refund_reconcile_platform_not_applied_restores_pending_without_provider_call():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.delivery import RefundReconcile, reconcile_delivery_refund
+    from app.core.exceptions import AppException
+
+    hint = SimpleNamespace(id=81, order_id=91, delivery_order_id=51)
+    order = SimpleNamespace(id=91, store_id=7)
+    d_order = SimpleNamespace(id=51, order_id=91, refund_status="PROCESSING")
+    refund = SimpleNamespace(id=81, order_id=91, delivery_order_id=51, status="PROCESSING", handled_at=None)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=hint)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.delivery.AuditService.log_staff", new=AsyncMock()), patch(
+        "app.api.delivery.DeliveryService.process_refund", new=AsyncMock()
+    ) as process_refund:
+        await reconcile_delivery_refund(
+            81,
+            RefundReconcile(
+                action="platform_not_applied",
+                reason="平台核实未执行：平台后台显示退款申请未受理",
+            ),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert refund.status == "PENDING"
+    assert d_order.refund_status == "PENDING"
+    db.commit.assert_awaited_once()
+    process_refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refund_reconcile_platform_success_uses_ledger_only_recovery():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.delivery import RefundReconcile, reconcile_delivery_refund
+
+    hint = SimpleNamespace(id=82, order_id=92, delivery_order_id=52)
+    order = SimpleNamespace(id=92, store_id=8)
+    d_order = SimpleNamespace(id=52, order_id=92, refund_status="PROCESSING")
+    refund = SimpleNamespace(id=82, order_id=92, delivery_order_id=52, status="PROCESSING", handled_at=None)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=hint)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.delivery.AuditService.log_staff", new=AsyncMock()), patch(
+        "app.api.delivery.DeliveryService.process_refund",
+        new=AsyncMock(return_value={"ok": True, "status": "APPROVED", "ledger_recovered": True}),
+    ) as process_refund:
+        await reconcile_delivery_refund(
+            82,
+            RefundReconcile(
+                action="platform_succeeded",
+                reason="平台核实已成功：平台退款单号 RF-82 状态 SUCCESS",
+            ),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert refund.status == "APPROVED_LEDGER_PENDING"
+    assert d_order.refund_status == "APPROVED_LEDGER_PENDING"
+    db.commit.assert_awaited_once()
+    process_refund.assert_awaited_once_with(db, 82, approve=True)
+
+
+@pytest.mark.asyncio
+async def test_refund_reconcile_is_super_admin_only():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.api.delivery import RefundReconcile, reconcile_delivery_refund
+    from app.core.exceptions import AppException
+
+    db = MagicMock()
+    db.get = AsyncMock()
+    with pytest.raises(AppException) as ei:
+        await reconcile_delivery_refund(
+            83,
+            RefundReconcile(
+                action="platform_not_applied",
+                reason="平台核实未执行：后台状态为未受理",
+            ),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="STORE_ADMIN")),
+        )
+    assert ei.value.code == 40300
+    db.get.assert_not_awaited()

@@ -6,12 +6,12 @@ import re
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, update
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
-from app.core.response import calc_pages, success, serialize_dt
-from app.models import OutboxEvent
+from app.core.response import calc_pages, success, serialize_dt, now_local
+from app.models import DeliveryOrder, Order, OutboxEvent
 from app.services.audit_service import AuditService
 from app.services.outbox_worker import (
     _resolve_outbox_handler,
@@ -60,6 +60,42 @@ def _ensure_handler_registry() -> None:
 
 class OutboxReplayIn(BaseModel):
     reason: str = Field(..., min_length=8, max_length=500)
+    confirmed_not_applied: bool = False
+
+
+class OutboxResolveIn(BaseModel):
+    reason: str = Field(..., min_length=8, max_length=500)
+
+
+def _is_external_result_unknown(value: str | None) -> bool:
+    return str(value or "").startswith("EXTERNAL_RESULT_UNKNOWN:")
+
+
+def _require_external_result_success_confirmation(reason: str) -> None:
+    if "平台核实已成功" not in str(reason or ""):
+        raise AppException(
+            40909,
+            "关闭结果未知死信前，必须先核实平台订单已成功执行，并在核实说明中写入“平台核实已成功”。",
+            status_code=409,
+        )
+
+
+def _require_external_result_replay_confirmation(
+    value: str | None,
+    confirmed_not_applied: bool,
+    reason: str,
+) -> None:
+    unknown = _is_external_result_unknown(value)
+    if unknown and (
+        not confirmed_not_applied or "下游核实未执行" not in str(reason or "")
+    ):
+        raise AppException(
+            40905,
+            "该事件的下游执行结果未知。请先核实外卖平台确实未执行，再明确确认后重放；若已执行，请使用“核实已成功”关闭死信。",
+            status_code=409,
+        )
+    if confirmed_not_applied and not unknown:
+        raise AppException(40906, "仅外部结果未知的死信需要该确认标记", status_code=409)
 
 
 @router.get("/dead-letters", dependencies=[require_permission("system:manage")])
@@ -72,8 +108,16 @@ async def list_dead_letters(
 ):
     _require_super_admin(user)
     filters = (
-        OutboxEvent.status == "FAILED",
-        OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+        or_(
+            and_(
+                OutboxEvent.status == "FAILED",
+                OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+            ),
+            and_(
+                OutboxEvent.status == "UNCERTAIN",
+                OutboxEvent.last_error.like("EXTERNAL_RESULT_UNKNOWN:%"),
+            ),
+        ),
     )
     total = int((await db.execute(
         select(func.count()).select_from(OutboxEvent).where(*filters)
@@ -95,6 +139,7 @@ async def list_dead_letters(
             "attempt_count": row.attempt_count,
             "max_attempts": row.max_attempts,
             "last_error": _safe_error(row.last_error),
+            "result_unknown": _is_external_result_unknown(row.last_error),
             "created_at": serialize_dt(row.created_at),
             "updated_at": serialize_dt(row.updated_at),
         } for row in rows],
@@ -121,8 +166,18 @@ async def replay_dead_letter(
     )).scalar_one_or_none()
     if row is None:
         raise AppException(40401, "Outbox 事件不存在", status_code=404)
-    if row.status != "FAILED" or int(row.attempt_count or 0) < int(row.max_attempts or 0):
-        raise AppException(40901, "该事件不是已耗尽重试次数的死信，不能人工重放", status_code=409)
+    is_regular_dead_letter = (
+        row.status == "FAILED"
+        and int(row.attempt_count or 0) >= int(row.max_attempts or 0)
+    )
+    is_unknown_dead_letter = (
+        row.status == "UNCERTAIN" and _is_external_result_unknown(row.last_error)
+    )
+    if not (is_regular_dead_letter or is_unknown_dead_letter):
+        raise AppException(40901, "该事件不是可人工处置的死信，不能重放", status_code=409)
+    _require_external_result_replay_confirmation(
+        row.last_error, data.confirmed_not_applied, data.reason
+    )
 
     try:
         payload = json.loads(row.payload) if row.payload else {}
@@ -162,6 +217,7 @@ async def replay_dead_letter(
             "previous_attempt_count": previous_attempt_count,
             "max_attempts": previous_max_attempts,
             "previous_error": previous_error,
+            "confirmed_not_applied": bool(data.confirmed_not_applied),
             "reason": data.reason.strip(),
         },
         request=request,
@@ -169,3 +225,254 @@ async def replay_dead_letter(
     )
     await db.commit()
     return success({"id": outbox_id, "status": "PENDING", "requeued": True}, request=request)
+
+
+@router.post("/dead-letters/{outbox_id}/resolve", dependencies=[require_permission("system:manage")])
+async def resolve_unknown_dead_letter(
+    outbox_id: int,
+    data: OutboxResolveIn,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """外部平台已确认执行成功时，关闭未知结果死信，避免误重放。"""
+    _require_super_admin(user)
+    if len(data.reason.strip()) < 8:
+        raise AppException(40012, "核实原因去除空格后至少需要 8 个字符", status_code=400)
+    _require_external_result_success_confirmation(data.reason)
+    row = (await db.execute(
+        select(OutboxEvent).where(OutboxEvent.id == outbox_id)
+    )).scalar_one_or_none()
+    if row is None:
+        raise AppException(40401, "Outbox 事件不存在", status_code=404)
+    if (
+        row.status != "UNCERTAIN"
+        or not _is_external_result_unknown(row.last_error)
+    ):
+        raise AppException(40907, "该事件不是待核实的外部结果未知死信", status_code=409)
+
+    # 商家取消的外部平台结果已核实成功时，必须先补齐本地订单状态，
+    # 再把 Outbox 标记 DONE；否则可能出现平台已取消、本地订单仍显示进行中。
+    local_reconciled = False
+    try:
+        payload = json.loads(row.payload or "{}")
+    except (TypeError, ValueError) as exc:
+        raise AppException(40910, "结果未知事件 payload 无效，拒绝自动对账", status_code=409) from exc
+    if row.aggregate_type == "webhook_task" and isinstance(payload, dict) and payload.get("action") == "cancel_order":
+        # 商家主动取消 payload 有 order_id；库存拒单发生在本地订单创建前，
+        # 可能没有 order_id/DeliveryOrder，此时平台确认取消后无需修改本地订单。
+        try:
+            payload_order_id = int(payload.get("order_id") or 0)
+            payload_store_id = int(payload.get("store_id") or 0)
+            platform = str(payload.get("platform") or "").upper()
+            platform_order_id = str(payload.get("platform_order_id") or "")
+        except (TypeError, ValueError) as exc:
+            raise AppException(40910, "取消事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409) from exc
+        if payload_store_id <= 0 or not platform or not platform_order_id:
+            raise AppException(40910, "取消事件缺少有效门店/平台关联信息，拒绝自动对账", status_code=409)
+
+        order_id = payload_order_id
+        if order_id <= 0:
+            candidate = (
+                await db.execute(
+                    select(DeliveryOrder).where(
+                        DeliveryOrder.platform == platform,
+                        DeliveryOrder.platform_order_id == platform_order_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            # 库存不足的回调拒单发生在 Order/DeliveryOrder 创建前；平台取消成功后
+            # 不存在需要回写的本地订单，仍可安全关闭该 Outbox。
+            if candidate is None:
+                # 还要排除“Order 已写入但 DeliveryOrder 缺失”的半成品数据；
+                # 只有订单和外卖记录都不存在，才视为库存拒单发生在本地建单之前。
+                orphan_order = (
+                    await db.execute(
+                        select(Order).where(
+                            Order.store_id == payload_store_id,
+                            Order.idempotency_key == f"{platform}:{platform_order_id}",
+                        )
+                    )
+                ).scalar_one_or_none()
+                if orphan_order is not None:
+                    raise AppException(40911, "取消订单存在本地 Order，但缺少 DeliveryOrder，需人工修复", status_code=409)
+                order_id = 0
+            else:
+                order_id = int(candidate.order_id)
+
+        if order_id > 0:
+            order = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == order_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            delivery_order = (
+                await db.execute(
+                    select(DeliveryOrder)
+                    .where(
+                        DeliveryOrder.order_id == order_id,
+                        DeliveryOrder.platform == platform,
+                        DeliveryOrder.platform_order_id == platform_order_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if order is None or delivery_order is None:
+                raise AppException(40911, "取消订单本地关联记录不存在或已变化，需人工核对后处理", status_code=409)
+            try:
+                actual_store_id = int(order.store_id)
+            except (TypeError, ValueError) as exc:
+                raise AppException(40912, "取消订单缺少有效门店归属，拒绝自动对账", status_code=409) from exc
+            if actual_store_id != payload_store_id:
+                raise AppException(40912, "取消订单门店归属与 Outbox 事件不一致", status_code=409)
+            if order.status in ("COMPLETED", "REFUNDED"):
+                raise AppException(40913, f"平台取消已核实，但本地订单为 {order.status}，需人工对账", status_code=409)
+            if order.status != "CANCELLED":
+                from app.services.order_lifecycle import apply_order_status
+
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark=str(payload.get("reason") or "商家取消")[:200],
+                )
+            delivery_order.delivery_status = "CANCELLED"
+            delivery_order.last_sync_at = now_local()
+            await db.flush()
+            local_reconciled = True
+    elif (
+        row.aggregate_type in ("delivery_manual", "webhook_task")
+        and isinstance(payload, dict)
+        and str(payload.get("action") or "").lower() == "confirm_order"
+    ):
+        # 手动接单在发起平台确认前已本地置为 CONFIRMED/ACCEPTED；
+        # 未知结果人工核实成功时，补齐/验证本地摘要后再关闭 Outbox。
+        try:
+            order_id = int(payload.get("order_id") or (
+                row.aggregate_id if row.aggregate_type == "delivery_manual" else 0
+            ) or 0)
+            payload_store_id = int(payload.get("store_id") or 0)
+            platform = str(payload.get("platform") or "").upper()
+            platform_order_id = str(payload.get("platform_order_id") or "")
+        except (TypeError, ValueError) as exc:
+            raise AppException(40910, "接单事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409) from exc
+        if (
+            order_id <= 0
+            or (
+                row.aggregate_type == "delivery_manual"
+                and int(row.aggregate_id) != order_id
+            )
+            or payload_store_id <= 0
+            or not platform
+            or not platform_order_id
+        ):
+            raise AppException(40910, "接单事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409)
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        delivery_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.order_id == order_id,
+                    DeliveryOrder.platform == platform,
+                    DeliveryOrder.platform_order_id == platform_order_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None or delivery_order is None:
+            raise AppException(40911, "接单事件本地关联记录不存在，需人工核对后处理", status_code=409)
+        try:
+            actual_store_id = int(order.store_id)
+        except (TypeError, ValueError) as exc:
+            raise AppException(40912, "接单订单缺少有效门店归属，拒绝自动对账", status_code=409) from exc
+        if actual_store_id != payload_store_id:
+            raise AppException(40912, "接单订单门店归属与 Outbox 事件不一致", status_code=409)
+        order_status = str(order.status or "").upper()
+        if order_status in ("CANCELLED", "REFUNDED"):
+            raise AppException(40913, f"平台接单已核实，但本地订单为 {order_status}，需人工对账", status_code=409)
+        if order_status == "PAID":
+            from app.services.order_lifecycle import apply_order_status
+
+            await apply_order_status(
+                db,
+                order,
+                "CONFIRMED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark="平台接单结果人工核实成功",
+            )
+        elif order_status not in ("CONFIRMED", "PREPARING", "READY", "COMPLETED"):
+            raise AppException(40914, f"平台接单已核实，但本地订单状态 {order_status} 不可自动对账", status_code=409)
+        delivery_status = str(delivery_order.delivery_status or "").upper()
+        if delivery_status in ("CANCELLED", "REFUNDED"):
+            raise AppException(40915, f"平台接单已核实，但本地外卖状态为 {delivery_status}，需人工对账", status_code=409)
+        if order_status == "COMPLETED":
+            delivery_order.delivery_status = "DONE"
+            delivery_order.logistics_status = "DELIVERED"
+            delivery_order.completed_at = (
+                getattr(delivery_order, "completed_at", None)
+                or getattr(order, "completed_at", None)
+                or now_local()
+            )
+        elif delivery_status == "PENDING":
+            delivery_order.delivery_status = "ACCEPTED"
+        delivery_order.last_sync_at = now_local()
+        await db.flush()
+        local_reconciled = True
+
+    previous_error = _safe_error(row.last_error)
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == int(outbox_id),
+            OutboxEvent.status == "UNCERTAIN",
+            OutboxEvent.last_error.like("EXTERNAL_RESULT_UNKNOWN:%"),
+        )
+        .values(
+            status="DONE",
+            processed_at=now_local(),
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+            last_error="EXTERNAL_RESULT_RECONCILED_SUCCESS",
+        )
+    )
+    if int(result.rowcount or 0) != 1:
+        await db.rollback()
+        raise AppException(40908, "死信状态已变化，请刷新后重试", status_code=409)
+
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="system.outbox.dead_letter.resolve",
+        module="system",
+        target_type="outbox_event",
+        target_id=outbox_id,
+        detail={
+            "aggregate_type": row.aggregate_type,
+            "aggregate_id": row.aggregate_id,
+            "event_kind": row.event_kind,
+            "previous_error": previous_error,
+            "resolution": "external_platform_confirmed_success",
+            "local_reconciled": local_reconciled,
+            "reason": data.reason.strip(),
+        },
+        request=request,
+        store_id=None,
+    )
+    await db.commit()
+    return success({"id": outbox_id, "status": "DONE", "resolved": True}, request=request)

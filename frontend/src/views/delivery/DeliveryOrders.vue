@@ -532,8 +532,18 @@ async function doCancel() {
   }
   cancelLoading.value = true
   try {
-    await api.post(`/delivery/orders/${cancelTarget.value.id}/cancel`, { reason: cancelReason.value.trim() })
-    ElMessage.success('已取消')
+    const response = await api.post(`/delivery/orders/${cancelTarget.value.id}/cancel`, { reason: cancelReason.value.trim() })
+    // API 仅确认 Outbox 状态；UNCERTAIN 必须人工核实，不能提示用户取消成功。
+    const cancelStatus = String(response?.data?.status || '').toUpperCase()
+    if (cancelStatus === 'UNCERTAIN') {
+      ElMessage.warning('平台取消结果暂不确定，请核实平台订单状态，暂勿重复操作')
+    } else if (cancelStatus === 'FAILED') {
+      ElMessage.error('平台取消未完成，请查看外卖任务记录')
+    } else if (cancelStatus === 'CANCELLED') {
+      ElMessage.success('外卖订单已取消')
+    } else {
+      ElMessage.success('取消请求已提交，平台确认后订单状态将自动更新')
+    }
     cancelVisible.value = false
     detailVisible.value = false
     await Promise.all([loadOrders(), loadStats()])

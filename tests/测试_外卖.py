@@ -206,10 +206,11 @@ async def test_eleme_rejects_http_200_empty_json_envelope(monkeypatch):
         allow_delivery_mock=False,
     )
     monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
-    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
-        result = await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown
 
-    assert result["error"]["code"] == "INVALID_RESPONSE"
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
 
 
 @pytest.mark.asyncio
@@ -329,7 +330,10 @@ async def test_duplicate_delivery_refund_callback_does_not_regress_terminal_summ
     )
     order = SimpleNamespace(id=99, total_amount=Decimal("30.00"))
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
 
     class _DuplicateSavepoint:
@@ -374,7 +378,10 @@ async def test_new_delivery_refund_callback_sets_pending_summary(monkeypatch):
     )
     order = SimpleNamespace(id=100, total_amount=Decimal("30.00"))
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
 
     class _Savepoint:
@@ -413,7 +420,10 @@ async def test_delivery_completed_callback_syncs_summary_when_order_already_comp
     )
     order = SimpleNamespace(id=101, status="COMPLETED", completed_at=None)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -439,7 +449,10 @@ async def test_delivery_cancel_callback_syncs_summary_when_order_already_cancell
     )
     order = SimpleNamespace(id=102, status="CANCELLED")
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -467,7 +480,10 @@ async def test_late_delivery_completed_callback_does_not_override_other_terminal
     )
     order = SimpleNamespace(id=103, status=terminal_status, completed_at=None)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -496,7 +512,10 @@ async def test_late_delivery_cancel_callback_does_not_override_other_terminal_st
     )
     order = SimpleNamespace(id=104, status=terminal_status)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -539,9 +558,10 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     )
     order = SimpleNamespace(id=105, status=order_status)
     db = MagicMock()
-    db.execute = AsyncMock(
-        return_value=SimpleNamespace(scalar_one_or_none=lambda: order)
-    )
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
@@ -567,6 +587,16 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     assert d_order.rider_phone == "13800000000"
     assert d_order.last_sync_at is not None
     db.flush.assert_awaited_once()
+    assert db.execute.await_count == 2
+    order_lock_sql = str(db.execute.await_args_list[0].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    assert "orders" in order_lock_sql and "for update" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
+    assert db.execute.await_count == 2
+    order_lock_sql = str(db.execute.await_args_list[0].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    assert "orders" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql
 
 
 @pytest.mark.asyncio
@@ -612,3 +642,300 @@ class _CallbackLogSavepoint:
         if exc_type is IntegrityError:
             return False
         return False
+
+
+@pytest.mark.asyncio
+async def test_merchant_cancel_persists_one_outbox_event_and_does_not_call_platform(monkeypatch):
+    """商家取消只持久化意图；并发重复请求复用唯一 Outbox 事件。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_service
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=501, order_id=601, platform="MEITUAN",
+        platform_order_id="MT-ORDER-501", delivery_status="ACCEPTED",
+    )
+    order = SimpleNamespace(id=601, store_id=7, status="CONFIRMED")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        SimpleNamespace(scalar_one_or_none=lambda: 601),
+        SimpleNamespace(scalar_one_or_none=lambda: order),
+        SimpleNamespace(scalar_one_or_none=lambda: d_order),
+        SimpleNamespace(first=lambda: None),  # no active refund intent
+    ])
+    db.commit = AsyncMock()
+
+    monkeypatch.setattr(
+        delivery_service, "get_credentials_for_store",
+        AsyncMock(return_value=SimpleNamespace(platform_shop_id="shop-7")),
+    )
+    event = SimpleNamespace(id=9001, status="PENDING")
+    enqueue = AsyncMock(return_value=(event, True))
+    monkeypatch.setattr(delivery_service, "enqueue_outbox", enqueue)
+
+    result = await DeliveryService.cancel_by_merchant(db, 501, "商家缺货")
+
+    assert result == {
+        "ok": False, "status": "PENDING", "order_id": 601,
+        "outbox_id": 9001, "queued": True,
+    }
+    enqueue.assert_awaited_once()
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["aggregate_type"] == "webhook_task"
+    assert kwargs["aggregate_id"] == 501
+    assert kwargs["event_kind"] == "deferred_cancel_order"
+    assert kwargs["payload"]["action"] == "cancel_order"
+    assert kwargs["payload"]["store_id"] == 7
+    assert kwargs["payload"]["platform_order_id"] == "MT-ORDER-501"
+    assert "credentials" not in kwargs["payload"]
+    db.commit.assert_awaited_once()
+    assert db.execute.await_count == 4
+    # 先读关联 ID，再锁 Order，最后锁 DeliveryOrder，避免与配送回调的锁顺序相反。
+    order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
+    assert "orders" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql
+
+
+@pytest.mark.asyncio
+async def test_merchant_cancel_outbox_handler_updates_local_state_only_after_platform_success(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_tasks
+    from app.services.delivery_tasks import execute_webhook_outbox_task
+
+    order = SimpleNamespace(id=601, status="CONFIRMED")
+    d_order = SimpleNamespace(id=501, order_id=601, delivery_status="ACCEPTED", last_sync_at=None)
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+    ])
+    db.flush = AsyncMock()
+
+    provider = SimpleNamespace(cancel_order=AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        delivery_tasks, "get_credentials_for_store",
+        AsyncMock(return_value=SimpleNamespace(platform_shop_id="shop-7")),
+    )
+    monkeypatch.setattr(delivery_tasks, "get_delivery_provider", lambda *_args: provider)
+
+    async def apply_status(_db, target, status, **_kwargs):
+        target.status = status
+
+    monkeypatch.setattr("app.services.order_lifecycle.apply_order_status", apply_status)
+
+    row = SimpleNamespace(
+        aggregate_id=501,
+        payload=json.dumps({
+            "action": "cancel_order", "platform": "MEITUAN",
+            "platform_order_id": "MT-ORDER-501", "store_id": 7,
+            "order_id": 601, "reason": "商家缺货",
+        }),
+    )
+    await execute_webhook_outbox_task(db, row)
+
+    provider.cancel_order.assert_awaited_once_with("MT-ORDER-501", "商家缺货")
+    assert order.status == "CANCELLED"
+    assert d_order.delivery_status == "CANCELLED"
+    assert d_order.last_sync_at is not None
+    db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_meituan_http_200_non_json_is_uncertain(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, MeituanProvider
+
+    url = "https://waimaiopen.meituan.com/api/v1/order/cancel"
+    response = httpx.Response(
+        200,
+        text="gateway returned an unreadable response",
+        request=httpx.Request("GET", url),
+    )
+    client = SimpleNamespace(get=AsyncMock(return_value=response), post=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await MeituanProvider()._request("/api/v1/order/cancel", {"order_id": "O1"})
+
+
+@pytest.mark.asyncio
+async def test_eleme_http_200_non_json_is_uncertain(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        text="invalid rpc response",
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc("eleme.order.cancelOrderLite", {"orderId": "O1"})
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action",
+    [
+        "eleme.order.confirmOrderLite",
+        "eleme.order.setOrderPrepared",
+        "eleme.order.replyReminder",
+        "eleme.order.agreeRefundLite",
+        "eleme.order.disagreeRefundLite",
+        "eleme.order.cancelOrderLite",
+    ],
+)
+async def test_eleme_side_effect_error_envelope_is_uncertain(monkeypatch, action):
+    """未知错误码不能当成确定拒绝，否则 Outbox/退款会自动重发副作用。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        json={"error": {"code": 1006, "message": "system error"}},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc(action, {"orderId": "O1"})
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/order/confirm",
+        "/api/v1/order/preparationMealComplete",
+        "/api/v1/order/remindReply",
+        "/api/v1/order/refund/agree",
+        "/api/v1/order/refund/reject",
+        "/api/v1/order/cancel",
+    ],
+)
+async def test_meituan_side_effect_error_envelope_is_uncertain(monkeypatch, path):
+    """未核实错误码语义前，不允许订单副作用 error 响应触发自动重试。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, MeituanProvider
+
+    url = "https://waimaiopen.meituan.com" + path
+    response = httpx.Response(
+        200,
+        json={"error": {"code": "SYSTEM_ERROR", "message": "temporary error"}},
+        request=httpx.Request("GET", url),
+    )
+    client = SimpleNamespace(get=AsyncMock(return_value=response), post=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await MeituanProvider()._request(path, {"order_id": "O1"})
+
+@pytest.mark.asyncio
+async def test_eleme_side_effect_result_false_is_not_treated_as_success(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        json={"result": False},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc("eleme.order.cancelOrderLite", {"orderId": "O1"})
+
+@pytest.mark.asyncio
+async def test_meituan_side_effect_conflicting_success_and_error_is_uncertain(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, MeituanProvider
+
+    url = "https://waimaiopen.meituan.com/api/v1/order/cancel"
+    response = httpx.Response(
+        200,
+        json={"data": "ok", "error": {"code": "SYSTEM_ERROR"}},
+        request=httpx.Request("GET", url),
+    )
+    client = SimpleNamespace(get=AsyncMock(return_value=response), post=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await MeituanProvider()._request("/api/v1/order/cancel", {"order_id": "O1"})

@@ -146,7 +146,100 @@ async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
     # 单条 UPDATE + CASE 原子区分可重试与耗尽行，避免两次 UPDATE 之间发生状态竞争。
     assert "CASE" in str(stmt).upper()
     assert "FAILED" in [str(v) for v in compiled.params.values()]
+    assert "UNCERTAIN" in [str(v) for v in compiled.params.values()]
     assert "PENDING" in [str(v) for v in compiled.params.values()]
+    # 外部平台/设备副作用事件不能在 worker 崩溃后盲目回到 PENDING。
+    assert "delivery_manual" in [str(v) for v in compiled.params.values()]
+    assert "webhook_task" in [str(v) for v in compiled.params.values()]
+    assert any('"action": "confirm_order"' in str(v) for v in compiled.params.values())
+    assert any('"action": "cancel_order"' in str(v) for v in compiled.params.values())
+    assert any('"action": "reply_urge"' in str(v) for v in compiled.params.values())
+    assert not any("print_ticket" in str(v) for v in compiled.params.values())
+    assert any("EXTERNAL_RESULT_UNKNOWN" in str(v) for v in compiled.params.values())
+
+
+@pytest.mark.asyncio
+async def test_mark_uncertain_moves_event_to_dead_letter_without_retry():
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+
+    await outbox_worker._mark_uncertain(
+        db, 41, "MEITUAN confirm order=7788: ReadTimeout", wid="worker-1"
+    )
+
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    assert "EXTERNAL_RESULT_UNKNOWN" in str(compiled.params.values())
+    assert "UNCERTAIN" in [str(v) for v in compiled.params.values()]
+    assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+    assert "worker-1" in [str(v) for v in compiled.params.values()]
+    assert "last_error" in str(stmt)
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_external_side_effect_read_timeout_is_uncertain_but_connect_error_can_retry():
+    import httpx
+
+    from app.services.delivery_tasks import _call_external_side_effect
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    request = httpx.Request("POST", "https://platform.invalid/order/confirm")
+
+    async def read_timeout():
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    with pytest.raises(ExternalSideEffectUncertain):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", read_timeout)
+
+    async def connect_error():
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with pytest.raises(httpx.ConnectError):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", connect_error)
+
+    async def server_error():
+        response = httpx.Response(503, request=request)
+        raise httpx.HTTPStatusError("upstream unavailable", request=request, response=response)
+
+    with pytest.raises(ExternalSideEffectUncertain):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", server_error)
+
+    async def conflict_error():
+        response = httpx.Response(409, request=request)
+        raise httpx.HTTPStatusError("order state conflict", request=request, response=response)
+
+    with pytest.raises(ExternalSideEffectUncertain):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", conflict_error)
+
+    async def client_error():
+        response = httpx.Response(400, request=request)
+        raise httpx.HTTPStatusError("invalid request", request=request, response=response)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", client_error)
+
+
+def test_unknown_external_result_requires_explicit_reconciliation_before_replay():
+    from app.api.outbox_admin import (
+        _is_external_result_unknown,
+        _require_external_result_replay_confirmation,
+        _require_external_result_success_confirmation,
+    )
+    from app.core.exceptions import AppException
+
+    marker = "EXTERNAL_RESULT_UNKNOWN: ReadTimeout"
+    assert _is_external_result_unknown(marker)
+    assert not _is_external_result_unknown("ordinary provider failure")
+    with pytest.raises(AppException):
+        _require_external_result_replay_confirmation(marker, False, "")
+    _require_external_result_replay_confirmation(marker, True, "下游核实未执行；订单仍待接单")
+    with pytest.raises(AppException):
+        _require_external_result_replay_confirmation("ordinary failure", True, "下游核实未执行；核对完成")
+    with pytest.raises(AppException):
+        _require_external_result_success_confirmation("未核实，先关闭")
+    _require_external_result_success_confirmation("平台核实已成功；订单已确认")
 
 
 @pytest.mark.asyncio
@@ -266,6 +359,177 @@ async def test_unknown_claim_completion_rowcount_fails_closed():
     assert rolled_back is True
     assert db.rollback.await_count == 1
 
+
+@pytest.mark.asyncio
+async def test_successful_handler_is_not_retried_when_post_handler_idempotency_write_fails(monkeypatch):
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=903,
+        aggregate_type="webhook_task",
+        aggregate_id=99,
+        event_kind="execute",
+        locked_by="worker:external-token",
+        payload='{"action":"cancel_order"}',
+        sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *args):
+            return False
+
+    handler = AsyncMock()
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = handler
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        idempotency, "try_acquire",
+        AsyncMock(side_effect=RuntimeError("idempotency database unavailable")),
+    )
+
+    async def _run_handler(handler_fn, _db, _row, **kwargs):
+        await handler_fn(_db, _row)
+        return True
+
+    monkeypatch.setattr(outbox_worker, "_run_handler_with_lease", AsyncMock(side_effect=_run_handler))
+    try:
+        assert await outbox_worker.process_outbox_item(903) is True
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("webhook_task", "execute"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = old_handler
+
+    handler.assert_awaited_once()
+    db.rollback.assert_awaited_once()
+    db.commit.assert_awaited_once()
+    done_stmt = db.execute.await_args_list[-1].args[0]
+    assert "DONE" in [str(v) for v in done_stmt.compile().params.values()]
+
+
+@pytest.mark.asyncio
+async def test_external_handler_becomes_uncertain_when_durable_finalize_fails(monkeypatch):
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=904,
+        aggregate_type="webhook_task",
+        aggregate_id=100,
+        event_kind="execute",
+        locked_by="worker:external-token",
+        payload='{"action":"cancel_order"}',
+        sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(
+        side_effect=[RuntimeError("temporary database failure"), MagicMock(rowcount=1)]
+    )
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *args):
+            return False
+
+    handler = AsyncMock()
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = handler
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    try_acquire = AsyncMock()
+    monkeypatch.setattr(idempotency, "try_acquire", try_acquire)
+    mark_failed = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "_mark_failed", mark_failed)
+
+    async def _run_handler(handler_fn, _db, _row, **kwargs):
+        await handler_fn(_db, _row)
+        return True
+
+    monkeypatch.setattr(outbox_worker, "_run_handler_with_lease", AsyncMock(side_effect=_run_handler))
+    try:
+        assert await outbox_worker.process_outbox_item(904) is True
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("webhook_task", "execute"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("webhook_task", "execute")] = old_handler
+
+    handler.assert_awaited_once()
+    try_acquire.assert_not_awaited()
+    mark_failed.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+    db.commit.assert_awaited_once()
+    uncertain_stmt = db.execute.await_args_list[-1].args[0]
+    assert "UNCERTAIN" in [str(v) for v in uncertain_stmt.compile().params.values()]
+
+
+@pytest.mark.asyncio
+async def test_internal_database_handler_remains_retryable_after_finalize_failure(monkeypatch):
+    """普通内部 DB handler 事务提交失败时，不能错误标记 DONE。"""
+    from app.domains.messaging import idempotency
+    from app.services import outbox_worker
+
+    row = MagicMock(
+        id=905, aggregate_type="test_internal", aggregate_id=101,
+        event_kind="update", locked_by="worker:internal-token",
+        payload="{}", sync_version=0,
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=RuntimeError("database finalize failed"))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return db
+        async def __aexit__(self, *args):
+            return False
+
+    handler = AsyncMock()
+    old_handler = outbox_worker.OUTBOX_HANDLERS.get(("test_internal", "update"))
+    outbox_worker.OUTBOX_HANDLERS[("test_internal", "update")] = handler
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(outbox_worker, "claim_outbox_item", AsyncMock(return_value=row))
+    monkeypatch.setattr(idempotency, "is_processed", AsyncMock(return_value=False))
+    mark_failed = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "_mark_failed", mark_failed)
+    mark_done = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "_mark_done_after_handler", mark_done)
+
+    async def _run_handler(handler_fn, _db, _row, **kwargs):
+        await handler_fn(_db, _row)
+        return True
+
+    monkeypatch.setattr(
+        outbox_worker, "_run_handler_with_lease", AsyncMock(side_effect=_run_handler)
+    )
+    try:
+        assert await outbox_worker.process_outbox_item(905) is True
+    finally:
+        if old_handler is None:
+            outbox_worker.OUTBOX_HANDLERS.pop(("test_internal", "update"), None)
+        else:
+            outbox_worker.OUTBOX_HANDLERS[("test_internal", "update")] = old_handler
+
+    handler.assert_awaited_once()
+    db.rollback.assert_awaited_once()
+    mark_failed.assert_awaited_once()
+    mark_done.assert_not_awaited()
 
 @pytest.mark.asyncio
 async def test_库存镜像复用事件不得被历史一次性幂等记录跳过(monkeypatch):
@@ -816,3 +1080,340 @@ def test_manual_delivery_confirm_retry_event_kinds_resolve_to_shared_handler():
     for event_kind in ("confirm_0123456789abcdef", "confirm_abcdef0123456789"):
         row = SimpleNamespace(aggregate_type="delivery_manual", event_kind=event_kind)
         assert _resolve_outbox_handler(row) is handler
+
+
+@pytest.mark.asyncio
+async def test_malformed_platform_response_is_uncertain_and_never_auto_retried():
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown
+    from app.services.delivery_tasks import _call_external_side_effect
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    async def malformed_success_http_response():
+        raise DeliveryPlatformResultUnknown(
+            "MEITUAN /api/v1/order/cancel: HTTP 200 response is not valid JSON"
+        )
+
+    with pytest.raises(ExternalSideEffectUncertain, match="响应格式/结构异常"):
+        await _call_external_side_effect(
+            "cancel_order", "MEITUAN", "MT-ORDER-UNKNOWN",
+            malformed_success_http_response,
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_deferred_confirm_does_not_rollback_on_read_timeout(monkeypatch):
+    import httpx
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_tasks
+
+    request = httpx.Request("POST", "https://platform.invalid/confirm")
+    provider = MagicMock()
+
+    async def timeout(_platform_order_id):
+        raise httpx.ReadTimeout("response lost", request=request)
+
+    provider.confirm_order = timeout
+    monkeypatch.setattr(delivery_tasks, "get_delivery_provider", lambda *_args: provider)
+    rollback = AsyncMock()
+    monkeypatch.setattr(delivery_tasks, "_rollback_confirm", rollback)
+
+    await delivery_tasks.run_deferred_tasks([{
+        "action": "confirm_order",
+        "platform": "MEITUAN",
+        "platform_order_id": "MT-UNKNOWN-1",
+        "rollback_on_fail": True,
+    }])
+
+    rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_deferred_confirm_rolls_back_only_on_explicit_false(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_tasks
+
+    provider = MagicMock()
+    provider.confirm_order = AsyncMock(return_value=False)
+    monkeypatch.setattr(delivery_tasks, "get_delivery_provider", lambda *_args: provider)
+    rollback = AsyncMock()
+    monkeypatch.setattr(delivery_tasks, "_rollback_confirm", rollback)
+
+    await delivery_tasks.run_deferred_tasks([{
+        "action": "confirm_order",
+        "platform": "MEITUAN",
+        "platform_order_id": "MT-REJECTED-1",
+        "rollback_on_fail": True,
+    }])
+
+    rollback.assert_awaited_once_with(None, "MEITUAN", "MT-REJECTED-1")
+
+@pytest.mark.asyncio
+async def test_resolve_cancel_unknown_outbox_reconciles_order_before_marking_done(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=501,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after cancel request",
+        aggregate_type="webhook_task",
+        aggregate_id=601,
+        event_kind="deferred_cancel_order",
+        payload=json.dumps({
+            "action": "cancel_order",
+            "order_id": 701,
+            "store_id": 7,
+            "platform": "MEITUAN",
+            "platform_order_id": "MT-701",
+            "reason": "商家缺货",
+        }),
+    )
+    order = SimpleNamespace(id=701, store_id=7, status="CONFIRMED")
+    delivery_order = SimpleNamespace(id=601, order_id=701, delivery_status="ACCEPTED")
+    update_result = MagicMock(rowcount=1)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),  # read Outbox snapshot
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder lock
+        update_result,  # conditional UNCERTAIN -> DONE
+    ])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    async def apply_status(_db, target, status, **_kwargs):
+        target.status = status
+
+    monkeypatch.setattr("app.services.order_lifecycle.apply_order_status", apply_status)
+    user = SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN"))
+    with patch(
+        "app.api.outbox_admin.AuditService.log_staff",
+        new=AsyncMock(),
+    ) as audit:
+        await resolve_unknown_dead_letter(
+            501,
+            OutboxResolveIn(reason="平台核实已成功：取消订单已在平台确认"),
+            request=MagicMock(),
+            db=db,
+            user=user,
+        )
+
+    assert order.status == "CANCELLED"
+    assert delivery_order.delivery_status == "CANCELLED"
+    assert db.execute.await_count == 4
+    order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
+    assert "orders" in order_lock_sql and "for update" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_cancel_unknown_outbox_rejects_store_mismatch():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+    from app.core.exceptions import AppException
+
+    row = SimpleNamespace(
+        id=502,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout",
+        aggregate_type="webhook_task",
+        aggregate_id=602,
+        event_kind="deferred_cancel_order",
+        payload=json.dumps({
+            "action": "cancel_order",
+            "order_id": 702,
+            "store_id": 7,
+            "platform": "MEITUAN",
+            "platform_order_id": "MT-702",
+        }),
+    )
+    order = SimpleNamespace(id=702, store_id=8, status="CONFIRMED")
+    delivery_order = SimpleNamespace(id=602, order_id=702, delivery_status="ACCEPTED")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+    ])
+    db.commit = AsyncMock()
+
+    with pytest.raises(AppException) as ei:
+        await resolve_unknown_dead_letter(
+            502,
+            OutboxResolveIn(reason="平台核实已成功：订单已取消"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert ei.value.code == 40912
+    db.commit.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_resolve_manual_confirm_unknown_outbox_reconciles_acceptance(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=503,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after confirm request",
+        aggregate_type="delivery_manual",
+        aggregate_id=701,
+        event_kind="confirm_0123456789abcdef",
+        payload=json.dumps({
+            "action": "confirm_order",
+            "platform": "MEITUAN",
+            "platform_order_id": "MT-701",
+            "store_id": 7,
+            "order_id": 701,
+            "rollback_on_fail": True,
+        }),
+    )
+    order = SimpleNamespace(id=701, store_id=7, status="CONFIRMED")
+    delivery_order = SimpleNamespace(
+        id=601, order_id=701, platform="MEITUAN",
+        platform_order_id="MT-701", delivery_status="PENDING",
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+        MagicMock(rowcount=1),
+    ])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
+        await resolve_unknown_dead_letter(
+            503,
+            OutboxResolveIn(reason="平台核实已成功：美团已确认接单"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert order.status == "CONFIRMED"
+    assert delivery_order.delivery_status == "ACCEPTED"
+    assert db.execute.await_count == 4
+    order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
+    assert "orders" in order_lock_sql and "for update" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_resolve_stock_rejection_cancel_without_local_order(monkeypatch):
+    """库存拒单发生在本地订单创建前；平台核实取消后无需虚构本地订单。"""
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=504,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after stock rejection cancel",
+        aggregate_type="webhook_task",
+        aggregate_id=9901,  # WebhookInbox.id, not DeliveryOrder.id
+        event_kind="deferred_0000",
+        payload=json.dumps({
+            "action": "cancel_order",
+            "platform": "ELEME",
+            "platform_order_id": "EL-NEW-1",
+            "store_id": 7,
+            "order_id": None,
+        }),
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no local DeliveryOrder exists
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no orphan Order exists
+        MagicMock(rowcount=1),  # mark Outbox DONE
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
+        await resolve_unknown_dead_letter(
+            504,
+            OutboxResolveIn(reason="平台核实已成功：库存拒单已取消"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert db.execute.await_count == 4
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_resolve_auto_confirm_unknown_outbox_uses_payload_order_not_inbox_id():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=505,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after auto-confirm",
+        aggregate_type="webhook_task",
+        aggregate_id=9902,  # WebhookInbox.id, not Order.id
+        event_kind="deferred_0000",
+        payload=json.dumps({
+            "action": "confirm_order",
+            "platform": "ELEME",
+            "platform_order_id": "EL-701",
+            "store_id": 7,
+            "order_id": 701,
+            "rollback_on_fail": True,
+        }),
+    )
+    order = SimpleNamespace(id=701, store_id=7, status="CONFIRMED")
+    delivery_order = SimpleNamespace(
+        id=601, order_id=701, platform="ELEME",
+        platform_order_id="EL-701", delivery_status="ACCEPTED",
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+        MagicMock(rowcount=1),
+    ])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
+        await resolve_unknown_dead_letter(
+            505,
+            OutboxResolveIn(reason="平台核实已成功：饿了么已确认接单"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert order.status == "CONFIRMED"
+    assert delivery_order.delivery_status == "ACCEPTED"
+    assert db.execute.await_count == 4
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()

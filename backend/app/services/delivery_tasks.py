@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
+
+import httpx
 
 from sqlalchemy import select
 
@@ -10,11 +12,41 @@ from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
 from app.models import DeliveryOrder, Order
 from app.services.delivery_context import PlatformCredentials, get_credentials_for_store
-from app.services.delivery_providers import get_delivery_provider
+from app.services.delivery_providers import DeliveryPlatformResultUnknown, get_delivery_provider
 from app.services.print_tasks import handle_deferred_print
-from app.services.outbox_worker import register_outbox_handler
+from app.services.outbox_worker import ExternalSideEffectUncertain, register_outbox_handler
 
 logger = logging.getLogger(__name__)
+
+
+async def _call_external_side_effect(
+    action: str,
+    platform: str,
+    platform_order_id: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> Any:
+    """识别请求已可能送达下游但响应未知的传输故障，禁止 Outbox 自动重发。"""
+    try:
+        return await operation()
+    except DeliveryPlatformResultUnknown as exc:
+        raise ExternalSideEffectUncertain(
+            f"{platform} {action} order={platform_order_id}: 平台响应格式/结构异常，无法确认副作用是否执行"
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (408, 409) or exc.response.status_code >= 500:
+            raise ExternalSideEffectUncertain(
+                f"{platform} {action} order={platform_order_id}: HTTP {exc.response.status_code}; "
+                "平台可能已执行，请核实平台订单状态后再处理"
+            ) from exc
+        raise
+    except httpx.TransportError as exc:
+        # 连接尚未建立/连接池未分配时可以安全重试；其他传输中断可能发生在请求发送之后。
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+            raise
+        raise ExternalSideEffectUncertain(
+            f"{platform} {action} order={platform_order_id}: {type(exc).__name__}; "
+            "请求结果未知，请核实平台订单状态后再处理"
+        ) from exc
 
 
 async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
@@ -35,17 +67,32 @@ async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
         provider = get_delivery_provider(platform, creds)
         try:
             if action == "confirm_order":
-                ok = await provider.confirm_order(platform_order_id)
+                ok = await _call_external_side_effect(
+                    action, platform, platform_order_id,
+                    lambda: provider.confirm_order(platform_order_id),
+                )
                 if ok is False and task.get("rollback_on_fail"):
+                    # 只有平台明确返回拒绝才允许回滚；未知结果由下面的分支保留原状态。
                     await _rollback_confirm(task.get("order_id"), platform, platform_order_id)
             elif action == "reply_urge":
-                await provider.reply_urge(platform_order_id, task.get("raw") or {})
+                await _call_external_side_effect(
+                    action, platform, platform_order_id,
+                    lambda: provider.reply_urge(platform_order_id, task.get("raw") or {}),
+                )
             elif action == "cancel_order":
-                # 库存不足拒单等：平台取消在 DB 事务外执行
                 reason = task.get("reason") or "商家取消"
-                await provider.cancel_order(platform_order_id, reason)
+                await _call_external_side_effect(
+                    action, platform, platform_order_id,
+                    lambda: provider.cancel_order(platform_order_id, reason),
+                )
             else:
                 logger.warning("未知 deferred task: %s", action)
+        except ExternalSideEffectUncertain as e:
+            # 旧调用路径没有持久化 UNCERTAIN 能力；宁可保留订单状态并报警，也绝不误回滚。
+            logger.critical(
+                "legacy deferred task external result uncertain; manual reconciliation required action=%s platform=%s order=%s error=%s",
+                action, platform, platform_order_id, e,
+            )
         except Exception as e:
             logger.exception("deferred task 失败 %s %s: %s", action, platform_order_id, e)
             if action == "confirm_order" and task.get("rollback_on_fail"):
@@ -126,18 +173,75 @@ async def execute_webhook_outbox_task(db, row) -> None:
     await db.commit()
     provider = get_delivery_provider(platform, credentials)
     if action == "confirm_order":
-        ok = await provider.confirm_order(platform_order_id)
+        ok = await _call_external_side_effect(
+            action, platform, platform_order_id,
+            lambda: provider.confirm_order(platform_order_id),
+        )
         if ok is False and payload.get("rollback_on_fail"):
             await _rollback_confirm(payload.get("order_id"), platform, platform_order_id)
             return
         if ok is False:
             raise RuntimeError("平台接单确认失败")
     elif action == "cancel_order":
-        ok = await provider.cancel_order(platform_order_id, str(payload.get("reason") or "商家取消"))
+        ok = await _call_external_side_effect(
+            action, platform, platform_order_id,
+            lambda: provider.cancel_order(platform_order_id, str(payload.get("reason") or "商家取消")),
+        )
         if ok is False:
             raise RuntimeError("平台取消订单失败")
+        # 平台已明确确认取消后才更新本地订单；本地写入失败必须转 UNCERTAIN，
+        # 不能让 worker 把同一平台取消动作当普通失败再次发送。
+        try:
+            order_id = int(payload.get("order_id") or 0)
+            delivery_order_id = int(row.aggregate_id)
+            # 外部平台确认后重新按统一锁序锁定本地订单，避免与配送回调并发写入时状态倒退。
+            order = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == order_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none() if order_id else None
+            d_order = (
+                await db.execute(
+                    select(DeliveryOrder)
+                    .where(
+                        DeliveryOrder.id == delivery_order_id,
+                        DeliveryOrder.order_id == order_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if order is None or d_order is None:
+                raise RuntimeError("平台取消已成功，但本地订单记录不存在或关联关系已变化")
+            if order.status not in ("CANCELLED",):
+                if order.status in ("COMPLETED", "REFUNDED"):
+                    raise RuntimeError(f"平台取消已成功，但本地订单已处于终态 {order.status}")
+                from app.services.order_lifecycle import apply_order_status
+
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark=str(payload.get("reason") or "商家取消"),
+                )
+            d_order.delivery_status = "CANCELLED"
+            d_order.last_sync_at = now_local()
+            await db.flush()
+        except Exception as exc:
+            raise ExternalSideEffectUncertain(
+                f"{platform} cancel_order order={platform_order_id}: 平台已确认取消，但本地状态持久化失败；"
+                "禁止自动再次取消，请核对本地订单后处理"
+            ) from exc
     elif action == "reply_urge":
-        ok = await provider.reply_urge(platform_order_id, payload.get("raw") or {})
+        ok = await _call_external_side_effect(
+            action, platform, platform_order_id,
+            lambda: provider.reply_urge(platform_order_id, payload.get("raw") or {}),
+        )
         if ok is False:
             raise RuntimeError("平台催单回复失败")
     else:

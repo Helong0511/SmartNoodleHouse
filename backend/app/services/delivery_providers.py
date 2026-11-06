@@ -32,6 +32,11 @@ from app.services.delivery_sign import (
 logger = logging.getLogger(__name__)
 
 
+class DeliveryPlatformResultUnknown(RuntimeError):
+    """HTTP 请求已发出，但平台响应不足以证明副作用成功或失败。"""
+
+
+
 def _ok_or_mock(data: dict, *, ok_expr: bool) -> bool:
     """平台真实成功才算成功；mock 仅 allow_delivery_mock 时为 True。"""
     if data.get("_mock"):
@@ -277,11 +282,39 @@ class MeituanProvider(DeliveryProvider):
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
+        except Exception as exc:
             logger.error("美团响应非 JSON: %s", resp.text[:200])
-            return {"data": "ng", "error": {"msg": resp.text[:200]}}
-        if data.get("data") != "ok" and data.get("error"):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: HTTP {resp.status_code} response is not valid JSON"
+            ) from exc
+        if not isinstance(data, dict):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: response JSON is not an object"
+            )
+        if "data" not in data and not data.get("error"):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: response has neither data nor explicit error"
+            )
+        if data.get("data") != "ok" and not data.get("error"):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: response data is not a recognized success or explicit rejection"
+            )
+        if data.get("error"):
             logger.error("美团 API 失败 %s: %s", path, data)
+            # 未建立可验证的确定拒绝错误码白名单前，订单副作用接口的 error
+            # envelope（即使同时携带 data=ok）不能作为“平台未执行/已执行”的证据。
+            side_effect_paths = {
+                "/api/v1/order/confirm",
+                "/api/v1/order/preparationMealComplete",
+                "/api/v1/order/remindReply",
+                "/api/v1/order/refund/agree",
+                "/api/v1/order/refund/reject",
+                "/api/v1/order/cancel",
+            }
+            if path in side_effect_paths:
+                raise DeliveryPlatformResultUnknown(
+                    f"MEITUAN {path}: platform returned an error envelope; downstream side effect is not safely classifiable"
+                )
         return data
 
     async def confirm_order(self, platform_order_id: str) -> bool:
@@ -619,17 +652,42 @@ class ElemeProvider(DeliveryProvider):
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
+        except Exception as exc:
             logger.error("饿了么响应非 JSON: %s", resp.text[:200])
-            return {"error": resp.text[:200]}
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: HTTP {resp.status_code} response is not valid JSON"
+            ) from exc
         if not isinstance(data, dict):
             logger.error("饿了么响应结构无效 action=%s type=%s", action, type(data).__name__)
-            return {"error": {"code": "INVALID_RESPONSE", "message": "响应必须为 JSON 对象"}}
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: response JSON is not an object"
+            )
         if data.get("error") is None and "result" not in data:
             logger.error("饿了么响应缺少 result/error action=%s", action)
-            return {"error": {"code": "INVALID_RESPONSE", "message": "响应缺少 result 字段"}}
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: response has neither result nor explicit error"
+            )
+        # 对外卖订单确认/取消/退款等有外部副作用的 RPC，
+        # 未经官方错误码白名单核验，不能把任意 error envelope 当成“确定未执行”。
+        # 系统错误、超时代理错误或显式 result=false 都不能被当作成功/安全重试依据。
+        side_effect_actions = {
+            "eleme.order.confirmOrderLite",
+            "eleme.order.setOrderPrepared",
+            "eleme.order.replyReminder",
+            "eleme.order.agreeRefundLite",
+            "eleme.order.disagreeRefundLite",
+            "eleme.order.cancelOrderLite",
+        }
         if data.get("error"):
             logger.error("饿了么 API 失败 %s: %s", action, data)
+            if action in side_effect_actions:
+                raise DeliveryPlatformResultUnknown(
+                    f"ELEME {action}: platform returned an error envelope; downstream side effect is not safely classifiable"
+                )
+        if action in side_effect_actions and data.get("result") is False:
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: platform returned result=false; downstream side effect semantics are not verified"
+            )
         return data
 
     async def confirm_order(self, platform_order_id: str) -> bool:
