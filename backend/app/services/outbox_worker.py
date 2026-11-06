@@ -161,13 +161,9 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
         .values(
             # 崩溃发生在最后一次允许尝试时，不能复位为可无限 claim 的 PENDING。
             status=case(
-                (external_side_effect, "FAILED"),
+                (external_side_effect, "UNCERTAIN"),
                 (exhausted, "FAILED"),
                 else_="PENDING",
-            ),
-            attempt_count=case(
-                (external_side_effect, OutboxEvent.max_attempts),
-                else_=OutboxEvent.attempt_count,
             ),
             next_retry_at=case(
                 (or_(external_side_effect, exhausted), None),
@@ -324,8 +320,7 @@ async def _mark_uncertain(db: AsyncSession, row: OutboxEvent, err: str, *, wid: 
             OutboxEvent.locked_by == wid,
         )
         .values(
-            status="FAILED",
-            attempt_count=OutboxEvent.max_attempts,
+            status="UNCERTAIN",
             last_error=("EXTERNAL_RESULT_UNKNOWN: " + str(err))[:500],
             next_retry_at=None,
             locked_at=None,
@@ -601,13 +596,21 @@ async def process_pending_outbox(limit: int = 30) -> int:
 
 
 async def requeue_dead_letter_outbox(db: AsyncSession, outbox_id: int) -> bool:
-    """仅将已耗尽重试次数的 FAILED 死信原子重排；不触碰 PROCESSING/可重试事件。"""
+    """仅重排已耗尽 FAILED 或需人工核实的 UNCERTAIN 事件；不触碰 PROCESSING/可重试事件。"""
     result = await db.execute(
         update(OutboxEvent)
         .where(
             OutboxEvent.id == int(outbox_id),
-            OutboxEvent.status == "FAILED",
-            OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+            or_(
+                and_(
+                    OutboxEvent.status == "FAILED",
+                    OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+                ),
+                and_(
+                    OutboxEvent.status == "UNCERTAIN",
+                    OutboxEvent.last_error.like("EXTERNAL_RESULT_UNKNOWN:%"),
+                ),
+            ),
         )
         .values(
             status="PENDING",
