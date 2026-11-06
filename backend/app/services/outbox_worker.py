@@ -136,9 +136,19 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
     普通事件恢复为 PENDING；外部副作用事件进入结果未知死信，避免崩溃后盲目重复执行。
     """
     cutoff = now_local() - timedelta(seconds=stale_after)
-    # delivery_manual/webhook_task handler 可能在发出平台请求后进程崩溃。
-    # stale PROCESSING 对这些事件不能简单回到 PENDING，否则平台已执行时会重复接单/取消/催单。
-    external_side_effect = OutboxEvent.aggregate_type.in_(("delivery_manual", "webhook_task"))
+    # delivery_manual/webhook_task 的外卖平台请求可能在进程崩溃前已送达。
+    # 只对确认/取消/催单动作 fail-closed；print_ticket 由 PrintJob 自己管理，不能混入此规则。
+    external_side_effect = or_(
+        OutboxEvent.aggregate_type == "delivery_manual",
+        and_(
+            OutboxEvent.aggregate_type == "webhook_task",
+            or_(
+                OutboxEvent.payload.like('%"action":"confirm_order"%'),
+                OutboxEvent.payload.like('%"action":"cancel_order"%'),
+                OutboxEvent.payload.like('%"action":"reply_urge"%'),
+            ),
+        ),
+    )
     exhausted = OutboxEvent.attempt_count >= OutboxEvent.max_attempts
     stmt = (
         update(OutboxEvent)
