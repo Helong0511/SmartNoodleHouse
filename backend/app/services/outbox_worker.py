@@ -45,7 +45,6 @@ class ExternalSideEffectUncertain(RuntimeError):
     """下游可能已执行副作用，但调用方未收到可确认结果；禁止自动重试。"""
 
 
-
 def register_outbox_handler(agg_type: str, kind: str) -> Callable[[OutboxHandler], OutboxHandler]:
     """装饰器：注册 outbox handler。handler 必须幂等。"""
 
