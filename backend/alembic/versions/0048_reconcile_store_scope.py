@@ -43,17 +43,15 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    duplicate = conn.execute(
+    store_scoped_rows = conn.execute(
         sa.text(
-            "SELECT channel, bill_date, COUNT(*) AS row_count "
-            "FROM payment_reconcile_batches "
-            "GROUP BY channel, bill_date HAVING COUNT(*) > 1 LIMIT 1"
+            "SELECT COUNT(*) FROM payment_reconcile_batches WHERE scope_store_id <> 0"
         )
-    ).first()
-    if duplicate:
+    ).scalar()
+    if int(store_scoped_rows or 0) > 0:
         raise RuntimeError(
-            "Cannot downgrade 0048_reconcile_store_scope: multiple store scopes "
-            "exist for the same channel/date; reconciliation evidence must not be merged."
+            "Cannot downgrade 0048_reconcile_store_scope: store-scoped batches exist; "
+            "dropping their scope would expose store-level reconciliation data as HQ data."
         )
 
     with op.batch_alter_table("payment_reconcile_batches") as batch:
