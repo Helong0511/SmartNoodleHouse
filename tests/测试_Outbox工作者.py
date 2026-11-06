@@ -206,6 +206,13 @@ async def test_external_side_effect_read_timeout_is_uncertain_but_connect_error_
     with pytest.raises(ExternalSideEffectUncertain):
         await _call_external_side_effect("confirm_order", "MEITUAN", "7788", server_error)
 
+    async def conflict_error():
+        response = httpx.Response(409, request=request)
+        raise httpx.HTTPStatusError("order state conflict", request=request, response=response)
+
+    with pytest.raises(ExternalSideEffectUncertain):
+        await _call_external_side_effect("confirm_order", "MEITUAN", "7788", conflict_error)
+
     async def client_error():
         response = httpx.Response(400, request=request)
         raise httpx.HTTPStatusError("invalid request", request=request, response=response)
