@@ -135,6 +135,13 @@ async def replay_dead_letter(
     if _resolve_outbox_handler(row) is None:
         raise AppException(40903, "当前版本未注册该事件处理器，拒绝重放", status_code=409)
 
+    # 保存重放前快照：SQLAlchemy ORM UPDATE 默认可能同步当前 identity map，
+    # 若在 UPDATE 后再读 row.attempt_count，审计日志会错误记录为 0。
+    previous_attempt_count = int(row.attempt_count or 0)
+    previous_max_attempts = int(row.max_attempts or 0)
+    previous_aggregate_type = row.aggregate_type
+    previous_aggregate_id = row.aggregate_id
+    previous_event_kind = row.event_kind
     previous_error = _safe_error(row.last_error)
     changed = await requeue_dead_letter_outbox(db, outbox_id)
     if not changed:
@@ -149,11 +156,11 @@ async def replay_dead_letter(
         target_type="outbox_event",
         target_id=outbox_id,
         detail={
-            "aggregate_type": row.aggregate_type,
-            "aggregate_id": row.aggregate_id,
-            "event_kind": row.event_kind,
-            "previous_attempt_count": row.attempt_count,
-            "max_attempts": row.max_attempts,
+            "aggregate_type": previous_aggregate_type,
+            "aggregate_id": previous_aggregate_id,
+            "event_kind": previous_event_kind,
+            "previous_attempt_count": previous_attempt_count,
+            "max_attempts": previous_max_attempts,
             "previous_error": previous_error,
             "reason": data.reason.strip(),
         },
