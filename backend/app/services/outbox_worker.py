@@ -423,12 +423,15 @@ async def process_outbox_item(outbox_id: int) -> bool:
             await _mark_failed(db, row, "payload_invalid_json", wid=wid)
             return True
 
+        handler_succeeded = False
         try:
             lease_owned = await _run_handler_with_lease(
                 handler, db, row, outbox_id=outbox_id, wid=wid
             )
             if not lease_owned:
                 return True
+            # 非库存镜像 handler 已成功完成；后续 finalize/辅助幂等写入失败不能再次执行副作用。
+            handler_succeeded = not is_stock_mirror
 
             expected_sync_version = int(getattr(row, "sync_version", 0) or 0)
             done_conditions = [
@@ -525,6 +528,14 @@ async def process_outbox_item(outbox_id: int) -> bool:
             await db.rollback()
             await _mark_uncertain(db, uncertain_outbox_id, str(exc), wid=wid)
         except Exception as exc:
+            if handler_succeeded:
+                logger.exception(
+                    "Outbox handler succeeded but finalization failed; prevent duplicate side effect id=%s: %s",
+                    outbox_id, exc,
+                )
+                await db.rollback()
+                await _mark_done_after_handler(db, outbox_id, wid=wid)
+                return True
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, exc)
             await db.rollback()
             await _mark_failed(db, row, str(exc), wid=wid)
