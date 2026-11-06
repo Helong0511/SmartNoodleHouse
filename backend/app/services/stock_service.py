@@ -1,8 +1,6 @@
 """库存原子扣减 / 回滚：优先分店库存，无覆盖则用品牌餐品库存"""
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -240,23 +238,6 @@ async def restore_stock(
     )
 
 
-async def _enqueue_menu_cache_invalidation(db: AsyncSession, store_id: int | None) -> None:
-    """在库存事务中写入菜单缓存失效 outbox；worker 仅在事务提交后消费。"""
-    if not store_id:
-        return
-    from app.services.outbox_worker import enqueue_outbox
-
-    # 每次库存变更使用独立事件 ID，避免同一门店后续变更被历史幂等标记跳过。
-    event_id = uuid.uuid4().int & ((1 << 63) - 1)
-    await enqueue_outbox(
-        db,
-        aggregate_type="menu_cache",
-        aggregate_id=event_id,
-        event_kind="invalidate",
-        payload={"store_id": int(store_id)},
-    )
-
-
 async def deduct_for_order_items(
     db: AsyncSession,
     items: list[dict],
@@ -271,4 +252,6 @@ async def deduct_for_order_items(
     for pid, qty in merged.items():
         await deduct_stock(db, pid, qty, store_id=store_id)
     if merged:
-        await _enqueue_menu_cache_invalidation(db, store_id)
+        from app.services.menu_cache_service import enqueue_menu_cache_invalidation
+
+        await enqueue_menu_cache_invalidation(db, store_id)
