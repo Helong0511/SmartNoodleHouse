@@ -184,14 +184,14 @@ async def get_recommendations(
             ab_status = ab_exp.status
         weight_override = (ab_params or {}).get("reco_weights")
 
-    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint)
+    cached = await get_cached_reco(cid, store_id, scene, ab_bucket, fingerprint, limit)
     if cached is not None:
         return success(cached, request=request)
 
     # 互斥重建：避免缓存击穿时多请求同时 recommend 压垮 DB
-    lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
+    lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint, limit)
     if not lock_token:
-        waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
+        waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3, limit)
         if waited is not None:
             return success(waited, request=request)
     try:
@@ -206,13 +206,13 @@ async def get_recommendations(
         )
         payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
         await set_cached_reco(
-            cid, store_id, scene, ab_bucket, payload, fingerprint, owner_token=lock_token
+            cid, store_id, scene, ab_bucket, payload, fingerprint, owner_token=lock_token, limit=limit
         )
         payload["cache_hit"] = False
     finally:
         if lock_token:
             await release_reco_lock(
-                cid, store_id, scene, ab_bucket, fingerprint, owner_token=lock_token
+                cid, store_id, scene, ab_bucket, fingerprint, owner_token=lock_token, limit=limit
             )
     return success(payload, request=request)
 
