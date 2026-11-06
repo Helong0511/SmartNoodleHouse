@@ -282,7 +282,7 @@ async def test_reco_cache_set_uses_jitter():
         assert 96 <= ex <= 144
         await reco_cache.release_reco_lock(1, 1, 'default', 'a', owner_token=token)
 
-# ── reco_cache invalidate_customer 延迟双删 ──
+# ── reco_cache invalidate_customer 失效缓存与撤销租约 ──
 
 @pytest.mark.asyncio
 async def test_reco_cache_invalidate_uses_retry(monkeypatch):
@@ -293,8 +293,6 @@ async def test_reco_cache_invalidate_uses_retry(monkeypatch):
     cache_key = reco_key(1, 1, 'default', 'a')
     fake.store[cache_key] = '{}'
     with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
-        # 禁用延迟双删的 sleep
-        monkeypatch.setattr("asyncio.sleep", AsyncMock())
         await reco_cache.invalidate_customer(1)
         assert cache_key in fake.delete_calls
         assert cache_key not in fake.store
