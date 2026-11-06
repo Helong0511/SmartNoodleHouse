@@ -587,6 +587,11 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     assert d_order.rider_phone == "13800000000"
     assert d_order.last_sync_at is not None
     db.flush.assert_awaited_once()
+    assert db.execute.await_count == 2
+    order_lock_sql = str(db.execute.await_args_list[0].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    assert "orders" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql
 
 
 @pytest.mark.asyncio
