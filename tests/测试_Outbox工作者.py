@@ -1045,3 +1045,53 @@ async def test_malformed_platform_response_is_uncertain_and_never_auto_retried()
             "cancel_order", "MEITUAN", "MT-ORDER-UNKNOWN",
             malformed_success_http_response,
         )
+
+
+@pytest.mark.asyncio
+async def test_legacy_deferred_confirm_does_not_rollback_on_read_timeout(monkeypatch):
+    import httpx
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_tasks
+
+    request = httpx.Request("POST", "https://platform.invalid/confirm")
+    provider = MagicMock()
+
+    async def timeout():
+        raise httpx.ReadTimeout("response lost", request=request)
+
+    provider.confirm_order = timeout
+    monkeypatch.setattr(delivery_tasks, "get_delivery_provider", lambda *_args: provider)
+    rollback = AsyncMock()
+    monkeypatch.setattr(delivery_tasks, "_rollback_confirm", rollback)
+
+    await delivery_tasks.run_deferred_tasks([{
+        "action": "confirm_order",
+        "platform": "MEITUAN",
+        "platform_order_id": "MT-UNKNOWN-1",
+        "rollback_on_fail": True,
+    }])
+
+    rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_deferred_confirm_rolls_back_only_on_explicit_false(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_tasks
+
+    provider = MagicMock()
+    provider.confirm_order = AsyncMock(return_value=False)
+    monkeypatch.setattr(delivery_tasks, "get_delivery_provider", lambda *_args: provider)
+    rollback = AsyncMock()
+    monkeypatch.setattr(delivery_tasks, "_rollback_confirm", rollback)
+
+    await delivery_tasks.run_deferred_tasks([{
+        "action": "confirm_order",
+        "platform": "MEITUAN",
+        "platform_order_id": "MT-REJECTED-1",
+        "rollback_on_fail": True,
+    }])
+
+    rollback.assert_awaited_once_with(None, "MEITUAN", "MT-REJECTED-1")
