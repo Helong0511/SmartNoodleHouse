@@ -223,14 +223,13 @@ def apply_menu_visibility(
 async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     """带 Redis + 进程内两级缓存的菜单 bundle，并确保 version>=1。
 
-    缓存命中时仍校验当前时段方案是否变化：跨午/晚市等窗口切换必须 bump 版本，
-    否则小程序携带旧 version 会一直收到 changed:false，分类顺序不更新。
+    缓存命中时校验当前时段方案；跨午/晚市窗口切换时必须 bump 版本。
+    Redis 写入必须发生在 owner 租约释放之前，避免 Lua fencing 拒绝合法写入。
     """
     sid = int(store_id)
     expected_sched = await _active_schedule_id(db, sid)
 
     def _bundle_has_visibility_meta(bundle: dict[str, Any] | None) -> bool:
-        """旧缓存若无 visibility_rule 字段，过滤会把限时菜当常显，须重建。"""
         if not bundle:
             return False
         products = bundle.get("products") or {}
@@ -254,38 +253,51 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         and _bundle_schedule_id(hit) == expected_sched
         and _bundle_has_visibility_meta(hit)
     ):
-        bundle = hit
-    else:
-        # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
+        # 本地缓存有效时不查 DB 重建；若取得租约，则顺便安全回填 Redis。
         lock_token = await try_acquire_rebuild_lock(sid)
-        if not lock_token:
-            # 未抢到锁：短暂等待其他进程重建完成后重读缓存
-            waited = await wait_for_rebuild(sid, 0.3)
-            if (
-                waited is not None
-                and _bundle_schedule_id(waited) == expected_sched
-                and _bundle_has_visibility_meta(waited)
-            ):
-                version = await get_menu_version(sid)
-                return {**waited, "version": version}
         try:
-            # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量
-            if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
-                invalidate_local_menu_cache(sid)
-                await bump_menu_version(sid)
-            bundle = await build_menu_bundle(db, sid)
-            _BUILD_CACHE.put(sid, bundle)
+            version = await get_menu_version(sid)
+            if version <= 0:
+                version = await bump_menu_version(sid)
+            bundle = {**hit, "version": version}
+            await set_menu_bundle(sid, bundle, owner_token=lock_token)
+            return bundle
         finally:
             if lock_token:
                 await release_rebuild_lock(sid, owner_token=lock_token)
 
-    version = await get_menu_version(sid)
-    if version <= 0:
-        # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
-        version = await bump_menu_version(sid)
-    bundle = {**bundle, "version": version}
-    await set_menu_bundle(sid, bundle, owner_token=lock_token)
-    return bundle
+    lock_token = await try_acquire_rebuild_lock(sid)
+    if not lock_token:
+        # 有其他实例正在重建时，先等待缓存；再尝试一次获取租约。
+        waited = await wait_for_rebuild(sid, 0.3)
+        if (
+            waited is not None
+            and _bundle_schedule_id(waited) == expected_sched
+            and _bundle_has_visibility_meta(waited)
+        ):
+            version = await get_menu_version(sid)
+            return {**waited, "version": version}
+        lock_token = await try_acquire_rebuild_lock(sid)
+
+    try:
+        # 时段方案切换或缓存过期：重建并抬升版本，通知客户端拉全量。
+        if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
+            invalidate_local_menu_cache(sid)
+            await bump_menu_version(sid)
+        bundle = await build_menu_bundle(db, sid)
+        _BUILD_CACHE.put(sid, bundle)
+
+        version = await get_menu_version(sid)
+        if version <= 0:
+            version = await bump_menu_version(sid)
+        bundle = {**bundle, "version": version}
+
+        # 只有持有当前租约的 owner 才能写入 Redis；必须先写再释放租约。
+        await set_menu_bundle(sid, bundle, owner_token=lock_token)
+        return bundle
+    finally:
+        if lock_token:
+            await release_rebuild_lock(sid, owner_token=lock_token)
 
 
 def invalidate_local_menu_cache(store_id: int) -> None:
