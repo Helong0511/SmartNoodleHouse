@@ -884,3 +884,31 @@ async def test_eleme_side_effect_result_false_is_not_treated_as_success(monkeypa
     with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
         with pytest.raises(DeliveryPlatformResultUnknown):
             await ElemeProvider()._rpc("eleme.order.cancelOrderLite", {"orderId": "O1"})
+
+@pytest.mark.asyncio
+async def test_meituan_side_effect_conflicting_success_and_error_is_uncertain(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, MeituanProvider
+
+    url = "https://waimaiopen.meituan.com/api/v1/order/cancel"
+    response = httpx.Response(
+        200,
+        json={"data": "ok", "error": {"code": "SYSTEM_ERROR"}},
+        request=httpx.Request("GET", url),
+    )
+    client = SimpleNamespace(get=AsyncMock(return_value=response), post=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await MeituanProvider()._request("/api/v1/order/cancel", {"order_id": "O1"})
