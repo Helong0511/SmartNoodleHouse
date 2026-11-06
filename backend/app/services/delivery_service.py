@@ -39,6 +39,7 @@ from app.services.delivery_events import (
 )
 from app.services.delivery_providers import get_delivery_provider
 from app.services.product_sync_service import ProductSyncService
+from app.services.outbox_worker import enqueue_outbox
 
 logger = logging.getLogger(__name__)
 
@@ -1101,45 +1102,57 @@ class DeliveryService:
 
     @classmethod
     async def cancel_by_merchant(cls, db: AsyncSession, delivery_order_id: int, reason: str) -> dict:
-        d_order = await db.get(DeliveryOrder, delivery_order_id)
+        """商家取消采用事务型 Outbox：先持久化意图，再由 worker 调用平台。"""
+        d_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(DeliveryOrder.id == int(delivery_order_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if not d_order:
             raise AppException(40454, "外卖订单不存在")
-        order = await db.get(Order, d_order.order_id)
+        order = await db.get(Order, d_order.order_id, with_for_update=True)
         if not order:
             raise AppException(40454, "关联订单不存在，无法取消外卖单")
         if order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
             raise AppException(40054, "订单已结束，无法取消")
 
         store_id = int(order.store_id)
-        platform = d_order.platform
-        platform_order_id = d_order.platform_order_id
+        platform = str(d_order.platform or "").upper()
+        platform_order_id = str(d_order.platform_order_id or "")
         order_id = int(order.id)
+        if platform not in {"MEITUAN", "ELEME"} or not platform_order_id:
+            raise AppException(40062, "外卖平台订单信息不完整，无法取消")
         credentials = await get_credentials_for_store(db, platform, store_id)
         if not credentials:
             raise AppException(40061, f"门店 {store_id} 未配置 {platform} 外卖凭证")
-        # 平台取消 HTTP 与本地落库分离，避免长事务拖住连接
-        await db.commit()
-        provider = get_delivery_provider(platform, credentials)
-        ok = await provider.cancel_order(platform_order_id, reason)
-        if ok:
-            from app.services.order_lifecycle import apply_order_status
 
-            order = await db.get(Order, order_id)
-            d_order = await db.get(DeliveryOrder, delivery_order_id)
-            if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
-                await apply_order_status(
-                    db,
-                    order,
-                    "CANCELLED",
-                    source="DELIVERY",
-                    assert_kind="SYSTEM",
-                    remark=reason or "商家取消",
-                )
-            if d_order:
-                d_order.delivery_status = "CANCELLED"
-                d_order.last_sync_at = now_local()
-            await db.flush()
-        return {"ok": ok, "order_id": order_id}
+        # 唯一键 (webhook_task, delivery_order_id, deferred_cancel_order)
+        # 保证并发重复点击只创建一个平台取消动作。
+        event, is_new = await enqueue_outbox(
+            db,
+            aggregate_type="webhook_task",
+            aggregate_id=int(delivery_order_id),
+            event_kind="deferred_cancel_order",
+            payload={
+                "action": "cancel_order",
+                "platform": platform,
+                "platform_order_id": platform_order_id,
+                "store_id": store_id,
+                "order_id": order_id,
+                "reason": str(reason or "商家取消")[:200],
+            },
+        )
+        await db.commit()
+        status = str(event.status or "PENDING").upper()
+        return {
+            "ok": status == "DONE",
+            "status": "CANCELLED" if status == "DONE" else status,
+            "order_id": order_id,
+            "outbox_id": int(event.id),
+            "queued": bool(is_new),
+        }
 
     @classmethod
     async def sync_kitchen_status(cls, db: AsyncSession, order: Order) -> None:
