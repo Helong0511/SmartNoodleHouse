@@ -194,10 +194,28 @@ async def execute_webhook_outbox_task(db, row) -> None:
         try:
             order_id = int(payload.get("order_id") or 0)
             delivery_order_id = int(row.aggregate_id)
-            order = await db.get(Order, order_id) if order_id else None
-            d_order = await db.get(DeliveryOrder, delivery_order_id)
+            # 外部平台确认后重新按统一锁序锁定本地订单，避免与配送回调并发写入时状态倒退。
+            order = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == order_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none() if order_id else None
+            d_order = (
+                await db.execute(
+                    select(DeliveryOrder)
+                    .where(
+                        DeliveryOrder.id == delivery_order_id,
+                        DeliveryOrder.order_id == order_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
             if order is None or d_order is None:
-                raise RuntimeError("平台取消已成功，但本地订单记录不存在")
+                raise RuntimeError("平台取消已成功，但本地订单记录不存在或关联关系已变化")
             if order.status not in ("CANCELLED",):
                 if order.status in ("COMPLETED", "REFUNDED"):
                     raise RuntimeError(f"平台取消已成功，但本地订单已处于终态 {order.status}")
