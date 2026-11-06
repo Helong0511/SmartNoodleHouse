@@ -538,7 +538,9 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     )
     order = SimpleNamespace(id=105, status=order_status)
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalar_one_or_none=lambda: order)
+    )
     db.flush = AsyncMock()
     monkeypatch.setattr(
         DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
