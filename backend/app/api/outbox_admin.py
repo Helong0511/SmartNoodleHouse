@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
 from app.core.response import calc_pages, success, serialize_dt
 from app.models import OutboxEvent
@@ -62,7 +62,7 @@ class OutboxReplayIn(BaseModel):
     reason: str = Field(..., min_length=8, max_length=500)
 
 
-@router.get("/dead-letters")
+@router.get("/dead-letters", dependencies=[require_permission("system:manage")])
 async def list_dead_letters(
     request: Request,
     db: DbSession,
@@ -105,7 +105,7 @@ async def list_dead_letters(
     }, request=request)
 
 
-@router.post("/dead-letters/{outbox_id}/replay")
+@router.post("/dead-letters/{outbox_id}/replay", dependencies=[require_permission("system:manage")])
 async def replay_dead_letter(
     outbox_id: int,
     data: OutboxReplayIn,
