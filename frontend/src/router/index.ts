@@ -113,6 +113,10 @@ router.beforeEach(async (to, _from, next) => {
         return
       }
     }
+    if (to.meta?.superAdminOnly && !auth.isSuperAdmin) {
+      next('/dashboard')
+      return
+    }
     if (to.meta?.denyCashier && auth.isCashier) {
       next('/pos-terminal')
       return
