@@ -163,11 +163,14 @@ async def test_menu_cache_rebuild_lock_acquire_release():
     fake = FakeRedis()
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
         ok1 = await menu_cache.try_acquire_rebuild_lock(1)
-        assert ok1 is True
+        assert isinstance(ok1, str) and ok1
         # 第二次抢锁应失败（NX 互斥）
         ok2 = await menu_cache.try_acquire_rebuild_lock(1)
-        assert ok2 is False
-        await menu_cache.release_rebuild_lock(1)
+        assert ok2 is None
+        fake.store[menu_cache.menu_rebuild_lock_key(1)] = "new-owner"
+        await menu_cache.release_rebuild_lock(1, owner_token=ok1)
+        assert fake.store[menu_cache.menu_rebuild_lock_key(1)] == "new-owner"
+        fake.store.pop(menu_cache.menu_rebuild_lock_key(1))
         # 释放后可再次抢锁
         ok3 = await menu_cache.try_acquire_rebuild_lock(1)
         assert ok3 is True
@@ -182,7 +185,8 @@ async def test_menu_cache_large_bundle_skipped():
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
         # 构造超 256KB 的 bundle
         big_data = {"data": "x" * (300 * 1024)}
-        await menu_cache.set_menu_bundle(1, big_data)
+        token = await menu_cache.try_acquire_rebuild_lock(1)
+        await menu_cache.set_menu_bundle(1, big_data, owner_token=token)
         # 不应写入 Redis
         assert menu_cache.menu_bundle_key(1) not in fake.store
 
@@ -193,7 +197,8 @@ async def test_menu_cache_normal_bundle_cached():
     fake = FakeRedis()
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
         bundle = {"categories": [{"id": 1, "name": "noodles"}]}
-        await menu_cache.set_menu_bundle(1, bundle)
+        token = await menu_cache.try_acquire_rebuild_lock(1)
+        await menu_cache.set_menu_bundle(1, bundle, owner_token=token)
         assert menu_cache.menu_bundle_key(1) in fake.store
 
 
