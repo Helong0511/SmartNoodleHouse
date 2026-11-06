@@ -42,11 +42,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # A downgrade would collapse multiple store-specific batches for the same
-    # channel/date into one row and could destroy reconciliation evidence.
-    # Deliberately refuse destructive rollback; restore from a reviewed backup
-    # and a purpose-built consolidation migration if rollback is ever required.
-    raise RuntimeError(
-        "0048_reconcile_store_scope is intentionally irreversible: "
-        "store-scoped batches cannot be safely collapsed into a global batch"
-    )
+    conn = op.get_bind()
+    duplicate = conn.execute(
+        sa.text(
+            "SELECT channel, bill_date, COUNT(*) AS row_count "
+            "FROM payment_reconcile_batches "
+            "GROUP BY channel, bill_date HAVING COUNT(*) > 1 LIMIT 1"
+        )
+    ).first()
+    if duplicate:
+        raise RuntimeError(
+            "Cannot downgrade 0048_reconcile_store_scope: multiple store scopes "
+            "exist for the same channel/date; reconciliation evidence must not be merged."
+        )
+
+    with op.batch_alter_table("payment_reconcile_batches") as batch:
+        batch.drop_index("ix_payment_reconcile_batches_scope_store_id")
+        batch.drop_constraint("uk_prb_channel_bill_store", type_="unique")
+        batch.drop_column("scope_store_id")
+        batch.create_unique_constraint(
+            "uk_prb_channel_bill", ["channel", "bill_date"]
+        )
