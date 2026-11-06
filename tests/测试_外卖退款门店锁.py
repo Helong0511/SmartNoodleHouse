@@ -234,6 +234,8 @@ async def test_process_refund_rejects_when_cancel_outbox_is_active():
         await DeliveryService.process_refund(db, 41, approve=True)
 
     assert ei.value.code == 40955
+    cancel_guard_sql = str(db.execute.await_args_list[4].args[0]).upper()
+    assert "FOR UPDATE" in cancel_guard_sql  # MySQL REPEATABLE READ current read
     db.commit.assert_not_awaited()
 
 @pytest.mark.asyncio
