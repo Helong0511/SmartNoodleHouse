@@ -501,3 +501,42 @@ def test_hikvision_isapi_base_uses_pinned_ip_not_dns_hostname(monkeypatch):
         ],
     )
     assert resolve_isapi_base("rtsp://camera.example/Streaming/Channels/102") == "http://192.168.1.103"
+
+
+def test_ipv6_camera_credentials_round_trip_preserves_valid_rtsp_authority(monkeypatch):
+    """IPv6 摄像头拆分凭据、重建连接 URL 和脱敏展示均须保留方括号。"""
+    from urllib.parse import urlparse
+
+    from app.services.camera_credentials import (
+        build_connect_source,
+        build_rtsp_url,
+        mask_rtsp_url,
+        prepare_camera_source,
+    )
+
+    safe_url, username, plaintext = prepare_camera_source(
+        "rtsp://admin:camera-pass@[fd00::10]:554/Streaming/Channels/101"
+    )
+    assert safe_url == "rtsp://admin@[fd00::10]:554/Streaming/Channels/102"
+    assert username == "admin"
+    assert plaintext == "camera-pass"
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.decrypt_password",
+        lambda _encrypted: "camera-pass",
+    )
+    connect_url = build_connect_source(safe_url, username, "encrypted-placeholder")
+    parsed = urlparse(connect_url)
+    assert parsed.hostname == "fd00::10"
+    assert parsed.port == 554
+    assert parsed.username == "admin"
+    assert parsed.password == "camera-pass"
+    assert parsed.path == "/Streaming/Channels/102"
+
+    masked = mask_rtsp_url(connect_url)
+    assert "[fd00::10]:554" in masked
+    assert "camera-pass" not in masked
+
+    assert build_rtsp_url("fd00::11", "admin", "secret").startswith(
+        "rtsp://admin:secret@[fd00::11]/"
+    )

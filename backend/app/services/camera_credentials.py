@@ -20,6 +20,19 @@ _BLOCKED_HOSTS = {
 }
 
 
+def _format_url_host(host: str) -> str:
+    """把 IPv6 literal 格式化为 URL authority 所需的方括号形式。"""
+    raw = (host or "").strip()
+    candidate = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
+    try:
+        address = ipaddress.ip_address(candidate)
+    except ValueError:
+        return raw
+    if isinstance(address, ipaddress.IPv6Address):
+        return f"[{address.compressed}]"
+    return str(address)
+
+
 def _is_blocked_ip(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)
@@ -164,7 +177,7 @@ def mask_rtsp_url(source_url: str) -> str:
     try:
         parsed = urlparse(source_url)
         if parsed.password or (parsed.username and "@" in (parsed.netloc or "")):
-            host = parsed.hostname or ""
+            host = _format_url_host(parsed.hostname or "")
             if parsed.port:
                 host = f"{host}:{parsed.port}"
             user = parsed.username or "***"
@@ -192,7 +205,7 @@ def extract_url_credentials(source_url: str) -> tuple[str, str | None, str | Non
     pwd = unquote(parsed.password) if parsed.password else None
     if not user and not pwd:
         return source_url, None, None
-    host = parsed.hostname or ""
+    host = _format_url_host(parsed.hostname or "")
     if not host:
         raise AppException(40025, "摄像头地址缺少主机名")
     port = f":{parsed.port}" if parsed.port else ""
@@ -253,6 +266,7 @@ def prepare_camera_source(
 def build_rtsp_url(host: str, username: str, password: str, channel: str = "102") -> str:
     user = quote(username, safe="")
     pwd = quote(password, safe="")
+    host = _format_url_host(host)
     return f"rtsp://{user}:{pwd}@{host}/Streaming/Channels/{channel}"
 
 
@@ -328,7 +342,7 @@ def build_connect_source(
         return source_url
 
     user = username or parsed.username or "admin"
-    host = parsed.hostname or ""
+    host = _format_url_host(parsed.hostname or "")
     if not host:
         return source_url
     port = f":{parsed.port}" if parsed.port else ""
