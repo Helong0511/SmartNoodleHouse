@@ -41,9 +41,11 @@ def test_custom_seed_has_stores_not_truncate():
     assert "JOIN `coupon_templates`" in DATA_CUSTOM_SQL
     assert "env_version=develop" not in DATA_CUSTOM_SQL
     assert "YOUR_ALIPAY_APPID" not in DATA_CUSTOM_SQL
-    # 员工角色按 code
-    assert "`r`.`code` = 'STORE_ADMIN'" in DATA_CUSTOM_SQL
-    assert "`r`.`code` = 'KITCHEN'" in DATA_CUSTOM_SQL
+    # RBAC 属于平台级种子；门店经营种子不得重复维护角色/权限
+    assert "`r`.`code` = 'STORE_ADMIN'" in DATA_SYS_SQL
+    assert "`r`.`code` = 'KITCHEN'" in DATA_SYS_SQL
+    assert "INSERT INTO `roles`" not in DATA_CUSTOM_SQL
+    assert "INSERT INTO `role_permissions`" not in DATA_CUSTOM_SQL
 
 
 def test_struct_financial_and_delivery_indexes():
