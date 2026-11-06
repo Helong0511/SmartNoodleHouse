@@ -2,12 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, "fix/**"]
+    branches: [main, master, develop, "fix/**", "integration/**"]
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 # 不取消正在运行的 CI：后端全量测试可能需要数分钟，频繁推送不应中断正在执行的验证。
 # GitHub 默认保留一个 pending run；后续新提交会替换尚未开始的 pending run，
