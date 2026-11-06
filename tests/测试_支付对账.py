@@ -153,7 +153,7 @@ async def test_store_reconcile_rejects_bill_without_merchant_payment_number(db_s
             db_session,
             channel="WECHAT",
             bill_date=date(2026, 11, 5),
-            bill_csv="trade_no,amount\\nWX-STORE-UNKNOWN,12.00\\n",
+            bill_csv="trade_no,amount\nWX-STORE-UNKNOWN,12.00\n",
             scope_store_id=101,
         )
     await db_session.rollback()
