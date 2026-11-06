@@ -38,5 +38,8 @@ async def test_store_operator_cannot_read_global_ab_experiment_report(db_session
             ) as client:
                 response = await client.get("/api/admin/ab-experiments/noodle/report")
                 assert response.status_code == 403, response.text
+
+                performance = await client.get("/api/admin/performance/reco-metrics")
+                assert performance.status_code == 403, performance.text
     finally:
         app.dependency_overrides.clear()
