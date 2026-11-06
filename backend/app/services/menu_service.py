@@ -275,8 +275,11 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
             and _bundle_schedule_id(waited) == expected_sched
             and _bundle_has_visibility_meta(waited)
         ):
-            version = await get_menu_version(sid)
-            return {**waited, "version": version}
+            # 等待期间版本可能再次变化；绝不把等待到的旧 bundle 改标为新版本。
+            waited_version = int(waited.get("version") or 0)
+            current_version = await get_menu_version(sid)
+            if waited_version == current_version:
+                return waited
         lock_token = await try_acquire_rebuild_lock(sid)
 
     try:
