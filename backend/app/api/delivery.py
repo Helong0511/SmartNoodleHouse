@@ -1,5 +1,6 @@
 """美团 / 饿了么外卖接入 API"""
 from typing import Literal
+import uuid
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -115,7 +116,7 @@ async def confirm_delivery_order(
             db,
             aggregate_type="delivery_manual",
             aggregate_id=int(order.id),
-            event_kind="confirm",
+            event_kind=f"confirm_{uuid.uuid4().hex}",
             payload=_build_deferred_outbox_payload(task, task.get("platform") or ""),
         )
         # FastAPI function-scoped DB dependency commits before background tasks execute.
