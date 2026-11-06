@@ -499,6 +499,9 @@ async def process_outbox_item(outbox_id: int) -> bool:
             if await rollback_if_claim_lost(db, done_result, model=OutboxEvent, row_id=outbox_id):
                 return True
 
+            await db.commit()
+            # 业务状态与 Outbox DONE 先原子提交；辅助幂等事实源在独立事务写入，
+            # 失败时只能回滚辅助标记，绝不能回滚已完成的外部副作用及本地状态。
             idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
             if not is_stock_mirror:
                 try:
@@ -508,23 +511,18 @@ async def process_outbox_item(outbox_id: int) -> bool:
                         ttl_seconds=86400 * 7, mark_redis=False,
                     )
                     if not acquired:
-                        # handler 已成功执行；重复幂等标记不应触发外部副作用重放。
                         logger.warning(
-                            "Outbox idempotency marker already exists after successful handler; completing event id=%s",
+                            "Outbox idempotency marker already exists after successful handler; event is already DONE id=%s",
                             outbox_id,
                         )
+                    await db.commit()
                 except Exception as exc:
-                    # handler 已成功执行，辅助幂等记录失败不能把事件重新排队，否则会重复执行下游副作用。
+                    await db.rollback()
                     logger.exception(
-                        "Outbox idempotency marker write failed after handler success id=%s: %s",
+                        "Outbox auxiliary idempotency marker failed after durable completion id=%s: %s",
                         outbox_id, exc,
                     )
-                    await db.rollback()
-                    await _mark_done_after_handler(db, outbox_id, wid=wid)
-                    return True
-
-            await db.commit()
-            # 只有订单状态与 Outbox DONE 已一并提交后，才广播商家取消完成事件。
+            # 只有订单状态与 Outbox DONE 已提交后，才广播商家取消完成事件。
             if row.aggregate_type == "webhook_task":
                 try:
                     completed_payload = json.loads(row.payload or "{}")
@@ -561,11 +559,15 @@ async def process_outbox_item(outbox_id: int) -> bool:
         except Exception as exc:
             if handler_succeeded:
                 logger.exception(
-                    "Outbox handler succeeded but finalization failed; prevent duplicate side effect id=%s: %s",
+                    "Outbox external side effect succeeded but durable finalization failed; require reconciliation id=%s: %s",
                     outbox_id, exc,
                 )
                 await db.rollback()
-                await _mark_done_after_handler(db, outbox_id, wid=wid)
+                await _mark_uncertain(
+                    db, int(row.id),
+                    f"handler returned success but local transaction finalization failed: {exc}",
+                    wid=wid,
+                )
                 return True
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, exc)
             await db.rollback()
