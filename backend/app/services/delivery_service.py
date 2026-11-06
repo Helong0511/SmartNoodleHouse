@@ -1021,7 +1021,9 @@ class DeliveryService:
                     OutboxEvent.aggregate_type == "webhook_task",
                     OutboxEvent.aggregate_id == delivery_order_id,
                     OutboxEvent.event_kind == "deferred_cancel_order",
-                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "DONE")),
+                    # DONE 表示取消已明确完成，不再是“待执行/结果未知”的互斥意图。
+                    # 取消完成后仍可能收到平台退款回调，必须允许对应退款继续入账。
+                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN")),
                 )
             )
         ).first()
