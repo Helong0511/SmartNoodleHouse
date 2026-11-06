@@ -271,16 +271,18 @@
 
 - [ ] 平台控制台轮换历史泄露密钥并更新生产 `.env`（BLK-002）
 - [ ] `validate_settings` 在生产配置上通过（无 SystemExit）
-- [ ] DATABASE_URL/REDIS_URL 指向非 localhost 且账号最小权限
+- [ ] DATABASE_URL/REDIS_URL 使用受控私网地址且账号最小权限；若单机同机部署使用 127.0.0.1/::1，必须显式设置 ALLOW_LOOPBACK_PRODUCTION_SERVICES=true，并确认 MySQL/Redis 仅绑定 loopback、Redis 启用 ACL/密码、云安全组/防火墙不开放 3306/6379
 - [ ] `alembic upgrade head` 在预生产演练通过
 - [ ] nginx TLS 证书有效、HSTS 开启、仅反代 127.0.0.1:8000
 - [ ] `/api/health`、`/api/ready` 接入负载均衡/监控
 - [ ] TRUSTED_PROXY_IPS 配置为真实 nginx 地址
 - [ ] S3 凭证/桶/CDN 配齐（如使用对象存储）
-- [ ] 数据库备份 + 恢复演练
-- [ ] Prometheus/Grafana/告警通道接入（BLK-004）
-- [ ] 微信/支付宝/美团/饿了么沙箱真实联调（BLK-001）
-- [ ] 小程序提审（BLK-005）
+- [ ] 数据库定时备份、binlog/PITR、异地加密副本、完整性校验和独立隔离库恢复演练；记录 RTO/RPO
+- [ ] 生产 schema 对比：执行 alembic upgrade head --sql，与生产实际 schema/Alembic 版本逐项核对（BLK-003）
+- [ ] Prometheus 抓取配置、Grafana 面板、关键告警阈值和通知通道实测（BLK-004）
+- [ ] 微信/支付宝/美团/饿了么沙箱真实联调：支付成功/失败/超时、退款、重复/乱序回调、签名失败、平台限流及结果未知人工对账（BLK-001）
+- [ ] 小程序隐私合规、类目/支付能力、微信/支付宝小程序审核和正式发布（BLK-005）
+- [ ] 全链路压测并记录容量基线：API Worker、DB/Redis 连接池、Outbox 积压、KDS/WebSocket、摄像头/TTS 队列
 
 ---
 
@@ -296,4 +298,4 @@
 
 ## 15. 结论
 
-进程模型（Leader 锁 + worker 角色）、调度互斥、Outbox/收件箱回收、健康探针、非 root systemd、nginx TLS/WS/限流等部署控制点在代码与模板中落实，并由相应可靠性测试覆盖。主要缺口在运维侧：密钥轮换确认、备份恢复演练、监控告警接入与真实沙箱联调，均已列入阻塞/遗留清单，不影响代码层面的部署正确性结论。
+进程模型（Leader 锁 + worker 角色）、调度互斥、Outbox/收件箱回收、健康探针、非 root systemd、nginx TLS/WS/限流等部署控制点在代码与模板中落实，并由相应可靠性测试覆盖。代码层面的发布控制已通过 CI；但“已合并 main”不等于“已完成生产上线”。生产启用前仍须完成 BLK-001 沙箱真实联调、BLK-002 历史密钥轮换、BLK-003 生产 schema 对比、BLK-004 监控告警接入、BLK-005 小程序提审，以及真实备份恢复演练和容量压测。以上依赖平台账号、生产环境或运维操作，不能由仓库 CI 代替；任一资金/支付/回调链路未完成沙箱验证时，不得开放真实交易。
