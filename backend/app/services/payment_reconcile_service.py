@@ -7,12 +7,12 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
-from app.models import Payment, PaymentReconcileBatch, PaymentReconcileDiff
+from app.models import Order, Payment, PaymentReconcileBatch, PaymentReconcileDiff, RechargeOrder
 
 
 def _dec(v: Any) -> Decimal | None:
@@ -87,8 +87,12 @@ class PaymentReconcileService:
         bill_csv: str,
         created_by: int | None = None,
         source_filename: str | None = None,
+        scope_store_id: int = 0,
     ) -> PaymentReconcileBatch:
         ch = channel.upper().strip()
+        scope_id = int(scope_store_id or 0)
+        if scope_id < 0:
+            raise ValueError("scope_store_id 不能为负数")
         if ch not in ("WECHAT", "ALIPAY"):
             raise ValueError("channel 仅支持 WECHAT/ALIPAY")
 
@@ -99,6 +103,7 @@ class PaymentReconcileService:
                 .where(
                     PaymentReconcileBatch.channel == ch,
                     PaymentReconcileBatch.bill_date == bill_date,
+                    PaymentReconcileBatch.scope_store_id == scope_id,
                 )
                 .with_for_update()
             )
@@ -107,6 +112,7 @@ class PaymentReconcileService:
             candidate = PaymentReconcileBatch(
                 channel=ch,
                 bill_date=bill_date,
+                scope_store_id=scope_id,
                 status="PENDING",
                 created_by=created_by,
             )
@@ -124,6 +130,7 @@ class PaymentReconcileService:
                         .where(
                             PaymentReconcileBatch.channel == ch,
                             PaymentReconcileBatch.bill_date == bill_date,
+                            PaymentReconcileBatch.scope_store_id == scope_id,
                         )
                         .with_for_update()
                     )
@@ -159,13 +166,21 @@ class PaymentReconcileService:
             local_payments = list(
                 (
                     await db.execute(
-                        select(Payment).where(
+                        select(Payment)
+                        .outerjoin(Order, Payment.order_id == Order.id)
+                        .outerjoin(RechargeOrder, Payment.recharge_order_id == RechargeOrder.id)
+                        .where(
                             and_(
                                 Payment.provider == ch,
                                 Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
                                 # 对账日按渠道实际支付成功时间，而非本地创建支付单时间归属。
                                 Payment.paid_at >= start,
                                 Payment.paid_at < end,
+                                *(
+                                    [or_(Order.store_id == scope_id, RechargeOrder.store_id == scope_id)]
+                                    if scope_id > 0
+                                    else []
+                                ),
                             )
                         )
                     )
