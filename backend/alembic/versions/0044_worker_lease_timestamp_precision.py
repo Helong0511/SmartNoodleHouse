@@ -8,7 +8,7 @@ from __future__ import annotations
 from alembic import op
 from sqlalchemy.dialects import mysql
 
-revision = "0044_worker_lease_timestamp_precision"
+revision = "0044_worker_lease_ts"
 down_revision = "0043_delivery_refund_fingerprint"
 branch_labels = None
 depends_on = None
