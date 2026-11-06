@@ -38,6 +38,7 @@ def _base_prod(**kwargs):
         wechat_api_v3_key="k" * 32,
         wechat_cert_serial_no="ABC123",
         wechat_app_id="wxapp",
+        wechat_app_secret="wechat-app-secret-real",
         wechat_platform_public_key="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds3xfn/ygWy\n-----END PUBLIC KEY-----",
         wechat_platform_serial_no="TEST-PLATFORM-SERIAL",
         wechat_platform_cert_path="",
@@ -260,6 +261,24 @@ def test_prod_rejects_placeholder_alipay_app_id():
                 alipay_private_key="real-private-key",
                 alipay_public_key="real-public-key",
                 alipay_seller_id="2088000000000000",
+            )
+        )
+
+
+def test_prod_rejects_partial_wechat_credentials():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(wechat_app_secret="")
+        )
+
+
+def test_prod_rejects_partial_alipay_credentials():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                alipay_app_id="2021000000000001",
+                alipay_private_key="real-private-key",
+                alipay_public_key="",
             )
         )
 
