@@ -1,12 +1,12 @@
 """Regression tests for reconciliation and archive store-level authorization."""
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.models import PaymentReconcileBatch, PaymentReconcileDiff
+from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReconcileDiff
 
 
 @pytest.mark.asyncio
@@ -41,6 +41,17 @@ async def test_store_admin_cannot_read_other_store_reconciliation_or_archive(db_
             batch_id=other_batch.id,
             diff_type="LONG",
             channel_trade_no="OTHER-STORE-TRADE",
+        )
+    )
+    db_session.add(
+        ArchivedOrderSnapshot(
+            order_id=99202,
+            store_id=202,
+            order_no="ARCHIVE-OTHER-STORE",
+            status="COMPLETED",
+            payment_status="PAID",
+            original_created_at=datetime(2026, 10, 1),
+            payload={"order": {"store_id": 202}},
         )
     )
     await db_session.commit()
