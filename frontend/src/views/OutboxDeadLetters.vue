@@ -1,0 +1,148 @@
+<template>
+  <div v-loading="loading" class="outbox-page">
+    <el-alert
+      title="死信人工重放会将事件重新放入待处理队列。请先确认下游故障已修复；处理器必须保持幂等。"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="notice"
+    />
+    <el-row :gutter="12" class="summary">
+      <el-col :xs="24" :sm="8">
+        <el-card shadow="never">
+          <div class="summary-label">待处置死信</div>
+          <div class="summary-value">{{ total }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="8">
+        <el-card shadow="never">
+          <div class="summary-label">当前页</div>
+          <div class="summary-value">{{ rows.length }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="8">
+        <el-card shadow="never">
+          <div class="summary-label">权限范围</div>
+          <div class="summary-value">仅超级管理员</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <div class="toolbar">
+      <el-button type="primary" :loading="loading" @click="load">刷新</el-button>
+    </div>
+
+    <el-table :data="rows" border empty-text="暂无达到最大重试次数的死信">
+      <el-table-column prop="id" label="事件 ID" width="90" />
+      <el-table-column label="业务对象" min-width="170">
+        <template #default="{ row }">{{ row.aggregate_type }} #{{ row.aggregate_id }}</template>
+      </el-table-column>
+      <el-table-column prop="event_kind" label="事件类型" min-width="150" show-overflow-tooltip />
+      <el-table-column label="重试次数" width="110">
+        <template #default="{ row }">{{ row.attempt_count }} / {{ row.max_attempts }}</template>
+      </el-table-column>
+      <el-table-column label="最后错误" min-width="260" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.last_error || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="最后更新" width="180">
+        <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="120" fixed="right">
+        <template #default="{ row }">
+          <el-button type="warning" link :loading="replayingId === row.id" @click="replay(row)">
+            人工重放
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :total="total"
+        :page-sizes="[20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        @current-change="load"
+        @size-change="reload"
+      />
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  listOutboxDeadLetters,
+  replayOutboxDeadLetter,
+  type OutboxDeadLetter,
+} from '@/api/outbox'
+
+const loading = ref(false)
+const rows = ref<OutboxDeadLetter[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
+const replayingId = ref<number | null>(null)
+
+function formatDate(value: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const res = await listOutboxDeadLetters(page.value, pageSize.value)
+    rows.value = res.data?.items || []
+    total.value = Number(res.data?.total || 0)
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || error?.message || '读取 Outbox 死信失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function reload() {
+  page.value = 1
+  load()
+}
+
+async function replay(row: OutboxDeadLetter) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `将事件 #${row.id} 重新放入待处理队列。请填写故障修复情况或重放原因（至少 8 个字符）。`,
+      '确认人工重放',
+      {
+        confirmButtonText: '确认重放',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '例如：已修复平台授权过期，确认下游接口恢复正常',
+        inputValidator: (value: string) => value.trim().length >= 8 || '原因至少需要 8 个字符',
+      },
+    )
+    replayingId.value = row.id
+    await replayOutboxDeadLetter(row.id, value.trim())
+    ElMessage.success(`事件 #${row.id} 已重新排队`)
+    await load()
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error?.response?.data?.detail || error?.message || '重放失败')
+  } finally {
+    replayingId.value = null
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.outbox-page { display: flex; flex-direction: column; gap: 14px; }
+.notice { margin-bottom: 2px; }
+.summary-label { color: var(--el-text-color-secondary); font-size: 13px; }
+.summary-value { margin-top: 8px; font-size: 24px; font-weight: 700; }
+.toolbar { display: flex; justify-content: flex-end; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+</style>
