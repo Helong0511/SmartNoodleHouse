@@ -251,7 +251,6 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     current_version = await get_menu_version(sid)
     if (
         hit is not None
-        and current_version > 0
         and int(hit.get("version") or 0) == current_version
         and _bundle_schedule_id(hit) == expected_sched
         and _bundle_has_visibility_meta(hit)
