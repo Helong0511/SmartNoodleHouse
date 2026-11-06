@@ -533,7 +533,8 @@ async function doCancel() {
   cancelLoading.value = true
   try {
     await api.post(`/delivery/orders/${cancelTarget.value.id}/cancel`, { reason: cancelReason.value.trim() })
-    ElMessage.success('已取消')
+    // API 仅确认 Outbox 已持久化，不代表平台已完成取消；实际状态由 worker 确认后更新。
+    ElMessage.success('取消请求已提交，平台确认后订单状态将自动更新')
     cancelVisible.value = false
     detailVisible.value = false
     await Promise.all([loadOrders(), loadStats()])
