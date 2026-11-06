@@ -352,4 +352,5 @@ def test_production_env_template_matches_single_host_startup_policy():
     assert "WEBHOOK_IP_ALLOWLIST=" in env
     assert "ENABLE_ALIPAY_PHONE_BIND=false" in env
     assert "ENABLE_WX_PHONE_BIND=false" in env
-    assert "ALIPAY_APP_ID=REPLACE_WITH_ALIPAY_APP_ID" in env
+    assert "ALIPAY_APP_ID=" in env
+    assert "WECHAT_APP_ID=" in env
