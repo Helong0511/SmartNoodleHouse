@@ -612,3 +612,90 @@ class _CallbackLogSavepoint:
         if exc_type is IntegrityError:
             return False
         return False
+
+
+@pytest.mark.asyncio
+async def test_merchant_cancel_persists_one_outbox_event_and_does_not_call_platform(monkeypatch):
+    """商家取消只持久化意图；并发重复请求复用唯一 Outbox 事件。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_service
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=501, order_id=601, platform="MEITUAN",
+        platform_order_id="MT-ORDER-501", delivery_status="ACCEPTED",
+    )
+    order = SimpleNamespace(id=601, store_id=7, status="CONFIRMED")
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: d_order))
+    db.get = AsyncMock(return_value=order)
+    db.commit = AsyncMock()
+
+    monkeypatch.setattr(
+        delivery_service, "get_credentials_for_store",
+        AsyncMock(return_value=SimpleNamespace(platform_shop_id="shop-7")),
+    )
+    event = SimpleNamespace(id=9001, status="PENDING")
+    enqueue = AsyncMock(return_value=(event, True))
+    monkeypatch.setattr(delivery_service, "enqueue_outbox", enqueue)
+
+    result = await DeliveryService.cancel_by_merchant(db, 501, "商家缺货")
+
+    assert result == {
+        "ok": False, "status": "PENDING", "order_id": 601,
+        "outbox_id": 9001, "queued": True,
+    }
+    enqueue.assert_awaited_once()
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["aggregate_type"] == "webhook_task"
+    assert kwargs["aggregate_id"] == 501
+    assert kwargs["event_kind"] == "deferred_cancel_order"
+    assert kwargs["payload"]["action"] == "cancel_order"
+    assert kwargs["payload"]["store_id"] == 7
+    assert kwargs["payload"]["platform_order_id"] == "MT-ORDER-501"
+    assert "credentials" not in kwargs["payload"]
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_merchant_cancel_outbox_handler_updates_local_state_only_after_platform_success(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services import delivery_tasks
+    from app.services.delivery_tasks import execute_webhook_outbox_task
+
+    order = SimpleNamespace(id=601, status="CONFIRMED")
+    d_order = SimpleNamespace(id=501, order_id=601, delivery_status="ACCEPTED", last_sync_at=None)
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.get = AsyncMock(side_effect=lambda model, key: order if model.__name__ == "Order" else d_order)
+    db.flush = AsyncMock()
+
+    provider = SimpleNamespace(cancel_order=AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        delivery_tasks, "get_credentials_for_store",
+        AsyncMock(return_value=SimpleNamespace(platform_shop_id="shop-7")),
+    )
+    monkeypatch.setattr(delivery_tasks, "get_delivery_provider", lambda *_args: provider)
+
+    async def apply_status(_db, target, status, **_kwargs):
+        target.status = status
+
+    monkeypatch.setattr("app.services.order_lifecycle.apply_order_status", apply_status)
+
+    row = SimpleNamespace(
+        aggregate_id=501,
+        payload=json.dumps({
+            "action": "cancel_order", "platform": "MEITUAN",
+            "platform_order_id": "MT-ORDER-501", "store_id": 7,
+            "order_id": 601, "reason": "商家缺货",
+        }),
+    )
+    await execute_webhook_outbox_task(db, row)
+
+    provider.cancel_order.assert_awaited_once_with("MT-ORDER-501", "商家缺货")
+    assert order.status == "CANCELLED"
+    assert d_order.delivery_status == "CANCELLED"
+    assert d_order.last_sync_at is not None
+    db.flush.assert_awaited_once()
