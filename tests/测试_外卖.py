@@ -330,7 +330,10 @@ async def test_duplicate_delivery_refund_callback_does_not_regress_terminal_summ
     )
     order = SimpleNamespace(id=99, total_amount=Decimal("30.00"))
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
 
     class _DuplicateSavepoint:
@@ -375,7 +378,10 @@ async def test_new_delivery_refund_callback_sets_pending_summary(monkeypatch):
     )
     order = SimpleNamespace(id=100, total_amount=Decimal("30.00"))
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),  # DeliveryOrder FOR UPDATE
+    ])
     db.flush = AsyncMock()
 
     class _Savepoint:
