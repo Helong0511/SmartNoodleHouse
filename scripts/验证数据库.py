@@ -10,6 +10,9 @@ import asyncio
 import os
 import sys
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from sqlalchemy import text
@@ -31,6 +34,10 @@ REQUIRED_TABLES = [
     "order_items",
     "payments",
     "payment_refunds",
+    "payment_reconcile_batches",
+    "payment_reconcile_diffs",
+    "archived_order_snapshots",
+    "outbox_events",
     "webhook_inbox",
     "financial_ledger",
     "point_ledger",
@@ -67,6 +74,7 @@ REQUIRED_UNIQUES = [
     ("roles", "code"),
     ("permissions", "code"),
     ("cashier_shifts", "uk_cashier_shift_one_open"),
+    ("payment_reconcile_batches", "uk_prb_channel_bill_store"),
 ]
 
 # (table, constraint_name) — CHECK
@@ -104,6 +112,13 @@ REQUIRED_COLUMNS = [
     ("payment_refunds", "next_retry_at"),
     ("payment_refunds", "last_error"),
     ("payment_refunds", "idempotency_key"),
+    ("payment_reconcile_batches", "scope_store_id"),
+    ("archived_order_snapshots", "store_id"),
+    ("outbox_events", "status"),
+    ("outbox_events", "attempt_count"),
+    ("outbox_events", "max_attempts"),
+    ("outbox_events", "locked_at"),
+    ("outbox_events", "next_retry_at"),
     ("customer_coupons", "status_reason"),
     ("print_jobs", "status"),
     ("print_jobs", "attempt_count"),
@@ -116,6 +131,20 @@ REQUIRED_COLUMNS = [
     ("products", "visibility_calendar"),
     ("stores", "logo"),
 ]
+
+
+def _expected_alembic_heads() -> set[str]:
+    """从仓库当前 migration graph 读取真实 head，不猜测 revision 前缀。"""
+    config = Config(str(ROOT / "backend" / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "backend" / "alembic"))
+    return set(ScriptDirectory.from_config(config).get_heads())
+
+
+def _alembic_heads_match(actual_revisions, expected_heads) -> bool:
+    """支持 Alembic 多 head；数据库版本必须与代码 migration graph 完全一致。"""
+    actual = {str(value) for value in actual_revisions if value}
+    expected = {str(value) for value in expected_heads if value}
+    return bool(expected) and actual == expected
 
 
 async def _table_exists(db, name: str) -> bool:
@@ -235,14 +264,27 @@ async def main() -> None:
                 failures.append(f"missing table: {t}")
 
         if await _table_exists(db, "alembic_version"):
-            ver = (await db.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))).scalar()
-            print(f"[{'OK' if ver else 'FAIL'}] alembic_version={ver!r}")
-            if not ver:
-                failures.append("alembic_version empty")
-            elif not str(ver).startswith("000"):
-                print(f"[WARN] unexpected alembic revision: {ver}")
+            actual_heads = set(
+                (await db.execute(text("SELECT version_num FROM alembic_version")))
+                .scalars()
+                .all()
+            )
+            try:
+                expected_heads = _expected_alembic_heads()
+            except Exception as exc:
+                failures.append(f"cannot determine repository Alembic heads: {exc}")
+                expected_heads = set()
+            if _alembic_heads_match(actual_heads, expected_heads):
+                print(f"[OK] Alembic heads match repository: {sorted(actual_heads)}")
             else:
-                print(f"[OK] alembic head-compatible revision={ver}")
+                print(
+                    f"[FAIL] Alembic heads mismatch: database={sorted(actual_heads)}, "
+                    f"repository={sorted(expected_heads)}"
+                )
+                failures.append(
+                    f"Alembic heads mismatch: database={sorted(actual_heads)}, "
+                    f"repository={sorted(expected_heads)}"
+                )
 
         RECOMMENDED_INDEXES = [
             ("orders", "idx_orders_store_pay_paid"),
@@ -250,6 +292,8 @@ async def main() -> None:
             ("payment_refunds", "idx_refunds_status_succ"),
             ("financial_ledger", "idx_fl_store_ch_type_created"),
             ("customer_coupons", "idx_cc_customer_status_exp"),
+            ("payment_reconcile_batches", "ix_payment_reconcile_batches_scope_store_id"),
+            ("outbox_events", "ix_oe_next_retry_at_status"),
         ]
         for table, index in RECOMMENDED_INDEXES:
             if not await _table_exists(db, table):
