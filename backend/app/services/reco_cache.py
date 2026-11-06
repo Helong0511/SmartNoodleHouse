@@ -12,11 +12,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 from app.core.async_utils import spawn_bg
 from app.core.cache_keys import (
     RECO_TTL_SECONDS,
+    reco_customer_lock_pattern,
     reco_customer_pattern,
     reco_key,
     reco_rebuild_lock_key,
@@ -27,7 +29,21 @@ from app.core.response import dumps_json
 
 logger = logging.getLogger(__name__)
 
-_REBUILD_LOCK_TTL = 10  # 重建锁最多持 10s
+_REBUILD_LOCK_TTL = 30  # 推荐重建最长租约；超时后旧 owner 不能释放/覆盖新 owner
+
+_RELEASE_LOCK_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_SET_CACHE_IF_OWNER_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+end
+return 0
+"""
 
 
 async def get_cached_reco(
@@ -55,16 +71,32 @@ async def set_cached_reco(
     bucket: str,
     payload: dict[str, Any],
     fingerprint: str = "",
+    *,
+    owner_token: str | None = None,
 ) -> None:
+    """仅允许当前锁 owner 写入缓存，避免过期旧任务覆盖新结果。
+
+    缓存键与锁键共享 Redis Cluster hash tag，因此 Lua 可在单 slot 原子执行。
+    未持有锁（Redis 故障或锁竞争超时后降级直算）的请求不写缓存。
+    """
+    if not owner_token:
+        return
     try:
         r = await get_redis()
         body = dict(payload)
         body["cache_hit"] = False
-        await r.set(
+        ttl = ttl_with_jitter(RECO_TTL_SECONDS)
+        result = await r.eval(
+            _SET_CACHE_IF_OWNER_SCRIPT,
+            2,
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
             reco_key(customer_id, store_id, scene, bucket, fingerprint),
+            owner_token,
             dumps_json(body, compact=True),
-            ex=ttl_with_jitter(RECO_TTL_SECONDS),
+            ttl,
         )
+        if not result:
+            logger.debug("推荐缓存写入跳过：重建租约已丢失")
     except Exception:  # noqa: BLE001
         logger.debug("推荐缓存写入失败，忽略", exc_info=True)
 
@@ -73,16 +105,21 @@ async def invalidate_customer(customer_id: int) -> None:
     """失效某顾客全部场景/桶位的推荐结果。延迟双删防止并发写窗口旧值残留。"""
     if not customer_id:
         return
-    pattern = reco_customer_pattern(customer_id)
+    patterns = (
+        reco_customer_pattern(customer_id),
+        reco_customer_lock_pattern(customer_id),
+    )
     try:
         r = await get_redis()
         keys = []
-        async for k in r.scan_iter(match=pattern, count=200):
-            keys.append(k)
+        for pattern in patterns:
+            async for k in r.scan_iter(match=pattern, count=200):
+                keys.append(k)
         if keys:
-            await delete_with_retry(r, *keys)
-        # 延迟双删：防止删后又有并发请求写入旧推荐结果
-        spawn_bg(_delayed_invalidate(pattern))
+            # 同时删除缓存和租约：在途旧 owner 后续 Lua 写入/释放均会因 token 不匹配而失败。
+            await delete_with_retry(r, *set(keys))
+        # 延迟再清缓存值（不清锁），兜底处理扫描/删除期间的并发写入。
+        spawn_bg(_delayed_invalidate(patterns[0]))
     except Exception:  # noqa: BLE001
         logger.debug("推荐缓存失效失败(customer=%s)，等待 TTL", customer_id, exc_info=True)
 
@@ -103,28 +140,45 @@ async def _delayed_invalidate(pattern: str) -> None:
 
 async def try_acquire_reco_lock(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
-) -> bool:
-    """缓存击穿保护：SET NX EX 抢锁。Redis 不可用时 fail-open。"""
+) -> str | None:
+    """缓存击穿保护：返回唯一 owner token；锁竞争/Redis 故障均返回 None 并允许降级直算。"""
+    token = uuid.uuid4().hex
     try:
         r = await get_redis()
-        return bool(
-            await r.set(
-                reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
-                "1", nx=True, ex=_REBUILD_LOCK_TTL,
-            )
+        acquired = await r.set(
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+            token,
+            nx=True,
+            ex=_REBUILD_LOCK_TTL,
         )
+        return token if acquired else None
     except Exception:
-        return False
+        logger.debug("推荐重建锁不可用，降级直算", exc_info=True)
+        return None
 
 
 async def release_reco_lock(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+    customer_id: int | None,
+    store_id: int,
+    scene: str,
+    bucket: str,
+    fingerprint: str = "",
+    *,
+    owner_token: str | None = None,
 ) -> None:
+    """仅允许当前 owner 释放锁，防止旧请求删除后来者的租约。"""
+    if not owner_token:
+        return
     try:
         r = await get_redis()
-        await r.delete(reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint))
+        await r.eval(
+            _RELEASE_LOCK_SCRIPT,
+            1,
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
+            owner_token,
+        )
     except Exception:
-        pass
+        logger.debug("推荐重建锁释放失败，等待租约过期", exc_info=True)
 
 
 async def wait_for_reco(
