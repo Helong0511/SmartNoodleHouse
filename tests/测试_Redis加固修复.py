@@ -1236,3 +1236,26 @@ async def test_redis_client_uses_bounded_blocking_pool(monkeypatch):
     pool.disconnect.assert_awaited_once_with(inuse_connections=True)
     assert redis_client._redis is None
     assert redis_client._redis_pool is None
+
+@pytest.mark.asyncio
+async def test_menu_rebuild_heartbeat_stops_when_request_owner_exits(monkeypatch):
+    """菜单请求结束后，后台续租任务必须退出，不能把重建锁变成孤儿锁。"""
+    from app.core import menu_cache
+
+    monkeypatch.setattr(menu_cache, "_REBUILD_LOCK_TTL", 3)
+    renew = AsyncMock(return_value=True)
+    monkeypatch.setattr(menu_cache, "renew_rebuild_lock", renew)
+
+    async def acquire_and_exit():
+        request_task = asyncio.current_task()
+        return asyncio.create_task(
+            menu_cache.maintain_rebuild_lock(
+                77, "owner-token", owner_task=request_task
+            )
+        )
+
+    heartbeat = await asyncio.create_task(acquire_and_exit())
+    await asyncio.sleep(1.1)
+
+    assert heartbeat.done()
+    renew.assert_not_awaited()

@@ -326,7 +326,10 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
                     lock_token = await try_acquire_rebuild_lock(sid)
                     lock_ok = lock_token is not None
                     if lock_ok and lock_token:
-                        heartbeat_task = asyncio.create_task(maintain_rebuild_lock(sid, lock_token))
+                        owner_task = asyncio.current_task()
+                        heartbeat_task = asyncio.create_task(
+                            maintain_rebuild_lock(sid, lock_token, owner_task=owner_task)
+                        )
                     if not lock_ok:
                         # 跨进程持锁者可能仍在构建；短暂等待后再查缓存。
                         waited = await wait_for_rebuild(sid, 2.0)
