@@ -332,7 +332,7 @@ async def _mark_uncertain(db: AsyncSession, outbox_id: int, err: str, *, wid: st
         logger.warning("Outbox uncertain result could not be marked by old owner id=%s", outbox_id)
         return
     logger.critical(
-        "Outbox EXTERNAL RESULT UNKNOWN: id=%s aggregate=%s/%s event=%s; automatic retry disabled",
+        "Outbox EXTERNAL RESULT UNKNOWN: id=%s; automatic retry disabled",
         outbox_id,
     )
 
