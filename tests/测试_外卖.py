@@ -815,3 +815,43 @@ async def test_eleme_side_effect_error_envelope_is_uncertain(monkeypatch, action
     with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
         with pytest.raises(DeliveryPlatformResultUnknown):
             await ElemeProvider()._rpc(action, {"orderId": "O1"})
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/order/confirm",
+        "/api/v1/order/preparationMealComplete",
+        "/api/v1/order/remindReply",
+        "/api/v1/order/refund/agree",
+        "/api/v1/order/refund/reject",
+        "/api/v1/order/cancel",
+    ],
+)
+async def test_meituan_side_effect_error_envelope_is_uncertain(monkeypatch, path):
+    """未核实错误码语义前，不允许订单副作用 error 响应触发自动重试。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, MeituanProvider
+
+    url = "https://waimaiopen.meituan.com" + path
+    response = httpx.Response(
+        200,
+        json={"error": {"code": "SYSTEM_ERROR", "message": "temporary error"}},
+        request=httpx.Request("GET", url),
+    )
+    client = SimpleNamespace(get=AsyncMock(return_value=response), post=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await MeituanProvider()._request(path, {"order_id": "O1"})
