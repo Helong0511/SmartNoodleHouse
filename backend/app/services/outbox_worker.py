@@ -363,6 +363,19 @@ async def _mark_done_after_handler(db: AsyncSession, outbox_id: int, *, wid: str
         )
 
 
+def _is_external_side_effect_outbox(row: OutboxEvent) -> bool:
+    """只对确实会调用外部平台的 Outbox 事件启用防重复副作用保护。"""
+    if str(getattr(row, "aggregate_type", "") or "") not in {"delivery_manual", "webhook_task"}:
+        return False
+    try:
+        payload = json.loads(getattr(row, "payload", None) or "{}")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and str(payload.get("action") or "").lower() in {
+        "confirm_order", "cancel_order", "reply_urge",
+    }
+
+
 async def process_outbox_item(outbox_id: int) -> bool:
     """原子认领、租约续期、幂等分发；库存镜像按 sync_version 收敛而非一次性去重。"""
     async with AsyncSessionLocal() as db:
@@ -430,8 +443,8 @@ async def process_outbox_item(outbox_id: int) -> bool:
             )
             if not lease_owned:
                 return True
-            # 非库存镜像 handler 已成功完成；后续 finalize/辅助幂等写入失败不能再次执行副作用。
-            handler_succeeded = not is_stock_mirror
+            # 仅外部平台副作用 handler 成功后启用防重复保护；普通 DB handler 仍必须按事务失败重试。
+            handler_succeeded = (not is_stock_mirror) and _is_external_side_effect_outbox(row)
 
             expected_sync_version = int(getattr(row, "sync_version", 0) or 0)
             done_conditions = [
