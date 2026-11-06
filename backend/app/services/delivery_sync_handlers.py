@@ -154,12 +154,16 @@ async def _execute_stock_push_jobs(
     return failures
 
 
-async def _push_store_product_stock(db, store_id: int, product_id: int) -> int:
-    """把某门店某餐品的当前本地库存镜像到该店所有有效平台绑定。返回失败平台数。
+async def _push_store_product_stock(
+    db, store_id: int, product_id: int, *, platform_filter: str | None = None
+) -> int:
+    """镜像指定门店餐品库存；可选限定平台。返回失败平台数。
 
     测试/对账可直接调用；outbox handler 会在 HTTP 前额外 commit 释放连接。
     """
-    jobs = await _collect_stock_push_jobs(db, store_id, product_id)
+    jobs = await _collect_stock_push_jobs(
+        db, store_id, product_id, platform_filter=platform_filter
+    )
     return await _execute_stock_push_jobs(jobs, store_id=store_id, product_id=product_id)
 
 
