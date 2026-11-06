@@ -228,6 +228,18 @@ def test_prod_rejects_mysql_root_account():
         )
 
 
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "mysql://user:strong-password@db.example.internal:3306/snh",
+        "mysql+pymysql://user:strong-password@db.example.internal:3306/snh",
+    ],
+)
+def test_prod_rejects_sync_mysql_drivers(database_url):
+    with pytest.raises(SystemExit):
+        validate_settings(_base_prod(database_url=database_url))
+
+
 def test_prod_rejects_placeholder_database_password():
     with pytest.raises(SystemExit):
         validate_settings(
