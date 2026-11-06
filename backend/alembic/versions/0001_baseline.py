@@ -90,17 +90,28 @@ def upgrade() -> None:
 
     raw = _extract_schema_section(path.read_text(encoding="utf-8"))
     conn = op.get_bind()
-    for stmt in _split_sql_statements(raw):
-        if _should_skip_statement(stmt):
-            continue
-        try:
-            # 用驱动原生 SQL，避免 COMMENT/JSON 示例中的 ":50" 被 text() 当成绑定参数
-            conn.exec_driver_sql(stmt)
-        except (ProgrammingError, DBAPIError) as exc:
-            errno = _mysql_errno(exc)
-            if errno in _IGNORE_MYSQL_ERRNOS:
+    is_mysql = conn.dialect.name == "mysql"
+    if is_mysql:
+        # struct.sql 按模块分组，部分子表在父表之前定义（如 ab_assignments → customers）。
+        # MySQL 官方支持在 FOREIGN_KEY_CHECKS=0 时按任意顺序导入含外键的表；
+        # 这里只在 schema DDL 阶段临时关闭，finally 必定恢复，不影响应用运行时约束。
+        conn.exec_driver_sql("SET SESSION FOREIGN_KEY_CHECKS=0")
+    try:
+        for stmt in _split_sql_statements(raw):
+            if _should_skip_statement(stmt):
                 continue
-            raise
+            try:
+                # 用驱动原生 SQL，避免 COMMENT/JSON 示例中的 ":50" 被 text() 当成绑定参数
+                conn.exec_driver_sql(stmt)
+            except (ProgrammingError, DBAPIError) as exc:
+                errno = _mysql_errno(exc)
+                if errno in _IGNORE_MYSQL_ERRNOS:
+                    continue
+                raise
+    finally:
+        if is_mysql:
+            # 不允许把会话的外键校验关闭状态带入后续 Alembic revisions / 应用连接。
+            conn.exec_driver_sql("SET SESSION FOREIGN_KEY_CHECKS=1")
 
 
 def downgrade() -> None:
