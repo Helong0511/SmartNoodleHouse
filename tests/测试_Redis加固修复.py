@@ -45,6 +45,19 @@ class FakeRedis:
     async def eval(self, script, numkeys, *args):
         self.eval_calls.append((script, numkeys, args))
         keys, argv = args[:numkeys], args[numkeys:]
+        if "MENU_GET_BUNDLE_WITH_VERSION" in script:
+            bundle = self.store.get(keys[0])
+            version = self.store.get(keys[1])
+            return [bundle, version] if bundle is not None and version is not None else None
+        if "MENU_BUNDLE_IF_OWNER_AND_VERSION" in script:
+            if self.store.get(keys[0]) != str(argv[0]):
+                return 0
+            if self.store.get(keys[2]) != str(argv[3]):
+                return 0
+            self.store[keys[1]] = argv[1]
+            ttl = int(argv[2])
+            self.set_calls.append((keys[1], argv[1], None, ttl))
+            return "OK"
         if not keys or not argv or self.store.get(keys[0]) != str(argv[0]):
             return 0
         if 'DEL' in script.upper():
@@ -199,10 +212,14 @@ async def test_menu_cache_normal_bundle_cached():
     from app.core import menu_cache
     fake = FakeRedis()
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
-        bundle = {"categories": [{"id": 1, "name": "noodles"}]}
+        bundle = {"version": 1, "categories": [{"id": 1, "name": "noodles"}]}
         token = await menu_cache.try_acquire_rebuild_lock(1)
-        await menu_cache.set_menu_bundle(1, bundle, owner_token=token)
+        fake.store[menu_cache.menu_version_key(1)] = "1"
+        assert await menu_cache.set_menu_bundle(
+            1, bundle, owner_token=token, expected_version=1
+        ) is True
         assert menu_cache.menu_bundle_key(1) in fake.store
+        assert await menu_cache.get_menu_bundle(1) == bundle
 
 
 # ── menu_cache bump_menu_version TTL 补全 ──
@@ -212,17 +229,13 @@ async def test_menu_cache_bump_always_expire():
     from app.core import menu_cache
     fake = FakeRedis()
     with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
-        # 第一次 bump（version 从 1 开始）：应该 expire
+        # 版本戳不能过期重置，否则旧客户端可能误判 changed:false。
         v1 = await menu_cache.bump_menu_version(1)
         assert v1 == 1
-        expire_keys = [k for k, _ in fake.expire_calls if "ver" in k]
-        assert len(expire_keys) == 1
-        # 第二次 bump：旧代码不 expire，修复后每次都 expire
-        fake.expire_calls.clear()
+        assert fake.expire_calls == []
         v2 = await menu_cache.bump_menu_version(1)
         assert v2 == 2
-        expire_keys = [k for k, _ in fake.expire_calls if "ver" in k]
-        assert len(expire_keys) == 1, "每次 incr 后都应补 expire"
+        assert fake.expire_calls == []
 
 
 # ── reco_cache 互斥锁 ──
@@ -540,3 +553,39 @@ async def test_delete_with_retry_retries_command_exception(monkeypatch):
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
     assert await delete_with_retry(fake, "snh:cache:key") == 1
     assert fake.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_menu_cache_rejects_stale_owner_version_write():
+    from app.core import menu_cache
+    fake = FakeRedis()
+    with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
+        token = await menu_cache.try_acquire_rebuild_lock(8)
+        fake.store[menu_cache.menu_version_key(8)] = "12"
+        stale = {"version": 11, "categories": ["old"]}
+        assert await menu_cache.set_menu_bundle(
+            8, stale, owner_token=token, expected_version=11
+        ) is False
+        assert menu_cache.menu_bundle_key(8) not in fake.store
+
+
+@pytest.mark.asyncio
+async def test_menu_cache_read_rejects_version_mismatch():
+    from app.core import menu_cache
+    fake = FakeRedis()
+    key = menu_cache.menu_bundle_key(9)
+    fake.store[key] = json.dumps({"version": 4, "categories": ["stale"]})
+    fake.store[menu_cache.menu_version_key(9)] = "5"
+    with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
+        assert await menu_cache.get_menu_bundle(9) is None
+
+
+@pytest.mark.asyncio
+async def test_menu_version_migrates_legacy_key_without_expiry():
+    from app.core import menu_cache
+    fake = FakeRedis()
+    fake.store["snh:menu:ver:10"] = "23"
+    with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
+        assert await menu_cache.get_menu_version(10) == 23
+        assert fake.store[menu_cache.menu_version_key(10)] == "23"
+        assert "{s10}" in menu_cache.menu_version_key(10)
