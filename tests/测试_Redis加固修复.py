@@ -505,3 +505,38 @@ async def test_reco_lock_acquire_release_uses_limit_dimension():
         assert fake.store.get(lock_key) == token
         await reco_cache.release_reco_lock(7, 3, "recommend_menu", "v1", owner_token=token, limit=5)
         assert lock_key not in fake.store
+
+
+@pytest.mark.asyncio
+async def test_delete_with_retry_does_not_retry_missing_key():
+    from app.core.redis_client import delete_with_retry
+
+    class MissingKeyRedis:
+        calls = 0
+
+        async def delete(self, *keys):
+            self.calls += 1
+            return 0
+
+    fake = MissingKeyRedis()
+    assert await delete_with_retry(fake, "snh:cache:missing") == 0
+    assert fake.calls == 1, "DEL 返回 0 是成功，不应重试不存在的键"
+
+
+@pytest.mark.asyncio
+async def test_delete_with_retry_retries_command_exception(monkeypatch):
+    from app.core.redis_client import delete_with_retry
+
+    class FlakyRedis:
+        calls = 0
+
+        async def delete(self, *keys):
+            self.calls += 1
+            if self.calls == 1:
+                raise ConnectionError("temporary Redis failure")
+            return 1
+
+    fake = FlakyRedis()
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    assert await delete_with_retry(fake, "snh:cache:key") == 1
+    assert fake.calls == 2
