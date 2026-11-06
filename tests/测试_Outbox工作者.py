@@ -1355,3 +1355,56 @@ async def test_resolve_stock_rejection_cancel_without_local_order(monkeypatch):
     assert db.execute.await_count == 4
     db.commit.assert_awaited_once()
     audit.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_resolve_auto_confirm_unknown_outbox_uses_payload_order_not_inbox_id():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=505,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after auto-confirm",
+        aggregate_type="webhook_task",
+        aggregate_id=9902,  # WebhookInbox.id, not Order.id
+        event_kind="deferred_0000",
+        payload=json.dumps({
+            "action": "confirm_order",
+            "platform": "ELEME",
+            "platform_order_id": "EL-701",
+            "store_id": 7,
+            "order_id": 701,
+            "rollback_on_fail": True,
+        }),
+    )
+    order = SimpleNamespace(id=701, store_id=7, status="CONFIRMED")
+    delivery_order = SimpleNamespace(
+        id=601, order_id=701, platform="ELEME",
+        platform_order_id="EL-701", delivery_status="ACCEPTED",
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+        MagicMock(rowcount=1),
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
+        await resolve_unknown_dead_letter(
+            505,
+            OutboxResolveIn(reason="平台核实已成功：饿了么已确认接单"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert order.status == "CONFIRMED"
+    assert delivery_order.delivery_status == "ACCEPTED"
+    assert db.execute.await_count == 4
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
