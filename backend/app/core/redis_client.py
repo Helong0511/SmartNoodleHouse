@@ -71,3 +71,18 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
+
+
+async def close_redis() -> None:
+    """关闭当前 Redis 客户端连接池；可重复调用。"""
+    global _redis
+    async with _lock:
+        client, _redis = _redis, None
+    if client is None:
+        return
+    try:
+        # redis-py 5.x 的异步客户端使用 aclose() 释放连接池。
+        await client.aclose()
+    except Exception:
+        # shutdown 阶段尽力释放；不能因 Redis 关闭异常阻断应用退出。
+        logger.exception("关闭 Redis 客户端失败")
