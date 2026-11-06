@@ -1,7 +1,7 @@
 <template>
   <div v-loading="loading" class="outbox-page">
     <el-alert
-      title="死信人工重放会将事件重新放入待处理队列。请先确认下游故障已修复；处理器必须保持幂等。"
+      title="外部结果未知的死信不会自动重试。必须先到平台核实：确认未执行才可重放；确认已执行则关闭死信。"
       type="warning"
       :closable="false"
       show-icon
@@ -41,15 +41,29 @@
       <el-table-column label="重试次数" width="110">
         <template #default="{ row }">{{ row.attempt_count }} / {{ row.max_attempts }}</template>
       </el-table-column>
+      <el-table-column label="外部结果" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="row.result_unknown" type="warning">结果未知</el-tag>
+          <span v-else>普通死信</span>
+        </template>
+      </el-table-column>
       <el-table-column label="最后错误" min-width="260" show-overflow-tooltip>
         <template #default="{ row }">{{ row.last_error || '—' }}</template>
       </el-table-column>
       <el-table-column label="最后更新" width="180">
         <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
-          <el-button type="warning" link :loading="replayingId === row.id" @click="replay(row)">
+          <template v-if="row.result_unknown">
+            <el-button type="success" link :loading="resolvingId === row.id" @click="resolveAsSuccess(row)">
+              核实已成功
+            </el-button>
+            <el-button type="warning" link :loading="replayingId === row.id" @click="replay(row)">
+              核实未执行后重放
+            </el-button>
+          </template>
+          <el-button v-else type="warning" link :loading="replayingId === row.id" @click="replay(row)">
             人工重放
           </el-button>
         </template>
@@ -76,6 +90,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listOutboxDeadLetters,
   replayOutboxDeadLetter,
+  resolveOutboxDeadLetter,
   type OutboxDeadLetter,
 } from '@/api/outbox'
 
@@ -85,6 +100,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const replayingId = ref<number | null>(null)
+const resolvingId = ref<number | null>(null)
 
 function formatDate(value: string | null) {
   if (!value) return '—'
@@ -113,18 +129,28 @@ function reload() {
 async function replay(row: OutboxDeadLetter) {
   try {
     const { value } = await ElMessageBox.prompt(
-      `将事件 #${row.id} 重新放入待处理队列。请填写故障修复情况或重放原因（至少 8 个字符）。`,
+      row.result_unknown
+        ? `事件 #${row.id} 的平台执行结果未知。请先登录对应外卖平台核实该订单操作确实没有执行；原因中必须包含“平台核实未执行”，否则系统拒绝重放。`
+        : `将事件 #${row.id} 重新放入待处理队列。请填写故障修复情况或重放原因（至少 8 个字符）。`,
       '确认人工重放',
       {
         confirmButtonText: '确认重放',
         cancelButtonText: '取消',
         inputType: 'textarea',
-        inputPlaceholder: '例如：已修复平台授权过期，确认下游接口恢复正常',
-        inputValidator: (value: string) => value.trim().length >= 8 || '原因至少需要 8 个字符',
+        inputPlaceholder: row.result_unknown
+          ? '平台核实未执行；订单仍待商家接单，现重新发起确认'
+          : '例如：已修复平台授权过期，确认下游接口恢复正常',
+        inputValidator: (value: string) => {
+          if (value.trim().length < 8) return '原因至少需要 8 个字符'
+          if (row.result_unknown && !value.includes('平台核实未执行')) {
+            return '结果未知事件必须先核实平台状态，并在原因中写入“平台核实未执行”'
+          }
+          return true
+        },
       },
     )
     replayingId.value = row.id
-    await replayOutboxDeadLetter(row.id, value.trim())
+    await replayOutboxDeadLetter(row.id, value.trim(), Boolean(row.result_unknown))
     ElMessage.success(`事件 #${row.id} 已重新排队`)
     await load()
   } catch (error: any) {
@@ -132,6 +158,31 @@ async function replay(row: OutboxDeadLetter) {
     ElMessage.error(error?.response?.data?.detail || error?.message || '重放失败')
   } finally {
     replayingId.value = null
+  }
+}
+
+async function resolveAsSuccess(row: OutboxDeadLetter) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `请确认已登录对应外卖平台核实订单操作已成功执行。关闭后系统不会再次发送该操作。`,
+      '核实外部操作已成功',
+      {
+        confirmButtonText: '确认关闭死信',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '例如：已在美团商家端确认订单接单成功，平台订单状态为已确认',
+        inputValidator: (value: string) => value.trim().length >= 8 || '核实说明至少需要 8 个字符',
+      },
+    )
+    resolvingId.value = row.id
+    await resolveOutboxDeadLetter(row.id, value.trim())
+    ElMessage.success(`事件 #${row.id} 已按外部平台成功结果关闭`)
+    await load()
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error?.response?.data?.detail || error?.message || '关闭死信失败')
+  } finally {
+    resolvingId.value = null
   }
 }
 
