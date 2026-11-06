@@ -57,6 +57,24 @@ BACKUP_MODULE = importlib.util.module_from_spec(BACKUP_SPEC)
 BACKUP_SPEC.loader.exec_module(BACKUP_MODULE)
 
 
+def test_backup_gzip_verification_rejects_empty_and_truncated_files(tmp_path):
+    empty = tmp_path / "empty.sql.gz"
+    with gzip.open(empty, "wb"):
+        pass
+    with pytest.raises(ValueError, match="为空"):
+        BACKUP_MODULE._verify_gzip_backup(empty)
+
+    valid = tmp_path / "valid.sql.gz"
+    with gzip.open(valid, "wb") as stream:
+        stream.write(b"SELECT 1;\\n" * 100)
+    assert BACKUP_MODULE._verify_gzip_backup(valid) == len(b"SELECT 1;\\n" * 100)
+
+    truncated = tmp_path / "truncated.sql.gz"
+    truncated.write_bytes(valid.read_bytes()[:-8])
+    with pytest.raises((EOFError, OSError)):
+        BACKUP_MODULE._verify_gzip_backup(truncated)
+
+
 def test_mysqldump_streaming_does_not_deadlock_when_stderr_is_large(tmp_path):
     output = tmp_path / "backup.sql.gz"
     sql = b"CREATE TABLE smoke_test (id INT);\\n"
