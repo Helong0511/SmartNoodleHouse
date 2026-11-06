@@ -1,6 +1,6 @@
 """美团 / 饿了么外卖接入 API"""
-from typing import Literal
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel
 from sqlalchemy import select
