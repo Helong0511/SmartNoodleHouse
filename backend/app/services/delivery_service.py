@@ -758,18 +758,39 @@ class DeliveryService:
         rider_name = parsed.get("rider_name") or raw.get("rider_name") or raw.get("courier_name")
         rider_phone = parsed.get("rider_phone") or raw.get("rider_phone") or raw.get("courier_phone")
 
-        d_order.logistics_status = str(logistics_status) if logistics_status else d_order.logistics_status
-        d_order.logistics_code = str(logistics_code) if logistics_code else d_order.logistics_code
-        if rider_name:
-            d_order.rider_name = str(rider_name)
-        if rider_phone:
-            d_order.rider_phone = str(rider_phone)
+        # 与 apply_order_status 的 Order 行锁使用相同串行化点：
+        # 并发完成/取消回调先后竞争时，迟到配送事件必须读取锁后的最新终态。
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == d_order.order_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        order_status = str(getattr(order, "status", "") or "").upper()
+        delivery_status = str(getattr(d_order, "delivery_status", "") or "").upper()
+        terminal_order = order_status in ("COMPLETED", "CANCELLED", "REFUNDED")
+        terminal_delivery = delivery_status in ("DONE", "COMPLETED", "CANCELLED", "REFUNDED")
+
+        # 配送回调可能乱序/重投。订单或外卖摘要已经进入终态时，
+        # 迟到的配送中事件不得把 DELIVERED/CANCELLED 等状态回退。
+        if not terminal_order and not terminal_delivery:
+            d_order.logistics_status = str(logistics_status) if logistics_status else d_order.logistics_status
+            d_order.logistics_code = str(logistics_code) if logistics_code else d_order.logistics_code
+            if rider_name:
+                d_order.rider_name = str(rider_name)
+            if rider_phone:
+                d_order.rider_phone = str(rider_phone)
         d_order.last_sync_at = now_local()
 
-        order = await db.get(Order, d_order.order_id)
         # 仅向前推进：配送中 → 制作中；勿把 READY/COOKING 倒退
-        if order and str(logistics_status).upper() in ("DELIVERING", "RIDER_TAKE", "PICKUP", "配送中"):
-            if order.status in ("PAID", "CONFIRMED"):
+        if (
+            not terminal_order
+            and not terminal_delivery
+            and order
+            and str(logistics_status).upper() in ("DELIVERING", "RIDER_TAKE", "PICKUP", "配送中")
+        ):
+            if order_status in ("PAID", "CONFIRMED"):
                 from app.services.order_lifecycle import apply_order_status
 
                 await apply_order_status(

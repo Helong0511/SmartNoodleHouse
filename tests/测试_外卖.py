@@ -506,3 +506,63 @@ async def test_late_delivery_cancel_callback_does_not_override_other_terminal_st
     assert result is order
     assert d_order.delivery_status == "DONE"
     db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "order_status,delivery_status",
+    [
+        ("COMPLETED", "ACCEPTED"),
+        ("CANCELLED", "ACCEPTED"),
+        ("REFUNDED", "ACCEPTED"),
+        ("PREPARING", "DONE"),
+        ("PREPARING", "CANCELLED"),
+    ],
+)
+async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
+    monkeypatch, order_status, delivery_status
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    d_order = SimpleNamespace(
+        id=95,
+        order_id=105,
+        delivery_status=delivery_status,
+        logistics_status="DELIVERED" if delivery_status == "DONE" else "CANCELLED",
+        logistics_code="FINAL",
+        rider_name="已确认骑手",
+        rider_phone="13800000000",
+        last_sync_at=None,
+    )
+    order = SimpleNamespace(id=105, status=order_status)
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=SimpleNamespace(scalar_one_or_none=lambda: order)
+    )
+    db.flush = AsyncMock()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=d_order)
+    )
+
+    result = await DeliveryService._handle_delivery(
+        db,
+        "MEITUAN",
+        {
+            "platform_order_id": "PLATFORM-105",
+            "logistics_status": "DELIVERING",
+            "logistics_code": "STALE",
+            "rider_name": "迟到的旧骑手",
+            "rider_phone": "13900000000",
+        },
+        {},
+    )
+
+    assert result is order
+    assert d_order.logistics_status in ("DELIVERED", "CANCELLED")
+    assert d_order.logistics_code == "FINAL"
+    assert d_order.rider_name == "已确认骑手"
+    assert d_order.rider_phone == "13800000000"
+    assert d_order.last_sync_at is not None
+    db.flush.assert_awaited_once()
