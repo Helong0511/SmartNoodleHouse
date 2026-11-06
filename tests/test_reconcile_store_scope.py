@@ -91,6 +91,11 @@ async def test_store_admin_cannot_read_other_store_reconciliation_or_archive(db_
                 )
                 assert archived.status_code == 200, archived.text
                 assert archived.json()["data"]["total"] == 0
+
+                archived_detail = await client.get(
+                    "/api/reconcile/orders/archived/ARCHIVE-OTHER-STORE"
+                )
+                assert archived_detail.status_code == 404, archived_detail.text
     finally:
         app.dependency_overrides.clear()
 
