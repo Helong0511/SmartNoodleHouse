@@ -261,3 +261,30 @@ async def test_enqueue_webhook_adds_row_inside_savepoint_before_flush():
     assert is_new is True
     assert row is not None
     assert events == ["savepoint_enter", "add", "flush", "savepoint_exit"]
+
+
+def test_make_event_id_without_provider_id_is_stable_across_json_formatting():
+    import json
+
+    from app.services.webhook_inbox import make_event_id
+
+    raw_a = {
+        "order_id": "order-1",
+        "status": "DELIVERING",
+        "logistics": {"rider": "A", "code": "10"},
+    }
+    raw_b = {
+        "logistics": {"code": "10", "rider": "A"},
+        "status": "DELIVERING",
+        "order_id": "order-1",
+    }
+    body_a = json.dumps(raw_a, separators=(",", ":")).encode("utf-8")
+    body_b = json.dumps(raw_b, ensure_ascii=False, indent=2).encode("utf-8")
+
+    assert make_event_id("MEITUAN", raw_a, body_a) == make_event_id(
+        "MEITUAN", raw_b, body_b
+    )
+    changed = {**raw_b, "status": "DELIVERED"}
+    assert make_event_id("MEITUAN", changed, json.dumps(changed).encode()) != make_event_id(
+        "MEITUAN", raw_a, body_a
+    )
