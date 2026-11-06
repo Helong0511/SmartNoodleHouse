@@ -617,6 +617,28 @@ def test_refund_reconciliation_handlers_are_registered():
 
 
 @pytest.mark.asyncio
+async def test_outbox_heartbeat_fails_closed_after_sustained_database_errors(monkeypatch):
+    from app.services import outbox_worker
+
+    class BrokenSession:
+        async def __aenter__(self):
+            raise RuntimeError("database unavailable")
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", BrokenSession)
+    monkeypatch.setattr(outbox_worker, "LEASE_HEARTBEAT_MAX_FAILURE_SEC", 0)
+    monkeypatch.setattr(outbox_worker.asyncio, "sleep", AsyncMock())
+
+    owned = await outbox_worker._heartbeat_outbox_lease(
+        501, "worker-token", interval=1
+    )
+
+    assert owned is False
+
+
+@pytest.mark.asyncio
 async def test_handler_is_cancelled_when_lease_is_lost(monkeypatch):
     """租约 owner 已变更时，旧 handler 必须被取消，不能继续写 DONE。"""
     started = asyncio.Event()
