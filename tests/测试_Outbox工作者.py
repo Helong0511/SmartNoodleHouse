@@ -1057,7 +1057,7 @@ async def test_legacy_deferred_confirm_does_not_rollback_on_read_timeout(monkeyp
     request = httpx.Request("POST", "https://platform.invalid/confirm")
     provider = MagicMock()
 
-    async def timeout():
+    async def timeout(_platform_order_id):
         raise httpx.ReadTimeout("response lost", request=request)
 
     provider.confirm_order = timeout
