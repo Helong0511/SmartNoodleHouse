@@ -443,6 +443,8 @@ export const DELIVERY_REFUND_STATUS: Record<string, string> = {
 
 export const REFUND_APPLY_STATUS: Record<string, string> = {
   PENDING: '待审核',
+  PROCESSING: '平台处理中（需核实）',
+  APPROVED_LEDGER_PENDING: '平台已退款，待补记账',
   APPROVED: '已同意',
   REJECTED: '已拒绝',
   SUCCESS: '已完成',

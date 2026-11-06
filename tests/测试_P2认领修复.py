@@ -24,8 +24,11 @@ async def test_handle_refund_dedup_uses_savepoint_on_conflict():
     order = SimpleNamespace(id=9, total_amount=100)
 
     db = MagicMock()
-    # _get_delivery_order 被 patch，db.get 仅用于 db.get(Order, 9)
-    db.get = AsyncMock(return_value=order)
+    # 回调统一先锁 Order，再锁 DeliveryOrder。
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+    ])
 
     # begin_nested 返回一个真正的 async context manager
     class _NestedCtx:
@@ -63,7 +66,10 @@ async def test_handle_refund_without_refund_id_inserts_directly():
     order = SimpleNamespace(id=9, total_amount=100)
 
     db = MagicMock()
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+    ])
     db.add = MagicMock()
     db.flush = AsyncMock()
     db.begin_nested = MagicMock()
@@ -97,9 +103,17 @@ async def test_process_refund_approve_platform_rejects_keeps_pending():
     d_order = SimpleNamespace(id=2, order_id=9, platform_order_id="po1", refund_status=None)
 
     db = MagicMock()
-    locked_result = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
-    db.execute = AsyncMock(return_value=locked_result)
-    db.get = AsyncMock(side_effect=[d_order, order, d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund hint
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund lock
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no pending cancel intent
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order re-lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder re-lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund re-lock
+    ])
+    db.get = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
 
@@ -134,9 +148,17 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
     d_order = SimpleNamespace(id=2, order_id=9, platform_order_id="po1")
 
     db = MagicMock()
-    locked_result = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
-    db.execute = AsyncMock(return_value=locked_result)
-    db.get = AsyncMock(side_effect=[d_order, order, d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund hint
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund lock
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no pending cancel intent
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order re-lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder re-lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund re-lock
+    ])
+    db.get = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
 

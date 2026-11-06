@@ -9,6 +9,7 @@ export interface OutboxDeadLetter {
   attempt_count: number
   max_attempts: number
   last_error: string
+  result_unknown?: boolean
   created_at: string | null
   updated_at: string | null
 }
@@ -27,6 +28,13 @@ export function listOutboxDeadLetters(page = 1, pageSize = 20) {
   }) as Promise<{ data: OutboxDeadLetterPage }>
 }
 
-export function replayOutboxDeadLetter(id: number, reason: string) {
-  return api.post(`/admin/outbox/dead-letters/${id}/replay`, { reason })
+export function replayOutboxDeadLetter(id: number, reason: string, confirmedNotApplied = false) {
+  return api.post(`/admin/outbox/dead-letters/${id}/replay`, {
+    reason,
+    confirmed_not_applied: confirmedNotApplied,
+  })
+}
+
+export function resolveOutboxDeadLetter(id: number, reason: string) {
+  return api.post(`/admin/outbox/dead-letters/${id}/resolve`, { reason })
 }

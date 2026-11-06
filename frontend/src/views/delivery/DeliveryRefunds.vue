@@ -6,8 +6,11 @@
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
-      <el-select v-model="refundFilter" placeholder="状态" clearable style="width: 120px" @change="reloadRefunds">
+      <el-select v-model="refundFilter" placeholder="全部状态" clearable style="width: 150px" @change="reloadRefunds">
+        <el-option label="全部状态（含待核实）" value="" />
         <el-option label="待审核" value="PENDING" />
+        <el-option label="平台处理中（需核实）" value="PROCESSING" />
+        <el-option label="待补记账" value="APPROVED_LEDGER_PENDING" />
         <el-option label="已同意" value="APPROVED" />
         <el-option label="已拒绝" value="REJECTED" />
       </el-select>
@@ -39,7 +42,7 @@
       <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.status === 'PENDING' ? 'danger' : 'info'">
+          <el-tag size="small" :type="row.status === 'PENDING' ? 'danger' : row.status === 'PROCESSING' || row.status === 'APPROVED_LEDGER_PENDING' ? 'warning' : 'info'">
             {{ label(REFUND_APPLY_STATUS, row.status) }}
           </el-tag>
         </template>
@@ -47,12 +50,24 @@
       <el-table-column label="申请时间" width="150">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="250" fixed="right">
         <template #default="{ row }">
           <template v-if="row.status === 'PENDING' && canHandleRefund">
             <el-button size="small" type="success" @click="handleRefund(row.id, 'approve')">同意</el-button>
             <el-button size="small" type="danger" @click="askRejectRefund(row)">拒绝</el-button>
           </template>
+          <el-button
+            v-else-if="row.status === 'APPROVED_LEDGER_PENDING' && canHandleRefund"
+            size="small"
+            type="warning"
+            @click="handleRefund(row.id, 'approve', undefined, true)"
+          >补记账</el-button>
+          <div v-else-if="row.status === 'PROCESSING' && auth.isSuperAdmin" class="reconcile-actions">
+            <el-button size="small" type="success" @click="reconcileRefund(row, 'platform_succeeded')">核实已退款</el-button>
+            <el-button size="small" type="warning" @click="reconcileRefund(row, 'platform_not_applied')">核实未执行</el-button>
+          </div>
+          <span v-else-if="row.status === 'PROCESSING'" class="muted">请超级管理员核实平台结果，禁止重复退款</span>
+          <span v-else-if="row.status === 'APPROVED_LEDGER_PENDING'" class="muted">仅有退款权限的人员可补记账</span>
           <span v-else-if="row.status === 'PENDING'" class="muted">仅店长可处理</span>
           <span v-else class="muted">已处理</span>
         </template>
@@ -77,7 +92,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 import { useStoreOptions } from '@/composables/useStoreOptions'
 import { useAuthStore } from '@/stores/auth'
@@ -94,7 +109,8 @@ const boundStoreName = computed(() => {
 })
 
 const refunds = ref<any[]>([])
-const refundFilter = ref('PENDING')
+// 默认展示全部状态，避免 PROCESSING/待补账记录被默认“待审核”筛选隐藏。
+const refundFilter = ref('')
 const platformFilter = ref('')
 const keyword = ref('')
 const dateRange = ref<string[] | null>(null)
@@ -168,16 +184,59 @@ async function jumpToLatest() {
   await loadRefunds()
 }
 
-async function handleRefund(id: number, action: 'approve' | 'reject', reason?: string) {
+async function handleRefund(
+  id: number,
+  action: 'approve' | 'reject',
+  reason?: string,
+  ledgerRecovery = false,
+) {
   try {
     await api.post(`/delivery/refunds/${id}/action`, {
       action,
       reason: action === 'approve' ? undefined : reason || '商家拒绝',
     })
-    ElMessage.success(action === 'approve' ? '已同意退款' : '已拒绝退款')
+    ElMessage.success(ledgerRecovery ? '财务分录补记成功' : action === 'approve' ? '已同意退款' : '已拒绝退款')
     await loadRefunds()
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
+  }
+}
+
+async function reconcileRefund(
+  row: any,
+  action: 'platform_succeeded' | 'platform_not_applied',
+) {
+  const succeeded = action === 'platform_succeeded'
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请填写平台后台核实依据，至少 8 个字；建议包含平台退款单号、平台状态和核实时间。',
+      succeeded ? '核实平台已退款成功' : '核实平台尚未执行退款',
+      {
+        inputType: 'textarea',
+        inputPlaceholder: '例如：平台退款单 RFxxxx 状态为 SUCCESS，核实时间 2026-11-06 10:30',
+        inputValidator: (value: string) => value.trim().length >= 8,
+        inputErrorMessage: '核实依据至少填写 8 个字',
+        confirmButtonText: '确认核实并恢复',
+        cancelButtonText: '取消',
+      },
+    )
+    const prefix = succeeded ? '平台核实已成功：' : '平台核实未执行：'
+    const result = await api.post('/delivery/refunds/' + row.id + '/reconcile', {
+      action,
+      reason: prefix + value.trim(),
+    })
+    ElMessage.success(
+      succeeded
+        ? (result.data?.status === 'APPROVED' ? '退款账务已完成核对' : '已记录平台成功，财务分录待补记')
+        : '已恢复待审核状态，可在确认安全后重新处理',
+    )
+    await loadRefunds()
+  } catch (e: any) {
+    // 即使补记账失败，后端也已持久化 APPROVED_LEDGER_PENDING；刷新显示真实状态。
+    await loadRefunds()
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(e.message || '退款结果核实失败')
+    }
   }
 }
 
@@ -261,5 +320,11 @@ onUnmounted(() => {
 
 .muted {
   color: #c0c4cc;
+}
+
+.reconcile-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
 }
 </style>

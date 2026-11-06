@@ -21,6 +21,7 @@ from app.models import (
     DeliveryOrder,
     DeliveryProductMap,
     DeliveryRefund,
+    OutboxEvent,
     DeliverySyncAlert,
     Option,
     OptionGroup,
@@ -39,6 +40,7 @@ from app.services.delivery_events import (
 )
 from app.services.delivery_providers import get_delivery_provider
 from app.services.product_sync_service import ProductSyncService
+from app.services.outbox_worker import enqueue_outbox
 
 logger = logging.getLogger(__name__)
 
@@ -662,11 +664,45 @@ class DeliveryService:
         return result.scalar_one_or_none()
 
     @classmethod
+    async def _lock_delivery_order_context(
+        cls, db: AsyncSession, d_order: DeliveryOrder
+    ) -> tuple[Order | None, DeliveryOrder | None]:
+        """所有外卖状态回调统一锁序：Order → DeliveryOrder。
+
+        先普通读取 DeliveryOrder 只用于取得 order_id；任何写入前都重新按关联条件加锁，
+        避免与商家取消/退款流程产生反向锁序或使用已变更的关联关系。
+        """
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(d_order.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not order:
+            return None, None
+        locked_delivery = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.id == int(d_order.id),
+                    DeliveryOrder.order_id == int(order.id),
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not locked_delivery:
+            return None, None
+        return order, locked_delivery
+
+    @classmethod
     async def _handle_cancel(cls, db: AsyncSession, platform: str, platform_order_id: str, raw: dict | None = None) -> Order | None:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None
-        order = await db.get(Order, d_order.order_id)
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
         if order:
             if str(order.status or "").upper() not in ("COMPLETED", "CANCELLED", "REFUNDED"):
                 from app.services.order_lifecycle import apply_order_status
@@ -692,8 +728,8 @@ class DeliveryService:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None
-        order = await db.get(Order, d_order.order_id)
-        if order:
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
+        if order and d_order:
             if str(order.status or "").upper() not in ("COMPLETED", "CANCELLED", "REFUNDED"):
                 from app.services.order_lifecycle import apply_order_status
 
@@ -720,8 +756,8 @@ class DeliveryService:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None
-        order = await db.get(Order, d_order.order_id)
-        if order and order.status == "PAID":
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
+        if order and d_order and order.status == "PAID":
             from app.services.order_lifecycle import apply_order_status
 
             await apply_order_status(
@@ -786,13 +822,9 @@ class DeliveryService:
 
         # 与 apply_order_status 的 Order 行锁使用相同串行化点：
         # 并发完成/取消回调先后竞争时，迟到配送事件必须读取锁后的最新终态。
-        order = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == d_order.order_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
+        if not order or not d_order:
+            return None
         order_status = str(getattr(order, "status", "") or "").upper()
         delivery_status = str(getattr(d_order, "delivery_status", "") or "").upper()
         terminal_order = order_status in ("COMPLETED", "CANCELLED", "REFUNDED")
@@ -850,7 +882,30 @@ class DeliveryService:
         if not d_order:
             return None
 
-        order = await db.get(Order, d_order.order_id)
+        # 回调退款意图也先锁 Order，再锁 DeliveryOrder，与商家取消/退款审批保持统一锁序。
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(d_order.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not order:
+            raise AppException(40463, "外卖退款回调关联订单不存在")
+        d_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.id == int(d_order.id),
+                    DeliveryOrder.order_id == int(order.id),
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not d_order:
+            raise AppException(40463, "外卖退款回调关联关系已变化")
         refund_id = str(
             raw.get("refund_id") or raw.get("refundId") or raw.get("refund_no")
             or raw.get("refundNo") or raw.get("out_refund_no") or parsed.get("refund_id") or ""
@@ -925,6 +980,62 @@ class DeliveryService:
         return order
 
     @classmethod
+    async def _has_pending_cancel_intent(
+        cls,
+        db: AsyncSession,
+        *,
+        order_id: int,
+        store_id: int,
+        platform: str,
+        platform_order_id: str,
+    ) -> bool:
+        """检查所有 webhook deferred cancel 意图，不依赖 aggregate_id 的历史差异。
+
+        商家主动取消以 delivery_order_id 作为 aggregate_id；库存拒单回调则以
+        WebhookInbox.id 作为 aggregate_id。必须同时按本地 order_id 和平台订单号关联。
+        """
+        rows = (
+            await db.execute(
+                select(OutboxEvent.payload)
+                .where(
+                    OutboxEvent.aggregate_type == "webhook_task",
+                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "FAILED")),
+                    OutboxEvent.event_kind.like("deferred_%"),
+                    OutboxEvent.payload.like("%cancel_order%"),
+                )
+                # MySQL 默认 REPEATABLE READ 下，前面的 hint SELECT 可能已建立旧快照；
+                # 必须用 locking/current read 看见等待 Order 锁期间刚提交的取消意图。
+                .with_for_update()
+            )
+        ).scalars().all()
+        for raw_payload in rows:
+            try:
+                payload = json.loads(raw_payload or "{}")
+            except (TypeError, ValueError):
+                # 候选取消事件无法解析时 fail closed，避免绕过退款互斥。
+                return True
+            if not isinstance(payload, dict) or str(payload.get("action") or "").lower() != "cancel_order":
+                continue
+            try:
+                payload_order_id = int(payload.get("order_id") or 0)
+            except (TypeError, ValueError):
+                return True
+            payload_platform = str(payload.get("platform") or "").upper()
+            payload_platform_order_id = str(payload.get("platform_order_id") or "")
+            try:
+                payload_store_id = int(payload.get("store_id") or 0)
+            except (TypeError, ValueError):
+                return True
+            if payload_order_id == int(order_id) or (
+                payload_platform == str(platform or "").upper()
+                and payload_platform_order_id
+                and payload_platform_order_id == str(platform_order_id or "")
+                and payload_store_id == int(store_id)
+            ):
+                return True
+        return False
+
+    @classmethod
     async def process_refund(
         cls,
         db: AsyncSession,
@@ -932,23 +1043,80 @@ class DeliveryService:
         approve: bool,
         reason: str | None = None,
     ) -> dict:
-        """处理外卖退款：短锁认领 PROCESSING → 锁外调平台 → 短锁落终态。
+        """订单级互斥处理退款：Order → DeliveryOrder → DeliveryRefund。
 
-        避免在 DeliveryRefund 行锁内等待美团/饿了么 HTTP。
+        先锁订单行，再认领退款意图；与商家取消创建 Outbox 使用同一串行化点。
+        外部平台 HTTP 仍在事务提交、释放行锁之后执行。
         """
-        refund = (
+        hint = (
             await db.execute(
-                select(DeliveryRefund).where(DeliveryRefund.id == int(refund_id)).with_for_update()
+                select(DeliveryRefund).where(DeliveryRefund.id == int(refund_id))
             )
         ).scalar_one_or_none()
-        if not refund:
+        if not hint:
             raise AppException(40453, "退款记录不存在")
+        order_id = int(hint.order_id)
+        delivery_order_id = int(hint.delivery_order_id)
+
+        async def lock_context():
+            order_row = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == order_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if not order_row:
+                raise AppException(40454, "关联订单不存在，无法处理外卖退款")
+            delivery_row = (
+                await db.execute(
+                    select(DeliveryOrder)
+                    .where(
+                        DeliveryOrder.id == delivery_order_id,
+                        DeliveryOrder.order_id == order_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if not delivery_row:
+                raise AppException(40454, "关联外卖订单不存在，无法处理退款")
+            refund_row = (
+                await db.execute(
+                    select(DeliveryRefund)
+                    .where(
+                        DeliveryRefund.id == int(refund_id),
+                        DeliveryRefund.order_id == order_id,
+                        DeliveryRefund.delivery_order_id == delivery_order_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if not refund_row:
+                raise AppException(40453, "退款记录不存在或关联关系已变化")
+            return order_row, delivery_row, refund_row
+
+        order, d_order, refund = await lock_context()
+
         if refund.status == "APPROVED_LEDGER_PENDING":
             # 平台已确认退款，但本地财务分录上次写入失败；只补记账，绝不再次调用平台退款接口。
-            d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
-            order = await db.get(Order, refund.order_id) if refund.order_id else None
-            if not order:
-                raise AppException(40454, "关联订单不存在，无法补记退款分录")
+            # 全额退款还必须补齐 Order/DeliveryOrder 终态，避免只记账却仍显示待配送。
+            if refund.refund_type == "FULL":
+                if order.status not in ("CANCELLED", "REFUNDED"):
+                    from app.services.order_lifecycle import apply_order_status
+
+                    await apply_order_status(
+                        db,
+                        order,
+                        "REFUNDED",
+                        source="DELIVERY",
+                        payment_status="REFUNDED",
+                        assert_kind="SYSTEM",
+                        remark="外卖全额退款平台结果人工核实成功",
+                    )
+                d_order.delivery_status = "CANCELLED"
             from app.services.financial_ledger_service import FinancialLedgerService
 
             try:
@@ -959,49 +1127,70 @@ class DeliveryService:
                     channel=refund.platform or getattr(order, "channel", None),
                     provider=refund.platform,
                     order_id=order.id,
-                    delivery_order_id=refund.delivery_order_id,
+                    delivery_order_id=delivery_order_id,
                     delivery_refund_id=refund.id,
                     remark=f"delivery_refund:{refund.platform}:{refund.platform_refund_id or refund.id}",
                 )
                 refund.status = "APPROVED"
                 refund.handled_at = now_local()
-                if d_order:
-                    d_order.refund_status = "APPROVED"
+                d_order.refund_status = "APPROVED"
                 await db.commit()
-                return {"ok": True, "status": "APPROVED", "refund_type": refund.refund_type, "ledger_recovered": True}
+                return {
+                    "ok": True,
+                    "status": "APPROVED",
+                    "refund_type": refund.refund_type,
+                    "ledger_recovered": True,
+                }
             except Exception as exc:
                 await db.rollback()
                 logger.exception("外卖退款财务分录补记失败 delivery_refund_id=%s", refund.id)
-                raise AppException(50354, "平台退款已成功，但财务分录仍待补记；请稍后重试补记账，不要重复退款") from exc
+                raise AppException(
+                    50354,
+                    "平台退款已成功，但财务分录仍待补记；请稍后重试补记账，不要重复退款",
+                ) from exc
 
         if refund.status in ("APPROVED", "REJECTED"):
             raise AppException(40053, f"退款已处理: {refund.status}")
         if refund.status == "PROCESSING":
-            raise AppException(40953, "退款正在平台处理中，请勿重复提交；请先核对平台退款结果")
+            raise AppException(
+                40953,
+                "退款正在平台处理中，请勿重复提交；请先核对平台退款结果",
+                status_code=409,
+            )
         if refund.status != "PENDING":
             raise AppException(40053, f"退款当前状态不可处理: {refund.status}")
 
-        d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
-        order = await db.get(Order, refund.order_id) if refund.order_id else None
-        if not order:
-            raise AppException(40454, "关联订单不存在，无法处理外卖退款")
+        # 仅在准备发起新的平台退款操作时检查取消意图。
+        # APPROVED_LEDGER_PENDING 是平台已确认退款成功后的本地补账，绝不能被取消 Outbox 阻断。
+        platform = str(refund.platform or "").upper()
+        platform_order_id = str(d_order.platform_order_id or "")
+        cancel_pending = await cls._has_pending_cancel_intent(
+            db,
+            order_id=order_id,
+            store_id=int(order.store_id),
+            platform=platform,
+            platform_order_id=platform_order_id,
+        )
+        if cancel_pending:
+            raise AppException(
+                40955,
+                "该外卖订单已有取消请求或取消结果待核实，暂不能处理退款",
+                status_code=409,
+            )
+
         store_id = int(order.store_id)
         credentials = await get_credentials_for_store(db, refund.platform, store_id)
         if not credentials:
             raise AppException(40061, f"门店 {store_id} 未配置 {refund.platform} 外卖凭证")
 
-        platform = refund.platform
         platform_refund_id = refund.platform_refund_id or ""
-        platform_order_id = d_order.platform_order_id if d_order else ""
         refund_type = refund.refund_type
         refund_amount = refund.amount
-        delivery_order_id = refund.delivery_order_id
         order_channel = getattr(order, "channel", None)
 
-        # 认领后立刻释放行锁，再调平台
-        if refund.status == "PENDING":
-            refund.status = "PROCESSING"
-            await db.flush()
+        # 将退款意图持久化后释放 Order/DeliveryOrder/DeliveryRefund 行锁，再调平台。
+        refund.status = "PROCESSING"
+        await db.flush()
         await db.commit()
 
         provider = get_delivery_provider(platform, credentials)
@@ -1015,131 +1204,172 @@ class DeliveryService:
                     reason or "商家拒绝退款",
                 )
         except Exception as exc:
-            # 网络超时/连接中断时平台可能已受理；保持 PROCESSING，禁止盲目重试造成重复退款。
             logger.exception("外卖退款平台结果不确定，保留 PROCESSING refund_id=%s", refund_id)
-            raise AppException(50353, "平台退款结果暂不确定，退款单已锁定处理中，请先查询平台结果") from exc
+            raise AppException(
+                50353,
+                "平台退款结果暂不确定，退款单已锁定处理中，请先查询平台结果",
+            ) from exc
 
-        refund = (
-            await db.execute(
-                select(DeliveryRefund).where(DeliveryRefund.id == int(refund_id)).with_for_update()
-            )
-        ).scalar_one_or_none()
-        if not refund:
-            raise AppException(40453, "退款记录不存在")
+        # 平台调用结束后仍使用相同锁序；PROCESSING 意图阻止商家取消抢占。
+        order, d_order, refund = await lock_context()
         if refund.status in ("APPROVED", "REJECTED"):
             return {"ok": True, "status": refund.status, "refund_type": refund.refund_type}
         if refund.status != "PROCESSING":
             raise AppException(40053, f"退款已处理: {refund.status}")
 
         if not ok:
-            # 平台拒绝：回 PENDING 供商家重试
             refund.status = "PENDING"
             await db.flush()
             await db.commit()
-            raise AppException(40062, "平台拒绝同意退款，请稍后重试或联系平台" if approve else "平台拒绝退款拒绝操作，请稍后重试或联系平台")
-
-        d_order = await db.get(DeliveryOrder, delivery_order_id)
-        order = await db.get(Order, refund.order_id) if refund.order_id else None
+            raise AppException(
+                40062,
+                "平台拒绝同意退款，请稍后重试或联系平台"
+                if approve
+                else "平台拒绝退款拒绝操作，请稍后重试或联系平台",
+            )
 
         if approve:
             refund.status = "APPROVED"
-            if d_order:
-                d_order.refund_status = "APPROVED"
-                order = await db.get(Order, d_order.order_id)
-                if order and refund_type == "FULL" and order.status not in ("CANCELLED", "REFUNDED"):
-                    from app.services.order_lifecycle import apply_order_status
+            d_order.refund_status = "APPROVED"
+            if refund_type == "FULL" and order.status not in ("CANCELLED", "REFUNDED"):
+                from app.services.order_lifecycle import apply_order_status
 
-                    await apply_order_status(
-                        db,
-                        order,
-                        "REFUNDED",
-                        source="DELIVERY",
-                        payment_status="REFUNDED",
-                        assert_kind="SYSTEM",
-                        remark="外卖全额退款同意",
-                    )
-                    d_order.delivery_status = "CANCELLED"
-            if order:
-                try:
-                    from app.services.financial_ledger_service import FinancialLedgerService
+                await apply_order_status(
+                    db,
+                    order,
+                    "REFUNDED",
+                    source="DELIVERY",
+                    payment_status="REFUNDED",
+                    assert_kind="SYSTEM",
+                    remark="外卖全额退款同意",
+                )
+                d_order.delivery_status = "CANCELLED"
+            try:
+                from app.services.financial_ledger_service import FinancialLedgerService
 
-                    await FinancialLedgerService.record_refund(
-                        db,
-                        store_id=int(order.store_id),
-                        amount=refund_amount,
-                        channel=platform or order_channel,
-                        provider=platform,
-                        order_id=order.id,
-                        delivery_order_id=delivery_order_id,
-                        delivery_refund_id=refund.id,
-                        remark=f"delivery_refund:{platform}:{platform_refund_id or refund.id}",
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "外卖 REFUND 入账失败 delivery_refund_id=%s order_id=%s",
-                        refund.id,
-                        order.id,
-                    )
-                    # 平台退款已成功，不能回滚为 PENDING 或再次请求平台。
-                    # 持久化专用待补账状态；同一审批入口重试时只重试本地幂等分录。
-                    refund.status = "APPROVED_LEDGER_PENDING"
-                    if d_order:
-                        d_order.refund_status = "APPROVED_LEDGER_PENDING"
-                    await db.flush()
-                    await db.commit()
-                    raise AppException(50354, "平台退款已成功，但财务分录写入失败；请重试补记账，不要再次退款") from exc
+                await FinancialLedgerService.record_refund(
+                    db,
+                    store_id=int(order.store_id),
+                    amount=refund_amount,
+                    channel=platform or order_channel,
+                    provider=platform,
+                    order_id=order.id,
+                    delivery_order_id=delivery_order_id,
+                    delivery_refund_id=refund.id,
+                    remark=f"delivery_refund:{platform}:{platform_refund_id or refund.id}",
+                )
+            except Exception as exc:
+                logger.exception(
+                    "外卖 REFUND 入账失败 delivery_refund_id=%s order_id=%s",
+                    refund.id,
+                    order.id,
+                )
+                refund.status = "APPROVED_LEDGER_PENDING"
+                d_order.refund_status = "APPROVED_LEDGER_PENDING"
+                await db.flush()
+                await db.commit()
+                raise AppException(
+                    50354,
+                    "平台退款已成功，但财务分录写入失败；请重试补记账，不要再次退款",
+                ) from exc
         else:
             refund.status = "REJECTED"
-            if d_order:
-                d_order.refund_status = "REJECTED"
+            d_order.refund_status = "REJECTED"
 
         refund.handled_at = now_local()
         await db.flush()
-        # 平台操作和财务分录已经完成；先持久化退款终态，后续审计日志失败不能回滚资金状态。
         await db.commit()
         return {"ok": ok, "status": refund.status, "refund_type": refund.refund_type}
 
     @classmethod
     async def cancel_by_merchant(cls, db: AsyncSession, delivery_order_id: int, reason: str) -> dict:
-        d_order = await db.get(DeliveryOrder, delivery_order_id)
-        if not d_order:
+        """商家取消采用事务型 Outbox：先持久化意图，再由 worker 调用平台。"""
+        # 统一采用 Order → DeliveryOrder 的加锁顺序。
+        # 配送回调先锁 Order 再更新 DeliveryOrder；反过来锁会形成死锁环。
+        order_id = (
+            await db.execute(
+                select(DeliveryOrder.order_id).where(DeliveryOrder.id == int(delivery_order_id))
+            )
+        ).scalar_one_or_none()
+        if not order_id:
             raise AppException(40454, "外卖订单不存在")
-        order = await db.get(Order, d_order.order_id)
+        order = (
+            await db.execute(
+                select(Order).where(Order.id == int(order_id)).with_for_update()
+            )
+        ).scalar_one_or_none()
         if not order:
             raise AppException(40454, "关联订单不存在，无法取消外卖单")
+        d_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.id == int(delivery_order_id),
+                    DeliveryOrder.order_id == int(order.id),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not d_order:
+            raise AppException(40954, "外卖订单关联关系已变化，请刷新后重试")
         if order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
             raise AppException(40054, "订单已结束，无法取消")
 
+        # 与退款认领共用 Order 行锁：存在退款审核/平台处理中/待补账/已批准记录时拒绝取消。
+        refund_conflict = (
+            await db.execute(
+                select(DeliveryRefund.id, DeliveryRefund.status)
+                .where(
+                    DeliveryRefund.delivery_order_id == int(delivery_order_id),
+                    DeliveryRefund.status.in_(
+                        ("PENDING", "PROCESSING", "APPROVED_LEDGER_PENDING", "APPROVED")
+                    ),
+                )
+                .limit(1)
+            )
+        ).first()
+        if refund_conflict:
+            raise AppException(
+                40956,
+                "该外卖订单已有退款申请、退款处理中或已退款记录，暂不能发起取消",
+                status_code=409,
+            )
+
         store_id = int(order.store_id)
-        platform = d_order.platform
-        platform_order_id = d_order.platform_order_id
+        platform = str(d_order.platform or "").upper()
+        platform_order_id = str(d_order.platform_order_id or "")
         order_id = int(order.id)
+        if platform not in {"MEITUAN", "ELEME"} or not platform_order_id:
+            raise AppException(40062, "外卖平台订单信息不完整，无法取消")
         credentials = await get_credentials_for_store(db, platform, store_id)
         if not credentials:
             raise AppException(40061, f"门店 {store_id} 未配置 {platform} 外卖凭证")
-        # 平台取消 HTTP 与本地落库分离，避免长事务拖住连接
-        await db.commit()
-        provider = get_delivery_provider(platform, credentials)
-        ok = await provider.cancel_order(platform_order_id, reason)
-        if ok:
-            from app.services.order_lifecycle import apply_order_status
 
-            order = await db.get(Order, order_id)
-            d_order = await db.get(DeliveryOrder, delivery_order_id)
-            if order and order.status not in ("COMPLETED", "CANCELLED", "REFUNDED"):
-                await apply_order_status(
-                    db,
-                    order,
-                    "CANCELLED",
-                    source="DELIVERY",
-                    assert_kind="SYSTEM",
-                    remark=reason or "商家取消",
-                )
-            if d_order:
-                d_order.delivery_status = "CANCELLED"
-                d_order.last_sync_at = now_local()
-            await db.flush()
-        return {"ok": ok, "order_id": order_id}
+        # 唯一键 (webhook_task, delivery_order_id, deferred_cancel_order)
+        # 保证并发重复点击只创建一个平台取消动作。
+        event, is_new = await enqueue_outbox(
+            db,
+            aggregate_type="webhook_task",
+            aggregate_id=int(delivery_order_id),
+            event_kind="deferred_cancel_order",
+            payload={
+                "action": "cancel_order",
+                "platform": platform,
+                "platform_order_id": platform_order_id,
+                "store_id": store_id,
+                "order_id": order_id,
+                "reason": str(reason or "商家取消")[:200],
+            },
+        )
+        await db.commit()
+        status = str(event.status or "PENDING").upper()
+        return {
+            "ok": status == "DONE",
+            "status": "CANCELLED" if status == "DONE" else status,
+            "order_id": order_id,
+            "outbox_id": int(event.id),
+            "queued": bool(is_new),
+        }
 
     @classmethod
     async def sync_kitchen_status(cls, db: AsyncSession, order: Order) -> None:
