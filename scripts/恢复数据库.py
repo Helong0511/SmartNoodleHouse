@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_database_url() -> str:
+    override = (os.environ.get("DATABASE_URL") or "").strip()
+    if override:
+        return override
     env = ROOT / ".env"
     if not env.is_file():
         raise RuntimeError("未找到仓库根 .env")
