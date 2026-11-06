@@ -72,6 +72,12 @@ class FakeRedis:
                 return 0
             self.expire_calls.append((keys[0], int(argv[1])))
             return 1
+        # 通用 compare-and-expire（scheduler_admin 使用同样的 owner fencing）。
+        if "EXPIRE" in script.upper() and len(keys) == 1 and len(argv) >= 2:
+            if self.store.get(keys[0]) != str(argv[0]):
+                return 0
+            self.expire_calls.append((keys[0], int(argv[1])))
+            return 1
         if "MENU_GET_BUNDLE_WITH_VERSION" in script:
             bundle = self.store.get(keys[0])
             version = self.store.get(keys[1])

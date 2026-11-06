@@ -2235,6 +2235,7 @@ class PaymentService:
                     raise AppException(40302, "支付宝退款查询的本次退款金额与本地申请不匹配")
                 if cumulative_amount is not None and cumulative_amount < money(row.amount):
                     raise AppException(40302, "支付宝累计退款金额小于本次已成功退款金额")
+                new_status = "SUCCESS"
             elif query_status in ("FAILED", "CLOSED"):
                 new_status = query_status
             else:

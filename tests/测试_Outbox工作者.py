@@ -131,25 +131,22 @@ async def test_claim_outbox_item_returns_row_on_success():
 @pytest.mark.asyncio
 async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
     db = MagicMock()
-    terminal_result = MagicMock(rowcount=2)
-    retry_result = MagicMock(rowcount=3)
-    db.execute = AsyncMock(side_effect=[terminal_result, retry_result])
+    result = MagicMock(rowcount=5)
+    db.execute = AsyncMock(return_value=result)
     db.commit = AsyncMock()
     n = await reclaim_stale_processing(db, stale_after=300)
     assert n == 5
-    assert db.commit.await_count == 1
-    terminal_stmt, retry_stmt = [
-        call.args[0] for call in db.execute.await_args_list
-    ]
-    for stmt in (terminal_stmt, retry_stmt):
-        compiled = stmt.compile()
-        assert "outbox_events" in str(stmt).lower()
-        assert "PROCESSING" in [str(v) for v in compiled.params.values()]
-        assert "locked_at" in str(stmt).lower()
-    assert ">=" in str(terminal_stmt.compile())
-    assert "<" in str(retry_stmt.compile())
-    assert "FAILED" in [str(v) for v in terminal_stmt.compile().params.values()]
-    assert "PENDING" in [str(v) for v in retry_stmt.compile().params.values()]
+    db.execute.assert_awaited_once()
+    db.commit.assert_awaited_once()
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    assert "outbox_events" in str(stmt).lower()
+    assert "PROCESSING" in [str(v) for v in compiled.params.values()]
+    assert "locked_at" in str(stmt).lower()
+    # 单条 UPDATE + CASE 原子区分可重试与耗尽行，避免两次 UPDATE 之间发生状态竞争。
+    assert "CASE" in str(stmt).upper()
+    assert "FAILED" in [str(v) for v in compiled.params.values()]
+    assert "PENDING" in [str(v) for v in compiled.params.values()]
 
 
 @pytest.mark.asyncio

@@ -173,9 +173,12 @@ def cart_fingerprint(product_ids) -> str:
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
 
 
-def customer_refresh_rotation_key(customer_id: int) -> str:
-    """P2-6 刷新旋转保护键：记录该顾客已成功消费的旧令牌最大 exp。"""
-    return f"{CUSTOMER_REFRESH_ROTATION_PREFIX}:{int(customer_id)}"
+def customer_refresh_rotation_key(customer_id: int, token_jti: str | None = None) -> str:
+    """单个顾客的单个旧 JWT jti 只能刷新一次；键中不暴露原始 jti。"""
+    if not token_jti:
+        raise ValueError("token_jti is required for refresh rotation")
+    digest = hashlib.sha256(str(token_jti).encode("utf-8")).hexdigest()[:32]
+    return f"{CUSTOMER_REFRESH_ROTATION_PREFIX}:{int(customer_id)}:{digest}"
 
 
 def login_credential_used_key(channel: str, credential: str) -> str:

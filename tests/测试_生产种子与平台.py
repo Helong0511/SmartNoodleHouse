@@ -64,7 +64,8 @@ def test_custom_seed_keeps_sh01_catalog_and_idempotent_style():
     assert "INSERT INTO `options`" in DATA_CUSTOM_SQL
     # 门店种子禁止 VALUES(...) 批量写法，统一 SELECT + NOT EXISTS
     assert not re.search(r"INSERT INTO `[a-z_]+`[^;]*VALUES\s*\(", DATA_CUSTOM_SQL, re.I | re.S)
-    assert DATA_SYS_SQL.count("TRUNCATE TABLE") == len(
+    # 以实际表名集合校验清理覆盖率；一条 SQL 可包含多张表，不能比较语句字面次数。
+    assert set(re.findall(r"TRUNCATE TABLE `([^`]+)`", DATA_SYS_SQL)) == set(
         re.findall(r"CREATE TABLE IF NOT EXISTS `([^`]+)`", STRUCT_SQL)
     )
     assert len(re.findall(r"INSERT INTO `tables`", DATA_CUSTOM_SQL)) >= 3

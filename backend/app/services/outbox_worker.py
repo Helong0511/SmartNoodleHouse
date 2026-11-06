@@ -168,7 +168,9 @@ async def claim_outbox_item(
 
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = (worker or f"{worker_id()[:30]}:{uuid.uuid4().hex}")[:64]
+    # 每次 claim 都追加唯一 token，避免同进程重领时旧 handler 的迟到完成误认新租约。
+    worker_prefix = (worker or worker_id())[:30]
+    wid = f"{worker_prefix}:{uuid.uuid4().hex}"[:64]
     now = now_local()
     stmt = (
         update(OutboxEvent)

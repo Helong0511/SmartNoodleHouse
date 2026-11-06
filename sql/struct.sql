@@ -4,7 +4,6 @@ DROP DATABASE IF EXISTS `smart_noodle_house`;
 CREATE DATABASE IF NOT EXISTS `smart_noodle_house` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- 切换数据库
 USE `smart_noodle_house`;
--- 部署前必须将 REPLACE_WITH_STRONG_DB_PASSWORD 替换为强密码；禁止把真实数据库密码提交到版本库。noodle_house`.* TO 'remote' @'localhost';
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 0;
 -- BEGIN CANONICAL SCHEMA

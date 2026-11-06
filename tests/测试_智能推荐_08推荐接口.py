@@ -7,7 +7,7 @@ import pytest
 from app.api.miniprogram import get_recommendations
 from app.core.exceptions import AppException
 from app.core.cache_keys import reco_key, reco_rebuild_lock_key
-from app.services.reco_cache import release_reco_lock, set_cached_reco, try_acquire_reco_lock
+from app.services.reco_cache import release_reco_lock, set_cached_reco_if_owner, try_acquire_reco_lock
 from app.models import CustomerTasteProfile
 from app.services.recommendation_service import invalidate_store_caches
 from app.services.taste_learning_service import TasteLearningService
@@ -63,33 +63,15 @@ class FakeRedis:
                 self.store[keys[1]] = argv[1]
                 return "OK"
             return 0
-        raise AssertionError(f"unexpected Lua key count: {numkeys}")
-
-        keys = list(args[:numkeys])
-        argv = list(args[numkeys:])
-        if "redis.call('INCR'" in script and len(keys) == 1:
-            generation = int(self.store.get(keys[0]) or 0) + 1
-            self.store[keys[0]] = str(generation)
-            return generation
-        if "redis.call('SET', KEYS[2]" in script and len(keys) == 3:
+        if numkeys == 3:
             lock_key, cache_key, generation_key = keys
             token, raw, _ttl, expected_generation = argv
             current_generation = self.store.get(generation_key) or "0"
             if self.store.get(lock_key) == str(token) and current_generation == str(expected_generation):
                 self.store[cache_key] = str(raw)
-            return None
-        if "redis.call('GET', KEYS[1])" in script and len(keys) == 2:
-            generation_key, cache_key = keys
-            expected_generation = str(argv[0])
-            if (self.store.get(generation_key) or "0") == expected_generation:
-                return self.store.get(cache_key)
-            return None
-        if "redis.call('del'" in script.lower() and len(keys) == 1:
-            if self.store.get(keys[0]) == str(argv[0]):
-                return await self.delete(keys[0])
-        if "redis.call('expire'" in script.lower() and len(keys) == 1:
-            return 1 if self.store.get(keys[0]) == str(argv[0]) else 0
-        raise NotImplementedError("FakeRedis.eval 未覆盖该 Lua 脚本")
+                return "OK"
+            return 0
+        raise AssertionError(f"unexpected Lua key count: {numkeys}")
     async def delete(self, *keys):
         n = 0
         for k in keys:
@@ -161,7 +143,7 @@ async def test_old_reco_owner_cannot_release_new_owners_lock(fake_redis):
 
     lock_key = reco_rebuild_lock_key(*args)
     fake_redis.store[lock_key] = "new-owner"
-    await release_reco_lock(*args, owner_token=old_owner)
+    await release_reco_lock(*args, token=old_owner)
 
     assert fake_redis.store[lock_key] == "new-owner"
 
@@ -173,10 +155,14 @@ async def test_reco_cache_write_requires_current_lock_owner(fake_redis):
     cache_key = reco_key(*args)
     fake_redis.store[lock_key] = "new-owner"
 
-    await set_cached_reco(*args[:4], {"items": ["stale"]}, args[4], owner_token="old-owner")
+    assert await set_cached_reco_if_owner(
+        *args[:4], {"items": ["stale"]}, args[4], "old-owner", expected_generation=0
+    ) is False
     assert cache_key not in fake_redis.store
 
-    await set_cached_reco(*args[:4], {"items": ["fresh"]}, args[4], owner_token="new-owner")
+    assert await set_cached_reco_if_owner(
+        *args[:4], {"items": ["fresh"]}, args[4], "new-owner", expected_generation=0
+    ) is True
     assert cache_key in fake_redis.store
 
 

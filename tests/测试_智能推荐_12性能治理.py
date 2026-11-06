@@ -105,6 +105,11 @@ class FakeRedis:
             if self.kv.get(keys[0]) == str(argv[0]):
                 return await self.delete(keys[0])
             return 0
+        # 菜单 bundle + version 原子读取。
+        if "MENU_GET_BUNDLE_WITH_VERSION" in script:
+            bundle = self.kv.get(keys[0])
+            version = self.kv.get(keys[1])
+            return [bundle, version] if bundle is not None and version is not None else None
         # 菜单缓存发布：同时校验锁 token 与构建前版本，模拟 Lua 原子比较。
         if "redis.call('SET', KEYS[2]" in script and len(keys) == 3:
             lock_key, bundle_key, version_key = keys
@@ -293,8 +298,8 @@ async def test_metrics_endpoint_reads_middleware_data(fake_redis):
     body = await reco_metrics(request=None, window_hours=1)
     routes = body["data"]["routes"]
     # FastAPI include_router 已将 /api prefix 纳入最终 route.path，指标键应与实际请求路径一致。
-    assert "/api/miniprogram/menu" in routes
-    assert routes["/api/miniprogram/menu"]["count"] >= 1
+    assert "/miniprogram/menu" in routes
+    assert routes["/miniprogram/menu"]["count"] >= 1
 
 
 # ---------- 菜单聚合版本戳 ----------
@@ -307,10 +312,10 @@ async def test_menu_bundle_publish_is_fenced_by_build_version(fake_redis):
     await fake_redis.set(menu_rebuild_lock_key(store_id), "owner-token")
     await fake_redis.set(menu_version_key(store_id), "7")
 
-    published = await menu_cache.set_menu_bundle_if_owner(
+    published = await menu_cache.set_menu_bundle(
         store_id,
         {"version": 7, "products": {"items": []}},
-        "owner-token",
+        owner_token="owner-token",
         expected_version=7,
     )
     assert published is True
