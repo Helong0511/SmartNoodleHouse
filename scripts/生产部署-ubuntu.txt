@@ -31,6 +31,26 @@ nano .env
 #   WEBHOOK_REQUIRE_ALLOWLIST=true 并填全；否则保持 false，系统仍强制验签、商户身份、
 #   金额/订单校验和幂等。微信支付官方 IP 段以其《回调通知注意事项》最新版本为准。
 
+# ── Redis 主机与内存基线（生产必做）──
+# Redis 官方建议开启 overcommit，避免 RDB/AOF 后台 fork 在 Linux 内存策略下失败：
+sudo tee /etc/sysctl.d/99-smart-noodle-redis.conf >/dev/null <<'EOF'
+vm.overcommit_memory = 1
+EOF
+sudo sysctl --system
+# Redis 配置必须显式设置 maxmemory 与 maxmemory-policy noeviction；本仓库 redis.conf.example
+# 默认 512mb 仅为小型单店示例，部署前按实测内存、MySQL/OS 预算及 AOF/RDB fork 峰值调整。
+# 本项目 Redis 混合保存缓存、限流、一次性凭证、活体挑战和分布式锁，禁止 allkeys-lru。
+# 达到 maxmemory 后写入应报 OOM 并触发关键路径 fail-closed/缓存降级，而不是淘汰安全状态。
+# Redis 启动后用认证安全地检查内存/持久化/拒绝写入指标（不要把密码写进命令行历史）：
+#   read -rsp 'Redis password: ' REDISCLI_AUTH; echo; export REDISCLI_AUTH
+#   redis-cli --no-auth-warning INFO memory | grep -E 'used_memory_human|maxmemory_human|mem_fragmentation_ratio'
+#   redis-cli --no-auth-warning INFO stats | grep -E 'evicted_keys|expired_keys|rejected_connections'
+#   redis-cli --no-auth-warning INFO persistence | grep -E 'rdb_last_bgsave_status|aof_last_write_status|aof_rewrite_in_progress'
+#   unset REDISCLI_AUTH
+# 告警：used_memory 接近 maxmemory、evicted_keys 非零、拒绝写入、AOF/RDB 状态异常、磁盘空间不足。
+# Redis 官方还建议关闭 Transparent Huge Pages；先执行并在重启后验证：
+#   echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+
 # ── 2. 后端依赖与迁移 ──
 cd backend
 python3 -m venv .venv
