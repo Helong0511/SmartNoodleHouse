@@ -2,7 +2,7 @@
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -31,6 +31,11 @@ class RefundAction(BaseModel):
 
 class MerchantCancel(BaseModel):
     reason: str = "商家取消"
+
+
+class RefundReconcile(BaseModel):
+    action: Literal["platform_succeeded", "platform_not_applied"]
+    reason: str = Field(..., min_length=8, max_length=500)
 
 
 def _ws_payload(result, platform: str) -> dict:
@@ -489,6 +494,127 @@ async def refund_action(refund_id: int, data: RefundAction, request: Request, db
         store_id=int(order.store_id) if order.store_id else None,
     )
     return success(result, request=request)
+
+
+@router.post("/refunds/{refund_id}/reconcile", dependencies=[require_permission("system:manage")])
+async def reconcile_delivery_refund(
+    refund_id: int,
+    data: RefundReconcile,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """超级管理员核实 PROCESSING 退款的外部结果；不确定状态绝不自动重调平台。"""
+    if getattr(getattr(user, "role", None), "code", None) != "SUPER_ADMIN":
+        raise AppException(40300, "退款结果核实仅超级管理员可操作", status_code=403)
+    reason = data.reason.strip()
+    required_phrase = (
+        "平台核实已成功"
+        if data.action == "platform_succeeded"
+        else "平台核实未执行"
+    )
+    if required_phrase not in reason:
+        raise AppException(
+            40957,
+            f"核实说明必须包含“{required_phrase}”，以明确人工核实结论",
+            status_code=409,
+        )
+
+    hint = await db.get(DeliveryRefund, refund_id)
+    if not hint:
+        raise AppException(40492, "退款单不存在", status_code=404)
+    order_id = int(hint.order_id)
+    delivery_order_id = int(hint.delivery_order_id)
+
+    # 与退款审批、商家取消、平台回调共用锁序：Order → DeliveryOrder → DeliveryRefund。
+    order = (
+        await db.execute(
+            select(Order)
+            .where(Order.id == order_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if not order:
+        raise AppException(40404, "关联订单不存在", status_code=404)
+    d_order = (
+        await db.execute(
+            select(DeliveryOrder)
+            .where(
+                DeliveryOrder.id == delivery_order_id,
+                DeliveryOrder.order_id == order_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if not d_order:
+        raise AppException(40450, "关联外卖订单不存在", status_code=404)
+    refund = (
+        await db.execute(
+            select(DeliveryRefund)
+            .where(
+                DeliveryRefund.id == int(refund_id),
+                DeliveryRefund.order_id == order_id,
+                DeliveryRefund.delivery_order_id == delivery_order_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if not refund:
+        raise AppException(40492, "退款单不存在或关联关系已变化", status_code=404)
+    if refund.status != "PROCESSING":
+        raise AppException(40958, f"退款当前状态为 {refund.status}，不能进行结果核实", status_code=409)
+
+    previous_status = refund.status
+    if data.action == "platform_succeeded":
+        # 先持久化“平台已退款，待补账”，然后复用 ledger-only 路径；绝不再调平台。
+        refund.status = "APPROVED_LEDGER_PENDING"
+        d_order.refund_status = "APPROVED_LEDGER_PENDING"
+    else:
+        # 平台已确认未执行：恢复待审核，后续由商家明确重新提交，不在本接口自动调用平台。
+        refund.status = "PENDING"
+        d_order.refund_status = "PENDING"
+        refund.handled_at = None
+
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="delivery.refund.reconcile",
+        module="delivery",
+        target_type="refund",
+        target_id=int(refund_id),
+        detail={
+            "action": data.action,
+            "previous_status": previous_status,
+            "status_after_reconcile": refund.status,
+            "reason": reason,
+            "order_id": order_id,
+            "store_id": int(order.store_id) if order.store_id else None,
+        },
+        request=request,
+        store_id=int(order.store_id) if order.store_id else None,
+    )
+    await db.commit()
+
+    if data.action == "platform_succeeded":
+        # 此状态分支只补财务分录与本地终态，不会请求美团/饿了么。
+        result = await DeliveryService.process_refund(db, refund_id, approve=True)
+        return success(
+            {**result, "reconciled": True, "platform_call": False},
+            request=request,
+        )
+
+    return success(
+        {
+            "ok": True,
+            "status": "PENDING",
+            "reconciled": True,
+            "platform_call": False,
+        },
+        request=request,
+    )
 
 
 @router.post("/orders/{delivery_order_id}/cancel", dependencies=[require_permission("order:update")])
