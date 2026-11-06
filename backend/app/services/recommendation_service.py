@@ -514,7 +514,7 @@ _CF_CACHE: HotCache[int, dict[int, dict[int, int]]] = HotCache(
 )
 
 
-async def invalidate_store_caches(store_id: int) -> None:
+async def invalidate_store_caches(store_id: int) -> bool:
     """餐品池/共现/菜单聚合缓存失效（产品写路径与 Task 8 主动失效调用）。
 
     注意：仅清本进程内存缓存。多 worker 部署下其他进程最多 POOL_TTL(60s)/CF_TTL(300s) 后自然过期。
