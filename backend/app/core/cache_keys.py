@@ -145,7 +145,7 @@ def menu_bundle_key(store_id: int) -> str:
 
 
 def menu_version_key(store_id: int) -> str:
-    return f"{MENU_CATALOG_PREFIX}:ver:{int(store_id)}"
+    return f"{MENU_CATALOG_PREFIX}:{{s{int(store_id)}}}:version"
 
 
 def cart_fingerprint(product_ids) -> str:
