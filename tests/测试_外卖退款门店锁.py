@@ -181,3 +181,47 @@ async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state
     assert refund.status == "APPROVED_LEDGER_PENDING"
     assert d_order.refund_status == "APPROVED_LEDGER_PENDING"
     db.rollback.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_cancel_by_merchant_rejects_when_refund_is_active():
+    order = SimpleNamespace(id=9, store_id=7, status="COOKING")
+    d_order = SimpleNamespace(id=2, order_id=9, platform="MEITUAN", platform_order_id="po")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(first=MagicMock(return_value=(31, "PROCESSING"))),
+    ])
+    db.commit = AsyncMock()
+
+    with pytest.raises(AppException) as ei:
+        await DeliveryService.cancel_by_merchant(db, 2, "售罄")
+
+    assert ei.value.code == 40956
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_refund_rejects_when_cancel_outbox_is_active():
+    refund = SimpleNamespace(
+        id=41, order_id=91, delivery_order_id=51, platform="MEITUAN",
+        status="PENDING", platform_refund_id="rf-41", refund_type="FULL", amount=20,
+    )
+    order = SimpleNamespace(id=91, store_id=7, status="COOKING")
+    d_order = SimpleNamespace(id=51, order_id=91, platform_order_id="po-51")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # hint
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund lock
+        MagicMock(first=MagicMock(return_value=(77, "PENDING"))),  # cancel Outbox intent
+    ])
+    db.commit = AsyncMock()
+
+    with pytest.raises(AppException) as ei:
+        await DeliveryService.process_refund(db, 41, approve=True)
+
+    assert ei.value.code == 40955
+    db.commit.assert_not_awaited()
