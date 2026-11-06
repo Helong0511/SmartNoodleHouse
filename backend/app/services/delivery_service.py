@@ -808,6 +808,7 @@ class DeliveryService:
             raise AppException(40063, "外卖退款金额超过订单金额或关联订单不存在")
         refund_type = "PARTIAL" if amount < money(order.total_amount) else "FULL"
 
+        inserted = False
         if not refund_id:
             # 部分平台回调不提供退款单号。使用原始事件规范化内容生成稳定指纹，
             # 由数据库唯一约束兜底并发/重复投递；不把合成值伪装成平台退款编号。
@@ -832,6 +833,7 @@ class DeliveryService:
                             raw_payload=dumps_json(raw),
                         )
                     )
+                inserted = True
             except _IntegrityError:
                 # 完全相同的无编号回调已存在；保持幂等，不再新增退款记录。
                 pass
@@ -854,11 +856,15 @@ class DeliveryService:
                             raw_payload=dumps_json(raw),
                         )
                     )
+                inserted = True
             except _IntegrityError:
                 # 并发回调：(platform, platform_refund_id) 冲突 → 已有台账，跳过
                 pass
 
-        d_order.refund_status = "PENDING"
+        # 只有真正创建了新退款台账才推进订单摘要状态。重复回调命中唯一约束时，
+        # 不得把已 APPROVED/REJECTED 的退款状态回退成 PENDING。
+        if inserted:
+            d_order.refund_status = "PENDING"
         d_order.last_sync_at = now_local()
         await db.flush()
         return order

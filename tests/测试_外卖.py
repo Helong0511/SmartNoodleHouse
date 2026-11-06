@@ -1,5 +1,6 @@
 """美团 / 饿了么官方签名、事件分类与解析测试"""
 import json
+from types import SimpleNamespace
 
 import pytest
 from decimal import Decimal
@@ -306,3 +307,94 @@ def test_meituan_refund_no_is_classified_as_refund_event():
     from app.services.delivery_events import DeliveryEvent, classify_meituan_event
 
     assert classify_meituan_event({"refund_no": "RF-2026-01", "order_id": "OD-1"}) == DeliveryEvent.REFUND
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refund_id", ["RF-DUP-1", None])
+async def test_duplicate_delivery_refund_callback_does_not_regress_terminal_summary(
+    monkeypatch, refund_id
+):
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.delivery_service import DeliveryService
+
+    delivery_order = SimpleNamespace(
+        id=88, order_id=99, platform="MEITUAN", refund_status="APPROVED",
+        last_sync_at=None,
+    )
+    order = SimpleNamespace(id=99, total_amount=Decimal("30.00"))
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock()
+
+    class _DuplicateSavepoint:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            if exc_type is None:
+                raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+            return False
+
+    db.begin_nested.return_value = _DuplicateSavepoint()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=delivery_order)
+    )
+
+    raw = {"refund_amount": "10.00", "status": "SUCCESS"}
+    parsed = {"platform_order_id": "PLATFORM-ORDER-1", "refund_amount": "10.00"}
+    if refund_id:
+        raw["refund_id"] = refund_id
+        parsed["refund_id"] = refund_id
+
+    result = await DeliveryService._handle_refund(
+        db, "MEITUAN", parsed, raw
+    )
+
+    assert result is order
+    assert delivery_order.refund_status == "APPROVED"
+    db.add.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_new_delivery_refund_callback_sets_pending_summary(monkeypatch):
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    delivery_order = SimpleNamespace(
+        id=89, order_id=100, platform="MEITUAN", refund_status="NONE",
+        last_sync_at=None,
+    )
+    order = SimpleNamespace(id=100, total_amount=Decimal("30.00"))
+    db = MagicMock()
+    db.get = AsyncMock(return_value=order)
+    db.flush = AsyncMock()
+
+    class _Savepoint:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    db.begin_nested.return_value = _Savepoint()
+    monkeypatch.setattr(
+        DeliveryService, "_get_delivery_order", AsyncMock(return_value=delivery_order)
+    )
+
+    result = await DeliveryService._handle_refund(
+        db,
+        "MEITUAN",
+        {"platform_order_id": "PLATFORM-ORDER-2", "refund_amount": "10.00", "refund_id": "RF-NEW"},
+        {"refund_amount": "10.00", "refund_id": "RF-NEW"},
+    )
+
+    assert result is order
+    assert delivery_order.refund_status == "PENDING"
+    db.add.assert_called_once()
