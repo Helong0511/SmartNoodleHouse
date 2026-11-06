@@ -114,6 +114,20 @@ def _run_mysqldump_to_gzip(cmd: list[str], out_path: Path, env: dict[str, str]) 
         return int(return_code), error
 
 
+def _verify_gzip_backup(path: Path) -> int:
+    """完整读取 gzip 流以验证 CRC/长度，拒绝空文件和截断备份。"""
+    total = 0
+    with gzip.open(path, "rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+    if total == 0:
+        raise ValueError("mysqldump 输出为空，拒绝发布备份")
+    return total
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="备份业务库")
     parser.add_argument("--keep-days", type=int, default=14, help="保留天数，0=不清理")
@@ -123,8 +137,12 @@ def main() -> int:
     BACKUP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix":
         os.chmod(BACKUP_DIR, 0o700)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 使用同目录唯一临时文件，只有完整备份通过 gzip CRC 校验后才原子发布。
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     out_path = BACKUP_DIR / f"smart_noodle_house_{stamp}.sql.gz"
+    fd, temp_name = tempfile.mkstemp(prefix=".smart-noodle-house-", suffix=".partial", dir=BACKUP_DIR)
+    os.close(fd)
+    temp_path = Path(temp_name)
     dump = find_mysqldump()
 
     env = os.environ.copy()
@@ -148,14 +166,20 @@ def main() -> int:
         cfg["database"],
     ]
     print("备份中…", cfg["database"], "->", out_path.name)
-    return_code, error = _run_mysqldump_to_gzip(cmd, out_path, env)
-    if return_code != 0:
-        sys.stderr.write(error)
-        return return_code
+    try:
+        return_code, error = _run_mysqldump_to_gzip(cmd, temp_path, env)
+        if return_code != 0:
+            sys.stderr.write(error)
+            return return_code
+        _verify_gzip_backup(temp_path)
+        # 备份包含顾客/订单/资金等敏感数据，禁止被同机其他普通用户读取。
+        if os.name == "posix":
+            os.chmod(temp_path, 0o600)
+        os.replace(temp_path, out_path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
-    # 备份包含顾客/订单/资金等敏感数据，禁止被同机其他普通用户读取。
-    if os.name == "posix":
-        os.chmod(out_path, 0o600)
     size_mb = out_path.stat().st_size / 1024 / 1024
     removed = prune(args.keep_days)
     print(f"完成：{out_path} ({size_mb:.2f} MB)，清理过期备份 {removed} 个")
