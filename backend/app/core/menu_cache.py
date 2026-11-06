@@ -184,7 +184,7 @@ async def maintain_rebuild_lock(
     store_id: int,
     owner_token: str,
     *,
-    owner_task: asyncio.Task[Any],
+    owner_task: asyncio.Task[Any] | None,
 ) -> None:
     """后台续租；由调用方传入请求任务，任务结束后停止续租。"""
     # 注意：current_task() 在本协程内只会返回心跳自身，不能代表发起请求的 task。
