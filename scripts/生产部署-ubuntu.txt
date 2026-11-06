@@ -22,6 +22,7 @@
 cd /path/to/SmartNoodleHouse
 cp .env.production.example .env
 nano .env
+chmod 600 .env  # .env 含 JWT、支付私钥、数据库/Redis 凭证；systemd 由 root 读取 EnvironmentFile
 # 必改：JWT_SECRET、DATABASE_URL、域名、微信/支付宝密钥
 # 单机同机部署：.env.production.example 默认使用 127.0.0.1 连接 MySQL/Redis，
 #   ALLOW_LOOPBACK_PRODUCTION_SERVICES=true 仅允许这两个依赖走 loopback；
@@ -37,7 +38,8 @@ sudo apt install -y redis-server
 sudo cp redis.conf.example /etc/redis/redis.conf
 sudo nano /etc/redis/redis.conf
 # 必须先把 requirepass 替换成随机强密码，并与 .env 的 REDIS_URL 密码保持一致；按主机内存调整 maxmemory。
-sudo chown redis:redis /etc/redis/redis.conf
+sudo chown root:redis /etc/redis/redis.conf
+sudo chmod 640 /etc/redis/redis.conf  # 限制 Redis 密码配置文件读取权限
 sudo systemctl enable redis-server
 sudo systemctl restart redis-server
 sudo systemctl --no-pager --full status redis-server
