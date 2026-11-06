@@ -32,6 +32,9 @@ BACKOFF_CAP_SEC = 600
 STALE_PROCESSING_SEC = 300
 # Worker 活跃期间续租；必须显著小于 stale 阈值。
 LEASE_HEARTBEAT_INTERVAL_SEC = 60
+# DB 连续不可用时必须在 stale reclaim 阈值前停止旧 handler，避免失租后继续发起外部副作用。
+LEASE_HEARTBEAT_MAX_FAILURE_SEC = 120
+LEASE_HEARTBEAT_DB_TIMEOUT_SEC = 15
 
 # handler 注册表：(aggregate_type, event_kind) -> async (db, row) -> None
 OutboxHandler = Callable[[AsyncSession, OutboxEvent], Awaitable[None]]
@@ -212,28 +215,45 @@ async def _heartbeat_outbox_lease(
     interval: int = LEASE_HEARTBEAT_INTERVAL_SEC,
 ) -> bool:
     """独立短事务续租；返回 False 表示锁已被回收/转移。"""
+    loop = asyncio.get_running_loop()
+    failure_started_at: float | None = None
     while True:
         await asyncio.sleep(max(1, interval))
         try:
-            async with AsyncSessionLocal() as lease_db:
-                result = await lease_db.execute(
-                    update(OutboxEvent)
-                    .where(
-                        OutboxEvent.id == outbox_id,
-                        OutboxEvent.status == "PROCESSING",
-                        OutboxEvent.locked_by == wid,
+            async with asyncio.timeout(LEASE_HEARTBEAT_DB_TIMEOUT_SEC):
+                async with AsyncSessionLocal() as lease_db:
+                    result = await lease_db.execute(
+                        update(OutboxEvent)
+                        .where(
+                            OutboxEvent.id == outbox_id,
+                            OutboxEvent.status == "PROCESSING",
+                            OutboxEvent.locked_by == wid,
+                        )
+                        .values(locked_at=now_local())
                     )
-                    .values(locked_at=now_local())
-                )
-                await lease_db.commit()
-                if not result.rowcount:
-                    logger.warning("Outbox lease lost id=%s worker=%s", outbox_id, wid)
-                    return False
+                    await lease_db.commit()
+            if not result.rowcount:
+                logger.warning("Outbox lease lost id=%s worker=%s", outbox_id, wid)
+                return False
+            failure_started_at = None
         except asyncio.CancelledError:
             raise
         except Exception:
-            # 短暂 DB 故障时继续重试；如果租约最终过期，下一次 UPDATE 会检测到 owner 已变更。
-            logger.exception("Outbox lease heartbeat failed id=%s worker=%s", outbox_id, wid)
+            if failure_started_at is None:
+                failure_started_at = loop.time()
+            outage_seconds = loop.time() - failure_started_at
+            logger.exception(
+                "Outbox lease heartbeat failed id=%s worker=%s outage_seconds=%.1f",
+                outbox_id, wid, outage_seconds,
+            )
+            # 不允许 DB 故障期间无限运行旧 handler：在 300 秒 stale reclaim 前
+            # 提前取消，给当前 owner 留出安全余量，避免新旧 worker 并发外部调用。
+            if outage_seconds >= LEASE_HEARTBEAT_MAX_FAILURE_SEC:
+                logger.error(
+                    "Outbox lease heartbeat unavailable too long; fail closed id=%s worker=%s",
+                    outbox_id, wid,
+                )
+                return False
 
 
 async def _run_handler_with_lease(
