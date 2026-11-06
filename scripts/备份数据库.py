@@ -22,6 +22,9 @@ BACKUP_DIR = ROOT / "backups"
 
 
 def load_database_url() -> str:
+    override = (os.environ.get("DATABASE_URL") or "").strip()
+    if override:
+        return override
     for line in (ROOT / ".env").read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line.startswith("DATABASE_URL="):
@@ -79,7 +82,9 @@ def main() -> int:
     args = parser.parse_args()
 
     cfg = parse_url(load_database_url())
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        os.chmod(BACKUP_DIR, 0o700)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = BACKUP_DIR / f"smart_noodle_house_{stamp}.sql.gz"
     dump = find_mysqldump()
@@ -125,6 +130,9 @@ def main() -> int:
         sys.stderr.write(err.decode("utf-8", errors="replace"))
         return proc.returncode
 
+    # 备份包含顾客/订单/资金等敏感数据，禁止被同机其他普通用户读取。
+    if os.name == "posix":
+        os.chmod(out_path, 0o600)
     size_mb = out_path.stat().st_size / 1024 / 1024
     removed = prune(args.keep_days)
     print(f"完成：{out_path} ({size_mb:.2f} MB)，清理过期备份 {removed} 个")
