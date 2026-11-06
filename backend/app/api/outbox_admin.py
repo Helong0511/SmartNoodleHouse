@@ -24,10 +24,10 @@ router = APIRouter(prefix="/admin/outbox", tags=["系统运维-Outbox"])
 def _safe_error(value: str | None) -> str:
     """隐藏异常文本中常见的凭据形式，避免运维列表泄露 token/密码。"""
     text = (value or "")[:1000]
-    text = re.sub(r"(?i)(authorization\\s*[:=]\\s*bearer\\s+)\\S+", r"\\1***", text)
+    text = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)\S+", r"\1***", text)
     text = re.sub(
-        r"(?i)(password|passwd|token|secret|api[_-]?key)(\\s*[:=]\\s*)[^,;\\s]+",
-        r"\\1\\2***",
+        r"(?i)(password|passwd|token|secret|api[_-]?key)(\s*[:=]\s*)[^,;\s]+",
+        r"\1\2***",
         text,
     )
     return text[:500]
