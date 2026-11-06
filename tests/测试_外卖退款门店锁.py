@@ -13,8 +13,8 @@ async def test_process_refund_requires_order_store():
     refund = SimpleNamespace(id=1, order_id=9, status="PENDING", delivery_order_id=2, platform="ELEME")
     db = MagicMock()
     locked = MagicMock(scalar_one_or_none=MagicMock(return_value=refund))
-    db.execute = AsyncMock(return_value=locked)
-    db.get = AsyncMock(side_effect=[SimpleNamespace(id=2), None])  # d_order, order missing
+    db.execute = AsyncMock(side_effect=[locked, MagicMock(scalar_one_or_none=MagicMock(return_value=None))])
+    db.get = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
 
@@ -40,8 +40,14 @@ async def test_process_refund_fail_closed_without_credentials():
     order = SimpleNamespace(id=9, store_id=7, status="COOKING")
     d_order = SimpleNamespace(id=2, order_id=9, platform_order_id="po1")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # hint
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder FOR UPDATE
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund FOR UPDATE
+        MagicMock(first=MagicMock(return_value=None)),  # no cancellation intent
+    ])
+    db.get = AsyncMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
 
@@ -83,6 +89,7 @@ async def test_cancel_by_merchant_http_after_commit():
         MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(first=MagicMock(return_value=None)),  # no active refund
     ])
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -117,8 +124,14 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     d_order = SimpleNamespace(id=41, order_id=91, refund_status="APPROVED_LEDGER_PENDING")
     order = SimpleNamespace(id=91, store_id=7, channel="MEITUAN")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+        MagicMock(first=MagicMock(return_value=None)),
+    ])
+    db.get = AsyncMock()
     db.commit = AsyncMock()
 
     with patch(
@@ -148,8 +161,14 @@ async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state
     d_order = SimpleNamespace(id=42, order_id=92, refund_status="APPROVED_LEDGER_PENDING")
     order = SimpleNamespace(id=92, store_id=8, channel="ELEME")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=refund)))
-    db.get = AsyncMock(side_effect=[d_order, order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+        MagicMock(first=MagicMock(return_value=None)),
+    ])
+    db.get = AsyncMock()
     db.rollback = AsyncMock()
 
     with patch(
