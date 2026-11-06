@@ -1582,23 +1582,28 @@ class PaymentService:
     async def sync_order_pending_payment(
         cls, db: AsyncSession, order: Order, *, provider: str | None = None
     ) -> tuple[Payment | None, dict]:
-        """按订单同步最近一笔待支付单；已结清则直接返回。"""
-        locked = (
-            await db.execute(select(Order).where(Order.id == order.id).with_for_update())
+        """按订单同步最近一笔待支付单；渠道 HTTP 查单必须在获取行锁前完成。"""
+        # 这里只做普通读取，不能先锁 Order 再调用 sync_payment_status：
+        # 后者需要请求微信/支付宝，网络 RTT 期间持有订单锁会放大高峰期锁等待。
+        current_order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order.id)
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
-        if not locked:
+        if not current_order:
             raise AppException(40402, "订单不存在")
-        order = locked
-        if order.payment_status == "PAID":
+        if current_order.payment_status == "PAID":
             return None, {
                 "synced": False,
                 "already_paid": True,
                 "payment_status": "PAID",
-                "order_status": order.status,
+                "order_status": current_order.status,
             }
         q = (
             select(Payment)
-            .where(Payment.order_id == order.id, Payment.status == "PENDING")
+            .where(Payment.order_id == current_order.id, Payment.status == "PENDING")
             .order_by(Payment.id.desc())
             .limit(1)
         )
@@ -1606,10 +1611,22 @@ class PaymentService:
             q = q.where(Payment.provider == provider.upper())
         payment = (await db.execute(q)).scalar_one_or_none()
         if not payment:
-            progress = await cls.payment_progress(db, order)
+            progress = await cls.payment_progress(db, current_order)
             return None, {"synced": False, "trade_state": "NO_PENDING", **progress}
+
+        # sync_payment_status 先在锁外查渠道，再按 Order→Payment 顺序短事务加锁入账。
         payment, meta = await cls.sync_payment_status(db, payment)
-        progress = await cls.payment_progress(db, order)
+        # 同步后重新读取订单，避免复用本事务中查单前的旧 ORM 快照。
+        current_order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == current_order.id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not current_order:
+            raise AppException(40402, "订单不存在")
+        progress = await cls.payment_progress(db, current_order)
         return payment, {
             "payment_no": payment.payment_no,
             "status": payment.status,
