@@ -31,7 +31,7 @@ pypinyin>=0.51.0,<1.0
 zhdate>=0.1,<0.2
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
-onnxruntime>=1.16.0,<2.0
+onnxruntime>=1.31.1,<2.0
 # Windows 本机/摄像头迎宾 TTS（SAPI）；Linux local 模式用 espeak，勿在 Ubuntu 强装 pywin32
 pywin32>=306; platform_system=="Windows"
 # 神经 TTS（生产 Ubuntu 温柔女声）；需本机 ffmpeg，合成时访问微软 Edge TTS
