@@ -26,7 +26,7 @@ numpy>=1.26.0,<3.0
 # Pillow 13.0.0（2026-10-16）修复多项 JPEG/TIFF/OpenJPEG/PDF 等关键图像解析漏洞；生产 Python 3.11+
 cryptography>=50.0.2,<51
 Pillow>=13.0.0,<14.0
-pypinyin>=0.51.0,<1.0
+pypinyin>=0.55.0,<1.0
 # 农历生日权益日判定：固定在跨平台通用发行线；1.0 的 PyPI 发布文件为 macOS ARM64 专用
 zhdate>=0.1,<0.2
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
