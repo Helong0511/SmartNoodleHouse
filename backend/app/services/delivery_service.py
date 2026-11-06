@@ -1162,6 +1162,8 @@ class DeliveryService:
 
         # 仅在准备发起新的平台退款操作时检查取消意图。
         # APPROVED_LEDGER_PENDING 是平台已确认退款成功后的本地补账，绝不能被取消 Outbox 阻断。
+        platform = str(refund.platform or "").upper()
+        platform_order_id = str(d_order.platform_order_id or "")
         cancel_pending = await cls._has_pending_cancel_intent(
             db,
             order_id=order_id,
@@ -1181,9 +1183,7 @@ class DeliveryService:
         if not credentials:
             raise AppException(40061, f"门店 {store_id} 未配置 {refund.platform} 外卖凭证")
 
-        platform = refund.platform
         platform_refund_id = refund.platform_refund_id or ""
-        platform_order_id = d_order.platform_order_id or ""
         refund_type = refund.refund_type
         refund_amount = refund.amount
         order_channel = getattr(order, "channel", None)
