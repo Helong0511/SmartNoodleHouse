@@ -6,7 +6,8 @@
         <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
-      <el-select v-model="refundFilter" placeholder="状态" clearable style="width: 120px" @change="reloadRefunds">
+      <el-select v-model="refundFilter" placeholder="全部状态" clearable style="width: 150px" @change="reloadRefunds">
+        <el-option label="全部状态（含待核实）" value="" />
         <el-option label="待审核" value="PENDING" />
         <el-option label="平台处理中（需核实）" value="PROCESSING" />
         <el-option label="待补记账" value="APPROVED_LEDGER_PENDING" />
@@ -108,7 +109,8 @@ const boundStoreName = computed(() => {
 })
 
 const refunds = ref<any[]>([])
-const refundFilter = ref('PENDING')
+// 默认展示全部状态，避免 PROCESSING/待补账记录被默认“待审核”筛选隐藏。
+const refundFilter = ref('')
 const platformFilter = ref('')
 const keyword = ref('')
 const dateRange = ref<string[] | null>(null)
