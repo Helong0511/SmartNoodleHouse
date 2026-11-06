@@ -2020,7 +2020,7 @@ CREATE TABLE IF NOT EXISTS `payment_reconcile_batches` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `channel` varchar(20) NOT NULL COMMENT 'WECHAT/ALIPAY',
   `bill_date` date NOT NULL COMMENT '对账日（渠道账单日）',
-  `scope_store_id` bigint UNSIGNED NOT NULL DEFAULT 0 COMMENT '对账范围：0总部全平台，正数门店ID',
+  `scope_store_id` bigint NOT NULL DEFAULT 0 COMMENT '对账范围：0总部全平台，正数门店ID',
   `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/DONE/FAILED',
   `local_count` int NOT NULL DEFAULT 0 COMMENT '本地成功支付笔数',
   `channel_count` int NOT NULL DEFAULT 0 COMMENT '渠道账单笔数',
