@@ -37,7 +37,7 @@ async def test_sync_refund_commits_before_websocket_notification(monkeypatch):
 
     db.commit = AsyncMock(side_effect=commit)
     db.get = AsyncMock(return_value=order)
-    monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", sync_refund_status)
+    monkeypatch.setattr(payment_api.PaymentService, "sync_refund_status", AsyncMock(side_effect=sync_refund_status))
     monkeypatch.setattr(payment_api, "assert_order_store_access", lambda *_: None)
     monkeypatch.setattr(payment_api.ws_manager, "notify_order_event", notify)
     monkeypatch.setattr(payment_api, "success", lambda data, request=None: data)
