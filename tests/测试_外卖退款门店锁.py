@@ -129,7 +129,6 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
-        MagicMock(first=MagicMock(return_value=None)),
     ])
     db.get = AsyncMock()
     db.commit = AsyncMock()
@@ -149,14 +148,8 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     record.assert_awaited_once()
     provider_factory.assert_not_called()
     db.commit.assert_awaited_once()
-
-    # 已确认完成的取消事件不是“待执行/结果未知”互斥意图；
-    # 取消后到达的退款仍必须能够补记财务分录。
-    cancel_guard_stmt = db.execute.await_args_list[4].args[0]
-    compiled_params = cancel_guard_stmt.compile().params
-    guarded_statuses = [str(value) for value in compiled_params.values()]
-    assert "DONE" not in guarded_statuses
-    assert "FAILED" in guarded_statuses  # 可重试/死信取消均须人工核实后再放行退款
+    # 已确认平台退款成功的补账路径不检查取消 Outbox，也不会再次调用平台。
+    assert db.execute.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -174,7 +167,6 @@ async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
-        MagicMock(first=MagicMock(return_value=None)),
     ])
     db.get = AsyncMock()
     db.rollback = AsyncMock()
