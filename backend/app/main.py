@@ -377,7 +377,7 @@ async def lifespan(app: FastAPI):
 
     async def _start_leader_work() -> None:
         """抢到锁后启动调度器 / TTS / 识别 / 摄像头。"""
-        nonlocal is_leader, _leader_promote_task
+        nonlocal is_leader, _leader_promote_task, warmup_task
         global tts_task, recognition_task, _leader_stop, _leader_renew_task
         from app.core.leader_lock import is_leader_held, set_leader_held, set_on_leader_lost
 
