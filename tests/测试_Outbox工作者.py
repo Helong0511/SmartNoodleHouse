@@ -160,18 +160,12 @@ async def test_reclaim_stale_processing_splits_retryable_and_exhausted_rows():
 
 @pytest.mark.asyncio
 async def test_mark_uncertain_moves_event_to_dead_letter_without_retry():
-    from types import SimpleNamespace
-
     db = MagicMock()
     db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
     db.commit = AsyncMock()
-    row = SimpleNamespace(
-        id=41, aggregate_type="delivery_manual", aggregate_id=901,
-        event_kind="confirm_abc123",
-    )
 
     await outbox_worker._mark_uncertain(
-        db, row, "MEITUAN confirm order=7788: ReadTimeout", wid="worker-1"
+        db, 41, "MEITUAN confirm order=7788: ReadTimeout", wid="worker-1"
     )
 
     stmt = db.execute.await_args.args[0]
