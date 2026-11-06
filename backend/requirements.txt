@@ -19,7 +19,7 @@ httpx>=0.26.0,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
 python-multipart>=0.0.33,<1.0
 aiofiles>=23.2.1,<25
-apscheduler>=3.10.4,<4.0
+apscheduler>=3.11.3,<4.0
 websockets>=12.0,<14
 opencv-python-headless>=4.14.0.94,<5.0
 numpy>=1.26.0,<3.0
