@@ -227,3 +227,109 @@ async def test_process_refund_rejects_when_cancel_outbox_is_active():
 
     assert ei.value.code == 40955
     db.commit.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_refund_reconcile_platform_not_applied_restores_pending_without_provider_call():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.delivery import RefundReconcile, reconcile_delivery_refund
+    from app.core.exceptions import AppException
+
+    hint = SimpleNamespace(id=81, order_id=91, delivery_order_id=51)
+    order = SimpleNamespace(id=91, store_id=7)
+    d_order = SimpleNamespace(id=51, order_id=91, refund_status="PROCESSING")
+    refund = SimpleNamespace(id=81, order_id=91, delivery_order_id=51, status="PROCESSING", handled_at=None)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=hint)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.delivery.AuditService.log_staff", new=AsyncMock()), patch(
+        "app.api.delivery.DeliveryService.process_refund", new=AsyncMock()
+    ) as process_refund:
+        await reconcile_delivery_refund(
+            81,
+            RefundReconcile(
+                action="platform_not_applied",
+                reason="平台核实未执行：平台后台显示退款申请未受理",
+            ),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert refund.status == "PENDING"
+    assert d_order.refund_status == "PENDING"
+    db.commit.assert_awaited_once()
+    process_refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refund_reconcile_platform_success_uses_ledger_only_recovery():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.delivery import RefundReconcile, reconcile_delivery_refund
+
+    hint = SimpleNamespace(id=82, order_id=92, delivery_order_id=52)
+    order = SimpleNamespace(id=92, store_id=8)
+    d_order = SimpleNamespace(id=52, order_id=92, refund_status="PROCESSING")
+    refund = SimpleNamespace(id=82, order_id=92, delivery_order_id=52, status="PROCESSING", handled_at=None)
+    db = MagicMock()
+    db.get = AsyncMock(return_value=hint)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),
+    ])
+    db.commit = AsyncMock()
+
+    with patch("app.api.delivery.AuditService.log_staff", new=AsyncMock()), patch(
+        "app.api.delivery.DeliveryService.process_refund",
+        new=AsyncMock(return_value={"ok": True, "status": "APPROVED", "ledger_recovered": True}),
+    ) as process_refund:
+        await reconcile_delivery_refund(
+            82,
+            RefundReconcile(
+                action="platform_succeeded",
+                reason="平台核实已成功：平台退款单号 RF-82 状态 SUCCESS",
+            ),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert refund.status == "APPROVED_LEDGER_PENDING"
+    assert d_order.refund_status == "APPROVED_LEDGER_PENDING"
+    db.commit.assert_awaited_once()
+    process_refund.assert_awaited_once_with(db, 82, approve=True)
+
+
+@pytest.mark.asyncio
+async def test_refund_reconcile_is_super_admin_only():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.api.delivery import RefundReconcile, reconcile_delivery_refund
+    from app.core.exceptions import AppException
+
+    db = MagicMock()
+    db.get = AsyncMock()
+    with pytest.raises(AppException) as ei:
+        await reconcile_delivery_refund(
+            83,
+            RefundReconcile(
+                action="platform_not_applied",
+                reason="平台核实未执行：后台状态为未受理",
+            ),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="STORE_ADMIN")),
+        )
+    assert ei.value.code == 40300
+    db.get.assert_not_awaited()
