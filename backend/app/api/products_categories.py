@@ -18,7 +18,7 @@ from app.schemas.product import CategoryCreate, CategoryUpdate
 from app.services.audit_service import AuditService
 from app.services.category_require import normalize_require_category_ids
 from app.services.category_schedule import apply_category_schedule_sort, parse_hhmm
-from app.services.recommendation_service import invalidate_store_caches
+from app.services.menu_cache_service import enqueue_menu_cache_invalidation
 from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(tags=["餐品"])
@@ -241,7 +241,7 @@ async def update_category(cat_id: int, data: CategoryUpdate, request: Request, d
     for k, v in payload.items():
         setattr(cat, k, v)
     await db.flush()
-    await invalidate_store_caches(int(cat.store_id))
+    await enqueue_menu_cache_invalidation(db, int(cat.store_id))
     await AuditService.log_staff(
         db,
         user=user,
