@@ -124,6 +124,9 @@ class FakeRedis:
     async def ping(self):
         pass
 
+    async def aclose(self):
+        self.closed = True
+
     async def publish(self, *args):
         pass
 
@@ -437,3 +440,21 @@ async def test_scheduler_admin_notify_expire(monkeypatch):
         await scheduler_admin.notify_overrides_changed(job_id="test")
         expire_keys = [k for k, _ in fake.expire_calls if "scheduler" in k and "overrides" in k]
         assert len(expire_keys) == 1, "incr 后应补 expire"
+
+
+# ── Redis 客户端生命周期 ──
+
+@pytest.mark.asyncio
+async def test_redis_client_close_resets_and_closes():
+    from app.core import redis_client
+
+    fake = FakeRedis()
+    fake.closed = False
+    with patch.object(redis_client, "_redis", fake):
+        await redis_client.close_redis()
+        assert fake.closed is True
+        assert redis_client._redis is None
+        # 重复关闭必须安全，且不能再次访问已关闭客户端。
+        await redis_client.close_redis()
+        assert fake.closed is True
+
