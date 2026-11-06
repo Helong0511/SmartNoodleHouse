@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import gzip
 import importlib.util
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,6 +47,34 @@ def test_database_identity_distinguishes_drill_database():
 def test_database_identity_rejects_invalid_mysql_target(url):
     with pytest.raises(ValueError):
         MODULE._database_identity(url)
+
+
+BACKUP_SPEC = importlib.util.spec_from_file_location(
+    "backup_database", ROOT / "scripts" / "备份数据库.py"
+)
+assert BACKUP_SPEC is not None and BACKUP_SPEC.loader is not None
+BACKUP_MODULE = importlib.util.module_from_spec(BACKUP_SPEC)
+BACKUP_SPEC.loader.exec_module(BACKUP_MODULE)
+
+
+def test_mysqldump_streaming_does_not_deadlock_when_stderr_is_large(tmp_path):
+    output = tmp_path / "backup.sql.gz"
+    sql = b"CREATE TABLE smoke_test (id INT);\\n"
+    command = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.write('E' * 2000000); "
+        "sys.stdout.buffer.write(" + repr(sql) + ")",
+    ]
+
+    return_code, error = BACKUP_MODULE._run_mysqldump_to_gzip(
+        command, output, os.environ.copy()
+    )
+
+    assert return_code == 0
+    assert len(error) == 1024 * 1024
+    with gzip.open(output, "rb") as stream:
+        assert stream.read() == sql
 
 
 RESTORE_SPEC = importlib.util.spec_from_file_location(
