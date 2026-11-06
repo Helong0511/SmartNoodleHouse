@@ -310,8 +310,8 @@ def validate_settings(settings: Settings) -> None:
             parsed_db = None
             db_scheme = ""
             db_host = None
-        if db_scheme not in ("mysql+aiomysql", "mysql+pymysql", "mysql") or not db_host:
-            errors.append("生产环境 DATABASE_URL 须为有效 MySQL URL，禁止 SQLite 或无效连接串")
+        if db_scheme != "mysql+aiomysql" or not db_host:
+            errors.append("生产环境 DATABASE_URL 必须使用 mysql+aiomysql 异步驱动 URL；禁止同步 MySQL 驱动、SQLite 或无效连接串")
         else:
             db_user = (parsed_db.username or "").strip().lower()
             db_password = parsed_db.password or ""
