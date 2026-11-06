@@ -216,3 +216,58 @@ async def test_claim_pending_outbox_requires_remaining_attempt_budget():
     assert "ATTEMPT_COUNT" in sql
     assert "MAX_ATTEMPTS" in sql
 
+
+
+@pytest.mark.asyncio
+async def test_stock_menu_invalidation_outbox_is_enqueued_in_business_transaction(monkeypatch):
+    from app.services import stock_service, outbox_worker
+
+    enqueue = AsyncMock(return_value=(MagicMock(), True))
+    deduct = AsyncMock()
+    monkeypatch.setattr(outbox_worker, "enqueue_outbox", enqueue)
+    monkeypatch.setattr(stock_service, "deduct_stock", deduct)
+
+    await stock_service.deduct_for_order_items(
+        MagicMock(),
+        [{"product_id": 11, "quantity": 2}, {"product_id": 12, "quantity": 1}],
+        store_id=7,
+    )
+
+    assert deduct.await_count == 2
+    enqueue.assert_awaited_once()
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["aggregate_type"] == "menu_cache"
+    assert kwargs["event_kind"] == "invalidate"
+    assert 0 < kwargs["aggregate_id"] < (1 << 63)
+    assert kwargs["payload"] == {"store_id": 7}
+
+
+@pytest.mark.asyncio
+async def test_menu_cache_invalidation_outbox_handler_retries_when_redis_unavailable(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from app.services import recommendation_service
+    from app.services import menu_cache_handlers
+
+    invalidate = AsyncMock(return_value=False)
+    monkeypatch.setattr(recommendation_service, "invalidate_store_caches", invalidate)
+    row = SimpleNamespace(payload=json.dumps({"store_id": 7}), aggregate_id=123)
+
+    with pytest.raises(RuntimeError, match="菜单缓存失效失败"):
+        await menu_cache_handlers.menu_cache_invalidate_handler(MagicMock(), row)
+    invalidate.assert_awaited_once_with(7)
+
+
+@pytest.mark.asyncio
+async def test_menu_cache_invalidation_outbox_handler_invalidates_after_commit_worker(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from app.services import recommendation_service
+    from app.services import menu_cache_handlers
+
+    invalidate = AsyncMock(return_value=True)
+    monkeypatch.setattr(recommendation_service, "invalidate_store_caches", invalidate)
+    row = SimpleNamespace(payload=json.dumps({"store_id": 8}), aggregate_id=124)
+
+    await menu_cache_handlers.menu_cache_invalidate_handler(MagicMock(), row)
+    invalidate.assert_awaited_once_with(8)
