@@ -206,10 +206,11 @@ async def test_eleme_rejects_http_200_empty_json_envelope(monkeypatch):
         allow_delivery_mock=False,
     )
     monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
-    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
-        result = await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown
 
-    assert result["error"]["code"] == "INVALID_RESPONSE"
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
 
 
 @pytest.mark.asyncio
@@ -699,3 +700,62 @@ async def test_merchant_cancel_outbox_handler_updates_local_state_only_after_pla
     assert d_order.delivery_status == "CANCELLED"
     assert d_order.last_sync_at is not None
     db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_meituan_http_200_non_json_is_uncertain(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, MeituanProvider
+
+    url = "https://waimaiopen.meituan.com/api/v1/order/cancel"
+    response = httpx.Response(
+        200,
+        text="gateway returned an unreadable response",
+        request=httpx.Request("GET", url),
+    )
+    client = SimpleNamespace(get=AsyncMock(return_value=response), post=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await MeituanProvider()._request("/api/v1/order/cancel", {"order_id": "O1"})
+
+
+@pytest.mark.asyncio
+async def test_eleme_http_200_non_json_is_uncertain(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        text="invalid rpc response",
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc("eleme.order.cancelOrderLite", {"orderId": "O1"})
