@@ -133,7 +133,7 @@ async def try_acquire_rebuild_lock(store_id: int) -> str | None:
         acquired = await r.set(menu_rebuild_lock_key(store_id), token, nx=True, ex=_REBUILD_LOCK_TTL)
         return token if acquired else None
     except Exception:
-        return False
+        return None
 
 
 async def release_rebuild_lock(store_id: int, *, owner_token: str | None = None) -> None:
