@@ -47,13 +47,13 @@ return 0
 
 
 async def get_cached_reco(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "", limit: int = 10
 ) -> dict[str, Any] | None:
     """读取推荐缓存。缓存穿透防护：无额外空值标记，因推荐服务对任意 customer/store
     都会返回合法 payload（冷启动时返回热门餐品），空结果本身会被缓存。"""
     try:
         r = await get_redis()
-        raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint))
+        raw = await r.get(reco_key(customer_id, store_id, scene, bucket, fingerprint, limit))
         if raw:
             payload = json.loads(raw)
             if isinstance(payload, dict):
@@ -73,6 +73,7 @@ async def set_cached_reco(
     fingerprint: str = "",
     *,
     owner_token: str | None = None,
+    limit: int = 10,
 ) -> None:
     """仅允许当前锁 owner 写入缓存，避免过期旧任务覆盖新结果。
 
@@ -89,8 +90,8 @@ async def set_cached_reco(
         result = await r.eval(
             _SET_CACHE_IF_OWNER_SCRIPT,
             2,
-            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint),
-            reco_key(customer_id, store_id, scene, bucket, fingerprint),
+            reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, limit),
+            reco_key(customer_id, store_id, scene, bucket, fingerprint, limit),
             owner_token,
             dumps_json(body, compact=True),
             ttl,
@@ -117,7 +118,9 @@ async def invalidate_customer(customer_id: int) -> None:
                 keys.append(k)
         if keys:
             # 同时删除缓存和租约：在途旧 owner 后续 Lua 写入/释放均会因 token 不匹配而失败。
-            await delete_with_retry(r, *set(keys))
+            # Cluster 多键 DEL 要求同一 hash slot；顾客的门店/场景键跨 slot，逐键删除。
+            for key in sorted(set(keys)):
+                await delete_with_retry(r, key)
         # 延迟再清缓存值（不清锁），兜底处理扫描/删除期间的并发写入。
         spawn_bg(_delayed_invalidate(patterns[0]))
     except Exception:  # noqa: BLE001
@@ -133,13 +136,15 @@ async def _delayed_invalidate(pattern: str) -> None:
         async for k in r.scan_iter(match=pattern, count=200):
             keys.append(k)
         if keys:
-            await r.delete(*keys)
+            # SCAN 可能命中多个 Cluster slot，不能跨 slot 执行多键 DEL。
+            for key in sorted(set(keys)):
+                await delete_with_retry(r, key)
     except Exception:
         pass
 
 
 async def try_acquire_reco_lock(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = ""
+    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "", limit: int = 10
 ) -> str | None:
     """缓存击穿保护：返回唯一 owner token；锁竞争/Redis 故障均返回 None 并允许降级直算。"""
     token = uuid.uuid4().hex
@@ -165,6 +170,7 @@ async def release_reco_lock(
     fingerprint: str = "",
     *,
     owner_token: str | None = None,
+    limit: int = 10,
 ) -> None:
     """仅允许当前 owner 释放锁，防止旧请求删除后来者的租约。"""
     if not owner_token:
@@ -184,10 +190,11 @@ async def release_reco_lock(
 async def wait_for_reco(
     customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "",
     timeout: float = 0.3,
+    limit: int = 10,
 ) -> dict[str, Any] | None:
     """未抢到锁的调用方短暂等待后重读缓存。"""
     try:
         await asyncio.sleep(timeout)
-        return await get_cached_reco(customer_id, store_id, scene, bucket, fingerprint)
+        return await get_cached_reco(customer_id, store_id, scene, bucket, fingerprint, limit)
     except Exception:
         return None
