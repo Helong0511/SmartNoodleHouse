@@ -71,6 +71,15 @@ def _is_external_result_unknown(value: str | None) -> bool:
     return str(value or "").startswith("EXTERNAL_RESULT_UNKNOWN:")
 
 
+def _require_external_result_success_confirmation(reason: str) -> None:
+    if "平台核实已成功" not in str(reason or ""):
+        raise AppException(
+            40909,
+            "关闭结果未知死信前，必须先核实平台订单已成功执行，并在核实说明中写入“平台核实已成功”。",
+            status_code=409,
+        )
+
+
 def _require_external_result_replay_confirmation(
     value: str | None,
     confirmed_not_applied: bool,
@@ -215,6 +224,7 @@ async def resolve_unknown_dead_letter(
     _require_super_admin(user)
     if len(data.reason.strip()) < 8:
         raise AppException(40012, "核实原因去除空格后至少需要 8 个字符", status_code=400)
+    _require_external_result_success_confirmation(data.reason)
     row = (await db.execute(
         select(OutboxEvent).where(OutboxEvent.id == outbox_id)
     )).scalar_one_or_none()
