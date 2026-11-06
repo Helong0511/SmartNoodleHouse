@@ -284,6 +284,18 @@ async def resolve_unknown_dead_letter(
             # 库存不足的回调拒单发生在 Order/DeliveryOrder 创建前；平台取消成功后
             # 不存在需要回写的本地订单，仍可安全关闭该 Outbox。
             if candidate is None:
+                # 还要排除“Order 已写入但 DeliveryOrder 缺失”的半成品数据；
+                # 只有订单和外卖记录都不存在，才视为库存拒单发生在本地建单之前。
+                orphan_order = (
+                    await db.execute(
+                        select(Order).where(
+                            Order.store_id == payload_store_id,
+                            Order.idempotency_key == f"{platform}:{platform_order_id}",
+                        )
+                    )
+                ).scalar_one_or_none()
+                if orphan_order is not None:
+                    raise AppException(40911, "取消订单存在本地 Order，但缺少 DeliveryOrder，需人工修复", status_code=409)
                 order_id = 0
             else:
                 order_id = int(candidate.order_id)
