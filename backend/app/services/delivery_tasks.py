@@ -170,6 +170,36 @@ async def execute_webhook_outbox_task(db, row) -> None:
         )
         if ok is False:
             raise RuntimeError("平台取消订单失败")
+        # 平台已明确确认取消后才更新本地订单；本地写入失败必须转 UNCERTAIN，
+        # 不能让 worker 把同一平台取消动作当普通失败再次发送。
+        try:
+            order_id = int(payload.get("order_id") or 0)
+            delivery_order_id = int(row.aggregate_id)
+            order = await db.get(Order, order_id) if order_id else None
+            d_order = await db.get(DeliveryOrder, delivery_order_id)
+            if order is None or d_order is None:
+                raise RuntimeError("平台取消已成功，但本地订单记录不存在")
+            if order.status not in ("CANCELLED",):
+                if order.status in ("COMPLETED", "REFUNDED"):
+                    raise RuntimeError(f"平台取消已成功，但本地订单已处于终态 {order.status}")
+                from app.services.order_lifecycle import apply_order_status
+
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark=str(payload.get("reason") or "商家取消"),
+                )
+            d_order.delivery_status = "CANCELLED"
+            d_order.last_sync_at = now_local()
+            await db.flush()
+        except Exception as exc:
+            raise ExternalSideEffectUncertain(
+                f"{platform} cancel_order order={platform_order_id}: 平台已确认取消，但本地状态持久化失败；"
+                "禁止自动再次取消，请核对本地订单后处理"
+            ) from exc
     elif action == "reply_urge":
         ok = await _call_external_side_effect(
             action, platform, platform_order_id,
