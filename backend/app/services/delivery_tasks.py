@@ -12,7 +12,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.response import now_local
 from app.models import DeliveryOrder, Order
 from app.services.delivery_context import PlatformCredentials, get_credentials_for_store
-from app.services.delivery_providers import get_delivery_provider
+from app.services.delivery_providers import DeliveryPlatformResultUnknown, get_delivery_provider
 from app.services.print_tasks import handle_deferred_print
 from app.services.outbox_worker import ExternalSideEffectUncertain, register_outbox_handler
 
@@ -28,6 +28,10 @@ async def _call_external_side_effect(
     """识别请求已可能送达下游但响应未知的传输故障，禁止 Outbox 自动重发。"""
     try:
         return await operation()
+    except DeliveryPlatformResultUnknown as exc:
+        raise ExternalSideEffectUncertain(
+            f"{platform} {action} order={platform_order_id}: 平台响应格式/结构异常，无法确认副作用是否执行"
+        ) from exc
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (408, 409) or exc.response.status_code >= 500:
             raise ExternalSideEffectUncertain(
