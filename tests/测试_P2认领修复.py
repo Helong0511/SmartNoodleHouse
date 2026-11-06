@@ -108,7 +108,7 @@ async def test_process_refund_approve_platform_rejects_keeps_pending():
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund lock
-        MagicMock(first=MagicMock(return_value=None)),  # no cancel Outbox intent
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no pending cancel intent
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order re-lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder re-lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund re-lock
@@ -153,7 +153,7 @@ async def test_process_refund_reject_platform_fails_keeps_pending():
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # DeliveryRefund lock
-        MagicMock(first=MagicMock(return_value=None)),  # no cancel Outbox intent
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # no pending cancel intent
         MagicMock(scalar_one_or_none=MagicMock(return_value=order)),  # Order re-lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),  # DeliveryOrder re-lock
         MagicMock(scalar_one_or_none=MagicMock(return_value=refund)),  # refund re-lock
