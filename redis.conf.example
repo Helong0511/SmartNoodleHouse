@@ -1,6 +1,7 @@
 # SmartNoodleHouse Redis 生产配置模板
-# 复制为 redis.conf 并根据实际环境修改后使用：redis-server /path/to/redis.conf
-# 或在 docker-compose.yml 中通过 command 指定。
+# 主机/systemd 单机部署：复制为 /etc/redis/redis.conf 并使用 redis-server 启动。
+# 容器部署须按容器网络调整 bind 与 REDIS_URL（容器内 127.0.0.1 不是宿主机/其他容器）；
+# 仅允许专用容器私网互通，禁止为方便连接而绑定公网网卡或开放公网 6379。
 
 # ── 网络 ──
 # 默认单机部署只监听本机；禁止将 Redis 直接绑定 0.0.0.0 或公网网卡。
