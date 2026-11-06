@@ -73,3 +73,16 @@ def test_fail_closed_redis_alert_is_not_suppressed_by_fail_open_traffic(monkeypa
     assert len(warnings) == 1
     assert len(errors) == 1
     assert "fail-closed" in errors[0][0]
+
+
+def test_production_env_example_covers_all_required_fail_closed_paths():
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parents[1]
+    env_example = (project_root / ".env.production.example").read_text(encoding="utf-8")
+    configured_line = next(
+        line for line in env_example.splitlines()
+        if line.startswith("RATE_LIMIT_FAIL_CLOSED_PATHS=")
+    )
+    configured = configured_line.split("=", 1)[1]
+    assert _missing_rate_limit_fail_closed_paths(configured) == []
