@@ -353,6 +353,7 @@ async def test_lost_claim_completion_rolls_back_entire_business_transaction():
     result = MagicMock(rowcount=0)
     rolled_back = await rollback_if_claim_lost(
         db, result, model=OutboxEvent, row_id=123
+    )
     assert rolled_back is True
     assert db.rollback.await_count == 1
 async def test_owned_claim_completion_does_not_rollback():
@@ -362,6 +363,7 @@ async def test_owned_claim_completion_does_not_rollback():
     result = MagicMock(rowcount=1)
     rolled_back = await rollback_if_claim_lost(
         db, result, model=OutboxEvent, row_id=123
+    )
     assert rolled_back is False
     assert db.rollback.await_count == 0
 async def test_unknown_claim_completion_rowcount_fails_closed():
@@ -371,6 +373,7 @@ async def test_unknown_claim_completion_rowcount_fails_closed():
     result = MagicMock(rowcount=None)
     rolled_back = await rollback_if_claim_lost(
         db, result, model=OutboxEvent, row_id=123
+    )
     assert rolled_back is True
     assert db.rollback.await_count == 1
 async def test_库存镜像复用事件不得被历史一次性幂等记录跳过(monkeypatch):
