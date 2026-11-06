@@ -1,4 +1,5 @@
 """Regression tests for store-scoped staff queue access."""
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,8 +9,14 @@ from app.core.exceptions import AppException
 
 
 @pytest.mark.asyncio
-async def test_admin_queue_list_uses_bound_store_even_if_other_store_requested():
-    from app.api.queue import admin_today_tickets
+async def test_admin_queue_list_uses_bound_store_even_if_other_store_requested(monkeypatch):
+    import app.api.queue as queue_api
+
+    monkeypatch.setattr(
+        queue_api,
+        "now_local",
+        lambda: datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
 
     user = SimpleNamespace(
         role=SimpleNamespace(code="STORE_ADMIN"),
@@ -19,7 +26,7 @@ async def test_admin_queue_list_uses_bound_store_even_if_other_store_requested()
     result.scalars.return_value.all.return_value = []
     db = SimpleNamespace(execute=AsyncMock(return_value=result))
 
-    await admin_today_tickets(
+    await queue_api.admin_today_tickets(
         request=None,
         db=db,
         user=user,
