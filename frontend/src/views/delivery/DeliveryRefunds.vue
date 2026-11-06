@@ -8,6 +8,8 @@
       <el-tag v-else-if="boundStoreName" type="info">门店：{{ boundStoreName }}</el-tag>
       <el-select v-model="refundFilter" placeholder="状态" clearable style="width: 120px" @change="reloadRefunds">
         <el-option label="待审核" value="PENDING" />
+        <el-option label="平台处理中（需核实）" value="PROCESSING" />
+        <el-option label="待补记账" value="APPROVED_LEDGER_PENDING" />
         <el-option label="已同意" value="APPROVED" />
         <el-option label="已拒绝" value="REJECTED" />
       </el-select>
@@ -39,7 +41,7 @@
       <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.status === 'PENDING' ? 'danger' : 'info'">
+          <el-tag size="small" :type="row.status === 'PENDING' ? 'danger' : row.status === 'PROCESSING' || row.status === 'APPROVED_LEDGER_PENDING' ? 'warning' : 'info'">
             {{ label(REFUND_APPLY_STATUS, row.status) }}
           </el-tag>
         </template>
@@ -53,6 +55,14 @@
             <el-button size="small" type="success" @click="handleRefund(row.id, 'approve')">同意</el-button>
             <el-button size="small" type="danger" @click="askRejectRefund(row)">拒绝</el-button>
           </template>
+          <el-button
+            v-else-if="row.status === 'APPROVED_LEDGER_PENDING' && canHandleRefund"
+            size="small"
+            type="warning"
+            @click="handleRefund(row.id, 'approve', undefined, true)"
+          >补记账</el-button>
+          <span v-else-if="row.status === 'PROCESSING'" class="muted">请先核实平台结果，禁止重复操作</span>
+          <span v-else-if="row.status === 'APPROVED_LEDGER_PENDING'" class="muted">仅有退款权限的人员可补记账</span>
           <span v-else-if="row.status === 'PENDING'" class="muted">仅店长可处理</span>
           <span v-else class="muted">已处理</span>
         </template>
@@ -168,13 +178,18 @@ async function jumpToLatest() {
   await loadRefunds()
 }
 
-async function handleRefund(id: number, action: 'approve' | 'reject', reason?: string) {
+async function handleRefund(
+  id: number,
+  action: 'approve' | 'reject',
+  reason?: string,
+  ledgerRecovery = false,
+) {
   try {
     await api.post(`/delivery/refunds/${id}/action`, {
       action,
       reason: action === 'approve' ? undefined : reason || '商家拒绝',
     })
-    ElMessage.success(action === 'approve' ? '已同意退款' : '已拒绝退款')
+    ElMessage.success(ledgerRecovery ? '财务分录补记成功' : action === 'approve' ? '已同意退款' : '已拒绝退款')
     await loadRefunds()
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
