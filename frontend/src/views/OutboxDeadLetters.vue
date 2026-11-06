@@ -32,7 +32,7 @@
       <el-button type="primary" :loading="loading" @click="load">刷新</el-button>
     </div>
 
-    <el-table :data="rows" border empty-text="暂无达到最大重试次数的死信">
+    <el-table :data="rows" border empty-text="暂无待处置的死信">
       <el-table-column prop="id" label="事件 ID" width="90" />
       <el-table-column label="业务对象" min-width="170">
         <template #default="{ row }">{{ row.aggregate_type }} #{{ row.aggregate_id }}</template>
