@@ -22,6 +22,8 @@ def test_production_redis_config_has_an_explicit_memory_ceiling_and_noeviction()
     assert directives["maxmemory"].lower() not in {"0", "0b"}
     assert directives.get("maxmemory-policy", "").lower() == "noeviction"
     assert directives.get("appendonly", "").lower() == "yes"
+    assert directives.get("bind", "").split() == ["127.0.0.1"]
+    assert directives.get("protected-mode", "").lower() == "yes"
 
 
 def test_ubuntu_deployment_instructions_cover_redis_kernel_and_memory_checks():
