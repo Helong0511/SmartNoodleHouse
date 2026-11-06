@@ -26,8 +26,8 @@ def _safe_error(value: str | None) -> str:
     text = (value or "")[:1000]
     text = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)\S+", r"\1***", text)
     text = re.sub(
-        r"(?i)(password|passwd|token|secret|api[_-]?key)(\s*[:=]\s*)[^,;\s]+",
-        r"\1\2***",
+        r'''(?i)(["']?[\w-]*(?:password|passwd|token|secret|api[_-]?key|auth[_-]?token)[\w-]*["']?\s*[:=]\s*["']?)[^"'\s,;}]+''',
+        r"\1***",
         text,
     )
     return text[:500]
