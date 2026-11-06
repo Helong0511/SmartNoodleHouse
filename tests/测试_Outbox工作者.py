@@ -744,3 +744,37 @@ async def test_process_pending_outbox_counts_claim_result_not_final_status(monke
 
     assert await outbox_worker.process_pending_outbox(limit=2) == 1
     assert [call.args[0] for call in process.await_args_list] == [101, 102]
+
+
+@pytest.mark.asyncio
+async def test_requeue_dead_letter_only_updates_exhausted_failed_rows():
+    from app.models import OutboxEvent
+    from app.services.outbox_worker import requeue_dead_letter_outbox
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=1))
+    db.flush = AsyncMock()
+
+    assert await requeue_dead_letter_outbox(db, 321) is True
+    db.flush.assert_awaited_once()
+    stmt = db.execute.await_args.args[0]
+    compiled = stmt.compile()
+    assert "outbox_events.status" in str(compiled)
+    assert "outbox_events.attempt_count" in str(compiled)
+    assert "PENDING" in compiled.params.values()
+    assert compiled.params.get("attempt_count_1") == 0
+    assert compiled.params.get("next_retry_at") is None
+    assert compiled.params.get("locked_at") is None
+    assert compiled.params.get("locked_by") is None
+
+
+@pytest.mark.asyncio
+async def test_requeue_dead_letter_fails_closed_when_row_changed_or_not_exhausted():
+    from app.services.outbox_worker import requeue_dead_letter_outbox
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    db.flush = AsyncMock()
+
+    assert await requeue_dead_letter_outbox(db, 321) is False
+    db.flush.assert_not_awaited()
