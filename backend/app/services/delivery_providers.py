@@ -32,6 +32,11 @@ from app.services.delivery_sign import (
 logger = logging.getLogger(__name__)
 
 
+class DeliveryPlatformResultUnknown(RuntimeError):
+    """HTTP 请求已发出，但平台响应不足以证明副作用成功或失败。"""
+
+
+
 def _ok_or_mock(data: dict, *, ok_expr: bool) -> bool:
     """平台真实成功才算成功；mock 仅 allow_delivery_mock 时为 True。"""
     if data.get("_mock"):
@@ -277,9 +282,19 @@ class MeituanProvider(DeliveryProvider):
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
+        except Exception as exc:
             logger.error("美团响应非 JSON: %s", resp.text[:200])
-            return {"data": "ng", "error": {"msg": resp.text[:200]}}
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: HTTP {resp.status_code} response is not valid JSON"
+            ) from exc
+        if not isinstance(data, dict):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: response JSON is not an object"
+            )
+        if "data" not in data and not data.get("error"):
+            raise DeliveryPlatformResultUnknown(
+                f"MEITUAN {path}: response has neither data nor explicit error"
+            )
         if data.get("data") != "ok" and data.get("error"):
             logger.error("美团 API 失败 %s: %s", path, data)
         return data
@@ -619,15 +634,21 @@ class ElemeProvider(DeliveryProvider):
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
+        except Exception as exc:
             logger.error("饿了么响应非 JSON: %s", resp.text[:200])
-            return {"error": resp.text[:200]}
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: HTTP {resp.status_code} response is not valid JSON"
+            ) from exc
         if not isinstance(data, dict):
             logger.error("饿了么响应结构无效 action=%s type=%s", action, type(data).__name__)
-            return {"error": {"code": "INVALID_RESPONSE", "message": "响应必须为 JSON 对象"}}
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: response JSON is not an object"
+            )
         if data.get("error") is None and "result" not in data:
             logger.error("饿了么响应缺少 result/error action=%s", action)
-            return {"error": {"code": "INVALID_RESPONSE", "message": "响应缺少 result 字段"}}
+            raise DeliveryPlatformResultUnknown(
+                f"ELEME {action}: response has neither result nor explicit error"
+            )
         if data.get("error"):
             logger.error("饿了么 API 失败 %s: %s", action, data)
         return data
