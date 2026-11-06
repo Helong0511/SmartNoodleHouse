@@ -299,10 +299,10 @@ class MeituanProvider(DeliveryProvider):
             raise DeliveryPlatformResultUnknown(
                 f"MEITUAN {path}: response data is not a recognized success or explicit rejection"
             )
-        if data.get("data") != "ok" and data.get("error"):
+        if data.get("error"):
             logger.error("美团 API 失败 %s: %s", path, data)
             # 未建立可验证的确定拒绝错误码白名单前，订单副作用接口的 error
-            # envelope 不能直接作为“平台未执行”的证据，避免 Worker/退款自动重发。
+            # envelope（即使同时携带 data=ok）不能作为“平台未执行/已执行”的证据。
             side_effect_paths = {
                 "/api/v1/order/confirm",
                 "/api/v1/order/preparationMealComplete",
