@@ -265,12 +265,12 @@ async def _run_handler_with_lease(
         await asyncio.gather(heartbeat_task, return_exceptions=True)
 
 
-async def process_outbox_item(outbox_id: int) -> None:
+async def process_outbox_item(outbox_id: int) -> bool:
     """原子认领、租约续期、幂等分发；库存镜像按 sync_version 收敛而非一次性去重。"""
     async with AsyncSessionLocal() as db:
         row = await claim_outbox_item(db, outbox_id)
         if not row:
-            return
+            return False
         wid = (row.locked_by or "")[:64]
         is_stock_mirror = (
             row.aggregate_type in ("delivery_stock", "delivery_stock_base")
@@ -293,14 +293,14 @@ async def process_outbox_item(outbox_id: int) -> None:
                     )
                     from app.services.worker_common import rollback_if_claim_lost
                     if await rollback_if_claim_lost(db, done_result, model=OutboxEvent, row_id=outbox_id):
-                        return
+                        return True
                     await db.commit()
-                    return
+                    return True
             except Exception as exc:
                 logger.exception("outbox 幂等预检失败 id=%s，停止处理并安排重试", outbox_id)
                 await db.rollback()
                 await _mark_failed(db, row, f"idempotency_precheck_failed: {exc}", wid=wid)
-                return
+                return True
 
         if row.aggregate_type in ("webhook_task", "delivery_manual"):
             try:
@@ -318,19 +318,19 @@ async def process_outbox_item(outbox_id: int) -> None:
         if handler is None:
             logger.error("Outbox handler not registered: %s/%s id=%s", row.aggregate_type, row.event_kind, outbox_id)
             await _mark_failed(db, row, "handler_not_registered", wid=wid)
-            return
+            return True
         try:
             json.loads(row.payload) if row.payload else {}
         except (TypeError, ValueError):
             await _mark_failed(db, row, "payload_invalid_json", wid=wid)
-            return
+            return True
 
         try:
             lease_owned = await _run_handler_with_lease(
                 handler, db, row, outbox_id=outbox_id, wid=wid
             )
             if not lease_owned:
-                return
+                return True
 
             expected_sync_version = int(getattr(row, "sync_version", 0) or 0)
             done_conditions = [
@@ -379,11 +379,11 @@ async def process_outbox_item(outbox_id: int) -> None:
                         await db.commit()
                     else:
                         await db.rollback()
-                return
+                return True
 
             from app.services.worker_common import rollback_if_claim_lost
             if await rollback_if_claim_lost(db, done_result, model=OutboxEvent, row_id=outbox_id):
-                return
+                return True
 
             idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
             if not is_stock_mirror:
@@ -396,11 +396,11 @@ async def process_outbox_item(outbox_id: int) -> None:
                     if not acquired:
                         await db.rollback()
                         await _mark_failed(db, row, "idempotency_already_exists_after_handler", wid=wid)
-                        return
+                        return True
                 except Exception as exc:
                     await db.rollback()
                     await _mark_failed(db, row, f"idempotency_write_failed: {exc}", wid=wid)
-                    return
+                    return True
 
             await db.commit()
             if not is_stock_mirror:
@@ -415,7 +415,7 @@ async def process_outbox_item(outbox_id: int) -> None:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, exc)
             await db.rollback()
             await _mark_failed(db, row, str(exc), wid=wid)
-
+        return True
 
 async def _mark_failed(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str = "") -> None:
     """仅原 claim owner 可标记失败；退避带 jitter，耗尽时暴露 DEAD-LETTER 告警。"""
@@ -509,19 +509,8 @@ async def process_pending_outbox(limit: int = 30) -> int:
         ids = list(rows)
     claimed = 0
     for oid in ids:
-        # process_outbox_item 内部原子 claim；通过事后查询行状态确认是否真正 claim 成功
-        before_status = await _peek_status(oid)
-        await process_outbox_item(oid)
-        after_status = await _peek_status(oid)
-        # 若状态从 PENDING/FAILED 变为 PROCESSING→DONE/FAILED，说明本次 claim 成功
-        if before_status in ("PENDING", "FAILED") and after_status in ("DONE", "FAILED", "PROCESSING"):
-            if before_status != after_status or after_status == "DONE":
-                claimed += 1
+        # 返回值直接来自原子 claim 结果，不再通过状态前后差异推断。
+        if await process_outbox_item(oid):
+            claimed += 1
     return claimed
 
-
-async def _peek_status(outbox_id: int) -> str | None:
-    """只读查询行状态，独立短事务，不干扰主流程。"""
-    async with AsyncSessionLocal() as db:
-        row = await db.get(OutboxEvent, outbox_id)
-        return row.status if row else None
