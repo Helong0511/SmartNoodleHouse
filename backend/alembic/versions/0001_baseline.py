@@ -112,6 +112,33 @@ def upgrade() -> None:
             # 不允许把会话的外键校验关闭状态带入后续 Alembic revisions / 应用连接。
             conn.exec_driver_sql("SET SESSION FOREIGN_KEY_CHECKS=1")
 
+    if is_mysql:
+        # FOREIGN_KEY_CHECKS=1 不会回扫历史行，因此显式确认所有 FK 元数据
+        # 都能解析到已创建的父表/父列，避免导入顺序错误留下悬空约束。
+        missing_reference = conn.exec_driver_sql(
+            """
+            SELECT k.TABLE_NAME, k.CONSTRAINT_NAME,
+                   k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
+            FROM information_schema.KEY_COLUMN_USAGE AS k
+            LEFT JOIN information_schema.TABLES AS t
+              ON t.TABLE_SCHEMA = k.TABLE_SCHEMA
+             AND t.TABLE_NAME = k.REFERENCED_TABLE_NAME
+            LEFT JOIN information_schema.COLUMNS AS c
+              ON c.TABLE_SCHEMA = k.TABLE_SCHEMA
+             AND c.TABLE_NAME = k.REFERENCED_TABLE_NAME
+             AND c.COLUMN_NAME = k.REFERENCED_COLUMN_NAME
+            WHERE k.TABLE_SCHEMA = DATABASE()
+              AND k.REFERENCED_TABLE_NAME IS NOT NULL
+              AND (t.TABLE_NAME IS NULL OR c.COLUMN_NAME IS NULL)
+            LIMIT 1
+            """
+        ).first()
+        if missing_reference:
+            raise RuntimeError(
+                "Canonical schema contains an unresolved foreign-key reference: "
+                f"{tuple(missing_reference)}"
+            )
+
 
 def downgrade() -> None:
     # 基线不回滚整库 DROP；需要重建时请空库后重新 upgrade。
