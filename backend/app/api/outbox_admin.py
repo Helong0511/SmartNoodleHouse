@@ -82,7 +82,7 @@ def _require_external_result_replay_confirmation(
     ):
         raise AppException(
             40905,
-            "该事件的下游执行结果未知。请先核实外卖平台/打印设备确实未执行，再明确确认后重放；若已执行，请使用“核实已成功”关闭死信。",
+            "该事件的下游执行结果未知。请先核实外卖平台确实未执行，再明确确认后重放；若已执行，请使用“核实已成功”关闭死信。",
             status_code=409,
         )
     if confirmed_not_applied and not unknown:
