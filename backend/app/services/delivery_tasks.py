@@ -67,17 +67,32 @@ async def run_deferred_tasks(tasks: list[dict[str, Any]]) -> None:
         provider = get_delivery_provider(platform, creds)
         try:
             if action == "confirm_order":
-                ok = await provider.confirm_order(platform_order_id)
+                ok = await _call_external_side_effect(
+                    action, platform, platform_order_id,
+                    lambda: provider.confirm_order(platform_order_id),
+                )
                 if ok is False and task.get("rollback_on_fail"):
+                    # 只有平台明确返回拒绝才允许回滚；未知结果由下面的分支保留原状态。
                     await _rollback_confirm(task.get("order_id"), platform, platform_order_id)
             elif action == "reply_urge":
-                await provider.reply_urge(platform_order_id, task.get("raw") or {})
+                await _call_external_side_effect(
+                    action, platform, platform_order_id,
+                    lambda: provider.reply_urge(platform_order_id, task.get("raw") or {}),
+                )
             elif action == "cancel_order":
-                # 库存不足拒单等：平台取消在 DB 事务外执行
                 reason = task.get("reason") or "商家取消"
-                await provider.cancel_order(platform_order_id, reason)
+                await _call_external_side_effect(
+                    action, platform, platform_order_id,
+                    lambda: provider.cancel_order(platform_order_id, reason),
+                )
             else:
                 logger.warning("未知 deferred task: %s", action)
+        except ExternalSideEffectUncertain as e:
+            # 旧调用路径没有持久化 UNCERTAIN 能力；宁可保留订单状态并报警，也绝不误回滚。
+            logger.critical(
+                "legacy deferred task external result uncertain; manual reconciliation required action=%s platform=%s order=%s error=%s",
+                action, platform, platform_order_id, e,
+            )
         except Exception as e:
             logger.exception("deferred task 失败 %s %s: %s", action, platform_order_id, e)
             if action == "confirm_order" and task.get("rollback_on_fail"):
