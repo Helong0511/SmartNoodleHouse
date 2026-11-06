@@ -15,7 +15,7 @@ from app.models import ArchivedOrderSnapshot, PaymentReconcileBatch, PaymentReco
 from app.schemas.pagination import clamp_page
 from app.services.order_archive_service import OrderArchiveService
 from app.services.payment_reconcile_service import PaymentReconcileService
-from app.services.store_scope import assert_store_access, effective_store_id
+from app.services.store_scope import assert_store_access, require_bound_store
 
 router = APIRouter(prefix="/reconcile", tags=["reconcile"])
 
@@ -30,8 +30,11 @@ async def import_payment_bill(
     user: CurrentUser,
     channel: Annotated[str, Form()],
     bill_date: Annotated[date, Form()],
+    store_id: Annotated[int | None, Form()] = None,
     file: UploadFile = File(...),
 ):
+    # 总部未指定门店时按全平台对账；门店账号无论提交何种 store_id 都强制本店。
+    scope_store_id = int(require_bound_store(user, store_id) or 0)
     raw = await file.read(MAX_RECONCILE_BILL_BYTES + 1)
     if len(raw) > MAX_RECONCILE_BILL_BYTES:
         raise AppException(41312, "渠道账单文件不能超过 10 MiB", status_code=413)
@@ -55,6 +58,7 @@ async def import_payment_bill(
             bill_csv=text,
             created_by=user.id,
             source_filename=source_filename,
+            scope_store_id=scope_store_id,
         )
         await db.commit()
     except ValueError as e:
@@ -64,6 +68,7 @@ async def import_payment_bill(
             "id": batch.id,
             "channel": batch.channel,
             "bill_date": batch.bill_date.isoformat(),
+            "scope_store_id": int(batch.scope_store_id or 0),
             "status": batch.status,
             "local_count": batch.local_count,
             "channel_count": batch.channel_count,
@@ -79,12 +84,17 @@ async def list_batches(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     limit: int | None = Query(None, ge=1, le=200),
+    store_id: int | None = Query(None, ge=1),
 ):
+    # 总部可查看全部或指定门店；门店账号强制限制在绑定门店。
+    sid = require_bound_store(user, store_id)
     # limit 兼容旧前端；有 page 时以分页为准
     if limit is not None and page == 1 and page_size == 20:
         page_size = min(limit, 100)
     page, page_size = clamp_page(page, page_size)
     q = select(PaymentReconcileBatch)
+    if sid is not None:
+        q = q.where(PaymentReconcileBatch.scope_store_id == sid)
     total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = list(
         (
@@ -120,6 +130,15 @@ async def list_batches(
 
 @router.get("/payments/batches/{batch_id}/diffs", dependencies=[require_permission("reconcile:read")])
 async def list_diffs(batch_id: int, db: DbSession, user: CurrentUser):
+    sid = require_bound_store(user)
+    batch = (
+        await db.execute(
+            select(PaymentReconcileBatch).where(PaymentReconcileBatch.id == batch_id)
+        )
+    ).scalar_one_or_none()
+    if batch is None or (sid is not None and int(batch.scope_store_id or 0) != sid):
+        # 跨门店批次与不存在批次统一返回 404，避免枚举其他门店财务数据。
+        raise AppException(40400, "对账批次不存在", status_code=404)
     rows = list(
         (
             await db.execute(
@@ -152,15 +171,18 @@ class ArchiveRunBody(BaseModel):
     older_than_days: int = Field(365, ge=30, le=3650)
     limit: int = Field(200, ge=1, le=1000)
     dry_run: bool = False
+    store_id: int | None = Field(default=None, ge=1)
 
 
 @router.post("/orders/archive", dependencies=[require_permission("archive:manage")])
 async def run_order_archive(body: ArchiveRunBody, db: DbSession, user: CurrentUser):
+    sid = require_bound_store(user, body.store_id)
     result = await OrderArchiveService.archive_older_than(
         db,
         older_than_days=body.older_than_days,
         limit=body.limit,
         dry_run=body.dry_run,
+        store_id=sid,
     )
     if not body.dry_run:
         await db.commit()
@@ -177,9 +199,7 @@ async def list_archived_orders(
     keyword: str | None = None,
     limit: int | None = Query(None, ge=1, le=200),
 ):
-    sid = effective_store_id(user, store_id)
-    if sid is not None:
-        assert_store_access(user, sid)
+    sid = require_bound_store(user, store_id)
     if limit is not None and page == 1 and page_size == 20:
         page_size = min(limit, 100)
     page, page_size = clamp_page(page, page_size)
