@@ -30,4 +30,5 @@ def test_ubuntu_deployment_instructions_cover_redis_kernel_and_memory_checks():
     assert "vm.overcommit_memory = 1" in instructions
     assert "INFO memory" in instructions
     assert "INFO persistence" in instructions
+    assert "python3.11 -m venv .venv" in instructions
     assert "maxmemory-policy noeviction" in instructions
