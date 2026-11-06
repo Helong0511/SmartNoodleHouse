@@ -60,7 +60,10 @@ async def test_process_refund_fail_closed_without_credentials():
 async def test_cancel_by_merchant_requires_order():
     d_order = SimpleNamespace(id=2, order_id=9, platform="MEITUAN", platform_order_id="po")
     db = MagicMock()
-    db.get = AsyncMock(side_effect=[d_order, None])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+    ])
     db.commit = AsyncMock()
     with pytest.raises(AppException) as ei:
         await DeliveryService.cancel_by_merchant(db, 2, "库存不足")
@@ -76,28 +79,31 @@ async def test_cancel_by_merchant_http_after_commit():
     )
     order = SimpleNamespace(id=9, store_id=7, status="COOKING")
     db = MagicMock()
-    db.get = AsyncMock(side_effect=[d_order, order, order, d_order])
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=9)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+    ])
     db.commit = AsyncMock()
     db.flush = AsyncMock()
-    mock_provider = MagicMock()
-    mock_provider.cancel_order = AsyncMock(return_value=True)
+    outbox_event = SimpleNamespace(id=77, status="PENDING")
 
     with patch(
         "app.services.delivery_service.get_credentials_for_store",
         AsyncMock(return_value=MagicMock()),
     ), patch(
-        "app.services.delivery_service.get_delivery_provider",
-        return_value=mock_provider,
-    ), patch(
-        "app.services.order_lifecycle.apply_order_status",
-        new_callable=AsyncMock,
-    ) as apply:
+        "app.services.delivery_service.enqueue_outbox",
+        new=AsyncMock(return_value=(outbox_event, True)),
+    ) as enqueue:
         out = await DeliveryService.cancel_by_merchant(db, 2, "售罄")
 
-    assert out["ok"] is True
-    db.commit.assert_awaited()
-    mock_provider.cancel_order.assert_awaited_once()
-    apply.assert_awaited()
+    assert out == {
+        "ok": False, "status": "PENDING", "order_id": 9,
+        "outbox_id": 77, "queued": True,
+    }
+    db.commit.assert_awaited_once()
+    enqueue.assert_awaited_once()
+
 
 
 @pytest.mark.asyncio
