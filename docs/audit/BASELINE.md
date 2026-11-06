@@ -1,7 +1,7 @@
 # Cwm9 项目基线与仓库地图
 
-> 本文档基于 2026-09-29 当前仓库真实代码扫描生成，反映实际存在的模块、入口、关键文件、依赖与基线状态。不含密钥值。
-> 维护规则：每次全项目审计前重新核实；不得依据旧审计文字假设代码状态。
+> 历史基线扫描：2026-09-29；生产配置与发布控制定点复核：2026-11-06。不含密钥值。
+> 本文档的目录/模块地图仍可作导航，但启动校验和部署行为以当前 `backend/app/core/startup_checks.py`、`redis.conf.example`、`scripts/生产部署-ubuntu.txt` 及最新 CI 为准；不得依据历史审计表格假设代码状态。
 
 ---
 
@@ -237,9 +237,10 @@
 | CORS_ORIGINS | localhost/127.0.0.1 | ✓ | - |
 | H5_PUBLIC_BASE_URL | 空/localhost | ✓ | - |
 | STORAGE_BACKEND=s3 | 未配齐 | ✓ | - |
-| WEBHOOK_IP_ALLOWLIST | 空或开 require 但缺白名单 | ✓ | - |
-| DATABASE_URL | sqlite/localhost/127.0.0.1 | ✓ | - |
-| REDIS_URL | localhost | 警告 | - |
+| WEBHOOK_IP_ALLOWLIST | `WEBHOOK_REQUIRE_ALLOWLIST=true` 但缺少有效白名单 | ✓ | - |
+| DATABASE_URL | sqlite；loopback 未显式 opt-in | ✓ | - |
+| REDIS_URL | 无效 scheme/无密码；loopback 未显式 opt-in | ✓ | - |
+| RATE_LIMIT_FAIL_CLOSED_PATHS | 缺少生产必需敏感路径 | ✓ | - |
 | PROCESS_ROLE | 非 leader/worker/auto | ✓ | - |
 | 微信支付 | 占位符/缺平台证书 | ✓ | - |
 | 支付宝 | 占位符 | ✓ | - |
@@ -374,7 +375,7 @@
 - **Payment callback**：拒绝 mchid/app_id 缺失或不匹配
 - **Face 注册**：仅允许 active 状态会员
 - **Webhook 请求头**：脱敏 Authorization/Cookie/token
-- **生产环境**：强制非默认 DATABASE_URL/REDIS_URL
+- **生产环境**：DATABASE_URL/REDIS_URL 必须有效且使用最小权限凭证；单机 loopback 仅在 `ALLOW_LOOPBACK_PRODUCTION_SERVICES=true` 时允许，Redis 必须配置密码。生产 Redis 需显式 `maxmemory` + `noeviction`，并按主机内存预算调整示例值。
 - **Webhook**：512KB body 限制 + 413
 - **Face 图片**：10MB + 最小尺寸防 decompression bomb
 - **订单状态机**：禁止 PENDING_PAYMENT → CONFIRMED
