@@ -381,7 +381,15 @@ async def resolve_unknown_dead_letter(
         delivery_status = str(delivery_order.delivery_status or "").upper()
         if delivery_status in ("CANCELLED", "REFUNDED"):
             raise AppException(40915, f"平台接单已核实，但本地外卖状态为 {delivery_status}，需人工对账", status_code=409)
-        if delivery_status == "PENDING":
+        if order_status == "COMPLETED":
+            delivery_order.delivery_status = "DONE"
+            delivery_order.logistics_status = "DELIVERED"
+            delivery_order.completed_at = (
+                getattr(delivery_order, "completed_at", None)
+                or getattr(order, "completed_at", None)
+                or now_local()
+            )
+        elif delivery_status == "PENDING":
             delivery_order.delivery_status = "ACCEPTED"
         delivery_order.last_sync_at = now_local()
         await db.flush()
