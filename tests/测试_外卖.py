@@ -855,3 +855,32 @@ async def test_meituan_side_effect_error_envelope_is_uncertain(monkeypatch, path
     with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
         with pytest.raises(DeliveryPlatformResultUnknown):
             await MeituanProvider()._request(path, {"order_id": "O1"})
+
+@pytest.mark.asyncio
+async def test_eleme_side_effect_result_false_is_not_treated_as_success(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown, ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        json={"result": False},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(DeliveryPlatformResultUnknown):
+            await ElemeProvider()._rpc("eleme.order.cancelOrderLite", {"orderId": "O1"})
