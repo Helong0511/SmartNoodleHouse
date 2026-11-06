@@ -116,7 +116,7 @@ jobs:
           PYTHONPATH: .
           APP_ENV: development
           APP_DEBUG: "true"
-          DATABASE_URL: "mysql+pymysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
         run: alembic upgrade head
       - name: Run MySQL-marked tests
         env:
