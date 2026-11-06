@@ -1044,26 +1044,6 @@ class DeliveryService:
 
         order, d_order, refund = await lock_context()
 
-        # 取消意图与退款意图互斥：取消在同一 Order 行锁内创建 Outbox。
-        cancel_event = (
-            await db.execute(
-                select(OutboxEvent.id, OutboxEvent.status).where(
-                    OutboxEvent.aggregate_type == "webhook_task",
-                    OutboxEvent.aggregate_id == delivery_order_id,
-                    OutboxEvent.event_kind == "deferred_cancel_order",
-                    # DONE 表示取消已明确完成，不再是“待执行/结果未知”的互斥意图。
-                    # 取消完成后仍可能收到平台退款回调，必须允许对应退款继续入账。
-                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "FAILED")),
-                )
-            )
-        ).first()
-        if cancel_event:
-            raise AppException(
-                40955,
-                "该外卖订单已有取消请求或取消结果待核实，暂不能处理退款",
-                status_code=409,
-            )
-
         if refund.status == "APPROVED_LEDGER_PENDING":
             # 平台已确认退款，但本地财务分录上次写入失败；只补记账，绝不再次调用平台退款接口。
             from app.services.financial_ledger_service import FinancialLedgerService
@@ -1108,6 +1088,26 @@ class DeliveryService:
             )
         if refund.status != "PENDING":
             raise AppException(40053, f"退款当前状态不可处理: {refund.status}")
+
+        # 仅在准备发起新的平台退款操作时检查取消意图。
+        # APPROVED_LEDGER_PENDING 是平台已确认退款成功后的本地补账，绝不能被取消 Outbox 阻断。
+        cancel_event = (
+            await db.execute(
+                select(OutboxEvent.id, OutboxEvent.status).where(
+                    OutboxEvent.aggregate_type == "webhook_task",
+                    OutboxEvent.aggregate_id == delivery_order_id,
+                    OutboxEvent.event_kind == "deferred_cancel_order",
+                    # FAILED 也保留为未核实状态：可能是可重试任务或已耗尽重试的死信。
+                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "FAILED")),
+                )
+            )
+        ).first()
+        if cancel_event:
+            raise AppException(
+                40955,
+                "该外卖订单已有取消请求或取消结果待核实，暂不能处理退款",
+                status_code=409,
+            )
 
         store_id = int(order.store_id)
         credentials = await get_credentials_for_store(db, refund.platform, store_id)
