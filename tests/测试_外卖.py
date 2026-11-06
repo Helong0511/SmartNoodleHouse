@@ -1,5 +1,6 @@
 """美团 / 饿了么官方签名、事件分类与解析测试"""
 import json
+from types import SimpleNamespace
 
 import pytest
 from decimal import Decimal
