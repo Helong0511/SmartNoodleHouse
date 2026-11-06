@@ -369,29 +369,49 @@ def validate_settings(settings: Settings) -> None:
             v = str(value or "").strip()
             return bool(v) and bool(_placeholder_re.search(v))
 
-        wechat_ok = bool(
-            getattr(settings, "wechat_mch_id", None)
-            and getattr(settings, "wechat_api_v3_key", None)
-            and getattr(settings, "wechat_cert_serial_no", None)
-            and getattr(settings, "wechat_app_id", None)
+        wechat_required_fields = (
+            "wechat_mch_id",
+            "wechat_api_v3_key",
+            "wechat_cert_serial_no",
+            "wechat_app_id",
+            "wechat_app_secret",
         )
+        wechat_any = any(
+            str(getattr(settings, field, None) or "").strip()
+            for field in wechat_required_fields
+        )
+        wechat_ok = all(
+            str(getattr(settings, field, None) or "").strip()
+            for field in wechat_required_fields
+        )
+        if wechat_any and not wechat_ok:
+            errors.append(
+                "微信支付配置不完整：MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID/APP_SECRET 必须配齐，"
+                "避免支付可用但小程序身份/授权链路不可用"
+            )
         if wechat_ok:
-            for label in (
-                "wechat_app_id",
-                "wechat_mch_id",
-                "wechat_app_secret",
-                "wechat_api_v3_key",
-                "wechat_cert_serial_no",
-            ):
+            for label in wechat_required_fields:
                 if _is_placeholder(getattr(settings, label, None)):
                     errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实配置")
-        alipay_ok = bool(
-            getattr(settings, "alipay_app_id", None)
-            and getattr(settings, "alipay_private_key", None)
-            and getattr(settings, "alipay_public_key", None)
+        alipay_required_fields = (
+            "alipay_app_id",
+            "alipay_private_key",
+            "alipay_public_key",
         )
+        alipay_any = any(
+            str(getattr(settings, field, None) or "").strip()
+            for field in alipay_required_fields
+        )
+        alipay_ok = all(
+            str(getattr(settings, field, None) or "").strip()
+            for field in alipay_required_fields
+        )
+        if alipay_any and not alipay_ok:
+            errors.append(
+                "支付宝支付配置不完整：APP_ID/应用私钥/支付宝公钥必须配齐，或全部留空停用该渠道"
+            )
         if alipay_ok:
-            for label in ("alipay_app_id", "alipay_private_key", "alipay_public_key"):
+            for label in alipay_required_fields:
                 if _is_placeholder(getattr(settings, label, None)):
                     errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实配置")
         for label in ("wechat_notify_url", "alipay_notify_url", "meituan_notify_url", "eleme_notify_url"):
