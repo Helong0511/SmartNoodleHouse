@@ -209,6 +209,7 @@ def test_unknown_external_result_requires_explicit_reconciliation_before_replay(
     from app.api.outbox_admin import (
         _is_external_result_unknown,
         _require_external_result_replay_confirmation,
+        _require_external_result_success_confirmation,
     )
     from app.core.exceptions import AppException
 
@@ -220,6 +221,9 @@ def test_unknown_external_result_requires_explicit_reconciliation_before_replay(
     _require_external_result_replay_confirmation(marker, True, "下游核实未执行；订单仍待接单")
     with pytest.raises(AppException):
         _require_external_result_replay_confirmation("ordinary failure", True, "下游核实未执行；核对完成")
+    with pytest.raises(AppException):
+        _require_external_result_success_confirmation("未核实，先关闭")
+    _require_external_result_success_confirmation("平台核实已成功；订单已确认")
 
 
 @pytest.mark.asyncio
