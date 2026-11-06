@@ -655,6 +655,21 @@ class ElemeProvider(DeliveryProvider):
             )
         if data.get("error"):
             logger.error("饿了么 API 失败 %s: %s", action, data)
+            # 对外卖订单确认/取消/退款等有外部副作用的 RPC，
+            # 未经官方错误码白名单核验，不能把任意 error envelope 当成“确定未执行”。
+            # 系统错误、超时代理错误等可能发生在平台已处理之后；统一进入人工核实。
+            side_effect_actions = {
+                "eleme.order.confirmOrderLite",
+                "eleme.order.setOrderPrepared",
+                "eleme.order.replyReminder",
+                "eleme.order.agreeRefundLite",
+                "eleme.order.disagreeRefundLite",
+                "eleme.order.cancelOrderLite",
+            }
+            if action in side_effect_actions:
+                raise DeliveryPlatformResultUnknown(
+                    f"ELEME {action}: platform returned an error envelope; downstream side effect is not safely classifiable"
+                )
         return data
 
     async def confirm_order(self, platform_order_id: str) -> bool:
