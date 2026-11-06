@@ -1186,13 +1186,15 @@ class PaymentService:
         from app.services.balance_service import BalanceService
         from app.services.financial_ledger_service import FinancialLedgerService
 
-        locked_p = (
-            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
-        ).scalar_one()
+        # 统一充值单锁序：RechargeOrder → Payment，与 _lock_order_then_payment 一致。
+        # 回调入口可能已持有充值单锁；反向先锁 Payment 会与并发结算形成死锁环。
         locked_r = (
             await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
         ).scalar_one()
-        payment, recharge = locked_p, locked_r
+        locked_p = (
+            await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
+        ).scalar_one()
+        recharge, payment = locked_r, locked_p
         if payment.status == "PAID" and recharge.status == "PAID":
             return {"already_paid": True, "status": "PAID"}
 
