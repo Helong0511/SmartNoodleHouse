@@ -1,7 +1,7 @@
 """Add explicit store scope to payment reconciliation batches.
 
 Revision ID: 0048_reconcile_store_scope
-Revises: 0047_payment_refund_idempotency_key
+Revises: 0047_payment_refund_idem
 
 Existing batches are retained as HQ/global scope (scope_store_id=0). The canonical
 baseline schema may already contain this column/index on a fresh install, so this
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0048_reconcile_store_scope"
-down_revision = "0047_payment_refund_idempotency_key"
+down_revision = "0047_payment_refund_idem"
 branch_labels = None
 depends_on = None
 
