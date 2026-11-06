@@ -44,7 +44,7 @@ def _production_redis_url_errors(
         )
     if not password:
         errors.append("生产环境 REDIS_URL 必须配置 Redis 密码（支持 ACL username:password）")
-    elif re.search(r"replace[_-]|your[-_]password|example\\.com", password, re.IGNORECASE):
+    elif re.search(r"replace[_-]|your[-_]password|example\.com", password, re.IGNORECASE):
         errors.append("生产环境 REDIS_URL 密码仍为示例占位值，必须替换为真实强密码")
     return errors
 
@@ -319,7 +319,7 @@ def validate_settings(settings: Settings) -> None:
             elif db_user == "root":
                 errors.append("生产环境 DATABASE_URL 禁止使用 MySQL root 账号，须使用最小权限应用账号")
             elif re.search(
-                r"replace[_-]|your[-_]password|example\\.com",
+                r"replace[_-]|your[-_]password|example\.com",
                 db_password,
                 re.IGNORECASE,
             ):
