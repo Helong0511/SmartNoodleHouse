@@ -664,11 +664,45 @@ class DeliveryService:
         return result.scalar_one_or_none()
 
     @classmethod
+    async def _lock_delivery_order_context(
+        cls, db: AsyncSession, d_order: DeliveryOrder
+    ) -> tuple[Order | None, DeliveryOrder | None]:
+        """所有外卖状态回调统一锁序：Order → DeliveryOrder。
+
+        先普通读取 DeliveryOrder 只用于取得 order_id；任何写入前都重新按关联条件加锁，
+        避免与商家取消/退款流程产生反向锁序或使用已变更的关联关系。
+        """
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(d_order.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not order:
+            return None, None
+        locked_delivery = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.id == int(d_order.id),
+                    DeliveryOrder.order_id == int(order.id),
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not locked_delivery:
+            return None, None
+        return order, locked_delivery
+
+    @classmethod
     async def _handle_cancel(cls, db: AsyncSession, platform: str, platform_order_id: str, raw: dict | None = None) -> Order | None:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None
-        order = await db.get(Order, d_order.order_id)
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
         if order:
             if str(order.status or "").upper() not in ("COMPLETED", "CANCELLED", "REFUNDED"):
                 from app.services.order_lifecycle import apply_order_status
@@ -694,8 +728,8 @@ class DeliveryService:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None
-        order = await db.get(Order, d_order.order_id)
-        if order:
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
+        if order and d_order:
             if str(order.status or "").upper() not in ("COMPLETED", "CANCELLED", "REFUNDED"):
                 from app.services.order_lifecycle import apply_order_status
 
@@ -722,8 +756,8 @@ class DeliveryService:
         d_order = await cls._get_delivery_order(db, platform, platform_order_id)
         if not d_order:
             return None
-        order = await db.get(Order, d_order.order_id)
-        if order and order.status == "PAID":
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
+        if order and d_order and order.status == "PAID":
             from app.services.order_lifecycle import apply_order_status
 
             await apply_order_status(
@@ -788,13 +822,9 @@ class DeliveryService:
 
         # 与 apply_order_status 的 Order 行锁使用相同串行化点：
         # 并发完成/取消回调先后竞争时，迟到配送事件必须读取锁后的最新终态。
-        order = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == d_order.order_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
+        order, d_order = await cls._lock_delivery_order_context(db, d_order)
+        if not order or not d_order:
+            return None
         order_status = str(getattr(order, "status", "") or "").upper()
         delivery_status = str(getattr(d_order, "delivery_status", "") or "").upper()
         terminal_order = order_status in ("COMPLETED", "CANCELLED", "REFUNDED")
