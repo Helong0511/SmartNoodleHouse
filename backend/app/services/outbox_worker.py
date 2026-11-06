@@ -407,6 +407,10 @@ async def process_pending_outbox(limit: int = 30) -> int:
         import app.services.delivery_sync_handlers  # noqa: F401
     except Exception:
         logger.exception("Failed to import delivery_sync_handlers handlers")
+    try:
+        import app.services.menu_cache_handlers  # noqa: F401
+    except Exception:
+        logger.exception("Failed to import menu_cache_handlers handlers")
     now = now_local()
     async with AsyncSessionLocal() as db:
         rows = (
