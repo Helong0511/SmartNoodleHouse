@@ -1193,6 +1193,26 @@ class DeliveryService:
         if order.status in ("COMPLETED", "CANCELLED", "REFUNDED"):
             raise AppException(40054, "订单已结束，无法取消")
 
+        # 与退款认领共用 Order 行锁：存在退款审核/平台处理中/待补账/已批准记录时拒绝取消。
+        refund_conflict = (
+            await db.execute(
+                select(DeliveryRefund.id, DeliveryRefund.status)
+                .where(
+                    DeliveryRefund.delivery_order_id == int(delivery_order_id),
+                    DeliveryRefund.status.in_(
+                        ("PENDING", "PROCESSING", "APPROVED_LEDGER_PENDING", "APPROVED")
+                    ),
+                )
+                .limit(1)
+            )
+        ).first()
+        if refund_conflict:
+            raise AppException(
+                40956,
+                "该外卖订单已有退款申请、退款处理中或已退款记录，暂不能发起取消",
+                status_code=409,
+            )
+
         store_id = int(order.store_id)
         platform = str(d_order.platform or "").upper()
         platform_order_id = str(d_order.platform_order_id or "")
