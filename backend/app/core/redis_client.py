@@ -50,18 +50,22 @@ async def try_get_redis() -> redis.Redis | None:
 
 
 async def delete_with_retry(r, *keys: str, retries: int = 2, delay: float = 0.05) -> int:
-    """删除缓存键，失败时短暂重试。返回删除数量。"""
-    deleted = 0
+    """删除缓存键，仅在 Redis 命令异常时重试。
+
+    DEL 返回 0 是成功结果（键不存在或已被其他实例删除），不能当作失败重试；
+    尤其逐键删除 Redis Cluster 缓存时，避免对大量不存在的键产生无意义延迟。
+    """
+    if not keys:
+        return 0
     for attempt in range(retries + 1):
         try:
-            deleted = await r.delete(*keys)
-            if deleted >= len(keys):
-                return deleted
+            return int(await r.delete(*keys) or 0)
         except Exception:
-            pass
-        if attempt < retries:
+            if attempt >= retries:
+                logger.warning("Redis DEL 重试耗尽（%d 个 key）", len(keys), exc_info=True)
+                return 0
             await asyncio.sleep(delay)
-    return deleted
+    return 0
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
