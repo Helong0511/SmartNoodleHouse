@@ -12,6 +12,7 @@ from app.core.response import naive_local_now, now_local, success, serialize_dt
 from app.models import QueueTicket
 from app.services.system_settings_service import SystemSettingsService
 from app.services.websocket_manager import ws_manager
+from app.services.store_scope import require_bound_store
 
 router = APIRouter(tags=["排队"])
 
@@ -179,6 +180,13 @@ async def _get_queue_ticket(db, ticket_id: int) -> QueueTicket:
     return ticket
 
 
+def _assert_staff_ticket_store(user: CurrentUser, ticket: QueueTicket) -> None:
+    """门店员工只能操作本店排队票；跨店 ID 与不存在统一 404。"""
+    sid = require_bound_store(user)
+    if sid is not None and int(ticket.store_id) != sid:
+        raise AppException(40404, "排队号不存在", status_code=404)
+
+
 @router.get("/admin/queue/today", dependencies=[require_permission("table:manage")])
 async def admin_today_tickets(
     request: Request,
@@ -188,9 +196,12 @@ async def admin_today_tickets(
     status: str | None = None,
 ):
     """当日某门店全部排队号：WAITING/CALLED 在前按 number 正序。"""
+    sid = require_bound_store(user, store_id)
+    if sid is None:
+        raise AppException(40008, "请选择门店")
     today = now_local().date()
     stmt = select(QueueTicket).where(
-        QueueTicket.store_id == store_id,
+        QueueTicket.store_id == sid,
         QueueTicket.issue_date == today,
     )
     if status:
@@ -223,6 +234,7 @@ async def admin_today_tickets(
 async def admin_call_ticket(ticket_id: int, request: Request, db: DbSession, user: CurrentUser):
     """叫号：WAITING→CALLED，并广播到叫号屏 display 渠道。"""
     ticket = await _get_queue_ticket(db, ticket_id)
+    _assert_staff_ticket_store(user, ticket)
     if ticket.status != "WAITING":
         raise AppException(40021, "仅等待中的排队号可叫号")
     ticket.status = "CALLED"
@@ -248,6 +260,7 @@ async def admin_call_ticket(ticket_id: int, request: Request, db: DbSession, use
 async def admin_seat_ticket(ticket_id: int, request: Request, db: DbSession, user: CurrentUser):
     """落座：CALLED→SEATED。"""
     ticket = await _get_queue_ticket(db, ticket_id)
+    _assert_staff_ticket_store(user, ticket)
     if ticket.status != "CALLED":
         raise AppException(40021, "仅已叫号的排队号可标记落座")
     ticket.status = "SEATED"
@@ -260,6 +273,7 @@ async def admin_seat_ticket(ticket_id: int, request: Request, db: DbSession, use
 async def admin_cancel_ticket(ticket_id: int, request: Request, db: DbSession, user: CurrentUser):
     """取消排队：WAITING/CALLED→CANCELLED。"""
     ticket = await _get_queue_ticket(db, ticket_id)
+    _assert_staff_ticket_store(user, ticket)
     if ticket.status not in ACTIVE_STATUSES:
         raise AppException(40021, "当前状态不可取消")
     ticket.status = "CANCELLED"
