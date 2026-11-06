@@ -12,8 +12,16 @@ def _top_level_statement_index(function, awaited_call_name: str) -> int:
         if any(
             isinstance(node, ast.Await)
             and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Attribute)
-            and node.value.func.attr == awaited_call_name
+            and (
+                (
+                    isinstance(node.value.func, ast.Attribute)
+                    and node.value.func.attr == awaited_call_name
+                )
+                or (
+                    isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == awaited_call_name
+                )
+            )
             for node in ast.walk(statement)
         ):
             return index
