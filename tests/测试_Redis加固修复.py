@@ -458,3 +458,28 @@ async def test_redis_client_close_resets_and_closes():
         await redis_client.close_redis()
         assert fake.closed is True
 
+
+
+@pytest.mark.asyncio
+async def test_reco_limit_is_part_of_cache_identity():
+    from app.core.cache_keys import reco_key, reco_rebuild_lock_key
+    k5 = reco_key(7, 3, "recommend_menu", "v1", "", 5)
+    k10 = reco_key(7, 3, "recommend_menu", "v1", "", 10)
+    l5 = reco_rebuild_lock_key(7, 3, "recommend_menu", "v1", "", 5)
+    assert k5 != k10
+    assert k5.split("{", 1)[1].split("}", 1)[0] == l5.split("{", 1)[1].split("}", 1)[0]
+
+@pytest.mark.asyncio
+async def test_reco_invalidation_deletes_cluster_keys_individually(monkeypatch):
+    from app.services import reco_cache
+    from app.core.cache_keys import reco_key
+    fake = FakeRedis()
+    k1 = reco_key(5, 1, "home", "v1")
+    k2 = reco_key(5, 2, "home", "v1")
+    fake.store[k1] = "{}"
+    fake.store[k2] = "{}"
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        monkeypatch.setattr("asyncio.sleep", AsyncMock())
+        await reco_cache.invalidate_customer(5)
+    assert k1 in fake.delete_calls and k2 in fake.delete_calls
+    assert k1 not in fake.store and k2 not in fake.store
