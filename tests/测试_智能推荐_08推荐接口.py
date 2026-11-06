@@ -6,6 +6,8 @@ import pytest
 
 from app.api.miniprogram import get_recommendations
 from app.core.exceptions import AppException
+from app.core.cache_keys import reco_key, reco_rebuild_lock_key
+from app.services.reco_cache import release_reco_lock, set_cached_reco, try_acquire_reco_lock
 from app.models import CustomerTasteProfile
 from app.services.recommendation_service import invalidate_store_caches
 from app.services.taste_learning_service import TasteLearningService
@@ -39,8 +41,26 @@ class FakeRedis:
     async def get(self, key):
         return self.store.get(key)
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.store:
+            return None
         self.store[key] = value
+        return True
+
+    async def eval(self, script, numkeys, *args):
+        keys = args[:numkeys]
+        argv = args[numkeys:]
+        if numkeys == 1:
+            if self.store.get(keys[0]) == argv[0]:
+                del self.store[keys[0]]
+                return 1
+            return 0
+        if numkeys == 2:
+            if self.store.get(keys[0]) == argv[0]:
+                self.store[keys[1]] = argv[1]
+                return "OK"
+            return 0
+        raise AssertionError(f"unexpected Lua key count: {numkeys}")
 
     async def delete(self, *keys):
         n = 0
@@ -103,6 +123,40 @@ async def _call(db, store, *, customer=None, scene="recommend_menu", limit=10, c
         cart_item_ids=",".join(str(i) for i in cart) if cart else None,
     )
     return resp["data"]
+
+
+@pytest.mark.asyncio
+async def test_old_reco_owner_cannot_release_new_owners_lock(fake_redis):
+    args = (None, 901, "recommend_menu", "v1", "")
+    old_owner = await try_acquire_reco_lock(*args)
+    assert old_owner
+
+    lock_key = reco_rebuild_lock_key(*args)
+    fake_redis.store[lock_key] = "new-owner"
+    await release_reco_lock(*args, owner_token=old_owner)
+
+    assert fake_redis.store[lock_key] == "new-owner"
+
+
+@pytest.mark.asyncio
+async def test_reco_cache_write_requires_current_lock_owner(fake_redis):
+    args = (None, 902, "recommend_menu", "v1", "")
+    lock_key = reco_rebuild_lock_key(*args)
+    cache_key = reco_key(*args)
+    fake_redis.store[lock_key] = "new-owner"
+
+    await set_cached_reco(*args[:4], {"items": ["stale"]}, args[4], owner_token="old-owner")
+    assert cache_key not in fake_redis.store
+
+    await set_cached_reco(*args[:4], {"items": ["fresh"]}, args[4], owner_token="new-owner")
+    assert cache_key in fake_redis.store
+
+
+def test_reco_data_and_lock_keys_share_redis_cluster_hash_slot():
+    args = (123, 456, "settle_addon", "v2", "cart-fingerprint")
+    cache_tag = reco_key(*args).split("{", 1)[1].split("}", 1)[0]
+    lock_tag = reco_rebuild_lock_key(*args).split("{", 1)[1].split("}", 1)[0]
+    assert cache_tag == lock_tag
 
 
 # ---------- TR-8.1 接口形态 ----------
