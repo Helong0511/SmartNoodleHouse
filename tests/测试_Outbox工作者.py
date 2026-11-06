@@ -1027,3 +1027,21 @@ def test_manual_delivery_confirm_retry_event_kinds_resolve_to_shared_handler():
     for event_kind in ("confirm_0123456789abcdef", "confirm_abcdef0123456789"):
         row = SimpleNamespace(aggregate_type="delivery_manual", event_kind=event_kind)
         assert _resolve_outbox_handler(row) is handler
+
+
+@pytest.mark.asyncio
+async def test_malformed_platform_response_is_uncertain_and_never_auto_retried():
+    from app.services.delivery_providers import DeliveryPlatformResultUnknown
+    from app.services.delivery_tasks import _call_external_side_effect
+    from app.services.outbox_worker import ExternalSideEffectUncertain
+
+    async def malformed_success_http_response():
+        raise DeliveryPlatformResultUnknown(
+            "MEITUAN /api/v1/order/cancel: HTTP 200 response is not valid JSON"
+        )
+
+    with pytest.raises(ExternalSideEffectUncertain, match="响应格式/结构异常"):
+        await _call_external_side_effect(
+            "cancel_order", "MEITUAN", "MT-ORDER-UNKNOWN",
+            malformed_success_http_response,
+        )
