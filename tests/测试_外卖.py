@@ -590,6 +590,11 @@ async def test_late_delivery_progress_callback_does_not_regress_terminal_state(
     assert db.execute.await_count == 2
     order_lock_sql = str(db.execute.await_args_list[0].args[0]).lower()
     delivery_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    assert "orders" in order_lock_sql and "for update" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
+    assert db.execute.await_count == 2
+    order_lock_sql = str(db.execute.await_args_list[0].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
     assert "orders" in order_lock_sql
     assert "delivery_orders" in delivery_lock_sql
 
@@ -703,7 +708,10 @@ async def test_merchant_cancel_outbox_handler_updates_local_state_only_after_pla
     d_order = SimpleNamespace(id=501, order_id=601, delivery_status="ACCEPTED", last_sync_at=None)
     db = MagicMock()
     db.commit = AsyncMock()
-    db.get = AsyncMock(side_effect=lambda model, key: order if model.__name__ == "Order" else d_order)
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=d_order)),
+    ])
     db.flush = AsyncMock()
 
     provider = SimpleNamespace(cancel_order=AsyncMock(return_value=True))
