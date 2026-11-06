@@ -45,6 +45,11 @@ class FakeRedis:
     async def eval(self, script, numkeys, *args):
         self.eval_calls.append((script, numkeys, args))
         keys, argv = args[:numkeys], args[numkeys:]
+        if "MENU_RENEW_LOCK" in script or "RECO_RENEW_LOCK" in script:
+            if self.store.get(keys[0]) != str(argv[0]):
+                return 0
+            self.expire_calls.append((keys[0], int(argv[1])))
+            return 1
         if "MENU_GET_BUNDLE_WITH_VERSION" in script:
             bundle = self.store.get(keys[0])
             version = self.store.get(keys[1])
@@ -589,3 +594,35 @@ async def test_menu_version_migrates_legacy_key_without_expiry():
         assert await menu_cache.get_menu_version(10) == 23
         assert fake.store[menu_cache.menu_version_key(10)] == "23"
         assert "{s10}" in menu_cache.menu_version_key(10)
+
+
+@pytest.mark.asyncio
+async def test_menu_rebuild_lock_renewal_requires_current_owner():
+    from app.core import menu_cache
+    fake = FakeRedis()
+    with patch.object(menu_cache, "get_redis", _patch_get_redis(fake)):
+        token = await menu_cache.try_acquire_rebuild_lock(31)
+        assert token
+        assert await menu_cache.renew_rebuild_lock(31, owner_token=token) is True
+        assert fake.expire_calls[-1] == (menu_cache.menu_rebuild_lock_key(31), 10)
+        fake.store[menu_cache.menu_rebuild_lock_key(31)] = "new-owner"
+        assert await menu_cache.renew_rebuild_lock(31, owner_token=token) is False
+
+
+@pytest.mark.asyncio
+async def test_reco_rebuild_lock_renewal_requires_current_owner():
+    from app.services import reco_cache
+    from app.core.cache_keys import reco_rebuild_lock_key
+    fake = FakeRedis()
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        token = await reco_cache.try_acquire_reco_lock(5, 31, "recommend_menu", "v1")
+        assert token
+        assert await reco_cache.renew_reco_lock(
+            5, 31, "recommend_menu", "v1", owner_token=token
+        ) is True
+        key = reco_rebuild_lock_key(5, 31, "recommend_menu", "v1")
+        assert fake.expire_calls[-1] == (key, 30)
+        fake.store[key] = "new-owner"
+        assert await reco_cache.renew_reco_lock(
+            5, 31, "recommend_menu", "v1", owner_token=token
+        ) is False
