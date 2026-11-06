@@ -3,10 +3,11 @@
 # 或在 docker-compose.yml 中通过 command 指定。
 
 # ── 网络 ──
-# 生产环境应绑定内网 IP，禁止暴露到公网
-# bind 10.0.0.1 127.0.0.1
-# protected-mode yes
-# port 6379
+# 默认单机部署只监听本机；禁止将 Redis 直接绑定 0.0.0.0 或公网网卡。
+# 多机部署必须显式改成专用私网 IP，并用安全组/防火墙限制应用服务器来源。
+bind 127.0.0.1
+protected-mode yes
+port 6379
 
 # ── 认证（必须设置强密码）──
 requirepass REPLACE_WITH_STRONG_REDIS_PASSWORD
