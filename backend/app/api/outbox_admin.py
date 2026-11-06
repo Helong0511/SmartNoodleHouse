@@ -6,11 +6,11 @@ import re
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.api.deps import CurrentUser, DbSession, require_permission
 from app.core.exceptions import AppException
-from app.core.response import calc_pages, success, serialize_dt
+from app.core.response import calc_pages, success, serialize_dt, now_local
 from app.models import OutboxEvent
 from app.services.audit_service import AuditService
 from app.services.outbox_worker import (
@@ -60,6 +60,15 @@ def _ensure_handler_registry() -> None:
 
 class OutboxReplayIn(BaseModel):
     reason: str = Field(..., min_length=8, max_length=500)
+    confirmed_not_applied: bool = False
+
+
+class OutboxResolveIn(BaseModel):
+    reason: str = Field(..., min_length=8, max_length=500)
+
+
+def _is_external_result_unknown(value: str | None) -> bool:
+    return str(value or "").startswith("EXTERNAL_RESULT_UNKNOWN:")
 
 
 @router.get("/dead-letters", dependencies=[require_permission("system:manage")])
@@ -95,6 +104,7 @@ async def list_dead_letters(
             "attempt_count": row.attempt_count,
             "max_attempts": row.max_attempts,
             "last_error": _safe_error(row.last_error),
+            "result_unknown": _is_external_result_unknown(row.last_error),
             "created_at": serialize_dt(row.created_at),
             "updated_at": serialize_dt(row.updated_at),
         } for row in rows],
@@ -123,6 +133,14 @@ async def replay_dead_letter(
         raise AppException(40401, "Outbox 事件不存在", status_code=404)
     if row.status != "FAILED" or int(row.attempt_count or 0) < int(row.max_attempts or 0):
         raise AppException(40901, "该事件不是已耗尽重试次数的死信，不能人工重放", status_code=409)
+    if _is_external_result_unknown(row.last_error) and not data.confirmed_not_applied:
+        raise AppException(
+            40905,
+            "该事件的外部执行结果未知。请先登录美团/饿了么核实订单确实未执行，再明确确认后重放；若平台已执行，请使用“核实已成功”关闭死信。",
+            status_code=409,
+        )
+    if data.confirmed_not_applied and not _is_external_result_unknown(row.last_error):
+        raise AppException(40906, "仅外部结果未知的死信需要该确认标记", status_code=409)
 
     try:
         payload = json.loads(row.payload) if row.payload else {}
@@ -162,6 +180,7 @@ async def replay_dead_letter(
             "previous_attempt_count": previous_attempt_count,
             "max_attempts": previous_max_attempts,
             "previous_error": previous_error,
+            "confirmed_not_applied": bool(data.confirmed_not_applied),
             "reason": data.reason.strip(),
         },
         request=request,
@@ -169,3 +188,71 @@ async def replay_dead_letter(
     )
     await db.commit()
     return success({"id": outbox_id, "status": "PENDING", "requeued": True}, request=request)
+
+
+@router.post("/dead-letters/{outbox_id}/resolve", dependencies=[require_permission("system:manage")])
+async def resolve_unknown_dead_letter(
+    outbox_id: int,
+    data: OutboxResolveIn,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """外部平台已确认执行成功时，关闭未知结果死信，避免误重放。"""
+    _require_super_admin(user)
+    if len(data.reason.strip()) < 8:
+        raise AppException(40012, "核实原因去除空格后至少需要 8 个字符", status_code=400)
+    row = (await db.execute(
+        select(OutboxEvent).where(OutboxEvent.id == outbox_id)
+    )).scalar_one_or_none()
+    if row is None:
+        raise AppException(40401, "Outbox 事件不存在", status_code=404)
+    if (
+        row.status != "FAILED"
+        or int(row.attempt_count or 0) < int(row.max_attempts or 0)
+        or not _is_external_result_unknown(row.last_error)
+    ):
+        raise AppException(40907, "该事件不是待核实的外部结果未知死信", status_code=409)
+
+    previous_error = _safe_error(row.last_error)
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == int(outbox_id),
+            OutboxEvent.status == "FAILED",
+            OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
+            OutboxEvent.last_error.like("EXTERNAL_RESULT_UNKNOWN:%"),
+        )
+        .values(
+            status="DONE",
+            processed_at=now_local(),
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+            last_error="EXTERNAL_RESULT_RECONCILED_SUCCESS",
+        )
+    )
+    if int(result.rowcount or 0) != 1:
+        await db.rollback()
+        raise AppException(40908, "死信状态已变化，请刷新后重试", status_code=409)
+
+    await AuditService.log_staff(
+        db,
+        user=user,
+        action="system.outbox.dead_letter.resolve",
+        module="system",
+        target_type="outbox_event",
+        target_id=outbox_id,
+        detail={
+            "aggregate_type": row.aggregate_type,
+            "aggregate_id": row.aggregate_id,
+            "event_kind": row.event_kind,
+            "previous_error": previous_error,
+            "resolution": "external_platform_confirmed_success",
+            "reason": data.reason.strip(),
+        },
+        request=request,
+        store_id=None,
+    )
+    await db.commit()
+    return success({"id": outbox_id, "status": "DONE", "resolved": True}, request=request)
