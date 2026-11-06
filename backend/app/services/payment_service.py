@@ -1235,31 +1235,36 @@ class PaymentService:
 
     @classmethod
     async def sync_recharge_payment(cls, db: AsyncSession, recharge: RechargeOrder) -> dict:
-        locked = (
-            await db.execute(select(RechargeOrder).where(RechargeOrder.id == recharge.id).with_for_update())
+        """充值单主动查单：第三方网络请求前不持有充值单行锁。"""
+        current = (
+            await db.execute(
+                select(RechargeOrder)
+                .where(RechargeOrder.id == recharge.id)
+                .execution_options(populate_existing=True)
+            )
         ).scalar_one_or_none()
-        if not locked:
+        if not current:
             raise AppException(40491, "充值单不存在")
-        recharge = locked
-        if recharge.status == "PAID":
+        if current.status == "PAID":
             return {"synced": False, "already_paid": True, "status": "PAID"}
         payment = None
-        if recharge.payment_id:
-            payment = await db.get(Payment, recharge.payment_id)
+        if current.payment_id:
+            payment = await db.get(Payment, current.payment_id)
         if not payment:
             payment = (
                 await db.execute(
                     select(Payment)
-                    .where(Payment.recharge_order_id == recharge.id)
+                    .where(Payment.recharge_order_id == current.id)
                     .order_by(Payment.id.desc())
                     .limit(1)
                 )
             ).scalar_one_or_none()
         if not payment:
             return {"synced": False, "trade_state": "NO_PAYMENT"}
+        # sync_payment_status 先完成渠道 HTTP 查询，再按充值单→支付单锁序入账。
         payment, meta = await cls.sync_payment_status(db, payment)
-        await db.refresh(recharge)
-        return {**meta, "payment_no": payment.payment_no, "recharge_status": recharge.status}
+        await db.refresh(current)
+        return {**meta, "payment_no": payment.payment_no, "recharge_status": current.status}
 
     @classmethod
     def _is_duplicate_out_trade_error(cls, exc: AppException) -> bool:
