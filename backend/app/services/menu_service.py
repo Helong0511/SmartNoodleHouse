@@ -375,6 +375,27 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
     if version <= 0:
         # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
         version = await bump_menu_version(sid)
+    if build_version is None and _bundle_version(bundle) != version:
+        # 缓存命中/等待者路径也可能在读完 bundle 后发生并发失效；
+        # 绝不能把旧 bundle 重新标记成新版本返回。
+        latest = await get_menu_bundle(sid)
+        latest_version = await get_menu_version(sid)
+        if (
+            latest is not None
+            and latest_version > 0
+            and _bundle_version(latest) == latest_version
+            and _bundle_schedule_id(latest) == expected_sched
+            and _bundle_has_visibility_meta(latest)
+        ):
+            bundle = latest
+            version = latest_version
+        else:
+            invalidate_local_menu_cache(sid)
+            raise AppException(
+                50301,
+                "菜单正在更新，请稍后重新获取",
+                status_code=503,
+            )
     # 若版本在构建期间发生变化，返回旧版本号，促使客户端下一次请求重新拉取；
     # 更重要的是绝不把旧快照伪装成最新版本发布到共享缓存。
     response_version = (

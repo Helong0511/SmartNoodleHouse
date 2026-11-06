@@ -32,7 +32,7 @@ from app.core.ip_allowlist import WebhookAllowlistMiddleware
 from app.core.webhook_body_limit import WebhookBodyLimitMiddleware
 from app.core.logging_config import setup_logging
 from app.core.rate_limit import RateLimitMiddleware
-from app.core.redis_client import RequestIDMiddleware, close_redis
+from app.core.redis_client import RequestIDMiddleware
 from app.core.startup_checks import validate_settings
 from app.services.face_service import WelcomeService
 from app.services.websocket_manager import on_redis_ws_message
@@ -241,7 +241,6 @@ async def _warmup_recognition_and_tts() -> None:
 async def lifespan(app: FastAPI):
     global tts_task, recognition_task, _leader_stop, _leader_renew_task, _leader_worker_id
     settings = get_settings()
-    warmup_task: asyncio.Task | None = None
     validate_settings(settings)
 
     try:
@@ -452,7 +451,7 @@ async def lifespan(app: FastAPI):
 
     async def _start_leader_work() -> None:
         """抢到锁后启动调度器 / TTS / 识别 / 摄像头。"""
-        nonlocal is_leader, _leader_promote_task, warmup_task
+        nonlocal is_leader, _leader_promote_task
         global tts_task, recognition_task, _leader_warmup_task, _leader_stop, _leader_renew_task
         from app.core.leader_lock import is_leader_held, set_leader_held, set_on_leader_lost
 
@@ -740,14 +739,6 @@ async def lifespan(app: FastAPI):
     if is_leader:
         if jobs_drained and tts_ok and recognition_ok and warmup_ok and camera_ok and renew_stopped:
             from app.core.leader_fencing import deactivate_leader_epoch
-    if warmup_task is not None and not warmup_task.done():
-        warmup_task.cancel()
-        try:
-            await warmup_task
-        except asyncio.CancelledError:
-            pass
-    # 所有已知后台 Redis 使用者停止后，再释放本进程连接池。
-    await close_redis()
 
             deactivate_leader_epoch(_leader_worker_id)
             if _leader_worker_id:
