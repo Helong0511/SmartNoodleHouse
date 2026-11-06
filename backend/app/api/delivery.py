@@ -505,6 +505,8 @@ async def reconcile_delivery_refund(
     user: CurrentUser,
 ):
     """超级管理员核实 PROCESSING 退款的外部结果；不确定状态绝不自动重调平台。"""
+    from app.models import Order
+
     if getattr(getattr(user, "role", None), "code", None) != "SUPER_ADMIN":
         raise AppException(40300, "退款结果核实仅超级管理员可操作", status_code=403)
     reason = data.reason.strip()
