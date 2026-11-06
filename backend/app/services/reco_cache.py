@@ -38,6 +38,14 @@ end
 return 0
 """
 
+_RENEW_LOCK_SCRIPT = """
+-- RECO_RENEW_LOCK
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
 _SET_CACHE_IF_OWNER_SCRIPT = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
@@ -160,6 +168,56 @@ async def try_acquire_reco_lock(
     except Exception:
         logger.debug("推荐重建锁不可用，降级直算", exc_info=True)
         return None
+
+
+async def renew_reco_lock(
+    customer_id: int | None,
+    store_id: int,
+    scene: str,
+    bucket: str,
+    fingerprint: str = "",
+    *,
+    owner_token: str | None = None,
+    limit: int = 10,
+) -> bool:
+    """仅当前 owner 可续租推荐重建锁。"""
+    if not owner_token:
+        return False
+    try:
+        r = await get_redis()
+        return bool(
+            await r.eval(
+                _RENEW_LOCK_SCRIPT,
+                1,
+                reco_rebuild_lock_key(customer_id, store_id, scene, bucket, fingerprint, limit),
+                owner_token,
+                _REBUILD_LOCK_TTL,
+            )
+        )
+    except Exception:
+        logger.debug("推荐重建锁续租失败 store=%s scene=%s", store_id, scene, exc_info=True)
+        return False
+
+
+async def maintain_reco_lock(
+    customer_id: int | None,
+    store_id: int,
+    scene: str,
+    bucket: str,
+    fingerprint: str = "",
+    *,
+    owner_token: str,
+    limit: int = 10,
+) -> None:
+    """后台续租；租约丢失后停止，旧 owner 写缓存仍受 Lua fencing 保护。"""
+    interval = max(1, _REBUILD_LOCK_TTL // 3)
+    while True:
+        await asyncio.sleep(interval)
+        if not await renew_reco_lock(
+            customer_id, store_id, scene, bucket, fingerprint,
+            owner_token=owner_token, limit=limit,
+        ):
+            return
 
 
 async def release_reco_lock(
