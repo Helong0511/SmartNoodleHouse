@@ -396,7 +396,7 @@ async def test_deduct_stock_race_loser_gets_40031():
         sql = str(stmt).lower()
         res = MagicMock()
         if "from products" in sql and "for update" in sql:
-            res.first.return_value = (1,)
+            res.first.return_value = (1, "ON_SALE")
             return res
         if "store_product_stocks" in sql and "for update" in sql:
             res.scalar_one_or_none.return_value = SimpleNamespace(id=3, status=1, stock=0)

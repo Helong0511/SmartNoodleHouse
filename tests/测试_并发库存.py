@@ -77,3 +77,23 @@ def test_delivery_auto_confirm_default_off():
 
     s = Settings(delivery_auto_confirm=False)
     assert s.delivery_auto_confirm is False
+
+
+
+@pytest.mark.asyncio
+async def test_store_stock_cannot_override_master_product_off_shelf_status():
+    """门店库存覆盖状态为在售，也不能绕过品牌餐品主档停售。"""
+    from app.services.stock_service import deduct_stock
+
+    db = AsyncMock()
+    result = MagicMock()
+    result.first.return_value = (7, "OFF_SALE")
+    db.execute = AsyncMock(return_value=result)
+
+    with pytest.raises(AppException) as exc:
+        await deduct_stock(db, product_id=101, qty=1, store_id=7)
+
+    assert exc.value.code == 40031
+    assert "品牌餐品已停售" in str(exc.value)
+    # 只读取并锁定餐品主档；不得继续读取门店库存或执行扣减 UPDATE。
+    db.execute.assert_awaited_once()

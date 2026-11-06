@@ -62,16 +62,20 @@ async def _emit_stock_mirror(
         )
 
 
-async def _lock_product_store(db: AsyncSession, product_id: int) -> int | None:
-    """锁定品牌餐品行并返回其 store_id。锁定读看最新已提交数据，避免快照把新库存行看成不存在。"""
+async def _lock_product_store(
+    db: AsyncSession, product_id: int
+) -> tuple[int, str] | None:
+    """锁定品牌餐品行并返回 (store_id, status)，读取权威主档上架状态。"""
     row = (
         await db.execute(
-            select(Product.store_id).where(Product.id == int(product_id)).with_for_update()
+            select(Product.store_id, Product.status)
+            .where(Product.id == int(product_id))
+            .with_for_update()
         )
     ).first()
     if row is None or row[0] is None:
         return None
-    return int(row[0])
+    return int(row[0]), str(row[1] or "").upper()
 
 
 async def _lock_store_row(db: AsyncSession, store_id: int, product_id: int) -> StoreProductStock | None:
@@ -101,8 +105,12 @@ async def deduct_stock(
 
     if store_id:
         owner = await _lock_product_store(db, product_id)
-        if owner is None or int(owner) != int(store_id):
+        if owner is None or owner[0] != int(store_id):
             raise AppException(40031, f"餐品不属于当前门店或不可售: {product_id}")
+        # 门店库存仅覆盖库存数量/本店上架状态，不能覆盖总部餐品主档停售。
+        # 主档停售后，即使 StoreProductStock.status 仍为 1，也必须拒绝新订单。
+        if owner[1] != "ON_SALE":
+            raise AppException(40031, f"品牌餐品已停售，不可扣减库存: {product_id}")
         row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
             if int(row.status) != 1:
@@ -205,7 +213,7 @@ async def restore_stock(
 
     if store_id:
         owner = await _lock_product_store(db, product_id)
-        if owner is None or int(owner) != int(store_id):
+        if owner is None or owner[0] != int(store_id):
             return
         row = await _lock_store_row(db, int(store_id), product_id)
         if row is not None:
