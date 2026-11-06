@@ -311,6 +311,81 @@ async def resolve_unknown_dead_letter(
         delivery_order.last_sync_at = now_local()
         await db.flush()
         local_reconciled = True
+    elif (
+        row.aggregate_type == "delivery_manual"
+        and isinstance(payload, dict)
+        and str(payload.get("action") or "").lower() == "confirm_order"
+    ):
+        # 手动接单在发起平台确认前已本地置为 CONFIRMED/ACCEPTED；
+        # 未知结果人工核实成功时，补齐/验证本地摘要后再关闭 Outbox。
+        try:
+            order_id = int(payload.get("order_id") or row.aggregate_id or 0)
+            delivery_order_id = int(row.aggregate_id)
+            payload_store_id = int(payload.get("store_id") or 0)
+            platform = str(payload.get("platform") or "").upper()
+            platform_order_id = str(payload.get("platform_order_id") or "")
+        except (TypeError, ValueError) as exc:
+            raise AppException(40910, "接单事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409) from exc
+        if (
+            order_id <= 0
+            or delivery_order_id != order_id
+            or payload_store_id <= 0
+            or not platform
+            or not platform_order_id
+        ):
+            raise AppException(40910, "接单事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409)
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == order_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        delivery_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.order_id == order_id,
+                    DeliveryOrder.platform == platform,
+                    DeliveryOrder.platform_order_id == platform_order_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if order is None or delivery_order is None:
+            raise AppException(40911, "接单事件本地关联记录不存在，需人工核对后处理", status_code=409)
+        try:
+            actual_store_id = int(order.store_id)
+        except (TypeError, ValueError) as exc:
+            raise AppException(40912, "接单订单缺少有效门店归属，拒绝自动对账", status_code=409) from exc
+        if actual_store_id != payload_store_id:
+            raise AppException(40912, "接单订单门店归属与 Outbox 事件不一致", status_code=409)
+        order_status = str(order.status or "").upper()
+        if order_status in ("CANCELLED", "REFUNDED"):
+            raise AppException(40913, f"平台接单已核实，但本地订单为 {order_status}，需人工对账", status_code=409)
+        if order_status == "PAID":
+            from app.services.order_lifecycle import apply_order_status
+
+            await apply_order_status(
+                db,
+                order,
+                "CONFIRMED",
+                source="DELIVERY",
+                assert_kind="SYSTEM",
+                remark="平台接单结果人工核实成功",
+            )
+        elif order_status not in ("CONFIRMED", "PREPARING", "READY", "COMPLETED"):
+            raise AppException(40914, f"平台接单已核实，但本地订单状态 {order_status} 不可自动对账", status_code=409)
+        delivery_status = str(delivery_order.delivery_status or "").upper()
+        if delivery_status in ("CANCELLED", "REFUNDED"):
+            raise AppException(40915, f"平台接单已核实，但本地外卖状态为 {delivery_status}，需人工对账", status_code=409)
+        if delivery_status == "PENDING":
+            delivery_order.delivery_status = "ACCEPTED"
+        delivery_order.last_sync_at = now_local()
+        await db.flush()
+        local_reconciled = True
 
     previous_error = _safe_error(row.last_error)
     result = await db.execute(
