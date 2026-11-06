@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     # 每个 Gunicorn/Uvicorn Worker 独立连接池；全局 Redis 连接上限约 Worker 数 × 此值
     redis_max_connections: int = Field(default=50, ge=1, le=1000)
+    # 单机生产部署可显式允许 MySQL/Redis 绑定回环地址；服务必须仅监听 loopback 并启用认证。
+    # 多机部署保持 false，禁止误把本机空服务当作生产依赖。
+    allow_loopback_production_services: bool = False
     # 每进程连接池；gunicorn -w N 时总连接 ≈ N*(pool_size+max_overflow)
     db_pool_size: int = 5
     db_max_overflow: int = 10
