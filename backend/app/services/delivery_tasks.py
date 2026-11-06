@@ -1,7 +1,6 @@
 """外卖平台异步回传任务（回调先应答，再调平台 API）"""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
