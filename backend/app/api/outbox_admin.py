@@ -71,9 +71,15 @@ def _is_external_result_unknown(value: str | None) -> bool:
     return str(value or "").startswith("EXTERNAL_RESULT_UNKNOWN:")
 
 
-def _require_external_result_replay_confirmation(value: str | None, confirmed_not_applied: bool) -> None:
+def _require_external_result_replay_confirmation(
+    value: str | None,
+    confirmed_not_applied: bool,
+    reason: str,
+) -> None:
     unknown = _is_external_result_unknown(value)
-    if unknown and not confirmed_not_applied:
+    if unknown and (
+        not confirmed_not_applied or "下游核实未执行" not in str(reason or "")
+    ):
         raise AppException(
             40905,
             "该事件的下游执行结果未知。请先核实外卖平台/打印设备确实未执行，再明确确认后重放；若已执行，请使用“核实已成功”关闭死信。",
@@ -145,7 +151,9 @@ async def replay_dead_letter(
         raise AppException(40401, "Outbox 事件不存在", status_code=404)
     if row.status != "FAILED" or int(row.attempt_count or 0) < int(row.max_attempts or 0):
         raise AppException(40901, "该事件不是已耗尽重试次数的死信，不能人工重放", status_code=409)
-    _require_external_result_replay_confirmation(row.last_error, data.confirmed_not_applied)
+    _require_external_result_replay_confirmation(
+        row.last_error, data.confirmed_not_applied, data.reason
+    )
 
     try:
         payload = json.loads(row.payload) if row.payload else {}
