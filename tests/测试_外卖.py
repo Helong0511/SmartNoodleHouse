@@ -629,8 +629,11 @@ async def test_merchant_cancel_persists_one_outbox_event_and_does_not_call_platf
     )
     order = SimpleNamespace(id=601, store_id=7, status="CONFIRMED")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: d_order))
-    db.get = AsyncMock(return_value=order)
+    db.execute = AsyncMock(side_effect=[
+        SimpleNamespace(scalar_one_or_none=lambda: 601),
+        SimpleNamespace(scalar_one_or_none=lambda: order),
+        SimpleNamespace(scalar_one_or_none=lambda: d_order),
+    ])
     db.commit = AsyncMock()
 
     monkeypatch.setattr(
@@ -657,6 +660,12 @@ async def test_merchant_cancel_persists_one_outbox_event_and_does_not_call_platf
     assert kwargs["payload"]["platform_order_id"] == "MT-ORDER-501"
     assert "credentials" not in kwargs["payload"]
     db.commit.assert_awaited_once()
+    assert db.execute.await_count == 3
+    # 先读关联 ID，再锁 Order，最后锁 DeliveryOrder，避免与配送回调的锁顺序相反。
+    order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
+    assert "orders" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql
 
 
 @pytest.mark.asyncio
