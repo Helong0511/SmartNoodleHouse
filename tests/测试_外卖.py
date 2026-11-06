@@ -662,6 +662,7 @@ async def test_merchant_cancel_persists_one_outbox_event_and_does_not_call_platf
         SimpleNamespace(scalar_one_or_none=lambda: 601),
         SimpleNamespace(scalar_one_or_none=lambda: order),
         SimpleNamespace(scalar_one_or_none=lambda: d_order),
+        SimpleNamespace(first=lambda: None),  # no active refund intent
     ])
     db.commit = AsyncMock()
 
@@ -689,7 +690,7 @@ async def test_merchant_cancel_persists_one_outbox_event_and_does_not_call_platf
     assert kwargs["payload"]["platform_order_id"] == "MT-ORDER-501"
     assert "credentials" not in kwargs["payload"]
     db.commit.assert_awaited_once()
-    assert db.execute.await_count == 3
+    assert db.execute.await_count == 4
     # 先读关联 ID，再锁 Order，最后锁 DeliveryOrder，避免与配送回调的锁顺序相反。
     order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
     delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
