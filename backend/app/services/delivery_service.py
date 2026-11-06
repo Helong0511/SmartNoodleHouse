@@ -980,6 +980,52 @@ class DeliveryService:
         return order
 
     @classmethod
+    async def _has_pending_cancel_intent(
+        cls,
+        db: AsyncSession,
+        *,
+        order_id: int,
+        platform: str,
+        platform_order_id: str,
+    ) -> bool:
+        """检查所有 webhook deferred cancel 意图，不依赖 aggregate_id 的历史差异。
+
+        商家主动取消以 delivery_order_id 作为 aggregate_id；库存拒单回调则以
+        WebhookInbox.id 作为 aggregate_id。必须同时按本地 order_id 和平台订单号关联。
+        """
+        rows = (
+            await db.execute(
+                select(OutboxEvent.payload).where(
+                    OutboxEvent.aggregate_type == "webhook_task",
+                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "FAILED")),
+                    OutboxEvent.event_kind.like("deferred_%"),
+                    OutboxEvent.payload.like("%cancel_order%"),
+                )
+            )
+        ).scalars().all()
+        for raw_payload in rows:
+            try:
+                payload = json.loads(raw_payload or "{}")
+            except (TypeError, ValueError):
+                # 候选取消事件无法解析时 fail closed，避免绕过退款互斥。
+                return True
+            if not isinstance(payload, dict) or str(payload.get("action") or "").lower() != "cancel_order":
+                continue
+            try:
+                payload_order_id = int(payload.get("order_id") or 0)
+            except (TypeError, ValueError):
+                return True
+            payload_platform = str(payload.get("platform") or "").upper()
+            payload_platform_order_id = str(payload.get("platform_order_id") or "")
+            if payload_order_id == int(order_id) or (
+                payload_platform == str(platform or "").upper()
+                and payload_platform_order_id
+                and payload_platform_order_id == str(platform_order_id or "")
+            ):
+                return True
+        return False
+
+    @classmethod
     async def process_refund(
         cls,
         db: AsyncSession,
@@ -1091,18 +1137,13 @@ class DeliveryService:
 
         # 仅在准备发起新的平台退款操作时检查取消意图。
         # APPROVED_LEDGER_PENDING 是平台已确认退款成功后的本地补账，绝不能被取消 Outbox 阻断。
-        cancel_event = (
-            await db.execute(
-                select(OutboxEvent.id, OutboxEvent.status).where(
-                    OutboxEvent.aggregate_type == "webhook_task",
-                    OutboxEvent.aggregate_id == delivery_order_id,
-                    OutboxEvent.event_kind == "deferred_cancel_order",
-                    # FAILED 也保留为未核实状态：可能是可重试任务或已耗尽重试的死信。
-                    OutboxEvent.status.in_(("PENDING", "PROCESSING", "UNCERTAIN", "FAILED")),
-                )
-            )
-        ).first()
-        if cancel_event:
+        cancel_pending = await cls._has_pending_cancel_intent(
+            db,
+            order_id=order_id,
+            platform=platform,
+            platform_order_id=platform_order_id,
+        )
+        if cancel_pending:
             raise AppException(
                 40955,
                 "该外卖订单已有取消请求或取消结果待核实，暂不能处理退款",
