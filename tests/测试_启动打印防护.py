@@ -243,3 +243,13 @@ def test_prod_rejects_invalid_nonempty_webhook_allowlist_even_when_optional():
                 webhook_require_allowlist=False,
             )
         )
+
+
+def test_production_env_template_matches_single_host_startup_policy():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = (root / ".env.production.example").read_text(encoding="utf-8")
+    assert "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true" in env
+    assert "WEBHOOK_REQUIRE_ALLOWLIST=false" in env
+    assert "WEBHOOK_IP_ALLOWLIST=" in env
