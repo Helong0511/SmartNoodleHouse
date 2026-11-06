@@ -257,8 +257,8 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         bundle = hit
     else:
         # 互斥重建：避免缓存击穿时多进程同时 build_menu_bundle 压垮数据库
-        lock_ok = await try_acquire_rebuild_lock(sid)
-        if not lock_ok:
+        lock_token = await try_acquire_rebuild_lock(sid)
+        if not lock_token:
             # 未抢到锁：短暂等待其他进程重建完成后重读缓存
             waited = await wait_for_rebuild(sid, 0.3)
             if (
@@ -276,15 +276,15 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
             bundle = await build_menu_bundle(db, sid)
             _BUILD_CACHE.put(sid, bundle)
         finally:
-            if lock_ok:
-                await release_rebuild_lock(sid)
+            if lock_token:
+                await release_rebuild_lock(sid, owner_token=lock_token)
 
     version = await get_menu_version(sid)
     if version <= 0:
         # 首次上线/Redis 被清空：建立版本基线，使客户端 version 校验立即可用
         version = await bump_menu_version(sid)
     bundle = {**bundle, "version": version}
-    await set_menu_bundle(sid, bundle)
+    await set_menu_bundle(sid, bundle, owner_token=lock_token)
     return bundle
 
 
