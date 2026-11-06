@@ -22,7 +22,8 @@
 cd /path/to/SmartNoodleHouse
 cp .env.production.example .env
 nano .env
-chmod 600 .env  # .env 含 JWT、支付私钥、数据库/Redis 凭证；systemd 由 root 读取 EnvironmentFile
+sudo chown root:www-data .env
+sudo chmod 640 .env  # systemd 由 root 读取；应用进程 www-data 也需读取 Pydantic env_file
 # 必改：JWT_SECRET、DATABASE_URL、域名、微信/支付宝密钥
 # 单机同机部署：.env.production.example 默认使用 127.0.0.1 连接 MySQL/Redis，
 #   ALLOW_LOOPBACK_PRODUCTION_SERVICES=true 仅允许这两个依赖走 loopback；
