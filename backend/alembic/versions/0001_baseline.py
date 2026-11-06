@@ -27,7 +27,6 @@ _IGNORE_MYSQL_ERRNOS = {
     1061,  # duplicate key name
     1062,  # duplicate entry（种子类语句偶发）
     1022,  # can't write; duplicate key
-    1826,  # duplicate FK name
 }
 
 
