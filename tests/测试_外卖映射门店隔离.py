@@ -120,3 +120,30 @@ async def test_ensure_default_map_rejects_reassigning_existing_platform_sku():
     assert exc.value.code == 40002
     assert "已绑定其他本地餐品" in str(exc.value)
     assert db.flushed is False
+
+
+
+@pytest.mark.asyncio
+async def test_reconcile_stock_honors_requested_platform_filter(monkeypatch):
+    from app.services import delivery_sync_handlers
+
+    class _Pairs:
+        def all(self):
+            return [(7, 99)]
+
+    class _Db:
+        async def execute(self, _statement):
+            return _Pairs()
+
+    push = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        delivery_sync_handlers, "_push_store_product_stock", push
+    )
+
+    result = await ProductSyncService.reconcile_stock(
+        _Db(), store_id=7, platform="eleme"
+    )
+
+    assert result == {"products": 1, "failures": 0, "ok": True}
+    push.assert_awaited_once()
+    assert push.await_args.kwargs["platform_filter"] == "ELEME"

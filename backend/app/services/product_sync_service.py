@@ -24,6 +24,28 @@ logger = logging.getLogger(__name__)
 
 
 class ProductSyncService:
+    @staticmethod
+    async def _require_active_binding_credentials(
+        db: AsyncSession, store_id: int, platform: str
+    ):
+        """所有主动平台同步都必须绑定到明确门店，禁止无绑定时回退全局凭证。"""
+        normalized = platform.upper()
+        binding = (
+            await db.execute(
+                select(PlatformStoreBinding).where(
+                    PlatformStoreBinding.store_id == int(store_id),
+                    PlatformStoreBinding.platform == normalized,
+                    PlatformStoreBinding.status == 1,
+                )
+            )
+        ).scalar_one_or_none()
+        if binding is None:
+            raise AppException(40063, f"{normalized} 门店未绑定或绑定已停用，拒绝同步")
+        credentials = await get_credentials_for_store(db, normalized, int(store_id))
+        if credentials is None:
+            raise AppException(40063, f"{normalized} 门店凭证不可用，拒绝同步")
+        return binding, credentials
+
     @classmethod
     async def sync_store_menu(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         binding = (
@@ -174,7 +196,7 @@ class ProductSyncService:
     @classmethod
     async def sync_prices(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         maps, products = await cls._load_maps_products(db, store_id, platform)
-        creds = await get_credentials_for_store(db, platform, store_id)
+        _, creds = await cls._require_active_binding_credentials(db, store_id, platform)
         items = [
             {
                 "app_food_code": m.app_food_code or products[m.product_id].product_no,
@@ -192,7 +214,7 @@ class ProductSyncService:
     @classmethod
     async def sync_stock(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         maps, products = await cls._load_maps_products(db, store_id, platform)
-        creds = await get_credentials_for_store(db, platform, store_id)
+        _, creds = await cls._require_active_binding_credentials(db, store_id, platform)
         stock_rows = (
             await db.execute(
                 select(StoreProductStock).where(
@@ -430,7 +452,7 @@ class ProductSyncService:
             {"app_food_code": m.app_food_code or m.platform_sku_id, "platform_sku_id": m.platform_sku_id}
             for m in maps
         ]
-        creds = await get_credentials_for_store(db, platform, store_id)
+        _, creds = await cls._require_active_binding_credentials(db, store_id, platform)
         await db.commit()
         provider = get_delivery_provider(platform, creds)
         done = await provider.set_sell_status(items, on_shelf)
@@ -459,7 +481,9 @@ class ProductSyncService:
 
         failures = 0
         for sid, pid in pairs:
-            failures += await _push_store_product_stock(db, int(sid), int(pid))
+            failures += await _push_store_product_stock(
+                db, int(sid), int(pid), platform_filter=platform.upper() if platform else None
+            )
         return {"products": len(pairs), "failures": failures, "ok": failures == 0}
 
     @staticmethod

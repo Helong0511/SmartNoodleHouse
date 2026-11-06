@@ -60,3 +60,51 @@ async def test_resolve_ignores_forged_local_store_id():
                 {},
             )
     assert ei.value.code == 40062
+
+
+
+@pytest.mark.asyncio
+async def test_product_sync_rejects_missing_active_binding_before_using_global_credentials(monkeypatch):
+    from app.core.exceptions import AppException
+    from app.services.product_sync_service import ProductSyncService
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
+    credentials = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.product_sync_service.get_credentials_for_store", credentials
+    )
+
+    with pytest.raises(AppException) as exc:
+        await ProductSyncService._require_active_binding_credentials(
+            db, store_id=77, platform="ELEME"
+        )
+
+    assert exc.value.code == 40063
+    credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_product_sync_rejects_active_binding_without_store_credentials(monkeypatch):
+    from app.core.exceptions import AppException
+    from app.services.product_sync_service import ProductSyncService
+
+    db = MagicMock()
+    binding = SimpleNamespace(store_id=77, platform="ELEME", status=1)
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=binding))
+    )
+    credentials = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "app.services.product_sync_service.get_credentials_for_store", credentials
+    )
+
+    with pytest.raises(AppException) as exc:
+        await ProductSyncService._require_active_binding_credentials(
+            db, store_id=77, platform="eleme"
+        )
+
+    assert exc.value.code == 40063
+    credentials.assert_awaited_once_with(db, "ELEME", 77)
