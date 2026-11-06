@@ -162,7 +162,7 @@
 
 ### 6.1 API 限流（[backend/app/core/rate_limit.py](file:///e:/SmartNoodleHouse/backend/app/core/rate_limit.py)）
 
-- Redis Lua 脚本 `INCR + EXPIRE` 原子化，避免无 TTL 计数键导致永久 429。
+- Redis Lua Token Bucket 使用 Redis `TIME` 作为权威时钟，以原子 `HSET + PEXPIRE` 更新令牌桶状态；固定 TTL 防止计数键永久残留，并降低固定窗口边界突发。
 - 敏感路径独立配额：
 
   | 路径 | 配额 |
