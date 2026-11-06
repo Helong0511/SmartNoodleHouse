@@ -16,6 +16,16 @@ jobs:
   backend-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     defaults:
       run:
         working-directory: .
@@ -54,6 +64,7 @@ jobs:
           ALLOW_PAYMENT_MOCK: "true"
           ALLOW_AUTH_MOCK: "true"
           ALLOW_DELIVERY_MOCK: "true"
+          REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
         run: |
           python -m pytest -q --tb=short \
             --cov=app --cov-report=term-missing --cov-report=xml \
