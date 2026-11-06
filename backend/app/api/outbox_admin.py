@@ -259,8 +259,14 @@ async def resolve_unknown_dead_letter(
     except (TypeError, ValueError) as exc:
         raise AppException(40910, "结果未知事件 payload 无效，拒绝自动对账", status_code=409) from exc
     if row.aggregate_type == "webhook_task" and isinstance(payload, dict) and payload.get("action") == "cancel_order":
-        order_id = int(payload.get("order_id") or 0)
-        delivery_order_id = int(row.aggregate_id)
+        try:
+            order_id = int(payload.get("order_id") or 0)
+            delivery_order_id = int(row.aggregate_id)
+            payload_store_id = int(payload.get("store_id") or 0)
+        except (TypeError, ValueError) as exc:
+            raise AppException(40910, "取消事件缺少有效订单/门店关联信息，拒绝自动对账", status_code=409) from exc
+        if order_id <= 0 or delivery_order_id <= 0 or payload_store_id <= 0:
+            raise AppException(40910, "取消事件缺少有效订单/门店关联信息，拒绝自动对账", status_code=409)
         order = (
             await db.execute(
                 select(Order)
@@ -282,8 +288,11 @@ async def resolve_unknown_dead_letter(
         ).scalar_one_or_none() if order_id > 0 else None
         if order is None or delivery_order is None:
             raise AppException(40911, "取消订单本地关联记录不存在，需人工核对后处理", status_code=409)
-        payload_store_id = int(payload.get("store_id") or 0)
-        if payload_store_id and int(order.store_id) != payload_store_id:
+        try:
+            actual_store_id = int(order.store_id)
+        except (TypeError, ValueError) as exc:
+            raise AppException(40912, "取消订单缺少有效门店归属，拒绝自动对账", status_code=409) from exc
+        if actual_store_id != payload_store_id:
             raise AppException(40912, "取消订单门店归属与 Outbox 事件不一致", status_code=409)
         if order.status in ("COMPLETED", "REFUNDED"):
             raise AppException(40913, f"平台取消已核实，但本地订单为 {order.status}，需人工对账", status_code=409)
