@@ -16,9 +16,9 @@ from app.core.response import dumps_json, now_local
 from app.models import WebhookInbox
 from app.services.delivery_events import EVENT_WS_MAP
 from app.services.delivery_service import DeliveryService
-from app.services.delivery_tasks import run_deferred_tasks
+from app.services.outbox_worker import enqueue_outbox
 from app.services.websocket_manager import ws_manager
-from app.services.worker_common import backoff_seconds, worker_id
+from app.services.worker_common import backoff_seconds, claim_lease_guard, claim_token, worker_id
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,31 @@ MAX_ATTEMPTS = 8
 BACKOFF_CAP_SEC = 3600
 # PROCESSING 行超时阈值（秒）：超过即视为崩溃残留，由 reclaim 复位 PENDING
 STALE_PROCESSING_SEC = 300
+
+
+def _build_deferred_outbox_payload(task: dict[str, Any], channel: str) -> dict[str, Any]:
+    """构建最小化、无密钥的持久化副作用 payload。"""
+    action = str(task.get("action") or "").strip().lower()
+    if action not in {"confirm_order", "cancel_order", "reply_urge", "print_ticket"}:
+        raise ValueError(f"unsupported deferred webhook action: {action or 'empty'}")
+    credentials = task.get("credentials") or {}
+    store_id = task.get("store_id") or (
+        credentials.get("store_id") if isinstance(credentials, dict) else None
+    )
+    raw = task.get("raw")
+    return {
+        "action": action,
+        "platform": str(task.get("platform") or channel).upper(),
+        "platform_order_id": str(task.get("platform_order_id") or ""),
+        "store_id": int(store_id) if store_id else None,
+        "order_id": int(task["order_id"]) if task.get("order_id") else None,
+        "rollback_on_fail": bool(task.get("rollback_on_fail")),
+        "reason": str(task.get("reason") or "")[:200],
+        "ticket_type": str(task.get("ticket_type") or "KITCHEN").upper(),
+        # 催单接口仅使用 reply_type；不保存整份 webhook（可能含顾客地址/手机号）。
+        "raw": {"reply_type": raw.get("reply_type", 2)}
+        if action == "reply_urge" and isinstance(raw, dict) else {},
+    }
 
 
 def _backoff_seconds(attempt_count: int) -> int:
@@ -88,10 +113,11 @@ async def enqueue_delivery_webhook(
         headers_json=dumps_json(safe_headers),
         status="PENDING",
     )
-    db.add(row)
     try:
-        # SAVEPOINT 隔离唯一冲突，避免 rollback 连带回滚调用方事务中的其他写入
+        # 必须在 SAVEPOINT 内 add + flush：begin_nested() 会先 flush 外层 pending 状态，
+        # 若先 db.add(row)，唯一键冲突可能发生在 SAVEPOINT 建立前并污染调用方事务。
         async with db.begin_nested():
+            db.add(row)
             await db.flush()
         return row, True
     except IntegrityError:
@@ -116,20 +142,41 @@ async def reclaim_stale_inbox(
     复位时不清零 attempt_count（避免无限重试），仅释放锁、保留退避。
     """
     cutoff = now_local() - timedelta(seconds=stale_after)
-    stmt = (
+    stale_filter = (
+        WebhookInbox.status == "PROCESSING",
+        or_(WebhookInbox.locked_at.is_(None), WebhookInbox.locked_at < cutoff),
+    )
+    # 若 worker 在最后一次允许尝试后崩溃，必须进入终态死信；
+    # 不得重新置为 PENDING，否则会绕过 MAX_ATTEMPTS 无限重放。
+    terminal_stmt = (
         update(WebhookInbox)
-        .where(
-            WebhookInbox.status == "PROCESSING",
-            or_(WebhookInbox.locked_at.is_(None), WebhookInbox.locked_at < cutoff),
+        .where(*stale_filter, WebhookInbox.attempt_count >= MAX_ATTEMPTS)
+        .values(
+            status="FAILED",
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+            last_error="claim lease expired after maximum attempts",
         )
+    )
+    retry_stmt = (
+        update(WebhookInbox)
+        .where(*stale_filter, WebhookInbox.attempt_count < MAX_ATTEMPTS)
         .values(status="PENDING", locked_at=None, locked_by=None)
     )
-    result = await db.execute(stmt)
+    terminal_result = await db.execute(terminal_stmt)
+    retry_result = await db.execute(retry_stmt)
     await db.commit()
-    count = int(result.rowcount or 0)
-    if count:
-        logger.warning("Reclaimed %s stale PROCESSING inbox events", count)
-    return count
+    terminal_count = int(terminal_result.rowcount or 0)
+    retry_count = int(retry_result.rowcount or 0)
+    if retry_count:
+        logger.warning("Reclaimed %s stale PROCESSING inbox events", retry_count)
+    if terminal_count:
+        logger.critical(
+            "Webhook inbox events exhausted max_attempts after lease expiry: count=%s",
+            terminal_count,
+        )
+    return terminal_count + retry_count
 
 
 async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | None = None) -> WebhookInbox | None:
@@ -137,7 +184,7 @@ async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | Non
     原子 claim：仅当 status=PENDING（或到点可重试的 FAILED）时 UPDATE 为 PROCESSING。
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = worker or worker_id()
+    wid = claim_token(worker)
     now = now_local()
     # UPDATE ... WHERE status 条件：跨 MySQL/SQLite 均可，无需 FOR UPDATE SKIP LOCKED
     stmt = (
@@ -145,7 +192,10 @@ async def claim_inbox_item(db: AsyncSession, inbox_id: int, *, worker: str | Non
         .where(
             WebhookInbox.id == inbox_id,
             or_(
-                WebhookInbox.status == "PENDING",
+                and_(
+                    WebhookInbox.status == "PENDING",
+                    WebhookInbox.attempt_count < MAX_ATTEMPTS,
+                ),
                 and_(
                     WebhookInbox.status == "FAILED",
                     WebhookInbox.attempt_count < MAX_ATTEMPTS,
@@ -180,43 +230,64 @@ async def process_inbox_item(inbox_id: int) -> bool:
     reclaim_stale_inbox 复位并被另一 worker 重新 claim，原 worker 的
     UPDATE 会命中 0 行，不会覆盖新 owner 的锁（避免误释放他人锁）。
     """
-    wid = worker_id()
     async with AsyncSessionLocal() as db:
-        row = await claim_inbox_item(db, inbox_id, worker=wid)
+        row = await claim_inbox_item(db, inbox_id)
         if not row:
             # 已被其他 worker claim，或 DONE / 未到重试时间
+            return False
+        # 每次 claim 使用唯一 token；不能用进程 worker_id 作为行锁 owner。
+        wid = (row.locked_by or "")[:64]
+        if not wid:
+            logger.error("Webhook inbox claim 成功但缺少 owner token id=%s", inbox_id)
             return False
 
         try:
             envelope = json.loads(row.payload)
             raw = envelope.get("raw") if isinstance(envelope, dict) and envelope.get("_verified") else envelope
-            result = await DeliveryService.process_raw(db, row.channel, raw if isinstance(raw, dict) else {})
-            # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
-            # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
-            done_stmt = (
-                update(WebhookInbox)
-                .where(
-                    WebhookInbox.id == inbox_id,
-                    WebhookInbox.locked_by == wid[:64],
+            async with claim_lease_guard(WebhookInbox, inbox_id, wid):
+                result = await DeliveryService.process_raw(
+                    db, row.channel, raw if isinstance(raw, dict) else {}
                 )
-                .values(
-                    status="DONE",
-                    processed_at=now_local(),
-                    error_message=None,
-                    last_error=None,
-                    next_retry_at=None,
-                    locked_at=None,
-                    locked_by=None,
+                # 将所有必须在事务提交后执行的副作用写入同一 DB Outbox 事务。
+                # 不持久化 access_token / refresh_token，也不保存整份 webhook raw。
+                for task_index, task in enumerate(result.deferred_tasks or []):
+                    await enqueue_outbox(
+                        db,
+                        aggregate_type="webhook_task",
+                        aggregate_id=int(inbox_id),
+                        event_kind=f"deferred_{task_index:04d}",
+                        payload=_build_deferred_outbox_payload(task, row.channel),
+                    )
+                # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
+                # 防止 reclaim 后新 owner 的锁被原 worker 误覆盖
+                done_stmt = (
+                    update(WebhookInbox)
+                    .where(
+                        WebhookInbox.id == inbox_id,
+                        WebhookInbox.locked_by == wid[:64],
+                    )
+                    .values(
+                        status="DONE",
+                        # 业务处理已完成，不再需要保存含顾客手机号/地址的原始 webhook body。
+                        # event_id、event_type、处理时间和状态保留，足以支持幂等与审计。
+                        payload="{}",
+                        headers_json="{}",
+                        processed_at=now_local(),
+                        error_message=None,
+                        last_error=None,
+                        next_retry_at=None,
+                        locked_at=None,
+                        locked_by=None,
+                    )
                 )
-            )
-            done_result = await db.execute(done_stmt)
-            await db.commit()
-            if not done_result.rowcount:
-                # 行已被 reclaim 并被其他 worker 重新 claim：不通知 WS（新 owner 负责）
-                logger.warning(
-                    "inbox 行在处理期间被 reclaim 释放 id=%s，跳过 WS 通知", inbox_id
-                )
-                return True
+                done_result = await db.execute(done_stmt)
+                from app.services.worker_common import rollback_if_claim_lost
+
+                if await rollback_if_claim_lost(
+                    db, done_result, model=WebhookInbox, row_id=inbox_id
+                ):
+                    return True
+                await db.commit()
 
             ws_event = EVENT_WS_MAP.get(result.event, "DELIVERY_UNKNOWN")
             payload = {"channel": row.channel, "event": result.event, **result.extra}
@@ -230,8 +301,6 @@ async def process_inbox_item(inbox_id: int) -> bool:
                     }
                 )
             await ws_manager.notify_order_event(ws_event, payload)
-            if result.deferred_tasks:
-                await run_deferred_tasks(result.deferred_tasks)
             return True
         except Exception as e:
             logger.exception("inbox 处理失败 id=%s: %s", inbox_id, e)
@@ -281,7 +350,10 @@ async def process_pending_inbox(limit: int = 20) -> int:
                 select(WebhookInbox.id)
                 .where(
                     or_(
-                        WebhookInbox.status == "PENDING",
+                        and_(
+                            WebhookInbox.status == "PENDING",
+                            WebhookInbox.attempt_count < MAX_ATTEMPTS,
+                        ),
                         and_(
                             WebhookInbox.status == "FAILED",
                             WebhookInbox.attempt_count < MAX_ATTEMPTS,

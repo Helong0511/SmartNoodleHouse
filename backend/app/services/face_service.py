@@ -22,7 +22,7 @@ from app.core.cache_keys import (
 )
 from app.core.config import get_settings
 from app.core.exceptions import AppException
-from app.core.redis_client import get_redis
+from app.core.redis_client import get_redis, release_owned_lock
 from app.core.response import now_local
 from app.core.warmup_budget import face_cache_max_profiles
 from app.models import (
@@ -658,25 +658,36 @@ class VisitorService:
 
     @staticmethod
     def uploads_url_to_key(url: str | None) -> str | None:
+        """将历史公开 URL、S3 URL 或 private:// 对象引用安全归一为 visitors/ 对象键。"""
+        from urllib.parse import urlparse
+
         s = str(url or "").strip().replace("\\", "/")
         if not s:
             return None
-        # 完整 URL：http(s)://host/uploads/visitors/...
-        if "://" in s:
-            marker = "/uploads/"
-            idx = s.find(marker)
-            if idx >= 0:
-                s = s[idx + len(marker) :]
-            else:
-                return None
+        if s.startswith("private://"):
+            s = s[len("private://") :]
+        elif s.startswith("s3://"):
+            # s3://bucket/visitors/...
+            parsed = urlparse(s)
+            s = parsed.path.lstrip("/")
+        elif "://" in s:
+            parsed = urlparse(s)
+            s = parsed.path.lstrip("/")
         elif s.startswith("/uploads/"):
             s = s[len("/uploads/") :]
         elif s.startswith("uploads/"):
             s = s[len("uploads/") :]
-        # 已是相对对象键
-        if s.startswith("visitors/"):
-            return s
-        return None
+        # 兼容 endpoint/bucket/key 形式，仅接受路径中明确的 visitors/ 前缀。
+        if not s.startswith("visitors/") and "/visitors/" in s:
+            s = s[s.index("visitors/") :]
+        parts = s.split("/")
+        if (
+            not s.startswith("visitors/")
+            or any(part in ("", ".", "..") for part in parts)
+            or "\x00" in s
+        ):
+            return None
+        return s
 
     @staticmethod
     def make_snapshot_key(camera_id: int, *, ext: str = "jpg") -> str:
@@ -709,14 +720,15 @@ class VisitorService:
 
     @classmethod
     async def save_frame_snapshot(cls, frame, camera_id: int) -> str:
-        """保存摄像头帧为 JPEG，返回 /uploads/visitors/年/月/日/... 路径。"""
+        """保存摄像头访客抓拍为私有对象；数据库仅保存 private:// 对象引用。"""
         import asyncio
 
         from app.services.object_storage import get_storage
 
         data = await asyncio.to_thread(cls.encode_frame_jpeg, frame)
         key = cls.make_snapshot_key(camera_id, ext="jpg")
-        return await get_storage().put_bytes(key, data, content_type="image/jpeg")
+        await get_storage().put_bytes(key, data, content_type="image/jpeg")
+        return f"private://{key}"
 
     @classmethod
     def _prune_unknown_tracks(cls, camera_id: int, now: float) -> list[dict]:
@@ -859,12 +871,14 @@ class VisitorService:
         # 进程内冷却/日志节流用 monotonic；Redis NX EX 仍走服务端墙钟 TTL
         now_mono = _time.monotonic()
         acquired = True
+        cooldown_token = uuid.uuid4().hex
+        cooldown_key = unknown_welcome_cooldown_key(int(camera_id))
         if cooldown > 0:
             try:
                 redis = await get_redis()
                 ok = await redis.set(
-                    unknown_welcome_cooldown_key(int(camera_id)),
-                    "1",
+                    cooldown_key,
+                    cooldown_token,
                     nx=True,
                     ex=int(cooldown),
                 )
@@ -900,7 +914,7 @@ class VisitorService:
             if cooldown > 0:
                 try:
                     redis = await get_redis()
-                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                    await release_owned_lock(redis, cooldown_key, cooldown_token)
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             return False
@@ -919,7 +933,7 @@ class VisitorService:
             if cooldown > 0:
                 try:
                     redis = await get_redis()
-                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                    await release_owned_lock(redis, cooldown_key, cooldown_token)
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             raise
@@ -928,7 +942,7 @@ class VisitorService:
             if cooldown > 0:
                 try:
                     redis = await get_redis()
-                    await redis.delete(unknown_welcome_cooldown_key(int(camera_id)))
+                    await release_owned_lock(redis, cooldown_key, cooldown_token)
                 except Exception:
                     cls._last_unknown_welcome_at.pop(int(camera_id), None)
             return False
@@ -971,22 +985,32 @@ class VisitorService:
         )
         storage = get_storage()
         deleted_files = 0
+        deletable_ids: list[int] = []
         for row in rows:
-            key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
+            snapshot_path = getattr(row, "snapshot_path", None)
+            key = cls.uploads_url_to_key(snapshot_path)
+            if not snapshot_path:
+                # 没有关联抓拍文件，可以直接清除事件记录。
+                deletable_ids.append(int(row.id))
+                continue
             if not key:
-                if getattr(row, "snapshot_path", None):
-                    logger.warning(
-                        "清空访客无法解析抓拍键 path=%s",
-                        row.snapshot_path,
-                    )
+                # 无法安全解析对象键时保留记录，避免丢失后续人工定位/清理依据。
+                logger.warning("清空访客无法解析抓拍键，保留事件记录 id=%s path=%s", row.id, snapshot_path)
                 continue
             try:
-                if await storage.delete(key):
+                # False 表示本地对象已不存在；删除目标已经满足，可清理数据库引用。
+                removed = await storage.delete(key)
+                deletable_ids.append(int(row.id))
+                if removed:
                     deleted_files += 1
             except Exception:
-                logger.warning("清空访客时删除抓拍失败 path=%s", row.snapshot_path, exc_info=True)
-        result = await db.execute(delete(VisitorEvent).where(VisitorEvent.camera_id.in_(ids)))
-        deleted_rows = int(result.rowcount or 0)
+                # 对象删除失败时保留 DB 行，供下一轮任务重试，禁止制造孤儿文件。
+                logger.warning("清空访客时删除抓拍失败，保留事件记录 id=%s path=%s", row.id, snapshot_path, exc_info=True)
+        if deletable_ids:
+            result = await db.execute(delete(VisitorEvent).where(VisitorEvent.id.in_(deletable_ids)))
+            deleted_rows = int(result.rowcount or 0)
+        else:
+            deleted_rows = 0
         # 再扫本地 visitors/ 下 cam{id}_* 孤儿文件（DB 已无记录但磁盘残留）
         orphan_files = await cls._purge_local_camera_snapshots(ids)
         for cid in ids:
@@ -1080,18 +1104,30 @@ class VisitorService:
         )
         storage = get_storage()
         deleted_files = 0
+        deletable_ids: list[int] = []
         for row in rows:
-            key = cls.uploads_url_to_key(getattr(row, "snapshot_path", None))
+            snapshot_path = getattr(row, "snapshot_path", None)
+            key = cls.uploads_url_to_key(snapshot_path)
+            if not snapshot_path:
+                deletable_ids.append(int(row.id))
+                continue
             if not key:
+                logger.warning("过期访客抓拍键无法解析，保留事件记录 id=%s path=%s", row.id, snapshot_path)
                 continue
             try:
-                if await storage.delete(key):
-                    deleted_files += 1
+                # 对象已不存在也可安全清除 DB 引用；适配器抛异常才视为删除失败。
+                await storage.delete(key)
+                deletable_ids.append(int(row.id))
+                deleted_files += 1
             except Exception:
-                logger.warning("删除访客抓拍失败 path=%s", row.snapshot_path, exc_info=True)
+                # 失败记录保留，下一轮 cleanup_expired 会再次尝试删除对象。
+                logger.warning("删除访客抓拍失败，保留事件记录 id=%s path=%s", row.id, snapshot_path, exc_info=True)
 
-        result = await db.execute(delete(VisitorEvent).where(VisitorEvent.expires_at <= now))
-        deleted_rows = int(result.rowcount or 0)
+        if deletable_ids:
+            result = await db.execute(delete(VisitorEvent).where(VisitorEvent.id.in_(deletable_ids)))
+            deleted_rows = int(result.rowcount or 0)
+        else:
+            deleted_rows = 0
         await db.commit()
 
         retention = await SystemSettingsService.get_int(

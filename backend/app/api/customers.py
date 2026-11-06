@@ -294,7 +294,8 @@ async def list_customers(
         pref_rows = (
             await db.execute(
                 select(CustomerPreference)
-                .where(CustomerPreference.customer_id.in_(ids))
+                .join(Customer, Customer.id == CustomerPreference.customer_id)
+                .where(CustomerPreference.customer_id.in_(ids), Customer.recommend_opt_in == 1)
                 .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
             )
         ).scalars().all()
@@ -447,14 +448,14 @@ async def get_customer(customer_id: int, request: Request, db: DbSession, user: 
     )
     prefs = await PreferenceService.get_recommendations(db, customer_id, store_id=effective_store)
     pref_list = prefs.get("preferences") or []
-    all_prefs = list(
-        (
-            await db.execute(
-                select(CustomerPreference)
-                .where(CustomerPreference.customer_id == customer_id)
-                .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
-            )
-        ).scalars().all()
+    all_prefs = (
+        list((await db.execute(
+            select(CustomerPreference)
+            .where(CustomerPreference.customer_id == customer_id)
+            .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
+        )).scalars().all())
+        if int(getattr(customer, "recommend_opt_in", 0) or 0)
+        else []
     )
     order_count_q = select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
     if effective_store is not None:
@@ -708,8 +709,14 @@ async def update_customer(
         old_opt = int(customer.recommend_opt_in or 0)
         new_opt = int(body.recommend_opt_in)
         if old_opt != new_opt:
+            if new_opt:
+                # 即使曾经同意过，撤回后也不能由员工代替顾客重新开启。
+                raise AppException(40931, "只能由顾客本人在小程序隐私设置中明确授权开启")
             changes["recommend_opt_in"] = {"old": old_opt, "new": new_opt}
             customer.recommend_opt_in = new_opt
+            if not new_opt:
+                from app.services.privacy_service import PrivacyService
+                await PrivacyService.clear_taste_profile(db, customer, request=request)
 
     if not changes:
         # 提交字段与现值相同：不写审计、不空刷渠道
@@ -793,7 +800,11 @@ async def get_preferences(
     prefs = await PreferenceService.get_recommendations(db, customer_id, store_id=store_id)
     result = await db.execute(
         select(CustomerPreference)
-        .where(CustomerPreference.customer_id == customer_id)
+        .join(Customer, Customer.id == CustomerPreference.customer_id)
+        .where(
+            CustomerPreference.customer_id == customer_id,
+            Customer.recommend_opt_in == 1,
+        )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
     )
     prefs["all"] = [

@@ -1,13 +1,34 @@
 """生产启动校验：危险默认配置必须显式覆盖。"""
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
+from urllib.parse import urlsplit
 import sys
 
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def _production_redis_url_errors(raw_url: str) -> list[str]:
+    """严格解析 redis:// 与 rediss://，不能用字符串中是否含 @ 判断密码。"""
+    value = (raw_url or "").strip()
+    errors: list[str] = []
+    try:
+        parsed = urlsplit(value)
+        hostname = (parsed.hostname or "").strip().lower()
+        password = parsed.password
+    except Exception:
+        return ["生产环境 REDIS_URL 格式无效，须为 redis:// 或 rediss:// URL"]
+    if parsed.scheme.lower() not in ("redis", "rediss") or not hostname:
+        errors.append("生产环境 REDIS_URL 须使用有效的 redis:// 或 rediss:// 地址")
+    if hostname in ("localhost", "127.0.0.1", "::1"):
+        errors.append("生产环境 REDIS_URL 不得指向 localhost/回环地址，须为生产 Redis 地址")
+    if not password:
+        errors.append("生产环境 REDIS_URL 必须配置 Redis 密码（支持 ACL username:password）")
+    return errors
 
 _DANGEROUS_JWT = {
     "change-me",
@@ -45,10 +66,79 @@ def _entropy_score(value: str) -> float:
     return (classes * 8.0) + (uniq / max(len(value), 1)) * 32.0
 
 
+def _invalid_ip_allowlist_entries(raw: str) -> list[str]:
+    """返回非法 Webhook IP/CIDR 项；生产配置必须至少包含一项有效地址。"""
+    parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    invalid: list[str] = []
+    if not parts:
+        return ["<empty>"]
+    for part in parts:
+        try:
+            if "/" in part:
+                network = ipaddress.ip_network(part, strict=False)
+                if network.prefixlen == 0:
+                    invalid.append(part)
+            else:
+                ipaddress.ip_address(part)
+        except ValueError:
+            invalid.append(part)
+    return invalid
+
+
+def _invalid_trusted_proxy_entries(raw: str) -> list[str]:
+    """可信代理允许为空（不信任任何转发头），但不能包含非法项或全网段。"""
+    parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    invalid: list[str] = []
+    for part in parts:
+        try:
+            if "/" in part:
+                network = ipaddress.ip_network(part, strict=False)
+                if network.prefixlen == 0:
+                    invalid.append(part)
+            else:
+                ipaddress.ip_address(part)
+        except ValueError:
+            invalid.append(part)
+    return invalid
+
+
+_REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS = (
+    "/api/auth/login",
+    "/api/auth/verify-password",
+    "/api/payments/",
+    "/api/miniprogram/wechat/login",
+    "/api/miniprogram/alipay/login",
+    "/api/miniprogram/auth/refresh",
+    "/api/delivery/meituan/notify",
+    "/api/delivery/eleme/notify",
+)
+
+
+def _missing_rate_limit_fail_closed_paths(raw: str) -> list[str]:
+    """生产必须保证认证、支付、小程序登录及外卖回调在 Redis 故障时 fail-closed。"""
+    prefixes = [part.strip().rstrip("/") for part in (raw or "").split(",") if part.strip()]
+    missing = []
+    for target in _REQUIRED_RATE_LIMIT_FAIL_CLOSED_PATHS:
+        normalized = target.rstrip("/")
+        if not any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in prefixes):
+            missing.append(target)
+    return missing
+
+
 def validate_settings(settings: Settings) -> None:
     errors: list[str] = []
     warnings: list[str] = []
+    webhook_limit = getattr(settings, "webhook_max_body_bytes", 512 * 1024)
+    if not isinstance(webhook_limit, int) or not 1024 <= webhook_limit <= 10 * 1024 * 1024:
+        errors.append("WEBHOOK_MAX_BODY_BYTES 必须在 1024 至 10485760 字节之间")
     is_prod = bool(getattr(settings, "is_production", False))
+    face_liveness_mode = str(
+        getattr(settings, "face_liveness_mode", "challenge") or "challenge"
+    ).strip().lower()
+    if is_prod and face_liveness_mode == "none":
+        errors.append(
+            "生产环境禁止 FACE_LIVENESS_MODE=none；至少启用一次性 challenge 门控（仍非服务端视觉活体证明）"
+        )
 
     env = str(getattr(settings, "app_env", "") or "").strip().lower()
     if env and env not in _ALLOWED_APP_ENV:
@@ -102,6 +192,15 @@ def validate_settings(settings: Settings) -> None:
 
     if is_prod and not getattr(settings, "enable_rate_limit", True):
         errors.append("生产环境禁止 ENABLE_RATE_LIMIT=false")
+    if is_prod:
+        missing_rate_limit_paths = _missing_rate_limit_fail_closed_paths(
+            getattr(settings, "rate_limit_fail_closed_paths", "") or ""
+        )
+        if missing_rate_limit_paths:
+            errors.append(
+                "生产 RATE_LIMIT_FAIL_CLOSED_PATHS 缺少关键路径；Redis 故障时这些接口会降级放行: "
+                + ", ".join(missing_rate_limit_paths)
+            )
 
     secret_enc = (getattr(settings, "secret_encryption_key", None) or "").strip()
     if is_prod and not secret_enc:
@@ -142,11 +241,26 @@ def validate_settings(settings: Settings) -> None:
         warnings.append("生产环境建议 STORAGE_BACKEND=s3，避免本地 uploads 直出")
 
     webhook_allow = (getattr(settings, "webhook_ip_allowlist", None) or "").strip()
-    if is_prod and getattr(settings, "webhook_require_allowlist", False) and not webhook_allow:
-        errors.append("已开启 WEBHOOK_REQUIRE_ALLOWLIST 但未配置 WEBHOOK_IP_ALLOWLIST")
+    if is_prod:
+        invalid_webhook_entries = _invalid_ip_allowlist_entries(webhook_allow)
+        if invalid_webhook_entries:
+            errors.append(
+                "生产 WEBHOOK_IP_ALLOWLIST 必须是有效 IP/CIDR 列表；非法项: "
+                + ", ".join(invalid_webhook_entries)
+            )
 
-    if is_prod and not webhook_allow:
-        errors.append("生产须配置 WEBHOOK_IP_ALLOWLIST（支付/外卖回调 IP 白名单）")
+    if is_prod:
+        trusted_proxy_raw = (getattr(settings, "trusted_proxy_ips", None) or "").strip()
+        invalid_proxy_entries = _invalid_trusted_proxy_entries(trusted_proxy_raw)
+        if invalid_proxy_entries:
+            errors.append(
+                "生产 TRUSTED_PROXY_IPS 不得包含非法地址或 0.0.0.0/0、::/0 等全网段；非法项: "
+                + ", ".join(invalid_proxy_entries)
+            )
+        elif not trusted_proxy_raw:
+            warnings.append(
+                "生产 TRUSTED_PROXY_IPS 为空：将不信任任何转发头，反代后的请求会统一按代理 IP 限流"
+            )
 
     # P1-41: 生产环境必需配置项不得使用开发默认值
     db_url = (getattr(settings, "database_url", None) or "").strip().lower()
@@ -154,18 +268,15 @@ def validate_settings(settings: Settings) -> None:
         errors.append("生产环境 DATABASE_URL 不得使用 sqlite/localhost，须为生产 MySQL 地址")
 
     redis_url = (getattr(settings, "redis_url", None) or "").strip()
-    redis_url_lower = redis_url.lower()
-    if is_prod and "redis://" in redis_url_lower:
-        if "localhost" in redis_url_lower or "127.0.0.1" in redis_url_lower:
-            errors.append("生产环境 REDIS_URL 不得指向 localhost/127.0.0.1，须为生产 Redis 地址")
-        # 无密码检查：redis://host:port/db 或 redis://host:port（不含 @）
-        if "@" not in redis_url_lower and "://" in redis_url_lower:
-            errors.append("生产环境 REDIS_URL 须包含密码（redis://:password@host:port/db），当前无认证凭据")
+    if is_prod:
+        errors.extend(_production_redis_url_errors(redis_url))
     if is_prod:
         # maxmemory 与持久化为 Redis 服务端配置，代码层无法验证，但须提醒运维检查
         warnings.append(
-            "生产 Redis 须配置 maxmemory + maxmemory-policy=allkeys-lru，"
-            "并启用 AOF（appendonly yes）/ RDB 持久化，参考项目根目录 redis.conf.example"
+            "生产 Redis 须配置 maxmemory、容量告警和 AOF/RDB；本项目同一 Redis 同时承载缓存、"
+            "限流、一次性凭证与分布式锁，禁止不加区分地使用 allkeys-lru（可能淘汰锁/安全状态键）。"
+            "优先拆分缓存 Redis 与协调/安全 Redis；未拆分前须评估 noeviction、预留内存并监控写入拒绝，"
+            "参考 redis.conf.example"
         )
 
     process_role = (getattr(settings, "process_role", None) or "").strip().lower()
@@ -207,12 +318,23 @@ def validate_settings(settings: Settings) -> None:
             errors.append(
                 "生产须至少配置微信（MCH_ID/API_V3_KEY/CERT_SERIAL/APP_ID）或支付宝（APP_ID/私钥/公钥）之一"
             )
+        if alipay_ok and not (
+            (getattr(settings, "alipay_seller_id", None) or "").strip()
+            or (getattr(settings, "alipay_seller_email", None) or "").strip()
+        ):
+            errors.append("生产启用支付宝时须配置 ALIPAY_SELLER_ID 或 ALIPAY_SELLER_EMAIL")
         if wechat_ok:
             plat_key = (getattr(settings, "wechat_platform_public_key", None) or "").strip()
             plat_cert = (getattr(settings, "wechat_platform_cert_path", None) or "").strip()
             cert_ok = False
             if plat_key:
                 cert_ok = True
+                if "BEGIN CERTIFICATE" not in plat_key and not (
+                    getattr(settings, "wechat_platform_serial_no", None) or ""
+                ).strip():
+                    errors.append(
+                        "使用独立微信平台公钥 PEM 时必须配置 WECHAT_PLATFORM_SERIAL_NO"
+                    )
             elif plat_cert:
                 from pathlib import Path
 

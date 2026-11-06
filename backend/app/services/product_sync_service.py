@@ -14,6 +14,7 @@ from app.models import (
     PlatformStoreBinding,
     Product,
     ProductCategory,
+    StoreProductStock,
 )
 from app.services.delivery_context import get_credentials_for_store
 from app.services.delivery_providers import get_delivery_provider
@@ -43,6 +44,15 @@ class ProductSyncService:
             ).scalars().all()
         )
         cat_ids = list({p.category_id for p in products})
+        stock_rows = (
+            await db.execute(
+                select(StoreProductStock).where(
+                    StoreProductStock.store_id == store_id,
+                    StoreProductStock.product_id.in_([p.id for p in products] or [-1]),
+                )
+            )
+        ).scalars().all()
+        stock_by_product = {int(row.product_id): row for row in stock_rows}
         cats = {
             c.id: c
             for c in (
@@ -66,6 +76,7 @@ class ProductSyncService:
                     cats.get(p.category_id),
                     binding.platform_shop_id,
                     cat_maps.get(int(p.category_id)) if p.category_id else None,
+                    stock_by_product.get(int(p.id)),
                 ),
             )
             for p in products
@@ -120,8 +131,18 @@ class ProductSyncService:
         product = await db.get(Product, product_id)
         if not product:
             return {"ok": False, "message": "餐品不存在"}
+        if int(product.store_id) != int(store_id):
+            raise AppException(40301, "餐品不属于当前门店，禁止跨店同步")
 
         cat = await db.get(ProductCategory, product.category_id) if product.category_id else None
+        store_stock = (
+            await db.execute(
+                select(StoreProductStock).where(
+                    StoreProductStock.store_id == store_id,
+                    StoreProductStock.product_id == product_id,
+                )
+            )
+        ).scalar_one_or_none()
         creds = await get_credentials_for_store(db, platform, store_id)
         if not creds:
             raise AppException(40063, "缺少平台凭证")
@@ -131,7 +152,9 @@ class ProductSyncService:
             cat_maps = await cls.resolve_category_maps(db, store_id=store_id, platform=platform)
             cat_map = cat_maps.get(int(product.category_id))
 
-        payload = cls._build_product_payload_cached(product, cat, binding.platform_shop_id, cat_map)
+        payload = cls._build_product_payload_cached(
+            product, cat, binding.platform_shop_id, cat_map, store_stock
+        )
         product_name = product.name
         await db.commit()
         result = await provider.sync_product(payload)
@@ -170,15 +193,35 @@ class ProductSyncService:
     async def sync_stock(cls, db: AsyncSession, store_id: int, platform: str) -> dict:
         maps, products = await cls._load_maps_products(db, store_id, platform)
         creds = await get_credentials_for_store(db, platform, store_id)
-        items = [
-            {
-                "app_food_code": m.app_food_code or products[m.product_id].product_no,
-                "platform_sku_id": m.platform_sku_id,
-                "stock": 9999 if products[m.product_id].stock >= 999 else products[m.product_id].stock,
-            }
-            for m in maps
-            if m.product_id in products
-        ]
+        stock_rows = (
+            await db.execute(
+                select(StoreProductStock).where(
+                    StoreProductStock.store_id == store_id,
+                    StoreProductStock.product_id.in_(list(products) or [-1]),
+                )
+            )
+        ).scalars().all()
+        stock_by_product = {int(row.product_id): row for row in stock_rows}
+        items = []
+        for m in maps:
+            product = products.get(m.product_id)
+            if product is None:
+                continue
+            override = stock_by_product.get(int(product.id))
+            effective = int(override.stock if override is not None else product.stock or 0)
+            is_available = product.status == "ON_SALE" and (
+                override is None or int(override.status) == 1
+            )
+            effective = (
+                9999 if effective >= 999 else max(0, effective)
+            ) if is_available else 0
+            items.append(
+                {
+                    "app_food_code": m.app_food_code or product.product_no,
+                    "platform_sku_id": m.platform_sku_id,
+                    "stock": effective,
+                }
+            )
         await db.commit()
         provider = get_delivery_provider(platform, creds)
         # 修复：原先可能把本地 stock 原样推平台导致 999=不限被当成 999 份
@@ -202,9 +245,20 @@ class ProductSyncService:
         products = {
             p.id: p
             for p in (
-                await db.execute(select(Product).where(Product.id.in_(pids or [-1])))
+                await db.execute(
+                    select(Product).where(
+                        Product.id.in_(pids or [-1]),
+                        Product.store_id == store_id,
+                    )
+                )
             ).scalars().all()
         }
+        invalid_maps = [m.id for m in maps if int(m.product_id) not in products]
+        if invalid_maps:
+            raise AppException(
+                40301,
+                f"检测到跨门店或不存在的外卖餐品映射，拒绝同步: {invalid_maps[:10]}",
+            )
         return maps, products
 
     @classmethod
@@ -214,9 +268,22 @@ class ProductSyncService:
         cat: ProductCategory | None,
         shop_id: str,
         cat_map: PlatformCategoryMap | None = None,
+        store_stock: StoreProductStock | None = None,
     ) -> dict:
-        skus = [{"sku_id": product.product_no, "price": str(product.price), "spec": "默认"}]
-        stock = 9999 if product.stock >= 999 else product.stock
+        raw_stock = int(store_stock.stock if store_stock is not None else product.stock or 0)
+        store_available = store_stock is None or int(store_stock.status) == 1
+        is_on_shelf = product.status == "ON_SALE" and store_available
+        stock = (
+            9999 if raw_stock >= 999 else max(0, raw_stock)
+        ) if is_on_shelf else 0
+        skus = [
+            {
+                "sku_id": product.product_no,
+                "price": str(product.price),
+                "spec": "默认",
+                "stock": stock,
+            }
+        ]
         # 分类名：门店覆盖总部映射优先，否则本地分类名
         category_name = (
             (cat_map.platform_category_name if cat_map and cat_map.platform_category_name else None)
@@ -233,6 +300,7 @@ class ProductSyncService:
             "box_price": str(getattr(product, "box_price", 0) or 0),
             "min_order_count": getattr(product, "min_order_count", 1) or 1,
             "stock": stock,
+            "is_sold_out": 0 if is_on_shelf else 1,
             "picture": product.main_image or "",
             "skus": skus,
         }
@@ -281,7 +349,13 @@ class ProductSyncService:
             )
         ).scalar_one_or_none()
         if existing:
-            # 饿了么重新同步可能拿到新 itemId，更新映射
+            # 同一平台 SKU 只能持续归属同一条本地餐品；禁止通过同步覆盖把旧映射静默转给另一条餐品。
+            if int(existing.product_id) != int(product.id):
+                raise AppException(
+                    40002,
+                    f"平台 SKU「{sku}」已绑定其他本地餐品（product_id={int(existing.product_id)}），拒绝覆盖映射",
+                )
+            # 同一餐品重新同步时允许刷新名称等元数据。
             existing.platform_sku_name = product.name
             existing.platform_spu_code = product.product_no
             existing.app_food_code = product.product_no
@@ -328,6 +402,29 @@ class ProductSyncService:
         maps = list((await db.execute(stmt)).scalars().all())
         if not maps:
             return {"ok": True, "updated": 0, "total": 0, "on_shelf": on_shelf}
+
+        # 映射表自身也可能因历史数据、手工 SQL 或旧版本缺陷而出现跨店关联。
+        # 在调用第三方平台前，必须再次确认每个映射对应的本地餐品确实属于当前门店。
+        mapped_product_ids = sorted({int(m.product_id) for m in maps})
+        foreign_product_id = await db.scalar(
+            select(Product.id)
+            .where(
+                Product.id.in_(mapped_product_ids),
+                Product.store_id != int(store_id),
+            )
+            .limit(1)
+        )
+        if foreign_product_id is not None:
+            logger.error(
+                "拒绝跨门店外卖上下架：store_id=%s platform=%s product_id=%s",
+                store_id,
+                platform,
+                foreign_product_id,
+            )
+            raise AppException(
+                40301,
+                f"检测到跨门店外卖餐品映射（product_id={int(foreign_product_id)}），已拒绝平台上下架操作",
+            )
 
         items = [
             {"app_food_code": m.app_food_code or m.platform_sku_id, "platform_sku_id": m.platform_sku_id}

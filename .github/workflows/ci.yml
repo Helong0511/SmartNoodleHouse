@@ -2,16 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, "fix/**", "integration/**"]
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
+# 不取消正在运行的 CI：后端全量测试可能需要数分钟，频繁推送不应中断正在执行的验证。
+# GitHub 默认保留一个 pending run；后续新提交会替换尚未开始的 pending run，
+# 但当前运行会完整结束，随后再验证最新提交。
+  cancel-in-progress: false
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: .
@@ -32,7 +36,7 @@ jobs:
           else
             pip install -r backend/requirements.txt
           fi
-          pip install pytest pytest-asyncio httpx pytest-cov
+          pip install pytest pytest-asyncio httpx pytest-cov aiosqlite
           python scripts/check_requirements_lock.py
       - name: Compile check
         run: |
@@ -57,6 +61,7 @@ jobs:
 
   backend-mysql:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       mysql:
         image: mysql:8.0
@@ -106,10 +111,12 @@ jobs:
           ALLOW_AUTH_MOCK: "true"
           ALLOW_DELIVERY_MOCK: "true"
         run: |
-          python -m pytest -q --tb=short -m mysql tests/测试_审计遗留加固.py
+          python -m pytest -q --tb=short -m mysql \
+            tests/测试_审计遗留加固.py tests/测试_数据库LeaderEpoch.py
 
   frontend-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -117,7 +124,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
@@ -126,3 +133,47 @@ jobs:
         run: npm test --if-present
       - name: Type check and build
         run: npm run build
+
+
+  dependency-security-audit:
+    name: dependency-security-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit --strict -r backend/requirements.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Audit npm dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+
+  miniprogram-static-check:
+    name: miniprogram-static-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check WeChat and Alipay mini-program JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            node --check --input-type=module < "$file"
+          done < <(find miniprogram-wechat miniprogram-alipay -type f -name '*.js' -print0)

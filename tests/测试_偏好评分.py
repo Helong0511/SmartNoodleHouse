@@ -78,7 +78,7 @@ def _patch_sqlite_pref_ids(db_session, start_id=920):
 async def test_update_from_order_scores_by_payment_status(db_session):
     """分母统计 payment_status=PAID，不受厨房态 status 影响；分数为近期加权占比。"""
     store = Store(id=901, store_no="T-PREF-01", name="偏好测试店", status=1)
-    customer = Customer(id=902, customer_no="C-PREF-01", nickname="偏好测试", status=1)
+    customer = Customer(id=902, customer_no="C-PREF-01", nickname="偏好测试", status=1, recommend_opt_in=1)
     cat = ProductCategory(id=903, category_no="C903", store_id=store.id, name="面类", sort_order=1, status=1)
     db_session.add_all([store, customer, cat])
     await db_session.flush()
@@ -188,7 +188,7 @@ async def test_update_from_order_scores_by_payment_status(db_session):
 async def test_update_from_order_skips_non_paid_status(db_session):
     """仅在 status=PAID 时写入偏好，COMPLETED 等状态不重复写入。"""
     store = Store(id=911, store_no="T-PREF-02", name="偏好测试店2", status=1)
-    customer = Customer(id=912, customer_no="C-PREF-02", nickname="偏好测试2", status=1)
+    customer = Customer(id=912, customer_no="C-PREF-02", nickname="偏好测试2", status=1, recommend_opt_in=1)
     db_session.add_all([store, customer])
     await db_session.flush()
 
@@ -222,7 +222,7 @@ async def test_update_from_order_skips_non_paid_status(db_session):
 async def test_same_option_in_one_order_counts_by_line_qty(db_session):
     """同一订单内同一规格按行数量加权（两行各 1 份计 2 次）。"""
     store = Store(id=941, store_no="T-PREF-DEDUP", name="去重店", status=1)
-    customer = Customer(id=942, customer_no="C-PREF-DEDUP", nickname="去重客", status=1)
+    customer = Customer(id=942, customer_no="C-PREF-DEDUP", nickname="去重客", status=1, recommend_opt_in=1)
     cat = ProductCategory(id=943, category_no="C943", store_id=store.id, name="面类", sort_order=1, status=1)
     product = Product(
         id=944,
@@ -306,7 +306,7 @@ async def test_same_option_in_one_order_counts_by_line_qty(db_session):
 async def test_recent_order_corrects_taste_preference(db_session):
     """口味改变后，近期订单权重更高，新口味分数应高于旧口味。"""
     store = Store(id=961, store_no="T-PREF-SHIFT", name="口味变化店", status=1)
-    customer = Customer(id=962, customer_no="C-PREF-SHIFT", nickname="变化客", status=1)
+    customer = Customer(id=962, customer_no="C-PREF-SHIFT", nickname="变化客", status=1, recommend_opt_in=1)
     cat = ProductCategory(id=963, category_no="C963", store_id=store.id, name="面类", sort_order=1, status=1)
     product = Product(
         id=964,
@@ -408,7 +408,7 @@ async def test_recent_order_corrects_taste_preference(db_session):
 async def test_recompute_excludes_fully_refunded_orders(db_session):
     """全额退款订单退出分析，偏好随之修正。"""
     store = Store(id=981, store_no="T-PREF-REF", name="退款店", status=1)
-    customer = Customer(id=982, customer_no="C-PREF-REF", nickname="退款客", status=1)
+    customer = Customer(id=982, customer_no="C-PREF-REF", nickname="退款客", status=1, recommend_opt_in=1)
     cat = ProductCategory(id=983, category_no="C983", store_id=store.id, name="面类", sort_order=1, status=1)
     product = Product(
         id=984,
@@ -502,7 +502,7 @@ async def test_recompute_excludes_fully_refunded_orders(db_session):
 @pytest.mark.asyncio
 async def test_get_recommendations_includes_all_confirmed_prefs(db_session):
     """规格组 + 多项加料可超过 TOP_N=8，推荐列表不得截断末位规格（如蒜末）。"""
-    customer = Customer(id=920, customer_no="C-PREF-MANY", nickname="多规格", status=1)
+    customer = Customer(id=920, customer_no="C-PREF-MANY", nickname="多规格", status=1, recommend_opt_in=1)
     db_session.add(customer)
     await db_session.flush()
 

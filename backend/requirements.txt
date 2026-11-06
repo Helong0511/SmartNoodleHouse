@@ -1,33 +1,34 @@
-fastapi>=0.109.0,<1.0
+fastapi>=0.162.0,<0.163.0
+# CVE-2025-62727 / CVE-2026-54283 等 Starlette 旧版本漏洞；锁定安全下限
+starlette>=1.6.0,<2.0
 uvicorn[standard]>=0.27.0,<1.0
 # CVE-2024-1135（请求走私）修复于 23.0.0
 gunicorn>=23.0.0,<25
 sqlalchemy[asyncio]>=2.0.25,<3.0
-aiomysql>=0.2.0,<0.3
+aiomysql>=0.3.2,<0.4
 alembic>=1.13.0,<2.0
 pydantic>=2.5.0,<3.0
 pydantic-settings>=2.1.0,<3.0
-python-jose[cryptography]>=3.4.0,<4.0
+python-dotenv>=1.2.4,<2.0
+PyJWT[crypto]>=2.15.1,<3.0
 passlib[bcrypt]>=1.7.4,<2.0
 # bcrypt>=4.1 移除 __about__，passlib 1.7.4 会 WARNING；钉 4.0.x 兼容（哈希格式不变）
 bcrypt>=4.0.1,<4.1
 redis>=5.0.0,<6.0
 httpx>=0.26.0,<1.0
 # CVE-2024-24762（ReDoS）修复于 0.0.18，取最新修复线
-python-multipart>=0.0.20,<1.0
+python-multipart>=0.0.33,<1.0
 aiofiles>=23.2.1,<25
 apscheduler>=3.10.4,<4.0
 websockets>=12.0,<14
-opencv-python-headless>=4.9.0,<5.0
+opencv-python-headless>=4.14.0.94,<5.0
 numpy>=1.26.0,<3.0
-# CVE-2024-26130 影响 42.0.0-42.0.3；上传图处理需较新 Pillow。
-# 注意：PyPI 无 11.3.2（旧约束会在 Win/Ubuntu 同时装失败）；11.x 最高 11.3.0，12.x 有 manylinux/cp311 轮子。
-# 生产 Ubuntu 22.04 + python3.11：与本地同约束；lock 钉 11.3.0，requirements.txt 允许升到 12.x。
-cryptography>=42.0.4,<46
-Pillow>=11.3.0,<13
+# Pillow 13.0.0（2026-10-16）修复多项 JPEG/TIFF/OpenJPEG/PDF 等关键图像解析漏洞；生产 Python 3.11+
+cryptography>=50.0.2,<51
+Pillow>=13.0.0,<14.0
 pypinyin>=0.51.0,<1.0
-# 农历生日权益日判定
-zhdate>=0.1,<1.0
+# 农历生日权益日判定：固定在跨平台通用发行线；1.0 的 PyPI 发布文件为 macOS ARM64 专用
+zhdate>=0.1,<0.2
 # 人脸：SCRFD + ArcFace（buffalo_l）；生产必须安装
 insightface>=0.7.3,<0.8
 onnxruntime>=1.16.0,<2.0

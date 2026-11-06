@@ -1095,7 +1095,7 @@ function isDefaultOption(o: any) {
   return isFlagOn(o?.is_default)
 }
 
-function activeOptionsOf(g: any) {
+function activeOptionsOf(g: any): any[] {
   return (g?.options || []).filter((o: any) => o && o.status !== 0)
 }
 

@@ -9,6 +9,8 @@ from app.api.deps import (
     CurrentUser,
     DbSession,
     OptionalCustomer,
+    OptionalStaffUser,
+    get_user_permissions,
     require_permission,
     require_pos,
     require_social_identity_manage,
@@ -239,23 +241,57 @@ async def pos_verify(data: PosVerifyIn, request: Request, db: DbSession, user: C
     return success(payload, request=request)
 
 
+async def _resolve_preview_scope(
+    *,
+    db: DbSession,
+    customer,
+    user,
+    requested_customer_id: int | None,
+    requested_store_id: int,
+) -> tuple[int, int]:
+    """顾客只能预览本人；POS 必须是有收银权限的员工且只能访问授权门店。"""
+    if customer is not None:
+        # 即使请求体伪造 customer_id，也始终以已验证 JWT 的 sub 为准。
+        return int(customer.id), int(requested_store_id)
+
+    if user is None:
+        raise AppException(40100, "请先登录后查询顾客公益资格", status_code=401)
+
+    perms = await get_user_permissions(db, user.role_id, user_id=user.id)
+    if user.role.code not in ("SUPER_ADMIN", "STORE_ADMIN", "CASHIER") and "order:update" not in perms:
+        raise AppException(40300, "无权使用收银公益预览", status_code=403)
+
+    # 非超管不能借请求体切换门店；超管则必须明确选择门店。
+    if user.role.code != "SUPER_ADMIN":
+        assert_store_access(user, requested_store_id)
+    store_id = require_bound_store(user, requested_store_id)
+    if store_id is None:
+        raise AppException(40008, "请选择门店")
+    if requested_customer_id is None:
+        raise AppException(40008, "请指定顾客")
+    return int(requested_customer_id), int(store_id)
+
+
 @router.post("/preview")
 async def preview(
     data: PreviewIn,
     request: Request,
     db: DbSession,
     customer: OptionalCustomer,
+    user: OptionalStaffUser,
 ):
-    """预览公益折扣。有顾客 JWT 时强制本人；否则须显式传 customer_id（如 POS）。"""
+    """预览公益折扣：顾客只能查询本人；POS 必须使用已授权员工身份和门店范围。"""
     from decimal import Decimal
 
     from app.core.response import money
 
-    cid = int(data.customer_id) if data.customer_id else None
-    if customer is not None:
-        cid = int(customer.id)
-    if cid is None:
-        raise AppException(40008, "请指定顾客")
+    cid, store_id = await _resolve_preview_scope(
+        db=db,
+        customer=customer,
+        user=user,
+        requested_customer_id=data.customer_id,
+        requested_store_id=int(data.store_id),
+    )
     subtotal = money(Decimal(str(data.subtotal)))
     disc = money(
         Decimal(
@@ -270,7 +306,7 @@ async def preview(
     result = await SocialBenefitService.preview(
         db,
         customer_id=cid,
-        store_id=int(data.store_id),
+        store_id=store_id,
         subtotal=subtotal,
         discountable_subtotal=disc,
         packing_fee=pack,

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import uuid
 from typing import Any
 
@@ -210,9 +211,17 @@ async def release_rebuild_lock(store_id: int, *, owner_token: str | None = None)
 
 
 async def wait_for_rebuild(store_id: int, timeout: float = 0.3) -> dict[str, Any] | None:
-    """未抢到锁的调用方短暂等待后重读缓存。"""
+    """有界轮询菜单缓存；等待者不回源重建，避免锁竞争时形成数据库惊群。"""
     try:
-        await asyncio.sleep(timeout)
-        return await get_menu_bundle(store_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, float(timeout))
+        while True:
+            cached = await get_menu_bundle(store_id)
+            if cached is not None:
+                return cached
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            await asyncio.sleep(min(random.uniform(0.04, 0.10), remaining))
     except Exception:
         return None

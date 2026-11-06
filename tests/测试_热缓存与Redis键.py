@@ -1,7 +1,9 @@
 """热缓存原语与 Redis 键目录标准化校验。"""
 from __future__ import annotations
 
+import asyncio
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -29,6 +31,7 @@ from app.core.cache_keys import (
     products_public_rate_limit_key,
     rate_limit_key,
     reco_key,
+    reco_generation_key,
     ttl_with_jitter,
     weather_key,
     welcome_cooldown_key,
@@ -51,6 +54,7 @@ def test_all_redis_keys_use_snh_prefix():
         PAY_SYNC_PREFIX,
         FACE_LIVENESS_PREFIX,
         reco_key(1, 2, "home", "b0"),
+        reco_generation_key(1),
         menu_bundle_key(1),
         menu_version_key(1),
         welcome_cooldown_key(9),
@@ -121,3 +125,35 @@ def test_hot_cache_get_or_set():
 )
 def test_key_builders_exact(builder, args, expected):
     assert builder(*args) == expected
+
+
+@pytest.mark.asyncio
+async def test_system_settings_cache_refresh_is_single_flight(monkeypatch):
+    from types import SimpleNamespace
+    from app.services.system_settings_service import SystemSettingsService
+
+    SystemSettingsService._cache = None
+    SystemSettingsService._cache_ver = -1
+    SystemSettingsService._cache_at = 0.0
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()
+    calls = {"count": 0}
+
+    class Result:
+        def scalars(self):
+            return [SimpleNamespace(setting_key="test_setting", setting_value="ok")]
+
+    class FakeDB:
+        async def execute(self, _statement):
+            calls["count"] += 1
+            await asyncio.sleep(0.02)
+            return Result()
+
+    monkeypatch.setattr(
+        SystemSettingsService, "_remote_version", AsyncMock(return_value=None)
+    )
+    db = FakeDB()
+    await asyncio.gather(*(SystemSettingsService.touch_cache(db) for _ in range(5)))
+
+    assert calls["count"] == 1
+    assert SystemSettingsService._cache == {"test_setting": "ok"}
+    SystemSettingsService._cache_refresh_lock = asyncio.Lock()

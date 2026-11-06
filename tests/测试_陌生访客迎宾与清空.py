@@ -103,6 +103,11 @@ async def test_maybe_welcome_unknown_respects_store_switch_and_cooldown():
             redis_keys.pop(key, None)
             return 1
 
+        async def eval(self, script, numkeys, key, token):
+            if redis_keys.get(key) == token:
+                return await self.delete(key)
+            return 0
+
     from app.services.face_service import WelcomeService
 
     async def _enqueue(item):
@@ -171,6 +176,11 @@ async def test_maybe_welcome_unknown_releases_cooldown_on_member_pending():
         async def delete(self, key):
             redis_keys.pop(key, None)
             return 1
+
+        async def eval(self, script, numkeys, key, token):
+            if redis_keys.get(key) == token:
+                return await self.delete(key)
+            return 0
 
     with (
         patch(

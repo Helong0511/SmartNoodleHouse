@@ -182,12 +182,16 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         refund_no="RF11",
         payment_id=3,
         order_id=9,
+        amount=Decimal("10.00"),
         status="PROCESSING",
     )
     payment = SimpleNamespace(
         id=3,
         payment_no="PAY3",
         provider="WECHAT",
+        provider_trade_no="WX3",
+        order_id=9,
+        amount=Decimal("50.00"),
     )
 
     class _CM:
@@ -219,15 +223,33 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         refund_no="RF11",
         payment_id=3,
         order_id=9,
+        amount=Decimal("10.00"),
         status="PROCESSING",
     )
+    settle_order = SimpleNamespace(id=9)
+    settle_payment = SimpleNamespace(
+        id=3,
+        payment_no="PAY3",
+        provider="WECHAT",
+        provider_trade_no="WX3",
+        order_id=9,
+        amount=Decimal("50.00"),
+    )
+
+    def _scalar_result(value):
+        return MagicMock(scalar_one_or_none=MagicMock(return_value=value))
 
     async def _finalize(_db, row, status, **_kw):
-        row.status = "SUCCESS"
+        row.status = status
 
     settle_db = AsyncMock()
+    # 依次模拟：锁退款行、锁订单、锁原支付单；与生产代码的 Order→Payment 锁序一致。
     settle_db.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=settle_row))
+        side_effect=[
+            _scalar_result(settle_row),
+            _scalar_result(settle_order),
+            _scalar_result(settle_payment),
+        ]
     )
     settle_db.commit = AsyncMock()
     settle_db.get = AsyncMock(
@@ -252,6 +274,10 @@ async def test_poll_refunds_queries_channel_outside_row_lock():
         new_callable=AsyncMock,
         return_value={
             "status": "SUCCESS",
+            "refund_no": "RF11",
+            "payment_no": "PAY3",
+            "provider_trade_no": "WX3",
+            "amount": {"refund": 1000, "total": 5000, "currency": "CNY"},
             "provider_refund_no": "wxr1",
             "raw": {},
         },

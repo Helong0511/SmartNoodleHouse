@@ -145,7 +145,7 @@
     <el-drawer v-model="refundDrawer" :title="refundDrawerTitle" size="720px" destroy-on-close>
       <div v-loading="refundListLoading">
         <el-alert v-if="refundDrawerMode === 'inflight'" type="warning" :closable="false" show-icon
-          title="以下为待处理 / 处理中的退款单。可点「同步」向平台查询结果（补偿回调丢失）。" style="margin-bottom:12px" />
+          title="以下为待处理、处理中、状态未知或异常待处理的退款单。异常退款请先在支付平台处理，再点「同步」核实结果。" style="margin-bottom:12px" />
         <el-table :data="refundList" border size="small">
           <el-table-column prop="refund_no" label="退款单号" min-width="260" show-overflow-tooltip />
           <el-table-column v-if="refundDrawerMode === 'inflight'" prop="payment_no" label="支付号" min-width="240"
@@ -292,7 +292,7 @@ function canRefund(row: any) {
 
 function canSyncRefund(row: any) {
   if (!canManageRefund.value) return false
-  return row.status === 'PENDING' || row.status === 'PROCESSING'
+  return row.status === 'PENDING' || row.status === 'PROCESSING' || row.status === 'UNKNOWN' || row.status === 'ABNORMAL'
 }
 
 function reload() {
@@ -434,7 +434,7 @@ async function loadInflightRefunds() {
     const params: Record<string, unknown> = {
       page: refundPage.value,
       page_size: refundPageSize.value,
-      status: 'PENDING,PROCESSING',
+      status: 'PENDING,PROCESSING,UNKNOWN,ABNORMAL',
       store_id: storeFilter.value,
       keyword: keyword.value.trim() || undefined,
     }

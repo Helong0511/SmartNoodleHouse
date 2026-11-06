@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/ 与仓库根目录均可放 .env（README 约定在根目录）
@@ -30,7 +31,8 @@ class Settings(BaseSettings):
 
     database_url: str = "mysql+aiomysql://root:password@127.0.0.1:3306/smart_noodle_house?charset=utf8mb4"
     redis_url: str = "redis://127.0.0.1:6379/0"
-    redis_max_connections: int = 50
+    # 每个 Gunicorn/Uvicorn Worker 独立连接池；全局 Redis 连接上限约 Worker 数 × 此值
+    redis_max_connections: int = Field(default=50, ge=1, le=1000)
     # 每进程连接池；gunicorn -w N 时总连接 ≈ N*(pool_size+max_overflow)
     db_pool_size: int = 5
     db_max_overflow: int = 10
@@ -66,6 +68,9 @@ class Settings(BaseSettings):
     wechat_subscribe_template_order_ready: str = ""
 
     alipay_app_id: str = ""
+    # 支付宝回调卖家身份绑定：生产至少配置 seller_id 或 seller_email
+    alipay_seller_id: str = ""
+    alipay_seller_email: str = ""
     alipay_private_key: str = ""
     alipay_public_key: str = ""
     alipay_aes_key: str = ""
@@ -123,11 +128,15 @@ class Settings(BaseSettings):
     face_encryption_key: str = ""
     # 轮换时保留旧密钥以便解密历史向量；新注册只用 face_encryption_key
     face_encryption_key_previous: str = ""
-    # 平台 Token 等业务密钥加密；未单独配置时回退到 FACE_ENCRYPTION_KEY
+    # 平台 Token / 摄像头口令等业务密钥加密；生产须独立于 FACE_ENCRYPTION_KEY
     secret_encryption_key: str = ""
+    # 轮换期间保留上一把业务密钥，读取历史 snhenc:v1 密文；完成重加密后可清空
+    secret_encryption_key_previous: str = ""
 
     # 微信平台公钥/证书 PEM（回调 Wechatpay-Signature 验签必填；生产强制）
     wechat_platform_public_key: str = ""
+    # 使用独立平台公钥 PEM 时，必须配置对应 Wechatpay-Serial（例如 PUB_KEY_ID_...）
+    wechat_platform_serial_no: str = ""
     wechat_platform_cert_path: str = "certs/wechat_platform_cert.pem"
 
     # 仅开发环境允许：假支付 / mock 小程序登录（生产启动校验会拒绝）
@@ -156,7 +165,7 @@ class Settings(BaseSettings):
     enable_rate_limit: bool = True
     # Redis 宕机时对这些路径前缀 fail-closed 返回 503（逗号分隔）；其余仍 fail-open
     # 例：/api/auth/login,/api/payments/,/api/miniprogram/login
-    rate_limit_fail_closed_paths: str = "/api/auth/login,/api/auth/verify-password,/api/payments/,/api/miniprogram/login"
+    rate_limit_fail_closed_paths: str = "/api/auth/login,/api/auth/verify-password,/api/payments/,/api/miniprogram/wechat/login,/api/miniprogram/alipay/login,/api/miniprogram/auth/refresh,/api/delivery/meituan/notify,/api/delivery/eleme/notify"
     # 未配置平台密钥时，同步接口是否允许返回 mock 成功（生产必须 false）
     allow_delivery_mock: bool = False
     # JWT：默认 HS256；若配置 jwt_private_key + jwt_public_key 且 algorithm=RS256/EdDSA 则用非对称
@@ -176,7 +185,7 @@ class Settings(BaseSettings):
     webhook_ip_allowlist: str = ""
     webhook_require_allowlist: bool = False
     # P1-43: Webhook 请求体最大字节数（超出返回 413）
-    webhook_max_body_bytes: int = 512 * 1024  # 512KB
+    webhook_max_body_bytes: int = Field(default=512 * 1024, ge=1024, le=10 * 1024 * 1024)  # 1KB–10MB
     # 仅这些直连 peer（反代）可让后端信任 X-Real-IP / X-Forwarded-For
     trusted_proxy_ips: str = "127.0.0.1,::1"
 

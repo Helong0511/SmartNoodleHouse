@@ -54,9 +54,21 @@ class Base(DeclarativeBase):
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
+        # Request-scoped sessions drain recommendation invalidations asynchronously only
+        # after the DB commit has completed; do not schedule a background race in after_commit.
+        session.sync_session.info["_reco_cache_async_commit_owner"] = True
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            info = session.sync_session.info
+            pending = tuple(info.pop("_reco_cache_invalidation_ids", set()))
+            committed = bool(info.pop("_reco_cache_pending_committed", False))
+            if pending and committed:
+                from app.services.reco_cache import invalidate_customer
+
+                for customer_id in pending:
+                    await invalidate_customer(customer_id)

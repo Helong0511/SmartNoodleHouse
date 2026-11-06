@@ -272,17 +272,18 @@ async def test_report_unknown_experiment_raises(db_session):
 async def test_recommendation_endpoint_uses_ab_bucket(db_session, monkeypatch):
     from app.api.miniprogram import get_recommendations
 
-    # 绕过 Redis（测试环境无服务）
-    from app.services import reco_cache
+    # 显式模拟分布式锁持有者，避免测试依赖本机 Redis。
+    from unittest.mock import AsyncMock
+
+    from app.api import miniprogram_menu as menu_api
 
     async def _miss(*a, **k):
         return None
 
-    async def _noop(*a, **k):
-        return None
-
-    monkeypatch.setattr(reco_cache, "get_cached_reco", _miss)
-    monkeypatch.setattr(reco_cache, "set_cached_reco", _noop)
+    monkeypatch.setattr(menu_api, "get_cached_reco", _miss)
+    monkeypatch.setattr(menu_api, "try_acquire_reco_lock", AsyncMock(return_value="test-owner"))
+    monkeypatch.setattr(menu_api, "set_cached_reco_if_owner", AsyncMock(return_value=True))
+    monkeypatch.setattr(menu_api, "release_reco_lock", AsyncMock())
 
     db = db_session
     store = await make_store(db)

@@ -266,7 +266,7 @@ async def refund(
 
 async def query_refund(*, refund_no: str) -> dict[str, Any]:
     """查询单笔退款（商户退款单号）。PROCESSING 不得当 SUCCESS；未知保留 UNKNOWN。"""
-    data = await _request("GET", f"/v3/refund/domestic/refunds/out-refund-no/{refund_no}")
+    data = await _request("GET", f"/v3/refund/domestic/refunds/{refund_no}")
     raw_status = (data.get("status") or "").upper()
     if raw_status == "SUCCESS":
         status = "SUCCESS"
@@ -279,6 +279,8 @@ async def query_refund(*, refund_no: str) -> dict[str, Any]:
         status = "UNKNOWN"
     return {
         "refund_no": data.get("out_refund_no") or refund_no,
+        "payment_no": data.get("out_trade_no"),
+        "provider_trade_no": data.get("transaction_id"),
         "status": status,
         "provider_refund_no": data.get("refund_id"),
         "amount": data.get("amount", {}),

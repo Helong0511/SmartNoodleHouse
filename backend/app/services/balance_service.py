@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.biz_no import generate_no
@@ -60,10 +60,24 @@ class BalanceService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
-        if existing:
-            return existing
         dp = money(recharge.credit_principal)
         dg = money(recharge.credit_gift)
+        if existing:
+            # 幂等命中必须验证同一笔充值的全部资金事实，不能把不同支付单、
+            # 顾客/门店或变更后的本金/赠送金额静默当作已成功入账。
+            if (
+                int(existing.customer_id) != int(recharge.customer_id)
+                or int(existing.recharge_order_id or 0) != int(recharge.id)
+                or existing.payment_id != payment_id
+                or existing.store_id != recharge.store_id
+                or money(existing.delta_principal) != dp
+                or money(existing.delta_gift) != dg
+            ):
+                raise AppException(
+                    40994,
+                    "充值编号已关联不同的储值入账流水，顾客/门店/支付单/本金/赠送金额不一致，拒绝重复入账",
+                )
+            return existing
         cust.balance_principal = money(cust.balance_principal or 0) + dp
         cust.balance_gift = money(cust.balance_gift or 0) + dg
         row = BalanceLedger(
@@ -115,6 +129,31 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if existing:
+            # 幂等命中不代表本次请求参数可信：必须确认同一顾客、订单、支付单及金额，
+            # 否则不能把旧扣款流水当作新支付成功返回。
+            existing_amount = money(
+                abs(existing.delta_principal) + abs(existing.delta_gift)
+            )
+            if (
+                int(existing.customer_id) != int(customer_id)
+                or int(existing.order_id or 0) != int(order_id)
+                or money(existing_amount) != pay
+                or (
+                    payment_id is not None
+                    and (
+                        existing.payment_id is None
+                        or int(existing.payment_id) != int(payment_id)
+                    )
+                )
+                or (
+                    store_id is not None
+                    and (
+                        existing.store_id is None
+                        or int(existing.store_id) != int(store_id)
+                    )
+                )
+            ):
+                raise AppException(40994, "订单已有储值扣款流水，但顾客/金额/支付单不一致，拒绝重复扣款")
             return existing
         from app.services.customer_service import CustomerService
 
@@ -178,6 +217,22 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if existing:
+            existing_amount = money(
+                abs(existing.delta_principal) + abs(existing.delta_gift)
+            )
+            if (
+                existing.entry_type != "REFUND_RESTORE"
+                or int(existing.customer_id) != int(customer_id)
+                or int(existing.order_id or 0) != int(order_id)
+                or (
+                    store_id is not None
+                    and int(getattr(existing, "store_id", 0) or 0) != int(store_id)
+                )
+                or money(existing.delta_principal) < 0
+                or money(existing.delta_gift) < 0
+                or money(existing_amount) != amt
+            ):
+                raise AppException(40994, "退款编号已关联不同的储值回补流水，拒绝重复入账")
             return existing
 
         pay_row = (
@@ -189,14 +244,54 @@ class BalanceService:
             )
         ).scalar_one_or_none()
         if pay_row:
-            paid_total = money(abs(pay_row.delta_principal) + abs(pay_row.delta_gift))
-            if paid_total > 0:
-                gift_share = money(abs(pay_row.delta_gift) * amt / paid_total)
-                principal_share = amt - gift_share
-            else:
-                gift_share = Decimal("0.00")
-                principal_share = amt
+            # 原扣款流水必须确属当前订单顾客/门店，且方向必须是扣款（负数）。
+            # 不能仅凭 order_id 找到任意 PAY 行就套用其本金/赠送比例。
+            if (
+                int(getattr(pay_row, "customer_id", 0) or 0) != int(customer_id)
+                or (
+                    store_id is not None
+                    and int(getattr(pay_row, "store_id", 0) or 0) != int(store_id)
+                )
+                or money(pay_row.delta_principal) > 0
+                or money(pay_row.delta_gift) > 0
+            ):
+                raise AppException(40991, "原储值支付流水与当前顾客/门店不匹配或扣款方向异常，拒绝自动回补")
+            paid_principal = money(abs(pay_row.delta_principal))
+            paid_gift = money(abs(pay_row.delta_gift))
+            paid_total = money(paid_principal + paid_gift)
+            if paid_total <= 0:
+                raise AppException(40991, "原储值支付流水金额无效，拒绝自动回补")
+            # 分笔退款不能逐笔独立四舍五入 gift 占比，否则多笔退款累加可能产生分币漂移。
+            # 按“累计已退款金额”计算目标赠送金回补值，本次只补差额；全额退时精确回到原始赠送金。
+            previous_restore = (
+                await db.execute(
+                    select(
+                        func.coalesce(func.sum(BalanceLedger.delta_principal), 0),
+                        func.coalesce(func.sum(BalanceLedger.delta_gift), 0),
+                    ).where(
+                        BalanceLedger.entry_type == "REFUND_RESTORE",
+                        BalanceLedger.order_id == order_id,
+                        BalanceLedger.customer_id == customer_id,
+                    )
+                )
+            ).one()
+            previous_principal = money(previous_restore[0] or 0)
+            previous_gift = money(previous_restore[1] or 0)
+            previous_total = money(previous_principal + previous_gift)
+            cumulative_refund = money(previous_total + amt)
+            if cumulative_refund > paid_total:
+                raise AppException(40992, "累计余额退款超过原储值支付金额，拒绝重复回补")
+            target_gift = (
+                paid_gift
+                if cumulative_refund == paid_total
+                else money(paid_gift * cumulative_refund / paid_total)
+            )
+            gift_share = money(target_gift - previous_gift)
+            principal_share = money(amt - gift_share)
+            if gift_share < 0 or principal_share < 0:
+                raise AppException(40993, "余额退款本金/赠送金分摊异常，需人工核对")
         else:
+            # 历史订单没有 PAY 流水时，沿用旧兼容策略：全部回补本金。
             gift_share = Decimal("0.00")
             principal_share = amt
 

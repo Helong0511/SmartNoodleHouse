@@ -93,6 +93,7 @@ from app.models.delivery import (  # noqa: F401
     DeliveryRefund,
     DeliveryCallbackLog,
 )
+from app.models.leader import LeaderFencingState  # noqa: F401
 from app.models.messaging import (  # noqa: F401
     WebhookInbox,
     ProcessedMessage,
@@ -197,6 +198,7 @@ __all__ = [
     "WebhookInbox",
     "ProcessedMessage",
     "OutboxEvent",
+    "LeaderFencingState",
     "SocialIdentityType",
     "CustomerSocialIdentity",
     "SocialBenefitRule",

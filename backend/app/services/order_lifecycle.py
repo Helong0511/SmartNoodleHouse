@@ -19,6 +19,18 @@ from app.services.status_history import record_order_status
 logger = logging.getLogger(__name__)
 
 
+def _default_restore_inventory(old_status: str, target_status: str) -> bool:
+    """退款不等于退回餐品：仅尚未进入制作流程的订单自动恢复库存。"""
+    old = (old_status or "").strip().upper()
+    target = (target_status or "").strip().upper()
+    if target == "CANCELLED":
+        return True
+    if target == "REFUNDED":
+        return old in ("PENDING_PAYMENT", "PAID", "CONFIRMED")
+    return False
+
+
+
 async def order_all_no_cooking(db: AsyncSession, order_id: int) -> bool:
     """订单内全部明细均为免烹饪餐品（如纯卤味单）。"""
     items = list((await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))).scalars().all())
@@ -48,7 +60,7 @@ async def apply_order_status(
     """将订单迁到 target，并联动必要副作用。
 
     assert_kind: STAFF | PAYMENT | SYSTEM；默认按 source 推断。
-    restore_inventory: None 时对 CANCELLED/REFUNDED 自动回库存（仅首次进入该终态）。
+    restore_inventory: None 时取消单自动回库存；退款单仅在 PENDING_PAYMENT/PAID/CONFIRMED 等未开制作状态回库存。
     update_preferences: None 时对 PAID 自动累计偏好（支付成功即记录所选规格）。
     """
     target = (target or "").strip().upper()
@@ -100,7 +112,7 @@ async def apply_order_status(
     if payment_status is not None:
         order.payment_status = payment_status
 
-    do_restore = restore_inventory if restore_inventory is not None else target in ("CANCELLED", "REFUNDED")
+    do_restore = bool(restore_inventory) if restore_inventory is not None else _default_restore_inventory(old, target)
     do_pref = update_preferences if update_preferences is not None else target == "PAID"
 
     if target == "COMPLETED" and old != "COMPLETED":

@@ -35,6 +35,7 @@ async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None, 
 
     async def _run():
         while True:
+            pubsub = None
             try:
                 r = await get_redis()
                 pubsub = r.pubsub()
@@ -59,6 +60,13 @@ async def start_ws_subscriber(on_message: Callable[[str, str, dict, int | None, 
             except Exception as e:
                 logger.error("WS Redis subscriber 断开，3s 后重连: %s", e)
                 await asyncio.sleep(3)
+            finally:
+                # PubSub 持有独立连接；断线重连/应用关闭时必须释放，否则会耗尽连接池。
+                if pubsub is not None:
+                    try:
+                        await pubsub.aclose()
+                    except Exception:
+                        logger.debug("关闭 WS Redis PubSub 失败", exc_info=True)
 
     if _listener_task is None or _listener_task.done():
         _listener_task = asyncio.create_task(_run())

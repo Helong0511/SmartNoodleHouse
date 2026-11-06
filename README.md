@@ -34,7 +34,7 @@
 ### 1. 准备环境
 
 - Python 3.11+
-- Node.js 20.19+（或 22.12+；Vite 8 要求，低于此版本前端构建会直接报错）
+- Node.js 22.20+ 或 24.12+ LTS（推荐 24 LTS；Node 20 已于 2026-04-30 EOL，不再接收安全修复）
 - MySQL 8
 - Redis 7
 - 微信 / 支付宝小程序开发者工具（可选）
@@ -392,7 +392,7 @@ python -m compileall backend
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y git curl wget vim nginx certbot python3-certbot-nginx \
   mysql-server redis-server build-essential python3.11 python3.11-venv python3-pip
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 

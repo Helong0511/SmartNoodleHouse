@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+from datetime import datetime
 import json
 from decimal import Decimal
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import select, text
 
+from app.core.exceptions import AppException
 from app.models import (
     DeliveryOrder,
     DeliveryProductMap,
@@ -98,6 +100,10 @@ def _patch_provider(monkeypatch, fake):
     async def _creds(db, platform, store_id):
         return MagicMock()
 
+    async def _set_sell_status(items, on_shelf):
+        return len(items)
+
+    fake.set_sell_status = _set_sell_status
     monkeypatch.setattr(hmod, "get_credentials_for_store", _creds)
 
 
@@ -120,14 +126,18 @@ async def test_扣到0发出售罄镜像(db_session):
 
 
 @pytest.mark.asyncio
-async def test_未扣到0不发镜像(db_session):
+async def test_未扣到0也发库存数量镜像(db_session):
     store = await _make_store(db_session, "S-SOLD-2")
     product = await _make_product(db_session, store, "P-SOLD-2")
     stock_row = await _make_listing(db_session, store, product, stock=5)
     await db_session.commit()
 
     await deduct_stock(db_session, product.id, 2, store_id=store.id)
-    assert await _outbox_row(db_session, stock_row.id) is None
+    ob = await _outbox_row(db_session, stock_row.id)
+    assert ob is not None and ob.status == "PENDING"
+    payload = json.loads(ob.payload)
+    assert payload["zero"] is False
+    assert payload["store_id"] == store.id and payload["product_id"] == product.id
 
 
 # ── 信号行复活：同一餐品反复售罄/补货只保留一行 ────────────────────────────
@@ -168,6 +178,38 @@ async def test_补货时已完成信号行被复活而非新增(db_session):
     assert rows[0].status == "PENDING"         # 已复活
     assert rows[0].attempt_count == 0          # 重试计数清零
     assert json.loads(rows[0].payload)["zero"] is False
+
+
+@pytest.mark.asyncio
+async def test_处理中库存信号只递增版本不得抢占原Worker租约(db_session):
+    store = await _make_store(db_session, "S-PROCESSING-COALESCE")
+    product = await _make_product(db_session, store, "P-PROCESSING-COALESCE")
+    stock_row = await _make_listing(db_session, store, product, stock=5)
+    await db_session.commit()
+
+    await _emit_stock_mirror(
+        db_session, store_id=store.id, product_id=product.id,
+        mirror_id=stock_row.id, zero=False,
+    )
+    await db_session.commit()
+    ob = await _outbox_row(db_session, stock_row.id)
+    ob.status = "PROCESSING"
+    ob.locked_by = "worker:original-claim-token"
+    ob.locked_at = datetime.now()
+    ob.sync_version = 7
+    await db_session.commit()
+
+    # 模拟原 Worker 正在 HTTP 请求时又发生库存变化。
+    await _emit_stock_mirror(
+        db_session, store_id=store.id, product_id=product.id,
+        mirror_id=stock_row.id, zero=False,
+    )
+    await db_session.flush()
+    await db_session.refresh(ob)
+
+    assert ob.status == "PROCESSING"
+    assert ob.locked_by == "worker:original-claim-token"
+    assert ob.sync_version == 8
 
 
 # ── handler：重读最新库存，乱序/重复都收敛 ─────────────────────────────────
@@ -244,28 +286,29 @@ async def test_handler平台返回失败时抛错等待重试(db_session, monkey
 
 
 @pytest.mark.asyncio
-async def test_handler_commits_before_platform_http():
-    """outbox 库存镜像：collect 后 commit，再调平台。"""
+async def test_handler_refreshes_each_platform_snapshot_before_http():
+    """每个平台 HTTP 前独立重读库存并提交读事务，不能复用上一平台的快照。"""
     order: list[str] = []
     db = AsyncMock()
+    db.commit = AsyncMock(side_effect=lambda: order.append("commit"))
+    db.expire_all = MagicMock()
+    platform_result = MagicMock()
+    platform_result.scalars.return_value.all.return_value = ["MEITUAN", "ELEME"]
+    db.execute = AsyncMock(return_value=platform_result)
 
-    async def _commit():
-        order.append("commit")
+    async def _collect(_db, store_id, product_id, *, platform_filter=None):
+        order.append(f"read:{platform_filter}")
+        stock = 3 if platform_filter == "MEITUAN" else 2
+        return [(platform_filter, MagicMock(), [{"stock": stock}], True)]
 
-    db.commit = AsyncMock(side_effect=_commit)
+    async def _push(jobs, *, store_id, product_id):
+        order.append(f"http:{jobs[0][0]}:{jobs[0][2][0]['stock']}")
+        return 0
 
     with patch.object(
-        hmod,
-        "_collect_stock_push_jobs",
-        new_callable=AsyncMock,
-        return_value=[("MEITUAN", MagicMock(), [{"stock": 0}])],
+        hmod, "_collect_stock_push_jobs", new_callable=AsyncMock, side_effect=_collect
     ), patch.object(
-        hmod,
-        "_execute_stock_push_jobs",
-        new_callable=AsyncMock,
-        side_effect=lambda jobs, store_id, product_id: (
-            order.append("http") or 0
-        ),
+        hmod, "_execute_stock_push_jobs", new_callable=AsyncMock, side_effect=_push
     ):
         await delivery_stock_mirror_handler(
             db,
@@ -275,7 +318,175 @@ async def test_handler_commits_before_platform_http():
             ),
         )
 
-    assert order == ["commit", "http"]
+    assert order == [
+        "commit",
+        "read:MEITUAN", "commit", "http:MEITUAN:3",
+        "read:ELEME", "commit", "http:ELEME:2",
+    ]
+    assert db.expire_all.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_平台间库存变化时后续平台必须读取更新后的数据库值(db_session, monkeypatch):
+    store = await _make_store(db_session, "S-PLATFORM-REFRESH")
+    product = await _make_product(db_session, store, "P-PLATFORM-REFRESH")
+    stock_row = await _make_listing(db_session, store, product, stock=3)
+    await _make_binding_and_map(
+        db_session, store, product, platform="MEITUAN", sku="SKU-MT", code="CODE-MT"
+    )
+    await _make_binding_and_map(
+        db_session, store, product, platform="ELEME", sku="SKU-EL", code="CODE-EL"
+    )
+    await db_session.commit()
+
+    pushed: list[tuple[str, int]] = []
+
+    class Provider:
+        def __init__(self, platform: str):
+            self.platform = platform
+
+        async def set_sku_stock(self, items):
+            pushed.append((self.platform, items[0]["stock"]))
+            if len(pushed) == 1:
+                # 模拟第一个平台 HTTP 等待期间，本地库存被新订单扣减。
+                await db_session.execute(
+                    text("UPDATE store_product_stocks SET stock = 1 WHERE id = :id"),
+                    {"id": stock_row.id},
+                )
+                await db_session.commit()
+            return len(items)
+
+        async def set_sell_status(self, items, on_shelf):
+            return len(items)
+
+    monkeypatch.setattr(
+        hmod, "get_delivery_provider", lambda platform, creds: Provider(platform)
+    )
+    async def _creds(db, platform, store_id):
+        return MagicMock()
+    monkeypatch.setattr(hmod, "get_credentials_for_store", _creds)
+
+    await delivery_stock_mirror_handler(
+        db_session,
+        SimpleNamespace(
+            id=987,
+            payload=json.dumps({"store_id": store.id, "product_id": product.id}),
+        ),
+    )
+
+    assert len(pushed) == 2
+    assert {platform for platform, _stock in pushed} == {"MEITUAN", "ELEME"}
+    assert pushed[0][1] == 3
+    assert pushed[1][1] == 1
+
+
+@pytest.mark.asyncio
+async def test_平台绑定凭证缺失时必须拒绝发送请求(db_session, monkeypatch):
+    store = await _make_store(db_session, "S-CREDENTIAL-FAIL-CLOSED")
+    product = await _make_product(db_session, store, "P-CREDENTIAL-FAIL-CLOSED")
+    await _make_listing(db_session, store, product, stock=4)
+    await _make_binding_and_map(
+        db_session, store, product, platform="MEITUAN",
+        sku="SKU-CRED", code="CODE-CRED",
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        hmod, "get_credentials_for_store", AsyncMock(return_value=None)
+    )
+    provider_factory = MagicMock(side_effect=AssertionError("凭证缺失时不得创建 Provider"))
+    monkeypatch.setattr(hmod, "get_delivery_provider", provider_factory)
+
+    with pytest.raises(RuntimeError, match="凭证不可用"):
+        await delivery_stock_mirror_handler(
+            db_session,
+            SimpleNamespace(
+                id=991,
+                payload=json.dumps({"store_id": store.id, "product_id": product.id}),
+            ),
+        )
+    provider_factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_饿了么门店token解密失败必须返回无凭证(monkeypatch):
+    from app.services import delivery_context as context
+
+    binding = SimpleNamespace(
+        store_id=11, platform_shop_id="ELEME-SHOP-11",
+        access_token="encrypted-token", refresh_token=None, extra_config=None,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = binding
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        context.SecretEncryptionService, "decrypt", staticmethod(lambda value: None)
+    )
+
+    credentials = await context.get_credentials_for_store(db, "ELEME", 11)
+    assert credentials is None
+
+
+@pytest.mark.asyncio
+async def test_美团门店shop_id缺失必须返回无凭证(monkeypatch):
+    from app.services import delivery_context as context
+
+    binding = SimpleNamespace(
+        store_id=12, platform_shop_id="", access_token=None,
+        refresh_token=None, extra_config=None,
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = binding
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        context.SecretEncryptionService, "decrypt", staticmethod(lambda value: None)
+    )
+
+    credentials = await context.get_credentials_for_store(db, "MEITUAN", 12)
+    assert credentials is None
+
+
+@pytest.mark.asyncio
+async def test_饿了么Provider不得把门店token缺失回退到全局token(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import delivery_providers as providers
+    from app.services.delivery_context import PlatformCredentials
+
+    monkeypatch.setattr(
+        providers, "get_settings",
+        lambda: SimpleNamespace(
+            eleme_app_id="app", eleme_app_secret="secret",
+            eleme_access_token="GLOBAL-WRONG-STORE-TOKEN",
+            is_production=True, allow_delivery_mock=False,
+        ),
+    )
+    provider = providers.ElemeProvider(
+        PlatformCredentials(store_id=14, platform_shop_id="SHOP-14", access_token=None)
+    )
+    with pytest.raises(ValueError, match="拒绝使用全局 token"):
+        await provider._rpc("eleme.shop.getShop", {"shopId": "SHOP-14"})
+
+
+@pytest.mark.asyncio
+async def test_美团Provider门店上下文缺shop_id时必须拒绝请求(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import delivery_providers as providers
+    from app.services.delivery_context import PlatformCredentials
+
+    monkeypatch.setattr(
+        providers, "get_settings",
+        lambda: SimpleNamespace(
+            meituan_app_id="app", meituan_app_secret="secret",
+            is_production=True, allow_delivery_mock=False,
+        ),
+    )
+    provider = providers.MeituanProvider(
+        PlatformCredentials(store_id=15, platform_shop_id=None)
+    )
+    with pytest.raises(ValueError, match="缺少 platform_shop_id"):
+        await provider._request("/api/v1/food/updateStock", {"app_food_code": "SKU-1"})
 
 
 # ── 库存映射：不限=9999、门店停售=0 ─────────────────────────────────────────
@@ -289,23 +500,32 @@ async def test_推送库存映射不限与停售(db_session, monkeypatch):
     await db_session.commit()
 
     seen = []
+    shelf_states = []
     fake = MagicMock()
 
     async def _set(items):
         seen.append(items[0]["stock"])
         return 1
 
+    async def _shelf(items, on_shelf):
+        shelf_states.append(on_shelf)
+        return len(items)
+
     fake.set_sku_stock = _set
+    fake.set_sell_status = _shelf
     _patch_provider(monkeypatch, fake)
+    fake.set_sell_status = _shelf
 
     assert await _push_store_product_stock(db_session, store.id, product.id) == 0
     assert seen == [9999]  # 本地"不限"映射为平台充足值
+    assert shelf_states == [True]
 
-    # 门店停售 → 平台售罄 0
+    # 门店停售 → 平台库存归零并同步下架
     stock_row.status = 0
     await db_session.commit()
     assert await _push_store_product_stock(db_session, store.id, product.id) == 0
     assert seen == [9999, 0]
+    assert shelf_states == [True, False]
 
 
 # ── 门店隔离：只推目标门店绑定，不波及其它门店 ─────────────────────────────
@@ -400,3 +620,121 @@ async def test_库存不足落单被拒_不建本地单且写告警(db_session):
     # 本地订单 / 外卖订单扩展均无记录
     assert (await db_session.execute(select(Order))).scalars().all() == []
     assert (await db_session.execute(select(DeliveryOrder))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_无门店覆盖行时产品基础库存变化也会镜像(db_session, monkeypatch):
+    store = await _make_store(db_session, "S-BASE-MIRROR")
+    product = await _make_product(db_session, store, "P-BASE-MIRROR", price="18.00")
+    product.stock = 5
+    await _make_binding_and_map(db_session, store, product, sku="SKU-BASE", code="BASE")
+    await db_session.commit()
+
+    await deduct_stock(db_session, product.id, 2, store_id=store.id)
+    ob = (
+        await db_session.execute(
+            select(OutboxEvent).where(
+                OutboxEvent.aggregate_type == "delivery_stock_base",
+                OutboxEvent.aggregate_id == product.id,
+                OutboxEvent.event_kind == "mirror",
+            )
+        )
+    ).scalar_one_or_none()
+    assert ob is not None
+
+    pushed = []
+    fake = MagicMock()
+
+    async def _set(items):
+        pushed.append(items[0]["stock"])
+        return 1
+
+    fake.set_sku_stock = _set
+    _patch_provider(monkeypatch, fake)
+    await delivery_stock_mirror_handler(db_session, SimpleNamespace(id=ob.id, payload=ob.payload))
+    assert pushed == [3]
+
+
+def test_外卖菜单初次同步使用门店覆盖库存():
+    from app.services.product_sync_service import ProductSyncService
+
+    product = SimpleNamespace(
+        id=1, product_no="N-1", name="牛肉面", description="", price=Decimal("18.00"),
+        stock=999, status="ON_SALE", box_price=Decimal("0.00"), min_order_count=1,
+        main_image="/uploads/beef.jpg",
+    )
+    store_stock = SimpleNamespace(stock=5, status=1)
+    payload = ProductSyncService._build_product_payload_cached(
+        product, None, "SHOP-1", None, store_stock
+    )
+    assert payload["stock"] == 5
+    assert payload["skus"][0]["stock"] == 5
+    assert payload["is_sold_out"] == 0
+
+    # 库存为0但仍在售：必须显示售罄，不应被误判为下架。
+    store_stock.stock = 0
+    payload = ProductSyncService._build_product_payload_cached(
+        product, None, "SHOP-1", None, store_stock
+    )
+    assert payload["stock"] == 0
+    assert payload["is_sold_out"] == 0
+
+    store_stock.stock = 5
+    store_stock.status = 0
+    payload = ProductSyncService._build_product_payload_cached(
+        product, None, "SHOP-1", None, store_stock
+    )
+    assert payload["stock"] == 0
+    assert payload["skus"][0]["stock"] == 0
+    assert payload["is_sold_out"] == 1
+
+
+@pytest.mark.asyncio
+async def test_跨门店餐品映射不得用于外卖订单落单(db_session):
+    from app.services.delivery_service import DeliveryService
+
+    store_a = await _make_store(db_session, "S-MAP-CROSS-A")
+    store_b = await _make_store(db_session, "S-MAP-CROSS-B")
+    product_b = await _make_product(db_session, store_b, "P-MAP-CROSS-B")
+    db_session.add(
+        DeliveryProductMap(
+            id=next(_seq), store_id=store_a.id, platform="MEITUAN",
+            platform_sku_id="SKU-CROSS", app_food_code="CODE-CROSS",
+            product_id=product_b.id, status=1,
+        )
+    )
+    await db_session.flush()
+
+    with pytest.raises(AppException, match="跨门店"):
+        await DeliveryService._resolve_product(
+            db_session, store_a.id, "MEITUAN",
+            {"platform_sku_id": "SKU-CROSS", "app_food_code": "CODE-CROSS", "name": "跨店餐品"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_跨门店餐品不得被推送到其他门店平台(db_session):
+    from app.services.product_sync_service import ProductSyncService
+
+    store_a = await _make_store(db_session, "S-SYNC-CROSS-A")
+    store_b = await _make_store(db_session, "S-SYNC-CROSS-B")
+    product_b = await _make_product(db_session, store_b, "P-SYNC-CROSS-B")
+    db_session.add(
+        PlatformStoreBinding(
+            id=next(_seq), store_id=store_a.id, platform="MEITUAN",
+            platform_shop_id=f"MT-{store_a.id}", status=1, auto_sync_open=False,
+        )
+    )
+    db_session.add(
+        DeliveryProductMap(
+            id=next(_seq), store_id=store_a.id, platform="MEITUAN",
+            platform_sku_id="SKU-SYNC-CROSS", app_food_code="CODE-SYNC-CROSS",
+            product_id=product_b.id, status=1,
+        )
+    )
+    await db_session.flush()
+
+    with pytest.raises(AppException, match="跨门店"):
+        await ProductSyncService._load_maps_products(db_session, store_a.id, "MEITUAN")
+    with pytest.raises(AppException, match="不属于当前门店"):
+        await ProductSyncService.sync_single_product(db_session, store_a.id, "MEITUAN", product_b.id)

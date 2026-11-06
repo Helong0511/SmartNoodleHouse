@@ -108,4 +108,6 @@ def test_baseline_reads_struct_sql_canonical_section():
     assert "CREATE TABLE" in section
     assert "DROP DATABASE" not in section
     assert "IDENTIFIED BY" not in section
-    assert "REPLACE_WITH_STRONG_DB_PASSWORD" in raw
+    # Schema migration/DDL 不应包含数据库用户口令或要求部署者把口令写进 SQL。
+    assert "IDENTIFIED BY" not in raw
+    assert "REPLACE_WITH_STRONG_DB_PASSWORD" not in raw

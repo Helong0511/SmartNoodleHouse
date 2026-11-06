@@ -84,8 +84,44 @@ class FakeRedis:
     async def get(self, key):
         return self.kv.get(key)
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
+        if nx and key in self.kv:
+            return None
+        if xx and key not in self.kv:
+            return None
         self.kv[key] = str(value)
+        return True
+
+    async def eval(self, script, numkeys, *args):
+        keys = list(args[:numkeys])
+        argv = list(args[numkeys:])
+        # owner-token 心跳续租
+        if "redis.call('expire'" in script.lower() and len(keys) == 1:
+            if self.kv.get(keys[0]) == str(argv[0]):
+                return await self.expire(keys[0], int(argv[1]))
+            return 0
+        # owner-token 释放
+        if "redis.call('del'" in script.lower() and len(keys) == 1:
+            if self.kv.get(keys[0]) == str(argv[0]):
+                return await self.delete(keys[0])
+            return 0
+        # 菜单 bundle + version 原子读取。
+        if "MENU_GET_BUNDLE_WITH_VERSION" in script:
+            bundle = self.kv.get(keys[0])
+            version = self.kv.get(keys[1])
+            return [bundle, version] if bundle is not None and version is not None else None
+        # 菜单缓存发布：同时校验锁 token 与构建前版本，模拟 Lua 原子比较。
+        if "redis.call('SET', KEYS[2]" in script and len(keys) == 3:
+            lock_key, bundle_key, version_key = keys
+            token, raw, _ttl, expected_version = argv
+            if (
+                self.kv.get(lock_key) == str(token)
+                and self.kv.get(version_key, "0") == str(expected_version)
+            ):
+                self.kv[bundle_key] = str(raw)
+                return "OK"
+            return None
+        raise NotImplementedError("FakeRedis.eval 未覆盖该 Lua 脚本")
 
     async def delete(self, *keys):
         n = 0
@@ -262,11 +298,40 @@ async def test_metrics_endpoint_reads_middleware_data(fake_redis):
     body = await reco_metrics(request=None, window_hours=1)
     routes = body["data"]["routes"]
     # FastAPI include_router 已将 /api prefix 纳入最终 route.path，指标键应与实际请求路径一致。
-    assert "/api/miniprogram/menu" in routes
-    assert routes["/api/miniprogram/menu"]["count"] >= 1
+    assert "/miniprogram/menu" in routes
+    assert routes["/miniprogram/menu"]["count"] >= 1
 
 
 # ---------- 菜单聚合版本戳 ----------
+
+@pytest.mark.asyncio
+async def test_menu_bundle_publish_is_fenced_by_build_version(fake_redis):
+    from app.core.cache_keys import menu_bundle_key, menu_rebuild_lock_key, menu_version_key
+
+    store_id = 99123
+    await fake_redis.set(menu_rebuild_lock_key(store_id), "owner-token")
+    await fake_redis.set(menu_version_key(store_id), "7")
+
+    published = await menu_cache.set_menu_bundle(
+        store_id,
+        {"version": 7, "products": {"items": []}},
+        owner_token="owner-token",
+        expected_version=7,
+    )
+    assert published is True
+    assert menu_bundle_key(store_id) in fake_redis.kv
+
+    # 写路径在快照构建后 bump 版本：旧 worker 即使仍持有租约，也不得覆盖新版本。
+    await fake_redis.set(menu_version_key(store_id), "8")
+    stale_publish = await menu_cache.set_menu_bundle(
+        store_id,
+        {"version": 7, "products": {"items": ["stale"]}},
+        owner_token="owner-token",
+        expected_version=7,
+    )
+    assert stale_publish is False
+    assert '"stale"' not in fake_redis.kv[menu_bundle_key(store_id)]
+
 
 @pytest.mark.asyncio
 async def test_menu_bundle_version_flow(fake_redis, db_session):
@@ -299,6 +364,31 @@ async def test_menu_bundle_version_flow(fake_redis, db_session):
     assert changed["data"]["changed"] is True
     assert changed["data"]["version"] == 2
     assert len(changed["data"]["products"]["items"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_menu_bundle_invalidates_stale_local_cache_from_remote_version(fake_redis, db_session):
+    db = db_session
+    store = await make_store(db)
+    cat = await make_category(db, store.id)
+    product = await make_product(db, store.id, cat.id, name="旧菜单名")
+
+    first = await get_menu_bundle_api(request=None, db=db, store_id=store.id)
+    old_version = first["data"]["version"]
+    assert first["data"]["products"]["items"][0]["name"] == "旧菜单名"
+
+    # 模拟另一个 worker 更新数据并只 bump Redis 版本；本 worker 的进程内缓存没有被直接清除。
+    product.name = "新菜单名"
+    await db.flush()
+    new_version = await menu_cache.bump_menu_version(store.id)
+    assert new_version > old_version
+
+    refreshed = await get_menu_bundle_api(
+        request=None, db=db, store_id=store.id, version=old_version
+    )
+    assert refreshed["data"]["changed"] is True
+    assert refreshed["data"]["version"] == new_version
+    assert refreshed["data"]["products"]["items"][0]["name"] == "新菜单名"
 
 
 @pytest.mark.asyncio

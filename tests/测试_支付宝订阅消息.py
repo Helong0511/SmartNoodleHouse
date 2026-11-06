@@ -130,5 +130,6 @@ async def test_notify_order_ready_tries_both_channels(db_session, monkeypatch):
     # 通知投递有意在后台 task 中执行，避免延长订单行锁；让事件循环调度任务后再断言。
     import asyncio
     await asyncio.sleep(0)
+    # 投递通过 create_task 异步调度；让两个任务获得一次执行机会后再断言。
     assert wx.await_count == 1
     assert ali.await_count == 1

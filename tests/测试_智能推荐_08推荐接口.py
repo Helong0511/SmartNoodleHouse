@@ -7,7 +7,7 @@ import pytest
 from app.api.miniprogram import get_recommendations
 from app.core.exceptions import AppException
 from app.core.cache_keys import reco_key, reco_rebuild_lock_key
-from app.services.reco_cache import release_reco_lock, set_cached_reco, try_acquire_reco_lock
+from app.services.reco_cache import release_reco_lock, set_cached_reco_if_owner, try_acquire_reco_lock
 from app.models import CustomerTasteProfile
 from app.services.recommendation_service import invalidate_store_caches
 from app.services.taste_learning_service import TasteLearningService
@@ -41,27 +41,46 @@ class FakeRedis:
     async def get(self, key):
         return self.store.get(key)
 
-    async def set(self, key, value, ex=None, nx=False):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
         if nx and key in self.store:
             return None
-        self.store[key] = value
+        if xx and key not in self.store:
+            return None
+        self.store[key] = str(value)
+        return True
         return True
 
     async def eval(self, script, numkeys, *args):
         keys = args[:numkeys]
         argv = args[numkeys:]
         if numkeys == 1:
+            if "INCR" in script.upper():
+                generation = int(self.store.get(keys[0]) or 0) + 1
+                self.store[keys[0]] = str(generation)
+                return generation
             if self.store.get(keys[0]) == argv[0]:
                 del self.store[keys[0]]
                 return 1
             return 0
         if numkeys == 2:
-            if self.store.get(keys[0]) == argv[0]:
+            # generation + cache 原子读取（只读，不得错误地当成 owner 写入）。
+            if len(argv) == 1 and "return redis.call('GET', KEYS[2])" in script:
+                if (self.store.get(keys[0]) or "0") == str(argv[0]):
+                    return self.store.get(keys[1])
+                return None
+            if self.store.get(keys[0]) == argv[0] and len(argv) >= 2:
                 self.store[keys[1]] = argv[1]
                 return "OK"
             return 0
+        if numkeys == 3:
+            lock_key, cache_key, generation_key = keys
+            token, raw, _ttl, expected_generation = argv
+            current_generation = self.store.get(generation_key) or "0"
+            if self.store.get(lock_key) == str(token) and current_generation == str(expected_generation):
+                self.store[cache_key] = str(raw)
+                return "OK"
+            return 0
         raise AssertionError(f"unexpected Lua key count: {numkeys}")
-
     async def delete(self, *keys):
         n = 0
         for k in keys:
@@ -80,7 +99,7 @@ class BrokenRedis(FakeRedis):
     async def get(self, key):
         raise RuntimeError("redis down")
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False, xx=False, px=None):
         raise RuntimeError("redis down")
 
     async def scan_iter(self, match, count=None):
@@ -133,7 +152,7 @@ async def test_old_reco_owner_cannot_release_new_owners_lock(fake_redis):
 
     lock_key = reco_rebuild_lock_key(*args)
     fake_redis.store[lock_key] = "new-owner"
-    await release_reco_lock(*args, owner_token=old_owner)
+    await release_reco_lock(*args, token=old_owner)
 
     assert fake_redis.store[lock_key] == "new-owner"
 
@@ -145,10 +164,14 @@ async def test_reco_cache_write_requires_current_lock_owner(fake_redis):
     cache_key = reco_key(*args)
     fake_redis.store[lock_key] = "new-owner"
 
-    await set_cached_reco(*args[:4], {"items": ["stale"]}, args[4], owner_token="old-owner")
+    assert await set_cached_reco_if_owner(
+        *args[:4], {"items": ["stale"]}, args[4], "old-owner", expected_generation=0
+    ) is False
     assert cache_key not in fake_redis.store
 
-    await set_cached_reco(*args[:4], {"items": ["fresh"]}, args[4], owner_token="new-owner")
+    assert await set_cached_reco_if_owner(
+        *args[:4], {"items": ["fresh"]}, args[4], "new-owner", expected_generation=0
+    ) is True
     assert cache_key in fake_redis.store
 
 
@@ -290,7 +313,7 @@ async def test_anonymous_vs_customer_cache_separated(db_session, fake_redis):
 
 
 @pytest.mark.asyncio
-async def test_redis_failure_degrades_gracefully(db_session, monkeypatch):
+async def test_redis_failure_without_cache_fails_closed_to_prevent_db_stampede(db_session, monkeypatch):
     async def _get():
         return BrokenRedis()
 
@@ -300,9 +323,12 @@ async def test_redis_failure_degrades_gracefully(db_session, monkeypatch):
     cat = await make_category(db, store.id, name="招牌面")
     await make_product(db, store.id, cat.id, name="小面", sales_count=10)
 
-    data = await _call(db, store)
-    assert data["items"]
-    assert data["cache_hit"] is False
+    # 推荐是非关键展示能力；Redis 不可用且本地无缓存时返回可重试 503，
+    # 不允许每个 worker 都绕过分布式锁并发回源查询画像/订单。
+    with pytest.raises(AppException) as exc:
+        await _call(db, store)
+    assert exc.value.code == 50301
+    assert exc.value.status_code == 503
 
 
 # ---------- TR-8.2 写后主动失效 ----------
@@ -323,9 +349,13 @@ async def test_paid_order_invalidates_customer_cache(db_session, fake_redis):
     # 下单支付 → record_paid_order_events 学习 + 主动失效
     order = await make_paid_order(db, cust.id, store.id, [(p, 1, [])])
     await TasteLearningService.record_paid_order_events(db, order.id)
-
-    keys_left = list(fake_redis.store.keys())
-    assert not any(f":c{cust.id}:" in k for k in keys_left), "支付后该顾客缓存应被清除"
+    # 个性化缓存失效在业务事务提交后执行；未提交前不能推进共享代际。
+    await db.commit()
+    # after_commit 会异步推进共享代际；旧代际键保留到 TTL，自然不可再命中。
+    import asyncio
+    await asyncio.sleep(0)
+    from app.core.cache_keys import reco_generation_key
+    assert fake_redis.store.get(reco_generation_key(cust.id)) == "1"
 
     third = await _call(db, store, customer=cust)
     assert third["cache_hit"] is False

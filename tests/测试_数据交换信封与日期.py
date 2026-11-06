@@ -230,7 +230,7 @@ async def test_rate_limit_reject_envelope_has_request_id():
     mw = RateLimitMiddleware(app=MagicMock())
     request = _http_request("/api/orders")
     redis = AsyncMock()
-    redis.eval = AsyncMock(return_value=999)
+    redis.eval = AsyncMock(return_value=(0, 1000))
     settings = SimpleNamespace(
         is_production=False,
         is_development=False,

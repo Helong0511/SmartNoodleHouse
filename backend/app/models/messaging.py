@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -45,7 +46,9 @@ class WebhookInbox(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(String(500))
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql")
+    )
     locked_by: Mapped[str | None] = mapped_column(String(64))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -94,11 +97,15 @@ class OutboxEvent(Base):
     aggregate_id: Mapped[int] = mapped_column(BigInteger)
     event_kind: Mapped[str] = mapped_column(String(64))
     payload: Mapped[str | None] = mapped_column(Text)
+    # 每次库存镜像信号递增；worker 处理期间若版本变化，完成时必须重新排队。
+    sync_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(16), default="PENDING")
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=8)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql")
+    )
     locked_by: Mapped[str | None] = mapped_column(String(64))
     last_error: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

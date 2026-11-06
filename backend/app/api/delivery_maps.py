@@ -85,7 +85,14 @@ async def list_product_maps(
     if product_ids:
         products = {
             p.id: p
-            for p in (await db.execute(select(Product).where(Product.id.in_(product_ids)))).scalars().all()
+            for p in (
+                await db.execute(
+                    select(Product).where(
+                        Product.id.in_(product_ids),
+                        Product.store_id == store_id,
+                    )
+                )
+            ).scalars().all()
         }
     items = [
         {

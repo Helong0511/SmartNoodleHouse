@@ -54,8 +54,20 @@ async def _resolve_table_for_shared_cart(
     token = (table_token or "").strip()
     if token:
         table = await resolve_dining_table(db, token)
+        # 同时传入 token 与 table_id 时必须指向同一桌，避免客户端上下文串桌。
+        if table and table_id and int(table.id) != int(table_id):
+            raise AppException(40313, "桌台凭证与桌台编号不匹配")
     elif table_id:
+        # table_id 是顺序主键，不是访问凭证。没有 QR token 时，必须证明当前顾客
+        # 已有未过期 DiningSession 且该会话绑定同一门店/桌台，防止枚举 table_id 加入他桌。
+        active = await DiningSessionService.get_active(db, int(customer.id))
+        if not active or not active.table_id or int(active.table_id) != int(table_id):
+            raise AppException(40313, "请先扫描该桌二维码并绑定桌台")
         table = await db.get(DiningTable, int(table_id))
+        if table and (
+            active.store_id is None or int(active.store_id) != int(table.store_id)
+        ):
+            raise AppException(40313, "当前顾客桌台会话与门店不匹配")
     else:
         active = await DiningSessionService.get_active(db, int(customer.id))
         if active and active.table_id:
@@ -229,10 +241,21 @@ async def list_table_party_orders(
     party = await SharedCartService.get_open_party(
         db, store_id=int(table.store_id), table_id=int(table.id)
     )
-    if party:
-        await SharedCartService._require_member(
-            db, party=party, customer_id=int(customer.id)
+    # 没有活动 party 时不应仅凭静态桌台 QR 凭证读取整桌历史/进行中订单。
+    if not party:
+        return success(
+            {
+                "table_id": int(table.id),
+                "party_id": None,
+                "items": [],
+                "count": 0,
+                "enabled": True,
+            },
+            request=request,
         )
+    await SharedCartService._require_member(
+        db, party=party, customer_id=int(customer.id)
+    )
     active = ("PAID", "CONFIRMED", "PREPARING", "COOKING", "READY")
     q = (
         select(Order)
@@ -252,7 +275,6 @@ async def list_table_party_orders(
             "status": o.status,
             "status_label": o.status,
             "total_amount": str(o.total_amount),
-            "customer_id": int(o.customer_id) if o.customer_id else None,
             "created_at": serialize_dt(o.created_at) if o.created_at else None,
         }
         for o in rows

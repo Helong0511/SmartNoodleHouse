@@ -20,6 +20,7 @@ RECO_TTL_SECONDS = 120  # 推荐结果最长缓存 120s（spec 要求 ≤120s）
 MENU_CATALOG_PREFIX = "snh:menu"
 MENU_CATALOG_TTL_SECONDS = 120
 MENU_BUNDLE_TTL_SECONDS = 60
+RECO_GENERATION_TTL_SECONDS = 30 * 24 * 3600
 
 # ---------------------------------------------------------------------------
 # 鉴权 / 登录
@@ -98,36 +99,52 @@ def ttl_with_jitter(ttl: int, *, min_ratio: float = 0.8, max_ratio: float = 1.2)
     return max(1, int(ttl * random.uniform(min_ratio, max_ratio)))
 
 
-def _reco_identity(store_id: int, scene: str, bucket: str, fingerprint: str = "", limit: int = 10) -> str:
-    """缓存与重建锁共享 Redis Cluster hash tag，允许 Lua 原子校验并写缓存。"""
-    suffix = f":{fingerprint}" if fingerprint else ""
-    return f"{{s{int(store_id)}:{scene}:{bucket}{suffix}:l{max(1, min(int(limit), 20))}}}"
-
-
-def reco_key(customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "", limit: int = 10) -> str:
-    """推荐结果键。fingerprint 用于 settle_addon 区分不同购物车内容。"""
+def reco_generation_key(customer_id: int | None) -> str:
+    """顾客推荐缓存代际键；与该顾客的缓存/锁共享 Redis Cluster hash slot。"""
     cid = int(customer_id) if customer_id else 0
-    return f"{RECO_KEY_PREFIX}:data:c{cid}:{_reco_identity(store_id, scene, bucket, fingerprint, limit)}"
+    return f"{RECO_KEY_PREFIX}:gen:{{c{cid}}}"
+
+
+def _reco_identity(
+    customer_id: int, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", generation: int = 0, limit: int = 10,
+) -> str:
+    """缓存与重建锁共享按顾客划分的 Redis Cluster hash tag，支持 Lua 原子 fencing。"""
+    suffix = f":{fingerprint}" if fingerprint else ""
+    return (
+        f"{{c{int(customer_id)}}}:s{int(store_id)}:{scene}:{bucket}:g{max(0, int(generation))}"
+        f"{suffix}:l{max(1, min(int(limit), 20))}"
+    )
+
+
+def reco_key(
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", generation: int = 0, limit: int = 10,
+) -> str:
+    """推荐结果键；顾客代际、门店、场景、桶位和购物车指纹均参与隔离。"""
+    cid = int(customer_id) if customer_id else 0
+    return f"{RECO_KEY_PREFIX}:data:{_reco_identity(cid, store_id, scene, bucket, fingerprint, generation, limit)}"
 
 
 def reco_customer_pattern(customer_id: int) -> str:
-    """画像/订单/评价变化后批量失效该顾客全部推荐缓存。"""
+    """画像/订单/评价变化后批量定位该顾客全部推荐缓存（仅用于运维清理）。"""
     cid = int(customer_id)
-    return f"{RECO_KEY_PREFIX}:data:c{cid}:*"
+    return f"{RECO_KEY_PREFIX}:data:{{c{cid}}}:*"
 
 
 def reco_customer_lock_pattern(customer_id: int) -> str:
-    """画像/订单/评价变化时同时撤销该顾客正在持有的重建租约。"""
+    """画像/订单/评价变化时定位该顾客重建租约（仅用于运维清理）。"""
     cid = int(customer_id)
-    return f"{RECO_KEY_PREFIX}:lock:c{cid}:*"
+    return f"{RECO_KEY_PREFIX}:lock:{{c{cid}}}:*"
 
 
 def reco_rebuild_lock_key(
-    customer_id: int | None, store_id: int, scene: str, bucket: str, fingerprint: str = "", limit: int = 10
+    customer_id: int | None, store_id: int, scene: str, bucket: str,
+    fingerprint: str = "", generation: int = 0, limit: int = 10,
 ) -> str:
-    """推荐重建锁键；与对应缓存键共享 hash tag，兼容 Redis Cluster Lua。"""
+    """推荐重建锁与数据键、代际键共享同一 hash slot，兼容 Redis Cluster Lua。"""
     cid = int(customer_id) if customer_id else 0
-    return f"{RECO_KEY_PREFIX}:lock:c{cid}:{_reco_identity(store_id, scene, bucket, fingerprint, limit)}"
+    return f"{RECO_KEY_PREFIX}:lock:{_reco_identity(cid, store_id, scene, bucket, fingerprint, generation, limit)}"
 
 
 def menu_rebuild_lock_key(store_id: int) -> str:
@@ -156,9 +173,12 @@ def cart_fingerprint(product_ids) -> str:
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
 
 
-def customer_refresh_rotation_key(customer_id: int) -> str:
-    """P2-6 刷新旋转保护键：记录该顾客已成功消费的旧令牌最大 exp。"""
-    return f"{CUSTOMER_REFRESH_ROTATION_PREFIX}:{int(customer_id)}"
+def customer_refresh_rotation_key(customer_id: int, token_jti: str | None = None) -> str:
+    """单个顾客的单个旧 JWT jti 只能刷新一次；键中不暴露原始 jti。"""
+    if not token_jti:
+        raise ValueError("token_jti is required for refresh rotation")
+    digest = hashlib.sha256(str(token_jti).encode("utf-8")).hexdigest()[:32]
+    return f"{CUSTOMER_REFRESH_ROTATION_PREFIX}:{int(customer_id)}:{digest}"
 
 
 def login_credential_used_key(channel: str, credential: str) -> str:

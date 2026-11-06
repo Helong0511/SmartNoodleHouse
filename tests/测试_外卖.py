@@ -1,5 +1,7 @@
 """美团 / 饿了么官方签名、事件分类与解析测试"""
 import json
+
+import pytest
 from decimal import Decimal
 
 from app.services.delivery_events import DeliveryEvent, EVENT_WS_MAP, classify_eleme_event, classify_meituan_event, parse_meituan_foods
@@ -116,3 +118,191 @@ def test_parse_meituan_foods_detail_json():
     assert items[0]["app_food_code"] == "P001"
     assert items[0]["quantity"] == 2
     assert items[0]["options"][0]["value"] == "大份"
+
+
+@pytest.mark.asyncio
+async def test_meituan_rejects_http_500_even_if_json_claims_success(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import MeituanProvider
+
+    url = "https://waimaiopen.meituan.com/api/v1/order/confirm"
+    response = httpx.Response(
+        500,
+        json={"data": "ok"},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response), get=AsyncMock())
+    settings = SimpleNamespace(
+        meituan_app_id="app",
+        meituan_app_secret="secret",
+        meituan_api_base="https://waimaiopen.meituan.com",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(httpx.HTTPStatusError):
+            await MeituanProvider()._request("/api/v1/order/confirm", {"order_id": "O1"}, method="POST")
+
+
+@pytest.mark.asyncio
+async def test_eleme_rejects_http_500_empty_json_response(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        500,
+        json={},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        with pytest.raises(httpx.HTTPStatusError):
+            await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
+
+
+@pytest.mark.asyncio
+async def test_eleme_rejects_http_200_empty_json_envelope(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from app.services.delivery_providers import ElemeProvider
+
+    url = "https://open-api.shop.ele.me/"
+    response = httpx.Response(
+        200,
+        json={},
+        request=httpx.Request("POST", url),
+    )
+    client = SimpleNamespace(post=AsyncMock(return_value=response))
+    settings = SimpleNamespace(
+        eleme_app_id="app",
+        eleme_app_secret="secret",
+        eleme_access_token="token",
+        eleme_api_base="https://open-api.shop.ele.me",
+        is_production=True,
+        allow_delivery_mock=False,
+    )
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    with patch("app.services.delivery_providers.get_http_client", new=AsyncMock(return_value=client)):
+        result = await ElemeProvider()._rpc("eleme.order.confirmOrderLite", {"orderId": "O1"})
+
+    assert result["error"]["code"] == "INVALID_RESPONSE"
+
+
+@pytest.mark.asyncio
+async def test_eleme_sync_product_requires_item_id_and_applies_off_shelf_state(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.services.delivery_providers import ElemeProvider
+
+    settings = SimpleNamespace(eleme_app_id="app", is_production=False, allow_delivery_mock=False)
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    provider = ElemeProvider()
+    provider._rpc = AsyncMock(return_value={"result": {"itemId": "ELEME-ITEM-1"}})
+    shelf_calls = []
+
+    async def _set_shelf(items, on_shelf):
+        shelf_calls.append((items, on_shelf))
+        return len(items)
+
+    provider.set_sell_status = _set_shelf
+    result = await provider.sync_product(
+        {
+            "shop_id": "SHOP-1", "name": "牛肉面", "app_food_code": "NOODLE-1",
+            "price": "18.00", "stock": 0, "is_sold_out": 1,
+        }
+    )
+    assert result["ok"] is True
+    assert result["platform_id"] == "ELEME-ITEM-1"
+    assert shelf_calls and shelf_calls[0][1] is False
+
+
+@pytest.mark.asyncio
+async def test_eleme_sync_product_does_not_create_mapping_without_item_id(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.services.delivery_providers import ElemeProvider
+
+    settings = SimpleNamespace(eleme_app_id="app", is_production=False, allow_delivery_mock=False)
+    monkeypatch.setattr("app.services.delivery_providers.get_settings", lambda: settings)
+    provider = ElemeProvider()
+    provider._rpc = AsyncMock(return_value={"result": {}})
+    provider.set_sell_status = AsyncMock(return_value=1)
+    result = await provider.sync_product(
+        {"shop_id": "SHOP-1", "name": "牛肉面", "app_food_code": "NOODLE-1", "price": "18.00"}
+    )
+    assert result["ok"] is False
+    assert result["platform_id"] is None
+    provider.set_sell_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delivery_callback_log_fallback_event_id_is_content_stable_and_distinct():
+    """无平台事件 ID 时，同订单同类型的不同回调不能因唯一键冲突而丢失。"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.services.delivery_service import DeliveryService
+
+    db = MagicMock()
+    db.flush = AsyncMock()
+    first = {"status": "PREPARING", "sequence": 1}
+    changed = {"status": "PREPARING", "sequence": 2}
+
+    await DeliveryService._log_callback(db, "MEITUAN", "ORDER_STATUS", "ORDER-1", 10, first)
+    first_row = db.add.call_args.args[0]
+    await DeliveryService._log_callback(db, "MEITUAN", "ORDER_STATUS", "ORDER-1", 10, first)
+    duplicate_row = db.add.call_args.args[0]
+    await DeliveryService._log_callback(db, "MEITUAN", "ORDER_STATUS", "ORDER-1", 10, changed)
+    changed_row = db.add.call_args.args[0]
+
+    assert first_row.event_id == duplicate_row.event_id
+    assert first_row.event_id != changed_row.event_id
+    assert len(first_row.event_id) <= 128
+
+
+def test_refund_event_fingerprint_is_stable_without_provider_refund_id():
+    from decimal import Decimal
+
+    from app.services.delivery_service import _refund_event_fingerprint
+
+    raw_a = {"refund_amount": "12.00", "reason": "顾客申请", "status": "SUCCESS"}
+    raw_b = {"status": "SUCCESS", "reason": "顾客申请", "refund_amount": "12.00"}
+
+    first = _refund_event_fingerprint("MEITUAN", 88, Decimal("12.00"), "PARTIAL", raw_a)
+    retry = _refund_event_fingerprint("meituan", 88, Decimal("12.00"), "PARTIAL", raw_b)
+    changed = _refund_event_fingerprint(
+        "MEITUAN", 88, Decimal("15.00"), "PARTIAL", {"refund_amount": "15.00", "status": "SUCCESS"}
+    )
+
+    assert first == retry
+    assert first != changed
+    assert len(first) == 64
+
+
+def test_meituan_refund_no_is_classified_as_refund_event():
+    from app.services.delivery_events import DeliveryEvent, classify_meituan_event
+
+    assert classify_meituan_event({"refund_no": "RF-2026-01", "order_id": "OD-1"}) == DeliveryEvent.REFUND

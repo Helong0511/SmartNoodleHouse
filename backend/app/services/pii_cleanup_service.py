@@ -11,7 +11,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
-from app.models import DeliveryOrder, Order
+from app.models import DeliveryCallbackLog, DeliveryOrder, DeliveryRefund, Order, WebhookInbox
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,23 @@ async def anonymize_expired_delivery_pii(
     expired_order_ids = select(Order.id).where(
         Order.status.in_(_FINAL_STATUSES),
         or_(
-            Order.completed_at.isnot(None),
-            Order.cancelled_at.isnot(None),
+            (Order.completed_at.isnot(None) & (Order.completed_at < cutoff)),
+            (Order.cancelled_at.isnot(None) & (Order.cancelled_at < cutoff)),
         ),
     )
     # 主更新：脱敏这些订单对应的 delivery_orders PII
     stmt = (
         update(DeliveryOrder)
         .where(
-            DeliveryOrder.recipient_phone.isnot(None),
             DeliveryOrder.order_id.in_(expired_order_ids),
+            or_(
+                DeliveryOrder.recipient_name.isnot(None),
+                DeliveryOrder.recipient_phone.isnot(None),
+                DeliveryOrder.recipient_address.isnot(None),
+                DeliveryOrder.rider_name.isnot(None),
+                DeliveryOrder.rider_phone.isnot(None),
+                DeliveryOrder.raw_payload.isnot(None),
+            ),
         )
         .values(
             recipient_name=None,
@@ -57,9 +64,39 @@ async def anonymize_expired_delivery_pii(
             recipient_address=None,
             rider_name=None,
             rider_phone=None,
+            raw_payload=None,
         )
     )
     result = await db.execute(stmt)
+    # 原始回调/退款 payload 也可能包含收件人、骑手和地址信息，必须与订单 PII 同期脱敏。
+    await db.execute(
+        update(DeliveryRefund)
+        .where(DeliveryRefund.order_id.in_(expired_order_ids), DeliveryRefund.raw_payload.isnot(None))
+        .values(raw_payload=None)
+    )
+    await db.execute(
+        update(DeliveryCallbackLog)
+        .where(DeliveryCallbackLog.order_id.in_(expired_order_ids), DeliveryCallbackLog.payload.isnot(None))
+        .values(payload=None)
+    )
+    # DONE 回调在消费成功时已清空；达到最大重试次数且 next_retry_at 为空的
+    # FAILED Inbox 属于终态死信，不会再自动消费。超过保留期后清理其中的顾客 PII，
+    # 但保留 event_id/channel/status/attempt_count/时间戳供审计与排障。
+    await db.execute(
+        update(WebhookInbox)
+        .where(
+            WebhookInbox.status == "FAILED",
+            WebhookInbox.next_retry_at.is_(None),
+            WebhookInbox.received_at < cutoff,
+            WebhookInbox.payload != "{}",
+        )
+        .values(
+            payload="{}",
+            headers_json="{}",
+            error_message=None,
+            last_error=None,
+        )
+    )
     await db.commit()
     count = int(result.rowcount or 0)
     if count:

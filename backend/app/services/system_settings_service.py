@@ -918,6 +918,8 @@ class SystemSettingsService:
     _cache_ver: int = -1
     CACHE_TTL = 15.0
     _seed_lock = asyncio.Lock()
+    # Redis 版本失效/故障时合并并发刷新，避免每个请求同时回源 MySQL。
+    _cache_refresh_lock = asyncio.Lock()
 
     @classmethod
     def _env_default(cls, key: str, settings: Settings | None = None) -> str:
@@ -939,16 +941,27 @@ class SystemSettingsService:
             return str(meta["default"])
         return ""
 
+    # Redis 版本键缺失/不可用均视为“版本未知”，不能与有效版本 0 混为一谈。
+    # 版本未知时只允许使用本进程最近 15 秒内的 DB 快照，之后必须回源 DB。
+    _REMOTE_VERSION_TTL = 30 * 24 * 3600
+    _BUMP_REMOTE_VERSION_LUA = """
+    local version = redis.call('INCR', KEYS[1])
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    return version
+    """
+
     @classmethod
-    async def _remote_version(cls) -> int:
+    async def _remote_version(cls) -> int | None:
         try:
             from app.core.redis_client import get_redis
 
             r = await get_redis()
             raw = await r.get(REDIS_CACHE_VER_KEY)
-            return int(raw or 0)
+            version = int(raw or 0)
+            return version if version > 0 else None
         except Exception:
-            return 0
+            logger.debug("读取系统设置 Redis 版本失败，进入短时 DB 快照降级", exc_info=True)
+            return None
 
     @classmethod
     async def _bump_remote_version(cls) -> int:
@@ -956,16 +969,22 @@ class SystemSettingsService:
             from app.core.redis_client import get_redis
 
             r = await get_redis()
-            new_ver = int(await r.incr(REDIS_CACHE_VER_KEY))
-            await r.expire(REDIS_CACHE_VER_KEY, 30 * 24 * 3600)
-            return new_ver
+            # INCR + EXPIRE 必须在同一 Lua 原子执行，避免进程在两条命令之间崩溃
+            # 导致版本键永久无 TTL，最终形成永不过期的跨 worker 状态。
+            return int(await r.eval(
+                cls._BUMP_REMOTE_VERSION_LUA,
+                1,
+                REDIS_CACHE_VER_KEY,
+                cls._REMOTE_VERSION_TTL,
+            ))
         except Exception:
+            logger.warning("递增系统设置 Redis 版本失败，跨 worker 缓存失效可能延迟", exc_info=True)
             return 0
 
     @classmethod
     async def public_config_version(cls) -> int:
-        """小程序/公开 API 用的配置世代号；全局或门店业务写路径 bump 后递增。"""
-        return await cls._remote_version()
+        """小程序/公开 API 用的配置世代号；Redis 未知时返回 0 表示不可验证。"""
+        return int(await cls._remote_version() or 0)
 
     @classmethod
     async def bump_public_config_version(cls) -> int:
@@ -973,22 +992,32 @@ class SystemSettingsService:
         return await cls._bump_remote_version()
 
     @classmethod
-    async def _load_raw(cls, db: AsyncSession, *, force: bool = False) -> dict[str, str]:
+    async def _load_raw_unlocked(
+        cls, db: AsyncSession, *, force: bool = False
+    ) -> dict[str, str]:
+        """调用方必须持有 _cache_refresh_lock，避免跨请求并发回源。"""
         now = time.monotonic()
         remote_ver = await cls._remote_version()
-        if (
-            not force
-            and cls._cache is not None
-            and cls._cache_ver == remote_ver
-            and now - cls._cache_at < cls.CACHE_TTL
-        ):
-            return cls._cache
+        cache_age = now - cls._cache_at
+        if not force and cls._cache is not None and cache_age < cls.CACHE_TTL:
+            if remote_ver is None:
+                # Redis 故障或版本键丢失：仅短时复用本进程 DB 快照，不把“未知”当作版本 0。
+                cls._cache_ver = -1
+                return cls._cache
+            if remote_ver > 0 and cls._cache_ver == remote_ver:
+                return cls._cache
         result = await db.execute(select(SystemSetting))
         cls._cache = {row.setting_key: row.setting_value for row in result.scalars()}
         cls._last_db_cache = dict(cls._cache)
         cls._cache_at = now
-        cls._cache_ver = remote_ver
+        cls._cache_ver = remote_ver if remote_ver is not None and remote_ver > 0 else -1
         return cls._cache
+
+    @classmethod
+    async def _load_raw(cls, db: AsyncSession, *, force: bool = False) -> dict[str, str]:
+        """所有 DB 回源统一 single-flight；包含 get_value 等非 touch_cache 直接调用路径。"""
+        async with cls._cache_refresh_lock:
+            return await cls._load_raw_unlocked(db, force=force)
 
     @classmethod
     async def invalidate_cache(cls) -> None:
@@ -1121,22 +1150,36 @@ class SystemSettingsService:
 
     @classmethod
     async def touch_cache(cls, db: AsyncSession | None = None) -> None:
-        """请求路径轻量刷新：Redis 版本未变且在 TTL 内则无 DB 查询。"""
+        """请求路径轻量刷新；缓存失效时单进程 single-flight 回源，避免 DB 雪崩。"""
         if db is not None:
+            # 调用方提供 Session 的路径也必须 single-flight；否则所有请求同时遇到
+            # Redis 版本变化/缓存过期时，会各自使用自己的 Session 并发回源 MySQL。
             await cls._load_raw(db)
             return
-        now = time.monotonic()
-        remote_ver = await cls._remote_version()
-        if (
-            cls._cache is not None
-            and cls._cache_ver == remote_ver
-            and now - cls._cache_at < cls.CACHE_TTL
-        ):
-            return
-        from app.core.database import AsyncSessionLocal
 
-        async with AsyncSessionLocal() as session:
-            await cls._load_raw(session)
+        def _is_fresh(remote_ver: int | None) -> bool:
+            if cls._cache is None or time.monotonic() - cls._cache_at >= cls.CACHE_TTL:
+                return False
+            if remote_ver is None:
+                # Redis 状态未知时允许短时 stale-if-error，TTL 到期后回源 DB。
+                cls._cache_ver = -1
+                return True
+            return remote_ver > 0 and cls._cache_ver == remote_ver
+
+        remote_ver = await cls._remote_version()
+        if _is_fresh(remote_ver):
+            return
+
+        # 多个请求同时遇到 Redis 版本变化/Redis 故障时，只允许一个请求回源；
+        # 其余请求等待后重新检查缓存，不再同时打 MySQL。
+        async with cls._cache_refresh_lock:
+            remote_ver = await cls._remote_version()
+            if _is_fresh(remote_ver):
+                return
+            from app.core.database import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                await cls._load_raw_unlocked(session)
 
     @classmethod
     async def get_float(cls, db: AsyncSession, key: str, fallback: float) -> float:

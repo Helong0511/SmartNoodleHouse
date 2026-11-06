@@ -1,6 +1,7 @@
 """外卖订单接入服务：推单落库 → 统一 Order → 厨房；取消/退款/催单/配送"""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -39,6 +40,17 @@ from app.services.delivery_providers import get_delivery_provider
 from app.services.product_sync_service import ProductSyncService
 
 logger = logging.getLogger(__name__)
+
+
+def _refund_event_fingerprint(platform: str, delivery_order_id: int, amount: Decimal, refund_type: str, raw: dict) -> str:
+    """平台未提供退款单号时，对完整规范化回调生成稳定去重指纹。"""
+    canonical_payload = json.dumps(
+        raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.sha256(
+        f"{platform.upper()}|{delivery_order_id}|{amount}|{refund_type}|{canonical_payload}".encode("utf-8")
+    ).hexdigest()
+
 
 STATUS_SYNC_MAP = {
     "CONFIRMED": "ACCEPTED",
@@ -171,8 +183,10 @@ class DeliveryService:
             order = await cls._handle_confirmed(db, platform, platform_order_id)
             return DeliveryNotifyResult(event=event, order=order)
 
-        if event not in (DeliveryEvent.ORDER_NEW, DeliveryEvent.UNKNOWN):
-            logger.info("未处理的外卖事件 %s: %s", event, platform_order_id)
+        # 仅明确识别为新订单的事件允许创建本地订单。
+        # UNKNOWN 是开放平台新增/未知回调码，必须记录并忽略，不能按新订单落库。
+        if event != DeliveryEvent.ORDER_NEW:
+            logger.info("忽略未识别或不支持的外卖事件 %s: %s", event, platform_order_id)
             return DeliveryNotifyResult(event=event)
 
         if not platform_order_id:
@@ -225,17 +239,23 @@ class DeliveryService:
         order_id: int | None,
         raw: dict,
     ) -> None:
+        # 有平台事件 ID 时优先使用；限制长度以匹配数据库列宽。
         event_id = None
         for key in ("requestId", "request_id", "msg_id", "msgid", "notify_id", "event_id"):
             if raw.get(key):
-                event_id = str(raw[key])
+                event_id = str(raw[key]).strip()[:128] or None
                 break
-        if not event_id and platform_order_id:
-            event_id = f"{event_type}:{platform_order_id}"
-        # 截断 payload，避免无限期保存大量 PII
+
+        # 部分平台通知没有独立事件 ID。不能仅用 event_type + order_id：
+        # 同一订单可能多次产生相同类型的合法状态通知，而日志表对此有唯一约束。
+        # 对规范化后的完整事件内容做摘要：完全相同的回调稳定去重，不同内容不会撞同一个业务键。
         payload = dumps_json(raw)
-        if len(payload) > 8000:
-            payload = payload[:8000] + "...[truncated]"
+        if not event_id:
+            digest = hashlib.sha256(
+                f"{platform.upper()}|{event_type}|{platform_order_id or ''}|{payload}".encode("utf-8")
+            ).hexdigest()
+            event_id = f"sha256:{digest}"
+        # 截断 payload，避免无限期保存大量 PII
         db.add(
             DeliveryCallbackLog(
                 platform=platform.upper(),
@@ -487,6 +507,9 @@ class DeliveryService:
         ).scalar_one_or_none()
         if not d_order:
             raise AppException(40450, "非外卖订单")
+        if d_order.delivery_status == "ACCEPTED" and order.status == "CONFIRMED":
+            # 已接单重复请求视为幂等成功，不再次向平台发送 confirm。
+            return order, []
         if d_order.delivery_status not in ("PENDING", "ACCEPTED"):
             raise AppException(40054, f"当前配送状态不可接单: {d_order.delivery_status}")
         credentials = await get_credentials_for_store(db, d_order.platform, order.store_id)
@@ -576,12 +599,24 @@ class DeliveryService:
             product = await db.get(Product, mapping.product_id)
             if not product:
                 raise AppException(40451, f"映射餐品不存在: {mapping.product_id}")
+            if int(product.store_id) != int(store_id):
+                raise AppException(40301, f"外卖餐品映射跨门店，拒绝落单: {mapping.id}")
             option_ids: list[int] = []
             if mapping.option_map_json:
+                # SQLAlchemy JSON 列在正常读取时已反序列化为 dict；
+                # 兼容历史 TEXT 字符串，但映射损坏时必须拒绝落单，不能静默丢失规格。
                 try:
-                    option_ids = [int(v) for v in json.loads(mapping.option_map_json).values()]
-                except Exception:
-                    option_ids = []
+                    option_map = mapping.option_map_json
+                    if isinstance(option_map, str):
+                        option_map = json.loads(option_map)
+                    if not isinstance(option_map, dict):
+                        raise ValueError("option_map_json 必须是对象")
+                    option_ids = [int(v) for v in option_map.values()]
+                    if any(option_id <= 0 for option_id in option_ids):
+                        raise ValueError("规格选项 ID 必须为正整数")
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    logger.exception("外卖规格映射数据无效 map_id=%s", mapping.id)
+                    raise AppException(40952, "外卖规格映射配置无效，请联系门店管理员修复") from exc
             return product, option_ids
 
         name = item.get("name") or ""
@@ -761,26 +796,45 @@ class DeliveryService:
             return None
 
         order = await db.get(Order, d_order.order_id)
-        refund_id = str(raw.get("refund_id") or raw.get("refundId") or parsed.get("refund_id") or "")
+        refund_id = str(
+            raw.get("refund_id") or raw.get("refundId") or raw.get("refund_no")
+            or raw.get("refundNo") or raw.get("out_refund_no") or parsed.get("refund_id") or ""
+        )
         amount = money(parsed.get("refund_amount") or raw.get("refund_amount") or raw.get("refundAmount") or 0)
         reason = str(raw.get("reason") or raw.get("refund_reason") or parsed.get("reason") or "")
-        refund_type = "PARTIAL" if amount and order and amount < order.total_amount else "FULL"
+        if amount <= 0:
+            raise AppException(40063, "外卖退款回调缺少有效退款金额，已拒绝生成退款台账")
+        if not order or amount > money(order.total_amount):
+            raise AppException(40063, "外卖退款金额超过订单金额或关联订单不存在")
+        refund_type = "PARTIAL" if amount < money(order.total_amount) else "FULL"
 
         if not refund_id:
-            # 平台未给 refund_id：不受唯一约束保护，直接插入
-            db.add(
-                DeliveryRefund(
-                    delivery_order_id=d_order.id,
-                    order_id=d_order.order_id,
-                    platform=platform.upper(),
-                    platform_refund_id=None,
-                    refund_type=refund_type,
-                    amount=amount,
-                    reason=reason,
-                    status="PENDING",
-                    raw_payload=dumps_json(raw),
-                )
+            # 部分平台回调不提供退款单号。使用原始事件规范化内容生成稳定指纹，
+            # 由数据库唯一约束兜底并发/重复投递；不把合成值伪装成平台退款编号。
+            fingerprint = _refund_event_fingerprint(
+                platform, d_order.id, amount, refund_type, raw
             )
+            from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        DeliveryRefund(
+                            delivery_order_id=d_order.id,
+                            order_id=d_order.order_id,
+                            platform=platform.upper(),
+                            platform_refund_id=None,
+                            event_fingerprint=fingerprint,
+                            refund_type=refund_type,
+                            amount=amount,
+                            reason=reason,
+                            status="PENDING",
+                            raw_payload=dumps_json(raw),
+                        )
+                    )
+            except _IntegrityError:
+                # 完全相同的无编号回调已存在；保持幂等，不再新增退款记录。
+                pass
         else:
             # 有 refund_id：利用唯一约束原子去重，IntegrityError 时回滚 savepoint 再查已有行
             from sqlalchemy.exc import IntegrityError as _IntegrityError
@@ -828,10 +882,43 @@ class DeliveryService:
         ).scalar_one_or_none()
         if not refund:
             raise AppException(40453, "退款记录不存在")
+        if refund.status == "APPROVED_LEDGER_PENDING":
+            # 平台已确认退款，但本地财务分录上次写入失败；只补记账，绝不再次调用平台退款接口。
+            d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
+            order = await db.get(Order, refund.order_id) if refund.order_id else None
+            if not order:
+                raise AppException(40454, "关联订单不存在，无法补记退款分录")
+            from app.services.financial_ledger_service import FinancialLedgerService
+
+            try:
+                await FinancialLedgerService.record_refund(
+                    db,
+                    store_id=int(order.store_id),
+                    amount=refund.amount,
+                    channel=refund.platform or getattr(order, "channel", None),
+                    provider=refund.platform,
+                    order_id=order.id,
+                    delivery_order_id=refund.delivery_order_id,
+                    delivery_refund_id=refund.id,
+                    remark=f"delivery_refund:{refund.platform}:{refund.platform_refund_id or refund.id}",
+                )
+                refund.status = "APPROVED"
+                refund.handled_at = now_local()
+                if d_order:
+                    d_order.refund_status = "APPROVED"
+                await db.commit()
+                return {"ok": True, "status": "APPROVED", "refund_type": refund.refund_type, "ledger_recovered": True}
+            except Exception as exc:
+                await db.rollback()
+                logger.exception("外卖退款财务分录补记失败 delivery_refund_id=%s", refund.id)
+                raise AppException(50354, "平台退款已成功，但财务分录仍待补记；请稍后重试补记账，不要重复退款") from exc
+
         if refund.status in ("APPROVED", "REJECTED"):
             raise AppException(40053, f"退款已处理: {refund.status}")
-        if refund.status not in ("PENDING", "PROCESSING"):
-            raise AppException(40053, f"退款已处理: {refund.status}")
+        if refund.status == "PROCESSING":
+            raise AppException(40953, "退款正在平台处理中，请勿重复提交；请先核对平台退款结果")
+        if refund.status != "PENDING":
+            raise AppException(40053, f"退款当前状态不可处理: {refund.status}")
 
         d_order = await db.get(DeliveryOrder, refund.delivery_order_id)
         order = await db.get(Order, refund.order_id) if refund.order_id else None
@@ -857,14 +944,19 @@ class DeliveryService:
         await db.commit()
 
         provider = get_delivery_provider(platform, credentials)
-        if approve:
-            ok = await provider.agree_refund(platform_refund_id, platform_order_id)
-        else:
-            ok = await provider.disagree_refund(
-                platform_refund_id,
-                platform_order_id,
-                reason or "商家拒绝退款",
-            )
+        try:
+            if approve:
+                ok = await provider.agree_refund(platform_refund_id, platform_order_id)
+            else:
+                ok = await provider.disagree_refund(
+                    platform_refund_id,
+                    platform_order_id,
+                    reason or "商家拒绝退款",
+                )
+        except Exception as exc:
+            # 网络超时/连接中断时平台可能已受理；保持 PROCESSING，禁止盲目重试造成重复退款。
+            logger.exception("外卖退款平台结果不确定，保留 PROCESSING refund_id=%s", refund_id)
+            raise AppException(50353, "平台退款结果暂不确定，退款单已锁定处理中，请先查询平台结果") from exc
 
         refund = (
             await db.execute(
@@ -882,6 +974,7 @@ class DeliveryService:
             # 平台拒绝：回 PENDING 供商家重试
             refund.status = "PENDING"
             await db.flush()
+            await db.commit()
             raise AppException(40062, "平台拒绝同意退款，请稍后重试或联系平台" if approve else "平台拒绝退款拒绝操作，请稍后重试或联系平台")
 
         d_order = await db.get(DeliveryOrder, delivery_order_id)
@@ -926,8 +1019,14 @@ class DeliveryService:
                         refund.id,
                         order.id,
                     )
-                    if get_settings().is_production:
-                        raise AppException(50010, "外卖退款分录写入失败，请重试") from exc
+                    # 平台退款已成功，不能回滚为 PENDING 或再次请求平台。
+                    # 持久化专用待补账状态；同一审批入口重试时只重试本地幂等分录。
+                    refund.status = "APPROVED_LEDGER_PENDING"
+                    if d_order:
+                        d_order.refund_status = "APPROVED_LEDGER_PENDING"
+                    await db.flush()
+                    await db.commit()
+                    raise AppException(50354, "平台退款已成功，但财务分录写入失败；请重试补记账，不要再次退款") from exc
         else:
             refund.status = "REJECTED"
             if d_order:
@@ -935,6 +1034,8 @@ class DeliveryService:
 
         refund.handled_at = now_local()
         await db.flush()
+        # 平台操作和财务分录已经完成；先持久化退款终态，后续审计日志失败不能回滚资金状态。
+        await db.commit()
         return {"ok": ok, "status": refund.status, "refund_type": refund.refund_type}
 
     @classmethod

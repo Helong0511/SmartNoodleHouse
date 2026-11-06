@@ -30,10 +30,10 @@ def _mock_allowed(*, provider_configured: bool = False) -> bool:
 
 
 def _allow_explicit_mock_code(code: str) -> bool:
-    """mock: 前缀为开发者显式信号，非生产环境一律走 mock（即使已配置真实密钥）。"""
+    """mock: 仅允许 development 环境使用，staging/prod 均不得凭前缀绕过真实平台认证。"""
     if not code or not str(code).startswith("mock:"):
         return False
-    return not get_settings().is_production
+    return bool(get_settings().is_development)
 
 
 def _mock_wechat_openid(code: str) -> dict:

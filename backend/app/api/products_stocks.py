@@ -119,6 +119,15 @@ async def upsert_store_stock(
         )
         db.add(row)
     await db.flush()
+    from app.services.stock_service import _emit_stock_mirror
+
+    await _emit_stock_mirror(
+        db,
+        store_id=int(sid),
+        product_id=int(product_id),
+        mirror_id=int(row.id),
+        zero=int(row.status) != 1 or int(row.stock) <= 0,
+    )
     await enqueue_menu_cache_invalidation(db, int(sid))
     await AuditService.log_staff(
         db,
@@ -161,13 +170,30 @@ async def delete_store_stock(
     if sid is None:
         raise AppException(40060, "请指定门店")
     assert_store_access(user, sid)
-    await db.execute(
-        delete(StoreProductStock).where(
-            StoreProductStock.store_id == sid,
-            StoreProductStock.product_id == product_id,
+    row = (
+        await db.execute(
+            select(StoreProductStock)
+            .where(
+                StoreProductStock.store_id == sid,
+                StoreProductStock.product_id == product_id,
+            )
+            .with_for_update()
         )
-    )
-    await db.flush()
+    ).scalar_one_or_none()
+    if row is not None:
+        mirror_id = int(row.id)
+        await db.delete(row)
+        await db.flush()
+        from app.services.stock_service import _emit_stock_mirror
+
+        # 删除覆盖后 handler 会回退读取 products.stock 并同步该门店的有效库存。
+        await _emit_stock_mirror(
+            db,
+            store_id=int(sid),
+            product_id=int(product_id),
+            mirror_id=mirror_id,
+            zero=False,
+        )
     await enqueue_menu_cache_invalidation(db, int(sid))
     await AuditService.log_staff(
         db,

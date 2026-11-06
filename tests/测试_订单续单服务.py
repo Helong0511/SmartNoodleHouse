@@ -9,6 +9,7 @@ import pytest
 from app.core.response import naive_local_now
 from app.models import Order, OrderItem, Product, ProductCategory, Store
 from app.services.dining_session_service import DiningSessionService
+from app.core.response import naive_local_now
 from app.services.order_service import OrderReorderService
 
 
@@ -76,7 +77,8 @@ async def test_dining_session_touch_accepts_naive_mysql_datetime():
     """MySQL DATETIME 读回 naive 时，触碰就餐会话不能抛时区比较异常。"""
     session = SimpleNamespace(
         status="ACTIVE",
-        expires_at=naive_local_now() + timedelta(hours=1),
+        # MySQL DATETIME 无时区值按应用时区解释，而不是 CI 主机 UTC。
+        expires_at=naive_local_now().replace(tzinfo=None) + timedelta(hours=1),
         last_active_at=None,
     )
     db = SimpleNamespace(get=AsyncMock(return_value=session), flush=AsyncMock())

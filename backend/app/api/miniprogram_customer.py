@@ -92,9 +92,14 @@ async def get_my_preferences(
 ):
     """当前会员口味偏好（小程序专用，以令牌身份为准，避免本地 customer_id 过期）。"""
     prefs = await PreferenceService.get_recommendations(db, customer.id, store_id=store_id)
+    from app.models import Customer
     result = await db.execute(
         select(CustomerPreference)
-        .where(CustomerPreference.customer_id == customer.id)
+        .join(Customer, Customer.id == CustomerPreference.customer_id)
+        .where(
+            CustomerPreference.customer_id == customer.id,
+            Customer.recommend_opt_in == 1,
+        )
         .order_by(CustomerPreference.preference_score.desc(), CustomerPreference.order_count.desc())
     )
     prefs["all"] = [

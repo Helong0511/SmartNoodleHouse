@@ -6,6 +6,7 @@ handler 必须自身幂等（按 aggregate_id 去重），outbox 表 UNIQUE 仅�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -50,6 +51,26 @@ def register_outbox_handler(agg_type: str, kind: str) -> Callable[[OutboxHandler
 def _backoff_seconds(attempt_count: int) -> int:
     """指数退避：2^attempt 秒，封顶 10 分钟。"""
     return backoff_seconds(attempt_count, cap=BACKOFF_CAP_SEC)
+
+
+def _resolve_outbox_handler(row: OutboxEvent) -> OutboxHandler | None:
+    """支持带唯一后缀的推荐失效与 Webhook 延迟动作，实际执行仍由白名单 handler 负责。"""
+    handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
+    if handler is None and row.aggregate_type == "reco_cache" and row.event_kind.startswith("invalidate_"):
+        handler = OUTBOX_HANDLERS.get(("reco_cache", "invalidate"))
+    if handler is None and row.aggregate_type == "webhook_task" and row.event_kind.startswith("deferred_"):
+        handler = OUTBOX_HANDLERS.get(("webhook_task", "execute"))
+    return handler
+
+
+def _jittered_backoff_seconds(attempt_count: int, event_id: int) -> int:
+    """确定性 ±20% jitter，分散同批 Outbox 重试，避免雪崩式重试。"""
+    base = _backoff_seconds(attempt_count)
+    digest = hashlib.blake2s(
+        f"{int(event_id)}:{int(attempt_count)}".encode("ascii"), digest_size=2
+    ).digest()
+    percent = int.from_bytes(digest, "big") % 41 - 20
+    return max(1, min(BACKOFF_CAP_SEC, int(round(base * (100 + percent) / 100))))
 
 
 async def enqueue_outbox(
@@ -147,7 +168,9 @@ async def claim_outbox_item(
 
     双 worker 并发时只有一行能更新成功，另一行 rowcount=0。
     """
-    wid = (worker or f"{worker_id()[:30]}:{uuid.uuid4().hex}")[:64]
+    # 每次 claim 都追加唯一 token，避免同进程重领时旧 handler 的迟到完成误认新租约。
+    worker_prefix = (worker or worker_id())[:30]
+    wid = f"{worker_prefix}:{uuid.uuid4().hex}"[:64]
     now = now_local()
     stmt = (
         update(OutboxEvent)
@@ -243,152 +266,190 @@ async def _run_handler_with_lease(
 
 
 async def process_outbox_item(outbox_id: int) -> None:
-    """claim 单条 outbox 事件并分发给已注册 handler。
-
-    claim 释放使用原子 UPDATE WHERE locked_by = wid：处理期间若行被
-    reclaim_stale_outbox 复位并被另一 worker 重新 claim，原 worker 的
-    UPDATE 命中 0 行，不会覆盖新 owner 的锁。
-    """
+    """原子认领、租约续期、幂等分发；库存镜像按 sync_version 收敛而非一次性去重。"""
     async with AsyncSessionLocal() as db:
         row = await claim_outbox_item(db, outbox_id)
         if not row:
-            # 已被其他 worker claim，或 DONE / 未到重试时间
             return
-        # claim 后 row.locked_by 即本 worker 的 owner token
         wid = (row.locked_by or "")[:64]
-        # 若业务幂等已标记完成（上次 handler 成功但 DONE 更新失败），跳过 handler
-        try:
-            from app.domains.messaging.idempotency import is_processed
+        is_stock_mirror = (
+            row.aggregate_type in ("delivery_stock", "delivery_stock_base")
+            and row.event_kind == "mirror"
+        )
 
-            msg_id = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
-            if await is_processed(db, scope="outbox", message_id=msg_id):
-                await db.execute(
-                    update(OutboxEvent)
-                    .where(OutboxEvent.id == outbox_id, OutboxEvent.locked_by == wid)
-                    .values(
-                        status="DONE",
-                        processed_at=now_local(),
-                        last_error=None,
-                        next_retry_at=None,
-                        locked_at=None,
-                        locked_by=None,
+        if not is_stock_mirror:
+            try:
+                from app.domains.messaging.idempotency import is_processed
+
+                msg_id = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
+                if await is_processed(db, scope="outbox", message_id=msg_id):
+                    done_result = await db.execute(
+                        update(OutboxEvent)
+                        .where(OutboxEvent.id == outbox_id, OutboxEvent.locked_by == wid)
+                        .values(
+                            status="DONE", processed_at=now_local(), last_error=None,
+                            next_retry_at=None, locked_at=None, locked_by=None,
+                        )
                     )
-                )
-                await db.commit()
+                    from app.services.worker_common import rollback_if_claim_lost
+                    if await rollback_if_claim_lost(db, done_result, model=OutboxEvent, row_id=outbox_id):
+                        return
+                    await db.commit()
+                    return
+            except Exception as exc:
+                logger.exception("outbox 幂等预检失败 id=%s，停止处理并安排重试", outbox_id)
+                await db.rollback()
+                await _mark_failed(db, row, f"idempotency_precheck_failed: {exc}", wid=wid)
                 return
-        except Exception:
-            logger.warning("outbox 幂等预检失败 id=%s，继续执行 handler", outbox_id)
 
-        handler = OUTBOX_HANDLERS.get((row.aggregate_type, row.event_kind))
+        if row.aggregate_type in ("webhook_task", "delivery_manual"):
+            try:
+                import app.services.delivery_tasks  # noqa: F401
+            except Exception:
+                logger.exception("Failed to import delivery_tasks handler registry")
+        if row.aggregate_type == "reco_cache":
+            try:
+                from app.services.reco_cache import register_reco_cache_outbox_handler
+                register_reco_cache_outbox_handler()
+            except Exception:
+                logger.exception("Failed to register recommendation cache invalidation handler")
+
+        handler = _resolve_outbox_handler(row)
         if handler is None:
-            logger.error(
-                "Outbox handler not registered: %s/%s id=%s",
-                row.aggregate_type,
-                row.event_kind,
-                outbox_id,
-            )
+            logger.error("Outbox handler not registered: %s/%s id=%s", row.aggregate_type, row.event_kind, outbox_id)
             await _mark_failed(db, row, "handler_not_registered", wid=wid)
             return
         try:
             json.loads(row.payload) if row.payload else {}
         except (TypeError, ValueError):
-            # payload 损坏无法解析，标记失败不再执行 handler，避免空 payload 继续处理
             await _mark_failed(db, row, "payload_invalid_json", wid=wid)
             return
+
         try:
             lease_owned = await _run_handler_with_lease(
                 handler, db, row, outbox_id=outbox_id, wid=wid
             )
             if not lease_owned:
-                # 新 owner 已接管；旧 owner 不得写 DONE/FAILED，等待新 owner 处理。
                 return
-            # 原子释放：仅当 locked_by 仍为本 worker 时才标记 DONE
-            done_stmt = (
+
+            expected_sync_version = int(getattr(row, "sync_version", 0) or 0)
+            done_conditions = [
+                OutboxEvent.id == outbox_id,
+                OutboxEvent.locked_by == wid,
+            ]
+            if is_stock_mirror:
+                done_conditions.append(OutboxEvent.sync_version == expected_sync_version)
+            done_result = await db.execute(
                 update(OutboxEvent)
-                .where(
-                    OutboxEvent.id == outbox_id,
-                    OutboxEvent.locked_by == wid,
-                )
+                .where(*done_conditions)
                 .values(
-                    status="DONE",
-                    processed_at=now_local(),
-                    last_error=None,
-                    next_retry_at=None,
-                    locked_at=None,
-                    locked_by=None,
+                    status="DONE", processed_at=now_local(), last_error=None,
+                    next_retry_at=None, locked_at=None, locked_by=None,
                 )
             )
-            done_result = await db.execute(done_stmt)
-            # 旁路幂等：先只写 MySQL（同事务）；Redis 必须等 commit 成功后再标记，
-            # 否则回滚后 Redis 脏键会导致 is_processed 误跳过（券卡在 RESERVED）。
+
+            if is_stock_mirror and int(done_result.rowcount or 0) != 1:
+                # 库存在平台同步期间再次变化：回滚旧快照副作用，仅在仍是本 owner 时重排最新绝对库存。
+                await db.rollback()
+                fresh = (
+                    await db.execute(
+                        select(OutboxEvent)
+                        .where(
+                            OutboxEvent.id == outbox_id,
+                            OutboxEvent.status == "PROCESSING",
+                            OutboxEvent.locked_by == wid,
+                        )
+                        .execution_options(populate_existing=True)
+                    )
+                ).scalar_one_or_none()
+                if fresh is not None:
+                    requeue = await db.execute(
+                        update(OutboxEvent)
+                        .where(
+                            OutboxEvent.id == outbox_id,
+                            OutboxEvent.status == "PROCESSING",
+                            OutboxEvent.locked_by == wid,
+                        )
+                        .values(
+                            status="PENDING", attempt_count=0, next_retry_at=None,
+                            locked_at=None, locked_by=None, last_error=None,
+                        )
+                    )
+                    if int(requeue.rowcount or 0) == 1:
+                        await db.commit()
+                    else:
+                        await db.rollback()
+                return
+
+            from app.services.worker_common import rollback_if_claim_lost
+            if await rollback_if_claim_lost(db, done_result, model=OutboxEvent, row_id=outbox_id):
+                return
+
             idem_msg = f"{row.aggregate_type}:{row.aggregate_id}:{row.event_kind}"
-            try:
-                from app.domains.messaging.idempotency import try_acquire
+            if not is_stock_mirror:
+                try:
+                    from app.domains.messaging.idempotency import try_acquire
+                    acquired = await try_acquire(
+                        db, scope="outbox", message_id=idem_msg,
+                        ttl_seconds=86400 * 7, mark_redis=False,
+                    )
+                    if not acquired:
+                        await db.rollback()
+                        await _mark_failed(db, row, "idempotency_already_exists_after_handler", wid=wid)
+                        return
+                except Exception as exc:
+                    await db.rollback()
+                    await _mark_failed(db, row, f"idempotency_write_failed: {exc}", wid=wid)
+                    return
 
-                await try_acquire(
-                    db,
-                    scope="outbox",
-                    message_id=idem_msg,
-                    ttl_seconds=86400 * 7,
-                    mark_redis=False,
-                )
-            except Exception:
-                # TODO: 考虑补偿监控告警，当前依赖 done_result.rowcount 兜底
-                logger.warning("outbox 幂等落库失败 id=%s", outbox_id)
             await db.commit()
-            try:
-                from app.domains.messaging.idempotency import mark_processed_redis
-
-                await mark_processed_redis(scope="outbox", message_id=idem_msg, ttl_seconds=86400 * 7)
-            except Exception:
-                logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
-            if not done_result.rowcount:
-                logger.warning(
-                    "Outbox 行在处理期间被 reclaim 释放 id=%s", outbox_id
-                )
-        except Exception as e:
-            logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, e)
-            # handler 异常后会话可能处于失败态，先回滚再用同一会话标记失败
+            if not is_stock_mirror:
+                try:
+                    from app.domains.messaging.idempotency import mark_processed_redis
+                    await mark_processed_redis(
+                        scope="outbox", message_id=idem_msg, ttl_seconds=86400 * 7
+                    )
+                except Exception:
+                    logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
+        except Exception as exc:
+            logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, exc)
             await db.rollback()
-            await _mark_failed(db, row, str(e), wid=wid)
+            await _mark_failed(db, row, str(exc), wid=wid)
 
 
 async def _mark_failed(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str = "") -> None:
-    """handler 异常时标记 FAILED 并安排退避；超过 max_attempts 不再自动重试。
-
-    原子 UPDATE WHERE locked_by = wid：仅当锁仍归原 worker 时才标记失败，
-    避免 reclaim 后新 owner 的锁被误覆盖。
-    """
-    # 重新加载以获取 attempt_count / max_attempts
+    """仅原 claim owner 可标记失败；退避带 jitter，耗尽时暴露 DEAD-LETTER 告警。"""
     fresh = await db.get(OutboxEvent, row.id)
     if not fresh or fresh.status == "DONE":
         return
     attempts = int(fresh.attempt_count or 1)
     max_att = int(fresh.max_attempts or MAX_ATTEMPTS)
     retry_at = (
-        now_local() + timedelta(seconds=_backoff_seconds(attempts))
-        if attempts < max_att
-        else None
+        now_local() + timedelta(seconds=_jittered_backoff_seconds(attempts, int(row.id)))
+        if attempts < max_att else None
     )
     fail_stmt = (
         update(OutboxEvent)
-        .where(
-            OutboxEvent.id == row.id,
-            OutboxEvent.locked_by == wid,
-        )
+        .where(OutboxEvent.id == row.id, OutboxEvent.locked_by == wid)
         .values(
-            status="FAILED",
-            last_error=err[:500],
-            locked_at=None,
-            locked_by=None,
-            next_retry_at=retry_at,
+            status="FAILED", last_error=err[:500], locked_at=None,
+            locked_by=None, next_retry_at=retry_at,
         )
     )
     fail_result = await db.execute(fail_stmt)
     await db.commit()
     if not fail_result.rowcount:
+        logger.warning("Outbox 行在失败标记期间被 reclaim 释放 id=%s", row.id)
+        return
+    if attempts >= max_att:
+        logger.critical(
+            "Outbox DEAD-LETTER: id=%s aggregate=%s/%s attempts=%s max_attempts=%s error=%s",
+            row.id, row.aggregate_type, row.aggregate_id, attempts, max_att, err[:300],
+        )
+    else:
         logger.warning(
-            "Outbox 行在失败标记期间被 reclaim 释放 id=%s", row.id
+            "Outbox retry scheduled: id=%s aggregate=%s/%s attempt=%s/%s retry_at=%s error=%s",
+            row.id, row.aggregate_type, row.aggregate_id, attempts, max_att, retry_at, err[:300],
         )
 
 
@@ -411,6 +472,15 @@ async def process_pending_outbox(limit: int = 30) -> int:
         import app.services.menu_cache_handlers  # noqa: F401
     except Exception:
         logger.exception("Failed to import menu_cache_handlers handlers")
+    try:
+        import app.services.delivery_tasks  # noqa: F401
+    except Exception:
+        logger.exception("Failed to import delivery_tasks handlers")
+    try:
+        from app.services.reco_cache import register_reco_cache_outbox_handler
+        register_reco_cache_outbox_handler()
+    except Exception:
+        logger.exception("Failed to register recommendation cache invalidation handler")
     now = now_local()
     async with AsyncSessionLocal() as db:
         rows = (
