@@ -800,3 +800,6 @@ def test_outbox_dead_letter_error_display_redacts_common_credentials():
     assert "secret-value" not in safe
     assert "***" in safe
     assert "upstream unavailable" in safe
+    json_safe = _safe_error('{"access_token":"json-secret","apiAuthToken":"app-secret"}')
+    assert "json-secret" not in json_safe
+    assert "app-secret" not in json_safe
