@@ -2021,6 +2021,7 @@ CREATE TABLE IF NOT EXISTS `payment_reconcile_batches` (
   `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `channel` varchar(20) NOT NULL COMMENT 'WECHAT/ALIPAY',
   `bill_date` date NOT NULL COMMENT '对账日（渠道账单日）',
+  `scope_store_id` bigint UNSIGNED NOT NULL DEFAULT 0 COMMENT '对账范围：0总部全平台，正数门店ID',
   `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/DONE/FAILED',
   `local_count` int NOT NULL DEFAULT 0 COMMENT '本地成功支付笔数',
   `channel_count` int NOT NULL DEFAULT 0 COMMENT '渠道账单笔数',
@@ -2031,8 +2032,9 @@ CREATE TABLE IF NOT EXISTS `payment_reconcile_batches` (
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `uk_prb_channel_bill`(`channel` ASC, `bill_date` ASC) USING BTREE,
-  INDEX `idx_prb_status_date`(`status` ASC, `bill_date` ASC) USING BTREE
+  UNIQUE INDEX `uk_prb_channel_bill_store`(`channel` ASC, `bill_date` ASC, `scope_store_id` ASC) USING BTREE,
+  INDEX `idx_prb_status_date`(`status` ASC, `bill_date` ASC) USING BTREE,
+  INDEX `idx_prb_scope_store`(`scope_store_id` ASC) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '支付渠道对账批次' ROW_FORMAT = Dynamic;
 -- ----------------------------
 -- Table structure for payment_reconcile_diffs
