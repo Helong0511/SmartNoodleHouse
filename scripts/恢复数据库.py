@@ -48,6 +48,21 @@ def parse_url(url: str) -> dict:
     }
 
 
+def _decompress_backup_to_temp(backup: Path) -> Path:
+    """分块解压到权限受限的临时文件，避免大备份一次性读入内存。"""
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".sql") as tmp:
+            tmp_path = Path(tmp.name)
+            with gzip.open(backup, "rb") as gz:
+                shutil.copyfileobj(gz, tmp, length=1024 * 1024)
+        return tmp_path
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def find_mysql() -> str:
     which = shutil.which("mysql")
     if which:
@@ -80,16 +95,13 @@ def main() -> int:
     if info["password"]:
         env["MYSQL_PWD"] = info["password"]
 
-    if backup.suffix == ".gz" or backup.name.endswith(".sql.gz"):
-        with gzip.open(backup, "rb") as gz, tempfile.NamedTemporaryFile(
-            delete=False, suffix=".sql"
-        ) as tmp:
-            tmp.write(gz.read())
-            sql_path = Path(tmp.name)
-    else:
-        sql_path = backup
-
+    sql_path: Path | None = None
     try:
+        if backup.suffix == ".gz" or backup.name.endswith(".sql.gz"):
+            sql_path = _decompress_backup_to_temp(backup)
+        else:
+            sql_path = backup
+
         cmd = [
             mysql,
             "-h",
@@ -104,7 +116,7 @@ def main() -> int:
             proc = subprocess.run(cmd, stdin=fh, env=env, check=False)
         return int(proc.returncode)
     finally:
-        if sql_path != backup and sql_path.exists():
+        if sql_path is not None and sql_path != backup and sql_path.exists():
             sql_path.unlink(missing_ok=True)
 
 
