@@ -150,6 +150,8 @@ async def sync_order_payment(
     payment, meta = await PaymentService.sync_order_pending_payment(
         db, order, provider=provider
     )
+    # Commit the authoritative payment/order state before notifying clients.
+    await db.commit()
     if meta.get("synced") and payment and payment.status == "PAID":
         await _notify_paid_or_refunded(db, payment, transitioned=True)
     await AuditService.log(
@@ -218,6 +220,8 @@ async def sync_payment(
     await _acquire_sync_cooldown(payment.id)
     before = payment.status
     payment, meta = await PaymentService.sync_payment_status(db, payment)
+    # Commit the authoritative payment/order state before notifying clients.
+    await db.commit()
     if before != "PAID" and payment.status == "PAID":
         await _notify_paid_or_refunded(db, payment, transitioned=True)
     progress = await PaymentService.payment_progress(db, order) if order else {}
@@ -520,17 +524,23 @@ async def sync_refund(refund_no: str, request: Request, db: DbSession, user: Cur
         assert_order_store_access(user, order)
     before_status = row.status
     row = await PaymentService.sync_refund_status(db, row)
+    # Persist the authoritative refund state before publishing the real-time event.
+    # DbSession commits at dependency teardown, after this endpoint returns.
+    await db.commit()
     if before_status != "SUCCESS" and row.status == "SUCCESS" and order:
-        await ws_manager.notify_order_event(
-            "ORDER_REFUNDED",
-            {
-                "order_id": order.id,
-                "order_no": order.order_no,
-                "refund_no": row.refund_no,
-                "amount": str(row.amount),
-                "store_id": order.store_id,
-            },
-        )
+        try:
+            await ws_manager.notify_order_event(
+                "ORDER_REFUNDED",
+                {
+                    "order_id": order.id,
+                    "order_no": order.order_no,
+                    "refund_no": row.refund_no,
+                    "amount": str(row.amount),
+                    "store_id": order.store_id,
+                },
+            )
+        except Exception:
+            logger.exception("退款查单已提交，但 WebSocket 通知失败 refund_no=%s", row.refund_no)
     return success(
         {"refund_no": row.refund_no, "status": row.status, "amount": str(row.amount)},
         request=request,
