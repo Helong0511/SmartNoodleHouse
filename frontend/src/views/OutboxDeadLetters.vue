@@ -164,14 +164,18 @@ async function replay(row: OutboxDeadLetter) {
 async function resolveAsSuccess(row: OutboxDeadLetter) {
   try {
     const { value } = await ElMessageBox.prompt(
-      `请确认已核实对应外卖平台已成功执行。关闭后系统不会再次发送该操作。`,
+      `请先核实对应外卖平台订单已成功执行；原因中必须包含“平台核实已成功”。关闭后系统不会再次发送该操作。`,
       '核实平台操作已成功',
       {
         confirmButtonText: '确认关闭死信',
         cancelButtonText: '取消',
         inputType: 'textarea',
-        inputPlaceholder: '例如：已在美团商家端确认订单接单成功，平台订单状态为已确认',
-        inputValidator: (value: string) => value.trim().length >= 8 || '核实说明至少需要 8 个字符',
+        inputPlaceholder: '例如：平台核实已成功；已在美团商家端确认订单接单成功，平台订单状态为已确认',
+        inputValidator: (value: string) => {
+          if (value.trim().length < 8) return '核实说明至少需要 8 个字符'
+          if (!value.includes('平台核实已成功')) return '请先核实平台订单成功，并写入“平台核实已成功”'
+          return true
+        },
       },
     )
     resolvingId.value = row.id
