@@ -78,6 +78,7 @@
           <el-menu-item v-if="showRolePerms" index="/role-permissions">角色权限</el-menu-item>
           <el-menu-item v-if="showSettings" index="/settings">系统设置</el-menu-item>
           <el-menu-item v-if="showAudit" index="/audit-logs">操作日志</el-menu-item>
+          <el-menu-item v-if="auth.isSuperAdmin" index="/outbox-dead-letters">Outbox 死信</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -190,7 +191,7 @@ const openGroup = computed(() => {
   ) return 'g-member'
   if (['/tables', '/users', '/role-delegations', '/store-info'].includes(p)) return 'g-store'
   if (['/cameras', '/welcome-logs'].includes(p)) return 'g-smart'
-  if (['/settings', '/audit-logs', '/role-permissions'].includes(p)) return 'g-system'
+  if (['/settings', '/audit-logs', '/role-permissions', '/outbox-dead-letters'].includes(p)) return 'g-system'
   return ''
 })
 
