@@ -180,10 +180,14 @@ async def renew_rebuild_lock(store_id: int, *, owner_token: str | None = None) -
         return False
 
 
-async def maintain_rebuild_lock(store_id: int, owner_token: str) -> None:
-    """后台续租；请求 owner 结束、锁丢失或 Redis 异常时停止。"""
-    # 与请求绑定：请求被取消/超时后，后台 task 不得继续永久续租孤儿锁。
-    owner_task = asyncio.current_task()
+async def maintain_rebuild_lock(
+    store_id: int,
+    owner_token: str,
+    *,
+    owner_task: asyncio.Task[Any],
+) -> None:
+    """后台续租；由调用方传入请求任务，任务结束后停止续租。"""
+    # 注意：current_task() 在本协程内只会返回心跳自身，不能代表发起请求的 task。
     interval = max(1, _REBUILD_LOCK_TTL // 3)
     while True:
         await asyncio.sleep(interval)
