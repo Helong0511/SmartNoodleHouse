@@ -96,12 +96,12 @@ class FakeRedis:
         keys = list(args[:numkeys])
         argv = list(args[numkeys:])
         # owner-token 心跳续租
-        if "redis.call('expire'" in script and len(keys) == 1:
+        if "redis.call('expire'" in script.lower() and len(keys) == 1:
             if self.kv.get(keys[0]) == str(argv[0]):
                 return await self.expire(keys[0], int(argv[1]))
             return 0
         # owner-token 释放
-        if "redis.call('del'" in script and len(keys) == 1:
+        if "redis.call('del'" in script.lower() and len(keys) == 1:
             if self.kv.get(keys[0]) == str(argv[0]):
                 return await self.delete(keys[0])
             return 0
@@ -323,10 +323,10 @@ async def test_menu_bundle_publish_is_fenced_by_build_version(fake_redis):
 
     # 写路径在快照构建后 bump 版本：旧 worker 即使仍持有租约，也不得覆盖新版本。
     await fake_redis.set(menu_version_key(store_id), "8")
-    stale_publish = await menu_cache.set_menu_bundle_if_owner(
+    stale_publish = await menu_cache.set_menu_bundle(
         store_id,
         {"version": 7, "products": {"items": ["stale"]}},
-        "owner-token",
+        owner_token="owner-token",
         expected_version=7,
     )
     assert stale_publish is False

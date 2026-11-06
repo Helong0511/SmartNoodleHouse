@@ -38,7 +38,7 @@ async def test_menu_bundle_rebuilds_when_redis_version_key_is_missing(monkeypatc
     )
     monkeypatch.setattr(menu_service, "build_menu_bundle", AsyncMock(return_value=fresh))
     publish = AsyncMock(return_value=True)
-    monkeypatch.setattr(menu_service, "set_menu_bundle_if_owner", publish)
+    monkeypatch.setattr(menu_service, "set_menu_bundle", publish)
     monkeypatch.setattr(menu_service, "release_rebuild_lock", AsyncMock())
 
     result = await menu_service.get_or_build_menu_bundle(object(), sid)
@@ -110,11 +110,11 @@ async def test_menu_cache_publish_refuses_missing_or_zero_version(monkeypatch):
     monkeypatch.setattr(menu_cache, "get_redis", get_redis)
 
     # Version 0 is never a valid published generation.
-    assert await menu_cache.set_menu_bundle_if_owner(
-        77125, {"products": []}, "owner-token", expected_version=0
+    assert await menu_cache.set_menu_bundle(
+        77125, {"products": []}, owner_token="owner-token", expected_version=0
     ) is False
     # A positive expected version cannot be published if Redis evicted its version key.
-    assert await menu_cache.set_menu_bundle_if_owner(
-        77125, {"products": []}, "owner-token", expected_version=1
+    assert await menu_cache.set_menu_bundle(
+        77125, {"products": []}, owner_token="owner-token", expected_version=1
     ) is False
     assert menu_cache.menu_bundle_key(77125) not in fake.store

@@ -549,6 +549,14 @@ def test_outbox_retry_jitter_is_deterministic_bounded_and_spread():
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_kind", "service_module", "service_name"),
+    [
+        ("social_benefit_reverse", "app.services.social_benefit_service", "SocialBenefitService"),
+        ("campaign_attribution_reverse", "app.services.attribution_service", "AttributionService"),
+    ],
+)
 async def test_refund_reconciliation_handlers_lock_order_and_dispatch(
     monkeypatch, event_kind, service_module, service_name
 ):

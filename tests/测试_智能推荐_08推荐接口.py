@@ -54,6 +54,10 @@ class FakeRedis:
         keys = args[:numkeys]
         argv = args[numkeys:]
         if numkeys == 1:
+            if "INCR" in script.upper():
+                generation = int(self.store.get(keys[0]) or 0) + 1
+                self.store[keys[0]] = str(generation)
+                return generation
             if self.store.get(keys[0]) == argv[0]:
                 del self.store[keys[0]]
                 return 1
