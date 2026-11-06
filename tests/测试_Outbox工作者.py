@@ -788,3 +788,15 @@ def test_outbox_dead_letter_admin_api_is_super_admin_only():
     with pytest.raises(AppException):
         _require_super_admin(SimpleNamespace(role=SimpleNamespace(code="CASHIER")))
     _require_super_admin(SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")))
+
+
+def test_outbox_dead_letter_error_display_redacts_common_credentials():
+    from app.api.outbox_admin import _safe_error
+
+    value = "Authorization: Bearer abc.def password=hunter2 token=secret-value upstream unavailable"
+    safe = _safe_error(value)
+    assert "abc.def" not in safe
+    assert "hunter2" not in safe
+    assert "secret-value" not in safe
+    assert "***" in safe
+    assert "upstream unavailable" in safe
