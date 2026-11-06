@@ -27,3 +27,13 @@ def test_recharge_sync_does_not_lock_recharge_order_before_provider_query():
         "sync_recharge_payment must not hold the RechargeOrder row lock while "
         "sync_payment_status performs provider HTTP queries"
     )
+
+
+def test_recharge_settlement_locks_recharge_before_payment():
+    source = inspect.getsource(PaymentService._settle_recharge_payment)
+    recharge_lock = source.index("select(RechargeOrder)")
+    payment_lock = source.index("select(Payment)")
+    assert recharge_lock < payment_lock, (
+        "recharge settlement must use RechargeOrder→Payment lock order "
+        "to match the shared callback lock helper and avoid deadlocks"
+    )
