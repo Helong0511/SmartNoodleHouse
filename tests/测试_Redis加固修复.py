@@ -491,3 +491,17 @@ async def test_reco_invalidation_deletes_cluster_keys_individually(monkeypatch):
         await reco_cache.invalidate_customer(5)
     assert k1 in fake.delete_calls and k2 in fake.delete_calls
     assert k1 not in fake.store and k2 not in fake.store
+
+
+@pytest.mark.asyncio
+async def test_reco_lock_acquire_release_uses_limit_dimension():
+    from app.services import reco_cache
+    from app.core.cache_keys import reco_rebuild_lock_key
+    fake = FakeRedis()
+    with patch.object(reco_cache, "get_redis", _patch_get_redis(fake)):
+        token = await reco_cache.try_acquire_reco_lock(7, 3, "recommend_menu", "v1", "", 5)
+        assert token
+        lock_key = reco_rebuild_lock_key(7, 3, "recommend_menu", "v1", "", 5)
+        assert fake.store.get(lock_key) == token
+        await reco_cache.release_reco_lock(7, 3, "recommend_menu", "v1", owner_token=token, limit=5)
+        assert lock_key not in fake.store
