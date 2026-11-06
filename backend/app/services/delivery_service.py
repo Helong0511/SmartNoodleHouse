@@ -985,6 +985,7 @@ class DeliveryService:
         db: AsyncSession,
         *,
         order_id: int,
+        store_id: int,
         platform: str,
         platform_order_id: str,
     ) -> bool:
@@ -1017,10 +1018,15 @@ class DeliveryService:
                 return True
             payload_platform = str(payload.get("platform") or "").upper()
             payload_platform_order_id = str(payload.get("platform_order_id") or "")
+            try:
+                payload_store_id = int(payload.get("store_id") or 0)
+            except (TypeError, ValueError):
+                return True
             if payload_order_id == int(order_id) or (
                 payload_platform == str(platform or "").upper()
                 and payload_platform_order_id
                 and payload_platform_order_id == str(platform_order_id or "")
+                and payload_store_id == int(store_id)
             ):
                 return True
         return False
@@ -1140,6 +1146,7 @@ class DeliveryService:
         cancel_pending = await cls._has_pending_cancel_intent(
             db,
             order_id=order_id,
+            store_id=int(order.store_id),
             platform=platform,
             platform_order_id=platform_order_id,
         )
