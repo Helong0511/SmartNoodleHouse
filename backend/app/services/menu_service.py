@@ -288,24 +288,29 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         version = await get_menu_version(sid)
         if version <= 0:
             version = await bump_menu_version(sid)
-        bundle = await build_menu_bundle(db, sid)
 
-        # 若菜单在构建期间发生变更，丢弃这次快照并按新版本重建一次。
-        latest_version = await get_menu_version(sid)
-        if latest_version > 0 and latest_version != version:
-            version = latest_version
-            bundle = await build_menu_bundle(db, sid)
+        bundle = None
+        stable_version = False
+        build_version = version
+        # 最多重建两次；若两次都遇到并发菜单变更，不伪造最新版本号，
+        # 只返回最后一次构建开始时的版本，并跳过两级缓存写入。
+        for _ in range(2):
+            build_version = await get_menu_version(sid) or build_version
+            candidate = await build_menu_bundle(db, sid)
             latest_version = await get_menu_version(sid)
-            if latest_version > 0:
-                version = latest_version
+            bundle = candidate
+            if latest_version <= 0 or latest_version == build_version:
+                stable_version = True
+                break
+            build_version = latest_version
 
-        bundle = {**bundle, "version": version}
-        _BUILD_CACHE.put(sid, bundle)
-
-        # Lua 同时校验 owner token 与 version，旧构建不能覆盖更新后的 bundle。
-        await set_menu_bundle(
-            sid, bundle, owner_token=lock_token, expected_version=version
-        )
+        bundle = {**(bundle or {}), "version": build_version}
+        if stable_version:
+            _BUILD_CACHE.put(sid, bundle)
+            # Lua 同时校验 owner token 与 version，旧构建不能覆盖更新后的 bundle。
+            await set_menu_bundle(
+                sid, bundle, owner_token=lock_token, expected_version=build_version
+            )
         return bundle
     finally:
         if lock_token:
