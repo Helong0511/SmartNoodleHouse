@@ -19,3 +19,11 @@ def test_payment_sync_queries_provider_before_acquiring_order_payment_locks():
     assert query_pos < lock_pos, (
         "provider HTTP query must finish before Order→Payment row locks are acquired"
     )
+
+
+def test_recharge_sync_does_not_lock_recharge_order_before_provider_query():
+    source = inspect.getsource(PaymentService.sync_recharge_payment)
+    assert "with_for_update" not in source, (
+        "sync_recharge_payment must not hold the RechargeOrder row lock while "
+        "sync_payment_status performs provider HTTP queries"
+    )
