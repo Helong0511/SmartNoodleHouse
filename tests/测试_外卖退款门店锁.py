@@ -150,6 +150,12 @@ async def test_process_refund_recovers_ledger_without_calling_provider():
     provider_factory.assert_not_called()
     db.commit.assert_awaited_once()
 
+    # 已确认完成的取消事件不是“待执行/结果未知”互斥意图；
+    # 取消后到达的退款仍必须能够补记财务分录。
+    cancel_guard_stmt = db.execute.await_args_list[4].args[0]
+    compiled_params = cancel_guard_stmt.compile().params
+    assert "DONE" not in [str(value) for value in compiled_params.values()]
+
 
 @pytest.mark.asyncio
 async def test_process_refund_ledger_recovery_failure_keeps_pending_repair_state():
