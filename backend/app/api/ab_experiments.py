@@ -98,7 +98,7 @@ async def delete_experiment(
     return success({"deleted": True, "key": key}, request=request)
 
 
-@router.get("/{key}/report", dependencies=[require_permission("order:read")])
+@router.get("/{key}/report", dependencies=[require_permission("system:manage")])
 async def experiment_report(
     key: str,
     request: Request,

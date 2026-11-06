@@ -7,12 +7,12 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import now_local
-from app.models import Payment, PaymentReconcileBatch, PaymentReconcileDiff
+from app.models import Order, Payment, PaymentReconcileBatch, PaymentReconcileDiff, RechargeOrder
 
 
 def _dec(v: Any) -> Decimal | None:
@@ -87,8 +87,12 @@ class PaymentReconcileService:
         bill_csv: str,
         created_by: int | None = None,
         source_filename: str | None = None,
+        scope_store_id: int = 0,
     ) -> PaymentReconcileBatch:
         ch = channel.upper().strip()
+        scope_id = int(scope_store_id or 0)
+        if scope_id < 0:
+            raise ValueError("scope_store_id 不能为负数")
         if ch not in ("WECHAT", "ALIPAY"):
             raise ValueError("channel 仅支持 WECHAT/ALIPAY")
 
@@ -99,6 +103,7 @@ class PaymentReconcileService:
                 .where(
                     PaymentReconcileBatch.channel == ch,
                     PaymentReconcileBatch.bill_date == bill_date,
+                    PaymentReconcileBatch.scope_store_id == scope_id,
                 )
                 .with_for_update()
             )
@@ -107,6 +112,7 @@ class PaymentReconcileService:
             candidate = PaymentReconcileBatch(
                 channel=ch,
                 bill_date=bill_date,
+                scope_store_id=scope_id,
                 status="PENDING",
                 created_by=created_by,
             )
@@ -124,6 +130,7 @@ class PaymentReconcileService:
                         .where(
                             PaymentReconcileBatch.channel == ch,
                             PaymentReconcileBatch.bill_date == bill_date,
+                            PaymentReconcileBatch.scope_store_id == scope_id,
                         )
                         .with_for_update()
                     )
@@ -154,18 +161,61 @@ class PaymentReconcileService:
 
         try:
             channel_rows = parse_channel_bill_csv(ch, bill_csv)
+            if scope_id > 0 and channel_rows:
+                # 门店级账单必须保留商户支付单号，以便阻止把同一商户号的总部总账
+                # 误导入单店批次。无法判断归属的行宁可拒绝，也不制造跨店 LONG 差异。
+                if any(not row.get("local_payment_no") for row in channel_rows):
+                    raise ValueError("门店级对账账单必须包含商户支付单号列（payment_no/out_trade_no）")
+                payment_numbers = list(
+                    dict.fromkeys(str(row["local_payment_no"]) for row in channel_rows)
+                )
+                # 账单可能包含其他门店的有效交易；检查已知商户单号的真实归属。
+                # 未在本地找到的单号仍保留为 LONG 差异，供门店核查渠道侧孤儿交易。
+                for offset in range(0, len(payment_numbers), 500):
+                    chunk = payment_numbers[offset : offset + 500]
+                    ownership_rows = (
+                        await db.execute(
+                            select(
+                                Payment.payment_no,
+                                Payment.provider,
+                                Order.store_id,
+                                RechargeOrder.store_id,
+                            )
+                            .outerjoin(Order, Payment.order_id == Order.id)
+                            .outerjoin(RechargeOrder, Payment.recharge_order_id == RechargeOrder.id)
+                            .where(Payment.payment_no.in_(chunk))
+                        )
+                    ).all()
+                    for payment_no, provider, order_store_id, recharge_store_id in ownership_rows:
+                        owner_store_id = order_store_id or recharge_store_id
+                        if (
+                            str(provider).upper() != ch
+                            or owner_store_id is None
+                            or int(owner_store_id) != scope_id
+                        ):
+                            raise ValueError(
+                                f"门店账单包含其他门店、其他渠道或无法确认归属的支付单: {payment_no}"
+                            )
             start = datetime.combine(bill_date, time.min).replace(tzinfo=now_local().tzinfo)
             end = start + timedelta(days=1)
             local_payments = list(
                 (
                     await db.execute(
-                        select(Payment).where(
+                        select(Payment)
+                        .outerjoin(Order, Payment.order_id == Order.id)
+                        .outerjoin(RechargeOrder, Payment.recharge_order_id == RechargeOrder.id)
+                        .where(
                             and_(
                                 Payment.provider == ch,
                                 Payment.status.in_(("PAID", "PARTIAL_REFUND", "REFUNDED")),
                                 # 对账日按渠道实际支付成功时间，而非本地创建支付单时间归属。
                                 Payment.paid_at >= start,
                                 Payment.paid_at < end,
+                                *(
+                                    [or_(Order.store_id == scope_id, RechargeOrder.store_id == scope_id)]
+                                    if scope_id > 0
+                                    else []
+                                ),
                             )
                         )
                     )

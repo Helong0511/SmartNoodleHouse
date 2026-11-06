@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "0047_payment_refund_idempotency_key"
+revision = "0047_payment_refund_idem"
 down_revision = "0046_outbox_stock_sync_version"
 branch_labels = None
 depends_on = None

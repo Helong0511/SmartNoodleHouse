@@ -10,7 +10,7 @@ from app.core.response import success
 router = APIRouter(prefix="/admin/performance", tags=["性能监控"])
 
 
-@router.get("/reco-metrics", dependencies=[require_permission("order:read")])
+@router.get("/reco-metrics", dependencies=[require_permission("system:manage")])
 async def reco_metrics(
     request: Request,
     window_hours: int = WINDOW_HOURS,

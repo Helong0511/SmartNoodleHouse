@@ -19,15 +19,10 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-# MySQL：对象已存在时可忽略（重复执行 / 部分表已手工建过）
+# CANONICAL SCHEMA 使用 CREATE TABLE IF NOT EXISTS；仅保留表已存在的兼容兜底。
+# 任何重复列/索引/外键或唯一键错误都必须失败，不能静默留下缺失约束的 schema。
 _IGNORE_MYSQL_ERRNOS = {
-    1007,  # database exists
     1050,  # table already exists
-    1060,  # duplicate column
-    1061,  # duplicate key name
-    1062,  # duplicate entry（种子类语句偶发）
-    1022,  # can't write; duplicate key
-    1826,  # duplicate FK name
 }
 
 
@@ -67,7 +62,7 @@ def _should_skip_statement(stmt: str) -> bool:
     # 防御性跳过：即使误入标记区也不执行删库/授权类语句
     return bool(
         re.match(
-            r"(?is)^(DROP\s+DATABASE|CREATE\s+DATABASE|USE|CREATE\s+USER|GRANT\b|FLUSH\s+PRIVILEGES)\b",
+            r"(?is)^(DROP\b|TRUNCATE\b|DELETE\b|CREATE\s+DATABASE|USE\b|CREATE\s+USER|GRANT\b|REVOKE\b|FLUSH\s+PRIVILEGES)\b",
             stmt,
         )
     )
@@ -90,17 +85,55 @@ def upgrade() -> None:
 
     raw = _extract_schema_section(path.read_text(encoding="utf-8"))
     conn = op.get_bind()
-    for stmt in _split_sql_statements(raw):
-        if _should_skip_statement(stmt):
-            continue
-        try:
-            # 用驱动原生 SQL，避免 COMMENT/JSON 示例中的 ":50" 被 text() 当成绑定参数
-            conn.exec_driver_sql(stmt)
-        except (ProgrammingError, DBAPIError) as exc:
-            errno = _mysql_errno(exc)
-            if errno in _IGNORE_MYSQL_ERRNOS:
+    is_mysql = conn.dialect.name == "mysql"
+    if is_mysql:
+        # struct.sql 按模块分组，部分子表在父表之前定义（如 ab_assignments → customers）。
+        # MySQL 官方支持在 FOREIGN_KEY_CHECKS=0 时按任意顺序导入含外键的表；
+        # 这里只在 schema DDL 阶段临时关闭，finally 必定恢复，不影响应用运行时约束。
+        conn.exec_driver_sql("SET SESSION FOREIGN_KEY_CHECKS=0")
+    try:
+        for stmt in _split_sql_statements(raw):
+            if _should_skip_statement(stmt):
                 continue
-            raise
+            try:
+                # 用驱动原生 SQL，避免 COMMENT/JSON 示例中的 ":50" 被 text() 当成绑定参数
+                conn.exec_driver_sql(stmt)
+            except (ProgrammingError, DBAPIError) as exc:
+                errno = _mysql_errno(exc)
+                if errno in _IGNORE_MYSQL_ERRNOS:
+                    continue
+                raise
+    finally:
+        if is_mysql:
+            # 不允许把会话的外键校验关闭状态带入后续 Alembic revisions / 应用连接。
+            conn.exec_driver_sql("SET SESSION FOREIGN_KEY_CHECKS=1")
+
+    if is_mysql:
+        # FOREIGN_KEY_CHECKS=1 不会回扫历史行，因此显式确认所有 FK 元数据
+        # 都能解析到已创建的父表/父列，避免导入顺序错误留下悬空约束。
+        missing_reference = conn.exec_driver_sql(
+            """
+            SELECT k.TABLE_NAME, k.CONSTRAINT_NAME,
+                   k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
+            FROM information_schema.KEY_COLUMN_USAGE AS k
+            LEFT JOIN information_schema.TABLES AS t
+              ON t.TABLE_SCHEMA = k.TABLE_SCHEMA
+             AND t.TABLE_NAME = k.REFERENCED_TABLE_NAME
+            LEFT JOIN information_schema.COLUMNS AS c
+              ON c.TABLE_SCHEMA = k.TABLE_SCHEMA
+             AND c.TABLE_NAME = k.REFERENCED_TABLE_NAME
+             AND c.COLUMN_NAME = k.REFERENCED_COLUMN_NAME
+            WHERE k.TABLE_SCHEMA = DATABASE()
+              AND k.REFERENCED_TABLE_NAME IS NOT NULL
+              AND (t.TABLE_NAME IS NULL OR c.COLUMN_NAME IS NULL)
+            LIMIT 1
+            """
+        ).first()
+        if missing_reference:
+            raise RuntimeError(
+                "Canonical schema contains an unresolved foreign-key reference: "
+                f"{tuple(missing_reference)}"
+            )
 
 
 def downgrade() -> None:

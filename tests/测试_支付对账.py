@@ -98,3 +98,62 @@ async def test_reconcile_batch_rerun_reuses_same_batch_and_replaces_result(db_se
     assert second.status == "DONE"
     assert second.source_filename == "wechat-retry.csv"
 
+
+
+@pytest.mark.asyncio
+async def test_reconcile_batches_are_unique_per_store_scope(db_session):
+    """同一渠道/日期允许总部与各门店分别对账，但同作用域只能有一个批次。"""
+    bill_date = date(2026, 11, 5)
+    bill = "trade_no,amount,payment_no\n"
+
+    hq = await PaymentReconcileService.run_batch(
+        db_session,
+        channel="WECHAT",
+        bill_date=bill_date,
+        bill_csv=bill,
+        scope_store_id=0,
+    )
+    store_a = await PaymentReconcileService.run_batch(
+        db_session,
+        channel="WECHAT",
+        bill_date=bill_date,
+        bill_csv=bill,
+        scope_store_id=101,
+    )
+    store_b = await PaymentReconcileService.run_batch(
+        db_session,
+        channel="WECHAT",
+        bill_date=bill_date,
+        bill_csv=bill,
+        scope_store_id=202,
+    )
+    await db_session.commit()
+
+    assert hq.scope_store_id == 0
+    assert store_a.scope_store_id == 101
+    assert store_b.scope_store_id == 202
+    assert len({hq.id, store_a.id, store_b.id}) == 3
+
+    retry = await PaymentReconcileService.run_batch(
+        db_session,
+        channel="wechat",
+        bill_date=bill_date,
+        bill_csv=bill,
+        scope_store_id=101,
+    )
+    await db_session.commit()
+    assert retry.id == store_a.id
+
+
+@pytest.mark.asyncio
+async def test_store_reconcile_rejects_bill_without_merchant_payment_number(db_session):
+    """单店账单必须能验证本地支付单归属，避免把总部总账导入单店批次。"""
+    with pytest.raises(ValueError, match="必须包含商户支付单号列"):
+        await PaymentReconcileService.run_batch(
+            db_session,
+            channel="WECHAT",
+            bill_date=date(2026, 11, 5),
+            bill_csv="trade_no,amount\nWX-STORE-UNKNOWN,12.00\n",
+            scope_store_id=101,
+        )
+    await db_session.rollback()

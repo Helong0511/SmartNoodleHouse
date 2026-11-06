@@ -110,6 +110,24 @@ jobs:
           MYSQL_PWD: root
         run: |
           mysql -h 127.0.0.1 -uroot -e "CREATE DATABASE IF NOT EXISTS smart_noodle_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+      - name: Upgrade empty MySQL schema to latest Alembic revision
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+          APP_ENV: development
+          APP_DEBUG: "true"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+        run: alembic upgrade head
+      - name: Verify MySQL store-scope migration downgrade and re-upgrade
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+          APP_ENV: development
+          APP_DEBUG: "true"
+          DATABASE_URL: "mysql+aiomysql://root:root@127.0.0.1:3306/smart_noodle_ci?charset=utf8mb4"
+        run: |
+          alembic downgrade 0047_payment_refund_idem
+          alembic upgrade head
       - name: Run MySQL-marked tests
         env:
           PYTHONPATH: backend
