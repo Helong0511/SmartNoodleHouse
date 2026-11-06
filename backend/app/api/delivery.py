@@ -510,12 +510,6 @@ async def merchant_cancel_order(
         raise AppException(40404, "订单不存在", status_code=404)
     assert_order_store_access(user, order)
     result = await DeliveryService.cancel_by_merchant(db, delivery_order_id, data.reason)
-    # Outbox 入队不代表平台已经取消；只有 worker 确认并完成本地状态更新后才广播终态事件。
-    if result.get("status") == "CANCELLED":
-        await ws_manager.notify_order_event(
-            "ORDER_CANCELLED",
-            {"order_id": result["order_id"], "reason": data.reason, "by": "merchant"},
-        )
     await AuditService.log_staff(
         db,
         user=user,
