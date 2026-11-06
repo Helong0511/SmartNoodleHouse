@@ -31,6 +31,17 @@ nano .env
 #   WEBHOOK_REQUIRE_ALLOWLIST=true 并填全；否则保持 false，系统仍强制验签、商户身份、
 #   金额/订单校验和幂等。微信支付官方 IP 段以其《回调通知注意事项》最新版本为准。
 
+# ── Redis 单机基线（外部托管 Redis 可跳过安装，仅落实等价安全配置）──
+# 本机 Redis 默认只监听 127.0.0.1；禁止绑定 0.0.0.0/公网地址。
+sudo apt install -y redis-server
+sudo cp redis.conf.example /etc/redis/redis.conf
+sudo nano /etc/redis/redis.conf
+# 必须先把 requirepass 替换成随机强密码，并与 .env 的 REDIS_URL 密码保持一致；按主机内存调整 maxmemory。
+sudo chown redis:redis /etc/redis/redis.conf
+sudo systemctl enable redis-server
+sudo systemctl restart redis-server
+sudo systemctl --no-pager --full status redis-server
+
 # ── Redis 主机与内存基线（生产必做）──
 # Redis 官方建议开启 overcommit，避免 RDB/AOF 后台 fork 在 Linux 内存策略下失败：
 sudo tee /etc/sysctl.d/99-smart-noodle-redis.conf >/dev/null <<'EOF'
