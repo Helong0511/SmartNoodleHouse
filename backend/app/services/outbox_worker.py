@@ -41,6 +41,11 @@ OutboxHandler = Callable[[AsyncSession, OutboxEvent], Awaitable[None]]
 OUTBOX_HANDLERS: dict[tuple[str, str], OutboxHandler] = {}
 
 
+class ExternalSideEffectUncertain(RuntimeError):
+    """下游可能已执行副作用，但调用方未收到可确认结果；禁止自动重试。"""
+
+
+
 def register_outbox_handler(agg_type: str, kind: str) -> Callable[[OutboxHandler], OutboxHandler]:
     """装饰器：注册 outbox handler。handler 必须幂等。"""
 
@@ -131,6 +136,10 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
     复位时不清零 attempt_count（避免无限重试），仅释放锁、保留退避。
     """
     cutoff = now_local() - timedelta(seconds=stale_after)
+    # delivery_manual/webhook_task handler 可能在发出平台请求后进程崩溃。
+    # stale PROCESSING 对这些事件不能简单回到 PENDING，否则平台已执行时会重复接单/取消/催单。
+    external_side_effect = OutboxEvent.aggregate_type.in_(("delivery_manual", "webhook_task"))
+    exhausted = OutboxEvent.attempt_count >= OutboxEvent.max_attempts
     stmt = (
         update(OutboxEvent)
         .where(
@@ -140,18 +149,24 @@ async def reclaim_stale_processing(db: AsyncSession, *, stale_after: int = STALE
         .values(
             # 崩溃发生在最后一次允许尝试时，不能复位为可无限 claim 的 PENDING。
             status=case(
-                (OutboxEvent.attempt_count >= OutboxEvent.max_attempts, "FAILED"),
+                (external_side_effect, "FAILED"),
+                (exhausted, "FAILED"),
                 else_="PENDING",
             ),
+            attempt_count=case(
+                (external_side_effect, OutboxEvent.max_attempts),
+                else_=OutboxEvent.attempt_count,
+            ),
             next_retry_at=case(
-                (OutboxEvent.attempt_count >= OutboxEvent.max_attempts, None),
+                (or_(external_side_effect, exhausted), None),
                 else_=OutboxEvent.next_retry_at,
             ),
             last_error=case(
                 (
-                    OutboxEvent.attempt_count >= OutboxEvent.max_attempts,
-                    "max_attempts_exhausted_after_stale_processing",
+                    external_side_effect,
+                    "EXTERNAL_RESULT_UNKNOWN: stale PROCESSING reclaimed after worker interruption; verify downstream platform before replay",
                 ),
+                (exhausted, "max_attempts_exhausted_after_stale_processing"),
                 else_=OutboxEvent.last_error,
             ),
             locked_at=None,
@@ -285,6 +300,34 @@ async def _run_handler_with_lease(
         if not heartbeat_task.done():
             heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+
+async def _mark_uncertain(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str) -> None:
+    """把外部结果未知事件直接转为死信，必须人工核实平台状态后才能重放。"""
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == row.id,
+            OutboxEvent.status == "PROCESSING",
+            OutboxEvent.locked_by == wid,
+        )
+        .values(
+            status="FAILED",
+            attempt_count=OutboxEvent.max_attempts,
+            last_error=("EXTERNAL_RESULT_UNKNOWN: " + str(err))[:500],
+            next_retry_at=None,
+            locked_at=None,
+            locked_by=None,
+        )
+    )
+    await db.commit()
+    if int(result.rowcount or 0) != 1:
+        logger.warning("Outbox uncertain result could not be marked by old owner id=%s", row.id)
+        return
+    logger.critical(
+        "Outbox EXTERNAL RESULT UNKNOWN: id=%s aggregate=%s/%s event=%s; automatic retry disabled",
+        row.id, row.aggregate_type, row.aggregate_id, row.event_kind,
+    )
 
 
 async def process_outbox_item(outbox_id: int) -> bool:
@@ -433,6 +476,13 @@ async def process_outbox_item(outbox_id: int) -> bool:
                     )
                 except Exception:
                     logger.warning("outbox 幂等 Redis 回填失败 id=%s", outbox_id)
+        except ExternalSideEffectUncertain as exc:
+            logger.error(
+                "Outbox external side effect result is uncertain id=%s agg=%s/%s: %s",
+                outbox_id, row.aggregate_type, row.event_kind, exc,
+            )
+            await db.rollback()
+            await _mark_uncertain(db, row, str(exc), wid=wid)
         except Exception as exc:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, exc)
             await db.rollback()
