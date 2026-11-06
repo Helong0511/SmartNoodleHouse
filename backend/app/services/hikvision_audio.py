@@ -169,6 +169,10 @@ def resolve_isapi_base(source_url: str) -> str | None:
         return None
     if "://" not in raw:
         raw = f"rtsp://{raw}"
+    # ISAPI 请求也必须使用已校验并固定的 IP，不能把原始 hostname 交给 HTTP 客户端二次解析。
+    from app.services.camera_credentials import pin_camera_url_for_connect
+
+    raw = pin_camera_url_for_connect(raw)
     try:
         parsed = urlparse(raw)
     except Exception:

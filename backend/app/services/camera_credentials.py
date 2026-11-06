@@ -39,61 +39,104 @@ def _is_blocked_ip(ip_str: str) -> bool:
     return False
 
 
-def assert_camera_url_safe(source_url: str) -> None:
-    """校验摄像头 RTSP/HTTP URL 不指向元数据/回环。
+def _resolve_camera_host(host: str, port: int | None = None) -> list[str]:
+    """解析并校验摄像头主机的全部 A/AAAA 结果；任意危险地址都会拒绝。"""
+    normalized = (host or "").strip().lower().rstrip(".")
+    if not normalized or normalized in _BLOCKED_HOSTS or normalized.endswith(".localhost") or normalized.endswith(".local"):
+        raise AppException(40026, "摄像头地址禁止指向元数据/危险端点")
+    if _is_blocked_ip(normalized):
+        raise AppException(40026, "摄像头地址禁止指向回环/链路本地地址")
+    try:
+        ipaddress.ip_address(normalized)
+        return [normalized]
+    except ValueError:
+        pass
 
-    允许 10.x / 172.16-31 / 192.168.x 店内私网。
-    对 hostname 做 DNS 解析，拒绝解析到回环/链路本地/元数据（缓解 DNS rebinding）。
-    """
+    try:
+        infos = socket.getaddrinfo(normalized, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise AppException(40026, f"摄像头主机名无法解析，拒绝连接: {normalized}") from exc
+    addresses = sorted({str(info[4][0]) for info in infos if info and info[4]})
+    if not addresses:
+        raise AppException(40026, f"摄像头主机名没有有效 DNS 记录: {normalized}")
+    # 不可只挑一个安全 IP：同一 DNS 答案中混入危险地址也必须整体拒绝。
+    for addr in addresses:
+        if _is_blocked_ip(addr):
+            raise AppException(40026, f"摄像头地址 DNS 解析到危险地址: {addr}")
+    return addresses
+
+
+def assert_camera_url_safe(source_url: str) -> None:
+    """校验摄像头 URL 的全部解析结果，不允许元数据、回环或链路本地目标。"""
     if not source_url or source_url.isdigit():
         return
     try:
         parsed = urlparse(source_url)
-        # URL-like 摄像头地址必须是明确支持的协议；解析异常或未知协议不得静默放行。
         if "://" in source_url and parsed.scheme.lower() not in ("rtsp", "rtsps", "http", "https"):
             raise AppException(40026, "摄像头地址协议不受支持")
         if "://" in source_url and not parsed.hostname:
             raise AppException(40026, "摄像头地址缺少有效主机名")
-        if "://" in source_url:
-            try:
-                port = parsed.port
-            except ValueError as exc:
-                raise AppException(40026, "摄像头地址端口格式非法") from exc
-            if port is not None and not (1 <= port <= 65535):
-                raise AppException(40026, "摄像头地址端口超出有效范围")
+        if "://" not in source_url:
+            return
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise AppException(40026, "摄像头地址端口格式非法") from exc
+        if port is not None and not (1 <= port <= 65535):
+            raise AppException(40026, "摄像头地址端口超出有效范围")
     except AppException:
         raise
     except Exception as exc:
         if "://" in source_url:
             raise AppException(40026, "摄像头地址格式非法") from exc
         return
-    if parsed.scheme not in ("rtsp", "rtsps", "http", "https"):
-        return
-    host = (parsed.hostname or "").strip().lower().rstrip(".")
-    if not host:
-        return
-    if host in _BLOCKED_HOSTS or host.endswith(".localhost") or host.endswith(".local"):
-        raise AppException(40026, f"摄像头地址禁止指向元数据/危险端点: {host}")
-    if _is_blocked_ip(host):
-        raise AppException(40026, "摄像头地址禁止指向回环/链路本地地址")
-    # DNS 解析复核：hostname 若解析到危险 IP 则拒绝
+    host = parsed.hostname or ""
+    if parsed.scheme.lower() in ("rtsps", "https"):
+        try:
+            ipaddress.ip_address(host)
+        except ValueError as exc:
+            raise AppException(
+                40026,
+                "RTSPS/HTTPS 摄像头必须配置固定 IP，不能使用 DNS 主机名",
+            ) from exc
+    _resolve_camera_host(host, port)
+
+
+def pin_camera_url_for_connect(source_url: str) -> str:
+    """连接前将 DNS 主机名固定为已校验的 IP 字面量，消除校验后 FFmpeg 再解析的 TOCTOU 窗口。
+
+    RTSP/HTTP 摄像头连接可固定到 IP；RTSPS/HTTPS 的 DNS 主机名因固定 IP 会破坏 TLS
+    SNI/证书主机名校验，故要求配置固定 IP。IP 字面量始终按同一危险地址策略校验。
+    """
+    if not source_url or source_url.isdigit() or "://" not in source_url:
+        return source_url
+    try:
+        parsed = urlparse(source_url)
+        if parsed.scheme.lower() not in ("rtsp", "rtsps", "http", "https") or not parsed.hostname:
+            raise AppException(40026, "摄像头地址协议或主机名无效")
+        port = parsed.port
+    except AppException:
+        raise
+    except Exception as exc:
+        raise AppException(40026, "摄像头地址格式非法") from exc
+
+    host = parsed.hostname.strip().lower().rstrip(".")
     try:
         ipaddress.ip_address(host)
-        return  # 已是字面量 IP，上面已校验
+        _resolve_camera_host(host, port)
+        return source_url
     except ValueError:
         pass
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError as exc:
-        # 无法解析就无法证明目标安全；拒绝保存，防止 DNS 故障/临时 NXDOMAIN
-        # 被当作安全放行，随后主机名解析结果变化指向内网管理面或云元数据。
-        raise AppException(40026, f"摄像头主机名无法解析，拒绝连接: {host}") from exc
-    if not infos:
-        raise AppException(40026, f"摄像头主机名没有有效 DNS 记录: {host}")
-    for info in infos:
-        addr = info[4][0]
-        if _is_blocked_ip(str(addr)):
-            raise AppException(40026, f"摄像头地址 DNS 解析到危险地址: {addr}")
+
+    if parsed.scheme.lower() in ("rtsps", "https"):
+        raise AppException(40026, "RTSPS/HTTPS 摄像头必须配置固定 IP，不能使用 DNS 主机名")
+    addresses = _resolve_camera_host(host, port)
+    pinned = addresses[0]
+    pinned_host = f"[{pinned}]" if ":" in pinned else pinned
+    port_part = f":{port}" if port is not None else ""
+    userinfo = f"{parsed.netloc.rsplit('@', 1)[0]}@" if "@" in parsed.netloc else ""
+    netloc = f"{userinfo}{pinned_host}{port_part}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 def encrypt_password(password: str) -> str:
@@ -270,10 +313,10 @@ def build_connect_source(
                     port = f":{parsed.port}" if parsed.port else ""
                     u = username or user or "admin"
                     netloc = f"{quote(u, safe='')}:{quote(pwd, safe='')}@{host}{port}"
-                    return urlunparse((parsed.scheme, netloc, parsed.path or "", "", parsed.query, ""))
+                    return pin_camera_url_for_connect(urlunparse((parsed.scheme, netloc, parsed.path or "", "", parsed.query, "")))
         except Exception:
             pass
-        return source_url
+        return pin_camera_url_for_connect(source_url)
     try:
         password = decrypt_password(password_encrypted)
     except Exception:
@@ -292,4 +335,4 @@ def build_connect_source(
     path = parsed.path or ""
     query = f"?{parsed.query}" if parsed.query else ""
     netloc = f"{quote(user, safe='')}:{quote(password, safe='')}@{host}{port}"
-    return urlunparse((parsed.scheme, netloc, path, "", parsed.query, ""))
+    return pin_camera_url_for_connect(urlunparse((parsed.scheme, netloc, path, "", parsed.query, "")))

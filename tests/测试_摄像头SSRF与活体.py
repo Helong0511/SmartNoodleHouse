@@ -363,7 +363,7 @@ def test_camera_worker_revalidates_target_before_open_and_reconnect(monkeypatch)
         raise AppException(40026, "DNS 解析到危险地址")
 
     monkeypatch.setattr(
-        "app.services.camera_credentials.assert_camera_url_safe", _reject
+        "app.services.camera_credentials.pin_camera_url_for_connect", _reject
     )
     capture = MagicMock()
     monkeypatch.setattr(camera_manager.cv2, "VideoCapture", capture)
@@ -382,6 +382,99 @@ def test_camera_worker_revalidates_target_before_open_and_reconnect(monkeypatch)
         "rtsp://192.168.1.10:not-a-port/Streaming/Channels/102",
     ],
 )
+def test_camera_connection_pins_hostname_to_validated_ip(monkeypatch):
+    """RTSP hostname 在交给 FFmpeg 前必须固定成已校验 IP，消除 DNS rebinding TOCTOU。"""
+    from urllib.parse import urlparse
+    from app.services.camera_credentials import pin_camera_url_for_connect
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (None, None, None, None, ("192.168.1.101", port or 554))
+        ],
+    )
+    pinned = pin_camera_url_for_connect(
+        "rtsp://camera-user:camera-pass@camera.example:554/Streaming/Channels/102"
+    )
+    parsed = urlparse(pinned)
+    assert parsed.hostname == "192.168.1.101"
+    assert parsed.port == 554
+    assert parsed.username == "camera-user"
+    assert parsed.password == "camera-pass"
+    assert "camera.example" not in pinned
+
+
+def test_camera_connection_rejects_mixed_safe_and_dangerous_dns_answers(monkeypatch):
+    """DNS 轮询/多 A 记录中只要混入危险地址，整个目标都必须拒绝。"""
+    from app.services.camera_credentials import pin_camera_url_for_connect
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (None, None, None, None, ("192.168.1.101", port or 554)),
+            (None, None, None, None, ("127.0.0.1", port or 554)),
+        ],
+    )
+    with pytest.raises(AppException) as ei:
+        pin_camera_url_for_connect("rtsp://camera.example/Streaming/Channels/102")
+    assert ei.value.code == 40026
+
+
+@pytest.mark.parametrize("url", [
+    "rtsps://camera.example/Streaming/Channels/102",
+    "https://camera.example/ISAPI/System/deviceInfo",
+])
+def test_camera_tls_hostname_requires_ip_literal(url, monkeypatch):
+    from app.services.camera_credentials import pin_camera_url_for_connect
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (None, None, None, None, ("192.168.1.101", port or 443))
+        ],
+    )
+    with pytest.raises(AppException) as ei:
+        pin_camera_url_for_connect(url)
+    assert ei.value.code == 40026
+
+
+def test_camera_worker_opens_pinned_ip_not_dns_hostname(monkeypatch):
+    """运行时采集线程必须把固定 IP 交给 FFmpeg，而不是再次交给 DNS。"""
+    import camera.camera_manager as camera_manager
+
+    class FakeCapture:
+        def __init__(self):
+            self.source = None
+
+        def set(self, *_args):
+            return True
+
+        def open(self, source, _backend):
+            self.source = source
+            return True
+
+        def isOpened(self):
+            return True
+
+        def release(self):
+            return None
+
+    capture = FakeCapture()
+    monkeypatch.setattr(camera_manager.cv2, "VideoCapture", lambda: capture)
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (None, None, None, None, ("192.168.1.102", port or 554))
+        ],
+    )
+    worker = camera_manager.CameraWorker(
+        1001, "rtsp://camera.example/Streaming/Channels/102", 25
+    )
+    assert worker._connect() is True
+    assert "192.168.1.102" in capture.source
+    assert "camera.example" not in capture.source
+
+
 def test_camera_url_rejects_invalid_ports(url):
     with pytest.raises(AppException) as ei:
         assert_camera_url_safe(url)
@@ -397,3 +490,14 @@ def test_camera_url_rejects_empty_dns_answer(monkeypatch):
         assert_camera_url_safe("rtsp://camera.example.invalid/Streaming/Channels/102")
     assert ei.value.code == 40026
 
+
+def test_hikvision_isapi_base_uses_pinned_ip_not_dns_hostname(monkeypatch):
+    from app.services.hikvision_audio import resolve_isapi_base
+
+    monkeypatch.setattr(
+        "app.services.camera_credentials.socket.getaddrinfo",
+        lambda host, port, *args, **kwargs: [
+            (None, None, None, None, ("192.168.1.103", port or 554))
+        ],
+    )
+    assert resolve_isapi_base("rtsp://camera.example/Streaming/Channels/102") == "http://192.168.1.103"
