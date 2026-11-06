@@ -37,6 +37,6 @@ pywin32>=306; platform_system=="Windows"
 # 神经 TTS（生产 Ubuntu 温柔女声）；需本机 ffmpeg，合成时访问微软 Edge TTS
 edge-tts>=7.3.1,<8.0
 # Alembic 同步驱动
-pymysql>=1.1.0,<2.0
+pymysql>=1.2.3,<2.0
 # 可选：S3/MinIO
 boto3>=1.34.0,<2.0
