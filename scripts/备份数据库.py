@@ -77,6 +77,43 @@ def prune(keep_days: int) -> int:
     return removed
 
 
+def _run_mysqldump_to_gzip(cmd: list[str], out_path: Path, env: dict[str, str]) -> tuple[int, str]:
+    """流式压缩 mysqldump 输出，避免 stdout/stderr 双 PIPE 互相阻塞。"""
+    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            env=env,
+        )
+        assert proc.stdout is not None
+        try:
+            with gzip.open(out_path, "wb", compresslevel=6) as gz:
+                while True:
+                    chunk = proc.stdout.read(1024 * 256)
+                    if not chunk:
+                        break
+                    gz.write(chunk)
+            return_code = proc.wait()
+        except BaseException:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            out_path.unlink(missing_ok=True)
+            raise
+        finally:
+            proc.stdout.close()
+
+        stderr_file.seek(0)
+        error = stderr_file.read(1024 * 1024).decode("utf-8", errors="replace")
+        if return_code != 0:
+            out_path.unlink(missing_ok=True)
+        return int(return_code), error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="备份业务库")
     parser.add_argument("--keep-days", type=int, default=14, help="保留天数，0=不清理")
@@ -111,42 +148,10 @@ def main() -> int:
         cfg["database"],
     ]
     print("备份中…", cfg["database"], "->", out_path.name)
-    # stderr 单独落入临时文件，避免 mysqldump 大量写 stderr 时填满 PIPE，
-    # 与父进程只读 stdout 形成双向管道死锁。错误输出只读取有限长度。
-    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=stderr_file,
-            env=env,
-        )
-        assert proc.stdout is not None
-        try:
-            with gzip.open(out_path, "wb", compresslevel=6) as gz:
-                while True:
-                    chunk = proc.stdout.read(1024 * 256)
-                    if not chunk:
-                        break
-                    gz.write(chunk)
-            return_code = proc.wait()
-        except BaseException:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            out_path.unlink(missing_ok=True)
-            raise
-        finally:
-            proc.stdout.close()
-
-        if return_code != 0:
-            out_path.unlink(missing_ok=True)
-            stderr_file.seek(0)
-            err = stderr_file.read(1024 * 1024)
-            sys.stderr.write(err.decode("utf-8", errors="replace"))
-            return int(return_code)
+    return_code, error = _run_mysqldump_to_gzip(cmd, out_path, env)
+    if return_code != 0:
+        sys.stderr.write(error)
+        return return_code
 
     # 备份包含顾客/订单/资金等敏感数据，禁止被同机其他普通用户读取。
     if os.name == "posix":
