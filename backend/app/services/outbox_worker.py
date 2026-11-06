@@ -310,12 +310,12 @@ async def _run_handler_with_lease(
         await asyncio.gather(heartbeat_task, return_exceptions=True)
 
 
-async def _mark_uncertain(db: AsyncSession, row: OutboxEvent, err: str, *, wid: str) -> None:
-    """把外部结果未知事件直接转为死信，必须人工核实平台状态后才能重放。"""
+async def _mark_uncertain(db: AsyncSession, outbox_id: int, err: str, *, wid: str) -> None:
+    """把外部结果未知事件直接转为 UNCERTAIN，必须人工核实平台状态后才能重放。"""
     result = await db.execute(
         update(OutboxEvent)
         .where(
-            OutboxEvent.id == row.id,
+            OutboxEvent.id == int(outbox_id),
             OutboxEvent.status == "PROCESSING",
             OutboxEvent.locked_by == wid,
         )
@@ -329,11 +329,11 @@ async def _mark_uncertain(db: AsyncSession, row: OutboxEvent, err: str, *, wid: 
     )
     await db.commit()
     if int(result.rowcount or 0) != 1:
-        logger.warning("Outbox uncertain result could not be marked by old owner id=%s", row.id)
+        logger.warning("Outbox uncertain result could not be marked by old owner id=%s", outbox_id)
         return
     logger.critical(
         "Outbox EXTERNAL RESULT UNKNOWN: id=%s aggregate=%s/%s event=%s; automatic retry disabled",
-        row.id, row.aggregate_type, row.aggregate_id, row.event_kind,
+        outbox_id,
     )
 
 
@@ -488,8 +488,9 @@ async def process_outbox_item(outbox_id: int) -> bool:
                 "Outbox external side effect result is uncertain id=%s agg=%s/%s: %s",
                 outbox_id, row.aggregate_type, row.event_kind, exc,
             )
+            uncertain_outbox_id = int(row.id)
             await db.rollback()
-            await _mark_uncertain(db, row, str(exc), wid=wid)
+            await _mark_uncertain(db, uncertain_outbox_id, str(exc), wid=wid)
         except Exception as exc:
             logger.exception("Outbox handler failed id=%s agg=%s/%s: %s", outbox_id, row.aggregate_type, row.event_kind, exc)
             await db.rollback()
