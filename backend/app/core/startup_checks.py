@@ -1,6 +1,7 @@
 """生产启动校验：危险默认配置必须显式覆盖。"""
 from __future__ import annotations
 
+import base64
 import ipaddress
 import logging
 import re
@@ -375,14 +376,24 @@ def validate_settings(settings: Settings) -> None:
             and getattr(settings, "wechat_app_id", None)
         )
         if wechat_ok:
-            for label in ("wechat_app_secret", "wechat_api_v3_key"):
+            for label in (
+                "wechat_app_id",
+                "wechat_mch_id",
+                "wechat_app_secret",
+                "wechat_api_v3_key",
+                "wechat_cert_serial_no",
+            ):
                 if _is_placeholder(getattr(settings, label, None)):
-                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实密钥")
+                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实配置")
         alipay_ok = bool(
             getattr(settings, "alipay_app_id", None)
             and getattr(settings, "alipay_private_key", None)
             and getattr(settings, "alipay_public_key", None)
         )
+        if alipay_ok:
+            for label in ("alipay_app_id", "alipay_private_key", "alipay_public_key"):
+                if _is_placeholder(getattr(settings, label, None)):
+                    errors.append(f"生产配置 {label.upper()} 仍为示例占位值，必须替换为真实配置")
         for label in ("wechat_notify_url", "alipay_notify_url", "meituan_notify_url", "eleme_notify_url"):
             if _is_placeholder(getattr(settings, label, None)):
                 errors.append(f"生产配置 {label.upper()} 仍为占位域名（your-domain），回调将无法送达")
@@ -395,6 +406,25 @@ def validate_settings(settings: Settings) -> None:
             or (getattr(settings, "alipay_seller_email", None) or "").strip()
         ):
             errors.append("生产启用支付宝时须配置 ALIPAY_SELLER_ID 或 ALIPAY_SELLER_EMAIL")
+        if getattr(settings, "enable_alipay_phone_bind", False):
+            aes_key = (getattr(settings, "alipay_aes_key", None) or "").strip()
+            try:
+                decoded_aes_key = base64.b64decode(aes_key, validate=True)
+            except Exception:
+                decoded_aes_key = b""
+            if len(decoded_aes_key) not in (16, 24, 32):
+                errors.append(
+                    "启用支付宝手机号授权时，生产 ALIPAY_AES_KEY 必须是 Base64 编码的 16/24/32 字节 AES 密钥"
+                )
+            if not alipay_ok:
+                errors.append("启用支付宝手机号授权时必须配置真实 ALIPAY_APP_ID/私钥/公钥")
+        if getattr(settings, "enable_wx_phone_bind", False):
+            wx_app_id = (getattr(settings, "wechat_app_id", None) or "").strip()
+            wx_app_secret = (getattr(settings, "wechat_app_secret", None) or "").strip()
+            if not wx_app_id or not wx_app_secret or _is_placeholder(wx_app_id) or _is_placeholder(wx_app_secret):
+                errors.append(
+                    "启用微信手机号授权时必须配置真实 WECHAT_APP_ID 和 WECHAT_APP_SECRET"
+                )
         if wechat_ok:
             plat_key = (getattr(settings, "wechat_platform_public_key", None) or "").strip()
             plat_cert = (getattr(settings, "wechat_platform_cert_path", None) or "").strip()
