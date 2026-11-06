@@ -248,20 +248,21 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         return cached
 
     hit = _BUILD_CACHE.get(sid)
+    current_version = await get_menu_version(sid)
     if (
         hit is not None
+        and current_version > 0
+        and int(hit.get("version") or 0) == current_version
         and _bundle_schedule_id(hit) == expected_sched
         and _bundle_has_visibility_meta(hit)
     ):
-        # 本地缓存有效时不查 DB 重建；若取得租约，则顺便安全回填 Redis。
+        # 本地缓存必须与 Redis 当前版本严格匹配，不能把旧内容伪装成新版本。
         lock_token = await try_acquire_rebuild_lock(sid)
         try:
-            version = await get_menu_version(sid)
-            if version <= 0:
-                version = await bump_menu_version(sid)
-            bundle = {**hit, "version": version}
-            await set_menu_bundle(sid, bundle, owner_token=lock_token)
-            return bundle
+            await set_menu_bundle(
+                sid, hit, owner_token=lock_token, expected_version=current_version
+            )
+            return hit
         finally:
             if lock_token:
                 await release_rebuild_lock(sid, owner_token=lock_token)
@@ -284,16 +285,27 @@ async def get_or_build_menu_bundle(db, store_id: int) -> dict[str, Any]:
         if cached is not None or (hit is not None and _bundle_schedule_id(hit) != expected_sched):
             invalidate_local_menu_cache(sid)
             await bump_menu_version(sid)
-        bundle = await build_menu_bundle(db, sid)
-        _BUILD_CACHE.put(sid, bundle)
-
         version = await get_menu_version(sid)
         if version <= 0:
             version = await bump_menu_version(sid)
-        bundle = {**bundle, "version": version}
+        bundle = await build_menu_bundle(db, sid)
 
-        # 只有持有当前租约的 owner 才能写入 Redis；必须先写再释放租约。
-        await set_menu_bundle(sid, bundle, owner_token=lock_token)
+        # 若菜单在构建期间发生变更，丢弃这次快照并按新版本重建一次。
+        latest_version = await get_menu_version(sid)
+        if latest_version > 0 and latest_version != version:
+            version = latest_version
+            bundle = await build_menu_bundle(db, sid)
+            latest_version = await get_menu_version(sid)
+            if latest_version > 0:
+                version = latest_version
+
+        bundle = {**bundle, "version": version}
+        _BUILD_CACHE.put(sid, bundle)
+
+        # Lua 同时校验 owner token 与 version，旧构建不能覆盖更新后的 bundle。
+        await set_menu_bundle(
+            sid, bundle, owner_token=lock_token, expected_version=version
+        )
         return bundle
     finally:
         if lock_token:
