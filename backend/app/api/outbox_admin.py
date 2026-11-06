@@ -259,58 +259,81 @@ async def resolve_unknown_dead_letter(
     except (TypeError, ValueError) as exc:
         raise AppException(40910, "结果未知事件 payload 无效，拒绝自动对账", status_code=409) from exc
     if row.aggregate_type == "webhook_task" and isinstance(payload, dict) and payload.get("action") == "cancel_order":
+        # 商家主动取消 payload 有 order_id；库存拒单发生在本地订单创建前，
+        # 可能没有 order_id/DeliveryOrder，此时平台确认取消后无需修改本地订单。
         try:
-            order_id = int(payload.get("order_id") or 0)
-            delivery_order_id = int(row.aggregate_id)
+            payload_order_id = int(payload.get("order_id") or 0)
             payload_store_id = int(payload.get("store_id") or 0)
+            platform = str(payload.get("platform") or "").upper()
+            platform_order_id = str(payload.get("platform_order_id") or "")
         except (TypeError, ValueError) as exc:
-            raise AppException(40910, "取消事件缺少有效订单/门店关联信息，拒绝自动对账", status_code=409) from exc
-        if order_id <= 0 or delivery_order_id <= 0 or payload_store_id <= 0:
-            raise AppException(40910, "取消事件缺少有效订单/门店关联信息，拒绝自动对账", status_code=409)
-        order = (
-            await db.execute(
-                select(Order)
-                .where(Order.id == order_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none() if order_id > 0 else None
-        delivery_order = (
-            await db.execute(
-                select(DeliveryOrder)
-                .where(
-                    DeliveryOrder.id == delivery_order_id,
-                    DeliveryOrder.order_id == order_id,
-                )
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none() if order_id > 0 else None
-        if order is None or delivery_order is None:
-            raise AppException(40911, "取消订单本地关联记录不存在，需人工核对后处理", status_code=409)
-        try:
-            actual_store_id = int(order.store_id)
-        except (TypeError, ValueError) as exc:
-            raise AppException(40912, "取消订单缺少有效门店归属，拒绝自动对账", status_code=409) from exc
-        if actual_store_id != payload_store_id:
-            raise AppException(40912, "取消订单门店归属与 Outbox 事件不一致", status_code=409)
-        if order.status in ("COMPLETED", "REFUNDED"):
-            raise AppException(40913, f"平台取消已核实，但本地订单为 {order.status}，需人工对账", status_code=409)
-        if order.status != "CANCELLED":
-            from app.services.order_lifecycle import apply_order_status
+            raise AppException(40910, "取消事件缺少有效订单/门店/平台关联信息，拒绝自动对账", status_code=409) from exc
+        if payload_store_id <= 0 or not platform or not platform_order_id:
+            raise AppException(40910, "取消事件缺少有效门店/平台关联信息，拒绝自动对账", status_code=409)
 
-            await apply_order_status(
-                db,
-                order,
-                "CANCELLED",
-                source="DELIVERY",
-                assert_kind="SYSTEM",
-                remark=str(payload.get("reason") or "商家取消")[:200],
-            )
-        delivery_order.delivery_status = "CANCELLED"
-        delivery_order.last_sync_at = now_local()
-        await db.flush()
-        local_reconciled = True
+        order_id = payload_order_id
+        if order_id <= 0:
+            candidate = (
+                await db.execute(
+                    select(DeliveryOrder).where(
+                        DeliveryOrder.platform == platform,
+                        DeliveryOrder.platform_order_id == platform_order_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            # 库存不足的回调拒单发生在 Order/DeliveryOrder 创建前；平台取消成功后
+            # 不存在需要回写的本地订单，仍可安全关闭该 Outbox。
+            if candidate is None:
+                order_id = 0
+            else:
+                order_id = int(candidate.order_id)
+
+        if order_id > 0:
+            order = (
+                await db.execute(
+                    select(Order)
+                    .where(Order.id == order_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            delivery_order = (
+                await db.execute(
+                    select(DeliveryOrder)
+                    .where(
+                        DeliveryOrder.order_id == order_id,
+                        DeliveryOrder.platform == platform,
+                        DeliveryOrder.platform_order_id == platform_order_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if order is None or delivery_order is None:
+                raise AppException(40911, "取消订单本地关联记录不存在或已变化，需人工核对后处理", status_code=409)
+            try:
+                actual_store_id = int(order.store_id)
+            except (TypeError, ValueError) as exc:
+                raise AppException(40912, "取消订单缺少有效门店归属，拒绝自动对账", status_code=409) from exc
+            if actual_store_id != payload_store_id:
+                raise AppException(40912, "取消订单门店归属与 Outbox 事件不一致", status_code=409)
+            if order.status in ("COMPLETED", "REFUNDED"):
+                raise AppException(40913, f"平台取消已核实，但本地订单为 {order.status}，需人工对账", status_code=409)
+            if order.status != "CANCELLED":
+                from app.services.order_lifecycle import apply_order_status
+
+                await apply_order_status(
+                    db,
+                    order,
+                    "CANCELLED",
+                    source="DELIVERY",
+                    assert_kind="SYSTEM",
+                    remark=str(payload.get("reason") or "商家取消")[:200],
+                )
+            delivery_order.delivery_status = "CANCELLED"
+            delivery_order.last_sync_at = now_local()
+            await db.flush()
+            local_reconciled = True
     elif (
         row.aggregate_type == "delivery_manual"
         and isinstance(payload, dict)
