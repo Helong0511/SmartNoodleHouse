@@ -695,3 +695,30 @@ async def test_menu_cache_invalidation_outbox_handler_invalidates_after_commit_w
 
     await menu_cache_handlers.menu_cache_invalidate_handler(MagicMock(), row)
     invalidate.assert_awaited_once_with(8)
+
+
+@pytest.mark.asyncio
+async def test_process_pending_outbox_counts_claim_result_not_final_status(monkeypatch):
+    """FAILED→PROCESSING→FAILED 仍应计入本轮 claim；未抢到的事件不计数。"""
+    from app.services import outbox_worker
+
+    class _Result:
+        def scalars(self):
+            return self
+        def all(self):
+            return [101, 102]
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return False
+        async def execute(self, stmt):
+            return _Result()
+
+    monkeypatch.setattr(outbox_worker, "AsyncSessionLocal", _Session)
+    process = AsyncMock(side_effect=[True, False])
+    monkeypatch.setattr(outbox_worker, "process_outbox_item", process)
+
+    assert await outbox_worker.process_pending_outbox(limit=2) == 1
+    assert [call.args[0] for call in process.await_args_list] == [101, 102]
