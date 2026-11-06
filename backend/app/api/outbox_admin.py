@@ -135,7 +135,7 @@ async def replay_dead_letter(
     if _resolve_outbox_handler(row) is None:
         raise AppException(40903, "当前版本未注册该事件处理器，拒绝重放", status_code=409)
 
-    previous_error = (row.last_error or "")[:300]
+    previous_error = _safe_error(row.last_error)
     changed = await requeue_dead_letter_outbox(db, outbox_id)
     if not changed:
         await db.rollback()
