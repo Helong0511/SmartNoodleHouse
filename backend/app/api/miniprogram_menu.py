@@ -189,8 +189,8 @@ async def get_recommendations(
         return success(cached, request=request)
 
     # 互斥重建：避免缓存击穿时多请求同时 recommend 压垮 DB
-    lock_ok = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
-    if not lock_ok:
+    lock_token = await try_acquire_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
+    if not lock_token:
         waited = await wait_for_reco(cid, store_id, scene, ab_bucket, fingerprint, 0.3)
         if waited is not None:
             return success(waited, request=request)
@@ -205,11 +205,15 @@ async def get_recommendations(
             weight_override=weight_override,
         )
         payload = _serialize_reco(ranked, state, meta, ab_bucket, ab_status)
-        await set_cached_reco(cid, store_id, scene, ab_bucket, payload, fingerprint)
+        await set_cached_reco(
+            cid, store_id, scene, ab_bucket, payload, fingerprint, owner_token=lock_token
+        )
         payload["cache_hit"] = False
     finally:
-        if lock_ok:
-            await release_reco_lock(cid, store_id, scene, ab_bucket, fingerprint)
+        if lock_token:
+            await release_reco_lock(
+                cid, store_id, scene, ab_bucket, fingerprint, owner_token=lock_token
+            )
     return success(payload, request=request)
 
 
