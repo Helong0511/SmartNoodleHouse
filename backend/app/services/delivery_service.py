@@ -758,7 +758,15 @@ class DeliveryService:
         rider_name = parsed.get("rider_name") or raw.get("rider_name") or raw.get("courier_name")
         rider_phone = parsed.get("rider_phone") or raw.get("rider_phone") or raw.get("courier_phone")
 
-        order = await db.get(Order, d_order.order_id)
+        # 与 apply_order_status 的 Order 行锁使用相同串行化点：
+        # 并发完成/取消回调先后竞争时，迟到配送事件必须读取锁后的最新终态。
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == d_order.order_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         order_status = str(getattr(order, "status", "") or "").upper()
         delivery_status = str(getattr(d_order, "delivery_status", "") or "").upper()
         terminal_order = order_status in ("COMPLETED", "CANCELLED", "REFUNDED")
