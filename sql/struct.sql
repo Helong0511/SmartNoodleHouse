@@ -2066,3 +2066,76 @@ CREATE TABLE IF NOT EXISTS `archived_order_snapshots` (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '历史订单冷库快照' ROW_FORMAT = Dynamic;
 -- END CANONICAL SCHEMA
 SET FOREIGN_KEY_CHECKS = 1;
+
+
+-- 0040/0041 marketing flash-sale schema (kept in sync with Alembic migrations)
+CREATE TABLE IF NOT EXISTS `marketing_campaign_stores` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `campaign_id` bigint UNSIGNED NOT NULL,
+  `store_id` bigint UNSIGNED NOT NULL,
+  `included` tinyint(1) NOT NULL DEFAULT 0 COMMENT '0=排除该门店（总部活动默认全店参与）',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mcs_camp_store`(`campaign_id` ASC, `store_id` ASC) USING BTREE,
+  INDEX `idx_mcs_store`(`store_id` ASC, `campaign_id` ASC) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='活动参与门店例外（总部活动默认全店参与）';
+
+CREATE TABLE IF NOT EXISTS `marketing_flash_sales` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `campaign_id` bigint UNSIGNED NOT NULL,
+  `product_id` bigint UNSIGNED NOT NULL,
+  `per_customer_limit` int NOT NULL DEFAULT 1 COMMENT '每人限购数量',
+  `claim_valid_minutes` int NOT NULL DEFAULT 30 COMMENT '资格有效分钟数',
+  `verify_deadline_at` datetime(3) NULL DEFAULT NULL COMMENT '绝对核销截止',
+  `notice` varchar(200) NULL DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mfs_campaign`(`campaign_id` ASC) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='限量免费抢购配置';
+
+CREATE TABLE IF NOT EXISTS `marketing_flash_sale_stocks` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `campaign_id` bigint UNSIGNED NOT NULL,
+  `store_id` bigint UNSIGNED NOT NULL,
+  `product_id` bigint UNSIGNED NULL DEFAULT NULL COMMENT '本店抢购餐品；空=回退活动配置',
+  `total_quantity` int NOT NULL DEFAULT 0,
+  `remaining_quantity` int NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mfss_camp_store`(`campaign_id` ASC, `store_id` ASC) USING BTREE,
+  INDEX `idx_mfss_store`(`store_id` ASC, `campaign_id` ASC) USING BTREE,
+  INDEX `ix_mfss_product`(`product_id` ASC) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='抢购门店库存（条件 UPDATE 原子扣减）';
+
+CREATE TABLE IF NOT EXISTS `marketing_flash_sale_claims` (
+  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT,
+  `campaign_id` bigint UNSIGNED NOT NULL,
+  `store_id` bigint UNSIGNED NOT NULL,
+  `customer_id` bigint UNSIGNED NOT NULL,
+  `unit_no` int NOT NULL DEFAULT 1 COMMENT '同一顾客第几份，配合唯一键限购',
+  `claim_no` varchar(40) NOT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'CLAIMED',
+  `claimed_at` datetime(3) NOT NULL,
+  `expires_at` datetime(3) NOT NULL,
+  `verify_deadline_at` datetime(3) NULL DEFAULT NULL,
+  `order_id` bigint UNSIGNED NULL DEFAULT NULL,
+  `verified_at` datetime(3) NULL DEFAULT NULL,
+  `verified_by` bigint UNSIGNED NULL DEFAULT NULL,
+  `client_request_id` varchar(64) NULL DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_mfsc_cust_unit`(`campaign_id` ASC, `customer_id` ASC, `unit_no` ASC) USING BTREE,
+  UNIQUE INDEX `uk_mfsc_no`(`claim_no` ASC) USING BTREE,
+  UNIQUE INDEX `uk_mfsc_req`(`client_request_id` ASC) USING BTREE,
+  INDEX `idx_mfsc_customer_status`(`customer_id` ASC, `status` ASC) USING BTREE,
+  INDEX `idx_mfsc_status_expire`(`status` ASC, `expires_at` ASC) USING BTREE,
+  INDEX `idx_mfsc_campaign_store`(`campaign_id` ASC, `store_id` ASC, `status` ASC) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='顾客抢购资格';
