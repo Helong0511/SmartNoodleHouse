@@ -1251,3 +1251,61 @@ async def test_resolve_cancel_unknown_outbox_rejects_store_mismatch():
 
     assert ei.value.code == 40912
     db.commit.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_resolve_manual_confirm_unknown_outbox_reconciles_acceptance(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.api.outbox_admin import OutboxResolveIn, resolve_unknown_dead_letter
+
+    row = SimpleNamespace(
+        id=503,
+        status="UNCERTAIN",
+        last_error="EXTERNAL_RESULT_UNKNOWN: timeout after confirm request",
+        aggregate_type="delivery_manual",
+        aggregate_id=701,
+        event_kind="confirm_0123456789abcdef",
+        payload=json.dumps({
+            "action": "confirm_order",
+            "platform": "MEITUAN",
+            "platform_order_id": "MT-701",
+            "store_id": 7,
+            "order_id": 701,
+            "rollback_on_fail": True,
+        }),
+    )
+    order = SimpleNamespace(id=701, store_id=7, status="CONFIRMED")
+    delivery_order = SimpleNamespace(
+        id=601, order_id=701, platform="MEITUAN",
+        platform_order_id="MT-701", delivery_status="PENDING",
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        MagicMock(scalar_one_or_none=MagicMock(return_value=row)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=order)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=delivery_order)),
+        MagicMock(rowcount=1),
+    ])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch("app.api.outbox_admin.AuditService.log_staff", new=AsyncMock()) as audit:
+        await resolve_unknown_dead_letter(
+            503,
+            OutboxResolveIn(reason="平台核实已成功：美团已确认接单"),
+            request=MagicMock(),
+            db=db,
+            user=SimpleNamespace(role=SimpleNamespace(code="SUPER_ADMIN")),
+        )
+
+    assert order.status == "CONFIRMED"
+    assert delivery_order.delivery_status == "ACCEPTED"
+    assert db.execute.await_count == 4
+    order_lock_sql = str(db.execute.await_args_list[1].args[0]).lower()
+    delivery_lock_sql = str(db.execute.await_args_list[2].args[0]).lower()
+    assert "orders" in order_lock_sql and "for update" in order_lock_sql
+    assert "delivery_orders" in delivery_lock_sql and "for update" in delivery_lock_sql
+    db.commit.assert_awaited_once()
+    audit.assert_awaited_once()
