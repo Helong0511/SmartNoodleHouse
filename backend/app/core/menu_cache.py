@@ -38,6 +38,14 @@ end
 return 0
 """
 
+_RENEW_LOCK_SCRIPT = """
+-- MENU_RENEW_LOCK
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
 _SET_BUNDLE_IF_OWNER_SCRIPT = """
 -- MENU_BUNDLE_IF_OWNER_AND_VERSION
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
@@ -160,6 +168,35 @@ async def set_menu_bundle(
         return bool(result)
     except Exception:
         return False
+
+
+async def renew_rebuild_lock(store_id: int, *, owner_token: str | None = None) -> bool:
+    """仅当前 owner 可续租菜单重建锁。"""
+    if not owner_token:
+        return False
+    try:
+        r = await get_redis()
+        return bool(
+            await r.eval(
+                _RENEW_LOCK_SCRIPT,
+                1,
+                menu_rebuild_lock_key(store_id),
+                owner_token,
+                _REBUILD_LOCK_TTL,
+            )
+        )
+    except Exception:
+        logger.debug("菜单重建锁续租失败 store=%s", store_id, exc_info=True)
+        return False
+
+
+async def maintain_rebuild_lock(store_id: int, owner_token: str) -> None:
+    """后台续租；owner 丢失或 Redis 异常时停止，旧 owner 写缓存仍受 Lua fencing 保护。"""
+    interval = max(1, _REBUILD_LOCK_TTL // 3)
+    while True:
+        await asyncio.sleep(interval)
+        if not await renew_rebuild_lock(store_id, owner_token=owner_token):
+            return
 
 
 async def try_acquire_rebuild_lock(store_id: int) -> str | None:
