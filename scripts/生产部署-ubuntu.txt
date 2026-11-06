@@ -51,9 +51,16 @@ sudo sysctl --system
 # Redis 官方还建议关闭 Transparent Huge Pages；先执行并在重启后验证：
 #   echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 
-# ── 2. 后端依赖与迁移 ──
+# ── 2. Python 运行时、后端依赖与迁移 ──
+# Ubuntu 22.04 默认 python3 通常是 3.10；本项目 CI/锁文件目标为 Python 3.11+，不可直接用系统 python3。
+sudo apt update
+sudo apt install -y software-properties-common
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev build-essential
+python3.11 --version
 cd backend
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 # 使用仓库维护的直接依赖固定版本清单，避免生产部署无意漂移到未经 CI 验证的新版本。
