@@ -150,6 +150,8 @@ async def sync_order_payment(
     payment, meta = await PaymentService.sync_order_pending_payment(
         db, order, provider=provider
     )
+    # 先提交支付状态，再发送实时通知；避免客户端收到通知后仍读到旧订单状态。
+    await db.commit()
     if meta.get("synced") and payment and payment.status == "PAID":
         await _notify_paid_or_refunded(db, payment, transitioned=True)
     await AuditService.log(
@@ -218,6 +220,8 @@ async def sync_payment(
     await _acquire_sync_cooldown(payment.id)
     before = payment.status
     payment, meta = await PaymentService.sync_payment_status(db, payment)
+    # 查单可能完成支付入账；必须先持久化，再通知 WebSocket，避免虚假/超前事件。
+    await db.commit()
     if before != "PAID" and payment.status == "PAID":
         await _notify_paid_or_refunded(db, payment, transitioned=True)
     progress = await PaymentService.payment_progress(db, order) if order else {}
