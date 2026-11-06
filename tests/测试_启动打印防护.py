@@ -245,6 +245,55 @@ def test_prod_rejects_placeholder_redis_password():
         )
 
 
+def test_prod_rejects_placeholder_wechat_app_id():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(wechat_app_id="wx_REPLACE_WITH_APP_ID")
+        )
+
+
+def test_prod_rejects_placeholder_alipay_app_id():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                alipay_app_id="REPLACE_WITH_ALIPAY_APP_ID",
+                alipay_private_key="real-private-key",
+                alipay_public_key="real-public-key",
+                alipay_seller_id="2088000000000000",
+            )
+        )
+
+
+def test_prod_requires_valid_alipay_aes_key_when_phone_binding_enabled():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_alipay_phone_bind=True,
+                alipay_aes_key="replace_with_alipay_aes_key_base64==",
+            )
+        )
+
+
+def test_prod_requires_alipay_credentials_when_phone_binding_enabled():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_alipay_phone_bind=True,
+                alipay_aes_key="MDEyMzQ1Njc4OWFiY2RlZg==",
+            )
+        )
+
+
+def test_prod_requires_wechat_app_secret_when_phone_binding_enabled():
+    with pytest.raises(SystemExit):
+        validate_settings(
+            _base_prod(
+                enable_wx_phone_bind=True,
+                wechat_app_secret="REPLACE_WITH_WECHAT_APP_SECRET",
+            )
+        )
+
+
 def test_prod_allows_empty_webhook_allowlist_only_when_explicitly_not_required():
     validate_settings(
         _base_prod(
@@ -282,3 +331,6 @@ def test_production_env_template_matches_single_host_startup_policy():
     assert "ALLOW_LOOPBACK_PRODUCTION_SERVICES=true" in env
     assert "WEBHOOK_REQUIRE_ALLOWLIST=false" in env
     assert "WEBHOOK_IP_ALLOWLIST=" in env
+    assert "ENABLE_ALIPAY_PHONE_BIND=false" in env
+    assert "ENABLE_WX_PHONE_BIND=false" in env
+    assert "ALIPAY_APP_ID=REPLACE_WITH_ALIPAY_APP_ID" in env
