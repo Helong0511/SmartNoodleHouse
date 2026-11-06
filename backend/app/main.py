@@ -31,7 +31,7 @@ from app.core.intrusion_detection import detect_intrusion
 from app.core.ip_allowlist import WebhookAllowlistMiddleware
 from app.core.logging_config import setup_logging
 from app.core.rate_limit import RateLimitMiddleware
-from app.core.redis_client import RequestIDMiddleware
+from app.core.redis_client import RequestIDMiddleware, close_redis
 from app.core.startup_checks import validate_settings
 from app.services.face_service import WelcomeService
 from app.services.websocket_manager import on_redis_ws_message
@@ -239,6 +239,7 @@ async def _warmup_recognition_and_tts() -> None:
 async def lifespan(app: FastAPI):
     global tts_task, recognition_task, _leader_stop, _leader_renew_task, _leader_worker_id
     settings = get_settings()
+    warmup_task: asyncio.Task | None = None
     validate_settings(settings)
 
     try:
@@ -466,7 +467,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("摄像头自动恢复失败: %s", e)
         # 后台预热 InsightFace + 试听短句 WAV，避免首人/首次试听卡数秒
-        asyncio.create_task(_warmup_recognition_and_tts())
+        warmup_task = asyncio.create_task(_warmup_recognition_and_tts())
 
     async def _standby_promote_loop() -> None:
         """auto/leader 非持锁进程持续争抢；Leader 宕机后自动接管调度。"""
@@ -546,6 +547,14 @@ async def lifespan(app: FastAPI):
             except (asyncio.CancelledError, Exception):
                 pass
         scheduler.shutdown()
+    if warmup_task is not None and not warmup_task.done():
+        warmup_task.cancel()
+        try:
+            await warmup_task
+        except asyncio.CancelledError:
+            pass
+    # 所有已知后台 Redis 使用者停止后，再释放本进程连接池。
+    await close_redis()
 
 
 def create_app() -> FastAPI:
