@@ -528,7 +528,8 @@ async def invalidate_store_caches(store_id: int) -> None:
     from app.services.menu_service import invalidate_local_menu_cache
 
     invalidate_local_menu_cache(sid)
-    await bump_menu_version(sid)
+    version = await bump_menu_version(sid)
+    return version > 0
 
 
 class RecommendationService:
