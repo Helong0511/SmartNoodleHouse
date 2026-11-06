@@ -239,11 +239,16 @@ async def test_reco_cache_set_uses_jitter():
     with patch.object(reco_cache, 'get_redis', _patch_get_redis(fake)):
         token = await reco_cache.try_acquire_reco_lock(1, 1, 'default', 'a')
         assert token
-        published = await reco_cache.set_cached_reco_if_owner(
-            1, 1, 'default', 'a', {'items': []}, '', token,
+        await reco_cache.set_cached_reco(
+            1, 1, 'default', 'a', {'items': []}, '', owner_token=token,
         )
-        assert published is True
+        assert fake.eval_calls, '应通过 Lua 原子校验 owner 并写缓存'
+        script, numkeys, args = fake.eval_calls[-1]
+        assert numkeys == 2
+        cache_key = args[1]
+        assert fake.store.get(cache_key)
         key, value, nx, ex = fake.set_calls[-1]
+        assert key == cache_key
         assert ex is not None
         assert 96 <= ex <= 144
         await reco_cache.release_reco_lock(1, 1, 'default', 'a', owner_token=token)
