@@ -852,7 +852,30 @@ class DeliveryService:
         if not d_order:
             return None
 
-        order = await db.get(Order, d_order.order_id)
+        # 回调退款意图也先锁 Order，再锁 DeliveryOrder，与商家取消/退款审批保持统一锁序。
+        order = (
+            await db.execute(
+                select(Order)
+                .where(Order.id == int(d_order.order_id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not order:
+            raise AppException(40463, "外卖退款回调关联订单不存在")
+        d_order = (
+            await db.execute(
+                select(DeliveryOrder)
+                .where(
+                    DeliveryOrder.id == int(d_order.id),
+                    DeliveryOrder.order_id == int(order.id),
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not d_order:
+            raise AppException(40463, "外卖退款回调关联关系已变化")
         refund_id = str(
             raw.get("refund_id") or raw.get("refundId") or raw.get("refund_no")
             or raw.get("refundNo") or raw.get("out_refund_no") or parsed.get("refund_id") or ""
