@@ -5,17 +5,14 @@
 - 画像更新 / 下单 / 评价后调用 invalidate_customer 主动失效；
 - 缓存击穿：SET NX EX 互斥锁，避免并发重建压垮 DB；
 - 缓存雪崩：TTL 加 ±20% 随机偏移；
-- 延迟双删：invalidate_customer 删后延迟再删一次。
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
 from typing import Any
 
-from app.core.async_utils import spawn_bg
 from app.core.cache_keys import (
     RECO_TTL_SECONDS,
     reco_customer_lock_pattern,
@@ -111,7 +108,7 @@ async def set_cached_reco(
 
 
 async def invalidate_customer(customer_id: int) -> None:
-    """失效某顾客全部场景/桶位的推荐结果。延迟双删防止并发写窗口旧值残留。"""
+    """失效某顾客全部场景/桶位的推荐结果，并撤销在途重建租约。"""
     if not customer_id:
         return
     patterns = (
@@ -129,26 +126,8 @@ async def invalidate_customer(customer_id: int) -> None:
             # Cluster 多键 DEL 要求同一 hash slot；顾客的门店/场景键跨 slot，逐键删除。
             for key in sorted(set(keys)):
                 await delete_with_retry(r, key)
-        # 延迟再清缓存值（不清锁），兜底处理扫描/删除期间的并发写入。
-        spawn_bg(_delayed_invalidate(patterns[0]))
     except Exception:  # noqa: BLE001
         logger.debug("推荐缓存失效失败(customer=%s)，等待 TTL", customer_id, exc_info=True)
-
-
-async def _delayed_invalidate(pattern: str) -> None:
-    """延迟再删一次，防止并发写窗口中旧值残留。"""
-    try:
-        await asyncio.sleep(0.1)
-        r = await get_redis()
-        keys = []
-        async for k in r.scan_iter(match=pattern, count=200):
-            keys.append(k)
-        if keys:
-            # SCAN 可能命中多个 Cluster slot，不能跨 slot 执行多键 DEL。
-            for key in sorted(set(keys)):
-                await delete_with_retry(r, key)
-    except Exception:
-        pass
 
 
 async def try_acquire_reco_lock(
